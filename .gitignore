@@ -1,0 +1,140 @@
+# ---------------------------------------------------------------------------
+# Agentic harness working directories
+# ---------------------------------------------------------------------------
+# These hold DEPLOYED agents — derivatives produced by transformation from
+# Agents/Generic/. They are outputs, not sources. Committing them would create
+# a second, drifting copy of every agent.
+#
+# Note: MOSAIC is developed using MOSAIC, so these directories are populated
+# in this very repository. That is expected. They still must not be tracked.
+
+.claude/
+.opencode/
+.vscode/
+.copilot/
+.github/agents/
+.github/chatmodes/
+.cursor/
+.aider*
+
+# Harness runtime/session state
+.claude/settings.local.json
+.opencode/node_modules/
+*.session.json
+
+# Machine-local MCP + harness configuration
+.mcp.json
+mcp.json
+opencode.json
+
+
+# ---------------------------------------------------------------------------
+# Orchestration runtime artifacts
+# ---------------------------------------------------------------------------
+# Produced by actually running MOSAIC. Per-run, per-machine, often large.
+# The TEMPLATE lives at Agents/Generic/Orchestrator/Orchestration.template.md
+# and is tracked; instances are not.
+
+Orchestration/
+OrchestrationLogs/
+Orchestration.md
+!Orchestration.template.md
+
+# Log capture output (optional enhancement tier)
+*.jsonl
+logs/
+
+# Cost / execution analyzer output
+CostReports/
+*.cost.json
+
+
+# ---------------------------------------------------------------------------
+# Private planning material — MUST NEVER BE PUBLISHED
+# ---------------------------------------------------------------------------
+# Anything referencing the predecessor workspace, provenance rationale, or the
+# content classification inventory. See the containment rule in Roadmap.md.
+
+Private/
+Roadmap.md
+
+
+# ---------------------------------------------------------------------------
+# Test infrastructure
+# ---------------------------------------------------------------------------
+# The suite invokes real models. Results and any captured transcripts are
+# per-run and may contain project content.
+
+TestResults/
+TestRuns/
+*.testrun.json
+coverage/
+.nyc_output/
+
+
+# ---------------------------------------------------------------------------
+# Tooling — Node / TypeScript (default stack)
+# ---------------------------------------------------------------------------
+
+node_modules/
+dist/
+build/
+out/
+*.tsbuildinfo
+.npm/
+.pnpm-store/
+.yarn/
+!.yarn/releases
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+
+# ---------------------------------------------------------------------------
+# Tooling — other stacks (per-tool language choice, see Roadmap 0.1)
+# ---------------------------------------------------------------------------
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+
+# Go
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Rust
+target/
+
+
+# ---------------------------------------------------------------------------
+# Environment & secrets
+# ---------------------------------------------------------------------------
+
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.json
+
+
+# ---------------------------------------------------------------------------
+# Editors & OS
+# ---------------------------------------------------------------------------
+
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
