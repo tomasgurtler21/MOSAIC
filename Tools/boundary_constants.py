@@ -63,6 +63,13 @@ KNOWN_FRONTMATTER_KEYS: frozenset[str] = frozenset({
     "tools",
     "transform_version",
     "injections_version",
+    # Harness-specific frontmatter fields carried by some concrete agent files.
+    # These are preserved verbatim by the transformer and must be accepted by
+    # the validator: OpenCode agents use `mode` and `permission`; agents that
+    # rely on MCP tooling declare `mcpServers`.
+    "mode",
+    "permission",
+    "mcpServers",
 })
 
 SECTION_HEADING_MAP: dict[str, str] = {

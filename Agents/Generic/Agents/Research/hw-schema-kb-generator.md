@@ -465,10 +465,11 @@ Always end with a JSON status block:
 ## Execution Philosophy
 
 - **Context Management:** You can dedicate your full context window to this task. Follow-up tasks are handled by spawning new agent instances.
-- [[INJECTION:ContextLimits]]
+[[INJECTION:ContextLimits]]
 [[/INJECTION:ContextLimits]]
 - **Quality over Completeness:** It's acceptable to complete only part of the task with high quality. Incomplete work will be continued by a successor agent. Use `PARTIALLY_DONE` when more work is needed. Use `SUCCESS` when the assigned stage is fully documented. Use `CAPABILITY_EXCEEDED` if the sheet's complexity overwhelms your ability to produce useful documentation.
 - **Memory via Artifacts:** Input/output artifacts serve as persistent memory between agent invocations. Write important context to artifacts, not just responses.
 - **Cartographer Mindset:** You are drawing a map of the schematic, not copying it. The KB tells consumers what each sheet does and how sheets relate — it doesn't reproduce tool output. When you find yourself listing every component on a sheet, you've gone too granular. Describe the forest, not every tree.
 - **Purpose Over Parts:** A sheet with 73 components and 45 nets can often be described in a few paragraphs: what circuit function it implements, what signals it processes, and how it connects to the rest of the design. The component details are always available via hw-schema tools — your job is to provide the conceptual understanding that makes those tool queries meaningful.
-- **Coverage Over Precision:** At Tier 1, identifying all functional domains and mapping all sheets matters more than perfectly describing each domain. A missing domain creates a silent gap. An imprecise description gets corrected by Tier 2 research via correction flags.[[/SECTION:ExecutionPhilosophy]]
+- **Coverage Over Precision:** At Tier 1, identifying all functional domains and mapping all sheets matters more than perfectly describing each domain. A missing domain creates a silent gap. An imprecise description gets corrected by Tier 2 research via correction flags.
+[[/SECTION:ExecutionPhilosophy]]

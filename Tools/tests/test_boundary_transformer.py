@@ -253,13 +253,18 @@ class TestGenericValidation:
     def test_context_limits_list_item_format(
         self, generic_validation_input, tmp_path
     ):
-        """A list-item [INJECTION: context_limits] must preserve the '- ' prefix on the open tag."""
+        """A list-item [INJECTION: context_limits] must become a standalone tag (no '- ' prefix).
+
+        A boundary tag must occupy its own line to match TAG_PATTERN and be
+        recognised by the validator, so the '- ' list-item prefix is dropped.
+        """
         _, output_path = _transform_to_tmp(generic_validation_input, tmp_path)
         lines = _read(output_path).splitlines()
         cl_lines = [l for l in lines if "[[INJECTION:ContextLimits]]" in l]
         assert len(cl_lines) == 1
-        assert cl_lines[0] == "- [[INJECTION:ContextLimits]]", (
-            f"List-item ContextLimits must keep '- ' prefix, got: {cl_lines[0]!r}"
+        assert cl_lines[0] == "[[INJECTION:ContextLimits]]", (
+            f"List-item ContextLimits must become a standalone tag with no '- ' "
+            f"prefix, got: {cl_lines[0]!r}"
         )
 
     def test_close_tag_after_list_item_injection(
@@ -269,13 +274,13 @@ class TestGenericValidation:
         _, output_path = _transform_to_tmp(generic_validation_input, tmp_path)
         lines = _read(output_path).splitlines()
         for i, line in enumerate(lines):
-            if line == "- [[INJECTION:ContextLimits]]":
+            if line == "[[INJECTION:ContextLimits]]":
                 assert i + 1 < len(lines) and lines[i + 1] == "[[/INJECTION:ContextLimits]]", (
                     "Close tag must immediately follow open tag for empty list-item injection"
                 )
                 break
         else:
-            pytest.fail("Did not find '- [[INJECTION:ContextLimits]]' in output")
+            pytest.fail("Did not find '[[INJECTION:ContextLimits]]' in output")
 
 
 # ---------------------------------------------------------------------------
@@ -994,6 +999,56 @@ class TestFrontmatterKeys:
         assert "transform_version" not in output_keys, (
             "transform_version must not be injected into generic files that did not have it."
         )
+
+    def test_harness_specific_frontmatter_fields_preserved_verbatim(
+        self, generic_standard_input, tmp_path
+    ):
+        """Harness-specific frontmatter fields must survive transformation byte-for-byte.
+
+        Regression guard: an earlier transformer emitted only a hardcoded subset of
+        frontmatter keys, silently dropping harness-specific fields such as an
+        inline `mode`, a multi-line `permission:` map, and an `mcpServers:` list.
+        The transformer must preserve the entire frontmatter block verbatim and
+        change only the version / transform_version values.
+        """
+        harness_fm = (
+            "---\n"
+            "id: 99\n"
+            "version: 2.2.0\n"
+            "transform_version: 2.2.0\n"
+            "injections_version: 1.1.0\n"
+            "name: extra-fields-agent\n"
+            "description: Agent carrying harness-specific multi-line frontmatter\n"
+            "mode: subagent\n"
+            "model: claude-opus-4\n"
+            "tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion\n"
+            "permission:\n"
+            "  read: allow\n"
+            "  write: allow\n"
+            "  bash: deny\n"
+            "mcpServers:\n"
+            "  - hw-schema\n"
+            "  - user-feedback\n"
+            "---\n"
+        )
+        body = _read(generic_standard_input).split("---\n", 2)[2]
+        input_path = tmp_path / "extra_fields_input.md"
+        input_path.write_text(harness_fm + body, encoding="utf-8")
+
+        output_path = tmp_path / "extra_fields_output.md"
+        result = transform_file(input_path, output_path, generic_standard_input)
+        assert result.success is True
+        out = _read(output_path)
+        out_fm = out.split("---\n", 2)[1]
+
+        # Every non-version field must be preserved exactly, including the
+        # multi-line map and list values with their indentation.
+        assert "mode: subagent\n" in out_fm
+        assert "permission:\n  read: allow\n  write: allow\n  bash: deny\n" in out_fm
+        assert "mcpServers:\n  - hw-schema\n  - user-feedback\n" in out_fm
+        # Only the version values changed (major bump), key order preserved.
+        assert "version: 3.0.0\n" in out_fm
+        assert "transform_version: 3.0.0\n" in out_fm
 
 
 # ---------------------------------------------------------------------------

@@ -477,7 +477,7 @@ Always end with a JSON status block:
 ## Execution Philosophy
 
 - **Context Management:** You can dedicate your full context window to this task. Follow-up tasks are handled by spawning new agent instances.
-- [[INJECTION:ContextLimits]]
+[[INJECTION:ContextLimits]]
 [[/INJECTION:ContextLimits]]
 - **Quality over Completeness:** It's acceptable to complete only part of the task with high quality. Incomplete work will be continued by a successor agent. With single-artifact input, you should typically complete in one pass. Use `PARTIALLY_DONE` only if the audit artifact is exceptionally large. A fresh agent instance produces better results than a compacted one.
 - **Memory via Artifacts:** Input/output artifacts serve as persistent memory between agent invocations. Write important context to artifacts, not just responses.

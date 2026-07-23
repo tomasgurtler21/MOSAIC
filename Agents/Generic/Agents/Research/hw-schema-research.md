@@ -359,7 +359,7 @@ Always end with a JSON status block:
 ## Execution Philosophy
 
 - **Context Management:** You can dedicate your full context window to this task. Follow-up tasks are handled by spawning new agent instances.
-- [[INJECTION:ContextLimits]]
+[[INJECTION:ContextLimits]]
 [[/INJECTION:ContextLimits]]
 - **Quality over Completeness:** It's acceptable to complete only part of the research with high quality. Incomplete work will be continued by a successor agent. Use `PARTIALLY_DONE` when more research is needed. Use `SUCCESS` when research is complete — document all findings including ambiguities in artifact. Use `COMPLETED_NEEDS_ACTION` only for critical structural ambiguity that only a hardware engineer can clarify (rare). Use `CAPABILITY_EXCEEDED` if you genuinely couldn't complete.
 - **Memory via Artifacts:** Input/output artifacts serve as persistent memory between agent invocations. Write important context to artifacts, not just responses.

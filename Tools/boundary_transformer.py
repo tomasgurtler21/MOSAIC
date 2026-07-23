@@ -22,9 +22,15 @@ from boundary_constants import (
     INJECTION_OLD_MARKER_MAP,
     MARKER_TO_INJECTION_NAME,
     SECTION_HEADING_MAP,
+    TAG_PATTERN,
     close_tag,
     open_tag,
 )
+
+# Matches a top-level YAML frontmatter key at the start of a line (no leading
+# whitespace). Indented lines belong to a multi-line value (list items or nested
+# map entries) and are intentionally NOT matched.
+_FRONTMATTER_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:")
 
 
 @dataclasses.dataclass
@@ -111,11 +117,12 @@ def transform_file(
             version_after=""
         )
 
-    # Bump version
+    # Compute bumped version values. These are applied to the verbatim
+    # frontmatter block below; no other field is touched.
     version_after = _bump_version(version_before)
-    frontmatter["version"] = version_after
+    transform_version_after = None
     if "transform_version" in frontmatter:
-        frontmatter["transform_version"] = _bump_version(frontmatter["transform_version"])
+        transform_version_after = _bump_version(frontmatter["transform_version"])
 
     # Parse body to identify sections and injections
     body_lines = lines[frontmatter_end:]
@@ -141,18 +148,25 @@ def transform_file(
             version_after=version_after
         )
 
-    # Write output
+    # Write output. The frontmatter is emitted verbatim -- every field is
+    # preserved in its original order and formatting (including multi-line
+    # `permission:` maps and `mcpServers:` lists) -- with only the version and
+    # transform_version VALUES rewritten in place.
     output_lines = []
     output_lines.append("---\n")
-    for key in ["id", "version", "transform_version", "injections_version", "name", "description", "model", "tools"]:
-        if key in frontmatter:
-            value = frontmatter[key]
-            if isinstance(value, str):
-                output_lines.append(f"{key}: {value}\n")
-            elif isinstance(value, list):
-                output_lines.append(f"{key}: {value}\n")
-            else:
-                output_lines.append(f"{key}: {value}\n")
+    for raw in frontmatter_result["raw_lines"]:
+        eol = "\n" if raw.endswith("\n") else ""
+        if raw[:1] not in (" ", "\t") and raw.strip():
+            match = _FRONTMATTER_KEY_RE.match(raw.strip())
+            if match:
+                key = match.group(1)
+                if key == "version":
+                    output_lines.append(f"version: {version_after}{eol}")
+                    continue
+                if key == "transform_version" and transform_version_after is not None:
+                    output_lines.append(f"transform_version: {transform_version_after}{eol}")
+                    continue
+        output_lines.append(raw)
     output_lines.append("---\n")
     output_lines.extend(transformed_body["lines"])
 
@@ -171,9 +185,19 @@ def transform_file(
 def _parse_frontmatter(lines: list[str]) -> dict:
     """Parse YAML frontmatter from lines.
 
+    The frontmatter block is preserved verbatim (returned as ``raw_lines``); the
+    transformer only rewrites the ``version`` / ``transform_version`` values and
+    never reorders, drops, or reformats any other field. Only top-level scalar
+    keys are parsed into ``frontmatter`` -- enough to detect the version and
+    whether the file is a harness variant. Indented lines belong to a multi-line
+    value (e.g. a ``permission:`` map or an ``mcpServers:`` list) and are left
+    untouched.
+
     Returns dict with:
         success: bool
-        frontmatter: dict (if success)
+        frontmatter: dict of top-level key -> value string (if success)
+        raw_lines: list[str] verbatim frontmatter content lines, excluding the
+            surrounding '---' delimiters (if success)
         end_line: int (line index after closing ---; if success)
         error: str (if not success)
         line_number: int (if not success)
@@ -199,25 +223,27 @@ def _parse_frontmatter(lines: list[str]) -> dict:
             "line_number": 1
         }
 
-    # Parse YAML (simple key: value format)
+    # Parse only top-level keys. A top-level key line has no leading whitespace;
+    # indented lines are part of a multi-line value and are skipped here (their
+    # bytes are still preserved via raw_lines).
     frontmatter = {}
     for i in range(1, closing_line):
-        line = lines[i].strip()
-        if not line:
+        raw = lines[i]
+        if not raw.strip():
             continue
-        if ": " in line:
-            key, value = line.split(": ", 1)
-            # Handle lists [a, b, c]
-            if value.startswith("[") and value.endswith("]"):
-                frontmatter[key] = value
-            else:
-                frontmatter[key] = value
-        else:
+        if raw[:1] in (" ", "\t"):
+            continue  # nested list item / map entry -- part of a multi-line value
+        stripped = raw.strip()
+        match = _FRONTMATTER_KEY_RE.match(stripped)
+        if not match:
             return {
                 "success": False,
-                "error": f"Malformed YAML line: {line}",
+                "error": f"Malformed YAML line: {stripped}",
                 "line_number": i + 1
             }
+        key = match.group(1)
+        value = stripped[match.end():].strip()
+        frontmatter[key] = value
 
     if "version" not in frontmatter:
         return {
@@ -229,6 +255,7 @@ def _parse_frontmatter(lines: list[str]) -> dict:
     return {
         "success": True,
         "frontmatter": frontmatter,
+        "raw_lines": lines[1:closing_line],
         "end_line": closing_line + 1
     }
 
@@ -257,8 +284,9 @@ def _transform_generic_body(lines: list[str]) -> dict:
     injections_added = []
     errors = []
 
-    # Identify all sections first
-    sections_result = _identify_sections(lines)
+    # Identify all sections first. Generic files use the strict Identity rule so
+    # any non-canonical H2 immediately after Identity is flagged (FR-13).
+    sections_result = _identify_sections(lines, strict_identity=True)
     sections = sections_result["sections"]
     errors.extend(sections_result["errors"])
 
@@ -314,14 +342,12 @@ def _transform_generic_body(lines: list[str]) -> dict:
                     injection_name = injection_match["name"]
                     injections_added.append(injection_name)
 
-                    if injection_match["is_list_item"]:
-                        # List item format: "- [INJECTION: name]"
-                        result_lines.append(f"- {open_tag(BoundaryKind.INJECTION, injection_name)}\n")
-                        result_lines.append(f"{close_tag(BoundaryKind.INJECTION, injection_name)}\n")
-                    else:
-                        # Standalone format: "[INJECTION: name]"
-                        result_lines.append(f"{open_tag(BoundaryKind.INJECTION, injection_name)}\n")
-                        result_lines.append(f"{close_tag(BoundaryKind.INJECTION, injection_name)}\n")
+                    # Both standalone ("[INJECTION: name]") and list-item
+                    # ("- [INJECTION: name]") markers become standalone boundary
+                    # tags with no "- " prefix: a tag must occupy its own line to
+                    # match TAG_PATTERN and be recognised by the validator.
+                    result_lines.append(f"{open_tag(BoundaryKind.INJECTION, injection_name)}\n")
+                    result_lines.append(f"{close_tag(BoundaryKind.INJECTION, injection_name)}\n")
                     j += 1
                     continue
 
@@ -329,7 +355,11 @@ def _transform_generic_body(lines: list[str]) -> dict:
                 result_lines.append(line)
                 j += 1
 
-            # Add section close tag
+            # Add section close tag. If the last content line has no trailing
+            # newline (file ended without one), add it to keep the close tag
+            # on its own line and parseable by TAG_PATTERN.
+            if result_lines and not result_lines[-1].endswith("\n"):
+                result_lines[-1] += "\n"
             result_lines.append(close_tag(BoundaryKind.SECTION, section_name) + "\n")
 
             i = section_end
@@ -348,8 +378,18 @@ def _transform_generic_body(lines: list[str]) -> dict:
     }
 
 
-def _identify_sections(lines: list[str]) -> dict:
+def _identify_sections(lines: list[str], strict_identity: bool = False) -> dict:
     """Identify all section boundaries in the body.
+
+    Args:
+        lines: body lines (after frontmatter).
+        strict_identity: when True (generic transform path), the Identity section
+            ends at the first H2 heading that follows it -- canonical or not --
+            so a stray non-canonical H2 right after Identity is left uncovered and
+            reported as unclassifiable. When False (harness path), Identity ends
+            only before the next CANONICAL heading, because harness orchestrators
+            legitimately carry workflow H2 headings inside Identity as
+            AvailableWorkflows fill content.
 
     Returns dict with:
         sections: list of dicts with:
@@ -366,7 +406,10 @@ def _identify_sections(lines: list[str]) -> dict:
     # treated as section starts: they are subsections that belong as prose
     # inside the enclosing canonical section (e.g. the orchestrator's
     # "## Core Orchestration Loop" lives inside the ErrorHandling section).
+    # all_h2_lines records every H2 heading (canonical or not) so the strict
+    # Identity rule can end Identity at the first following H2.
     section_starts = []
+    all_h2_lines = []
     for i, line in enumerate(lines):
         if line.strip().startswith("```"):
             in_fenced_block = not in_fenced_block
@@ -377,6 +420,7 @@ def _identify_sections(lines: list[str]) -> dict:
 
         # Check for H2 headings
         if line.startswith("## ") and not line.startswith("###"):
+            all_h2_lines.append(i)
             section_name = _canonical_section_for_heading(line)
             if section_name is not None:
                 section_starts.append({"name": section_name, "line": i})
@@ -390,17 +434,30 @@ def _identify_sections(lines: list[str]) -> dict:
     for idx, section_start in enumerate(section_starts):
         start_line = section_start["line"]
 
-        if section_start["name"] == "Identity":
-            # The Identity (H1 title) section is only the title block: it ends
-            # at the first --- separator after its heading. Content after that
-            # separator is not absorbed by Identity, so a stray non-canonical
-            # block there is reported as unclassifiable rather than silently
-            # swallowed.
-            end_line = len(lines)
-            for i in range(start_line + 1, len(lines)):
+        if section_start["name"] == "Identity" and idx + 1 < len(section_starts):
+            # Identity ends at the --- separator immediately before its boundary
+            # heading. On the harness path the boundary heading is the next
+            # canonical heading: this lets harness orchestrators keep workflow H2
+            # headings (and the --- separators between them) inside Identity as
+            # AvailableWorkflows fill content. On the strict generic path the
+            # boundary heading is the FIRST following H2 of any kind, so a stray
+            # non-canonical H2 right after Identity (which never occurs in a
+            # legitimate generic file) is left uncovered and reported as
+            # unclassifiable instead of being silently absorbed.
+            boundary_line = section_starts[idx + 1]["line"]
+            if strict_identity:
+                for h2 in all_h2_lines:
+                    if h2 > start_line:
+                        boundary_line = h2
+                        break
+            end_line = boundary_line
+            for i in range(boundary_line - 1, start_line, -1):
                 if lines[i].strip() == "---":
                     end_line = i
                     break
+        elif section_start["name"] == "Identity":
+            # Identity is the only section -- absorb everything to EOF.
+            end_line = len(lines)
         elif idx + 1 < len(section_starts):
             # A canonical H2 section extends to the --- separator immediately
             # before the next canonical heading, absorbing any non-canonical
@@ -465,7 +522,16 @@ def _canonical_section_for_heading(line: str) -> Optional[str]:
 
 
 def _match_injection_marker(line: str) -> Optional[dict]:
-    """Check if line contains an old-format injection marker.
+    """Check if line is an injection marker (old- or new-style OPEN tag only).
+
+    Matches:
+    - Old-style standalone: "[INJECTION: name]"
+    - Old-style list-item:  "- [INJECTION: name]"
+    - New-style open tag:   "[[INJECTION:Name]]" (present in already-transformed
+      generic reference files after Batch A)
+
+    Does NOT match new-style close tags "[[/INJECTION:Name]]" -- those are
+    handled as generic-only lines and dropped.
 
     Returns dict with:
         name: str (canonical injection name)
@@ -483,10 +549,19 @@ def _match_injection_marker(line: str) -> Optional[dict]:
                 "is_list_item": True
             }
 
-    # Try standalone format: "[INJECTION: name]"
+    # Try old-style standalone format: "[INJECTION: name]"
     if stripped in MARKER_TO_INJECTION_NAME:
         return {
             "name": MARKER_TO_INJECTION_NAME[stripped],
+            "is_list_item": False
+        }
+
+    # Try new-style open tag: "[[INJECTION:Name]]"
+    # (present in already-transformed generic reference files)
+    m = TAG_PATTERN.match(stripped)
+    if m and m.group("kind") == "INJECTION" and not m.group("close"):
+        return {
+            "name": m.group("name"),
             "is_list_item": False
         }
 
@@ -560,16 +635,22 @@ def _is_h3_heading(line: str) -> bool:
 
 
 def _next_generic_anchor(generic_section: list[str], start: int) -> Optional[str]:
-    """Return the next non-blank, non-marker generic line at/after start, or None.
+    """Return the next shared content line in the generic section at/after start.
 
-    This is the fixed line that both files share immediately after an injection
-    region -- used as a stop marker when collecting harness fill content.
+    A "shared" line is one that both harness and generic files have verbatim.
+    We skip blank lines, old-style injection markers, and any new-style
+    SECTION/INJECTION boundary tags (open or close) -- those are generated by
+    the transformer and are not present in the untransformed harness.
     """
     for i in range(start, len(generic_section)):
         line = generic_section[i]
         if not line.strip():
             continue
         if _match_injection_marker(line):
+            continue
+        # Skip any new-style boundary tags ([[SECTION:...]], [[/SECTION:...]],
+        # [[/INJECTION:...]]) that appear in already-transformed generic refs.
+        if TAG_PATTERN.match(line.strip()):
             continue
         return line
     return None

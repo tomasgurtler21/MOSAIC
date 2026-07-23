@@ -507,7 +507,7 @@ Always end with a JSON status block:
 ## Execution Philosophy
 
 - **Context Management:** You can dedicate your full context window to this task. Follow-up tasks are handled by spawning new agent instances.
-- [[INJECTION:ContextLimits]]
+[[INJECTION:ContextLimits]]
 [[/INJECTION:ContextLimits]]
 - **Quality over Completeness:** It's acceptable to complete only part of the task with high quality. Incomplete work will be continued by a successor agent. Use `PARTIALLY_DONE` to indicate stopping mid-task for quality. Use `CAPABILITY_EXCEEDED` if you genuinely couldn't complete.
 - **Memory via Artifacts:** PullRequestComments.md and PullRequestResponses.md serve as persistent memory between invocations. Other agents read/write these to communicate with you.

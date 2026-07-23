@@ -344,7 +344,7 @@ Always end with a JSON status block:
 ## Execution Philosophy
 
 - **Context Management:** You can dedicate your full context window to this task. Follow-up tasks are handled by spawning new agent instances.
-- [[INJECTION:ContextLimits]]
+[[INJECTION:ContextLimits]]
 [[/INJECTION:ContextLimits]]
 - **Quality over Completeness:** It's acceptable to complete only part of the review with high quality. Incomplete work will be continued by a successor agent. Use `PARTIALLY_DONE` for quality-driven stops, `COMPLETED_NEEDS_ACTION` for findings requiring attention, or `CAPABILITY_EXCEEDED` if the task is beyond current capabilities.
 - **Memory via Artifacts:** Input/output artifacts serve as persistent memory between agent invocations. Write important context to artifacts, not just responses.

@@ -258,11 +258,6 @@ The consolidated report merges all partial transform reports' JSON data and adds
 
 - `merged_processing_notes` — all processing note arrays from all partial reports concatenated, each prefixed with source identification
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
-[[INJECTION:CustomConstraints]]
-[[/INJECTION:CustomConstraints]]
-
 [[/SECTION:Capabilities]]
 ---
 
@@ -280,6 +275,10 @@ The consolidated report merges all partial transform reports' JSON data and adds
 - **Preserve all transform report data:** Every filtered entry and processing note from every partial transform report must appear in the consolidated report. Do not summarize or drop partial report data — reviewers need the full detail.
 - **Schema conformance:** The consolidated PR response queue must use the same schema as the partial queues. Do not invent a new format.
 - **Err toward keeping both:** When uncertain whether two findings are true duplicates, keep both. A slightly redundant PR comment is less harmful than suppressing a unique insight.
+[[INJECTION:HarnessConstraints]]
+[[/INJECTION:HarnessConstraints]]
+[[INJECTION:CustomConstraints]]
+[[/INJECTION:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---
@@ -344,7 +343,7 @@ Always end with a JSON status block:
 ## Execution Philosophy
 
 - **Context Management:** You can dedicate your full context window to this task. Follow-up tasks are handled by spawning new agent instances.
-- [[INJECTION:ContextLimits]]
+[[INJECTION:ContextLimits]]
 [[/INJECTION:ContextLimits]]
 - **Quality over Completeness:** It's acceptable to complete only part of the task with high quality. Incomplete work will be continued by a successor agent. Use `PARTIALLY_DONE` if the volume of partial files exceeds what can be processed in one pass.
 - **Memory via Artifacts:** Input/output artifacts serve as persistent memory between agent invocations. Write important context to artifacts, not just responses.

@@ -97,7 +97,7 @@ Always end with a JSON status block.
 ## Execution Philosophy
 
 - **Context Management:** You can dedicate your full context window to this task.
-- [[INJECTION:ContextLimits]]
+[[INJECTION:ContextLimits]]
 [[/INJECTION:ContextLimits]]
 - **Quality over Completeness:** Stop at a good stopping point.
 [[/SECTION:ExecutionPhilosophy]]
