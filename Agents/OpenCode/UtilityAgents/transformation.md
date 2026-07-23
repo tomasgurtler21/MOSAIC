@@ -222,7 +222,7 @@ Content for these injection points comes from the target platform's `Agents/{Pla
 - `[INJECTION: protocol_extension]`
 - `[INJECTION: error_handling_extension]`
 - `[INJECTION: context_limits]`
-- `[INJECTION: platform_constraints]`
+- `[INJECTION: harness_constraints]`
 
 ### Project-Level (keep in platform transformation, fill in project transformation)
 - `[INJECTION: identity_extension]`
