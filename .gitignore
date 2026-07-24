@@ -78,7 +78,6 @@ coverage/
 
 node_modules/
 dist/
-build/
 out/
 *.tsbuildinfo
 .npm/

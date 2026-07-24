@@ -126,7 +126,7 @@ Phrases like "think step by step", "be thorough", "analyze carefully" are legacy
 Restating protocol rules that are already in the Communication Protocol section. The template structure already includes the full protocol — adding extra protocol reminders creates maintenance burden and potential inconsistencies.
 
 ### 8. Scope Bleed Between Agents
-Giving a subagent responsibilities that overlap with existing agents in the workflow. Each subagent has a single responsibility — check the agent reference in Workflows.md before defining scope.
+Giving a subagent responsibilities that overlap with existing agents in the workflow. Each subagent has a single responsibility — check the agent reference in `Workflows/Index.md` before defining scope.
 
 ### 9. Agent Name Coupling
 Referencing other subagents by name in instructions creates tight coupling. If an agent is renamed, split, or removed, all referencing agents need updating. Subagents should be self-contained — they interact with artifacts and roles, not with specific agents.
@@ -164,7 +164,7 @@ The template defines these required sections in order:
 
 ### Agent Function Categories & Workflows
 
-Subagents are organized by function (Research, Planning, Validation, Creation, Execution, Interface). Read `Agents/Generic/Orchestrator/Workflows.md` for the current agent reference, function categories, and workflow definitions. Always check this file during Phase 2 to understand existing agents and where the new subagent fits.
+Subagents are organized by function (Research, Planning, Validation, Creation, Execution, Interface). Read `Workflows/Index.md` for the current agent reference and workflow index, then read individual workflow files under `Workflows/{Category}/` as needed. Always check these during Phase 2 to understand existing agents and where the new subagent fits.
 
 ### Communication Protocol, Injection Points & Authority Hierarchy
 
@@ -196,7 +196,7 @@ Understand how this subagent fits into the orchestration system:
 
 **Questions:**
 - "Which function category does this belong to?" (Research, Planning, Validation, Creation, Execution, Interface, or new?)
-- "Which workflows will use this subagent?" (Existing workflows from Workflows.md, or a new workflow?)
+- "Which workflows will use this subagent?" (Existing workflows from `Workflows/Index.md`, or a new workflow?)
 - "What artifacts does this subagent read and write?"
 - "Where in the workflow sequence does it fit?" (After which agent? Before which agent?)
 - "Does it need human-in-the-loop by default?"
@@ -373,7 +373,7 @@ When asked to review or update an existing subagent:
 
 1. Read the existing subagent file
 2. Read `Development/Designs/AgentTemplateArchitecture.md` for current template structure
-3. Read `Agents/Generic/Orchestrator/Workflows.md` for current agent reference and workflow context
+3. Read `Workflows/Index.md` for current agent reference and workflow context
 4. Apply the Self-Review Checklist (both General Coherence and Orchestration Compliance)
 5. Report findings: what passes, what needs updating, and why
 6. If updates are needed, propose specific changes with rationale

@@ -61,7 +61,9 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 [[/INJECTION:AvailableWorkflows]]
 
 <!-- 
-When creating a concrete orchestrator, inject workflow definitions here. Examples are in Workflows.md file
+When creating a concrete orchestrator, inject workflow definitions here. Workflows are defined as individual
+files under the Workflows/ directory (e.g., Workflows/{Category}/{id}.md). See Workflows/Index.md for the
+full list of available workflows and their categories.
 -->
 
 [[INJECTION:IdentityExtension]]

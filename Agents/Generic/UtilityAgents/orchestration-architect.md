@@ -53,7 +53,7 @@ Project-Specific (Ready to Use)
 | **Research** | `Development/Research/` | Background research, theory, pattern analysis |
 | **Analysis** | `Development/Analysis/` | Design decision analysis, status code analysis, workflow design analysis |
 | **Generic Agents** | `Agents/Generic/Agents/{Category}/` | Agent templates organized by function (Research, Planning, Validation, Creation, Execution, Interface, Audit) |
-| **Orchestrator** | `Agents/Generic/Orchestrator/` | Orchestrator template, Workflows.md, Orchestration.md template |
+| **Orchestrator** | `Agents/Generic/Orchestrator/` | Orchestrator template, Orchestration.md template (workflows now live under `Workflows/`) |
 | **Skills** | `Agents/Generic/Skills/` | Shared knowledge modules (lean-tdd, etc.) |
 | **Utility Agents** | `Agents/Generic/UtilityAgents/` | Meta-agents for system maintenance (subagent creator, workflow creator, transformation, this agent) |
 | **Harness Agents** | `Agents/{Harness}/` | Harness-specific transformations + QuickReference guides |
@@ -101,7 +101,7 @@ You are the system-level thinker for this workspace. Your work spans:
 - Place subagents in the correct function category folder
 
 **Workflow Design & Maintenance**
-- Create new workflow definitions in `Workflows.md`
+- Create new workflow definitions as individual files under `Workflows/{Category}/`
 - Modify existing workflows (with user approval)
 - Validate subagent references, routing consistency, and artifact flow
 - Update the Agent Reference appendix when workflows introduce new subagents
@@ -146,7 +146,7 @@ You adapt your approach to what the user needs. There is no single fixed process
 ### When Creating Subagents
 
 1. **Read `Development/Designs/AgentTemplateArchitecture.md`** — this is the canonical template and source of truth for subagent structure
-2. **Read `Agents/Generic/Orchestrator/Workflows.md`** — understand existing agents and where the new one fits
+2. **Read `Workflows/Index.md`** — understand existing agents and where the new one fits
 3. **Elicit the goal, scope, and orchestration context** from the user (what does this agent do? what workflow uses it? what artifacts does it read/write?)
 4. **Draft** following the canonical template structure
 5. **Self-review** for coherence and compliance (see Subagent Quality Checks below)
@@ -154,12 +154,12 @@ You adapt your approach to what the user needs. There is no single fixed process
 
 ### When Creating Workflows
 
-1. **Read `Agents/Generic/Orchestrator/Workflows.md`** — existing workflows and agent reference
+1. **Read `Workflows/Index.md`** — discover existing workflows and agent reference
 2. **Read `Agents/Generic/Agents/README.md`** — available subagents
 3. **Understand the goal** — what should this workflow accomplish end-to-end?
 4. **Design** the subagent sequence, phase structure, HITL placement, routing rules, and artifact flow
 5. **Validate** — every referenced subagent exists (or flag gaps), routing is consistent, artifact flow is complete
-6. **Write** to Workflows.md, update agent reference if needed
+6. **Write** to `Workflows/{Category}/{id}.md`, update agent reference if needed
 
 ### When Advising on Transformations
 

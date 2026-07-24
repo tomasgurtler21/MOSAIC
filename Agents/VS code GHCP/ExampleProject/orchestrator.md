@@ -61,6 +61,8 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 ### Available Workflows
 
 [[INJECTION:AvailableWorkflows]]
+[[SECTION:Workflow:greenfield-tdd]]
+<!-- workflow-version: 3.3 -->
 ## Greenfield TDD Workflow
 
 > **Version:** 3.3
@@ -93,8 +95,11 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 - **Greenfield** = no existing codebase, architecture created from scratch
 - If system-design-review finds requirements issues → system-designer evaluates and may loop to requirements-refinement
 
+[[/SECTION:Workflow:greenfield-tdd]]
 ---
 
+[[SECTION:Workflow:brownfield-tdd]]
+<!-- workflow-version: 3.4 -->
 ## Brownfield TDD Workflow
 
 > **Version:** 3.4
@@ -127,8 +132,11 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 - contracts-designer + contracts-review are optional - skip both if no new contracts are needed
 - implementation-review may identify other issues than code itself → callback to codebase-research, planner-tdd-soft, contracts-designer
 
+[[/SECTION:Workflow:brownfield-tdd]]
 ---
 
+[[SECTION:Workflow:quick-fix]]
+<!-- workflow-version: 3.0 -->
 ## Quick Fix Workflow
 
 > **Version:** 3.0
@@ -145,8 +153,11 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 **Notes:**
 - Single-stage plans use Stage-1/ folder for consistency (Decision 15)
 
+[[/SECTION:Workflow:quick-fix]]
 ---
 
+[[SECTION:Workflow:brownfield-research-only]]
+<!-- workflow-version: 2.1 -->
 ## Brownfield Research Only Workflow
 
 > **Version:** 2.1
@@ -160,8 +171,11 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 **Notes:**
 - **Brownfield** = existing codebase to analyze
 
+[[/SECTION:Workflow:brownfield-research-only]]
 ---
 
+[[SECTION:Workflow:brownfield-design]]
+<!-- workflow-version: 3.2 -->
 ## Brownfield Design Review Workflow
 
 > **Version:** 3.2
@@ -183,8 +197,11 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 - contracts-designer + contracts-review are optional - skip both if no new/modified contracts are needed
 - Enable HITL on contracts-designer/contracts-review if user review is required
 
+[[/SECTION:Workflow:brownfield-design]]
 ---
 
+[[SECTION:Workflow:implementation-only]]
+<!-- workflow-version: 3.1 -->
 ## Implementation Only Workflow
 
 > **Version:** 3.1
@@ -201,8 +218,11 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 
 **Prerequisites:** ContractsDesign.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md must exist
 
+[[/SECTION:Workflow:implementation-only]]
 ---
 
+[[SECTION:Workflow:brownfield-pr-audit]]
+<!-- workflow-version: 3.0 -->
 ## Brownfield PR Audit Workflow
 
 > **Version:** 3.1
@@ -245,8 +265,11 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 - Audit category recommendations in Requirements.md are advisory — the workflow always dispatches the fixed architecture/contracts tracks; planner decides which staged types to create
 - `architecture-audit(staged)` / `contracts-audit(staged)` — same underlying agent as the fixed instances; parenthetical suffix disambiguates rows
 
+[[/SECTION:Workflow:brownfield-pr-audit]]
 ---
 
+[[SECTION:Workflow:brownfield-system-audit]]
+<!-- workflow-version: 1.0 -->
 ## Brownfield System Audit Workflow
 
 > **Version:** 1.0
@@ -272,8 +295,11 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 - Output (ArchitectureAudit.md, ContractsAudit.md) can guide follow-up per-component PR Audit workflows
 - Workflow completes when all dispatched subagents have finished (both `architecture-audit` and `contracts-audit` return COMPLETE)
 
+[[/SECTION:Workflow:brownfield-system-audit]]
 ---
 
+[[SECTION:Workflow:kb-generation]]
+<!-- workflow-version: 0.5 -->
 ## Knowledge Base Generation Workflow
 
 > **Version:** 0.5
@@ -300,8 +326,11 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 - **Refresh/update** — re-run on an existing KB to refresh after codebase changes. Generator updates existing documents and flags new drift
 - **Verification** — run a separate Knowledge Verification workflow after generation to test KB quality
 
+[[/SECTION:Workflow:kb-generation]]
 ---
 
+[[SECTION:Workflow:kb-verification-human]]
+<!-- workflow-version: 0.4 -->
 ## Knowledge Verification (Human) Workflow
 
 > **Version:** 0.4
@@ -322,8 +351,11 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 - **Diagnostic only** — workflow ends at VerificationReport.md. To act on findings, run a separate remediation workflow (e.g., Knowledge Base Correction)
 - **Knowledge-source agnostic** — verifies whether questions can be answered from whatever knowledge sources the codebase-research agent has access to (KB, docs, code comments, etc.)
 
+[[/SECTION:Workflow:kb-verification-human]]
 ---
 
+[[SECTION:Workflow:kb-verification-sampler]]
+<!-- workflow-version: 0.4 -->
 ## Knowledge Verification (Sampler) Workflow
 
 > **Version:** 0.4
@@ -346,8 +378,11 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 - **Q/A artifact lifecycle** — `(create)` creates empty artifacts → `codebase-question-sampler` populates → `(validate)` validates and creates batched `VerificationAttemptedAnswers.md`
 - **Diagnostic only** — workflow ends at VerificationReport.md. To act on findings, run a separate remediation workflow (e.g., Knowledge Base Correction)
 
+[[/SECTION:Workflow:kb-verification-sampler]]
 ---
 
+[[SECTION:Workflow:kb-correction]]
+<!-- workflow-version: 0.1 -->
 ## Knowledge Base Correction Workflow
 
 > **Version:** 0.1
@@ -367,9 +402,12 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 - **May create new tiers** — if corrections reveal areas needing deeper documentation, generator adds new stages to KBProgress.md
 - **No re-verification** — after corrections, workflow completes. Run a separate verification workflow to confirm fixes
 
+[[/SECTION:Workflow:kb-correction]]
 ---
 
 
+[[SECTION:Workflow:kb-verification-sampler-human]]
+<!-- workflow-version: 1.0 -->
 ## Knowledge Verification (Sampler + Human) Workflow
 
 > **Version:** 1.0
@@ -398,8 +436,11 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 - **Shared artifact concurrency** — both the human preparer and sampler append to the same VerificationQuestions.md and VerificationAnswers.md. The `Source` field (`user` vs `agent`) distinguishes origin. Both agents append with independent numbering — the validate step handles any numbering conflicts
 - **Question sources are independent** — if one source produces no questions (e.g., user has no questions, or sampler finds the codebase too small), the workflow continues with whatever questions the other source produced
 
+[[/SECTION:Workflow:kb-verification-sampler-human]]
 ---
 
+[[SECTION:Workflow:hw-schema-kb-generation]]
+<!-- workflow-version: 0.5 -->
 ## HW Schema Knowledge Base Generation Workflow
 
 > **Version:** 0.5
@@ -428,6 +469,8 @@ You CANNOT proceed without Task, Workflow type, and Checkpoints explicitly speci
 - **Two progress artifacts** — HWResearchProgress.md tracks per-sheet research stages; KBProgress.md tracks KB generation/correction stages. Different concerns, different lifecycles
 - **Per-sheet research files are temporary** — project files in a dedicated directory (e.g., `SheetsResearch/`), referenced in HWResearchProgress.md. Can be cleaned up after workflow completion
 - **KBProgress.md bootstrap** — first KB generator run creates KBProgress.md based on its analysis of all sheet research; it does not exist as a prerequisite
+
+[[/SECTION:Workflow:hw-schema-kb-generation]]
 [[/INJECTION:AvailableWorkflows]]
 
 [[INJECTION:IdentityExtension]]
