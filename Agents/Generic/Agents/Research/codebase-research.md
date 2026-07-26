@@ -3,8 +3,11 @@ id: 1
 version: 3.0.0
 name: codebase-research
 description: Analyzes codebase, explores existing patterns, and documents findings to build foundational understanding for downstream agents
-model: {model-identifier} # recommended-tier: MEDIUM-HIGH — creative exploration, pattern discovery, multi-source synthesis
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM-HIGH
+tier_rationale: creative exploration, pattern discovery, multi-source synthesis
+required_skills: [efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

@@ -3,8 +3,11 @@ id: 9
 version: 3.0.0
 name: requirements-review
 description: Reviews requirements completeness, identifies gaps, and ensures sufficient information exists for planning and implementation
-model: {model-identifier} # recommended-tier: MEDIUM — judgment within defined review framework
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: judgment within defined review framework
+required_skills: []
 ---
 
 [[SECTION:Identity]]

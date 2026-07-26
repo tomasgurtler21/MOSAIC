@@ -1,0 +1,13 @@
+# Valid descriptor with model identifiers in formats the tool has never seen before.
+# AC5.4: no model identifier format is validated; all are loaded verbatim.
+schema_version: "1"
+id: "unusual-models-harness"
+display_name: "Unusual Models Harness"
+models:
+  ids:
+    - "accounts/fireworks/models/deepseek-r1"
+    - "gpt-4-turbo-preview-2024-04-09"
+    - "any-arbitrary-string-12345"
+    - "provider:region:model-name"
+    - "UPPERCASE-MODEL-ID"
+  format_hint: "any format hint text is also accepted without validation"

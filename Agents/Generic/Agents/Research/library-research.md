@@ -3,8 +3,11 @@ id: 2
 version: 2.0.0
 name: library-research
 description: Researches external libraries, APIs, and documentation to provide comprehensive reference information for development tasks
-model: {model-identifier} # recommended-tier: MEDIUM — structured investigation within clear scope
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, web_search, web_fetch, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: structured investigation within clear scope
+required_skills: []
 ---
 
 [[SECTION:Identity]]

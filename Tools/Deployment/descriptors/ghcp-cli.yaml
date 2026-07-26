@@ -1,0 +1,127 @@
+schema_version: "1"
+id: "ghcp-cli"
+display_name: "GitHub Copilot CLI"
+transform_version: "3.0.0"
+injections_version: "1.2.0"
+
+models:
+  ids:
+    - "claude-sonnet-4-6"
+    - "claude-opus-4-6"
+    - "claude-haiku-4-6"
+    - "gpt-5"
+    - "gpt-5-mini"
+  format_hint: "claude-<model>-<version> or gpt-<version>"
+
+tools:
+  shape: list
+  universe:
+    - name: "read"
+      unused: deny
+      by_convention: false
+    - name: "edit"
+      unused: deny
+      by_convention: false
+    - name: "search"
+      unused: deny
+      by_convention: false
+    - name: "execute"
+      unused: deny
+      by_convention: false
+    - name: "ask_user"
+      unused: deny
+      by_convention: false
+    - name: "agent"
+      unused: deny
+      by_convention: false
+    - name: "skill"
+      unused: deny
+      by_convention: false
+  mappings:
+    - generic: "file_read"
+      harness_tools:
+        - "read"
+    - generic: "file_write"
+      harness_tools:
+        - "edit"
+    - generic: "file_edit"
+      harness_tools:
+        - "edit"
+    - generic: "file_search"
+      harness_tools:
+        - "search"
+    - generic: "content_search"
+      harness_tools:
+        - "search"
+    - generic: "terminal"
+      harness_tools:
+        - "execute"
+    - generic: "user_interaction"
+      harness_tools:
+        - "ask_user"
+    - generic: "subagent"
+      harness_tools:
+        - "agent"
+    - generic: "skill"
+      harness_tools:
+        - "skill"
+  placeholder_expansion:
+    - "read"
+    - "edit"
+    - "search"
+    - "execute"
+    - "ask_user"
+    - "agent"
+
+paths:
+  agents:
+    supported: true
+    project: ".github/agents"
+    user:
+      "darwin": "~/.copilot/agents"
+      "linux": "~/.copilot/agents"
+      "windows": "${APPDATA}/GitHub Copilot/agents"
+      "": "~/.copilot/agents"
+  skills:
+    supported: true
+    project: ".github/skills"
+    user:
+      "darwin": "~/.copilot/skills"
+      "linux": "~/.copilot/skills"
+      "windows": "${APPDATA}/GitHub Copilot/skills"
+      "": "~/.copilot/skills"
+  hooks:
+    supported: false
+
+extensions:
+  agent: ".agent.md"
+
+frontmatter:
+  model_key: "model"
+  tools_key: "tools"
+  add:
+    - key: "user-invocable"
+      value: false
+  drop:
+    - "recommended_tier"
+    - "tier_rationale"
+    - "required_skills"
+  key_order:
+    - "id"
+    - "version"
+    - "transform_version"
+    - "injections_version"
+    - "name"
+    - "description"
+    - "model"
+    - "tools"
+    - "user-invocable"
+
+injections:
+  - name: "HarnessConstraints"
+    content: "**Parallel Tool Calls:** Issue multiple independent tool calls in a single response whenever possible. Sequential tool calls are only permitted when a later call depends on the result of an earlier one. This minimises inference API calls to improve speed and reduce cost."
+  - name: "LanguagePatterns"
+    content: ""
+
+hooks:
+  supported: false

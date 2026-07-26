@@ -3,8 +3,11 @@ id: 24
 version: 2.0.0
 name: knowledge-base-flag-sorter
 description: Collects correction flags from KBFlags.md, organizes them bottom-up by target tier, produces a sorted flag report, and creates correction stages in KBProgress.md
-model: {model-identifier} # recommended-tier: LOW-MEDIUM — mostly organizing, some categorization judgment
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: LOW-MEDIUM
+tier_rationale: mostly organizing, some categorization judgment
+required_skills: []
 ---
 
 [[SECTION:Identity]]

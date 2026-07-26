@@ -1,5 +1,6 @@
 ---
 name: git-read-commands
+version: 1.0.0
 description: Safe, read-only git commands for AI agents. Covers remote refs, staleness detection, diff/log/show commands, rename handling, and pitfalls. Use for any git-based analysis (PR audits, code reviews, branch comparisons). NOT FOR write operations (commit, push, merge, rebase, checkout, reset).
 ---
 

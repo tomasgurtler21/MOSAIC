@@ -1,0 +1,18 @@
+# Invalid descriptor: two tool mappings declare the same generic tool name.
+# Validate must reject this with an error identifying the duplicate field.
+schema_version: "1"
+id: "duplicate-mappings-harness"
+display_name: "Duplicate Mappings Harness"
+tools:
+  shape: list
+  universe:
+    - name: "read/readFile"
+      unused: deny
+      by_convention: false
+  mappings:
+    - generic: "file_read"
+      harness_tools:
+        - "read/readFile"
+    - generic: "file_read"
+      harness_tools:
+        - "read/readFile"

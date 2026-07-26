@@ -2,8 +2,11 @@
 version: 1.0.0
 name: system-prompt-capturer
 description: Captures and maintains harness-injected system prompts, built-in tool definitions, and tool output format documentation following the SystemPromptCaptureGuide
-model: {model-identifier} # recommended-tier: MEDIUM — structured capture and file manipulation work
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, bash, user_interaction, task]
+recommended_tier: MEDIUM
+tier_rationale: structured capture and file manipulation work
+required_skills: []
 ---
 
 # System Prompt Capturer

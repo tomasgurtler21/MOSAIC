@@ -1,5 +1,6 @@
 ---
 name: efficient-file-reading
+version: 1.0.0
 description: Efficient file reading strategies that maximize context quality while minimizing context waste. Use when exploring codebases, reading documentation, analyzing configuration files, or investigating any file-based content. Covers scout-first reading, targeted search patterns, and structure-aware exploration. Tool-agnostic principles applicable across all harnesses.
 ---
 

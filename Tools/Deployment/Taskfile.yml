@@ -1,0 +1,326 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+#
+# mosaic-deploy build, install, and check tasks.
+#
+# Prerequisites:
+#   - Go 1.22 or later
+#   - Task (https://taskfile.dev) installed and on PATH
+#   - A POSIX-compatible shell (sh/bash) on PATH — required by tasks that use
+#     inline shell scripts (verify:static:*, verify:layout, install:config,
+#     verify:e2e). On Windows, Git for Windows provides a compatible sh.exe.
+#
+# Run all tasks from this directory (Tools/Deployment/).
+# The MOSAIC root is two levels up (../../).
+#
+# Quick start:
+#   task install          Build the native binary and install it with default configs
+#   task build:all        Cross-compile for Windows and Linux
+#   task check:imports    Verify import-boundary rules
+#   task test             Run the full test suite
+
+version: "3"
+
+vars:
+  BINARY_NAME: mosaic-deploy
+  CMD_PKG: ./cmd/mosaic-deploy
+  LDFLAGS: -s -w
+  MOSAIC_ROOT: ../..
+  DIST_DIR: ./dist
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Build tasks
+  # ---------------------------------------------------------------------------
+
+  build:windows:
+    desc: Cross-compile for Windows (amd64). Output: dist/mosaic-deploy.exe
+    summary: |
+      Produces a statically-linked Windows amd64 binary with no external runtime
+      dependency. CGO is disabled so the binary works on any Windows machine
+      without a C runtime.
+    env:
+      GOOS: windows
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    cmds:
+      - mkdir -p {{.DIST_DIR}}
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}}.exe {{.CMD_PKG}}
+    generates:
+      - "{{.DIST_DIR}}/{{.BINARY_NAME}}.exe"
+
+  build:linux:
+    desc: Cross-compile for Linux (amd64). Output: dist/mosaic-deploy-linux-amd64
+    summary: |
+      Produces a statically-linked Linux amd64 binary with no external runtime
+      dependency. CGO is disabled and GOOS=linux ensures reproducible output
+      regardless of the host platform.
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    cmds:
+      - mkdir -p {{.DIST_DIR}}
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64 {{.CMD_PKG}}
+    generates:
+      - "{{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64"
+
+  build:all:
+    desc: Cross-compile for all supported platforms (Windows and Linux amd64)
+    summary: |
+      Builds dependency-free binaries for Windows and Linux from the current
+      source tree. Both outputs land in dist/. See AC24.1.
+    deps: [build:windows, build:linux]
+
+  build:native:
+    desc: Build a binary for the current platform (used by install and tests)
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}}{{exeExt}} {{.CMD_PKG}}
+
+  # ---------------------------------------------------------------------------
+  # Import-boundary check
+  # ---------------------------------------------------------------------------
+
+  check:imports:
+    desc: Verify import-boundary rules (dependency direction + I/O ban on transform)
+    summary: |
+      Runs tools/importcheck against the module source. Fails with exit code 1
+      if any of the following rules is violated:
+
+        - domain: must not import any mosaic-deploy package
+        - transform: must not import os, io/fs, net, time, math/rand, crypto/rand
+        - app: must not import internal/tui or internal/cli
+
+      Wire this task into CI alongside go test so boundary drift is caught
+      before it reaches review. See AC24.4.
+    cmds:
+      - go run ./tools/importcheck
+
+  # ---------------------------------------------------------------------------
+  # Full checked build (import check + cross-compilation)
+  # ---------------------------------------------------------------------------
+
+  build-checked:
+    desc: Run import-boundary check then cross-compile for all platforms
+    summary: |
+      The intended release-gate task. Verifies dependency direction, then
+      produces both platform binaries. Equivalent to:
+        task check:imports && task build:all
+    cmds:
+      - task: check:imports
+      - task: build:all
+
+  # ---------------------------------------------------------------------------
+  # Test
+  # ---------------------------------------------------------------------------
+
+  test:
+    desc: Run the full test suite
+    cmds:
+      - go test ./...
+
+  test:short:
+    desc: Run tests excluding the conformance suite (faster iteration)
+    cmds:
+      - go test -short ./...
+
+  # ---------------------------------------------------------------------------
+  # Install — copy the binary and default configs to the MOSAIC root
+  # ---------------------------------------------------------------------------
+  #
+  # After running `task install` from Tools/Deployment/, the MOSAIC root
+  # contains:
+  #
+  #   MOSAIC/
+  #     mosaic-deploy[.exe]           # the native binary
+  #     MosaicDeploy/
+  #       config/
+  #         tool-config.yaml          # utility-agent allow-list, external-module opt-in
+  #         user-config.yaml          # tier-to-model mappings per harness
+  #       harnesses/                  # optional runtime harness modules (drop-in)
+  #       logs/                       # run logs (created on first run)
+  #       fallback/                   # second-choice deployment target
+  #
+  # Existing config files are never overwritten by the install step.
+  # The binary IS overwritten so that `task install` upgrades the binary.
+
+  install:
+    desc: Build and install the native binary and default config to the MOSAIC root
+    summary: |
+      Compiles the binary for the current platform and writes it to the MOSAIC
+      root directory (../../). Then creates the MosaicDeploy/ runtime tree and
+      seeds it with default config files if they are not already present.
+
+      Existing config files are left untouched so local customisations survive
+      an upgrade. See AC24.2, AC24.3.
+    cmds:
+      - task: install:binary
+      - task: install:config
+
+  install:binary:
+    desc: Compile and copy the native binary to the MOSAIC root
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.MOSAIC_ROOT}}/{{.BINARY_NAME}}{{exeExt}} {{.CMD_PKG}}
+
+  install:config:
+    desc: Create the MosaicDeploy/ runtime tree and seed default configs (non-destructive)
+    cmds:
+      - mkdir -p {{.MOSAIC_ROOT}}/MosaicDeploy/config
+      - mkdir -p {{.MOSAIC_ROOT}}/MosaicDeploy/harnesses
+      - mkdir -p {{.MOSAIC_ROOT}}/MosaicDeploy/logs
+      - mkdir -p {{.MOSAIC_ROOT}}/MosaicDeploy/fallback
+      # Copy default configs only when not already present so local edits survive upgrades.
+      - test -f {{.MOSAIC_ROOT}}/MosaicDeploy/config/tool-config.yaml || cp config/tool-config.yaml {{.MOSAIC_ROOT}}/MosaicDeploy/config/tool-config.yaml
+      - test -f {{.MOSAIC_ROOT}}/MosaicDeploy/config/user-config.yaml || cp config/user-config.yaml {{.MOSAIC_ROOT}}/MosaicDeploy/config/user-config.yaml
+
+  # ---------------------------------------------------------------------------
+  # Verify — static analysis of built binaries
+  # ---------------------------------------------------------------------------
+
+  verify:static:windows:
+    desc: Verify that the Windows binary has no dynamic dependencies
+    summary: |
+      Uses `go tool nm` to inspect the Windows binary for dynamic-link symbols.
+      A static binary should contain no DLL import entries. Fails if the binary
+      does not exist (run `task build:windows` first). See AC24.1.
+    cmds:
+      - |
+        if [ ! -f {{.DIST_DIR}}/{{.BINARY_NAME}}.exe ]; then
+          echo "ERROR: {{.DIST_DIR}}/{{.BINARY_NAME}}.exe not found. Run: task build:windows" >&2
+          exit 1
+        fi
+        go tool nm {{.DIST_DIR}}/{{.BINARY_NAME}}.exe | grep -i "__imp_" && \
+          { echo "ERROR: Windows binary has dynamic-link imports (CGO leak?)" >&2; exit 1; } || \
+          echo "OK: no dynamic-link imports found in Windows binary"
+
+  verify:static:linux:
+    desc: Verify that the Linux binary has no dynamic dependencies
+    summary: |
+      Uses `go tool nm` to inspect the Linux binary and checks for references to
+      libc/libpthread symbols that indicate a dynamic dependency. Fails if the
+      binary does not exist (run `task build:linux` first). See AC24.1.
+    cmds:
+      - |
+        if [ ! -f {{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64 ]; then
+          echo "ERROR: {{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64 not found. Run: task build:linux" >&2
+          exit 1
+        fi
+        go tool nm {{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64 | grep -i "libc\|libpthread\|__glibc" && \
+          { echo "ERROR: Linux binary references dynamic libraries (CGO leak?)" >&2; exit 1; } || \
+          echo "OK: no dynamic library references found in Linux binary"
+
+  verify:layout:
+    desc: Verify that the installed runtime layout matches the documented structure
+    summary: |
+      Checks that every directory and file that should be present after `task install`
+      is actually present at the MOSAIC root. Fails with a descriptive error for each
+      missing item. Run after `task install`. See AC24.2.
+    cmds:
+      - |
+        errors=0
+        check() {
+          if [ ! -e "{{.MOSAIC_ROOT}}/$1" ]; then
+            echo "MISSING: $1" >&2
+            errors=$((errors + 1))
+          else
+            echo "OK:      $1"
+          fi
+        }
+        check "MosaicDeploy/config/tool-config.yaml"
+        check "MosaicDeploy/config/user-config.yaml"
+        check "MosaicDeploy/harnesses"
+        check "MosaicDeploy/logs"
+        check "MosaicDeploy/fallback"
+        if [ -f "{{.MOSAIC_ROOT}}/mosaic-deploy.exe" ] || [ -f "{{.MOSAIC_ROOT}}/mosaic-deploy" ]; then
+          echo "OK:      mosaic-deploy binary"
+        else
+          echo "MISSING: mosaic-deploy binary (mosaic-deploy or mosaic-deploy.exe)" >&2
+          errors=$((errors + 1))
+        fi
+        [ "$errors" -eq 0 ] || exit 1
+
+  # ---------------------------------------------------------------------------
+  # End-to-end verification (I24.6 / AC24.7)
+  # ---------------------------------------------------------------------------
+  #
+  # Runs a full build → install → deploy → update sequence against a scratch
+  # workspace. Requires a real MOSAIC repository at ../../ with at least one
+  # harness available. The scratch workspace is created under $TMPDIR and
+  # removed when the run completes.
+  #
+  # Usage:
+  #   task verify:e2e                           # default harness: claude-code
+  #   task verify:e2e HARNESS=opencode          # specify harness
+  #   task verify:e2e HARNESS=claude-code SCOPE=user
+
+  verify:e2e:
+    desc: End-to-end verification (build, install, deploy, update) against a scratch workspace
+    summary: |
+      Runs the full release-gate sequence:
+        1. Build import check
+        2. Build native binary
+        3. Install to MOSAIC root
+        4. Deploy to a scratch workspace (auto-confirm, no manual steps)
+        5. Run update on the same workspace (verifies the update path)
+        6. Introduce a local modification and run update again (verifies the
+           locally-modified-file path with --conflict skip)
+        7. Clean up the scratch workspace
+
+      All steps run against the real binary, not an in-process test shim.
+      This is the only criterion in the plan that exercises the real binary
+      against a real workspace; treat it as the release gate (AC24.7).
+    vars:
+      HARNESS: '{{default "claude-code" .HARNESS}}'
+      SCOPE: '{{default "project" .SCOPE}}'
+      SCRATCH: '{{tempDir}}/mosaic-e2e-verify'
+    cmds:
+      - task: check:imports
+      - task: install
+      - |
+        set -euo pipefail
+        BINARY="{{.MOSAIC_ROOT}}/mosaic-deploy"
+        if [ -f "{{.MOSAIC_ROOT}}/mosaic-deploy.exe" ]; then
+          BINARY="{{.MOSAIC_ROOT}}/mosaic-deploy.exe"
+        fi
+        SCRATCH="{{.SCRATCH}}"
+        rm -rf "$SCRATCH"
+        mkdir -p "$SCRATCH"
+
+        echo "--- Step 1: deploy to scratch workspace ---"
+        "$BINARY" deploy \
+          --harness "{{.HARNESS}}" \
+          --workspace "$SCRATCH" \
+          --scope "{{.SCOPE}}" \
+          --auto-confirm \
+          --mosaic-root "{{.MOSAIC_ROOT}}"
+
+        echo "--- Step 2: update the same workspace (no changes expected) ---"
+        "$BINARY" update \
+          --harness "{{.HARNESS}}" \
+          --workspace "$SCRATCH" \
+          --auto-confirm \
+          --mosaic-root "{{.MOSAIC_ROOT}}"
+
+        echo "--- Step 3: introduce a local modification and update with --conflict skip ---"
+        # Find one deployed agent file and modify it to simulate a local edit.
+        AGENT_FILE=$(find "$SCRATCH" -name "*.md" | head -1)
+        if [ -n "$AGENT_FILE" ]; then
+          echo "" >> "$AGENT_FILE"
+          echo "<!-- local modification for e2e test -->" >> "$AGENT_FILE"
+          "$BINARY" update \
+            --harness "{{.HARNESS}}" \
+            --workspace "$SCRATCH" \
+            --conflict skip \
+            --auto-confirm \
+            --mosaic-root "{{.MOSAIC_ROOT}}"
+          echo "OK: locally-modified file handled via --conflict skip"
+        else
+          echo "WARNING: no deployed files found; skipping local-modification step"
+        fi
+
+        rm -rf "$SCRATCH"
+        echo "--- End-to-end verification complete ---"

@@ -1,0 +1,35 @@
+# mosaic-deploy user configuration
+#
+# This file stores per-user state for the MOSAIC deployment tool.
+# It records tier-to-model mappings from previous runs so you are not asked
+# to choose models repeatedly for agents in the same tier.
+#
+# IMPORTANT: Do NOT commit this file to the repository. It contains personal
+# preferences and harness-specific model selections that differ between users
+# and machines. Add MosaicDeploy/config/user-config.yaml to your .gitignore
+# (the MOSAIC root .gitignore already excludes the MosaicDeploy/ tree).
+#
+# Location after install: MosaicDeploy/config/user-config.yaml (at MOSAIC root)
+# Source template:        Tools/Deployment/config/user-config.yaml
+
+schema_version: "1"
+
+# tier_models records the user's tier-to-model selections per harness.
+# Structure: harness-id -> tier-name -> model-id
+#
+# This is written automatically by the tool when you confirm a model selection
+# during deployment. You can also edit it directly.
+#
+# Tier keys are stored verbatim and are never validated against the tiers
+# currently in source. A tier that has since been renamed does not cause an
+# error on load.
+#
+# Example (after a deployment run):
+#   tier_models:
+#     claude-code:
+#       HIGH: claude-opus-4-5
+#       LOW: claude-haiku-3-5
+#     opencode:
+#       HIGH: gpt-4o
+#       LOW: gpt-4o-mini
+tier_models: {}

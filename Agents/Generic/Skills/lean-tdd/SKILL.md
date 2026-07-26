@@ -1,5 +1,6 @@
 ---
 name: lean-tdd
+version: 1.0.0
 description: Lean TDD practices that eliminate wasteful testing patterns. Use when writing tests, reviewing test code, or validating RED/GREEN phases. Covers valid RED phase definition, behavioral testing principles, exception assertions, and mocking guidelines. Language-agnostic principles with C# examples.
 ---
 

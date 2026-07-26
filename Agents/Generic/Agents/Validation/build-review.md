@@ -3,8 +3,11 @@ id: 35
 version: 2.0.0
 name: build-review
 description: Imports source files into the build system, resolves dependencies, executes compilation, and reports success or failure with actionable error details
-model: {model-identifier} # recommended-tier: LOW-MEDIUM — mechanical build execution, no design judgment
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: LOW-MEDIUM
+tier_rationale: mechanical build execution, no design judgment
+required_skills: []
 ---
 
 [[SECTION:Identity]]

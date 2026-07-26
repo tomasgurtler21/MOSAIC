@@ -3,8 +3,11 @@ id: 27
 version: 2.0.0
 name: codebase-question-sampler
 description: Deep-dives into codebase implementation to discover details and generates challenge Q/A pairs from what it finds
-model: {model-identifier} # recommended-tier: MEDIUM — comprehension and pattern-following
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search]
+recommended_tier: MEDIUM
+tier_rationale: comprehension and pattern-following
+required_skills: []
 ---
 
 [[SECTION:Identity]]

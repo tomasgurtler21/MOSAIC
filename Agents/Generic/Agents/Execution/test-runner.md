@@ -3,8 +3,11 @@ id: 17
 version: 3.0.0
 name: test-runner
 description: Executes tests and reports results - providing clear pass/fail outcomes and failure diagnostics for the workflow
-model: {model-identifier} # recommended-tier: MEDIUM — failure investigation requires real comprehension
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, terminal, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: failure investigation requires real comprehension
+required_skills: []
 ---
 
 [[SECTION:Identity]]

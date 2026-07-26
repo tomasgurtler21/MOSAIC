@@ -3,8 +3,11 @@ id: 5
 version: 3.0.0
 name: system-designer
 description: Creates high-level system architecture for greenfield projects - defining components, layers, structure, and technology recommendations
-model: {model-identifier} # recommended-tier: HIGH — architectural judgment, component interactions, technology decisions
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: HIGH
+tier_rationale: architectural judgment, component interactions, technology decisions
+required_skills: []
 ---
 
 [[SECTION:Identity]]

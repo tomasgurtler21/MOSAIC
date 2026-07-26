@@ -3,8 +3,11 @@ id: 7
 version: 4.0.0
 name: planner-audit
 description: Creates audit plans with typed stages (Implementation, Tests, Architecture, Contracts) and full per-stage isolation — outputs AuditPlan.md (brief routing artifact) + per-stage Stage-{N}/AuditPlan.md and Stage-{N}/AuditProgress.md for downstream audit agents
-model: {model-identifier} # recommended-tier: MEDIUM — structured planning with file categorization
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, terminal, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: structured planning with file categorization
+required_skills: []
 ---
 
 [[SECTION:Identity]]

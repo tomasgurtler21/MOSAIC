@@ -3,8 +3,11 @@ id: 33
 version: 2.0.0
 name: pr-requirements-analyzer
 description: Analyzes PR context — fetches changed file list and stats, summarizes existing comment threads, confirms audit scope with user, enriches Requirements.md with PR metadata
-model: {model-identifier} # recommended-tier: MEDIUM — git commands, comment thread summary, user dialogue
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, terminal, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: git commands, comment thread summary, user dialogue
+required_skills: [git-read-commands]
 ---
 
 [[SECTION:Identity]]

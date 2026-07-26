@@ -3,8 +3,11 @@ id: 10
 version: 3.0.0
 name: system-design-review
 description: Reviews system design quality for greenfield projects - ensuring architecture is complete, consistent, implementable, and aligned with requirements
-model: {model-identifier} # recommended-tier: MEDIUM — design comprehension within review framework
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: design comprehension within review framework
+required_skills: []
 ---
 
 [[SECTION:Identity]]

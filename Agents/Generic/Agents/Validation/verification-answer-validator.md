@@ -3,8 +3,11 @@ id: 28
 version: 2.0.0
 name: verification-answer-validator
 description: Compares attempted answers to expected answers, judges each as Match/Mismatch/Partial with reasoning, and produces a verification report
-model: {model-identifier} # recommended-tier: LOW-MEDIUM — structured comparison with nuanced judgment
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: LOW-MEDIUM
+tier_rationale: structured comparison with nuanced judgment
+required_skills: []
 ---
 
 [[SECTION:Identity]]

@@ -109,6 +109,15 @@ venv/
 *.so
 *.dylib
 
+# mosaic-deploy — built binaries and installed runtime tree (AC24.8)
+# The Linux binary at the MOSAIC root (the Windows .exe is covered by *.exe above).
+/mosaic-deploy
+/mosaic-deploy-linux-amd64
+# The installed runtime tree. Sources live in Tools/Deployment/; this tree is generated.
+/MosaicDeploy/
+# Cross-compilation output directory inside the tool sources.
+/Tools/Deployment/dist/
+
 # Rust
 target/
 

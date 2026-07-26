@@ -3,8 +3,11 @@ id: 12
 version: 3.0.0
 name: contracts-review
 description: Reviews technical design quality - ensuring interfaces, contracts, and data structures are complete, consistent, testable, and aligned with codebase patterns
-model: {model-identifier} # recommended-tier: MEDIUM — analysis within defined review criteria
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: analysis within defined review criteria
+required_skills: [efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

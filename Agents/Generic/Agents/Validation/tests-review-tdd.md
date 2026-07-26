@@ -3,8 +3,11 @@ id: 13
 version: 3.0.0
 name: tests-review-tdd
 description: Reviews test quality, coverage, and TDD RED phase correctness - ensuring tests fail appropriately before implementation and adequately verify design specifications
-model: {model-identifier} # recommended-tier: MEDIUM — testing expertise within review framework
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, terminal, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: testing expertise within review framework
+required_skills: [lean-tdd, efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

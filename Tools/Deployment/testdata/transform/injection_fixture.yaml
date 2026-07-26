@@ -1,0 +1,115 @@
+# Injection-specific fixture harness descriptor used by Stage 10 injection merge tests.
+# Identical to fixture.yaml in all respects except it declares harness-level injection
+# content for HarnessConstraints. This file is used only by tests that explicitly need
+# to verify the InjectionFilled path for harness injections.
+#
+# The base fixture.yaml intentionally carries no injection content so that the body
+# preservation tests (Stage 8) can compare source and output bodies byte-for-byte without
+# accounting for injected text. Having a second fixture avoids perturbing those tests.
+schema_version: "1"
+id: "fixture-harness"
+display_name: "Fixture Harness"
+transform_version: "3.0.0"
+injections_version: "1.2.0"
+
+models:
+  ids:
+    - "claude/claude-sonnet"
+  format_hint: "provider/model"
+
+tools:
+  shape: list
+  universe:
+    - name: "read-file"
+      unused: deny
+      by_convention: false
+    - name: "write-file"
+      unused: deny
+      by_convention: false
+    - name: "edit-file"
+      unused: deny
+      by_convention: false
+    - name: "search-file"
+      unused: deny
+      by_convention: false
+    - name: "search-text"
+      unused: deny
+      by_convention: false
+    - name: "run-terminal"
+      unused: deny
+      by_convention: false
+    - name: "ask-user"
+      unused: deny
+      by_convention: false
+  mappings:
+    - generic: "file_read"
+      harness_tools:
+        - "read-file"
+    - generic: "file_write"
+      harness_tools:
+        - "write-file"
+    - generic: "file_edit"
+      harness_tools:
+        - "edit-file"
+    - generic: "file_search"
+      harness_tools:
+        - "search-file"
+    - generic: "content_search"
+      harness_tools:
+        - "search-text"
+    - generic: "terminal"
+      harness_tools:
+        - "run-terminal"
+    - generic: "user_interaction"
+      harness_tools:
+        - "ask-user"
+  placeholder_expansion:
+    - "read-file"
+    - "write-file"
+    - "edit-file"
+    - "search-file"
+    - "search-text"
+    - "run-terminal"
+    - "ask-user"
+
+paths:
+  agents:
+    supported: true
+    project: ".fixture/agents"
+    user:
+      "": "~/.config/fixture/agents"
+  skills:
+    supported: false
+  hooks:
+    supported: false
+
+extensions:
+  agent: ".fixture.md"
+
+frontmatter:
+  model_key: "model"
+  tools_key: "tools"
+  add:
+    - key: "mode"
+      value: "subagent"
+  drop:
+    - "name"
+    - "recommended_tier"
+    - "tier_rationale"
+  key_order:
+    - "id"
+    - "version"
+    - "transform_version"
+    - "injections_version"
+    - "description"
+    - "mode"
+    - "model"
+    - "tools"
+
+injections:
+  - name: "HarnessConstraints"
+    content: "Fixture harness constraint: always use the approved tool list.\nDo not invoke tools not declared in the agent's tools field."
+
+hooks:
+  supported: false
+  variant_key: ""

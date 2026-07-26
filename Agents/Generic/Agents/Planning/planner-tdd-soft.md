@@ -3,8 +3,11 @@ id: 6
 version: 6.0.0
 name: planner-tdd-soft
 description: Creates implementation plans with per-stage context isolation (Plan.md routing artifact + Stage-{N}/Plan.md + Stage-{N}/PlanProgress.md) following TDD principles when feasible - breaking down requirements into test-first stages with unique IDs, clear sequencing, and immutable tracking
-model: {model-identifier} # recommended-tier: HIGH — complex task decomposition, dependency analysis, TDD strategy
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, terminal, user_interaction]
+recommended_tier: HIGH
+tier_rationale: complex task decomposition, dependency analysis, TDD strategy
+required_skills: [lean-tdd, efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

@@ -3,8 +3,11 @@ id: 4
 version: 3.0.0
 name: requirements-refinement
 description: Transforms raw or incomplete requirements into complete, crystal-clear specifications through collaborative user dialogue
-model: {model-identifier} # recommended-tier: MEDIUM-HIGH — collaborative elicitation, gap detection, ambiguity handling
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM-HIGH
+tier_rationale: collaborative elicitation, gap detection, ambiguity handling
+required_skills: []
 ---
 
 [[SECTION:Identity]]

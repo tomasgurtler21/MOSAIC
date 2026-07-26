@@ -3,8 +3,11 @@ id: 26
 version: 2.0.0
 name: verification-questions-preparer
 description: Creates, populates (via HITL or autonomously), and validates Q/A verification artifacts — owns the Q/A artifact format specification
-model: {model-identifier} # recommended-tier: MEDIUM — structured planning and validation
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: structured planning and validation
+required_skills: []
 ---
 
 [[SECTION:Identity]]

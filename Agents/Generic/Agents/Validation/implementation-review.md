@@ -3,8 +3,11 @@ id: 14
 version: 3.0.0
 name: implementation-review
 description: Reviews implementation quality, design compliance, and code standards - ensuring code meets quality bar before proceeding
-model: {model-identifier} # recommended-tier: MEDIUM — core engineering judgment within review framework
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, terminal, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: core engineering judgment within review framework
+required_skills: [efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

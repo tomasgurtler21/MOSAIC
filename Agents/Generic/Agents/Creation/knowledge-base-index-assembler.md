@@ -3,8 +3,11 @@ id: 25
 version: 2.0.0
 name: knowledge-base-index-assembler
 description: Creates the top-level Index.md in the KB output path from all completed KB documents — compiles the areas table and identifies system-wide patterns and invariants
-model: {model-identifier} # recommended-tier: LOW — assembly task from completed documents
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: LOW
+tier_rationale: assembly task from completed documents
+required_skills: []
 ---
 
 [[SECTION:Identity]]

@@ -1,0 +1,609 @@
+package app
+
+// resolve.go implements the shared resolvers used by both use cases: harness/workspace/
+// workflow/utility-agent/hook selection, tier and per-agent model resolution, and custom
+// tool name resolution. Every resolver either uses a pre-answered request field (CD-6) or
+// consults domain.Interaction exactly once per decision point.
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+
+	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/plan"
+	"mosaic-deploy/internal/transform"
+)
+
+// ---------------------------------------------------------------------------
+// Harness, workspace, workflow, utility-agent, and hook selection
+// ---------------------------------------------------------------------------
+
+// askHarness prompts for a harness selection from the registry's known harnesses.
+func (s *service) askHarness(ctx context.Context) (string, error) {
+	opts := make([]domain.Option, 0)
+	for _, h := range s.deps.Registry.List() {
+		opts = append(opts, domain.Option{
+			ID: h.ID, Label: h.DisplayName, Disabled: !h.Usable, DisabledReason: h.UnusableReason,
+		})
+	}
+	q := domain.ChoiceQuestion{
+		Question: domain.Question{ID: domain.QHarness, Title: "Select a harness"},
+		Options:  opts,
+	}
+	ans, err := s.deps.Interaction.SelectOne(ctx, q)
+	if err != nil {
+		return "", err
+	}
+	if ans.Status == domain.Cancelled {
+		return "", errors.New("harness selection was cancelled")
+	}
+	id := ans.OptionID
+	if id == "" {
+		id = ans.Custom
+	}
+	if id == "" {
+		return "", errors.New("no harness was selected")
+	}
+	return id, nil
+}
+
+// askWorkspace prompts for the target workspace path.
+func (s *service) askWorkspace(ctx context.Context) (string, error) {
+	q := domain.TextQuestion{
+		Question: domain.Question{ID: domain.QWorkspace, Title: "Target workspace path"},
+	}
+	ans, err := s.deps.Interaction.AskText(ctx, q)
+	if err != nil {
+		return "", err
+	}
+	if ans.Status != domain.Answered || ans.Text == "" {
+		return "", errors.New("no workspace path was provided")
+	}
+	return ans.Text, nil
+}
+
+// askWorkflows prompts for workflow selection, grouped by category for browsable display.
+func (s *service) askWorkflows(ctx context.Context) []string {
+	opts := make([]domain.Option, 0)
+	for _, cat := range s.deps.Catalog.WorkflowCategories() {
+		for _, wf := range cat.Workflows {
+			opts = append(opts, domain.Option{
+				ID: wf.ID, Label: wf.Name, Description: wf.Description, Hint: wf.Hint, Group: cat.Name,
+			})
+		}
+	}
+	q := domain.ChoiceQuestion{
+		Question: domain.Question{ID: domain.QWorkflows, Title: "Select workflows", AllowSkip: true, AllowSkipAll: true},
+		Options:  opts,
+	}
+	ans, err := s.deps.Interaction.SelectMany(ctx, q)
+	if err != nil || ans.Status != domain.Answered {
+		return []string{}
+	}
+	return ans.OptionIDs
+}
+
+// askUtilityAgents prompts for utility-agent selection, restricted to the tool config's
+// allow-list (FR-8).
+func (s *service) askUtilityAgents(ctx context.Context) []string {
+	cfg, _ := s.deps.ToolConfig.Load()
+	allowed := make(map[string]bool, len(cfg.UtilityAgentAllowList))
+	for _, k := range cfg.UtilityAgentAllowList {
+		allowed[k] = true
+	}
+	opts := make([]domain.Option, 0)
+	for _, a := range s.deps.Catalog.UtilityAgents() {
+		if !allowed[a.Key] {
+			continue
+		}
+		opts = append(opts, domain.Option{ID: a.Key, Label: a.Name, Description: a.Description})
+	}
+	q := domain.ChoiceQuestion{
+		Question: domain.Question{ID: domain.QUtilityAgents, Title: "Select utility agents", AllowSkip: true, AllowSkipAll: true},
+		Options:  opts,
+	}
+	ans, err := s.deps.Interaction.SelectMany(ctx, q)
+	if err != nil || ans.Status != domain.Answered {
+		return []string{}
+	}
+	return ans.OptionIDs
+}
+
+// askHooks prompts for hook bundle selection from every bundle the catalog knows about.
+func (s *service) askHooks(ctx context.Context) []string {
+	opts := make([]domain.Option, 0)
+	for _, h := range s.deps.Catalog.Hooks() {
+		opts = append(opts, domain.Option{ID: h.Key, Label: h.Key, Description: h.Description})
+	}
+	q := domain.ChoiceQuestion{
+		Question: domain.Question{ID: domain.QHooks, Title: "Select hook bundles", AllowSkip: true, AllowSkipAll: true},
+		Options:  opts,
+	}
+	ans, err := s.deps.Interaction.SelectMany(ctx, q)
+	if err != nil || ans.Status != domain.Answered {
+		return []string{}
+	}
+	return ans.OptionIDs
+}
+
+// ---------------------------------------------------------------------------
+// Tier discovery and per-agent model resolution
+// ---------------------------------------------------------------------------
+
+// modelResolution is the outcome of resolveModels: the per-agent model map ready for
+// plan.Input.Models, and the tier-to-model mappings used this run (pre-answered, persisted,
+// and freshly answered), which the caller persists to user config (AC18.3).
+type modelResolution struct {
+	models         map[string]domain.ModelSelection
+	tierModelsUsed map[domain.Tier]string
+}
+
+// resolveModels asks QTierModel once per discovered tier and QAgentModel once per agent
+// whose model could not be resolved from a tier mapping, honouring pre-answers, skip, and
+// skip-all. Every agent left without a resolved model produces a GapNoModel entry (AC18.5).
+func (s *service) resolveModels(
+	ctx context.Context,
+	tierModels map[domain.Tier]string,
+	agentModels map[string]string,
+	skipAll map[domain.QuestionID]bool,
+	harnessID string,
+	module domain.HarnessModule,
+	agents []domain.Agent,
+) modelResolution {
+	cfg, _ := s.deps.UserConfig.Load()
+	tierModelsUsed := make(map[domain.Tier]string)
+	for k, v := range cfg.TierModels[harnessID] {
+		tierModelsUsed[k] = v
+	}
+	for k, v := range tierModels {
+		tierModelsUsed[k] = v
+	}
+
+	harnessOptions := buildModelOptions(module.Descriptor().Models.IDs)
+
+	tierSkippedAll := skipAll[domain.QTierModel]
+	for _, ti := range s.deps.Catalog.Tiers() {
+		if _, ok := tierModelsUsed[ti.Tier]; ok {
+			continue // pre-answered, either from this request or a prior persisted run
+		}
+		if tierSkippedAll {
+			continue
+		}
+		q := domain.ChoiceQuestion{
+			Question: domain.Question{
+				ID: domain.QTierModel, Subject: string(ti.Tier),
+				Title: "Select a model for tier " + string(ti.Tier), Detail: ti.Rationale,
+				AllowSkip: true, AllowSkipAll: true, AllowCustom: true,
+			},
+			Options: harnessOptions,
+		}
+		ans, err := s.deps.Interaction.SelectOne(ctx, q)
+		if err != nil {
+			continue
+		}
+		switch ans.Status {
+		case domain.SkippedAll:
+			tierSkippedAll = true
+		case domain.Answered:
+			modelID := ans.OptionID
+			if ans.Custom != "" {
+				modelID = ans.Custom
+			}
+			if modelID != "" {
+				tierModelsUsed[ti.Tier] = modelID
+			}
+		}
+	}
+
+	models := make(map[string]domain.ModelSelection)
+	agentSkippedAll := skipAll[domain.QAgentModel]
+	for _, agent := range agents {
+		resolved := false
+
+		if modelID, ok := agentModels[agent.Key]; ok && modelID != "" {
+			origin := domain.OriginCustom
+			for _, opt := range harnessOptions {
+				if opt.ID == modelID {
+					origin = domain.OriginHarnessList
+					break
+				}
+			}
+			models[agent.Key] = domain.ModelSelection{ModelID: modelID, Origin: origin}
+			resolved = true
+		} else if tierModel, ok := tierModelsUsed[agent.RecommendedTier]; ok && tierModel != "" {
+			models[agent.Key] = domain.ModelSelection{ModelID: tierModel, Origin: domain.OriginTierMapping}
+			resolved = true
+		} else if !agentSkippedAll {
+			options := make([]domain.Option, 0, len(harnessOptions)+1)
+			options = append(options, domain.Option{
+				ID: "apply-tier-mapping", Label: "Apply stored tier mapping",
+				Disabled:       true,
+				DisabledReason: fmt.Sprintf("no stored mapping for tier %q", agent.RecommendedTier),
+			})
+			options = append(options, harnessOptions...)
+			q := domain.ChoiceQuestion{
+				Question: domain.Question{
+					ID: domain.QAgentModel, Subject: agent.Key,
+					Title: "Select a model for " + agent.Key,
+					AllowSkip: true, AllowSkipAll: true, AllowCustom: true,
+				},
+				Options: options,
+			}
+			ans, err := s.deps.Interaction.SelectOne(ctx, q)
+			if err == nil {
+				switch ans.Status {
+				case domain.SkippedAll:
+					agentSkippedAll = true
+				case domain.Answered:
+					modelID := ans.OptionID
+					origin := domain.OriginHarnessList
+					if ans.Custom != "" {
+						modelID = ans.Custom
+						origin = domain.OriginCustom
+					}
+					if modelID != "" {
+						models[agent.Key] = domain.ModelSelection{ModelID: modelID, Origin: origin}
+						resolved = true
+					}
+				}
+			}
+		}
+
+		if !resolved {
+			s.deps.Todo.AddGap(domain.Gap{
+				Kind: domain.GapNoModel, Subject: agent.Key,
+				Detail: "no model selected for agent " + agent.Key,
+			})
+		}
+	}
+
+	return modelResolution{models: models, tierModelsUsed: tierModelsUsed}
+}
+
+// buildModelOptions converts a harness's declared model list into ChoiceQuestion options.
+func buildModelOptions(ids []string) []domain.Option {
+	opts := make([]domain.Option, 0, len(ids))
+	for _, id := range ids {
+		opts = append(opts, domain.Option{ID: id, Label: id})
+	}
+	return opts
+}
+
+// persistTierModels merges the tier mappings used this run into the persisted user config
+// and saves it, keyed by harness id (AC18.3). Per-agent selections are never passed here.
+func (s *service) persistTierModels(harnessID string, tierModelsUsed map[domain.Tier]string) error {
+	cfg, err := s.deps.UserConfig.Load()
+	if err != nil {
+		return err
+	}
+	if cfg.TierModels == nil {
+		cfg.TierModels = make(map[string]map[domain.Tier]string)
+	}
+	merged := make(map[domain.Tier]string, len(tierModelsUsed))
+	for k, v := range cfg.TierModels[harnessID] {
+		merged[k] = v
+	}
+	for k, v := range tierModelsUsed {
+		merged[k] = v
+	}
+	cfg.TierModels[harnessID] = merged
+	return s.deps.UserConfig.Save(cfg)
+}
+
+// ---------------------------------------------------------------------------
+// Custom tool name resolution
+// ---------------------------------------------------------------------------
+
+// resolveCustomTools discovers every generic tool with no harness mapping across the given
+// agents, asks QCustomTool once per distinct unmapped tool (honouring pre-answers, skip, and
+// skip-all), and returns the resolved custom names plus the set of tools the user skipped.
+// Every skipped tool produces a GapUnmappedTool entry (AC18.5).
+func (s *service) resolveCustomTools(
+	ctx context.Context,
+	preAnswered map[string]string,
+	skipAll map[domain.QuestionID]bool,
+	module domain.HarnessModule,
+	agents []domain.Agent,
+) (map[string]string, map[string]bool) {
+	customNames := make(map[string]string, len(preAnswered))
+	for k, v := range preAnswered {
+		customNames[k] = v
+	}
+	skipped := make(map[string]bool)
+
+	var unmappedOrder []string
+	seen := make(map[string]bool)
+	for _, agent := range agents {
+		if len(agent.Tools) == 0 {
+			continue
+		}
+		result, err := module.Tools(domain.ToolRequest{
+			AgentKey: agent.Key, Generic: agent.Tools, Placeholder: agent.ToolsPlaceholder,
+		})
+		if err != nil {
+			continue
+		}
+		for _, res := range result.Resolutions {
+			if res.Outcome == domain.ToolUnmapped && !seen[res.Generic] {
+				seen[res.Generic] = true
+				unmappedOrder = append(unmappedOrder, res.Generic)
+			}
+		}
+	}
+
+	skippedAll := skipAll[domain.QCustomTool]
+	for _, toolName := range unmappedOrder {
+		if _, ok := customNames[toolName]; ok {
+			continue // pre-answered
+		}
+		if skippedAll {
+			skipped[toolName] = true
+			continue
+		}
+		q := domain.TextQuestion{
+			Question: domain.Question{
+				ID: domain.QCustomTool, Subject: toolName,
+				Title: "Custom MCP server name for " + toolName,
+				AllowSkip: true, AllowSkipAll: true,
+			},
+		}
+		ans, err := s.deps.Interaction.AskText(ctx, q)
+		if err != nil {
+			skipped[toolName] = true
+			continue
+		}
+		switch ans.Status {
+		case domain.SkippedAll:
+			skippedAll = true
+			skipped[toolName] = true
+		case domain.Answered:
+			if ans.Text != "" {
+				customNames[toolName] = ans.Text
+			} else {
+				skipped[toolName] = true
+			}
+		default:
+			skipped[toolName] = true
+		}
+	}
+
+	// Re-resolve with the final custom-name and skip maps so the harness module records the
+	// propagated custom names (used by content generation during deployment).
+	for _, agent := range agents {
+		if len(agent.Tools) == 0 {
+			continue
+		}
+		_, _ = module.Tools(domain.ToolRequest{
+			AgentKey: agent.Key, Generic: agent.Tools, Placeholder: agent.ToolsPlaceholder,
+			CustomNames: customNames, SkippedTools: skipped,
+		})
+	}
+
+	for toolName := range skipped {
+		s.deps.Todo.AddGap(domain.Gap{
+			Kind: domain.GapUnmappedTool, Subject: toolName,
+			Detail: "no harness mapping for tool " + toolName,
+		})
+	}
+
+	return customNames, skipped
+}
+
+// ---------------------------------------------------------------------------
+// Locally-modified file prompting (update flow)
+// ---------------------------------------------------------------------------
+
+// askLocalModification prompts for the per-file decision on a locally-modified artifact.
+// Any non-answered outcome (skip, skip-all, cancel) defaults to DecisionSkip, the safest
+// choice: it never discards the user's local edits without an explicit overwrite decision.
+func (s *service) askLocalModification(ctx context.Context, item domain.PlanItem) domain.ConflictDecision {
+	opts := []domain.Option{
+		{ID: string(domain.DecisionOverwrite), Label: "Overwrite"},
+		{ID: string(domain.DecisionSkip), Label: "Skip"},
+		{ID: string(domain.DecisionBackupThenOverwrite), Label: "Back up then overwrite"},
+	}
+	q := domain.ChoiceQuestion{
+		Question: domain.Question{
+			ID: domain.QLocalModification, Subject: item.TargetPath,
+			Title: "Locally modified file: " + item.TargetPath, AllowSkip: true,
+		},
+		Options: opts,
+	}
+	ans, err := s.deps.Interaction.SelectOne(ctx, q)
+	if err != nil || ans.Status != domain.Answered {
+		return domain.DecisionSkip
+	}
+	if d := domain.ConflictDecision(ans.OptionID); d != "" {
+		return d
+	}
+	return domain.DecisionSkip
+}
+
+// ---------------------------------------------------------------------------
+// Content generation and supporting helpers
+// ---------------------------------------------------------------------------
+
+// buildWorkflowBlocks assembles the WorkflowBlock list for the orchestrator's
+// AvailableWorkflows injection from the catalog's per-workflow section content.
+func (s *service) buildWorkflowBlocks(workflowIDs []string) []transform.WorkflowBlock {
+	blocks := make([]transform.WorkflowBlock, 0, len(workflowIDs))
+	for _, id := range workflowIDs {
+		b, err := s.deps.Catalog.WorkflowSection(id)
+		if err != nil {
+			continue
+		}
+		blocks = append(blocks, transform.WorkflowBlock{ID: id, Block: b})
+	}
+	return blocks
+}
+
+// buildContent returns the deploy.ExecRequest.Content callback for one run. Agent items are
+// rendered through transform.Apply; skill and hook items are copied verbatim from source.
+func (s *service) buildContent(
+	module domain.HarnessModule,
+	agentByKey map[string]domain.Agent,
+	models map[string]domain.ModelSelection,
+	customTools map[string]string,
+	skippedTools map[string]bool,
+	workflowBlocks []transform.WorkflowBlock,
+	scope domain.Scope,
+	deployedReader func(domain.PlanItem) []byte,
+) func(domain.PlanItem) ([]byte, error) {
+	return func(item domain.PlanItem) ([]byte, error) {
+		if item.Ref.Kind != domain.ArtifactAgent {
+			return s.deps.Catalog.ReadSource(item.SourcePath)
+		}
+		agent, ok := agentByKey[item.Ref.Key]
+		if !ok {
+			return nil, fmt.Errorf("unknown agent %q", item.Ref.Key)
+		}
+		src, err := s.deps.Catalog.ReadSource(agent.SourcePath)
+		if err != nil {
+			return nil, err
+		}
+		var deployed []byte
+		if deployedReader != nil {
+			deployed = deployedReader(item)
+		}
+		var blocks []transform.WorkflowBlock
+		if agent.Role == domain.RoleOrchestrator {
+			blocks = workflowBlocks
+		}
+		res, err := transform.Apply(transform.Request{
+			Source: src, Kind: domain.ArtifactAgent, Key: agent.Key, Module: module,
+			Model: models[agent.Key], CustomTools: customTools, SkippedTools: skippedTools,
+			Scope: scope, Deployed: deployed, Workflows: blocks,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return res.Output, nil
+	}
+}
+
+// buildVersionStamps derives the version stamps for every plan item from the resolved
+// artifact set and harness descriptor, keyed by target path (as deploy.ExecRequest requires).
+func buildVersionStamps(
+	agents []domain.Agent, skills []domain.Skill, hooks []domain.HookBundle,
+	items []domain.PlanItem, desc *domain.HarnessDescriptor,
+) map[string]domain.VersionStamp {
+	agentByKey := make(map[string]domain.Agent, len(agents))
+	for _, a := range agents {
+		agentByKey[a.Key] = a
+	}
+	skillByKey := make(map[string]domain.Skill, len(skills))
+	for _, sk := range skills {
+		skillByKey[sk.Key] = sk
+	}
+	hookByKey := make(map[string]domain.HookBundle, len(hooks))
+	for _, h := range hooks {
+		hookByKey[h.Key] = h
+	}
+
+	stamps := make(map[string]domain.VersionStamp, len(items))
+	for _, item := range items {
+		switch item.Ref.Kind {
+		case domain.ArtifactAgent:
+			if a, ok := agentByKey[item.Ref.Key]; ok {
+				stamps[item.TargetPath] = domain.VersionStamp{
+					Version: a.Version, TransformVersion: desc.TransformVersion, InjectionsVersion: desc.InjectionsVersion,
+				}
+			}
+		case domain.ArtifactSkill:
+			if sk, ok := skillByKey[item.Ref.Key]; ok {
+				stamps[item.TargetPath] = domain.VersionStamp{Version: sk.Version}
+			}
+		case domain.ArtifactHook:
+			if h, ok := hookByKey[item.Ref.Key]; ok {
+				stamps[item.TargetPath] = domain.VersionStamp{Version: h.Version}
+			}
+		}
+	}
+	return stamps
+}
+
+// buildHookPlans resolves every selected hook bundle against the harness module.
+func buildHookPlans(module domain.HarnessModule, hooks []domain.HookBundle, scope domain.Scope) []domain.HookPlan {
+	plans := make([]domain.HookPlan, 0, len(hooks))
+	for _, h := range hooks {
+		p, err := module.HookPlan(domain.HookPlanRequest{Bundle: h, Scope: scope})
+		if err == nil {
+			plans = append(plans, p)
+		}
+	}
+	return plans
+}
+
+// ---------------------------------------------------------------------------
+// Update-flow workflow discovery
+// ---------------------------------------------------------------------------
+
+var workflowSectionPattern = regexp.MustCompile(`\[\[SECTION:Workflow:([^\]]+)\]\]`)
+
+// extractWorkflowIDs scans deployed orchestrator content for workflow section markers,
+// returning the distinct IDs in first-occurrence order.
+func extractWorkflowIDs(data []byte) []string {
+	matches := workflowSectionPattern.FindAllSubmatch(data, -1)
+	ids := make([]string, 0, len(matches))
+	seen := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		id := string(m[1])
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// discoverExistingWorkflows determines which workflows are already injected into the
+// deployed orchestrator, so the update flow can add new workflows without losing them
+// (AC18.6). It reads the deployed orchestrator file directly when present; otherwise it
+// falls back to the planner's own view of the current deployment state.
+func (s *service) discoverExistingWorkflows(
+	ctx context.Context, module domain.HarnessModule, workspace string, scope domain.Scope, snap plan.Input,
+) []string {
+	orchestrator := s.deps.Catalog.Orchestrator()
+	targetPath, err := module.TargetPath(domain.TargetPathRequest{
+		Kind: domain.ArtifactAgent, Key: orchestrator.Key,
+		FileName: filepath.Base(orchestrator.SourcePath), Scope: scope, GOOS: s.deps.GOOS,
+	})
+	if err == nil {
+		if data, rerr := os.ReadFile(filepath.Join(workspace, targetPath)); rerr == nil {
+			if ids := extractWorkflowIDs(data); len(ids) > 0 {
+				return ids
+			}
+		}
+	}
+
+	p, berr := s.deps.Planner.Build(ctx, snap)
+	if berr != nil {
+		return nil
+	}
+	return p.Workflows
+}
+
+// unionPreserveOrder returns the deduplicated union of a and b, preserving first-occurrence
+// order with a's elements first.
+func unionPreserveOrder(a, b []string) []string {
+	seen := make(map[string]bool, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, id := range a {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	for _, id := range b {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}

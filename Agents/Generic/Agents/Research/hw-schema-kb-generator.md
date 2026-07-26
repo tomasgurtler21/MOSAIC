@@ -3,8 +3,11 @@ id: 30
 version: 2.0.0
 name: hw-schema-kb-generator
 description: Synthesizes domain-oriented KB documentation from per-sheet research artifacts (Tier 1) and direct hw-schema tool queries (Tier 2+), describing functional domains, signal topology, and cross-sheet relationships
-model: {model-identifier} # recommended-tier: MEDIUM-HIGH — domain synthesis from multiple research artifacts
+model: {model-identifier}
 tools: [hw_schema_read, file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM-HIGH
+tier_rationale: domain synthesis from multiple research artifacts
+required_skills: []
 ---
 
 [[SECTION:Identity]]

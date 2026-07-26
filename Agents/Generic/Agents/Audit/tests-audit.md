@@ -3,8 +3,11 @@ id: 23
 version: 3.0.0
 name: tests-audit
 description: Audits existing test quality in a codebase — evaluating coverage, clarity, determinism, and edge case handling with verbose findings. Writes per-stage findings to Stage-{N}/TestsAudit.md
-model: {model-identifier} # recommended-tier: MEDIUM — structured analysis with clear criteria
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: structured analysis with clear criteria
+required_skills: [efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

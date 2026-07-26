@@ -3,8 +3,11 @@ id: 3
 version: 2.0.0
 name: knowledge-base-generator
 description: Researches codebase scope and produces N-tier knowledge base documentation optimized for KB consumer navigation
-model: {model-identifier} # recommended-tier: MEDIUM-HIGH — multi-source synthesis into coherent structured documentation
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM-HIGH
+tier_rationale: multi-source synthesis into coherent structured documentation
+required_skills: [efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

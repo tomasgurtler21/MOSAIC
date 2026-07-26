@@ -3,8 +3,11 @@ id: 21
 version: 2.0.0
 name: contracts-audit
 description: Audits existing interfaces, contracts, and data structures in a codebase for quality issues, producing verbose findings with evidence and recommendations
-model: {model-identifier} # recommended-tier: MEDIUM-HIGH — broad scope, needs to connect many dots across interfaces
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM-HIGH
+tier_rationale: broad scope, needs to connect many dots across interfaces
+required_skills: [efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

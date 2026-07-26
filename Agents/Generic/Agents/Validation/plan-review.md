@@ -3,8 +3,11 @@ id: 11
 version: 4.0.0
 name: plan-review
 description: Reviews plan quality, task sizing, dependency correctness, and validates TDD decisions against actual codebase - validating Plan.md (routing artifact) and all per-stage files (Stage-{N}/Plan.md, Stage-{N}/PlanProgress.md) before proceeding to design
-model: {model-identifier} # recommended-tier: MEDIUM — quality gate with structured checklist
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: quality gate with structured checklist
+required_skills: [efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

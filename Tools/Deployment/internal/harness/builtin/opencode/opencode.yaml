@@ -1,0 +1,159 @@
+schema_version: "1"
+id: "opencode"
+display_name: "OpenCode"
+transform_version: "3.0.0"
+injections_version: "1.3.1"
+
+models:
+  ids:
+    - "github-copilot/claude-opus-4.6"
+    - "github-copilot/claude-sonnet-4-6"
+    - "anthropic/claude-opus-4-20250514"
+    - "anthropic/claude-sonnet-4-20250514"
+  format_hint: "provider/model-id"
+
+tools:
+  shape: permission
+  universe:
+    - name: "read"
+      unused: deny
+      by_convention: false
+    - name: "write"
+      unused: deny
+      by_convention: false
+    - name: "edit"
+      unused: deny
+      by_convention: false
+    - name: "glob"
+      unused: deny
+      by_convention: false
+    - name: "grep"
+      unused: deny
+      by_convention: false
+    - name: "list"
+      unused: deny
+      by_convention: true
+    - name: "bash"
+      unused: deny
+      by_convention: false
+    - name: "patch"
+      unused: deny
+      by_convention: false
+    - name: "webfetch"
+      unused: deny
+      by_convention: false
+    - name: "question"
+      unused: deny
+      by_convention: false
+    - name: "lsp"
+      unused: deny
+      by_convention: false
+    - name: "task"
+      unused: deny
+      by_convention: false
+    - name: "todowrite"
+      unused: deny
+      by_convention: false
+    - name: "todoread"
+      unused: deny
+      by_convention: false
+    - name: "skill"
+      unused: deny
+      by_convention: false
+  mappings:
+    - generic: "file_read"
+      harness_tools:
+        - "read"
+    - generic: "file_write"
+      harness_tools:
+        - "write"
+    - generic: "file_edit"
+      harness_tools:
+        - "edit"
+    - generic: "file_search"
+      harness_tools:
+        - "glob"
+    - generic: "content_search"
+      harness_tools:
+        - "grep"
+    - generic: "terminal"
+      harness_tools:
+        - "bash"
+    - generic: "user_interaction"
+      harness_tools:
+        - "question"
+    - generic: "subagent"
+      harness_tools:
+        - "task"
+    - generic: "skill"
+      harness_tools:
+        - "skill"
+  placeholder_expansion:
+    - "read"
+    - "write"
+    - "edit"
+    - "glob"
+    - "grep"
+    - "bash"
+    - "question"
+    - "task"
+
+paths:
+  agents:
+    supported: true
+    project: ".opencode/agents"
+    user:
+      "darwin": "~/.config/opencode/agents"
+      "linux": "~/.config/opencode/agents"
+      "windows": "${APPDATA}/opencode/agents"
+      "": "~/.config/opencode/agents"
+  skills:
+    supported: true
+    project: ".opencode/skills"
+    user:
+      "darwin": "~/.config/opencode/skills"
+      "linux": "~/.config/opencode/skills"
+      "windows": "${APPDATA}/opencode/skills"
+      "": "~/.config/opencode/skills"
+  hooks:
+    supported: true
+    project: ".opencode/plugins"
+    user:
+      "darwin": "~/.config/opencode/plugins"
+      "linux": "~/.config/opencode/plugins"
+      "windows": "${APPDATA}/opencode/plugins"
+      "": "~/.config/opencode/plugins"
+
+extensions:
+  agent: ".md"
+
+frontmatter:
+  model_key: "model"
+  tools_key: "permission"
+  drop:
+    - "name"
+    - "recommended_tier"
+    - "tier_rationale"
+    - "required_skills"
+    - "tools"
+  key_order:
+    - "id"
+    - "version"
+    - "transform_version"
+    - "injections_version"
+    - "description"
+    - "mode"
+    - "model"
+    - "permission"
+
+injections:
+  - name: "HarnessConstraints"
+    content: |-
+      - **Parallel Tool Calls:** Issue multiple independent tool calls in a single response whenever possible. Sequential tool calls are only permitted when a later call depends on the result of an earlier one. This minimises inference API calls to improve speed and reduce cost.
+      - **Working Directory vs Workspace Root:** File tool paths resolve relative to the **working directory**, not the workspace root. Orchestration is always at working directory.
+  - name: "LanguagePatterns"
+    content: ""
+
+hooks:
+  supported: true
+  variant_key: "opencode"

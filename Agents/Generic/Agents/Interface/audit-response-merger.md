@@ -3,8 +3,11 @@ id: 34
 version: 2.0.0
 name: audit-response-merger
 description: Merges partial PR response queues and transform reports from parallel audit-to-pull-request instances into consolidated PullRequestResponses.md and AuditTransformReport.md — script-driven merge with cross-audit deduplication, source attribution, merge summary
-model: {model-identifier} # recommended-tier: MEDIUM-HIGH — dynamic structure discovery of two JSON formats, multi-script pipeline authoring, semantic deduplication judgment with context-breadth evaluation
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, terminal, user_interaction]
+recommended_tier: MEDIUM-HIGH
+tier_rationale: dynamic structure discovery of two JSON formats, multi-script pipeline authoring, semantic deduplication judgment with context-breadth evaluation
+required_skills: []
 ---
 
 [[SECTION:Identity]]

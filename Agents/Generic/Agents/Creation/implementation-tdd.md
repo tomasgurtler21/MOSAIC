@@ -3,8 +3,11 @@ id: 16
 version: 4.0.0
 name: implementation-tdd
 description: Implements and updates production code to satisfy tests and design specifications. Primary mode is TDD GREEN phase; also handles implementation fixes from review feedback. Does not create or modify tests.
-model: {model-identifier} # recommended-tier: MEDIUM — core coding work within defined scope
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, terminal, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: core coding work within defined scope
+required_skills: [efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

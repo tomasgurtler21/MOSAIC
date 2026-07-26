@@ -1,0 +1,932 @@
+package ghcpcli_test
+
+// Tests for the GitHub Copilot CLI built-in harness module.
+//
+// Coverage:
+//   Golden file tests (tool-light, tool-heavy, skill-using, orchestrator agents):
+//   - A transform of the generic contracts-review agent produces a flow-style single-quoted
+//     tool list ['skill', 'read', 'edit', 'search', 'ask_user'] with user-invocable: false.
+//   - A transform of the generic test-runner agent produces ['read', 'edit', 'search', 'execute',
+//     'ask_user'] demonstrating many-to-one aliasing (file_write + file_edit → edit;
+//     file_search + content_search → search).
+//   - A transform of the generic planner-tdd-soft agent includes skill and execute, showing
+//     that skill maps to the 'skill' harness tool and terminal maps to 'execute'.
+//   - A transform of the generic orchestrator produces the placeholder expansion as a
+//     flow-style list without 'skill' (orchestrators do not use skills).
+//   - All GHCP CLI agents have the .agent.md extension and user-invocable: false field.
+//
+//   Many-to-one aliasing:
+//   - file_write and file_edit both map to 'edit'; only one 'edit' entry appears in output.
+//   - file_search and content_search both map to 'search'; only one 'search' appears.
+//   - Resolutions report both generic tools as ToolMapped with HarnessTools: ["edit"/"search"].
+//
+//   Deployment path resolution:
+//   - Project-scoped agent path is ".github/agents/<key>.agent.md"
+//   - User-scoped agent path on linux is "~/.copilot/agents/<key>.agent.md"
+//   - User-scoped agent path on darwin is "~/.copilot/agents/<key>.agent.md"
+//   - User-scoped agent path on windows is "${APPDATA}/GitHub Copilot/agents/<key>.agent.md"
+//   - Project-scoped skill path is ".github/skills/<key>/SKILL.md" (key subdirectory prevents collisions)
+//   - User-scoped skill path on linux is "~/.copilot/skills/<key>/SKILL.md"
+//   - User-scoped skill path on darwin is "~/.copilot/skills/<key>/SKILL.md"
+//   - User-scoped skill path on windows is "${APPDATA}/GitHub Copilot/skills/<key>/SKILL.md"
+//   - Hook artifact kind returns ErrArtifactUnsupported (GHCP CLI has no hook support)
+//
+//   No-hook-support:
+//   - HookPlan always returns Supported: false regardless of bundle content.
+//   - HookPlan.Reason is non-empty when Supported is false.
+//   - HookPlan.Files is empty when Supported is false.
+//   - TargetPath for ArtifactHook returns an error wrapping ErrArtifactUnsupported.
+//
+//   Harness-level injections:
+//   - HarnessConstraints is filled with the parallel tool calls instruction text.
+//   - LanguagePatterns is filled with empty content.
+//   - injections_version is "1.2.0" per the GHCP CLI descriptor.
+//   - Project-class injections are not filled by the harness.
+//
+//   Shared contract:
+//   - Both modules pass contracttest.Run with identical universal invariant results.
+
+import (
+	"bytes"
+	"errors"
+	"flag"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/harness/builtin/ghcpcli"
+	"mosaic-deploy/internal/harness/contracttest"
+	"mosaic-deploy/internal/transform"
+)
+
+// updateGolden regenerates the golden files from current engine output when -update is passed.
+// Run: go test ./internal/harness/builtin/ghcpcli/... -run TestGoldenFile -update
+var updateGolden = flag.Bool("update", false, "regenerate golden files from current engine output")
+
+// testModel is the ModelSelection used in all GHCP CLI golden file tests.
+var testModel = domain.ModelSelection{
+	ModelID: "claude-sonnet-4-6",
+	Origin:  domain.OriginHarnessList,
+}
+
+// ghcpHarnessConstraints is the expected content of the HarnessConstraints injection for GHCP CLI.
+const ghcpHarnessConstraints = "**Parallel Tool Calls:** Issue multiple independent tool calls in a single response whenever possible. Sequential tool calls are only permitted when a later call depends on the result of an earlier one. This minimises inference API calls to improve speed and reduce cost."
+
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	// Package is at Tools/Deployment/internal/harness/builtin/ghcpcli/
+	rel := filepath.Join("..", "..", "..", "..", "..", "..")
+	abs, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+	return abs
+}
+
+func goldenDir(t *testing.T) string {
+	t.Helper()
+	rel := filepath.Join("..", "..", "..", "..", "testdata", "golden", "ghcp-cli")
+	abs, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatalf("resolve golden dir: %v", err)
+	}
+	return abs
+}
+
+func newModule(t *testing.T) domain.HarnessModule {
+	t.Helper()
+	mod, err := ghcpcli.New()
+	if err != nil {
+		t.Fatalf("ghcpcli.New(): %v", err) // RED: not implemented
+	}
+	return mod
+}
+
+func applyAndCompare(t *testing.T, mod domain.HarnessModule, req transform.Request, goldenPath string) {
+	t.Helper()
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("transform.Apply: %v", err)
+	}
+
+	if *updateGolden {
+		if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
+			t.Fatalf("create golden dir: %v", err)
+		}
+		if err := os.WriteFile(goldenPath, result.Output, 0o644); err != nil {
+			t.Fatalf("write golden file: %v", err)
+		}
+		t.Logf("updated golden file: %s (%d bytes)", goldenPath, len(result.Output))
+		return
+	}
+
+	golden, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("read golden file %s: %v\n(run go test -update to generate it)", goldenPath, err)
+	}
+
+	if !bytes.Equal(result.Output, golden) {
+		first := firstDiff(result.Output, golden)
+		t.Errorf("output does not match golden file %s\n"+
+			"output: %d bytes, golden: %d bytes, first difference at byte %d\n\n"+
+			"--- output (first 800 bytes) ---\n%s\n\n--- golden (first 800 bytes) ---\n%s",
+			goldenPath,
+			len(result.Output), len(golden), first,
+			truncate(result.Output, 800),
+			truncate(golden, 800),
+		)
+	}
+}
+
+func firstDiff(a, b []byte) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			return i
+		}
+	}
+	return n
+}
+
+func truncate(b []byte, n int) []byte {
+	if len(b) <= n {
+		return b
+	}
+	return b[:n]
+}
+
+// ---------------------------------------------------------------------------
+// Golden file tests
+// ---------------------------------------------------------------------------
+
+// TestGoldenFile_GHCP_ContractsReviewAgent tests a "tool-light" agent: contracts-review uses
+// [skill, file_read, file_write, file_edit, file_search, content_search, user_interaction].
+// The output should have: tools: ['skill', 'read', 'edit', 'search', 'ask_user']
+// Aliasing: file_write + file_edit → edit (one entry); file_search + content_search → search.
+// The file uses the .agent.md extension and adds user-invocable: false.
+//
+// Deliberate deviations from Agents/GHCP CLI/CodebaseAgnostic/Agents/contracts-review.agent.md:
+// the committed file shows "tools: [skill, read, edit, search, ask_user]" (no quotes on items),
+// whereas the canonical GHCP CLI format uses single-quoted flow style: ['skill', 'read', ...].
+// The golden file uses the correct single-quoted flow style.
+func TestGoldenFile_GHCP_ContractsReviewAgent(t *testing.T) {
+	mod := newModule(t)
+	root := repoRoot(t)
+
+	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Validation", "contracts-review.md")
+	src, err := os.ReadFile(srcPath)
+	if err != nil {
+		t.Skipf("generic contracts-review agent not found at %s: %v", srcPath, err)
+	}
+
+	req := transform.Request{
+		Source: src,
+		Kind:   domain.ArtifactAgent,
+		Key:    "contracts-review",
+		Module: mod,
+		Model:  testModel,
+		Scope:  domain.ScopeProject,
+	}
+
+	goldenPath := filepath.Join(goldenDir(t), "contracts-review.agent.md")
+	applyAndCompare(t, mod, req, goldenPath)
+}
+
+// TestGoldenFile_GHCP_TestRunnerAgent tests the tool-heavy case: test-runner uses all seven
+// generic tools [file_read, file_write, file_edit, file_search, content_search, terminal,
+// user_interaction]. The output demonstrates the canonical GHCP CLI many-to-one aliasing:
+// tools: ['read', 'edit', 'search', 'execute', 'ask_user']
+// (file_write + file_edit → edit; file_search + content_search → search; no duplication)
+func TestGoldenFile_GHCP_TestRunnerAgent(t *testing.T) {
+	mod := newModule(t)
+	root := repoRoot(t)
+
+	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
+	src, err := os.ReadFile(srcPath)
+	if err != nil {
+		t.Skipf("generic test-runner agent not found at %s: %v", srcPath, err)
+	}
+
+	req := transform.Request{
+		Source: src,
+		Kind:   domain.ArtifactAgent,
+		Key:    "test-runner",
+		Module: mod,
+		Model:  testModel,
+		Scope:  domain.ScopeProject,
+	}
+
+	goldenPath := filepath.Join(goldenDir(t), "test-runner.agent.md")
+	applyAndCompare(t, mod, req, goldenPath)
+}
+
+// TestGoldenFile_GHCP_PlannerTDDSoftAgent tests the skill-and-tool combination:
+// planner-tdd-soft uses [skill, file_read, file_write, file_edit, file_search, content_search,
+// terminal, user_interaction]. The output should include 'skill' (maps to skill harness tool)
+// and 'execute' (maps from terminal):
+// tools: ['skill', 'read', 'edit', 'search', 'execute', 'ask_user']
+func TestGoldenFile_GHCP_PlannerTDDSoftAgent(t *testing.T) {
+	mod := newModule(t)
+	root := repoRoot(t)
+
+	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Planning", "planner-tdd-soft.md")
+	src, err := os.ReadFile(srcPath)
+	if err != nil {
+		t.Skipf("generic planner-tdd-soft agent not found at %s: %v", srcPath, err)
+	}
+
+	req := transform.Request{
+		Source: src,
+		Kind:   domain.ArtifactAgent,
+		Key:    "planner-tdd-soft",
+		Module: mod,
+		Model:  testModel,
+		Scope:  domain.ScopeProject,
+	}
+
+	goldenPath := filepath.Join(goldenDir(t), "planner-tdd-soft.agent.md")
+	applyAndCompare(t, mod, req, goldenPath)
+}
+
+// TestGoldenFile_GHCP_Orchestrator tests the {tool-permissions} placeholder expansion.
+// The orchestrator uses {tool-permissions} as its tools value. The placeholder expands to
+// the GHCP CLI placeholder_expansion: ['read', 'edit', 'search', 'execute', 'ask_user', 'agent'].
+// (skill is excluded from the placeholder expansion because orchestrators do not use skills)
+//
+// Deliberate deviation from Agents/GHCP CLI/CodebaseAgnostic/orchestrator.agent.md:
+// the committed file shows tools: ['read', 'edit', 'ask_user', 'agent'], missing 'search'
+// and 'execute'. This appears to be an error in the committed file produced by the rough
+// LLM-based process. The correct expansion should include all placeholder_expansion tools.
+func TestGoldenFile_GHCP_Orchestrator(t *testing.T) {
+	mod := newModule(t)
+	root := repoRoot(t)
+
+	srcPath := filepath.Join(root, "Agents", "Generic", "Orchestrator", "orchestrator.md")
+	src, err := os.ReadFile(srcPath)
+	if err != nil {
+		t.Skipf("generic orchestrator not found at %s: %v", srcPath, err)
+	}
+
+	req := transform.Request{
+		Source: src,
+		Kind:   domain.ArtifactAgent,
+		Key:    "orchestrator",
+		Module: mod,
+		Model:  testModel,
+		Scope:  domain.ScopeProject,
+	}
+
+	goldenPath := filepath.Join(goldenDir(t), "orchestrator.agent.md")
+	applyAndCompare(t, mod, req, goldenPath)
+}
+
+// ---------------------------------------------------------------------------
+// Many-to-one aliasing tests
+// ---------------------------------------------------------------------------
+
+// TestToolAliasing_FileWriteAndEditCollapse verifies that file_write and file_edit both map
+// to the 'edit' harness tool and that exactly one 'edit' entry appears in the output.
+func TestToolAliasing_FileWriteAndEditCollapse(t *testing.T) {
+	mod := newModule(t)
+
+	result, err := mod.Tools(domain.ToolRequest{
+		AgentKey: "test-aliasing",
+		Generic:  []string{"file_write", "file_edit"},
+	})
+	if err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+
+	// Both resolutions should map to "edit".
+	for i, res := range result.Resolutions {
+		if res.Outcome != domain.ToolMapped {
+			t.Errorf("Resolutions[%d].Outcome = %q, want ToolMapped", i, res.Outcome)
+		}
+		if len(res.HarnessTools) != 1 || res.HarnessTools[0] != "edit" {
+			t.Errorf("Resolutions[%d].HarnessTools = %v, want [\"edit\"]", i, res.HarnessTools)
+		}
+	}
+
+	// The rendered tools field should contain exactly one "edit" item.
+	editCount := 0
+	for _, field := range result.Fields {
+		if field.Key == "tools" && field.Value.Kind == domain.KindList {
+			for _, item := range field.Value.Items {
+				if item.Scalar == "edit" {
+					editCount++
+				}
+			}
+		}
+	}
+	if editCount != 1 {
+		t.Errorf("'edit' appears %d times in the tools field; want exactly 1 (many-to-one deduplication)", editCount)
+	}
+}
+
+// TestToolAliasing_FileSearchAndContentSearchCollapse verifies that file_search and
+// content_search both map to 'search' and appear only once in the output.
+func TestToolAliasing_FileSearchAndContentSearchCollapse(t *testing.T) {
+	mod := newModule(t)
+
+	result, err := mod.Tools(domain.ToolRequest{
+		AgentKey: "test-aliasing",
+		Generic:  []string{"file_search", "content_search"},
+	})
+	if err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+
+	for i, res := range result.Resolutions {
+		if res.Outcome != domain.ToolMapped {
+			t.Errorf("Resolutions[%d].Outcome = %q, want ToolMapped", i, res.Outcome)
+		}
+		if len(res.HarnessTools) != 1 || res.HarnessTools[0] != "search" {
+			t.Errorf("Resolutions[%d].HarnessTools = %v, want [\"search\"]", i, res.HarnessTools)
+		}
+	}
+
+	searchCount := 0
+	for _, field := range result.Fields {
+		if field.Key == "tools" && field.Value.Kind == domain.KindList {
+			for _, item := range field.Value.Items {
+				if item.Scalar == "search" {
+					searchCount++
+				}
+			}
+		}
+	}
+	if searchCount != 1 {
+		t.Errorf("'search' appears %d times in the tools field; want exactly 1", searchCount)
+	}
+}
+
+// TestToolAliasing_FullTestRunnerSet verifies the complete many-to-one aliasing for the
+// test-runner tool set (7 generic tools → 5 unique harness tools).
+func TestToolAliasing_FullTestRunnerSet(t *testing.T) {
+	mod := newModule(t)
+
+	result, err := mod.Tools(domain.ToolRequest{
+		AgentKey: "test-runner",
+		Generic:  []string{"file_read", "file_write", "file_edit", "file_search", "content_search", "terminal", "user_interaction"},
+	})
+	if err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+
+	// Verify resolution count.
+	if len(result.Resolutions) != 7 {
+		t.Errorf("Resolutions count = %d, want 7", len(result.Resolutions))
+	}
+
+	// Verify no harness tool appears more than once in the rendered output.
+	seen := make(map[string]int)
+	for _, field := range result.Fields {
+		if field.Key == "tools" && field.Value.Kind == domain.KindList {
+			for _, item := range field.Value.Items {
+				seen[item.Scalar]++
+			}
+		}
+	}
+	for tool, count := range seen {
+		if count > 1 {
+			t.Errorf("harness tool %q appears %d times in output; want at most 1 (deduplication required)", tool, count)
+		}
+	}
+
+	// Verify expected harness tool set.
+	wantTools := map[string]bool{"read": true, "edit": true, "search": true, "execute": true, "ask_user": true}
+	for tool := range wantTools {
+		if seen[tool] == 0 {
+			t.Errorf("expected harness tool %q not found in output", tool)
+		}
+	}
+}
+
+// TestToolFormat_FlowStyleSingleQuoted verifies that GHCP CLI emits tools as a flow-style
+// YAML sequence with single-quoted items: tools: ['read', 'edit'].
+func TestToolFormat_FlowStyleSingleQuoted(t *testing.T) {
+	mod := newModule(t)
+
+	result, err := mod.Tools(domain.ToolRequest{
+		AgentKey: "format-check",
+		Generic:  []string{"file_read", "terminal"},
+	})
+	if err != nil {
+		t.Fatalf("Tools: %v", err)
+	}
+
+	var toolsField *domain.FrontmatterField
+	for i, f := range result.Fields {
+		if f.Key == "tools" {
+			toolsField = &result.Fields[i]
+			break
+		}
+	}
+	if toolsField == nil {
+		t.Fatal("tools field not found in result.Fields")
+	}
+	if toolsField.Value.Kind != domain.KindList {
+		t.Fatalf("tools field Kind = %q, want KindList", toolsField.Value.Kind)
+	}
+	if toolsField.Value.List != domain.ListFlow {
+		t.Errorf("tools field List style = %q, want ListFlow (GHCP CLI uses flow-style [...])", toolsField.Value.List)
+	}
+	for i, item := range toolsField.Value.Items {
+		if item.Quote != domain.QuoteSingle {
+			t.Errorf("tools field Items[%d].Quote = %q, want QuoteSingle (GHCP CLI uses 'single-quoted' items)", i, item.Quote)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Deployment path resolution tests
+// ---------------------------------------------------------------------------
+
+// TestTargetPath_GHCP_AgentExtension verifies that GHCP CLI agents use the .agent.md extension.
+func TestTargetPath_GHCP_AgentExtension(t *testing.T) {
+	mod := newModule(t)
+	path, err := mod.TargetPath(domain.TargetPathRequest{
+		Kind:  domain.ArtifactAgent,
+		Key:   "test-runner",
+		Scope: domain.ScopeProject,
+		GOOS:  "linux",
+	})
+	if err != nil {
+		t.Fatalf("TargetPath: %v", err)
+	}
+	want := ".github/agents/test-runner.agent.md"
+	if path != want {
+		t.Errorf("TargetPath = %q, want %q", path, want)
+	}
+}
+
+// TestTargetPath_GHCP_AgentUserScope_Linux verifies user-scoped path on Linux.
+func TestTargetPath_GHCP_AgentUserScope_Linux(t *testing.T) {
+	mod := newModule(t)
+	path, err := mod.TargetPath(domain.TargetPathRequest{
+		Kind:  domain.ArtifactAgent,
+		Key:   "test-runner",
+		Scope: domain.ScopeUser,
+		GOOS:  "linux",
+	})
+	if err != nil {
+		t.Fatalf("TargetPath: %v", err)
+	}
+	want := "~/.copilot/agents/test-runner.agent.md"
+	if path != want {
+		t.Errorf("TargetPath = %q, want %q", path, want)
+	}
+}
+
+// TestTargetPath_GHCP_AgentUserScope_Windows verifies user-scoped path on Windows.
+func TestTargetPath_GHCP_AgentUserScope_Windows(t *testing.T) {
+	mod := newModule(t)
+	path, err := mod.TargetPath(domain.TargetPathRequest{
+		Kind:  domain.ArtifactAgent,
+		Key:   "test-runner",
+		Scope: domain.ScopeUser,
+		GOOS:  "windows",
+	})
+	if err != nil {
+		t.Fatalf("TargetPath: %v", err)
+	}
+	want := "${APPDATA}/GitHub Copilot/agents/test-runner.agent.md"
+	if path != want {
+		t.Errorf("TargetPath = %q, want %q", path, want)
+	}
+}
+
+// TestTargetPath_GHCP_AgentUserScope_Darwin verifies user-scoped agent path on macOS.
+// Darwin uses the same base path as Linux for GHCP CLI: "~/.copilot/agents/<key>.agent.md".
+func TestTargetPath_GHCP_AgentUserScope_Darwin(t *testing.T) {
+	mod := newModule(t)
+	path, err := mod.TargetPath(domain.TargetPathRequest{
+		Kind:  domain.ArtifactAgent,
+		Key:   "codebase-research",
+		Scope: domain.ScopeUser,
+		GOOS:  "darwin",
+	})
+	if err != nil {
+		t.Fatalf("TargetPath: %v", err)
+	}
+	want := "~/.copilot/agents/codebase-research.agent.md"
+	if path != want {
+		t.Errorf("TargetPath = %q, want %q", path, want)
+	}
+}
+
+// TestTargetPath_GHCP_SkillProjectScope verifies that a GHCP CLI skill is deployed under a
+// key-named subdirectory: ".github/skills/<key>/SKILL.md". The key subdirectory is required
+// because all skill entry files are named SKILL.md by convention.
+func TestTargetPath_GHCP_SkillProjectScope(t *testing.T) {
+	mod := newModule(t)
+	path, err := mod.TargetPath(domain.TargetPathRequest{
+		Kind:     domain.ArtifactSkill,
+		Key:      "lean-tdd",
+		FileName: "SKILL.md",
+		Scope:    domain.ScopeProject,
+		GOOS:     "linux",
+	})
+	if err != nil {
+		t.Fatalf("TargetPath: %v", err)
+	}
+	want := ".github/skills/lean-tdd/SKILL.md"
+	if path != want {
+		t.Errorf("TargetPath = %q, want %q", path, want)
+	}
+}
+
+// TestTargetPath_GHCP_SkillUserScope_Linux verifies user-scoped skill path on Linux:
+// "~/.copilot/skills/<key>/SKILL.md".
+func TestTargetPath_GHCP_SkillUserScope_Linux(t *testing.T) {
+	mod := newModule(t)
+	path, err := mod.TargetPath(domain.TargetPathRequest{
+		Kind:     domain.ArtifactSkill,
+		Key:      "lean-tdd",
+		FileName: "SKILL.md",
+		Scope:    domain.ScopeUser,
+		GOOS:     "linux",
+	})
+	if err != nil {
+		t.Fatalf("TargetPath: %v", err)
+	}
+	want := "~/.copilot/skills/lean-tdd/SKILL.md"
+	if path != want {
+		t.Errorf("TargetPath = %q, want %q", path, want)
+	}
+}
+
+// TestTargetPath_GHCP_SkillUserScope_Darwin verifies user-scoped skill path on macOS:
+// "~/.copilot/skills/<key>/SKILL.md".
+func TestTargetPath_GHCP_SkillUserScope_Darwin(t *testing.T) {
+	mod := newModule(t)
+	path, err := mod.TargetPath(domain.TargetPathRequest{
+		Kind:     domain.ArtifactSkill,
+		Key:      "lean-tdd",
+		FileName: "SKILL.md",
+		Scope:    domain.ScopeUser,
+		GOOS:     "darwin",
+	})
+	if err != nil {
+		t.Fatalf("TargetPath: %v", err)
+	}
+	want := "~/.copilot/skills/lean-tdd/SKILL.md"
+	if path != want {
+		t.Errorf("TargetPath = %q, want %q", path, want)
+	}
+}
+
+// TestTargetPath_GHCP_SkillUserScope_Windows verifies user-scoped skill path on Windows:
+// "${APPDATA}/GitHub Copilot/skills/<key>/SKILL.md".
+func TestTargetPath_GHCP_SkillUserScope_Windows(t *testing.T) {
+	mod := newModule(t)
+	path, err := mod.TargetPath(domain.TargetPathRequest{
+		Kind:     domain.ArtifactSkill,
+		Key:      "lean-tdd",
+		FileName: "SKILL.md",
+		Scope:    domain.ScopeUser,
+		GOOS:     "windows",
+	})
+	if err != nil {
+		t.Fatalf("TargetPath: %v", err)
+	}
+	want := "${APPDATA}/GitHub Copilot/skills/lean-tdd/SKILL.md"
+	if path != want {
+		t.Errorf("TargetPath = %q, want %q", path, want)
+	}
+}
+
+// TestTargetPath_GHCP_HookReturnsUnsupported verifies that requesting a hook target path
+// returns an error wrapping ErrArtifactUnsupported (GHCP CLI has no hook support).
+func TestTargetPath_GHCP_HookReturnsUnsupported(t *testing.T) {
+	mod := newModule(t)
+	_, err := mod.TargetPath(domain.TargetPathRequest{
+		Kind:     domain.ArtifactHook,
+		Key:      "subagent-logger",
+		FileName: "hook.sh",
+		Scope:    domain.ScopeProject,
+		GOOS:     "linux",
+	})
+	if err == nil {
+		t.Fatal("TargetPath for ArtifactHook returned nil error; want ErrArtifactUnsupported")
+	}
+	if !errors.Is(err, domain.ErrArtifactUnsupported) {
+		t.Errorf("TargetPath for ArtifactHook: err=%v; want errors.Is(err, ErrArtifactUnsupported)", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// No-hook-support tests
+// ---------------------------------------------------------------------------
+
+// TestHookPlan_GHCP_AlwaysUnsupported verifies that HookPlan always returns Supported: false
+// for GHCP CLI, regardless of the bundle passed in.
+func TestHookPlan_GHCP_AlwaysUnsupported(t *testing.T) {
+	mod := newModule(t)
+
+	plan, err := mod.HookPlan(domain.HookPlanRequest{})
+	if err != nil {
+		t.Fatalf("HookPlan: %v", err)
+	}
+	if plan.Supported {
+		t.Error("HookPlan.Supported = true; GHCP CLI declares no hook support and must always return Supported: false")
+	}
+}
+
+// TestHookPlan_GHCP_ReasonIsNonEmpty verifies that the unsupported reason is non-empty so
+// callers can report it rather than silently ignoring the lack of support.
+func TestHookPlan_GHCP_ReasonIsNonEmpty(t *testing.T) {
+	mod := newModule(t)
+
+	plan, err := mod.HookPlan(domain.HookPlanRequest{})
+	if err != nil {
+		t.Fatalf("HookPlan: %v", err)
+	}
+	if plan.Reason == "" {
+		t.Error("HookPlan.Reason is empty; must be non-empty when Supported is false so the caller can explain the gap")
+	}
+}
+
+// TestHookPlan_GHCP_NoFilesWhenUnsupported verifies that no files are returned when
+// Supported is false (a caller should not attempt to deploy any files).
+func TestHookPlan_GHCP_NoFilesWhenUnsupported(t *testing.T) {
+	mod := newModule(t)
+
+	plan, err := mod.HookPlan(domain.HookPlanRequest{})
+	if err != nil {
+		t.Fatalf("HookPlan: %v", err)
+	}
+	if len(plan.Files) > 0 {
+		t.Errorf("HookPlan.Files has %d entries when Supported=false; must be empty", len(plan.Files))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Harness-level injection tests
+// ---------------------------------------------------------------------------
+
+// TestInjection_GHCP_HarnessConstraintsFilled verifies that GHCP CLI provides the parallel
+// tool calls instruction in its HarnessConstraints injection.
+func TestInjection_GHCP_HarnessConstraintsFilled(t *testing.T) {
+	mod := newModule(t)
+	content, ok := mod.Injection("HarnessConstraints")
+	if !ok {
+		t.Fatal("Injection(\"HarnessConstraints\") returned ok=false; GHCP CLI must fill this injection")
+	}
+	if content != ghcpHarnessConstraints {
+		t.Errorf("Injection(\"HarnessConstraints\"):\n  got:  %q\n  want: %q", content, ghcpHarnessConstraints)
+	}
+}
+
+// TestInjection_GHCP_LanguagePatternsIsEmpty verifies that LanguagePatterns is declared but empty.
+func TestInjection_GHCP_LanguagePatternsIsEmpty(t *testing.T) {
+	mod := newModule(t)
+	content, ok := mod.Injection("LanguagePatterns")
+	if !ok {
+		t.Fatal("Injection(\"LanguagePatterns\") returned ok=false; GHCP CLI must declare this injection")
+	}
+	if content != "" {
+		t.Errorf("Injection(\"LanguagePatterns\") = %q; want empty string", content)
+	}
+}
+
+// TestInjection_GHCP_ProjectInjectionsNotFilled verifies that project-class injections are
+// not filled by the GHCP CLI harness.
+func TestInjection_GHCP_ProjectInjectionsNotFilled(t *testing.T) {
+	mod := newModule(t)
+	projectInjections := []string{
+		"IdentityExtension",
+		"ProtocolExtension",
+		"CodebaseContext",
+		"OutputArtifactTemplate",
+		"CustomConstraints",
+		"ErrorHandlingExtension",
+		"ContextLimits",
+	}
+	for _, name := range projectInjections {
+		_, ok := mod.Injection(name)
+		if ok {
+			t.Errorf("Injection(%q) returned ok=true; project-class injections must not be filled by the harness", name)
+		}
+	}
+}
+
+// TestInjection_GHCP_InjectionsVersion verifies injections_version "1.2.0" for GHCP CLI.
+func TestInjection_GHCP_InjectionsVersion(t *testing.T) {
+	mod := newModule(t)
+	d := mod.Descriptor()
+	if d == nil {
+		t.Fatal("Descriptor() returned nil")
+	}
+	want := "1.2.0"
+	if d.InjectionsVersion != want {
+		t.Errorf("Descriptor().InjectionsVersion = %q, want %q", d.InjectionsVersion, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Shared contract test
+// ---------------------------------------------------------------------------
+
+// TestContract_GHCP runs the shared HarnessModule contract suite against the GHCP CLI module.
+func TestContract_GHCP(t *testing.T) {
+	mod := newModule(t) // RED: fails here until implementation is complete
+
+	contracttest.Run(t, mod, contracttest.Fixtures{
+		ToolCases: []contracttest.ToolCase{
+			{
+				// many_to_one_aliasing_write_and_edit: verifies many-to-one deduplication AND the
+				// flow-style single-quoted list format that distinguishes GHCP CLI from Claude Code.
+				// file_write and file_edit both resolve to "edit"; the rendered tools field contains
+				// exactly one 'edit' item in a ['edit'] flow-style single-quoted sequence.
+				Name: "many_to_one_aliasing_write_and_edit",
+				Request: domain.ToolRequest{
+					AgentKey: "aliasing-test",
+					Generic:  []string{"file_write", "file_edit"},
+				},
+				Fields: []domain.FrontmatterField{
+					{
+						Key: "tools",
+						Value: domain.FieldValue{
+							Kind: domain.KindList,
+							List: domain.ListFlow,
+							Items: []domain.FieldValue{
+								{Kind: domain.KindScalar, Scalar: "edit", Quote: domain.QuoteSingle},
+							},
+						},
+					},
+				},
+				Resolutions: []domain.ToolResolution{
+					{Generic: "file_write", Outcome: domain.ToolMapped, HarnessTools: []string{"edit"}},
+					{Generic: "file_edit", Outcome: domain.ToolMapped, HarnessTools: []string{"edit"}},
+				},
+			},
+			{
+				// many_to_one_aliasing_search: verifies file_search + content_search → one 'search'.
+				Name: "many_to_one_aliasing_search",
+				Request: domain.ToolRequest{
+					AgentKey: "aliasing-test",
+					Generic:  []string{"file_search", "content_search"},
+				},
+				Fields: []domain.FrontmatterField{
+					{
+						Key: "tools",
+						Value: domain.FieldValue{
+							Kind: domain.KindList,
+							List: domain.ListFlow,
+							Items: []domain.FieldValue{
+								{Kind: domain.KindScalar, Scalar: "search", Quote: domain.QuoteSingle},
+							},
+						},
+					},
+				},
+				Resolutions: []domain.ToolResolution{
+					{Generic: "file_search", Outcome: domain.ToolMapped, HarnessTools: []string{"search"}},
+					{Generic: "content_search", Outcome: domain.ToolMapped, HarnessTools: []string{"search"}},
+				},
+			},
+			{
+				Name: "skill_maps_to_skill",
+				Request: domain.ToolRequest{
+					AgentKey: "skill-test",
+					Generic:  []string{"skill"},
+				},
+				Fields: []domain.FrontmatterField{
+					{
+						Key: "tools",
+						Value: domain.FieldValue{
+							Kind: domain.KindList,
+							List: domain.ListFlow,
+							Items: []domain.FieldValue{
+								{Kind: domain.KindScalar, Scalar: "skill", Quote: domain.QuoteSingle},
+							},
+						},
+					},
+				},
+				Resolutions: []domain.ToolResolution{
+					{Generic: "skill", Outcome: domain.ToolMapped, HarnessTools: []string{"skill"}},
+				},
+			},
+			{
+				Name: "subagent_maps_to_agent",
+				Request: domain.ToolRequest{
+					AgentKey: "orchestrator",
+					Generic:  []string{"subagent"},
+				},
+				Fields: []domain.FrontmatterField{
+					{
+						Key: "tools",
+						Value: domain.FieldValue{
+							Kind: domain.KindList,
+							List: domain.ListFlow,
+							Items: []domain.FieldValue{
+								{Kind: domain.KindScalar, Scalar: "agent", Quote: domain.QuoteSingle},
+							},
+						},
+					},
+				},
+				Resolutions: []domain.ToolResolution{
+					{Generic: "subagent", Outcome: domain.ToolMapped, HarnessTools: []string{"agent"}},
+				},
+			},
+		},
+
+		FrontmatterCases: []contracttest.FrontmatterCase{
+			{
+				// adds_user_invocable_false_and_drops_generic_keys: the key behavioral difference
+				// between GHCP CLI and Claude Code in Frontmatter is that GHCP CLI declaratively adds
+				// "user-invocable: false" to every agent's frontmatter. Set contains only this static
+				// descriptor Add field. The three generic-only keys are removed, and the canonical key
+				// order (with user-invocable at the end) is applied. Model and version stamps are NOT
+				// in Set — they are applied exclusively by the transform's Steps 3 and 4. Including
+				// them here would cause duplicate FieldChange entries in transform.Report.Fields.
+				Name: "adds_user_invocable_false_and_drops_generic_keys",
+				Request: domain.FrontmatterRequest{
+					Kind:     domain.ArtifactAgent,
+					AgentKey: "test-agent",
+					Model: domain.ModelSelection{
+						ModelID: "claude-sonnet-4-6",
+						Origin:  domain.OriginHarnessList,
+					},
+					Versions: domain.VersionStamps{
+						TransformVersion:  "3.0.0",
+						InjectionsVersion: "1.2.0",
+					},
+				},
+				Expected: domain.FrontmatterPlan{
+					Set: []domain.FrontmatterField{
+						{Key: "user-invocable", Value: domain.ScalarValue("false", domain.QuotePlain)},
+					},
+					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
+					KeyOrder: []string{"id", "version", "transform_version", "injections_version", "name", "description", "model", "tools", "user-invocable"},
+				},
+			},
+		},
+
+		InjectionCases: map[string]string{
+			"HarnessConstraints": ghcpHarnessConstraints,
+			"LanguagePatterns":   "",
+		},
+
+		NotFilled: []string{
+			"IdentityExtension",
+			"ProtocolExtension",
+			"CodebaseContext",
+			"OutputArtifactTemplate",
+			"CustomConstraints",
+			"ErrorHandlingExtension",
+			"ContextLimits",
+			"AvailableWorkflows",
+		},
+
+		TargetPathCases: []contracttest.TargetPathCase{
+			{
+				Name:     "agent_project_linux",
+				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeProject, GOOS: "linux"},
+				Expected: ".github/agents/test-runner.agent.md",
+			},
+			{
+				Name:     "agent_user_darwin",
+				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "darwin"},
+				Expected: "~/.copilot/agents/test-runner.agent.md",
+			},
+			{
+				Name:     "agent_user_windows",
+				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "windows"},
+				Expected: "${APPDATA}/GitHub Copilot/agents/test-runner.agent.md",
+			},
+			{
+				Name:     "skill_project_linux",
+				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeProject, GOOS: "linux"},
+				Expected: ".github/skills/lean-tdd/SKILL.md",
+			},
+			{
+				Name:     "skill_user_linux",
+				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeUser, GOOS: "linux"},
+				Expected: "~/.copilot/skills/lean-tdd/SKILL.md",
+			},
+			{
+				Name:     "skill_user_windows",
+				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeUser, GOOS: "windows"},
+				Expected: "${APPDATA}/GitHub Copilot/skills/lean-tdd/SKILL.md",
+			},
+			{
+				Name:    "hook_returns_unsupported",
+				Request: domain.TargetPathRequest{Kind: domain.ArtifactHook, Key: "any-hook", FileName: "hook.sh", Scope: domain.ScopeProject, GOOS: "linux"},
+				Err:     domain.ErrArtifactUnsupported,
+			},
+		},
+
+		HookPlanCases: []contracttest.HookPlanCase{
+			{
+				Name:      "hooks_not_supported",
+				Request:   domain.HookPlanRequest{},
+				Supported: false,
+			},
+		},
+	})
+}

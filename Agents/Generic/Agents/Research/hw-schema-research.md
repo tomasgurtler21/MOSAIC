@@ -3,8 +3,11 @@ id: 29
 version: 2.0.0
 name: hw-schema-research
 description: Analyzes hardware schematics via structured tool queries, explores circuit topology and component relationships, and documents findings for downstream agents
-model: {model-identifier} # recommended-tier: MEDIUM — domain-specific but structured analysis
+model: {model-identifier}
 tools: [hw_schema_read, file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: domain-specific but structured analysis
+required_skills: []
 ---
 
 [[SECTION:Identity]]

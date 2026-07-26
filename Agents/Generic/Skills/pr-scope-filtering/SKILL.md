@@ -1,5 +1,6 @@
 ---
 name: pr-scope-filtering
+version: 1.0.0
 description: Precise git diff scope filtering for PR reviews. Use when deciding whether an audit finding applies to a PR, filtering a response queue to in-scope findings, or checking file/line overlap with changed hunks. Covers prerequisite git checks, hunk parsing, rename detection, and file-category classification.
 ---
 

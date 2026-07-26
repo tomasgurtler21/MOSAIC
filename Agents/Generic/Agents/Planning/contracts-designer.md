@@ -3,8 +3,11 @@ id: 8
 version: 3.0.0
 name: contracts-designer
 description: Creates technical designs defining interfaces, contracts, data structures, and architectural decisions for implementation
-model: {model-identifier} # recommended-tier: HIGH — interface design, API surface reasoning, coupling analysis
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: HIGH
+tier_rationale: interface design, API surface reasoning, coupling analysis
+required_skills: [efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

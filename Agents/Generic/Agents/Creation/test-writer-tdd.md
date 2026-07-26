@@ -3,8 +3,11 @@ id: 15
 version: 4.0.0
 name: test-writer-tdd
 description: Writes, updates, and fixes test code — creates failing tests from design specifications (TDD RED phase), updates tests for changed requirements, and fixes test issues identified by review feedback
-model: {model-identifier} # recommended-tier: MEDIUM — core coding work within defined scope
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, terminal, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: core coding work within defined scope
+required_skills: [lean-tdd, efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

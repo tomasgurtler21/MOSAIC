@@ -1,0 +1,5 @@
+schema_version: "0"
+utility_agent_allow_list:
+  - anthropic-subagent-creator
+allow_external_modules: true
+log_retention_runs: 5

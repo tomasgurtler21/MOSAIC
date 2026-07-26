@@ -3,8 +3,11 @@ id: 19
 version: 5.0.0
 name: audit-to-pull-request
 description: Transforms a single audit artifact into condensed PR-ready comments — filters to PR scope via git diff hunk-level analysis with context zone intelligence, deduplicates against existing PR comments, writes unique in-scope findings to a partial PR response queue, and captures filtered-out findings in a transform report
-model: {model-identifier} # recommended-tier: HIGH — git diff analysis, hunk-level scope filtering, and context zone relevance require significant reasoning
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, terminal, user_interaction]
+recommended_tier: HIGH
+tier_rationale: git diff analysis, hunk-level scope filtering, and context zone relevance require significant reasoning
+required_skills: [git-read-commands, pr-scope-filtering]
 ---
 
 [[SECTION:Identity]]

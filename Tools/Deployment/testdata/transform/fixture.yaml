@@ -1,0 +1,114 @@
+# Fixture harness descriptor used by the transform package tests.
+# It exercises the full frontmatter-shaping pipeline:
+#   - Drops: name, recommended_tier, tier_rationale (present on every generic agent)
+#   - Adds:  mode: subagent
+#   - Sets model via model_key
+#   - Sets tools via tools_key (list shape)
+#   - Stamps transform_version and injections_version
+#   - Applies a key_order that includes the stamped fields
+#
+# The placeholder_expansion covers the orchestrator's {tool-permissions} placeholder (T8.7).
+schema_version: "1"
+id: "fixture-harness"
+display_name: "Fixture Harness"
+transform_version: "3.0.0"
+injections_version: "1.2.0"
+
+models:
+  ids:
+    - "claude/claude-sonnet"
+  format_hint: "provider/model"
+
+tools:
+  shape: list
+  universe:
+    - name: "read-file"
+      unused: deny
+      by_convention: false
+    - name: "write-file"
+      unused: deny
+      by_convention: false
+    - name: "edit-file"
+      unused: deny
+      by_convention: false
+    - name: "search-file"
+      unused: deny
+      by_convention: false
+    - name: "search-text"
+      unused: deny
+      by_convention: false
+    - name: "run-terminal"
+      unused: deny
+      by_convention: false
+    - name: "ask-user"
+      unused: deny
+      by_convention: false
+  mappings:
+    - generic: "file_read"
+      harness_tools:
+        - "read-file"
+    - generic: "file_write"
+      harness_tools:
+        - "write-file"
+    - generic: "file_edit"
+      harness_tools:
+        - "edit-file"
+    - generic: "file_search"
+      harness_tools:
+        - "search-file"
+    - generic: "content_search"
+      harness_tools:
+        - "search-text"
+    - generic: "terminal"
+      harness_tools:
+        - "run-terminal"
+    - generic: "user_interaction"
+      harness_tools:
+        - "ask-user"
+  # placeholder_expansion: tools assigned when {tool-permissions} placeholder is present
+  placeholder_expansion:
+    - "read-file"
+    - "write-file"
+    - "edit-file"
+    - "search-file"
+    - "search-text"
+    - "run-terminal"
+    - "ask-user"
+
+paths:
+  agents:
+    supported: true
+    project: ".fixture/agents"
+    user:
+      "": "~/.config/fixture/agents"
+  skills:
+    supported: false
+  hooks:
+    supported: false
+
+extensions:
+  agent: ".fixture.md"
+
+frontmatter:
+  model_key: "model"
+  tools_key: "tools"
+  add:
+    - key: "mode"
+      value: "subagent"
+  drop:
+    - "name"
+    - "recommended_tier"
+    - "tier_rationale"
+  key_order:
+    - "id"
+    - "version"
+    - "transform_version"
+    - "injections_version"
+    - "description"
+    - "mode"
+    - "model"
+    - "tools"
+
+hooks:
+  supported: false
+  variant_key: ""

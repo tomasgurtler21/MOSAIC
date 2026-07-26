@@ -3,8 +3,11 @@ id: 18
 version: 2.0.0
 name: pull-request-comment-interface
 description: Bridges pull request comments with the multi-agent orchestration system - retrieves comment threads for subagent consumption and posts subagent responses/new comments to PRs with AI attribution
-model: {model-identifier} # recommended-tier: LOW — data transport between systems
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, pr_comments_read, pr_comments_write, user_interaction]
+recommended_tier: LOW
+tier_rationale: data transport between systems
+required_skills: []
 ---
 
 [[SECTION:Identity]]

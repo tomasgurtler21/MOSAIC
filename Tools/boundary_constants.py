@@ -63,6 +63,13 @@ KNOWN_FRONTMATTER_KEYS: frozenset[str] = frozenset({
     "tools",
     "transform_version",
     "injections_version",
+    # Deployment metadata added to generic source files.
+    "recommended_tier",
+    "tier_rationale",
+    "required_skills",
+    # Utility-agent-specific fields (e.g. base-version tracks the template version
+    # the utility agent was built from).
+    "base-version",
     # Harness-specific frontmatter fields carried by some concrete agent files.
     # These are preserved verbatim by the transformer and must be accepted by
     # the validator: OpenCode agents use `mode` and `permission`; agents that

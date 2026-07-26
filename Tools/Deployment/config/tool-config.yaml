@@ -1,0 +1,37 @@
+# mosaic-deploy tool configuration
+#
+# This file is the project-level configuration for the MOSAIC deployment tool.
+# It is typically committed to the MOSAIC repository and shared across the team.
+#
+# Location after install: MosaicDeploy/config/tool-config.yaml (at MOSAIC root)
+# Source template:        Tools/Deployment/config/tool-config.yaml
+#
+# Per-user settings (tier-to-model mappings) live in user-config.yaml, which
+# should NOT be committed to the repository.
+
+schema_version: "1"
+
+# utility_agent_allow_list controls which utility agents appear in the selection
+# UI during deployment. Only agents whose key (file base name) appears in this
+# list are offered to the user.
+#
+# An empty list means no utility agents are selectable. Add keys here as your
+# team's workflow requires utility agents.
+#
+# Example:
+#   utility_agent_allow_list:
+#     - code-reviewer
+#     - documentation-writer
+utility_agent_allow_list: []
+
+# allow_external_modules controls whether external harness modules discovered
+# under MosaicDeploy/harnesses/ may be used. Defaults to false so that external
+# module execution is always an explicit operator decision.
+#
+# Set to true only if you have verified the module binary and trust its source.
+# See docs/external-protocol.md for the security model.
+allow_external_modules: false
+
+# log_retention_runs is the maximum number of run entries to keep in the
+# history log file. 0 means keep all history (unbounded).
+log_retention_runs: 0

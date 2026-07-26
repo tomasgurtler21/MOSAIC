@@ -1,0 +1,6 @@
+# Invalid descriptor: contains an unrecognised top-level field.
+# Parse must reject this with an error; unknown fields are not silently ignored.
+schema_version: "1"
+id: "unknown-field-harness"
+display_name: "Unknown Field Harness"
+supersecret_undocumented_feature: true

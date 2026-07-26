@@ -1,0 +1,4 @@
+# Invalid descriptor: the required "schema_version" field is absent.
+# Load and Parse must reject this with an error naming the "schema_version" field.
+id: "no-version-harness"
+display_name: "No Version Harness"

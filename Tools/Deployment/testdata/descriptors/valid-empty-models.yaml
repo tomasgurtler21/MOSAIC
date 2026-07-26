@@ -1,0 +1,6 @@
+# Valid descriptor with no models block.
+# AC5.4: absence of a model list must not cause a load error.
+# Model identifiers are never validated against any fixed list.
+schema_version: "1"
+id: "no-models-harness"
+display_name: "No Models Harness"

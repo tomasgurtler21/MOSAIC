@@ -3,8 +3,11 @@ id: 20
 version: 2.0.0
 name: architecture-audit
 description: Audits existing system architecture in a codebase for quality issues — evaluating layers, dependencies, component boundaries, and pattern adherence with verbose findings
-model: {model-identifier} # recommended-tier: MEDIUM-HIGH — needs genuine architectural insight to spot issues
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM-HIGH
+tier_rationale: needs genuine architectural insight to spot issues
+required_skills: [efficient-file-reading]
 ---
 
 [[SECTION:Identity]]

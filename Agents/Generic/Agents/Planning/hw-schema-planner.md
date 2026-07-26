@@ -3,8 +3,11 @@ id: 31
 version: 2.0.0
 name: hw-schema-planner
 description: Plans HW schematic research by discovering all sheets via hw-schema tools and creating HWResearchProgress.md with one research stage per sheet
-model: {model-identifier} # recommended-tier: MEDIUM — planning within narrow domain
+model: {model-identifier}
 tools: [hw_schema_read, file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: planning within narrow domain
+required_skills: []
 ---
 
 [[SECTION:Identity]]

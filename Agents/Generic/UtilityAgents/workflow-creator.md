@@ -2,8 +2,11 @@
 version: 1.1.0
 name: workflow-creator
 description: Collaboratively creates and modifies orchestration workflow definitions with the user, ensuring valid subagent references, routing consistency, and compliance with the workflow definition schema
-model: {model-identifier} # recommended-tier: MEDIUM-HIGH — workflow design, routing consistency, schema compliance
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM-HIGH
+tier_rationale: workflow design, routing consistency, schema compliance
+required_skills: []
 ---
 
 # Workflow Creator

@@ -2,8 +2,11 @@
 version: 2.1.0
 name: harness-bug-hunter
 description: Discovers, validates, and maintains a knowledge base of harness bugs and workarounds for the agentic harnesses used by this orchestration system
-model: {model-identifier} # recommended-tier: MEDIUM — investigative work with structured reporting
+model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, github_mcp, bash, web_fetch, web_search, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: investigative work with structured reporting
+required_skills: []
 ---
 
 # Harness Bug Hunter

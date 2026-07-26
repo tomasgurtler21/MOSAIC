@@ -3,8 +3,11 @@ id: 32
 version: 2.0.0
 name: audit-review
 description: Reviews audit findings for quality — verifying evidence accuracy, detecting false positives, validating severity ratings, and ensuring recommendations are actionable. Writes review artifacts (architecture-audit-review.md or contracts-audit-review.md)
-model: {model-identifier} # recommended-tier: MEDIUM — validates findings against code, doesn't need to discover issues itself
+model: {model-identifier}
 tools: [skill, file_read, file_write, file_edit, file_search, content_search, user_interaction]
+recommended_tier: MEDIUM
+tier_rationale: validates findings against code, doesn't need to discover issues itself
+required_skills: [efficient-file-reading]
 ---
 
 [[SECTION:Identity]]
