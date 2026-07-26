@@ -21,9 +21,10 @@ type HarnessModule interface {
 	// The module decides adds, drops, and final key order; it never edits a document itself.
 	Frontmatter(req FrontmatterRequest) (FrontmatterPlan, error)
 
-	// TargetPath returns the deployment path for one artifact, relative to the deployment root
-	// for ScopeProject, or expanded-absolute for ScopeUser. It includes the filename and the
-	// harness's extension rule. Returns ErrArtifactUnsupported when the harness has no such path.
+	// TargetPath returns the deployment path for one artifact, relative to the deployment root.
+	// It includes the filename and the harness's extension rule. Returns ErrArtifactUnsupported
+	// when the harness has no deployment path for the requested artifact kind. Returns
+	// ErrUnsupportedScope when req.Scope is not ScopeProject.
 	TargetPath(req TargetPathRequest) (string, error)
 
 	// Injection returns the harness-level content for a canonical injection name.

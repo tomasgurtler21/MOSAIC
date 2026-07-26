@@ -1,26 +1,30 @@
 package plan_test
 
-// staleness_test.go covers version staleness comparison and local-modification detection
-// (T16.3, T16.4, T16.5).
+// staleness_test.go covers version staleness comparison and local-modification detection.
 //
-// T16.3 — Independent per-field staleness (AgentStaleness, SkillStaleness, HookStaleness):
-//   - Each of the three agent version fields drives staleness independently
-//   - A mismatch on any single field produces one delta naming that field
-//   - The plan records the deployed and source values, not just a boolean
-//   - Deltas are returned in the fixed order: version, transform_version, injections_version
-//   - All fields matching produces an empty slice (not stale)
-//   - Skills and hook bundles use their single "version" field
+// Staleness-function tests (T4.1, T4.8):
+//   - AgentStaleness, SkillStaleness, HookStaleness compare source stamps against the versions
+//     read from the deployed file (domain.DeployedArtifactState), not against the manifest entry.
+//   - Each of the three agent version fields drives staleness independently.
+//   - A mismatch on any single field produces one delta naming that field.
+//   - The delta carries the value from the deployed file in delta.Deployed, so the review
+//     screen can show the truthful "deployed version changed from X to Y" message.
+//   - Deltas are returned in the fixed order: version, transform_version, injections_version.
+//   - All fields matching produces an empty slice (not stale).
+//   - A deployed file carrying no version stamps at all (all fields empty) produces deltas
+//     whenever the source has non-empty stamps; delta.Deployed is "" in each case.
+//   - Skills and hook bundles use their single "version" field only.
 //
-// T16.4 — Local-modification detection:
-//   - A deployed file whose current hash matches the recorded hash is ActionUnchanged
-//   - A deployed file whose current hash differs (even by whitespace only) is ActionConflict
-//   - A file present on disk with no manifest record is treated as locally-modified
+// Local-modification detection (T4.5, T4.8):
+//   - The deployed file's content hash is compared against the manifest's recorded hash.
+//   - A hash mismatch classifies the item as ActionConflict regardless of staleness.
+//   - A deployed file whose hash matches the manifest's recorded hash, and whose version
+//     stamps match the source stamps, classifies as ActionUnchanged.
+//   - A file present on disk with no manifest record for the current target path is a conflict.
 //
-// T16.5 — Missing-manifest policy:
-//   - A workspace with deployed files but StateAbsent manifest classifies every file as
-//     ActionConflict with LocalModification.ManifestMissing = true
-//   - A workspace with deployed files but StateCorrupt manifest has the same classification
-//   - A file without a manifest record but with a present manifest is ActionCreate (not conflict)
+// Missing-manifest policy (T4.8):
+//   - A workspace with deployed files but a StateAbsent or StateCorrupt manifest classifies
+//     every present file as ActionConflict with LocalModification.ManifestMissing = true.
 
 import (
 	"context"
@@ -33,40 +37,44 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// T16.3 — AgentStaleness: per-field independent comparison
+// Staleness function helpers
 // ---------------------------------------------------------------------------
 
-// sampleStamps returns VersionStamps that match the given ManifestEntry exactly (not stale).
-func sampleStamps(entry domain.ManifestEntry) domain.VersionStamps {
-	return domain.VersionStamps{
-		Version:           entry.Version,
-		TransformVersion:  entry.TransformVersion,
-		InjectionsVersion: entry.InjectionsVersion,
-	}
-}
-
-// sampleEntry returns a ManifestEntry with all version fields set to distinct values.
-func sampleEntry() domain.ManifestEntry {
-	return domain.ManifestEntry{
-		Ref:               agentRef("test-agent"),
-		TargetPath:        "agents/test-agent.md",
+// sampleDeployedState returns a DeployedArtifactState with all version fields set to
+// distinct values. Callers may override individual fields to create mismatch scenarios.
+func sampleDeployedState() domain.DeployedArtifactState {
+	return domain.DeployedArtifactState{
+		Present:           true,
+		ContentHash:       "sha256:aaaa",
 		Version:           "1.0",
 		TransformVersion:  "2.0",
 		InjectionsVersion: "3.0",
-		ContentHash:       "sha256:aaaa",
-		DeployedAt:        time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 }
 
+// sampleStampsFromDeployed returns VersionStamps that exactly match the given deployed state
+// (not stale). Use this to establish a clean baseline before introducing a single mismatch.
+func sampleStampsFromDeployed(deployed domain.DeployedArtifactState) domain.VersionStamps {
+	return domain.VersionStamps{
+		Version:           deployed.Version,
+		TransformVersion:  deployed.TransformVersion,
+		InjectionsVersion: deployed.InjectionsVersion,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.1 / T4.8 — AgentStaleness: comparing against deployed-file versions
+// ---------------------------------------------------------------------------
+
 // TestAgentStaleness_AllMatch_ReturnsEmptySlice verifies that when all three version
-// fields in the manifest entry match the stamps, AgentStaleness returns an empty slice.
+// fields in the deployed state match the stamps, AgentStaleness returns an empty slice.
 // An empty slice is the signal that the item is not stale and should be ActionUnchanged.
 func TestAgentStaleness_AllMatch_ReturnsEmptySlice(t *testing.T) {
-	entry := sampleEntry()
-	agent := makeAgent("test-agent", entry.Version)
-	stamps := sampleStamps(entry)
+	deployed := sampleDeployedState()
+	agent := makeAgent("test-agent", deployed.Version)
+	stamps := sampleStampsFromDeployed(deployed)
 
-	deltas := plan.AgentStaleness(entry, agent, stamps)
+	deltas := plan.AgentStaleness(deployed, agent, stamps)
 
 	if len(deltas) != 0 {
 		t.Errorf("AgentStaleness with all matching fields: got %d deltas, want 0 (not stale)", len(deltas))
@@ -76,15 +84,15 @@ func TestAgentStaleness_AllMatch_ReturnsEmptySlice(t *testing.T) {
 // TestAgentStaleness_VersionMismatch_Only_ReturnsSingleDelta verifies that a mismatch on
 // the "version" field alone produces exactly one delta naming "version".
 func TestAgentStaleness_VersionMismatch_Only_ReturnsSingleDelta(t *testing.T) {
-	entry := sampleEntry()
-	agent := makeAgent("test-agent", "1.1") // version differs from entry.Version "1.0"
+	deployed := sampleDeployedState() // deployed.Version = "1.0"
+	agent := makeAgent("test-agent", "1.1")
 	stamps := domain.VersionStamps{
-		Version:           "1.1", // differs from entry.Version
-		TransformVersion:  entry.TransformVersion,
-		InjectionsVersion: entry.InjectionsVersion,
+		Version:           "1.1", // differs from deployed.Version "1.0"
+		TransformVersion:  deployed.TransformVersion,
+		InjectionsVersion: deployed.InjectionsVersion,
 	}
 
-	deltas := plan.AgentStaleness(entry, agent, stamps)
+	deltas := plan.AgentStaleness(deployed, agent, stamps)
 
 	if len(deltas) != 1 {
 		t.Fatalf("AgentStaleness with version mismatch only: got %d deltas, want 1", len(deltas))
@@ -94,43 +102,43 @@ func TestAgentStaleness_VersionMismatch_Only_ReturnsSingleDelta(t *testing.T) {
 	}
 }
 
-// TestAgentStaleness_VersionMismatch_RecordsDeployedAndSourceValues verifies that the delta
-// for a version mismatch carries the deployed value (from the manifest entry) and the source
-// value (from stamps), not just a boolean indicator.
-func TestAgentStaleness_VersionMismatch_RecordsDeployedAndSourceValues(t *testing.T) {
-	entry := sampleEntry() // entry.Version = "1.0"
+// TestAgentStaleness_VersionMismatch_DeployedCarriesFileValue verifies that the delta for
+// a version mismatch carries the value actually present in the deployed file in delta.Deployed,
+// not the manifest entry value. The review screen depends on this to show "file has X".
+func TestAgentStaleness_VersionMismatch_DeployedCarriesFileValue(t *testing.T) {
+	deployed := sampleDeployedState() // deployed.Version = "1.0" — value in the file
 	stamps := domain.VersionStamps{
 		Version:           "1.1", // source is newer
-		TransformVersion:  entry.TransformVersion,
-		InjectionsVersion: entry.InjectionsVersion,
+		TransformVersion:  deployed.TransformVersion,
+		InjectionsVersion: deployed.InjectionsVersion,
 	}
 	agent := makeAgent("test-agent", "1.1")
 
-	deltas := plan.AgentStaleness(entry, agent, stamps)
+	deltas := plan.AgentStaleness(deployed, agent, stamps)
 
 	if len(deltas) != 1 {
 		t.Fatalf("expected 1 delta, got %d", len(deltas))
 	}
 	if deltas[0].Deployed != "1.0" {
-		t.Errorf("delta.Deployed = %q, want %q (the value in the manifest)", deltas[0].Deployed, "1.0")
+		t.Errorf("delta.Deployed = %q, want %q (value read from the deployed file)", deltas[0].Deployed, "1.0")
 	}
 	if deltas[0].Source != "1.1" {
-		t.Errorf("delta.Source = %q, want %q (the value in the source)", deltas[0].Source, "1.1")
+		t.Errorf("delta.Source = %q, want %q (source catalog value)", deltas[0].Source, "1.1")
 	}
 }
 
 // TestAgentStaleness_TransformVersionMismatch_Only_ReturnsSingleDelta verifies that a
 // mismatch on "transform_version" alone produces exactly one delta naming "transform_version".
 func TestAgentStaleness_TransformVersionMismatch_Only_ReturnsSingleDelta(t *testing.T) {
-	entry := sampleEntry()
-	agent := makeAgent("test-agent", entry.Version)
+	deployed := sampleDeployedState()
+	agent := makeAgent("test-agent", deployed.Version)
 	stamps := domain.VersionStamps{
-		Version:           entry.Version,
-		TransformVersion:  "2.1", // differs from entry.TransformVersion "2.0"
-		InjectionsVersion: entry.InjectionsVersion,
+		Version:           deployed.Version,
+		TransformVersion:  "2.1", // differs from deployed.TransformVersion "2.0"
+		InjectionsVersion: deployed.InjectionsVersion,
 	}
 
-	deltas := plan.AgentStaleness(entry, agent, stamps)
+	deltas := plan.AgentStaleness(deployed, agent, stamps)
 
 	if len(deltas) != 1 {
 		t.Fatalf("AgentStaleness with transform_version mismatch only: got %d deltas, want 1", len(deltas))
@@ -143,15 +151,15 @@ func TestAgentStaleness_TransformVersionMismatch_Only_ReturnsSingleDelta(t *test
 // TestAgentStaleness_InjectionsVersionMismatch_Only_ReturnsSingleDelta verifies that a
 // mismatch on "injections_version" alone produces exactly one delta naming "injections_version".
 func TestAgentStaleness_InjectionsVersionMismatch_Only_ReturnsSingleDelta(t *testing.T) {
-	entry := sampleEntry()
-	agent := makeAgent("test-agent", entry.Version)
+	deployed := sampleDeployedState()
+	agent := makeAgent("test-agent", deployed.Version)
 	stamps := domain.VersionStamps{
-		Version:           entry.Version,
-		TransformVersion:  entry.TransformVersion,
-		InjectionsVersion: "3.1", // differs from entry.InjectionsVersion "3.0"
+		Version:           deployed.Version,
+		TransformVersion:  deployed.TransformVersion,
+		InjectionsVersion: "3.1", // differs from deployed.InjectionsVersion "3.0"
 	}
 
-	deltas := plan.AgentStaleness(entry, agent, stamps)
+	deltas := plan.AgentStaleness(deployed, agent, stamps)
 
 	if len(deltas) != 1 {
 		t.Fatalf("AgentStaleness with injections_version mismatch only: got %d deltas, want 1", len(deltas))
@@ -164,15 +172,15 @@ func TestAgentStaleness_InjectionsVersionMismatch_Only_ReturnsSingleDelta(t *tes
 // TestAgentStaleness_AllThreeVersionsMismatch_ReturnsThreeDeltas verifies that when all
 // three version fields differ, AgentStaleness returns three deltas, one per field.
 func TestAgentStaleness_AllThreeVersionsMismatch_ReturnsThreeDeltas(t *testing.T) {
-	entry := sampleEntry()
+	deployed := sampleDeployedState()
 	agent := makeAgent("test-agent", "1.1")
 	stamps := domain.VersionStamps{
-		Version:           "1.1", // all three differ
+		Version:           "1.1", // all three differ from deployed
 		TransformVersion:  "2.1",
 		InjectionsVersion: "3.1",
 	}
 
-	deltas := plan.AgentStaleness(entry, agent, stamps)
+	deltas := plan.AgentStaleness(deployed, agent, stamps)
 
 	if len(deltas) != 3 {
 		t.Fatalf("AgentStaleness with all three fields mismatching: got %d deltas, want 3", len(deltas))
@@ -183,7 +191,7 @@ func TestAgentStaleness_AllThreeVersionsMismatch_ReturnsThreeDeltas(t *testing.T
 // mismatch, the deltas are returned in the fixed order: version, transform_version,
 // injections_version. The order must be deterministic and independent of which fields differ.
 func TestAgentStaleness_DeltaOrder_IsFixed_VersionFirst(t *testing.T) {
-	entry := sampleEntry()
+	deployed := sampleDeployedState()
 	agent := makeAgent("test-agent", "1.1")
 	stamps := domain.VersionStamps{
 		Version:           "1.1",
@@ -191,7 +199,7 @@ func TestAgentStaleness_DeltaOrder_IsFixed_VersionFirst(t *testing.T) {
 		InjectionsVersion: "3.1",
 	}
 
-	deltas := plan.AgentStaleness(entry, agent, stamps)
+	deltas := plan.AgentStaleness(deployed, agent, stamps)
 
 	if len(deltas) != 3 {
 		t.Fatalf("expected 3 deltas, got %d", len(deltas))
@@ -207,37 +215,104 @@ func TestAgentStaleness_DeltaOrder_IsFixed_VersionFirst(t *testing.T) {
 // TestAgentStaleness_PartialMismatch_VersionAndTransform_TwoDeltas verifies that a
 // mismatch on two out of three fields returns exactly two deltas.
 func TestAgentStaleness_PartialMismatch_VersionAndTransform_TwoDeltas(t *testing.T) {
-	entry := sampleEntry()
+	deployed := sampleDeployedState()
 	agent := makeAgent("test-agent", "1.1")
 	stamps := domain.VersionStamps{
 		Version:           "1.1", // differs
 		TransformVersion:  "2.1", // differs
-		InjectionsVersion: entry.InjectionsVersion, // matches
+		InjectionsVersion: deployed.InjectionsVersion, // matches
 	}
 
-	deltas := plan.AgentStaleness(entry, agent, stamps)
+	deltas := plan.AgentStaleness(deployed, agent, stamps)
 
 	if len(deltas) != 2 {
 		t.Fatalf("AgentStaleness with version+transform_version mismatch: got %d deltas, want 2", len(deltas))
 	}
 }
 
+// TestAgentStaleness_NoVersionInfo_SourceHasValues_ProducesThreeDeltas verifies that when
+// the deployed file carries no readable version stamps (all fields empty), AgentStaleness
+// produces three deltas with empty delta.Deployed values. An unversioned deployed file
+// cannot be proven current; the comparison produces deltas so the classifier detects stale.
+func TestAgentStaleness_NoVersionInfo_SourceHasValues_ProducesThreeDeltas(t *testing.T) {
+	deployed := domain.DeployedArtifactState{
+		Present:           true,
+		ContentHash:       "sha256:abc",
+		Version:           "",  // no version stamp in the deployed file
+		TransformVersion:  "",
+		InjectionsVersion: "",
+	}
+	agent := makeAgent("test-agent", "2.0")
+	stamps := domain.VersionStamps{
+		Version:           "2.0",
+		TransformVersion:  "1.5",
+		InjectionsVersion: "3.0",
+	}
+
+	deltas := plan.AgentStaleness(deployed, agent, stamps)
+
+	if len(deltas) != 3 {
+		t.Fatalf("AgentStaleness with no version info in deployed file: got %d deltas, want 3", len(deltas))
+	}
+	// Every delta.Deployed must be empty, reflecting what was read from the deployed file.
+	for _, d := range deltas {
+		if d.Deployed != "" {
+			t.Errorf("delta for field %q: Deployed = %q, want empty string (no stamp in deployed file)",
+				d.Field, d.Deployed)
+		}
+	}
+}
+
+// TestAgentStaleness_DeltaFieldNames_CompatibleWithExecutorStamping verifies that the field
+// names produced by AgentStaleness are exactly "version", "transform_version", and
+// "injections_version" — the three names the executor's resolveVersionStamp switches on
+// when writing manifest version stamps. Changing these names would silently break the
+// manifest stamping and leave deployed files with empty version fields.
+func TestAgentStaleness_DeltaFieldNames_CompatibleWithExecutorStamping(t *testing.T) {
+	deployed := domain.DeployedArtifactState{
+		Present:           true,
+		ContentHash:       "sha256:abc",
+		Version:           "1.0",
+		TransformVersion:  "1.0",
+		InjectionsVersion: "1.0",
+	}
+	agent := makeAgent("test-agent", "2.0")
+	stamps := domain.VersionStamps{
+		Version:           "2.0",
+		TransformVersion:  "1.5",
+		InjectionsVersion: "3.0",
+	}
+
+	deltas := plan.AgentStaleness(deployed, agent, stamps)
+
+	if len(deltas) != 3 {
+		t.Fatalf("expected 3 deltas (all fields differ), got %d", len(deltas))
+	}
+
+	wantFields := []string{"version", "transform_version", "injections_version"}
+	for i, want := range wantFields {
+		if deltas[i].Field != want {
+			t.Errorf("deltas[%d].Field = %q, want %q; this name is relied on by the executor for manifest stamping",
+				i, deltas[i].Field, want)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
-// T16.3 — SkillStaleness: single version field
+// T4.1 / T4.8 — SkillStaleness: single version field from deployed file
 // ---------------------------------------------------------------------------
 
 // TestSkillStaleness_VersionMatch_ReturnsEmptySlice verifies that when the skill's version
-// matches the manifest entry, SkillStaleness returns an empty slice (not stale).
+// from the deployed file matches the source, SkillStaleness returns an empty slice.
 func TestSkillStaleness_VersionMatch_ReturnsEmptySlice(t *testing.T) {
-	entry := domain.ManifestEntry{
-		Ref:        skillRef("lean-tdd"),
-		TargetPath: "skills/lean-tdd/SKILL.md",
-		Version:    "1.5",
-		DeployedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+	deployed := domain.DeployedArtifactState{
+		Present:     true,
+		ContentHash: "sha256:abc",
+		Version:     "1.5",
 	}
-	skill := makeSkill("lean-tdd", "1.5") // version matches entry
+	skill := makeSkill("lean-tdd", "1.5") // version matches deployed file
 
-	deltas := plan.SkillStaleness(entry, skill)
+	deltas := plan.SkillStaleness(deployed, skill)
 
 	if len(deltas) != 0 {
 		t.Errorf("SkillStaleness with matching version: got %d deltas, want 0", len(deltas))
@@ -245,17 +320,16 @@ func TestSkillStaleness_VersionMatch_ReturnsEmptySlice(t *testing.T) {
 }
 
 // TestSkillStaleness_VersionMismatch_ReturnsSingleDelta verifies that a version mismatch
-// produces exactly one delta with Field = "version".
+// produces exactly one delta with Field = "version", carrying the deployed and source values.
 func TestSkillStaleness_VersionMismatch_ReturnsSingleDelta(t *testing.T) {
-	entry := domain.ManifestEntry{
-		Ref:        skillRef("lean-tdd"),
-		TargetPath: "skills/lean-tdd/SKILL.md",
-		Version:    "1.5",
-		DeployedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+	deployed := domain.DeployedArtifactState{
+		Present:     true,
+		ContentHash: "sha256:abc",
+		Version:     "1.5", // deployed file version
 	}
-	skill := makeSkill("lean-tdd", "1.6") // version differs
+	skill := makeSkill("lean-tdd", "1.6") // source is newer
 
-	deltas := plan.SkillStaleness(entry, skill)
+	deltas := plan.SkillStaleness(deployed, skill)
 
 	if len(deltas) != 1 {
 		t.Fatalf("SkillStaleness with version mismatch: got %d deltas, want 1", len(deltas))
@@ -264,29 +338,48 @@ func TestSkillStaleness_VersionMismatch_ReturnsSingleDelta(t *testing.T) {
 		t.Errorf("SkillStaleness delta.Field = %q, want %q", deltas[0].Field, "version")
 	}
 	if deltas[0].Deployed != "1.5" {
-		t.Errorf("SkillStaleness delta.Deployed = %q, want %q", deltas[0].Deployed, "1.5")
+		t.Errorf("SkillStaleness delta.Deployed = %q, want %q (value from deployed file)", deltas[0].Deployed, "1.5")
 	}
 	if deltas[0].Source != "1.6" {
 		t.Errorf("SkillStaleness delta.Source = %q, want %q", deltas[0].Source, "1.6")
 	}
 }
 
+// TestSkillStaleness_NoVersionInfo_ProducesDelta verifies that when the deployed file carries
+// no version stamp (empty string), SkillStaleness produces a delta with empty Deployed.
+func TestSkillStaleness_NoVersionInfo_ProducesDelta(t *testing.T) {
+	deployed := domain.DeployedArtifactState{
+		Present:     true,
+		ContentHash: "sha256:abc",
+		Version:     "", // no version stamp in the deployed file
+	}
+	skill := makeSkill("lean-tdd", "1.5")
+
+	deltas := plan.SkillStaleness(deployed, skill)
+
+	if len(deltas) != 1 {
+		t.Fatalf("SkillStaleness with no version info: got %d deltas, want 1", len(deltas))
+	}
+	if deltas[0].Deployed != "" {
+		t.Errorf("delta.Deployed = %q, want empty string (no version stamp in deployed file)", deltas[0].Deployed)
+	}
+}
+
 // ---------------------------------------------------------------------------
-// T16.3 — HookStaleness: single version field
+// T4.1 / T4.8 — HookStaleness: single version field from deployed file
 // ---------------------------------------------------------------------------
 
 // TestHookStaleness_VersionMatch_ReturnsEmptySlice verifies that when the hook bundle's
-// version matches the manifest entry, HookStaleness returns an empty slice.
+// version from the deployed file matches the catalog version, HookStaleness returns an empty slice.
 func TestHookStaleness_VersionMatch_ReturnsEmptySlice(t *testing.T) {
-	entry := domain.ManifestEntry{
-		Ref:        hookRef("my-hooks"),
-		TargetPath: "hooks/my-hooks",
-		Version:    "2.0",
-		DeployedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+	deployed := domain.DeployedArtifactState{
+		Present:     true,
+		ContentHash: "sha256:abc",
+		Version:     "2.0",
 	}
 	bundle := makeHookBundle("my-hooks", "2.0") // version matches
 
-	deltas := plan.HookStaleness(entry, bundle)
+	deltas := plan.HookStaleness(deployed, bundle)
 
 	if len(deltas) != 0 {
 		t.Errorf("HookStaleness with matching version: got %d deltas, want 0", len(deltas))
@@ -296,15 +389,14 @@ func TestHookStaleness_VersionMatch_ReturnsEmptySlice(t *testing.T) {
 // TestHookStaleness_VersionMismatch_ReturnsSingleDelta verifies that a version mismatch
 // produces exactly one delta with Field = "version".
 func TestHookStaleness_VersionMismatch_ReturnsSingleDelta(t *testing.T) {
-	entry := domain.ManifestEntry{
-		Ref:        hookRef("my-hooks"),
-		TargetPath: "hooks/my-hooks",
-		Version:    "2.0",
-		DeployedAt: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+	deployed := domain.DeployedArtifactState{
+		Present:     true,
+		ContentHash: "sha256:abc",
+		Version:     "2.0",
 	}
-	bundle := makeHookBundle("my-hooks", "2.1") // version differs
+	bundle := makeHookBundle("my-hooks", "2.1") // source is newer
 
-	deltas := plan.HookStaleness(entry, bundle)
+	deltas := plan.HookStaleness(deployed, bundle)
 
 	if len(deltas) != 1 {
 		t.Fatalf("HookStaleness with version mismatch: got %d deltas, want 1", len(deltas))
@@ -314,17 +406,37 @@ func TestHookStaleness_VersionMismatch_ReturnsSingleDelta(t *testing.T) {
 	}
 }
 
+// TestHookStaleness_NoVersionInfo_ProducesDelta verifies that when the deployed file carries
+// no version stamp, HookStaleness produces a delta with empty Deployed.
+func TestHookStaleness_NoVersionInfo_ProducesDelta(t *testing.T) {
+	deployed := domain.DeployedArtifactState{
+		Present:     true,
+		ContentHash: "sha256:abc",
+		Version:     "", // no version stamp in the deployed file
+	}
+	bundle := makeHookBundle("my-hooks", "2.0")
+
+	deltas := plan.HookStaleness(deployed, bundle)
+
+	if len(deltas) != 1 {
+		t.Fatalf("HookStaleness with no version info: got %d deltas, want 1", len(deltas))
+	}
+	if deltas[0].Deployed != "" {
+		t.Errorf("delta.Deployed = %q, want empty string (no version stamp in deployed file)", deltas[0].Deployed)
+	}
+}
+
 // ---------------------------------------------------------------------------
-// T16.4 — Local-modification detection via manifest hash
+// T4.5 / T4.8 — Local-modification detection via manifest hash
 // ---------------------------------------------------------------------------
 
 // buildInputWithSingleAgent returns a minimal plan.Input that includes the given agent
 // via a single workflow. The agent's default target path from newFakeModule is "agents/<key>.md".
-// The manifest snapshot and deployed hashes are provided by the caller.
+// The manifest snapshot and deployed state are provided by the caller.
 func buildInputWithSingleAgent(
 	agent domain.Agent,
 	snap manifest.Snapshot,
-	deployedHashes map[string]string,
+	deployedState map[string]domain.DeployedArtifactState,
 ) plan.Input {
 	wfID := "test-wf-for-" + agent.Key
 	wf := makeWorkflow(wfID, agent.Key)
@@ -335,14 +447,14 @@ func buildInputWithSingleAgent(
 	}
 	module := newFakeModule()
 	return plan.Input{
-		Catalog:         cat,
-		Module:          module,
-		Mode:            domain.ModeUpdate,
-		WorkspacePath:   "/fake/workspace",
-		Scope:           domain.ScopeProject,
-		GOOS:            "linux",
-		Manifest:        snap,
-		WorkflowIDs:     []string{wfID},
+		Catalog:       cat,
+		Module:        module,
+		Mode:          domain.ModeUpdate,
+		WorkspacePath: "/fake/workspace",
+		Scope:         domain.ScopeProject,
+		GOOS:          "linux",
+		Manifest:      snap,
+		WorkflowIDs:   []string{wfID},
 		UtilityAgentIDs: nil,
 		Models: map[string]domain.ModelSelection{
 			agent.Key: {
@@ -354,13 +466,13 @@ func buildInputWithSingleAgent(
 				Origin:  domain.OriginHarnessList,
 			},
 		},
-		DeployedHashes: deployedHashes,
+		DeployedState: deployedState,
 	}
 }
 
 // TestBuild_LocalModification_HashMatch_ClassifiesAsUnchanged verifies that when the current
-// hash of a deployed file matches the hash recorded in the manifest, the plan item is
-// ActionUnchanged — not a conflict.
+// hash of a deployed file matches the hash recorded in the manifest, and all version stamps
+// also match, the plan item is ActionUnchanged — not a conflict.
 func TestBuild_LocalModification_HashMatch_ClassifiesAsUnchanged(t *testing.T) {
 	const targetPath = "agents/test-agent.md"
 	const hash = "sha256:abc123"
@@ -378,10 +490,12 @@ func TestBuild_LocalModification_HashMatch_ClassifiesAsUnchanged(t *testing.T) {
 		Entries:       []domain.ManifestEntry{manifestEntry},
 	})
 
-	// Current deployed hash matches the manifest — no local modification.
-	deployedHashes := map[string]string{targetPath: hash}
+	// Deployed file is present, hash matches, all version stamps match source.
+	ds := map[string]domain.DeployedArtifactState{
+		targetPath: deployedState(hash, "1.0", "1.0", "1.0"),
+	}
 
-	input := buildInputWithSingleAgent(agent, snap, deployedHashes)
+	input := buildInputWithSingleAgent(agent, snap, ds)
 
 	p, err := plan.New().Build(context.Background(), input)
 	must(t, err)
@@ -391,7 +505,7 @@ func TestBuild_LocalModification_HashMatch_ClassifiesAsUnchanged(t *testing.T) {
 		t.Fatal("plan has no item for test-agent")
 	}
 	if item.Action != domain.ActionUnchanged {
-		t.Errorf("test-agent with matching hash: Action = %q, want %q",
+		t.Errorf("test-agent with matching hash and versions: Action = %q, want %q",
 			item.Action, domain.ActionUnchanged)
 	}
 }
@@ -417,10 +531,12 @@ func TestBuild_LocalModification_HashMismatch_ClassifiesAsConflict(t *testing.T)
 		Entries:       []domain.ManifestEntry{manifestEntry},
 	})
 
-	// Current deployed hash differs — locally modified.
-	deployedHashes := map[string]string{targetPath: currentHash}
+	// Deployed hash differs from manifest — locally modified.
+	ds := map[string]domain.DeployedArtifactState{
+		targetPath: deployedState(currentHash, "1.0", "1.0", "1.0"),
+	}
 
-	input := buildInputWithSingleAgent(agent, snap, deployedHashes)
+	input := buildInputWithSingleAgent(agent, snap, ds)
 
 	p, err := plan.New().Build(context.Background(), input)
 	must(t, err)
@@ -440,7 +556,7 @@ func TestBuild_LocalModification_HashMismatch_ClassifiesAsConflict(t *testing.T)
 
 // TestBuild_LocalModification_WhitespaceChange_ClassifiesAsConflict verifies that a
 // whitespace-only change is detected as a local modification. Content hashes use no
-// normalisation (CD-11): a line-ending or whitespace change changes the hash.
+// normalisation: a line-ending or whitespace change changes the hash.
 func TestBuild_LocalModification_WhitespaceChange_ClassifiesAsConflict(t *testing.T) {
 	const targetPath = "agents/test-agent.md"
 
@@ -467,9 +583,11 @@ func TestBuild_LocalModification_WhitespaceChange_ClassifiesAsConflict(t *testin
 		Entries:       []domain.ManifestEntry{manifestEntry},
 	})
 
-	deployedHashes := map[string]string{targetPath: currentHash}
+	ds := map[string]domain.DeployedArtifactState{
+		targetPath: deployedState(currentHash, "1.0", "1.0", "1.0"),
+	}
 
-	input := buildInputWithSingleAgent(agent, snap, deployedHashes)
+	input := buildInputWithSingleAgent(agent, snap, ds)
 
 	p, err := plan.New().Build(context.Background(), input)
 	must(t, err)
@@ -485,9 +603,9 @@ func TestBuild_LocalModification_WhitespaceChange_ClassifiesAsConflict(t *testin
 }
 
 // TestBuild_LocalModification_FileWithNoManifestRecord_ClassifiesAsConflict verifies that
-// a file present in DeployedHashes but absent from the manifest is treated as locally
-// modified (ActionConflict with ManifestMissing = true), not silently classified as a
-// fresh create. The conservative classification protects hand-deployed files.
+// a file present in DeployedState but absent from the manifest is treated as locally
+// modified (ActionConflict with ManifestMissing = true). The conservative classification
+// protects hand-deployed files.
 func TestBuild_LocalModification_FileWithNoManifestRecord_ClassifiesAsConflict(t *testing.T) {
 	const targetPath = "agents/test-agent.md"
 	const currentHash = "sha256:abcdef"
@@ -502,10 +620,12 @@ func TestBuild_LocalModification_FileWithNoManifestRecord_ClassifiesAsConflict(t
 		Entries:       nil, // no entries
 	})
 
-	// File exists on disk (has a hash), but has no manifest record.
-	deployedHashes := map[string]string{targetPath: currentHash}
+	// File exists on disk (Present: true) but has no manifest record.
+	ds := map[string]domain.DeployedArtifactState{
+		targetPath: deployedState(currentHash, "1.0", "1.0", "1.0"),
+	}
 
-	input := buildInputWithSingleAgent(agent, snap, deployedHashes)
+	input := buildInputWithSingleAgent(agent, snap, ds)
 
 	p, err := plan.New().Build(context.Background(), input)
 	must(t, err)
@@ -536,9 +656,11 @@ func TestBuild_LocalModification_ManifestMissingFlag_SetWhenFileHasNoRecord(t *t
 		UpdatedAt:     time.Now(),
 		Entries:       nil,
 	})
-	deployedHashes := map[string]string{targetPath: "sha256:abc123"}
+	ds := map[string]domain.DeployedArtifactState{
+		targetPath: deployedState("sha256:abc123", "1.0", "1.0", "1.0"),
+	}
 
-	input := buildInputWithSingleAgent(agent, snap, deployedHashes)
+	input := buildInputWithSingleAgent(agent, snap, ds)
 
 	p, err := plan.New().Build(context.Background(), input)
 	must(t, err)
@@ -556,16 +678,19 @@ func TestBuild_LocalModification_ManifestMissingFlag_SetWhenFileHasNoRecord(t *t
 }
 
 // ---------------------------------------------------------------------------
-// T16.5 — Missing-manifest policy
+// T4.8 — Missing-manifest policy
 // ---------------------------------------------------------------------------
 
 // buildInputWithManifestState returns a plan.Input with the given manifest snapshot and
-// the agent's target path present in deployedHashes (simulating a file on disk).
+// the agent's target path marked as present in DeployedState.
 func buildInputWithManifestState(agent domain.Agent, snap manifest.Snapshot, deployedTargetPath string) plan.Input {
-	deployedHashes := map[string]string{
-		deployedTargetPath: "sha256:cafebabe",
+	ds := map[string]domain.DeployedArtifactState{
+		deployedTargetPath: {
+			Present:     true,
+			ContentHash: "sha256:cafebabe",
+		},
 	}
-	return buildInputWithSingleAgent(agent, snap, deployedHashes)
+	return buildInputWithSingleAgent(agent, snap, ds)
 }
 
 // TestBuild_MissingManifest_StateAbsent_ClassifiesDeployedFilesAsConflict verifies that
@@ -659,14 +784,14 @@ func TestBuild_MissingManifest_StateCorrupt_ManifestMissingFlagIsTrue(t *testing
 	}
 }
 
-// TestBuild_MissingManifest_FileAbsentFromDeployedHashes_ClassifiesAsCreate verifies that
-// when the manifest is absent but a file does NOT appear in DeployedHashes (it doesn't exist
+// TestBuild_MissingManifest_FileAbsentFromDeployedState_ClassifiesAsCreate verifies that
+// when the manifest is absent but a file is NOT present in DeployedState (it doesn't exist
 // on disk), the item is ActionCreate — not ActionConflict. The conflict classification only
 // applies to files actually present on disk.
-func TestBuild_MissingManifest_FileAbsentFromDeployedHashes_ClassifiesAsCreate(t *testing.T) {
+func TestBuild_MissingManifest_FileAbsentFromDeployedState_ClassifiesAsCreate(t *testing.T) {
 	agent := makeAgent("test-agent", "1.0")
 
-	// Absent manifest, no deployed hashes — file is not on disk.
+	// Absent manifest, no deployed state — file is not on disk.
 	input := buildInputWithSingleAgent(agent, absentSnapshot(), nil)
 
 	p, err := plan.New().Build(context.Background(), input)
@@ -681,11 +806,47 @@ func TestBuild_MissingManifest_FileAbsentFromDeployedHashes_ClassifiesAsCreate(t
 	}
 }
 
-// TestBuild_PresentManifest_FileNotInManifest_NotInDeployedHashes_ClassifiesAsCreate verifies
-// that an artifact in the set that has no manifest entry and is not present on disk is
-// classified as ActionCreate (not ActionConflict). The conflict guard applies only when
+// ---------------------------------------------------------------------------
+// Version-downgrade staleness: direction of delta is irrelevant
+// ---------------------------------------------------------------------------
+
+// TestAgentStaleness_VersionDowngrade_StillProducesDelta verifies that when the deployed file
+// carries a version that is higher than the source version (a downgrade scenario, e.g. after
+// a catalog rollback or a manual stamp edit), AgentStaleness still produces a delta.
+// Version delta direction is irrelevant: any difference between deployed and source is stale.
+func TestAgentStaleness_VersionDowngrade_StillProducesDelta(t *testing.T) {
+	deployed := domain.DeployedArtifactState{
+		Present:           true,
+		ContentHash:       "sha256:abc",
+		Version:           "2.0", // deployed is newer than source
+		TransformVersion:  "1.0",
+		InjectionsVersion: "1.0",
+	}
+	agent := makeAgent("test-agent", "1.0") // source is older
+	stamps := domain.VersionStamps{
+		Version:           "1.0",
+		TransformVersion:  "1.0",
+		InjectionsVersion: "1.0",
+	}
+
+	deltas := plan.AgentStaleness(deployed, agent, stamps)
+
+	if len(deltas) == 0 {
+		t.Error("AgentStaleness with downgraded version: got 0 deltas, want at least 1; downgrade must still be detected as stale")
+	}
+	if len(deltas) > 0 && deltas[0].Deployed != "2.0" {
+		t.Errorf("delta.Deployed = %q, want %q (value from deployed file)", deltas[0].Deployed, "2.0")
+	}
+	if len(deltas) > 0 && deltas[0].Source != "1.0" {
+		t.Errorf("delta.Source = %q, want %q (source catalog value)", deltas[0].Source, "1.0")
+	}
+}
+
+// TestBuild_PresentManifest_FileNotInManifest_NotInDeployedState_ClassifiesAsCreate verifies
+// that an artifact in the set that has no manifest entry and is not present in DeployedState
+// is classified as ActionCreate (not ActionConflict). The conflict guard applies only when
 // the file is actually deployed.
-func TestBuild_PresentManifest_FileNotInManifest_NotInDeployedHashes_ClassifiesAsCreate(t *testing.T) {
+func TestBuild_PresentManifest_FileNotInManifest_NotInDeployedState_ClassifiesAsCreate(t *testing.T) {
 	agent := makeAgent("test-agent", "1.0")
 
 	// Manifest is present but has no entry for test-agent; file is also not on disk.

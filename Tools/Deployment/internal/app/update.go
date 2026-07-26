@@ -6,13 +6,48 @@ package app
 
 import (
 	"context"
-	"errors"
+	"path/filepath"
 
 	"mosaic-deploy/internal/deploy"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/plan"
 	"mosaic-deploy/internal/todo"
 )
+
+// deployedModelSelections builds the agent-key-keyed model selections implied by the models
+// already embedded in deployed files. Only agents whose deployed artifact carries a non-empty
+// ModelID appear in the result; every other agent is absent, so downstream gap evaluation
+// still flags agents that genuinely have no model.
+//
+// This is a pure function: no I/O, no mutation of its arguments.
+func deployedModelSelections(
+	agents []domain.Agent,
+	paths plan.PlannedPaths,
+	deployedState map[string]domain.DeployedArtifactState,
+) map[string]domain.ModelSelection {
+	if len(agents) == 0 {
+		return nil
+	}
+	var result map[string]domain.ModelSelection
+	for _, agent := range agents {
+		targetPath, ok := paths.Path(domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: agent.Key})
+		if !ok {
+			continue
+		}
+		state, exists := deployedState[targetPath]
+		if !exists || state.ModelID == "" {
+			continue
+		}
+		if result == nil {
+			result = make(map[string]domain.ModelSelection)
+		}
+		result[agent.Key] = domain.ModelSelection{
+			ModelID: state.ModelID,
+			Origin:  domain.OriginDeployed,
+		}
+	}
+	return result
+}
 
 // Update runs the update flow. See Service.Update for the contract.
 func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSummary, error) {
@@ -45,17 +80,55 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 
 	snap, _ := s.deps.Manifest.Load(workspace)
 
-	discoveryInput := plan.Input{
-		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeUpdate,
-		WorkspacePath: workspace, Scope: scope, GOOS: s.deps.GOOS, Manifest: snap,
+	// Probe the deployed orchestrator early to discover which workflow IDs are already
+	// embedded in it. This replaces the prior approach of reading the orchestrator file
+	// separately: we probe it once here and seed the full-probe map with the result so
+	// the file is read at most once per run.
+	var orchState domain.DeployedArtifactState
+	var orchTargetPath string
+	orchestrator := s.deps.Catalog.Orchestrator()
+	if orchPath, pathErr := module.TargetPath(domain.TargetPathRequest{
+		Kind:     domain.ArtifactAgent,
+		Key:      orchestrator.Key,
+		FileName: filepath.Base(orchestrator.SourcePath),
+		Scope:    scope,
+		GOOS:     s.deps.GOOS,
+	}); pathErr == nil {
+		orchTargetPath = orchPath
+		orchState = probeDeployedArtifact(workspace, orchTargetPath, module.Descriptor().Frontmatter.ModelKey)
 	}
-	existing := s.discoverExistingWorkflows(ctx, module, workspace, scope, discoveryInput)
+	existing := discoverExistingWorkflows(orchState)
 	workflowIDs := unionPreserveOrder(existing, req.AddWorkflowIDs)
+
+	// Resolve the artifact set from the discovered workflow IDs so we can enumerate target
+	// paths for the full probe. Plan.Build will also resolve internally; this call is the
+	// app layer's own probe-preparation step, not a duplicate plan build.
+	set, err := plan.ResolveArtifacts(s.deps.Catalog, workflowIDs, nil, nil)
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
+
+	plannedPaths, err := plan.EnumerateTargetPaths(set, module, scope, s.deps.GOOS)
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
+
+	// Seed the full probe with the orchestrator state already probed above, so the
+	// orchestrator file is read exactly once per run.
+	var seed map[string]domain.DeployedArtifactState
+	if orchTargetPath != "" {
+		seed = map[string]domain.DeployedArtifactState{orchTargetPath: orchState}
+	}
+	deployedState := probeDeployedState(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed)
+
+	modelSelections := deployedModelSelections(set.Agents, plannedPaths, deployedState)
 
 	planInput := plan.Input{
 		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeUpdate,
 		WorkspacePath: workspace, Scope: scope, GOOS: s.deps.GOOS,
 		Manifest: snap, WorkflowIDs: workflowIDs,
+		DeployedState: deployedState,
+		Models:        modelSelections,
 	}
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
@@ -90,31 +163,22 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		return domain.RunSummary{}, rerr
 	}
 	if !req.AutoConfirmPlan && (ans.Status == domain.Cancelled || !ans.Confirm) {
-		return domain.RunSummary{}, errors.New("update plan was not confirmed")
+		return domain.RunSummary{}, ErrPlanNotConfirmed
 	}
 
-	set, setErr := plan.ResolveArtifacts(s.deps.Catalog, workflowIDs, nil, nil)
-	var agentByKey map[string]domain.Agent
-	var hookPlans []domain.HookPlan
-	if setErr == nil {
-		agentByKey = make(map[string]domain.Agent, len(set.Agents))
-		for _, a := range set.Agents {
-			agentByKey[a.Key] = a
-		}
-		hookPlans = buildHookPlans(module, set.Hooks, scope)
+	agentByKey := make(map[string]domain.Agent, len(set.Agents))
+	for _, a := range set.Agents {
+		agentByKey[a.Key] = a
 	}
+	hookPlans := buildHookPlans(module, set.Hooks, scope)
+
 	workflowBlocks := s.buildWorkflowBlocks(workflowIDs)
 	deployedReader := func(item domain.PlanItem) []byte {
 		return readDeployedFile(workspace, item.TargetPath)
 	}
-	contentFn := s.buildContent(module, agentByKey, nil, req.CustomTools, nil, workflowBlocks, scope, deployedReader)
+	contentFn := s.buildContent(module, agentByKey, modelSelections, req.CustomTools, nil, workflowBlocks, scope, deployedReader)
 
-	var versionStamps map[string]domain.VersionStamp
-	if setErr == nil {
-		versionStamps = buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor())
-	} else {
-		versionStamps = map[string]domain.VersionStamp{}
-	}
+	versionStamps := buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor())
 
 	now := s.now()
 	execReq := deploy.ExecRequest{

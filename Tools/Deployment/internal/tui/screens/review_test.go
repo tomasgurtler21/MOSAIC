@@ -5,6 +5,7 @@ package screens_test
 // for updated items, the empty-plan message, scrolling, and the y/n/esc confirmation keys.
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -325,5 +326,80 @@ func TestReviewScreen_Reset_ClearsDone(t *testing.T) {
 
 	if s.Done() {
 		t.Error("Done() = true after Reset; want false")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Backup hint (FR-4)
+// ---------------------------------------------------------------------------
+
+// TestReviewScreen_View_ShowsBackupHint verifies that the review screen displays a visible
+// warning reminding the user to back up existing workspace files before proceeding. Files may
+// be overwritten by the deployment, so users must be warned before they answer the prompt.
+func TestReviewScreen_View_ShowsBackupHint(t *testing.T) {
+	s := screens.NewReviewScreen(fullPlan(), 80, 40, plainStyles())
+
+	view := collapseWhitespace(strings.ToLower(s.View()))
+
+	if !strings.Contains(view, "back up") &&
+		!strings.Contains(view, "backup") &&
+		!strings.Contains(view, "overwrite") {
+		t.Errorf("review screen view does not show a backup warning; "+
+			"users must be warned about potential file overwrites before they confirm:\n%s", s.View())
+	}
+}
+
+// TestReviewScreen_View_BackupHint_VisibleAtNonZeroScrollOffset verifies that the backup hint
+// cannot be scrolled out of view. The hint must reside in the non-scrollable header or footer
+// region so the user always sees it regardless of how far they have scrolled through the plan.
+func TestReviewScreen_View_BackupHint_VisibleAtNonZeroScrollOffset(t *testing.T) {
+	// Build a plan with enough items to make the content taller than the visible window.
+	var items []domain.PlanItem
+	for i := 0; i < 30; i++ {
+		items = append(items, domain.PlanItem{
+			Ref:        agentRef(fmt.Sprintf("agent-%02d", i)),
+			Action:     domain.ActionCreate,
+			TargetPath: fmt.Sprintf("Agents/agent-%02d.md", i),
+		})
+	}
+	p := planWithItems(domain.ModeDeployNew, items)
+	// A small height forces the content to overflow the visible window.
+	s := screens.NewReviewScreen(p, 80, 10, plainStyles())
+
+	// Scroll down enough that the early content lines are no longer visible.
+	for i := 0; i < 20; i++ {
+		s.Update(tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	view := collapseWhitespace(strings.ToLower(s.View()))
+
+	if !strings.Contains(view, "back up") &&
+		!strings.Contains(view, "backup") &&
+		!strings.Contains(view, "overwrite") {
+		t.Errorf("backup hint disappeared after scrolling; "+
+			"the hint must be placed in the non-scrollable header/footer region so it is always visible:\n%s",
+			s.View())
+	}
+}
+
+// TestReviewScreen_View_BackupHint_FitsWithinConfiguredWidth verifies that the backup hint
+// renders within the configured terminal width, consistent with every other line on the screen.
+// Oversized lines would corrupt the layout on narrow terminals.
+func TestReviewScreen_View_BackupHint_FitsWithinConfiguredWidth(t *testing.T) {
+	const width = 60
+	s := screens.NewReviewScreen(fullPlan(), width, 40, plainStyles())
+
+	view := s.View()
+
+	for i, line := range strings.Split(view, "\n") {
+		// Trim trailing spaces that lipgloss Width() padding may add; the visible content
+		// must still fit within the configured width.
+		// Use rune count (not byte count) since box-drawing and Unicode characters occupy
+		// one terminal column per rune, matching how lipgloss measures width.
+		trimmed := strings.TrimRight(line, " ")
+		if len([]rune(trimmed)) > width {
+			t.Errorf("line %d exceeds configured width %d (rune count=%d): %q",
+				i+1, width, len([]rune(trimmed)), trimmed)
+		}
 	}
 }

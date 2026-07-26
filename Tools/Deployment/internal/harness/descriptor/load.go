@@ -57,9 +57,8 @@ type wirePathSpec struct {
 }
 
 type wireScopedPaths struct {
-	Supported bool              `yaml:"supported"`
-	Project   string            `yaml:"project"`
-	User      map[string]string `yaml:"user"`
+	Supported bool   `yaml:"supported"`
+	Project   string `yaml:"project"`
 }
 
 type wireFrontmatterSpec struct {
@@ -216,7 +215,6 @@ func mapWireScopedPaths(w *wireScopedPaths) domain.ScopedPaths {
 	return domain.ScopedPaths{
 		Supported: w.Supported,
 		Project:   w.Project,
-		User:      w.User,
 	}
 }
 

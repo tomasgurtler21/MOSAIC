@@ -9,7 +9,7 @@ package descriptor_test
 //     are populated from the YAML.
 //   - The model catalog (IDs and FormatHint) is populated.
 //   - The tool spec (Shape, Universe entries, Mappings) is populated.
-//   - Deployment paths for agents, skills, and hooks are populated with project and user paths.
+//   - Deployment paths for agents and skills are populated with project paths.
 //   - File extension rules per artifact kind are populated.
 //   - Frontmatter shaping rules (Add, Drop, KeyOrder) are populated.
 //   - Harness-level injection content (Name and Content) is populated.
@@ -293,20 +293,6 @@ func TestLoad_WellFormedDescriptor_AgentProjectPathPopulated(t *testing.T) {
 	}
 }
 
-func TestLoad_WellFormedDescriptor_AgentUserPathsPopulated(t *testing.T) {
-	d := loadFixture(t, "valid-full.yaml")
-
-	if len(d.Paths.Agents.User) == 0 {
-		t.Fatal("Paths.Agents.User should be non-empty")
-	}
-	// The fixture declares a Windows path and a fallback.
-	if _, ok := d.Paths.Agents.User["windows"]; !ok {
-		t.Error("Paths.Agents.User: expected entry for \"windows\"")
-	}
-	if _, ok := d.Paths.Agents.User[""]; !ok {
-		t.Error("Paths.Agents.User: expected fallback entry with empty-string key")
-	}
-}
 
 func TestLoad_WellFormedDescriptor_SkillPathsSupported(t *testing.T) {
 	d := loadFixture(t, "valid-full.yaml")

@@ -216,35 +216,19 @@ func (m *module) TargetPath(req domain.TargetPathRequest) (string, error) {
 // skillTargetPath resolves a skill deployment path with an intermediate key subdirectory:
 // <skills-dir>/<key>/<filename>. This prevents filename collisions when multiple skills
 // (all named SKILL.md by convention) are deployed to the same harness.
-//
-// VS Code GHCP skill paths use ~/.copilot/skills/ on all platforms per the agentskills.io
-// open standard, without Windows-specific variants (unlike agent paths which vary by OS).
 func (m *module) skillTargetPath(req domain.TargetPathRequest) (string, error) {
+	if req.Scope != domain.ScopeProject {
+		return "", fmt.Errorf("%w: scope %q is not supported; only %q is accepted", domain.ErrUnsupportedScope, req.Scope, domain.ScopeProject)
+	}
 	sp := m.desc.Paths.Skills
 	if !sp.Supported {
 		return "", fmt.Errorf("%w: skill", domain.ErrArtifactUnsupported)
-	}
-	var baseDir string
-	switch req.Scope {
-	case domain.ScopeProject:
-		baseDir = sp.Project
-	case domain.ScopeUser:
-		tmpl, ok := sp.User[req.GOOS]
-		if !ok {
-			tmpl, ok = sp.User[""]
-			if !ok {
-				return "", fmt.Errorf("%w: no user skill path declared for %s", domain.ErrArtifactUnsupported, req.GOOS)
-			}
-		}
-		baseDir = tmpl
-	default:
-		return "", fmt.Errorf("unknown scope %q", req.Scope)
 	}
 	filename := req.FileName
 	if filename == "" {
 		filename = req.Key
 	}
-	return path.Join(baseDir, req.Key, filename), nil
+	return path.Join(sp.Project, req.Key, filename), nil
 }
 
 // Injection returns the harness-level content for a canonical injection name as declared

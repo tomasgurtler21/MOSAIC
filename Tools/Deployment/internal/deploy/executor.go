@@ -275,6 +275,22 @@ func (e *executor) executeItem(
 		return ar, nil
 
 	case domain.ActionCreate, domain.ActionUpdate:
+		// Hook items are multi-file bundles: their SourcePath is the bundle directory, not a
+		// single file registered in the catalog. Calling req.Content on a hook item always
+		// returns a catalog error. Hook bundle files are written by deployHooks (which runs
+		// after this loop); hook plan items exist only for action recording and manifest
+		// tracking. Skip the content/write path entirely for hook items.
+		if item.Ref.Kind == domain.ArtifactHook {
+			if item.Action == domain.ActionCreate {
+				ar.Taken = domain.TakenCreated
+			} else {
+				ar.Taken = domain.TakenUpdated
+			}
+			stamp := resolveVersionStamp(item, req.VersionStamps)
+			entry := newManifestEntry(item, nil, stamp)
+			return ar, &entry
+		}
+
 		content, err := req.Content(item)
 		if err != nil {
 			ar.Taken = domain.TakenFailed
@@ -328,10 +344,16 @@ func (e *executor) executeFallbackItem(
 		return ar, nil
 
 	case domain.ActionCreate, domain.ActionUpdate:
-		content, err := req.Content(item)
-		if err == nil {
-			// Write to the fallback tier so the plan is physically complete there.
-			_ = mkdirAndWrite(filepath.Join(deployRoot, item.TargetPath), content)
+		// Hook items must not go through the content path: their SourcePath is a bundle
+		// directory that the catalog never registers, so req.Content would return an error.
+		// In fallback mode all items are TakenFailed anyway (the workspace was unwritable),
+		// so skip the content call entirely for hook items.
+		if item.Ref.Kind != domain.ArtifactHook {
+			content, err := req.Content(item)
+			if err == nil {
+				// Write to the fallback tier so the plan is physically complete there.
+				_ = mkdirAndWrite(filepath.Join(deployRoot, item.TargetPath), content)
+			}
 		}
 		ar.Taken = domain.TakenFailed
 		if probeErr != nil {
@@ -375,6 +397,15 @@ func (e *executor) executeConflict(
 		return ar, nil
 
 	case domain.DecisionOverwrite:
+		// Hook items are multi-file bundles: their SourcePath is the bundle directory, not a
+		// single catalog-registered file. Skip the content/write path entirely; bundle files
+		// are managed by deployHooks. Produce the action record and manifest entry directly.
+		if item.Ref.Kind == domain.ArtifactHook {
+			ar.Taken = domain.TakenUpdated
+			stamp := resolveVersionStamp(item, req.VersionStamps)
+			entry := newManifestEntry(item, nil, stamp)
+			return ar, &entry
+		}
 		content, err := req.Content(item)
 		if err != nil {
 			ar.Taken = domain.TakenFailed
@@ -393,6 +424,16 @@ func (e *executor) executeConflict(
 		return ar, &entry
 
 	case domain.DecisionBackupThenOverwrite:
+		// Hook items are multi-file bundles whose TargetPath is a directory, not a single
+		// file. Backing up or overwriting a directory via the single-file path is not
+		// meaningful here; deployHooks manages the actual bundle files. Skip the backup,
+		// content fetch and file write; produce the action record and manifest entry directly.
+		if item.Ref.Kind == domain.ArtifactHook {
+			ar.Taken = domain.TakenBackedUp
+			stamp := resolveVersionStamp(item, req.VersionStamps)
+			entry := newManifestEntry(item, nil, stamp)
+			return ar, &entry
+		}
 		// Backup the current on-disk file before overwriting.
 		srcPath := filepath.Join(deployRoot, item.TargetPath)
 		backupPath, err := createBackup(req.Plan.WorkspacePath, item.TargetPath, srcPath)

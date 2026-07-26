@@ -76,8 +76,6 @@ paths:
   agents:
     supported: true
     project: ".fixture/agents"
-    user:
-      "": "~/.config/fixture/agents"
   skills:
     supported: false
   hooks:

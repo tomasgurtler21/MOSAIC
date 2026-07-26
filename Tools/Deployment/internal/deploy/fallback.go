@@ -55,12 +55,19 @@ func resolveDeploymentRoot(req ExecRequest) (root string, fallback domain.Fallba
 	return "", "", nil, ErrNoWritableLocation
 }
 
-// firstProbeItem returns the first ActionCreate or ActionUpdate item from the plan.
-// Conflict and unchanged items are not used for writability probing.
+// firstProbeItem returns the first ActionCreate or ActionUpdate item from the plan that
+// is suitable for a writability probe (i.e. has content that can be fetched and written).
+// Conflict and unchanged items are not used for probing.
+// Hook items are also excluded: their SourcePath is a bundle directory that the catalog
+// never registers as a file, so calling req.Content on them always returns a catalog error.
+// Hook deployment is handled separately by deployHooks and must not be used to probe the
+// workspace write path.
 func firstProbeItem(items []domain.PlanItem) (domain.PlanItem, bool) {
 	for _, item := range items {
 		if item.Action == domain.ActionCreate || item.Action == domain.ActionUpdate {
-			return item, true
+			if item.Ref.Kind != domain.ArtifactHook {
+				return item, true
+			}
 		}
 	}
 	return domain.PlanItem{}, false

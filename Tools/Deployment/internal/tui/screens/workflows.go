@@ -5,27 +5,39 @@ package screens
 // and a focused-workflow detail pane.
 //
 // Navigation contract:
-//   - Level 0 (categories): ↑/↓ navigate, Enter opens a folder, Tab confirms the full
-//     selection, Esc sets Back().
-//   - Level 1 (workflows within a folder): ↑/↓ navigate, Space toggles selection, Enter
-//     or Esc returns to the category list with selections intact.
+//   - Level 0 (categories): ↑/↓ navigate; →/l opens the focused folder; Enter confirms
+//     the full selection (if non-empty); Esc cancels the whole screen.
+//   - Level 1 (workflows within a folder): ↑/↓ navigate; Space toggles selection;
+//     ←/h or Esc returns to the category list with selections preserved; Enter confirms
+//     the full selection (if non-empty) directly from this level.
+//
+// Tab is not a binding at either level.
 //
 // Selection state is stored in a persistent map keyed by workflow ID. When entering a
 // folder the map is consulted to restore prior checks; when leaving it is updated so that
 // deselected items are also removed. This is the mechanism that makes cross-folder
 // multi-select possible without any special inter-widget protocol.
+//
+// Empty-selection guard: if the user presses Enter at either level with no workflows
+// selected a transient validation message is displayed. The message is cleared on the
+// next navigation (entering or leaving a folder) or when a workflow is toggled. Esc
+// always remains a working cancel or back path regardless of validation state.
 
 import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/tui/widgets"
 )
+
+// MsgNoWorkflowsSelected is the transient validation message rendered when the user
+// attempts to confirm with an empty selection. It is exported so tests can assert on
+// its presence without duplicating the literal.
+const MsgNoWorkflowsSelected = "No workflows selected — press space to select at least one, or esc to cancel."
 
 // wfNavLevel identifies which navigation level the browser is showing.
 type wfNavLevel int
@@ -53,6 +65,10 @@ type WorkflowBrowserScreen struct {
 	// Cross-folder selection state: workflow ID -> selected.
 	selected map[string]bool
 
+	// Transient validation message shown when the user tries to confirm with no selection.
+	// Separate from hasError (which is a terminal catalog-failure condition).
+	validationMsg string
+
 	// Error and empty state.
 	hasError bool
 	errorMsg string
@@ -62,9 +78,6 @@ type WorkflowBrowserScreen struct {
 	width  int
 	height int
 	styles Styles
-
-	// Keybindings that the category list does not handle (Tab to confirm).
-	confirmKey key.Binding
 }
 
 // NewWorkflowBrowserScreen creates the workflow browser. categories is the ordered set of
@@ -107,7 +120,6 @@ func NewWorkflowBrowserScreen(
 		width:         width,
 		height:        height,
 		styles:        styles,
-		confirmKey:    key.NewBinding(key.WithKeys("tab")),
 	}
 	return s
 }
@@ -143,7 +155,15 @@ func makeWorkflowItems(wfs []domain.Workflow) []widgets.ListItem {
 	return items
 }
 
-// Update processes a key message. Tab at the category level confirms the whole selection.
+// isRune reports whether the key message is for the given rune character.
+func isRune(keyMsg tea.KeyMsg, r rune) bool {
+	return keyMsg.Type == tea.KeyRunes && len(keyMsg.Runes) == 1 && keyMsg.Runes[0] == r
+}
+
+// Update processes a key message. At the category level: →/l opens a folder, Enter
+// confirms the selection (if non-empty), Esc cancels. At the workflow level: Space
+// toggles, ←/h and Esc return to the category list, Enter confirms the selection (if
+// non-empty). Tab is inert at both levels.
 func (s *WorkflowBrowserScreen) Update(msg tea.Msg) tea.Cmd {
 	if s.hasError {
 		// In error state only Esc is recognised.
@@ -153,46 +173,100 @@ func (s *WorkflowBrowserScreen) Update(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		// Tab at category level confirms the selection from any folder state.
-		if s.level == wfNavCategories && key.Matches(keyMsg, s.confirmKey) {
-			s.done = true
-			return nil
-		}
-		// Esc at workflow level returns to category list without consuming the Esc.
-		if s.level == wfNavWorkflows && keyMsg.Type == tea.KeyEsc {
-			s.leaveCategory()
-			return nil
-		}
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return nil
 	}
 
 	switch s.level {
 	case wfNavCategories:
-		cmd := s.catList.Update(msg)
-		if s.catList.Back() {
-			s.catList.Reset()
-			s.back = true
-		} else if s.catList.Done() {
-			idx := s.catList.CursorIndex()
-			s.catList.Reset()
-			if idx >= 0 && idx < len(s.categories) {
-				s.enterCategory(idx)
-			}
-		}
-		return cmd
-
+		return s.updateCategories(keyMsg)
 	case wfNavWorkflows:
-		cmd := s.wfMultisel.Update(msg)
-		if s.wfMultisel.Done() || s.wfMultisel.Back() {
-			s.wfMultisel.Reset()
-			s.leaveCategory()
-		} else {
-			s.syncCurrentFolder()
-			s.updateDetail()
-		}
-		return cmd
+		return s.updateWorkflows(keyMsg)
 	}
 	return nil
+}
+
+// updateCategories handles key events at the category-list level.
+func (s *WorkflowBrowserScreen) updateCategories(keyMsg tea.KeyMsg) tea.Cmd {
+	switch {
+	case keyMsg.Type == tea.KeyEsc:
+		// Esc at category level cancels the whole screen.
+		s.back = true
+		return nil
+
+	case keyMsg.Type == tea.KeyEnter:
+		// Enter confirms if at least one workflow is selected; otherwise shows the
+		// transient validation message.
+		if len(s.SelectedIDs()) > 0 {
+			s.done = true
+		} else {
+			s.validationMsg = MsgNoWorkflowsSelected
+		}
+		return nil
+
+	case keyMsg.Type == tea.KeyRight || isRune(keyMsg, 'l'):
+		// Right or l opens the focused category folder.
+		s.validationMsg = ""
+		idx := s.catList.CursorIndex()
+		if idx >= 0 && idx < len(s.categories) {
+			s.enterCategory(idx)
+		}
+		return nil
+
+	case keyMsg.Type == tea.KeyTab:
+		// Tab is not a binding at this level; consume and ignore.
+		return nil
+	}
+
+	// Delegate navigation (Up/Down/j/k) to the category list widget. Enter and Esc
+	// are already intercepted above so the widget's Done/Back flags will not be set,
+	// but we reset them defensively.
+	cmd := s.catList.Update(keyMsg)
+	if s.catList.Done() || s.catList.Back() {
+		s.catList.Reset()
+	}
+	return cmd
+}
+
+// updateWorkflows handles key events at the workflow-list level.
+func (s *WorkflowBrowserScreen) updateWorkflows(keyMsg tea.KeyMsg) tea.Cmd {
+	switch {
+	case keyMsg.Type == tea.KeyEsc || keyMsg.Type == tea.KeyLeft || isRune(keyMsg, 'h'):
+		// Esc, Left, or h returns to the category list, preserving selections.
+		s.validationMsg = ""
+		s.leaveCategory()
+		return nil
+
+	case keyMsg.Type == tea.KeyEnter:
+		// Enter confirms if at least one workflow is selected; otherwise shows the
+		// transient validation message.
+		if len(s.SelectedIDs()) > 0 {
+			s.done = true
+		} else {
+			s.validationMsg = MsgNoWorkflowsSelected
+		}
+		return nil
+
+	case keyMsg.Type == tea.KeyTab:
+		// Tab is not a binding at this level; consume and ignore.
+		return nil
+	}
+
+	// Delegate Space (toggle) and navigation (Up/Down/j/k) to the multi-select widget.
+	// Enter and Esc are already intercepted above so the widget's Done/Back flags will
+	// not be set, but we reset them defensively.
+	cmd := s.wfMultisel.Update(keyMsg)
+	if s.wfMultisel.Done() || s.wfMultisel.Back() {
+		s.wfMultisel.Reset()
+	} else {
+		// Clear the validation message whenever the user interacts with the list
+		// (covers Space toggle as well as cursor movement).
+		s.validationMsg = ""
+		s.syncCurrentFolder()
+		s.updateDetail()
+	}
+	return cmd
 }
 
 // enterCategory transitions to the workflow-list view for the category at idx.
@@ -284,7 +358,8 @@ func (s *WorkflowBrowserScreen) updateDetail() {
 }
 
 // View renders the browser. At the category level the category list is shown with a summary
-// bar. At the workflow level the multi-select and detail pane are shown side by side.
+// bar. At the workflow level the multi-select and detail pane are shown side by side. A
+// transient validation message is shown when the user attempts to confirm with no selection.
 func (s *WorkflowBrowserScreen) View() string {
 	title := s.styles.Title.Width(s.width).Render("Select Workflows")
 	border := s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width))
@@ -314,7 +389,12 @@ func (s *WorkflowBrowserScreen) View() string {
 	summary := s.renderSummary()
 	help := s.renderHelp()
 
-	return strings.Join([]string{title, border, content, border, summary, help}, "\n")
+	parts := []string{title, border, content, border, summary}
+	if s.validationMsg != "" {
+		parts = append(parts, s.styles.Error.Width(s.width).Render(s.validationMsg))
+	}
+	parts = append(parts, help)
+	return strings.Join(parts, "\n")
 }
 
 // renderSummary produces the persistent selection summary line.
@@ -331,19 +411,20 @@ func (s *WorkflowBrowserScreen) renderSummary() string {
 	return s.styles.Success.Width(s.width).Render(label)
 }
 
-// renderHelp returns the context-sensitive help bar.
+// renderHelp returns the context-sensitive help bar matching the active bindings at the
+// current navigation level.
 func (s *WorkflowBrowserScreen) renderHelp() string {
 	if s.level == wfNavWorkflows {
 		return s.styles.Help.Width(s.width).Render(
-			"↑/k up  ↓/j down  space toggle  enter/esc back to folders  ctrl+c quit",
+			"↑/k up  ↓/j down  space toggle  ←/h back to folders  enter confirm  ctrl+c quit",
 		)
 	}
 	return s.styles.Help.Width(s.width).Render(
-		"↑/k up  ↓/j down  enter open folder  tab confirm  esc cancel  ctrl+c quit",
+		"↑/k up  ↓/j down  →/l open folder  enter confirm  esc cancel  ctrl+c quit",
 	)
 }
 
-// Done reports whether the user confirmed the selection (Tab at category level).
+// Done reports whether the user confirmed the selection.
 func (s *WorkflowBrowserScreen) Done() bool { return s.done }
 
 // Back reports whether the user cancelled (Esc at category level).

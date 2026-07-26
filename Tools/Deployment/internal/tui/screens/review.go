@@ -52,8 +52,8 @@ func NewReviewScreen(p domain.Plan, width, height int, styles Styles) *ReviewScr
 
 // reviewVisibleLines computes the scrollable area height.
 func reviewVisibleLines(totalHeight int) int {
-	// title + subtitle + border + help + confirm-prompt = 5 fixed lines
-	h := totalHeight - 5
+	// title + subtitle + border + backup-warning + help = 6 fixed lines (was 5)
+	h := totalHeight - 6
 	if h < 3 {
 		return 3
 	}
@@ -248,6 +248,10 @@ func (s *ReviewScreen) View() string {
 		sb.WriteByte('\n')
 	}
 
+	sb.WriteString(s.styles.Warning.Width(s.width).Render(
+		"WARNING: Proceeding will overwrite existing workspace files. Back up any important changes first.",
+	))
+	sb.WriteByte('\n')
 	sb.WriteString(s.styles.Help.Width(s.width).Render(
 		"↑/k up  ↓/j down  y/enter proceed  n/q/esc cancel",
 	))

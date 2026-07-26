@@ -90,16 +90,9 @@ paths:
   agents:
     supported: true
     project: ".github/agents"
-    user:
-      "windows": "${APPDATA}/Code/User/prompts"
-      "linux": "~/.config/Code/User/prompts"
-      "darwin": "~/.config/Code/User/prompts"
-      "": "~/.config/Code/User/prompts"
   skills:
     supported: true
     project: ".github/skills"
-    user:
-      "": "~/.copilot/skills"
   hooks:
     supported: true
     project: ".claude/hooks"

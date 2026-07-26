@@ -45,16 +45,10 @@ package opencode_test
 //
 //   Deployment paths and hook registration:
 //   - Project-scoped agent path is ".opencode/agents/<key>.md"
-//   - User-scoped agent path on linux is "~/.config/opencode/agents/<key>.md"
-//   - User-scoped agent path on darwin is "~/.config/opencode/agents/<key>.md"
-//   - User-scoped agent path on windows is "${APPDATA}/opencode/agents/<key>.md"
 //   - Project-scoped skill path is ".opencode/skills/<key>/SKILL.md" (key subdirectory)
-//   - User-scoped skill path on linux is "~/.config/opencode/skills/<key>/SKILL.md"
-//   - User-scoped skill path on darwin is "~/.config/opencode/skills/<key>/SKILL.md"
-//   - User-scoped skill path on windows is "${APPDATA}/opencode/skills/<key>/SKILL.md"
 //   - Project-scoped hook path is ".opencode/plugins/<filename>" (plugins/, not hooks/)
-//   - User-scoped hook path on linux is "~/.config/opencode/plugins/<filename>"
 //   - Hooks require no registration steps (HookPlan.Registration is empty)
+//   - Any non-project scope returns domain.ErrUnsupportedScope (via the shared contracttest universal invariant)
 //
 //   Harness-level injections:
 //   - HarnessConstraints is filled with the parallel tool calls and working directory note.
@@ -993,80 +987,6 @@ func TestTargetPath_OpenCode_AgentProjectScope(t *testing.T) {
 	}
 }
 
-// TestTargetPath_OpenCode_AgentUserScope_Linux verifies user-scoped agent path on Linux.
-func TestTargetPath_OpenCode_AgentUserScope_Linux(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "test-runner",
-		Scope: domain.ScopeUser,
-		GOOS:  "linux",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.config/opencode/agents/test-runner.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_OpenCode_AgentUserScope_Darwin verifies user-scoped agent path on macOS.
-func TestTargetPath_OpenCode_AgentUserScope_Darwin(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "codebase-research",
-		Scope: domain.ScopeUser,
-		GOOS:  "darwin",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.config/opencode/agents/codebase-research.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_OpenCode_AgentUserScope_Windows verifies user-scoped agent path on Windows.
-func TestTargetPath_OpenCode_AgentUserScope_Windows(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "test-runner",
-		Scope: domain.ScopeUser,
-		GOOS:  "windows",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "${APPDATA}/opencode/agents/test-runner.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_OpenCode_AgentUserScope_UnknownGOOS verifies fallback path for an
-// unrecognised platform.
-func TestTargetPath_OpenCode_AgentUserScope_UnknownGOOS(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "test-runner",
-		Scope: domain.ScopeUser,
-		GOOS:  "plan9",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	// Falls back to the empty-key ("") user template.
-	want := "~/.config/opencode/agents/test-runner.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
 // TestTargetPath_OpenCode_SkillProjectScope verifies that a skill is deployed under a
 // key-named subdirectory: ".opencode/skills/<key>/SKILL.md". The key subdirectory is
 // required because all skill entry files are named SKILL.md.
@@ -1088,63 +1008,6 @@ func TestTargetPath_OpenCode_SkillProjectScope(t *testing.T) {
 	}
 }
 
-// TestTargetPath_OpenCode_SkillUserScope_Linux verifies user-scoped skill path on Linux.
-func TestTargetPath_OpenCode_SkillUserScope_Linux(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactSkill,
-		Key:      "lean-tdd",
-		FileName: "SKILL.md",
-		Scope:    domain.ScopeUser,
-		GOOS:     "linux",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.config/opencode/skills/lean-tdd/SKILL.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_OpenCode_SkillUserScope_Darwin verifies user-scoped skill path on macOS.
-func TestTargetPath_OpenCode_SkillUserScope_Darwin(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactSkill,
-		Key:      "lean-tdd",
-		FileName: "SKILL.md",
-		Scope:    domain.ScopeUser,
-		GOOS:     "darwin",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.config/opencode/skills/lean-tdd/SKILL.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_OpenCode_SkillUserScope_Windows verifies user-scoped skill path on Windows.
-func TestTargetPath_OpenCode_SkillUserScope_Windows(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactSkill,
-		Key:      "lean-tdd",
-		FileName: "SKILL.md",
-		Scope:    domain.ScopeUser,
-		GOOS:     "windows",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "${APPDATA}/opencode/skills/lean-tdd/SKILL.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
 // TestTargetPath_OpenCode_HookProjectScope verifies that hooks deploy to
 // ".opencode/plugins/<filename>", not ".opencode/hooks/". OpenCode uses the
 // "plugins/" directory for hooks; presence alone activates them.
@@ -1161,25 +1024,6 @@ func TestTargetPath_OpenCode_HookProjectScope(t *testing.T) {
 		t.Fatalf("TargetPath: %v", err)
 	}
 	want := ".opencode/plugins/subagent-logger.ts"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_OpenCode_HookUserScope_Linux verifies user-scoped hook path on Linux.
-func TestTargetPath_OpenCode_HookUserScope_Linux(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactHook,
-		Key:      "subagent-logger",
-		FileName: "subagent-logger.ts",
-		Scope:    domain.ScopeUser,
-		GOOS:     "linux",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.config/opencode/plugins/subagent-logger.ts"
 	if path != want {
 		t.Errorf("TargetPath = %q, want %q", path, want)
 	}
@@ -1547,44 +1391,14 @@ func TestContract_OpenCode(t *testing.T) {
 				Expected: ".opencode/agents/test-runner.md",
 			},
 			{
-				Name:     "agent_user_linux",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "linux"},
-				Expected: "~/.config/opencode/agents/test-runner.md",
-			},
-			{
-				Name:     "agent_user_darwin",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "darwin"},
-				Expected: "~/.config/opencode/agents/test-runner.md",
-			},
-			{
-				Name:     "agent_user_windows",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "windows"},
-				Expected: "${APPDATA}/opencode/agents/test-runner.md",
-			},
-			{
 				Name:     "skill_project_linux",
 				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeProject, GOOS: "linux"},
 				Expected: ".opencode/skills/lean-tdd/SKILL.md",
 			},
 			{
-				Name:     "skill_user_linux",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeUser, GOOS: "linux"},
-				Expected: "~/.config/opencode/skills/lean-tdd/SKILL.md",
-			},
-			{
-				Name:     "skill_user_windows",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeUser, GOOS: "windows"},
-				Expected: "${APPDATA}/opencode/skills/lean-tdd/SKILL.md",
-			},
-			{
 				Name:     "hook_project_linux",
 				Request:  domain.TargetPathRequest{Kind: domain.ArtifactHook, Key: "subagent-logger", FileName: "subagent-logger.ts", Scope: domain.ScopeProject, GOOS: "linux"},
 				Expected: ".opencode/plugins/subagent-logger.ts",
-			},
-			{
-				Name:     "hook_user_linux",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactHook, Key: "subagent-logger", FileName: "subagent-logger.ts", Scope: domain.ScopeUser, GOOS: "linux"},
-				Expected: "~/.config/opencode/plugins/subagent-logger.ts",
 			},
 			{
 				Name:    "unsupported_kind_returns_sentinel",

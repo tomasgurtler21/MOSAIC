@@ -416,19 +416,9 @@ paths:
   agents:
     supported: true
     project: ".conformance-test/agents"
-    user:
-      "linux": "~/.config/conformance-test/agents"
-      "darwin": "~/.config/conformance-test/agents"
-      "windows": "${APPDATA}/conformance-test/agents"
-      "": "~/.config/conformance-test/agents"
   skills:
     supported: true
     project: ".conformance-test/skills"
-    user:
-      "linux": "~/.config/conformance-test/skills"
-      "darwin": "~/.config/conformance-test/skills"
-      "windows": "${APPDATA}/conformance-test/skills"
-      "": "~/.config/conformance-test/skills"
 `
 
 // resolveDescriptorOnly loads the conformanceDescriptor YAML into a descriptor-only
@@ -537,12 +527,6 @@ func TestDescriptorOnly_ConformanceHarness_PassesContractTest(t *testing.T) {
 				Name:     "agent_project_linux",
 				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeProject, GOOS: "linux"},
 				Expected: ".conformance-test/agents/test-runner.md",
-			},
-			{
-				// agent_user_linux: user-scoped path uses the Linux user template.
-				Name:     "agent_user_linux",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "linux"},
-				Expected: "~/.config/conformance-test/agents/test-runner.md",
 			},
 			{
 				// skill_project_linux: skills deploy to .conformance-test/skills/<key>/SKILL.md.

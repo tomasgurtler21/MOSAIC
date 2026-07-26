@@ -55,14 +55,9 @@ paths:
   agents:
     supported: true
     project: ".test/agents"
-    user:
-      windows: "${APPDATA}/Test/agents"
-      "": "~/.config/test/agents"
   skills:
     supported: true
     project: ".test/skills"
-    user:
-      "": "~/.config/test/skills"
   hooks:
     supported: false
 

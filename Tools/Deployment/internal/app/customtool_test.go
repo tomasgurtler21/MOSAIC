@@ -111,6 +111,8 @@ func TestDeployNew_CustomToolPreAnswered_DoesNotAskQCustomTool(t *testing.T) {
 
 // TestDeployNew_UnmappedTool_SkipOne_ProducesGapUnmappedTool verifies that answering
 // SkippedOne for a QCustomTool question produces a GapUnmappedTool gap for that tool.
+// The gap is produced by plan.Build (Path B) and flows through the plan.Gaps copy into
+// the todo collector; resolveCustomTools no longer emits it directly.
 func TestDeployNew_UnmappedTool_SkipOne_ProducesGapUnmappedTool(t *testing.T) {
 	// Arrange — stub defaults to SkippedOne for QCustomTool (unscripted)
 	mod := &unmappedToolModule{
@@ -125,7 +127,15 @@ func TestDeployNew_UnmappedTool_SkipOne_ProducesGapUnmappedTool(t *testing.T) {
 		Build() // QCustomTool is unscripted → SkippedOne by default
 	spy := &spyTodo{}
 	deps, workspace := newBaseDeps(t, stub)
+
+	// Plan stub carries the agent-attributed gap that plan.Build produces for an unmapped tool.
+	planWithGap := newMinimalPlan(workspace)
+	planWithGap.Gaps = []domain.Gap{
+		{Kind: domain.GapUnmappedTool, Subject: "bash",
+			Detail: `generic tool "bash" has no harness mapping for agent "test-runner"`},
+	}
 	deps.Registry = reg
+	deps.Planner = &stubPlanner{plan: planWithGap}
 	deps.Todo = spy
 	svc := app.New(deps)
 
@@ -236,6 +246,8 @@ func TestDeployNew_UnmappedTool_SkipAll_StopsAsking(t *testing.T) {
 
 // TestDeployNew_UnmappedTool_SkipAll_ProducesGapForRemainingTools verifies that when
 // QCustomTool is skipped-all, all remaining unmapped tools also receive GapUnmappedTool entries.
+// The gaps are produced by plan.Build (Path B) for each unmapped tool and flow through
+// plan.Gaps into the todo collector.
 func TestDeployNew_UnmappedTool_SkipAll_ProducesGapForRemainingTools(t *testing.T) {
 	// Arrange — two unmapped tools; skip-all on first.
 	// The catalog agent must declare both tools so the app discovers both as requiring mapping.
@@ -267,8 +279,18 @@ func TestDeployNew_UnmappedTool_SkipAll_ProducesGapForRemainingTools(t *testing.
 		Build()
 	spy := &spyTodo{}
 	deps, workspace := newBaseDeps(t, stub)
+
+	// Plan stub carries the agent-attributed gaps that plan.Build produces for each unmapped tool.
+	planWithGaps := newMinimalPlan(workspace)
+	planWithGaps.Gaps = []domain.Gap{
+		{Kind: domain.GapUnmappedTool, Subject: "bash",
+			Detail: `generic tool "bash" has no harness mapping for agent "test-runner"`},
+		{Kind: domain.GapUnmappedTool, Subject: "web-search",
+			Detail: `generic tool "web-search" has no harness mapping for agent "test-runner"`},
+	}
 	deps.Catalog = cat
 	deps.Registry = reg
+	deps.Planner = &stubPlanner{plan: planWithGaps}
 	deps.Todo = spy
 	svc := app.New(deps)
 

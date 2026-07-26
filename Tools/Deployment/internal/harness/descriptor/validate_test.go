@@ -293,6 +293,25 @@ func TestValidationError_ImplementsErrorInterface(t *testing.T) {
 
 // --- Parse: YAML-structural errors ---
 
+func TestParse_UserPathBlock_IsRejectedAsUnknownField(t *testing.T) {
+	// A descriptor that declares a user: block inside its paths section must be rejected
+	// by the loader. Once the User YAML wire field is removed from the paths struct,
+	// the loader's existing unknown-field check produces an error for any descriptor
+	// that still carries user: path entries.
+	//
+	// This test is RED in the TDD phase: the current loader still accepts user: blocks
+	// because the User field exists in the wire struct. The test will pass once I1.2
+	// removes that field and user: becomes an unknown field.
+	src := readValidateFixture(t, "invalid/paths-user-block.yaml")
+
+	_, err := descriptor.Parse(src, "invalid/paths-user-block.yaml")
+
+	if err == nil {
+		t.Fatal("expected Parse to return an error for a descriptor with a user: path block; " +
+			"user-scope paths are not supported and must be treated as unknown fields")
+	}
+}
+
 func TestParse_UnknownField_ReturnsError(t *testing.T) {
 	// Unknown YAML fields must not be silently ignored; Parse must return an error.
 	src := readValidateFixture(t, "invalid/unknown-field.yaml")

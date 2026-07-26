@@ -22,14 +22,9 @@ package ghcpcli_test
 //
 //   Deployment path resolution:
 //   - Project-scoped agent path is ".github/agents/<key>.agent.md"
-//   - User-scoped agent path on linux is "~/.copilot/agents/<key>.agent.md"
-//   - User-scoped agent path on darwin is "~/.copilot/agents/<key>.agent.md"
-//   - User-scoped agent path on windows is "${APPDATA}/GitHub Copilot/agents/<key>.agent.md"
 //   - Project-scoped skill path is ".github/skills/<key>/SKILL.md" (key subdirectory prevents collisions)
-//   - User-scoped skill path on linux is "~/.copilot/skills/<key>/SKILL.md"
-//   - User-scoped skill path on darwin is "~/.copilot/skills/<key>/SKILL.md"
-//   - User-scoped skill path on windows is "${APPDATA}/GitHub Copilot/skills/<key>/SKILL.md"
 //   - Hook artifact kind returns ErrArtifactUnsupported (GHCP CLI has no hook support)
+//   - Any non-project scope returns domain.ErrUnsupportedScope (via the shared contracttest universal invariant)
 //
 //   No-hook-support:
 //   - HookPlan always returns Supported: false regardless of bundle content.
@@ -464,61 +459,6 @@ func TestTargetPath_GHCP_AgentExtension(t *testing.T) {
 	}
 }
 
-// TestTargetPath_GHCP_AgentUserScope_Linux verifies user-scoped path on Linux.
-func TestTargetPath_GHCP_AgentUserScope_Linux(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "test-runner",
-		Scope: domain.ScopeUser,
-		GOOS:  "linux",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.copilot/agents/test-runner.agent.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_GHCP_AgentUserScope_Windows verifies user-scoped path on Windows.
-func TestTargetPath_GHCP_AgentUserScope_Windows(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "test-runner",
-		Scope: domain.ScopeUser,
-		GOOS:  "windows",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "${APPDATA}/GitHub Copilot/agents/test-runner.agent.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_GHCP_AgentUserScope_Darwin verifies user-scoped agent path on macOS.
-// Darwin uses the same base path as Linux for GHCP CLI: "~/.copilot/agents/<key>.agent.md".
-func TestTargetPath_GHCP_AgentUserScope_Darwin(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "codebase-research",
-		Scope: domain.ScopeUser,
-		GOOS:  "darwin",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.copilot/agents/codebase-research.agent.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
 // TestTargetPath_GHCP_SkillProjectScope verifies that a GHCP CLI skill is deployed under a
 // key-named subdirectory: ".github/skills/<key>/SKILL.md". The key subdirectory is required
 // because all skill entry files are named SKILL.md by convention.
@@ -535,66 +475,6 @@ func TestTargetPath_GHCP_SkillProjectScope(t *testing.T) {
 		t.Fatalf("TargetPath: %v", err)
 	}
 	want := ".github/skills/lean-tdd/SKILL.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_GHCP_SkillUserScope_Linux verifies user-scoped skill path on Linux:
-// "~/.copilot/skills/<key>/SKILL.md".
-func TestTargetPath_GHCP_SkillUserScope_Linux(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactSkill,
-		Key:      "lean-tdd",
-		FileName: "SKILL.md",
-		Scope:    domain.ScopeUser,
-		GOOS:     "linux",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.copilot/skills/lean-tdd/SKILL.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_GHCP_SkillUserScope_Darwin verifies user-scoped skill path on macOS:
-// "~/.copilot/skills/<key>/SKILL.md".
-func TestTargetPath_GHCP_SkillUserScope_Darwin(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactSkill,
-		Key:      "lean-tdd",
-		FileName: "SKILL.md",
-		Scope:    domain.ScopeUser,
-		GOOS:     "darwin",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.copilot/skills/lean-tdd/SKILL.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_GHCP_SkillUserScope_Windows verifies user-scoped skill path on Windows:
-// "${APPDATA}/GitHub Copilot/skills/<key>/SKILL.md".
-func TestTargetPath_GHCP_SkillUserScope_Windows(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactSkill,
-		Key:      "lean-tdd",
-		FileName: "SKILL.md",
-		Scope:    domain.ScopeUser,
-		GOOS:     "windows",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "${APPDATA}/GitHub Copilot/skills/lean-tdd/SKILL.md"
 	if path != want {
 		t.Errorf("TargetPath = %q, want %q", path, want)
 	}
@@ -890,29 +770,9 @@ func TestContract_GHCP(t *testing.T) {
 				Expected: ".github/agents/test-runner.agent.md",
 			},
 			{
-				Name:     "agent_user_darwin",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "darwin"},
-				Expected: "~/.copilot/agents/test-runner.agent.md",
-			},
-			{
-				Name:     "agent_user_windows",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "windows"},
-				Expected: "${APPDATA}/GitHub Copilot/agents/test-runner.agent.md",
-			},
-			{
 				Name:     "skill_project_linux",
 				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeProject, GOOS: "linux"},
 				Expected: ".github/skills/lean-tdd/SKILL.md",
-			},
-			{
-				Name:     "skill_user_linux",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeUser, GOOS: "linux"},
-				Expected: "~/.copilot/skills/lean-tdd/SKILL.md",
-			},
-			{
-				Name:     "skill_user_windows",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeUser, GOOS: "windows"},
-				Expected: "${APPDATA}/GitHub Copilot/skills/lean-tdd/SKILL.md",
 			},
 			{
 				Name:    "hook_returns_unsupported",

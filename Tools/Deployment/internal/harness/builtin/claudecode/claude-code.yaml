@@ -79,27 +79,12 @@ paths:
   agents:
     supported: true
     project: ".claude/agents"
-    user:
-      "darwin": "~/.claude/agents"
-      "linux": "~/.claude/agents"
-      "windows": "${APPDATA}/Claude/agents"
-      "": "~/.claude/agents"
   skills:
     supported: true
     project: ".claude/skills"
-    user:
-      "darwin": "~/.claude/skills"
-      "linux": "~/.claude/skills"
-      "windows": "${APPDATA}/Claude/skills"
-      "": "~/.claude/skills"
   hooks:
     supported: true
     project: ".claude/hooks"
-    user:
-      "darwin": "~/.claude/hooks"
-      "linux": "~/.claude/hooks"
-      "windows": "${APPDATA}/Claude/hooks"
-      "": "~/.claude/hooks"
 
 extensions:
   agent: ".md"

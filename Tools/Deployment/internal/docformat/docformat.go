@@ -70,7 +70,21 @@ func (d *Document) Bytes() []byte {
 	}
 
 	if !d.hasFM {
-		return bodyBytes
+		// When the source had no frontmatter but keys were subsequently added via Set,
+		// synthesise a minimal frontmatter block so the added keys appear in the output.
+		// When no keys have been added, return the body unchanged (roundtrip invariant).
+		if len(d.fm.entries) == 0 {
+			return bodyBytes
+		}
+		nl := "\n"
+		var buf bytes.Buffer
+		buf.WriteString("---\n")
+		for _, e := range d.fm.entries {
+			buf.WriteString(serializeEntry(e.key, e.value, nl))
+		}
+		buf.WriteString("---\n")
+		buf.Write(bodyBytes)
+		return buf.Bytes()
 	}
 	nl := nlFromDelim(d.fmDelim)
 	var buf bytes.Buffer

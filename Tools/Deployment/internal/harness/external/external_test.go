@@ -1192,44 +1192,14 @@ func TestContractTest_ExternalAdapter_PassesSharedContractSuite(t *testing.T) {
 				Expected: ".opencode/agents/test-runner.md",
 			},
 			{
-				Name:     "agent_user_linux",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "linux"},
-				Expected: "~/.config/opencode/agents/test-runner.md",
-			},
-			{
-				Name:     "agent_user_darwin",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "darwin"},
-				Expected: "~/.config/opencode/agents/test-runner.md",
-			},
-			{
-				Name:     "agent_user_windows",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "windows"},
-				Expected: "${APPDATA}/opencode/agents/test-runner.md",
-			},
-			{
 				Name:     "skill_project_linux",
 				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeProject, GOOS: "linux"},
 				Expected: ".opencode/skills/lean-tdd/SKILL.md",
 			},
 			{
-				Name:     "skill_user_linux",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeUser, GOOS: "linux"},
-				Expected: "~/.config/opencode/skills/lean-tdd/SKILL.md",
-			},
-			{
-				Name:     "skill_user_windows",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeUser, GOOS: "windows"},
-				Expected: "${APPDATA}/opencode/skills/lean-tdd/SKILL.md",
-			},
-			{
 				Name:     "hook_project_linux",
 				Request:  domain.TargetPathRequest{Kind: domain.ArtifactHook, Key: "subagent-logger", FileName: "subagent-logger.ts", Scope: domain.ScopeProject, GOOS: "linux"},
 				Expected: ".opencode/plugins/subagent-logger.ts",
-			},
-			{
-				Name:     "hook_user_linux",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactHook, Key: "subagent-logger", FileName: "subagent-logger.ts", Scope: domain.ScopeUser, GOOS: "linux"},
-				Expected: "~/.config/opencode/plugins/subagent-logger.ts",
 			},
 			{
 				Name:    "unsupported_kind_returns_sentinel",

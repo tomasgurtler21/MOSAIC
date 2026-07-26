@@ -77,19 +77,9 @@ paths:
   agents:
     supported: true
     project: ".github/agents"
-    user:
-      "darwin": "~/.copilot/agents"
-      "linux": "~/.copilot/agents"
-      "windows": "${APPDATA}/GitHub Copilot/agents"
-      "": "~/.copilot/agents"
   skills:
     supported: true
     project: ".github/skills"
-    user:
-      "darwin": "~/.copilot/skills"
-      "linux": "~/.copilot/skills"
-      "windows": "${APPDATA}/GitHub Copilot/skills"
-      "": "~/.copilot/skills"
   hooks:
     supported: false
 

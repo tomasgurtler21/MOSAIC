@@ -156,6 +156,14 @@ func TestDeployNew_AgentModel_SkipOne_ProducesGapNoModel(t *testing.T) {
 	deps.UserConfig = &spyUserConfig{}
 	spy := &spyTodo{}
 	deps.Todo = spy
+	// Plan stub carries the GapNoModel gap that plan.Build produces when an agent has no
+	// resolved model. GapNoModel now comes exclusively from plan.Gaps (Path B); resolveModels
+	// no longer emits it directly (Path A was removed in Stage 4).
+	planWithGap := newMinimalPlan(workspace)
+	planWithGap.Gaps = []domain.Gap{
+		{Kind: domain.GapNoModel, Subject: "test-runner", Detail: `no model has been selected for agent "test-runner"`},
+	}
+	deps.Planner = &stubPlanner{plan: planWithGap}
 	svc := app.New(deps)
 
 	// Act

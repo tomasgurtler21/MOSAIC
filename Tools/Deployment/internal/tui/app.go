@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -95,12 +96,15 @@ type rootModel struct {
 
 	// Question overlay shown during screenQuestion. Exactly one of these is non-nil at a time.
 	activeQuestion  *questionMsg
-	selectOverlay   *inlineSelectOne   // generic SelectOne/SelectMany fallback
-	confirmOverlay  *inlineConfirm     // Confirm questions
-	modelOverlay    *screens.ModelSelectScreen  // QTierModel, QAgentModel
-	textOverlay     *screens.TextPromptScreen   // AskText questions (QCustomTool, QCustomModel)
-	conflictOverlay *screens.ConflictScreen     // QLocalModification
-	reviewOverlay   *screens.ReviewScreen       // Review() calls
+	selectOverlay   *inlineSelectOne              // generic SelectOne/SelectMany fallback
+	confirmOverlay  *inlineConfirm                // Confirm questions
+	modelOverlay    *screens.ModelSelectScreen    // QTierModel, QAgentModel
+	textOverlay     *screens.TextPromptScreen     // AskText questions (QCustomTool, QCustomModel)
+	conflictOverlay *screens.ConflictScreen       // QLocalModification
+	reviewOverlay   *screens.ReviewScreen         // Review() calls
+	workflowOverlay *screens.WorkflowBrowserScreen // QWorkflows multi-select
+	agentOverlay    *screens.UtilityAgentScreen   // QUtilityAgents multi-select
+	hookOverlay     *screens.HookScreen           // QHooks multi-select
 
 	// Post-run summary screen (shown on screenDone after a successful or partial run).
 	summaryScreen *screens.SummaryScreen
@@ -220,6 +224,16 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if errMsg, ok := msg.(runErrorMsg); ok {
+		if errors.Is(errMsg.err, app.ErrPlanNotConfirmed) {
+			// The user declined or cancelled the plan review; restart the selection flow
+			// in the same session rather than showing the done/error state.
+			m.screen = screenHarness
+			m.errMsg = ""
+			m.selections = entrySelections{}
+			m.activeQuestion = nil
+			m.reviewOverlay = nil
+			return m, nil
+		}
 		m.screen = screenDone
 		m.errMsg = errMsg.err.Error()
 		return m, nil
@@ -276,6 +290,15 @@ func (m *rootModel) resizeQuestionOverlays(width, height int) {
 	}
 	if m.reviewOverlay != nil {
 		m.reviewOverlay.Resize(width, height)
+	}
+	if m.workflowOverlay != nil {
+		m.workflowOverlay.Resize(width, height)
+	}
+	if m.agentOverlay != nil {
+		m.agentOverlay.Resize(width, height)
+	}
+	if m.hookOverlay != nil {
+		m.hookOverlay.Resize(width, height)
 	}
 }
 
@@ -386,6 +409,54 @@ func (m *rootModel) updateQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// WorkflowBrowserScreen overlay (QWorkflows).
+	if m.workflowOverlay != nil {
+		cmd := m.workflowOverlay.Update(msg)
+		if m.workflowOverlay.Done() {
+			ids := m.workflowOverlay.SelectedIDs()
+			m.dispatchMultiChoiceAnswer(ids)
+			m.workflowOverlay = nil
+			m.screen = screenRunning
+		} else if m.workflowOverlay.Back() {
+			m.dispatchMultiChoiceCancelled()
+			m.workflowOverlay = nil
+			m.screen = screenRunning
+		}
+		return m, cmd
+	}
+
+	// UtilityAgentScreen overlay (QUtilityAgents).
+	if m.agentOverlay != nil {
+		cmd := m.agentOverlay.Update(msg)
+		if m.agentOverlay.Done() {
+			ids := m.agentOverlay.SelectedIDs()
+			m.dispatchMultiChoiceAnswer(ids)
+			m.agentOverlay = nil
+			m.screen = screenRunning
+		} else if m.agentOverlay.Back() {
+			m.dispatchMultiChoiceCancelled()
+			m.agentOverlay = nil
+			m.screen = screenRunning
+		}
+		return m, cmd
+	}
+
+	// HookScreen overlay (QHooks).
+	if m.hookOverlay != nil {
+		cmd := m.hookOverlay.Update(msg)
+		if m.hookOverlay.Done() {
+			ids := m.hookOverlay.SelectedIDs()
+			m.dispatchMultiChoiceAnswer(ids)
+			m.hookOverlay = nil
+			m.screen = screenRunning
+		} else if m.hookOverlay.Back() {
+			m.dispatchMultiChoiceCancelled()
+			m.hookOverlay = nil
+			m.screen = screenRunning
+		}
+		return m, cmd
+	}
+
 	// Generic SelectOne / SelectMany overlay (fallback for non-specialised question IDs).
 	if m.selectOverlay != nil {
 		done := m.selectOverlay.update(msg)
@@ -457,6 +528,40 @@ func (m *rootModel) dispatchChoiceAnswer(ans domain.ChoiceAnswer) {
 	m.activeQuestion = nil
 }
 
+// dispatchMultiChoiceAnswer sends a MultiChoiceAnswer to the active question's reply channel.
+// When ids is non-empty the status is Answered; when ids is empty the status is SkippedOne,
+// consistent with AllowSkip being true on all three SelectMany questions.
+func (m *rootModel) dispatchMultiChoiceAnswer(ids []string) {
+	if m.activeQuestion == nil {
+		return
+	}
+	status := domain.SkippedOne
+	if len(ids) > 0 {
+		status = domain.Answered
+	}
+	m.activeQuestion.reply <- answerMsg{
+		multiChoiceAns: domain.MultiChoiceAnswer{
+			Status:    status,
+			OptionIDs: ids,
+		},
+	}
+	m.activeQuestion = nil
+}
+
+// dispatchMultiChoiceCancelled sends a Cancelled MultiChoiceAnswer to the active question's
+// reply channel. Used when the user presses Esc/Back on a dedicated multi-select screen.
+func (m *rootModel) dispatchMultiChoiceCancelled() {
+	if m.activeQuestion == nil {
+		return
+	}
+	m.activeQuestion.reply <- answerMsg{
+		multiChoiceAns: domain.MultiChoiceAnswer{
+			Status: domain.Cancelled,
+		},
+	}
+	m.activeQuestion = nil
+}
+
 func (m *rootModel) handleQuestionMsg(qMsg questionMsg) (tea.Model, tea.Cmd) {
 	style := stylesFromTheme(m.theme)
 
@@ -491,7 +596,19 @@ func (m *rootModel) handleQuestionMsg(qMsg questionMsg) (tea.Model, tea.Cmd) {
 
 	case questionSelectMany:
 		m.activeQuestion = &qMsg
-		m.selectOverlay = newInlineSelectOne(qMsg.choiceQ, m.theme, m.width, m.height)
+		switch qMsg.choiceQ.ID {
+		case domain.QWorkflows:
+			cats := optionsToWorkflowCategories(qMsg.choiceQ.Options)
+			m.workflowOverlay = screens.NewWorkflowBrowserScreen(cats, m.width, m.height, style, "")
+		case domain.QUtilityAgents:
+			agents := optionsToAgents(qMsg.choiceQ.Options)
+			m.agentOverlay = screens.NewUtilityAgentScreen(agents, m.width, m.height, style, "")
+		case domain.QHooks:
+			bundles, supported := optionsToHookBundles(qMsg.choiceQ.Options)
+			m.hookOverlay = screens.NewHookScreen(bundles, supported, m.width, m.height, style, "")
+		default:
+			m.selectOverlay = newInlineSelectOne(qMsg.choiceQ, m.theme, m.width, m.height)
+		}
 		m.screen = screenQuestion
 		return m, nil
 
@@ -591,6 +708,15 @@ func (m *rootModel) viewQuestion() string {
 	}
 	if m.reviewOverlay != nil {
 		return m.reviewOverlay.View()
+	}
+	if m.workflowOverlay != nil {
+		return m.workflowOverlay.View()
+	}
+	if m.agentOverlay != nil {
+		return m.agentOverlay.View()
+	}
+	if m.hookOverlay != nil {
+		return m.hookOverlay.View()
 	}
 	if m.selectOverlay != nil {
 		return m.selectOverlay.view()

@@ -1,8 +1,10 @@
 // Package plan computes a domain.Plan describing every action a deployment run would take,
-// without performing any writes. The Planner reads from the catalog and the manifest snapshot,
-// delegates artifact resolution and staleness comparisons to exported helper functions, and
-// returns a fully renderable plan that both frontends can display for user review before any
-// file is touched.
+// without performing any writes. The Planner reads from the catalog and the deployed-file
+// state (supplied by the app layer), delegates artifact resolution and staleness comparisons
+// to exported helper functions, and returns a fully renderable plan that both frontends can
+// display for user review before any file is touched. The manifest is consulted only for
+// bookkeeping: harness identity, known-entry listing, recorded content hash for
+// local-modification conflict detection, and absent/corrupt-state detection.
 package plan
 
 import (
@@ -41,9 +43,13 @@ type Input struct {
 	UtilityAgentIDs []string                         // must already be filtered by the tool config allow-list
 	HookIDs         []string
 	Models          map[string]domain.ModelSelection // agent key -> resolved model selection
-	// DeployedHashes supplies the current on-disk hash per target path; the planner never
-	// reads files itself. Keys are target paths relative to the deployment root.
-	DeployedHashes map[string]string
+	// DeployedState supplies the full probed state of every planned target path: presence,
+	// content hash, the version stamps read from the deployed file itself, and — for the
+	// orchestrator — the embedded workflow IDs and their versions. This is the planner's
+	// sole source of truth for version comparison; the manifest is bookkeeping only.
+	// Keys are target paths relative to the deployment root. A missing key is equivalent to
+	// an absent artifact (Present: false).
+	DeployedState map[string]domain.DeployedArtifactState
 	// WorkspaceFileExists reports whether a file at the given workspace-relative path exists.
 	// Build uses this function for hook registration target existence checks, keeping Build
 	// free of direct file-system access and enabling controlled unit tests without real disk

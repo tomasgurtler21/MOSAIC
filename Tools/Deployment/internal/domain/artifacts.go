@@ -1,6 +1,9 @@
 package domain
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // ArtifactKind classifies a catalog artifact by type.
 type ArtifactKind string
@@ -33,10 +36,15 @@ func (r ArtifactRef) String() string {
 	return fmt.Sprintf("%s:%s", r.Kind, r.Key)
 }
 
-// Scope selects between project-scoped and user-scoped deployment paths.
+// Scope selects the deployment root. MOSAIC deploys into the project workspace only.
 type Scope string
 
 const (
 	ScopeProject Scope = "project"
-	ScopeUser    Scope = "user"
 )
+
+// ErrUnsupportedScope is returned by every target-path resolver when asked for a scope
+// other than ScopeProject. Declared here alongside ScopeProject so all resolvers can
+// return a single sentinel, enabling conformance tests to assert all five implementations
+// identically with errors.Is.
+var ErrUnsupportedScope = errors.New("unsupported deployment scope")

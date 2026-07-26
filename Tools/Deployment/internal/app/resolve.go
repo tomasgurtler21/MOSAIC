@@ -9,12 +9,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
+	"strings"
 
 	"mosaic-deploy/internal/domain"
-	"mosaic-deploy/internal/plan"
 	"mosaic-deploy/internal/transform"
 )
 
@@ -51,6 +48,17 @@ func (s *service) askHarness(ctx context.Context) (string, error) {
 	return id, nil
 }
 
+// stripMatchedOuterQuotes removes a single surrounding pair of double-quote characters when
+// both the first and last characters are double quotes. It strips exactly one outer pair; an
+// unmatched quote or multiple nested pairs are left unchanged. The input must already have
+// surrounding whitespace removed.
+func stripMatchedOuterQuotes(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
 // askWorkspace prompts for the target workspace path.
 func (s *service) askWorkspace(ctx context.Context) (string, error) {
 	q := domain.TextQuestion{
@@ -60,10 +68,14 @@ func (s *service) askWorkspace(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if ans.Status != domain.Answered || ans.Text == "" {
+	if ans.Status != domain.Answered {
 		return "", errors.New("no workspace path was provided")
 	}
-	return ans.Text, nil
+	text := stripMatchedOuterQuotes(strings.TrimSpace(ans.Text))
+	if text == "" {
+		return "", errors.New("no workspace path was provided")
+	}
+	return text, nil
 }
 
 // askWorkflows prompts for workflow selection, grouped by category for browsable display.
@@ -144,7 +156,8 @@ type modelResolution struct {
 
 // resolveModels asks QTierModel once per discovered tier and QAgentModel once per agent
 // whose model could not be resolved from a tier mapping, honouring pre-answers, skip, and
-// skip-all. Every agent left without a resolved model produces a GapNoModel entry (AC18.5).
+// skip-all. Agents left without a resolved model receive a GapNoModel gap solely via
+// plan.Build (Plan.Gaps), which is also what the Review screen renders.
 func (s *service) resolveModels(
 	ctx context.Context,
 	tierModels map[domain.Tier]string,
@@ -202,8 +215,6 @@ func (s *service) resolveModels(
 	models := make(map[string]domain.ModelSelection)
 	agentSkippedAll := skipAll[domain.QAgentModel]
 	for _, agent := range agents {
-		resolved := false
-
 		if modelID, ok := agentModels[agent.Key]; ok && modelID != "" {
 			origin := domain.OriginCustom
 			for _, opt := range harnessOptions {
@@ -213,10 +224,8 @@ func (s *service) resolveModels(
 				}
 			}
 			models[agent.Key] = domain.ModelSelection{ModelID: modelID, Origin: origin}
-			resolved = true
 		} else if tierModel, ok := tierModelsUsed[agent.RecommendedTier]; ok && tierModel != "" {
 			models[agent.Key] = domain.ModelSelection{ModelID: tierModel, Origin: domain.OriginTierMapping}
-			resolved = true
 		} else if !agentSkippedAll {
 			options := make([]domain.Option, 0, len(harnessOptions)+1)
 			options = append(options, domain.Option{
@@ -247,18 +256,14 @@ func (s *service) resolveModels(
 					}
 					if modelID != "" {
 						models[agent.Key] = domain.ModelSelection{ModelID: modelID, Origin: origin}
-						resolved = true
 					}
 				}
 			}
 		}
-
-		if !resolved {
-			s.deps.Todo.AddGap(domain.Gap{
-				Kind: domain.GapNoModel, Subject: agent.Key,
-				Detail: "no model selected for agent " + agent.Key,
-			})
-		}
+		// GapNoModel gaps for unresolved agents are emitted solely by plan.Build, which
+		// also populates Plan.Gaps (rendered by the Review screen). Emitting them here
+		// would produce duplicates — one from plan.Gaps copied into the collector and a
+		// second one from this loop.
 	}
 
 	return modelResolution{models: models, tierModelsUsed: tierModelsUsed}
@@ -383,12 +388,8 @@ func (s *service) resolveCustomTools(
 		})
 	}
 
-	for toolName := range skipped {
-		s.deps.Todo.AddGap(domain.Gap{
-			Kind: domain.GapUnmappedTool, Subject: toolName,
-			Detail: "no harness mapping for tool " + toolName,
-		})
-	}
+	// Unmapped-tool gaps are emitted solely by plan.Build, which names the owning agent and
+	// also fires in the update flow. Emitting them here would produce duplicates.
 
 	return customNames, skipped
 }
@@ -442,7 +443,8 @@ func (s *service) buildWorkflowBlocks(workflowIDs []string) []transform.Workflow
 }
 
 // buildContent returns the deploy.ExecRequest.Content callback for one run. Agent items are
-// rendered through transform.Apply; skill and hook items are copied verbatim from source.
+// rendered through transform.Apply; skill items are copied verbatim from source. Hook items
+// bypass this callback entirely and are handled by deployHooks.
 func (s *service) buildContent(
 	module domain.HarnessModule,
 	agentByKey map[string]domain.Agent,
@@ -541,52 +543,6 @@ func buildHookPlans(module domain.HarnessModule, hooks []domain.HookBundle, scop
 // ---------------------------------------------------------------------------
 // Update-flow workflow discovery
 // ---------------------------------------------------------------------------
-
-var workflowSectionPattern = regexp.MustCompile(`\[\[SECTION:Workflow:([^\]]+)\]\]`)
-
-// extractWorkflowIDs scans deployed orchestrator content for workflow section markers,
-// returning the distinct IDs in first-occurrence order.
-func extractWorkflowIDs(data []byte) []string {
-	matches := workflowSectionPattern.FindAllSubmatch(data, -1)
-	ids := make([]string, 0, len(matches))
-	seen := make(map[string]bool, len(matches))
-	for _, m := range matches {
-		id := string(m[1])
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		ids = append(ids, id)
-	}
-	return ids
-}
-
-// discoverExistingWorkflows determines which workflows are already injected into the
-// deployed orchestrator, so the update flow can add new workflows without losing them
-// (AC18.6). It reads the deployed orchestrator file directly when present; otherwise it
-// falls back to the planner's own view of the current deployment state.
-func (s *service) discoverExistingWorkflows(
-	ctx context.Context, module domain.HarnessModule, workspace string, scope domain.Scope, snap plan.Input,
-) []string {
-	orchestrator := s.deps.Catalog.Orchestrator()
-	targetPath, err := module.TargetPath(domain.TargetPathRequest{
-		Kind: domain.ArtifactAgent, Key: orchestrator.Key,
-		FileName: filepath.Base(orchestrator.SourcePath), Scope: scope, GOOS: s.deps.GOOS,
-	})
-	if err == nil {
-		if data, rerr := os.ReadFile(filepath.Join(workspace, targetPath)); rerr == nil {
-			if ids := extractWorkflowIDs(data); len(ids) > 0 {
-				return ids
-			}
-		}
-	}
-
-	p, berr := s.deps.Planner.Build(ctx, snap)
-	if berr != nil {
-		return nil
-	}
-	return p.Workflows
-}
 
 // unionPreserveOrder returns the deduplicated union of a and b, preserving first-occurrence
 // order with a's elements first.

@@ -366,3 +366,136 @@ func TestWorkspaceScreen_Enter_NonWritableDir_ShowsErrorInView(t *testing.T) {
 		t.Errorf("view does not mention writability after non-writable directory rejection:\n%s", view)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Quote stripping — matched pair, unmatched, double-nested, whitespace combinations
+// ---------------------------------------------------------------------------
+
+// TestWorkspaceScreen_Enter_QuotedValidPath_SetsDone verifies that a path wrapped in a
+// matched pair of double quotes (the format produced by Windows Explorer "Copy as path")
+// is accepted after the outer quote pair is stripped. Without stripping the literal "
+// characters the path does not exist on the filesystem, causing a spurious validation failure.
+func TestWorkspaceScreen_Enter_QuotedValidPath_SetsDone(t *testing.T) {
+	// Arrange
+	validDir := t.TempDir()
+	s := newWSScreen()
+	s.SetPrefilledPath(`"` + validDir + `"`)
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if !s.Done() {
+		t.Errorf("Done() = false for quoted path %q; want true (outer quotes must be stripped before validation)", `"`+validDir+`"`)
+	}
+}
+
+// TestWorkspaceScreen_WorkspacePath_QuotedInput_ReturnsUnquotedAbsPath verifies that
+// WorkspacePath() returns the absolute form of the path with surrounding double quotes removed
+// after the user enters a Windows-Explorer-style "Copy as path" value.
+func TestWorkspaceScreen_WorkspacePath_QuotedInput_ReturnsUnquotedAbsPath(t *testing.T) {
+	// Arrange
+	validDir := t.TempDir()
+	s := newWSScreen()
+	s.SetPrefilledPath(`"` + validDir + `"`)
+	s.Update(wsEnterKey())
+
+	// Act
+	got := s.WorkspacePath()
+
+	// Assert — returned path must equal the absolute form of the bare directory.
+	want, _ := filepath.Abs(validDir)
+	if got != want {
+		t.Errorf("WorkspacePath() = %q; want %q (outer quotes must be stripped and path resolved to absolute)", got, want)
+	}
+}
+
+// TestWorkspaceScreen_Enter_WhitespacePlusQuotedPath_SetsDone verifies that surrounding
+// whitespace padded around a quoted path is handled: trim whitespace first, then strip the
+// matched outer quote pair, so `  "<dir>"  ` resolves to <dir> and passes validation.
+func TestWorkspaceScreen_Enter_WhitespacePlusQuotedPath_SetsDone(t *testing.T) {
+	// Arrange
+	validDir := t.TempDir()
+	s := newWSScreen()
+	s.SetPrefilledPath(`  "` + validDir + `"  `)
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if !s.Done() {
+		t.Errorf("Done() = false for whitespace-padded quoted path; want true (whitespace and outer quotes must both be stripped)")
+	}
+}
+
+// TestWorkspaceScreen_Enter_EmptyQuotedInput_ShowsEmptyError verifies that the input `""` —
+// two double-quote characters that yield an empty path after stripping — produces the
+// "path cannot be empty" feedback rather than a "does not exist" error for a path named `""`.
+func TestWorkspaceScreen_Enter_EmptyQuotedInput_ShowsEmptyError(t *testing.T) {
+	// Arrange
+	s := newWSScreen()
+	s.SetPrefilledPath(`""`)
+
+	// Act
+	s.Update(wsEnterKey())
+	view := s.View()
+
+	// Assert — the view must mention emptiness so the user knows the input was blank.
+	if !strings.Contains(view, "empty") {
+		t.Errorf("view does not contain 'empty' after \"\" (empty-after-stripping) input; want 'path cannot be empty' feedback:\n%s", view)
+	}
+}
+
+// TestWorkspaceScreen_Enter_UnmatchedLeadingQuote_DoesNotSetDone verifies that a path with
+// only a leading double-quote and no matching trailing quote is left unchanged. Because the
+// literal " character makes the path non-existent on the filesystem, validation must fail
+// rather than silently strip the unmatched character.
+func TestWorkspaceScreen_Enter_UnmatchedLeadingQuote_DoesNotSetDone(t *testing.T) {
+	// Arrange — leading " present, no trailing "
+	validDir := t.TempDir()
+	s := newWSScreen()
+	s.SetPrefilledPath(`"` + validDir) // intentionally no closing "
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert — the unmatched quote is preserved, so the path does not exist, and Done stays false.
+	if s.Done() {
+		t.Error("Done() = true for path with unmatched leading quote; want false (unmatched quote must not be stripped)")
+	}
+}
+
+// TestWorkspaceScreen_Enter_UnmatchedTrailingQuote_DoesNotSetDone verifies that a path with
+// only a trailing double-quote and no matching leading quote is left unchanged.
+func TestWorkspaceScreen_Enter_UnmatchedTrailingQuote_DoesNotSetDone(t *testing.T) {
+	// Arrange — no leading ", trailing " present
+	validDir := t.TempDir()
+	s := newWSScreen()
+	s.SetPrefilledPath(validDir + `"`) // intentionally no opening "
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if s.Done() {
+		t.Error("Done() = true for path with unmatched trailing quote; want false (unmatched quote must not be stripped)")
+	}
+}
+
+// TestWorkspaceScreen_Enter_DoubleNestedQuotes_DoesNotSetDone verifies that only one outer
+// matched pair of quotes is stripped. Input `""<dir>""` (two leading, two trailing) strips to
+// `"<dir>"` which still contains quotes and therefore cannot be an existing directory path.
+func TestWorkspaceScreen_Enter_DoubleNestedQuotes_DoesNotSetDone(t *testing.T) {
+	// Arrange — two leading and two trailing quotes around a real directory
+	validDir := t.TempDir()
+	s := newWSScreen()
+	s.SetPrefilledPath(`""` + validDir + `""`)
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert — after stripping one pair the remaining inner quotes prevent the path from being found.
+	if s.Done() {
+		t.Error("Done() = true after double-nested quote input; want false (only one outer matched pair must be stripped, leaving inner quotes intact)")
+	}
+}

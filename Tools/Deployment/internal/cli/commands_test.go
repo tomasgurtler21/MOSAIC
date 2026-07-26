@@ -8,11 +8,10 @@ package cli_test
 // Deploy subcommand flag mapping (T19.1):
 //   - --harness maps to DeployRequest.HarnessID
 //   - --workspace maps to DeployRequest.WorkspacePath
-//   - --scope project maps to domain.ScopeProject (the default)
-//   - --scope user maps to domain.ScopeUser
 //   - --dry-run maps to DeployRequest.DryRun
 //   - --auto-confirm maps to DeployRequest.AutoConfirmPlan
 //   - --output json is accepted without error
+//   - --scope is not a recognised flag; passing it returns ExitUsage (RED: currently accepted)
 //
 // Update subcommand flag mapping (T19.1):
 //   - update --harness maps to UpdateRequest.HarnessID
@@ -118,27 +117,25 @@ func TestRun_DeploySubcommand_ScopeProject_IsDefault(t *testing.T) {
 	}
 }
 
-// TestRun_DeploySubcommand_ScopeUser_MapsToRequest verifies that --scope user sets
-// DeployRequest.Scope to ScopeUser.
-func TestRun_DeploySubcommand_ScopeUser_MapsToRequest(t *testing.T) {
+// TestRun_DeploySubcommand_ScopeFlag_ReturnsExitUsage verifies that passing --scope on the
+// deploy subcommand returns ExitUsage. MOSAIC deploys into the project workspace only; the
+// --scope flag was removed when user-scope deployment support was dropped.
+//
+// RED: currently the flag is still registered and this test fails. It will pass after I1.5
+// removes the --scope flag from the deploy subcommand.
+func TestRun_DeploySubcommand_ScopeFlag_ReturnsExitUsage(t *testing.T) {
 	// Arrange
 	workspace := t.TempDir()
 	svc := &spyService{deployResp: successSummary(workspace)}
 
 	// Act
 	code := cli.Run(context.Background(),
-		[]string{"deploy", "--harness", "stub-harness", "--workspace", workspace, "--scope", "user", "--auto-confirm"},
+		[]string{"deploy", "--harness", "stub-harness", "--workspace", workspace, "--scope", "project", "--auto-confirm"},
 		svc, &bytes.Buffer{}, &bytes.Buffer{})
 
 	// Assert
-	if code != cli.ExitSuccess {
-		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
-	}
-	if svc.deployReq == nil {
-		t.Fatal("DeployNew was not called")
-	}
-	if svc.deployReq.Scope != domain.ScopeUser {
-		t.Errorf("Scope = %q, want %q", svc.deployReq.Scope, domain.ScopeUser)
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want %d (ExitUsage); --scope is not a recognised flag after user-scope removal", code, cli.ExitUsage)
 	}
 }
 

@@ -15,16 +15,9 @@ package claudecode_test
 //
 //   Deployment path resolution:
 //   - Project-scoped agent path is ".claude/agents/<key>.md"
-//   - User-scoped agent path on linux is "~/.claude/agents/<key>.md"
-//   - User-scoped agent path on darwin is "~/.claude/agents/<key>.md"
-//   - User-scoped agent path on windows is "${APPDATA}/Claude/agents/<key>.md"
 //   - Project-scoped skill path is ".claude/skills/<key>/SKILL.md" (key subdirectory prevents collisions)
-//   - User-scoped skill path on linux is "~/.claude/skills/<key>/SKILL.md"
-//   - User-scoped skill path on darwin is "~/.claude/skills/<key>/SKILL.md"
-//   - User-scoped skill path on windows is "${APPDATA}/Claude/skills/<key>/SKILL.md"
 //   - Project-scoped hook path is ".claude/hooks/<filename>"
-//   - User-scoped hook path on linux is "~/.claude/hooks/<filename>"
-//   - User-scoped agent for an unknown GOOS falls back to the empty-key template
+//   - Any non-project scope returns domain.ErrUnsupportedScope (via the shared contracttest universal invariant)
 //
 //   Harness-level injections:
 //   - HarnessConstraints injection is filled with empty content (Claude Code has no constraint)
@@ -306,80 +299,6 @@ func TestTargetPath_ClaudeCode_AgentProjectScope(t *testing.T) {
 	}
 }
 
-// TestTargetPath_ClaudeCode_AgentUserScope_Linux verifies user-scoped agent path on Linux.
-func TestTargetPath_ClaudeCode_AgentUserScope_Linux(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "test-runner",
-		Scope: domain.ScopeUser,
-		GOOS:  "linux",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.claude/agents/test-runner.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_ClaudeCode_AgentUserScope_Darwin verifies user-scoped agent path on macOS.
-func TestTargetPath_ClaudeCode_AgentUserScope_Darwin(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "codebase-research",
-		Scope: domain.ScopeUser,
-		GOOS:  "darwin",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.claude/agents/codebase-research.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_ClaudeCode_AgentUserScope_Windows verifies user-scoped agent path on Windows.
-func TestTargetPath_ClaudeCode_AgentUserScope_Windows(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "test-runner",
-		Scope: domain.ScopeUser,
-		GOOS:  "windows",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "${APPDATA}/Claude/agents/test-runner.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_ClaudeCode_AgentUserScope_UnknownGOOS verifies fallback to the empty-key
-// template for platforms not explicitly declared in the descriptor.
-func TestTargetPath_ClaudeCode_AgentUserScope_UnknownGOOS(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "test-runner",
-		Scope: domain.ScopeUser,
-		GOOS:  "plan9",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	// Falls back to the empty-key ("") user template: ~/.claude/agents/
-	want := "~/.claude/agents/test-runner.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
 // TestTargetPath_ClaudeCode_SkillProjectScope verifies that a skill is deployed under a
 // key-named subdirectory: ".claude/skills/<key>/SKILL.md". The key subdirectory is required
 // because all skill entry files are named SKILL.md by convention; without it, every deployed
@@ -402,66 +321,6 @@ func TestTargetPath_ClaudeCode_SkillProjectScope(t *testing.T) {
 	}
 }
 
-// TestTargetPath_ClaudeCode_SkillUserScope_Linux verifies user-scoped skill path on Linux:
-// "~/.claude/skills/<key>/SKILL.md".
-func TestTargetPath_ClaudeCode_SkillUserScope_Linux(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactSkill,
-		Key:      "lean-tdd",
-		FileName: "SKILL.md",
-		Scope:    domain.ScopeUser,
-		GOOS:     "linux",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.claude/skills/lean-tdd/SKILL.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_ClaudeCode_SkillUserScope_Darwin verifies user-scoped skill path on macOS:
-// "~/.claude/skills/<key>/SKILL.md".
-func TestTargetPath_ClaudeCode_SkillUserScope_Darwin(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactSkill,
-		Key:      "lean-tdd",
-		FileName: "SKILL.md",
-		Scope:    domain.ScopeUser,
-		GOOS:     "darwin",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.claude/skills/lean-tdd/SKILL.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_ClaudeCode_SkillUserScope_Windows verifies user-scoped skill path on Windows:
-// "${APPDATA}/Claude/skills/<key>/SKILL.md".
-func TestTargetPath_ClaudeCode_SkillUserScope_Windows(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactSkill,
-		Key:      "lean-tdd",
-		FileName: "SKILL.md",
-		Scope:    domain.ScopeUser,
-		GOOS:     "windows",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "${APPDATA}/Claude/skills/lean-tdd/SKILL.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
 // TestTargetPath_ClaudeCode_HookProjectScope verifies that hooks are deployed to
 // ".claude/hooks/<filename>" when Claude Code hook support is declared.
 func TestTargetPath_ClaudeCode_HookProjectScope(t *testing.T) {
@@ -477,26 +336,6 @@ func TestTargetPath_ClaudeCode_HookProjectScope(t *testing.T) {
 		t.Fatalf("TargetPath: %v", err)
 	}
 	want := ".claude/hooks/subagent-logger.sh"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_ClaudeCode_HookUserScope_Linux verifies that user-scoped hooks are deployed
-// to "~/.claude/hooks/<filename>" on Linux. Claude Code declares user hook paths in its descriptor.
-func TestTargetPath_ClaudeCode_HookUserScope_Linux(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactHook,
-		Key:      "subagent-logger",
-		FileName: "subagent-logger.sh",
-		Scope:    domain.ScopeUser,
-		GOOS:     "linux",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.claude/hooks/subagent-logger.sh"
 	if path != want {
 		t.Errorf("TargetPath = %q, want %q", path, want)
 	}
@@ -704,39 +543,14 @@ func TestContract_ClaudeCode(t *testing.T) {
 				Expected: ".claude/agents/test-runner.md",
 			},
 			{
-				Name:     "agent_user_darwin",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "darwin"},
-				Expected: "~/.claude/agents/test-runner.md",
-			},
-			{
-				Name:     "agent_user_windows",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "windows"},
-				Expected: "${APPDATA}/Claude/agents/test-runner.md",
-			},
-			{
 				Name:     "skill_project_linux",
 				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeProject, GOOS: "linux"},
 				Expected: ".claude/skills/lean-tdd/SKILL.md",
 			},
 			{
-				Name:     "skill_user_linux",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeUser, GOOS: "linux"},
-				Expected: "~/.claude/skills/lean-tdd/SKILL.md",
-			},
-			{
-				Name:     "skill_user_windows",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeUser, GOOS: "windows"},
-				Expected: "${APPDATA}/Claude/skills/lean-tdd/SKILL.md",
-			},
-			{
 				Name:     "hook_project_linux",
 				Request:  domain.TargetPathRequest{Kind: domain.ArtifactHook, Key: "subagent-logger", FileName: "hook.sh", Scope: domain.ScopeProject, GOOS: "linux"},
 				Expected: ".claude/hooks/hook.sh",
-			},
-			{
-				Name:     "hook_user_linux",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactHook, Key: "subagent-logger", FileName: "hook.sh", Scope: domain.ScopeUser, GOOS: "linux"},
-				Expected: "~/.claude/hooks/hook.sh",
 			},
 			{
 				Name:    "unsupported_kind_returns_sentinel",

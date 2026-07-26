@@ -1,5 +1,5 @@
 ---
-version: "3.4"
+version: "3.5"
 name: "Brownfield TDD Workflow"
 description: "New features or significant changes to an existing codebase requiring test-first development with full research and design."
 hint: "Brownfield with research, TDD, and design phases"

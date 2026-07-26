@@ -8,7 +8,11 @@ package screens_test
 //   - Selection summary: SelectedIDs() is accurate at all navigation states.
 //   - Detail pane: shows the focused workflow's name, ID, description, and hint.
 //   - Empty state: rendered correctly when the catalog has no workflows.
-//   - Keyboard-only operability: every interaction is driven through key messages.
+//   - Stage 6 keybindings:
+//       - Category level: Right/l opens folder; Enter confirms (with selection); Esc cancels; Tab is inert.
+//       - Workflow level: Space toggles; Left/h and Esc return to categories; Enter confirms (with selection); Tab is inert.
+//   - Empty-selection validation: visible transient message, Done() stays false, Esc always cancels.
+//   - Help bars: list only the active bindings at each level; Tab and "enter open folder" are absent.
 
 import (
 	"strings"
@@ -41,68 +45,552 @@ var wfAudit = domain.WorkflowCategory{
 
 var wfAllCategories = []domain.WorkflowCategory{wfBuild, wfAudit}
 
-// newWFBrowser is a convenience constructor using plain styles and an 80×24 terminal.
+// newWFBrowser is a convenience constructor using plain styles and an 80x24 terminal.
 func newWFBrowser(cats []domain.WorkflowCategory) *screens.WorkflowBrowserScreen {
 	return screens.NewWorkflowBrowserScreen(cats, 80, 24, plainStyles(), "")
 }
 
-// sendWFKey drives the browser with a single key.
+// sendWFKey drives the browser with a single special key.
 func sendWFKey(s *screens.WorkflowBrowserScreen, keyType tea.KeyType) {
 	s.Update(tea.KeyMsg{Type: keyType})
 }
 
-// sendWFRune drives the browser with a rune key.
+// sendWFRune drives the browser with a rune key (printable character).
 func sendWFRune(s *screens.WorkflowBrowserScreen, r rune) {
 	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 }
 
-// sendWFTab drives the browser with the Tab key.
+// sendWFTab drives the browser with the Tab key. Used in tests that assert Tab is inert.
 func sendWFTab(s *screens.WorkflowBrowserScreen) {
 	s.Update(tea.KeyMsg{Type: tea.KeyTab})
 }
 
-// enterFolder opens the folder at the current cursor position using Enter.
-func enterFolder(s *screens.WorkflowBrowserScreen) { sendWFKey(s, tea.KeyEnter) }
+// enterFolder opens the focused category folder using the Right arrow key (Stage 6
+// scheme: Right/l opens folder; Enter confirms).
+func enterFolder(s *screens.WorkflowBrowserScreen) { sendWFKey(s, tea.KeyRight) }
 
-// leaveFolder returns to the category list using Esc.
+// leaveFolder returns to the category list using Esc. Valid at the workflow level in
+// both the old and the new keybinding scheme.
 func leaveFolder(s *screens.WorkflowBrowserScreen) { sendWFKey(s, tea.KeyEsc) }
 
 // toggleWorkflow toggles the focused workflow's selection with Space.
 func toggleWorkflow(s *screens.WorkflowBrowserScreen) { sendWFRune(s, ' ') }
 
 // ---------------------------------------------------------------------------
-// Two-level navigation
+// Stage 6 — Category-level binding tests
 // ---------------------------------------------------------------------------
 
-// TestWorkflowBrowser_Enter_OpensCategoryFolder verifies that pressing Enter on a category
-// transitions the browser from category list to workflow list.
-func TestWorkflowBrowser_Enter_OpensCategoryFolder(t *testing.T) {
+// TestWorkflowBrowser_CategoryLevel_Right_OpensFocusedFolder verifies that pressing the Right
+// arrow key at the category level transitions the browser into the focused category's workflow
+// list.
+func TestWorkflowBrowser_CategoryLevel_Right_OpensFocusedFolder(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+	view := s.View()
+	if !strings.Contains(view, "Build") {
+		t.Fatalf("initial view must show category 'Build'; got:\n%s", view)
+	}
+
+	sendWFKey(s, tea.KeyRight) // Right opens folder under new scheme
+
+	view = s.View()
+	if !strings.Contains(collapseWhitespace(view), "Greenfield TDD Workflow [greenfield-tdd]") {
+		t.Errorf("after Right at category level, must show Build folder workflows; got:\n%s", view)
+	}
+}
+
+// TestWorkflowBrowser_CategoryLevel_L_OpensFocusedFolder verifies that pressing 'l'
+// (vim-style right) at the category level opens the focused folder.
+func TestWorkflowBrowser_CategoryLevel_L_OpensFocusedFolder(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	sendWFRune(s, 'l') // 'l' is the vim-style open-folder key
+
+	view := s.View()
+	if !strings.Contains(collapseWhitespace(view), "Greenfield TDD Workflow [greenfield-tdd]") {
+		t.Errorf("after 'l' at category level, must show Build folder workflows; got:\n%s", view)
+	}
+}
+
+// TestWorkflowBrowser_CategoryLevel_Enter_WithSelection_ConfirmsAndSetsDone verifies that
+// pressing Enter at the category level when at least one workflow is selected confirms the
+// whole selection and sets Done() to true.
+func TestWorkflowBrowser_CategoryLevel_Enter_WithSelection_ConfirmsAndSetsDone(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	// Open the first folder, select a workflow, return to the category list.
+	enterFolder(s)
+	toggleWorkflow(s) // select greenfield-tdd
+	leaveFolder(s)    // Esc returns to categories
+
+	// At category level with one workflow selected, Enter must confirm.
+	sendWFKey(s, tea.KeyEnter)
+
+	if !s.Done() {
+		t.Error("Done() = false after Enter at category level with one workflow selected; want true (Enter must confirm when selection is non-empty)")
+	}
+}
+
+// TestWorkflowBrowser_CategoryLevel_Enter_WithNoSelection_DoesNotSetDone verifies that
+// pressing Enter at the category level with no workflows selected does not confirm the run
+// and shows the validation message to inform the user.
+func TestWorkflowBrowser_CategoryLevel_Enter_WithNoSelection_DoesNotSetDone(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	sendWFKey(s, tea.KeyEnter) // Enter with zero selections
+
+	if s.Done() {
+		t.Error("Done() = true after Enter at category level with no selection; want false (empty selection must be blocked)")
+	}
+	if !strings.Contains(s.View(), screens.MsgNoWorkflowsSelected) {
+		t.Errorf("view after Enter with no selection at category level must contain the validation message;\nwant substring: %q\ngot view:\n%s",
+			screens.MsgNoWorkflowsSelected, s.View())
+	}
+}
+
+// TestWorkflowBrowser_CategoryLevel_Esc_SetsBack verifies that pressing Esc at the
+// category level signals Back(), providing a genuine cancel path.
+func TestWorkflowBrowser_CategoryLevel_Esc_SetsBack(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	sendWFKey(s, tea.KeyEsc)
+
+	if !s.Back() {
+		t.Error("Back() = false after Esc at category level; want true")
+	}
+	if s.Done() {
+		t.Error("Done() = true after Esc at category level; want false")
+	}
+}
+
+// TestWorkflowBrowser_CategoryLevel_Tab_IsInert verifies that pressing Tab at the category
+// level has no effect: Done() stays false, Back() stays false, and the view still shows the
+// category list.
+func TestWorkflowBrowser_CategoryLevel_Tab_IsInert(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	sendWFTab(s)
+
+	if s.Done() {
+		t.Error("Done() = true after Tab at category level; Tab must not confirm (it is not a binding on this screen)")
+	}
+	if s.Back() {
+		t.Error("Back() = true after Tab at category level; Tab must not cancel")
+	}
+	view := s.View()
+	if !strings.Contains(view, "Build") {
+		t.Errorf("after Tab at category level, view must still show category list; got:\n%s", view)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stage 6 — Workflow-level binding tests
+// ---------------------------------------------------------------------------
+
+// TestWorkflowBrowser_WorkflowLevel_Space_TogglesSelection verifies that Space toggles the
+// focused workflow's selection while inside a folder.
+func TestWorkflowBrowser_WorkflowLevel_Space_TogglesSelection(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	enterFolder(s) // open Build folder
+
+	if containsStr(s.SelectedIDs(), "greenfield-tdd") {
+		t.Fatal("precondition: greenfield-tdd must not be selected before first toggle")
+	}
+
+	toggleWorkflow(s) // Space: select greenfield-tdd
+
+	if !containsStr(s.SelectedIDs(), "greenfield-tdd") {
+		t.Errorf("SelectedIDs() = %v after Space; want 'greenfield-tdd' selected", s.SelectedIDs())
+	}
+}
+
+// TestWorkflowBrowser_WorkflowLevel_Left_ReturnsToCategoriesPreservingSelection verifies that
+// pressing Left at the workflow level returns to the category list with selections preserved.
+func TestWorkflowBrowser_WorkflowLevel_Left_ReturnsToCategoriesPreservingSelection(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	enterFolder(s)    // open Build folder
+	toggleWorkflow(s) // select greenfield-tdd
+
+	sendWFKey(s, tea.KeyLeft) // Left returns to category list
+
+	// Must be back at the category level.
+	view := s.View()
+	if !strings.Contains(view, "Build") || !strings.Contains(view, "Audit") {
+		t.Errorf("after Left at workflow level, must show category list with both categories; got:\n%s", view)
+	}
+	// Selection must be preserved across the navigation.
+	if !containsStr(s.SelectedIDs(), "greenfield-tdd") {
+		t.Errorf("SelectedIDs() = %v after Left; want 'greenfield-tdd' to survive navigation", s.SelectedIDs())
+	}
+}
+
+// TestWorkflowBrowser_WorkflowLevel_H_ReturnsToCategoriesPreservingSelection verifies that
+// pressing 'h' (vim-style left) at the workflow level returns to the category list with
+// selections preserved.
+func TestWorkflowBrowser_WorkflowLevel_H_ReturnsToCategoriesPreservingSelection(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	enterFolder(s)    // open Build folder
+	toggleWorkflow(s) // select greenfield-tdd
+
+	sendWFRune(s, 'h') // 'h' is the vim-style leave-folder key
+
+	view := s.View()
+	if !strings.Contains(view, "Build") {
+		t.Errorf("after 'h' at workflow level, must show category list; got:\n%s", view)
+	}
+	if !containsStr(s.SelectedIDs(), "greenfield-tdd") {
+		t.Errorf("SelectedIDs() = %v after 'h'; want 'greenfield-tdd' to survive navigation", s.SelectedIDs())
+	}
+}
+
+// TestWorkflowBrowser_WorkflowLevel_Esc_ReturnsToCategoriesPreservingSelection verifies that
+// pressing Esc at the workflow level returns to the category list with selections preserved and
+// does NOT trigger Back() (Esc at workflow level is "back one level", not "cancel screen").
+func TestWorkflowBrowser_WorkflowLevel_Esc_ReturnsToCategoriesPreservingSelection(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	enterFolder(s)    // open Build folder
+	toggleWorkflow(s) // select greenfield-tdd
+	leaveFolder(s)    // Esc at workflow level returns to categories
+
+	if s.Back() {
+		t.Error("Back() = true after Esc at workflow level; Esc must return to the category list, not cancel the whole screen")
+	}
+	view := s.View()
+	if !strings.Contains(view, "Build") {
+		t.Errorf("after Esc at workflow level, must show category list; got:\n%s", view)
+	}
+	if !containsStr(s.SelectedIDs(), "greenfield-tdd") {
+		t.Errorf("SelectedIDs() = %v after Esc at workflow level; want 'greenfield-tdd' to survive navigation", s.SelectedIDs())
+	}
+}
+
+// TestWorkflowBrowser_WorkflowLevel_Enter_WithSelection_ConfirmsAndSetsDone verifies that
+// pressing Enter at the workflow level when at least one workflow is selected confirms the
+// whole selection and sets Done() to true without requiring a return to the category level first.
+func TestWorkflowBrowser_WorkflowLevel_Enter_WithSelection_ConfirmsAndSetsDone(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	enterFolder(s)    // open Build folder
+	toggleWorkflow(s) // select greenfield-tdd
+
+	// Enter at the workflow level with a selection must confirm the run directly.
+	sendWFKey(s, tea.KeyEnter)
+
+	if !s.Done() {
+		t.Error("Done() = false after Enter at workflow level with one workflow selected; want true (Enter must confirm at both levels)")
+	}
+	if !containsStr(s.SelectedIDs(), "greenfield-tdd") {
+		t.Errorf("SelectedIDs() = %v after Enter confirmation from workflow level; want 'greenfield-tdd'", s.SelectedIDs())
+	}
+}
+
+// TestWorkflowBrowser_WorkflowLevel_Enter_WithNoSelection_DoesNotSetDone verifies that
+// pressing Enter at the workflow level with no workflows selected does not confirm the run
+// and shows the validation message to inform the user.
+func TestWorkflowBrowser_WorkflowLevel_Enter_WithNoSelection_DoesNotSetDone(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	enterFolder(s) // open Build folder — no workflow selected yet
+
+	sendWFKey(s, tea.KeyEnter)
+
+	if s.Done() {
+		t.Error("Done() = true after Enter at workflow level with no selection; want false (empty selection must be blocked at both levels)")
+	}
+	if !strings.Contains(s.View(), screens.MsgNoWorkflowsSelected) {
+		t.Errorf("view after Enter with no selection at workflow level must contain the validation message;\nwant substring: %q\ngot view:\n%s",
+			screens.MsgNoWorkflowsSelected, s.View())
+	}
+}
+
+// TestWorkflowBrowser_WorkflowLevel_Tab_IsInert verifies that pressing Tab while inside a
+// workflow folder has no effect — Tab is not a binding at the workflow level either.
+func TestWorkflowBrowser_WorkflowLevel_Tab_IsInert(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	enterFolder(s) // open Build folder
+	sendWFTab(s)
+
+	if s.Done() {
+		t.Error("Done() = true after Tab inside a workflow folder; Tab must not confirm at the workflow level")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stage 6 — Empty-selection validation
+// ---------------------------------------------------------------------------
+
+// TestWorkflowBrowser_CategoryLevel_Enter_WithNoSelection_ShowsValidationMessage verifies that
+// pressing Enter at the category level with no selection renders the transient validation
+// message so the user understands why the screen did not advance.
+func TestWorkflowBrowser_CategoryLevel_Enter_WithNoSelection_ShowsValidationMessage(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	sendWFKey(s, tea.KeyEnter) // Enter with no selection
+
+	view := s.View()
+	if !strings.Contains(view, screens.MsgNoWorkflowsSelected) {
+		t.Errorf("view after Enter with no selection at category level must contain the validation message;\nwant substring: %q\ngot view:\n%s",
+			screens.MsgNoWorkflowsSelected, view)
+	}
+}
+
+// TestWorkflowBrowser_WorkflowLevel_Enter_WithNoSelection_ShowsValidationMessage verifies that
+// pressing Enter at the workflow level with no selection also renders the transient validation
+// message.
+func TestWorkflowBrowser_WorkflowLevel_Enter_WithNoSelection_ShowsValidationMessage(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	enterFolder(s) // open Build folder — no workflow selected yet
+	sendWFKey(s, tea.KeyEnter)
+
+	view := s.View()
+	if !strings.Contains(view, screens.MsgNoWorkflowsSelected) {
+		t.Errorf("view after Enter with no selection at workflow level must contain the validation message;\nwant substring: %q\ngot view:\n%s",
+			screens.MsgNoWorkflowsSelected, view)
+	}
+}
+
+// TestWorkflowBrowser_ValidationMessage_ClearsAfterWorkflowSelected verifies that the
+// transient validation message disappears once the user selects at least one workflow.
+func TestWorkflowBrowser_ValidationMessage_ClearsAfterWorkflowSelected(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	// Trigger the validation message at the workflow level.
+	enterFolder(s)
+	sendWFKey(s, tea.KeyEnter) // Enter with no selection → shows message
+
+	if !strings.Contains(s.View(), screens.MsgNoWorkflowsSelected) {
+		t.Fatal("precondition: validation message must be visible before workflow is selected; test is set up incorrectly")
+	}
+
+	// Selecting a workflow must clear the message.
+	toggleWorkflow(s)
+
+	if strings.Contains(s.View(), screens.MsgNoWorkflowsSelected) {
+		t.Errorf("validation message must clear once a workflow is selected; still present in view:\n%s", s.View())
+	}
+}
+
+// TestWorkflowBrowser_ValidationMessage_ClearsOnNavigation verifies that the transient
+// validation message is cleared when the user navigates into a folder.
+func TestWorkflowBrowser_ValidationMessage_ClearsOnNavigation(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	// Trigger the validation message at the category level.
+	sendWFKey(s, tea.KeyEnter) // Enter with no selection
+
+	if !strings.Contains(s.View(), screens.MsgNoWorkflowsSelected) {
+		t.Fatal("precondition: validation message must be visible after Enter with no selection at category level; test is set up incorrectly")
+	}
+
+	// Navigating into a folder must clear the message.
+	enterFolder(s) // Right
+
+	if strings.Contains(s.View(), screens.MsgNoWorkflowsSelected) {
+		t.Errorf("validation message must clear when user navigates into a folder; still present in view:\n%s", s.View())
+	}
+}
+
+// TestWorkflowBrowser_ValidationMessage_ClearsOnReturnToCategories verifies that the
+// transient validation message is cleared when the user presses Esc (or Left/h) at the
+// workflow level to return to the category list. The design specifies that all navigation-
+// back keys (Left, h, Esc at workflow level) clear the message.
+func TestWorkflowBrowser_ValidationMessage_ClearsOnReturnToCategories(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	// Enter a folder and trigger the validation message at the workflow level.
+	enterFolder(s)
+	sendWFKey(s, tea.KeyEnter) // Enter with no selection → shows message
+
+	if !strings.Contains(s.View(), screens.MsgNoWorkflowsSelected) {
+		t.Fatal("precondition: validation message must be visible at the workflow level before navigating back; test is set up incorrectly")
+	}
+
+	// Return to the category list with Esc at the workflow level.
+	leaveFolder(s) // Esc
+
+	if strings.Contains(s.View(), screens.MsgNoWorkflowsSelected) {
+		t.Errorf("validation message must be cleared when returning from workflow level to category level via Esc; still present in view:\n%s", s.View())
+	}
+}
+
+// TestWorkflowBrowser_ValidationMessage_EscCancelsAtCategoryLevel verifies that Esc at the
+// category level sets Back() even when the validation message is visible. The user must never
+// be trapped on the screen.
+func TestWorkflowBrowser_ValidationMessage_EscCancelsAtCategoryLevel(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	// Trigger the validation message.
+	sendWFKey(s, tea.KeyEnter) // Enter with no selection
+
+	// Esc must still cancel regardless of validation state.
+	sendWFKey(s, tea.KeyEsc)
+
+	if !s.Back() {
+		t.Error("Back() = false after Esc with validation message visible; Esc must always provide a cancel path at the category level")
+	}
+	if s.Done() {
+		t.Error("Done() = true after Esc at category level with validation message; want false")
+	}
+}
+
+// TestWorkflowBrowser_ValidationMessage_EscLeavesWorkflowLevel verifies that Esc at the
+// workflow level returns to the category list — not to Back() — even when the validation
+// message is visible. The user is not trapped.
+func TestWorkflowBrowser_ValidationMessage_EscLeavesWorkflowLevel(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	// Open a folder and trigger the validation message at the workflow level.
+	enterFolder(s)
+	sendWFKey(s, tea.KeyEnter) // Enter with no selection
+
+	if !strings.Contains(s.View(), screens.MsgNoWorkflowsSelected) {
+		t.Fatal("precondition: validation message must be visible at the workflow level before pressing Esc; test is set up incorrectly")
+	}
+
+	// Esc at workflow level must return to the category list, not trigger Back().
+	leaveFolder(s) // Esc
+
+	if s.Back() {
+		t.Error("Back() = true after Esc at workflow level with validation message; Esc at workflow level must return to category list, not cancel the screen")
+	}
+	if s.Done() {
+		t.Error("Done() = true after Esc at workflow level; want false")
+	}
+	view := s.View()
+	if !strings.Contains(view, "Build") {
+		t.Errorf("after Esc at workflow level, view must show the category list; got:\n%s", view)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stage 6 — Help bar accuracy
+// ---------------------------------------------------------------------------
+
+// TestWorkflowBrowser_CategoryLevel_HelpBar_ListsRightAndConfirm verifies that the category-
+// level help bar advertises the Right/l open-folder binding and the Enter confirm binding.
+func TestWorkflowBrowser_CategoryLevel_HelpBar_ListsRightAndConfirm(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	view := collapseWhitespace(s.View())
+
+	// The help bar must mention the Right/l open-folder binding.
+	if !strings.Contains(view, "→/l") {
+		t.Errorf("category-level help bar must mention '→/l open folder'; got:\n%s", s.View())
+	}
+	// It must mention open folder in conjunction with that key.
+	if !strings.Contains(strings.ToLower(view), "open folder") {
+		t.Errorf("category-level help bar must mention 'open folder'; got:\n%s", s.View())
+	}
+	// It must mention enter confirm.
+	if !strings.Contains(strings.ToLower(view), "enter confirm") {
+		t.Errorf("category-level help bar must mention 'enter confirm'; got:\n%s", s.View())
+	}
+}
+
+// TestWorkflowBrowser_CategoryLevel_HelpBar_DoesNotMentionTab verifies that the category-
+// level help bar does not mention Tab, which is no longer a binding on this screen.
+func TestWorkflowBrowser_CategoryLevel_HelpBar_DoesNotMentionTab(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	view := strings.ToLower(s.View())
+
+	if strings.Contains(view, "tab") {
+		t.Errorf("category-level help bar must not mention 'tab' (Tab is not a binding in Stage 6);\ngot view:\n%s", s.View())
+	}
+}
+
+// TestWorkflowBrowser_CategoryLevel_HelpBar_DoesNotSayEnterOpenFolder verifies that the
+// category-level help bar does not describe Enter as "open folder" (Enter now confirms).
+func TestWorkflowBrowser_CategoryLevel_HelpBar_DoesNotSayEnterOpenFolder(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	view := strings.ToLower(collapseWhitespace(s.View()))
+
+	if strings.Contains(view, "enter open folder") {
+		t.Errorf("category-level help bar must not say 'enter open folder'; Enter now confirms, not opens:\n%s", s.View())
+	}
+}
+
+// TestWorkflowBrowser_WorkflowLevel_HelpBar_ListsLeftAndConfirm verifies that the workflow-
+// level help bar advertises the Left/h back-to-folders binding and the Enter confirm binding.
+func TestWorkflowBrowser_WorkflowLevel_HelpBar_ListsLeftAndConfirm(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	enterFolder(s) // open Build folder → workflow level
+
+	view := collapseWhitespace(s.View())
+	lower := strings.ToLower(view)
+
+	// Must mention the Left/h back-to-folders binding.
+	if !strings.Contains(view, "←/h") {
+		t.Errorf("workflow-level help bar must mention '←/h back to folders'; got:\n%s", s.View())
+	}
+	if !strings.Contains(lower, "back to folders") {
+		t.Errorf("workflow-level help bar must mention 'back to folders'; got:\n%s", s.View())
+	}
+	// Must mention enter confirm.
+	if !strings.Contains(lower, "enter confirm") {
+		t.Errorf("workflow-level help bar must mention 'enter confirm'; got:\n%s", s.View())
+	}
+	// Must mention space toggle.
+	if !strings.Contains(lower, "space toggle") {
+		t.Errorf("workflow-level help bar must mention 'space toggle'; got:\n%s", s.View())
+	}
+}
+
+// TestWorkflowBrowser_WorkflowLevel_HelpBar_DoesNotMentionTab verifies that the workflow-
+// level help bar does not advertise Tab.
+func TestWorkflowBrowser_WorkflowLevel_HelpBar_DoesNotMentionTab(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	enterFolder(s) // open Build folder
+
+	view := strings.ToLower(s.View())
+
+	if strings.Contains(view, "tab") {
+		t.Errorf("workflow-level help bar must not mention 'tab';\ngot view:\n%s", s.View())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Two-level navigation (updated for Stage 6: Right opens folder)
+// ---------------------------------------------------------------------------
+
+// TestWorkflowBrowser_Right_OpensCategoryFolder verifies that pressing Right on a category
+// transitions the browser from the category list to the workflow list for that category.
+func TestWorkflowBrowser_Right_OpensCategoryFolder(t *testing.T) {
 	s := newWFBrowser(wfAllCategories)
 	view := s.View()
 	if !strings.Contains(view, "Build") {
 		t.Fatalf("initial view must show the category 'Build'; got:\n%s", view)
 	}
 
-	// Enter the first category (Build).
+	// Open the first category (Build) with Right.
 	enterFolder(s)
 
 	view = s.View()
-	// The workflow list should now show workflows from the Build category.
 	if !strings.Contains(collapseWhitespace(view), "Greenfield TDD Workflow [greenfield-tdd]") {
-		t.Errorf("after entering Build folder, view must list workflows with name and id; got:\n%s", view)
+		t.Errorf("after entering Build folder (Right), view must list workflows with name and id; got:\n%s", view)
 	}
 }
 
 // TestWorkflowBrowser_Esc_FromWorkflowLevel_ReturnsToCategories verifies that pressing Esc
-// while in a workflow list returns the browser to the category list.
+// while in a workflow list returns the browser to the category list without triggering Back().
 func TestWorkflowBrowser_Esc_FromWorkflowLevel_ReturnsToCategories(t *testing.T) {
 	s := newWFBrowser(wfAllCategories)
 	enterFolder(s)
 
 	leaveFolder(s)
 
+	if s.Back() {
+		t.Error("Back() = true after Esc from workflow level; Esc at workflow level must return to the category list, not cancel the whole screen")
+	}
 	view := s.View()
-	// Must show the category list again.
 	if !strings.Contains(view, "Build") {
 		t.Errorf("after Esc from workflow level, category 'Build' must be visible; got:\n%s", view)
 	}
@@ -184,9 +672,9 @@ func TestWorkflowBrowser_SelectionPersists_WhileInsideOtherFolder(t *testing.T) 
 	}
 }
 
-// TestWorkflowBrowser_Deselect_RemovesFromSelectedIDs verifies that toggling an already-selected
-// workflow off removes it from SelectedIDs(). This guards against the bug where selected items
-// can only be added, never removed.
+// TestWorkflowBrowser_Deselect_RemovesFromSelectedIDs verifies that toggling an already-
+// selected workflow off removes it from SelectedIDs(). This guards against the bug where
+// selected items can only be added, never removed.
 func TestWorkflowBrowser_Deselect_RemovesFromSelectedIDs(t *testing.T) {
 	s := newWFBrowser(wfAllCategories)
 
@@ -237,19 +725,20 @@ func TestWorkflowBrowser_CrossFolderMultiSelect(t *testing.T) {
 	}
 }
 
-// TestWorkflowBrowser_Tab_ConfirmsEntireSelection verifies that pressing Tab at the category
-// level signals Done() so the root model can proceed with the collected workflow IDs.
-func TestWorkflowBrowser_Tab_ConfirmsEntireSelection(t *testing.T) {
+// TestWorkflowBrowser_Enter_ConfirmsEntireSelection verifies that pressing Enter at the
+// category level with at least one workflow selected signals Done() so the root model can
+// proceed with the collected workflow IDs.
+func TestWorkflowBrowser_Enter_ConfirmsEntireSelection(t *testing.T) {
 	s := newWFBrowser(wfAllCategories)
 
-	// Select a workflow, return to category level, then confirm.
+	// Select a workflow, return to the category level, then confirm with Enter.
 	enterFolder(s)
 	toggleWorkflow(s)
 	leaveFolder(s)
-	sendWFTab(s)
+	sendWFKey(s, tea.KeyEnter)
 
 	if !s.Done() {
-		t.Error("Done() = false after Tab at category level; want true")
+		t.Error("Done() = false after Enter at category level with a selection; want true")
 	}
 }
 
@@ -267,7 +756,6 @@ func TestWorkflowBrowser_DetailPane_ShowsNameIDDescriptionHint(t *testing.T) {
 
 	view := collapseWhitespace(s.View())
 
-	// The workflow's name and ID should both appear.
 	if !strings.Contains(view, "Greenfield TDD Workflow") {
 		t.Errorf("detail pane does not show workflow name 'Greenfield TDD Workflow'; view:\n%s", s.View())
 	}
@@ -303,13 +791,12 @@ func TestWorkflowBrowser_DetailPane_TracksNavigation(t *testing.T) {
 }
 
 // TestWorkflowBrowser_List_ShowsNameAndID verifies that each workflow list row displays both
-// the human-readable name and the machine id (the picker must show both per AC21.2).
+// the human-readable name and the machine id.
 func TestWorkflowBrowser_List_ShowsNameAndID(t *testing.T) {
 	s := newWFBrowser(wfAllCategories)
 	enterFolder(s)
 
 	view := s.View()
-	// The row should contain both the name and the id in the list column.
 	if !strings.Contains(collapseWhitespace(view), "Quick Fix Workflow [quick-fix]") {
 		t.Errorf("workflow list row must show both name and id; got:\n%s", view)
 	}
@@ -391,9 +878,15 @@ func TestWorkflowBrowser_ErrorState_EscSetsBack(t *testing.T) {
 // idle state.
 func TestWorkflowBrowser_Reset_ClearsDoneAndBack(t *testing.T) {
 	s := newWFBrowser(wfAllCategories)
-	sendWFTab(s)
+
+	// Set up a selection and confirm with Enter (Stage 6 scheme).
+	enterFolder(s)
+	toggleWorkflow(s) // select greenfield-tdd
+	leaveFolder(s)
+	sendWFKey(s, tea.KeyEnter) // Enter at category level with selection → Done()
+
 	if !s.Done() {
-		t.Fatal("precondition: Done() must be true after Tab")
+		t.Fatal("precondition: Done() must be true after Enter with selection at category level")
 	}
 
 	s.Reset()
@@ -442,21 +935,31 @@ func TestWorkflowBrowser_SelectedIDs_CategoryDeclarationOrder(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Tab key ignored inside a workflow folder
+// Tab is inert at both levels (updated for Stage 6: Tab is never a confirm key)
 // ---------------------------------------------------------------------------
 
-// TestWorkflowBrowser_Tab_IgnoredAtWorkflowLevel verifies that pressing Tab while inside a
-// workflow folder does not trigger Done(). Tab is only meaningful at the category level.
-func TestWorkflowBrowser_Tab_IgnoredAtWorkflowLevel(t *testing.T) {
-	s := newWFBrowser(wfAllCategories)
+// TestWorkflowBrowser_Tab_IsInertAtBothLevels verifies that pressing Tab neither confirms
+// nor cancels at either navigation level. Tab is not a binding on this screen.
+func TestWorkflowBrowser_Tab_IsInertAtBothLevels(t *testing.T) {
+	t.Run("category level", func(t *testing.T) {
+		s := newWFBrowser(wfAllCategories)
+		sendWFTab(s)
+		if s.Done() {
+			t.Error("Done() = true after Tab at category level; Tab must not confirm at any level")
+		}
+		if s.Back() {
+			t.Error("Back() = true after Tab at category level; Tab must not cancel")
+		}
+	})
 
-	// Enter a folder then send Tab.
-	enterFolder(s)
-	sendWFTab(s)
-
-	if s.Done() {
-		t.Error("Done() = true after Tab inside a workflow folder; Tab must only confirm at the category level")
-	}
+	t.Run("workflow level", func(t *testing.T) {
+		s := newWFBrowser(wfAllCategories)
+		enterFolder(s) // open Build folder
+		sendWFTab(s)
+		if s.Done() {
+			t.Error("Done() = true after Tab inside a workflow folder; Tab must not confirm at any level")
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -464,8 +967,7 @@ func TestWorkflowBrowser_Tab_IgnoredAtWorkflowLevel(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestWorkflowBrowser_SummaryView_ContainsSelectedID verifies that the selection summary line
-// in View() includes the actual workflow ID, not just the count, so the user can see at a
-// glance which workflows are selected without leaving the screen.
+// in View() includes the actual workflow ID, not just the count.
 func TestWorkflowBrowser_SummaryView_ContainsSelectedID(t *testing.T) {
 	s := newWFBrowser(wfAllCategories)
 
@@ -481,16 +983,17 @@ func TestWorkflowBrowser_SummaryView_ContainsSelectedID(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Keyboard-only operability
+// Keyboard-only operability (updated for Stage 6 keybinding scheme)
 // ---------------------------------------------------------------------------
 
 // TestWorkflowBrowser_KeyboardOnly_FullFlow verifies that a complete workflow selection
-// session is achievable using only keyboard input (no mouse events required).
+// session is achievable using only keyboard input under the Stage 6 scheme:
+// Right to open folder, Space to toggle, Esc to return to categories, Enter to confirm.
 func TestWorkflowBrowser_KeyboardOnly_FullFlow(t *testing.T) {
 	s := newWFBrowser(wfAllCategories)
 
-	// Open Build folder with Enter.
-	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Open Build folder with Right.
+	s.Update(tea.KeyMsg{Type: tea.KeyRight})
 
 	// Toggle the first workflow (greenfield-tdd) with Space.
 	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
@@ -498,11 +1001,11 @@ func TestWorkflowBrowser_KeyboardOnly_FullFlow(t *testing.T) {
 	// Return to categories with Esc.
 	s.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
-	// Confirm with Tab.
-	s.Update(tea.KeyMsg{Type: tea.KeyTab})
+	// Confirm with Enter (Stage 6: Enter at category level with selection confirms).
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if !s.Done() {
-		t.Error("Done() = false after complete keyboard-only flow; want true")
+		t.Error("Done() = false after complete keyboard-only flow (Right→Space→Esc→Enter); want true")
 	}
 	ids := s.SelectedIDs()
 	if !containsStr(ids, "greenfield-tdd") {
@@ -510,21 +1013,45 @@ func TestWorkflowBrowser_KeyboardOnly_FullFlow(t *testing.T) {
 	}
 }
 
-// TestWorkflowBrowser_KeyboardOnly_VimKeys verifies that vim-style navigation (j/k) works.
+// TestWorkflowBrowser_KeyboardOnly_FullFlow_ConfirmFromWorkflowLevel verifies that a
+// complete session can also be confirmed directly from the workflow level without returning
+// to the category list first.
+func TestWorkflowBrowser_KeyboardOnly_FullFlow_ConfirmFromWorkflowLevel(t *testing.T) {
+	s := newWFBrowser(wfAllCategories)
+
+	// Open Build folder with Right.
+	s.Update(tea.KeyMsg{Type: tea.KeyRight})
+
+	// Toggle the first workflow with Space.
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+
+	// Confirm directly from the workflow level with Enter.
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if !s.Done() {
+		t.Error("Done() = false after Right→Space→Enter (confirm from workflow level); want true")
+	}
+	ids := s.SelectedIDs()
+	if !containsStr(ids, "greenfield-tdd") {
+		t.Errorf("SelectedIDs() = %v after confirming from workflow level; want 'greenfield-tdd'", ids)
+	}
+}
+
+// TestWorkflowBrowser_KeyboardOnly_VimKeys verifies that vim-style navigation (j/k) and the
+// vim-style open-folder key (l) work for fully keyboard-driven use.
 func TestWorkflowBrowser_KeyboardOnly_VimKeys(t *testing.T) {
 	s := newWFBrowser(wfAllCategories)
 
 	// Navigate to the second category using 'j'.
 	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 
-	// Enter the second category (Audit).
-	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Open the second category (Audit) with 'l' (vim-style Right).
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 
-	// The view should show Audit workflows. The name "Brownfield PR Audit" is unique to the
-	// Audit folder and short enough to fit on one rendered line without wrapping.
+	// The view should show Audit workflows.
 	view := s.View()
 	if !strings.Contains(view, "Brownfield PR Audit") {
-		t.Errorf("vim 'j' key must move cursor to Audit category; want Audit workflows in view:\n%s", view)
+		t.Errorf("vim 'j'+'l' keys must navigate into Audit category and show its workflows; got:\n%s", view)
 	}
 }
 

@@ -270,6 +270,44 @@ func runUniversalInvariants(t *testing.T, m domain.HarnessModule) {
 		}
 	})
 
+	t.Run("TargetPath_unsupported_scope_returns_sentinel", func(t *testing.T) {
+		// Any scope value other than ScopeProject must return domain.ErrUnsupportedScope.
+		// The app layer is responsible for normalising empty scope to ScopeProject before
+		// reaching path resolution, so any non-project value that does reach here is an error.
+		// Two representative non-project values are tested: a named removed scope and the empty
+		// string, so that an allowlist-by-bad-value implementation cannot satisfy this invariant
+		// by only rejecting known scope names while silently accepting empty scope.
+		nonProjectScopes := []struct {
+			name  string
+			scope domain.Scope
+		}{
+			{"named_removed_scope", domain.Scope("user")},
+			{"empty_scope", domain.Scope("")},
+		}
+		for _, sc := range nonProjectScopes {
+			sc := sc
+			t.Run(sc.name, func(t *testing.T) {
+				req := domain.TargetPathRequest{
+					Kind:  domain.ArtifactAgent,
+					Key:   "test-agent",
+					Scope: sc.scope,
+					GOOS:  "linux",
+				}
+				path, err := m.TargetPath(req)
+				if err == nil {
+					t.Errorf("TargetPath for non-project scope %q returned %q with nil error; want ErrUnsupportedScope", sc.scope, path)
+					return
+				}
+				if !errors.Is(err, domain.ErrUnsupportedScope) {
+					t.Errorf("TargetPath for non-project scope %q returned err=%v; want errors.Is(err, domain.ErrUnsupportedScope)", sc.scope, err)
+				}
+				if path != "" {
+					t.Errorf("TargetPath for non-project scope %q returned non-empty path %q alongside error", sc.scope, path)
+				}
+			})
+		}
+	})
+
 	t.Run("TargetPath_never_empty_on_success", func(t *testing.T) {
 		// A supported artifact kind must never return an empty string with a nil error.
 		req := domain.TargetPathRequest{

@@ -188,6 +188,20 @@ func newInlineSelectOne(q domain.ChoiceQuestion, styles Theme, width, height int
 	return &inlineSelectOne{q: q, styles: styles, width: width, height: height}
 }
 
+// totalOptions returns the number of selectable entries: real options plus the
+// synthetic None entry when the question allows skipping.
+func (s *inlineSelectOne) totalOptions() int {
+	if s.q.AllowSkip {
+		return len(s.q.Options) + 1
+	}
+	return len(s.q.Options)
+}
+
+// isNoneEntry reports whether idx refers to the synthetic skip entry.
+func (s *inlineSelectOne) isNoneEntry(idx int) bool {
+	return s.q.AllowSkip && idx == len(s.q.Options)
+}
+
 func (s *inlineSelectOne) update(msg tea.Msg) bool {
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
@@ -199,11 +213,13 @@ func (s *inlineSelectOne) update(msg tea.Msg) bool {
 			s.cursor--
 		}
 	case "down", "j":
-		if s.cursor < len(s.q.Options)-1 {
+		if s.cursor < s.totalOptions()-1 {
 			s.cursor++
 		}
 	case "enter":
-		if s.cursor >= 0 && s.cursor < len(s.q.Options) {
+		if s.isNoneEntry(s.cursor) {
+			s.done = true
+		} else if s.cursor >= 0 && s.cursor < len(s.q.Options) {
 			if !s.q.Options[s.cursor].Disabled {
 				s.done = true
 			}
@@ -218,6 +234,9 @@ func (s *inlineSelectOne) answer() domain.ChoiceAnswer {
 	if s.back {
 		return domain.ChoiceAnswer{Status: domain.Cancelled}
 	}
+	if s.isNoneEntry(s.cursor) {
+		return domain.ChoiceAnswer{Status: domain.SkippedOne}
+	}
 	if s.cursor >= 0 && s.cursor < len(s.q.Options) {
 		return domain.ChoiceAnswer{Status: domain.Answered, OptionID: s.q.Options[s.cursor].ID}
 	}
@@ -225,6 +244,21 @@ func (s *inlineSelectOne) answer() domain.ChoiceAnswer {
 }
 
 func (s *inlineSelectOne) view() string {
+	const prefixLen = 2    // "  " or "▶ "
+	const descIndent = 4   // "    "
+
+	// Calculate width budgets for option text, accounting for prefix and indent.
+	// Clamp to a minimum of 1 so very narrow widths do not produce zero/negative
+	// values when passed to lipgloss.
+	labelWidth := s.width - prefixLen
+	if labelWidth < 1 {
+		labelWidth = 1
+	}
+	descWidth := s.width - descIndent
+	if descWidth < 1 {
+		descWidth = 1
+	}
+
 	var sb strings.Builder
 	sb.WriteString(s.styles.Style(RoleTitle).Width(s.width).Render(s.q.Title))
 	sb.WriteByte('\n')
@@ -246,14 +280,25 @@ func (s *inlineSelectOne) view() string {
 			if opt.DisabledReason != "" {
 				label = fmt.Sprintf("%s (%s)", label, opt.DisabledReason)
 			}
-			sb.WriteString(prefix + s.styles.Style(RoleMuted).Render(label) + "\n")
+			sb.WriteString(prefix + s.styles.Style(RoleMuted).Width(labelWidth).Render(label) + "\n")
 		} else if i == s.cursor {
-			sb.WriteString(prefix + s.styles.Style(RoleSelected).Render(label) + "\n")
+			sb.WriteString(prefix + s.styles.Style(RoleSelected).Width(labelWidth).Render(label) + "\n")
 		} else {
-			sb.WriteString(prefix + s.styles.Style(RoleBody).Render(label) + "\n")
+			sb.WriteString(prefix + s.styles.Style(RoleBody).Width(labelWidth).Render(label) + "\n")
 		}
 		if opt.Description != "" && i == s.cursor {
-			sb.WriteString("    " + s.styles.Style(RoleMuted).Render(opt.Description) + "\n")
+			sb.WriteString("    " + s.styles.Style(RoleMuted).Width(descWidth).Render(opt.Description) + "\n")
+		}
+	}
+	// Synthetic "None" skip entry — rendered only when the question allows skipping.
+	if s.q.AllowSkip {
+		noneIdx := len(s.q.Options)
+		prefix := "  "
+		if s.cursor == noneIdx {
+			prefix = "▶ "
+			sb.WriteString(prefix + s.styles.Style(RoleSelected).Width(labelWidth).Render("None") + "\n")
+		} else {
+			sb.WriteString(prefix + s.styles.Style(RoleBody).Width(labelWidth).Render("None") + "\n")
 		}
 	}
 	sb.WriteString(s.styles.Style(RoleHelp).Width(s.width).Render("↑/k up  ↓/j down  enter select  esc cancel"))

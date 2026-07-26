@@ -466,6 +466,8 @@ func handleRequest(mod domain.HarnessModule, req wireRequest) wireResponse {
 			code := "internal"
 			if isArtifactUnsupported(err) {
 				code = "unsupported_artifact"
+			} else if isScopeUnsupported(err) {
+				code = "unsupported_scope"
 			}
 			base.Error = &wireRespError{Code: code, Message: err.Error()}
 			return base
@@ -525,6 +527,25 @@ func isArtifactUnsupported(err error) bool {
 	type unwrapper interface{ Unwrap() error }
 	for err != nil {
 		if err == domain.ErrArtifactUnsupported {
+			return true
+		}
+		u, ok := err.(unwrapper)
+		if !ok {
+			break
+		}
+		err = u.Unwrap()
+	}
+	return false
+}
+
+// isScopeUnsupported returns true if err wraps domain.ErrUnsupportedScope.
+func isScopeUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	type unwrapper interface{ Unwrap() error }
+	for err != nil {
+		if err == domain.ErrUnsupportedScope {
 			return true
 		}
 		u, ok := err.(unwrapper)

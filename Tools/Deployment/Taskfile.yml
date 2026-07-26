@@ -34,7 +34,7 @@ tasks:
   # ---------------------------------------------------------------------------
 
   build:windows:
-    desc: Cross-compile for Windows (amd64). Output: dist/mosaic-deploy.exe
+    desc: "Cross-compile for Windows (amd64). Output: dist/mosaic-deploy.exe"
     summary: |
       Produces a statically-linked Windows amd64 binary with no external runtime
       dependency. CGO is disabled so the binary works on any Windows machine
@@ -50,7 +50,7 @@ tasks:
       - "{{.DIST_DIR}}/{{.BINARY_NAME}}.exe"
 
   build:linux:
-    desc: Cross-compile for Linux (amd64). Output: dist/mosaic-deploy-linux-amd64
+    desc: "Cross-compile for Linux (amd64). Output: dist/mosaic-deploy-linux-amd64"
     summary: |
       Produces a statically-linked Linux amd64 binary with no external runtime
       dependency. CGO is disabled and GOOS=linux ensures reproducible output

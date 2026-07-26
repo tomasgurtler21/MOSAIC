@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"mosaic-deploy/internal/domain"
@@ -44,4 +45,47 @@ func tierModelsFromFile(sf selectionsFile) map[domain.Tier]string {
 		m[domain.Tier(k)] = v
 	}
 	return m
+}
+
+// PreAnswersFromSelectionsFile reads the YAML selections file at path and converts it
+// into a PreAnswers value encoding the file's workflow, utility-agent, hook, and
+// tier-model selections in the question-ID / subject scheme that NewInteraction expects.
+//
+//   - Workflow, utility-agent, and hook IDs are comma-joined into a run-level (subject "")
+//     answer for their respective QuestionIDs (QWorkflows, QUtilityAgents, QHooks).
+//   - Tier-model entries produce one QTierModel answer per tier, keyed by the tier name as
+//     the subject.
+//   - Absent or empty sections produce no entry in the returned PreAnswers.Values map.
+//
+// Returns an error wrapping the underlying OS error when path does not exist (callers may
+// use errors.Is to detect fs.ErrNotExist), and a plain error for invalid YAML content.
+func PreAnswersFromSelectionsFile(path string) (PreAnswers, error) {
+	sf, _, err := parseSelectionsFile(path)
+	if err != nil {
+		return PreAnswers{}, err
+	}
+
+	values := make(map[domain.QuestionID]map[string]string)
+
+	if len(sf.Workflows) > 0 {
+		values[domain.QWorkflows] = map[string]string{"": strings.Join(sf.Workflows, ",")}
+	}
+	if len(sf.UtilityAgents) > 0 {
+		values[domain.QUtilityAgents] = map[string]string{"": strings.Join(sf.UtilityAgents, ",")}
+	}
+	if len(sf.Hooks) > 0 {
+		values[domain.QHooks] = map[string]string{"": strings.Join(sf.Hooks, ",")}
+	}
+	if len(sf.TierModels) > 0 {
+		tierMap := make(map[string]string, len(sf.TierModels))
+		for tier, model := range sf.TierModels {
+			tierMap[tier] = model
+		}
+		values[domain.QTierModel] = tierMap
+	}
+
+	if len(values) == 0 {
+		return PreAnswers{}, nil
+	}
+	return PreAnswers{Values: values}, nil
 }

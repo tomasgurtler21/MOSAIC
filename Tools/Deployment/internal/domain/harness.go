@@ -51,13 +51,10 @@ type PathSpec struct {
 	Hooks  ScopedPaths
 }
 
-// ScopedPaths holds path templates relative to the deployment root (project) or with expansion
-// tokens (user). Recognised tokens: "~", "${APPDATA}", "${XDG_CONFIG_HOME}".
-// User is keyed by GOOS; the empty-string key is the fallback for all other platforms.
+// ScopedPaths holds path templates relative to the deployment root (project scope).
 type ScopedPaths struct {
 	Supported bool
 	Project   string
-	User      map[string]string
 }
 
 // FrontmatterSpec declares the field operations a harness applies to every agent frontmatter.

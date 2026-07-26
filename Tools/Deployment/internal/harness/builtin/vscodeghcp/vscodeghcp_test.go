@@ -43,15 +43,11 @@ package vscodeghcp_test
 //   - A ModelSelection with ModelID "Claude Sonnet 4.6" is emitted verbatim as that string.
 //   - A custom ModelID is also emitted verbatim with no reformatting (AC13.3, FR-11).
 //
-//   Platform-dependent user-scope path resolution:
+//   Project-scope path resolution:
 //   - Project-scoped agent path is ".github/agents/<key>.md"
-//   - User-scoped agent path on Windows is "${APPDATA}/Code/User/prompts/<key>.md"
-//   - User-scoped agent path on Linux is "~/.config/Code/User/prompts/<key>.md"
-//   - User-scoped agent path on Darwin (macOS) is "~/.config/Code/User/prompts/<key>.md"
 //   - Project-scoped skill path is ".github/skills/<key>/SKILL.md" (key subdirectory)
-//   - User-scoped skill path on Linux is "~/.copilot/skills/<key>/SKILL.md"
-//   - User-scoped agent for an unknown GOOS falls back to the empty-key template
 //   - Hook artifact paths resolve relative to .claude/hooks/ (reuses Claude Code convention)
+//   - Any non-project scope returns domain.ErrUnsupportedScope (via the shared contracttest universal invariant)
 //
 //   Hook variant reuse:
 //   - The vscode-ghcp hook variant declares reuses: claude-code in hook.yaml.
@@ -838,7 +834,7 @@ func TestModel_DescriptorFormatHintIsDisplayName(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Platform-dependent user-scope path resolution tests (T13.4)
+// Project-scope path resolution tests
 // ---------------------------------------------------------------------------
 
 // TestTargetPath_VSCodeGHCP_AgentProjectScope verifies that an agent deployed to project scope
@@ -860,80 +856,6 @@ func TestTargetPath_VSCodeGHCP_AgentProjectScope(t *testing.T) {
 	}
 }
 
-// TestTargetPath_VSCodeGHCP_AgentUserScope_Windows verifies user-scoped agent path on Windows.
-// VS Code on Windows places user agents at %APPDATA%\Code\User\prompts\ (plan specification).
-func TestTargetPath_VSCodeGHCP_AgentUserScope_Windows(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "test-runner",
-		Scope: domain.ScopeUser,
-		GOOS:  "windows",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "${APPDATA}/Code/User/prompts/test-runner.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_VSCodeGHCP_AgentUserScope_Linux verifies user-scoped agent path on Linux.
-// VS Code on Linux places user agents at ~/.config/Code/User/prompts/ (plan specification).
-func TestTargetPath_VSCodeGHCP_AgentUserScope_Linux(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "test-runner",
-		Scope: domain.ScopeUser,
-		GOOS:  "linux",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.config/Code/User/prompts/test-runner.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_VSCodeGHCP_AgentUserScope_Darwin verifies user-scoped agent path on macOS.
-// VS Code on macOS follows the same convention as Linux: ~/.config/Code/User/prompts/.
-func TestTargetPath_VSCodeGHCP_AgentUserScope_Darwin(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "codebase-research",
-		Scope: domain.ScopeUser,
-		GOOS:  "darwin",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.config/Code/User/prompts/codebase-research.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_VSCodeGHCP_AgentUserScope_UnknownGOOS verifies that an unrecognised platform
-// falls back to the empty-key template rather than returning an error, so deployments on
-// unknown platforms produce a best-effort path.
-func TestTargetPath_VSCodeGHCP_AgentUserScope_UnknownGOOS(t *testing.T) {
-	mod := newModule(t)
-	// plan9 is not a declared GOOS; the descriptor's User map has an empty-key fallback.
-	_, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:  domain.ArtifactAgent,
-		Key:   "test-runner",
-		Scope: domain.ScopeUser,
-		GOOS:  "plan9",
-	})
-	if err != nil {
-		t.Errorf("TargetPath for unknown GOOS returned error %v; should fall back to the empty-key template", err)
-	}
-}
-
 // TestTargetPath_VSCodeGHCP_SkillProjectScope verifies that a skill is deployed under a
 // key-named subdirectory: ".github/skills/<key>/SKILL.md". The key subdirectory is required
 // because all skill entry files are named SKILL.md by convention.
@@ -952,55 +874,6 @@ func TestTargetPath_VSCodeGHCP_SkillProjectScope(t *testing.T) {
 	want := ".github/skills/lean-tdd/SKILL.md"
 	if path != want {
 		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_VSCodeGHCP_SkillUserScope_Linux verifies user-scoped skill path on Linux.
-// The VS Code GHCP QuickReference documents ~/.copilot/skills/ as the personal skill location.
-func TestTargetPath_VSCodeGHCP_SkillUserScope_Linux(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactSkill,
-		Key:      "lean-tdd",
-		FileName: "SKILL.md",
-		Scope:    domain.ScopeUser,
-		GOOS:     "linux",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	want := "~/.copilot/skills/lean-tdd/SKILL.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q", path, want)
-	}
-}
-
-// TestTargetPath_VSCodeGHCP_SkillUserScope_Windows verifies user-scoped skill path on Windows.
-// Unlike user-scoped agent paths (which use %APPDATA%\Code\User\prompts\ on Windows), skills
-// follow the platform-agnostic agentskills.io standard: ~/.copilot/skills/ on all platforms.
-// The QuickReference documents ~/.copilot/skills/ as the personal skill location with no
-// Windows-specific variant — the path uses tilde notation uniformly across operating systems.
-func TestTargetPath_VSCodeGHCP_SkillUserScope_Windows(t *testing.T) {
-	mod := newModule(t)
-	path, err := mod.TargetPath(domain.TargetPathRequest{
-		Kind:     domain.ArtifactSkill,
-		Key:      "lean-tdd",
-		FileName: "SKILL.md",
-		Scope:    domain.ScopeUser,
-		GOOS:     "windows",
-	})
-	if err != nil {
-		t.Fatalf("TargetPath: %v", err)
-	}
-	// Skills use ~/.copilot/skills/ on all platforms (not %APPDATA%-based like agent paths).
-	// The agentskills.io open standard defines a single personal path; VS Code GHCP respects it.
-	want := "~/.copilot/skills/lean-tdd/SKILL.md"
-	if path != want {
-		t.Errorf("TargetPath = %q, want %q\n"+
-			"Decision: skill user-scope paths use ~/.copilot/skills/ on all platforms per\n"+
-			"the agentskills.io open standard (QuickReference Section 11, Personal location).\n"+
-			"This differs from agent user-scope paths which use %%APPDATA%%\\Code\\User\\prompts\\ on Windows.",
-			path, want)
 	}
 }
 
@@ -1514,37 +1387,9 @@ func TestContract_VSCodeGHCP(t *testing.T) {
 				Expected: ".github/agents/test-runner.md",
 			},
 			{
-				Name:     "agent_user_windows",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "windows"},
-				Expected: "${APPDATA}/Code/User/prompts/test-runner.md",
-			},
-			{
-				Name:     "agent_user_linux",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "linux"},
-				Expected: "~/.config/Code/User/prompts/test-runner.md",
-			},
-			{
-				Name:     "agent_user_darwin",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactAgent, Key: "test-runner", Scope: domain.ScopeUser, GOOS: "darwin"},
-				Expected: "~/.config/Code/User/prompts/test-runner.md",
-			},
-			{
 				Name:     "skill_project_linux",
 				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeProject, GOOS: "linux"},
 				Expected: ".github/skills/lean-tdd/SKILL.md",
-			},
-			{
-				Name:     "skill_user_linux",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeUser, GOOS: "linux"},
-				Expected: "~/.copilot/skills/lean-tdd/SKILL.md",
-			},
-			{
-				// skill_user_windows: skills use ~/.copilot/skills/ on all platforms.
-				// Unlike agent paths (which use %APPDATA%\Code\User\prompts\ on Windows),
-				// skill paths follow the agentskills.io open standard uniformly.
-				Name:     "skill_user_windows",
-				Request:  domain.TargetPathRequest{Kind: domain.ArtifactSkill, Key: "lean-tdd", FileName: "SKILL.md", Scope: domain.ScopeUser, GOOS: "windows"},
-				Expected: "~/.copilot/skills/lean-tdd/SKILL.md",
 			},
 			{
 				Name:     "hook_project_linux",

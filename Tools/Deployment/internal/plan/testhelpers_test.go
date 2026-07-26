@@ -323,6 +323,34 @@ func makeManifestEntry(ref domain.ArtifactRef, targetPath, version, contentHash 
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Deployed-state fixture builder (Stage 4)
+// ---------------------------------------------------------------------------
+
+// deployedState returns a DeployedArtifactState value representing a present artifact
+// carrying the given content hash and version stamps read from the deployed file itself.
+// Use this builder instead of constructing the struct literal inline, so tests remain
+// insulated from struct field changes.
+//
+// To express an absent artifact use the zero value: domain.DeployedArtifactState{}.
+//
+// Compose a DeployedState map for plan.Input.DeployedState as:
+//
+//	map[string]domain.DeployedArtifactState{targetPath: deployedState(hash, v, tv, iv)}
+//
+// Pass version, transformVersion, and injectionsVersion as "" when the deployed file
+// carries no stamp for that field. A present file with all three empty represents an
+// unversioned deployed artifact (treated as stale by the classifier per D5).
+func deployedState(contentHash, version, transformVersion, injectionsVersion string) domain.DeployedArtifactState {
+	return domain.DeployedArtifactState{
+		Present:           true,
+		ContentHash:       contentHash,
+		Version:           version,
+		TransformVersion:  transformVersion,
+		InjectionsVersion: injectionsVersion,
+	}
+}
+
 // presentSnapshot returns a Snapshot with StatePresent and the given manifest.
 func presentSnapshot(m domain.Manifest) manifest.Snapshot {
 	return manifest.Snapshot{
@@ -492,4 +520,25 @@ func findGap(gaps []domain.Gap, kind domain.GapKind) (domain.Gap, bool) {
 		}
 	}
 	return domain.Gap{}, false
+}
+
+// findGapForSubject returns the first Gap matching both kind and subject, or a zero Gap and
+// false. Use this in preference to findGap when asserting on a specific agent or tool within
+// a plan that may contain multiple gaps of the same kind.
+func findGapForSubject(gaps []domain.Gap, kind domain.GapKind, subject string) (domain.Gap, bool) {
+	for _, g := range gaps {
+		if g.Kind == kind && g.Subject == subject {
+			return g, true
+		}
+	}
+	return domain.Gap{}, false
+}
+
+// deployedStateWithModel returns a DeployedArtifactState identical to deployedState but with
+// ModelID set to modelID. Use this when a test needs the deployed file to carry an embedded
+// model so the action-aware gap logic can treat it as "model already present on disk".
+func deployedStateWithModel(contentHash, version, transformVersion, injectionsVersion, modelID string) domain.DeployedArtifactState {
+	s := deployedState(contentHash, version, transformVersion, injectionsVersion)
+	s.ModelID = modelID
+	return s
 }

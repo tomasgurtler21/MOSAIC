@@ -60,7 +60,6 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 	var (
 		deployHarness     string
 		deployWorkspace   string
-		deployScope       string
 		deploySelections  string
 		deployOutput      string
 		deployDryRun      bool
@@ -72,23 +71,10 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Parse --scope
-			var scope domain.Scope
-			switch strings.ToLower(deployScope) {
-			case "project", "":
-				scope = domain.ScopeProject
-			case "user":
-				scope = domain.ScopeUser
-			default:
-				fmt.Fprintf(errOut, "invalid --scope value %q; valid values: project, user\n", deployScope)
-				exitCode = ExitUsage
-				return nil
-			}
-
 			req := app.DeployRequest{
 				HarnessID:       deployHarness,
 				WorkspacePath:   deployWorkspace,
-				Scope:           scope,
+				Scope:           domain.ScopeProject,
 				DryRun:          deployDryRun,
 				AutoConfirmPlan: deployAutoConfirm,
 			}
@@ -117,7 +103,6 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 
 	deployCmd.Flags().StringVar(&deployHarness, "harness", "", "Harness ID")
 	deployCmd.Flags().StringVar(&deployWorkspace, "workspace", "", "Workspace path")
-	deployCmd.Flags().StringVar(&deployScope, "scope", "project", "Deployment scope (project|user)")
 	deployCmd.Flags().StringVar(&deploySelections, "selections", "", "Path to selections YAML file")
 	deployCmd.Flags().StringVar(&deployOutput, "output", "", "Output format (json)")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Dry run mode; no files are written")

@@ -6,7 +6,6 @@ package app
 
 import (
 	"context"
-	"errors"
 
 	"mosaic-deploy/internal/deploy"
 	"mosaic-deploy/internal/domain"
@@ -41,10 +40,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		workspace = ws
 	}
 
-	scope := req.Scope
-	if scope == "" {
-		scope = domain.ScopeProject
-	}
+	scope := domain.ScopeProject
 
 	workflowIDs := req.WorkflowIDs
 	if workflowIDs == nil {
@@ -87,11 +83,21 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 
 	snap, _ := s.deps.Manifest.Load(workspace)
 
+	// Enumerate every planned target path and probe the workspace for each one.
+	// plan.Input.DeployedState is the single carrier of presence, content hash, and version
+	// stamps for all planned target paths.
+	plannedPaths, pathErr := plan.EnumerateTargetPaths(set, module, scope, s.deps.GOOS)
+	if pathErr != nil {
+		return domain.RunSummary{}, pathErr
+	}
+	deployedState := probeDeployedState(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil)
+
 	planInput := plan.Input{
 		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeDeployNew,
 		WorkspacePath: workspace, Scope: scope, GOOS: s.deps.GOOS,
 		Manifest: snap, WorkflowIDs: workflowIDs, UtilityAgentIDs: utilityIDs, HookIDs: hookIDs,
-		Models: modelRes.models,
+		Models:        modelRes.models,
+		DeployedState: deployedState,
 	}
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
@@ -124,7 +130,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		return domain.RunSummary{}, rerr
 	}
 	if !req.AutoConfirmPlan && (ans.Status == domain.Cancelled || !ans.Confirm) {
-		return domain.RunSummary{}, errors.New("deployment plan was not confirmed")
+		return domain.RunSummary{}, ErrPlanNotConfirmed
 	}
 
 	agentByKey := make(map[string]domain.Agent, len(set.Agents))

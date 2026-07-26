@@ -1,0 +1,12 @@
+# Invalid descriptor: contains a user: block in the paths section.
+# The descriptor loader must reject this as an unknown field once the User
+# YAML field is removed from the descriptor wire struct.
+schema_version: "1"
+id: "user-paths-harness"
+display_name: "User Paths Harness"
+paths:
+  agents:
+    supported: true
+    project: ".test/agents"
+    user:
+      "": "~/.config/test/agents"

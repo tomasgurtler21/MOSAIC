@@ -102,27 +102,12 @@ paths:
   agents:
     supported: true
     project: ".opencode/agents"
-    user:
-      "darwin": "~/.config/opencode/agents"
-      "linux": "~/.config/opencode/agents"
-      "windows": "${APPDATA}/opencode/agents"
-      "": "~/.config/opencode/agents"
   skills:
     supported: true
     project: ".opencode/skills"
-    user:
-      "darwin": "~/.config/opencode/skills"
-      "linux": "~/.config/opencode/skills"
-      "windows": "${APPDATA}/opencode/skills"
-      "": "~/.config/opencode/skills"
   hooks:
     supported: true
     project: ".opencode/plugins"
-    user:
-      "darwin": "~/.config/opencode/plugins"
-      "linux": "~/.config/opencode/plugins"
-      "windows": "${APPDATA}/opencode/plugins"
-      "": "~/.config/opencode/plugins"
 
 extensions:
   agent: ".md"

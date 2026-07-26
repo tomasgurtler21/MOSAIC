@@ -1,13 +1,19 @@
 package plan_test
 
-// gaps_test.go covers gap surfacing and change explanation records (T16.8, T16.9).
+// gaps_test.go covers gap surfacing and change explanation records.
 //
-// T16.8 — Gap surfacing:
-//   - An agent with no resolved model (absent from Input.Models or OriginUnresolved) produces
-//     a GapNoModel gap in Plan.Gaps, with Subject equal to the agent key
+// Gap surfacing:
+//   - An agent with no resolved model produces a GapNoModel gap when its action requires a
+//     file write (ActionCreate, or ActionUpdate/ActionConflict without an embedded deployed
+//     model). See action_aware_gaps_test.go for the full action × model matrix.
+//   - An ActionUnchanged agent never produces a GapNoModel gap — no rewrite occurs.
 //   - A generic tool that the harness module reports as ToolUnmapped produces GapUnmappedTool
 //   - A hook registration step whose target already exists produces GapHookRegistration
 //   - Every unresolved gap appears explicitly in Plan.Gaps; none is silently defaulted
+//
+// The tests below exercise the ActionCreate scenario for GapNoModel (the simplest case where
+// a file will definitely be written and must have a model). The multi-action matrix is covered
+// in action_aware_gaps_test.go.
 //
 // T16.9 — Change explanation records:
 //   - Every ActionUpdate item has a non-empty Reason string
@@ -32,9 +38,9 @@ import (
 // T16.8 — Gap surfacing: missing model
 // ---------------------------------------------------------------------------
 
-// TestBuild_AgentWithNoModel_ProducesGapNoModel verifies that when an agent in the artifact
-// set has no entry in Input.Models, the plan surfaces a GapNoModel gap with Subject equal
-// to the agent key. The user must be told which agent needs a model decision.
+// TestBuild_AgentWithNoModel_ProducesGapNoModel verifies that when an agent has no deployed
+// file (ActionCreate) and no entry in Input.Models, the plan surfaces a GapNoModel gap with
+// Subject equal to the agent key. The new file that will be written must have a model.
 func TestBuild_AgentWithNoModel_ProducesGapNoModel(t *testing.T) {
 	agent := makeAgent("test-agent", "1.0")
 	wf := makeWorkflow("test-wf", agent.Key)
@@ -72,9 +78,10 @@ func TestBuild_AgentWithNoModel_ProducesGapNoModel(t *testing.T) {
 	}
 }
 
-// TestBuild_AgentWithUnresolvedModel_ProducesGapNoModel verifies that an agent whose
-// ModelSelection has OriginUnresolved (the user skipped model selection) also produces
-// a GapNoModel gap. An unresolved model and a missing model are both gaps.
+// TestBuild_AgentWithUnresolvedModel_ProducesGapNoModel verifies that an agent with no
+// deployed file (ActionCreate) whose ModelSelection has OriginUnresolved (the user skipped
+// model selection) also produces a GapNoModel gap. An unresolved model and a missing model
+// are both gaps when a file write will occur.
 func TestBuild_AgentWithUnresolvedModel_ProducesGapNoModel(t *testing.T) {
 	agent := makeAgent("test-agent", "1.0")
 	wf := makeWorkflow("test-wf", agent.Key)
@@ -346,7 +353,10 @@ func TestBuild_ActionUpdate_ReasonIsNonEmpty(t *testing.T) {
 			agent.Key:    {ModelID: "test-model", Origin: domain.OriginHarnessList},
 			"orchestrator": {ModelID: "test-model", Origin: domain.OriginHarnessList},
 		},
-		DeployedHashes: map[string]string{agentTarget: hash},
+		// Deployed file present with matching hash; version "1.0" in file vs "1.1" in source → update.
+		DeployedState: map[string]domain.DeployedArtifactState{
+			agentTarget: deployedState(hash, "1.0", "1.0", "1.0"),
+		},
 	}
 
 	p, err := plan.New().Build(context.Background(), input)
@@ -400,7 +410,10 @@ func TestBuild_ActionUpdate_StaleFieldsMatchVersionDeltas(t *testing.T) {
 			agent.Key:    {ModelID: "test-model", Origin: domain.OriginHarnessList},
 			"orchestrator": {ModelID: "test-model", Origin: domain.OriginHarnessList},
 		},
-		DeployedHashes: map[string]string{agentTarget: hash},
+		// Deployed file has version "1.0" in the file; source is "1.1" → one version delta.
+		DeployedState: map[string]domain.DeployedArtifactState{
+			agentTarget: deployedState(hash, "1.0", "1.0", "1.0"),
+		},
 	}
 
 	p, err := plan.New().Build(context.Background(), input)
@@ -416,7 +429,7 @@ func TestBuild_ActionUpdate_StaleFieldsMatchVersionDeltas(t *testing.T) {
 	if len(item.Stale) == 0 {
 		t.Fatal("ActionUpdate item has empty Stale slice; expected at least one version delta")
 	}
-	// The only mismatch is "version": deployed="1.0", source="1.1".
+	// The only mismatch is "version": deployed file has "1.0", source is "1.1".
 	found := false
 	for _, delta := range item.Stale {
 		if delta.Field == "version" && delta.Deployed == "1.0" && delta.Source == "1.1" {
@@ -504,7 +517,10 @@ func TestBuild_ActionConflict_ReasonIsNonEmpty(t *testing.T) {
 			agent.Key:    {ModelID: "test-model", Origin: domain.OriginHarnessList},
 			"orchestrator": {ModelID: "test-model", Origin: domain.OriginHarnessList},
 		},
-		DeployedHashes: map[string]string{agentTarget: "sha256:locally-modified"},
+		// Deployed file has a hash that differs from the manifest's recorded hash → conflict.
+		DeployedState: map[string]domain.DeployedArtifactState{
+			agentTarget: deployedState("sha256:locally-modified", "1.0", "1.0", "1.0"),
+		},
 	}
 
 	p, err := plan.New().Build(context.Background(), input)
@@ -556,7 +572,10 @@ func TestBuild_ActionUnchanged_StaleIsEmpty(t *testing.T) {
 			agent.Key:    {ModelID: "test-model", Origin: domain.OriginHarnessList},
 			"orchestrator": {ModelID: "test-model", Origin: domain.OriginHarnessList},
 		},
-		DeployedHashes: map[string]string{agentTarget: hash},
+		// Deployed file present with matching hash and all version stamps matching source.
+		DeployedState: map[string]domain.DeployedArtifactState{
+			agentTarget: deployedState(hash, "1.0", "1.0", "1.0"),
+		},
 	}
 
 	p, err := plan.New().Build(context.Background(), input)
@@ -608,7 +627,10 @@ func TestBuild_ActionUnchanged_ConflictIsNil(t *testing.T) {
 			agent.Key:    {ModelID: "test-model", Origin: domain.OriginHarnessList},
 			"orchestrator": {ModelID: "test-model", Origin: domain.OriginHarnessList},
 		},
-		DeployedHashes: map[string]string{agentTarget: hash},
+		// Deployed file present with matching hash and version stamps → unchanged (no conflict).
+		DeployedState: map[string]domain.DeployedArtifactState{
+			agentTarget: deployedState(hash, "1.0", "1.0", "1.0"),
+		},
 	}
 
 	p, err := plan.New().Build(context.Background(), input)
@@ -667,7 +689,10 @@ func TestBuild_LoggingConsumer_ActionRecordFields(t *testing.T) {
 			agent.Key:    {ModelID: "test-model", Origin: domain.OriginHarnessList},
 			"orchestrator": {ModelID: "test-model", Origin: domain.OriginHarnessList},
 		},
-		DeployedHashes: map[string]string{agentTarget: hash},
+		// Deployed file has version "1.0"; source is "1.1" → version delta fires.
+		DeployedState: map[string]domain.DeployedArtifactState{
+			agentTarget: deployedState(hash, "1.0", "1.0", "1.0"),
+		},
 	}
 
 	p, err := plan.New().Build(context.Background(), input)

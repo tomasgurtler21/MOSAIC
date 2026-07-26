@@ -295,12 +295,15 @@ func ApplyFrontmatterSpec(d *domain.HarnessDescriptor, req domain.FrontmatterReq
 	}, nil
 }
 
-// ResolveTargetPath expands the deployment path template for a given artifact kind and scope.
-// For ScopeProject it returns a path relative to the deployment root (e.g. ".claude/agents/key.md").
-// For ScopeUser it returns the path with expansion tokens ("~", "${APPDATA}", "${XDG_CONFIG_HOME}")
-// left verbatim — expansion of environment tokens is the caller's responsibility.
-// Returns domain.ErrArtifactUnsupported when the descriptor has no path for the requested kind.
+// ResolveTargetPath expands the deployment path template for a given artifact kind.
+// Returns a path relative to the deployment root using forward slashes.
+// Returns domain.ErrArtifactUnsupported when the descriptor declares no path for the kind.
+// Returns domain.ErrUnsupportedScope when req.Scope is not domain.ScopeProject.
 func ResolveTargetPath(d *domain.HarnessDescriptor, req domain.TargetPathRequest) (string, error) {
+	if req.Scope != domain.ScopeProject {
+		return "", fmt.Errorf("%w: scope %q is not supported; only %q is accepted", domain.ErrUnsupportedScope, req.Scope, domain.ScopeProject)
+	}
+
 	sp, err := scopedPathsForKind(d, req.Kind)
 	if err != nil {
 		return "", err
@@ -315,35 +318,15 @@ func ResolveTargetPath(d *domain.HarnessDescriptor, req domain.TargetPathRequest
 		filename = req.Key + ext
 	}
 
-	switch req.Scope {
-	case domain.ScopeProject:
-		if sp.Project == "" {
-			return "", fmt.Errorf("%w: no project path declared for %s", domain.ErrArtifactUnsupported, req.Kind)
-		}
-		if req.Kind == domain.ArtifactSkill {
-			// Skills share the filename "SKILL.md" across all skill bundles. Deploy each
-			// under its own key subdirectory to prevent filename collisions.
-			return path.Join(sp.Project, req.Key, filename), nil
-		}
-		return path.Join(sp.Project, filename), nil
-
-	case domain.ScopeUser:
-		template, ok := sp.User[req.GOOS]
-		if !ok {
-			// Fall back to the empty-string key, which represents all other platforms.
-			template, ok = sp.User[""]
-			if !ok {
-				return "", fmt.Errorf("%w: no user path declared for %s on %s", domain.ErrArtifactUnsupported, req.Kind, req.GOOS)
-			}
-		}
-		if req.Kind == domain.ArtifactSkill {
-			return path.Join(template, req.Key, filename), nil
-		}
-		return path.Join(template, filename), nil
-
-	default:
-		return "", fmt.Errorf("unknown scope %q", req.Scope)
+	if sp.Project == "" {
+		return "", fmt.Errorf("%w: no project path declared for %s", domain.ErrArtifactUnsupported, req.Kind)
 	}
+	if req.Kind == domain.ArtifactSkill {
+		// Skills share the filename "SKILL.md" across all skill bundles. Deploy each
+		// under its own key subdirectory to prevent filename collisions.
+		return path.Join(sp.Project, req.Key, filename), nil
+	}
+	return path.Join(sp.Project, filename), nil
 }
 
 // scopedPathsForKind returns the ScopedPaths for the requested artifact kind, or

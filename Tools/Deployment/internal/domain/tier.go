@@ -20,6 +20,7 @@ const (
 	OriginTierMapping ModelOrigin = "tier-mapping"
 	OriginHarnessList ModelOrigin = "harness-list"
 	OriginCustom      ModelOrigin = "custom"
+	OriginDeployed    ModelOrigin = "deployed"   // read back from an already-deployed file
 	OriginUnresolved  ModelOrigin = "unresolved" // skipped or never offered
 )
 

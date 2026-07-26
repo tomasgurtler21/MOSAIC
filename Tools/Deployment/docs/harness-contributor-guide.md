@@ -259,7 +259,7 @@ Before submitting a harness, verify:
 
 - [ ] Descriptor YAML is valid (`mosaic-deploy --harness myharness.yaml validate`)
 - [ ] All generic tool mappings are declared
-- [ ] Deployment paths are tested for `ScopeProject` and `ScopeUser` on the target platforms
+- [ ] Deployment paths are tested for `ScopeProject` on the target platforms; any other scope must return `ErrUnsupportedScope`
 - [ ] `injection("HarnessConstraints")` returns your constraints (or `ok=false` if none)
 - [ ] `hook_plan` returns `Supported=false` with a non-empty `Reason` if hooks are not supported
 - [ ] `TargetPath` for an unknown artifact kind returns `ErrArtifactUnsupported` (code `"unsupported_artifact"`)

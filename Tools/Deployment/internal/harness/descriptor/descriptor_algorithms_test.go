@@ -14,8 +14,8 @@ package descriptor_test
 //   ResolveTargetPath:
 //   - ScopeProject returns a path that contains the descriptor's project template.
 //   - ScopeProject path ends with the expected artifact file name and extension.
-//   - ScopeUser returns a path that contains the user template for the given GOOS.
-//   - ScopeUser with an unknown GOOS falls back to the empty-key user template.
+//   - Any non-project scope returns domain.ErrUnsupportedScope.
+//   - An empty scope (unreached by normalised callers) also returns domain.ErrUnsupportedScope.
 //   - An artifact kind with Supported == false returns domain.ErrArtifactUnsupported.
 //   - ResolveTargetPath never returns an empty string with a nil error.
 
@@ -220,55 +220,55 @@ func TestResolveTargetPath_ProjectScope_EndsWithArtifactFilename(t *testing.T) {
 	}
 }
 
-func TestResolveTargetPath_UserScope_ContainsUserTemplate(t *testing.T) {
-	// ScopeUser must resolve using the user path entry for the given GOOS.
-	// For GOOS "linux" (not in the map, falls back to "" key), the template is
-	// "~/.config/test/agents".
+func TestResolveTargetPath_NonProjectScope_ReturnsErrUnsupportedScope(t *testing.T) {
+	// Any scope value other than ScopeProject must return domain.ErrUnsupportedScope.
+	// MOSAIC deploys into the project workspace only; user-scope is not supported.
+	// Uses domain.Scope("user") as a representative non-project scope value, expressed as
+	// a raw string cast so this test compiles regardless of whether the ScopeUser constant
+	// continues to exist.
 	d := resolveAlgorithmDescriptor(t)
 	req := domain.TargetPathRequest{
 		Kind:  domain.ArtifactAgent,
 		Key:   "test-runner",
-		Scope: domain.ScopeUser,
+		Scope: domain.Scope("user"),
 		GOOS:  "linux",
 	}
 
 	path, err := descriptor.ResolveTargetPath(d, req)
 
-	if err != nil {
-		t.Fatalf("ResolveTargetPath (user scope, linux): %v", err)
+	if err == nil {
+		t.Fatalf("ResolveTargetPath for non-project scope returned %q with nil error; want domain.ErrUnsupportedScope", path)
 	}
-	if path == "" {
-		t.Fatal("ResolveTargetPath must never return an empty path with a nil error")
+	if !errors.Is(err, domain.ErrUnsupportedScope) {
+		t.Errorf("ResolveTargetPath for non-project scope: err=%v; want errors.Is(err, domain.ErrUnsupportedScope)", err)
 	}
-	// The fallback user template for linux is "~/.config/test/agents".
-	if !strings.Contains(path, ".config/test/agents") {
-		t.Errorf("user-scope path for GOOS=linux should contain %q; got %q", ".config/test/agents", path)
+	if path != "" {
+		t.Errorf("ResolveTargetPath for non-project scope must return empty path alongside error; got %q", path)
 	}
 }
 
-func TestResolveTargetPath_UserScope_WindowsUsesWindowsTemplate(t *testing.T) {
-	// For GOOS "windows", the descriptor declares "${APPDATA}/Test/agents".
-	// The path must contain the windows-specific template text (or its expansion).
+func TestResolveTargetPath_EmptyScope_ReturnsErrUnsupportedScope(t *testing.T) {
+	// An empty scope that has not been normalised by the app layer must return
+	// domain.ErrUnsupportedScope. Normalising empty → ScopeProject is the app layer's
+	// responsibility; path resolution treats every non-project value as unsupported.
 	d := resolveAlgorithmDescriptor(t)
 	req := domain.TargetPathRequest{
 		Kind:  domain.ArtifactAgent,
 		Key:   "test-runner",
-		Scope: domain.ScopeUser,
-		GOOS:  "windows",
+		Scope: domain.Scope(""),
+		GOOS:  "linux",
 	}
 
 	path, err := descriptor.ResolveTargetPath(d, req)
 
-	if err != nil {
-		t.Fatalf("ResolveTargetPath (user scope, windows): %v", err)
+	if err == nil {
+		t.Fatalf("ResolveTargetPath for empty scope returned %q with nil error; want domain.ErrUnsupportedScope", path)
 	}
-	if path == "" {
-		t.Fatal("ResolveTargetPath must never return an empty path with a nil error")
+	if !errors.Is(err, domain.ErrUnsupportedScope) {
+		t.Errorf("ResolveTargetPath for empty scope: err=%v; want errors.Is(err, domain.ErrUnsupportedScope)", err)
 	}
-	// The windows user template is "${APPDATA}/Test/agents". The path must reference it
-	// (either as the literal token or expanded). Either way it should contain "Test/agents".
-	if !strings.Contains(path, "Test/agents") {
-		t.Errorf("user-scope path for GOOS=windows should contain %q; got %q", "Test/agents", path)
+	if path != "" {
+		t.Errorf("ResolveTargetPath for empty scope must return empty path alongside error; got %q", path)
 	}
 }
 

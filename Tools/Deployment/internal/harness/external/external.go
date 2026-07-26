@@ -701,6 +701,8 @@ func mapWireError(e *wireRespError) error {
 	switch e.Code {
 	case "unsupported_artifact":
 		return fmt.Errorf("%w: %s", domain.ErrArtifactUnsupported, e.Message)
+	case "unsupported_scope":
+		return fmt.Errorf("%w: %s", domain.ErrUnsupportedScope, e.Message)
 	default:
 		return fmt.Errorf("external harness error [%s]: %s", e.Code, e.Message)
 	}

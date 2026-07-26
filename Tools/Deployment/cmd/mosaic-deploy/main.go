@@ -1,8 +1,10 @@
 // Command mosaic-deploy is the entry point for the MOSAIC deployment tool.
 //
 // When a subcommand is present in the arguments (deploy or update), the CLI adapter handles
-// the invocation non-interactively. When no subcommand is present and a terminal is attached,
-// the TUI frontend would be invoked (TUI wiring is a later stage).
+// the invocation non-interactively. When no subcommand is present and a terminal is attached
+// to both stdin and stdout, the TUI frontend is launched instead. This is also what happens
+// when the binary is double-clicked from Explorer: Windows attaches a fresh console with a
+// real stdin/stdout, so isatty is true and the TUI takes over.
 //
 // Dependency construction (catalog, registry, manifest, config, logging, todo) is done here
 // once, before dispatching to a frontend. Neither the CLI nor TUI packages construct their
@@ -16,6 +18,8 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/mattn/go-isatty"
+
 	"mosaic-deploy/internal/app"
 	"mosaic-deploy/internal/catalog"
 	"mosaic-deploy/internal/cli"
@@ -26,6 +30,7 @@ import (
 	"mosaic-deploy/internal/manifest"
 	"mosaic-deploy/internal/plan"
 	"mosaic-deploy/internal/todo"
+	"mosaic-deploy/internal/tui"
 
 	// Import built-in harnesses so their init() functions run and register
 	// themselves with the package-level registry before Discover is called.
@@ -35,10 +40,19 @@ import (
 	_ "mosaic-deploy/internal/harness/builtin/vscodeghcp"
 )
 
+// wantsTUI reports whether mosaic-deploy should launch the interactive TUI: no subcommand
+// was given, and both stdin and stdout are attached to a real terminal (not a pipe/redirect).
+func wantsTUI(args []string) bool {
+	if len(args) != 0 {
+		return false
+	}
+	return isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
+}
+
 func main() {
 	args := os.Args[1:]
 
-	if len(args) == 0 {
+	if len(args) == 0 && !wantsTUI(args) {
 		fmt.Fprintln(os.Stderr, "usage: mosaic-deploy <deploy|update> [flags]")
 		os.Exit(cli.ExitUsage)
 	}
@@ -100,22 +114,37 @@ func main() {
 	// both sinks write to the same checklist.
 	todoCollector := todo.NewCollector()
 	manifestStore := manifest.NewStore()
-	interaction := cli.NewInteraction(cli.PreAnswers{}, todoCollector, os.Stdout)
 
+	// The Interaction port differs by frontend: the TUI needs a ProgramRef so the
+	// service's blocking calls can round-trip through the Bubble Tea program; the
+	// CLI needs the non-interactive, pre-answers-only implementation. It is set
+	// below, per branch, before app.New(deps) is called.
 	deps := app.Deps{
-		Catalog:     cat,
-		Registry:    reg,
-		Planner:     plan.New(),
-		Executor:    deploy.NewExecutor(manifestStore, logger, todoCollector),
-		Manifest:    manifestStore,
-		ToolConfig:  toolConfigStore,
-		UserConfig:  config.NewUserConfigStore(mosaicRoot),
-		Logger:      logger,
-		Todo:        todoCollector,
-		Interaction: interaction,
-		MosaicRoot:  mosaicRoot,
-		GOOS:        runtime.GOOS,
+		Catalog:    cat,
+		Registry:   reg,
+		Planner:    plan.New(),
+		Executor:   deploy.NewExecutor(manifestStore, logger, todoCollector),
+		Manifest:   manifestStore,
+		ToolConfig: toolConfigStore,
+		UserConfig: config.NewUserConfigStore(mosaicRoot),
+		Logger:     logger,
+		Todo:       todoCollector,
+		MosaicRoot: mosaicRoot,
+		GOOS:       runtime.GOOS,
 	}
+
+	if wantsTUI(args) {
+		ref := tui.NewInteraction()
+		deps.Interaction = ref
+		if err := tui.Run(context.Background(), app.New(deps), tui.Options{Interaction: ref}); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(cli.ExitFailure)
+		}
+		os.Exit(cli.ExitSuccess)
+	}
+
+	preAnswers := buildPreAnswers(args)
+	deps.Interaction = cli.NewInteraction(preAnswers, todoCollector, os.Stdout)
 
 	// Step 8: Dispatch to the CLI adapter with a fully-wired service. cli.Run
 	// handles all subcommand routing and output formatting; main.go is purely
@@ -145,4 +174,33 @@ func scanGlobalFlags(args []string) (mosaicRoot string, allowExternal bool) {
 		}
 	}
 	return
+}
+
+// buildPreAnswers pre-scans args for --selections and, when present, parses the file
+// into a PreAnswers value for the non-interactive Interaction. The scan follows the
+// same --flag value / --flag=value form as scanGlobalFlags. When the flag is absent,
+// or when the file cannot be read or parsed, an empty PreAnswers is returned so that
+// cobra's own flag validation and exit-code logic remain the authoritative handler for
+// bad --selections values.
+func buildPreAnswers(args []string) cli.PreAnswers {
+	var selectionsPath string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--selections" && i+1 < len(args):
+			selectionsPath = args[i+1]
+			i++
+		case strings.HasPrefix(arg, "--selections="):
+			selectionsPath = strings.TrimPrefix(arg, "--selections=")
+		}
+	}
+	if selectionsPath == "" {
+		return cli.PreAnswers{}
+	}
+	pa, err := cli.PreAnswersFromSelectionsFile(selectionsPath)
+	if err != nil {
+		// Return empty so cobra handles the error at flag-parse time with the correct exit code.
+		return cli.PreAnswers{}
+	}
+	return pa
 }
