@@ -82,7 +82,7 @@ Event-specific fields are declared as named, typed fields, not an untyped free-f
 | `run_id` | string | Required | Overrides the envelope's optional status — a run event must identify its run. |
 | `cwd` | string | Optional | Working directory the run started in. |
 | `model` | string | Optional | Orchestrator model identifier. |
-| `adapter_version` | string | Optional | Version of the hook bundle that emitted this run's logs. There is no single "MOSAIC version" to report — agents, skills, hooks, and workflows are each versioned independently — so this names the one component that's actually meaningful here: the adapter itself. Sourced by embedding the hook bundle's `version` (from its manifest) into the deployed adapter script at deploy time, the same mechanism already used to stamp agent files with their own version — a literal baked in at deploy, not a runtime lookup. |
+| `adapter_version` | string | Optional | Version of the hook bundle that emitted this run's logs. There is no single "MOSAIC version" to report — agents, skills, hooks, and workflows are each versioned independently — so this names the one component that's actually meaningful here: the adapter itself. Sourced at runtime by reading the `version` field out of the hook bundle's own `hook.yaml`, which is deployed alongside the adapter scripts as an ordinary bundle file (no deploy-time content substitution, unlike the mechanism used to stamp agent files with their own version). This keeps the reported value permanently in sync with `hook.yaml` without requiring any change to the deployment tool. |
 
 **`run_end`**
 

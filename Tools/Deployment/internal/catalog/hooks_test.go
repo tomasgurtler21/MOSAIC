@@ -3,7 +3,7 @@ package catalog_test
 // Tests for hook bundle enumeration (T7.4) and integrity validation (T7.5).
 //
 // Hook bundles live under Agents/Generic/Hooks/{bundle-id}/ and are described by a
-// hook.yaml manifest. The repository currently contains one bundle: subagent-logger.
+// hook.yaml manifest. The repository currently contains one bundle: mosaic-logger.
 //
 // T7.4 covers:
 //   - Bundle id, version, description, and placeholder flag
@@ -17,7 +17,7 @@ package catalog_test
 //   - Hook bundle integrity: if hook.yaml carries a content_hash field that does not
 //     match the computed hash of all listed variant files, the catalog reports an Issue
 //     with code "hook-hash-mismatch".
-//   - The real subagent-logger bundle (which has no content_hash field) produces no
+//   - The real mosaic-logger bundle (which has no content_hash field) produces no
 //     hash-mismatch issue — the absence of a stored hash means no check is performed.
 
 import (
@@ -29,7 +29,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// T7.4 — Bundle enumeration: real subagent-logger bundle
+// T7.4 — Bundle enumeration: real mosaic-logger bundle
 // ---------------------------------------------------------------------------
 
 // TestHooks_AtLeastOneBundlePresent verifies that the catalog enumerates at least one
@@ -38,75 +38,76 @@ func TestHooks_AtLeastOneBundlePresent(t *testing.T) {
 	cat := loadRealCatalog(t)
 	hooks := cat.Hooks()
 	if len(hooks) == 0 {
-		t.Fatal("Hooks() returned an empty list; expected at least the subagent-logger bundle")
+		t.Fatal("Hooks() returned an empty list; expected at least the mosaic-logger bundle")
 	}
 }
 
-// TestHooks_SubagentLogger_IsPresent verifies that the subagent-logger bundle is found.
-func TestHooks_SubagentLogger_IsPresent(t *testing.T) {
+// TestHooks_MosaicLogger_IsPresent verifies that the mosaic-logger bundle is found.
+func TestHooks_MosaicLogger_IsPresent(t *testing.T) {
 	cat := loadRealCatalog(t)
-	_, ok := cat.Hook("subagent-logger")
+	_, ok := cat.Hook("mosaic-logger")
 	if !ok {
-		t.Fatal("Hook(\"subagent-logger\"): returned not-found; expected this bundle to be present")
+		t.Fatal("Hook(\"mosaic-logger\"): returned not-found; expected this bundle to be present")
 	}
 }
 
-// TestHook_SubagentLogger_Key verifies the subagent-logger bundle's key matches its id.
-func TestHook_SubagentLogger_Key(t *testing.T) {
+// TestHook_MosaicLogger_Key verifies the mosaic-logger bundle's key matches its id.
+func TestHook_MosaicLogger_Key(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, ok := cat.Hook("subagent-logger")
+	h, ok := cat.Hook("mosaic-logger")
 	if !ok {
-		t.Fatal("Hook(\"subagent-logger\"): not found")
+		t.Fatal("Hook(\"mosaic-logger\"): not found")
 	}
-	if h.Key != "subagent-logger" {
-		t.Errorf("subagent-logger Key = %q, want %q", h.Key, "subagent-logger")
+	if h.Key != "mosaic-logger" {
+		t.Errorf("mosaic-logger Key = %q, want %q", h.Key, "mosaic-logger")
 	}
 }
 
-// TestHook_SubagentLogger_Version_NonEmpty verifies that the version field is populated.
-func TestHook_SubagentLogger_Version_NonEmpty(t *testing.T) {
+// TestHook_MosaicLogger_Version_NonEmpty verifies that the version field is populated.
+func TestHook_MosaicLogger_Version_NonEmpty(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 	if h.Version == "" {
-		t.Error("subagent-logger Version is empty; expected non-empty version from hook.yaml")
+		t.Error("mosaic-logger Version is empty; expected non-empty version from hook.yaml")
 	}
 }
 
-// TestHook_SubagentLogger_Description_NonEmpty verifies that the description field is populated.
-func TestHook_SubagentLogger_Description_NonEmpty(t *testing.T) {
+// TestHook_MosaicLogger_Description_NonEmpty verifies that the description field is populated.
+func TestHook_MosaicLogger_Description_NonEmpty(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 	if h.Description == "" {
-		t.Error("subagent-logger Description is empty; expected non-empty description from hook.yaml")
+		t.Error("mosaic-logger Description is empty; expected non-empty description from hook.yaml")
 	}
 }
 
-// TestHook_SubagentLogger_Placeholder_IsTrue verifies that the placeholder flag is set
-// for the subagent-logger bundle, which carries placeholder variant content.
-func TestHook_SubagentLogger_Placeholder_IsTrue(t *testing.T) {
+// TestHook_MosaicLogger_Placeholder_IsFalse verifies that the placeholder flag is not set
+// for the mosaic-logger bundle. The claude-code variant is fully authored; the placeholder
+// key is absent from hook.yaml so the Go zero value (false) applies.
+func TestHook_MosaicLogger_Placeholder_IsFalse(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
-	if !h.Placeholder {
-		t.Error("subagent-logger Placeholder = false; expected true (hook.yaml declares placeholder: true)")
+	h, _ := cat.Hook("mosaic-logger")
+	if h.Placeholder {
+		t.Error("mosaic-logger Placeholder = true; expected false (hook.yaml omits the placeholder key)")
 	}
 }
 
-// TestHook_SubagentLogger_SourceDir_IsAbsolute verifies that the bundle's SourceDir is
+// TestHook_MosaicLogger_SourceDir_IsAbsolute verifies that the bundle's SourceDir is
 // an absolute path.
-func TestHook_SubagentLogger_SourceDir_IsAbsolute(t *testing.T) {
+func TestHook_MosaicLogger_SourceDir_IsAbsolute(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 	if !filepath.IsAbs(h.SourceDir) {
-		t.Errorf("subagent-logger SourceDir is not absolute: %q", h.SourceDir)
+		t.Errorf("mosaic-logger SourceDir is not absolute: %q", h.SourceDir)
 	}
 }
 
-// TestHook_SubagentLogger_SourceDir_Exists verifies that the SourceDir exists on disk.
-func TestHook_SubagentLogger_SourceDir_Exists(t *testing.T) {
+// TestHook_MosaicLogger_SourceDir_Exists verifies that the SourceDir exists on disk.
+func TestHook_MosaicLogger_SourceDir_Exists(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 	if _, err := os.Stat(h.SourceDir); os.IsNotExist(err) {
-		t.Errorf("subagent-logger SourceDir %q does not exist on disk", h.SourceDir)
+		t.Errorf("mosaic-logger SourceDir %q does not exist on disk", h.SourceDir)
 	}
 }
 
@@ -114,13 +115,13 @@ func TestHook_SubagentLogger_SourceDir_Exists(t *testing.T) {
 // T7.4 — Variant support: supported vs unsupported
 // ---------------------------------------------------------------------------
 
-// TestHook_SubagentLogger_Variants_NonEmpty verifies that the Variants map is non-nil
+// TestHook_MosaicLogger_Variants_NonEmpty verifies that the Variants map is non-nil
 // and contains at least one entry.
-func TestHook_SubagentLogger_Variants_NonEmpty(t *testing.T) {
+func TestHook_MosaicLogger_Variants_NonEmpty(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 	if len(h.Variants) == 0 {
-		t.Error("subagent-logger Variants is empty; expected variant entries from hook.yaml")
+		t.Error("mosaic-logger Variants is empty; expected variant entries from hook.yaml")
 	}
 }
 
@@ -128,11 +129,11 @@ func TestHook_SubagentLogger_Variants_NonEmpty(t *testing.T) {
 // as supported.
 func TestHook_Variant_ClaudeCode_IsSupported(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["claude-code"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"claude-code\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"claude-code\"]: not found")
 	}
 	if !v.Supported {
 		t.Error("claude-code variant Supported = false; expected true")
@@ -143,11 +144,11 @@ func TestHook_Variant_ClaudeCode_IsSupported(t *testing.T) {
 // as supported.
 func TestHook_Variant_OpenCode_IsSupported(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["opencode"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"opencode\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"opencode\"]: not found")
 	}
 	if !v.Supported {
 		t.Error("opencode variant Supported = false; expected true")
@@ -158,11 +159,11 @@ func TestHook_Variant_OpenCode_IsSupported(t *testing.T) {
 // as supported.
 func TestHook_Variant_VscodeGhcp_IsSupported(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["vscode-ghcp"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"vscode-ghcp\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"vscode-ghcp\"]: not found")
 	}
 	if !v.Supported {
 		t.Error("vscode-ghcp variant Supported = false; expected true")
@@ -173,11 +174,11 @@ func TestHook_Variant_VscodeGhcp_IsSupported(t *testing.T) {
 // as not supported.
 func TestHook_Variant_GhcpCli_IsNotSupported(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["ghcp-cli"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"ghcp-cli\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"ghcp-cli\"]: not found")
 	}
 	if v.Supported {
 		t.Error("ghcp-cli variant Supported = true; expected false (hook.yaml declares supported: false)")
@@ -188,16 +189,16 @@ func TestHook_Variant_GhcpCli_IsNotSupported(t *testing.T) {
 // T7.4 — File sets
 // ---------------------------------------------------------------------------
 
-// TestHook_Variant_ClaudeCode_Files_TwoFiles verifies that the claude-code variant has
-// exactly 2 files as declared in hook.yaml: subagent-logger.ps1 and config.json.
-func TestHook_Variant_ClaudeCode_Files_TwoFiles(t *testing.T) {
-	const wantCount = 2
+// TestHook_Variant_ClaudeCode_Files_TenFiles verifies that the claude-code variant has
+// exactly 10 files as declared in hook.yaml: the 9 Python adapter modules plus hook.yaml.
+func TestHook_Variant_ClaudeCode_Files_TenFiles(t *testing.T) {
+	const wantCount = 10
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["claude-code"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"claude-code\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"claude-code\"]: not found")
 	}
 	if len(v.Files) != wantCount {
 		var names []string
@@ -209,19 +210,27 @@ func TestHook_Variant_ClaudeCode_Files_TwoFiles(t *testing.T) {
 }
 
 // TestHook_Variant_ClaudeCode_Files_TargetNames verifies the exact target file names
-// for the claude-code variant.
+// for the claude-code variant: the 9 Python adapter modules plus the self-deployed hook.yaml.
 func TestHook_Variant_ClaudeCode_Files_TargetNames(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["claude-code"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"claude-code\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"claude-code\"]: not found")
 	}
 
 	wantTargets := map[string]bool{
-		"subagent-logger.ps1":  true,
-		"subagent-logger.json": true,
+		"mosaic_logger.py":                  true,
+		"mosaic_logger_core.py":             true,
+		"mosaic_logger_runstate.py":         true,
+		"mosaic_logger_export.py":           true,
+		"mosaic_logger_transcript.py":       true,
+		"mosaic_logger_handlers_session.py": true,
+		"mosaic_logger_handlers_invocation.py": true,
+		"mosaic_logger_handlers_tools.py":   true,
+		"mosaic_logger_artifacts.py":        true,
+		"hook.yaml":                         true,
 	}
 	for _, f := range v.Files {
 		if !wantTargets[f.TargetName] {
@@ -238,11 +247,11 @@ func TestHook_Variant_ClaudeCode_Files_TargetNames(t *testing.T) {
 // the claude-code variant has a SourcePath that exists on disk.
 func TestHook_Variant_ClaudeCode_Files_SourcePathsExist(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["claude-code"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"claude-code\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"claude-code\"]: not found")
 	}
 	for _, f := range v.Files {
 		if !filepath.IsAbs(f.SourcePath) {
@@ -262,11 +271,11 @@ func TestHook_Variant_ClaudeCode_Files_SourcePathsExist(t *testing.T) {
 // variant has at least one registration step.
 func TestHook_Variant_ClaudeCode_RegistrationSteps_Present(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["claude-code"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"claude-code\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"claude-code\"]: not found")
 	}
 	if len(v.Registration) == 0 {
 		t.Error("claude-code variant has no registration steps; expected at least one")
@@ -277,11 +286,11 @@ func TestHook_Variant_ClaudeCode_RegistrationSteps_Present(t *testing.T) {
 // step has a non-empty ID.
 func TestHook_Variant_ClaudeCode_RegistrationSteps_HaveIDs(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["claude-code"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"claude-code\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"claude-code\"]: not found")
 	}
 	for i, step := range v.Registration {
 		if step.ID == "" {
@@ -294,11 +303,11 @@ func TestHook_Variant_ClaudeCode_RegistrationSteps_HaveIDs(t *testing.T) {
 // settings-fragment step is present and is marked as performable.
 func TestHook_Variant_ClaudeCode_RegistrationSteps_HasSettingsFragment(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["claude-code"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"claude-code\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"claude-code\"]: not found")
 	}
 	for _, step := range v.Registration {
 		if step.ID == "settings-fragment" {
@@ -318,11 +327,11 @@ func TestHook_Variant_ClaudeCode_RegistrationSteps_HasSettingsFragment(t *testin
 // has no registration steps (declared as registration: [] in hook.yaml).
 func TestHook_Variant_OpenCode_RegistrationSteps_Empty(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["opencode"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"opencode\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"opencode\"]: not found")
 	}
 	if len(v.Registration) != 0 {
 		t.Errorf("opencode variant Registration has %d steps, want 0", len(v.Registration))
@@ -330,57 +339,42 @@ func TestHook_Variant_OpenCode_RegistrationSteps_Empty(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T7.4 — Variant reuse resolution
+// T7.4 — Variant reuse: vscode-ghcp carries its own files (no reuse link)
 // ---------------------------------------------------------------------------
 
-// TestHook_Variant_VscodeGhcp_ReusesClaudeCode verifies that vscode-ghcp declares
-// ReusesVariant = "claude-code" as written in hook.yaml.
-func TestHook_Variant_VscodeGhcp_ReusesClaudeCode(t *testing.T) {
+// TestHook_Variant_VscodeGhcp_DoesNotReuseClaudeCode verifies that vscode-ghcp declares
+// no reuse link. A reuses: claude-code link would silently ship the Python adapter into
+// VS Code deployments; the variant instead carries its own placeholder file.
+func TestHook_Variant_VscodeGhcp_DoesNotReuseClaudeCode(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["vscode-ghcp"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"vscode-ghcp\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"vscode-ghcp\"]: not found")
 	}
-	if v.ReusesVariant != "claude-code" {
-		t.Errorf("vscode-ghcp ReusesVariant = %q, want %q", v.ReusesVariant, "claude-code")
+	if v.ReusesVariant != "" {
+		t.Errorf("vscode-ghcp ReusesVariant = %q, want %q (no reuse; variant has its own file)", v.ReusesVariant, "")
 	}
 }
 
-// TestHook_Variant_VscodeGhcp_FilesResolvedFromClaudeCode verifies that when a variant
-// declares "reuses: <other>", the catalog resolves and exposes the OTHER variant's file
-// list. The caller must not need to follow the reuse chain manually.
-func TestHook_Variant_VscodeGhcp_FilesResolvedFromClaudeCode(t *testing.T) {
+// TestHook_Variant_VscodeGhcp_HasOwnFile verifies that the vscode-ghcp variant carries
+// exactly one file of its own rather than inheriting claude-code's files.
+func TestHook_Variant_VscodeGhcp_HasOwnFile(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
-	claudeCode, ok := h.Variants["claude-code"]
+	v, ok := h.Variants["vscode-ghcp"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"claude-code\"]: not found")
-	}
-	vscode, ok := h.Variants["vscode-ghcp"]
-	if !ok {
-		t.Fatal("subagent-logger Variants[\"vscode-ghcp\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"vscode-ghcp\"]: not found")
 	}
 
-	// The vscode-ghcp variant reuses claude-code's files; after resolution the Files
-	// lists must be equivalent (same target names, since source paths may differ).
-	if len(vscode.Files) != len(claudeCode.Files) {
-		t.Errorf("vscode-ghcp Files count = %d after reuse resolution, want %d (same as claude-code)",
-			len(vscode.Files), len(claudeCode.Files))
-		return
-	}
-
-	// Compare target names (source path prefix may differ but the deployed names must match).
-	claudeTargets := make(map[string]bool)
-	for _, f := range claudeCode.Files {
-		claudeTargets[f.TargetName] = true
-	}
-	for _, f := range vscode.Files {
-		if !claudeTargets[f.TargetName] {
-			t.Errorf("vscode-ghcp resolved file %q not present in claude-code Files", f.TargetName)
+	if len(v.Files) != 1 {
+		var names []string
+		for _, f := range v.Files {
+			names = append(names, f.TargetName)
 		}
+		t.Errorf("vscode-ghcp Files count = %d, want 1 (own placeholder file): %v", len(v.Files), names)
 	}
 }
 
@@ -388,11 +382,11 @@ func TestHook_Variant_VscodeGhcp_FilesResolvedFromClaudeCode(t *testing.T) {
 // has no files (an unsupported variant has no deployable content).
 func TestHook_Variant_GhcpCli_Files_Empty(t *testing.T) {
 	cat := loadRealCatalog(t)
-	h, _ := cat.Hook("subagent-logger")
+	h, _ := cat.Hook("mosaic-logger")
 
 	v, ok := h.Variants["ghcp-cli"]
 	if !ok {
-		t.Fatal("subagent-logger Variants[\"ghcp-cli\"]: not found")
+		t.Fatal("mosaic-logger Variants[\"ghcp-cli\"]: not found")
 	}
 	if len(v.Files) != 0 {
 		t.Errorf("unsupported ghcp-cli variant has %d files; expected 0", len(v.Files))
@@ -498,15 +492,15 @@ func TestIssues_TamperedHookBundle_SubjectIsBundle(t *testing.T) {
 	}
 }
 
-// TestIssues_RealSubagentLoggerBundle_NoHashMismatch verifies that the real
-// subagent-logger bundle does not produce a hook-hash-mismatch issue. The bundle has no
+// TestIssues_RealMosaicLoggerBundle_NoHashMismatch verifies that the real
+// mosaic-logger bundle does not produce a hook-hash-mismatch issue. The bundle has no
 // content_hash field in its hook.yaml, so no integrity check can be performed.
-func TestIssues_RealSubagentLoggerBundle_NoHashMismatch(t *testing.T) {
+func TestIssues_RealMosaicLoggerBundle_NoHashMismatch(t *testing.T) {
 	cat := loadRealCatalog(t)
 
 	for _, iss := range cat.Issues() {
 		if iss.Code == "hook-hash-mismatch" {
-			t.Errorf("real subagent-logger bundle produced unexpected hook-hash-mismatch issue: %+v", iss)
+			t.Errorf("real mosaic-logger bundle produced unexpected hook-hash-mismatch issue: %+v", iss)
 		}
 	}
 }

@@ -1,0 +1,244 @@
+schema_version: "1"
+id: mosaic-logger
+version: 1.0.0
+description: >-
+  Captures all 12 Claude Code hook events for full MOSAIC orchestration log
+  capture: session lifecycle, user turns, assistant turns, tool calls, subagent
+  invocations, notifications, and compaction events. Produces structured JSONL
+  event streams, per-invocation markdown artifacts, and byte-identical transcript
+  exports under OrchestrationLogs/.
+
+# placeholder is absent: the claude-code variant carries a real, deployable Python
+# adapter. The opencode and vscode-ghcp variants remain placeholder stubs — see
+# README.md. The schema has no per-variant placeholder flag, so the whole-bundle
+# key is omitted rather than mislabelling a deployable adapter as unauthored.
+
+# content_hash is absent: the claude-code variant lists ../hook.yaml in its file
+# set so the deployed adapter can read its own version at runtime (adapter_version
+# in run_start events). Listing hook.yaml in the hash input makes the hash
+# unstable by construction (the hash value changes the file, changing the hash).
+# validateContentHash performs no check when this field is empty.
+
+variants:
+  claude-code:
+    supported: true
+    files:
+      - source: mosaic_logger.py
+        target: mosaic_logger.py
+      - source: mosaic_logger_core.py
+        target: mosaic_logger_core.py
+      - source: mosaic_logger_runstate.py
+        target: mosaic_logger_runstate.py
+      - source: mosaic_logger_export.py
+        target: mosaic_logger_export.py
+      - source: mosaic_logger_transcript.py
+        target: mosaic_logger_transcript.py
+      - source: mosaic_logger_handlers_session.py
+        target: mosaic_logger_handlers_session.py
+      - source: mosaic_logger_handlers_invocation.py
+        target: mosaic_logger_handlers_invocation.py
+      - source: mosaic_logger_handlers_tools.py
+        target: mosaic_logger_handlers_tools.py
+      - source: mosaic_logger_artifacts.py
+        target: mosaic_logger_artifacts.py
+      - source: ../hook.yaml
+        target: hook.yaml
+    registration:
+      - id: settings-fragment
+        target_path: .claude/settings.json
+        performable: true
+        instruction: >-
+          Merge the hooks fragment into .claude/settings.json to register the
+          mosaic-logger dispatcher as a handler for all 12 Claude Code hook
+          events. SubagentStart is synchronous so that the agent_id mapping is
+          written before the subagent's first tool call. All other events are
+          asynchronous so the adapter cannot block or deny operations.
+        fragment: |
+          {
+            "hooks": {
+              "SessionStart": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "SessionEnd": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "UserPromptSubmit": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "Stop": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "PreToolUse": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "PostToolUse": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "PostToolUseFailure": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "SubagentStart": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": false,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "SubagentStop": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "Notification": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "PreCompact": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "PostCompact": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+
+  opencode:
+    supported: true
+    files:
+      - source: plugin.ts
+        target: mosaic-logger.ts
+    registration: []
+
+  vscode-ghcp:
+    supported: true
+    # No reuses key: the deployment schema's reuse mechanism copies the referenced
+    # variant's entire file list verbatim. A reuses: claude-code link would
+    # silently ship the Python adapter into VS Code deployments. This variant
+    # carries its own placeholder file entry instead.
+    files:
+      - source: README.md
+        target: README.md
+    registration:
+      - id: enable-chat-hooks
+        target_path: ""
+        performable: false
+        instruction: >-
+          Enable hooks in VS Code: open User Settings (JSON) and set
+          "chat.hooks.enabled": true. This is a user-level editor setting
+          and cannot be set by the deployment tool.
+
+  ghcp-cli:
+    supported: false
