@@ -3,7 +3,7 @@ package transform
 import (
 	"strings"
 
-	"mosaic-deploy/internal/docformat"
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 )
 

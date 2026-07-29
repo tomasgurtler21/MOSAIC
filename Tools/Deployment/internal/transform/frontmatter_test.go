@@ -16,7 +16,7 @@ package transform_test
 import (
 	"testing"
 
-	"mosaic-deploy/internal/docformat"
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/transform"
 )

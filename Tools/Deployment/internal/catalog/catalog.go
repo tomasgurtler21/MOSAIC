@@ -8,7 +8,7 @@ package catalog
 import (
 	"errors"
 
-	"mosaic-deploy/internal/docformat"
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 )
 

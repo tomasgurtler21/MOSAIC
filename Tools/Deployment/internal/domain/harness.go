@@ -1,5 +1,17 @@
 package domain
 
+import "mosaic-common/mosaic"
+
+// InjectionClass type alias — domain.InjectionClass IS mosaic.InjectionClass.
+type InjectionClass = mosaic.InjectionClass
+
+// Re-declared constants pointing at the mosaic-common originals.
+const (
+	InjectionHarness  = mosaic.InjectionHarness
+	InjectionProject  = mosaic.InjectionProject
+	InjectionWorkflow = mosaic.InjectionWorkflow
+)
+
 // ProvisionTier indicates how a harness implementation is provided.
 type ProvisionTier string
 
@@ -65,15 +77,6 @@ type FrontmatterSpec struct {
 	Drop     []string           // keys removed from the generic source
 	KeyOrder []string           // output order; unlisted keys keep source-relative order, appended after
 }
-
-// InjectionClass distinguishes the three kinds of injection point a harness fills.
-type InjectionClass string
-
-const (
-	InjectionHarness  InjectionClass = "harness"  // filled from descriptor on every transform
-	InjectionProject  InjectionClass = "project"  // always empty on create, preserved on update
-	InjectionWorkflow InjectionClass = "workflow" // AvailableWorkflows, assembled from selections
-)
 
 // InjectionContent is one injection point's harness-level content, keyed by the canonical name.
 type InjectionContent struct {

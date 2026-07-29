@@ -1,0 +1,91 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+#
+# mosaic-run build, test, and check tasks.
+#
+# Prerequisites:
+#   - Go 1.22 or later
+#   - Task (https://taskfile.dev) installed and on PATH
+#
+# Run all tasks from this directory (Tools/Runner/).
+
+version: "3"
+
+vars:
+  BINARY_NAME: mosaic-run
+  CMD_PKG: ./cmd/mosaic-run
+  LDFLAGS: -s -w
+  DIST_DIR: ./dist
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Build tasks
+  # ---------------------------------------------------------------------------
+
+  build:windows:
+    desc: "Cross-compile for Windows (amd64). Output: dist/mosaic-run.exe"
+    env:
+      GOOS: windows
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    cmds:
+      - mkdir -p {{.DIST_DIR}}
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}}.exe {{.CMD_PKG}}
+    generates:
+      - "{{.DIST_DIR}}/{{.BINARY_NAME}}.exe"
+
+  build:linux:
+    desc: "Cross-compile for Linux (amd64). Output: dist/mosaic-run-linux-amd64"
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    cmds:
+      - mkdir -p {{.DIST_DIR}}
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64 {{.CMD_PKG}}
+    generates:
+      - "{{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64"
+
+  build:all:
+    desc: Cross-compile for all supported platforms (Windows and Linux amd64)
+    deps: [build:windows, build:linux]
+
+  build:native:
+    desc: Build a binary for the current platform
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}}{{exeExt}} {{.CMD_PKG}}
+
+  # ---------------------------------------------------------------------------
+  # Import-boundary check
+  # ---------------------------------------------------------------------------
+
+  check:imports:
+    desc: Verify import-boundary rules (dependency direction + I/O ban on engine)
+    cmds:
+      - go run ./tools/importcheck
+
+  # ---------------------------------------------------------------------------
+  # Full checked build (import check + cross-compilation)
+  # ---------------------------------------------------------------------------
+
+  build-checked:
+    desc: Run import-boundary check then cross-compile for all platforms
+    cmds:
+      - task: check:imports
+      - task: build:all
+
+  # ---------------------------------------------------------------------------
+  # Test
+  # ---------------------------------------------------------------------------
+
+  test:
+    desc: Run the full test suite
+    cmds:
+      - go test ./...
+
+  test:short:
+    desc: Run tests excluding slow integration tests (faster iteration)
+    cmds:
+      - go test -short ./...

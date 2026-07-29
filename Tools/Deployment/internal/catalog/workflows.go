@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mosaic-deploy/internal/docformat"
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 )
 

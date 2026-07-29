@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"mosaic-deploy/internal/docformat"
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/manifest"
 	"mosaic-deploy/internal/plan"

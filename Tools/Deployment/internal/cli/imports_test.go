@@ -81,7 +81,7 @@ func TestCLI_DoesNotImportPlan(t *testing.T) {
 // TestCLI_DoesNotImportDocformat verifies that the cli package does not import the
 // docformat package. Document parsing is a domain concern used only by the core packages.
 func TestCLI_DoesNotImportDocformat(t *testing.T) {
-	assertCLIDoesNotImport(t, "mosaic-deploy/internal/docformat")
+	assertCLIDoesNotImport(t, "mosaic-common/docformat")
 }
 
 // TestCLI_DoesNotImportHarness verifies that the cli package does not import any

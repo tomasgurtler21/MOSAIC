@@ -66,7 +66,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mosaic-deploy/internal/docformat"
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/builtin/opencode"
 	"mosaic-deploy/internal/harness/contracttest"

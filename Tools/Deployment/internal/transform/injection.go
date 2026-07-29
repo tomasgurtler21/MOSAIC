@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"mosaic-deploy/internal/docformat"
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 )
 

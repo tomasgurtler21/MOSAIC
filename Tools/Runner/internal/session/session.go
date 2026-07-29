@@ -1,0 +1,593 @@
+// Package session implements the use-case loop that connects the pure engine
+// to the outside world. It drives the complete run lifecycle:
+//
+//  1. Run-start sequence (in fixed order):
+//     a. Load orchestrator file and enumerate workflow regions (orchfile)
+//     b. Parse the selected workflow routing table (workflow)
+//     c. Read existing artifact or detect new run (artifact store)
+//     d. Admit the workflow (compat)
+//     e. Resolve every agent identifier (agentresolve)
+//     f. Read stage set if a staged phase is present (planstages)
+//     g. Settle checkpoint value (FR-9 refusal if no provider)
+//     h. Create or resume the artifact
+//
+//  2. Dispatch loop: ask engine → dispatch via harness → apply to artifact → repeat.
+//
+//  3. Special cases in the dispatch loop:
+//     - On Findings auto-routing: engine returns Dispatch for COMPLETED_NEEDS_ACTION
+//       with an unambiguous hint; session treats it identically to any other
+//       Dispatch (harness → artifact update). No deviation resolver is invoked.
+//     - Stage-* output re-derivation: after a completed row's output artifacts
+//       include a Stage-* pattern, session re-reads the plan artifact via
+//       planstages to obtain a refreshed stage set for the engine's next call.
+//     - Deviation: engine returns Deviation; session invokes the deviation
+//       resolver, re-reads the artifact from disk (FR-23), then resumes.
+//     - Harness error: a harness-level failure is treated as a deviation with
+//       kind DeviationHarnessError rather than a run failure ("never a crash"
+//       per port contract). The deviation resolver decides whether to rejoin,
+//       dispatch a custom agent, or stop.
+//     - Graceful stop: session records current state and returns RunStopped.
+//     - Infrastructure-agent trigger: a named no-op hook is called after each
+//       harness invocation (FR-40).
+//
+// Both frontends (TUI and CLI) drive the same Session surface.
+package session
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"mosaic-common/interaction"
+	"mosaic-run/internal/agentresolve"
+	"mosaic-run/internal/compat"
+	"mosaic-run/internal/domain"
+	"mosaic-run/internal/engine"
+	"mosaic-run/internal/orchfile"
+	"mosaic-run/internal/planstages"
+	"mosaic-run/internal/workflow"
+)
+
+// Session is the use-case layer that drives the execution loop.
+// Both frontends (TUI and CLI) drive it through this surface.
+type Session interface {
+	// Start begins or resumes a run. It performs the full run-start sequence
+	// and then enters the dispatch loop.
+	//
+	// Progress is reported through the Interaction port's Progress and Notify
+	// methods.
+	//
+	// Returns the run outcome when the run completes, stops, or is refused.
+	// Refusals (pre-invocation failures) are returned as RunOutcome{Status:
+	// RunRefused} with a nil error. Unexpected infrastructure failures return
+	// a non-nil error.
+	Start(ctx context.Context, config domain.RunConfig) (domain.RunOutcome, error)
+}
+
+// Deps collects all port dependencies required by the session.
+// Every field is a port (interface); no concrete types are used.
+type Deps struct {
+	// Harness dispatches subagent invocations.
+	Harness domain.HarnessAdapter
+	// Store reads and writes the Orchestration.md artifact.
+	Store domain.ArtifactStore
+	// Deviation resolves situations where the engine cannot decide.
+	Deviation domain.DeviationResolver
+	// Clock provides deterministic timestamps.
+	Clock domain.Clock
+	// Interact provides the user-interaction channel (progress events, etc.).
+	Interact domain.Interaction
+	// OnInfrastructureTrigger is an optional hook called after each harness
+	// invocation (FR-40). If nil, no action is taken. In production this is the
+	// named no-op; tests inject a counter function to verify the hook is invoked
+	// exactly once per dispatch cycle (AC8.7).
+	OnInfrastructureTrigger func()
+}
+
+// New creates a new Session with the given port dependencies.
+//
+// The returned session uses the following fixed-path dependencies from the
+// runner's package set: orchfile, workflow, compat, agentresolve, planstages,
+// and engine. These are not behind ports because they are pure functions or
+// read-only loaders that impose no testability burden of their own.
+func New(deps Deps) Session {
+	return &sessionImpl{deps: deps}
+}
+
+// sessionImpl is the concrete implementation of Session.
+type sessionImpl struct {
+	deps Deps
+}
+
+// Start implements Session.
+func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domain.RunOutcome, error) {
+	// =========================================================================
+	// Run-start sequence (fixed order)
+	// =========================================================================
+
+	// Step 1: Load orchestrator file and get the selected workflow region.
+	region, err := orchfile.GetWorkflow(config.OrchestratorFilePath, string(config.WorkflowID))
+	if err != nil {
+		return refusal(err.Error()), nil
+	}
+
+	// Step 2: Parse the routing table.
+	table, err := workflow.Parse(region.Content, region.Info)
+	if err != nil {
+		return refusal(err.Error()), nil
+	}
+
+	// Step 3: Read existing artifact (FR-7a: refuse non-canonical; ErrNotExist = new run).
+	existingState, readErr := s.deps.Store.Read(ctx)
+	var existingExists bool
+	if readErr != nil {
+		var refErr *domain.RefusalError
+		if errors.As(readErr, &refErr) {
+			return refusal(refErr.Error()), nil
+		}
+		if !errors.Is(readErr, os.ErrNotExist) {
+			return domain.RunOutcome{Status: domain.RunFailed, Message: readErr.Error()}, readErr
+		}
+		existingExists = false
+	} else {
+		existingExists = true
+	}
+
+	// Handle ExistingFail: refuse if artifact already exists.
+	if existingExists && config.ExistingArtifact == domain.ExistingFail {
+		return refusal("artifact already exists and ExistingFail mode was requested"), nil
+	}
+
+	// Handle ExistingFresh: treat as new run regardless of existing artifact.
+	if existingExists && config.ExistingArtifact == domain.ExistingFresh {
+		existingExists = false
+	}
+
+	// FR-7b: version check for resume mode.
+	if existingExists && !config.AllowVersionDrift {
+		if existingState.WorkflowVersion != region.Info.Version {
+			return refusal(fmt.Sprintf(
+				"workflow version mismatch: artifact has %q, selected workflow has %q",
+				existingState.WorkflowVersion, region.Info.Version,
+			)), nil
+		}
+	}
+
+	// Step 4: Admit the workflow (FR-18a compat checks and group resolution).
+	admitted, err := compat.Admit(table)
+	if err != nil {
+		return refusal(err.Error()), nil
+	}
+
+	// Step 5: Resolve every agent identifier to a definition file.
+	orchDir := filepath.Dir(config.OrchestratorFilePath)
+	identifiers := uniqueAgentIdentifiers(table)
+	agents, err := agentresolve.ResolveAll(orchDir, identifiers)
+	if err != nil {
+		return refusal(err.Error()), nil
+	}
+
+	// Step 6: Read stage set if the workflow has a staged EXECUTION phase.
+	var stages *domain.StageSet
+	if admitted.HasStagedPhase {
+		planPath := filepath.Join(orchDir, "Plan.md")
+		ss, stageErr := planstages.ReadStages(planPath, admitted.TwoGroup)
+		if stageErr != nil {
+			return refusal(stageErr.Error()), nil
+		}
+		stages = &ss
+	}
+
+	// Step 7: Settle checkpoints (FR-9: refuse if no provider is available).
+	if config.Checkpoints {
+		return refusal("checkpoints requested but no checkpoint provider is available"), nil
+	}
+
+	// Step 8: Create or resume the artifact.
+	var state domain.ArtifactState
+	var seq int
+	var lastResponse *domain.ProtocolResponse
+
+	if !existingExists {
+		// New run: create a fresh artifact.
+		state, err = s.deps.Store.Create(ctx, region.Info, config.Task, false, s.deps.Clock.Now())
+		if err != nil {
+			return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
+		}
+		seq = 0
+	} else {
+		// Resume: use the existing artifact.
+		state = existingState
+		resume, resumeErr := engine.ResumePoint(admitted, stages, state)
+		if resumeErr != nil {
+			return domain.RunOutcome{Status: domain.RunFailed, Message: resumeErr.Error()}, resumeErr
+		}
+		seq = resume.Seq
+
+		// FR-33: if the last step was interrupted, rewind CurrentState so that
+		// engine.Next re-dispatches the interrupted row.
+		if resume.RerunLast {
+			state = rewindStateForRerun(state)
+		}
+	}
+
+	// =========================================================================
+	// Dispatch loop
+	// =========================================================================
+	var refreshedStages *domain.StageSet
+	// hitlOverride carries an explicit HITL value from a deviation rejoin
+	// instruction to the next harness invocation (FR-20 / FR-24). The override
+	// is applied once and then cleared; it is never originated by the session.
+	var hitlOverride *bool
+
+	for {
+		decision := engine.Next(
+			admitted,
+			stages,
+			state,
+			lastResponse,
+			agents,
+			seq,
+			s.deps.Clock.Now(),
+			refreshedStages,
+		)
+		// Consume the refreshed stages once (they are only for one engine.Next call).
+		refreshedStages = nil
+
+		if decision.Dispatch != nil {
+			if len(decision.Dispatch.Steps) == 0 {
+				return domain.RunOutcome{Status: domain.RunFailed, Message: "engine returned empty dispatch"}, nil
+			}
+			step := decision.Dispatch.Steps[0]
+
+			// Apply the HITL override from a prior deviation rejoin instruction
+			// (FR-24 / FR-20). The override is for this one invocation only.
+			if hitlOverride != nil {
+				step.Request.HumanInTheLoop = *hitlOverride
+				hitlOverride = nil
+			}
+
+			// Notify the interaction port that a step is starting. The TUI frontend
+			// uses this to append a new progress row before the invocation blocks.
+			s.deps.Interact.Notify(ctx, interaction.Notice{
+				Level:   interaction.NoticeInfo,
+				Title:   step.Request.AgentInstanceID,
+				Message: fmt.Sprintf("phase=%s stage=%q status=running", step.Phase, step.Stage),
+			})
+
+			// Invoke the harness.
+			response, invokeErr := s.deps.Harness.Invoke(ctx, step.Agent, step.Request)
+			if invokeErr != nil {
+				// Context cancellation: graceful stop.
+				if ctx.Err() != nil {
+					return domain.RunOutcome{
+						Status:  domain.RunStopped,
+						Message: "run stopped: context cancelled",
+					}, nil
+				}
+				// Harness error: treat as a deviation rather than a run failure
+				// ("the caller treats this as a deviation, never a crash" per the
+				// HarnessAdapter port contract). Invoke the deviation resolver to
+				// decide whether to rejoin, dispatch a custom agent, or stop.
+				deviationInfo := domain.DeviationInfo{
+					Kind: domain.DeviationHarnessError,
+					Response: domain.ProtocolResponse{
+						AgentInstanceID: step.Request.AgentInstanceID,
+						StatusCode:      domain.StatusBLOCKED,
+						StatusMessage:   invokeErr.Error(),
+					},
+					CurrentRow:    step.RowIndex,
+					CurrentPhase:  step.Phase,
+					CurrentStage:  step.Stage,
+					ArtifactState: state,
+				}
+				instr, resolveErr := s.deps.Deviation.Resolve(ctx, deviationInfo)
+				if resolveErr != nil {
+					return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: resolveErr.Error()}, nil
+				}
+				done, outcome, outErr := s.applyRejoinInstruction(ctx, instr, &state, &hitlOverride, &lastResponse, table)
+				if done {
+					return outcome, outErr
+				}
+				continue
+			}
+
+			// Apply the completed step to the artifact.
+			completedSeq := seq + 1
+			completedStep := domain.CompletedStep{
+				Seq:             completedSeq,
+				AgentInstance:   step.Request.AgentInstanceID,
+				Phase:           step.Phase,
+				Stage:           step.Stage,
+				Status:          response.StatusCode,
+				ErrorCode:       response.ErrorCode,
+				Summary:         response.StatusMessage,
+				Timestamp:       s.deps.Clock.Now(),
+				OutputArtifacts: step.Request.OutputArtifacts,
+			}
+			state, err = s.deps.Store.Apply(ctx, state, completedStep)
+			if err != nil {
+				return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
+			}
+			seq = completedSeq
+			lastResponse = &response
+
+			// Report per-step completion via the Interaction port (FR-5).
+			// The CLI frontend writes this as a machine-readable line; the TUI
+			// frontend can render it differently. Both use the same notice format:
+			// Title = agent instance ID, Message = structured key=value pairs.
+			s.deps.Interact.Notify(ctx, interaction.Notice{
+				Level:   interaction.NoticeInfo,
+				Title:   completedStep.AgentInstance,
+				Message: fmt.Sprintf("phase=%s stage=%q status=%s", completedStep.Phase, completedStep.Stage, string(completedStep.Status)),
+			})
+
+			// Infrastructure-agent trigger hook (FR-40): named no-op as the
+			// discoverable anchor point, plus the injected hook for test observation.
+			onInfrastructureAgentTrigger()
+			if s.deps.OnInfrastructureTrigger != nil {
+				s.deps.OnInfrastructureTrigger()
+			}
+
+			// Stage-* output re-derivation: re-read Plan.md after any row whose
+			// output artifacts contain Stage-* so the engine can expand wildcards
+			// on the next row.
+			if hasStageStarArtifact(step.Request.OutputArtifacts) {
+				planPath := filepath.Join(orchDir, "Plan.md")
+				ss, ssErr := planstages.ReadStages(planPath, admitted.TwoGroup)
+				if ssErr != nil {
+					s.deps.Interact.Notify(ctx, interaction.Notice{
+						Level:   interaction.NoticeWarning,
+						Message: fmt.Sprintf("failed to re-read stage set after Stage-* output: %v", ssErr),
+					})
+				} else {
+					refreshedStages = &ss
+				}
+			}
+
+			continue
+		}
+
+		if decision.Complete != nil {
+			return domain.RunOutcome{
+				Status:  domain.RunCompleted,
+				Message: "run completed successfully",
+			}, nil
+		}
+
+		if decision.Deviation != nil {
+			// Invoke the deviation resolver.
+			instr, resolveErr := s.deps.Deviation.Resolve(ctx, decision.Deviation.Info)
+			if resolveErr != nil {
+				return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: resolveErr.Error()}, nil
+			}
+			done, outcome, outErr := s.applyRejoinInstruction(ctx, instr, &state, &hitlOverride, &lastResponse, table)
+			if done {
+				return outcome, outErr
+			}
+			continue
+		}
+
+		if decision.Stop != nil {
+			return domain.RunOutcome{
+				Status:  domain.RunStopped,
+				Message: "engine stop: " + decision.Stop.Reason,
+			}, nil
+		}
+
+		return domain.RunOutcome{Status: domain.RunFailed, Message: "engine returned nil decision"}, nil
+	}
+}
+
+// applyRejoinInstruction applies a RejoinInstruction after deviation resolution.
+// It re-reads the artifact from disk (FR-23), then either:
+//   - Stops the run (Stop field set).
+//   - Adjusts state to re-enter at the specified row (Rejoin field set), carrying
+//     any HITL override for the next invocation (FR-20 / FR-24).
+//   - Executes a custom harness invocation then adjusts state (Custom field set).
+//
+// Returns done=true with an outcome when the run should terminate, or done=false
+// when the dispatch loop should continue.
+func (s *sessionImpl) applyRejoinInstruction(
+	ctx context.Context,
+	instr domain.RejoinInstruction,
+	state *domain.ArtifactState,
+	hitlOverride **bool,
+	lastResponse **domain.ProtocolResponse,
+	table domain.RoutingTable,
+) (done bool, outcome domain.RunOutcome, outErr error) {
+	// FR-23: re-read the artifact from disk. The orchestrator delegate may
+	// have updated it out-of-band during resolution.
+	if freshState, freshReadErr := s.deps.Store.Read(ctx); freshReadErr == nil {
+		*state = freshState
+	}
+
+	if instr.Stop != nil {
+		return true, domain.RunOutcome{
+			Status:  domain.RunDeviationUnresolved,
+			Message: "deviation resolver returned stop: " + instr.Stop.Reason,
+		}, nil
+	}
+
+	if instr.Rejoin != nil {
+		// Carry the HITL override to the next dispatch cycle (FR-24 / FR-20).
+		// It is never originated here — only carried from an explicit instruction.
+		*hitlOverride = instr.Rejoin.HITLOverride
+		*state = applyRejoinAtRow(instr.Rejoin.RowIndex, *state, table)
+		*lastResponse = nil
+		return false, domain.RunOutcome{}, nil
+	}
+
+	if instr.Custom != nil {
+		// Custom dispatch: execute a harness invocation that is not in the routing
+		// table, then rejoin at the specified row. If Agent is unset (schema gap),
+		// the custom invocation cannot be performed and the run stops.
+		if instr.Custom.Agent.Identifier == "" {
+			return true, domain.RunOutcome{
+				Status:  domain.RunDeviationUnresolved,
+				Message: "custom dispatch: agent not specified (custom_agent missing from orchestrator instruction)",
+			}, nil
+		}
+		req := instr.Custom.Request
+		if instr.Custom.HITLOverride != nil {
+			req.HumanInTheLoop = *instr.Custom.HITLOverride
+		}
+		_, invokeErr := s.deps.Harness.Invoke(ctx, instr.Custom.Agent, req)
+		if invokeErr != nil {
+			if ctx.Err() != nil {
+				return true, domain.RunOutcome{
+					Status:  domain.RunStopped,
+					Message: "run stopped: context cancelled during custom dispatch",
+				}, nil
+			}
+			return true, domain.RunOutcome{
+				Status:  domain.RunFailed,
+				Message: "custom dispatch harness error: " + invokeErr.Error(),
+			}, invokeErr
+		}
+		*state = applyRejoinAtRow(instr.Custom.RejoinRow, *state, table)
+		*lastResponse = nil
+		return false, domain.RunOutcome{}, nil
+	}
+
+	return true, domain.RunOutcome{
+		Status:  domain.RunDeviationUnresolved,
+		Message: "deviation resolver returned empty instruction",
+	}, nil
+}
+
+// applyRejoinAtRow adjusts the artifact CurrentState so that engine.Next
+// dispatches from the specified routing table row on the next call.
+//
+// For row 0 (first row), CurrentState is cleared to trigger initial dispatch.
+// For row N > 0, the function searches the execution log for the last completed
+// step whose agent matches the routing table row at index N-1. If found, that
+// entry becomes CurrentState so the engine routes forward to row N. If no such
+// entry exists (e.g. the target precedes any recorded step), CurrentState is
+// cleared to restart from row 0.
+//
+// This supports arbitrary row jumps from the deviation resolver — not just
+// re-running the most recently deviating row.
+func applyRejoinAtRow(targetRowIdx int, state domain.ArtifactState, table domain.RoutingTable) domain.ArtifactState {
+	if targetRowIdx == 0 {
+		state.CurrentState = domain.CurrentState{}
+		return state
+	}
+
+	// Find the agent identifier for the row that precedes targetRowIdx.
+	prevRow, found := rowAtIndex(table, targetRowIdx-1)
+	if !found {
+		// Unknown preceding row: cannot determine correct CurrentState.
+		state.CurrentState = domain.CurrentState{}
+		return state
+	}
+	prevAgentID := prevRow.Agent
+
+	// Search the execution log from the end for the last entry produced by
+	// the preceding row. Entry agents are stored as instance IDs ("{id}#{seq}");
+	// we match by extracting the identifier prefix.
+	for i := len(state.ExecutionLog) - 1; i >= 0; i-- {
+		entry := state.ExecutionLog[i]
+		if extractAgentIdentifier(entry.Agent) == prevAgentID {
+			state.CurrentState = domain.CurrentState{
+				Phase:      entry.Phase,
+				Stage:      entry.Stage,
+				LastStatus: domain.StatusSUCCESS,
+				LastAgent:  entry.Agent,
+			}
+			return state
+		}
+	}
+
+	// No matching log entry: clear CurrentState so the engine starts from the
+	// beginning (the deviation resolver is directing a rejoin earlier than any
+	// recorded step).
+	state.CurrentState = domain.CurrentState{}
+	return state
+}
+
+// rowAtIndex returns the routing table row at the given zero-based index, or
+// false if no row with that index exists.
+func rowAtIndex(table domain.RoutingTable, idx int) (domain.RoutingRow, bool) {
+	for _, row := range table.Rows {
+		if row.Index == idx {
+			return row, true
+		}
+	}
+	return domain.RoutingRow{}, false
+}
+
+// extractAgentIdentifier extracts the agent identifier from an agent instance
+// ID (e.g. "agent-a#1" → "agent-a"). If the input contains no "#", it is
+// returned unchanged.
+func extractAgentIdentifier(instanceID string) string {
+	if idx := strings.LastIndex(instanceID, "#"); idx >= 0 {
+		return instanceID[:idx]
+	}
+	return instanceID
+}
+
+// rewindStateForRerun adjusts the artifact CurrentState for a mid-invocation
+// interruption (FR-33): the last logged step was interrupted before Apply
+// completed, so the session must re-dispatch it. Rewinding CurrentState to
+// the second-to-last log entry (or empty) causes engine.Next to route to the
+// interrupted row again.
+func rewindStateForRerun(state domain.ArtifactState) domain.ArtifactState {
+	if len(state.ExecutionLog) <= 1 {
+		state.CurrentState = domain.CurrentState{}
+		return state
+	}
+	prev := state.ExecutionLog[len(state.ExecutionLog)-2]
+	state.CurrentState = domain.CurrentState{
+		Phase:      prev.Phase,
+		Stage:      prev.Stage,
+		LastStatus: domain.StatusSUCCESS,
+		LastAgent:  prev.Agent,
+	}
+	return state
+}
+
+// refusal constructs a RunOutcome with RunRefused status and a message.
+func refusal(message string) domain.RunOutcome {
+	return domain.RunOutcome{
+		Status:  domain.RunRefused,
+		Message: message,
+	}
+}
+
+// uniqueAgentIdentifiers returns the unique agent identifiers from the routing
+// table in first-occurrence order.
+func uniqueAgentIdentifiers(table domain.RoutingTable) []string {
+	seen := make(map[string]bool, len(table.Rows))
+	result := make([]string, 0, len(table.Rows))
+	for _, row := range table.Rows {
+		if !seen[row.Agent] {
+			seen[row.Agent] = true
+			result = append(result, row.Agent)
+		}
+	}
+	return result
+}
+
+// hasStageStarArtifact reports whether any artifact path in the slice contains
+// the Stage-* wildcard pattern.
+func hasStageStarArtifact(artifacts []string) bool {
+	for _, a := range artifacts {
+		if strings.Contains(a, "Stage-*") {
+			return true
+		}
+	}
+	return false
+}
+
+// onInfrastructureAgentTrigger is the named no-op hook that marks the
+// infrastructure-agent trigger point in the dispatch loop (FR-40). It is
+// called alongside Deps.OnInfrastructureTrigger after each harness invocation,
+// making the trigger point discoverable by name. Production code passes nil
+// for Deps.OnInfrastructureTrigger; tests inject a counter.
+func onInfrastructureAgentTrigger() {
+	// no-op: production hook; real infrastructure-agent dispatch goes here.
+}

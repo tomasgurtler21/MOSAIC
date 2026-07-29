@@ -23,7 +23,7 @@ import (
 	"testing"
 
 	"mosaic-deploy/internal/domain"
-	"mosaic-deploy/internal/docformat"
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/harness/descriptor"
 	"mosaic-deploy/internal/transform"
 )

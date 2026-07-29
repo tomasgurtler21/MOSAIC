@@ -10,7 +10,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 
-	"mosaic-deploy/internal/docformat"
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 )
 
