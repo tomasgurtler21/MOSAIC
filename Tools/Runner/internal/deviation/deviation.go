@@ -134,7 +134,7 @@ func (d *OrchestratorDelegate) Resolve(ctx context.Context, info domain.Deviatio
 		// rather than calling Harness.Invoke with a zero AgentReference.
 		var customAgent domain.AgentReference
 		if instr.CustomAgent != "" {
-			customAgent = domain.AgentReference{Identifier: instr.CustomAgent}
+			customAgent = domain.AgentReference{Identifier: instr.CustomAgent, InvocationKind: domain.InvocationOrdinary}
 		}
 		return domain.RejoinInstruction{
 			Custom: &domain.CustomDispatch{

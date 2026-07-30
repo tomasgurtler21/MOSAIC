@@ -81,6 +81,9 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 		checkpoints       string
 		runIDFlag         string // --run: resume a specific run by run_id
 		isNewRunFlag      bool   // --new-run: force creation of a new run
+		harnessFlag       string // --harness: adapter selection (fake|claude-code)
+		timeoutFlag       string // --timeout: invocation timeout duration string
+		claudePathFlag    string // --claude-path: Claude Code CLI executable path
 	)
 
 	runCmd := &cobra.Command{
@@ -138,6 +141,26 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				exitCode = ExitUsage
 				return nil
 			}
+
+			// Validate --harness.
+			switch harnessFlag {
+			case "fake", "claude-code":
+				// valid
+			default:
+				fmt.Fprintf(errOut, "error: invalid --harness value %q; valid values: fake, claude-code\n", harnessFlag)
+				exitCode = ExitUsage
+				return nil
+			}
+
+			// Validate --timeout (must be a parseable duration).
+			if _, err := time.ParseDuration(timeoutFlag); err != nil {
+				fmt.Fprintf(errOut, "error: invalid --timeout value %q: %v\n", timeoutFlag, err)
+				exitCode = ExitUsage
+				return nil
+			}
+
+			// --claude-path is accepted as-is (any non-empty string is valid).
+			_ = claudePathFlag
 
 			// Resolve run identity from flags or scanner.
 			// When a pre-resolved identity is provided (production path via main.go),
@@ -294,6 +317,9 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 	runCmd.Flags().StringVar(&checkpoints, "checkpoints", "disabled", "Checkpoint support (disabled|enabled)")
 	runCmd.Flags().StringVar(&runIDFlag, "run", "", "Resume a specific run by run_id")
 	runCmd.Flags().BoolVar(&isNewRunFlag, "new-run", false, "Force creation of a new run")
+	runCmd.Flags().StringVar(&harnessFlag, "harness", "fake", "Harness adapter to use (fake|claude-code)")
+	runCmd.Flags().StringVar(&timeoutFlag, "timeout", "30m", "Invocation timeout for the harness adapter (e.g. 30m, 1h)")
+	runCmd.Flags().StringVar(&claudePathFlag, "claude-path", "claude", "Path to the Claude Code CLI binary")
 
 	root.AddCommand(runCmd)
 	root.SetArgs(args)

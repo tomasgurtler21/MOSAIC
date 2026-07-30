@@ -75,6 +75,7 @@ func ResolveAll(dir string, identifiers []string) (map[string]domain.AgentRefere
 		result[id] = domain.AgentReference{
 			Identifier:     id,
 			DefinitionPath: path,
+			InvocationKind: domain.InvocationOrdinary,
 		}
 	}
 

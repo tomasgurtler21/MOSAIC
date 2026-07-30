@@ -28,6 +28,7 @@ import (
 	"mosaic-run/internal/runscan"
 	"mosaic-run/internal/session"
 	"mosaic-run/internal/tui"
+	"mosaic-run/internal/tui/screens"
 )
 
 // wantsTUI reports whether mosaic-run should launch the interactive TUI.
@@ -56,7 +57,7 @@ func main() {
 		return
 	}
 
-	// CLI mode: pre-scan --orchestrator-file and --on-deviation for dependency wiring,
+	// CLI mode: pre-scan flags needed for dependency wiring before cobra parses them,
 	// then resolve run identity (run_id, run folder, is-new-run) before constructing
 	// the session. Resolving run identity here ensures the session's ArtifactStore is
 	// wired to the correct run-scoped Orchestration.md path from the start.
@@ -64,6 +65,25 @@ func main() {
 	onDeviationStr := scanFlag(args, "--on-deviation")
 	if onDeviationStr == "" {
 		onDeviationStr = "delegate" // matches the flag default
+	}
+	harnessStr := scanFlag(args, "--harness")
+	if harnessStr == "" {
+		harnessStr = "fake" // matches the flag default
+	}
+	timeoutStr := scanFlag(args, "--timeout")
+	if timeoutStr == "" {
+		timeoutStr = "30m" // matches the flag default
+	}
+	claudePathStr := scanFlag(args, "--claude-path")
+	if claudePathStr == "" {
+		claudePathStr = "claude" // matches the flag default
+	}
+
+	// Parse the timeout duration; fall back to 30 minutes on invalid input
+	// (cli.Run will surface the parse error to the user with ExitUsage).
+	invocationTimeout := 30 * time.Minute
+	if d, err := time.ParseDuration(timeoutStr); err == nil && d > 0 {
+		invocationTimeout = d
 	}
 
 	// Resolve run identity and construct the store from the run-scoped path.
@@ -81,10 +101,11 @@ func main() {
 	// Interaction (for per-step progress and notices) and writes to os.Stdout.
 	interact := cli.NewInteraction(os.Stdout)
 
-	// Build the harness adapter. A real Claude Code harness adapter will replace this
-	// placeholder when it is implemented in a follow-up stage. For now, all invocations
-	// return an error and the deviation resolver handles the outcome.
-	h := harness.NewFakeAdapter()
+	// Build the harness adapter based on the --harness flag.
+	// When --harness=claude-code, construct the real adapter with the configured
+	// executable path and timeout. The fake adapter is the default and is used
+	// for development/testing without an actual Claude Code CLI.
+	h := buildAdapter(harnessStr, claudePathStr, invocationTimeout)
 
 	// Build the deviation resolver based on the --on-deviation flag.
 	artifactPath := filepath.Join(runIdentity.RunFolder, "Orchestration.md")
@@ -95,6 +116,8 @@ func main() {
 	default: // "delegate"
 		if orchFile != "" {
 			// Use the OrchestratorDelegate when an orchestrator file is provided.
+			// The same harness instance (h) is used for both the session dispatch
+			// and the orchestrator deviation resolution.
 			orchDir := orchFileDir(orchFile)
 			var orchSeq int
 			dev = &deviation.OrchestratorDelegate{
@@ -102,6 +125,7 @@ func main() {
 				Orchestrator: domain.AgentReference{
 					Identifier:     "orchestrator-script",
 					DefinitionPath: orchDir + "/orchestrator-script.md",
+					InvocationKind: domain.InvocationOrchestrator,
 				},
 				ArtifactPath: artifactPath,
 				NextSeq:      func() int { orchSeq++; return orchSeq },
@@ -138,21 +162,37 @@ func runTUIMode(args []string) {
 		os.Exit(1)
 	}
 
-	h := harness.NewFakeAdapter()
+	// Pre-scan --claude-path so it is available to the session factory.
+	claudePathTUI := scanFlag(args, "--claude-path")
+	if claudePathTUI == "" {
+		claudePathTUI = "claude"
+	}
+
 	programRef := tui.NewProgramRef()
 
 	// TUIDeviationResolver routes deviation decisions through the TUI's deviation
-	// screen. Delegate is nil here because the orchestrator file path is not known
-	// until the user enters it in the first setup screen. When the user picks
-	// "Delegate to orchestrator" in the deviation screen and no delegate is wired,
-	// the resolver returns a stop instruction as a safe fallback.
+	// screen. Delegate starts nil (orchestrator file and harness are not known until
+	// setup completes). The sessFactory wires Delegate when the user picks
+	// "Claude Code CLI" in the config screen and an orchestrator file is known.
 	tuiDev := &tui.TUIDeviationResolver{
 		Program: programRef,
 	}
 
-	// SessionFactory builds the session with the run-scoped artifact store after
-	// the TUI resolves run identity (either from RunSelectScreen or pre-launch flags).
-	sessFactory := func(runFolder string, isNewRun bool) session.Session {
+	// SessionFactory builds the session with the run-scoped artifact store and the
+	// harness adapter selected in the config screen. orchFile is the path to the
+	// orchestrator agent file (empty when called before the file screen completes).
+	// cfg carries the harness selection and timeout from the config screen.
+	sessFactory := func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session {
+		// Build the harness adapter based on the user's selection.
+		h := buildAdapter(cfg.Harness, claudePathTUI, cfg.Timeout)
+
+		// Wire OrchestratorDelegate into tuiDev when using the real adapter and
+		// the orchestrator file path is known (entered in the file screen).
+		// This enables deviation resolution through the real Claude Code CLI.
+		// The same harness instance (h) is used for both session dispatch and
+		// orchestrator invocation.
+		tuiDev.Delegate = buildTUIDelegate(h, cfg.Harness, orchFile, runFolder)
+
 		artifactPath := "Orchestration.md"
 		if runFolder != "" {
 			artifactPath = filepath.Join(runFolder, "Orchestration.md")
@@ -221,8 +261,9 @@ func runTUIMode(args []string) {
 	}
 
 	// Construct the initial session using the resolved identity (or placeholder for multi-candidate).
+	// Harness config is not yet known (config screen has not run); defaults to fake adapter.
 	initialFolder := resolvedRunFolder
-	initSess := sessFactory(initialFolder, isNewRun)
+	initSess := sessFactory(initialFolder, isNewRun, "", screens.ConfigSelection{})
 
 	ctx := context.Background()
 	if err := tui.Run(ctx, initSess, tui.Options{
@@ -384,6 +425,55 @@ func scanFlag(args []string, flag string) string {
 		}
 	}
 	return ""
+}
+
+// buildAdapter constructs the HarnessAdapter specified by harnessStr.
+//
+// When harnessStr is "claude-code", a ClaudeCodeAdapter is created with
+// claudePathStr as the executable path and timeout as the invocation limit.
+// A zero or negative timeout is treated as the default (30 minutes).
+// For any other value (including "fake" and unknown strings), FakeAdapter is
+// returned. Unknown values are not rejected here; cli.Run validates the
+// --harness flag and surfaces usage errors for unknown values (AC3.8).
+func buildAdapter(harnessStr, claudePathStr string, timeout time.Duration) domain.HarnessAdapter {
+	switch harnessStr {
+	case "claude-code":
+		if timeout <= 0 {
+			timeout = 30 * time.Minute
+		}
+		return harness.NewClaudeCodeAdapter(claudePathStr, timeout)
+	default: // "fake" or unknown
+		return harness.NewFakeAdapter()
+	}
+}
+
+// buildTUIDelegate constructs the OrchestratorDelegate for TUI deviation
+// resolution. Returns a non-nil delegate only when harnessStr is "claude-code"
+// and orchFile is non-empty; otherwise returns nil (falling back to stop mode).
+//
+// The same harness instance h must be the one used for both session dispatch
+// and orchestrator invocation, ensuring deviation resolution uses the same
+// adapter as the primary session.
+func buildTUIDelegate(h domain.HarnessAdapter, harnessStr, orchFile, runFolder string) *deviation.OrchestratorDelegate {
+	if harnessStr != "claude-code" || orchFile == "" {
+		return nil
+	}
+	orchDir := orchFileDir(orchFile)
+	artifactPath := "Orchestration.md"
+	if runFolder != "" {
+		artifactPath = filepath.Join(runFolder, "Orchestration.md")
+	}
+	var orchSeq int
+	return &deviation.OrchestratorDelegate{
+		Harness: h,
+		Orchestrator: domain.AgentReference{
+			Identifier:     "orchestrator-script",
+			DefinitionPath: orchDir + "/orchestrator-script.md",
+			InvocationKind: domain.InvocationOrchestrator,
+		},
+		ArtifactPath: artifactPath,
+		NextSeq:      func() int { orchSeq++; return orchSeq },
+	}
 }
 
 // realClock provides the current UTC time.

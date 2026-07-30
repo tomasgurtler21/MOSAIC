@@ -140,7 +140,7 @@ func makeDeviationInfo(table domain.RoutingTable) domain.DeviationInfo {
 		CurrentStage: "",
 		PlannedContinuation: &domain.DispatchStep{
 			RowIndex: 1,
-			Agent:    domain.AgentReference{Identifier: "agent-b"},
+			Agent:    domain.AgentReference{Identifier: "agent-b", InvocationKind: domain.InvocationOrdinary},
 		},
 		ArtifactState: domain.ArtifactState{},
 	}
@@ -150,6 +150,7 @@ func orchestratorRef() domain.AgentReference {
 	return domain.AgentReference{
 		Identifier:     "orchestrator-script",
 		DefinitionPath: "/agents/orchestrator-script.md",
+		InvocationKind: domain.InvocationOrdinary,
 	}
 }
 

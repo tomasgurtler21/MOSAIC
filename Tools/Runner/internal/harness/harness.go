@@ -4,7 +4,7 @@
 // (not panics), and handles context cancellation.
 //
 // Protocol serialisation helpers (MarshalRequest / UnmarshalResponse) encode
-// and decode Communication Protocol v1.7 JSON messages.
+// and decode Communication Protocol v1.8 JSON messages.
 package harness
 
 import (
@@ -120,13 +120,13 @@ func (f *FakeAdapter) Invoke(ctx context.Context, agent domain.AgentReference, r
 	return domain.ProtocolResponse{}, errors.New("harness: scripted entry has none of Response, Err, or RawJSON set")
 }
 
-// MarshalRequest serialises a ProtocolRequest to Communication Protocol v1.7
+// MarshalRequest serialises a ProtocolRequest to Communication Protocol v1.8
 // JSON. Field names follow the json struct tags on ProtocolRequest.
 func MarshalRequest(req domain.ProtocolRequest) ([]byte, error) {
 	return json.Marshal(req)
 }
 
-// UnmarshalResponse parses Communication Protocol v1.7 JSON bytes into a
+// UnmarshalResponse parses Communication Protocol v1.8 JSON bytes into a
 // ProtocolResponse. Returns an error if the bytes are not valid JSON.
 func UnmarshalResponse(data []byte) (domain.ProtocolResponse, error) {
 	var r domain.ProtocolResponse

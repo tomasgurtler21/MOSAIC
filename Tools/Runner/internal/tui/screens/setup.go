@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -418,13 +419,17 @@ type ConfigSelection struct {
 	DeviationMode     domain.DeviationMode
 	AllowVersionDrift bool
 	Checkpoints       bool
+	Harness           string        // "fake" or "claude-code"
+	Timeout           time.Duration // invocation timeout (only relevant when Harness == "claude-code")
 }
 
 // configStep identifies which configuration prompt is currently active.
 type configStep int
 
 const (
-	configStepDeviation configStep = iota
+	configStepDeviation     configStep = iota
+	configStepHarness                  // harness adapter selection
+	configStepHarnessTimeout           // timeout entry (only when claude-code is selected)
 	configStepVersionDrift
 	configStepCheckpoints
 	configStepDone
@@ -436,29 +441,81 @@ const (
 //   - After all prompts are answered -> Done() == true, Selection() returns the choices.
 //   - Esc on first prompt -> Back() == true.
 //   - Esc on subsequent prompts -> goes back to the previous prompt.
+//   - The harness timeout step is only shown when "Claude Code CLI" is selected.
 type ConfigScreen struct {
-	step      configStep
-	back      bool
-	sel       ConfigSelection
-	cursor    int
-	width     int
-	height    int
-	styles    Styles
+	step         configStep
+	back         bool
+	sel          ConfigSelection
+	cursor       int
+	width        int
+	height       int
+	styles       Styles
+	timeoutInput *widgets.TextInput
 }
 
 // NewConfigScreen creates the configuration screen.
 func NewConfigScreen(width, height int, styles Styles) *ConfigScreen {
+	inputStyles := widgets.TextInputStyles{
+		Label:  styles.Subtitle,
+		Input:  styles.Body,
+		ErrMsg: styles.Error,
+	}
+	timeoutInput := widgets.NewTextInput(
+		"Invocation timeout (e.g. 30m, 1h):",
+		"30m",
+		width,
+		inputStyles,
+	)
+	timeoutInput.SetValidate(func(v string) error {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return errors.New("timeout cannot be empty")
+		}
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("invalid duration %q: must be like 30m, 1h, 90m", v)
+		}
+		if d <= 0 {
+			return errors.New("timeout must be greater than zero")
+		}
+		return nil
+	})
 	return &ConfigScreen{
-		step:   configStepDeviation,
-		sel:    ConfigSelection{DeviationMode: domain.DeviationDelegate},
-		width:  width,
-		height: height,
-		styles: styles,
+		step:         configStepDeviation,
+		sel:          ConfigSelection{DeviationMode: domain.DeviationDelegate},
+		width:        width,
+		height:       height,
+		styles:       styles,
+		timeoutInput: timeoutInput,
 	}
 }
 
 // Update processes a key message for the current configuration prompt.
 func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
+	// The harness timeout step delegates all key handling to the text input widget.
+	if s.step == configStepHarnessTimeout {
+		cmd := s.timeoutInput.Update(msg)
+		if s.timeoutInput.Back() {
+			s.timeoutInput.Reset()
+			s.step = configStepHarness
+			s.cursor = 0
+			return nil
+		}
+		if s.timeoutInput.Done() {
+			durStr := strings.TrimSpace(s.timeoutInput.Value())
+			if d, err := time.ParseDuration(durStr); err == nil && d > 0 {
+				s.sel.Timeout = d
+			} else {
+				s.sel.Timeout = 30 * time.Minute
+			}
+			s.timeoutInput.Reset()
+			s.step = configStepVersionDrift
+			s.cursor = 0
+			return nil
+		}
+		return cmd
+	}
+
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return nil
@@ -471,16 +528,20 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 		}
 	case "down", "j":
 		switch s.step {
-		case configStepDeviation, configStepVersionDrift, configStepCheckpoints:
+		case configStepDeviation, configStepHarness, configStepVersionDrift, configStepCheckpoints:
 			if s.cursor < 1 {
 				s.cursor++
 			}
 		}
 	case "enter":
-		s.advance()
+		return s.advance()
 	case "esc":
 		if s.step == configStepDeviation {
 			s.back = true
+		} else if s.step == configStepVersionDrift && s.sel.Harness != "claude-code" {
+			// When fake harness was chosen, the timeout step was skipped; go back to harness.
+			s.step = configStepHarness
+			s.cursor = 0
 		} else {
 			s.step--
 			s.cursor = 0
@@ -490,7 +551,8 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 }
 
 // advance commits the current selection and moves to the next step.
-func (s *ConfigScreen) advance() {
+// It returns a tea.Cmd when the harness timeout text input needs to start blinking.
+func (s *ConfigScreen) advance() tea.Cmd {
 	switch s.step {
 	case configStepDeviation:
 		if s.cursor == 0 {
@@ -498,7 +560,18 @@ func (s *ConfigScreen) advance() {
 		} else {
 			s.sel.DeviationMode = domain.DeviationStop
 		}
-		s.step = configStepVersionDrift
+		s.step = configStepHarness
+		s.cursor = 0
+	case configStepHarness:
+		if s.cursor == 0 {
+			s.sel.Harness = "fake"
+			s.step = configStepVersionDrift // skip timeout for fake harness
+		} else {
+			s.sel.Harness = "claude-code"
+			s.step = configStepHarnessTimeout
+			s.timeoutInput.Reset()
+			return s.timeoutInput.Init() // start cursor blink in text input
+		}
 		s.cursor = 0
 	case configStepVersionDrift:
 		s.sel.AllowVersionDrift = s.cursor == 0
@@ -508,6 +581,7 @@ func (s *ConfigScreen) advance() {
 		s.sel.Checkpoints = s.cursor == 0
 		s.step = configStepDone
 	}
+	return nil
 }
 
 // View renders the current configuration prompt.
@@ -523,6 +597,12 @@ func (s *ConfigScreen) View() string {
 		body.WriteString(s.styles.Body.Width(s.width).Render("Deviation handling:") + "\n")
 		body.WriteString(s.renderOption(0, "Delegate to orchestrator (default)"))
 		body.WriteString(s.renderOption(1, "Stop the run"))
+	case configStepHarness:
+		body.WriteString(s.styles.Body.Width(s.width).Render("Harness adapter:") + "\n")
+		body.WriteString(s.renderOption(0, "Fake (scripted) (default)"))
+		body.WriteString(s.renderOption(1, "Claude Code CLI"))
+	case configStepHarnessTimeout:
+		body.WriteString(s.timeoutInput.View())
 	case configStepVersionDrift:
 		body.WriteString(s.styles.Body.Width(s.width).Render("Allow workflow version drift:") + "\n")
 		body.WriteString(s.renderOption(0, "Yes"))
@@ -561,10 +641,12 @@ func (s *ConfigScreen) Reset() {
 	s.back = false
 	s.cursor = 0
 	s.sel = ConfigSelection{DeviationMode: domain.DeviationDelegate}
+	s.timeoutInput.Reset()
 }
 
 // Resize updates the screen dimensions.
 func (s *ConfigScreen) Resize(width, height int) {
 	s.width = width
 	s.height = height
+	s.timeoutInput.Resize(width)
 }

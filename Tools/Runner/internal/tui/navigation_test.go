@@ -583,9 +583,10 @@ func TestSetupSequence_ForwardNavigation_ReachesProgressScreen(t *testing.T) {
 		t.Fatalf("after task entry: screen = %v, want screenSetupConfig", m.screen)
 	}
 
-	// Accept all three configuration prompts with their default selections.
+	// Accept all four configuration prompts with their default selections.
 	// (ExistingArtifact prompt was removed from ConfigScreen in Stage 6.)
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation mode
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness (default: fake)
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → transitions to screenProgress
 
@@ -1159,21 +1160,22 @@ func TestRunSelect_EnterOnCandidate_SetsRunIDAndAdvances(t *testing.T) {
 // ConfigScreen: ExistingArtifact step removed
 // ---------------------------------------------------------------------------
 
-// TestConfigScreen_ExistingArtifactPromptRemoved verifies that the ConfigScreen
-// does not present an ExistingArtifact prompt. Only three prompts should appear:
-// deviation handling, version drift, and checkpoints.
-func TestConfigScreen_ExistingArtifactPromptRemoved(t *testing.T) {
+// TestConfigScreen_PromptsCount verifies that the ConfigScreen presents exactly four
+// prompts: deviation handling, harness selection, version drift, and checkpoints.
+// (The ExistingArtifact prompt was removed in Stage 6; the harness prompt was added in Stage 3.)
+func TestConfigScreen_PromptsCount(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenSetupConfig
 
-	// Only three Enters are needed to complete the config screen.
-	// If a fourth prompt existed, the screen would not be done after three Enters.
+	// Exactly four Enters are needed to complete the config screen when using the
+	// default (fake) harness — the timeout step is skipped for fake harness.
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation mode
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness (default: fake, skips timeout)
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → done
 
 	if m.screen != screenProgress {
-		t.Errorf("screen = %v after three config Enters, want screenProgress (%v); ExistingArtifact prompt may still be present", m.screen, screenProgress)
+		t.Errorf("screen = %v after four config Enters, want screenProgress (%v)", m.screen, screenProgress)
 	}
 }
 

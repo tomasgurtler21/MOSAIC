@@ -76,9 +76,12 @@ type Options struct {
 	InitialRunFolder string
 
 	// SessionFactory, when non-nil, is called after run identity is resolved to
-	// construct the session with the correct run-scoped artifact store. When nil,
-	// the session passed to Run() is used directly (test/backward-compat path).
-	SessionFactory func(runFolder string, isNewRun bool) session.Session
+	// construct the session with the correct run-scoped artifact store and harness
+	// adapter. orchFile is the path entered by the user on the orchestrator file
+	// screen (empty when called before setup completes). cfg carries the harness
+	// adapter selection and timeout from the config screen (zero value = fake adapter).
+	// When nil, the session passed to Run() is used directly (test/backward-compat path).
+	SessionFactory func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session
 }
 
 // runSetupSelections holds all inputs collected during the setup phase.
@@ -139,7 +142,7 @@ type rootModel struct {
 
 	// Session dependencies.
 	sess           session.Session
-	sessionFactory func(runFolder string, isNewRun bool) session.Session
+	sessionFactory func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session
 	interact       *ProgramRef
 
 	// Enumerated workflow regions (populated after orchestrator file is loaded).
@@ -421,8 +424,9 @@ func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selections.runFolder = c.FolderPath
 				m.selections.isNewRun = false
 				// Reconstruct the session with the correct run-scoped store if a factory is available.
+				// Harness config is not yet known (config screen has not run); defaults to fake adapter.
 				if m.sessionFactory != nil {
-					m.sess = m.sessionFactory(c.FolderPath, false)
+					m.sess = m.sessionFactory(c.FolderPath, false, "", screens.ConfigSelection{})
 				}
 			}
 		}
@@ -430,7 +434,7 @@ func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// factory is called with an empty folder (the session layer will mint the ID
 		// when Store.Create is called in a later stage).
 		if m.selections.isNewRun && m.sessionFactory != nil {
-			m.sess = m.sessionFactory("", true)
+			m.sess = m.sessionFactory("", true, "", screens.ConfigSelection{})
 		}
 		m.runSelectScreen.Reset()
 		m.screen = screenSetupFile
@@ -530,6 +534,13 @@ func (m *rootModel) updateSetupConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.configScreen.Done() {
 		m.selections.config = m.configScreen.Selection()
 		m.configScreen.Reset()
+
+		// Reconstruct the session with the harness adapter selected in the config screen.
+		// This replaces the placeholder session (which used the fake adapter) with one
+		// using the real adapter when "Claude Code CLI" was chosen.
+		if m.sessionFactory != nil {
+			m.sess = m.sessionFactory(m.selections.runFolder, m.selections.isNewRun, m.selections.orchestratorFile, m.selections.config)
+		}
 
 		// Transition to progress screen and start the session.
 		style := stylesFromTheme(m.theme)
@@ -953,7 +964,7 @@ func (r *TUIDeviationResolver) Resolve(ctx context.Context, info domain.Deviatio
 			}
 			return domain.RejoinInstruction{
 				Custom: &domain.CustomDispatch{
-					Agent:        domain.AgentReference{Identifier: res.Agent},
+					Agent:        domain.AgentReference{Identifier: res.Agent, InvocationKind: domain.InvocationOrdinary},
 					Request:      req,
 					HITLOverride: res.HITLOverride,
 					RejoinRow:    res.RejoinRowIndex,

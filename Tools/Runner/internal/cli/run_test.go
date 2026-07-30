@@ -1089,3 +1089,117 @@ func TestCOMPLETEDMarker_NotWrittenWhenRunFailed(t *testing.T) {
 		t.Errorf("store.SetPhase called %d time(s), want 0 when status is RunFailed", len(spy.setCalls))
 	}
 }
+
+// ============================================================
+// T3.1: CLI harness flag tests
+// ============================================================
+
+// baseHarnessArgs returns the minimum required flags for the run subcommand.
+func baseHarnessArgs() []string {
+	return []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--new-run",
+	}
+}
+
+// TestHarnessFlag_FakeAccepted verifies that --harness fake is accepted and the
+// session is started normally.
+func TestHarnessFlag_FakeAccepted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	args := append(baseHarnessArgs(), "--harness", "fake")
+	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+	if code != cli.ExitSuccess {
+		t.Errorf("exit code = %d, want ExitSuccess (%d); stderr: %q", code, cli.ExitSuccess, errOut)
+	}
+	if !sess.called {
+		t.Error("session.Start was not called for --harness fake")
+	}
+}
+
+// TestHarnessFlag_ClaudeCodeAccepted verifies that --harness claude-code is accepted
+// and the session is started normally.
+func TestHarnessFlag_ClaudeCodeAccepted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	args := append(baseHarnessArgs(), "--harness", "claude-code")
+	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+	if code != cli.ExitSuccess {
+		t.Errorf("exit code = %d, want ExitSuccess (%d); stderr: %q", code, cli.ExitSuccess, errOut)
+	}
+	if !sess.called {
+		t.Error("session.Start was not called for --harness claude-code")
+	}
+}
+
+// TestHarnessFlag_UnknownRejectsWithUsageError verifies that --harness with an
+// unknown value produces ExitUsage and an actionable error message that names
+// both the invalid value and the valid alternatives, satisfying AC3.8.
+func TestHarnessFlag_UnknownRejectsWithUsageError(t *testing.T) {
+	sess := &scriptedSession{}
+	args := append(baseHarnessArgs(), "--harness", "invalid-harness")
+	code, _, errOut := runCLI(t, args, sess)
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage (%d) for unknown --harness value", code, cli.ExitUsage)
+	}
+	// Error must name the invalid value so the user can see what they typed.
+	if !strings.Contains(errOut, "invalid-harness") {
+		t.Errorf("stderr %q should mention the invalid value %q", errOut, "invalid-harness")
+	}
+	// Error must also name the valid alternatives so the user knows how to fix it.
+	if !strings.Contains(errOut, "fake") {
+		t.Errorf("stderr %q should mention valid value %q so the error is actionable", errOut, "fake")
+	}
+	if !strings.Contains(errOut, "claude-code") {
+		t.Errorf("stderr %q should mention valid value %q so the error is actionable", errOut, "claude-code")
+	}
+	if sess.called {
+		t.Error("session.Start should not be called for invalid --harness value")
+	}
+}
+
+// TestTimeoutFlag_ValidDurationAccepted verifies that --timeout with a parseable
+// duration string is accepted and the session is started normally.
+func TestTimeoutFlag_ValidDurationAccepted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	args := append(baseHarnessArgs(), "--timeout", "45m")
+	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+	if code != cli.ExitSuccess {
+		t.Errorf("exit code = %d, want ExitSuccess (%d); stderr: %q", code, cli.ExitSuccess, errOut)
+	}
+	if !sess.called {
+		t.Error("session.Start was not called for valid --timeout value")
+	}
+}
+
+// TestTimeoutFlag_InvalidDurationRejectsWithUsageError verifies that --timeout with
+// an unparseable duration string produces ExitUsage.
+func TestTimeoutFlag_InvalidDurationRejectsWithUsageError(t *testing.T) {
+	sess := &scriptedSession{}
+	args := append(baseHarnessArgs(), "--timeout", "not-a-duration")
+	code, _, errOut := runCLI(t, args, sess)
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage (%d) for invalid --timeout value", code, cli.ExitUsage)
+	}
+	if !strings.Contains(errOut, "not-a-duration") {
+		t.Errorf("stderr %q should mention the invalid value", errOut)
+	}
+	if sess.called {
+		t.Error("session.Start should not be called for invalid --timeout value")
+	}
+}
+
+// TestClaudePathFlag_Accepted verifies that --claude-path is accepted with any
+// non-empty string value and the session is started normally.
+func TestClaudePathFlag_Accepted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	args := append(baseHarnessArgs(), "--claude-path", "/usr/local/bin/claude")
+	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+	if code != cli.ExitSuccess {
+		t.Errorf("exit code = %d, want ExitSuccess (%d); stderr: %q", code, cli.ExitSuccess, errOut)
+	}
+	if !sess.called {
+		t.Error("session.Start was not called when --claude-path is provided")
+	}
+}

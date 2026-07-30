@@ -50,11 +50,30 @@ type ProtocolResponse struct {
 	ErrorReason     string     `json:"error_reason,omitempty"`
 }
 
+// InvocationKind identifies the CLI invocation strategy the harness adapter
+// should use for a given agent dispatch.
+type InvocationKind string
+
+const (
+	// InvocationOrdinary is a standard single-agent dispatch. The adapter uses
+	// --append-system-prompt-file to inject the agent definition while preserving
+	// the CLI's default system prompt and <env> block.
+	InvocationOrdinary InvocationKind = "ordinary"
+
+	// InvocationOrchestrator is a deviation-resolution dispatch where the
+	// orchestrator agent needs native subagent-spawning capability. The adapter
+	// uses --agent <identifier> to launch the orchestrator as the CLI's primary
+	// thread, and synthesizes an <env> block to compensate for the lost default
+	// system prompt.
+	InvocationOrchestrator InvocationKind = "orchestrator"
+)
+
 // AgentReference is a resolved agent: the workflow's identifier plus the
 // path to the definition file the harness adapter needs.
 type AgentReference struct {
-	Identifier     string // agent identifier from the routing table
-	DefinitionPath string // absolute path to the .md file in the orchestrator file's directory
+	Identifier     string         // agent identifier from the routing table
+	DefinitionPath string         // absolute path to the .md file in the orchestrator file's directory
+	InvocationKind InvocationKind // CLI strategy: ordinary or orchestrator
 }
 
 // DispatchStep is everything the session needs to execute one invocation.
