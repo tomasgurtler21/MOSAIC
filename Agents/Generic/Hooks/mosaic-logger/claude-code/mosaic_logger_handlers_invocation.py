@@ -71,22 +71,23 @@ def extract_status_code(message: "str | None") -> "str | None":
 def handle_subagent_start(ctx: "core.HookContext") -> None:
     """Handle SubagentStart: register mapping, emit invocation_start and input turn,
     write 01_input.md, and refresh 00_orchestrator_session.raw."""
-    if not ctx.run_id or not ctx.agent_id:
+    if not ctx.agent_id:
         return
 
+    run_id = core.effective_run_id(ctx)
     agent_prompt = ctx.field("agent_prompt")
     agent_type = ctx.agent_type
 
-    # 1. Resolve agent_instance_id
+    # 1. Resolve agent_instance_id — falls back to "unknown-agent" when extraction fails
     extracted = runstate.extract_instance_id(agent_prompt)
-    agent_instance_id = extracted or runstate.fallback_instance_id(agent_type)
+    agent_instance_id = extracted if extracted else "unknown-agent"
 
     # 2. Persist mapping FIRST — before any event write
     runstate.put_agent_mapping(
-        ctx.paths, ctx.run_id, ctx.agent_id, agent_instance_id, agent_type
+        ctx.paths, run_id, ctx.agent_id, agent_instance_id, agent_type
     )
 
-    sink = ctx.paths.invocation_events(ctx.run_id, agent_instance_id)
+    sink = ctx.paths.invocation_events(run_id, agent_instance_id)
 
     # 3. Emit invocation_start
     event = core.build_event(
@@ -104,12 +105,12 @@ def handle_subagent_start(ctx: "core.HookContext") -> None:
 
     # 5. Write 01_input.md
     input_text = artifacts.render_input(ctx, agent_instance_id, agent_prompt)
-    artifacts.write_artifact(ctx.paths.invocation_input(ctx.run_id, agent_instance_id), input_text)
+    artifacts.write_artifact(ctx.paths.invocation_input(run_id, agent_instance_id), input_text)
 
     # 6. Refresh 00_orchestrator_session.raw from the orchestrator transcript
     export.export_transcript(
         ctx.transcript_path,
-        ctx.paths.orchestrator_raw(ctx.run_id),
+        ctx.paths.orchestrator_raw(run_id),
         "transcript_path",
     )
 
@@ -117,14 +118,16 @@ def handle_subagent_start(ctx: "core.HookContext") -> None:
 def handle_subagent_stop(ctx: "core.HookContext") -> None:
     """Handle SubagentStop: emit invocation_end and final assistant turn, write
     02_output.md, export agent transcript, and refresh 00_orchestrator_session.raw."""
-    if not ctx.run_id or not ctx.agent_id:
+    if not ctx.agent_id:
         return
+
+    run_id = core.effective_run_id(ctx)
 
     # 1. Resolve agent_instance_id via mapping (so start and end agree on folder)
     agent_instance_id = runstate.resolve_invocation_id(
-        ctx.paths, ctx.run_id, ctx.agent_id
+        ctx.paths, run_id, ctx.agent_id
     )
-    sink = ctx.paths.invocation_events(ctx.run_id, agent_instance_id)
+    sink = ctx.paths.invocation_events(run_id, agent_instance_id)
 
     # 2. Read transcript facts once; reuse for both invocation_end and final turn
     agent_transcript_path = ctx.field("agent_transcript_path")
@@ -157,19 +160,19 @@ def handle_subagent_stop(ctx: "core.HookContext") -> None:
 
     # 5. Write 02_output.md
     output_text = artifacts.render_output(ctx, agent_instance_id, last_msg, status_code, facts)
-    artifacts.write_artifact(ctx.paths.invocation_output(ctx.run_id, agent_instance_id), output_text)
+    artifacts.write_artifact(ctx.paths.invocation_output(run_id, agent_instance_id), output_text)
 
     # 6. Export agent transcript to 04_session.raw + 04_session.meta.json
     export.export_transcript(
         agent_transcript_path,
-        ctx.paths.invocation_raw(ctx.run_id, agent_instance_id),
+        ctx.paths.invocation_raw(run_id, agent_instance_id),
         "agent_transcript_path",
     )
 
     # 7. Refresh 00_orchestrator_session.raw from the orchestrator's transcript
     export.export_transcript(
         ctx.transcript_path,
-        ctx.paths.orchestrator_raw(ctx.run_id),
+        ctx.paths.orchestrator_raw(run_id),
         "transcript_path",
     )
 

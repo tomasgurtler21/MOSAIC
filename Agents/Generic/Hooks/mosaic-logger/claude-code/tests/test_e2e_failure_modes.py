@@ -22,6 +22,7 @@ Failure modes covered:
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -427,10 +428,21 @@ class TestFailureModeInProcess(unittest.TestCase):
             "tool_input": {"file_path": "/some/path"},
         }))
         paths = core.build_paths(self.tmp_path)
-        marker = paths.marker(session_id)
-        if not marker.exists():
+        # Resolve run_id via directory scan — extraction-based routing uses
+        # unknown-run/ when no run_id is embedded in the prompt.
+        _RUN_ID_RE = re.compile(r'^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{4}$')
+        log_root = paths.root
+        if not log_root.exists():
             return
-        run_id = json.loads(marker.read_text("utf-8")).get("run_id")
+        run_id = None
+        for child in log_root.iterdir():
+            if child.is_dir() and _RUN_ID_RE.match(child.name):
+                run_id = child.name
+                break
+        if run_id is None and (log_root / "unknown-run").exists():
+            run_id = "unknown-run"
+        if run_id is None:
+            return
         orch_events_path = paths.orchestrator_events(run_id)
         if not orch_events_path.exists():
             return

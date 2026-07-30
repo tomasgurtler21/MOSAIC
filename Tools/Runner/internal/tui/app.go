@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,6 +22,7 @@ import (
 	"mosaic-run/internal/deviation"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/orchfile"
+	"mosaic-run/internal/runscan"
 	"mosaic-run/internal/session"
 	"mosaic-run/internal/tui/screens"
 	"mosaic-run/internal/workflow"
@@ -30,7 +32,8 @@ import (
 type screenID int
 
 const (
-	screenSetupFile     screenID = iota // orchestrator file path entry
+	screenRunSelect     screenID = iota // run selection (shown when multiple resumable runs exist)
+	screenSetupFile                     // orchestrator file path entry
 	screenSetupWorkflow                 // workflow selection
 	screenSetupTask                     // task description entry
 	screenSetupConfig                   // run configuration prompts
@@ -53,6 +56,29 @@ type Options struct {
 
 	// Theme sets the colour scheme. DefaultTheme() is used when zero.
 	Theme tuicommon.Theme
+
+	// ScanResult carries the run folder scan results. When Candidates has
+	// more than one entry, the RunSelectScreen is shown before setup.
+	// When nil or empty, the screen is skipped and a new run is assumed.
+	ScanResult *runscan.ScanResult
+
+	// ResolvedRunID is set when --run or --new-run resolved identity before
+	// the TUI launched. When non-empty, the RunSelectScreen is skipped.
+	ResolvedRunID string
+
+	// IsNewRun is true when --new-run was given or the scan yielded zero candidates.
+	IsNewRun bool
+
+	// InitialRunFolder is the resolved run-scoped folder path when --run or
+	// single-candidate auto-resume resolved run identity before TUI launch.
+	// It is carried into m.selections.runFolder so that readArtifactContent
+	// and the COMPLETED-marker write in a later stage use the correct path.
+	InitialRunFolder string
+
+	// SessionFactory, when non-nil, is called after run identity is resolved to
+	// construct the session with the correct run-scoped artifact store. When nil,
+	// the session passed to Run() is used directly (test/backward-compat path).
+	SessionFactory func(runFolder string, isNewRun bool) session.Session
 }
 
 // runSetupSelections holds all inputs collected during the setup phase.
@@ -61,6 +87,11 @@ type runSetupSelections struct {
 	workflowID       domain.WorkflowID
 	task             string
 	config           screens.ConfigSelection
+
+	// Run identity resolved by RunSelectScreen or pre-launch flags.
+	runID     string // resolved run_id; empty if not yet resolved
+	runFolder string // resolved run-scoped folder path (absolute)
+	isNewRun  bool   // true = create new artifact; false = resume existing
 }
 
 // runDoneMsg is sent by the session goroutine when the run completes.
@@ -107,8 +138,9 @@ type rootModel struct {
 	height    int
 
 	// Session dependencies.
-	sess session.Session
-	interact *ProgramRef
+	sess           session.Session
+	sessionFactory func(runFolder string, isNewRun bool) session.Session
+	interact       *ProgramRef
 
 	// Enumerated workflow regions (populated after orchestrator file is loaded).
 	workflows []domain.WorkflowRegion
@@ -116,6 +148,9 @@ type rootModel struct {
 	// Routing table for the selected workflow (populated after workflow selection).
 	// Passed to NewDeviationScreen so the manual deviation row list is populated.
 	routingTable domain.RoutingTable
+
+	// Run selection screen (shown when multiple resumable candidates exist).
+	runSelectScreen *screens.RunSelectScreen
 
 	// Entry screens (concrete types so back-navigation preserves state).
 	fileScreen     *screens.OrchestratorFileScreen
@@ -187,19 +222,45 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 		interact = NewProgramRef()
 	}
 
-	return &rootModel{
-		ctx:        ctx,
-		ctxCancel:  cancel,
-		theme:      opts.Theme,
-		screen:     screenSetupFile,
-		width:      w,
-		height:     h,
-		sess:       sess,
-		interact:   interact,
-		fileScreen: fileScreen,
-		taskScreen: taskScreen,
-		configScreen: configScreen,
+	// Determine the initial screen and resolve run identity from pre-launch options.
+	initialScreen := screenSetupFile
+	var runSelectScreen *screens.RunSelectScreen
+	preRunID := opts.ResolvedRunID
+	preIsNewRun := opts.IsNewRun
+
+	if opts.ResolvedRunID == "" && !opts.IsNewRun && opts.ScanResult != nil && len(opts.ScanResult.Candidates) > 1 {
+		// Multiple resumable candidates with no pre-resolved run: show the selection screen.
+		runSelectScreen = screens.NewRunSelectScreen(opts.ScanResult.Candidates, w, h, style)
+		initialScreen = screenRunSelect
 	}
+	// Zero or one candidate (or pre-resolved): skip run select, go straight to setup.
+
+	m := &rootModel{
+		ctx:             ctx,
+		ctxCancel:       cancel,
+		theme:           opts.Theme,
+		screen:          initialScreen,
+		width:           w,
+		height:          h,
+		sess:            sess,
+		sessionFactory:  opts.SessionFactory,
+		interact:        interact,
+		runSelectScreen: runSelectScreen,
+		fileScreen:      fileScreen,
+		taskScreen:      taskScreen,
+		configScreen:    configScreen,
+	}
+
+	// Pre-populate run identity when already resolved (--run / --new-run / single candidate).
+	// InitialRunFolder carries the resolved run-scoped folder so that readArtifactContent
+	// and any later COMPLETED-marker write target the correct path immediately.
+	if preRunID != "" || preIsNewRun {
+		m.selections.runID = preRunID
+		m.selections.runFolder = opts.InitialRunFolder
+		m.selections.isNewRun = preIsNewRun
+	}
+
+	return m
 }
 
 // stylesFromTheme converts a tuicommon.Theme to screens.Styles.
@@ -221,6 +282,9 @@ func stylesFromTheme(t tuicommon.Theme) screens.Styles {
 
 // Init is called once when the Bubble Tea program starts.
 func (m *rootModel) Init() tea.Cmd {
+	if m.screen == screenRunSelect {
+		return nil
+	}
 	return m.fileScreen.InputInit()
 }
 
@@ -277,6 +341,8 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Delegate to current screen.
 	switch m.screen {
+	case screenRunSelect:
+		return m.updateRunSelect(msg)
 	case screenSetupFile:
 		return m.updateSetupFile(msg)
 	case screenSetupWorkflow:
@@ -300,6 +366,9 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *rootModel) resizeScreens() {
+	if m.runSelectScreen != nil {
+		m.runSelectScreen.Resize(m.width, m.height)
+	}
 	if m.fileScreen != nil {
 		m.fileScreen.Resize(m.width, m.height)
 	}
@@ -324,6 +393,50 @@ func (m *rootModel) resizeScreens() {
 	if m.doneScreen != nil {
 		m.doneScreen.Resize(m.width, m.height)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Run select screen handler
+// ---------------------------------------------------------------------------
+
+func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.runSelectScreen == nil {
+		m.screen = screenSetupFile
+		return m, m.fileScreen.InputInit()
+	}
+	m.runSelectScreen.Update(msg)
+	if m.runSelectScreen.Back() {
+		m.runSelectScreen.Reset()
+		return m, tea.Quit
+	}
+	if m.runSelectScreen.Done() {
+		if m.runSelectScreen.IsNewRun() {
+			m.selections.runID = ""
+			m.selections.runFolder = ""
+			m.selections.isNewRun = true
+		} else {
+			c := m.runSelectScreen.SelectedCandidate()
+			if c != nil {
+				m.selections.runID = c.RunID
+				m.selections.runFolder = c.FolderPath
+				m.selections.isNewRun = false
+				// Reconstruct the session with the correct run-scoped store if a factory is available.
+				if m.sessionFactory != nil {
+					m.sess = m.sessionFactory(c.FolderPath, false)
+				}
+			}
+		}
+		// When "new run" is selected but no run folder is known yet, the session
+		// factory is called with an empty folder (the session layer will mint the ID
+		// when Store.Create is called in a later stage).
+		if m.selections.isNewRun && m.sessionFactory != nil {
+			m.sess = m.sessionFactory("", true)
+		}
+		m.runSelectScreen.Reset()
+		m.screen = screenSetupFile
+		return m, m.fileScreen.InputInit()
+	}
+	return m, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -472,8 +585,20 @@ func extractField(msg, key string) string {
 }
 
 // readArtifactContent reads the Orchestration.md file at the canonical path.
+// When a run-scoped folder is known (resumed run or flag-resolved identity),
+// the artifact lives at {runFolder}/Orchestration.md. For new runs whose
+// run folder has not yet been minted, it falls back to the directory that
+// contains the orchestrator file.
 func (m *rootModel) readArtifactContent() string {
-	// The canonical path is in the same directory as the orchestrator file.
+	if m.selections.runFolder != "" {
+		artPath := filepath.Join(m.selections.runFolder, "Orchestration.md")
+		data, err := os.ReadFile(artPath)
+		if err != nil {
+			return fmt.Sprintf("(could not read artifact: %v)", err)
+		}
+		return string(data)
+	}
+	// Fallback: artifact in the same directory as the orchestrator file.
 	path := m.selections.orchestratorFile
 	dir := ""
 	if idx := strings.LastIndexByte(path, '/'); idx >= 0 {
@@ -691,8 +816,10 @@ func (m *rootModel) startSession() tea.Cmd {
 			OrchestratorFilePath: sel.orchestratorFile,
 			WorkflowID:           sel.workflowID,
 			Task:                 sel.task,
+			RunID:                sel.runID,
+			RunFolder:            sel.runFolder,
+			IsNewRun:             sel.isNewRun,
 			OnDeviation:          sel.config.DeviationMode,
-			ExistingArtifact:     sel.config.ExistingArtifact,
 			AllowVersionDrift:    sel.config.AllowVersionDrift,
 			Checkpoints:          sel.config.Checkpoints,
 		}
@@ -711,6 +838,10 @@ func (m *rootModel) startSession() tea.Cmd {
 // View renders the current screen to a string.
 func (m *rootModel) View() string {
 	switch m.screen {
+	case screenRunSelect:
+		if m.runSelectScreen != nil {
+			return m.runSelectScreen.View()
+		}
 	case screenSetupFile:
 		return m.fileScreen.View()
 	case screenSetupWorkflow:

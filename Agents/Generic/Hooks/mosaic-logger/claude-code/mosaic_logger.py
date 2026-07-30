@@ -24,21 +24,24 @@ for _mod in [_session, _invocation, _tools]:
     if hasattr(_mod, "HANDLERS"):
         HANDLERS.update(_mod.HANDLERS)
 
-# Events permitted to mint a new run_id
-MINTING_EVENTS: frozenset = frozenset({"SessionStart", "SubagentStart", "UserPromptSubmit"})
-
-# Events that close the run marker
-CLOSING_EVENTS: frozenset = frozenset({"SessionEnd"})
-
 
 # ---------------------------------------------------------------------------
 # Dispatcher functions
 # ---------------------------------------------------------------------------
 
+# Events with prompt-bearing fields from which run_id may be extracted.
+_RUN_ID_PROMPT_FIELDS: dict = {
+    "SubagentStart": "agent_prompt",
+    "SubagentStop": "last_assistant_message",
+    "UserPromptSubmit": "user_prompt",
+    "Stop": "last_assistant_message",
+    "Notification": "message",
+}
+
+
 def build_context(payload: dict) -> core.HookContext:
     """Construct the immutable per-firing context from a parsed hook payload.
-    Resolves the workspace root and LogPaths tree. Does not touch the run marker
-    and does not create directories.
+    Resolves the workspace root and LogPaths tree. Does not create directories.
     """
     workspace_root = core.resolve_workspace_root(payload)
     paths = core.build_paths(workspace_root)
@@ -46,38 +49,24 @@ def build_context(payload: dict) -> core.HookContext:
     return core.HookContext(payload, workspace_root, paths, timestamp)
 
 
-def run_identity_prelude(ctx: core.HookContext) -> runstate.RunResolution:
-    """Resolve (and when permitted, mint or close) the session's run_id.
+def resolve_run_identity(ctx: core.HookContext) -> None:
+    """Set ctx.run_id by extracting from the event-specific prompt field.
 
-    Sets ctx.run_id. Emits run_start on a MINTED outcome.
-    Runs BEFORE the event handler so every handler sees a resolved ctx.run_id.
-    Returns the RunResolution so the postlude can act on it.
+    For events with no prompt-bearing field (SessionStart, SessionEnd, tool
+    events, compaction, etc.), ctx.run_id remains None. Routing to the
+    appropriate bucket (run_id folder or unknown-run/) is handled by
+    effective_run_id() in the core module.
+
+    Never raises.
     """
-    if ctx.event in CLOSING_EVENTS:
-        resolution = runstate.close_run(ctx.paths, ctx.session_id)
-    else:
-        allow_mint = ctx.event in MINTING_EVENTS
-        resolution = runstate.resolve_run(ctx.paths, ctx.session_id, allow_mint)
-
-    ctx.run_id = resolution.run_id
-
-    if resolution.outcome == "minted":
-        _session.emit_run_start(ctx)
-
-    return resolution
-
-
-def run_identity_postlude(ctx: core.HookContext,
-                          resolution: runstate.RunResolution) -> None:
-    """Emit run_end when, and only when, resolution.outcome == 'closed'.
-
-    Called AFTER the event handler so run_end is the last line of the
-    orchestrator stream — run is the outer scope and closes last.
-    """
-    if resolution.outcome == "closed":
-        # Derive outcome from SessionEnd reason when available
-        outcome = ctx.field("reason") if ctx.event in CLOSING_EVENTS else None
-        _session.emit_run_end(ctx, outcome)
+    try:
+        field_name = _RUN_ID_PROMPT_FIELDS.get(ctx.event)
+        if field_name is None:
+            return  # No prompt-bearing field for this event
+        prompt = ctx.field(field_name)
+        ctx.run_id = runstate.extract_run_id(prompt)
+    except Exception as exc:
+        core.debug_log("resolve_run_identity failed", exc)
 
 
 def dispatch(raw_input: str) -> None:
@@ -86,10 +75,11 @@ def dispatch(raw_input: str) -> None:
     Steps:
       1. Parse raw_input as JSON; abort silently if not a dict.
       2. Build HookContext.
-      3. run_identity_prelude — sets ctx.run_id, mints/closes marker, emits run_start.
-      4. Invoke registered handler for ctx.event, if any.
-      5. run_identity_postlude — emits run_end on CLOSED outcome.
-    Step 5 runs even when step 4 raised, so a handler failure on SessionEnd
+      3. resolve_run_identity — extracts run_id from prompt content when present.
+      4. Emit run_start on SessionStart (event-based, not mint-outcome-based).
+      5. Invoke registered handler for ctx.event, if any.
+      6. Emit run_end on SessionEnd (event-based, after the handler) — always runs.
+    Step 6 runs even when step 5 raised, so a handler failure on SessionEnd
     cannot swallow run_end.
     Any exception at any step is caught and swallowed.
     """
@@ -105,14 +95,20 @@ def dispatch(raw_input: str) -> None:
         # Step 2: context
         ctx = build_context(payload)
 
-        # Step 3: prelude (marker mint/close, run_start emission)
+        # Step 3: resolve run identity via extraction
         try:
-            resolution = run_identity_prelude(ctx)
+            resolve_run_identity(ctx)
         except Exception as exc:
-            core.debug_log("run_identity_prelude failed", exc)
-            resolution = runstate.RunResolution(run_id=None, outcome="unresolved")
+            core.debug_log("resolve_run_identity failed", exc)
 
-        # Step 4: handler
+        # Step 4: emit run_start on SessionStart
+        try:
+            if ctx.event == "SessionStart":
+                _session.emit_run_start(ctx)
+        except Exception as exc:
+            core.debug_log("emit_run_start failed", exc)
+
+        # Step 5: handler
         try:
             handler = HANDLERS.get(ctx.event)
             if handler is not None:
@@ -120,11 +116,13 @@ def dispatch(raw_input: str) -> None:
         except Exception as exc:
             core.debug_log(f"handler for {ctx.event!r} raised", exc)
 
-        # Step 5: postlude (run_end emission) — always runs
+        # Step 6: emit run_end on SessionEnd — always runs
         try:
-            run_identity_postlude(ctx, resolution)
+            if ctx.event == "SessionEnd":
+                outcome = ctx.field("reason")
+                _session.emit_run_end(ctx, outcome)
         except Exception as exc:
-            core.debug_log("run_identity_postlude failed", exc)
+            core.debug_log("emit_run_end failed", exc)
 
     except Exception as exc:
         core.debug_log("dispatch outer exception", exc)

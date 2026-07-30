@@ -19,8 +19,6 @@ package docformat_test
 //   - Issue.Node is non-empty for a mismatched-tag issue (offending section name is known).
 //   - RequireCanonicalSections enforces order of present sections, not presence of all sections.
 //   - Workflow files with compound section names are excluded from AC4.4 Python-Go agreement scope.
-//   - CanonicalSections contains all seven expected section names in canonical order.
-//   - CanonicalInjections contains all twelve expected injection names.
 //   - InjectionParent maps each canonical injection to its expected parent section.
 //   - ClassifyInjection returns InjectionWorkflow for "AvailableWorkflows".
 //   - ClassifyInjection returns InjectionHarness for "HarnessConstraints".
@@ -257,60 +255,8 @@ func TestValidate_UnbalancedOpenTag_IssueLineIsNonZero(t *testing.T) {
 
 // --- Canonical vocabulary ---
 
-func TestCanonicalSections_ContainsSevenSectionsInCanonicalOrder(t *testing.T) {
-	want := []string{
-		"Identity",
-		"CommunicationProtocol",
-		"Capabilities",
-		"Constraints",
-		"ErrorHandling",
-		"OutputFormat",
-		"ExecutionPhilosophy",
-	}
-
-	got := docformat.CanonicalSections
-
-	if len(got) != len(want) {
-		t.Fatalf("CanonicalSections length: want %d, got %d: %v", len(want), len(got), got)
-	}
-	for i, w := range want {
-		if got[i] != w {
-			t.Errorf("CanonicalSections[%d]: want %q, got %q", i, w, got[i])
-		}
-	}
-}
-
-func TestCanonicalInjections_ContainsTwelveInjections(t *testing.T) {
-	wantNames := []string{
-		"IdentityExtension",
-		"ProtocolExtension",
-		"LanguagePatterns",
-		"CodebaseContext",
-		"OutputArtifactTemplate",
-		"HarnessConstraints",
-		"CustomConstraints",
-		"ErrorHandlingExtension",
-		"ContextLimits",
-		"SeverityThresholds",
-		"SeverityDefinitions",
-		"AvailableWorkflows",
-	}
-
-	got := docformat.CanonicalInjections
-
-	if len(got) != len(wantNames) {
-		t.Fatalf("CanonicalInjections length: want %d, got %d: %v", len(wantNames), len(got), got)
-	}
-	wantSet := make(map[string]bool, len(wantNames))
-	for _, n := range wantNames {
-		wantSet[n] = true
-	}
-	for _, n := range got {
-		if !wantSet[n] {
-			t.Errorf("unexpected injection name in CanonicalInjections: %q", n)
-		}
-	}
-}
+// Note: CanonicalSections full-order and CanonicalInjections count tests have been moved to
+// vocabulary_additions_test.go, which covers the 8-section and 13-injection contracts.
 
 func TestInjectionParent_MapsEachCanonicalInjectionToItsExpectedParent(t *testing.T) {
 	wantMap := map[string]string{

@@ -266,8 +266,8 @@ class TestHandleSessionStart(unittest.TestCase):
             with self.subTest(key=key):
                 self.assertIsNotNone(value)
 
-    def test_no_event_written_when_run_id_is_none(self):
-        """When run_id is None, no event file may be written."""
+    def test_event_written_to_unknown_run_when_run_id_is_none(self):
+        """When run_id is None, event is routed to the unknown-run/ bucket."""
         payload = {
             "hook_event_name": "SessionStart",
             "session_id": TEST_SESSION_ID,
@@ -276,10 +276,10 @@ class TestHandleSessionStart(unittest.TestCase):
         ctx = _make_ctx(payload, self.tmp_path)
         ctx.run_id = None
         session_handlers.handle_session_start(ctx)
-        # No events file should be created (run_id is unresolvable)
-        log_root = self.tmp_path / "OrchestrationLogs"
-        jsonl_files = list(log_root.rglob("*.jsonl")) if log_root.exists() else []
-        self.assertEqual(0, len(jsonl_files))
+        # effective_run_id returns "unknown-run" — event must land there
+        unknown_run_events = ctx.paths.orchestrator_events("unknown-run")
+        self.assertTrue(unknown_run_events.exists(),
+                        "Event must be routed to unknown-run/ when run_id is None")
 
 
 # ---------------------------------------------------------------------------

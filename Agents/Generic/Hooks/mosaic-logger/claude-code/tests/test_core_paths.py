@@ -72,21 +72,6 @@ class TestLogPathsLayout(unittest.TestCase):
     def test_root_is_workspace_orchestration_logs(self):
         self.assertEqual(self.root / "OrchestrationLogs", self.paths.root)
 
-    def test_markers_dir_is_dot_run_markers(self):
-        self.assertEqual(
-            self.root / "OrchestrationLogs" / ".run-markers",
-            self.paths.markers_dir,
-        )
-
-    def test_marker_path_for_plain_session_id(self):
-        result = self.paths.marker("mysession")
-        expected = self.root / "OrchestrationLogs" / ".run-markers" / "mysession.json"
-        self.assertEqual(expected, result)
-
-    def test_marker_path_sanitizes_reserved_chars_in_session_id(self):
-        result = self.paths.marker("session:with:colons")
-        self.assertNotIn(":", result.name)
-
     def test_run_root_contains_run_id_component(self):
         result = self.paths.run_root(self.run_id)
         self.assertEqual(self.root / "OrchestrationLogs" / self.run_id, result)

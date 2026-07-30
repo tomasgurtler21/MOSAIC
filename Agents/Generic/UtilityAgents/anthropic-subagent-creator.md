@@ -149,7 +149,7 @@ You create subagents for a specific multi-agent orchestration system. Understand
 - **Hub-and-spoke model:** An Orchestrator coordinates specialized subagents
 - **No direct agent-to-agent communication** — all routing goes through the Orchestrator
 - **Blackboard pattern:** Shared state via `Orchestration.md` artifact
-- **Communication Protocol v1.7:** Standardized JSON messages between orchestrator and subagents
+- **Communication Protocol v1.8:** Standardized JSON messages between orchestrator and subagents
 
 ### Template Architecture
 
@@ -157,12 +157,13 @@ Every subagent MUST follow the canonical template structure defined in `Developm
 
 The template defines these required sections in order:
 1. **Identity** — Who the agent is, goal, scope, process, authority hierarchy
-2. **Communication Protocol** — Protocol v1.6 compliance (standardized section)
-3. **Capabilities** — What the agent can do, agent-specific artifact behavior
-4. **Constraints** — What the agent must NOT do
-5. **Error Handling** — When to use which status code
-6. **Output Format** — JSON response examples
-7. **Execution Philosophy** — Context management, quality mindset
+2. **Communication Protocol** — Protocol v1.8 compliance (standardized section)
+3. **Artifact Provenance** — Output artifact frontmatter stamping rules
+4. **Capabilities** — What the agent can do, agent-specific artifact behavior
+5. **Constraints** — What the agent must NOT do
+6. **Error Handling** — When to use which status code
+7. **Output Format** — JSON response examples
+8. **Execution Philosophy** — Context management, quality mindset
 
 ### Agent Function Categories & Workflows
 
@@ -414,9 +415,9 @@ Before presenting a draft, verify:
 
 **Orchestration Compliance:**
 - [ ] **Template Structure:** Does it follow the canonical template from AgentTemplateArchitecture.md?
-- [ ] **All 7 Sections Present:** Identity, Protocol, Capabilities, Constraints, Error Handling, Output Format, Execution Philosophy?
+- [ ] **All 8 Sections Present:** Identity, Protocol, ArtifactProvenance, Capabilities, Constraints, Error Handling, Output Format, Execution Philosophy?
 - [ ] **Authority Hierarchy:** Is the standard authority hierarchy included in Identity?
-- [ ] **Protocol Section:** Is the full Communication Protocol v1.7 section included?
+- [ ] **Protocol Section:** Is the full Communication Protocol v1.8 section included?
 - [ ] **Status Code Mapping:** Does Error Handling specify when to use each status code?
 - [ ] **Output Examples:** Are there realistic JSON examples for at least SUCCESS and BLOCKED?
 - [ ] **Injection Points:** Are all relevant injection points included and unfilled?

@@ -15,10 +15,11 @@ package session_test
 //   - Refusal ordering: non-canonical artifact (earlier step) takes priority over
 //     missing agents (later step) when both conditions are simultaneously true.
 //
-//   Existing artifact modes:
-//   - ExistingFresh with a pre-existing artifact: session creates a new artifact
-//     from scratch (GlobalSequence resets to 0 for the new run).
-//   - ExistingFail with a pre-existing artifact: session returns RunRefused.
+//   IsNewRun contract:
+//   - IsNewRun=true with a pre-existing artifact: session returns RunRefused
+//     (race-condition guard — the folder already contains an artifact).
+//   - IsNewRun=false with a missing artifact: session returns RunRefused
+//     (stale-scan guard — the resolved run folder has no artifact to resume).
 //
 //   Happy path:
 //   - Engine Dispatch → harness Invoke → artifact Apply → engine called again.
@@ -61,6 +62,7 @@ package session_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,11 +88,12 @@ func orchFilePath(name string) string {
 // memStore is an in-memory ArtifactStore for use in session tests.
 // It starts empty (ErrNotExist on Read) and records every Apply call.
 type memStore struct {
-	state     domain.ArtifactState
-	exists    bool
-	readErr   error
-	Applied   []domain.CompletedStep
-	ReadCount int // counts every call to Read; used to verify re-read after deviation
+	state          domain.ArtifactState
+	exists         bool
+	readErr        error
+	Applied        []domain.CompletedStep
+	ReadCount      int    // counts every call to Read; used to verify re-read after deviation
+	CreatedRunID   string // records the runID argument passed to Create; used to verify AC7.7
 }
 
 func (m *memStore) Read(_ context.Context) (domain.ArtifactState, error) {
@@ -104,9 +107,11 @@ func (m *memStore) Read(_ context.Context) (domain.ArtifactState, error) {
 	return m.state, nil
 }
 
-func (m *memStore) Create(_ context.Context, info domain.WorkflowInfo, task string, checkpoints bool, now time.Time) (domain.ArtifactState, error) {
+func (m *memStore) Create(_ context.Context, info domain.WorkflowInfo, task string, checkpoints bool, now time.Time, runID string) (domain.ArtifactState, error) {
+	m.CreatedRunID = runID // record for AC7.7 assertion
 	m.state = domain.ArtifactState{
 		Type:            "orchestration-artifact",
+		RunID:           runID,
 		Workflow:        info.ID,
 		WorkflowVersion: info.Version,
 		Task:            task,
@@ -137,6 +142,10 @@ func (m *memStore) Apply(_ context.Context, state domain.ArtifactState, step dom
 	})
 	m.state = state
 	return state, nil
+}
+
+func (m *memStore) SetPhase(_ context.Context, _ domain.ArtifactState, _ string, _ time.Time) (domain.ArtifactState, error) {
+	return domain.ArtifactState{}, fmt.Errorf("memStore.SetPhase: not implemented (session tests do not exercise SetPhase)")
 }
 
 // ---- fixed-time Clock ----
@@ -251,13 +260,14 @@ func newLinearSession(t *testing.T) (ses session.Session, f *harness.FakeAdapter
 }
 
 // baseLinearConfig returns a RunConfig for the linear workflow in the given
-// orchestrator file directory.
+// orchestrator file directory. IsNewRun is true (new run) by default; tests
+// that exercise resume behaviour should override it with cfg.IsNewRun = false.
 func baseLinearConfig(orchPath string) domain.RunConfig {
 	return domain.RunConfig{
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 }
@@ -308,7 +318,7 @@ func TestSession_Start_MissingOrchestratorFile_ReturnsRefusal(t *testing.T) {
 		OrchestratorFilePath: filepath.Join(dir, "nonexistent.md"),
 		WorkflowID:           "linear",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 	}
 
 	got, err := ses.Start(context.Background(), cfg)
@@ -336,7 +346,7 @@ func TestSession_Start_WorkflowNotFound_ReturnsRefusal(t *testing.T) {
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "no-such-workflow",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 	}
 
 	got, err := ses.Start(context.Background(), cfg)
@@ -412,7 +422,7 @@ func TestSession_Start_AdmissionFailure_ReturnsRefusal(t *testing.T) {
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "refused",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 	}
 
 	got, err := ses.Start(context.Background(), cfg)
@@ -619,7 +629,7 @@ func TestSession_Start_OnFindings_LoopBack_HarnessInvokedNotDeviation(t *testing
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "loopback",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 
@@ -701,7 +711,7 @@ func TestSession_Start_StageStarOutput_TriggersStageSetRederivation(t *testing.T
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "stage-star-output",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 
@@ -797,7 +807,7 @@ func TestSession_Start_Deviation_ResolvesAndResumes(t *testing.T) {
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "deviate",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 
@@ -857,7 +867,7 @@ func TestSession_Start_ResumesFromExistingArtifact(t *testing.T) {
 	}})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.ExistingArtifact = domain.ExistingResume
+	cfg.IsNewRun = false // resume: artifact already exists
 
 	got, err := ses.Start(context.Background(), cfg)
 
@@ -916,7 +926,7 @@ func TestSession_Start_MidInvocationInterruption_RerunsLastStep(t *testing.T) {
 	}})
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.ExistingArtifact = domain.ExistingResume
+	cfg.IsNewRun = false // resume: artifact already exists
 
 	got, err := ses.Start(context.Background(), cfg)
 
@@ -1095,7 +1105,7 @@ func TestSession_Start_StagedWorkflow_Completes(t *testing.T) {
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "staged",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 
@@ -1139,6 +1149,7 @@ func TestSession_Start_VersionMismatchArtifact_ReturnsRefusal(t *testing.T) {
 	})
 
 	cfg := baseLinearConfig(orchPath)
+	cfg.IsNewRun = false          // resume: artifact already exists
 	cfg.AllowVersionDrift = false // default; explicit for clarity
 
 	got, err := ses.Start(context.Background(), cfg)
@@ -1201,7 +1212,7 @@ func TestSession_Start_Deviation_ResolverStop_ReturnsDeviationUnresolved(t *test
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "deviate-stop",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 
@@ -1263,63 +1274,13 @@ func TestSession_Start_RefusalOrder_ArtifactBeforeAgentResolution(t *testing.T) 
 	}
 }
 
-// ===== ExistingArtifact modes =====
+// ===== IsNewRun contract =====
 
-// TestSession_Start_ExistingFresh_StartsFromScratch verifies that when
-// ExistingArtifact=ExistingFresh and a pre-existing artifact is present, the
-// session creates a fresh artifact rather than resuming. The first Apply call
-// must have Seq=1 (fresh-run sequence number), not a continuation of the
-// existing GlobalSequence.
-func TestSession_Start_ExistingFresh_StartsFromScratch(t *testing.T) {
-	ses, f, store, orchPath := newLinearSession(t)
-
-	// Pre-populate the store with an existing artifact at GlobalSequence=5.
-	store.state = domain.ArtifactState{
-		Type:            "orchestration-artifact",
-		Workflow:        "linear",
-		WorkflowVersion: "1.0",
-		Task:            "old task",
-		GlobalSequence:  5,
-		CurrentState: domain.CurrentState{
-			LastStatus: domain.StatusSUCCESS,
-			LastAgent:  "agent-a#5",
-		},
-	}
-	store.exists = true
-
-	// Queue responses for both agents (fresh run, starting from agent-a).
-	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#1",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "done",
-	}})
-	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-b#2",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "done",
-	}})
-
-	cfg := baseLinearConfig(orchPath)
-	cfg.ExistingArtifact = domain.ExistingFresh
-
-	got, err := ses.Start(context.Background(), cfg)
-
-	requireRunStatus(t, got, err, domain.RunCompleted)
-
-	// Verify fresh start: the first Apply must have Seq=1 (not 6, which would
-	// indicate continuation from the pre-existing GlobalSequence=5).
-	if len(store.Applied) == 0 {
-		t.Fatal("want at least one Apply call for fresh run, got zero")
-	}
-	if store.Applied[0].Seq != 1 {
-		t.Errorf("want first Apply Seq=1 (fresh run), got Seq=%d (suggests resume from existing artifact)", store.Applied[0].Seq)
-	}
-}
-
-// TestSession_Start_ExistingFail_ArtifactExistsReturnsRefusal verifies that
-// when ExistingArtifact=ExistingFail and a pre-existing artifact is present,
-// the session returns RunRefused without dispatching any agents.
-func TestSession_Start_ExistingFail_ArtifactExistsReturnsRefusal(t *testing.T) {
+// TestSession_Start_IsNewRunTrue_ExistingArtifact_ReturnsRefusal verifies the
+// race-condition guard: when IsNewRun=true but an artifact already exists at
+// the resolved run folder, the session returns RunRefused without dispatching
+// any agents. This prevents accidentally overwriting an in-progress run.
+func TestSession_Start_IsNewRunTrue_ExistingArtifact_ReturnsRefusal(t *testing.T) {
 	ses, _, store, orchPath := newLinearSession(t)
 
 	// Pre-populate the store with an existing artifact.
@@ -1332,12 +1293,516 @@ func TestSession_Start_ExistingFail_ArtifactExistsReturnsRefusal(t *testing.T) {
 	}
 	store.exists = true
 
+	cfg := baseLinearConfig(orchPath) // IsNewRun: true
+	got, err := ses.Start(context.Background(), cfg)
+
+	requireRefused(t, got, err)
+}
+
+// TestSession_Start_IsNewRunFalse_MissingArtifact_ReturnsRefusal verifies the
+// stale-scan guard: when IsNewRun=false but no artifact exists at the resolved
+// run folder, the session returns RunRefused. This prevents resuming a run
+// whose folder was deleted between scan and session start.
+func TestSession_Start_IsNewRunFalse_MissingArtifact_ReturnsRefusal(t *testing.T) {
+	ses, _, _, orchPath := newLinearSession(t)
+	// store.exists is false by default (no artifact)
+
 	cfg := baseLinearConfig(orchPath)
-	cfg.ExistingArtifact = domain.ExistingFail
+	cfg.IsNewRun = false // attempt to resume with no artifact present
 
 	got, err := ses.Start(context.Background(), cfg)
 
 	requireRefused(t, got, err)
+}
+
+// ===== Run-scoped dispatch: RunID propagation and path resolution (T7.2) =====
+//
+// All tests in this section are in the RED phase: they compile but fail because
+// the session dispatch loop does not yet populate ProtocolRequest.RunID from
+// ArtifactState.RunID, and does not yet resolve artifact paths to run-scoped
+// form (Orchestration-{run_id}/...).
+
+// TestSession_Start_Dispatch_PopulatesRunID_FromArtifactState verifies that
+// when the artifact store returns an ArtifactState with a non-empty RunID, the
+// constructed ProtocolRequest sent to the harness carries that same RunID value.
+//
+// The session derives RunID from the artifact state (not from RunConfig) so that
+// resumed runs carry the RunID that was minted at creation time.
+func TestSession_Start_Dispatch_PopulatesRunID_FromArtifactState(t *testing.T) {
+	ses, f, store, orchPath := newLinearSession(t)
+
+	// Pre-populate the store state with a known RunID.
+	// The session should read this from the artifact and carry it into the request.
+	store.state = domain.ArtifactState{
+		RunID:           "20260727T170000Z-a3f9",
+		Workflow:        "linear",
+		WorkflowVersion: "1.0",
+		Task:            "test task",
+		GlobalSequence:  0,
+	}
+	// We still call Create (IsNewRun=true) but override the returned state.
+	// To achieve this without changing flow, we use a custom store wrapper that
+	// injects the RunID into the created state. The simplest approach: set
+	// RunID on the memStore so Create propagates it.
+	store.state.RunID = "20260727T170000Z-a3f9"
+
+	// Use a new session with RunID set in RunConfig. The session passes config.RunID
+	// to Store.Create; Store.Create returns state.RunID in the created ArtifactState.
+	// The dispatch loop must then populate ProtocolRequest.RunID from state.RunID.
+	cfg := baseLinearConfig(orchPath)
+	cfg.RunID = "20260727T170000Z-a3f9"
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	invs := f.Invocations()
+	if len(invs) < 1 {
+		t.Fatal("want at least one harness invocation, got none")
+	}
+
+	// Every dispatched request must carry the run_id from the artifact state.
+	for i, inv := range invs {
+		if inv.Request.RunID != "20260727T170000Z-a3f9" {
+			t.Errorf("invocation[%d] ProtocolRequest.RunID: want %q, got %q",
+				i, "20260727T170000Z-a3f9", inv.Request.RunID)
+		}
+	}
+}
+
+// TestSession_Start_Dispatch_ResolvesInputArtifacts_ToRunScopedForm verifies
+// that input_artifacts paths in the ProtocolRequest are resolved to run-scoped
+// form by prepending the run-scoped folder name (e.g. "Plan.md" becomes
+// "Orchestration-{run_id}/Plan.md").
+//
+// This satisfies AC7.4: artifact paths in input_artifacts/output_artifacts are
+// resolved to run-scoped form.
+func TestSession_Start_Dispatch_ResolvesInputArtifacts_ToRunScopedForm(t *testing.T) {
+	dir := t.TempDir()
+
+	// Workflow with explicit input artifacts to verify path resolution.
+	const resolveWorkflow = `[[SECTION:Workflow:resolve-test]]
+<!-- workflow-version: 1.0 -->
+## Resolve Test Workflow
+
+| Phase | Subagent | HITL | Input | Output |
+|-------|----------|:----:|-------|--------|
+| PLANNING | agent-a | ❌ | Plan.md | Progress.md |
+| PLANNING | agent-b | ❌ | Progress.md | Result.md |
+[[/SECTION:Workflow:resolve-test]]
+`
+	orchPath := filepath.Join(dir, "resolve-orch.md")
+	if err := os.WriteFile(orchPath, []byte(resolveWorkflow), 0600); err != nil {
+		t.Fatalf("write resolve-orch.md: %v", err)
+	}
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	const runID = "20260727T170000Z-a3f9"
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Deviation: &scriptedResolver{},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "resolve-test",
+		Task:                 "task",
+		RunID:                runID,
+		IsNewRun:             true,
+		OnDeviation:          domain.DeviationDelegate,
+	}
+
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	invs := f.Invocations()
+	if len(invs) < 1 {
+		t.Fatal("want at least one harness invocation, got none")
+	}
+
+	// agent-a's input artifact "Plan.md" must be resolved to
+	// "Orchestration-20260727T170000Z-a3f9/Plan.md".
+	firstReq := invs[0].Request
+	expectedInput := "Orchestration-" + runID + "/Plan.md"
+	if !containsInput(firstReq.InputArtifacts, expectedInput) {
+		t.Errorf("first request InputArtifacts: want %q (run-scoped), got %v",
+			expectedInput, firstReq.InputArtifacts)
+	}
+	// The unscoped path must not appear.
+	if containsInput(firstReq.InputArtifacts, "Plan.md") {
+		t.Errorf("first request InputArtifacts: must not contain unscoped %q when run_id is set, got %v",
+			"Plan.md", firstReq.InputArtifacts)
+	}
+}
+
+// TestSession_Start_Dispatch_ResolvesOutputArtifacts_ToRunScopedForm verifies
+// that output_artifacts paths in the ProtocolRequest are also resolved to
+// run-scoped form (the same resolution applies to both input and output paths).
+func TestSession_Start_Dispatch_ResolvesOutputArtifacts_ToRunScopedForm(t *testing.T) {
+	dir := t.TempDir()
+
+	const resolveWorkflow = `[[SECTION:Workflow:resolve-out]]
+<!-- workflow-version: 1.0 -->
+## Resolve Output Workflow
+
+| Phase | Subagent | HITL | Input | Output |
+|-------|----------|:----:|-------|--------|
+| PLANNING | agent-a | ❌ | - | Progress.md |
+| PLANNING | agent-b | ❌ | Progress.md | Result.md |
+[[/SECTION:Workflow:resolve-out]]
+`
+	orchPath := filepath.Join(dir, "resolve-out-orch.md")
+	if err := os.WriteFile(orchPath, []byte(resolveWorkflow), 0600); err != nil {
+		t.Fatalf("write resolve-out-orch.md: %v", err)
+	}
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	const runID = "20260101T120000Z-beef"
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Deviation: &scriptedResolver{},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "resolve-out",
+		Task:                 "task",
+		RunID:                runID,
+		IsNewRun:             true,
+		OnDeviation:          domain.DeviationDelegate,
+	}
+
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	invs := f.Invocations()
+	if len(invs) < 1 {
+		t.Fatal("want at least one harness invocation, got none")
+	}
+
+	// agent-a's output artifact "Progress.md" must be resolved to
+	// "Orchestration-{runID}/Progress.md".
+	firstReq := invs[0].Request
+	expectedOutput := "Orchestration-" + runID + "/Progress.md"
+	if !containsInput(firstReq.OutputArtifacts, expectedOutput) {
+		t.Errorf("first request OutputArtifacts: want %q (run-scoped), got %v",
+			expectedOutput, firstReq.OutputArtifacts)
+	}
+	// The unscoped path must not appear.
+	if containsInput(firstReq.OutputArtifacts, "Progress.md") {
+		t.Errorf("first request OutputArtifacts: must not contain unscoped %q when run_id is set, got %v",
+			"Progress.md", firstReq.OutputArtifacts)
+	}
+}
+
+// TestSession_Start_Dispatch_DoesNotDoublePrefixAlreadyScopedPaths verifies
+// that artifact paths which already contain the run-scoped folder prefix are
+// NOT double-prefixed. A path such as "Orchestration-{run_id}/Plan.md" must
+// remain unchanged; it must not become
+// "Orchestration-{run_id}/Orchestration-{run_id}/Plan.md".
+//
+// This satisfies the risk mitigation in the Stage 7 plan: "Resolve only paths
+// that are relative and not already run-scoped; pass through absolute paths unchanged."
+//
+// RED phase note: this test passes vacuously during the RED phase because no
+// path resolution exists yet — paths pass through unchanged, so there is nothing
+// to double-prefix. It will provide correct regression protection once the
+// implementation adds path prefixing (a double-prefix bug would be caught).
+func TestSession_Start_Dispatch_DoesNotDoublePrefixAlreadyScopedPaths(t *testing.T) {
+	dir := t.TempDir()
+	const runID = "20260727T170000Z-a3f9"
+	scopedPrefix := "Orchestration-" + runID + "/"
+
+	// Workflow where input/output are already run-scoped.
+	resolveWorkflow := `[[SECTION:Workflow:already-scoped]]
+<!-- workflow-version: 1.0 -->
+## Already Scoped Workflow
+
+| Phase | Subagent | HITL | Input | Output |
+|-------|----------|:----:|-------|--------|
+| PLANNING | agent-a | ❌ | ` + scopedPrefix + `Plan.md | ` + scopedPrefix + `Progress.md |
+[[/SECTION:Workflow:already-scoped]]
+`
+	orchPath := filepath.Join(dir, "already-scoped-orch.md")
+	if err := os.WriteFile(orchPath, []byte(resolveWorkflow), 0600); err != nil {
+		t.Fatalf("write already-scoped-orch.md: %v", err)
+	}
+	writeAgentFile(t, dir, "agent-a")
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Deviation: &scriptedResolver{},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	// agent-a returns SUCCESS → COMPLETE.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "already-scoped",
+		Task:                 "task",
+		RunID:                runID,
+		IsNewRun:             true,
+		OnDeviation:          domain.DeviationDelegate,
+	}
+
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	invs := f.Invocations()
+	if len(invs) < 1 {
+		t.Fatal("want at least one harness invocation, got none")
+	}
+
+	req := invs[0].Request
+
+	// Input and output paths must remain exactly as specified — no double prefix.
+	expectedInput := scopedPrefix + "Plan.md"
+	expectedOutput := scopedPrefix + "Progress.md"
+	doublePrefix := scopedPrefix + scopedPrefix
+
+	for _, inp := range req.InputArtifacts {
+		if strings.HasPrefix(inp, doublePrefix) {
+			t.Errorf("InputArtifacts: double-prefixed path detected: %q", inp)
+		}
+		if inp == expectedInput {
+			// Correct — path is present once with the right prefix.
+			continue
+		}
+		// Any other value is unexpected.
+		t.Errorf("InputArtifacts: unexpected path %q (want %q, no double prefix)", inp, expectedInput)
+	}
+
+	for _, out := range req.OutputArtifacts {
+		if strings.HasPrefix(out, doublePrefix) {
+			t.Errorf("OutputArtifacts: double-prefixed path detected: %q", out)
+		}
+		if out == expectedOutput {
+			// Correct — path is present once with the right prefix.
+			continue
+		}
+		// Any other value is unexpected.
+		t.Errorf("OutputArtifacts: unexpected path %q (want %q, no double prefix)", out, expectedOutput)
+	}
+}
+
+// TestSession_Start_Dispatch_EmptyRunID_PathsNotPrefixed verifies that when
+// RunID is empty (pre-v1.8 or caller did not set it), artifact paths are NOT
+// prefixed. This maintains backward compatibility with runs that have no run_id.
+//
+// RED phase note: this test passes vacuously during the RED phase because no
+// path resolution exists yet — empty RunID produces the same no-op result as
+// correct behavior. It will provide correct regression protection once the
+// implementation adds path prefixing (spurious prefixing with empty RunID would
+// be caught).
+func TestSession_Start_Dispatch_EmptyRunID_PathsNotPrefixed(t *testing.T) {
+	dir := t.TempDir()
+
+	const resolveWorkflow = `[[SECTION:Workflow:no-runid]]
+<!-- workflow-version: 1.0 -->
+## No RunID Workflow
+
+| Phase | Subagent | HITL | Input | Output |
+|-------|----------|:----:|-------|--------|
+| PLANNING | agent-a | ❌ | Plan.md | Progress.md |
+[[/SECTION:Workflow:no-runid]]
+`
+	orchPath := filepath.Join(dir, "no-runid-orch.md")
+	if err := os.WriteFile(orchPath, []byte(resolveWorkflow), 0600); err != nil {
+		t.Fatalf("write no-runid-orch.md: %v", err)
+	}
+	writeAgentFile(t, dir, "agent-a")
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Deviation: &scriptedResolver{},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "no-runid",
+		Task:                 "task",
+		RunID:                "", // no run_id
+		IsNewRun:             true,
+		OnDeviation:          domain.DeviationDelegate,
+	}
+
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	invs := f.Invocations()
+	if len(invs) < 1 {
+		t.Fatal("want at least one harness invocation, got none")
+	}
+
+	req := invs[0].Request
+
+	// With empty RunID, paths must remain unchanged (no Orchestration-/ prefix added).
+	if !containsInput(req.InputArtifacts, "Plan.md") {
+		t.Errorf("InputArtifacts: want unscoped %q when RunID is empty, got %v",
+			"Plan.md", req.InputArtifacts)
+	}
+	// RunID in request must also be empty.
+	if req.RunID != "" {
+		t.Errorf("ProtocolRequest.RunID: want empty string when config.RunID is empty, got %q", req.RunID)
+	}
+}
+
+// TestSession_Start_Dispatch_PopulatesRunID_FromArtifactState_ResumedRun verifies
+// that on the resume path (IsNewRun=false), every ProtocolRequest sent to the
+// harness carries the RunID from the artifact state returned by Store.Read.
+//
+// cfg.RunID is intentionally left empty so that the only possible source for a
+// non-empty ProtocolRequest.RunID is state.RunID (loaded from the artifact via
+// Store.Read). This closes the AC7.3 resume-path gap and eliminates the
+// RunID-source ambiguity present in the new-run test (both config.RunID and
+// state.RunID were the same value there, making the source indistinguishable).
+//
+// This test is in the RED phase: it fails because the session dispatch loop does
+// not yet populate ProtocolRequest.RunID from ArtifactState.RunID.
+func TestSession_Start_Dispatch_PopulatesRunID_FromArtifactState_ResumedRun(t *testing.T) {
+	ses, f, store, orchPath := newLinearSession(t)
+
+	const artifactRunID = "20260727T170000Z-a3f9"
+
+	// Pre-populate the store with a run whose artifact already carries a RunID.
+	// Both agents are still pending (no execution log, GlobalSequence=0) so the
+	// session will dispatch both agent-a and agent-b.
+	store.state = domain.ArtifactState{
+		RunID:           artifactRunID,
+		Workflow:        "linear",
+		WorkflowVersion: "1.0",
+		Task:            "test task",
+		GlobalSequence:  0,
+	}
+	store.exists = true
+
+	// cfg.RunID is empty — it is not the source of ProtocolRequest.RunID on the
+	// resume path. The session must derive RunID from the loaded artifact state.
+	cfg := baseLinearConfig(orchPath)
+	cfg.IsNewRun = false
+	cfg.RunID = "" // deliberately empty to distinguish from state.RunID
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	invs := f.Invocations()
+	if len(invs) < 1 {
+		t.Fatal("want at least one harness invocation, got none")
+	}
+
+	// Every dispatched request must carry the RunID from the artifact state,
+	// not from cfg.RunID (which is empty).
+	for i, inv := range invs {
+		if inv.Request.RunID != artifactRunID {
+			t.Errorf("invocation[%d] ProtocolRequest.RunID: want %q (from artifact state), got %q",
+				i, artifactRunID, inv.Request.RunID)
+		}
+	}
+}
+
+// TestSession_Start_Create_PassesConfigRunID_ToStore verifies that when
+// IsNewRun=true, the session passes RunConfig.RunID to Store.Create as the
+// runID argument. This satisfies AC7.7: session.go calls Store.Create with
+// the minted run_id (supplied via RunConfig.RunID by the CLI/TUI layer).
+//
+// This test is in the RED phase: it fails if the session passes an incorrect or
+// empty value to Store.Create rather than cfg.RunID.
+func TestSession_Start_Create_PassesConfigRunID_ToStore(t *testing.T) {
+	ses, f, store, orchPath := newLinearSession(t)
+
+	const wantRunID = "20260727T170000Z-a3f9"
+	cfg := baseLinearConfig(orchPath)
+	cfg.RunID = wantRunID
+	cfg.IsNewRun = true
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	// The runID argument recorded by memStore.Create must match cfg.RunID.
+	if store.CreatedRunID != wantRunID {
+		t.Errorf("Store.Create runID argument: want %q (from cfg.RunID), got %q",
+			wantRunID, store.CreatedRunID)
+	}
 }
 
 // ---- small utilities ----

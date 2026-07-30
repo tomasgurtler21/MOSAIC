@@ -165,23 +165,6 @@ class TestMosaicLoggerHandlersRegistry(unittest.TestCase):
     def test_unknown_event_not_in_registry(self):
         self.assertNotIn("NonExistentEventXYZ", mosaic_logger.HANDLERS)
 
-    def test_minting_events_frozenset_exists(self):
-        self.assertIsInstance(mosaic_logger.MINTING_EVENTS, frozenset)
-
-    def test_closing_events_frozenset_exists(self):
-        self.assertIsInstance(mosaic_logger.CLOSING_EVENTS, frozenset)
-
-    def test_session_start_in_minting_events(self):
-        self.assertIn("SessionStart", mosaic_logger.MINTING_EVENTS)
-
-    def test_subagent_start_in_minting_events(self):
-        self.assertIn("SubagentStart", mosaic_logger.MINTING_EVENTS)
-
-    def test_user_prompt_submit_in_minting_events(self):
-        self.assertIn("UserPromptSubmit", mosaic_logger.MINTING_EVENTS)
-
-    def test_session_end_in_closing_events(self):
-        self.assertIn("SessionEnd", mosaic_logger.CLOSING_EVENTS)
 
 
 class TestMainExitCode(unittest.TestCase):
@@ -241,9 +224,9 @@ class TestMainExitCode(unittest.TestCase):
         result = self._run_main(b"not json")
         self.assertEqual(b"", result.stdout)
 
-    def test_main_processes_session_start_and_creates_run_marker(self):
+    def test_main_processes_session_start_and_creates_log_directory(self):
         """Verifies the dispatcher actually runs (not just exits): a SessionStart
-        with a known workspace dir must produce a run-marker file on disk."""
+        with a known workspace dir must produce an unknown-run/ log directory on disk."""
         with tempfile.TemporaryDirectory() as tmp:
             payload = json.dumps({
                 "hook_event_name": "SessionStart",
@@ -254,8 +237,8 @@ class TestMainExitCode(unittest.TestCase):
             # Safety: exit 0 always
             self.assertEqual(0, result.returncode)
             self.assertEqual(b"", result.stdout)
-            # Behavioral: a run-marker must have been created
-            marker_dir = pathlib.Path(tmp) / "OrchestrationLogs" / ".run-markers"
-            markers = list(marker_dir.glob("*.json")) if marker_dir.exists() else []
-            self.assertGreater(len(markers), 0,
-                               "No marker file created — dispatcher did not process the event")
+            # Behavioral: unknown-run/ directory must have been created since no
+            # run_id can be extracted from a SessionStart event's (absent) prompt field
+            unknown_run_dir = pathlib.Path(tmp) / "OrchestrationLogs" / "unknown-run"
+            self.assertTrue(unknown_run_dir.exists(),
+                            "unknown-run/ directory not created — dispatcher did not process the event")

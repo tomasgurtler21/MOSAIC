@@ -20,6 +20,7 @@ interleaving order, which keeps them deterministic and non-flaky under CI.
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -150,14 +151,23 @@ class TestConcurrentDispatchers(unittest.TestCase):
             timeout=20,
         )
 
-    def _find_run_id(self, session_id: str) -> "str | None":
-        marker = core.build_paths(self.tmp_path).marker(session_id)
-        if not marker.exists():
+    def _find_run_id(self, session_id: str = "") -> "str | None":
+        """Return the effective run_id by scanning OrchestrationLogs/.
+
+        The session_id parameter is accepted for API compatibility but not used.
+        Scans for a timestamp-format run_id folder; falls back to 'unknown-run'.
+        """
+        _RUN_ID_RE = re.compile(r'^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{4}$')
+        log_root = core.build_paths(self.tmp_path).root
+        if not log_root.exists():
             return None
-        try:
-            return json.loads(marker.read_text("utf-8")).get("run_id")
-        except Exception:
-            return None
+        for child in log_root.iterdir():
+            if child.is_dir() and _RUN_ID_RE.match(child.name):
+                return child.name
+        unknown_run = log_root / "unknown-run"
+        if unknown_run.exists():
+            return "unknown-run"
+        return None
 
     # --- T6.9a: concurrent SubagentStart processes (distinct agent_ids) ---
 

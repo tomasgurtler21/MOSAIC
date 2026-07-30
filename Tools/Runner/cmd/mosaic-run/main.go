@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ import (
 	"mosaic-run/internal/deviation"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
+	"mosaic-run/internal/runscan"
 	"mosaic-run/internal/session"
 	"mosaic-run/internal/tui"
 )
@@ -54,22 +56,30 @@ func main() {
 		return
 	}
 
-	// CLI mode: parse --artifact-location and --orchestrator-file for dependency wiring.
-	artifactLocation := scanFlag(args, "--artifact-location")
-	artifactPath := resolveArtifactPath(artifactLocation)
-
+	// CLI mode: pre-scan --orchestrator-file and --on-deviation for dependency wiring,
+	// then resolve run identity (run_id, run folder, is-new-run) before constructing
+	// the session. Resolving run identity here ensures the session's ArtifactStore is
+	// wired to the correct run-scoped Orchestration.md path from the start.
 	orchFile := scanFlag(args, "--orchestrator-file")
 	onDeviationStr := scanFlag(args, "--on-deviation")
 	if onDeviationStr == "" {
 		onDeviationStr = "delegate" // matches the flag default
 	}
 
+	// Resolve run identity and construct the store from the run-scoped path.
+	// This pre-scan mirrors the --orchestrator-file and --on-deviation pre-scans:
+	// it reads the same flags (--run / --new-run) that cli.Run will parse via cobra,
+	// so both this site and cli.Run converge on the same run folder.
+	// When cli.Run receives a non-nil identity, it skips its own resolution step.
+	runIdentity, store, identErr := resolveRunIdentityForCLI(args)
+	if identErr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", identErr)
+		os.Exit(2)
+	}
+
 	// Build the CLI Interaction port. The same instance is used as the session's
 	// Interaction (for per-step progress and notices) and writes to os.Stdout.
 	interact := cli.NewInteraction(os.Stdout)
-
-	// Build the artifact store pointed at the resolved artifact path.
-	store := artifact.NewFileStore(artifactPath)
 
 	// Build the harness adapter. A real Claude Code harness adapter will replace this
 	// placeholder when it is implemented in a follow-up stage. For now, all invocations
@@ -77,6 +87,7 @@ func main() {
 	h := harness.NewFakeAdapter()
 
 	// Build the deviation resolver based on the --on-deviation flag.
+	artifactPath := filepath.Join(runIdentity.RunFolder, "Orchestration.md")
 	var dev domain.DeviationResolver
 	switch onDeviationStr {
 	case "stop":
@@ -101,7 +112,9 @@ func main() {
 		}
 	}
 
-	// Wire the session with all port dependencies.
+	// Wire the session with the resolved run-scoped store and all port dependencies.
+	// The store path matches runIdentity.RunFolder, so session I/O and the COMPLETED
+	// marker write both target the same Orchestration-{run_id}/Orchestration.md file.
 	sess := session.New(session.Deps{
 		Harness:   h,
 		Store:     store,
@@ -110,22 +123,22 @@ func main() {
 		Interact:  interact,
 	})
 
-	os.Exit(cli.Run(context.Background(), args, sess, os.Stdout, os.Stderr))
+	// Pass the pre-resolved store and identity so that cli.Run skips its own
+	// resolution step and uses the same run folder that was used to wire the session.
+	os.Exit(cli.Run(context.Background(), args, store, runIdentity, sess, os.Stdout, os.Stderr))
 }
 
 // runTUIMode launches the interactive TUI frontend. All session dependencies are
 // constructed here; the TUI's ProgramRef provides the Interaction port and the
 // TUIDeviationResolver handles deviation resolution through the TUI's deviation screen.
 func runTUIMode(args []string) {
-	// Build common infrastructure used by both modes.
-	artifactLocation := scanFlag(args, "--artifact-location")
-	artifactPath := resolveArtifactPath(artifactLocation)
-	store := artifact.NewFileStore(artifactPath)
-	h := harness.NewFakeAdapter()
+	workDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: getting working directory: %v\n", err)
+		os.Exit(1)
+	}
 
-	// The ProgramRef implements the Interaction port and also drives the TUI overlays.
-	// It must be wired into both the session and the TUI Options so that session
-	// goroutine calls reach the Bubble Tea event loop.
+	h := harness.NewFakeAdapter()
 	programRef := tui.NewProgramRef()
 
 	// TUIDeviationResolver routes deviation decisions through the TUI's deviation
@@ -137,19 +150,199 @@ func runTUIMode(args []string) {
 		Program: programRef,
 	}
 
-	sess := session.New(session.Deps{
-		Harness:   h,
-		Store:     store,
-		Deviation: tuiDev,
-		Clock:     &realClock{},
-		Interact:  programRef,
-	})
+	// SessionFactory builds the session with the run-scoped artifact store after
+	// the TUI resolves run identity (either from RunSelectScreen or pre-launch flags).
+	sessFactory := func(runFolder string, isNewRun bool) session.Session {
+		artifactPath := "Orchestration.md"
+		if runFolder != "" {
+			artifactPath = filepath.Join(runFolder, "Orchestration.md")
+		}
+		store := artifact.NewFileStore(artifactPath)
+		return session.New(session.Deps{
+			Harness:   h,
+			Store:     store,
+			Deviation: tuiDev,
+			Clock:     &realClock{},
+			Interact:  programRef,
+		})
+	}
+
+	// Resolve run identity from --run / --new-run flags.
+	runIDFlag := scanFlag(args, "--run")
+	isNewRunFlag := scanBoolFlag(args, "--new-run")
+
+	if runIDFlag != "" && isNewRunFlag {
+		fmt.Fprintf(os.Stderr, "error: --run and --new-run are mutually exclusive\n")
+		os.Exit(2)
+	}
+
+	var resolvedRunID, resolvedRunFolder string
+	var isNewRun bool
+	var scanResult *runscan.ScanResult
+
+	switch {
+	case runIDFlag != "":
+		// --run <run_id>: validate format and resolve the run folder.
+		if !domain.IsValidRunID(runIDFlag) {
+			fmt.Fprintf(os.Stderr, "error: invalid run_id format %q; expected {YYYYMMDD}T{HHMMSS}Z-{4-hex}\n", runIDFlag)
+			os.Exit(2)
+		}
+		resolvedRunID = runIDFlag
+		resolvedRunFolder = filepath.Join(workDir, domain.RunScopedFolder(runIDFlag))
+		isNewRun = false
+
+	case isNewRunFlag:
+		// --new-run: identity will be minted by the session factory (runFolder="").
+		resolvedRunID = ""
+		resolvedRunFolder = ""
+		isNewRun = true
+
+	default:
+		// Neither flag: scan the working directory for resumable candidates.
+		scanner := runscan.NewDirScanner()
+		result, scanErr := scanner.Scan(workDir)
+		if scanErr != nil {
+			fmt.Fprintf(os.Stderr, "error: scanning for runs: %v\n", scanErr)
+			os.Exit(1)
+		}
+		switch len(result.Candidates) {
+		case 0:
+			// No candidates: new run (identity minted by session factory).
+			isNewRun = true
+		case 1:
+			// Single candidate: auto-resume.
+			resolvedRunID = result.Candidates[0].RunID
+			resolvedRunFolder = result.Candidates[0].FolderPath
+			isNewRun = false
+		default:
+			// Multiple candidates: show the RunSelectScreen.
+			scanResult = &result
+		}
+	}
+
+	// Construct the initial session using the resolved identity (or placeholder for multi-candidate).
+	initialFolder := resolvedRunFolder
+	initSess := sessFactory(initialFolder, isNewRun)
 
 	ctx := context.Background()
-	if err := tui.Run(ctx, sess, tui.Options{Interaction: programRef}); err != nil {
+	if err := tui.Run(ctx, initSess, tui.Options{
+		Interaction:      programRef,
+		ScanResult:       scanResult,
+		ResolvedRunID:    resolvedRunID,
+		IsNewRun:         isNewRun,
+		InitialRunFolder: resolvedRunFolder,
+		SessionFactory:   sessFactory,
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "tui: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// resolveRunIdentityForCLI pre-scans --run / --new-run and the working directory
+// to determine the run folder before the session is constructed. It mirrors the
+// pre-scan pattern used for --orchestrator-file and --on-deviation.
+//
+// When --run <run_id> is present, the folder is Orchestration-{run_id} under the
+// working directory. When --new-run is present, a new run_id is minted here so
+// that the same id is used by both the session's store and cli.Run's RunConfig.
+// When neither flag is present, the working directory is scanned for resumable
+// candidates; zero candidates mints a new run_id, one candidate uses that folder,
+// and multiple candidates return an error (the multi-candidate rejection cannot be
+// deferred to cli.Run because a non-nil identity skips cli.Run's internal check).
+func resolveRunIdentityForCLI(args []string) (*cli.RunIdentity, domain.ArtifactStore, error) {
+	workDir, err := os.Getwd()
+	if err != nil {
+		return nil, nil, fmt.Errorf("getting working directory: %w", err)
+	}
+
+	runIDFlag := scanFlag(args, "--run")
+	isNewRunFlag := scanBoolFlag(args, "--new-run")
+
+	var runID, runFolder string
+	var isNewRun bool
+
+	switch {
+	case runIDFlag != "":
+		// --run <run_id>: validate format, verify the run folder exists on disk,
+		// and reject completed runs. These checks must be done here rather than
+		// deferred to cli.Run, because cli.Run skips its own resolution step
+		// whenever a non-nil identity is supplied (which is always the case in
+		// production). Omitting them here would silently bypass AC5.3.
+		if !domain.IsValidRunID(runIDFlag) {
+			return nil, nil, fmt.Errorf("invalid run_id format %q; expected {YYYYMMDD}T{HHMMSS}Z-{4-hex}", runIDFlag)
+		}
+		folderPath := filepath.Join(workDir, domain.RunScopedFolder(runIDFlag))
+		artifactPath := filepath.Join(folderPath, "Orchestration.md")
+		data, readErr := os.ReadFile(artifactPath)
+		if readErr != nil {
+			if errors.Is(readErr, os.ErrNotExist) {
+				return nil, nil, fmt.Errorf("no run found with id %s", runIDFlag)
+			}
+			return nil, nil, fmt.Errorf("reading run artifact for %s: %w", runIDFlag, readErr)
+		}
+		// Treat parse errors as resumable: the session layer will surface real
+		// format problems when it calls store.Read. Only reject when we can
+		// confirm the run is completed.
+		if state, parseErr := artifact.Parse(data); parseErr == nil {
+			if strings.EqualFold(state.CurrentState.Phase, "COMPLETED") {
+				return nil, nil, fmt.Errorf("run %s is completed and cannot be resumed", runIDFlag)
+			}
+		}
+		runID = runIDFlag
+		runFolder = folderPath
+		isNewRun = false
+
+	case isNewRunFlag:
+		// --new-run: mint the run_id here so both the session's store and the
+		// RunConfig use the same path. cli.Run receives the identity and skips
+		// its own mint.
+		newID := domain.NewRunID(&realClock{}, domain.DefaultRandomSource())
+		runID = newID
+		runFolder = filepath.Join(workDir, domain.RunScopedFolder(newID))
+		isNewRun = true
+
+	default:
+		// Neither flag: scan the working directory for resumable candidates.
+		scanner := runscan.NewDirScanner()
+		result, scanErr := scanner.Scan(workDir)
+		if scanErr != nil {
+			return nil, nil, fmt.Errorf("scanning for runs: %w", scanErr)
+		}
+		switch len(result.Candidates) {
+		case 0:
+			// No candidates: mint a new run_id for a fresh run.
+			newID := domain.NewRunID(&realClock{}, domain.DefaultRandomSource())
+			runID = newID
+			runFolder = filepath.Join(workDir, domain.RunScopedFolder(newID))
+			isNewRun = true
+		case 1:
+			// Exactly one candidate: auto-resume that run.
+			runID = result.Candidates[0].RunID
+			runFolder = result.Candidates[0].FolderPath
+			isNewRun = false
+		default:
+			// Multiple candidates: surface the ambiguity as an error.
+			// A non-nil identity returned to cli.Run would bypass cli.Run's own
+			// multi-candidate rejection check (non-nil identity skips all internal
+			// resolution). Reject here so the production path behaves identically
+			// to the nil-identity path that unit tests exercise.
+			var sb strings.Builder
+			sb.WriteString("multiple resumable runs found; use --run <run_id> to select one:")
+			for _, c := range result.Candidates {
+				sb.WriteString("\n  ")
+				sb.WriteString(c.RunID)
+			}
+			return nil, nil, fmt.Errorf("%s", sb.String())
+		}
+	}
+
+	identity := &cli.RunIdentity{
+		RunID:     runID,
+		RunFolder: runFolder,
+		IsNewRun:  isNewRun,
+	}
+	store := artifact.NewFileStore(filepath.Join(runFolder, "Orchestration.md"))
+	return identity, store, nil
 }
 
 // scanBoolFlag reports whether a boolean flag (e.g. "--tui") appears anywhere in args.
@@ -171,15 +364,6 @@ func hasPositionalArg(args []string) bool {
 		}
 	}
 	return false
-}
-
-// resolveArtifactPath returns the artifact path: the explicit override, or the
-// canonical default ("Orchestration.md" in the working directory).
-func resolveArtifactPath(override string) string {
-	if override != "" {
-		return override
-	}
-	return "Orchestration.md"
 }
 
 // orchFileDir returns the directory containing the orchestrator file.

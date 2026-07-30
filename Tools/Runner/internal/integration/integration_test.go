@@ -220,7 +220,7 @@ func TestIntegration_LinearWorkflow_GoldenFileMatch(t *testing.T) {
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 
@@ -312,7 +312,7 @@ func TestIntegration_StagedWorkflow_TwoStages_Completes(t *testing.T) {
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "staged",
 		Task:                 "two-stage task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 
@@ -399,7 +399,7 @@ func TestIntegration_VersionDrift_Refused(t *testing.T) {
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             false, // resume: versionDrift artifact already written
 		AllowVersionDrift:    false,
 	}
 
@@ -441,7 +441,7 @@ func TestIntegration_VersionDrift_AllowOverride_Resumes(t *testing.T) {
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             false, // resume: versionDrift artifact already written
 		AllowVersionDrift:    true,
 	}
 
@@ -479,7 +479,7 @@ func TestIntegration_StagedWorkflow_NoPlanMd_ReturnsRefusal(t *testing.T) {
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "staged",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
@@ -553,7 +553,7 @@ func TestIntegration_OptionalRow_IsDispatchedAndContributesToDeviation(t *testin
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "optional-row",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 
@@ -661,7 +661,7 @@ func TestIntegration_BuildReview_OnFindings_LoopBack_NoDev(t *testing.T) {
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "build-review-loop",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 
@@ -798,7 +798,7 @@ func TestIntegration_AllFourApproaches_StagedWorkflow_GoldenFileMatch(t *testing
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "four-approach-staged",
 		Task:                 "four-approach task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 
@@ -1122,7 +1122,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 				OrchestratorFilePath: orchPath,
 				WorkflowID:           domain.WorkflowID(tc.workflowID),
 				Task:                 tc.name + " task",
-				ExistingArtifact:     domain.ExistingResume,
+				IsNewRun:             true,
 				OnDeviation:          domain.DeviationDelegate,
 			}
 
@@ -1208,7 +1208,7 @@ func TestIntegration_Deviation_ResolvesAndResumes_FileStore(t *testing.T) {
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "deviation-resume",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 
@@ -1322,7 +1322,7 @@ current_state:
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             false, // resume: interrupted artifact already written
 		OnDeviation:          domain.DeviationDelegate,
 	}
 
@@ -1429,7 +1429,7 @@ func TestIntegration_IncompatibleWorkflow_RefusedFR18a(t *testing.T) {
 				OrchestratorFilePath: orchPath,
 				WorkflowID:           domain.WorkflowID(tc.workflowID),
 				Task:                 "task",
-				ExistingArtifact:     domain.ExistingResume,
+				IsNewRun:             true,
 			}
 
 			got, err := sess.Start(context.Background(), cfg)
@@ -1485,7 +1485,7 @@ It has no YAML frontmatter and no SECTION boundary tags.
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             false, // resume: non-canonical artifact already written
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
@@ -1584,7 +1584,7 @@ func TestIntegration_StageWildcardResolution_NonExecutionRow(t *testing.T) {
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "wildcard-resolve",
 		Task:                 "task",
-		ExistingArtifact:     domain.ExistingResume,
+		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 	}
 

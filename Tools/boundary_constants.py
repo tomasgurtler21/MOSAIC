@@ -17,6 +17,7 @@ class BoundaryKind(Enum):
 CANONICAL_SECTIONS: tuple[str, ...] = (
     "Identity",
     "CommunicationProtocol",
+    "ArtifactProvenance",
     "Capabilities",
     "Constraints",
     "ErrorHandling",
@@ -27,6 +28,7 @@ CANONICAL_SECTIONS: tuple[str, ...] = (
 CANONICAL_INJECTIONS: tuple[str, ...] = (
     "IdentityExtension",
     "ProtocolExtension",
+    "ArtifactProvenanceExtension",
     "LanguagePatterns",
     "CodebaseContext",
     "OutputArtifactTemplate",
@@ -42,6 +44,7 @@ CANONICAL_INJECTIONS: tuple[str, ...] = (
 INJECTION_PARENT_MAP: dict[str, str] = {
     "IdentityExtension": "Identity",
     "ProtocolExtension": "CommunicationProtocol",
+    "ArtifactProvenanceExtension": "ArtifactProvenance",
     "LanguagePatterns": "Capabilities",
     "CodebaseContext": "Capabilities",
     "OutputArtifactTemplate": "Capabilities",
@@ -82,6 +85,7 @@ KNOWN_FRONTMATTER_KEYS: frozenset[str] = frozenset({
 SECTION_HEADING_MAP: dict[str, str] = {
     "Identity": "# ",           # H1 -- matches any "# ... Agent" line
     "CommunicationProtocol": "## Communication Protocol",
+    "ArtifactProvenance": "## Artifact Provenance",
     "Capabilities": "## Capabilities",
     "Constraints": "## Constraints",
     "ErrorHandling": "## Error Handling",

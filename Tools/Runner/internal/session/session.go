@@ -120,34 +120,39 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		return refusal(err.Error()), nil
 	}
 
-	// Step 3: Read existing artifact (FR-7a: refuse non-canonical; ErrNotExist = new run).
+	// Step 3: Read existing artifact (FR-7a: refuse non-canonical; ErrNotExist = no artifact).
 	existingState, readErr := s.deps.Store.Read(ctx)
-	var existingExists bool
 	if readErr != nil {
 		var refErr *domain.RefusalError
 		if errors.As(readErr, &refErr) {
+			// Non-canonical format: always refuse regardless of IsNewRun.
 			return refusal(refErr.Error()), nil
 		}
 		if !errors.Is(readErr, os.ErrNotExist) {
+			// Unexpected infrastructure error.
 			return domain.RunOutcome{Status: domain.RunFailed, Message: readErr.Error()}, readErr
 		}
-		existingExists = false
+		// os.ErrNotExist: no artifact at this location (expected for a new run).
+	}
+
+	// Apply IsNewRun contract: the CLI/TUI layer resolves run identity before calling
+	// session, so the session only needs to know "create" vs "resume".
+	if config.IsNewRun {
+		// New run: refuse if an artifact already exists (race condition guard).
+		if readErr == nil {
+			return refusal("run folder already contains an artifact; cannot create a new run here"), nil
+		}
+		// Expected: os.ErrNotExist — proceed to create below.
 	} else {
-		existingExists = true
-	}
-
-	// Handle ExistingFail: refuse if artifact already exists.
-	if existingExists && config.ExistingArtifact == domain.ExistingFail {
-		return refusal("artifact already exists and ExistingFail mode was requested"), nil
-	}
-
-	// Handle ExistingFresh: treat as new run regardless of existing artifact.
-	if existingExists && config.ExistingArtifact == domain.ExistingFresh {
-		existingExists = false
+		// Resume: refuse if no artifact exists (stale scan guard).
+		if errors.Is(readErr, os.ErrNotExist) {
+			return refusal("no artifact found at the resolved run folder; cannot resume"), nil
+		}
+		// Artifact exists — proceed to resume below.
 	}
 
 	// FR-7b: version check for resume mode.
-	if existingExists && !config.AllowVersionDrift {
+	if !config.IsNewRun && !config.AllowVersionDrift {
 		if existingState.WorkflowVersion != region.Info.Version {
 			return refusal(fmt.Sprintf(
 				"workflow version mismatch: artifact has %q, selected workflow has %q",
@@ -191,15 +196,15 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	var seq int
 	var lastResponse *domain.ProtocolResponse
 
-	if !existingExists {
+	if config.IsNewRun {
 		// New run: create a fresh artifact.
-		state, err = s.deps.Store.Create(ctx, region.Info, config.Task, false, s.deps.Clock.Now())
+		state, err = s.deps.Store.Create(ctx, region.Info, config.Task, false, s.deps.Clock.Now(), config.RunID)
 		if err != nil {
 			return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
 		}
 		seq = 0
 	} else {
-		// Resume: use the existing artifact.
+		// Resume: use the existing artifact (already validated above).
 		state = existingState
 		resume, resumeErr := engine.ResumePoint(admitted, stages, state)
 		if resumeErr != nil {
@@ -242,6 +247,16 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 				return domain.RunOutcome{Status: domain.RunFailed, Message: "engine returned empty dispatch"}, nil
 			}
 			step := decision.Dispatch.Steps[0]
+
+			// Populate RunID from the artifact state and resolve artifact paths to
+			// run-scoped form. The session derives RunID from state (not from
+			// RunConfig) so that resumed runs carry the RunID minted at creation.
+			step.Request.RunID = state.RunID
+			if state.RunID != "" {
+				folder := domain.RunScopedFolder(state.RunID) + "/"
+				step.Request.InputArtifacts = resolveToRunScoped(step.Request.InputArtifacts, folder)
+				step.Request.OutputArtifacts = resolveToRunScoped(step.Request.OutputArtifacts, folder)
+			}
 
 			// Apply the HITL override from a prior deviation rejoin instruction
 			// (FR-24 / FR-20). The override is for this one invocation only.
@@ -590,4 +605,22 @@ func hasStageStarArtifact(artifacts []string) bool {
 // for Deps.OnInfrastructureTrigger; tests inject a counter.
 func onInfrastructureAgentTrigger() {
 	// no-op: production hook; real infrastructure-agent dispatch goes here.
+}
+
+// resolveToRunScoped prepends the run-scoped folder prefix to each artifact
+// path that does not already carry it. Paths that already start with prefix
+// are passed through unchanged, preventing double-prefixing.
+func resolveToRunScoped(paths []string, prefix string) []string {
+	if len(paths) == 0 {
+		return paths
+	}
+	resolved := make([]string, len(paths))
+	for i, p := range paths {
+		if strings.HasPrefix(p, prefix) {
+			resolved[i] = p
+		} else {
+			resolved[i] = prefix + p
+		}
+	}
+	return resolved
 }

@@ -14,6 +14,11 @@ package artifact_test
 //   - ArtifactRegistry: row count, first row's Artifact/CreatedIn/CreatedBy.
 //   - WorkflowNotes: count, first note's Seq and text preserved verbatim.
 //
+//   Parse — run_id handling:
+//   - Frontmatter with run_id field: Parse populates ArtifactState.RunID.
+//   - Canonical fixture: RunID parsed correctly from frontmatter.
+//   - Frontmatter without run_id field: ArtifactState.RunID is "" (no error).
+//
 //   Parse — refusal cases:
 //   - Non-existent file → os.ErrNotExist (tested via Read, not Parse directly).
 //   - Missing "type: orchestration-artifact" → *domain.RefusalError.
@@ -23,6 +28,14 @@ package artifact_test
 //   - Truncated file → *domain.RefusalError.
 //   - RefusalError.Component must be "artifact".
 //   - RefusalError.Resource must name the file path.
+//
+//   Render — run_id handling:
+//   - ArtifactState with non-empty RunID: run_id emitted in frontmatter.
+//   - run_id field positioned after type and before workflow.
+//   - ArtifactState with empty RunID: run_id field NOT emitted (backward compatibility).
+//
+//   Round-trip — run_id:
+//   - Parse then Render preserves RunID: re-parsing the rendered bytes yields the same RunID.
 //
 //   Create:
 //   - WorkflowID appears in the returned ArtifactState.
@@ -62,6 +75,16 @@ package artifact_test
 //   - Pipe characters ("|") are stripped from the result.
 //   - Newline characters are stripped from the result.
 //   - The head/tail split is counted on the clean (stripped) string.
+//
+//   SetPhase (T5.3):
+//   - SetPhase updates current_state.phase in the returned ArtifactState.
+//   - SetPhase bumps global_sequence by one in the returned ArtifactState.
+//   - SetPhase sets last_updated to the supplied now timestamp.
+//   - SetPhase does NOT append an execution log entry (log length unchanged).
+//   - SetPhase does NOT modify ArtifactRegistry entries.
+//   - Round-trip: Read after SetPhase returns the updated phase.
+//   - SetPhase preserves WorkflowNotes unchanged.
+//   - SetPhase with "COMPLETED" phase persists correctly (case preserved in output).
 
 import (
 	"bytes"
@@ -534,7 +557,7 @@ func TestCreate_WorkflowID_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "some task", false, time.Now())
+	state, err := store.Create(ctx, info, "some task", false, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -550,7 +573,7 @@ func TestCreate_WorkflowVersion_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "some task", false, time.Now())
+	state, err := store.Create(ctx, info, "some task", false, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -566,7 +589,7 @@ func TestCreate_Task_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "My important task", false, time.Now())
+	state, err := store.Create(ctx, info, "My important task", false, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -582,7 +605,7 @@ func TestCreate_CheckpointsEnabled_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", true, time.Now())
+	state, err := store.Create(ctx, info, "task", true, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -598,7 +621,7 @@ func TestCreate_CheckpointsDisabled_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", false, time.Now())
+	state, err := store.Create(ctx, info, "task", false, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -617,7 +640,7 @@ func TestCreate_Type_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", false, time.Now())
+	state, err := store.Create(ctx, info, "task", false, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -636,7 +659,7 @@ func TestCreate_Started_SetFromNowParameter(t *testing.T) {
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 	now := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
 
-	state, err := store.Create(ctx, info, "task", false, now)
+	state, err := store.Create(ctx, info, "task", false, now, "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -654,7 +677,7 @@ func TestCreate_GlobalSequence_InitiallyZero(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", false, time.Now())
+	state, err := store.Create(ctx, info, "task", false, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -670,7 +693,7 @@ func TestCreate_ExecutionLog_Empty(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", false, time.Now())
+	state, err := store.Create(ctx, info, "task", false, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -686,7 +709,7 @@ func TestCreate_ArtifactRegistry_Empty(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", false, time.Now())
+	state, err := store.Create(ctx, info, "task", false, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -704,12 +727,12 @@ func TestCreate_FailsIfFileAlreadyExists(t *testing.T) {
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
 	// Create the file once.
-	if _, err := store.Create(ctx, info, "first", false, time.Now()); err != nil {
+	if _, err := store.Create(ctx, info, "first", false, time.Now(), ""); err != nil {
 		t.Fatalf("first Create: unexpected error: %v", err)
 	}
 
 	// A second Create on the same path must fail.
-	_, err := store.Create(ctx, info, "second", false, time.Now())
+	_, err := store.Create(ctx, info, "second", false, time.Now(), "")
 	if err == nil {
 		t.Fatal("second Create: want error because file already exists, got nil")
 	}
@@ -724,7 +747,7 @@ func TestCreate_FileReadableAfterCreate(t *testing.T) {
 	now := time.Date(2026, 1, 29, 9, 0, 0, 0, time.UTC)
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	created, err := store.Create(ctx, info, "Fix something", false, now)
+	created, err := store.Create(ctx, info, "Fix something", false, now, "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -763,7 +786,7 @@ func mustCreateStore(t *testing.T) (domain.ArtifactStore, domain.ArtifactState) 
 	store := artifact.NewFileStore(filepath.Join(dir, "Orchestration.md"))
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
-	state, err := store.Create(ctx, info, "test task", false, time.Now())
+	state, err := store.Create(ctx, info, "test task", false, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -1090,7 +1113,7 @@ func TestApply_WorkflowNotes_PreservedUnchanged(t *testing.T) {
 
 	// Seed the temp file.
 	info := domain.WorkflowInfo{ID: state.Workflow, Version: state.WorkflowVersion}
-	seedState, err := tempStore.Create(ctx, info, state.Task, state.Checkpoints, state.Started)
+	seedState, err := tempStore.Create(ctx, info, state.Task, state.Checkpoints, state.Started, "")
 	if err != nil {
 		t.Fatalf("Create temp: %v", err)
 	}
@@ -1228,5 +1251,518 @@ func TestTruncateSummary_StripBeforeTruncation_HeadTailFromCleanString(t *testin
 	// After stripping the pipe, we have exactly 100 chars — no truncation.
 	if got != clean {
 		t.Errorf("TruncateSummary(%q): want %q (stripped, no truncation), got %q", input, clean, got)
+	}
+}
+
+// ---- Parse: run_id handling ----
+
+// minimalArtifactBytes builds the minimal valid artifact bytes for use in
+// inline parse tests. When runID is non-empty, it is placed after "type:" and
+// before "workflow:" in the frontmatter. When runID is empty, the run_id line
+// is omitted entirely (simulating a pre-v1.8 artifact).
+func minimalArtifactBytes(runID string) []byte {
+	runIDLine := ""
+	if runID != "" {
+		runIDLine = "run_id: " + runID + "\n"
+	}
+	return []byte("---\n" +
+		"type: orchestration-artifact\n" +
+		runIDLine +
+		"workflow: test\n" +
+		"workflow_version: \"1.0\"\n" +
+		"task: \"test\"\n" +
+		"started: 2026-01-01T00:00:00Z\n" +
+		"last_updated: 2026-01-01T00:00:00Z\n" +
+		"global_sequence: 0\n" +
+		"checkpoints: disabled\n" +
+		"current_state:\n" +
+		"  phase: null\n" +
+		"  stage: null\n" +
+		"  last_status: null\n" +
+		"  last_agent: null\n" +
+		"  error_code: null\n" +
+		"---\n" +
+		"\n" +
+		"[[SECTION:ExecutionLog]]\n" +
+		"[[/SECTION:ExecutionLog]]\n" +
+		"\n" +
+		"[[SECTION:Artifacts]]\n" +
+		"[[/SECTION:Artifacts]]\n" +
+		"\n" +
+		"[[SECTION:WorkflowNotes]]\n" +
+		"[[/SECTION:WorkflowNotes]]\n")
+}
+
+func TestParse_RunIDPresentInFrontmatter_PopulatesRunID(t *testing.T) {
+	// When the frontmatter contains a run_id field, Parse must populate
+	// ArtifactState.RunID with the exact string value.
+	const wantRunID = "20260727T170000Z-a3f9"
+	data := minimalArtifactBytes(wantRunID)
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+
+	if state.RunID != wantRunID {
+		t.Errorf("RunID: want %q, got %q", wantRunID, state.RunID)
+	}
+}
+
+func TestParse_CanonicalFile_RunID(t *testing.T) {
+	// The canonical fixture includes run_id in the frontmatter.
+	// Parse must populate ArtifactState.RunID from that field.
+	const wantRunID = "20260727T170000Z-a3f9"
+	state := mustReadCanonical(t)
+
+	if state.RunID != wantRunID {
+		t.Errorf("RunID from canonical fixture: want %q, got %q", wantRunID, state.RunID)
+	}
+}
+
+func TestParse_RunIDAbsentFromFrontmatter_ReturnsEmptyString(t *testing.T) {
+	// When the frontmatter has no run_id field (pre-v1.8 artifact),
+	// ArtifactState.RunID must be "" — not an error.
+	data := minimalArtifactBytes("") // no run_id line
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+
+	if state.RunID != "" {
+		t.Errorf("RunID: want %q (absent = empty), got %q", "", state.RunID)
+	}
+}
+
+func TestParse_RunIDAbsentFromFrontmatter_ReturnsNoError(t *testing.T) {
+	// Absence of run_id in frontmatter must not cause a parse error.
+	// Pre-v1.8 artifacts do not have this field and must parse successfully.
+	data := minimalArtifactBytes("")
+
+	_, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Errorf("Parse: want no error when run_id absent, got %v", err)
+	}
+}
+
+// ---- Render: run_id handling ----
+
+func TestRender_WithRunID_EmitsRunIDInFrontmatter(t *testing.T) {
+	// When ArtifactState.RunID is non-empty, Render must emit
+	// "run_id: <value>" in the frontmatter block.
+	const runID = "20260727T170000Z-a3f9"
+	state := domain.ArtifactState{
+		RunID:    runID,
+		Type:     "orchestration-artifact",
+		Workflow: "test",
+	}
+
+	got, err := artifact.Render(state)
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+
+	if !strings.Contains(string(got), "run_id: "+runID) {
+		t.Errorf("Render: want frontmatter to contain %q, but it was absent.\nOutput:\n%s", "run_id: "+runID, got)
+	}
+}
+
+func TestRender_RunIDPosition_AfterTypeBeforeWorkflow(t *testing.T) {
+	// When run_id is present, it must appear in the frontmatter after "type:"
+	// and before "workflow:", matching the field ordering specified in the design.
+	const runID = "20260727T170000Z-a3f9"
+	state := domain.ArtifactState{
+		RunID:    runID,
+		Type:     "orchestration-artifact",
+		Workflow: "test",
+	}
+
+	got, err := artifact.Render(state)
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+
+	output := string(got)
+	typeIdx := strings.Index(output, "type:")
+	runIDIdx := strings.Index(output, "run_id:")
+	workflowIdx := strings.Index(output, "\nworkflow:")
+
+	if typeIdx < 0 {
+		t.Fatal("rendered output is missing the type: field")
+	}
+	if runIDIdx < 0 {
+		t.Fatal("rendered output is missing the run_id: field")
+	}
+	if workflowIdx < 0 {
+		t.Fatal("rendered output is missing the workflow: field")
+	}
+	if !(typeIdx < runIDIdx && runIDIdx < workflowIdx) {
+		t.Errorf("run_id is not positioned after type: and before workflow:. type@%d, run_id@%d, workflow@%d",
+			typeIdx, runIDIdx, workflowIdx)
+	}
+}
+
+func TestRender_EmptyRunID_NotEmittedInFrontmatter(t *testing.T) {
+	// When ArtifactState.RunID is empty (pre-v1.8 artifact), Render must NOT
+	// emit a run_id line. This preserves backward compatibility: rendering a
+	// pre-v1.8 artifact must not add a spurious run_id field.
+	state := domain.ArtifactState{
+		RunID:    "", // empty
+		Type:     "orchestration-artifact",
+		Workflow: "test",
+	}
+
+	got, err := artifact.Render(state)
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+
+	if strings.Contains(string(got), "run_id:") {
+		t.Errorf("Render: want no run_id: field when RunID is empty, but output contained it.\nOutput:\n%s", got)
+	}
+}
+
+// ---- Round-trip: run_id ----
+
+func TestRoundTrip_WithRunID_PreservesRunID(t *testing.T) {
+	// Parse an artifact that has run_id in its frontmatter, render the resulting
+	// state back to bytes, then re-parse. The RunID must survive the round-trip
+	// unchanged.
+	const runID = "20260727T170000Z-a3f9"
+	data := minimalArtifactBytes(runID)
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	rendered, err := artifact.Render(state)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	state2, err := artifact.Parse(rendered)
+	if err != nil {
+		t.Fatalf("Parse rendered bytes: %v", err)
+	}
+
+	if state2.RunID != runID {
+		t.Errorf("RunID after round-trip: want %q, got %q", runID, state2.RunID)
+	}
+}
+
+// ============================================================
+// T5.3: SetPhase tests
+// ============================================================
+//
+// All tests in this section are in the RED phase: they compile but fail because
+// fileStore.SetPhase panics ("not implemented") until I5.4 is complete.
+
+// setPhaseFixture creates a temporary artifact via store.Create and returns
+// the store and initial state for use in SetPhase tests.
+func setPhaseFixture(t *testing.T) (domain.ArtifactStore, domain.ArtifactState) {
+	t.Helper()
+	dir := t.TempDir()
+	store := artifact.NewFileStore(filepath.Join(dir, "Orchestration.md"))
+	ctx := context.Background()
+	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
+	state, err := store.Create(ctx, info, "test task", false, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), "")
+	if err != nil {
+		t.Fatalf("setPhaseFixture: Create: %v", err)
+	}
+	return store, state
+}
+
+func TestSetPhase_UpdatesPhaseInReturnedState(t *testing.T) {
+	// SetPhase must return an ArtifactState with current_state.phase set to
+	// the supplied phase value.
+	store, state := setPhaseFixture(t)
+	ctx := context.Background()
+	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+
+	updated, err := store.SetPhase(ctx, state, "COMPLETED", now)
+
+	if err != nil {
+		t.Fatalf("SetPhase: unexpected error: %v", err)
+	}
+	if updated.CurrentState.Phase != "COMPLETED" {
+		t.Errorf("Phase = %q, want %q", updated.CurrentState.Phase, "COMPLETED")
+	}
+}
+
+func TestSetPhase_BumpsGlobalSequence(t *testing.T) {
+	// SetPhase must increment global_sequence by one from the supplied state.
+	store, state := setPhaseFixture(t)
+	ctx := context.Background()
+	beforeSeq := state.GlobalSequence
+	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+
+	updated, err := store.SetPhase(ctx, state, "COMPLETED", now)
+
+	if err != nil {
+		t.Fatalf("SetPhase: unexpected error: %v", err)
+	}
+	if updated.GlobalSequence != beforeSeq+1 {
+		t.Errorf("GlobalSequence = %d, want %d (incremented by 1)", updated.GlobalSequence, beforeSeq+1)
+	}
+}
+
+func TestSetPhase_SetsLastUpdatedToNow(t *testing.T) {
+	// SetPhase must set last_updated to the supplied now timestamp.
+	store, state := setPhaseFixture(t)
+	ctx := context.Background()
+	setTime := time.Date(2026, 7, 27, 17, 0, 0, 0, time.UTC)
+
+	updated, err := store.SetPhase(ctx, state, "COMPLETED", setTime)
+
+	if err != nil {
+		t.Fatalf("SetPhase: unexpected error: %v", err)
+	}
+	if !updated.LastUpdated.Equal(setTime) {
+		t.Errorf("LastUpdated = %v, want %v", updated.LastUpdated, setTime)
+	}
+}
+
+func TestSetPhase_DoesNotAppendExecutionLogEntry(t *testing.T) {
+	// SetPhase must not append any row to the execution log.
+	// The execution log length must be the same before and after SetPhase.
+	store, state := setPhaseFixture(t)
+	ctx := context.Background()
+	logLenBefore := len(state.ExecutionLog)
+	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+
+	_, err := store.SetPhase(ctx, state, "COMPLETED", now)
+
+	if err != nil {
+		t.Fatalf("SetPhase: unexpected error: %v", err)
+	}
+
+	// Read back the persisted artifact and check execution log length.
+	readBack, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after SetPhase: %v", err)
+	}
+	if len(readBack.ExecutionLog) != logLenBefore {
+		t.Errorf("ExecutionLog length = %d after SetPhase, want %d (no new entries)", len(readBack.ExecutionLog), logLenBefore)
+	}
+}
+
+func TestSetPhase_DoesNotModifyArtifactRegistry(t *testing.T) {
+	// SetPhase must not modify the artifact registry.
+	// The registry must have the same entries after SetPhase.
+	store, state := setPhaseFixture(t)
+	ctx := context.Background()
+
+	// Apply a step with an output artifact so the registry is non-empty.
+	state, err := store.Apply(ctx, state, domain.CompletedStep{
+		Seq:             1,
+		AgentInstance:   "agent#1",
+		Phase:           "EXECUTION",
+		Status:          "SUCCESS",
+		Timestamp:       time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC),
+		OutputArtifacts: []string{"Plan.md"},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	registryLenBefore := len(state.ArtifactRegistry)
+	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+
+	_, err = store.SetPhase(ctx, state, "COMPLETED", now)
+
+	if err != nil {
+		t.Fatalf("SetPhase: unexpected error: %v", err)
+	}
+
+	readBack, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after SetPhase: %v", err)
+	}
+	if len(readBack.ArtifactRegistry) != registryLenBefore {
+		t.Errorf("ArtifactRegistry length = %d after SetPhase, want %d (registry must not be modified)",
+			len(readBack.ArtifactRegistry), registryLenBefore)
+	}
+}
+
+func TestSetPhase_RoundTrip_ReadReturnsUpdatedPhase(t *testing.T) {
+	// Read after SetPhase must return an ArtifactState with the updated phase.
+	store, state := setPhaseFixture(t)
+	ctx := context.Background()
+	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+
+	_, err := store.SetPhase(ctx, state, "COMPLETED", now)
+
+	if err != nil {
+		t.Fatalf("SetPhase: unexpected error: %v", err)
+	}
+
+	readBack, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after SetPhase: %v", err)
+	}
+	if readBack.CurrentState.Phase != "COMPLETED" {
+		t.Errorf("Phase after round-trip = %q, want %q", readBack.CurrentState.Phase, "COMPLETED")
+	}
+}
+
+func TestSetPhase_PreservesWorkflowNotes(t *testing.T) {
+	// SetPhase must preserve WorkflowNotes unchanged (same behaviour as Apply).
+	// WorkflowNotes are Tier 3 (opaque) and must survive all write operations.
+	//
+	// Since Create produces an artifact with no WorkflowNotes (only the orchestrator
+	// writes them), this test verifies that SetPhase does not corrupt the notes block
+	// by checking the notes count is still zero.
+	store, state := setPhaseFixture(t)
+	ctx := context.Background()
+	notesBefore := len(state.WorkflowNotes)
+	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+
+	_, err := store.SetPhase(ctx, state, "COMPLETED", now)
+
+	if err != nil {
+		t.Fatalf("SetPhase: unexpected error: %v", err)
+	}
+
+	readBack, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after SetPhase: %v", err)
+	}
+	if len(readBack.WorkflowNotes) != notesBefore {
+		t.Errorf("WorkflowNotes count = %d after SetPhase, want %d", len(readBack.WorkflowNotes), notesBefore)
+	}
+}
+
+func TestSetPhase_COMPLETEDPhase_PersistedCasePreserved(t *testing.T) {
+	// SetPhase must write the phase value with the exact casing supplied.
+	// "COMPLETED" must be read back as "COMPLETED", not lowercased or altered.
+	store, state := setPhaseFixture(t)
+	ctx := context.Background()
+	now := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+
+	_, err := store.SetPhase(ctx, state, "COMPLETED", now)
+	if err != nil {
+		t.Fatalf("SetPhase: unexpected error: %v", err)
+	}
+
+	readBack, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after SetPhase: %v", err)
+	}
+	if readBack.CurrentState.Phase != "COMPLETED" {
+		t.Errorf("Phase = %q, want exact casing %q", readBack.CurrentState.Phase, "COMPLETED")
+	}
+}
+
+// ---- Create with run_id (T7.4) ----
+//
+// All tests in this section are in the RED phase: they compile but fail because
+// fileStore.Create does not yet store runID in the artifact frontmatter.
+
+// createFixtureWithRunID creates a temp artifact with the given runID and returns
+// the store and the initial state for use in Create+runID tests.
+func createFixtureWithRunID(t *testing.T, runID string) (domain.ArtifactStore, domain.ArtifactState) {
+	t.Helper()
+	dir := t.TempDir()
+	store := artifact.NewFileStore(filepath.Join(dir, "Orchestration.md"))
+	ctx := context.Background()
+	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
+	state, err := store.Create(ctx, info, "test task", false, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), runID)
+	if err != nil {
+		t.Fatalf("createFixtureWithRunID: Create: %v", err)
+	}
+	return store, state
+}
+
+// TestCreate_RunID_SetInReturnedState verifies that the run_id passed to Create
+// is reflected in the returned ArtifactState.RunID field.
+func TestCreate_RunID_SetInReturnedState(t *testing.T) {
+	const runID = "20260727T170000Z-a3f9"
+	_, state := createFixtureWithRunID(t, runID)
+
+	if state.RunID != runID {
+		t.Errorf("state.RunID: want %q, got %q", runID, state.RunID)
+	}
+}
+
+// TestCreate_RunID_PersistedToFrontmatter verifies that the run_id passed to
+// Create is written to the artifact file's frontmatter and can be read back via
+// Read. This is the key persistence requirement: once created, the run_id is the
+// permanent identity of the run and must survive a read cycle.
+func TestCreate_RunID_PersistedToFrontmatter(t *testing.T) {
+	const runID = "20260727T170000Z-a3f9"
+	store, _ := createFixtureWithRunID(t, runID)
+	ctx := context.Background()
+
+	readBack, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after Create: unexpected error: %v", err)
+	}
+
+	if readBack.RunID != runID {
+		t.Errorf("RunID after Read: want %q, got %q", runID, readBack.RunID)
+	}
+}
+
+// TestCreate_RunID_EmptyRunID_NotInFrontmatter verifies that when Create is called
+// with an empty runID (pre-v1.8 or minting-deferred callers), the artifact file
+// does NOT contain a "run_id" key in its frontmatter. This maintains backward
+// compatibility with pre-v1.8 artifacts where the run_id field is absent.
+func TestCreate_RunID_EmptyRunID_NotInFrontmatter(t *testing.T) {
+	_, state := createFixtureWithRunID(t, "")
+
+	if state.RunID != "" {
+		t.Errorf("state.RunID: want empty string when runID param is empty, got %q", state.RunID)
+	}
+}
+
+// TestCreate_RunID_DifferentValues_Stored verifies that Create correctly stores
+// whatever run_id value is passed — not just the specific "a3f9" suffix value.
+// Uses a different run_id to confirm the parameter is being used, not a hardcoded default.
+func TestCreate_RunID_DifferentValues_Stored(t *testing.T) {
+	const runID = "20260101T000000Z-ffff"
+	_, state := createFixtureWithRunID(t, runID)
+
+	if state.RunID != runID {
+		t.Errorf("state.RunID: want %q, got %q", runID, state.RunID)
+	}
+}
+
+// TestCreate_RunID_RoundTrip_PreservesAllOtherFields verifies that providing a
+// non-empty runID does not affect the storage of any other artifact fields.
+// WorkflowID, Task, Checkpoints, GlobalSequence, etc. must all be correct.
+func TestCreate_RunID_RoundTrip_PreservesAllOtherFields(t *testing.T) {
+	const runID = "20260727T170000Z-a3f9"
+	dir := t.TempDir()
+	store := artifact.NewFileStore(filepath.Join(dir, "Orchestration.md"))
+	ctx := context.Background()
+	info := domain.WorkflowInfo{ID: "my-workflow", Version: "2.0"}
+	now := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
+
+	created, err := store.Create(ctx, info, "important task", true, now, runID)
+	if err != nil {
+		t.Fatalf("Create: unexpected error: %v", err)
+	}
+
+	// Verify all fields beyond RunID are still correct.
+	if created.Workflow != domain.WorkflowID("my-workflow") {
+		t.Errorf("Workflow: want %q, got %q", "my-workflow", created.Workflow)
+	}
+	if created.WorkflowVersion != domain.WorkflowVersion("2.0") {
+		t.Errorf("WorkflowVersion: want %q, got %q", "2.0", created.WorkflowVersion)
+	}
+	if created.Task != "important task" {
+		t.Errorf("Task: want %q, got %q", "important task", created.Task)
+	}
+	if !created.Checkpoints {
+		t.Error("Checkpoints: want true, got false")
+	}
+	if created.GlobalSequence != 0 {
+		t.Errorf("GlobalSequence: want 0, got %d", created.GlobalSequence)
+	}
+	// And verify RunID is also correct.
+	if created.RunID != runID {
+		t.Errorf("RunID: want %q, got %q", runID, created.RunID)
 	}
 }

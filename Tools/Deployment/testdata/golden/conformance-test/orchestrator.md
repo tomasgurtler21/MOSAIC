@@ -76,12 +76,13 @@ full list of available workflows and their categories.
 [[SECTION:CommunicationProtocol]]
 ## Communication Protocol
 
-You operate under **Communication Protocol v1.7**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
+You operate under **Communication Protocol v1.8**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
 
 ### Task Invocation Message (Orchestrator → Subagent)
 ```json
 {
   "agent_instance_id": "{AgentName}#{Number}",
+  "run_id": "{run-identifier}",
   "task_description": "What to accomplish",
   "input_artifacts": ["orchestration artifacts to read (STRICT)"],
   "output_artifacts": ["orchestration artifacts to create/modify (STRICT)"],
@@ -97,6 +98,7 @@ You operate under **Communication Protocol v1.7**. This protocol governs agent-t
 ```json
 {
   "agent_instance_id": "{echo from input}",
+  "run_id": "{echo from run_id input}",
   "status_code": "SUCCESS|COMPLETED_NEEDS_ACTION|PARTIALLY_DONE|NEEDS_CLARIFICATION|CAPABILITY_EXCEEDED|BLOCKED",
   "status_message": "1-2 sentence outcome. Describe what was modified.",
   "result_data": "Only if include_result_summary was true in input",
@@ -131,6 +133,16 @@ You operate under **Communication Protocol v1.7**. This protocol governs agent-t
 | `E501` | TOOL_UNAVAILABLE | Auto-retry with backoff (Tier 1) |
 | `E502` | PERMISSION_DENIED | Escalate to human |
 | `E503` | USER_CONTACT_UNAVAILABLE | Re-invoke without HITL flag or escalate |
+
+### Field Obligation Semantics
+
+**Producer obligation** is the requirement that a sender must emit a field. **Consumer enforcement** defines what happens when a receiver finds the field absent.
+
+`run_id` is required by producer obligation: you (the orchestrator) always emit it in every Task Invocation Message, and subagents always echo it in every Task Response Message.
+
+Consumer enforcement is tiered:
+- **Core components** (runner, orchestrator): may reject the message or halt the orchestration run when `run_id` is absent or does not match expectations.
+- **Auxiliary consumers** (logger, future analyzers): must degrade gracefully when `run_id` is absent or unreadable. An auxiliary consumer must never fail or crash an orchestration run because `run_id` is missing.
 
 [[INJECTION:ProtocolExtension]]
 [[/INJECTION:ProtocolExtension]]

@@ -1,6 +1,6 @@
-"""mosaic_logger_runstate.py — Run marker state machine and agent mapping store.
+"""mosaic_logger_runstate.py — Run identity extraction and agent mapping store.
 
-Owns: per-session run marker (open/closed), run_id and instance_id minting,
+Owns: run_id and agent_instance_id extraction from dispatch content,
 agent_id -> agent_instance_id mapping files.
 """
 
@@ -10,25 +10,6 @@ import random
 import re
 
 import mosaic_logger_core as core
-
-
-# ---------------------------------------------------------------------------
-# RunResolution
-# ---------------------------------------------------------------------------
-
-class RunResolution:
-    """Outcome of a resolve_run or close_run call.
-
-    outcome: "minted" | "reused" | "closed" | "unresolved"
-    run_id:  the resolved identifier, or None when outcome is "unresolved"
-    opened_at: marker opened_at string, or None
-    """
-
-    def __init__(self, run_id: "str | None", outcome: str,
-                 opened_at: "str | None" = None):
-        self.run_id = run_id
-        self.outcome = outcome
-        self.opened_at = opened_at
 
 
 # ---------------------------------------------------------------------------
@@ -118,143 +99,43 @@ def extract_instance_id(prompt: "str | None") -> "str | None":
 
 
 # ---------------------------------------------------------------------------
-# Run-marker state machine
+# run_id extraction
 # ---------------------------------------------------------------------------
 
-def _parse_opened_at(s: "str | None") -> "datetime.datetime | None":
-    """Parse an ISO 8601 Z-suffix string to a timezone-aware datetime."""
-    if not s:
-        return None
-    try:
-        return datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except Exception:
-        return None
+# Structured match: run_id key (with optional quotes/colon/equals) followed
+# by a value matching the {YYYYMMDD}T{HHMMSS}Z-{4hex} format.
+_RUN_ID_STRUCTURED_RE = re.compile(
+    r'(?<![A-Za-z0-9_])run_id\s*["\']?\s*[:=]\s*["\']?\s*'
+    r'([0-9]{8}T[0-9]{6}Z-[0-9a-f]{4})'
+)
+
+# Bare match: {YYYYMMDD}T{HHMMSS}Z-{4hex} not immediately preceded by alnum/.-_
+_RUN_ID_BARE_RE = re.compile(
+    r'(?<![A-Za-z0-9_.-])([0-9]{8}T[0-9]{6}Z-[0-9a-f]{4})'
+)
 
 
-def _read_marker(paths: "core.LogPaths",
-                 session_id: str) -> "dict | None":
-    """Read and parse the marker file. Returns None if absent, unreadable, or malformed."""
-    try:
-        path = paths.marker(session_id)
-        text = path.read_text(encoding="utf-8")
-        data = json.loads(text)
-        if not isinstance(data, dict):
-            return None
-        return data
-    except Exception:
-        return None
+def extract_run_id(prompt: "str | None") -> "str | None":
+    """Extract a MOSAIC run_id from dispatched prompt text.
 
-
-def _write_marker(paths: "core.LogPaths", session_id: str, marker: dict) -> None:
-    """Write the marker via atomic replace, creating the markers directory if needed."""
-    path = paths.marker(session_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    core.atomic_replace(path, json.dumps(marker, ensure_ascii=False).encode("utf-8"))
-
-
-def resolve_run(paths: "core.LogPaths",
-                session_id: "str | None",
-                allow_mint: bool,
-                now: "datetime.datetime | None" = None) -> RunResolution:
-    """Read-check-write the per-session run marker and return the resolved identity.
-
-    Branches (evaluated in order):
-      absent/unreadable/malformed + allow_mint  -> MINTED
-      status "open" and opened_at within 24h    -> REUSED (any allow_mint)
-      status "closed" + allow_mint              -> MINTED (resume)
-      opened_at older than 24h + allow_mint     -> MINTED (stale)
-      any non-reusable state + !allow_mint      -> UNRESOLVED
-      missing/empty session_id                  -> UNRESOLVED
-    Never raises.
+    Matching order (stops at first hit):
+      1. Structured: run_id key followed by a value matching the format
+         {YYYYMMDD}T{HHMMSS}Z-{4 lowercase hex chars}.
+      2. Bare: earliest occurrence of the format pattern in the text.
+    Returns None when no confident match exists. Never raises.
     """
+    if not prompt:
+        return None
     try:
-        if not session_id:
-            return RunResolution(run_id=None, outcome="unresolved")
-
-        now_dt = _utcnow(now)
-        marker = _read_marker(paths, session_id)
-
-        if marker is None:
-            # Absent or unreadable
-            if allow_mint:
-                return _mint(paths, session_id, now_dt)
-            return RunResolution(run_id=None, outcome="unresolved")
-
-        run_id = marker.get("run_id")
-        status = marker.get("status")
-        opened_at_str = marker.get("opened_at")
-        opened_at_dt = _parse_opened_at(opened_at_str)
-
-        # Check freshness first — stale trumps both open and closed
-        if opened_at_dt is not None:
-            age_seconds = (now_dt - opened_at_dt).total_seconds()
-            is_stale = age_seconds > core.STALE_AFTER_SECONDS
-        else:
-            # Unparseable opened_at: treat as stale
-            is_stale = True
-
-        # REUSED: open and fresh
-        if status == "open" and not is_stale:
-            return RunResolution(run_id=run_id, outcome="reused",
-                                 opened_at=opened_at_str)
-
-        # MINTED: closed and not stale (resume-for-a-new-run)
-        if status == "closed" and not is_stale:
-            if allow_mint:
-                return _mint(paths, session_id, now_dt)
-            return RunResolution(run_id=None, outcome="unresolved")
-
-        # MINTED: stale (any status)
-        if is_stale:
-            if allow_mint:
-                return _mint(paths, session_id, now_dt)
-            return RunResolution(run_id=None, outcome="unresolved")
-
-        # Fallback — any other non-reusable state
-        if allow_mint:
-            return _mint(paths, session_id, now_dt)
-        return RunResolution(run_id=None, outcome="unresolved")
-
+        m = _RUN_ID_STRUCTURED_RE.search(prompt)
+        if m:
+            return m.group(1)
+        m = _RUN_ID_BARE_RE.search(prompt)
+        if m:
+            return m.group(1)
+        return None
     except Exception:
-        return RunResolution(run_id=None, outcome="unresolved")
-
-
-def _mint(paths: "core.LogPaths", session_id: str,
-          now_dt: datetime.datetime) -> RunResolution:
-    """Mint a new run_id and write the marker with status 'open'."""
-    run_id = new_run_id(now=now_dt)
-    opened_at = _iso_ms(now_dt)
-    marker = {"run_id": run_id, "opened_at": opened_at, "status": "open"}
-    _write_marker(paths, session_id, marker)
-    return RunResolution(run_id=run_id, outcome="minted", opened_at=opened_at)
-
-
-def close_run(paths: "core.LogPaths",
-              session_id: "str | None",
-              now: "datetime.datetime | None" = None) -> RunResolution:
-    """Set the existing marker's status to 'closed', preserving run_id and opened_at.
-
-    Returns CLOSED with the run_id, or UNRESOLVED when no marker exists.
-    Never raises.
-    """
-    try:
-        if not session_id:
-            return RunResolution(run_id=None, outcome="unresolved")
-
-        marker = _read_marker(paths, session_id)
-        if marker is None:
-            return RunResolution(run_id=None, outcome="unresolved")
-
-        run_id = marker.get("run_id")
-        opened_at = marker.get("opened_at")
-
-        updated = {"run_id": run_id, "opened_at": opened_at, "status": "closed"}
-        _write_marker(paths, session_id, updated)
-
-        return RunResolution(run_id=run_id, outcome="closed",
-                             opened_at=opened_at)
-    except Exception:
-        return RunResolution(run_id=None, outcome="unresolved")
+        return None
 
 
 # ---------------------------------------------------------------------------

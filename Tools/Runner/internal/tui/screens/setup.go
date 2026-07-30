@@ -10,6 +10,7 @@ import (
 
 	"mosaic-common/tui/widgets"
 	"mosaic-run/internal/domain"
+	"mosaic-run/internal/runscan"
 )
 
 // OrchestratorFileScreen prompts the user to enter the path to the orchestrator agent file.
@@ -183,6 +184,152 @@ func (s *WorkflowSelectScreen) Resize(width, height int) {
 }
 
 // ---------------------------------------------------------------------------
+// RunSelectScreen
+// ---------------------------------------------------------------------------
+
+// NewRunSentinelID is the list-item ID used for the synthetic "Start new run"
+// entry. It is deliberately not a valid run_id (contains no timestamp or hex
+// suffix) so it can never collide with a real RunCandidate's RunID.
+const NewRunSentinelID = "__new_run__"
+
+// RunSelectScreen lets the user select a resumable run or start a new one.
+//
+// Navigation contract:
+//   - Enter on a candidate -> Done() == true, SelectedCandidate() returns the chosen RunCandidate.
+//   - Enter on the "Start new run" item -> Done() == true, IsNewRun() == true.
+//   - Esc -> Back() == true.
+type RunSelectScreen struct {
+	list       *widgets.List
+	candidates []runscan.RunCandidate
+	width      int
+	height     int
+	styles     Styles
+}
+
+// NewRunSelectScreen creates the run selection screen.
+// candidates must be non-empty (caller should skip this screen when len == 0 or 1).
+// A synthetic "Start new run" item is prepended to the list with ID = NewRunSentinelID.
+func NewRunSelectScreen(candidates []runscan.RunCandidate, width, height int, styles Styles) *RunSelectScreen {
+	items := make([]widgets.ListItem, 0, len(candidates)+1)
+
+	// Prepend the "Start new run" entry.
+	items = append(items, widgets.ListItem{
+		ID:    NewRunSentinelID,
+		Label: "Start a new run",
+	})
+
+	// Append each resumable candidate.
+	for _, c := range candidates {
+		label := c.RunID
+		detail := ""
+		if c.Workflow != "" {
+			detail += c.Workflow
+		}
+		if c.Task != "" {
+			if detail != "" {
+				detail += " — "
+			}
+			detail += c.Task
+		}
+		if !c.LastUpdated.IsZero() {
+			if detail != "" {
+				detail += "  "
+			}
+			detail += c.LastUpdated.Format("2006-01-02 15:04:05 UTC")
+		}
+		if c.ParseError != nil {
+			detail = "(unreadable: " + c.ParseError.Error() + ")"
+		}
+		items = append(items, widgets.ListItem{
+			ID:     c.RunID,
+			Label:  label,
+			Detail: detail,
+		})
+	}
+
+	listStyles := widgets.ListStyles{
+		Normal:   styles.Body,
+		Selected: styles.Selected,
+		Disabled: styles.Muted,
+		Cursor:   "▶",
+	}
+	contentH := height - 6
+	if contentH < 1 {
+		contentH = 1
+	}
+	list := widgets.NewList(items, contentH, width, listStyles)
+
+	return &RunSelectScreen{
+		list:       list,
+		candidates: candidates,
+		width:      width,
+		height:     height,
+		styles:     styles,
+	}
+}
+
+// Update processes a key message and delegates to the list widget.
+func (s *RunSelectScreen) Update(msg tea.Msg) tea.Cmd {
+	s.list.Update(msg)
+	return nil
+}
+
+// View renders the run selection screen with title, candidate list, and help bar.
+func (s *RunSelectScreen) View() string {
+	title := s.styles.Title.Width(s.width).Render("Select Run")
+	subtitle := s.styles.Subtitle.Width(s.width).Render("Choose a resumable run or start a new one.")
+	border := s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width))
+	listView := s.list.View()
+	help := s.styles.Help.Width(s.width).Render("↑/k up  ↓/j down  enter select  esc quit  ctrl+c quit")
+	return strings.Join([]string{title, subtitle, border, listView, border, help}, "\n")
+}
+
+// Done reports whether the user selected an item.
+func (s *RunSelectScreen) Done() bool { return s.list.Done() }
+
+// Back reports whether the user pressed Esc.
+func (s *RunSelectScreen) Back() bool { return s.list.Back() }
+
+// SelectedID returns the ID of the selected list item. Only valid when Done() is true.
+func (s *RunSelectScreen) SelectedID() string { return s.list.SelectedID() }
+
+// SelectedCandidate returns the selected RunCandidate.
+// Only valid when Done() == true and IsNewRun() == false.
+// Returns nil when IsNewRun() is true.
+func (s *RunSelectScreen) SelectedCandidate() *runscan.RunCandidate {
+	if s.IsNewRun() {
+		return nil
+	}
+	id := s.list.SelectedID()
+	for i := range s.candidates {
+		if s.candidates[i].RunID == id {
+			return &s.candidates[i]
+		}
+	}
+	return nil
+}
+
+// IsNewRun reports whether the user chose the "Start new run" option.
+// Only valid when Done() == true.
+func (s *RunSelectScreen) IsNewRun() bool {
+	return s.list.SelectedID() == NewRunSentinelID
+}
+
+// Reset clears the done and back flags.
+func (s *RunSelectScreen) Reset() { s.list.Reset() }
+
+// Resize updates the screen dimensions and reflows the list.
+func (s *RunSelectScreen) Resize(width, height int) {
+	s.width = width
+	s.height = height
+	contentH := height - 6
+	if contentH < 1 {
+		contentH = 1
+	}
+	s.list.Resize(contentH, width)
+}
+
+// ---------------------------------------------------------------------------
 // TaskScreen
 // ---------------------------------------------------------------------------
 
@@ -269,7 +416,6 @@ func (s *TaskScreen) Resize(width, height int) {
 // ConfigSelection holds the user's choices from the configuration screen.
 type ConfigSelection struct {
 	DeviationMode     domain.DeviationMode
-	ExistingArtifact  domain.ExistingArtifactMode
 	AllowVersionDrift bool
 	Checkpoints       bool
 }
@@ -279,7 +425,6 @@ type configStep int
 
 const (
 	configStepDeviation configStep = iota
-	configStepExisting
 	configStepVersionDrift
 	configStepCheckpoints
 	configStepDone
@@ -305,10 +450,7 @@ type ConfigScreen struct {
 func NewConfigScreen(width, height int, styles Styles) *ConfigScreen {
 	return &ConfigScreen{
 		step:   configStepDeviation,
-		sel:    ConfigSelection{
-			DeviationMode:    domain.DeviationDelegate,
-			ExistingArtifact: domain.ExistingResume,
-		},
+		sel:    ConfigSelection{DeviationMode: domain.DeviationDelegate},
 		width:  width,
 		height: height,
 		styles: styles,
@@ -329,15 +471,7 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 		}
 	case "down", "j":
 		switch s.step {
-		case configStepDeviation:
-			if s.cursor < 1 {
-				s.cursor++
-			}
-		case configStepExisting:
-			if s.cursor < 2 {
-				s.cursor++
-			}
-		case configStepVersionDrift, configStepCheckpoints:
+		case configStepDeviation, configStepVersionDrift, configStepCheckpoints:
 			if s.cursor < 1 {
 				s.cursor++
 			}
@@ -364,17 +498,6 @@ func (s *ConfigScreen) advance() {
 		} else {
 			s.sel.DeviationMode = domain.DeviationStop
 		}
-		s.step = configStepExisting
-		s.cursor = 0
-	case configStepExisting:
-		switch s.cursor {
-		case 0:
-			s.sel.ExistingArtifact = domain.ExistingResume
-		case 1:
-			s.sel.ExistingArtifact = domain.ExistingFresh
-		case 2:
-			s.sel.ExistingArtifact = domain.ExistingFail
-		}
 		s.step = configStepVersionDrift
 		s.cursor = 0
 	case configStepVersionDrift:
@@ -400,11 +523,6 @@ func (s *ConfigScreen) View() string {
 		body.WriteString(s.styles.Body.Width(s.width).Render("Deviation handling:") + "\n")
 		body.WriteString(s.renderOption(0, "Delegate to orchestrator (default)"))
 		body.WriteString(s.renderOption(1, "Stop the run"))
-	case configStepExisting:
-		body.WriteString(s.styles.Body.Width(s.width).Render("Existing artifact:") + "\n")
-		body.WriteString(s.renderOption(0, "Resume (default)"))
-		body.WriteString(s.renderOption(1, "Start fresh"))
-		body.WriteString(s.renderOption(2, "Fail if exists"))
 	case configStepVersionDrift:
 		body.WriteString(s.styles.Body.Width(s.width).Render("Allow workflow version drift:") + "\n")
 		body.WriteString(s.renderOption(0, "Yes"))
@@ -442,10 +560,7 @@ func (s *ConfigScreen) Reset() {
 	s.step = configStepDeviation
 	s.back = false
 	s.cursor = 0
-	s.sel = ConfigSelection{
-		DeviationMode:    domain.DeviationDelegate,
-		ExistingArtifact: domain.ExistingResume,
-	}
+	s.sel = ConfigSelection{DeviationMode: domain.DeviationDelegate}
 }
 
 // Resize updates the screen dimensions.

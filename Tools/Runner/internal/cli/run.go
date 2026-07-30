@@ -2,16 +2,49 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/domain"
+	"mosaic-run/internal/runscan"
 	"mosaic-run/internal/session"
 )
 
+// RunIdentity holds a pre-resolved run identity for main.go wiring.
+//
+// When passed to Run as a non-nil pointer, the resolution step (scanner,
+// flag validation, run-id minting) is skipped and these values are used
+// directly to build the RunConfig. This ensures that the run folder
+// resolved in main.go (used to construct the session's ArtifactStore)
+// matches the RunFolder that cli.Run sets on the RunConfig.
+//
+// Tests pass nil so that the full internal resolution logic is exercised.
+type RunIdentity struct {
+	RunID     string
+	RunFolder string
+	IsNewRun  bool
+}
+
 // Run implements the mosaic-run CLI entry point.
+//
+// store is the ArtifactStore used by the session and to write the COMPLETED
+// phase marker after a run finishes with RunCompleted. When non-nil (production),
+// the caller has already constructed the store at the run-scoped path. When nil
+// (legacy test helper calls), the store is constructed internally from the
+// resolved run folder path.
+//
+// identity is the pre-resolved run identity (RunID, RunFolder, IsNewRun).
+// When non-nil, the internal resolution step (scanner, flag validation,
+// run-id minting) is skipped and these values are used directly. Tests
+// pass nil to exercise the full internal resolution logic.
 //
 // sess is the Session implementation to use for runs. It is injected so that
 // tests can supply a scripted session without constructing real infrastructure.
@@ -20,7 +53,7 @@ import (
 // port (per-step lines, notices). errOut receives error and usage messages.
 //
 // Returns an exit code per the ExitXxx constants.
-func Run(ctx context.Context, args []string, sess session.Session, out, errOut io.Writer) int {
+func Run(ctx context.Context, args []string, store domain.ArtifactStore, identity *RunIdentity, sess session.Session, out, errOut io.Writer) int {
 	exitCode := ExitUsage
 
 	root := &cobra.Command{
@@ -44,10 +77,10 @@ func Run(ctx context.Context, args []string, sess session.Session, out, errOut i
 		workflowID        string
 		task              string
 		onDeviation       string
-		existingArtifact  string
 		allowVersionDrift bool
-		artifactLocation  string
 		checkpoints       string
+		runIDFlag         string // --run: resume a specific run by run_id
+		isNewRunFlag      bool   // --new-run: force creation of a new run
 	)
 
 	runCmd := &cobra.Command{
@@ -73,6 +106,13 @@ func Run(ctx context.Context, args []string, sess session.Session, out, errOut i
 				return nil
 			}
 
+			// Check --run and --new-run mutual exclusivity.
+			if runIDFlag != "" && isNewRunFlag {
+				fmt.Fprintf(errOut, "error: --run and --new-run are mutually exclusive\n")
+				exitCode = ExitUsage
+				return nil
+			}
+
 			// Parse --on-deviation.
 			var devMode domain.DeviationMode
 			switch onDeviation {
@@ -82,21 +122,6 @@ func Run(ctx context.Context, args []string, sess session.Session, out, errOut i
 				devMode = domain.DeviationStop
 			default:
 				fmt.Fprintf(errOut, "error: invalid --on-deviation value %q; valid values: delegate, stop\n", onDeviation)
-				exitCode = ExitUsage
-				return nil
-			}
-
-			// Parse --existing-artifact.
-			var existingMode domain.ExistingArtifactMode
-			switch existingArtifact {
-			case "resume":
-				existingMode = domain.ExistingResume
-			case "fresh":
-				existingMode = domain.ExistingFresh
-			case "fail":
-				existingMode = domain.ExistingFail
-			default:
-				fmt.Fprintf(errOut, "error: invalid --existing-artifact value %q; valid values: resume, fresh, fail\n", existingArtifact)
 				exitCode = ExitUsage
 				return nil
 			}
@@ -114,16 +139,118 @@ func Run(ctx context.Context, args []string, sess session.Session, out, errOut i
 				return nil
 			}
 
-			// Build the run configuration from parsed flags.
+			// Resolve run identity from flags or scanner.
+			// When a pre-resolved identity is provided (production path via main.go),
+			// skip the resolution step entirely and use the caller-supplied values.
+			// This ensures the RunConfig's RunFolder matches the store path that was
+			// constructed in main.go before the session was created.
+			var resolvedRunID, resolvedRunFolder string
+			var resolvedIsNewRun bool
+
+			if identity != nil {
+				// Pre-resolved by caller: use directly, no scanning or minting.
+				resolvedRunID = identity.RunID
+				resolvedRunFolder = identity.RunFolder
+				resolvedIsNewRun = identity.IsNewRun
+			} else {
+				workDir, err := os.Getwd()
+				if err != nil {
+					fmt.Fprintf(errOut, "error: getting working directory: %v\n", err)
+					exitCode = ExitUsage
+					return nil
+				}
+
+				if runIDFlag != "" {
+					// --run <run_id>: validate format, verify existence, reject if completed.
+					if !domain.IsValidRunID(runIDFlag) {
+						fmt.Fprintf(errOut, "error: invalid run_id format %q; expected {YYYYMMDD}T{HHMMSS}Z-{4-hex}\n", runIDFlag)
+						exitCode = ExitUsage
+						return nil
+					}
+
+					folderPath := filepath.Join(workDir, domain.RunScopedFolder(runIDFlag))
+					artifactPath := filepath.Join(folderPath, "Orchestration.md")
+
+					data, readErr := os.ReadFile(artifactPath)
+					if readErr != nil {
+						if errors.Is(readErr, os.ErrNotExist) {
+							fmt.Fprintf(errOut, "error: no run found with id %s\n", runIDFlag)
+						} else {
+							fmt.Fprintf(errOut, "error: reading run artifact for %s: %v\n", runIDFlag, readErr)
+						}
+						exitCode = ExitUsage
+						return nil
+					}
+
+					// Check whether the run is completed. Parse errors are treated as
+					// resumable (the session layer will surface any real parse issues).
+					if state, parseErr := artifact.Parse(data); parseErr == nil {
+						if strings.EqualFold(state.CurrentState.Phase, "COMPLETED") {
+							fmt.Fprintf(errOut, "error: run %s is completed and cannot be resumed\n", runIDFlag)
+							exitCode = ExitUsage
+							return nil
+						}
+					}
+
+					resolvedRunID = runIDFlag
+					resolvedRunFolder = folderPath
+					resolvedIsNewRun = false
+
+				} else if isNewRunFlag {
+					// --new-run: mint a new run_id.
+					newRunID := domain.NewRunID(cliClock{}, domain.DefaultRandomSource())
+					resolvedRunID = newRunID
+					resolvedRunFolder = filepath.Join(workDir, domain.RunScopedFolder(newRunID))
+					resolvedIsNewRun = true
+
+				} else {
+					// Neither flag: scan working directory for resumable candidates.
+					scanner := runscan.NewDirScanner()
+					scanResult, scanErr := scanner.Scan(workDir)
+					if scanErr != nil {
+						fmt.Fprintf(errOut, "error: scanning for runs: %v\n", scanErr)
+						exitCode = ExitUsage
+						return nil
+					}
+
+					switch len(scanResult.Candidates) {
+					case 0:
+						// No resumable candidates: start a new run.
+						newRunID := domain.NewRunID(cliClock{}, domain.DefaultRandomSource())
+						resolvedRunID = newRunID
+						resolvedRunFolder = filepath.Join(workDir, domain.RunScopedFolder(newRunID))
+						resolvedIsNewRun = true
+
+					case 1:
+						// Exactly one candidate: auto-resume.
+						c := scanResult.Candidates[0]
+						resolvedRunID = c.RunID
+						resolvedRunFolder = c.FolderPath
+						resolvedIsNewRun = false
+
+					default:
+						// Multiple candidates: non-interactive mode cannot resolve ambiguity.
+						fmt.Fprintf(errOut, "error: multiple resumable runs found; use --run <run_id> to select one:\n")
+						for _, c := range scanResult.Candidates {
+							fmt.Fprintf(errOut, "  %s\n", c.RunID)
+						}
+						exitCode = ExitUsage
+						return nil
+					}
+				}
+			}
+
+			// Build the run configuration from parsed flags and resolved run identity.
 			config := domain.RunConfig{
 				OrchestratorFilePath: orchestratorFile,
 				WorkflowID:           domain.WorkflowID(workflowID),
 				Task:                 task,
-				ArtifactLocation:     artifactLocation,
 				OnDeviation:          devMode,
-				ExistingArtifact:     existingMode,
 				AllowVersionDrift:    allowVersionDrift,
 				Checkpoints:          checkpointsEnabled,
+				RunID:                resolvedRunID,
+				RunFolder:            resolvedRunFolder,
+				IsNewRun:             resolvedIsNewRun,
 			}
 
 			// Start the session and map the outcome to an exit code.
@@ -132,6 +259,21 @@ func Run(ctx context.Context, args []string, sess session.Session, out, errOut i
 				fmt.Fprintf(errOut, "error: %v\n", err)
 				exitCode = ExitFailure
 				return nil
+			}
+
+			// Write COMPLETED phase marker when the run finishes successfully.
+			// Use the injected store (tests) or construct from the resolved run-scoped
+			// artifact path (production). This ensures the marker is written to the
+			// correct Orchestration-{run_id}/Orchestration.md file.
+			if outcome.Status == domain.RunCompleted {
+				effectiveStore := store
+				if effectiveStore == nil {
+					artifactPath := filepath.Join(resolvedRunFolder, "Orchestration.md")
+					effectiveStore = artifact.NewFileStore(artifactPath)
+				}
+				if _, setErr := effectiveStore.SetPhase(ctx, domain.ArtifactState{}, "COMPLETED", cliClock{}.Now()); setErr != nil {
+					fmt.Fprintf(errOut, "warning: failed to write COMPLETED marker: %v\n", setErr)
+				}
 			}
 
 			exitCode = outcomeToExitCode(outcome)
@@ -148,16 +290,18 @@ func Run(ctx context.Context, args []string, sess session.Session, out, errOut i
 	runCmd.Flags().StringVar(&workflowID, "workflow", "", "Workflow identifier (required)")
 	runCmd.Flags().StringVar(&task, "task", "", "Task description (required)")
 	runCmd.Flags().StringVar(&onDeviation, "on-deviation", "delegate", "How to handle deviations (delegate|stop)")
-	runCmd.Flags().StringVar(&existingArtifact, "existing-artifact", "resume", "How to handle an existing artifact (resume|fresh|fail)")
-	runCmd.Flags().BoolVar(&allowVersionDrift, "allow-version-drift", false, "Allow workflow version mismatch when resuming (FR-7b override)")
-	runCmd.Flags().StringVar(&artifactLocation, "artifact-location", "", "Override canonical Orchestration.md path (FR-1b)")
+	runCmd.Flags().BoolVar(&allowVersionDrift, "allow-version-drift", false, "Allow workflow version mismatch when resuming")
 	runCmd.Flags().StringVar(&checkpoints, "checkpoints", "disabled", "Checkpoint support (disabled|enabled)")
+	runCmd.Flags().StringVar(&runIDFlag, "run", "", "Resume a specific run by run_id")
+	runCmd.Flags().BoolVar(&isNewRunFlag, "new-run", false, "Force creation of a new run")
 
 	root.AddCommand(runCmd)
 	root.SetArgs(args)
 
 	if err := root.Execute(); err != nil {
-		// cobra failed to parse flags or find a subcommand.
+		// cobra failed to parse flags or find a subcommand; print the error so
+		// callers can detect which flag was unknown or what went wrong.
+		fmt.Fprintf(errOut, "error: %v\n", err)
 		return ExitUsage
 	}
 	return exitCode
@@ -180,3 +324,8 @@ func outcomeToExitCode(outcome domain.RunOutcome) int {
 		return ExitFailure
 	}
 }
+
+// cliClock implements domain.Clock using the real system clock.
+type cliClock struct{}
+
+func (cliClock) Now() time.Time { return time.Now().UTC() }

@@ -145,8 +145,8 @@ class TestAgentInstanceIdResolution(unittest.TestCase):
         event_path = self._paths().invocation_events(self.run_id, "DataProcessor#5")
         self.assertTrue(event_path.exists())
 
-    def test_fallback_uses_agent_type_as_prefix_when_prompt_absent(self):
-        """When agent_prompt is absent, fallback uses agent_type as the prefix."""
+    def test_fallback_uses_unknown_agent_when_prompt_absent(self):
+        """When agent_prompt is absent and extraction fails, fallback is 'unknown-agent'."""
         ctx = _make_start_ctx(
             self.tmp.name, self.run_id,
             agent_id="harness-c3d4", agent_type="RequirementsRefinement",
@@ -154,11 +154,11 @@ class TestAgentInstanceIdResolution(unittest.TestCase):
         invocation.handle_subagent_start(ctx)
         dirs = self._invocation_dirs()
         self.assertEqual(1, len(dirs))
-        self.assertTrue(dirs[0].name.startswith("RequirementsRefinement_"),
-                        f"Expected prefix 'RequirementsRefinement_', got {dirs[0].name!r}")
+        self.assertEqual("unknown-agent", dirs[0].name,
+                         f"Expected 'unknown-agent', got {dirs[0].name!r}")
 
-    def test_fallback_uses_agent_literal_when_neither_prompt_nor_type_present(self):
-        """When both agent_prompt and agent_type are absent, prefix is 'agent'."""
+    def test_fallback_uses_unknown_agent_when_neither_prompt_nor_type_present(self):
+        """When both agent_prompt and agent_type are absent, fallback is 'unknown-agent'."""
         ctx = _make_start_ctx(
             self.tmp.name, self.run_id,
             agent_id="harness-d4e5",
@@ -166,11 +166,11 @@ class TestAgentInstanceIdResolution(unittest.TestCase):
         invocation.handle_subagent_start(ctx)
         dirs = self._invocation_dirs()
         self.assertEqual(1, len(dirs))
-        self.assertTrue(dirs[0].name.startswith("agent_"),
-                        f"Expected prefix 'agent_', got {dirs[0].name!r}")
+        self.assertEqual("unknown-agent", dirs[0].name,
+                         f"Expected 'unknown-agent', got {dirs[0].name!r}")
 
-    def test_fallback_id_contains_timestamp_and_random_suffix(self):
-        """Fallback follows the documented {prefix}_{YYYYMMDD}T{HHMMSS}Z-{4hex} format."""
+    def test_fallback_id_is_unknown_agent_when_extraction_fails(self):
+        """When agent_instance_id cannot be extracted, fallback is the literal 'unknown-agent'."""
         ctx = _make_start_ctx(
             self.tmp.name, self.run_id,
             agent_id="harness-e5f6", agent_type="SomeAgent",
@@ -179,10 +179,8 @@ class TestAgentInstanceIdResolution(unittest.TestCase):
         dirs = self._invocation_dirs()
         self.assertEqual(1, len(dirs))
         folder = dirs[0].name
-        self.assertRegex(
-            folder,
-            r"^SomeAgent_[0-9]{8}T[0-9]{6}Z-[0-9a-f]{4}$",
-        )
+        self.assertEqual("unknown-agent", folder,
+                         f"Expected 'unknown-agent', got {folder!r}")
 
     def test_invocation_start_event_always_has_agent_instance_id(self):
         """invocation_start always carries a non-empty agent_instance_id."""
@@ -348,8 +346,8 @@ class TestInvocationStartEventAndTurn(unittest.TestCase):
             "SubagentStart must not write to the orchestrator events stream",
         )
 
-    def test_handler_does_nothing_when_run_id_is_none(self):
-        """No files are written when ctx.run_id is None (unresolved run)."""
+    def test_handler_routes_to_unknown_run_when_run_id_is_none(self):
+        """When ctx.run_id is None, events are routed to the unknown-run/ bucket."""
         payload = {
             "hook_event_name": "SubagentStart",
             "session_id": _SESSION_ID,
@@ -360,10 +358,12 @@ class TestInvocationStartEventAndTurn(unittest.TestCase):
         workspace_root = pathlib.Path(self.tmp.name)
         paths = core.build_paths(workspace_root)
         ctx = core.HookContext(payload, workspace_root, paths, _TS)
-        ctx.run_id = None  # Explicitly unresolved
+        ctx.run_id = None  # Explicitly unresolved — routes to unknown-run/
         invocation.handle_subagent_start(ctx)
-        self.assertFalse(self.paths.root.exists(),
-                         "No files should be created when run_id is None")
+        # effective_run_id returns "unknown-run" when ctx.run_id is None
+        unknown_run_dir = paths.run_root("unknown-run")
+        self.assertTrue(unknown_run_dir.exists(),
+                        "Events must be routed to unknown-run/ when ctx.run_id is None")
 
     def test_handler_does_nothing_when_agent_id_is_none(self):
         """No files are written when agent_id is absent (not a subagent context)."""

@@ -13,10 +13,10 @@ The replay harness sets CLAUDE_PROJECT_DIR to a temporary directory so no test
 writes outside its own temp tree.
 """
 
-import datetime
 import json
 import os
 import pathlib
+import re
 import sys
 import tempfile
 import unittest
@@ -106,15 +106,28 @@ class _ReplayHarness:
     # Inspection helpers
     # ------------------------------------------------------------------
 
-    def find_run_id(self, session_id: str) -> "str | None":
-        """Read the run_id from the marker file for session_id; None if absent."""
-        marker = core.build_paths(self.workspace).marker(session_id)
-        if not marker.exists():
+    def find_run_id(self, session_id: str = "") -> "str | None":
+        """Return the effective run_id for this workspace.
+
+        Scans OrchestrationLogs/ for a timestamp-format run_id folder first.
+        Falls back to 'unknown-run' if that directory exists (events were
+        routed there because run_id could not be extracted from any prompt).
+        Returns None if the log root does not exist at all.
+
+        The session_id parameter is accepted for API compatibility but is not
+        used — extraction-based routing does not track per-session markers.
+        """
+        _RUN_ID_RE = re.compile(r'^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{4}$')
+        log_root = core.build_paths(self.workspace).root
+        if not log_root.exists():
             return None
-        try:
-            return json.loads(marker.read_text("utf-8")).get("run_id")
-        except Exception:
-            return None
+        for child in log_root.iterdir():
+            if child.is_dir() and _RUN_ID_RE.match(child.name):
+                return child.name
+        unknown_run = log_root / "unknown-run"
+        if unknown_run.exists():
+            return "unknown-run"
+        return None
 
     def read_jsonl(self, path: pathlib.Path) -> list:
         """Parse every non-empty line in a JSONL file. Returns [] if absent."""
@@ -319,7 +332,7 @@ class TestReplayHarness(unittest.TestCase):
         restored = os.environ.get("CLAUDE_PROJECT_DIR", "__sentinel__")
         self.assertEqual(original, restored)
 
-    def test_replay_creates_marker_file_after_session_start(self):
+    def test_replay_creates_log_directory_after_session_start(self):
         payload = {
             "hook_event_name": "SessionStart",
             "session_id": "harness-check-001",
@@ -328,7 +341,8 @@ class TestReplayHarness(unittest.TestCase):
         with _ReplayHarness(self.tmp_path) as h:
             h.replay([payload])
             run_id = h.find_run_id("harness-check-001")
-        self.assertIsNotNone(run_id, "SessionStart must mint a run_id")
+        self.assertIsNotNone(run_id,
+                             "SessionStart must create a log directory (run_id or unknown-run)")
 
     def test_replay_single_payload_produces_orchestrator_events(self):
         payload = {
@@ -351,7 +365,8 @@ class TestReplayHarness(unittest.TestCase):
         # The full session emits several orchestrator events.
         self.assertGreater(len(events), 4)
 
-    def test_harness_find_run_id_returns_none_when_no_marker(self):
+    def test_harness_find_run_id_returns_none_when_no_log_root(self):
+        """find_run_id returns None when no events have been written to the workspace."""
         with _ReplayHarness(self.tmp_path) as h:
             result = h.find_run_id("nonexistent-session")
         self.assertIsNone(result)
@@ -362,7 +377,7 @@ class TestReplayHarness(unittest.TestCase):
         self.assertEqual([], result)
 
     def test_workspace_env_isolation_does_not_leak(self):
-        """Two back-to-back harness uses do not share run state."""
+        """Two back-to-back harness uses write to separate file trees."""
         with tempfile.TemporaryDirectory() as tmp2:
             tmp2_path = pathlib.Path(tmp2)
             with _ReplayHarness(self.tmp_path) as h1:
@@ -378,13 +393,15 @@ class TestReplayHarness(unittest.TestCase):
                     "session_id": "isolation-b",
                 }])
                 run_b = h2.find_run_id("isolation-b")
-                # The second workspace must not contain the first session's marker.
-                run_a_in_h2 = h2.find_run_id("isolation-a")
 
-        self.assertIsNotNone(run_a)
-        self.assertIsNotNone(run_b)
-        self.assertIsNone(run_a_in_h2,
-                          "First session's marker must not appear in second workspace")
+        # Both workspaces received events.
+        self.assertIsNotNone(run_a, "First workspace must have a run_id")
+        self.assertIsNotNone(run_b, "Second workspace must have a run_id")
+        # The workspaces are separate temp directories — their log trees must not overlap.
+        log_root_1 = core.build_paths(self.tmp_path).root
+        log_root_2 = core.build_paths(tmp2_path).root
+        self.assertNotEqual(log_root_1, log_root_2,
+                            "Two harness instances must use different log roots")
 
 
 # ---------------------------------------------------------------------------
@@ -404,18 +421,6 @@ class TestFullSessionLayout(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
-
-    # Run marker
-    def test_run_marker_file_exists(self):
-        self.assertTrue(self.paths.marker(_SESSION_ID).exists())
-
-    def test_run_marker_has_closed_status(self):
-        data = json.loads(self.paths.marker(_SESSION_ID).read_text("utf-8"))
-        self.assertEqual("closed", data.get("status"))
-
-    def test_run_marker_records_correct_run_id(self):
-        data = json.loads(self.paths.marker(_SESSION_ID).read_text("utf-8"))
-        self.assertEqual(self.run_id, data.get("run_id"))
 
     # Orchestrator event stream
     def test_orchestrator_events_file_exists(self):
@@ -887,178 +892,6 @@ class TestStartEndPairing(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# T6.6 — Run identity across sessions
-# ---------------------------------------------------------------------------
-
-class TestRunIdentity(unittest.TestCase):
-    """run_id is reused while the marker is open, re-minted after close,
-    re-minted after staleness, and run directories never collide."""
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.tmp_path = pathlib.Path(self.tmp.name)
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def _dispatch(self, payload: dict) -> None:
-        orig = os.environ.get("CLAUDE_PROJECT_DIR")
-        os.environ["CLAUDE_PROJECT_DIR"] = str(self.tmp_path)
-        try:
-            mosaic_logger.dispatch(json.dumps(payload))
-        finally:
-            if orig is None:
-                os.environ.pop("CLAUDE_PROJECT_DIR", None)
-            else:
-                os.environ["CLAUDE_PROJECT_DIR"] = orig
-
-    def _find_run_id(self, session_id: str) -> "str | None":
-        marker = core.build_paths(self.tmp_path).marker(session_id)
-        if not marker.exists():
-            return None
-        try:
-            return json.loads(marker.read_text("utf-8")).get("run_id")
-        except Exception:
-            return None
-
-    def _session_start(self, session_id: str, source: str = "startup") -> "str | None":
-        self._dispatch({
-            "hook_event_name": "SessionStart",
-            "session_id": session_id,
-            "source": source,
-        })
-        return self._find_run_id(session_id)
-
-    def _session_end(self, session_id: str, reason: str = "clear") -> None:
-        self._dispatch({
-            "hook_event_name": "SessionEnd",
-            "session_id": session_id,
-            "reason": reason,
-        })
-
-    def _read_orch_events(self, run_id: str) -> list:
-        p = core.build_paths(self.tmp_path).orchestrator_events(run_id)
-        if not p.exists():
-            return []
-        return [json.loads(ln) for ln in p.read_text("utf-8").splitlines() if ln.strip()]
-
-    # -- Reuse while open --
-    def test_run_id_reused_for_subsequent_events_in_same_session(self):
-        session = "identity-reuse-001"
-        run_id_1 = self._session_start(session)
-        # A non-minting event must not change the run_id.
-        self._dispatch({
-            "hook_event_name": "Notification",
-            "session_id": session,
-            "notification_type": "info",
-            "message": "Still in the same run.",
-        })
-        run_id_2 = self._find_run_id(session)
-        self.assertEqual(run_id_1, run_id_2)
-
-    def test_only_one_run_start_emitted_for_reused_run(self):
-        session = "identity-reuse-002"
-        run_id = self._session_start(session)
-        # Dispatch a minting-capable event that should reuse, not mint.
-        self._dispatch({
-            "hook_event_name": "UserPromptSubmit",
-            "session_id": session,
-            "user_prompt": "Still the same run.",
-        })
-        events = self._read_orch_events(run_id)
-        run_starts = [e for e in events if e["event"] == "run_start"]
-        self.assertEqual(1, len(run_starts),
-                         "Expected exactly one run_start for a reused run")
-
-    # -- Fresh run after close --
-    def test_fresh_run_id_minted_after_session_end(self):
-        session = "identity-remint-001"
-        run_id_1 = self._session_start(session)
-        self._session_end(session, reason="clear")
-        run_id_2 = self._session_start(session, source="resume")
-        self.assertIsNotNone(run_id_1)
-        self.assertIsNotNone(run_id_2)
-        self.assertNotEqual(run_id_1, run_id_2)
-
-    def test_each_run_has_its_own_directory(self):
-        session = "identity-dirs-001"
-        run_id_1 = self._session_start(session)
-        self._session_end(session)
-        run_id_2 = self._session_start(session, source="resume")
-        # Both run roots must exist and be distinct.
-        paths = core.build_paths(self.tmp_path)
-        self.assertTrue(paths.run_root(run_id_1).exists())
-        self.assertTrue(paths.run_root(run_id_2).exists())
-        self.assertNotEqual(paths.run_root(run_id_1), paths.run_root(run_id_2))
-
-    def test_second_run_events_do_not_appear_in_first_run_file(self):
-        session = "identity-isolation-001"
-        run_id_1 = self._session_start(session)
-        self._session_end(session)
-        run_id_2 = self._session_start(session, source="resume")
-        events_1 = self._read_orch_events(run_id_1)
-        events_2 = self._read_orch_events(run_id_2)
-        # run_end must only appear in run 1's file.
-        types_1 = [e["event"] for e in events_1]
-        types_2 = [e["event"] for e in events_2]
-        self.assertIn("run_end", types_1)
-        self.assertNotIn("run_end", types_2)
-
-    # -- Fresh run after staleness --
-    def test_stale_marker_causes_new_run_id(self):
-        """A marker whose opened_at is older than 24 h is treated as stale."""
-        session = "identity-stale-001"
-        run_id_1 = self._session_start(session)
-        # Rewrite the marker with an opened_at 25 hours in the past.
-        marker_path = core.build_paths(self.tmp_path).marker(session)
-        marker_data = json.loads(marker_path.read_text("utf-8"))
-        old_time = (
-            datetime.datetime.now(datetime.timezone.utc)
-            - datetime.timedelta(hours=25)
-        )
-        marker_data["opened_at"] = (
-            old_time.strftime("%Y-%m-%dT%H:%M:%S.") +
-            f"{old_time.microsecond // 1000:03d}Z"
-        )
-        marker_data["status"] = "open"   # still marked open, but stale
-        marker_path.write_text(json.dumps(marker_data), encoding="utf-8")
-        # Now a minting event must produce a fresh run_id.
-        run_id_2 = self._session_start(session)
-        self.assertIsNotNone(run_id_2)
-        self.assertNotEqual(run_id_1, run_id_2)
-
-    def test_stale_marker_run_directories_do_not_collide(self):
-        """A fresh run after staleness gets its own directory."""
-        session = "identity-stale-002"
-        run_id_1 = self._session_start(session)
-        marker_path = core.build_paths(self.tmp_path).marker(session)
-        marker_data = json.loads(marker_path.read_text("utf-8"))
-        old_time = (
-            datetime.datetime.now(datetime.timezone.utc)
-            - datetime.timedelta(hours=25)
-        )
-        marker_data["opened_at"] = (
-            old_time.strftime("%Y-%m-%dT%H:%M:%S.") +
-            f"{old_time.microsecond // 1000:03d}Z"
-        )
-        marker_path.write_text(json.dumps(marker_data), encoding="utf-8")
-        run_id_2 = self._session_start(session)
-        paths = core.build_paths(self.tmp_path)
-        self.assertNotEqual(
-            paths.run_root(run_id_1), paths.run_root(run_id_2)
-        )
-
-    def test_marker_status_is_closed_after_session_end(self):
-        session = "identity-closed-001"
-        self._session_start(session)
-        self._session_end(session)
-        marker_data = json.loads(
-            core.build_paths(self.tmp_path).marker(session).read_text("utf-8")
-        )
-        self.assertEqual("closed", marker_data.get("status"))
-
-
-# ---------------------------------------------------------------------------
 # T6.8 — Field-level degradation yields omitted keys, not nulls
 # ---------------------------------------------------------------------------
 
@@ -1086,13 +919,18 @@ class TestFieldLevelDegradation(unittest.TestCase):
                 os.environ["CLAUDE_PROJECT_DIR"] = orig
 
     def _find_run_id(self) -> "str | None":
-        marker = core.build_paths(self.tmp_path).marker(self.session_id)
-        if not marker.exists():
+        """Return the effective run_id by scanning OrchestrationLogs/."""
+        _RUN_ID_RE = re.compile(r'^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{4}$')
+        log_root = core.build_paths(self.tmp_path).root
+        if not log_root.exists():
             return None
-        try:
-            return json.loads(marker.read_text("utf-8")).get("run_id")
-        except Exception:
-            return None
+        for child in log_root.iterdir():
+            if child.is_dir() and _RUN_ID_RE.match(child.name):
+                return child.name
+        unknown_run = log_root / "unknown-run"
+        if unknown_run.exists():
+            return "unknown-run"
+        return None
 
     def _read_events(self, path: pathlib.Path) -> list:
         if not path.exists():
@@ -1101,16 +939,15 @@ class TestFieldLevelDegradation(unittest.TestCase):
                 if ln.strip()]
 
     def test_absent_agent_prompt_still_yields_agent_instance_id(self):
-        """When agent_prompt is absent, agent_instance_id falls back to the
-        timestamp-plus-suffix pattern; the field must still be present and non-empty."""
+        """When agent_prompt is absent, agent_instance_id falls back to 'unknown-agent';
+        the field must still be present and non-empty."""
         agent_id = "agt-noprompt-001"
         self._dispatch({
             "hook_event_name": "SessionStart",
             "session_id": self.session_id,
             "source": "startup",
         })
-        run_id = self._find_run_id()
-        # SubagentStart without agent_prompt — fallback to fallback_instance_id.
+        # SubagentStart without agent_prompt — fallback is 'unknown-agent'.
         self._dispatch({
             "hook_event_name": "SubagentStart",
             "session_id": self.session_id,
@@ -1118,6 +955,8 @@ class TestFieldLevelDegradation(unittest.TestCase):
             "agent_type": "Research",
             # agent_prompt deliberately omitted
         })
+        run_id = self._find_run_id()
+        self.assertIsNotNone(run_id, "Log directory must exist after dispatch")
         paths = core.build_paths(self.tmp_path)
         # Find the invocation folder — any folder under run_root that is not .agent-map.
         run_root = paths.run_root(run_id)
@@ -1161,12 +1000,14 @@ class TestFieldLevelDegradation(unittest.TestCase):
                 os.environ.pop("CLAUDE_PROJECT_DIR", None)
             else:
                 os.environ["CLAUDE_PROJECT_DIR"] = orig
+        # Use _find_run_id to locate the effective run bucket
+        run_id = self._find_run_id()
+        if run_id is None:
+            return  # no log root — skip silently
         paths = core.build_paths(self.tmp_path)
-        marker = paths.marker(session_id)
-        if not marker.exists():
-            return  # session didn't resolve — skip silently
-        run_id = json.loads(marker.read_text("utf-8")).get("run_id")
         run_root = paths.run_root(run_id)
+        if not run_root.exists():
+            return
         for inv_dir in run_root.iterdir():
             if inv_dir.is_dir() and not inv_dir.name.startswith("."):
                 events = self._read_events(inv_dir / "03_events.jsonl")
@@ -1205,9 +1046,8 @@ class TestFieldLevelDegradation(unittest.TestCase):
                     os.environ["CLAUDE_PROJECT_DIR"] = orig
 
         paths = core.build_paths(self.tmp_path)
-        run_id = json.loads(
-            paths.marker(session_id).read_text("utf-8")
-        ).get("run_id")
+        run_id = self._find_run_id()
+        self.assertIsNotNone(run_id, "Log directory must exist after SessionStart+SubagentStart")
 
         # SubagentStop with an unreadable transcript path.
         orig = os.environ.get("CLAUDE_PROJECT_DIR")
@@ -1269,9 +1109,8 @@ class TestFieldLevelDegradation(unittest.TestCase):
                     os.environ["CLAUDE_PROJECT_DIR"] = orig
 
         paths = core.build_paths(self.tmp_path)
-        run_id = json.loads(
-            paths.marker(session_id).read_text("utf-8")
-        ).get("run_id")
+        run_id = self._find_run_id()
+        self.assertIsNotNone(run_id, "Log directory must exist after session events")
         events = self._read_events(paths.invocation_events(run_id, instance_id))
         inv_end_events = [e for e in events if e["event"] == "invocation_end"]
         self.assertEqual(1, len(inv_end_events),
@@ -1297,9 +1136,8 @@ class TestFieldLevelDegradation(unittest.TestCase):
                 os.environ["CLAUDE_PROJECT_DIR"] = orig
 
         paths = core.build_paths(self.tmp_path)
-        run_id = json.loads(
-            paths.marker(session_id).read_text("utf-8")
-        ).get("run_id")
+        run_id = self._find_run_id()
+        self.assertIsNotNone(run_id, "Log directory must exist after SessionStart")
         events_path = paths.orchestrator_events(run_id)
         events = self._read_events(events_path)
         run_start = next((e for e in events if e["event"] == "run_start"), None)
@@ -1327,9 +1165,8 @@ class TestFieldLevelDegradation(unittest.TestCase):
                     os.environ["CLAUDE_PROJECT_DIR"] = orig
 
         paths = core.build_paths(self.tmp_path)
-        run_id = json.loads(
-            paths.marker(session_id).read_text("utf-8")
-        ).get("run_id")
+        run_id = self._find_run_id()
+        self.assertIsNotNone(run_id, "Log directory must exist after session events")
         events = self._read_events(paths.orchestrator_events(run_id))
         run_end = next((e for e in events if e["event"] == "run_end"), None)
         self.assertIsNotNone(run_end)

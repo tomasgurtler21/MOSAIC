@@ -22,7 +22,7 @@ This document is the complete, self-contained specification for this log format.
 - **Fields degrade, never fabricate.** Every optional field is populated only when the adapter can actually supply it; when it can't, the field is omitted entirely — never null, zero, or a placeholder value. The same applies at the event-type level: an entire event type may be absent for a harness that can't supply it.
 - **No cost field.** Token counts are the canonical unit; cost derivation is a downstream consumer's job, not part of this schema.
 - **No dedicated error event type.** A failed or aborted invocation is still an `invocation_end` event whose `status_code` reflects the failure when determinable. `run_end`/`session_end` carry an outcome/reason field rather than spawning error-specific event types.
-- **Prefer harness-native identifiers over adapter-invented state.** Wherever a harness or its API already hands the adapter a usable identifier (a tool-call id, a message index), the adapter uses it rather than minting and tracking its own. This isn't an absolute ban on adapter-side state — the run-identity marker in §4.2 is exactly that, and it's justified because it's low-frequency (one read-check-write per run open/close). What's avoided is *high-frequency* state: a counter that would need a write on every turn or every tool call. That's the line — not "no local state," but "no state whose write frequency scales with conversation activity."
+- **Prefer harness-native identifiers over adapter-invented state.** Wherever a harness or its API already hands the adapter a usable identifier (a tool-call id, a message index), the adapter uses it rather than minting and tracking its own. For `run_id`, the authoritative value is the one the script runner authored and embedded in dispatch content — the adapter extracts it rather than inventing its own. What's avoided is *high-frequency* state: a counter that would need a write on every turn or every tool call. That's the line — not "no local state," but "no state whose write frequency scales with conversation activity."
 - **Derive, don't track, anything computable from paired timestamps or file order.** `timestamp` is mandatory on every event, and every start/end pair for a correlation key lives in the same file (§3.5). Durations and ordinal indices are therefore always reconstructable by any reader of that file — they are not part of the wire schema at all, and adapters never carry state purely to compute one.
 
 ## 3. Canonical Log Event Schema
@@ -212,25 +212,23 @@ That makes `run_id` load-bearing for storage, not just for correlation: artifact
 
 **Why not key storage on `session_id` instead of minting a separate `run_id`?** The schema already distinguishes the two on purpose: a session may span several runs, and a run may resume an existing session. In the common case they coincide, but the schema's own model allows them to diverge, and an adapter has no reliable way to know in advance which case it's in. Keying storage on `session_id` would be correct today and silently wrong the moment a session is resumed for a second, unrelated run. `run_id` is the concept the rest of the schema already commits to for correlation; storage should commit to the same one.
 
-### 4.2 Minting `run_id`
+### 4.2 Adopting `run_id`
 
-An adapter cannot ask the orchestrator "what run is this" — it is an external observer with no access to orchestrator-internal state. `run_id` is therefore derived entirely from what an adapter can observe plus a small piece of on-disk correlation state.
+An adapter cannot ask the orchestrator "what run is this" — it is an external observer with no access to orchestrator-internal state. The adapter resolves `run_id` by **extracting it from the dispatch content** of the events it observes, rather than minting or tracking one itself.
 
-- **Format:** `{compact ISO 8601 timestamp}-{4-char random suffix}`, e.g. `20260727T170000Z-a3f9`. Sortable by creation time, collision-resistant, human-scannable in a directory listing.
-- **State file:** `OrchestrationLogs/.run-markers/{session_id}.json`, containing `{ "run_id": "...", "opened_at": "...", "status": "open" | "closed" }`.
-- **Minting rule:** the first event observed for a given `session_id` — preferring `session_start` where the harness supports it, falling back to the first `invocation_start` otherwise — checks for an existing marker. If none exists, the existing marker's `status` is `"closed"`, or the marker is older than the staleness timeout (below), a new `run_id` is minted and the marker is (re)written with `status: "open"`. Otherwise the existing `run_id` is reused. **Minting is also the trigger for emitting `run_start`** — see the note below.
-- **Closing:** `run_end` (or `session_end`, whichever fires) sets the marker's `status` to `"closed"`. A closed marker never blocks minting a fresh `run_id` for the same `session_id` later — this is exactly the resume-for-a-new-run case. Closing the marker is also what triggers emitting `run_end`.
+- **Format:** `{YYYYMMDD}T{HHMMSS}Z-{4-char-hex-suffix}`, e.g. `20260727T170000Z-a3f9`. Sortable by creation time, collision-resistant, human-scannable in a directory listing. The minting authority is the script runner (or orchestrator), which generates `run_id` once at artifact creation; the adapter merely reads it from the payloads it intercepts.
+- **Extraction rule:** the adapter searches each incoming event payload for a value matching the `run_id` format (`\d{8}T\d{6}Z-[0-9a-f]{4}`). It first looks for a structured key-value match (`run_id: ...` or `"run_id": "..."`); if that fails, it falls back to the earliest bare occurrence of the format pattern in the same payload. Matching stops at the first confident hit. When no match is found, `run_id` is treated as absent for that event.
+- **Per-event extraction sources:** extraction is applied to the prompt-bearing field of the event where one is available. For events with no prompt-bearing field (e.g. `SessionStart`, `SessionEnd`, `PreToolUse`, `PostToolUse`, `PreCompact`, `PostCompact`), extraction yields no result.
+- **`run_start`/`run_end` triggering:** `run_start` is emitted on `SessionStart`; `run_end` is emitted on `SessionEnd`. These are emitted regardless of whether extraction succeeds — when `run_id` is absent, the events are routed to the `unknown-run/` degradation bucket (§4.3).
 
-**`run_start`/`run_end` vs. `session_start`/`session_end` for hook adapters.** No harness exposes a native "orchestration run" concept — hooks only ever see sessions and invocations. A hook adapter therefore can't *observe* a run boundary independently; it *infers* one, using exactly this minting/closing logic. Concretely: `run_start` is emitted precisely when a new `run_id` is minted (which, in the common case of a fresh session with no open marker, happens at the same moment as `session_start` and carries near-identical `cwd`/`model`/`timestamp` — that overlap is expected, not a bug). `run_end` is emitted when the marker is closed. The two event types stay distinct in the schema regardless, for two reasons that don't depend on hook adapters specifically: `run_id` is already the key the on-disk layout (§4.3) organizes around, so the merged stream should carry an explicit marker for the same boundary rather than making a consumer reconstruct it from the run-marker file; and a future producer that drives orchestration directly rather than observing it via hooks would have a genuine independent signal for run boundaries, decoupled from harness session lifecycle — the distinction is real for that producer even where it's synthesized for this one.
-- **Staleness timeout:** if a run crashes without ever writing `run_end`, its marker would stay `"open"` forever, incorrectly folding a genuinely new run into the dead one. Default timeout: **24 hours** — a marker older than that is treated as closed regardless of its `status` field. This is a pragmatic starting default, not empirically validated; revisit if real usage shows it wrong in either direction. There is no separate process enforcing this: staleness is evaluated lazily, purely as one branch of the minting rule above, the next time this `session_id` is seen. A stale marker that's never revisited again simply sits inert on disk — nothing needs to actively expire it.
-- **Concurrency:** minting is a read-check-write against one small per-session file, not the shared multi-writer surface the per-invocation JSONL scoping is guarding against. A lost race here — two processes minting different `run_id`s for the same session's opening moment — is a real but narrow edge case, mitigated by the same atomic-replace pattern used for the orchestrator transcript (§4.4): write a temp file, then rename over the target, so the marker file itself is torn-write-safe even if the race isn't fully closed. Full mutual exclusion is not attempted — this is optional tooling, and runtime safety outranks consumer convenience. This is an acceptable margin, not a guard against an expected pattern: concurrent run-starts for the same `session_id` aren't a supported orchestration scenario in the first place (one workflow per session), so the race being narrowed here is defensive slack, not protection against real usage.
+**`unknown-run/` degradation bucket.** When extraction fails for an event — because the event has no prompt-bearing field, or because the payload contains no recognizable `run_id` value — the adapter uses the literal folder name `unknown-run` in place of a real `run_id` for that event's storage path. This means the event is still logged (nothing is silently dropped), and a consumer examining the log directory can inspect `unknown-run/` to investigate events that arrived with no discernible run context. Events from concurrent sessions where extraction consistently fails may interleave within `unknown-run/` — this is an accepted limitation of extraction-based identity.
+
+**No marker files.** The previous marker-file mechanism (`OrchestrationLogs/.run-markers/{session_id}.json`) is removed. The adapter no longer mints `run_id`, writes marker files, or consults staleness timeouts. Run identity is authored by the script runner and propagated through dispatch content; the adapter's job is solely to extract it.
 
 ### 4.3 Directory layout
 
 ```
 OrchestrationLogs/
-├── .run-markers/
-│   └── {session_id}.json                    # run_id correlation state, §4.2
 ├── {run_id}/
 │   ├── 00_orchestrator_session.raw           # orchestrator transcript export, §4.4, atomic replace
 │   ├── 00_orchestrator_session.meta.json     # sidecar: harness, native format, source, capture timestamp
@@ -241,10 +239,13 @@ OrchestrationLogs/
 │       ├── 03_events.jsonl                   # canonical event stream for this invocation, §3
 │       ├── 04_session.raw                    # full session transcript export, raw byte-for-byte, §4.5
 │       └── 04_session.meta.json              # sidecar for the above
-└── {run_id}/...                              # sibling runs, never colliding
+├── {run_id}/...                              # sibling runs, never colliding
+└── unknown-run/                              # degradation bucket: events whose run_id could not be extracted (§4.2)
+    └── {agent_instance_id}/                  # same internal structure as a real run folder
+        └── ...
 ```
 
-`{agent_instance_id}` folder names are sanitized for filesystem safety (`<>:"/\|?*` replaced with underscores). Numbering (`00_`, `01_`, …) exists purely for human browsability when sorted in a file explorer and carries no machine meaning. `.run-markers/` is prefixed with `.` to visually separate logging-internal bookkeeping from human-browsable run output.
+`{agent_instance_id}` folder names are sanitized for filesystem safety (`<>:"/\|?*` replaced with underscores). Numbering (`00_`, `01_`, …) exists purely for human browsability when sorted in a file explorer and carries no machine meaning. `unknown-run/` follows the same internal structure as a real run folder — per-invocation `{agent_instance_id}/` subdirectories with the same file set — so tooling that processes `{run_id}/` directories can process `unknown-run/` with the same code path.
 
 ### 4.4 Orchestrator-level transcript and events
 
@@ -326,4 +327,3 @@ No `cost_usd` field exists anywhere in the schema. No error/exception event type
 Nothing here blocks adapter implementation or any other downstream work:
 
 - Whether future test-evaluation tooling needs supplementary fields layered on top of this schema without polluting production logs with test-only concerns.
-- The 24-hour run-marker staleness timeout (§4.2) is a starting default, not empirically validated.

@@ -2,14 +2,15 @@ package domain
 
 // RunConfig carries all user-supplied configuration for a run.
 type RunConfig struct {
-	OrchestratorFilePath string               // path to the orchestrator agent file
-	WorkflowID           WorkflowID           // selected workflow identifier
-	Task                 string               // task description
-	ArtifactLocation     string               // override, or "" for canonical path
-	OnDeviation          DeviationMode        // how to handle deviations in non-interactive mode
-	ExistingArtifact     ExistingArtifactMode // how a pre-existing Orchestration.md is handled
-	AllowVersionDrift    bool                 // override version check
-	Checkpoints          bool                 // checkpoint support
+	OrchestratorFilePath string        // path to the orchestrator agent file
+	WorkflowID           WorkflowID    // selected workflow identifier
+	Task                 string        // task description
+	RunID                string        // resolved run_id (minted or from scan); empty triggers minting
+	RunFolder            string        // resolved run-scoped folder path (absolute, e.g. "/workspace/Orchestration-20260727T170000Z-a3f9")
+	OnDeviation          DeviationMode // how to handle deviations in non-interactive mode
+	AllowVersionDrift    bool          // override version check
+	Checkpoints          bool          // checkpoint support
+	IsNewRun             bool          // true = create new artifact; false = resume existing
 }
 
 // DeviationMode controls non-interactive deviation handling.
@@ -18,15 +19,6 @@ type DeviationMode string
 const (
 	DeviationDelegate DeviationMode = "delegate" // default: delegate to orchestrator
 	DeviationStop     DeviationMode = "stop"      // stop the run
-)
-
-// ExistingArtifactMode controls how a pre-existing Orchestration.md is handled.
-type ExistingArtifactMode string
-
-const (
-	ExistingResume ExistingArtifactMode = "resume" // default
-	ExistingFresh  ExistingArtifactMode = "fresh"
-	ExistingFail   ExistingArtifactMode = "fail"
 )
 
 // RunOutcome is the result of a session run.

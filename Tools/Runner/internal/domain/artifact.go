@@ -6,6 +6,7 @@ import "time"
 // It is the runner's only durable state.
 type ArtifactState struct {
 	// Frontmatter (Tier 1)
+	RunID           string          // set once at creation, never modified; empty for pre-v1.8 artifacts
 	Type            string          // "orchestration-artifact"
 	Workflow        WorkflowID
 	WorkflowVersion WorkflowVersion

@@ -11,12 +11,14 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	tuicommon "mosaic-common/tui"
 	"mosaic-common/interaction"
 	"mosaic-run/internal/domain"
+	"mosaic-run/internal/runscan"
 	"mosaic-run/internal/tui/screens"
 )
 
@@ -581,9 +583,9 @@ func TestSetupSequence_ForwardNavigation_ReachesProgressScreen(t *testing.T) {
 		t.Fatalf("after task entry: screen = %v, want screenSetupConfig", m.screen)
 	}
 
-	// Accept all four configuration prompts with their default selections.
+	// Accept all three configuration prompts with their default selections.
+	// (ExistingArtifact prompt was removed from ConfigScreen in Stage 6.)
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation mode
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // existing artifact
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → transitions to screenProgress
 
@@ -954,6 +956,304 @@ func TestNavigation_DeviationStop_ChoiceEnterSendsStopReply(t *testing.T) {
 		}
 	default:
 		t.Error("no reply on channel after selecting Stop from deviation choice screen")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Run selection screen
+// ---------------------------------------------------------------------------
+
+// makeCandidate creates a RunCandidate with the given runID for test use.
+func makeCandidate(runID, folderPath string) runscan.RunCandidate {
+	return runscan.RunCandidate{
+		RunID:       runID,
+		FolderPath:  folderPath,
+		LastUpdated: time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC),
+		Workflow:    "test-workflow",
+		Task:        "test task",
+	}
+}
+
+// newModelWithScan creates a rootModel with the given scan candidates pre-loaded via Options.
+func newModelWithScan(candidates []runscan.RunCandidate) *rootModel {
+	sess := &stubNavSession{outcome: domain.RunOutcome{Status: domain.RunCompleted, Message: "ok"}}
+	scanResult := &runscan.ScanResult{Candidates: candidates}
+	return newRootModel(context.Background(), sess, Options{
+		Theme:      tuicommon.DefaultTheme(),
+		ScanResult: scanResult,
+	})
+}
+
+// TestRunSelect_InitialScreen_IsRunSelectWithMultipleCandidates verifies that when the
+// scan result carries more than one candidate and no run is pre-resolved, the TUI starts
+// on the run-selection screen.
+func TestRunSelect_InitialScreen_IsRunSelectWithMultipleCandidates(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	m := newModelWithScan(candidates)
+	if m.screen != screenRunSelect {
+		t.Errorf("initial screen = %v, want screenRunSelect (%v)", m.screen, screenRunSelect)
+	}
+	if m.runSelectScreen == nil {
+		t.Error("runSelectScreen = nil; must be constructed when multiple candidates exist")
+	}
+}
+
+// TestRunSelect_InitialScreen_IsSetupFileWithZeroCandidates verifies that an empty scan
+// result (no resumable runs) skips the run-selection screen and goes to the file screen.
+func TestRunSelect_InitialScreen_IsSetupFileWithZeroCandidates(t *testing.T) {
+	m := newModelWithScan(nil)
+	if m.screen != screenSetupFile {
+		t.Errorf("initial screen = %v, want screenSetupFile (%v) for zero candidates", m.screen, screenSetupFile)
+	}
+	if m.runSelectScreen != nil {
+		t.Error("runSelectScreen should be nil when there are zero candidates")
+	}
+}
+
+// TestRunSelect_InitialScreen_IsSetupFileWithOneCandidate verifies that a single
+// resumable candidate skips the run-selection screen and goes to the file screen.
+func TestRunSelect_InitialScreen_IsSetupFileWithOneCandidate(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+	}
+	m := newModelWithScan(candidates)
+	if m.screen != screenSetupFile {
+		t.Errorf("initial screen = %v, want screenSetupFile (%v) for single candidate", m.screen, screenSetupFile)
+	}
+	if m.runSelectScreen != nil {
+		t.Error("runSelectScreen should be nil when there is exactly one candidate")
+	}
+}
+
+// TestRunSelect_SkippedWhenResolvedRunIDSet verifies that when ResolvedRunID is populated
+// (i.e. --run was given), the TUI starts directly on the file screen.
+func TestRunSelect_SkippedWhenResolvedRunIDSet(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	sess := &stubNavSession{outcome: domain.RunOutcome{Status: domain.RunCompleted, Message: "ok"}}
+	m := newRootModel(context.Background(), sess, Options{
+		Theme:         tuicommon.DefaultTheme(),
+		ScanResult:    &runscan.ScanResult{Candidates: candidates},
+		ResolvedRunID: "20260701T120000Z-a3f9",
+	})
+	if m.screen != screenSetupFile {
+		t.Errorf("initial screen = %v, want screenSetupFile (%v) when ResolvedRunID is set", m.screen, screenSetupFile)
+	}
+}
+
+// TestRunSelect_SkippedWhenIsNewRunSet verifies that when IsNewRun is true
+// (i.e. --new-run was given), the TUI starts directly on the file screen.
+func TestRunSelect_SkippedWhenIsNewRunSet(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	sess := &stubNavSession{outcome: domain.RunOutcome{Status: domain.RunCompleted, Message: "ok"}}
+	m := newRootModel(context.Background(), sess, Options{
+		Theme:      tuicommon.DefaultTheme(),
+		ScanResult: &runscan.ScanResult{Candidates: candidates},
+		IsNewRun:   true,
+	})
+	if m.screen != screenSetupFile {
+		t.Errorf("initial screen = %v, want screenSetupFile (%v) when IsNewRun is set", m.screen, screenSetupFile)
+	}
+}
+
+// TestRunSelect_ViewShowsCandidates verifies that the run-selection screen view contains
+// each candidate's run_id and the "Start a new run" entry.
+func TestRunSelect_ViewShowsCandidates(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	m := newModelWithScan(candidates)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+	view := m.View()
+	if !containsStr(view, "20260701T120000Z-a3f9") {
+		t.Errorf("run select view does not contain first candidate run_id:\n%s", view)
+	}
+	if !containsStr(view, "20260702T120000Z-b4e8") {
+		t.Errorf("run select view does not contain second candidate run_id:\n%s", view)
+	}
+	if !containsAny(view, "Start", "new run", "new") {
+		t.Errorf("run select view does not contain 'Start a new run' entry:\n%s", view)
+	}
+}
+
+// TestRunSelect_EscQuitsProgram verifies that Esc from the run-selection screen issues
+// a quit command (there is no previous screen to go back to).
+func TestRunSelect_EscQuitsProgram(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	m := newModelWithScan(candidates)
+	_, cmd := sendKey(m, tea.KeyEsc)
+	if cmd == nil {
+		t.Error("cmd = nil after Esc from run-selection screen; want tea.Quit (non-nil)")
+	}
+}
+
+// TestRunSelect_EnterOnNewRun_SetsIsNewRunAndAdvances verifies that pressing Enter on
+// the "Start a new run" entry (the first item, which is always selected initially) sets
+// isNewRun=true and transitions to the file screen.
+func TestRunSelect_EnterOnNewRun_SetsIsNewRunAndAdvances(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	m := newModelWithScan(candidates)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	// The first item is "Start a new run" (NewRunSentinelID). Press Enter to select it.
+	sendKey(m, tea.KeyEnter)
+
+	if m.screen != screenSetupFile {
+		t.Errorf("screen = %v after selecting 'Start new run', want screenSetupFile (%v)", m.screen, screenSetupFile)
+	}
+	if !m.selections.isNewRun {
+		t.Error("selections.isNewRun = false after selecting 'Start new run'; want true")
+	}
+}
+
+// TestRunSelect_EnterOnCandidate_SetsRunIDAndAdvances verifies that pressing Enter on
+// a candidate entry populates the run identity and transitions to the file screen.
+func TestRunSelect_EnterOnCandidate_SetsRunIDAndAdvances(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	m := newModelWithScan(candidates)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	// Navigate down once to move past "Start a new run" to the first candidate.
+	sendKey(m, tea.KeyDown)
+	sendKey(m, tea.KeyEnter)
+
+	if m.screen != screenSetupFile {
+		t.Errorf("screen = %v after selecting candidate, want screenSetupFile (%v)", m.screen, screenSetupFile)
+	}
+	if m.selections.isNewRun {
+		t.Error("selections.isNewRun = true after selecting an existing candidate; want false")
+	}
+	if m.selections.runID != "20260701T120000Z-a3f9" {
+		t.Errorf("selections.runID = %q, want %q", m.selections.runID, "20260701T120000Z-a3f9")
+	}
+	if m.selections.runFolder == "" {
+		t.Error("selections.runFolder is empty after selecting candidate; want the candidate's folder path")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ConfigScreen: ExistingArtifact step removed
+// ---------------------------------------------------------------------------
+
+// TestConfigScreen_ExistingArtifactPromptRemoved verifies that the ConfigScreen
+// does not present an ExistingArtifact prompt. Only three prompts should appear:
+// deviation handling, version drift, and checkpoints.
+func TestConfigScreen_ExistingArtifactPromptRemoved(t *testing.T) {
+	m := newTestModel()
+	m.screen = screenSetupConfig
+
+	// Only three Enters are needed to complete the config screen.
+	// If a fourth prompt existed, the screen would not be done after three Enters.
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation mode
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → done
+
+	if m.screen != screenProgress {
+		t.Errorf("screen = %v after three config Enters, want screenProgress (%v); ExistingArtifact prompt may still be present", m.screen, screenProgress)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Run selection screen: RunSelectScreen screen type
+// ---------------------------------------------------------------------------
+
+// TestRunSelectScreen_NewRunSentinelID verifies that the sentinel constant is defined
+// and has the expected value.
+func TestRunSelectScreen_NewRunSentinelID(t *testing.T) {
+	const wantID = "__new_run__"
+	if screens.NewRunSentinelID != wantID {
+		t.Errorf("NewRunSentinelID = %q, want %q", screens.NewRunSentinelID, wantID)
+	}
+}
+
+// TestRunSelectScreen_IsNewRun_TrueOnFirstEntry verifies that the newly constructed
+// RunSelectScreen has "Start a new run" as the first (selected) item, so IsNewRun()
+// returns true without any navigation.
+func TestRunSelectScreen_IsNewRun_TrueOnFirstEntry(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+	}
+	style := stylesFromTheme(tuicommon.DefaultTheme())
+	s := screens.NewRunSelectScreen(candidates, 80, 24, style)
+
+	// Simulate selection (Enter) without navigating.
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if !s.Done() {
+		t.Error("Done() = false after Enter; want true")
+	}
+	if !s.IsNewRun() {
+		t.Error("IsNewRun() = false when first item was selected; want true (first item is 'Start new run')")
+	}
+	if s.SelectedCandidate() != nil {
+		t.Error("SelectedCandidate() != nil when IsNewRun() is true; want nil")
+	}
+}
+
+// TestRunSelectScreen_SelectedCandidate_AfterNavigation verifies that navigating to a
+// candidate entry and pressing Enter sets SelectedCandidate correctly.
+func TestRunSelectScreen_SelectedCandidate_AfterNavigation(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+	}
+	style := stylesFromTheme(tuicommon.DefaultTheme())
+	s := screens.NewRunSelectScreen(candidates, 80, 24, style)
+
+	// Navigate past "Start new run" to the candidate.
+	s.Update(tea.KeyMsg{Type: tea.KeyDown})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if !s.Done() {
+		t.Error("Done() = false after Enter on candidate; want true")
+	}
+	if s.IsNewRun() {
+		t.Error("IsNewRun() = true after selecting candidate; want false")
+	}
+	c := s.SelectedCandidate()
+	if c == nil {
+		t.Fatal("SelectedCandidate() = nil after selecting candidate; want non-nil")
+	}
+	if c.RunID != "20260701T120000Z-a3f9" {
+		t.Errorf("SelectedCandidate().RunID = %q, want %q", c.RunID, "20260701T120000Z-a3f9")
+	}
+}
+
+// TestRunSelectScreen_Back_TrueOnEsc verifies that pressing Esc sets Back() to true.
+func TestRunSelectScreen_Back_TrueOnEsc(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+	}
+	style := stylesFromTheme(tuicommon.DefaultTheme())
+	s := screens.NewRunSelectScreen(candidates, 80, 24, style)
+
+	s.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if !s.Back() {
+		t.Error("Back() = false after Esc; want true")
 	}
 }
 

@@ -3,11 +3,12 @@ package docformat
 import "mosaic-common/mosaic"
 
 func init() {
-	// CanonicalSections lists the seven MOSAIC section names in their required document
+	// CanonicalSections lists the eight MOSAIC section names in their required document
 	// order, mirroring boundary_constants.py.
 	CanonicalSections = []string{
 		"Identity",
 		"CommunicationProtocol",
+		"ArtifactProvenance",
 		"Capabilities",
 		"Constraints",
 		"ErrorHandling",
@@ -15,11 +16,12 @@ func init() {
 		"ExecutionPhilosophy",
 	}
 
-	// CanonicalInjections lists the twelve canonical MOSAIC injection names, mirroring
+	// CanonicalInjections lists the thirteen canonical MOSAIC injection names, mirroring
 	// boundary_constants.py.
 	CanonicalInjections = []string{
 		"IdentityExtension",
 		"ProtocolExtension",
+		"ArtifactProvenanceExtension",
 		"LanguagePatterns",
 		"CodebaseContext",
 		"OutputArtifactTemplate",
@@ -35,9 +37,10 @@ func init() {
 	// InjectionParent maps each canonical injection name to the name of the section in
 	// which it is expected to appear, mirroring boundary_constants.py.
 	InjectionParent = map[string]string{
-		"IdentityExtension":      "Identity",
-		"ProtocolExtension":      "CommunicationProtocol",
-		"LanguagePatterns":       "Capabilities",
+		"IdentityExtension":           "Identity",
+		"ProtocolExtension":           "CommunicationProtocol",
+		"ArtifactProvenanceExtension": "ArtifactProvenance",
+		"LanguagePatterns":            "Capabilities",
 		"CodebaseContext":        "Capabilities",
 		"OutputArtifactTemplate": "Capabilities",
 		"SeverityThresholds":     "Capabilities",

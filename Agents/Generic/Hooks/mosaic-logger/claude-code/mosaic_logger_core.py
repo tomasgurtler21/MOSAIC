@@ -21,9 +21,7 @@ import tempfile
 SCHEMA_VERSION = "1.0.0"
 HARNESS = "claude-code"
 LOGS_DIRNAME = "OrchestrationLogs"
-MARKERS_DIRNAME = ".run-markers"
 AGENT_MAP_DIRNAME = ".agent-map"
-STALE_AFTER_SECONDS = 86400
 RESERVED_FILENAME_CHARS = '<>:"/\\|?*'
 DEBUG_ENV_VAR = "MOSAIC_LOGGER_DEBUG"
 WORKSPACE_ENV_VAR = "CLAUDE_PROJECT_DIR"
@@ -138,6 +136,24 @@ def build_event(event: str, ctx: "HookContext", **fields) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Effective run_id resolution
+# ---------------------------------------------------------------------------
+
+def effective_run_id(ctx: "HookContext") -> str:
+    """Return ctx.run_id when present, or 'unknown-run' as the fallback bucket.
+
+    This is the single decision point for run_id-to-path mapping. Handlers
+    call this instead of guarding on ctx.run_id directly. The returned value
+    is always a non-empty string suitable for use in path construction.
+
+    Never raises.
+    """
+    if ctx.run_id:
+        return ctx.run_id
+    return "unknown-run"
+
+
+# ---------------------------------------------------------------------------
 # Write primitives
 # ---------------------------------------------------------------------------
 
@@ -210,10 +226,6 @@ class LogPaths:
 
     def __init__(self, workspace_root: pathlib.Path):
         self.root: pathlib.Path = workspace_root / LOGS_DIRNAME
-        self.markers_dir: pathlib.Path = self.root / MARKERS_DIRNAME
-
-    def marker(self, session_id: str) -> pathlib.Path:
-        return self.markers_dir / f"{sanitize_component(session_id)}.json"
 
     def run_root(self, run_id: str) -> pathlib.Path:
         return self.root / run_id
@@ -286,9 +298,10 @@ def event_sink_for(ctx: "HookContext", agent_instance_id: "str | None") -> pathl
     agent_instance_id is None  -> orchestrator events file
     otherwise                  -> invocation events file
     """
+    run_id = effective_run_id(ctx)
     if agent_instance_id is None:
-        return ctx.paths.orchestrator_events(ctx.run_id)
-    return ctx.paths.invocation_events(ctx.run_id, agent_instance_id)
+        return ctx.paths.orchestrator_events(run_id)
+    return ctx.paths.invocation_events(run_id, agent_instance_id)
 
 
 # ---------------------------------------------------------------------------

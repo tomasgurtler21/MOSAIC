@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"mosaic-common/interaction"
 	"mosaic-run/internal/cli"
@@ -34,7 +37,7 @@ func (s *scriptedSession) Start(_ context.Context, config domain.RunConfig) (dom
 func runCLI(t *testing.T, args []string, sess *scriptedSession) (exitCode int, stdout, stderr string) {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	code := cli.Run(context.Background(), args, sess, &out, &errOut)
+	code := cli.Run(context.Background(), args, nil, nil, sess, &out, &errOut)
 	return code, out.String(), errOut.String()
 }
 
@@ -84,12 +87,14 @@ func TestMissingRequiredFlags(t *testing.T) {
 
 func TestDefaultFlagValues(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
-	code, _, _ := runCLI(t, []string{
+	// Use runCLIWithStore (not runCLI) so that the test does not panic after I5.4
+	// adds a store.SetPhase call on RunCompleted. A nil store would panic at that point.
+	code, _, _ := runCLIWithStore(t, []string{
 		"run",
 		"--orchestrator-file", "orch.md",
 		"--workflow", "my-workflow",
 		"--task", "do the work",
-	}, sess)
+	}, &spyStore{}, sess)
 
 	if code != cli.ExitSuccess {
 		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
@@ -111,14 +116,8 @@ func TestDefaultFlagValues(t *testing.T) {
 	if cfg.OnDeviation != domain.DeviationDelegate {
 		t.Errorf("OnDeviation = %q, want %q (default)", cfg.OnDeviation, domain.DeviationDelegate)
 	}
-	if cfg.ExistingArtifact != domain.ExistingResume {
-		t.Errorf("ExistingArtifact = %q, want %q (default)", cfg.ExistingArtifact, domain.ExistingResume)
-	}
 	if cfg.AllowVersionDrift {
 		t.Error("AllowVersionDrift should default to false")
-	}
-	if cfg.ArtifactLocation != "" {
-		t.Errorf("ArtifactLocation = %q, want empty string (default = canonical path)", cfg.ArtifactLocation)
 	}
 	if cfg.Checkpoints {
 		t.Error("Checkpoints should default to false (--checkpoints=disabled)")
@@ -135,10 +134,9 @@ func TestAllFlagsExplicitlySet(t *testing.T) {
 		"--workflow", "greenfield-tdd",
 		"--task", "build the feature",
 		"--on-deviation", "stop",
-		"--existing-artifact", "fresh",
 		"--allow-version-drift",
-		"--artifact-location", "/path/to/Orchestration.md",
 		"--checkpoints", "enabled",
+		"--new-run",
 	}, sess)
 
 	if code != cli.ExitSuccess {
@@ -158,43 +156,11 @@ func TestAllFlagsExplicitlySet(t *testing.T) {
 	if cfg.OnDeviation != domain.DeviationStop {
 		t.Errorf("OnDeviation = %q, want %q", cfg.OnDeviation, domain.DeviationStop)
 	}
-	if cfg.ExistingArtifact != domain.ExistingFresh {
-		t.Errorf("ExistingArtifact = %q, want %q", cfg.ExistingArtifact, domain.ExistingFresh)
-	}
 	if !cfg.AllowVersionDrift {
 		t.Error("AllowVersionDrift should be true when --allow-version-drift is set")
 	}
-	if cfg.ArtifactLocation != "/path/to/Orchestration.md" {
-		t.Errorf("ArtifactLocation = %q, want %q", cfg.ArtifactLocation, "/path/to/Orchestration.md")
-	}
 	if !cfg.Checkpoints {
 		t.Error("Checkpoints should be true when --checkpoints=enabled")
-	}
-}
-
-// ---- tests: existing-artifact flag variants ----
-
-func TestExistingArtifactFlag(t *testing.T) {
-	tests := []struct {
-		value string
-		want  domain.ExistingArtifactMode
-	}{
-		{"resume", domain.ExistingResume},
-		{"fresh", domain.ExistingFresh},
-		{"fail", domain.ExistingFail},
-	}
-	for _, tt := range tests {
-		t.Run(tt.value, func(t *testing.T) {
-			sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
-			runCLI(t, []string{
-				"run",
-				"--orchestrator-file", "f", "--workflow", "w", "--task", "t",
-				"--existing-artifact", tt.value,
-			}, sess)
-			if sess.config.ExistingArtifact != tt.want {
-				t.Errorf("ExistingArtifact = %q, want %q", sess.config.ExistingArtifact, tt.want)
-			}
-		})
 	}
 }
 
@@ -224,7 +190,9 @@ func TestExitCodeMapping(t *testing.T) {
 			sess := &scriptedSession{
 				outcome: domain.RunOutcome{Status: tt.status, Message: "test outcome message"},
 			}
-			code, _, _ := runCLI(t, baseArgs, sess)
+			// Use runCLIWithStore (not runCLI) so that the RunCompleted subtest does
+			// not panic after I5.4 adds a store.SetPhase call on RunCompleted.
+			code, _, _ := runCLIWithStore(t, baseArgs, &spyStore{}, sess)
 			if code != tt.wantCode {
 				t.Errorf("exit code = %d, want %d for status %q", code, tt.wantCode, tt.status)
 			}
@@ -296,7 +264,6 @@ func TestInvalidFlagValues(t *testing.T) {
 		extraVal string
 	}{
 		{"invalid --on-deviation", "--on-deviation", "invalid-value"},
-		{"invalid --existing-artifact", "--existing-artifact", "invalid-value"},
 		{"invalid --checkpoints", "--checkpoints", "invalid-value"},
 	}
 
@@ -413,5 +380,712 @@ func TestExitCodeConstants(t *testing.T) {
 			t.Errorf("duplicate exit code %d shared by %s and %s", code, prev, name)
 		}
 		seen[code] = name
+	}
+}
+
+// ============================================================
+// T5.2: CLI flag change tests
+// ============================================================
+//
+// These tests specify the new --run and --new-run flag behaviour and verify
+// that the removed flags (--existing-artifact, --artifact-location) are no
+// longer recognised by the CLI.
+//
+// All tests in this section are in the RED phase: they compile but fail because
+// the implementation (I5.3) has not been completed yet.
+
+// ---- spyStore: fake ArtifactStore that records SetPhase calls ----
+
+// spyStore is a test double for domain.ArtifactStore.
+// It panics on operations that CLI tests should not trigger (Read, Create, Apply),
+// and records every SetPhase call for T5.3 assertions.
+type spyStore struct {
+	setCalls []spySetPhaseCall
+}
+
+type spySetPhaseCall struct {
+	state domain.ArtifactState
+	phase string
+	now   time.Time
+}
+
+func (s *spyStore) Read(_ context.Context) (domain.ArtifactState, error) {
+	panic("spyStore.Read: unexpected call in CLI tests")
+}
+
+func (s *spyStore) Create(_ context.Context, _ domain.WorkflowInfo, _ string, _ bool, _ time.Time, _ string) (domain.ArtifactState, error) {
+	panic("spyStore.Create: unexpected call in CLI tests")
+}
+
+func (s *spyStore) Apply(_ context.Context, _ domain.ArtifactState, _ domain.CompletedStep) (domain.ArtifactState, error) {
+	panic("spyStore.Apply: unexpected call in CLI tests")
+}
+
+func (s *spyStore) SetPhase(_ context.Context, state domain.ArtifactState, phase string, now time.Time) (domain.ArtifactState, error) {
+	s.setCalls = append(s.setCalls, spySetPhaseCall{state, phase, now})
+	state.CurrentState.Phase = phase
+	return state, nil
+}
+
+// ---- helper: runCLIWithStore ----
+
+// runCLIWithStore is like runCLI but injects a real store (for T5.3 tests).
+func runCLIWithStore(t *testing.T, args []string, store domain.ArtifactStore, sess *scriptedSession) (exitCode int, stdout, stderr string) {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	code := cli.Run(context.Background(), args, store, nil, sess, &out, &errOut)
+	return code, out.String(), errOut.String()
+}
+
+// ---- helper: writeCompletedRunArtifact ----
+
+// writeCompletedRunArtifact creates a completed run folder and its Orchestration.md
+// inside rootDir. Returns the absolute path to the Orchestration.md file.
+func writeCompletedRunArtifact(t *testing.T, rootDir, runID string) string {
+	t.Helper()
+	folderPath := filepath.Join(rootDir, "Orchestration-"+runID)
+	if err := os.MkdirAll(folderPath, 0700); err != nil {
+		t.Fatalf("writeCompletedRunArtifact: %v", err)
+	}
+	artifactContent := `---
+type: orchestration-artifact
+workflow: test-workflow
+workflow_version: "1.0"
+task: "test task"
+started: 2026-01-01T00:00:00Z
+last_updated: 2026-01-01T00:00:00Z
+global_sequence: 1
+checkpoints: disabled
+current_state:
+  phase: COMPLETED
+  stage: ""
+  last_status: SUCCESS
+  last_agent: "agent#1"
+  error_code: null
+---
+
+[[SECTION:ExecutionLog]]
+| Seq | Agent   | Phase     | Stage | Status  | Timestamp            | Summary | Checkpoint |
+| --- | ------- | --------- | ----- | ------- | -------------------- | ------- | ---------- |
+| 1   | agent#1 | EXECUTION | -     | SUCCESS | 2026-01-01T00:00:00Z | done    | -          |
+[[/SECTION:ExecutionLog]]
+
+[[SECTION:Artifacts]]
+| Artifact | Created In | Created By |
+| -------- | ---------- | ---------- |
+[[/SECTION:Artifacts]]
+`
+	artifactPath := filepath.Join(folderPath, "Orchestration.md")
+	if err := os.WriteFile(artifactPath, []byte(artifactContent), 0600); err != nil {
+		t.Fatalf("writeCompletedRunArtifact: %v", err)
+	}
+	return artifactPath
+}
+
+const testRunID = "20260727T170000Z-a3f9"
+
+// cliRunID1 and cliRunID2 are run IDs used in default-scan-path tests that need
+// more than one resumable candidate in the working directory.
+const (
+	cliRunID1 = "20260201T000000Z-cccc"
+	cliRunID2 = "20260202T000000Z-dddd"
+)
+
+// writeResumableRunArtifact creates a resumable (non-COMPLETED) run folder and
+// its Orchestration.md inside rootDir. Returns the absolute path of the artifact.
+func writeResumableRunArtifact(t *testing.T, rootDir, runID string) string {
+	t.Helper()
+	folderPath := filepath.Join(rootDir, "Orchestration-"+runID)
+	if err := os.MkdirAll(folderPath, 0700); err != nil {
+		t.Fatalf("writeResumableRunArtifact: %v", err)
+	}
+	artifactContent := `---
+type: orchestration-artifact
+workflow: test-workflow
+workflow_version: "1.0"
+task: "test task"
+started: 2026-01-01T00:00:00Z
+last_updated: 2026-01-01T00:00:00Z
+global_sequence: 1
+checkpoints: disabled
+current_state:
+  phase: EXECUTION
+  stage: ""
+  last_status: SUCCESS
+  last_agent: "agent#1"
+  error_code: null
+---
+
+[[SECTION:ExecutionLog]]
+| Seq | Agent   | Phase     | Stage | Status  | Timestamp            | Summary | Checkpoint |
+| --- | ------- | --------- | ----- | ------- | -------------------- | ------- | ---------- |
+| 1   | agent#1 | EXECUTION | -     | SUCCESS | 2026-01-01T00:00:00Z | done    | -          |
+[[/SECTION:ExecutionLog]]
+
+[[SECTION:Artifacts]]
+| Artifact | Created In | Created By |
+| -------- | ---------- | ---------- |
+[[/SECTION:Artifacts]]
+`
+	artifactPath := filepath.Join(folderPath, "Orchestration.md")
+	if err := os.WriteFile(artifactPath, []byte(artifactContent), 0600); err != nil {
+		t.Fatalf("writeResumableRunArtifact: %v", err)
+	}
+	return artifactPath
+}
+
+// ---- tests: --new-run flag ----
+
+func TestNewRunFlag_SetsIsNewRunTrue(t *testing.T) {
+	// --new-run must set RunConfig.IsNewRun to true and cause the session to be called.
+	// Currently fails (RED) because --new-run is not a recognised flag yet (I5.3).
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--new-run",
+	}, sess)
+
+	if !sess.called {
+		t.Fatal("session.Start was not called; --new-run must cause the session to run")
+	}
+	if !sess.config.IsNewRun {
+		t.Error("IsNewRun = false, want true when --new-run is set")
+	}
+}
+
+// ---- tests: --run flag ----
+
+func TestRunFlag_SetsRunID(t *testing.T) {
+	// --run <run_id> must set RunConfig.RunID to the given run_id value.
+	// Currently fails (RED) because --run is not a recognised flag yet (I5.3).
+	// Filesystem setup: create a resumable run folder so the CLI can find it after
+	// --run is implemented and reads the artifact to confirm the run is not COMPLETED.
+	rootDir := t.TempDir()
+	writeResumableRunArtifact(t, rootDir, testRunID)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(rootDir); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--run", testRunID,
+	}, sess)
+
+	if !sess.called {
+		t.Fatal("session.Start was not called; --run must cause the session to run")
+	}
+	if sess.config.RunID != testRunID {
+		t.Errorf("RunID = %q, want %q", sess.config.RunID, testRunID)
+	}
+}
+
+func TestRunFlag_SetsIsNewRunFalse(t *testing.T) {
+	// --run must set RunConfig.IsNewRun to false (resuming, not creating).
+	// Currently fails (RED) because --run is not a recognised flag yet (I5.3).
+	// Filesystem setup mirrors TestRunFlag_SetsRunID.
+	rootDir := t.TempDir()
+	writeResumableRunArtifact(t, rootDir, testRunID)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(rootDir); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--run", testRunID,
+	}, sess)
+
+	if !sess.called {
+		t.Fatal("session.Start was not called; --run must cause the session to run")
+	}
+	if sess.config.IsNewRun {
+		t.Error("IsNewRun = true, want false when --run selects an existing run")
+	}
+}
+
+func TestRunFlag_SetsRunFolder(t *testing.T) {
+	// --run <run_id> must set RunConfig.RunFolder to the derived folder path.
+	// Currently fails (RED) because --run is not a recognised flag yet (I5.3).
+	// Filesystem setup mirrors TestRunFlag_SetsRunID.
+	rootDir := t.TempDir()
+	writeResumableRunArtifact(t, rootDir, testRunID)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(rootDir); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--run", testRunID,
+	}, sess)
+
+	if !sess.called {
+		t.Fatal("session.Start was not called; --run must cause the session to run")
+	}
+	if sess.config.RunFolder == "" {
+		t.Error("RunFolder is empty, want a path derived from the run_id")
+	}
+	wantFolderName := "Orchestration-" + testRunID
+	if !strings.Contains(sess.config.RunFolder, wantFolderName) {
+		t.Errorf("RunFolder = %q, want it to contain %q", sess.config.RunFolder, wantFolderName)
+	}
+}
+
+// ---- tests: --run and --new-run mutual exclusivity ----
+
+func TestRunAndNewRunFlags_MutuallyExclusive(t *testing.T) {
+	// Passing both --run and --new-run must be rejected with a clear error.
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--run", testRunID,
+		"--new-run",
+	}, sess)
+
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage (%d) for mutually exclusive flags", code, cli.ExitUsage)
+	}
+	if !strings.Contains(errOut, "mutually exclusive") {
+		t.Errorf("stderr %q does not contain %q", errOut, "mutually exclusive")
+	}
+	if sess.called {
+		t.Error("session.Start should not be called when flags are mutually exclusive")
+	}
+}
+
+// ---- tests: removed flags ----
+
+func TestExistingArtifactFlag_IsNoLongerRecognized(t *testing.T) {
+	// --existing-artifact was removed in Stage 5; cobra must reject it as unknown.
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--existing-artifact", "resume",
+	}, sess)
+
+	if code != cli.ExitUsage {
+		t.Errorf("--existing-artifact: exit code = %d, want ExitUsage (%d) (flag must be removed)",
+			code, cli.ExitUsage)
+	}
+	if !strings.Contains(errOut, "unknown flag") && !strings.Contains(errOut, "existing-artifact") {
+		t.Errorf("stderr %q does not indicate that --existing-artifact is unknown", errOut)
+	}
+}
+
+func TestArtifactLocationFlag_IsNoLongerRecognized(t *testing.T) {
+	// --artifact-location was removed in Stage 5; cobra must reject it as unknown.
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--artifact-location", "/some/path",
+	}, sess)
+
+	if code != cli.ExitUsage {
+		t.Errorf("--artifact-location: exit code = %d, want ExitUsage (%d) (flag must be removed)",
+			code, cli.ExitUsage)
+	}
+	if !strings.Contains(errOut, "unknown flag") && !strings.Contains(errOut, "artifact-location") {
+		t.Errorf("stderr %q does not indicate that --artifact-location is unknown", errOut)
+	}
+}
+
+// ---- tests: help text ----
+
+func TestHelpText_ContainsNewRunFlag(t *testing.T) {
+	// The help text must mention --new-run after implementation.
+	sess := &scriptedSession{}
+	_, _, errOut := runCLI(t, []string{"run", "--help"}, sess)
+
+	if !strings.Contains(errOut, "--new-run") {
+		t.Errorf("help text does not contain --new-run; got:\n%s", errOut)
+	}
+}
+
+func TestHelpText_ContainsRunFlag(t *testing.T) {
+	// The help text must mention --run after implementation.
+	sess := &scriptedSession{}
+	_, _, errOut := runCLI(t, []string{"run", "--help"}, sess)
+
+	if !strings.Contains(errOut, "--run") {
+		t.Errorf("help text does not contain --run; got:\n%s", errOut)
+	}
+}
+
+func TestHelpText_DoesNotContainExistingArtifactFlag(t *testing.T) {
+	// --existing-artifact was removed in Stage 5; it must not appear in help text.
+	sess := &scriptedSession{}
+	_, _, errOut := runCLI(t, []string{"run", "--help"}, sess)
+
+	if strings.Contains(errOut, "existing-artifact") {
+		t.Errorf("help text still contains 'existing-artifact' (must be removed); got:\n%s", errOut)
+	}
+}
+
+func TestHelpText_DoesNotContainArtifactLocationFlag(t *testing.T) {
+	// --artifact-location was removed in Stage 5; it must not appear in help text.
+	sess := &scriptedSession{}
+	_, _, errOut := runCLI(t, []string{"run", "--help"}, sess)
+
+	if strings.Contains(errOut, "artifact-location") {
+		t.Errorf("help text still contains 'artifact-location' (must be removed); got:\n%s", errOut)
+	}
+}
+
+// ---- tests: --run targeting a completed run ----
+
+func TestRunFlag_TargetingCompletedRun_IsRejected(t *testing.T) {
+	// --run with a run_id whose artifact has phase==COMPLETED must be rejected.
+	// The CLI must not call session.Start for a completed run.
+	rootDir := t.TempDir()
+	writeCompletedRunArtifact(t, rootDir, testRunID)
+
+	// Change to rootDir so the CLI can find the run folder.
+	// Note: this changes the process working directory for this test.
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(rootDir); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--run", testRunID,
+	}, sess)
+
+	if code != cli.ExitUsage && code != cli.ExitRefused {
+		t.Errorf("exit code = %d, want ExitUsage or ExitRefused for completed run", code)
+	}
+	if !strings.Contains(errOut, "completed") && !strings.Contains(errOut, testRunID) {
+		t.Errorf("stderr %q does not mention 'completed' or the run_id %q", errOut, testRunID)
+	}
+	if sess.called {
+		t.Error("session.Start must not be called for a completed run")
+	}
+}
+
+func TestRunFlag_InvalidFormat_IsRejected(t *testing.T) {
+	// --run with a run_id that does not match the expected format must be rejected.
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--run", "not-a-valid-run-id",
+	}, sess)
+
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage for invalid run_id format", code)
+	}
+	_ = errOut // error message content not asserted (allow flexibility in wording)
+	if sess.called {
+		t.Error("session.Start must not be called for an invalid run_id")
+	}
+}
+
+func TestRunFlag_NonExistentRun_IsRejected(t *testing.T) {
+	// --run <run_id> whose folder does not exist on disk must be rejected.
+	// The CLI must not call session.Start when the specified run folder is absent.
+	rootDir := t.TempDir()
+	// No run folder created — the folder for testRunID is absent.
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(rootDir); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--run", testRunID,
+	}, sess)
+
+	if code != cli.ExitUsage && code != cli.ExitRefused {
+		t.Errorf("exit code = %d, want ExitUsage or ExitRefused for non-existent run_id", code)
+	}
+	if !strings.Contains(errOut, testRunID) {
+		t.Errorf("stderr %q does not contain the run_id %q", errOut, testRunID)
+	}
+	if sess.called {
+		t.Error("session.Start must not be called when the run folder is absent")
+	}
+}
+
+// ---- tests: default scan delegation (neither --run nor --new-run) ----
+
+func TestDefaultPath_ZeroCandidates_StartsNewRun(t *testing.T) {
+	// With no --run or --new-run and an empty working directory, the scanner
+	// finds zero candidates. The CLI must mint a new run and call session.Start
+	// with IsNewRun=true. Currently fails (RED): the implementation (I5.3) has
+	// not added the default scan path yet, so IsNewRun defaults to false.
+	rootDir := t.TempDir()
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(rootDir); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	code, _, _ := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+	}, sess)
+
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want ExitSuccess for zero-candidate default path", code)
+	}
+	if !sess.called {
+		t.Fatal("session.Start was not called; CLI must start a new run when no candidates exist")
+	}
+	if !sess.config.IsNewRun {
+		t.Error("IsNewRun = false, want true when no resumable candidates exist (new run minted)")
+	}
+}
+
+func TestDefaultPath_OneCandidateWithNoFlag_AutoResumes(t *testing.T) {
+	// With no --run or --new-run and exactly one resumable candidate in the
+	// working directory, the CLI must auto-resume that candidate without user
+	// interaction. Currently fails (RED): I5.3 has not added the default scan
+	// path yet, so the CLI does not populate RunID from the scanned candidate.
+	rootDir := t.TempDir()
+	writeResumableRunArtifact(t, rootDir, cliRunID1)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(rootDir); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	code, _, _ := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+	}, sess)
+
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want ExitSuccess for single-candidate auto-resume", code)
+	}
+	if !sess.called {
+		t.Fatal("session.Start was not called; CLI must auto-resume the single candidate")
+	}
+	if sess.config.IsNewRun {
+		t.Error("IsNewRun = true, want false when auto-resuming the single candidate")
+	}
+	if sess.config.RunID != cliRunID1 {
+		t.Errorf("RunID = %q, want %q (the auto-resumed candidate's run_id)", sess.config.RunID, cliRunID1)
+	}
+}
+
+func TestDefaultPath_MultipleCandidates_CLIRejectsWithRunIDList(t *testing.T) {
+	// With no --run or --new-run and multiple resumable candidates in the
+	// working directory, the CLI cannot resolve ambiguity in non-interactive
+	// mode. It must reject with ExitUsage and list the candidate run_ids in
+	// stderr. Currently fails (RED): I5.3 has not added the default scan path.
+	rootDir := t.TempDir()
+	writeResumableRunArtifact(t, rootDir, cliRunID1)
+	writeResumableRunArtifact(t, rootDir, cliRunID2)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(rootDir); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+	}, sess)
+
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage when multiple candidates exist and no --run flag", code)
+	}
+	// stderr must identify the candidate run_ids so the user knows which to pass to --run.
+	if !strings.Contains(errOut, cliRunID1) {
+		t.Errorf("stderr %q does not contain candidate run_id %q", errOut, cliRunID1)
+	}
+	if !strings.Contains(errOut, cliRunID2) {
+		t.Errorf("stderr %q does not contain candidate run_id %q", errOut, cliRunID2)
+	}
+	if sess.called {
+		t.Error("session.Start must not be called when multiple candidates exist and no --run flag")
+	}
+}
+
+// ============================================================
+// T5.3: COMPLETED marker persistence tests
+// ============================================================
+//
+// These tests verify that the CLI writes "COMPLETED" to current_state.phase
+// via store.SetPhase when the session returns RunCompleted, and does NOT call
+// SetPhase for other terminal statuses.
+//
+// The positive test (RunCompleted → SetPhase called) is RED: the current CLI
+// does not call SetPhase.
+//
+// The negative tests (other statuses → SetPhase not called) are trivially GREEN
+// with the current implementation (CLI never calls SetPhase) and serve as
+// regression guards once the feature is implemented.
+
+func TestCOMPLETEDMarker_WrittenWhenRunCompleted(t *testing.T) {
+	// When session.Start returns RunCompleted, the CLI must call
+	// store.SetPhase with phase="COMPLETED".
+	spy := &spyStore{}
+	sess := &scriptedSession{
+		outcome: domain.RunOutcome{
+			Status: domain.RunCompleted,
+			Message: "run finished",
+		},
+	}
+	code, _, _ := runCLIWithStore(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+	}, spy, sess)
+
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want ExitSuccess", code)
+	}
+	if len(spy.setCalls) == 0 {
+		t.Error("store.SetPhase was not called; want it called with phase=COMPLETED after RunCompleted")
+	} else if spy.setCalls[0].phase != "COMPLETED" {
+		t.Errorf("SetPhase called with phase=%q, want %q", spy.setCalls[0].phase, "COMPLETED")
+	}
+}
+
+func TestCOMPLETEDMarker_NotWrittenWhenRunStopped(t *testing.T) {
+	// When session.Start returns RunStopped, the CLI must NOT call SetPhase
+	// (the run must remain resumable).
+	spy := &spyStore{}
+	sess := &scriptedSession{
+		outcome: domain.RunOutcome{Status: domain.RunStopped},
+	}
+	runCLIWithStore(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+	}, spy, sess)
+
+	if len(spy.setCalls) != 0 {
+		t.Errorf("store.SetPhase called %d time(s), want 0 when status is RunStopped", len(spy.setCalls))
+	}
+}
+
+func TestCOMPLETEDMarker_NotWrittenWhenRunDeviationUnresolved(t *testing.T) {
+	// When session.Start returns RunDeviationUnresolved, the CLI must NOT call SetPhase.
+	spy := &spyStore{}
+	sess := &scriptedSession{
+		outcome: domain.RunOutcome{Status: domain.RunDeviationUnresolved},
+	}
+	runCLIWithStore(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+	}, spy, sess)
+
+	if len(spy.setCalls) != 0 {
+		t.Errorf("store.SetPhase called %d time(s), want 0 when status is RunDeviationUnresolved", len(spy.setCalls))
+	}
+}
+
+func TestCOMPLETEDMarker_NotWrittenWhenRunRefused(t *testing.T) {
+	// When session.Start returns RunRefused, the CLI must NOT call SetPhase.
+	spy := &spyStore{}
+	sess := &scriptedSession{
+		outcome: domain.RunOutcome{Status: domain.RunRefused},
+	}
+	runCLIWithStore(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+	}, spy, sess)
+
+	if len(spy.setCalls) != 0 {
+		t.Errorf("store.SetPhase called %d time(s), want 0 when status is RunRefused", len(spy.setCalls))
+	}
+}
+
+func TestCOMPLETEDMarker_NotWrittenWhenRunFailed(t *testing.T) {
+	// When session.Start returns RunFailed, the CLI must NOT call SetPhase.
+	spy := &spyStore{}
+	sess := &scriptedSession{
+		outcome: domain.RunOutcome{Status: domain.RunFailed},
+	}
+	runCLIWithStore(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+	}, spy, sess)
+
+	if len(spy.setCalls) != 0 {
+		t.Errorf("store.SetPhase called %d time(s), want 0 when status is RunFailed", len(spy.setCalls))
 	}
 }

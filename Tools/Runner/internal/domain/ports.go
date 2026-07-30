@@ -51,8 +51,9 @@ type ArtifactStore interface {
 	Read(ctx context.Context) (ArtifactState, error)
 
 	// Create writes a new Orchestration.md with the initial frontmatter.
+	// The runID is stored in the frontmatter's run_id field, set once and never modified.
 	// Returns an error if a file already exists at the location.
-	Create(ctx context.Context, info WorkflowInfo, task string, checkpoints bool, now time.Time) (ArtifactState, error)
+	Create(ctx context.Context, info WorkflowInfo, task string, checkpoints bool, now time.Time, runID string) (ArtifactState, error)
 
 	// Apply records a completed step: updates current_state, appends an execution log
 	// entry, upserts artifact registry entries for each output artifact, bumps
@@ -60,6 +61,19 @@ type ArtifactStore interface {
 	// The step's output artifact paths are recorded exactly as provided.
 	// Workflow Notes are preserved unchanged.
 	Apply(ctx context.Context, state ArtifactState, step CompletedStep) (ArtifactState, error)
+
+	// SetPhase updates only current_state.phase (and bumps last_updated and
+	// global_sequence) without appending an execution log entry or modifying
+	// the artifact registry. The write is atomic (write-temp-then-rename).
+	//
+	// This is the designated path for writing the COMPLETED phase marker after
+	// the session finishes. Using Apply for this purpose would require a
+	// synthetic CompletedStep with meaningless values, producing a spurious
+	// execution log row.
+	//
+	// Returns the updated ArtifactState with the new phase, bumped sequence,
+	// and updated timestamp.
+	SetPhase(ctx context.Context, state ArtifactState, phase string, now time.Time) (ArtifactState, error)
 }
 
 // DeviationResolver handles situations where the engine cannot decide the next step.

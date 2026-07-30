@@ -85,6 +85,10 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 		Type: "orchestration-artifact",
 	}
 
+	if v, ok := topLevel["run_id"]; ok {
+		state.RunID = v
+	}
+
 	if v, ok := topLevel["workflow"]; ok {
 		state.Workflow = domain.WorkflowID(v)
 	}
@@ -187,6 +191,9 @@ func Render(state domain.ArtifactState) ([]byte, error) {
 	// --- Frontmatter ---
 	buf.WriteString("---\n")
 	buf.WriteString("type: orchestration-artifact\n")
+	if state.RunID != "" {
+		buf.WriteString("run_id: " + state.RunID + "\n")
+	}
 	buf.WriteString("workflow: " + string(state.Workflow) + "\n")
 	buf.WriteString("workflow_version: \"" + string(state.WorkflowVersion) + "\"\n")
 	buf.WriteString("task: \"" + state.Task + "\"\n")
@@ -281,7 +288,7 @@ func (f *fileStore) Read(ctx context.Context) (domain.ArtifactState, error) {
 	return state, nil
 }
 
-func (f *fileStore) Create(ctx context.Context, info domain.WorkflowInfo, task string, checkpoints bool, now time.Time) (domain.ArtifactState, error) {
+func (f *fileStore) Create(ctx context.Context, info domain.WorkflowInfo, task string, checkpoints bool, now time.Time, runID string) (domain.ArtifactState, error) {
 	// Fail if file already exists.
 	if _, err := os.Stat(f.path); err == nil {
 		return domain.ArtifactState{}, fmt.Errorf("artifact: file already exists at %s", f.path)
@@ -289,6 +296,7 @@ func (f *fileStore) Create(ctx context.Context, info domain.WorkflowInfo, task s
 
 	state := domain.ArtifactState{
 		Type:            "orchestration-artifact",
+		RunID:           runID,
 		Workflow:        info.ID,
 		WorkflowVersion: info.Version,
 		Task:            task,
@@ -300,6 +308,13 @@ func (f *fileStore) Create(ctx context.Context, info domain.WorkflowInfo, task s
 
 	data, err := Render(state)
 	if err != nil {
+		return domain.ArtifactState{}, err
+	}
+
+	// Ensure the run-scoped folder exists before writing. The folder
+	// (e.g. Orchestration-{run_id}/) is never created by the caller;
+	// Create is responsible for initialising the entire run directory.
+	if err := os.MkdirAll(filepath.Dir(f.path), 0755); err != nil {
 		return domain.ArtifactState{}, err
 	}
 

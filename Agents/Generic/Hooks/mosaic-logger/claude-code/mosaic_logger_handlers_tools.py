@@ -12,12 +12,13 @@ import mosaic_logger_runstate as runstate
 
 def resolve_destination(ctx: "core.HookContext"):
     """Route tool event to orchestrator or subagent stream based on agent_id presence."""
+    run_id = core.effective_run_id(ctx)
     if not ctx.agent_id:
-        return ctx.paths.orchestrator_events(ctx.run_id)
+        return ctx.paths.orchestrator_events(run_id)
     agent_instance_id = runstate.resolve_invocation_id(
-        ctx.paths, ctx.run_id, ctx.agent_id
+        ctx.paths, run_id, ctx.agent_id
     )
-    return ctx.paths.invocation_events(ctx.run_id, agent_instance_id)
+    return ctx.paths.invocation_events(run_id, agent_instance_id)
 
 
 def resolve_call_id(ctx: "core.HookContext") -> str:
@@ -30,8 +31,6 @@ def resolve_call_id(ctx: "core.HookContext") -> str:
 
 def handle_pre_tool_use(ctx: "core.HookContext") -> None:
     """Emit tool_call_start."""
-    if not ctx.run_id:
-        return
     event = core.build_event(
         "tool_call_start", ctx,
         call_id=resolve_call_id(ctx),
@@ -43,8 +42,6 @@ def handle_pre_tool_use(ctx: "core.HookContext") -> None:
 
 def handle_post_tool_use(ctx: "core.HookContext") -> None:
     """Emit tool_call_end with status 'success'."""
-    if not ctx.run_id:
-        return
     event = core.build_event(
         "tool_call_end", ctx,
         call_id=resolve_call_id(ctx),
@@ -56,8 +53,6 @@ def handle_post_tool_use(ctx: "core.HookContext") -> None:
 
 def handle_post_tool_use_failure(ctx: "core.HookContext") -> None:
     """Emit tool_call_end with status 'error'."""
-    if not ctx.run_id:
-        return
     tool_output = ctx.field("tool_output")
     error = ctx.field("error") or (str(tool_output) if tool_output is not None else None)
     event = core.build_event(
