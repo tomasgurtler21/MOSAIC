@@ -2,7 +2,7 @@
 
 > **Status:** Approved
 > **Created:** 2026-07-28
-> **Last Updated:** 2026-07-28
+> **Last Updated:** 2026-07-31
 > **Scope:** The schema of `Orchestration.md` — the blackboard artifact an orchestrator (human-driven LLM or a future deterministic script) reads and writes to track execution state for one workflow run. Defines its sections, their mutability rules, and the format each section uses.
 
 ---
@@ -168,7 +168,13 @@ The `[[SECTION:...]]` boundary exists purely so a parser locating other sections
 
 All writes to this file happen **after** a subagent invocation completes, never before — there is no "in-progress" state to track separately. If an invocation is interrupted mid-flight, the file simply still reflects the last completed step, which is exactly what recovery (§9) relies on.
 
-Every write is a single, complete rewrite of the file (frontmatter update + Execution Log append + Artifacts upsert if applicable, in one pass) rather than several partial writes — this keeps "file exists and is well-formed" equivalent to "file reflects a fully-completed step," with no window where a reader could observe a torn update.
+**The invariant a write must satisfy is reconcilability, not atomicity.** An earlier draft of this schema mandated that every write be a single, complete rewrite of the file (frontmatter update + Execution Log append + Artifacts upsert in one pass), on the theory that this made "file exists and is well-formed" equivalent to "file reflects a fully-completed step." That's the right guarantee but the wrong requirement: §9's recovery procedure already reconciles a frontmatter/Execution Log disagreement (the log wins, `current_state` and `global_sequence` are re-derived from it), so a partially-applied write is not an unrecoverable state — it's precisely the state recovery was designed to handle. What this schema requires is therefore only that any observable intermediate state be reconcilable by §9, which constrains **write order** rather than write count:
+
+**The Execution Log row is written first**, because it is the authoritative record §9 reconciles everything else against. An interruption after the log row but before the frontmatter leaves a file recovery restores exactly; the reverse order leaves frontmatter claiming an invocation the log doesn't record, causing a completed invocation to be re-run.
+
+How an orchestrator meets this is its own implementation concern, and the right answer differs by executor. A deterministic script should still prefer a genuine atomic replace (write-temp-then-rename), which is free and eliminates the intermediate state entirely. An LLM orchestrator should not: for it, a "single rewrite" means regenerating every historical Execution Log row as output on every step, which grows without bound over a run and gives each step a fresh opportunity to mutate rows this schema declares append-only. Ordered targeted edits are both cheaper and structurally safer there, and §9 covers the residual window.
+
+One residual gap is accepted rather than solved: an interruption between the Execution Log append and the Artifacts upsert leaves a produced path unregistered, and §9 has no reconciliation for it (the log doesn't record artifact paths, so it can't). The consequence is bounded — the Artifacts registry is a lookup convenience, dispatch artifact lists derive from the workflow's own routing table, and the row is restored on that path's next write — so this doesn't warrant additional in-file bookkeeping to close.
 
 ## 9. Recovery
 
