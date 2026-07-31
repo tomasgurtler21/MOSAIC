@@ -514,6 +514,201 @@ class TestPopPendingDispatch(unittest.TestCase):
 # Concurrent write safety
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Prompt field round-trip through put_pending_dispatch / pop_pending_dispatch
+# ---------------------------------------------------------------------------
+
+class TestPendingDispatchPromptField(unittest.TestCase):
+    """put_pending_dispatch must accept and persist a 'prompt' keyword argument.
+    pop_pending_dispatch must return the stored prompt value (or None via
+    .get() access for backward-compatible old-format entries that lack the field).
+
+    All tests that call put with a prompt or that assert the 'prompt' key is
+    present in the popped dict will FAIL until the implementation is updated:
+    - put_pending_dispatch does not yet accept a 'prompt' keyword argument.
+    - pop_pending_dispatch does not yet include 'prompt' in its returned dict.
+    """
+
+    # A realistic dispatch JSON, the same text that would come from tool_input.prompt.
+    _SAMPLE_PROMPT = (
+        '{"agent_instance_id": "test-writer-tdd#6", '
+        '"run_id": "20260731T141500Z-e5a2", '
+        '"task_description": "Write tests for the hook logging fix."}'
+    )
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _pop(self, session_id=_SESSION_ID):
+        return runstate.pop_pending_dispatch(self.paths, _RUN_ID, session_id)
+
+    # --- put_pending_dispatch: prompt acceptance and persistence ---
+
+    def test_put_accepts_prompt_keyword_argument(self):
+        """put_pending_dispatch must accept a 'prompt' keyword argument without raising.
+
+        Currently FAILS with TypeError ('prompt' is not an accepted parameter).
+        """
+        try:
+            result = runstate.put_pending_dispatch(
+                self.paths, _RUN_ID, _SESSION_ID,
+                _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID,
+                prompt=self._SAMPLE_PROMPT,
+            )
+        except TypeError as exc:
+            self.fail(
+                "put_pending_dispatch does not accept 'prompt' keyword argument: "
+                f"{exc}"
+            )
+        self.assertTrue(result, "put_pending_dispatch must return True on success")
+
+    def test_put_persists_prompt_text_in_queue_entry(self):
+        """When a prompt is given, the JSONL queue entry must contain the full
+        prompt text under the 'prompt' key.
+
+        Currently FAILS because put_pending_dispatch does not accept prompt.
+        """
+        runstate.put_pending_dispatch(
+            self.paths, _RUN_ID, _SESSION_ID,
+            _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID,
+            prompt=self._SAMPLE_PROMPT,
+        )
+        entry_path = self.paths.pending_dispatch_entry(_RUN_ID, _SESSION_ID)
+        self.assertTrue(entry_path.exists(), "Queue file must exist after put")
+        line = entry_path.read_text("utf-8").strip().splitlines()[0]
+        entry = json.loads(line)
+        self.assertIn("prompt", entry,
+                      "Queue entry must contain 'prompt' when a prompt is given")
+        self.assertEqual(
+            self._SAMPLE_PROMPT, entry["prompt"],
+            "Stored 'prompt' value must exactly match what was passed to put",
+        )
+
+    def test_put_prompt_key_absent_from_entry_when_not_given(self):
+        """When no prompt is given (default None), the queue entry must not
+        contain a 'prompt' key (degrade-never-fabricate: no null fields).
+
+        This test exercises the current API, so it passes before the fix too,
+        but it specifies the invariant that must hold after the fix as well.
+        """
+        runstate.put_pending_dispatch(
+            self.paths, _RUN_ID, _SESSION_ID, _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID
+        )
+        entry_path = self.paths.pending_dispatch_entry(_RUN_ID, _SESSION_ID)
+        line = entry_path.read_text("utf-8").strip().splitlines()[0]
+        entry = json.loads(line)
+        self.assertNotIn(
+            "prompt", entry,
+            "Queue entry must NOT contain 'prompt' when none is given "
+            "(degrade-never-fabricate)",
+        )
+
+    # --- pop_pending_dispatch: prompt key in returned dict ---
+
+    def test_pop_includes_prompt_key_in_returned_dict(self):
+        """pop_pending_dispatch must always include a 'prompt' key in the
+        returned dict, even when the stored value is None.
+
+        Currently FAILS because the returned dict does not contain 'prompt'.
+        """
+        runstate.put_pending_dispatch(
+            self.paths, _RUN_ID, _SESSION_ID,
+            _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID,
+            prompt=self._SAMPLE_PROMPT,
+        )
+        result = self._pop()
+        self.assertIsNotNone(result)
+        self.assertIn(
+            "prompt", result,
+            "pop_pending_dispatch must include 'prompt' in the returned dict",
+        )
+
+    def test_pop_returns_correct_prompt_value(self):
+        """The 'prompt' value in the popped dict must match the stored text.
+
+        Currently FAILS because pop_pending_dispatch does not return 'prompt'.
+        """
+        runstate.put_pending_dispatch(
+            self.paths, _RUN_ID, _SESSION_ID,
+            _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID,
+            prompt=self._SAMPLE_PROMPT,
+        )
+        result = self._pop()
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            self._SAMPLE_PROMPT, result["prompt"],
+            "Popped 'prompt' must equal the value that was stored",
+        )
+
+    def test_pop_returns_none_for_prompt_key_when_entry_lacks_prompt_field(self):
+        """Backward compatibility: an old-format entry (no 'prompt' field) must
+        yield None for 'prompt' in the popped dict (via .get() access in pop).
+
+        The returned dict must still contain the 'prompt' key (set to None),
+        so callers can always access result.get('prompt') without a KeyError.
+
+        Currently FAILS because the returned dict does not contain 'prompt'.
+        """
+        # Write an old-format entry directly, without a 'prompt' field.
+        entry_path = self.paths.pending_dispatch_entry(_RUN_ID, _SESSION_ID)
+        entry_path.parent.mkdir(parents=True, exist_ok=True)
+        entry_path.write_text(
+            json.dumps({
+                "agent_instance_id": _AGENT_INSTANCE_ID,
+                "run_id": _EXTRACTED_RUN_ID,
+                "created_at": _fresh_timestamp(),
+            }) + "\n",
+            encoding="utf-8",
+        )
+        result = runstate.pop_pending_dispatch(self.paths, _RUN_ID, _SESSION_ID)
+        self.assertIsNotNone(result)
+        self.assertIn(
+            "prompt", result,
+            "pop_pending_dispatch must include 'prompt' key even for old-format entries",
+        )
+        self.assertIsNone(
+            result["prompt"],
+            "Old-format entry (no 'prompt' field) must yield None for 'prompt'",
+        )
+
+    def test_pop_returns_none_for_prompt_when_put_called_without_prompt(self):
+        """When put is called without a prompt argument, pop must include a
+        'prompt' key set to None in the returned dict.
+
+        Currently FAILS because the returned dict does not contain 'prompt'.
+        """
+        runstate.put_pending_dispatch(
+            self.paths, _RUN_ID, _SESSION_ID, _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID
+        )
+        result = self._pop()
+        self.assertIsNotNone(result)
+        self.assertIn("prompt", result)
+        self.assertIsNone(
+            result["prompt"],
+            "pop must return None for 'prompt' when put was called without one",
+        )
+
+    def test_prompt_does_not_affect_other_fields_in_popped_dict(self):
+        """Storing a prompt must not alter agent_instance_id or run_id in the
+        popped dict.
+
+        Currently FAILS because put does not accept prompt (TypeError).
+        """
+        runstate.put_pending_dispatch(
+            self.paths, _RUN_ID, _SESSION_ID,
+            _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID,
+            prompt=self._SAMPLE_PROMPT,
+        )
+        result = self._pop()
+        self.assertIsNotNone(result)
+        self.assertEqual(_AGENT_INSTANCE_ID, result["agent_instance_id"])
+        self.assertEqual(_EXTRACTED_RUN_ID, result["run_id"])
+
+
 class TestConcurrentPutPendingDispatch(unittest.TestCase):
     """Multiple concurrent put_pending_dispatch calls for the same session must not
     lose entries. Uses real subprocesses to exercise OS-level concurrent writes."""

@@ -1,7 +1,7 @@
-"""mosaic_logger_runstate.py — Run identity extraction and agent mapping store.
+"""mosaic_logger_runstate.py -- Run identity extraction and agent mapping store.
 
 Owns: run_id and agent_instance_id extraction from dispatch content,
-agent_id -> agent_instance_id mapping files.
+agent_id -> agent_instance_id mapping files, pending dispatch queue.
 """
 
 import datetime
@@ -79,10 +79,10 @@ _BARE_RE = re.compile(r'(?<![A-Za-z0-9_.-])([A-Za-z][A-Za-z0-9_.-]*#[0-9]+)')
 
 
 def extract_instance_id(prompt: "str | None") -> "str | None":
-    """Extract a MOSAIC {AgentName}#{Number} instance ID from dispatched prompt text.
+    """Extract a MOSAIC {AgentName}#{Number} instance ID from text.
 
     Matching order (stops at first hit):
-      1. Structured: agent_instance_id key followed by the value (normal dispatch case).
+      1. Structured: agent_instance_id key followed by the value.
       2. Bare: earliest {Name}#{Number} occurrence in the text.
     Returns None when no confident match exists. Never raises.
     """
@@ -104,25 +104,23 @@ def extract_instance_id(prompt: "str | None") -> "str | None":
 # run_id extraction
 # ---------------------------------------------------------------------------
 
-# Structured match: run_id key (with optional quotes/colon/equals) followed
-# by a value matching the {YYYYMMDD}T{HHMMSS}Z-{4hex} format.
+# Structured match: run_id key followed by a value matching the format.
 _RUN_ID_STRUCTURED_RE = re.compile(
     r'(?<![A-Za-z0-9_])run_id\s*["\']?\s*[:=]\s*["\']?\s*'
     r'([0-9]{8}T[0-9]{6}Z-[0-9a-f]{4})'
 )
 
-# Bare match: {YYYYMMDD}T{HHMMSS}Z-{4hex} not immediately preceded by alnum/.-_
+# Bare match: {YYYYMMDD}T{HHMMSS}Z-{4hex}
 _RUN_ID_BARE_RE = re.compile(
     r'(?<![A-Za-z0-9_.-])([0-9]{8}T[0-9]{6}Z-[0-9a-f]{4})'
 )
 
 
 def extract_run_id(prompt: "str | None") -> "str | None":
-    """Extract a MOSAIC run_id from dispatched prompt text.
+    """Extract a MOSAIC run_id from text.
 
     Matching order (stops at first hit):
-      1. Structured: run_id key followed by a value matching the format
-         {YYYYMMDD}T{HHMMSS}Z-{4 lowercase hex chars}.
+      1. Structured: run_id key followed by a value matching the format.
       2. Bare: earliest occurrence of the format pattern in the text.
     Returns None when no confident match exists. Never raises.
     """
@@ -157,21 +155,8 @@ def put_pending_dispatch(
 ) -> bool:
     """Persist a pending dispatch entry for the given session.
 
-    Appends a single JSON line to a per-session JSONL file keyed by
-    session_id. Uses OS-appropriate locking to ensure concurrent writers
-    do not overwrite each other:
-
-    - Windows: opens the file for read+write (O_RDWR|O_CREAT), acquires
-      an advisory byte-range lock on byte 0 via msvcrt.locking (LK_LOCK
-      retries for up to 10 seconds), seeks to end, writes the encoded
-      line, then releases the lock. Python's O_APPEND on Windows is
-      implemented by the MSVCRT CRT with a non-atomic seek+write, so
-      explicit locking is required.
-    - POSIX: opens with O_WRONLY|O_CREAT|O_APPEND and uses a single
-      os.write() call, which the kernel guarantees is atomic for writes
-      under PIPE_BUF (~4 KB). JSON lines for these entries are well
-      within that bound.
-
+    Appends a single JSON line to a per-session JSONL file keyed by session_id.
+    Uses OS-appropriate locking for concurrent safety.
     Returns True on success. Never raises.
     """
     try:
@@ -221,11 +206,9 @@ def pop_pending_dispatch(
 ) -> "dict | None":
     """Pop and return the oldest non-stale pending dispatch for the given session.
 
-    Reads the JSONL file, evicts leading stale entries (older than
-    max_age_seconds), then pops the first remaining entry. Atomically
-    replaces the file with the remaining lines. Returns None when the
-    queue is empty, the file is absent, or any I/O/parse error occurs.
-    Never raises.
+    Evicts leading stale entries, pops the first remaining one. Atomically
+    replaces the file with the remaining lines. Returns None when the queue
+    is empty, the file is absent, or any I/O/parse error occurs. Never raises.
     """
     try:
         path = paths.pending_dispatch_entry(path_run_id, session_id)
@@ -240,7 +223,6 @@ def pop_pending_dispatch(
 
         now = datetime.datetime.now(datetime.timezone.utc)
 
-        # Parse all lines -- any corrupt line causes the whole pop to fail safely.
         parsed = []
         for ln in raw_lines:
             try:
@@ -261,17 +243,14 @@ def pop_pending_dispatch(
                     first_fresh = i + 1
                     continue
             except Exception:
-                # Unparseable timestamp -- treat as stale.
                 first_fresh = i + 1
                 continue
-            break  # Found first non-stale entry.
+            break
 
         if first_fresh >= len(parsed):
-            # All entries are stale -- write empty file.
             core.atomic_replace(path, b"")
             return None
 
-        # Pop the first non-stale entry.
         popped_entry = parsed[first_fresh][1]
         remaining_lines = [ln for ln, _ in parsed[first_fresh + 1:]]
 
@@ -297,10 +276,7 @@ def put_agent_mapping(paths: "core.LogPaths",
                       agent_instance_id: str,
                       agent_type: "str | None") -> bool:
     """Persist the agent_id -> agent_instance_id mapping via atomic replace.
-
-    One file per agent_id; parallel SubagentStart processes never contend.
-    Returns True on success. Never raises.
-    """
+    Returns True on success. Never raises."""
     try:
         now = datetime.datetime.now(datetime.timezone.utc)
         data = {
@@ -340,7 +316,7 @@ def resolve_invocation_id(paths: "core.LogPaths",
     """Return the agent_instance_id for routing a subagent-scoped event.
 
     Falls back to the deterministic 'unmapped_{agent_id}' string when no
-    mapping exists. Never returns None. Never misattributes to the orchestrator.
+    mapping exists. Never returns None.
     """
     mapping = get_agent_mapping(paths, run_id, agent_id)
     if mapping is not None:

@@ -30,16 +30,19 @@ def resolve_call_id(ctx: "core.HookContext") -> str:
 
 
 def handle_pre_tool_use(ctx: "core.HookContext") -> None:
-    """Emit tool_call_start. Additionally, when tool_name is 'Agent',
+    """Emit tool_call_start. Additionally, when tool_name is 'Agent' or 'Task',
     extract agent_instance_id and run_id from tool_input.prompt and
     persist a pending dispatch for the current session_id.
+
+    Both 'Agent' and 'Task' tool names are accepted because Claude Code may
+    dispatch subagents under either name depending on the harness version.
 
     The pending-dispatch write is best-effort; failure does not prevent
     the tool_call_start event from being emitted. Never raises.
     """
-    # Capture pending dispatch for Agent tool invocations.
+    # Capture pending dispatch for Agent/Task tool invocations.
     tool_name = ctx.field("tool_name")
-    if tool_name == "Agent":
+    if tool_name in ("Agent", "Task"):
         try:
             tool_input = ctx.field("tool_input")
             prompt = None
@@ -55,6 +58,7 @@ def handle_pre_tool_use(ctx: "core.HookContext") -> None:
                         ctx.session_id,
                         agent_instance_id,
                         extracted_run_id,
+                        prompt=prompt,
                     )
         except Exception:
             pass  # Never let dispatch capture suppress the tool_call_start event.

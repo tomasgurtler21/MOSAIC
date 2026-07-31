@@ -925,5 +925,196 @@ class TestMissingMappingDegradation(unittest.TestCase):
                       "Fallback ID must contain agent_id for traceability")
 
 
+# ---------------------------------------------------------------------------
+# Tool-name gate: both "Agent" and "Task" must trigger dispatch capture
+# ---------------------------------------------------------------------------
+
+class TestPreToolUseToolNameGate(unittest.TestCase):
+    """handle_pre_tool_use must capture a pending dispatch for tool_name='Task'
+    as well as tool_name='Agent'. All other tool names must leave the
+    pending-dispatch queue untouched.
+
+    Tests that verify 'Task' capture will FAIL until the gate is widened from
+    `if tool_name == 'Agent':` to `if tool_name in ('Agent', 'Task'):`.
+    """
+
+    # A realistic dispatch JSON containing an extractable agent_instance_id and run_id.
+    _DISPATCH_PROMPT = (
+        '{"agent_instance_id": "test-writer-tdd#6", '
+        '"run_id": "20260731T141500Z-e5a2", '
+        '"task_description": "Write tests."}'
+    )
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _dispatch_tool_ctx(self, tool_name, tool_use_id="tu-gate-001"):
+        """Build a PreToolUse context carrying the dispatch prompt in tool_input."""
+        return _make_ctx(
+            self.tmp.name, "PreToolUse",
+            run_id=None,
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            tool_input={"prompt": self._DISPATCH_PROMPT},
+        )
+
+    def _read_queue(self):
+        """Read all pending-dispatch queue entries for the default session."""
+        entry_path = self.paths.pending_dispatch_entry("unknown-run", _SESSION_ID)
+        if not entry_path.exists():
+            return []
+        return [
+            json.loads(ln)
+            for ln in entry_path.read_text("utf-8").splitlines()
+            if ln.strip()
+        ]
+
+    # --- Task capture (RED until gate is widened) ---
+
+    def test_task_tool_name_creates_pending_dispatch_entry(self):
+        """Dispatching with tool_name='Task' must create a pending dispatch entry.
+
+        Currently FAILS because the gate only matches tool_name='Agent'.
+        After the fix the gate must accept both 'Agent' and 'Task'.
+        """
+        ctx = self._dispatch_tool_ctx("Task")
+        tools.handle_pre_tool_use(ctx)
+        entries = self._read_queue()
+        self.assertEqual(
+            1, len(entries),
+            "tool_name='Task' must create exactly one pending dispatch entry",
+        )
+
+    def test_task_tool_name_extracts_agent_instance_id_from_prompt(self):
+        """The pending dispatch created for tool_name='Task' must carry the
+        agent_instance_id extracted from tool_input.prompt.
+
+        Currently FAILS because the 'Task' branch is not entered.
+        """
+        ctx = self._dispatch_tool_ctx("Task")
+        tools.handle_pre_tool_use(ctx)
+        entries = self._read_queue()
+        self.assertEqual(1, len(entries))
+        self.assertEqual(
+            "test-writer-tdd#6", entries[0]["agent_instance_id"],
+            "agent_instance_id must be extracted from the dispatch prompt",
+        )
+
+    def test_task_tool_name_extracts_run_id_from_prompt(self):
+        """The pending dispatch created for tool_name='Task' must carry the
+        run_id extracted from tool_input.prompt.
+
+        Currently FAILS because the 'Task' branch is not entered.
+        """
+        ctx = self._dispatch_tool_ctx("Task")
+        tools.handle_pre_tool_use(ctx)
+        entries = self._read_queue()
+        self.assertEqual(1, len(entries))
+        self.assertEqual(
+            "20260731T141500Z-e5a2", entries[0]["run_id"],
+            "run_id must be extracted from the dispatch prompt",
+        )
+
+    # --- Regression guard: 'Agent' must still work ---
+
+    def test_agent_tool_name_still_creates_pending_dispatch(self):
+        """tool_name='Agent' must still create a pending dispatch (regression guard)."""
+        ctx = self._dispatch_tool_ctx("Agent")
+        tools.handle_pre_tool_use(ctx)
+        entries = self._read_queue()
+        self.assertEqual(
+            1, len(entries),
+            "tool_name='Agent' must still create a pending dispatch entry",
+        )
+
+    # --- Gate must not fire for non-dispatch tool names ---
+
+    def test_read_tool_name_does_not_create_pending_dispatch(self):
+        """tool_name='Read' must not create any pending dispatch entry."""
+        ctx = _make_ctx(
+            self.tmp.name, "PreToolUse",
+            run_id=None,
+            tool_name="Read",
+            tool_input={"file_path": "/some/file.py"},
+        )
+        tools.handle_pre_tool_use(ctx)
+        entries = self._read_queue()
+        self.assertEqual(
+            0, len(entries),
+            "tool_name='Read' must never create a pending dispatch",
+        )
+
+    def test_bash_tool_name_does_not_create_pending_dispatch(self):
+        """tool_name='Bash' must not create any pending dispatch entry."""
+        ctx = _make_ctx(
+            self.tmp.name, "PreToolUse",
+            run_id=None,
+            tool_name="Bash",
+            tool_input={"command": "echo hello"},
+        )
+        tools.handle_pre_tool_use(ctx)
+        entries = self._read_queue()
+        self.assertEqual(
+            0, len(entries),
+            "tool_name='Bash' must never create a pending dispatch",
+        )
+
+    def test_write_tool_name_does_not_create_pending_dispatch(self):
+        """tool_name='Write' must not create any pending dispatch entry."""
+        ctx = _make_ctx(
+            self.tmp.name, "PreToolUse",
+            run_id=None,
+            tool_name="Write",
+            tool_input={"file_path": "/f", "content": "x"},
+        )
+        tools.handle_pre_tool_use(ctx)
+        entries = self._read_queue()
+        self.assertEqual(
+            0, len(entries),
+            "tool_name='Write' must never create a pending dispatch",
+        )
+
+    # --- Verify tool_call_start is always emitted regardless of gate ---
+
+    def test_task_tool_name_still_emits_tool_call_start(self):
+        """tool_call_start must always be emitted, even when tool_name='Task'.
+
+        The dispatch capture branch must never suppress the primary event.
+        """
+        ctx = _make_ctx(
+            self.tmp.name, "PreToolUse",
+            run_id=None,
+            tool_name="Task",
+            tool_use_id="tu-task-event-check",
+            tool_input={"prompt": self._DISPATCH_PROMPT},
+        )
+        tools.handle_pre_tool_use(ctx)
+        orc_path = self.paths.orchestrator_events("unknown-run")
+        self.assertTrue(
+            orc_path.exists(),
+            "tool_call_start must be written for tool_name='Task'",
+        )
+        events = [
+            json.loads(ln)
+            for ln in orc_path.read_text("utf-8").splitlines()
+            if ln.strip()
+        ]
+        event_names = [e["event"] for e in events]
+        self.assertIn("tool_call_start", event_names,
+                      "tool_call_start must appear in orchestrator events for 'Task' tool")
+
+    def test_never_raises_for_task_tool(self):
+        """handle_pre_tool_use must never raise when tool_name='Task'."""
+        ctx = self._dispatch_tool_ctx("Task")
+        try:
+            tools.handle_pre_tool_use(ctx)
+        except Exception as exc:
+            self.fail(f"handle_pre_tool_use raised for tool_name='Task': {exc}")
+
+
 if __name__ == "__main__":
     unittest.main()

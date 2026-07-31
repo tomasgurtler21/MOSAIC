@@ -977,7 +977,15 @@ class TestFieldLevelDegradation(unittest.TestCase):
         self.assertGreater(len(agent_instance_id), 0)
 
     def test_absent_agent_prompt_omits_prompt_field_from_invocation_start(self):
-        """No agent_prompt → prompt field absent from invocation_start, not null."""
+        """No pending dispatch → prompt field absent from invocation_start, not null.
+
+        The scenario dispatches SubagentStart directly without a preceding
+        PreToolUse that would populate the pending-dispatch queue. After the fix,
+        the prompt source is the pending dispatch (not agent_prompt), so with no
+        prior dispatch the prompt field is correctly absent from invocation_start.
+        The assertions remain accurate for the new code path: pending dispatch
+        absent → no prompt → prompt key absent from invocation_start.
+        """
         agent_id = "agt-noprompt-002"
         self._dispatch({
             "hook_event_name": "SessionStart",

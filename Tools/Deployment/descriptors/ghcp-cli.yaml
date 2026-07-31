@@ -98,7 +98,8 @@ paths:
     supported: true
     project: ".github/skills"
   hooks:
-    supported: false
+    supported: true
+    project: ".github/hooks"
 
 extensions:
   agent: ".agent.md"
@@ -125,4 +126,5 @@ frontmatter:
     - "user-invocable"
 
 hooks:
-  supported: false
+  supported: true
+  variant_key: "ghcp-cli"

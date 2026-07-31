@@ -8,6 +8,7 @@ sanitization, and the guarantee that no invocation event reaches the
 orchestrator event stream.
 """
 
+import datetime
 import json
 import os
 import pathlib
@@ -1474,6 +1475,348 @@ class TestNoInvocationEventToOrchestratorStream(unittest.TestCase):
         """HANDLERS dict must include both SubagentStart and SubagentStop."""
         self.assertIn("SubagentStart", invocation.HANDLERS)
         self.assertIn("SubagentStop", invocation.HANDLERS)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for prompt-threading tests
+# ---------------------------------------------------------------------------
+
+def _iso_ms_now() -> str:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    ms = now.microsecond // 1000
+    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ms:03d}Z"
+
+
+def _write_dispatch_entry_for_prompt_tests(
+    paths, run_id: str, session_id: str,
+    agent_instance_id: str, prompt=None, extracted_run_id=None
+) -> None:
+    """Write a raw pending-dispatch JSONL entry directly into the queue file.
+
+    This bypasses put_pending_dispatch so the prompt-threading tests can inject
+    a dispatch entry containing a 'prompt' field without depending on the
+    put_pending_dispatch API accepting a prompt keyword argument (I1.2).
+
+    When prompt is given it is included in the entry. When prompt is None the
+    'prompt' key is omitted, simulating an old-format pre-fix entry.
+    """
+    entry_path = paths.pending_dispatch_entry(run_id, session_id)
+    entry_path.parent.mkdir(parents=True, exist_ok=True)
+    entry: dict = {
+        "agent_instance_id": agent_instance_id,
+        "run_id": extracted_run_id,
+        "created_at": _iso_ms_now(),
+    }
+    if prompt is not None:
+        entry["prompt"] = prompt
+    with open(entry_path, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Prompt present in pending dispatch — expected to fail until fix is applied
+# ---------------------------------------------------------------------------
+
+_PROMPT_THREADING_SESSION = "test-session-prompt-thread"
+_PROMPT_THREADING_AGENT_ID = "harness-prompt-thread-001"
+_PROMPT_THREADING_INSTANCE_ID = "test-writer-tdd#6"
+_PROMPT_THREADING_TEXT = (
+    '{"agent_instance_id": "test-writer-tdd#6", '
+    '"run_id": "20260731T141500Z-e5a2", '
+    '"task_description": "Write tests for the hook logging fix."}'
+)
+
+
+class TestSubagentStartPromptFromDispatch(unittest.TestCase):
+    """When the pending dispatch carries a prompt, handle_subagent_start must:
+      (a) include the prompt text in the invocation_start event's 'prompt' field;
+      (b) emit a turn event with role='user' and the prompt as content;
+      (c) pass the prompt to render_input so 01_input.md contains '## Prompt'.
+
+    All three positive tests will FAIL until both fixes are in place:
+      1. pop_pending_dispatch returns 'prompt' from the stored entry.
+      2. handle_subagent_start reads the prompt from dispatch.get('prompt')
+         instead of ctx.field('agent_prompt').
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _setup_dispatch(self):
+        """Write a dispatch entry carrying the test prompt into the unknown-run bucket."""
+        _write_dispatch_entry_for_prompt_tests(
+            self.paths, "unknown-run", _PROMPT_THREADING_SESSION,
+            _PROMPT_THREADING_INSTANCE_ID, prompt=_PROMPT_THREADING_TEXT,
+        )
+
+    def _start_ctx(self, agent_id=_PROMPT_THREADING_AGENT_ID):
+        """Build a SubagentStart context with run_id=None (routes to unknown-run bucket)."""
+        payload = {
+            "hook_event_name": "SubagentStart",
+            "session_id": _PROMPT_THREADING_SESSION,
+            "agent_id": agent_id,
+        }
+        workspace_root = pathlib.Path(self.tmp.name)
+        ctx = core.HookContext(payload, workspace_root, self.paths, _TS)
+        ctx.run_id = None
+        return ctx
+
+    def _invocation_events_from_run(self, run_id="unknown-run"):
+        run_root = self.paths.run_root(run_id)
+        if not run_root.exists():
+            return []
+        for inv_dir in run_root.iterdir():
+            if inv_dir.is_dir() and not inv_dir.name.startswith("."):
+                events_file = inv_dir / "03_events.jsonl"
+                if events_file.exists():
+                    return _read_jsonl(events_file)
+        return []
+
+    def _input_md_text(self, run_id="unknown-run"):
+        run_root = self.paths.run_root(run_id)
+        if not run_root.exists():
+            return ""
+        for inv_dir in run_root.iterdir():
+            if inv_dir.is_dir() and not inv_dir.name.startswith("."):
+                input_md = inv_dir / "01_input.md"
+                if input_md.exists():
+                    return input_md.read_text("utf-8")
+        return ""
+
+    def test_invocation_start_includes_prompt_from_pending_dispatch(self):
+        """When the pending dispatch carries a prompt, invocation_start must include
+        the prompt text in its 'prompt' field.
+
+        Currently FAILS: pop_pending_dispatch does not return 'prompt', and
+        handle_subagent_start reads agent_prompt from the payload (absent here)
+        rather than from the dispatch.
+        """
+        self._setup_dispatch()
+        invocation.handle_subagent_start(self._start_ctx())
+        events = self._invocation_events_from_run()
+        inv_start = next(
+            (e for e in events if e.get("event") == "invocation_start"), None
+        )
+        self.assertIsNotNone(inv_start, "invocation_start event must be emitted")
+        self.assertIn(
+            "prompt", inv_start,
+            "invocation_start must include 'prompt' when the dispatch carries one",
+        )
+        self.assertEqual(
+            _PROMPT_THREADING_TEXT, inv_start["prompt"],
+            "prompt in invocation_start must match the dispatch's prompt text exactly",
+        )
+
+    def test_user_turn_emitted_with_dispatch_prompt_as_content(self):
+        """A turn event with role='user' must be emitted carrying the dispatch prompt
+        as content when the pending dispatch includes a prompt.
+
+        Currently FAILS: agent_prompt is absent from the payload, so the current
+        implementation emits no user turn.
+        """
+        self._setup_dispatch()
+        invocation.handle_subagent_start(self._start_ctx())
+        events = self._invocation_events_from_run()
+        user_turns = [
+            e for e in events
+            if e.get("event") == "turn" and e.get("role") == "user"
+        ]
+        self.assertEqual(
+            1, len(user_turns),
+            "Exactly one user turn must be emitted when the dispatch carries a prompt",
+        )
+        self.assertEqual(
+            _PROMPT_THREADING_TEXT, user_turns[0].get("content"),
+            "User turn content must equal the dispatch's prompt text",
+        )
+
+    def test_input_artifact_has_prompt_section_when_dispatch_carries_prompt(self):
+        """01_input.md must contain a '## Prompt' section followed by the prompt text
+        when the pending dispatch includes a prompt.
+
+        Currently FAILS: render_input is called with agent_prompt=None (absent from
+        the payload), so no '## Prompt' section is rendered.
+        """
+        self._setup_dispatch()
+        invocation.handle_subagent_start(self._start_ctx())
+        text = self._input_md_text()
+        self.assertIn(
+            "## Prompt", text,
+            "01_input.md must contain a '## Prompt' section when dispatch has a prompt",
+        )
+        self.assertIn(
+            _PROMPT_THREADING_TEXT, text,
+            "01_input.md must contain the full prompt text from the dispatch",
+        )
+
+    def test_never_raises_when_dispatch_carries_prompt(self):
+        """handle_subagent_start must never raise when the dispatch carries a prompt."""
+        self._setup_dispatch()
+        ctx = self._start_ctx()
+        try:
+            invocation.handle_subagent_start(ctx)
+        except Exception as exc:
+            self.fail(
+                f"handle_subagent_start raised when dispatch carries prompt: {exc}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Degrade-never-fabricate: prompt absent → no prompt field, no user turn
+# ---------------------------------------------------------------------------
+
+class TestSubagentStartPromptDegradeNeverFabricate(unittest.TestCase):
+    """When no pending dispatch exists, or the dispatch has no 'prompt' field,
+    the degrade-never-fabricate convention must be preserved:
+      - 'prompt' is absent from invocation_start (not null, not empty string).
+      - No user turn event is emitted.
+      - 01_input.md has no '## Prompt' section.
+
+    These tests serve as a regression guard: the prompt-threading fix must not
+    accidentally introduce prompt fabrication when no prompt is available.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    _DEGRADE_SESSION = "test-session-degrade-inv"
+
+    def _start_ctx(self, agent_id, session_id=None):
+        session_id = session_id or self._DEGRADE_SESSION
+        payload = {
+            "hook_event_name": "SubagentStart",
+            "session_id": session_id,
+            "agent_id": agent_id,
+        }
+        workspace_root = pathlib.Path(self.tmp.name)
+        ctx = core.HookContext(payload, workspace_root, self.paths, _TS)
+        ctx.run_id = None
+        return ctx
+
+    def _invocation_events(self, run_id="unknown-run"):
+        run_root = self.paths.run_root(run_id)
+        if not run_root.exists():
+            return []
+        for inv_dir in run_root.iterdir():
+            if inv_dir.is_dir() and not inv_dir.name.startswith("."):
+                events_file = inv_dir / "03_events.jsonl"
+                if events_file.exists():
+                    return _read_jsonl(events_file)
+        return []
+
+    def _input_md_text(self, run_id="unknown-run"):
+        run_root = self.paths.run_root(run_id)
+        if not run_root.exists():
+            return ""
+        for inv_dir in run_root.iterdir():
+            if inv_dir.is_dir() and not inv_dir.name.startswith("."):
+                input_md = inv_dir / "01_input.md"
+                if input_md.exists():
+                    return input_md.read_text("utf-8")
+        return ""
+
+    # --- No pending dispatch at all ---
+
+    def test_prompt_absent_from_invocation_start_when_no_pending_dispatch(self):
+        """When no pending dispatch exists, 'prompt' must be absent from
+        invocation_start (not null, not any fabricated value)."""
+        ctx = self._start_ctx("harness-dg-001")
+        invocation.handle_subagent_start(ctx)
+        events = self._invocation_events()
+        inv_start = next(
+            (e for e in events if e.get("event") == "invocation_start"), None
+        )
+        self.assertIsNotNone(inv_start, "invocation_start must be emitted")
+        self.assertNotIn(
+            "prompt", inv_start,
+            "prompt must be absent when no pending dispatch exists",
+        )
+
+    def test_no_user_turn_emitted_when_no_pending_dispatch(self):
+        """When no pending dispatch exists, no user turn must be emitted."""
+        ctx = self._start_ctx("harness-dg-002")
+        invocation.handle_subagent_start(ctx)
+        events = self._invocation_events()
+        user_turns = [
+            e for e in events
+            if e.get("event") == "turn" and e.get("role") == "user"
+        ]
+        self.assertEqual(
+            0, len(user_turns),
+            "No user turn must be emitted when no pending dispatch exists",
+        )
+
+    def test_no_prompt_section_in_input_artifact_when_no_pending_dispatch(self):
+        """01_input.md must not contain '## Prompt' when no dispatch exists."""
+        ctx = self._start_ctx("harness-dg-003")
+        invocation.handle_subagent_start(ctx)
+        text = self._input_md_text()
+        self.assertNotIn(
+            "## Prompt", text,
+            "01_input.md must not have '## Prompt' when no pending dispatch exists",
+        )
+
+    # --- Dispatch exists but has no prompt field (backward-compatible old format) ---
+
+    def test_prompt_absent_from_invocation_start_when_dispatch_has_no_prompt_field(self):
+        """When the dispatch entry has no 'prompt' field (old-format entry), 'prompt'
+        must be absent from invocation_start (backward-compatible degrade path)."""
+        _write_dispatch_entry_for_prompt_tests(
+            self.paths, "unknown-run", self._DEGRADE_SESSION,
+            "unknown-agent",
+            # prompt omitted -> old-format entry
+        )
+        ctx = self._start_ctx("harness-dg-004", session_id=self._DEGRADE_SESSION)
+        invocation.handle_subagent_start(ctx)
+        events = self._invocation_events()
+        inv_start = next(
+            (e for e in events if e.get("event") == "invocation_start"), None
+        )
+        self.assertIsNotNone(inv_start)
+        self.assertNotIn(
+            "prompt", inv_start,
+            "prompt must be absent when the dispatch entry has no 'prompt' field",
+        )
+
+    def test_no_user_turn_when_dispatch_has_no_prompt_field(self):
+        """No user turn must be emitted when the dispatch entry has no 'prompt' field."""
+        _write_dispatch_entry_for_prompt_tests(
+            self.paths, "unknown-run", self._DEGRADE_SESSION,
+            "unknown-agent",
+        )
+        ctx = self._start_ctx("harness-dg-005", session_id=self._DEGRADE_SESSION)
+        invocation.handle_subagent_start(ctx)
+        events = self._invocation_events()
+        user_turns = [
+            e for e in events
+            if e.get("event") == "turn" and e.get("role") == "user"
+        ]
+        self.assertEqual(
+            0, len(user_turns),
+            "No user turn must be emitted when dispatch has no 'prompt' field",
+        )
+
+    def test_no_prompt_section_in_input_artifact_when_dispatch_has_no_prompt_field(self):
+        """01_input.md must not have '## Prompt' when the dispatch entry has no prompt."""
+        _write_dispatch_entry_for_prompt_tests(
+            self.paths, "unknown-run", self._DEGRADE_SESSION,
+            "unknown-agent",
+        )
+        ctx = self._start_ctx("harness-dg-006", session_id=self._DEGRADE_SESSION)
+        invocation.handle_subagent_start(ctx)
+        text = self._input_md_text()
+        self.assertNotIn(
+            "## Prompt", text,
+            "01_input.md must not have '## Prompt' when dispatch has no 'prompt' field",
+        )
 
 
 if __name__ == "__main__":

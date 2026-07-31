@@ -170,9 +170,9 @@ func TestHook_Variant_VscodeGhcp_IsSupported(t *testing.T) {
 	}
 }
 
-// TestHook_Variant_GhcpCli_IsNotSupported verifies that the ghcp-cli variant is marked
-// as not supported.
-func TestHook_Variant_GhcpCli_IsNotSupported(t *testing.T) {
+// TestHook_Variant_GhcpCli_IsSupported verifies that the ghcp-cli variant is marked
+// as supported.
+func TestHook_Variant_GhcpCli_IsSupported(t *testing.T) {
 	cat := loadRealCatalog(t)
 	h, _ := cat.Hook("mosaic-logger")
 
@@ -180,8 +180,8 @@ func TestHook_Variant_GhcpCli_IsNotSupported(t *testing.T) {
 	if !ok {
 		t.Fatal("mosaic-logger Variants[\"ghcp-cli\"]: not found")
 	}
-	if v.Supported {
-		t.Error("ghcp-cli variant Supported = true; expected false (hook.yaml declares supported: false)")
+	if !v.Supported {
+		t.Error("ghcp-cli variant Supported = false; expected true (hook.yaml declares supported: true)")
 	}
 }
 
@@ -378,9 +378,10 @@ func TestHook_Variant_VscodeGhcp_HasOwnFile(t *testing.T) {
 	}
 }
 
-// TestHook_Variant_GhcpCli_Files_Empty verifies that the unsupported ghcp-cli variant
-// has no files (an unsupported variant has no deployable content).
-func TestHook_Variant_GhcpCli_Files_Empty(t *testing.T) {
+// TestHook_Variant_GhcpCli_Files_TenFiles verifies that the ghcp-cli variant has
+// exactly 10 files: the 9 Python adapter modules plus hook.yaml.
+func TestHook_Variant_GhcpCli_Files_TenFiles(t *testing.T) {
+	const wantCount = 10
 	cat := loadRealCatalog(t)
 	h, _ := cat.Hook("mosaic-logger")
 
@@ -388,9 +389,71 @@ func TestHook_Variant_GhcpCli_Files_Empty(t *testing.T) {
 	if !ok {
 		t.Fatal("mosaic-logger Variants[\"ghcp-cli\"]: not found")
 	}
-	if len(v.Files) != 0 {
-		t.Errorf("unsupported ghcp-cli variant has %d files; expected 0", len(v.Files))
+	if len(v.Files) != wantCount {
+		var names []string
+		for _, f := range v.Files {
+			names = append(names, f.TargetName)
+		}
+		t.Errorf("ghcp-cli Files count = %d, want %d: %v", len(v.Files), wantCount, names)
 	}
+}
+
+// TestHook_Variant_GhcpCli_Files_TargetNames verifies the exact target file names for
+// the ghcp-cli variant: the 9 Python adapter modules plus the self-deployed hook.yaml.
+func TestHook_Variant_GhcpCli_Files_TargetNames(t *testing.T) {
+	cat := loadRealCatalog(t)
+	h, _ := cat.Hook("mosaic-logger")
+
+	v, ok := h.Variants["ghcp-cli"]
+	if !ok {
+		t.Fatal("mosaic-logger Variants[\"ghcp-cli\"]: not found")
+	}
+
+	wantTargets := map[string]bool{
+		"mosaic_logger.py":                     true,
+		"mosaic_logger_core.py":                true,
+		"mosaic_logger_runstate.py":            true,
+		"mosaic_logger_export.py":              true,
+		"mosaic_logger_transcript.py":          true,
+		"mosaic_logger_handlers_session.py":    true,
+		"mosaic_logger_handlers_invocation.py": true,
+		"mosaic_logger_handlers_tools.py":      true,
+		"mosaic_logger_artifacts.py":           true,
+		"hook.yaml":                            true,
+	}
+	for _, f := range v.Files {
+		if !wantTargets[f.TargetName] {
+			t.Errorf("ghcp-cli variant has unexpected target file %q", f.TargetName)
+		}
+		delete(wantTargets, f.TargetName)
+	}
+	for remaining := range wantTargets {
+		t.Errorf("ghcp-cli variant is missing expected target file %q", remaining)
+	}
+}
+
+// TestHook_Variant_GhcpCli_RegistrationSteps_HasSettingsFragment verifies that the
+// ghcp-cli variant has a settings-fragment registration step with a non-empty fragment.
+func TestHook_Variant_GhcpCli_RegistrationSteps_HasSettingsFragment(t *testing.T) {
+	cat := loadRealCatalog(t)
+	h, _ := cat.Hook("mosaic-logger")
+
+	v, ok := h.Variants["ghcp-cli"]
+	if !ok {
+		t.Fatal("mosaic-logger Variants[\"ghcp-cli\"]: not found")
+	}
+	for _, step := range v.Registration {
+		if step.ID == "settings-fragment" {
+			if !step.Performable {
+				t.Error("ghcp-cli settings-fragment step Performable = false; expected true")
+			}
+			if step.Fragment == "" {
+				t.Error("ghcp-cli settings-fragment step Fragment is empty; expected hook JSON")
+			}
+			return
+		}
+	}
+	t.Error("ghcp-cli variant missing expected registration step with id \"settings-fragment\"")
 }
 
 // ---------------------------------------------------------------------------

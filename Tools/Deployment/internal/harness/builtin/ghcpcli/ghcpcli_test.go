@@ -23,14 +23,15 @@ package ghcpcli_test
 //   Deployment path resolution:
 //   - Project-scoped agent path is ".github/agents/<key>.agent.md"
 //   - Project-scoped skill path is ".github/skills/<key>/SKILL.md" (key subdirectory prevents collisions)
-//   - Hook artifact kind returns ErrArtifactUnsupported (GHCP CLI has no hook support)
+//   - Hook artifact kind resolves via descriptor to ".github/hooks/<filename>"
 //   - Any non-project scope returns domain.ErrUnsupportedScope (via the shared contracttest universal invariant)
 //
-//   No-hook-support:
-//   - HookPlan always returns Supported: false regardless of bundle content.
-//   - HookPlan.Reason is non-empty when Supported is false.
-//   - HookPlan.Files is empty when Supported is false.
-//   - TargetPath for ArtifactHook returns an error wrapping ErrArtifactUnsupported.
+//   Hook support:
+//   - HookPlan returns Supported: true for any bundle (including an empty bundle with no variants).
+//   - HookPlan.Reason is empty when Supported is true.
+//   - HookPlan.TargetDir is ".github/hooks" when Supported is true.
+//   - HookPlan.Files contains the ghcp-cli variant files when the bundle carries a "ghcp-cli" variant.
+//   - TargetPath for ArtifactHook resolves via descriptor; returns a path under ".github/hooks/".
 //
 //   Harness-level injections:
 //   - HarnessConstraints is filled with the parallel tool calls instruction text.
@@ -43,7 +44,6 @@ package ghcpcli_test
 
 import (
 	"bytes"
-	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -480,68 +480,139 @@ func TestTargetPath_GHCP_SkillProjectScope(t *testing.T) {
 	}
 }
 
-// TestTargetPath_GHCP_HookReturnsUnsupported verifies that requesting a hook target path
-// returns an error wrapping ErrArtifactUnsupported (GHCP CLI has no hook support).
-func TestTargetPath_GHCP_HookReturnsUnsupported(t *testing.T) {
+// TestTargetPath_GHCP_HookResolvesViaDescriptor verifies that requesting a hook target path
+// succeeds and returns a path under ".github/hooks/" (resolves via the descriptor's hooks.project setting).
+func TestTargetPath_GHCP_HookResolvesViaDescriptor(t *testing.T) {
 	mod := newModule(t)
-	_, err := mod.TargetPath(domain.TargetPathRequest{
+	got, err := mod.TargetPath(domain.TargetPathRequest{
 		Kind:     domain.ArtifactHook,
 		Key:      "subagent-logger",
 		FileName: "hook.sh",
 		Scope:    domain.ScopeProject,
 		GOOS:     "linux",
 	})
-	if err == nil {
-		t.Fatal("TargetPath for ArtifactHook returned nil error; want ErrArtifactUnsupported")
+	if err != nil {
+		t.Fatalf("TargetPath for ArtifactHook returned error %v; want a resolved path under .github/hooks/", err)
 	}
-	if !errors.Is(err, domain.ErrArtifactUnsupported) {
-		t.Errorf("TargetPath for ArtifactHook: err=%v; want errors.Is(err, ErrArtifactUnsupported)", err)
+	want := ".github/hooks/hook.sh"
+	if got != want {
+		t.Errorf("TargetPath for ArtifactHook = %q, want %q", got, want)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// No-hook-support tests
+// Hook support tests
 // ---------------------------------------------------------------------------
 
-// TestHookPlan_GHCP_AlwaysUnsupported verifies that HookPlan always returns Supported: false
-// for GHCP CLI, regardless of the bundle passed in.
-func TestHookPlan_GHCP_AlwaysUnsupported(t *testing.T) {
+// TestHookPlan_GHCP_Supported verifies that HookPlan returns Supported: true for GHCP CLI,
+// reflecting that the descriptor now declares hooks as supported with a "ghcp-cli" variant key.
+func TestHookPlan_GHCP_Supported(t *testing.T) {
 	mod := newModule(t)
 
 	plan, err := mod.HookPlan(domain.HookPlanRequest{})
 	if err != nil {
 		t.Fatalf("HookPlan: %v", err)
 	}
-	if plan.Supported {
-		t.Error("HookPlan.Supported = true; GHCP CLI declares no hook support and must always return Supported: false")
+	if !plan.Supported {
+		t.Error("HookPlan.Supported = false; GHCP CLI descriptor declares hooks supported and HookPlan must return Supported: true")
 	}
 }
 
-// TestHookPlan_GHCP_ReasonIsNonEmpty verifies that the unsupported reason is non-empty so
-// callers can report it rather than silently ignoring the lack of support.
-func TestHookPlan_GHCP_ReasonIsNonEmpty(t *testing.T) {
+// TestHookPlan_GHCP_ReasonEmptyWhenSupported verifies that HookPlan.Reason is empty when
+// Supported is true. A non-empty reason is only meaningful for an unsupported harness.
+func TestHookPlan_GHCP_ReasonEmptyWhenSupported(t *testing.T) {
 	mod := newModule(t)
 
 	plan, err := mod.HookPlan(domain.HookPlanRequest{})
 	if err != nil {
 		t.Fatalf("HookPlan: %v", err)
 	}
-	if plan.Reason == "" {
-		t.Error("HookPlan.Reason is empty; must be non-empty when Supported is false so the caller can explain the gap")
+	if plan.Reason != "" {
+		t.Errorf("HookPlan.Reason = %q; must be empty when Supported is true", plan.Reason)
 	}
 }
 
-// TestHookPlan_GHCP_NoFilesWhenUnsupported verifies that no files are returned when
-// Supported is false (a caller should not attempt to deploy any files).
-func TestHookPlan_GHCP_NoFilesWhenUnsupported(t *testing.T) {
+// TestHookPlan_GHCP_NoFilesWhenBundleEmpty verifies that when no bundle variant is provided
+// (empty bundle), HookPlan still returns Supported: true but Files is empty because there
+// is no "ghcp-cli" variant in the bundle to pull files from.
+func TestHookPlan_GHCP_NoFilesWhenBundleEmpty(t *testing.T) {
 	mod := newModule(t)
 
 	plan, err := mod.HookPlan(domain.HookPlanRequest{})
 	if err != nil {
 		t.Fatalf("HookPlan: %v", err)
+	}
+	if !plan.Supported {
+		t.Fatal("HookPlan.Supported = false; want true even when bundle has no variant")
 	}
 	if len(plan.Files) > 0 {
-		t.Errorf("HookPlan.Files has %d entries when Supported=false; must be empty", len(plan.Files))
+		t.Errorf("HookPlan.Files has %d entries when bundle has no ghcp-cli variant; want empty", len(plan.Files))
+	}
+}
+
+// TestHookPlan_GHCP_TargetDir verifies that HookPlan returns TargetDir ".github/hooks" when
+// supported, matching the hooks.project value declared in the ghcp-cli.yaml descriptor.
+func TestHookPlan_GHCP_TargetDir(t *testing.T) {
+	mod := newModule(t)
+
+	plan, err := mod.HookPlan(domain.HookPlanRequest{})
+	if err != nil {
+		t.Fatalf("HookPlan: %v", err)
+	}
+	want := ".github/hooks"
+	if plan.TargetDir != want {
+		t.Errorf("HookPlan.TargetDir = %q, want %q", plan.TargetDir, want)
+	}
+}
+
+// TestHookPlan_GHCP_WithBundleVariant verifies that HookPlan returns the files and registration
+// steps from the bundle's "ghcp-cli" variant when that variant is present. This mirrors the
+// claude-code HookPlan test pattern and confirms the descriptor-driven variant lookup is wired
+// correctly for the GHCP CLI harness.
+func TestHookPlan_GHCP_WithBundleVariant(t *testing.T) {
+	mod := newModule(t)
+
+	bundle := domain.HookBundle{
+		Key: "mosaic-logger",
+		Variants: map[string]domain.HookVariant{
+			"ghcp-cli": {
+				HarnessID: "ghcp-cli",
+				Supported: true,
+				Files: []domain.HookFile{
+					{SourcePath: "/tmp/src/mosaic_logger.py", TargetName: "mosaic_logger.py"},
+					{SourcePath: "/tmp/src/mosaic_logger_core.py", TargetName: "mosaic_logger_core.py"},
+				},
+				Registration: []domain.RegistrationStep{
+					{ID: "settings-fragment", TargetPath: ".github/hooks/mosaic-logger.json", Performable: true},
+				},
+			},
+		},
+	}
+
+	plan, err := mod.HookPlan(domain.HookPlanRequest{Bundle: bundle})
+	if err != nil {
+		t.Fatalf("HookPlan with bundle variant: %v", err)
+	}
+	if !plan.Supported {
+		t.Fatalf("HookPlan.Supported = false; want true when ghcp-cli variant is present in bundle")
+	}
+	if plan.TargetDir != ".github/hooks" {
+		t.Errorf("HookPlan.TargetDir = %q, want %q", plan.TargetDir, ".github/hooks")
+	}
+	wantFileNames := []string{"mosaic_logger.py", "mosaic_logger_core.py"}
+	if len(plan.Files) != len(wantFileNames) {
+		t.Fatalf("HookPlan.Files has %d entries; want %d (matching bundle variant file count)", len(plan.Files), len(wantFileNames))
+	}
+	for i, want := range wantFileNames {
+		if plan.Files[i].TargetName != want {
+			t.Errorf("HookPlan.Files[%d].TargetName = %q, want %q", i, plan.Files[i].TargetName, want)
+		}
+	}
+	if len(plan.Registration) != 1 {
+		t.Fatalf("HookPlan.Registration has %d entries; want 1", len(plan.Registration))
+	}
+	if plan.Registration[0].ID != "settings-fragment" {
+		t.Errorf("HookPlan.Registration[0].ID = %q, want %q", plan.Registration[0].ID, "settings-fragment")
 	}
 }
 
@@ -775,17 +846,18 @@ func TestContract_GHCP(t *testing.T) {
 				Expected: ".github/skills/lean-tdd/SKILL.md",
 			},
 			{
-				Name:    "hook_returns_unsupported",
-				Request: domain.TargetPathRequest{Kind: domain.ArtifactHook, Key: "any-hook", FileName: "hook.sh", Scope: domain.ScopeProject, GOOS: "linux"},
-				Err:     domain.ErrArtifactUnsupported,
+				Name:     "hook_resolves_via_descriptor",
+				Request:  domain.TargetPathRequest{Kind: domain.ArtifactHook, Key: "any-hook", FileName: "hook.sh", Scope: domain.ScopeProject, GOOS: "linux"},
+				Expected: ".github/hooks/hook.sh",
 			},
 		},
 
 		HookPlanCases: []contracttest.HookPlanCase{
 			{
-				Name:      "hooks_not_supported",
+				Name:      "hooks_supported",
 				Request:   domain.HookPlanRequest{},
-				Supported: false,
+				Supported: true,
+				TargetDir: ".github/hooks",
 			},
 		},
 	})

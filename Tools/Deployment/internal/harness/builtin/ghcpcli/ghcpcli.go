@@ -24,8 +24,10 @@
 //     would produce duplicate FieldChange entries in transform.Report.Fields because the
 //     transform applies them independently of the module plan.
 //
-// GHCP CLI does not support hooks. TargetPath for ArtifactHook returns
-// ErrArtifactUnsupported; HookPlan always returns Supported: false.
+// GHCP CLI supports hooks. HookPlan is descriptor-driven (same pattern as claudecode.go):
+// it reads hooks.supported and hooks.variant_key from the descriptor and returns variant
+// files from the bundle when the "ghcp-cli" variant is present. TargetPath for ArtifactHook
+// resolves via descriptor.ResolveTargetPath using the paths.hooks.project setting.
 //
 // Registration: init() calls registry.Register so the module is available whenever this
 // package is imported.
@@ -233,8 +235,7 @@ func filterKeyOrder(keys []string, exclude string) []string {
 // TargetPath returns the deployment path for one artifact.
 //
 // Skills receive a key-named subdirectory to prevent filename collisions (see package
-// documentation). Hook artifacts return ErrArtifactUnsupported because GHCP CLI does
-// not support hooks. All other kinds are handled by the descriptor algorithm.
+// documentation). All other kinds, including hooks, are handled by the descriptor algorithm.
 func (m *module) TargetPath(req domain.TargetPathRequest) (string, error) {
 	if req.Kind == domain.ArtifactSkill {
 		return m.skillTargetPath(req)
@@ -286,12 +287,32 @@ func (m *module) Injection(req domain.InjectionRequest) (string, bool) {
 	return "", true
 }
 
-// HookPlan always returns Supported: false because GHCP CLI does not support hooks.
-// Any request for hooks (TargetPath for ArtifactHook or a HookPlan call) is reported
-// rather than silently ignored.
+// HookPlan resolves a hook bundle for GHCP CLI. GHCP CLI supports hooks via the descriptor;
+// the plan depends on whether the bundle carries a "ghcp-cli" variant.
 func (m *module) HookPlan(req domain.HookPlanRequest) (domain.HookPlan, error) {
+	if !m.desc.Hooks.Supported {
+		return domain.HookPlan{
+			Supported: false,
+			Reason:    "harness descriptor declares hooks not supported",
+		}, nil
+	}
+	variantKey := m.desc.Hooks.VariantKey
+	if variantKey == "" {
+		variantKey = m.desc.ID
+	}
+	targetDir := m.desc.Paths.Hooks.Project
+	variant, ok := req.Bundle.Variants[variantKey]
+	if !ok {
+		// No variant in this bundle (e.g. empty bundle in tests).
+		return domain.HookPlan{
+			Supported: true,
+			TargetDir: targetDir,
+		}, nil
+	}
 	return domain.HookPlan{
-		Supported: false,
-		Reason:    "GitHub Copilot CLI does not support hooks",
+		Supported:    true,
+		TargetDir:    targetDir,
+		Files:        variant.Files,
+		Registration: variant.Registration,
 	}, nil
 }

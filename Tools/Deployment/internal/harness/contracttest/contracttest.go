@@ -605,16 +605,24 @@ func runHookPlanCases(t *testing.T, m domain.HarnessModule, cases []HookPlanCase
 			for i, f := range plan.Files {
 				gotNames[i] = f.TargetName
 			}
-			if !reflect.DeepEqual(gotNames, tc.FileNames) {
-				t.Errorf("HookPlan file names: got %v, want %v", gotNames, tc.FileNames)
+			wantNames := tc.FileNames
+			if wantNames == nil {
+				wantNames = []string{}
+			}
+			if !reflect.DeepEqual(gotNames, wantNames) {
+				t.Errorf("HookPlan file names: got %v, want %v", gotNames, wantNames)
 			}
 
 			gotStepIDs := make([]string, len(plan.Registration))
 			for i, s := range plan.Registration {
 				gotStepIDs[i] = s.ID
 			}
-			if !reflect.DeepEqual(gotStepIDs, tc.StepIDs) {
-				t.Errorf("HookPlan step IDs: got %v, want %v", gotStepIDs, tc.StepIDs)
+			wantStepIDs := tc.StepIDs
+			if wantStepIDs == nil {
+				wantStepIDs = []string{}
+			}
+			if !reflect.DeepEqual(gotStepIDs, wantStepIDs) {
+				t.Errorf("HookPlan step IDs: got %v, want %v", gotStepIDs, wantStepIDs)
 			}
 		})
 	}
