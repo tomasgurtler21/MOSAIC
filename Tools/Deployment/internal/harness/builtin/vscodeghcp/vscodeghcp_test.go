@@ -1104,7 +1104,7 @@ func TestHookPlan_VSCodeGHCP_EnableChatHooksNeverAttempted(t *testing.T) {
 // agents commonly stop reading files mid-way; this injection addresses that at the harness level.
 func TestInjection_VSCodeGHCP_HarnessConstraintsFilledWithFileReadingWarning(t *testing.T) {
 	mod := newModule(t)
-	content, ok := mod.Injection("HarnessConstraints")
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints"})
 	if !ok {
 		t.Fatal("Injection(\"HarnessConstraints\") returned ok=false; VS Code GHCP must fill this injection with the file-reading constraint")
 	}
@@ -1117,7 +1117,7 @@ func TestInjection_VSCodeGHCP_HarnessConstraintsFilledWithFileReadingWarning(t *
 // of the HarnessConstraints injection against the reference in HarnessInjections.md.
 func TestInjection_VSCodeGHCP_HarnessConstraintsExactContent(t *testing.T) {
 	mod := newModule(t)
-	content, ok := mod.Injection("HarnessConstraints")
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints"})
 	if !ok {
 		t.Fatal("Injection(\"HarnessConstraints\") returned ok=false")
 	}
@@ -1132,7 +1132,7 @@ func TestInjection_VSCodeGHCP_HarnessConstraintsExactContent(t *testing.T) {
 // optimisation, not a project-specific constraint.
 func TestInjection_VSCodeGHCP_CustomConstraintsFilledWithParallelToolCalls(t *testing.T) {
 	mod := newModule(t)
-	content, ok := mod.Injection("CustomConstraints")
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "CustomConstraints"})
 	if !ok {
 		t.Fatal("Injection(\"CustomConstraints\") returned ok=false; VS Code GHCP fills CustomConstraints at the harness level with the parallel tool calls instruction")
 	}
@@ -1145,7 +1145,7 @@ func TestInjection_VSCodeGHCP_CustomConstraintsFilledWithParallelToolCalls(t *te
 // with empty content (VS Code GHCP has no language-specific pattern injection).
 func TestInjection_VSCodeGHCP_LanguagePatternsIsEmpty(t *testing.T) {
 	mod := newModule(t)
-	content, ok := mod.Injection("LanguagePatterns")
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns"})
 	if !ok {
 		t.Fatal("Injection(\"LanguagePatterns\") returned ok=false; VS Code GHCP must declare this injection")
 	}
@@ -1168,7 +1168,7 @@ func TestInjection_VSCodeGHCP_ProjectInjectionsNotFilled(t *testing.T) {
 		"ContextLimits",
 	}
 	for _, name := range projectInjections {
-		_, ok := mod.Injection(name)
+		_, ok := mod.Injection(domain.InjectionRequest{Name: name})
 		if ok {
 			t.Errorf("Injection(%q) returned ok=true; this injection is not declared by VS Code GHCP at the harness level", name)
 		}

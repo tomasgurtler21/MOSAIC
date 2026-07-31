@@ -9,8 +9,8 @@ import (
 
 // AgentStaleness compares the source version stamps against the versions read from the
 // deployed file, returning one delta per mismatching field in the fixed order
-// version, transform_version, injections_version. VersionDelta.Deployed carries the value
-// actually present in the deployed file.
+// version, transform_version, injections_version, orchestrator_injections_version.
+// VersionDelta.Deployed carries the value actually present in the deployed file.
 //
 // Callers must only invoke this for a deployed artifact that is present; absence is
 // handled by the classifier as ActionCreate before staleness is consulted.
@@ -40,6 +40,13 @@ func AgentStaleness(deployed domain.DeployedArtifactState, _ domain.Agent, stamp
 			Field:    "injections_version",
 			Deployed: deployed.InjectionsVersion,
 			Source:   stamps.InjectionsVersion,
+		})
+	}
+	if deployed.OrchestratorInjectionsVersion != stamps.OrchestratorInjectionsVersion {
+		deltas = append(deltas, domain.VersionDelta{
+			Field:    "orchestrator_injections_version",
+			Deployed: deployed.OrchestratorInjectionsVersion,
+			Source:   stamps.OrchestratorInjectionsVersion,
 		})
 	}
 

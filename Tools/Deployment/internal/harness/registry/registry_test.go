@@ -171,7 +171,7 @@ func (m *minimalModule) Frontmatter(_ domain.FrontmatterRequest) (domain.Frontma
 func (m *minimalModule) TargetPath(_ domain.TargetPathRequest) (string, error) {
 	return "", domain.ErrArtifactUnsupported
 }
-func (m *minimalModule) Injection(_ string) (string, bool) { return "", false }
+func (m *minimalModule) Injection(_ domain.InjectionRequest) (string, bool) { return "", false }
 func (m *minimalModule) HookPlan(_ domain.HookPlanRequest) (domain.HookPlan, error) {
 	return domain.HookPlan{Supported: false, Reason: "stub"}, nil
 }

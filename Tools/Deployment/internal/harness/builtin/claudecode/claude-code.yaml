@@ -101,16 +101,11 @@ frontmatter:
     - "version"
     - "transform_version"
     - "injections_version"
+    - "orchestrator_injections_version"
     - "name"
     - "description"
     - "model"
     - "tools"
-
-injections:
-  - name: "HarnessConstraints"
-    content: ""
-  - name: "LanguagePatterns"
-    content: ""
 
 hooks:
   supported: true

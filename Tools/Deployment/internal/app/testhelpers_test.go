@@ -123,7 +123,7 @@ func (m *stubHarnessModule) Frontmatter(req domain.FrontmatterRequest) (domain.F
 func (m *stubHarnessModule) TargetPath(req domain.TargetPathRequest) (string, error) {
 	return req.Key + ".md", nil
 }
-func (m *stubHarnessModule) Injection(name string) (string, bool) { return "", false }
+func (m *stubHarnessModule) Injection(_ domain.InjectionRequest) (string, bool) { return "", false }
 func (m *stubHarnessModule) HookPlan(req domain.HookPlanRequest) (domain.HookPlan, error) {
 	return domain.HookPlan{Supported: false, Reason: "stub"}, nil
 }

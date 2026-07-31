@@ -10,9 +10,10 @@ import (
 // can record current source versions in ManifestEntry, enabling the planner to
 // detect staleness on subsequent runs.
 type VersionStamp struct {
-	Version           string // catalog version of the artifact (agents, skills, hooks)
-	TransformVersion  string // transform engine version (agents only)
-	InjectionsVersion string // injections version (agents only)
+	Version                       string // catalog version of the artifact (agents, skills, hooks)
+	TransformVersion              string // transform engine version (agents only)
+	InjectionsVersion             string // injections version (agents only)
+	OrchestratorInjectionsVersion string // orchestrator-only injections version; empty for subagents
 }
 
 // Manifest is the deployment tool's bookkeeping record for every artifact it has written to
@@ -30,13 +31,14 @@ type Manifest struct {
 // ManifestEntry records one deployed artifact: its identity, the path it was written to,
 // the version stamps at the time of deployment, and a content hash for conflict detection.
 type ManifestEntry struct {
-	Ref               ArtifactRef
-	TargetPath        string    // relative to the deployment root
-	Version           string    // agents, skills, hook bundles
-	TransformVersion  string    // agents only
-	InjectionsVersion string    // agents only
-	ContentHash       string    // "sha256:<hex>" over the exact deployed bytes (CD-11)
-	DeployedAt        time.Time
+	Ref                           ArtifactRef
+	TargetPath                    string    // relative to the deployment root
+	Version                       string    // agents, skills, hook bundles
+	TransformVersion              string    // agents only
+	InjectionsVersion             string    // agents only
+	OrchestratorInjectionsVersion string    // orchestrator-only; empty for subagents
+	ContentHash                   string    // "sha256:<hex>" over the exact deployed bytes (CD-11)
+	DeployedAt                    time.Time
 }
 
 // Lookup finds the manifest entry for one artifact. The second return value is false when

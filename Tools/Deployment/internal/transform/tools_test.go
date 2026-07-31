@@ -57,9 +57,9 @@ func (m *descriptorModule) TargetPath(req domain.TargetPathRequest) (string, err
 	return descriptor.ResolveTargetPath(m.desc, req)
 }
 
-func (m *descriptorModule) Injection(name string) (string, bool) {
+func (m *descriptorModule) Injection(req domain.InjectionRequest) (string, bool) {
 	for _, inj := range m.desc.Injections {
-		if inj.Name == name {
+		if inj.Name == req.Name {
 			return inj.Content, true
 		}
 	}

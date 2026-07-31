@@ -28,8 +28,14 @@ type HarnessModule interface {
 	TargetPath(req TargetPathRequest) (string, error)
 
 	// Injection returns the harness-level content for a canonical injection name.
+	// When req.AgentKey is "orchestrator", the returned content is the shared
+	// (subagent-level) content merged with any orchestrator-only content for the
+	// same injection name — shared content first, then a blank-line separator,
+	// then orchestrator-only content. When only one source has content, no
+	// separator is added. When neither source has content for the name, ok is false.
+	// For all other agent keys, only shared content is returned.
 	// ok is false for injections this harness does not fill (which are left empty).
-	Injection(name string) (content string, ok bool)
+	Injection(req InjectionRequest) (content string, ok bool)
 
 	// HookPlan resolves a hook bundle for this harness, including variant reuse and registration.
 	HookPlan(req HookPlanRequest) (HookPlan, error)
@@ -37,6 +43,15 @@ type HarnessModule interface {
 	// Close releases any resource the provision tier holds (a child process, for the external
 	// tier). Built-in and descriptor-only implementations return nil.
 	Close() error
+}
+
+// InjectionRequest is the input to HarnessModule.Injection. It mirrors the
+// FrontmatterRequest pattern: a struct that carries context about the requesting
+// agent alongside the query parameter, enabling future extension without
+// signature changes.
+type InjectionRequest struct {
+	Name     string // canonical injection name, e.g. "HarnessConstraints"
+	AgentKey string // artifact slug of the requesting agent, e.g. "orchestrator"
 }
 
 // FrontmatterRequest is the input to HarnessModule.Frontmatter.
@@ -49,11 +64,12 @@ type FrontmatterRequest struct {
 	Versions   VersionStamps
 }
 
-// VersionStamps carries the three version fields stamped into every deployed agent.
+// VersionStamps carries the version fields stamped into every deployed agent.
 type VersionStamps struct {
-	Version           string // carried through from the source, unchanged
-	TransformVersion  string
-	InjectionsVersion string
+	Version                       string // carried through from the source, unchanged
+	TransformVersion              string
+	InjectionsVersion             string
+	OrchestratorInjectionsVersion string // orchestrator-only; empty for subagents
 }
 
 // FrontmatterPlan is a declarative edit list that transform applies via docformat. The module

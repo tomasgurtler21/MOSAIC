@@ -97,9 +97,10 @@ type wireModelSelection struct {
 }
 
 type wireVersionStamps struct {
-	Version           string `json:"version"`
-	TransformVersion  string `json:"transform_version"`
-	InjectionsVersion string `json:"injections_version"`
+	Version                       string `json:"version"`
+	TransformVersion              string `json:"transform_version"`
+	InjectionsVersion             string `json:"injections_version"`
+	OrchestratorInjectionsVersion string `json:"orchestrator_injections_version,omitempty"`
 }
 
 type wireTargetPathRequest struct {
@@ -111,7 +112,8 @@ type wireTargetPathRequest struct {
 }
 
 type wireInjectionRequest struct {
-	Name string `json:"name"`
+	Name     string `json:"name"`
+	AgentKey string `json:"agent_key,omitempty"`
 }
 
 type wireHookPlanRequest struct {
@@ -430,9 +432,10 @@ func handleRequest(mod domain.HarnessModule, req wireRequest) wireResponse {
 			Model:      domain.ModelSelection{ModelID: params.Model.ModelID, Origin: domain.ModelOrigin(params.Model.Origin)},
 			ToolFields: fromWireFrontmatterFields(params.ToolFields),
 			Versions: domain.VersionStamps{
-				Version:           params.Versions.Version,
-				TransformVersion:  params.Versions.TransformVersion,
-				InjectionsVersion: params.Versions.InjectionsVersion,
+				Version:                       params.Versions.Version,
+				TransformVersion:              params.Versions.TransformVersion,
+				InjectionsVersion:             params.Versions.InjectionsVersion,
+				OrchestratorInjectionsVersion: params.Versions.OrchestratorInjectionsVersion,
 			},
 		}
 		plan, err := mod.Frontmatter(domReq)
@@ -482,7 +485,7 @@ func handleRequest(mod domain.HarnessModule, req wireRequest) wireResponse {
 			base.Error = &wireRespError{Code: "bad_params", Message: err.Error()}
 			return base
 		}
-		content, ok := mod.Injection(params.Name)
+		content, ok := mod.Injection(domain.InjectionRequest{Name: params.Name, AgentKey: params.AgentKey})
 		result := wireInjectionResult{Content: content, OK: ok}
 		raw, _ := json.Marshal(result)
 		base.Result = raw

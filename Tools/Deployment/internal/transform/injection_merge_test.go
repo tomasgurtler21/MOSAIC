@@ -168,7 +168,7 @@ func TestNewDeployment_HarnessInjection_FilledFromDescriptor(t *testing.T) {
 	// unaffected). This test verifies the Stage 8 InjectionFilled path is exercised when
 	// the harness supplies content, as a precondition for Stage 10 merge correctness.
 	mod := newInjectionFixtureModule(t)
-	harnessContent, ok := mod.Injection("HarnessConstraints")
+	harnessContent, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: ""})
 	if !ok || harnessContent == "" {
 		t.Fatalf("injection_fixture.yaml must declare HarnessConstraints content but does not")
 	}
@@ -447,7 +447,7 @@ Old harness constraint text that should be replaced on every transform.
 // survive.
 func TestUpdate_HarnessInjection_RefreshedFromDescriptorNotDeployed(t *testing.T) {
 	mod := newInjectionFixtureModule(t)
-	harnessContent, ok := mod.Injection("HarnessConstraints")
+	harnessContent, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: ""})
 	if !ok || harnessContent == "" {
 		t.Fatalf("injection_fixture.yaml must declare HarnessConstraints content but does not")
 	}

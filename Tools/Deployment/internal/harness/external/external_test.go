@@ -497,7 +497,7 @@ func TestProtocol_Injection_RoundTrip(t *testing.T) {
 	defer m.Close() //nolint:errcheck
 
 	// The echo server returns ok=false for all injections.
-	_, ok := m.Injection("HarnessConstraints")
+	_, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints"})
 	if ok {
 		t.Errorf("Injection(\"HarnessConstraints\"): echo server returned ok=true, want ok=false (echo server reports nothing filled)")
 	}
@@ -557,7 +557,7 @@ func TestProtocol_MessageTypesHaveProtocolField(t *testing.T) {
 	if _, err := m.Frontmatter(domain.FrontmatterRequest{Kind: domain.ArtifactAgent, AgentKey: "x"}); err != nil {
 		t.Errorf("Frontmatter round-trip: %v", err)
 	}
-	if _, _ = m.Injection("HarnessConstraints"); false {
+	if _, _ = m.Injection(domain.InjectionRequest{Name: "HarnessConstraints"}); false {
 		// ok/content return is checked in TestProtocol_Injection_RoundTrip; here we just call it.
 	}
 }

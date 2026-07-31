@@ -137,7 +137,7 @@ Unlike the Execution Log, this section is **not** a history — it's a lookup ta
 |---|---|
 | `Artifact` | Path, exactly as it appeared in the subagent's declared output artifacts. The key for this table. |
 | `Created In` | `Phase` or `Phase.Stage`, taken from `current_state` at the moment this row is last written. Reflects the most recent write, not the original creation. |
-| `Created By` | `{AgentName}#{Seq}` of the invocation that most recently produced or reworked it — the same value as that invocation's `Agent` column in the Execution Log, letting the two tables be cross-referenced directly. |
+| `Created By` | `{AgentName}#{Seq}` of the invocation that most recently produced or reworked it — the same value as that invocation's `Agent` column in the Execution Log, letting the two tables be cross-referenced directly. The single exception is the reserved literal `user`, for artifacts adopted at run init (§11) that no invocation produced; such rows carry `Created In: INIT` and are the one case where a row has no corresponding Execution Log entry. A consumer cross-referencing this column must tolerate that. Once a subagent reworks such a path, the row is overwritten in place like any other and `user` is replaced by the producing invocation. |
 
 **No `Type` column, and no validity-window notation for scope.** A column classifying the artifact (Research / Plan / Review / …) was considered but left out: that classification is already fully recoverable from the artifact's own filename — reserved-keyword naming conventions already used across this workspace (a `Plan`-named file is a routing artifact, a kebab-case `{agent-name}.md` file is a review output, and so on) make a separate stored classification pure duplication of what the name already encodes. A richer scope notation (marking an artifact as valid across a phase range, or across a specific span of stages) was also considered and left out — expressing that requires judgment about how long an artifact stays relevant, which isn't something a script can determine mechanically at write time. Where that distinction matters (e.g. `Iteration1_Review.md` vs. `Iteration2_Review.md`), it's already visible in the filename itself, not something this table needs to additionally encode.
 
@@ -222,6 +222,7 @@ current_state:
 [[SECTION:Artifacts]]
 | Artifact | Created In | Created By |
 |----------|------------|------------|
+| Requirements.md | INIT | user |
 | Research.md | RESEARCH | Research#1 |
 | Plan.md | PLANNING | Planner#2 |
 | Design.md | DESIGN | Designer#3 |
@@ -255,6 +256,16 @@ This convention:
 - Keeps the artifact path derivable from `run_id` without any additional registry or index.
 
 Subagent invocations express their `input_artifacts` and `output_artifacts` paths with the run-scoped folder as a prefix (e.g. `Orchestration-20260129T090000Z-a3f9/Plan.md`). The orchestrator resolves paths with this prefix to the artifact store at the corresponding location; paths that already include the prefix are not double-prefixed.
+
+### Seed artifact adoption
+
+A run is frequently started from an artifact the user authored beforehand — a requirements document, a specification, a brief. Such a file cannot arrive pre-placed: `run_id` is minted at artifact creation, so the correct destination is unknowable at the moment the user writes the file. Any expectation that seed inputs already sit in the run folder is unsatisfiable by construction.
+
+At run init, therefore, the orchestrator **copies** each user-supplied orchestration artifact into `Orchestration-{run_id}/` and registers it with `Created By: user` (§6). Copy rather than move: the original is user-authored content, and relocating it would strand the input inside a dead run folder if the run aborts before completing, forcing the user to retrieve it before retrying. Divergence between original and copy is not a concern, because the run reads only the copy from that point on.
+
+This applies strictly to orchestration artifacts. Project files — repo content referenced via `input_files` — are never copied into the run folder; doing so would duplicate codebase content into orchestration state and erode the artifact/file distinction the protocol relies on.
+
+Adoption does not make a run reproducible: it still reads project files that mutate underneath it, and this schema makes no attempt to capture those. The narrower property it does secure is that a run's *orchestration artifact set* is complete and archivable on its own, rather than depending on an external path that a subsequent run may overwrite.
 
 ## 12. Non-Goals
 

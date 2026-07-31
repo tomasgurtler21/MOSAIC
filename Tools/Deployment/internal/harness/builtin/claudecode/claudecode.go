@@ -34,11 +34,18 @@ import (
 
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
+	"mosaic-deploy/internal/harness/injectionfile"
 	"mosaic-deploy/internal/harness/registry"
 )
 
 //go:embed claude-code.yaml
 var embeddedDescriptor []byte
+
+//go:embed HarnessInjections.md
+var embeddedInjections []byte
+
+//go:embed HarnessInjectionsOrchestrator.md
+var embeddedOrchestratorInjections []byte
 
 func init() {
 	registry.Register("claude-code", func() (domain.HarnessModule, error) {
@@ -48,24 +55,36 @@ func init() {
 
 // module is the Claude Code built-in HarnessModule implementation.
 type module struct {
-	ref  domain.HarnessRef
-	desc *domain.HarnessDescriptor
+	ref             domain.HarnessRef
+	desc            *domain.HarnessDescriptor
+	injections      map[string]string // parsed from HarnessInjections.md at construction time
+	orchInjections  map[string]string // parsed from HarnessInjectionsOrchestrator.md at construction time
 }
 
-// New parses the embedded claude-code.yaml descriptor and returns the Claude Code
-// HarnessModule. The module formats tools as a comma-separated scalar string.
+// New parses the embedded claude-code.yaml descriptor, HarnessInjections.md, and
+// HarnessInjectionsOrchestrator.md, then returns the Claude Code HarnessModule.
+// The module formats tools as a comma-separated scalar string.
 func New() (domain.HarnessModule, error) {
 	desc, err := descriptor.Parse(embeddedDescriptor, "builtin:claude-code")
 	if err != nil {
 		return nil, fmt.Errorf("parse embedded claude-code descriptor: %w", err)
 	}
+	injections, err := injectionfile.ParseInjections(embeddedInjections)
+	if err != nil {
+		return nil, fmt.Errorf("parse embedded claude-code HarnessInjections.md: %w", err)
+	}
+	orchInjections, orchVersion, err := injectionfile.ParseInjectionsWithVersion(embeddedOrchestratorInjections)
+	if err != nil {
+		return nil, fmt.Errorf("parse embedded claude-code HarnessInjectionsOrchestrator.md: %w", err)
+	}
+	desc.OrchestratorInjectionsVersion = orchVersion
 	ref := domain.HarnessRef{
 		ID:          desc.ID,
 		DisplayName: desc.DisplayName,
 		Tier:        domain.TierBuiltin,
 		Usable:      true,
 	}
-	return &module{ref: ref, desc: desc}, nil
+	return &module{ref: ref, desc: desc, injections: injections, orchInjections: orchInjections}, nil
 }
 
 // Ref returns identity and provenance. Two calls return equal values.
@@ -153,16 +172,47 @@ func (m *module) convertFieldsToScalar(result domain.ToolResult) domain.ToolResu
 // Model and version stamps are applied exclusively by the transform pipeline and must
 // not appear here; including them would produce duplicate FieldChange entries in
 // transform.Report.Fields.
+//
+// Exception: orchestrator_injections_version is stamped here (not by the transform
+// pipeline) because it is conditional on AgentKey — only the orchestrator agent
+// receives this field. The transform pipeline applies version stamps uniformly;
+// it cannot express this per-agent-key conditional. For non-orchestrator agents,
+// orchestrator_injections_version is also excluded from the returned KeyOrder so it
+// does not appear in the deployed subagent frontmatter at all.
 func (m *module) Frontmatter(req domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
 	var set []domain.FrontmatterField
 	if len(m.desc.Frontmatter.Add) > 0 {
-		set = m.desc.Frontmatter.Add
+		set = append(set, m.desc.Frontmatter.Add...)
 	}
+
+	keyOrder := m.desc.Frontmatter.KeyOrder
+	if req.AgentKey == "orchestrator" && req.Versions.OrchestratorInjectionsVersion != "" {
+		set = append(set, domain.FrontmatterField{
+			Key:   "orchestrator_injections_version",
+			Value: domain.ScalarValue(req.Versions.OrchestratorInjectionsVersion, domain.QuotePlain),
+		})
+	} else {
+		// For non-orchestrator agents, strip orchestrator_injections_version from the key
+		// order so the field is not positioned (and thus not emitted) in subagent output.
+		keyOrder = filterKeyOrder(keyOrder, "orchestrator_injections_version")
+	}
+
 	return domain.FrontmatterPlan{
 		Set:      set,
 		Remove:   m.desc.Frontmatter.Drop,
-		KeyOrder: m.desc.Frontmatter.KeyOrder,
+		KeyOrder: keyOrder,
 	}, nil
+}
+
+// filterKeyOrder returns a copy of keys with the given key removed.
+func filterKeyOrder(keys []string, exclude string) []string {
+	filtered := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k != exclude {
+			filtered = append(filtered, k)
+		}
+	}
+	return filtered
 }
 
 // TargetPath returns the deployment path for one artifact.
@@ -194,15 +244,37 @@ func (m *module) skillTargetPath(req domain.TargetPathRequest) (string, error) {
 	return path.Join(sp.Project, req.Key, filename), nil
 }
 
-// Injection returns the harness-level content for a canonical injection name as declared
-// in the embedded descriptor's injections list.
-func (m *module) Injection(name string) (string, bool) {
-	for _, inj := range m.desc.Injections {
-		if inj.Name == name {
-			return inj.Content, true
-		}
+// Injection returns the harness-level content for a canonical injection name.
+//
+// For the "orchestrator" agent key, shared content (from HarnessInjections.md) is merged
+// with orchestrator-only content (from HarnessInjectionsOrchestrator.md):
+//   - Both non-empty: returns sharedContent + "\n\n" + orchContent, ok=true
+//   - Only shared non-empty: returns sharedContent, ok=true
+//   - Only orchestrator-only non-empty: returns orchContent, ok=true
+//   - Both declared-but-empty: returns "", ok=true
+//   - Neither declared: returns "", ok=false
+//
+// For all other agent keys, only shared content is returned (existing behavior).
+func (m *module) Injection(req domain.InjectionRequest) (string, bool) {
+	sharedContent, sharedOk := m.injections[req.Name]
+	if req.AgentKey != "orchestrator" {
+		return sharedContent, sharedOk
 	}
-	return "", false
+	orchContent, orchOk := m.orchInjections[req.Name]
+	if !sharedOk && !orchOk {
+		return "", false
+	}
+	if sharedContent != "" && orchContent != "" {
+		return sharedContent + "\n\n" + orchContent, true
+	}
+	if sharedContent != "" {
+		return sharedContent, true
+	}
+	if orchContent != "" {
+		return orchContent, true
+	}
+	// Both declared but empty.
+	return "", true
 }
 
 // HookPlan resolves a hook bundle for Claude Code. Claude Code supports hooks; the plan

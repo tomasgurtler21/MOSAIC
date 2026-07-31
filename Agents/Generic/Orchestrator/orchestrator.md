@@ -280,6 +280,21 @@ This keeps concurrent or successive runs from colliding on disk (`agent_instance
 
 **Artifact paths:** express `input_artifacts` and `output_artifacts` with the run-scoped folder as prefix (e.g. `Orchestration-20260129T090000Z-a3f9/Plan.md`). If a path from the workflow table already carries the prefix, do not add it a second time.
 
+### Seed Artifact Adoption
+
+Users often hand you a starting artifact — a requirements document, a specification, a brief — written before the run existed. They cannot have placed it in the run folder: `run_id` doesn't exist until you mint it, so the correct destination was unknowable when they wrote the file.
+
+**At run init, adopt each user-supplied orchestration artifact into the run folder:**
+
+1. Copy it into `Orchestration-{run_id}/`, keeping its filename.
+2. Leave the original untouched — it is the user's file, not yours. Copying rather than moving means an aborted run never strands their input inside a dead run folder, and they can start a fresh run from the same seed.
+3. Register the copy in the Artifacts section with `Created By: user`.
+4. Reference **only the copy** in every dispatch. The original is never read again, so the two cannot meaningfully diverge.
+
+**This applies to orchestration artifacts only — never to project files.** A path the user mentions as codebase context is repo content passed via `input_files`; it stays where it lives and is never copied. Copying project files into the run folder would duplicate the codebase into orchestration state and break the artifact/file separation the protocol depends on.
+
+**Why adopt at all:** a run whose driving input lives outside it depends on a file that a later run can overwrite, and archives into a record missing the thing that started it. Adoption doesn't make a run fully reproducible — it still reads project code that mutates underneath it — but it does keep the orchestration artifact set coherent on its own.
+
 ### Orchestration.md Section Details
 
 **1. FRONTMATTER** (Tier 1 — parsed for every routing decision)
@@ -353,6 +368,7 @@ A non-empty `Checkpoint` always means real, restorable content exists. Never wri
 [[SECTION:Artifacts]]
 | Artifact | Created In | Created By |
 |----------|------------|------------|
+| Requirements.md | INIT | user |
 | Research.md | RESEARCH | Research#1 |
 | Stage-1/PlanProgress.md | EXECUTION.Stage-1 | Implementation#10 |
 [[/SECTION:Artifacts]]
@@ -361,6 +377,8 @@ A non-empty `Checkpoint` always means real, restorable content exists. Never wri
 This answers "what artifacts exist and who most recently produced each one" — a current-state question, not a historical one. The history already lives in the Execution Log.
 
 After each invocation completes, for every path in that invocation's declared output artifacts: insert a row if the path is new, **update the existing row in place** if the path is already registered (a rework after review findings, a later iteration). `Created In` is `Phase` or `Phase.Stage` from `current_state` at write time; `Created By` is that invocation's `{AgentName}#{Seq}`, matching its Execution Log row so the two tables cross-reference directly. `Artifact` is the path exactly as it appeared in the subagent's declared output artifacts — it is the key.
+
+`user` is the one reserved `Created By` value, for artifacts adopted at run init that no invocation produced (see Seed Artifact Adoption); those rows carry `Created In: INIT` and have no corresponding Execution Log row. If a subagent later reworks that path, the row is overwritten in place like any other and `user` is replaced by the producing invocation.
 
 No `Type` column and no scope notation: the artifact's own filename already encodes both, and scope requires domain judgment you don't have.
 

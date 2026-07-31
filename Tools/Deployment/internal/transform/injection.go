@@ -115,7 +115,7 @@ func processInjections(doc *docformat.Document, req Request) (outcomes []Injecti
 // Harness content is refreshed on every transform; the deployed file's content is never
 // consulted for harness injections.
 func applyHarnessInjection(node *docformat.Node, name string, class domain.InjectionClass, req Request) InjectionOutcome {
-	content, ok := req.Module.Injection(name)
+	content, ok := req.Module.Injection(domain.InjectionRequest{Name: name, AgentKey: req.Key})
 	if ok && content != "" {
 		node.SetContent([]byte(content)) //nolint:errcheck // docformat.Node.SetContent always returns nil; the error return is part of the interface for forward compatibility only. TODO: propagate when the interface produces real errors.
 		return InjectionOutcome{

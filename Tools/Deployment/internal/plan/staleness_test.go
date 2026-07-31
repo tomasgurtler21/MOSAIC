@@ -54,11 +54,17 @@ func sampleDeployedState() domain.DeployedArtifactState {
 
 // sampleStampsFromDeployed returns VersionStamps that exactly match the given deployed state
 // (not stale). Use this to establish a clean baseline before introducing a single mismatch.
+//
+// Note: OrchestratorInjectionsVersion is intentionally omitted here — it is left as the
+// zero-value empty string. Tests that need the orchestrator-specific field use
+// orchestratorStampsFromDeployed (in orchestrator_staleness_test.go), which extends the
+// result of this helper by copying OrchestratorInjectionsVersion from the deployed state.
 func sampleStampsFromDeployed(deployed domain.DeployedArtifactState) domain.VersionStamps {
 	return domain.VersionStamps{
 		Version:           deployed.Version,
 		TransformVersion:  deployed.TransformVersion,
 		InjectionsVersion: deployed.InjectionsVersion,
+		// OrchestratorInjectionsVersion intentionally omitted — see note above.
 	}
 }
 

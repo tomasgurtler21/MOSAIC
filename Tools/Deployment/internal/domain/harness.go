@@ -36,18 +36,19 @@ type HarnessRef struct {
 // HarnessDescriptor is the declarative half of the harness contract. It carries no struct tags
 // (CD-1): the harness/descriptor package maps YAML onto this type using an unexported wire type.
 type HarnessDescriptor struct {
-	SchemaVersion     string
-	ID                string
-	DisplayName       string
-	TransformVersion  string // stamped into every deployed agent
-	InjectionsVersion string // stamped into every deployed agent
-	Models            ModelCatalog
-	Tools             ToolSpec
-	Paths             PathSpec
-	Extensions        map[ArtifactKind]string // e.g. ArtifactAgent -> ".agent.md"
-	Frontmatter       FrontmatterSpec
-	Injections        []InjectionContent
-	Hooks             HookSupport
+	SchemaVersion                 string
+	ID                            string
+	DisplayName                   string
+	TransformVersion              string // stamped into every deployed agent
+	InjectionsVersion             string // stamped into every deployed agent
+	OrchestratorInjectionsVersion string // stamped into the orchestrator's deployed file only; populated at module construction time from HarnessInjectionsOrchestrator.md frontmatter
+	Models                        ModelCatalog
+	Tools                         ToolSpec
+	Paths                         PathSpec
+	Extensions                    map[ArtifactKind]string // e.g. ArtifactAgent -> ".agent.md"
+	Frontmatter                   FrontmatterSpec
+	Injections                    []InjectionContent
+	Hooks                         HookSupport
 }
 
 // ModelCatalog lists the models a harness exposes to the user during model selection.

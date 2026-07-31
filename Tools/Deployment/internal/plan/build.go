@@ -281,6 +281,9 @@ func classifyAgentItem(
 		TransformVersion:  desc.TransformVersion,
 		InjectionsVersion: desc.InjectionsVersion,
 	}
+	if agent.Role == domain.RoleOrchestrator {
+		stamps.OrchestratorInjectionsVersion = desc.OrchestratorInjectionsVersion
+	}
 	deltas := AgentStaleness(deployed, agent, stamps)
 
 	// Step 6a: For orchestrator-role agents, also compare the deployed workflow set

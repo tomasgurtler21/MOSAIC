@@ -511,9 +511,13 @@ func buildVersionStamps(
 		switch item.Ref.Kind {
 		case domain.ArtifactAgent:
 			if a, ok := agentByKey[item.Ref.Key]; ok {
-				stamps[item.TargetPath] = domain.VersionStamp{
+				stamp := domain.VersionStamp{
 					Version: a.Version, TransformVersion: desc.TransformVersion, InjectionsVersion: desc.InjectionsVersion,
 				}
+				if a.Role == domain.RoleOrchestrator {
+					stamp.OrchestratorInjectionsVersion = desc.OrchestratorInjectionsVersion
+				}
+				stamps[item.TargetPath] = stamp
 			}
 		case domain.ArtifactSkill:
 			if sk, ok := skillByKey[item.Ref.Key]; ok {

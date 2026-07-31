@@ -198,7 +198,7 @@ func (m *fakeModule) Frontmatter(_ domain.FrontmatterRequest) (domain.Frontmatte
 	return domain.FrontmatterPlan{}, nil
 }
 
-func (m *fakeModule) Injection(_ string) (string, bool) { return "", false }
+func (m *fakeModule) Injection(_ domain.InjectionRequest) (string, bool) { return "", false }
 
 func (m *fakeModule) HookPlan(req domain.HookPlanRequest) (domain.HookPlan, error) {
 	if m.HookPlanFn != nil {

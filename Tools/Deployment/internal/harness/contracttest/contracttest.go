@@ -39,11 +39,22 @@ type Fixtures struct {
 	FrontmatterCases []FrontmatterCase
 
 	// InjectionCases maps canonical injection name to the expected content string.
-	// Injection(name) must return (content, true) for each entry in this map.
+	// Deprecated: replaced by AgentInjectionCases. Retained for backward compatibility
+	// during migration. When AgentInjectionCases is non-empty, InjectionCases and
+	// NotFilled are ignored.
+	// Injection({Name: name, AgentKey: ""}) must return (content, true) for each entry.
 	InjectionCases map[string]string
 
 	// NotFilled lists injection names for which Injection must return ok==false.
+	// Deprecated: replaced by AgentInjectionCases.
 	NotFilled []string
+
+	// AgentInjectionCases drives the Injection method sub-suite with agent-key awareness.
+	// Each entry represents a test scenario for one agent key. At minimum, two entries
+	// are expected: one for a non-orchestrator key (subagent behavior) and one for
+	// AgentKey="orchestrator" (merged-content behavior).
+	// When this field is non-empty, InjectionCases and NotFilled are ignored.
+	AgentInjectionCases []InjectionCase
 
 	// TargetPathCases drives the TargetPath method sub-suite.
 	TargetPathCases []TargetPathCase
@@ -73,6 +84,15 @@ type TargetPathCase struct {
 	Request  domain.TargetPathRequest
 	Expected string // expected path; ignored when Err is non-nil
 	Err      error  // non-nil => errors.Is(err, Err) must match; Expected is ignored
+}
+
+// InjectionCase is one Injection method test case covering a specific agent key.
+// It is used in Fixtures.AgentInjectionCases to verify agent-identity-aware behavior.
+type InjectionCase struct {
+	Name      string            // test sub-name, e.g. "subagent_HarnessConstraints"
+	AgentKey  string            // agent key to pass in InjectionRequest
+	Filled    map[string]string // canonical name -> expected content (ok=true)
+	NotFilled []string          // canonical names expected to return ok=false
 }
 
 // HookPlanCase is one HookPlan method test case.
@@ -107,7 +127,11 @@ func Run(t *testing.T, m domain.HarnessModule, f Fixtures) {
 		})
 	}
 
-	if len(f.InjectionCases) > 0 || len(f.NotFilled) > 0 {
+	if len(f.AgentInjectionCases) > 0 {
+		t.Run("Injection", func(t *testing.T) {
+			runAgentInjectionCases(t, m, f.AgentInjectionCases)
+		})
+	} else if len(f.InjectionCases) > 0 || len(f.NotFilled) > 0 {
 		t.Run("Injection", func(t *testing.T) {
 			runInjectionCases(t, m, f.InjectionCases, f.NotFilled)
 		})
@@ -323,28 +347,36 @@ func runUniversalInvariants(t *testing.T, m domain.HarnessModule) {
 	})
 
 	t.Run("Injection_unknown_name_returns_false", func(t *testing.T) {
-		// Any name outside CanonicalInjections must return ok==false.
+		// Any name outside CanonicalInjections must return ok==false regardless of agent key.
 		nonCanonical := []string{
 			"NotAnInjection",
 			"",
 			"random-garbage-xyz",
 			"harness_constraints", // wrong casing
 		}
+		agentKeys := []string{"", "some-subagent", "orchestrator"}
 		for _, name := range nonCanonical {
-			_, ok := m.Injection(name)
-			if ok {
-				t.Errorf("Injection(%q) returned ok=true; must return ok=false for non-canonical injection names", name)
+			for _, agentKey := range agentKeys {
+				req := domain.InjectionRequest{Name: name, AgentKey: agentKey}
+				_, ok := m.Injection(req)
+				if ok {
+					t.Errorf("Injection(%q, agentKey=%q) returned ok=true; must return ok=false for non-canonical injection names", name, agentKey)
+				}
 			}
 		}
 	})
 
 	t.Run("Injection_deterministic", func(t *testing.T) {
+		agentKeys := []string{"", "some-subagent", "orchestrator"}
 		for _, name := range docformat.CanonicalInjections {
-			c1, ok1 := m.Injection(name)
-			c2, ok2 := m.Injection(name)
-			if ok1 != ok2 || c1 != c2 {
-				t.Errorf("Injection(%q) non-deterministic: first=(%q,%v), second=(%q,%v)",
-					name, c1, ok1, c2, ok2)
+			for _, agentKey := range agentKeys {
+				req := domain.InjectionRequest{Name: name, AgentKey: agentKey}
+				c1, ok1 := m.Injection(req)
+				c2, ok2 := m.Injection(req)
+				if ok1 != ok2 || c1 != c2 {
+					t.Errorf("Injection(%q, agentKey=%q) non-deterministic: first=(%q,%v), second=(%q,%v)",
+						name, agentKey, c1, ok1, c2, ok2)
+				}
 			}
 		}
 	})
@@ -452,7 +484,8 @@ func runInjectionCases(t *testing.T, m domain.HarnessModule, cases map[string]st
 	for name, want := range cases {
 		name, want := name, want
 		t.Run("filled_"+name, func(t *testing.T) {
-			got, ok := m.Injection(name)
+			req := domain.InjectionRequest{Name: name, AgentKey: ""}
+			got, ok := m.Injection(req)
 			if !ok {
 				t.Errorf("Injection(%q) returned ok=false; want ok=true with content %q", name, want)
 				return
@@ -466,9 +499,45 @@ func runInjectionCases(t *testing.T, m domain.HarnessModule, cases map[string]st
 	for _, name := range notFilled {
 		name := name
 		t.Run("not_filled_"+name, func(t *testing.T) {
-			_, ok := m.Injection(name)
+			req := domain.InjectionRequest{Name: name, AgentKey: ""}
+			_, ok := m.Injection(req)
 			if ok {
 				t.Errorf("Injection(%q) returned ok=true; this injection should not be filled by this harness", name)
+			}
+		})
+	}
+}
+
+// runAgentInjectionCases drives the Injection method sub-suite with agent-key awareness.
+// Each InjectionCase covers one agent key and its expected filled/not-filled injection sets.
+func runAgentInjectionCases(t *testing.T, m domain.HarnessModule, cases []InjectionCase) {
+	t.Helper()
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.Name, func(t *testing.T) {
+			for name, want := range tc.Filled {
+				name, want := name, want
+				t.Run("filled_"+name, func(t *testing.T) {
+					req := domain.InjectionRequest{Name: name, AgentKey: tc.AgentKey}
+					got, ok := m.Injection(req)
+					if !ok {
+						t.Errorf("Injection(%q, agentKey=%q) returned ok=false; want ok=true with content %q", name, tc.AgentKey, want)
+						return
+					}
+					if got != want {
+						t.Errorf("Injection(%q, agentKey=%q): got %q, want %q", name, tc.AgentKey, got, want)
+					}
+				})
+			}
+			for _, name := range tc.NotFilled {
+				name := name
+				t.Run("not_filled_"+name, func(t *testing.T) {
+					req := domain.InjectionRequest{Name: name, AgentKey: tc.AgentKey}
+					_, ok := m.Injection(req)
+					if ok {
+						t.Errorf("Injection(%q, agentKey=%q) returned ok=true; this injection should not be filled", name, tc.AgentKey)
+					}
+				})
 			}
 		})
 	}

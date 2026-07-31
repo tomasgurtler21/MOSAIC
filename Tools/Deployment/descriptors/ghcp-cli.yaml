@@ -7,10 +7,27 @@ injections_version: "1.2.0"
 models:
   ids:
     - "claude-sonnet-4-6"
+    - "claude-sonnet-4-5"
     - "claude-opus-4-6"
-    - "claude-haiku-4-6"
-    - "gpt-5"
-    - "gpt-5-mini"
+    - "claude-opus-4-7"
+    - "claude-opus-4-8"
+    - "claude-opus-4-8-fast"
+    - "claude-opus-5"
+    - "claude-haiku-4-5"
+    - "claude-fable-5"
+    - "gpt-5.4"
+    - "gpt-5.4-mini"
+    - "gpt-5.4-nano"
+    - "gpt-5.3-codex"
+    - "gpt-5.2-codex"
+    - "gpt-4.1"
+    - "gemini-3.5-flash"
+    - "gemini-3.6-flash"
+    - "kimi-k2.7-code"
+    - "gpt-5.6-sol"
+    - "gpt-5.6-terra"
+    - "gpt-5.6-luna"
+    - "mai-code-1-flash"
   format_hint: "claude-<model>-<version> or gpt-<version>"
 
 tools:
@@ -106,12 +123,6 @@ frontmatter:
     - "model"
     - "tools"
     - "user-invocable"
-
-injections:
-  - name: "HarnessConstraints"
-    content: "**Parallel Tool Calls:** Issue multiple independent tool calls in a single response whenever possible. Sequential tool calls are only permitted when a later call depends on the result of an earlier one. This minimises inference API calls to improve speed and reduce cost."
-  - name: "LanguagePatterns"
-    content: ""
 
 hooks:
   supported: false

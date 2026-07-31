@@ -1104,7 +1104,7 @@ func TestHookPlan_TargetDirIsPluginsDir(t *testing.T) {
 // OpenCode adds both constraints; GHCP CLI adds only the parallel tool calls instruction.
 func TestInjection_OpenCode_HarnessConstraintsFilled(t *testing.T) {
 	mod := newModule(t)
-	content, ok := mod.Injection("HarnessConstraints")
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints"})
 	if !ok {
 		t.Fatal("Injection(\"HarnessConstraints\") returned ok=false; OpenCode must fill this injection")
 	}
@@ -1117,7 +1117,7 @@ func TestInjection_OpenCode_HarnessConstraintsFilled(t *testing.T) {
 // declared but empty (no language-specific pattern guidance for OpenCode agents).
 func TestInjection_OpenCode_LanguagePatternsIsEmpty(t *testing.T) {
 	mod := newModule(t)
-	content, ok := mod.Injection("LanguagePatterns")
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns"})
 	if !ok {
 		t.Fatal("Injection(\"LanguagePatterns\") returned ok=false; OpenCode must declare this injection")
 	}
@@ -1140,7 +1140,7 @@ func TestInjection_OpenCode_ProjectInjectionsNotFilled(t *testing.T) {
 		"ContextLimits",
 	}
 	for _, name := range projectInjections {
-		_, ok := mod.Injection(name)
+		_, ok := mod.Injection(domain.InjectionRequest{Name: name})
 		if ok {
 			t.Errorf("Injection(%q) returned ok=true; project-class injections must not be filled by the harness", name)
 		}

@@ -155,9 +155,10 @@ type wireModelSelection struct {
 }
 
 type wireVersionStamps struct {
-	Version           string `json:"version"`
-	TransformVersion  string `json:"transform_version"`
-	InjectionsVersion string `json:"injections_version"`
+	Version                       string `json:"version"`
+	TransformVersion              string `json:"transform_version"`
+	InjectionsVersion             string `json:"injections_version"`
+	OrchestratorInjectionsVersion string `json:"orchestrator_injections_version,omitempty"` // omitted for backward compatibility with older external modules
 }
 
 type wireTargetPathRequest struct {
@@ -169,7 +170,8 @@ type wireTargetPathRequest struct {
 }
 
 type wireInjectionRequest struct {
-	Name string `json:"name"`
+	Name     string `json:"name"`
+	AgentKey string `json:"agent_key,omitempty"` // omitted for backward compatibility with older external modules
 }
 
 type wireHookPlanRequest struct {
@@ -792,9 +794,10 @@ func (a *adapter) Frontmatter(req domain.FrontmatterRequest) (domain.Frontmatter
 		},
 		ToolFields: toWireFrontmatterFields(req.ToolFields),
 		Versions: wireVersionStamps{
-			Version:           req.Versions.Version,
-			TransformVersion:  req.Versions.TransformVersion,
-			InjectionsVersion: req.Versions.InjectionsVersion,
+			Version:                       req.Versions.Version,
+			TransformVersion:              req.Versions.TransformVersion,
+			InjectionsVersion:             req.Versions.InjectionsVersion,
+			OrchestratorInjectionsVersion: req.Versions.OrchestratorInjectionsVersion,
 		},
 	}
 
@@ -842,12 +845,16 @@ func (a *adapter) TargetPath(req domain.TargetPathRequest) (string, error) {
 // Injection returns the harness-level content for a canonical injection name.
 // ok is false for injections this harness does not fill.
 //
+// The agent_key field is forwarded to the external module via the wire protocol. External
+// modules that predate this change ignore the unknown field and return shared content only
+// (graceful degradation via omitempty on the wire type).
+//
 // The domain.HarnessModule interface does not permit returning an error from Injection,
 // so communication or decode failures are treated as "not provided" (ok=false). This is
 // intentional: callers fall back to the next harness in the chain rather than aborting the
 // transform when a single injection lookup fails.
-func (a *adapter) Injection(name string) (string, bool) {
-	params := wireInjectionRequest{Name: name}
+func (a *adapter) Injection(req domain.InjectionRequest) (string, bool) {
+	params := wireInjectionRequest{Name: req.Name, AgentKey: req.AgentKey}
 
 	raw, err := a.callMethod("injection", params)
 	if err != nil {

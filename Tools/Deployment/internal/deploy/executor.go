@@ -505,13 +505,14 @@ func simulateAction(item domain.PlanItem, req ExecRequest) domain.ActionRecord {
 // staleness on subsequent runs.
 func newManifestEntry(item domain.PlanItem, content []byte, stamp domain.VersionStamp) domain.ManifestEntry {
 	return domain.ManifestEntry{
-		Ref:               item.Ref,
-		TargetPath:        item.TargetPath,
-		Version:           stamp.Version,
-		TransformVersion:  stamp.TransformVersion,
-		InjectionsVersion: stamp.InjectionsVersion,
-		ContentHash:       manifest.Hash(content),
-		DeployedAt:        time.Now(),
+		Ref:                           item.Ref,
+		TargetPath:                    item.TargetPath,
+		Version:                       stamp.Version,
+		TransformVersion:              stamp.TransformVersion,
+		InjectionsVersion:             stamp.InjectionsVersion,
+		OrchestratorInjectionsVersion: stamp.OrchestratorInjectionsVersion,
+		ContentHash:                   manifest.Hash(content),
+		DeployedAt:                    time.Now(),
 	}
 }
 
@@ -532,6 +533,8 @@ func resolveVersionStamp(item domain.PlanItem, stamps map[string]domain.VersionS
 				stamp.TransformVersion = delta.Source
 			case "injections_version":
 				stamp.InjectionsVersion = delta.Source
+			case "orchestrator_injections_version":
+				stamp.OrchestratorInjectionsVersion = delta.Source
 			}
 		}
 	}

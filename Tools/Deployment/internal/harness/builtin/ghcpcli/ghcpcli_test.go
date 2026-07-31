@@ -553,7 +553,7 @@ func TestHookPlan_GHCP_NoFilesWhenUnsupported(t *testing.T) {
 // tool calls instruction in its HarnessConstraints injection.
 func TestInjection_GHCP_HarnessConstraintsFilled(t *testing.T) {
 	mod := newModule(t)
-	content, ok := mod.Injection("HarnessConstraints")
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints"})
 	if !ok {
 		t.Fatal("Injection(\"HarnessConstraints\") returned ok=false; GHCP CLI must fill this injection")
 	}
@@ -565,7 +565,7 @@ func TestInjection_GHCP_HarnessConstraintsFilled(t *testing.T) {
 // TestInjection_GHCP_LanguagePatternsIsEmpty verifies that LanguagePatterns is declared but empty.
 func TestInjection_GHCP_LanguagePatternsIsEmpty(t *testing.T) {
 	mod := newModule(t)
-	content, ok := mod.Injection("LanguagePatterns")
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns"})
 	if !ok {
 		t.Fatal("Injection(\"LanguagePatterns\") returned ok=false; GHCP CLI must declare this injection")
 	}
@@ -588,7 +588,7 @@ func TestInjection_GHCP_ProjectInjectionsNotFilled(t *testing.T) {
 		"ContextLimits",
 	}
 	for _, name := range projectInjections {
-		_, ok := mod.Injection(name)
+		_, ok := mod.Injection(domain.InjectionRequest{Name: name})
 		if ok {
 			t.Errorf("Injection(%q) returned ok=true; project-class injections must not be filled by the harness", name)
 		}

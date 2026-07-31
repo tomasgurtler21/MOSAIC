@@ -207,12 +207,22 @@ func Discover(opts Options) (Registry, error) {
 			}
 			var mod domain.HarnessModule
 			if usable {
-				mod = newRuntimeModule(ref, h.desc)
+				// External tier: inject from HarnessInjections.md if present alongside harness.yaml.
+				extInjections, _ := loadInjections(h.yamlPath)
+				extOrchInjections, _ := loadOrchInjections(h.yamlPath)
+				mod = newRuntimeModule(ref, h.desc, extInjections, extOrchInjections)
 			}
 			newEntry = harnessEntry{ref: ref, mod: mod}
 
 		default:
 			// Descriptor-only: always usable when the descriptor is valid.
+			// Load injection content from HarnessInjections.md and HarnessInjectionsOrchestrator.md
+			// in the same directory. Absence of either file is treated as no injections (empty map).
+			injections, injErr := loadInjections(h.yamlPath)
+			if injErr != nil {
+				injections = make(map[string]string)
+			}
+			orchInjections, _ := loadOrchInjections(h.yamlPath)
 			ref := domain.HarnessRef{
 				ID:          id,
 				DisplayName: h.desc.DisplayName,
@@ -220,7 +230,7 @@ func Discover(opts Options) (Registry, error) {
 				SourcePath:  h.yamlPath,
 				Usable:      true,
 			}
-			newEntry = harnessEntry{ref: ref, mod: newRuntimeModule(ref, h.desc)}
+			newEntry = harnessEntry{ref: ref, mod: newRuntimeModule(ref, h.desc, injections, orchInjections)}
 		}
 
 		// Apply precedence: external > descriptor-only > built-in.

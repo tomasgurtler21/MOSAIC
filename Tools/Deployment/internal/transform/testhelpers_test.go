@@ -151,9 +151,9 @@ func (m *fixtureModule) TargetPath(req domain.TargetPathRequest) (string, error)
 	return descriptor.ResolveTargetPath(m.desc, req)
 }
 
-func (m *fixtureModule) Injection(name string) (string, bool) {
+func (m *fixtureModule) Injection(req domain.InjectionRequest) (string, bool) {
 	for _, inj := range m.desc.Injections {
-		if inj.Name == name {
+		if inj.Name == req.Name {
 			return inj.Content, true
 		}
 	}

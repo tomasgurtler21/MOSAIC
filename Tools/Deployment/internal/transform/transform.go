@@ -48,9 +48,10 @@ func Apply(req Request) (Result, error) {
 		Model:      req.Model,
 		ToolFields: toolResult.Fields,
 		Versions: domain.VersionStamps{
-			Version:           sourceVersion,
-			TransformVersion:  desc.TransformVersion,
-			InjectionsVersion: desc.InjectionsVersion,
+			Version:                       sourceVersion,
+			TransformVersion:              desc.TransformVersion,
+			InjectionsVersion:             desc.InjectionsVersion,
+			OrchestratorInjectionsVersion: desc.OrchestratorInjectionsVersion,
 		},
 	}
 	fmPlan, err := req.Module.Frontmatter(fmReq)

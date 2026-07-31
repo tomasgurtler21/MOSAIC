@@ -38,11 +38,18 @@ import (
 
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
+	"mosaic-deploy/internal/harness/injectionfile"
 	"mosaic-deploy/internal/harness/registry"
 )
 
 //go:embed ghcp-cli.yaml
 var embeddedDescriptor []byte
+
+//go:embed HarnessInjections.md
+var embeddedInjections []byte
+
+//go:embed HarnessInjectionsOrchestrator.md
+var embeddedOrchestratorInjections []byte
 
 func init() {
 	registry.Register("ghcp-cli", func() (domain.HarnessModule, error) {
@@ -52,24 +59,36 @@ func init() {
 
 // module is the GitHub Copilot CLI built-in HarnessModule implementation.
 type module struct {
-	ref  domain.HarnessRef
-	desc *domain.HarnessDescriptor
+	ref             domain.HarnessRef
+	desc            *domain.HarnessDescriptor
+	injections      map[string]string // parsed from HarnessInjections.md at construction time
+	orchInjections  map[string]string // parsed from HarnessInjectionsOrchestrator.md at construction time
 }
 
-// New parses the embedded ghcp-cli.yaml descriptor and returns the GHCP CLI HarnessModule.
+// New parses the embedded ghcp-cli.yaml descriptor, HarnessInjections.md, and
+// HarnessInjectionsOrchestrator.md, then returns the GHCP CLI HarnessModule.
 // The module formats tools as a flow-style single-quoted YAML sequence.
 func New() (domain.HarnessModule, error) {
 	desc, err := descriptor.Parse(embeddedDescriptor, "builtin:ghcp-cli")
 	if err != nil {
 		return nil, fmt.Errorf("parse embedded ghcp-cli descriptor: %w", err)
 	}
+	injections, err := injectionfile.ParseInjections(embeddedInjections)
+	if err != nil {
+		return nil, fmt.Errorf("parse embedded ghcp-cli HarnessInjections.md: %w", err)
+	}
+	orchInjections, orchVersion, err := injectionfile.ParseInjectionsWithVersion(embeddedOrchestratorInjections)
+	if err != nil {
+		return nil, fmt.Errorf("parse embedded ghcp-cli HarnessInjectionsOrchestrator.md: %w", err)
+	}
+	desc.OrchestratorInjectionsVersion = orchVersion
 	ref := domain.HarnessRef{
 		ID:          desc.ID,
 		DisplayName: desc.DisplayName,
 		Tier:        domain.TierBuiltin,
 		Usable:      true,
 	}
-	return &module{ref: ref, desc: desc}, nil
+	return &module{ref: ref, desc: desc, injections: injections, orchInjections: orchInjections}, nil
 }
 
 // Ref returns identity and provenance. Two calls return equal values.
@@ -175,12 +194,40 @@ func (m *module) convertFieldsToFlowList(result domain.ToolResult) domain.ToolRe
 // and key order. Model and version stamps are applied exclusively by the transform
 // pipeline and must not appear here; including them would produce duplicate FieldChange
 // entries in transform.Report.Fields.
+//
+// Exception: orchestrator_injections_version is stamped here for the orchestrator agent when
+// non-empty, and filtered from the key_order for non-orchestrator agents and orchestrator agents
+// with an empty version (where the field is not emitted).
 func (m *module) Frontmatter(req domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
+	set := make([]domain.FrontmatterField, len(m.desc.Frontmatter.Add))
+	copy(set, m.desc.Frontmatter.Add)
+
+	keyOrder := m.desc.Frontmatter.KeyOrder
+	if req.AgentKey == "orchestrator" && req.Versions.OrchestratorInjectionsVersion != "" {
+		set = append(set, domain.FrontmatterField{
+			Key:   "orchestrator_injections_version",
+			Value: domain.ScalarValue(req.Versions.OrchestratorInjectionsVersion, domain.QuotePlain),
+		})
+	} else {
+		keyOrder = filterKeyOrder(keyOrder, "orchestrator_injections_version")
+	}
+
 	return domain.FrontmatterPlan{
-		Set:      m.desc.Frontmatter.Add,
+		Set:      set,
 		Remove:   m.desc.Frontmatter.Drop,
-		KeyOrder: m.desc.Frontmatter.KeyOrder,
+		KeyOrder: keyOrder,
 	}, nil
+}
+
+// filterKeyOrder returns a copy of keys with the given key removed.
+func filterKeyOrder(keys []string, exclude string) []string {
+	filtered := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k != exclude {
+			filtered = append(filtered, k)
+		}
+	}
+	return filtered
 }
 
 // TargetPath returns the deployment path for one artifact.
@@ -213,15 +260,30 @@ func (m *module) skillTargetPath(req domain.TargetPathRequest) (string, error) {
 	return path.Join(sp.Project, req.Key, filename), nil
 }
 
-// Injection returns the harness-level content for a canonical injection name as declared
-// in the embedded descriptor's injections list.
-func (m *module) Injection(name string) (string, bool) {
-	for _, inj := range m.desc.Injections {
-		if inj.Name == name {
-			return inj.Content, true
-		}
+// Injection returns the harness-level content for a canonical injection name.
+//
+// For the "orchestrator" agent key, shared content (from HarnessInjections.md) is merged
+// with orchestrator-only content (from HarnessInjectionsOrchestrator.md). For all other
+// agent keys, only shared content is returned.
+func (m *module) Injection(req domain.InjectionRequest) (string, bool) {
+	sharedContent, sharedOk := m.injections[req.Name]
+	if req.AgentKey != "orchestrator" {
+		return sharedContent, sharedOk
 	}
-	return "", false
+	orchContent, orchOk := m.orchInjections[req.Name]
+	if !sharedOk && !orchOk {
+		return "", false
+	}
+	if sharedContent != "" && orchContent != "" {
+		return sharedContent + "\n\n" + orchContent, true
+	}
+	if sharedContent != "" {
+		return sharedContent, true
+	}
+	if orchContent != "" {
+		return orchContent, true
+	}
+	return "", true
 }
 
 // HookPlan always returns Supported: false because GHCP CLI does not support hooks.

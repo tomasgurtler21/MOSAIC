@@ -86,13 +86,14 @@ type yamlManifest struct {
 }
 
 type yamlManifestEntry struct {
-	Ref               yamlArtifactRef `yaml:"ref"`
-	TargetPath        string          `yaml:"target_path"`
-	Version           string          `yaml:"version"`
-	TransformVersion  string          `yaml:"transform_version"`
-	InjectionsVersion string          `yaml:"injections_version"`
-	ContentHash       string          `yaml:"content_hash"`
-	DeployedAt        string          `yaml:"deployed_at"`
+	Ref                           yamlArtifactRef `yaml:"ref"`
+	TargetPath                    string          `yaml:"target_path"`
+	Version                       string          `yaml:"version"`
+	TransformVersion              string          `yaml:"transform_version"`
+	InjectionsVersion             string          `yaml:"injections_version"`
+	OrchestratorInjectionsVersion string          `yaml:"orchestrator_injections_version,omitempty"`
+	ContentHash                   string          `yaml:"content_hash"`
+	DeployedAt                    string          `yaml:"deployed_at"`
 }
 
 type yamlArtifactRef struct {
@@ -172,13 +173,14 @@ func (s *store) Load(workspaceRoot string) (Snapshot, error) {
 			return snap, nil
 		}
 		m.Entries = append(m.Entries, domain.ManifestEntry{
-			Ref:               domain.ArtifactRef{Kind: domain.ArtifactKind(e.Ref.Kind), Key: e.Ref.Key},
-			TargetPath:        e.TargetPath,
-			Version:           e.Version,
-			TransformVersion:  e.TransformVersion,
-			InjectionsVersion: e.InjectionsVersion,
-			ContentHash:       e.ContentHash,
-			DeployedAt:        deployedAt,
+			Ref:                           domain.ArtifactRef{Kind: domain.ArtifactKind(e.Ref.Kind), Key: e.Ref.Key},
+			TargetPath:                    e.TargetPath,
+			Version:                       e.Version,
+			TransformVersion:              e.TransformVersion,
+			InjectionsVersion:             e.InjectionsVersion,
+			OrchestratorInjectionsVersion: e.OrchestratorInjectionsVersion,
+			ContentHash:                   e.ContentHash,
+			DeployedAt:                    deployedAt,
 		})
 	}
 
@@ -209,13 +211,14 @@ func (s *store) Save(workspaceRoot string, m domain.Manifest) error {
 
 	for _, e := range m.Entries {
 		raw.Entries = append(raw.Entries, yamlManifestEntry{
-			Ref:               yamlArtifactRef{Kind: string(e.Ref.Kind), Key: e.Ref.Key},
-			TargetPath:        e.TargetPath,
-			Version:           e.Version,
-			TransformVersion:  e.TransformVersion,
-			InjectionsVersion: e.InjectionsVersion,
-			ContentHash:       e.ContentHash,
-			DeployedAt:        e.DeployedAt.UTC().Format(time.RFC3339),
+			Ref:                           yamlArtifactRef{Kind: string(e.Ref.Kind), Key: e.Ref.Key},
+			TargetPath:                    e.TargetPath,
+			Version:                       e.Version,
+			TransformVersion:              e.TransformVersion,
+			InjectionsVersion:             e.InjectionsVersion,
+			OrchestratorInjectionsVersion: e.OrchestratorInjectionsVersion,
+			ContentHash:                   e.ContentHash,
+			DeployedAt:                    e.DeployedAt.UTC().Format(time.RFC3339),
 		})
 	}
 

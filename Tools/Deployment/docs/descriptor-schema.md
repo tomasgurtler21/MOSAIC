@@ -200,22 +200,20 @@ frontmatter:
     - "mode"
 
 # --------------------------------------------------------------------------
-# Field group 7 — OPTIONAL: harness-level injection content
+# Field group 7 — DEPRECATED: harness-level injection content in YAML
 #
-# These blocks fill named [[INJECTION:...]] markers in deployed agents.
-# Each entry has:
-#   name:    the canonical injection name (e.g. "HarnessConstraints").
-#   content: verbatim text placed between the injection boundary tags.
-#            May span multiple lines.
+# The injections: field is DEPRECATED. Injection content is now sourced
+# exclusively from HarnessInjections.md (placed alongside harness.yaml).
+# The injections: block is retained for backward compatibility: old
+# descriptors with this field still parse without error, but the content
+# is ignored. New descriptors should omit this field entirely.
 #
-# Injections not listed here are left empty (the markers remain in place
-# for project-specific content to be added later).
+# See HarnessInjections.md for the current injection content format.
 # --------------------------------------------------------------------------
-injections:
-  - name: "HarnessConstraints"
-    content: |
-      This agent runs under My Harness. Use only tools from the approved
-      tool universe declared in the harness descriptor.
+# injections:  (deprecated — omit this field; use HarnessInjections.md instead)
+#   - name: "HarnessConstraints"
+#     content: |
+#       This agent runs under My Harness.
 
 # --------------------------------------------------------------------------
 # OPTIONAL: hook support
@@ -346,16 +344,26 @@ extension change.
 
 ---
 
-### `injections` (optional)
+### `injections` (deprecated — use `HarnessInjections.md` instead)
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Canonical injection name, e.g. `"HarnessConstraints"`. |
 | `content` | string | Verbatim text placed between the injection boundary tags. |
 
-Injection names not listed here are left empty in deployed agents. Project-specific
-injection content (placed in `[[INJECTION:ProjectContext]]` etc.) is never overwritten
-by harness injection data.
+**Deprecated.** The `injections:` YAML field is no longer the source of harness-level
+injection content. All provision tiers (built-in, descriptor-only, external) now source
+injection content from a `HarnessInjections.md` file placed alongside the descriptor.
+Old descriptors with `injections:` blocks still parse without error (the field is retained
+in the Go structs for backward compatibility), but the content is silently ignored.
+
+**New harnesses:** Place injection content in `HarnessInjections.md` using the
+`[[INJECTION:Name]]...[[/INJECTION:Name]]` boundary-tag format. Omit the `injections:`
+YAML field entirely.
+
+**Injection source precedence:** `HarnessInjections.md` is the sole authoritative source.
+If `HarnessInjections.md` is absent for a descriptor-only harness, all injections return
+`ok=false` (no harness-level content is injected).
 
 ---
 

@@ -56,6 +56,9 @@ func probeDeployedArtifact(workspace, targetPath, modelKey string) domain.Deploy
 			if v, ok := fm.Get("injections_version"); ok && v.Kind == domain.KindScalar {
 				state.InjectionsVersion = v.Scalar
 			}
+			if v, ok := fm.Get("orchestrator_injections_version"); ok && v.Kind == domain.KindScalar {
+				state.OrchestratorInjectionsVersion = v.Scalar
+			}
 			if modelKey != "" {
 				if v, ok := fm.Get(modelKey); ok && v.Kind == domain.KindScalar {
 					state.ModelID = v.Scalar

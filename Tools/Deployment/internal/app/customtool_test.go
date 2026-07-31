@@ -403,8 +403,8 @@ func (m *capturingToolsModule) Frontmatter(req domain.FrontmatterRequest) (domai
 func (m *capturingToolsModule) TargetPath(req domain.TargetPathRequest) (string, error) {
 	return m.base.TargetPath(req)
 }
-func (m *capturingToolsModule) Injection(name string) (string, bool) {
-	return m.base.Injection(name)
+func (m *capturingToolsModule) Injection(req domain.InjectionRequest) (string, bool) {
+	return m.base.Injection(req)
 }
 func (m *capturingToolsModule) HookPlan(req domain.HookPlanRequest) (domain.HookPlan, error) {
 	return m.base.HookPlan(req)
@@ -439,7 +439,7 @@ func (m *unmappedToolModule) Frontmatter(req domain.FrontmatterRequest) (domain.
 func (m *unmappedToolModule) TargetPath(req domain.TargetPathRequest) (string, error) {
 	return m.base.TargetPath(req)
 }
-func (m *unmappedToolModule) Injection(name string) (string, bool) { return m.base.Injection(name) }
+func (m *unmappedToolModule) Injection(req domain.InjectionRequest) (string, bool) { return m.base.Injection(req) }
 func (m *unmappedToolModule) HookPlan(req domain.HookPlanRequest) (domain.HookPlan, error) {
 	return m.base.HookPlan(req)
 }

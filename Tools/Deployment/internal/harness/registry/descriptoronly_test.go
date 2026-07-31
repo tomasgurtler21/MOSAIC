@@ -52,6 +52,18 @@ func makeDescriptorRoot(t *testing.T, id, yamlContent string) (root string) {
 	return root
 }
 
+// makeDescriptorRootWithInjections builds a MosaicRoot with a single descriptor-only harness
+// whose harness.yaml and HarnessInjections.md are written from the provided content strings.
+func makeDescriptorRootWithInjections(t *testing.T, id, yamlContent, injectionsMd string) (root string) {
+	t.Helper()
+	root = makeDescriptorRoot(t, id, yamlContent)
+	dir := filepath.Join(root, "MosaicDeploy", "harnesses", id)
+	if err := os.WriteFile(filepath.Join(dir, "HarnessInjections.md"), []byte(injectionsMd), 0o644); err != nil {
+		t.Fatalf("write HarnessInjections.md: %v", err)
+	}
+	return root
+}
+
 // resolveDescriptorOnly is a test helper that calls Discover and Resolve for a
 // descriptor-only harness, fatally failing if either step fails.
 func resolveDescriptorOnly(t *testing.T, root, id string) domain.HarnessModule {
@@ -455,33 +467,72 @@ func TestDescriptorOnly_Injection_ReturnsFalseForUnknownNames(t *testing.T) {
 	root := makeDescriptorRoot(t, id, yaml)
 	m := resolveDescriptorOnly(t, root, id)
 
-	_, ok := m.Injection("HarnessConstraints")
+	_, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints"})
 	if ok {
 		t.Errorf("Injection(\"HarnessConstraints\") returned ok = true for an empty descriptor; want false")
 	}
 }
 
 // TestDescriptorOnly_Injection_ReturnsContentForDeclaredName verifies that Injection()
-// returns the declared content and ok == true for names listed in the descriptor.
+// returns the declared content and ok == true for names present in HarnessInjections.md.
+// Injection content is now sourced from HarnessInjections.md (not from the YAML injections: block).
 func TestDescriptorOnly_Injection_ReturnsContentForDeclaredName(t *testing.T) {
 	id := "descriptor-injectioncontent-test"
-	wantContent := "This is the harness-level content.\n"
-	yaml := fmt.Sprintf(`schema_version: "1"
-id: %q
-display_name: "Injection Content Test"
-injections:
-  - name: "HarnessConstraints"
-    content: %q
+	wantContent := "This is the harness-level content."
+	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"Injection Content Test\"\n", id)
+	injectionsMd := fmt.Sprintf(`---
+version: "1.0.0"
+harness: %s
+---
+
+# Harness Injections — Test
+
+[[INJECTION:HarnessConstraints]]
+%s
+[[/INJECTION:HarnessConstraints]]
 `, id, wantContent)
-	root := makeDescriptorRoot(t, id, yaml)
+	root := makeDescriptorRootWithInjections(t, id, yamlContent, injectionsMd)
 	m := resolveDescriptorOnly(t, root, id)
 
-	content, ok := m.Injection("HarnessConstraints")
+	content, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints"})
 	if !ok {
 		t.Errorf("Injection(\"HarnessConstraints\") returned ok = false; want true")
 	}
 	if content != wantContent {
 		t.Errorf("Injection(\"HarnessConstraints\") content = %q, want %q", content, wantContent)
+	}
+}
+
+// TestDescriptorOnly_Injection_YAMLBackwardCompatibility verifies that a descriptor with
+// an injections: block in its YAML still parses without error. The YAML injections: field
+// is retained for backward compatibility but is no longer the data source — content comes
+// from HarnessInjections.md. This test confirms that old YAML descriptors with injections:
+// blocks do not cause parse failures (the field is silently ignored).
+func TestDescriptorOnly_Injection_YAMLBackwardCompatibility(t *testing.T) {
+	id := "descriptor-yamlcompat-test"
+	// Old-style YAML with injections: block — must still parse without error.
+	yamlContent := fmt.Sprintf(`schema_version: "1"
+id: %q
+display_name: "YAML Backward Compat Test"
+injections:
+  - name: "HarnessConstraints"
+    content: "content from yaml (ignored)"
+`, id)
+	root := makeDescriptorRoot(t, id, yamlContent)
+
+	// Discover and resolve must succeed — the injections: block must not cause a parse error.
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	m, err := reg.Resolve(id)
+	if err != nil {
+		t.Fatalf("Resolve(%q): %v — old YAML with injections: block must parse without error", id, err)
+	}
+	// No HarnessInjections.md exists, so Injection returns ok=false (not the YAML content).
+	_, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints"})
+	if ok {
+		t.Error("Injection(\"HarnessConstraints\") returned ok=true; expected ok=false because HarnessInjections.md is absent (YAML injections: block is ignored)")
 	}
 }
 

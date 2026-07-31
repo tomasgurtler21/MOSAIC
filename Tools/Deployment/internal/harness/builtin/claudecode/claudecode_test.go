@@ -349,7 +349,7 @@ func TestTargetPath_ClaudeCode_HookProjectScope(t *testing.T) {
 // HarnessConstraints with empty content (no constraint injection).
 func TestInjection_ClaudeCode_HarnessConstraintsIsEmpty(t *testing.T) {
 	mod := newModule(t)
-	content, ok := mod.Injection("HarnessConstraints")
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: ""})
 	if !ok {
 		t.Fatal("Injection(\"HarnessConstraints\") returned ok=false; Claude Code must declare this injection")
 	}
@@ -362,7 +362,7 @@ func TestInjection_ClaudeCode_HarnessConstraintsIsEmpty(t *testing.T) {
 // LanguagePatterns with empty content (no language pattern injection).
 func TestInjection_ClaudeCode_LanguagePatternsIsEmpty(t *testing.T) {
 	mod := newModule(t)
-	content, ok := mod.Injection("LanguagePatterns")
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: ""})
 	if !ok {
 		t.Fatal("Injection(\"LanguagePatterns\") returned ok=false; Claude Code must declare this injection")
 	}
@@ -385,7 +385,7 @@ func TestInjection_ClaudeCode_ProjectInjectionsNotFilled(t *testing.T) {
 		"ContextLimits",
 	}
 	for _, name := range projectInjections {
-		_, ok := mod.Injection(name)
+		_, ok := mod.Injection(domain.InjectionRequest{Name: name, AgentKey: ""})
 		if ok {
 			t.Errorf("Injection(%q) returned ok=true; project-class injections must not be filled by the harness", name)
 		}
