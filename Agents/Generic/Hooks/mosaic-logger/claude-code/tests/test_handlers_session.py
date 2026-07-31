@@ -1,20 +1,14 @@
 """Tests for session-scoped event handlers in mosaic_logger_handlers_session.
 
 Covers:
-  T3.1 - SessionStart → session_start event with resumed derivation and
-          SessionEnd → session_end with undocumented reason pass-through
-  T3.3 - UserPromptSubmit → user turn (full untruncated content);
-          Stop → assistant turn (full content, transcript-derived model/token_usage)
-  T3.5 - Notification → notification event; PreCompact/PostCompact →
-          two independent partial compaction events (design decision: two partials)
-  T3.6 - Stop carrying agent_id → no entry written to orchestrator event stream
-  T3.7 - Stop → exports 00_orchestrator_session.raw with .meta.json sidecar
-
-RED-phase notes:
-  - T3.3 model/token_usage assertions will FAIL: handle_stop does not yet call
-    transcript.read_last_assistant_facts.
-  - T3.7 assertions will FAIL: handle_stop does not yet call export.export_transcript.
-  Tests for T3.1, T3.5, T3.6 exercise implemented behaviour and define the specification.
+  SessionStart → session_start event with resumed derivation and
+  SessionEnd → session_end with undocumented reason pass-through
+  UserPromptSubmit → user turn (full untruncated content);
+  Stop → assistant turn (full content, transcript-derived model/token_usage)
+  Notification → notification event; PreCompact/PostCompact →
+  two independent partial compaction events (design decision: two partials)
+  Stop carrying agent_id → still emits orchestrator turn event (guard removed)
+  Stop → exports 00_orchestrator_session.raw with .meta.json sidecar
 """
 
 import json
@@ -633,7 +627,6 @@ class TestHandleStop(unittest.TestCase):
         ctx = _make_ctx(payload, self.tmp_path)
         session_handlers.handle_stop(ctx)
         event = _read_events(ctx)[0]
-        # Expected to FAIL until handle_stop integrates transcript reading
         self.assertIn("model", event)
         self.assertEqual("claude-opus-4-5", event["model"])
 
@@ -659,7 +652,6 @@ class TestHandleStop(unittest.TestCase):
         ctx = _make_ctx(payload, self.tmp_path)
         session_handlers.handle_stop(ctx)
         event = _read_events(ctx)[0]
-        # Expected to FAIL until handle_stop integrates transcript reading
         self.assertIn("token_usage", event)
         usage = event["token_usage"]
         self.assertEqual(200, usage["input_tokens"])
@@ -974,11 +966,18 @@ class TestHandleCompaction(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# T3.6 – Stop with agent_id → no orchestrator stream entry
+# T3.6 – Stop with agent_id → still emits orchestrator event (guard removed)
 # ---------------------------------------------------------------------------
 
 class TestHandleStopAgentIdGuard(unittest.TestCase):
-    """A Stop input carrying agent_id must not produce any orchestrator event."""
+    """handle_stop must process Stop events regardless of agent_id presence.
+
+    The previous `if ctx.agent_id: return` guard is removed. Event-name-based
+    dispatch (Stop vs SubagentStop) already distinguishes orchestrator from
+    subagent firings, so the guard is redundant and unsafe once orchestrators
+    adopt `--agent` launches (which populates agent_id on all hook events
+    including the top-level Stop).
+    """
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -987,7 +986,8 @@ class TestHandleStopAgentIdGuard(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_stop_with_agent_id_writes_no_event(self):
+    def test_stop_with_agent_id_still_emits_turn_event(self):
+        """handle_stop must emit a turn event even when agent_id is populated."""
         payload = {
             "hook_event_name": "Stop",
             "session_id": TEST_SESSION_ID,
@@ -997,9 +997,10 @@ class TestHandleStopAgentIdGuard(unittest.TestCase):
         ctx = _make_ctx(payload, self.tmp_path)
         session_handlers.handle_stop(ctx)
         events = _read_events(ctx)
-        self.assertEqual(0, len(events))
+        self.assertEqual(1, len(events))
 
-    def test_stop_with_agent_id_does_not_create_events_file(self):
+    def test_stop_with_agent_id_still_creates_events_file(self):
+        """handle_stop must create the orchestrator events file even when agent_id is set."""
         payload = {
             "hook_event_name": "Stop",
             "session_id": TEST_SESSION_ID,
@@ -1009,10 +1010,10 @@ class TestHandleStopAgentIdGuard(unittest.TestCase):
         ctx = _make_ctx(payload, self.tmp_path)
         session_handlers.handle_stop(ctx)
         events_file = ctx.paths.orchestrator_events(TEST_RUN_ID)
-        self.assertFalse(events_file.exists())
+        self.assertTrue(events_file.exists())
 
     def test_stop_without_agent_id_does_write_event(self):
-        """Contrast: orchestrator Stop (no agent_id) DOES emit a turn."""
+        """Orchestrator Stop (no agent_id) also emits a turn."""
         payload = {
             "hook_event_name": "Stop",
             "session_id": TEST_SESSION_ID,
@@ -1023,8 +1024,21 @@ class TestHandleStopAgentIdGuard(unittest.TestCase):
         events = _read_events(ctx)
         self.assertEqual(1, len(events))
 
+    def test_stop_with_agent_id_turn_event_has_assistant_role(self):
+        """handle_stop must emit a turn event with role 'assistant' when agent_id is populated."""
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": TEST_SESSION_ID,
+            "agent_id": "orchestrator-agent-001",
+            "last_assistant_message": "Orchestrator response.",
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_stop(ctx)
+        event = _read_events(ctx)[0]
+        self.assertEqual("assistant", event["role"])
+
     def test_stop_with_agent_id_does_not_raise(self):
-        """The guard must silently return, never raise."""
+        """handle_stop must never raise when agent_id is present."""
         payload = {
             "hook_event_name": "Stop",
             "session_id": TEST_SESSION_ID,
@@ -1057,10 +1071,7 @@ class TestHandleStopAgentIdGuard(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestOrchestratorTranscriptExport(unittest.TestCase):
-    """handle_stop exports the orchestrator transcript to 00_orchestrator_session.raw.
-
-    These tests are expected to FAIL until handle_stop integrates export_transcript.
-    """
+    """handle_stop exports the orchestrator transcript to 00_orchestrator_session.raw."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -1086,7 +1097,6 @@ class TestOrchestratorTranscriptExport(unittest.TestCase):
         }
         ctx = _make_ctx(payload, self.tmp_path)
         session_handlers.handle_stop(ctx)
-        # Expected to FAIL until handle_stop calls export_transcript
         raw_path = ctx.paths.orchestrator_raw(TEST_RUN_ID)
         self.assertTrue(raw_path.exists(), "00_orchestrator_session.raw was not created")
 

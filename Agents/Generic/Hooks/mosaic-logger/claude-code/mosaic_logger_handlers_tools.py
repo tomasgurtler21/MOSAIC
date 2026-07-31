@@ -30,11 +30,39 @@ def resolve_call_id(ctx: "core.HookContext") -> str:
 
 
 def handle_pre_tool_use(ctx: "core.HookContext") -> None:
-    """Emit tool_call_start."""
+    """Emit tool_call_start. Additionally, when tool_name is 'Agent',
+    extract agent_instance_id and run_id from tool_input.prompt and
+    persist a pending dispatch for the current session_id.
+
+    The pending-dispatch write is best-effort; failure does not prevent
+    the tool_call_start event from being emitted. Never raises.
+    """
+    # Capture pending dispatch for Agent tool invocations.
+    tool_name = ctx.field("tool_name")
+    if tool_name == "Agent":
+        try:
+            tool_input = ctx.field("tool_input")
+            prompt = None
+            if isinstance(tool_input, dict):
+                prompt = tool_input.get("prompt") or None
+            if prompt:
+                agent_instance_id = runstate.extract_instance_id(prompt)
+                if agent_instance_id:
+                    extracted_run_id = runstate.extract_run_id(prompt)
+                    runstate.put_pending_dispatch(
+                        ctx.paths,
+                        core.effective_run_id(ctx),
+                        ctx.session_id,
+                        agent_instance_id,
+                        extracted_run_id,
+                    )
+        except Exception:
+            pass  # Never let dispatch capture suppress the tool_call_start event.
+
     event = core.build_event(
         "tool_call_start", ctx,
         call_id=resolve_call_id(ctx),
-        tool_name=ctx.field("tool_name"),
+        tool_name=tool_name,
         tool_input=ctx.field("tool_input"),
     )
     core.append_event(resolve_destination(ctx), event)

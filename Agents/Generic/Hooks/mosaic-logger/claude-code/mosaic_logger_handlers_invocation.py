@@ -69,20 +69,48 @@ def extract_status_code(message: "str | None") -> "str | None":
 # ---------------------------------------------------------------------------
 
 def handle_subagent_start(ctx: "core.HookContext") -> None:
-    """Handle SubagentStart: register mapping, emit invocation_start and input turn,
-    write 01_input.md, and refresh 00_orchestrator_session.raw."""
+    """Handle SubagentStart: register mapping, emit invocation_start and
+    input turn, write 01_input.md, and refresh 00_orchestrator_session.raw.
+
+    Agent instance ID is sourced from the pending-dispatch queue (populated
+    by handle_pre_tool_use when tool_name was 'Agent') rather than from
+    ctx.field('agent_prompt') (which is never populated in practice).
+    Falls back to 'unknown-agent' when no pending dispatch is available.
+
+    If the pending dispatch also carried a run_id and ctx.run_id is not
+    yet set, sets ctx.run_id to improve run-scoped routing.
+
+    Never raises.
+    """
     if not ctx.agent_id:
         return
 
+    # 1. Pop pending dispatch (after guard, before path resolution).
+    dispatch = runstate.pop_pending_dispatch(
+        ctx.paths, core.effective_run_id(ctx), ctx.session_id
+    )
+
+    # 2. Optionally set ctx.run_id from the dispatch's run_id when not yet set.
+    if dispatch and dispatch.get("run_id") and not ctx.run_id:
+        ctx.run_id = dispatch["run_id"]
+
+    # 3. Compute effective run_id for all downstream path routing.
     run_id = core.effective_run_id(ctx)
+
     agent_prompt = ctx.field("agent_prompt")
+
+    # 4. Resolve agent_instance_id: pending dispatch takes priority; fall back
+    #    to extracting from agent_prompt (backward-compatible path for callers
+    #    that supply the prompt directly without a pending dispatch); final
+    #    fallback is 'unknown-agent'.
+    if dispatch:
+        agent_instance_id = dispatch["agent_instance_id"]
+    else:
+        extracted = runstate.extract_instance_id(agent_prompt)
+        agent_instance_id = extracted if extracted else "unknown-agent"
     agent_type = ctx.agent_type
 
-    # 1. Resolve agent_instance_id — falls back to "unknown-agent" when extraction fails
-    extracted = runstate.extract_instance_id(agent_prompt)
-    agent_instance_id = extracted if extracted else "unknown-agent"
-
-    # 2. Persist mapping FIRST — before any event write
+    # 5. Persist mapping FIRST — before any event write
     runstate.put_agent_mapping(
         ctx.paths, run_id, ctx.agent_id, agent_instance_id, agent_type
     )
@@ -116,8 +144,18 @@ def handle_subagent_start(ctx: "core.HookContext") -> None:
 
 
 def handle_subagent_stop(ctx: "core.HookContext") -> None:
-    """Handle SubagentStop: emit invocation_end and final assistant turn, write
-    02_output.md, export agent transcript, and refresh 00_orchestrator_session.raw."""
+    """Handle SubagentStop: emit invocation_end and final assistant turn,
+    write 02_output.md, export agent transcript, and refresh
+    00_orchestrator_session.raw.
+
+    Guard: returns immediately (no events, no artifacts, no exports)
+    when resolve_invocation_id returns an 'unmapped_*' value, indicating
+    this firing has no corresponding SubagentStart mapping and is likely
+    a Claude Code internal activity-narration snapshot rather than a
+    genuine subagent completion.
+
+    Never raises.
+    """
     if not ctx.agent_id:
         return
 
@@ -127,6 +165,11 @@ def handle_subagent_stop(ctx: "core.HookContext") -> None:
     agent_instance_id = runstate.resolve_invocation_id(
         ctx.paths, run_id, ctx.agent_id
     )
+
+    # Guard: skip unmapped SubagentStop firings (activity-narration snapshots).
+    if agent_instance_id.startswith("unmapped_"):
+        return
+
     sink = ctx.paths.invocation_events(run_id, agent_instance_id)
 
     # 2. Read transcript facts once; reuse for both invocation_end and final turn

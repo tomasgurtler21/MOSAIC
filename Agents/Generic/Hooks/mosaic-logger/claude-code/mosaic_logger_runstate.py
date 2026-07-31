@@ -6,8 +6,10 @@ agent_id -> agent_instance_id mapping files.
 
 import datetime
 import json
+import os
 import random
 import re
+import sys
 
 import mosaic_logger_core as core
 
@@ -134,6 +136,149 @@ def extract_run_id(prompt: "str | None") -> "str | None":
         if m:
             return m.group(1)
         return None
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Pending-dispatch state management
+# ---------------------------------------------------------------------------
+
+PENDING_DISPATCH_MAX_AGE_SECONDS = 120
+
+
+def put_pending_dispatch(
+    paths: "core.LogPaths",
+    path_run_id: str,
+    session_id: str,
+    agent_instance_id: str,
+    extracted_run_id: "str | None",
+) -> bool:
+    """Persist a pending dispatch entry for the given session.
+
+    Appends a single JSON line to a per-session JSONL file keyed by
+    session_id. Uses OS-appropriate locking to ensure concurrent writers
+    do not overwrite each other:
+
+    - Windows: opens the file for read+write (O_RDWR|O_CREAT), acquires
+      an advisory byte-range lock on byte 0 via msvcrt.locking (LK_LOCK
+      retries for up to 10 seconds), seeks to end, writes the encoded
+      line, then releases the lock. Python's O_APPEND on Windows is
+      implemented by the MSVCRT CRT with a non-atomic seek+write, so
+      explicit locking is required.
+    - POSIX: opens with O_WRONLY|O_CREAT|O_APPEND and uses a single
+      os.write() call, which the kernel guarantees is atomic for writes
+      under PIPE_BUF (~4 KB). JSON lines for these entries are well
+      within that bound.
+
+    Returns True on success. Never raises.
+    """
+    try:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        entry = {
+            "agent_instance_id": agent_instance_id,
+            "run_id": extracted_run_id,
+            "created_at": _iso_ms(now),
+        }
+        path = paths.pending_dispatch_entry(path_run_id, session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+
+        if sys.platform == "win32":
+            import msvcrt
+            fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o666)
+            try:
+                os.lseek(fd, 0, 0)
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                try:
+                    os.lseek(fd, 0, 2)
+                    os.write(fd, data)
+                finally:
+                    os.lseek(fd, 0, 0)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            finally:
+                os.close(fd)
+        else:
+            fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o666)
+            try:
+                os.write(fd, data)
+            finally:
+                os.close(fd)
+
+        return True
+    except Exception:
+        return False
+
+
+def pop_pending_dispatch(
+    paths: "core.LogPaths",
+    path_run_id: str,
+    session_id: str,
+    max_age_seconds: int = PENDING_DISPATCH_MAX_AGE_SECONDS,
+) -> "dict | None":
+    """Pop and return the oldest non-stale pending dispatch for the given session.
+
+    Reads the JSONL file, evicts leading stale entries (older than
+    max_age_seconds), then pops the first remaining entry. Atomically
+    replaces the file with the remaining lines. Returns None when the
+    queue is empty, the file is absent, or any I/O/parse error occurs.
+    Never raises.
+    """
+    try:
+        path = paths.pending_dispatch_entry(path_run_id, session_id)
+        if not path.exists():
+            return None
+
+        text = path.read_text(encoding="utf-8")
+        raw_lines = [ln for ln in text.splitlines() if ln.strip()]
+
+        if not raw_lines:
+            return None
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        # Parse all lines -- any corrupt line causes the whole pop to fail safely.
+        parsed = []
+        for ln in raw_lines:
+            try:
+                parsed.append((ln, json.loads(ln)))
+            except (json.JSONDecodeError, ValueError):
+                return None
+
+        # Evict leading stale entries.
+        first_fresh = 0
+        for i, (ln, entry) in enumerate(parsed):
+            try:
+                created_at = entry.get("created_at", "")
+                ts = datetime.datetime.fromisoformat(
+                    created_at.replace("Z", "+00:00")
+                )
+                age_seconds = (now - ts).total_seconds()
+                if age_seconds > max_age_seconds:
+                    first_fresh = i + 1
+                    continue
+            except Exception:
+                # Unparseable timestamp -- treat as stale.
+                first_fresh = i + 1
+                continue
+            break  # Found first non-stale entry.
+
+        if first_fresh >= len(parsed):
+            # All entries are stale -- write empty file.
+            core.atomic_replace(path, b"")
+            return None
+
+        # Pop the first non-stale entry.
+        popped_entry = parsed[first_fresh][1]
+        remaining_lines = [ln for ln, _ in parsed[first_fresh + 1:]]
+
+        remaining_text = "".join(ln + "\n" for ln in remaining_lines)
+        core.atomic_replace(path, remaining_text.encode("utf-8"))
+
+        return {
+            "agent_instance_id": popped_entry.get("agent_instance_id"),
+            "run_id": popped_entry.get("run_id"),
+        }
     except Exception:
         return None
 

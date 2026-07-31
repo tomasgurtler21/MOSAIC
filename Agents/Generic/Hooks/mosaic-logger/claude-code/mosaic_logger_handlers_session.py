@@ -85,9 +85,16 @@ def handle_user_prompt_submit(ctx: "core.HookContext") -> None:
 
 
 def handle_stop(ctx: "core.HookContext") -> None:
-    """Emit turn with role 'assistant' for the orchestrator only.
+    """Emit turn with role 'assistant' for the orchestrator.
 
-    Guard: returns immediately when agent_id is present (subagent Stop).
+    This handler is registered for hook_event_name == 'Stop' only;
+    SubagentStop events are dispatched to handle_subagent_stop instead.
+    The event-name-based dispatch in HANDLERS already distinguishes
+    orchestrator Stop from subagent SubagentStop, so no agent_id guard
+    is needed.
+
+    Processes Stop events regardless of whether agent_id is populated
+    (which occurs when the orchestrator is launched with --agent).
 
     model and token_usage are read from the transcript JSONL at
     ctx.transcript_path. Both are independently optional; a missing or
@@ -96,9 +103,9 @@ def handle_stop(ctx: "core.HookContext") -> None:
     After writing the turn event, the orchestrator transcript is exported to
     00_orchestrator_session.raw plus its .meta.json sidecar. An export failure
     is swallowed and never prevents the turn event from being written.
+
+    Never raises.
     """
-    if ctx.agent_id:
-        return
     run_id = core.effective_run_id(ctx)
     content = ctx.field("last_assistant_message")
     if content is None:

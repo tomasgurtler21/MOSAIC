@@ -22,6 +22,7 @@ SCHEMA_VERSION = "1.0.0"
 HARNESS = "claude-code"
 LOGS_DIRNAME = "OrchestrationLogs"
 AGENT_MAP_DIRNAME = ".agent-map"
+PENDING_DISPATCH_DIRNAME = ".pending-dispatch"
 RESERVED_FILENAME_CHARS = '<>:"/\\|?*'
 DEBUG_ENV_VAR = "MOSAIC_LOGGER_DEBUG"
 WORKSPACE_ENV_VAR = "CLAUDE_PROJECT_DIR"
@@ -256,6 +257,14 @@ class LogPaths:
 
     def invocation_raw(self, run_id: str, agent_instance_id: str) -> pathlib.Path:
         return self.invocation_dir(run_id, agent_instance_id) / "04_session.raw"
+
+    def pending_dispatch_dir(self, run_id: str) -> pathlib.Path:
+        """Directory for pending-dispatch queue files."""
+        return self.run_root(run_id) / PENDING_DISPATCH_DIRNAME
+
+    def pending_dispatch_entry(self, run_id: str, session_id: str) -> pathlib.Path:
+        """Per-session pending-dispatch queue file."""
+        return self.pending_dispatch_dir(run_id) / f"{sanitize_component(session_id)}.jsonl"
 
 
 def build_paths(workspace_root: pathlib.Path) -> LogPaths:
