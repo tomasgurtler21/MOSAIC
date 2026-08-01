@@ -12,10 +12,11 @@ import (
 // selectionsFile is the YAML schema for the --selections flag file. Fields are parsed
 // leniently: unknown keys are silently ignored for forward compatibility (AC19.8).
 type selectionsFile struct {
-	Workflows     []string          `yaml:"workflows"`
-	UtilityAgents []string          `yaml:"utility_agents"`
-	Hooks         []string          `yaml:"hooks"`
-	TierModels    map[string]string `yaml:"tier_models"`
+	Workflows              []string          `yaml:"workflows"`
+	UtilityAgents          []string          `yaml:"utility_agents"`
+	InfrastructureAgents   []string          `yaml:"infrastructure_agents"`
+	Hooks                  []string          `yaml:"hooks"`
+	TierModels             map[string]string `yaml:"tier_models"`
 }
 
 // parseSelectionsFile reads and parses a YAML selections file at path.
@@ -72,6 +73,9 @@ func PreAnswersFromSelectionsFile(path string) (PreAnswers, error) {
 	}
 	if len(sf.UtilityAgents) > 0 {
 		values[domain.QUtilityAgents] = map[string]string{"": strings.Join(sf.UtilityAgents, ",")}
+	}
+	if len(sf.InfrastructureAgents) > 0 {
+		values[domain.QInfrastructureAgents] = map[string]string{"": strings.Join(sf.InfrastructureAgents, ",")}
 	}
 	if len(sf.Hooks) > 0 {
 		values[domain.QHooks] = map[string]string{"": strings.Join(sf.Hooks, ",")}

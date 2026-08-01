@@ -65,9 +65,10 @@ func Apply(req Request) (Result, error) {
 
 	// Process injection regions in the body, applying the injection merge policy:
 	// harness injections are filled from the module, project injections are lifted from
-	// the deployed file (or emptied on new deployment), and AvailableWorkflows is
-	// assembled from req.Workflows. Orphaned injection points produce gaps.
-	injectionOutcomes, injectionGaps, workflowIDs, err := processInjections(doc, req)
+	// the deployed file (or emptied on new deployment), AvailableWorkflows is assembled
+	// from req.Workflows, and InfrastructureAgents is assembled from
+	// req.InfrastructureAgents. Orphaned injection points produce gaps.
+	injectionOutcomes, injectionGaps, workflowIDs, infraAgentKeys, err := processInjections(doc, req)
 	if err != nil {
 		return Result{}, err
 	}
@@ -79,12 +80,13 @@ func Apply(req Request) (Result, error) {
 	allGaps := append(gaps, injectionGaps...)
 
 	report := Report{
-		Fields:      fieldChanges,
-		Tools:       toolResult.Resolutions,
-		Injections:  injectionOutcomes,
-		Gaps:        allGaps,
-		Workflows:   workflowIDs,
-		OutputBytes: len(output),
+		Fields:               fieldChanges,
+		Tools:                toolResult.Resolutions,
+		Injections:           injectionOutcomes,
+		Gaps:                 allGaps,
+		Workflows:            workflowIDs,
+		InfrastructureAgents: infraAgentKeys,
+		OutputBytes:          len(output),
 	}
 
 	return Result{Output: output, Report: report}, nil

@@ -1,5 +1,5 @@
 ---
-version: 7.0.0
+version: 7.1.0
 transform_version: 3.0.0
 injections_version: 1.3.0
 orchestrator_injections_version: 1.0.0
@@ -58,8 +58,12 @@ Before creating Orchestration.md and dispatching anything, validate the configur
 **1. Every subagent named by the chosen workflow must be available.**
 If a workflow step names a subagent you cannot dispatch to, stop and report which one is missing. Never substitute anything for it — not a general-purpose agent, not a similarly-named agent, not yourself. A workflow names specific agents because their system prompts carry the domain expertise and quality standards that step depends on; a substitute produces output that looks like the step succeeded while lacking exactly what made the step worth running. This is a deployment/configuration problem for the user to fix, not a gap for you to route around at runtime.
 
-**2. `checkpoints: enabled` requires a content-preservation mechanism.**
-Checkpointing is only meaningful if something actually preserves file content and can supply a restorable content-reference (see Checkpoints under Orchestration.md Management). If the user requests checkpoints but the chosen workflow includes no such mechanism, tell them and require an explicit choice: supply a mechanism, or run with `checkpoints: disabled`. Recording checkpoints that cannot restore anything is a broken promise — the entire value of checkpointing is the ability to roll back.
+**2. `checkpoints: enabled` requires a declared checkpoint-class infrastructure agent.**
+This is a string comparison, not a judgement about your own configuration: does the `[[INJECTION:InfrastructureAgents]]` region contain at least one agent whose `Class` is `checkpoint`? If it does, the precondition holds. If it does not, tell the user and require an explicit choice: run with `checkpoints: disabled`, or start again against an orchestrator that declares a checkpoint-class agent. This is a deployment fact, so it cannot be fixed at run time.
+
+**`Class = commit` does not satisfy this precondition**, even though a commit-class agent also makes git commits at stage boundaries. Its commits go into the user's own history and are never restore targets — the agent that restores refuses any target outside the checkpoint namespace. Accepting one here would let a run start believing it can roll back when nothing can, which is precisely the state this check exists to prevent. A run wanting both behaviours needs both agents declared.
+
+Recording checkpoints that cannot restore anything is a broken promise — the entire value of checkpointing is the ability to roll back.
 
 ### Authority Hierarchy
 
@@ -77,6 +81,17 @@ Checkpointing is only meaningful if something actually preserves file content an
 When creating a concrete orchestrator, inject workflow definitions here. Workflows are defined as individual
 files under the Workflows/ directory (e.g., Workflows/{Category}/{id}.md). See Workflows/Index.md for the
 full list of available workflows and their categories.
+-->
+
+[[INJECTION:InfrastructureAgents]]
+[[/INJECTION:InfrastructureAgents]]
+
+<!--
+When creating a concrete orchestrator, inject infrastructure agent declarations here. Infrastructure agents
+fire on trigger conditions (not workflow routing) and perform orchestration-support work such as
+checkpointing and periodic review. Each agent appears as a [[SECTION:InfrastructureAgent:{name}]] block
+containing its class, trigger(s), parameter, failure policy, and description. An absent or empty region
+means this orchestrator has no infrastructure agents, which is valid and must not be treated as an error.
 -->
 
 [[INJECTION:IdentityExtension]]
@@ -262,7 +277,7 @@ Every field you write is derived from data you already hold — protocol respons
 | **Example** | "test-writer-tdd#5 completed SUCCESS" | "Stage 2: ✅ Test A, ✅ Test B, ⏳ Test C" |
 
 **Key points:**
-- Orchestration.md is YOURS - subagents never access it
+- Orchestration.md is YOURS - subagents never access it, with two stated exceptions: `orchestration-review` is permitted to read `Orchestration-{run_id}/Orchestration.md` when dispatched (its entire purpose is to check the artifact, and it makes no routing decisions from what it reads); `checkpoint-restore-git` is permitted to read other runs' `Orchestration.md` files to determine whether concurrent runs are active before restoring the working tree (it extracts only `current_state.phase` and makes no routing decision from it). Both exceptions are also stated in the respective agent's design; they do not generalise to other subagents.
 - Progress artifacts are shared - subagents write them, you read them for routing decisions during EXECUTION phase
 - When resuming after crash: check BOTH Orchestration.md (workflow state) AND progress artifact (task state) to determine true position
 
@@ -338,10 +353,10 @@ current_state:
 **2. EXECUTION LOG** (Append-only — NEVER modify a written row)
 ```markdown
 [[SECTION:ExecutionLog]]
-| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Checkpoint |
-|-----|-------|-------|-------|--------|-----------|---------|------------|
-| 1 | Research#1 | RESEARCH | - | SUCCESS | 2026-01-29T09:05:00Z | Analyzed auth requirements, JWT approach selected | - |
-| 3 | Designer#3 | DESIGN | - | SUCCESS | 2026-01-29T09:15:00Z | Designed ProfileService interface | 4f1a08d |
+| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
+|-----|-------|-------|-------|--------|-----------|---------|--------|------------|
+| 1 | Research#1 | RESEARCH | - | SUCCESS | 2026-01-29T09:05:00Z | Analyzed auth requirements, JWT approach selected | - | - |
+| 3 | Designer#3 | DESIGN | - | SUCCESS | 2026-01-29T09:15:00Z | Designed ProfileService interface | - | 4f1a08d |
 [[/SECTION:ExecutionLog]]
 ```
 
@@ -356,13 +371,16 @@ One row per **completed** invocation, appended after it completes — never befo
 | `Status` | The subagent's returned status code |
 | `Timestamp` | ISO-8601 completion time |
 | `Summary` | The subagent's own `status_message`, **copied across** — never text you compose yourself |
-| `Checkpoint` | `-` on almost every row; a content-reference when a checkpoint was taken right after this invocation |
+| `Inputs` | Comma-separated list of the dispatched `input_artifacts` for this invocation; `-` when none were given |
+| `Checkpoint` | `-` on almost every row; on a checkpoint agent's own row, the content-reference that invocation returned |
 
 **Summary handling.** Copy `status_message` verbatim. Strip or escape any `|` or newline it contains — either one breaks the table. If it exceeds 100 characters, keep the **first 50 and last 50**, joined by ` … `. Do not truncate head-only: an over-long `status_message` tends to front-load process narration and put the actual outcome in its final sentence, so a head-only cut discards the part most worth keeping.
 
-**Checkpoints are a column, not a section.** A checkpoint is always "taken right after invocation N," and invocation N's row already carries the phase, stage, and sequence a checkpoint would restore to — so it needs no separate structure. When a trigger fires (phase complete, stage complete, manual request, or immediately before a rollback), populate `Checkpoint` on **that invocation's own row** with the content-reference (e.g. a git commit hash) supplied by whatever mechanism preserved the file content.
+**Checkpoints are a column, not a section.** A checkpoint is taken by a dispatched checkpoint agent, and that agent's own row already carries the sequence, phase, and stage the checkpoint sits at — so it needs no separate structure. Populate `Checkpoint` on **the checkpoint agent's own row**, with the content-reference that agent returned (e.g. a git commit hash).
 
-A non-empty `Checkpoint` always means real, restorable content exists. Never write a placeholder or bare marker — see Configuration Preconditions for why a run reaches this point only when a real mechanism is present. Never mark old entries `[EXPIRED]` or delete them: which checkpoints are live is computed at read time by walking the log backward, so nothing in the file needs updating as they retire, and the section stays strictly append-only.
+Never populate it on the row of the workflow step that preceded the checkpoint. That row was appended before the checkpoint agent was even dispatched, so writing to it means editing a row already written, in a section that is strictly append-only. The checkpoint agent's row sits immediately after it in every case, so nothing is lost in interpretation: the column means "content was preserved at this point in the log."
+
+A non-empty `Checkpoint` always means real, restorable content exists. Never write a placeholder or bare marker — see Configuration Preconditions for why a run reaches this point only when a checkpoint-class agent is declared. Never mark old entries `[EXPIRED]` or delete them: which checkpoints are live is computed at read time by walking the log backward, so nothing in the file needs updating as they retire, and the section stays strictly append-only.
 
 **3. ARTIFACTS** (Keyed registry — upsert, not history)
 ```markdown
@@ -494,19 +512,20 @@ WHILE workflow not complete:
     5. Invoke subagent
     6. Parse subagent response
     7. Update Orchestration.md via targeted edits, in this order:
-       a. ExecutionLog: append one row for the completed invocation
+       a. ExecutionLog: append one row for the completed invocation; populate the `Inputs` column from the `input_artifacts` list in the task invocation message (comma-separated paths, or `-` when none were given)
        b. Frontmatter: last_updated, global_sequence, current_state
        c. Artifacts: upsert a row per declared output artifact
        d. WorkflowNotes: append if the response surfaced something downstream agents need
-    8. Route based on status_code:
+    8. Evaluate infrastructure agent triggers against the now-updated
+       artifact and dispatch every agent that fired, before dispatching the
+       next workflow agent (see Infrastructure Agent Dispatch)
+    9. Route based on status_code:
        - SUCCESS → continue loop (next subagent)
        - COMPLETED_NEEDS_ACTION → invoke fix target subagent
        - PARTIALLY_DONE → invoke successor subagent (same type)
        - NEEDS_CLARIFICATION → provide context or escalate
        - CAPABILITY_EXCEEDED → try close alternative or escalate to human
        - BLOCKED → apply tiered error handling
-    9. If a checkpoint trigger fired, record its content-reference in the
-       Checkpoint column of the row just appended
 END WHILE
 ```
 
@@ -563,6 +582,50 @@ Workflow tables use template syntax for per-stage artifact paths. Resolve these 
 
 ---
 
+## Infrastructure Agent Dispatch (Step 8)
+
+Infrastructure agents are declared in the `[[INJECTION:InfrastructureAgents]]` region rather than in a workflow table. They do orchestration-support work — preserving restorable checkpoints, periodically reviewing the run's own bookkeeping — and they are invoked because a **trigger condition became true**, not because a status code routed to them. An absent or empty region means this orchestrator has none; that is valid and is not an error.
+
+They are a new *reason to invoke*, not a new *kind of invocation*. Each one consumes the next `global_sequence`, receives a standard task invocation message, returns a standard task response, and gets an ordinary appended Execution Log row. Nothing about your recovery procedure, your logging, or your routing needs a special case for them.
+
+### Evaluation Procedure
+
+After each **workflow** invocation completes:
+
+1. **Write that invocation's Orchestration.md updates first** — Execution Log row, then frontmatter, then Artifacts. Triggers are decided from artifact state, so evaluating before the write evaluates against stale state. Writing first also means an interruption between the write and the trigger loses at most the checkpoint, never the record of the invocation.
+2. **Evaluate each declared agent's triggers** against the updated artifact, in the order the agents appear in the declaration region. Two kinds of agent are skipped before their triggers are even looked at:
+   - **Agents gated off for this run.** `Class = checkpoint` agents are evaluated only when `checkpoints: enabled`.
+   - **Agents that modify the working tree to a previous state.** Restore agents are declared in this region so they can be *found and dispatched*, not so they can fire on their own. **Never dispatch one from trigger evaluation, whatever triggers it declares** — a declared trigger on a restore agent is a misconfiguration, not an instruction, and honouring it would overwrite the user's files at an arbitrary moment with no human expecting it. The `Description` column identifies these agents; when a description says an agent restores, reverts, or overwrites content, it is dispatched only under Rollback.
+3. **Dispatch each agent that fired** as an ordinary invocation, and process its response fully — including appending its own Execution Log row and updating frontmatter — before evaluating the next agent.
+4. **Do not evaluate triggers after an infrastructure agent completes.** This is what makes evaluation terminate: an infrastructure agent can never cause another one to fire, so no evaluation pass can be longer than the number of declared agents.
+
+**Every agent that fired runs. This is not a selection.** One evaluation pass can dispatch many agents, and when several fire you dispatch all of them, one after another, in declaration order. There is no priority, no winner, and no "most important" trigger — declaration order decides only the *sequence* they run in, never which of them run at all.
+
+A stage boundary is the ordinary case where this bites: a checkpoint agent, a commit agent, and a review agent may all have a condition satisfied by the same boundary. That produces **three dispatches, three sequence numbers, and three Execution Log rows**, not one. Stopping after the first would silently drop a checkpoint or a commit while the run continued as though it had them.
+
+**The per-agent rule is different and narrower: one agent fires at most once per pass, however many of *its own* triggers matched.** An agent declaring both `STAGE_END` and `INVOCATION_INTERVAL` produces one invocation at a boundary that satisfies both — its triggers are alternative reasons to run that agent, not independent invocations of it, and firing twice would burn two sequence numbers on two identical rows for one event. This collapses one agent's duplicate triggers; it never collapses two different agents.
+
+**Declaration order is fixed and you never reorder it.** It is arbitrary but deterministic, and determinism is the property that matters: the same run must produce the same Execution Log however it is executed. It also carries meaning you cannot see — where co-firing agents differ in `On Failure`, the order decides how much of a boundary's work has already happened when a `halt` lands, so a deployment that puts `halt` agents first is doing so deliberately. Running them in your own preferred order can turn a recoverable stop into an unrecoverable one.
+
+### Failure Policy
+
+Each agent declares `On Failure` in the declaration region. It applies when that agent returns any status code other than `SUCCESS`. It is the agent's own property — never override it, and never substitute your tiered error handling for it.
+
+| `On Failure` | What you do |
+|---|---|
+| `halt` | Append the row, then stop the run and escalate to the user. The row goes first so the failure is on the record before the run stops. A halt is **not** a rollback: the run stops where it is with its artifact intact, and what happens next is a human decision. |
+| `continue` | Append the row and proceed to the next workflow agent as though the trigger had never fired. |
+
+The policy differs per agent because the right answer genuinely differs. An agent that preserves restorable state must halt — a run with checkpointing enabled whose checkpoint silently failed believes it can roll back and cannot, which is exactly the broken promise the `Checkpoint` column forbids. An agent whose output is advisory must continue — halting a healthy run because an optional check could not complete inverts the cost of the check.
+
+### Recording a Checkpoint Reference
+
+A checkpoint agent ends its `status_message` with a marker of the form `[checkpoint:{sha}]`. Extract that reference and write it to the `Checkpoint` column of **that agent's own row** — never the row of the workflow step that preceded it.
+
+You do not need to preserve the marker separately: `status_message` is copied verbatim into `Summary`, and because the marker sits at the very end it survives the head-and-tail truncation rule. The structured column is an optimisation over a record that already exists, so a failed extraction degrades into a hash a human can still read rather than a lost checkpoint.
+
+---
+
 ## Agent Callbacks vs Rollbacks
 
 **Agent Callback (Lightweight):**
@@ -572,11 +635,15 @@ Workflow tables use template syntax for per-stage artifact paths. Resolve these 
 - Example: implementation-review finds design issue → callback to contracts-designer
 
 **Rollback (Heavy):**
-- Triggered ONLY by human decision after Tier 3 escalation
+- Triggered ONLY by an explicit human instruction — after a Tier 3 escalation, or a direct user request to abandon recent work
 - Requires checkpointing to be enabled, and a target row whose `Checkpoint` column is non-empty
-- Performed by dispatching whatever the workflow configures for it — you never restore content yourself
+- Performed by dispatching a **restore agent, out of band** — you never restore content yourself. A restore agent is the counterpart of the checkpoint-class agent that produced the reference, and resolves that reference back into files.
+- **You find it in the `[[INJECTION:InfrastructureAgents]]` region**, identified by its `Description`, and you dispatch it by the name its section carries. It is declared there to be discoverable, *not* to be automatic: it appears in no workflow routing table, and trigger evaluation always skips it (see Infrastructure Agent Dispatch). If no declared agent restores content, a rollback is not available in this deployment — say so and stop, rather than substituting anything.
+- The target is a content-reference the **human** picks from the non-empty `Checkpoint` values in the Execution Log, passed through in `task_description`. Which point in the run was still good is a domain judgement about the work; you neither select it nor advise on it.
+- Because it is dispatched out of band, an agent auditing recorded execution against the workflow table will observe a log row for an agent the table never names. For any out-of-band dispatch that observation is expected and is not a routing error — do not treat it as one.
 - Is an ordinary invocation as far as Orchestration.md is concerned: it consumes the next sequence number, returns a normal status code, and gets its own appended row. `global_sequence` is never rewound.
-- Use sparingly - callbacks handle most "go back" scenarios
+- `current_state` is not rewound either. The run's files move backward; its history does not. You correct phase and stage through the routing of whatever you dispatch next — rewinding `current_state` directly would leave it disagreeing with the last Execution Log row, and recovery resolves that disagreement by trusting the log, silently undoing the rewind.
+- Use sparingly — callbacks handle most "go back" scenarios
 
 ### Creator/Reviewer Pairs
 
@@ -609,7 +676,7 @@ flowchart TD
 ### Recovery Steps:
 
 1. Read Orchestration.md frontmatter — `current_state` gives phase, stage, last status, last agent, and error code directly
-2. Read the **Execution Log** - the last row is the truth of where you are
+2. Read the **Execution Log** - the last row is the truth of where you are. Route from the last row for an agent named by the workflow table: rows for infrastructure agents and out-of-band dispatches record that support work happened, not where the workflow stands, so a run interrupted just after a checkpoint resumes from the workflow step that checkpoint followed
 3. Cross-check `current_state` against that last row. They must agree; if they disagree, the Execution Log wins and you re-derive `current_state` from it, not the other way around
 4. Validate `global_sequence` against the highest `Seq` in the Execution Log. If the frontmatter value is behind, correct it to `max(Seq) + 1`
 5. **If in EXECUTION phase:** Read the Plan artifact for stage list and the current stage's progress artifact for task state

@@ -1,8 +1,9 @@
 # Orchestration Artifact Format
 
 > **Status:** Approved
+> **Version:** 2.0
 > **Created:** 2026-07-28
-> **Last Updated:** 2026-07-31
+> **Last Updated:** 2026-08-01
 > **Scope:** The schema of `Orchestration.md` — the blackboard artifact an orchestrator (human-driven LLM or a future deterministic script) reads and writes to track execution state for one workflow run. Defines its sections, their mutability rules, and the format each section uses.
 
 ---
@@ -55,6 +56,8 @@ started: 2026-01-29T09:00:00Z
 last_updated: 2026-01-29T11:30:00Z
 global_sequence: 8
 checkpoints: enabled
+commits: enabled
+commit_branch: mosaic/run/20260129T090000Z-a3f9
 current_state:
   phase: EXECUTION
   stage: GREEN
@@ -75,6 +78,9 @@ current_state:
 | `last_updated` | Updated in place | ISO-8601 timestamp, bumped on every write to this file. |
 | `global_sequence` | Updated in place | Monotonically increasing invocation counter. Incremented before each subagent invocation; the incremented value becomes that invocation's `{AgentName}#{Number}` suffix. Never decremented or reused — a rollback-performing invocation is still just an invocation (§5) and gets the next sequence number like any other. |
 | `checkpoints` | Set once | `enabled` or `disabled`. Fixed for the life of the run. When `disabled`, the Execution Log's `Checkpoint` column is always empty. |
+| `commits` | Set once | `enabled` or `disabled`. Fixed for the life of the run. Controls whether `commit`-class infrastructure agents fire on trigger. Default `disabled`. |
+| `commit_branch` | Set once | The branch name the `commit`-class agent commits to, recorded once at run start. Present when `commits: enabled`; absent or `null` when `disabled`. Enables branch-mismatch detection if `HEAD` moves mid-run. |
+| `infrastructure_overrides` | Set once | Optional block; absent in the common case. When present, each key is an infrastructure agent name whose `triggers` list is replaced by the specified list for the duration of the run. Set once at run start and never modified during the run. An agent name not present in the infrastructure agent declaration region is a start-up error. Shape: `{agent-name}: { triggers: [ { trigger: <trigger>, trigger_param: <param-or-null> } ] }`. |
 | `current_state.phase` | Updated in place | One of the standard workflow phases (`PLANNING`, `DESIGN`, `EXECUTION`, etc.). `COMPLETED` is the terminal value written after the session finishes successfully — once set to `COMPLETED`, the run is no longer resumable. |
 | `current_state.stage` | Updated in place | Stage name when `phase` is `EXECUTION` and the workflow has stages; `null` otherwise. |
 | `current_state.last_status` | Updated in place | The status code returned by the most recently completed subagent; `null` before any subagent has run. |
@@ -87,10 +93,10 @@ current_state:
 
 ```markdown
 [[SECTION:ExecutionLog]]
-| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Checkpoint |
-|-----|-------|-------|-------|--------|-----------|---------|------------|
-| 1 | Research#1 | RESEARCH | - | SUCCESS | 2026-01-29T09:05:00Z | Analyzed auth requirements, JWT approach selected | - |
-| 2 | Validator#2 | RESEARCH | - | SUCCESS | 2026-01-29T09:10:00Z | Validated JWT approach feasibility | - |
+| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
+|-----|-------|-------|-------|--------|-----------|---------|--------|------------|
+| 1 | Research#1 | RESEARCH | - | SUCCESS | 2026-01-29T09:05:00Z | Analyzed auth requirements, JWT approach selected | - | - |
+| 2 | Validator#2 | RESEARCH | - | SUCCESS | 2026-01-29T09:10:00Z | Validated JWT approach feasibility | Research.md | - |
 [[/SECTION:ExecutionLog]]
 ```
 
@@ -105,11 +111,14 @@ One row per completed subagent invocation, appended after that invocation comple
 | `Status` | The subagent's returned status code. |
 | `Timestamp` | ISO-8601, invocation completion time. |
 | `Summary` | The subagent's own `status_message` from its protocol response, copied across — not text the orchestrator composes itself. This keeps `Summary` inside the "mechanical" category (§2) despite reading like free text: it's copied content, not authored content. Bounded and single-line by construction — a `|` or a literal newline inside this field is invalid and must be stripped or escaped by whatever writes the row. Truncation, when `status_message` exceeds 100 characters, takes the **first 50 and last 50 characters**, joined by ` … ` — not a naive first-100 cut. This isn't cosmetic: a verbose `status_message` (which shouldn't happen per protocol, but does) tends to front-load process narration and put the actual outcome in its closing sentence, so a head-only truncation systematically discards the part most worth keeping. Head+tail keeps both the opening context and the conclusion, at the same total character budget. |
-| `Checkpoint` | Empty (`-`) on almost every row. Populated only when a checkpoint was taken immediately after this invocation — see below. |
+| `Inputs` | The `input_artifacts` list dispatched with this invocation; comma-separated filenames with the run-scoped folder prefix omitted (it is identical for every artifact in a run and recoverable from `run_id`). `-` when no artifacts were passed. Sourced directly from the dispatch message — not authored content. On the same mechanical footing as `Status` or `Agent`. |
+| `Checkpoint` | Empty (`-`) on almost every row. Populated on the row of the checkpoint agent invocation that took the checkpoint — never on the row of the preceding workflow step. A non-empty value names a real, externally-restorable content reference; a bare placeholder is never valid. |
 
-**Checkpoints as a column, not a section.** A checkpoint is never a standalone event — it's always "a checkpoint was taken right after invocation N completed," and invocation N's row already carries the phase, stage, and sequence that checkpoint would restore to. Restating those three fields in a separate block, as an earlier draft of this schema did, was pure duplication. Instead: when a checkpoint trigger fires (phase complete, stage complete, manual request, or immediately before a rollback), the `Checkpoint` column on *that invocation's own row* is populated with the external content-reference (e.g. a git commit hash) supplied by whatever mechanism actually preserved file content at that point.
+**Consumers bind by column name, not position.** The `Inputs` column is an insertion that changes the column count from 8 to 9. As of version 2.0, all consumers must locate columns by matching the header row rather than by counting positions — a positional parser would silently misread every row. The header row is present in every artifact; a name-bound parser also tolerates any future column insertions without a code change.
 
-**A `Checkpoint` entry always means real, restorable content exists — there is no bare/contentless marker.** An earlier draft of this schema allowed populating `Checkpoint` with a placeholder when no content-preservation mechanism was available, on the theory that resetting orchestration state alone (phase/stage/sequence, no file content) was still a useful partial degradation. It isn't: with `checkpoints: enabled` but nothing actually preserving content, a "checkpoint" that can't restore anything isn't a degraded success, it's a broken promise — the whole reason to enable checkpointing is the ability to roll back, and orchestration bookkeeping without matching file content is not that. This schema takes no position on what happens when checkpointing is enabled but no content-preservation mechanism is present to supply a reference — surfacing that as an error, refusing to start, or some other handling is a policy decision belonging to whatever component owns the checkpoint trigger, not to this artifact's schema. What this schema does guarantee: if `Checkpoint` is non-empty, it names a real, externally-restorable point.
+**Checkpoints as a column, not a section.** A checkpoint is taken by a dedicated infrastructure agent dispatched on a trigger condition. That agent's own Execution Log row carries the content-reference in its `Checkpoint` column — not the row of the preceding workflow step. An earlier model placed the reference on the preceding row, on the reasoning that a checkpoint is always "taken right after invocation N," but that reasoning is incoherent once checkpointing is an agent: the checkpoint agent's row is appended only after the checkpoint completes, so populating the preceding row at that point requires editing an already-written row in an append-only section. Recording the reference on the checkpoint agent's own row eliminates the contradiction and upholds the append-only guarantee without exception. The row sits immediately after the workflow step that triggered it, so the phase, stage, and sequence context are fully recoverable from the adjacent rows — restating them in a separate section, as an earlier draft did, was pure duplication.
+
+**A `Checkpoint` entry always means real, restorable content exists — there is no bare/contentless marker.** An earlier draft of this schema allowed populating `Checkpoint` with a placeholder when no content-preservation mechanism was available, on the theory that resetting orchestration state alone (phase/stage/sequence, no file content) was still a useful partial degradation. It isn't: with `checkpoints: enabled` but nothing actually preserving content, a "checkpoint" that can't restore anything isn't a degraded success, it's a broken promise — the whole reason to enable checkpointing is the ability to roll back, and orchestration bookkeeping without matching file content is not that. When `checkpoints: enabled` and the infrastructure agent declaration region contains no agent with `Class = checkpoint`, the configuration is invalid and the run must not start. This check is a string comparison against the declaration region and requires no inference. What this schema guarantees: if `Checkpoint` is non-empty, it names a real, externally-restorable point.
 
 **Rollback isn't a distinct mechanism this schema defines.** Whatever performs a rollback — most plausibly a dedicated agent invocation, given the `Checkpoint` reference points at content something else preserved — is just another subagent invocation as far as `Orchestration.md` is concerned: it gets dispatched, it does its work, and it completes with a normal status code, at which point its own row is appended and `current_state` is updated exactly as §5 and §8 already describe for any invocation. No special row shape, agent name, or status value is reserved for it here. How that invocation resolves a target checkpoint into an actual restore is entirely its own design.
 
@@ -197,26 +206,30 @@ workflow_version: "2.1"
 task: "Implement user profile CRUD operations with avatar upload support"
 started: 2026-01-29T08:00:00Z
 last_updated: 2026-01-29T12:45:00Z
-global_sequence: 14
+global_sequence: 16
 checkpoints: enabled
+commits: enabled
+commit_branch: mosaic/run/20260129T080000Z-b2c4
 current_state:
   phase: EXECUTION
   stage: GREEN
   last_status: SUCCESS
-  last_agent: "Implementation#14"
+  last_agent: "Implementation#16"
   error_code: null
 ---
 
 [[SECTION:ExecutionLog]]
-| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Checkpoint |
-|-----|-------|-------|-------|--------|-----------|---------|------------|
-| 1 | Research#1 | RESEARCH | - | SUCCESS | 2026-01-29T08:10:00Z | Analyzed profile feature requirements | - |
-| 2 | Planner#2 | PLANNING | - | SUCCESS | 2026-01-29T08:35:00Z | Created 2-iteration plan for profile CRUD | - |
-| 3 | Designer#3 | DESIGN | - | SUCCESS | 2026-01-29T09:15:00Z | Designed ProfileService interface | 4f1a08d |
-| ... | ... | ... | ... | ... | ... | ... | ... |
-| 12 | TestRunner#12 | EXECUTION | REVIEW | SUCCESS | 2026-01-29T10:50:00Z | All tests pass (3/3) | 7c2e9f1 |
-| 13 | TestCreator#13 | EXECUTION | RED | SUCCESS | 2026-01-29T11:15:00Z | Created tests for updateProfile endpoint | - |
-| 14 | Implementation#14 | EXECUTION | GREEN | SUCCESS | 2026-01-29T12:45:00Z | Implemented updateProfile endpoint | - |
+| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
+|-----|-------|-------|-------|--------|-----------|---------|--------|------------|
+| 1 | Research#1 | RESEARCH | - | SUCCESS | 2026-01-29T08:10:00Z | Analyzed profile feature requirements | - | - |
+| 2 | Planner#2 | PLANNING | - | SUCCESS | 2026-01-29T08:35:00Z | Created 2-iteration plan for profile CRUD | - | - |
+| 3 | Designer#3 | DESIGN | - | SUCCESS | 2026-01-29T09:15:00Z | Designed ProfileService interface | Research.md | - |
+| 4 | checkpoint-manager-git#4 | DESIGN | - | SUCCESS | 2026-01-29T09:16:00Z | Committed checkpoint of working tree (3 files). [checkpoint:4f1a08d] | - | 4f1a08d |
+| ... | ... | ... | ... | ... | ... | ... | ... | ... |
+| 13 | TestRunner#13 | EXECUTION | REVIEW | SUCCESS | 2026-01-29T10:50:00Z | All tests pass (3/3) | Plan.md, Stage-1/PlanProgress.md | - |
+| 14 | checkpoint-manager-git#14 | EXECUTION | REVIEW | SUCCESS | 2026-01-29T10:51:00Z | Committed checkpoint of working tree (7 files). [checkpoint:7c2e9f1] | - | 7c2e9f1 |
+| 15 | TestCreator#15 | EXECUTION | RED | SUCCESS | 2026-01-29T11:15:00Z | Created tests for updateProfile endpoint | Plan.md | - |
+| 16 | Implementation#16 | EXECUTION | GREEN | SUCCESS | 2026-01-29T12:45:00Z | Implemented updateProfile endpoint | Plan.md, Design.md | - |
 [[/SECTION:ExecutionLog]]
 
 [[SECTION:Artifacts]]
@@ -226,7 +239,7 @@ current_state:
 | Research.md | RESEARCH | Research#1 |
 | Plan.md | PLANNING | Planner#2 |
 | Design.md | DESIGN | Designer#3 |
-| ProfileService.ts | EXECUTION.GREEN | Implementation#14 |
+| ProfileService.ts | EXECUTION.GREEN | Implementation#16 |
 [[/SECTION:Artifacts]]
 
 [[SECTION:WorkflowNotes]]
@@ -237,7 +250,7 @@ current_state:
 [[/SECTION:WorkflowNotes]]
 ```
 
-Rows #3 and #12 both carry a real commit reference — both are fully restorable rollback targets. Walking the table backward, a consumer retaining (say) its two most recent checkpoints would find #12 and #3 without anything in the file itself having to record that — how many to retain is that consumer's own policy, not something recorded here (§5).
+checkpoint-manager-git rows #4 and #14 both carry a real commit reference — both are fully restorable rollback targets. Walking the table backward, a consumer retaining (say) its two most recent checkpoints would find #14 and #4 without anything in the file itself having to record that — how many to retain is that consumer's own policy, not something recorded here (§5).
 
 ## 11. Run-Scoped Folder Convention
 
@@ -272,7 +285,7 @@ Adoption does not make a run reproducible: it still reads project files that mut
 - How a workflow's routing table is located and resolved at runtime from the `workflow`/`workflow_version` reference — a separate concern, since the resolution mechanism depends on where the orchestrator runs and isn't part of this artifact's own schema (§1).
 - A single, formally unified frontmatter schema across every MOSAIC document type. A shared-fields convention already exists de facto across agent and workflow files in this workspace (`version`, `id`/`name`, and so on); this document's frontmatter (§4) follows that same spirit rather than diverging from it, but doesn't attempt to formally consolidate the convention itself — that consolidation, if it happens, is a separate piece of work.
 - The actual mechanism that preserves and restores file content for a `Checkpoint` reference (§5) — this document defines the reference's role, not the mechanism that produces or consumes it.
-- What happens when `checkpoints: enabled` but no content-preservation mechanism is available to supply a `Checkpoint` reference — §5 states this schema takes no position on it (error, refusal to start, or otherwise); that's a policy decision for whatever owns the checkpoint trigger.
+- What happens when `checkpoints: enabled` but no content-preservation mechanism is available — this is now resolved in §5: the configuration is invalid and the run must not start.
 - Checkpoint retention policy — how many checkpoints to keep as live rollback targets, and by what rule. §5 defines this as a read-time computation with no in-file bookkeeping, but the count and selection rule themselves are owned by whatever consumes the Execution Log for rollback, not by this schema.
 - Parsing/validation tooling itself — this document specifies the format a validator would check, not the validator.
 

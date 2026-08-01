@@ -62,6 +62,17 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		}
 	}
 
+	infraAgentIDs := req.InfrastructureAgentIDs
+	if infraAgentIDs == nil {
+		if req.SkipAll[domain.QInfrastructureAgents] {
+			infraAgentIDs = []string{}
+		} else if len(s.deps.Catalog.InfrastructureAgents()) > 0 {
+			infraAgentIDs = s.askInfrastructureAgents(ctx)
+		} else {
+			infraAgentIDs = []string{}
+		}
+	}
+
 	hookIDs := req.HookIDs
 	if hookIDs == nil {
 		if req.SkipAll[domain.QHooks] {
@@ -73,20 +84,23 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		}
 	}
 
-	set, err := plan.ResolveArtifacts(s.deps.Catalog, workflowIDs, utilityIDs, hookIDs)
+	// Resolve the artifact set for probing deployed state and model/tool resolution.
+	// Infrastructure agents are excluded here and passed directly to plan.Input because
+	// they do not participate in model resolution or the pre-probe at deploy time.
+	probeSet, err := plan.ResolveArtifacts(s.deps.Catalog, workflowIDs, utilityIDs, nil, hookIDs)
 	if err != nil {
 		return domain.RunSummary{}, err
 	}
 
-	modelRes := s.resolveModels(ctx, req.TierModels, req.AgentModels, req.SkipAll, harnessID, module, set.Agents)
-	customTools, skippedTools := s.resolveCustomTools(ctx, req.CustomTools, req.SkipAll, module, set.Agents)
+	modelRes := s.resolveModels(ctx, req.TierModels, req.AgentModels, req.SkipAll, harnessID, module, probeSet.Agents)
+	customTools, skippedTools := s.resolveCustomTools(ctx, req.CustomTools, req.SkipAll, module, probeSet.Agents)
 
 	snap, _ := s.deps.Manifest.Load(workspace)
 
 	// Enumerate every planned target path and probe the workspace for each one.
 	// plan.Input.DeployedState is the single carrier of presence, content hash, and version
 	// stamps for all planned target paths.
-	plannedPaths, pathErr := plan.EnumerateTargetPaths(set, module, scope, s.deps.GOOS)
+	plannedPaths, pathErr := plan.EnumerateTargetPaths(probeSet, module, scope, s.deps.GOOS)
 	if pathErr != nil {
 		return domain.RunSummary{}, pathErr
 	}
@@ -95,7 +109,8 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	planInput := plan.Input{
 		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeDeployNew,
 		WorkspacePath: workspace, Scope: scope, GOOS: s.deps.GOOS,
-		Manifest: snap, WorkflowIDs: workflowIDs, UtilityAgentIDs: utilityIDs, HookIDs: hookIDs,
+		Manifest: snap, WorkflowIDs: workflowIDs, UtilityAgentIDs: utilityIDs,
+		InfrastructureAgentIDs: infraAgentIDs, HookIDs: hookIDs,
 		Models:        modelRes.models,
 		DeployedState: deployedState,
 	}
@@ -133,12 +148,13 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		return domain.RunSummary{}, ErrPlanNotConfirmed
 	}
 
-	agentByKey := make(map[string]domain.Agent, len(set.Agents))
-	for _, a := range set.Agents {
+	agentByKey := make(map[string]domain.Agent, len(probeSet.Agents))
+	for _, a := range probeSet.Agents {
 		agentByKey[a.Key] = a
 	}
 	workflowBlocks := s.buildWorkflowBlocks(workflowIDs)
-	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, workflowBlocks, scope, nil)
+	infraBlocks := s.buildInfrastructureBlocks(infraAgentIDs)
+	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, workflowBlocks, infraBlocks, scope, nil)
 
 	now := s.now()
 	execReq := deploy.ExecRequest{
@@ -146,8 +162,8 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		MosaicRoot:    s.deps.MosaicRoot,
 		Content:       contentFn,
 		Conflicts:     conflicts,
-		VersionStamps: buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor()),
-		Hooks:         buildHookPlans(module, set.Hooks, scope),
+		VersionStamps: buildVersionStamps(probeSet.Agents, probeSet.Skills, probeSet.Hooks, p.Items, module.Descriptor()),
+		Hooks:         buildHookPlans(module, probeSet.Hooks, scope),
 		Todo:          s.deps.Todo.Items(),
 		TodoMeta: todo.Meta{
 			Harness: harnessRef.DisplayName, WorkspacePath: workspace, DeploymentRoot: workspace,

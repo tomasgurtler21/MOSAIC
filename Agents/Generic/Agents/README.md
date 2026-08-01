@@ -13,6 +13,7 @@ Agent definitions organized by function.
 | [Creation](./Creation/) | Building project files (code and tests) | implementation-tdd, test-writer-tdd, knowledge-base-index-assembler |
 | [Execution](./Execution/) | Running tests and tools | test-runner |
 | [Interface](./Interface/) | Bidirectional bridges with external systems | audit-to-pull-request, audit-response-merger, pull-request-comment-interface |
+| [Infrastructure](./Infrastructure/) | Orchestration support fired by triggers, not by routing | checkpoint-manager-git, checkpoint-restore-git, commit-manager-git, orchestration-review |
 
 ## Agent Summary
 
@@ -52,6 +53,10 @@ Agent definitions organized by function.
 | 19 | audit-to-pull-request | Interface | 3.0.0 | HIGH | Transforms a single audit artifact into PR-ready comments with context zone intelligence |
 | 34 | audit-response-merger | Interface | 1.0.0 | MEDIUM | Merges partial PR response queues from parallel audit-to-pull-request instances with cross-audit deduplication |
 | 18 | pull-request-comment-interface | Interface | 1.1.2 | LOW | Bridges PR comments with orchestration system |
+| 36 | checkpoint-manager-git | Infrastructure | 1.0.0 | LOW | Commits a restorable checkpoint of the working tree to a private git ref namespace |
+| 37 | checkpoint-restore-git | Infrastructure | 1.0.0 | MEDIUM | Restores the working tree to a checkpoint and reconciles the branch with committed work |
+| 38 | commit-manager-git | Infrastructure | 1.0.0 | LOW | Commits completed stage work to the user's branch with a plan-derived message |
+| 39 | orchestration-review | Infrastructure | 1.0.0 | LOW | Advisory — checks a run's bookkeeping and routing against its declared workflow |
 
 See [ModelSelectionGuide.md](../../../Documentation/ModelSelectionGuide.md) for tier definitions and model recommendations.
 

@@ -22,8 +22,9 @@ type Request struct {
 	Scope        domain.Scope
 	// Deployed is the currently-deployed file bytes, or nil on create. Injection content
 	// for InjectionProject class is lifted from here and reinstated in the output.
-	Deployed  []byte
-	Workflows []WorkflowBlock // non-empty only for the orchestrator agent
+	Deployed             []byte
+	Workflows            []WorkflowBlock        // non-empty only for the orchestrator agent
+	InfrastructureAgents []InfrastructureBlock  // non-empty only for the orchestrator agent
 }
 
 // Result is the output of a successful Apply call.
@@ -35,12 +36,13 @@ type Result struct {
 // Report is the audit trail of one transformation. It is the input to per-item update
 // logging, gap collection, and the TODO checklist (AC8.5, AC15.2).
 type Report struct {
-	Fields      []FieldChange
-	Tools       []domain.ToolResolution
-	Injections  []InjectionOutcome
-	Gaps        []domain.Gap
-	Workflows   []string // workflow IDs present in the assembled injection, in emitted order
-	OutputBytes int
+	Fields               []FieldChange
+	Tools                []domain.ToolResolution
+	Injections           []InjectionOutcome
+	Gaps                 []domain.Gap
+	Workflows            []string // workflow IDs present in the assembled injection, in emitted order
+	InfrastructureAgents []string // agent keys present in the assembled InfrastructureAgents injection, in emitted order
+	OutputBytes          int
 }
 
 // FieldChange records what happened to one frontmatter field: whether it was added,
@@ -65,6 +67,9 @@ const (
 	InjectionEmptied InjectionAction = "left-empty"
 	// InjectionAssembled means the AvailableWorkflows injection was assembled from Workflows.
 	InjectionAssembled InjectionAction = "assembled-workflows"
+	// InjectionAssembledInfra means the InfrastructureAgents injection was assembled from
+	// selected infrastructure agents.
+	InjectionAssembledInfra InjectionAction = "assembled-infrastructure"
 	// InjectionOrphaned means content existed in the deployed file at an injection point that
 	// no longer exists in the source; the content has been discarded.
 	InjectionOrphaned InjectionAction = "orphaned"

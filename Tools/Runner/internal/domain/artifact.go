@@ -2,6 +2,19 @@ package domain
 
 import "time"
 
+// InfrastructureOverride represents one agent's trigger override from the
+// infrastructure_overrides frontmatter block. The YAML format uses agent
+// names as map keys; this struct carries the key as AgentName for iteration
+// convenience in the session.
+//
+// An override replaces (not merges with) the agent's declared trigger list
+// for the duration of the run. An AgentName that does not match any declared
+// infrastructure agent is a start-up error.
+type InfrastructureOverride struct {
+	AgentName string
+	Triggers  []DeclaredInfraTrigger // replacement trigger list
+}
+
 // ArtifactState is the parsed content of Orchestration.md.
 // It is the runner's only durable state.
 type ArtifactState struct {
@@ -15,7 +28,11 @@ type ArtifactState struct {
 	LastUpdated     time.Time
 	GlobalSequence  int
 	Checkpoints     bool         // true = enabled
-	CurrentState    CurrentState
+	// InfrastructureOverrides carries the optional infrastructure_overrides
+	// frontmatter block. Nil when the block is absent (the common case).
+	// Each entry replaces the named agent's declared trigger list at run start.
+	InfrastructureOverrides []InfrastructureOverride
+	CurrentState            CurrentState
 
 	// Structured sections (Tier 2)
 	ExecutionLog     []ExecutionLogEntry
@@ -43,6 +60,7 @@ type ExecutionLogEntry struct {
 	Status     StatusCode
 	Timestamp  time.Time
 	Summary    string // from ProtocolResponse.StatusMessage, truncated
+	Inputs     string // comma-separated input_artifacts, or "" if none; "-" in the table
 	Checkpoint string // "" unless a checkpoint was taken
 }
 

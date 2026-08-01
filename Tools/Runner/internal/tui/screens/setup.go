@@ -421,6 +421,13 @@ type ConfigSelection struct {
 	Checkpoints       bool
 	Harness           string        // "fake" or "claude-code"
 	Timeout           time.Duration // invocation timeout (only relevant when Harness == "claude-code")
+
+	// InfraClassSelections maps gated infrastructure class names (e.g. "checkpoint",
+	// "commit") to the selected agent name for this run. Populated by the
+	// configStepInfraClass step when multiple agents of the same gated class are
+	// declared. Nil when no filtering is needed (single agent per class or no gated
+	// class agents declared).
+	InfraClassSelections map[string]string
 }
 
 // configStep identifies which configuration prompt is currently active.
@@ -432,8 +439,16 @@ const (
 	configStepHarnessTimeout           // timeout entry (only when claude-code is selected)
 	configStepVersionDrift
 	configStepCheckpoints
+	configStepInfraClass // agent-per-class selection (only when multiple same-class gated agents)
 	configStepDone
 )
+
+// infraClassEntry holds the class name and the in-declaration-order list of
+// agent names for one gated class that has multiple declared agents.
+type infraClassEntry struct {
+	class  string
+	agents []string
+}
 
 // ConfigScreen presents the run configuration prompts sequentially.
 //
@@ -442,15 +457,24 @@ const (
 //   - Esc on first prompt -> Back() == true.
 //   - Esc on subsequent prompts -> goes back to the previous prompt.
 //   - The harness timeout step is only shown when "Claude Code CLI" is selected.
+//   - The infra-class step is only shown for gated classes with multiple declared agents.
 type ConfigScreen struct {
-	step         configStep
-	back         bool
-	sel          ConfigSelection
-	cursor       int
-	width        int
-	height       int
-	styles       Styles
-	timeoutInput *widgets.TextInput
+	step           configStep
+	back           bool
+	sel            ConfigSelection
+	cursor         int
+	width          int
+	height         int
+	styles         Styles
+	timeoutInput   *widgets.TextInput
+	declaredAgents []domain.DeclaredInfraAgent // populated by SetDeclaredAgents
+
+	// infraClassQueue holds the gated classes needing user selection, in the
+	// order they were encountered in declaredAgents. Populated when
+	// configStepCheckpoints advances and multiple same-class gated agents exist.
+	infraClassQueue []infraClassEntry
+	// infraClassIdx is the index into infraClassQueue for the current prompt.
+	infraClassIdx int
 }
 
 // NewConfigScreen creates the configuration screen.
@@ -532,6 +556,13 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 			if s.cursor < 1 {
 				s.cursor++
 			}
+		case configStepInfraClass:
+			if s.infraClassIdx < len(s.infraClassQueue) {
+				max := len(s.infraClassQueue[s.infraClassIdx].agents) - 1
+				if s.cursor < max {
+					s.cursor++
+				}
+			}
 		}
 	case "enter":
 		return s.advance()
@@ -579,9 +610,66 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		s.cursor = 0
 	case configStepCheckpoints:
 		s.sel.Checkpoints = s.cursor == 0
-		s.step = configStepDone
+		s.infraClassQueue = s.buildInfraClassQueue()
+		s.infraClassIdx = 0
+		s.cursor = 0
+		if len(s.infraClassQueue) > 0 {
+			s.step = configStepInfraClass
+		} else {
+			s.step = configStepDone
+		}
+	case configStepInfraClass:
+		entry := s.infraClassQueue[s.infraClassIdx]
+		selected := entry.agents[s.cursor]
+		if s.sel.InfraClassSelections == nil {
+			s.sel.InfraClassSelections = make(map[string]string)
+		}
+		s.sel.InfraClassSelections[entry.class] = selected
+		s.infraClassIdx++
+		s.cursor = 0
+		if s.infraClassIdx >= len(s.infraClassQueue) {
+			s.step = configStepDone
+		}
 	}
 	return nil
+}
+
+// buildInfraClassQueue returns one infraClassEntry per gated class that has
+// more than one declared agent, in the order classes first appear in
+// declaredAgents. Classes with a single agent are omitted (auto-selected).
+func (s *ConfigScreen) buildInfraClassQueue() []infraClassEntry {
+	// Preserve declaration order using a slice of class names and a map.
+	seen := make(map[string]bool)
+	classOrder := []string{}
+	classAgents := make(map[string][]string)
+	for _, a := range s.declaredAgents {
+		if !isGatedInfraClass(a.Class) {
+			continue
+		}
+		if !seen[a.Class] {
+			seen[a.Class] = true
+			classOrder = append(classOrder, a.Class)
+		}
+		classAgents[a.Class] = append(classAgents[a.Class], a.Name)
+	}
+	var queue []infraClassEntry
+	for _, class := range classOrder {
+		agents := classAgents[class]
+		if len(agents) > 1 {
+			queue = append(queue, infraClassEntry{class: class, agents: agents})
+		}
+	}
+	return queue
+}
+
+// isGatedInfraClass reports whether the given class name is a gated
+// infrastructure class (checkpoint, commit, or restore). Non-gated classes
+// (e.g. "review") have all declared agents evaluated unconditionally.
+// Note: gatedInfraClasses in Tools/Runner/internal/session/selection.go
+// maintains an equivalent set for the session layer. Keep both in sync when
+// adding new gated classes.
+func isGatedInfraClass(class string) bool {
+	return class == "checkpoint" || class == "commit" || class == "restore"
 }
 
 // View renders the current configuration prompt.
@@ -611,6 +699,15 @@ func (s *ConfigScreen) View() string {
 		body.WriteString(s.styles.Body.Width(s.width).Render("Checkpoints:") + "\n")
 		body.WriteString(s.renderOption(0, "Enabled"))
 		body.WriteString(s.renderOption(1, "Disabled (default)"))
+	case configStepInfraClass:
+		if s.infraClassIdx < len(s.infraClassQueue) {
+			entry := s.infraClassQueue[s.infraClassIdx]
+			prompt := fmt.Sprintf("Select %s agent for this run:", entry.class)
+			body.WriteString(s.styles.Body.Width(s.width).Render(prompt) + "\n")
+			for i, agentName := range entry.agents {
+				body.WriteString(s.renderOption(i, agentName))
+			}
+		}
 	}
 
 	return strings.Join([]string{title, subtitle, border, body.String(), border, help}, "\n")
@@ -642,6 +739,8 @@ func (s *ConfigScreen) Reset() {
 	s.cursor = 0
 	s.sel = ConfigSelection{DeviationMode: domain.DeviationDelegate}
 	s.timeoutInput.Reset()
+	s.infraClassQueue = nil
+	s.infraClassIdx = 0
 }
 
 // Resize updates the screen dimensions.
@@ -649,4 +748,16 @@ func (s *ConfigScreen) Resize(width, height int) {
 	s.width = width
 	s.height = height
 	s.timeoutInput.Resize(width)
+}
+
+// SetDeclaredAgents injects the declared infrastructure agents into the
+// ConfigScreen so that the configStepInfraClass step can determine which
+// gated classes have multiple agents and need a selection prompt.
+//
+// Must be called before the screen is shown. When multiple agents of the
+// same gated class are declared, the configStepInfraClass step prompts the
+// user to select one. When only one agent per class is declared, the step is
+// skipped and the single agent is auto-selected.
+func (s *ConfigScreen) SetDeclaredAgents(agents []domain.DeclaredInfraAgent) {
+	s.declaredAgents = agents
 }

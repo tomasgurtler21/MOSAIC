@@ -1,5 +1,12 @@
 package domain
 
+// InfrastructureTrigger represents one trigger entry from an infrastructure agent's
+// frontmatter. A single agent may declare multiple triggers.
+type InfrastructureTrigger struct {
+	Trigger      string // e.g. "STAGE_END", "INVOCATION_INTERVAL", "PHASE_END", "MANUAL"
+	TriggerParam string // e.g. "10"; empty string when the trigger takes no parameter
+}
+
 // Agent is the parsed metadata of one generic source agent. It never carries file content;
 // content is read on demand through Catalog.ReadSource.
 type Agent struct {
@@ -16,6 +23,18 @@ type Agent struct {
 	ToolsPlaceholder string   // e.g. "{tool-permissions}"; empty when Tools is a real list
 	RequiredSkills   []string // skill keys
 	SourcePath       string   // absolute
+
+	// Infrastructure fields — non-empty only for infrastructure agents.
+
+	// Infrastructure is the agent's class from the infrastructure class vocabulary
+	// ("checkpoint", "commit", "review"). Empty for non-infrastructure agents.
+	Infrastructure string
+
+	// Triggers is the list of declared trigger conditions. Nil for non-infrastructure agents.
+	Triggers []InfrastructureTrigger
+
+	// OnFailure is the failure policy: "halt" or "continue". Empty for non-infrastructure agents.
+	OnFailure string
 }
 
 // Skill is a versioned capability bundle that agents can require.

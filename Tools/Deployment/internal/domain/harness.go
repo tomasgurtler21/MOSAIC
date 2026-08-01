@@ -7,9 +7,10 @@ type InjectionClass = mosaic.InjectionClass
 
 // Re-declared constants pointing at the mosaic-common originals.
 const (
-	InjectionHarness  = mosaic.InjectionHarness
-	InjectionProject  = mosaic.InjectionProject
-	InjectionWorkflow = mosaic.InjectionWorkflow
+	InjectionHarness        = mosaic.InjectionHarness
+	InjectionProject        = mosaic.InjectionProject
+	InjectionWorkflow       = mosaic.InjectionWorkflow
+	InjectionInfrastructure = mosaic.InjectionInfrastructure
 )
 
 // ProvisionTier indicates how a harness implementation is provided.

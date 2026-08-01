@@ -312,6 +312,108 @@ func TestFlow_RunningNoticeThenCompletion_RowMarkedComplete(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// ConfigScreen infra-class step
+// ---------------------------------------------------------------------------
+
+// TestFlow_ConfigScreen_InfraClassStep_PopulatesInfraClassSelections verifies that when
+// the ConfigScreen is given two same-class checkpoint agents via SetDeclaredAgents, the
+// configStepInfraClass step is shown and the user's selection is captured in
+// ConfigSelection.InfraClassSelections.
+//
+// In RED: SetDeclaredAgents stores the agents but advance() skips configStepInfraClass
+// entirely (the implementation task I7.2 has not been done). After driving through all
+// existing steps the ConfigScreen reaches Done() with InfraClassSelections == nil. The
+// assertion that InfraClassSelections["checkpoint"] == "checkpoint-manager-git" fails.
+//
+// In GREEN: advance() after configStepCheckpoints transitions to configStepInfraClass
+// when multiple same-class agents are declared; the user selects an agent and
+// InfraClassSelections is populated before Done() is set.
+func TestFlow_ConfigScreen_InfraClassStep_PopulatesInfraClassSelections(t *testing.T) {
+	tuiTheme := tuicommon.DefaultTheme()
+	style := stylesFromTheme(tuiTheme)
+	s := screens.NewConfigScreen(80, 24, style)
+
+	// Inject two same-class checkpoint agents. The step should be shown so the user
+	// can select which one to use for this run.
+	s.SetDeclaredAgents([]domain.DeclaredInfraAgent{
+		{Name: "checkpoint-manager-git", Class: "checkpoint"},
+		{Name: "checkpoint-manager-alt", Class: "checkpoint"},
+	})
+
+	// Drive through: deviation (enter), harness (enter → fake, skip timeout),
+	// versionDrift (enter), checkpoints (enter).
+	// After checkpoints, the infra-class step should appear for the checkpoint class.
+	driveConfigStepEnter(s)
+	driveConfigStepEnter(s)
+	driveConfigStepEnter(s)
+	driveConfigStepEnter(s)
+
+	// If the infra-class step is shown, drive it by selecting option 0
+	// (checkpoint-manager-git) and confirming.
+	if !s.Done() {
+		driveConfigStepEnter(s)
+	}
+
+	if !s.Done() {
+		t.Fatal("ConfigScreen did not reach Done() after driving through all expected steps")
+	}
+
+	sel := s.Selection()
+	if sel.InfraClassSelections == nil {
+		t.Error("InfraClassSelections is nil: want non-nil map populated by configStepInfraClass when multiple same-class agents are declared")
+		return
+	}
+	if sel.InfraClassSelections["checkpoint"] != "checkpoint-manager-git" {
+		t.Errorf("InfraClassSelections[checkpoint] = %q, want %q (first option selected)",
+			sel.InfraClassSelections["checkpoint"], "checkpoint-manager-git")
+	}
+}
+
+// TestFlow_ConfigScreen_InfraClassStep_SkippedWhenSingleAgentPerClass verifies that
+// when only one agent of each gated class is declared, the configStepInfraClass step
+// is skipped entirely — the ConfigScreen reaches Done() after the existing steps
+// without showing an extra prompt.
+//
+// This test passes in both RED and GREEN: in RED the infra-class step is not shown
+// (the implementation is absent), and in GREEN the implementation also skips it for
+// single-agent classes. It serves as a regression guard: if a future change incorrectly
+// adds the infra step for single-agent classes, Done() would not be set after the
+// expected number of key presses.
+func TestFlow_ConfigScreen_InfraClassStep_SkippedWhenSingleAgentPerClass(t *testing.T) {
+	tuiTheme := tuicommon.DefaultTheme()
+	style := stylesFromTheme(tuiTheme)
+	s := screens.NewConfigScreen(80, 24, style)
+
+	// Inject a single checkpoint agent. No selection prompt should be shown.
+	s.SetDeclaredAgents([]domain.DeclaredInfraAgent{
+		{Name: "checkpoint-manager-git", Class: "checkpoint"},
+	})
+
+	// Drive through: deviation, harness (fake), versionDrift, checkpoints.
+	// Done() should be true immediately after — no infra-class step.
+	driveConfigStepEnter(s)
+	driveConfigStepEnter(s)
+	driveConfigStepEnter(s)
+	driveConfigStepEnter(s)
+
+	if !s.Done() {
+		t.Error("ConfigScreen did not reach Done() after the standard steps; configStepInfraClass must be skipped when only one agent per gated class is declared")
+	}
+
+	sel := s.Selection()
+	// InfraClassSelections should be nil when there is nothing to select.
+	if sel.InfraClassSelections != nil {
+		t.Errorf("InfraClassSelections = %v, want nil when single agent per class (auto-selected, no user prompt needed)",
+			sel.InfraClassSelections)
+	}
+}
+
+// driveConfigStepEnter sends one Enter key press to the ConfigScreen.
+func driveConfigStepEnter(s *screens.ConfigScreen) {
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

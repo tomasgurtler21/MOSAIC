@@ -150,5 +150,43 @@ func parseAgentFile(path string, role domain.AgentRole, category string) (domain
 		}
 	}
 
+	// Infrastructure fields — only present on infrastructure agents.
+
+	// infrastructure: scalar class name ("checkpoint", "commit", "review")
+	if v, ok := fm.Get("infrastructure"); ok && v.Kind == domain.KindScalar {
+		agent.Infrastructure = v.Scalar
+	}
+
+	// triggers: list of maps, each with "trigger" and "trigger_param" keys.
+	// The triggers field is only set when the key exists in the frontmatter.
+	if v, ok := fm.Get("triggers"); ok && v.Kind == domain.KindList {
+		for _, item := range v.Items {
+			if item.Kind != domain.KindMapping {
+				continue
+			}
+			var trig domain.InfrastructureTrigger
+			for _, pair := range item.Pairs {
+				if pair.Value.Kind != domain.KindScalar {
+					continue
+				}
+				switch pair.Key {
+				case "trigger":
+					trig.Trigger = pair.Value.Scalar
+				case "trigger_param":
+					// Normalise YAML null ("null") to empty string; non-null values are kept verbatim.
+					if pair.Value.Scalar != "null" {
+						trig.TriggerParam = pair.Value.Scalar
+					}
+				}
+			}
+			agent.Triggers = append(agent.Triggers, trig)
+		}
+	}
+
+	// on_failure: scalar policy ("halt" or "continue")
+	if v, ok := fm.Get("on_failure"); ok && v.Kind == domain.KindScalar {
+		agent.OnFailure = v.Scalar
+	}
+
 	return agent, nil
 }

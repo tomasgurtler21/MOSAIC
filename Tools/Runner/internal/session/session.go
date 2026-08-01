@@ -39,6 +39,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"mosaic-common/interaction"
@@ -186,8 +188,24 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		stages = &ss
 	}
 
-	// Step 7: Settle checkpoints (FR-9: refuse if no provider is available).
-	if config.Checkpoints {
+	// Step 6b: Enumerate declared infrastructure agents from the orchestrator file.
+	// This must happen before Step 7 (checkpoint refusal) so we can check for a
+	// checkpoint-class agent. An empty slice is valid — no infrastructure agents deployed.
+	declaredInfraAgents, err := orchfile.EnumerateInfrastructureAgents(config.OrchestratorFilePath)
+	if err != nil {
+		return refusal(err.Error()), nil
+	}
+
+	// Step 6c: Validate per-class agent selection. When multiple agents of the
+	// same gated class are declared and no selection is provided in RunConfig,
+	// refuse at run start (non-interactive CLI runs must supply --infra-class).
+	if err := validateClassSelections(declaredInfraAgents, config.InfraClassSelections); err != nil {
+		return refusal(err.Error()), nil
+	}
+
+	// Step 7: Settle checkpoints (FR-9). Refuse only when checkpoints are enabled
+	// AND no checkpoint-class infrastructure agent is declared for this run.
+	if config.Checkpoints && !hasCheckpointClassAgent(declaredInfraAgents) {
 		return refusal("checkpoints requested but no checkpoint provider is available"), nil
 	}
 
@@ -219,6 +237,15 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		}
 	}
 
+	// Step 8b: Validate and apply infrastructure_overrides from the artifact state.
+	// Each override must name a declared infrastructure agent; unknown names are
+	// a run-start refusal. Trigger restrictions are also validated per agent class.
+	// The returned slice has replacement trigger lists applied (override semantics).
+	declaredInfraAgents, err = validateAndApplyOverrides(state.InfrastructureOverrides, declaredInfraAgents)
+	if err != nil {
+		return refusal(err.Error()), nil
+	}
+
 	// =========================================================================
 	// Dispatch loop
 	// =========================================================================
@@ -227,6 +254,11 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	// instruction to the next harness invocation (FR-20 / FR-24). The override
 	// is applied once and then cleared; it is never originated by the session.
 	var hitlOverride *bool
+	// prevWorkflowStep tracks the most recently completed workflow step for
+	// retrospective STAGE_END / PHASE_END trigger evaluation. Nil until the
+	// first workflow step completes. Updated only for workflow steps, not for
+	// infrastructure agent completions (no-cascades rule).
+	var prevWorkflowStep *domain.CompletedStep
 
 	for {
 		decision := engine.Next(
@@ -321,6 +353,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 				ErrorCode:       response.ErrorCode,
 				Summary:         response.StatusMessage,
 				Timestamp:       s.deps.Clock.Now(),
+				Inputs:          formatInputs(step.Request.InputArtifacts),
 				OutputArtifacts: step.Request.OutputArtifacts,
 			}
 			state, err = s.deps.Store.Apply(ctx, state, completedStep)
@@ -340,11 +373,50 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 				Message: fmt.Sprintf("phase=%s stage=%q status=%s", completedStep.Phase, completedStep.Stage, string(completedStep.Status)),
 			})
 
-			// Infrastructure-agent trigger hook (FR-40): named no-op as the
-			// discoverable anchor point, plus the injected hook for test observation.
-			onInfrastructureAgentTrigger()
-			if s.deps.OnInfrastructureTrigger != nil {
-				s.deps.OnInfrastructureTrigger()
+			// Infrastructure-agent trigger evaluation (FR-40).
+			// Only workflow steps (IsInfrastructure=false) trigger evaluation;
+			// infrastructure step completions skip this block entirely (no-cascades
+			// rule). The named no-op and injected test hook are called once per
+			// workflow step dispatch cycle, matching the pre-existing contract.
+			if !completedStep.IsInfrastructure {
+				// Save the workflow step's CurrentState so the engine sees the
+				// correct last-workflow-agent after any infra dispatches complete.
+				// Infra rows update CurrentState (via Store.Apply), which would
+				// confuse engine.Next's row-lookup; restoring after evaluation
+				// keeps the engine's view consistent with the workflow routing table.
+				savedCurrentState := state.CurrentState
+
+				halt, trigErr := s.evaluateTriggers(
+					ctx, &state, &seq, completedStep, prevWorkflowStep,
+					declaredInfraAgents, config,
+					buildActiveAgentsFilter(declaredInfraAgents, config.InfraClassSelections),
+					orchDir,
+				)
+
+				// Restore the workflow step's CurrentState so engine.Next can
+				// locate the correct row on its next call.
+				state.CurrentState = savedCurrentState
+
+				if trigErr != nil {
+					if ctx.Err() != nil {
+						return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
+					}
+					return domain.RunOutcome{Status: domain.RunFailed, Message: trigErr.Error()}, trigErr
+				}
+				if halt {
+					return domain.RunOutcome{Status: domain.RunStopped, Message: "infrastructure agent halted the run"}, nil
+				}
+
+				// Update prevWorkflowStep after all infra agents have been
+				// evaluated for this workflow step completion.
+				cp := completedStep
+				prevWorkflowStep = &cp
+
+				// Named no-op anchor point (FR-40) plus injected test hook.
+				onInfrastructureAgentTrigger()
+				if s.deps.OnInfrastructureTrigger != nil {
+					s.deps.OnInfrastructureTrigger()
+				}
 			}
 
 			// Stage-* output re-derivation: re-read Plan.md after any row whose
@@ -623,4 +695,291 @@ func resolveToRunScoped(paths []string, prefix string) []string {
 		}
 	}
 	return resolved
+}
+
+// formatInputs formats a list of input artifact paths as a comma-separated
+// string for the Inputs column of the Execution Log. Returns "" when the
+// list is empty (rendered as "-" in the table).
+func formatInputs(paths []string) string {
+	return strings.Join(paths, ", ")
+}
+
+// hasCheckpointClassAgent reports whether any declared infrastructure agent
+// has Class == "checkpoint".
+func hasCheckpointClassAgent(agents []domain.DeclaredInfraAgent) bool {
+	for _, a := range agents {
+		if a.Class == "checkpoint" {
+			return true
+		}
+	}
+	return false
+}
+
+// allowedTriggersForClass returns the set of trigger names that are permitted
+// for the given infrastructure agent class. A nil return means all triggers
+// are allowed (no class-level restriction). Currently:
+//   - "commit" class: only STAGE_END is permitted
+//   - All other classes: no restriction
+func allowedTriggersForClass(class string) map[string]bool {
+	switch class {
+	case "commit":
+		return map[string]bool{"STAGE_END": true}
+	default:
+		return nil
+	}
+}
+
+// checkpointMarkerRe matches the [checkpoint:{sha}] marker pattern in a
+// status_message. The sha is captured in group 1.
+var checkpointMarkerRe = regexp.MustCompile(`\[checkpoint:([^\]]+)\]`)
+
+// extractCheckpointRef scans statusMessage for a [checkpoint:{sha}] marker
+// and returns the sha string. Returns "" when no marker is found.
+func extractCheckpointRef(statusMessage string) string {
+	m := checkpointMarkerRe.FindStringSubmatch(statusMessage)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// lastInfraSeqInLog returns the Seq of the most recent execution log entry
+// whose agent identifier matches agentName. Returns -1 when no matching entry
+// is found (the agent has never been dispatched).
+func lastInfraSeqInLog(agentName string, log []domain.ExecutionLogEntry) int {
+	for i := len(log) - 1; i >= 0; i-- {
+		if extractAgentIdentifier(log[i].Agent) == agentName {
+			return log[i].Seq
+		}
+	}
+	return -1
+}
+
+// infraTriggerFires reports whether the given trigger should fire after the
+// workflow step described by completedStep and prevWorkflowStep.
+//
+// currentSeq is the global sequence after the most recent Store.Apply call
+// (including any infra dispatches that have already completed during this
+// evaluation pass). log is the current execution log, used for
+// INVOCATION_INTERVAL interval arithmetic.
+func infraTriggerFires(
+	trigger domain.DeclaredInfraTrigger,
+	currentSeq int,
+	log []domain.ExecutionLogEntry,
+	agentName string,
+	completedStep domain.CompletedStep,
+	prevWorkflowStep *domain.CompletedStep,
+) bool {
+	switch trigger.Trigger {
+	case "INVOCATION_INTERVAL":
+		param, convErr := strconv.Atoi(trigger.Param)
+		if convErr != nil || param <= 0 {
+			return false
+		}
+		lastSeq := lastInfraSeqInLog(agentName, log)
+		if lastSeq < 0 {
+			// No prior dispatch row: fires when global_sequence >= param.
+			return currentSeq >= param
+		}
+		return (currentSeq - lastSeq) >= param
+
+	case "STAGE_END":
+		if prevWorkflowStep == nil {
+			// First workflow step: no prior step to compare against.
+			return false
+		}
+		return completedStep.Stage != prevWorkflowStep.Stage
+
+	case "PHASE_END":
+		if prevWorkflowStep == nil {
+			return false
+		}
+		return completedStep.Phase != prevWorkflowStep.Phase
+
+	case "MANUAL":
+		// MANUAL triggers never fire automatically.
+		return false
+
+	default:
+		return false
+	}
+}
+
+// evaluateTriggers checks all declared infrastructure agent triggers against
+// the current artifact state after a workflow step completes. Agents are
+// evaluated in declaration order; each agent fires at most once per
+// evaluation even if multiple triggers match.
+//
+// Dispatch is performed synchronously: each matching agent's invocation
+// completes (including its Execution Log row via Store.Apply) before the
+// next declared agent's triggers are evaluated.
+//
+// Returns (true, nil) when an on_failure=halt agent stops the run.
+// Returns (false, non-nil) on unexpected infrastructure errors.
+// Returns (false, nil) when all evaluations complete without a halt.
+func (s *sessionImpl) evaluateTriggers(
+	ctx context.Context,
+	state *domain.ArtifactState,
+	seq *int,
+	completedStep domain.CompletedStep,
+	prevWorkflowStep *domain.CompletedStep,
+	declared []domain.DeclaredInfraAgent,
+	config domain.RunConfig,
+	activeAgents map[string]bool,
+	orchDir string,
+) (haltRun bool, err error) {
+	for _, agent := range declared {
+		// Restore-class agents are never dispatched by automatic trigger
+		// evaluation; they act only on explicit manual instruction (MANUAL
+		// trigger). The exclusion is by class so that any restore-class agent
+		// (e.g. a future checkpoint-restore-s3) is automatically excluded
+		// without a code change.
+		if agent.Class == "restore" {
+			continue
+		}
+
+		// activeAgents filter: when non-nil, only listed agents are evaluated.
+		if activeAgents != nil && !activeAgents[agent.Name] {
+			continue
+		}
+
+		// Activation gating: checkpoint-class agents require checkpoints to be
+		// enabled for the run. Other classes are always active.
+		if agent.Class == "checkpoint" && !config.Checkpoints {
+			continue
+		}
+
+		// Check whether any declared trigger fires. An agent fires at most once
+		// per evaluation pass even if multiple triggers match.
+		fired := false
+		for _, trigger := range agent.Triggers {
+			if infraTriggerFires(trigger, *seq, state.ExecutionLog, agent.Name, completedStep, prevWorkflowStep) {
+				fired = true
+				break
+			}
+		}
+		if !fired {
+			continue
+		}
+
+		// Dispatch the infrastructure agent.
+		infraSeq := *seq + 1
+		agentRef := domain.AgentReference{
+			Identifier:     agent.Name,
+			DefinitionPath: filepath.Join(orchDir, agent.Name+".md"),
+		}
+		req := domain.ProtocolRequest{
+			AgentInstanceID: fmt.Sprintf("%s#%d", agent.Name, infraSeq),
+			RunID:           state.RunID,
+			TaskDescription: fmt.Sprintf("infrastructure agent dispatch: %s", agent.Name),
+		}
+
+		response, invokeErr := s.deps.Harness.Invoke(ctx, agentRef, req)
+		if invokeErr != nil {
+			if ctx.Err() != nil {
+				return true, ctx.Err()
+			}
+			// Harness-level error: treat as non-SUCCESS and apply on_failure policy.
+			response = domain.ProtocolResponse{
+				AgentInstanceID: req.AgentInstanceID,
+				StatusCode:      domain.StatusBLOCKED,
+				StatusMessage:   invokeErr.Error(),
+			}
+		}
+
+		// Extract a checkpoint content-reference from checkpoint-class responses.
+		checkpoint := ""
+		if agent.Class == "checkpoint" {
+			checkpoint = extractCheckpointRef(response.StatusMessage)
+		}
+
+		// Record the completed infrastructure step in the Execution Log.
+		infraStep := domain.CompletedStep{
+			Seq:              infraSeq,
+			AgentInstance:    req.AgentInstanceID,
+			Phase:            completedStep.Phase,
+			Stage:            completedStep.Stage,
+			Status:           response.StatusCode,
+			Summary:          response.StatusMessage,
+			Timestamp:        s.deps.Clock.Now(),
+			Checkpoint:       checkpoint,
+			IsInfrastructure: true,
+		}
+		newState, applyErr := s.deps.Store.Apply(ctx, *state, infraStep)
+		if applyErr != nil {
+			return false, applyErr
+		}
+		*state = newState
+		*seq = infraSeq
+
+		// Apply on_failure policy for non-SUCCESS outcomes. Infrastructure
+		// failures never enter the deviation resolver; they follow this path
+		// exclusively.
+		if response.StatusCode != domain.StatusSUCCESS {
+			if agent.OnFailure == "halt" {
+				return true, nil
+			}
+			// continue policy: record the failure and proceed.
+		}
+	}
+	return false, nil
+}
+
+// validateAndApplyOverrides validates each infrastructure_overrides entry
+// against the declared infrastructure agents, then applies replacement semantics:
+// each override replaces the named agent's trigger list entirely.
+//
+// Returns an error if:
+//   - An override names an agent not in declaredAgents (unknown agent name).
+//   - An override specifies a trigger not allowed for the agent's class.
+//
+// Returns the modified declared-agent slice (with trigger lists replaced by
+// any matching overrides). When overrides is empty, the input slice is returned
+// unchanged.
+func validateAndApplyOverrides(overrides []domain.InfrastructureOverride, declared []domain.DeclaredInfraAgent) ([]domain.DeclaredInfraAgent, error) {
+	if len(overrides) == 0 {
+		return declared, nil
+	}
+
+	// Build a lookup map of declared agents by name.
+	agentByName := make(map[string]domain.DeclaredInfraAgent, len(declared))
+	for _, a := range declared {
+		agentByName[a.Name] = a
+	}
+
+	for _, ov := range overrides {
+		agent, ok := agentByName[ov.AgentName]
+		if !ok {
+			return nil, fmt.Errorf("infrastructure_overrides: agent %q is not declared in the orchestrator file", ov.AgentName)
+		}
+
+		// Validate trigger restrictions for the agent's class.
+		allowed := allowedTriggersForClass(agent.Class)
+		if allowed != nil {
+			for _, tr := range ov.Triggers {
+				if !allowed[tr.Trigger] {
+					return nil, fmt.Errorf(
+						"infrastructure_overrides: trigger %q is not allowed for %s-class agent %q",
+						tr.Trigger, agent.Class, ov.AgentName,
+					)
+				}
+			}
+		}
+	}
+
+	// Build a map of overrides by agent name for fast lookup.
+	overrideMap := make(map[string][]domain.DeclaredInfraTrigger, len(overrides))
+	for _, ov := range overrides {
+		overrideMap[ov.AgentName] = ov.Triggers
+	}
+
+	// Apply replacement semantics: copy the slice and replace trigger lists.
+	result := make([]domain.DeclaredInfraAgent, len(declared))
+	copy(result, declared)
+	for i := range result {
+		if newTriggers, ok := overrideMap[result[i].Name]; ok {
+			result[i].Triggers = newTriggers
+		}
+	}
+	return result, nil
 }

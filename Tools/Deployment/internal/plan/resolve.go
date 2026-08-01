@@ -14,6 +14,7 @@ import (
 //   - The orchestrator (always present, regardless of other selections)
 //   - Every referenced agent from the selected workflows
 //   - Every utility agent whose key appears in utilityAgentIDs (must already be allow-listed)
+//   - Every infrastructure agent whose key appears in infrastructureAgentIDs
 //   - Every skill transitively required by any included agent
 //   - Every hook bundle whose key appears in hookIDs
 //
@@ -22,8 +23,9 @@ import (
 //
 // Errors:
 //   - ErrUnknownWorkflow if any workflowID is not found in the catalog
-//   - ErrUnknownAgent if any workflow references an agent that does not exist in the catalog
-func ResolveArtifacts(c catalog.Catalog, workflowIDs, utilityAgentIDs, hookIDs []string) (ArtifactSet, error) {
+//   - ErrUnknownAgent if any workflow references an agent that does not exist in the catalog,
+//     or if any infrastructureAgentID is not found in the catalog
+func ResolveArtifacts(c catalog.Catalog, workflowIDs, utilityAgentIDs, infrastructureAgentIDs, hookIDs []string) (ArtifactSet, error) {
 	agentsSeen := make(map[string]bool)
 	var agents []domain.Agent
 
@@ -58,6 +60,21 @@ func ResolveArtifacts(c catalog.Catalog, workflowIDs, utilityAgentIDs, hookIDs [
 		agent, ok := c.Agent(utilityKey)
 		if !ok {
 			return ArtifactSet{}, fmt.Errorf("%w: utility agent %q not found in catalog", ErrUnknownAgent, utilityKey)
+		}
+		agentsSeen[agent.Key] = true
+		agents = append(agents, agent)
+	}
+
+	// Collect explicitly selected infrastructure agents. Multiple agents of the same class
+	// may be selected without restriction (the "at most one active per class" rule is
+	// enforced at run start, not deploy time).
+	for _, infraKey := range infrastructureAgentIDs {
+		if agentsSeen[infraKey] {
+			continue
+		}
+		agent, ok := c.Agent(infraKey)
+		if !ok {
+			return ArtifactSet{}, fmt.Errorf("%w: infrastructure agent %q not found in catalog", ErrUnknownAgent, infraKey)
 		}
 		agentsSeen[agent.Key] = true
 		agents = append(agents, agent)

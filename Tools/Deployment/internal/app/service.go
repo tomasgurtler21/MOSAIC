@@ -83,12 +83,13 @@ type Deps struct {
 // used directly without asking; an unset field causes the flow to ask through Interaction
 // (CD-6). This is the single mechanism that makes CLI flags and TUI screens interchangeable.
 type DeployRequest struct {
-	HarnessID       string
-	WorkspacePath   string
-	Scope           domain.Scope
-	WorkflowIDs     []string
-	UtilityAgentIDs []string
-	HookIDs         []string
+	HarnessID               string
+	WorkspacePath           string
+	Scope                   domain.Scope
+	WorkflowIDs             []string
+	UtilityAgentIDs         []string
+	InfrastructureAgentIDs  []string
+	HookIDs                 []string
 	// TierModels pre-answers the per-tier model selection step (QTierModel) for each tier key.
 	TierModels  map[domain.Tier]string
 	AgentModels map[string]string // agent key -> model id; pre-answers QAgentModel per agent

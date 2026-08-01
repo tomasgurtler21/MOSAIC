@@ -607,12 +607,45 @@ func parseBlockValue(lines [][]byte, startLine int) (mosaic.FieldValue, error) {
 	return parseBlockMapping(lines, startLine)
 }
 
-// parseBlockSequence parses indented "  - item" lines into a KindList with ListBlock.
+// parseBlockSequence parses indented block sequence lines into a KindList with ListBlock.
+//
+// Each list item begins with a "  - " marker at a consistent indentation level. Items may
+// be simple scalars ("  - value") or inline mappings ("  - key: value" followed by
+// continuation lines "    key2: value2"). Continuation lines are collected and parsed as
+// KindMapping items, enabling YAML list-of-maps support (e.g. the `triggers` field in
+// infrastructure agent frontmatter).
 func parseBlockSequence(lines [][]byte, startLine int) (mosaic.FieldValue, error) {
-	var items []mosaic.FieldValue
+	// Determine the indentation level of the sequence from the first non-empty line.
+	itemIndentLen := -1
+	for _, l := range lines {
+		if len(bytes.TrimSpace(l)) > 0 {
+			itemIndentLen = len(l) - len(bytes.TrimLeft(l, " "))
+			break
+		}
+	}
+	if itemIndentLen < 0 {
+		return mosaic.ListValue(nil, mosaic.ListBlock), nil
+	}
+
+	// Group lines into per-item groups. A new item starts when we encounter "- " at
+	// exactly the detected indentation level. Continuation lines (deeper indentation,
+	// used for mapping-valued items) are attached to the preceding item.
+	type itemGroup struct {
+		firstLineText []byte   // text after "- " on the opening line
+		continuation  [][]byte // subsequent lines belonging to this item
+		startLine     int
+	}
+	var groups []itemGroup
+
 	for i, line := range lines {
 		lineNum := startLine + 1 + i
+
 		if len(bytes.TrimSpace(line)) == 0 {
+			// Empty lines belong to the current group for structural completeness,
+			// but are ignored during per-item parsing.
+			if len(groups) > 0 {
+				groups[len(groups)-1].continuation = append(groups[len(groups)-1].continuation, line)
+			}
 			continue
 		}
 		if len(line) > 0 && line[0] == '\t' {
@@ -620,24 +653,103 @@ func parseBlockSequence(lines [][]byte, startLine int) (mosaic.FieldValue, error
 				"frontmatter: line %d: tab character used for indentation", lineNum,
 			)
 		}
+
+		// Count leading spaces on this line.
+		leadingSpaces := 0
+		for _, b := range line {
+			if b == ' ' {
+				leadingSpaces++
+			} else {
+				break
+			}
+		}
 		stripped := bytes.TrimLeft(line, " ")
 		strippedStr := string(bytes.TrimRight(stripped, "\r\n"))
-		if !strings.HasPrefix(strippedStr, "- ") && strippedStr != "-" {
+
+		if leadingSpaces == itemIndentLen && (strings.HasPrefix(strippedStr, "- ") || strippedStr == "-") {
+			// New list item at the canonical indentation level.
+			var itemText []byte
+			if strings.HasPrefix(strippedStr, "- ") {
+				itemText = []byte(strippedStr[2:])
+			}
+			groups = append(groups, itemGroup{
+				firstLineText: itemText,
+				startLine:     lineNum,
+			})
+		} else if len(groups) > 0 {
+			// Continuation line (deeper indentation): belongs to the current item.
+			groups[len(groups)-1].continuation = append(groups[len(groups)-1].continuation, line)
+		} else {
 			return mosaic.FieldValue{}, fmt.Errorf(
 				"frontmatter: line %d: expected list item ('- '), got %q", lineNum, strippedStr,
 			)
 		}
-		var itemText []byte
-		if strings.HasPrefix(strippedStr, "- ") {
-			itemText = []byte(strippedStr[2:])
-		}
-		item, err := parseScalarBytes(itemText)
-		if err != nil {
-			return mosaic.FieldValue{}, fmt.Errorf("frontmatter: line %d: %w", lineNum, err)
-		}
-		items = append(items, item)
 	}
+
+	// Parse each item group into a FieldValue.
+	var items []mosaic.FieldValue
+	for _, g := range groups {
+		// An item is a mapping when it has non-empty continuation lines or when its
+		// first-line text looks like "key: value".
+		hasContinuation := false
+		for _, l := range g.continuation {
+			if len(bytes.TrimSpace(l)) > 0 {
+				hasContinuation = true
+				break
+			}
+		}
+		isMapping := hasContinuation || blockSequenceItemLooksLikeMapping(g.firstLineText)
+
+		if isMapping {
+			// Build a flat list of mapping lines: the first-line text (acting as the
+			// first "key: value" pair) followed by the non-empty continuation lines.
+			var mappingLines [][]byte
+			if len(g.firstLineText) > 0 {
+				mappingLines = append(mappingLines, g.firstLineText)
+			}
+			for _, cl := range g.continuation {
+				if len(bytes.TrimSpace(cl)) > 0 {
+					mappingLines = append(mappingLines, cl)
+				}
+			}
+			item, err := parseBlockMapping(mappingLines, g.startLine)
+			if err != nil {
+				return mosaic.FieldValue{}, err
+			}
+			items = append(items, item)
+		} else {
+			item, err := parseScalarBytes(g.firstLineText)
+			if err != nil {
+				return mosaic.FieldValue{}, fmt.Errorf("frontmatter: line %d: %w", g.startLine, err)
+			}
+			items = append(items, item)
+		}
+	}
+
 	return mosaic.ListValue(items, mosaic.ListBlock), nil
+}
+
+// blockSequenceItemLooksLikeMapping reports whether the text after "- " on a block
+// sequence item's opening line looks like a YAML mapping entry ("key: value" or "key:").
+// This heuristic drives the decision to parse the item (and its continuation lines) as a
+// KindMapping rather than a KindScalar. False positives are intentionally avoided by
+// requiring that the colon be followed by a space, tab, or end-of-content (bare "key:"
+// form). URLs such as "https://example.com" are not matched because their colon is
+// followed by "/".
+func blockSequenceItemLooksLikeMapping(text []byte) bool {
+	for i, b := range text {
+		if b != ':' || i == 0 {
+			continue
+		}
+		if i+1 >= len(text) {
+			return true // "key:" at end of line
+		}
+		next := text[i+1]
+		if next == ' ' || next == '\t' || next == '\r' || next == '\n' {
+			return true // "key: value"
+		}
+	}
+	return false
 }
 
 // parseBlockMapping parses indented "  key: value" lines into a KindMapping.

@@ -16,8 +16,8 @@ type planner struct{}
 
 // Build derives the complete plan from the given inputs. It performs no file writes.
 func (p *planner) Build(ctx context.Context, in Input) (domain.Plan, error) {
-	// Resolve the complete artifact set from workflow selections, utility agents, and hooks.
-	set, err := ResolveArtifacts(in.Catalog, in.WorkflowIDs, in.UtilityAgentIDs, in.HookIDs)
+	// Resolve the complete artifact set from workflow selections, utility agents, infrastructure agents, and hooks.
+	set, err := ResolveArtifacts(in.Catalog, in.WorkflowIDs, in.UtilityAgentIDs, in.InfrastructureAgentIDs, in.HookIDs)
 	if err != nil {
 		return domain.Plan{}, err
 	}

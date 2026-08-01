@@ -56,11 +56,13 @@ func TestAgents_ReturnsNonEmptyList(t *testing.T) {
 	}
 }
 
-// TestAgents_Count_Matches35Workers verifies that Agents() returns exactly 35 worker
+// TestAgents_Count_Matches39Workers verifies that Agents() returns exactly 39 worker
 // agents, matching the known count of generic agent files in the repository (each category
 // folder contains one README.md that is not an agent and must be excluded).
-func TestAgents_Count_Matches35Workers(t *testing.T) {
-	const wantCount = 35
+// Count breakdown: 35 prior agents + 4 infrastructure agents (checkpoint-manager-git,
+// checkpoint-restore-git, commit-manager-git, orchestration-review).
+func TestAgents_Count_Matches39Workers(t *testing.T) {
+	const wantCount = 39
 	cat := loadRealCatalog(t)
 	agents := cat.Agents()
 	if len(agents) != wantCount {
@@ -226,10 +228,10 @@ func TestAgents_AllHaveAbsoluteSourcePath(t *testing.T) {
 }
 
 // TestAgents_KnownCategories_AllPresent verifies that the catalog returns at least one
-// agent for each of the seven known category folders.
+// agent for each of the eight known category folders, including Infrastructure.
 func TestAgents_KnownCategories_AllPresent(t *testing.T) {
 	knownCategories := []string{
-		"Audit", "Creation", "Execution", "Interface", "Planning", "Research", "Validation",
+		"Audit", "Creation", "Execution", "Infrastructure", "Interface", "Planning", "Research", "Validation",
 	}
 	cat := loadRealCatalog(t)
 	agents := cat.Agents()
@@ -608,4 +610,171 @@ func allAgentKeys(agents []domain.Agent) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// ---------------------------------------------------------------------------
+// Infrastructure agent frontmatter parsing — T3.1
+// ---------------------------------------------------------------------------
+//
+// Tests below verify that parseAgentFile correctly populates the new
+// Infrastructure, Triggers, and OnFailure fields on domain.Agent from the
+// infrastructure-agent source files in Agents/Generic/Agents/Infrastructure/.
+//
+// Infrastructure agents are loaded as ordinary RoleWorker agents with
+// Category = "Infrastructure". The new fields distinguish them from plain
+// worker agents at runtime.
+
+// TestInfrastructureAgent_CheckpointManagerGit_InfrastructureField verifies that the
+// infrastructure field of checkpoint-manager-git is parsed as "checkpoint", correctly
+// identifying its class within the infrastructure-agent vocabulary.
+func TestInfrastructureAgent_CheckpointManagerGit_InfrastructureField(t *testing.T) {
+	cat := loadRealCatalog(t)
+	a, ok := cat.Agent("checkpoint-manager-git")
+	if !ok {
+		t.Fatal("Agent(\"checkpoint-manager-git\") not found in catalog")
+	}
+	if a.Infrastructure != "checkpoint" {
+		t.Errorf("checkpoint-manager-git.Infrastructure = %q, want %q", a.Infrastructure, "checkpoint")
+	}
+}
+
+// TestInfrastructureAgent_CheckpointManagerGit_TriggerCount verifies that exactly two
+// triggers are parsed from checkpoint-manager-git's frontmatter (STAGE_END and
+// INVOCATION_INTERVAL), one entry per declared trigger.
+func TestInfrastructureAgent_CheckpointManagerGit_TriggerCount(t *testing.T) {
+	cat := loadRealCatalog(t)
+	a, ok := cat.Agent("checkpoint-manager-git")
+	if !ok {
+		t.Fatal("Agent(\"checkpoint-manager-git\") not found in catalog")
+	}
+	if len(a.Triggers) != 2 {
+		t.Fatalf("checkpoint-manager-git has %d triggers, want 2; triggers: %+v", len(a.Triggers), a.Triggers)
+	}
+}
+
+// TestInfrastructureAgent_CheckpointManagerGit_FirstTrigger_StageEnd verifies that the
+// first trigger entry is STAGE_END with an empty TriggerParam (the frontmatter carries
+// trigger_param: null, which must be normalised to empty string).
+func TestInfrastructureAgent_CheckpointManagerGit_FirstTrigger_StageEnd(t *testing.T) {
+	cat := loadRealCatalog(t)
+	a, ok := cat.Agent("checkpoint-manager-git")
+	if !ok {
+		t.Fatal("Agent(\"checkpoint-manager-git\") not found in catalog")
+	}
+	if len(a.Triggers) < 1 {
+		t.Fatal("no triggers parsed; cannot check first trigger")
+	}
+	trig := a.Triggers[0]
+	if trig.Trigger != "STAGE_END" {
+		t.Errorf("Triggers[0].Trigger = %q, want %q", trig.Trigger, "STAGE_END")
+	}
+	if trig.TriggerParam != "" {
+		t.Errorf("Triggers[0].TriggerParam = %q, want empty string (null trigger_param)", trig.TriggerParam)
+	}
+}
+
+// TestInfrastructureAgent_CheckpointManagerGit_SecondTrigger_InvocationInterval verifies
+// that the second trigger entry is INVOCATION_INTERVAL with TriggerParam "10".
+func TestInfrastructureAgent_CheckpointManagerGit_SecondTrigger_InvocationInterval(t *testing.T) {
+	cat := loadRealCatalog(t)
+	a, ok := cat.Agent("checkpoint-manager-git")
+	if !ok {
+		t.Fatal("Agent(\"checkpoint-manager-git\") not found in catalog")
+	}
+	if len(a.Triggers) < 2 {
+		t.Fatal("fewer than 2 triggers parsed; cannot check second trigger")
+	}
+	trig := a.Triggers[1]
+	if trig.Trigger != "INVOCATION_INTERVAL" {
+		t.Errorf("Triggers[1].Trigger = %q, want %q", trig.Trigger, "INVOCATION_INTERVAL")
+	}
+	if trig.TriggerParam != "10" {
+		t.Errorf("Triggers[1].TriggerParam = %q, want %q", trig.TriggerParam, "10")
+	}
+}
+
+// TestInfrastructureAgent_CheckpointManagerGit_OnFailure_Halt verifies that the
+// on_failure field of checkpoint-manager-git is "halt".
+func TestInfrastructureAgent_CheckpointManagerGit_OnFailure_Halt(t *testing.T) {
+	cat := loadRealCatalog(t)
+	a, ok := cat.Agent("checkpoint-manager-git")
+	if !ok {
+		t.Fatal("Agent(\"checkpoint-manager-git\") not found in catalog")
+	}
+	if a.OnFailure != "halt" {
+		t.Errorf("checkpoint-manager-git.OnFailure = %q, want %q", a.OnFailure, "halt")
+	}
+}
+
+// TestInfrastructureAgent_CommitManagerGit_NullTriggerParam_EmptyString verifies that
+// commit-manager-git's single trigger (STAGE_END) has an empty TriggerParam. The source
+// frontmatter carries trigger_param: null, which must be normalised to empty string — not
+// the literal string "null".
+func TestInfrastructureAgent_CommitManagerGit_NullTriggerParam_EmptyString(t *testing.T) {
+	cat := loadRealCatalog(t)
+	a, ok := cat.Agent("commit-manager-git")
+	if !ok {
+		t.Fatal("Agent(\"commit-manager-git\") not found in catalog")
+	}
+	if len(a.Triggers) != 1 {
+		t.Fatalf("commit-manager-git has %d triggers, want 1; triggers: %+v", len(a.Triggers), a.Triggers)
+	}
+	if a.Triggers[0].TriggerParam != "" {
+		t.Errorf("commit-manager-git Triggers[0].TriggerParam = %q, want empty string (null → empty)", a.Triggers[0].TriggerParam)
+	}
+}
+
+// TestInfrastructureAgent_OrchestrationReview_Fields verifies that orchestration-review
+// has infrastructure "review", a single INVOCATION_INTERVAL trigger with param "30", and
+// on_failure "continue".
+func TestInfrastructureAgent_OrchestrationReview_Fields(t *testing.T) {
+	cat := loadRealCatalog(t)
+	a, ok := cat.Agent("orchestration-review")
+	if !ok {
+		t.Fatal("Agent(\"orchestration-review\") not found in catalog")
+	}
+	if a.Infrastructure != "review" {
+		t.Errorf("orchestration-review.Infrastructure = %q, want %q", a.Infrastructure, "review")
+	}
+	if a.OnFailure != "continue" {
+		t.Errorf("orchestration-review.OnFailure = %q, want %q", a.OnFailure, "continue")
+	}
+	if len(a.Triggers) != 1 {
+		t.Fatalf("orchestration-review has %d triggers, want 1", len(a.Triggers))
+	}
+	if a.Triggers[0].Trigger != "INVOCATION_INTERVAL" {
+		t.Errorf("orchestration-review Triggers[0].Trigger = %q, want %q", a.Triggers[0].Trigger, "INVOCATION_INTERVAL")
+	}
+	if a.Triggers[0].TriggerParam != "30" {
+		t.Errorf("orchestration-review Triggers[0].TriggerParam = %q, want %q", a.Triggers[0].TriggerParam, "30")
+	}
+}
+
+// TestInfrastructureAgent_CheckpointRestoreGit verifies that checkpoint-restore-git
+// is parsed as a restore-class infrastructure agent with a single MANUAL trigger and
+// on_failure=halt. After Stage 8, checkpoint-restore-git gains infrastructure frontmatter
+// (infrastructure: restore, triggers: [{trigger: MANUAL, trigger_param: null}],
+// on_failure: halt), promoting it from an unclassified ordinary agent to a classified
+// infrastructure agent with the new "restore" class.
+func TestInfrastructureAgent_CheckpointRestoreGit(t *testing.T) {
+	cat := loadRealCatalog(t)
+	a, ok := cat.Agent("checkpoint-restore-git")
+	if !ok {
+		t.Fatal("Agent(\"checkpoint-restore-git\") not found in catalog")
+	}
+	if a.Infrastructure != "restore" {
+		t.Errorf("checkpoint-restore-git.Infrastructure = %q, want %q", a.Infrastructure, "restore")
+	}
+	if len(a.Triggers) != 1 {
+		t.Fatalf("checkpoint-restore-git has %d triggers, want 1; triggers: %+v", len(a.Triggers), a.Triggers)
+	}
+	if a.Triggers[0].Trigger != "MANUAL" {
+		t.Errorf("checkpoint-restore-git Triggers[0].Trigger = %q, want %q", a.Triggers[0].Trigger, "MANUAL")
+	}
+	if a.Triggers[0].TriggerParam != "" {
+		t.Errorf("checkpoint-restore-git Triggers[0].TriggerParam = %q, want empty string (null trigger_param)", a.Triggers[0].TriggerParam)
+	}
+	if a.OnFailure != "halt" {
+		t.Errorf("checkpoint-restore-git.OnFailure = %q, want %q", a.OnFailure, "halt")
+	}
 }

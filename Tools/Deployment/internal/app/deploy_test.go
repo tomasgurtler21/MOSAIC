@@ -32,6 +32,7 @@ package app_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"mosaic-deploy/internal/app"
@@ -555,6 +556,397 @@ func TestDeployNew_TierRationaleCarriedToInteraction(t *testing.T) {
 		t.Errorf("QTierModel Question.Detail = %q; want the tier rationale %q (AC18.8)",
 			capturedDetail, "Needs a capable model to analyse test output")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Infrastructure agent selection question (T4.2)
+// ---------------------------------------------------------------------------
+
+// TestDeployNew_NoInfraAgentsPreAnswered_AsksQInfrastructureAgents verifies that when
+// InfrastructureAgentIDs is not set in the request and the catalog has infrastructure agents,
+// QInfrastructureAgents is asked through Interaction.
+func TestDeployNew_NoInfraAgentsPreAnswered_AsksQInfrastructureAgents(t *testing.T) {
+	// Arrange — catalog has an infrastructure agent so the question has options to present.
+	cat := newMinimalCatalog()
+	cat.infraAgents = []domain.Agent{
+		{
+			Key:            "checkpoint-manager-git",
+			NumericID:      "36",
+			Version:        "1.0",
+			Name:           "checkpoint-manager-git",
+			Role:           domain.RoleWorker,
+			Infrastructure: "checkpoint",
+			Description:    "Commits a checkpoint to a git ref",
+		},
+	}
+	stub := interactiontest.NewBuilder().
+		AnswerSelectMany(domain.QInfrastructureAgents, "", []string{}).
+		AnswerReview(true).
+		Build()
+	deps, workspace := newBaseDeps(t, stub)
+	deps.Catalog = cat
+	svc := app.New(deps)
+
+	// Act — InfrastructureAgentIDs is absent (nil) → flow must ask.
+	_, _ = svc.DeployNew(context.Background(), app.DeployRequest{
+		HarnessID:       "stub-harness",
+		WorkspacePath:   workspace,
+		WorkflowIDs:     []string{"quick-fix"},
+		AutoConfirmPlan: true,
+	})
+
+	// Assert
+	if !stub.WasAsked(domain.QInfrastructureAgents, "") {
+		t.Error("QInfrastructureAgents was not asked when InfrastructureAgentIDs is not pre-supplied; " +
+			"the deploy-new flow must ask QInfrastructureAgents when the catalog has infrastructure agents")
+	}
+}
+
+// TestDeployNew_InfraAgentsPreAnswered_DoesNotAskQInfrastructureAgents verifies that when
+// InfrastructureAgentIDs is set in the request, QInfrastructureAgents is never asked (CD-6).
+func TestDeployNew_InfraAgentsPreAnswered_DoesNotAskQInfrastructureAgents(t *testing.T) {
+	// Arrange
+	stub := interactiontest.NewBuilder().
+		AnswerReview(true).
+		Build()
+	deps, workspace := newBaseDeps(t, stub)
+	svc := app.New(deps)
+
+	// Act — InfrastructureAgentIDs is set to empty slice (explicitly pre-answered: no selection).
+	_, _ = svc.DeployNew(context.Background(), app.DeployRequest{
+		HarnessID:              "stub-harness",
+		WorkspacePath:          workspace,
+		WorkflowIDs:            []string{"quick-fix"},
+		InfrastructureAgentIDs: []string{},
+		AutoConfirmPlan:        true,
+	})
+
+	// Assert
+	if stub.WasAsked(domain.QInfrastructureAgents, "") {
+		t.Error("QInfrastructureAgents was asked even though InfrastructureAgentIDs was pre-supplied in the request (CD-6)")
+	}
+}
+
+// TestDeployNew_InfraAgentOptions_ClassSuffixInLabel verifies that when QInfrastructureAgents
+// is asked, each option's Label includes the agent's infrastructure class as a suffix of the
+// form " [class]" so the user can distinguish agents by class.
+func TestDeployNew_InfraAgentOptions_ClassSuffixInLabel(t *testing.T) {
+	// Arrange — capture the actual ChoiceQuestion presented to SelectMany.
+	var capturedQ domain.ChoiceQuestion
+	capture := &captureInfraInteraction{
+		captureSelectMany: func(q domain.ChoiceQuestion) {
+			if q.ID == domain.QInfrastructureAgents {
+				capturedQ = q
+			}
+		},
+		defaultSelectMany:    domain.MultiChoiceAnswer{Status: domain.Answered, OptionIDs: []string{}},
+		defaultConfirmAnswer: domain.ConfirmAnswer{Status: domain.Answered, Confirm: true},
+	}
+	cat := newMinimalCatalog()
+	cat.infraAgents = []domain.Agent{
+		{
+			Key:            "checkpoint-manager-git",
+			NumericID:      "36",
+			Version:        "1.0",
+			Name:           "checkpoint-manager-git",
+			Role:           domain.RoleWorker,
+			Infrastructure: "checkpoint",
+			Description:    "Commits a checkpoint to a git ref",
+		},
+	}
+	deps, workspace := newBaseDeps(t, nil)
+	deps.Catalog = cat
+	deps.Interaction = capture
+	svc := app.New(deps)
+
+	// Act — InfrastructureAgentIDs intentionally omitted so QInfrastructureAgents is asked.
+	_, _ = svc.DeployNew(context.Background(), app.DeployRequest{
+		HarnessID:       "stub-harness",
+		WorkspacePath:   workspace,
+		WorkflowIDs:     []string{"quick-fix"},
+		AutoConfirmPlan: true,
+	})
+
+	// Assert — fail rather than skip when the question was not asked, to preserve RED-phase signal.
+	if len(capturedQ.Options) == 0 {
+		t.Fatal("QInfrastructureAgents was not asked or had no options; " +
+			"askInfrastructureAgents must be implemented to present infrastructure agent options")
+	}
+	found := false
+	for _, opt := range capturedQ.Options {
+		if opt.ID == "checkpoint-manager-git" {
+			found = true
+			if !strings.Contains(opt.Label, "[checkpoint]") {
+				t.Errorf("option label %q does not contain class suffix [checkpoint]; "+
+					"infrastructure agent option labels must include the class in brackets", opt.Label)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("checkpoint-manager-git was not present in QInfrastructureAgents options")
+	}
+}
+
+// TestDeployNew_InfraAgentOptions_FilteredToNonEmptyInfrastructureField verifies that when
+// QInfrastructureAgents is asked, only agents with a non-empty Infrastructure field appear
+// as options. Non-infrastructure worker agents must be excluded.
+func TestDeployNew_InfraAgentOptions_FilteredToNonEmptyInfrastructureField(t *testing.T) {
+	var capturedQ domain.ChoiceQuestion
+	capture := &captureInfraInteraction{
+		captureSelectMany: func(q domain.ChoiceQuestion) {
+			if q.ID == domain.QInfrastructureAgents {
+				capturedQ = q
+			}
+		},
+		defaultSelectMany:    domain.MultiChoiceAnswer{Status: domain.Answered, OptionIDs: []string{}},
+		defaultConfirmAnswer: domain.ConfirmAnswer{Status: domain.Answered, Confirm: true},
+	}
+	cat := newMinimalCatalog()
+	// minimalCatalog's agents field has test-runner (non-infrastructure worker).
+	// We also add an infrastructure agent via infraAgents.
+	cat.infraAgents = []domain.Agent{
+		{Key: "checkpoint-manager-git", Infrastructure: "checkpoint", Role: domain.RoleWorker},
+	}
+	deps, workspace := newBaseDeps(t, nil)
+	deps.Catalog = cat
+	deps.Interaction = capture
+	svc := app.New(deps)
+
+	_, _ = svc.DeployNew(context.Background(), app.DeployRequest{
+		HarnessID:       "stub-harness",
+		WorkspacePath:   workspace,
+		WorkflowIDs:     []string{"quick-fix"},
+		AutoConfirmPlan: true,
+	})
+
+	// Fail rather than skip when the question was not asked, to preserve RED-phase signal.
+	if len(capturedQ.Options) == 0 {
+		t.Fatal("QInfrastructureAgents was not asked; " +
+			"askInfrastructureAgents must be implemented and wired into the deploy-new flow")
+	}
+	for _, opt := range capturedQ.Options {
+		if opt.ID == "test-runner" {
+			t.Error("non-infrastructure agent test-runner appeared in QInfrastructureAgents options; " +
+				"only agents with non-empty Infrastructure field must be presented")
+		}
+	}
+}
+
+// TestDeployNew_InfraAgentsAskedAfterUtilityAgents verifies that QInfrastructureAgents is
+// asked after QUtilityAgents in the question sequence, consistent with the deploy-new flow
+// ordering (utility agents → infrastructure agents → hooks).
+func TestDeployNew_InfraAgentsAskedAfterUtilityAgents(t *testing.T) {
+	cat := newMinimalCatalog()
+	cat.utilityAgents = []domain.Agent{
+		{Key: "code-checker", NumericID: "10", Version: "1.0", Name: "Code Checker", Role: domain.RoleUtility},
+	}
+	cat.infraAgents = []domain.Agent{
+		{Key: "checkpoint-manager-git", Infrastructure: "checkpoint", Role: domain.RoleWorker},
+	}
+	stub := interactiontest.NewBuilder().
+		AnswerSelectMany(domain.QUtilityAgents, "", []string{}).
+		AnswerSelectMany(domain.QInfrastructureAgents, "", []string{}).
+		AnswerReview(true).
+		Build()
+	deps, workspace := newBaseDeps(t, stub)
+	deps.Catalog = cat
+	svc := app.New(deps)
+
+	_, _ = svc.DeployNew(context.Background(), app.DeployRequest{
+		HarnessID:       "stub-harness",
+		WorkspacePath:   workspace,
+		WorkflowIDs:     []string{"quick-fix"},
+		AutoConfirmPlan: true,
+	})
+
+	order := stub.QuestionOrder()
+	utilityIdx := -1
+	infraIdx := -1
+	for i, id := range order {
+		switch id {
+		case domain.QUtilityAgents:
+			utilityIdx = i
+		case domain.QInfrastructureAgents:
+			infraIdx = i
+		}
+	}
+
+	// Fail on the infra index missing to preserve RED-phase signal — this is the property
+	// under test. Skip on the utility index missing (that question is a separate concern).
+	if infraIdx == -1 {
+		t.Fatal("QInfrastructureAgents was not asked; " +
+			"askInfrastructureAgents must be wired into the deploy-new flow after utility agents")
+	}
+	if utilityIdx == -1 {
+		t.Skip("QUtilityAgents was not asked; cannot verify relative ordering without both questions")
+	}
+	if infraIdx <= utilityIdx {
+		t.Errorf("QInfrastructureAgents (index %d) was asked before or at the same position as QUtilityAgents (index %d); "+
+			"infrastructure agents must be asked after utility agents", infraIdx, utilityIdx)
+	}
+}
+
+// TestDeployNew_EmptyCatalog_DoesNotAskQInfrastructureAgents verifies that when the
+// catalog has no infrastructure agents, QInfrastructureAgents is never asked through
+// Interaction. An empty catalog must cause the question to be skipped entirely.
+func TestDeployNew_EmptyCatalog_DoesNotAskQInfrastructureAgents(t *testing.T) {
+	// Arrange — catalog has no infrastructure agents (infraAgents defaults to nil/empty)
+	cat := newMinimalCatalog()
+	// infraAgents is not set — cat.InfrastructureAgents() returns nil
+	stub := interactiontest.NewBuilder().
+		AnswerReview(true).
+		Build()
+	deps, workspace := newBaseDeps(t, stub)
+	deps.Catalog = cat
+	svc := app.New(deps)
+
+	// Act — InfrastructureAgentIDs is absent (nil); catalog has no infra agents
+	_, _ = svc.DeployNew(context.Background(), app.DeployRequest{
+		HarnessID:       "stub-harness",
+		WorkspacePath:   workspace,
+		WorkflowIDs:     []string{"quick-fix"},
+		AutoConfirmPlan: true,
+	})
+
+	// Assert
+	if stub.WasAsked(domain.QInfrastructureAgents, "") {
+		t.Error("QInfrastructureAgents was asked even though the catalog has no infrastructure agents; " +
+			"the question must be skipped when InfrastructureAgents() returns an empty slice")
+	}
+}
+
+// TestDeployNew_InfraAgentsAskedBeforeHooks verifies that QInfrastructureAgents is asked
+// before QHooks in the question sequence, consistent with the documented flow ordering:
+// utility agents → infrastructure agents → hooks.
+func TestDeployNew_InfraAgentsAskedBeforeHooks(t *testing.T) {
+	// Arrange — catalog has both infrastructure agents and hooks so both questions are triggered
+	cat := newMinimalCatalog()
+	cat.infraAgents = []domain.Agent{
+		{Key: "checkpoint-manager-git", Infrastructure: "checkpoint", Role: domain.RoleWorker},
+	}
+	cat.hooks = []domain.HookBundle{
+		{Key: "test-hooks", Version: "1.0", Description: "Test hook bundle"},
+	}
+	stub := interactiontest.NewBuilder().
+		AnswerSelectMany(domain.QInfrastructureAgents, "", []string{}).
+		AnswerSelectMany(domain.QHooks, "", []string{}).
+		AnswerReview(true).
+		Build()
+	deps, workspace := newBaseDeps(t, stub)
+	deps.Catalog = cat
+	svc := app.New(deps)
+
+	_, _ = svc.DeployNew(context.Background(), app.DeployRequest{
+		HarnessID:       "stub-harness",
+		WorkspacePath:   workspace,
+		WorkflowIDs:     []string{"quick-fix"},
+		AutoConfirmPlan: true,
+	})
+
+	order := stub.QuestionOrder()
+	infraIdx := -1
+	hooksIdx := -1
+	for i, id := range order {
+		switch id {
+		case domain.QInfrastructureAgents:
+			infraIdx = i
+		case domain.QHooks:
+			hooksIdx = i
+		}
+	}
+
+	if infraIdx == -1 {
+		t.Fatal("QInfrastructureAgents was not asked; " +
+			"askInfrastructureAgents must be wired into the deploy-new flow before hooks")
+	}
+	if hooksIdx == -1 {
+		t.Skip("QHooks was not asked; cannot verify relative ordering without both questions")
+	}
+	if infraIdx >= hooksIdx {
+		t.Errorf("QInfrastructureAgents (index %d) was asked after or at the same position as QHooks (index %d); "+
+			"infrastructure agents must be asked before hooks in the question sequence", infraIdx, hooksIdx)
+	}
+}
+
+// TestDeployNew_InfraAgentIDsPreAnswered_PassedToPlanner verifies the end-to-end propagation
+// of pre-answered infrastructure agent IDs from DeployRequest into the plan.Input that the
+// planner receives. This guards against a bug where the deploy flow asks (or accepts) the
+// selection but silently discards it before calling the planner (AC4.3).
+//
+// This test references plan.Input.InfrastructureAgentIDs, which does not yet exist. It will
+// fail to compile until I4.4 adds InfrastructureAgentIDs to plan.Input — that is the correct
+// RED-phase behaviour. After I4.4 it will compile but the assertion will fail until I4.5
+// wires the selection through the deploy-new flow.
+func TestDeployNew_InfraAgentIDsPreAnswered_PassedToPlanner(t *testing.T) {
+	// Arrange
+	stub := interactiontest.NewBuilder().
+		AnswerReview(true).
+		Build()
+	deps, workspace := newBaseDeps(t, stub)
+	capturing := &capturingPlanner{result: newMinimalPlan(workspace)}
+	deps.Planner = capturing
+	svc := app.New(deps)
+
+	// Act — InfrastructureAgentIDs is pre-answered; the flow must not ask and must pass the IDs onward
+	_, err := svc.DeployNew(context.Background(), app.DeployRequest{
+		HarnessID:              "stub-harness",
+		WorkspacePath:          workspace,
+		WorkflowIDs:            []string{"quick-fix"},
+		InfrastructureAgentIDs: []string{"checkpoint-manager-git"},
+		AutoConfirmPlan:        true,
+	})
+	if err != nil {
+		t.Fatalf("DeployNew returned unexpected error: %v", err)
+	}
+
+	// Assert — the planner must have received the infrastructure agent ID in plan.Input
+	found := false
+	for _, id := range capturing.capturedInput.InfrastructureAgentIDs {
+		if id == "checkpoint-manager-git" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("planner was not given InfrastructureAgentIDs containing \"checkpoint-manager-git\"; "+
+			"the deploy-new flow must pass selected infrastructure agent IDs to plan.Input (AC4.3 propagation); "+
+			"got: %v", capturing.capturedInput.InfrastructureAgentIDs)
+	}
+}
+
+// captureInfraInteraction is a minimal domain.Interaction implementation that captures
+// SelectMany calls for infrastructure agent selection verification. It routes QWorkflows
+// to return the quick-fix workflow so the deploy flow can proceed to the infrastructure
+// agents question.
+type captureInfraInteraction struct {
+	captureSelectMany    func(domain.ChoiceQuestion)
+	defaultSelectMany    domain.MultiChoiceAnswer
+	defaultConfirmAnswer domain.ConfirmAnswer
+}
+
+func (c *captureInfraInteraction) SelectOne(_ context.Context, q domain.ChoiceQuestion) (domain.ChoiceAnswer, error) {
+	return domain.ChoiceAnswer{Status: domain.Answered}, nil
+}
+func (c *captureInfraInteraction) SelectMany(_ context.Context, q domain.ChoiceQuestion) (domain.MultiChoiceAnswer, error) {
+	if c.captureSelectMany != nil {
+		c.captureSelectMany(q)
+	}
+	if q.ID == domain.QWorkflows {
+		return domain.MultiChoiceAnswer{Status: domain.Answered, OptionIDs: []string{"quick-fix"}}, nil
+	}
+	return c.defaultSelectMany, nil
+}
+func (c *captureInfraInteraction) AskText(_ context.Context, q domain.TextQuestion) (domain.TextAnswer, error) {
+	return domain.TextAnswer{Status: domain.Answered, Text: "stub-value"}, nil
+}
+func (c *captureInfraInteraction) Confirm(_ context.Context, q domain.Question) (domain.ConfirmAnswer, error) {
+	return c.defaultConfirmAnswer, nil
+}
+func (c *captureInfraInteraction) Notify(_ context.Context, n domain.Notice)       {}
+func (c *captureInfraInteraction) Progress(_ context.Context, e domain.ProgressEvent) {}
+func (c *captureInfraInteraction) Review(_ context.Context, p domain.Plan) (domain.ConfirmAnswer, error) {
+	return c.defaultConfirmAnswer, nil
 }
 
 type captureTierInteraction struct {

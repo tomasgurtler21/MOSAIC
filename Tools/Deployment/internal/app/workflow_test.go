@@ -637,15 +637,4 @@ func findPlanItem(items []domain.PlanItem, key string) (domain.PlanItem, bool) {
 	return domain.PlanItem{}, false
 }
 
-// capturingPlanner records the Input passed to Build and returns a configurable plan.
-type capturingPlanner struct {
-	result        domain.Plan
-	err           error
-	capturedInput *plan.Input
-}
-
-func (p *capturingPlanner) Build(ctx context.Context, in plan.Input) (domain.Plan, error) {
-	cp := in
-	p.capturedInput = &cp
-	return p.result, p.err
-}
+// capturingPlanner is defined in testhelpers_test.go and shared across all app package tests.

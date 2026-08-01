@@ -123,6 +123,12 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 		state.Checkpoints = (v == "enabled")
 	}
 
+	// Parse infrastructure_overrides block (optional; nil when absent).
+	overrides := parseInfrastructureOverrides(string(fmContent))
+	if len(overrides) > 0 {
+		state.InfrastructureOverrides = overrides
+	}
+
 	// Parse current_state nested block.
 	cs := domain.CurrentState{}
 	if v, ok := currentState["phase"]; ok {
@@ -204,6 +210,19 @@ func Render(state domain.ArtifactState) ([]byte, error) {
 		buf.WriteString("checkpoints: enabled\n")
 	} else {
 		buf.WriteString("checkpoints: disabled\n")
+	}
+	if len(state.InfrastructureOverrides) > 0 {
+		buf.WriteString("infrastructure_overrides:\n")
+		for _, ov := range state.InfrastructureOverrides {
+			buf.WriteString("  " + ov.AgentName + ":\n")
+			buf.WriteString("    triggers:\n")
+			for _, tr := range ov.Triggers {
+				buf.WriteString("      - trigger: " + tr.Trigger + "\n")
+				if tr.Param != "" {
+					buf.WriteString("        trigger_param: " + tr.Param + "\n")
+				}
+			}
+		}
 	}
 	buf.WriteString("current_state:\n")
 	cs := state.CurrentState
@@ -335,6 +354,7 @@ func (f *fileStore) Apply(ctx context.Context, state domain.ArtifactState, step 
 		Status:     step.Status,
 		Timestamp:  step.Timestamp,
 		Summary:    TruncateSummary(step.Summary),
+		Inputs:     step.Inputs,
 		Checkpoint: step.Checkpoint,
 	}
 
@@ -384,7 +404,12 @@ func (f *fileStore) Apply(ctx context.Context, state domain.ArtifactState, step 
 
 // splitDocument splits the raw document bytes into frontmatter content and body content.
 // Returns hasFM=false when no frontmatter delimiters are found.
+// CRLF line endings are normalised to LF before splitting so that the function
+// behaves correctly on Windows where git may check out files with CRLF endings.
 func splitDocument(data []byte) (fmContent string, bodyContent string, hasFM bool) {
+	// Normalise CRLF to LF so the parser works on Windows checkouts.
+	data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+
 	if !bytes.HasPrefix(data, []byte("---\n")) {
 		return "", string(data), false
 	}
@@ -403,31 +428,54 @@ func splitDocument(data []byte) (fmContent string, bodyContent string, hasFM boo
 }
 
 // parseFrontmatter parses the YAML frontmatter content into top-level key-value
-// pairs and the nested current_state pairs. This minimal parser handles only the
-// subset used by orchestration artifacts.
+// pairs, the nested current_state pairs, and the infrastructure_overrides block.
+// This minimal parser handles only the subset used by orchestration artifacts.
 func parseFrontmatter(content string) (topLevel map[string]string, currentState map[string]string, err error) {
 	topLevel = make(map[string]string)
 	currentState = make(map[string]string)
 
 	lines := strings.Split(content, "\n")
 	inCurrentState := false
+	inInfraOverrides := false
 
-	for _, line := range lines {
-		if strings.TrimRight(line, "\r") == "" {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimRight(line, "\r")
+
+		if trimmed == "" {
+			continue
+		}
+
+		// Detect the infrastructure_overrides block header.
+		if trimmed == "infrastructure_overrides:" {
+			inInfraOverrides = true
+			inCurrentState = false
 			continue
 		}
 
 		// Detect the current_state block header.
-		if strings.TrimRight(line, "\r") == "current_state:" {
+		if trimmed == "current_state:" {
 			inCurrentState = true
+			inInfraOverrides = false
 			continue
+		}
+
+		// Skip lines that are part of the infrastructure_overrides block
+		// (they are parsed separately by parseInfrastructureOverrides).
+		if inInfraOverrides {
+			if strings.HasPrefix(line, "  ") {
+				// Still inside the block.
+				continue
+			}
+			// No longer in the infra overrides block.
+			inInfraOverrides = false
 		}
 
 		if inCurrentState {
 			if strings.HasPrefix(line, "  ") {
 				// Nested current_state key.
-				trimmed := line[2:]
-				key, value := parseYAMLLine(trimmed)
+				nestedTrimmed := line[2:]
+				key, value := parseYAMLLine(nestedTrimmed)
 				if key != "" {
 					currentState[key] = value
 				}
@@ -437,13 +485,106 @@ func parseFrontmatter(content string) (topLevel map[string]string, currentState 
 			inCurrentState = false
 		}
 
-		key, value := parseYAMLLine(line)
+		key, value := parseYAMLLine(trimmed)
 		if key != "" {
 			topLevel[key] = value
 		}
 	}
 
 	return topLevel, currentState, nil
+}
+
+// parseInfrastructureOverrides parses the infrastructure_overrides block from
+// frontmatter content. The block format is:
+//
+//	infrastructure_overrides:
+//	  agent-name:
+//	    triggers:
+//	      - trigger: STAGE_END
+//	      - trigger: INVOCATION_INTERVAL
+//	        trigger_param: 10
+//
+// Returns nil when the block is absent.
+func parseInfrastructureOverrides(content string) []domain.InfrastructureOverride {
+	lines := strings.Split(content, "\n")
+	inBlock := false
+
+	var overrides []domain.InfrastructureOverride
+	var currentAgent *domain.InfrastructureOverride
+	var currentTrigger *domain.DeclaredInfraTrigger
+
+	for _, rawLine := range lines {
+		line := strings.TrimRight(rawLine, "\r")
+
+		if line == "infrastructure_overrides:" {
+			inBlock = true
+			continue
+		}
+
+		if !inBlock {
+			continue
+		}
+
+		// Check if we've left the block (non-indented line).
+		if len(line) > 0 && !strings.HasPrefix(line, " ") {
+			break
+		}
+
+		// 2-space indent: agent name (e.g., "  checkpoint-manager-git:")
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasSuffix(trimmed, ":") {
+				// Save previous trigger if any
+				if currentTrigger != nil && currentAgent != nil {
+					currentAgent.Triggers = append(currentAgent.Triggers, *currentTrigger)
+					currentTrigger = nil
+				}
+				// Save previous agent if any
+				if currentAgent != nil {
+					overrides = append(overrides, *currentAgent)
+				}
+				agentName := strings.TrimSuffix(trimmed, ":")
+				currentAgent = &domain.InfrastructureOverride{AgentName: agentName}
+			}
+			continue
+		}
+
+		// 4-space or more indent: triggers, trigger items
+		if strings.HasPrefix(line, "    ") {
+			trimmed := strings.TrimSpace(line)
+
+			// Trigger list item start (e.g., "      - trigger: STAGE_END")
+			if strings.HasPrefix(trimmed, "- trigger:") {
+				// Save previous trigger if any
+				if currentTrigger != nil && currentAgent != nil {
+					currentAgent.Triggers = append(currentAgent.Triggers, *currentTrigger)
+				}
+				triggerVal := strings.TrimSpace(strings.TrimPrefix(trimmed, "- trigger:"))
+				currentTrigger = &domain.DeclaredInfraTrigger{Trigger: triggerVal}
+				continue
+			}
+
+			// Trigger param (e.g., "        trigger_param: 10")
+			if strings.HasPrefix(trimmed, "trigger_param:") && currentTrigger != nil {
+				paramVal := strings.TrimSpace(strings.TrimPrefix(trimmed, "trigger_param:"))
+				currentTrigger.Param = paramVal
+				continue
+			}
+
+			// Ignore "triggers:" line and other structural lines.
+			continue
+		}
+	}
+
+	// Flush trailing trigger and agent.
+	if currentTrigger != nil && currentAgent != nil {
+		currentAgent.Triggers = append(currentAgent.Triggers, *currentTrigger)
+	}
+	if currentAgent != nil {
+		overrides = append(overrides, *currentAgent)
+	}
+
+	return overrides
 }
 
 // parseYAMLLine parses a single YAML line of the form "key: value" or "key: \"value\"".
@@ -524,6 +665,7 @@ func parseExecutionLog(content []byte) ([]domain.ExecutionLogEntry, error) {
 	statusCol := t.Column("Status")
 	tsCol := t.Column("Timestamp")
 	summaryCol := t.Column("Summary")
+	inputsCol := t.Column("Inputs")
 	checkpointCol := t.Column("Checkpoint")
 
 	var entries []domain.ExecutionLogEntry
@@ -560,6 +702,13 @@ func parseExecutionLog(content []byte) ([]domain.ExecutionLogEntry, error) {
 		}
 		if summaryCol >= 0 {
 			entry.Summary = strings.TrimSpace(row[summaryCol])
+		}
+		if inputsCol >= 0 {
+			v := strings.TrimSpace(row[inputsCol])
+			if v == "-" {
+				v = ""
+			}
+			entry.Inputs = v
 		}
 		if checkpointCol >= 0 {
 			v := strings.TrimSpace(row[checkpointCol])
@@ -643,13 +792,17 @@ func parseWorkflowNotes(content []byte) ([]domain.WorkflowNote, error) {
 
 // renderExecutionLog renders the execution log entries as a markdown table.
 func renderExecutionLog(entries []domain.ExecutionLogEntry) []byte {
-	headers := []string{"Seq", "Agent", "Phase", "Stage", "Status", "Timestamp", "Summary", "Checkpoint"}
+	headers := []string{"Seq", "Agent", "Phase", "Stage", "Status", "Timestamp", "Summary", "Inputs", "Checkpoint"}
 	t := mdtable.Table{Header: headers}
 
 	for _, e := range entries {
 		stage := e.Stage
 		if stage == "" {
 			stage = "-"
+		}
+		inputs := e.Inputs
+		if inputs == "" {
+			inputs = "-"
 		}
 		checkpoint := e.Checkpoint
 		if checkpoint == "" {
@@ -663,6 +816,7 @@ func renderExecutionLog(entries []domain.ExecutionLogEntry) []byte {
 			string(e.Status),
 			e.Timestamp.UTC().Format(time.RFC3339),
 			e.Summary,
+			inputs,
 			checkpoint,
 		}
 		t = t.AppendRow(row)

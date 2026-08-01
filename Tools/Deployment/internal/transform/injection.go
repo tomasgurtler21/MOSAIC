@@ -9,8 +9,9 @@ import (
 )
 
 // processInjections applies the injection merge policy to every injection region in the
-// document body and returns the outcomes, any gaps generated, and the workflow IDs
-// assembled into AvailableWorkflows (in emitted order).
+// document body and returns the outcomes, any gaps generated, the workflow IDs assembled
+// into AvailableWorkflows, and the infrastructure agent keys assembled into
+// InfrastructureAgents (both in emitted order).
 //
 // Merge policy by injection class:
 //
@@ -27,20 +28,23 @@ import (
 //     order. The deployed file's AvailableWorkflows content is completely replaced on every
 //     transform to prevent duplication and to reflect the current selection.
 //
+//   - InjectionInfrastructure (InfrastructureAgents): assembled from req.InfrastructureAgents
+//     in selection order, analogous to InjectionWorkflow.
+//
 // Injection points present in the deployed file but absent from the source produce an
 // InjectionOrphaned outcome and a GapRemovedInjection gap whose Fragment carries the
 // orphaned content so the user can recover it.
 //
 // Body bytes outside injection regions are never modified, preserving byte-identity with
 // the generic source for all non-injection prose.
-func processInjections(doc *docformat.Document, req Request) (outcomes []InjectionOutcome, gaps []domain.Gap, workflowIDs []string, err error) {
+func processInjections(doc *docformat.Document, req Request) (outcomes []InjectionOutcome, gaps []domain.Gap, workflowIDs []string, infraAgentKeys []string, err error) {
 	// Build a lookup of injection content from the deployed file (update scenario only).
 	// Returns nil when req.Deployed is nil (new deployment). A parse error means the
 	// deployed file is structurally unreadable; propagate it so the caller can surface
 	// it to the user rather than silently dropping all their injection content.
 	deployedContent, err := buildDeployedInjectionMap(req.Deployed)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	body := doc.Body()
@@ -73,6 +77,11 @@ func processInjections(doc *docformat.Document, req Request) (outcomes []Injecti
 			outcome, ids := applyWorkflowInjection(node, name, class, req)
 			outcomes = append(outcomes, outcome)
 			workflowIDs = ids
+
+		case domain.InjectionInfrastructure:
+			outcome, ids := applyInfrastructureInjection(node, name, class, req)
+			outcomes = append(outcomes, outcome)
+			infraAgentKeys = ids
 		}
 	}
 
@@ -108,7 +117,7 @@ func processInjections(doc *docformat.Document, req Request) (outcomes []Injecti
 		}
 	}
 
-	return outcomes, gaps, workflowIDs, nil
+	return outcomes, gaps, workflowIDs, infraAgentKeys, nil
 }
 
 // applyHarnessInjection fills a harness-level injection from the module's declared content.
@@ -200,6 +209,31 @@ func applyWorkflowInjection(node *docformat.Node, name string, class domain.Inje
 		Action: InjectionAssembled,
 		Bytes:  len(assembled),
 	}, ids
+}
+
+// applyInfrastructureInjection assembles the InfrastructureAgents injection from
+// req.InfrastructureAgents. The blocks are concatenated in selection order; the deployed
+// file's InfrastructureAgents content is completely replaced on every transform to prevent
+// duplication and to reflect the current selection. This is analogous to applyWorkflowInjection.
+func applyInfrastructureInjection(node *docformat.Node, name string, class domain.InjectionClass, req Request) (InjectionOutcome, []string) {
+	if len(req.InfrastructureAgents) == 0 {
+		node.Clear() //nolint:errcheck // docformat.Node.Clear always returns nil; the error return is part of the interface for forward compatibility only. TODO: propagate when the interface produces real errors.
+		return InjectionOutcome{
+			Name:   name,
+			Class:  class,
+			Action: InjectionEmptied,
+			Bytes:  0,
+		}, nil
+	}
+
+	assembled, keys := AssembleInfrastructureBlocks(req.InfrastructureAgents)
+	node.SetContent(assembled) //nolint:errcheck // docformat.Node.SetContent always returns nil; the error return is part of the interface for forward compatibility only. TODO: propagate when the interface produces real errors.
+	return InjectionOutcome{
+		Name:   name,
+		Class:  class,
+		Action: InjectionAssembledInfra,
+		Bytes:  len(assembled),
+	}, keys
 }
 
 // buildDeployedInjectionMap parses the deployed file and returns a map from injection name

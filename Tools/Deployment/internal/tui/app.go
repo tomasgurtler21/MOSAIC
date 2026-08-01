@@ -95,16 +95,17 @@ type rootModel struct {
 	selections entrySelections
 
 	// Question overlay shown during screenQuestion. Exactly one of these is non-nil at a time.
-	activeQuestion  *questionMsg
-	selectOverlay   *inlineSelectOne              // generic SelectOne/SelectMany fallback
-	confirmOverlay  *inlineConfirm                // Confirm questions
-	modelOverlay    *screens.ModelSelectScreen    // QTierModel, QAgentModel
-	textOverlay     *screens.TextPromptScreen     // AskText questions (QCustomTool, QCustomModel)
-	conflictOverlay *screens.ConflictScreen       // QLocalModification
-	reviewOverlay   *screens.ReviewScreen         // Review() calls
-	workflowOverlay *screens.WorkflowBrowserScreen // QWorkflows multi-select
-	agentOverlay    *screens.UtilityAgentScreen   // QUtilityAgents multi-select
-	hookOverlay     *screens.HookScreen           // QHooks multi-select
+	activeQuestion   *questionMsg
+	selectOverlay    *inlineSelectOne                   // generic SelectOne/SelectMany fallback
+	confirmOverlay   *inlineConfirm                     // Confirm questions
+	modelOverlay     *screens.ModelSelectScreen         // QTierModel, QAgentModel
+	textOverlay      *screens.TextPromptScreen          // AskText questions (QCustomTool, QCustomModel)
+	conflictOverlay  *screens.ConflictScreen            // QLocalModification
+	reviewOverlay    *screens.ReviewScreen              // Review() calls
+	workflowOverlay  *screens.WorkflowBrowserScreen     // QWorkflows multi-select
+	agentOverlay     *screens.UtilityAgentScreen        // QUtilityAgents multi-select
+	infraAgentOverlay *screens.InfrastructureAgentScreen // QInfrastructureAgents multi-select
+	hookOverlay      *screens.HookScreen                // QHooks multi-select
 
 	// Post-run summary screen (shown on screenDone after a successful or partial run).
 	summaryScreen *screens.SummaryScreen
@@ -297,6 +298,9 @@ func (m *rootModel) resizeQuestionOverlays(width, height int) {
 	if m.agentOverlay != nil {
 		m.agentOverlay.Resize(width, height)
 	}
+	if m.infraAgentOverlay != nil {
+		m.infraAgentOverlay.Resize(width, height)
+	}
 	if m.hookOverlay != nil {
 		m.hookOverlay.Resize(width, height)
 	}
@@ -436,6 +440,22 @@ func (m *rootModel) updateQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.agentOverlay.Back() {
 			m.dispatchMultiChoiceCancelled()
 			m.agentOverlay = nil
+			m.screen = screenRunning
+		}
+		return m, cmd
+	}
+
+	// InfrastructureAgentScreen overlay (QInfrastructureAgents).
+	if m.infraAgentOverlay != nil {
+		cmd := m.infraAgentOverlay.Update(msg)
+		if m.infraAgentOverlay.Done() {
+			ids := m.infraAgentOverlay.SelectedIDs()
+			m.dispatchMultiChoiceAnswer(ids)
+			m.infraAgentOverlay = nil
+			m.screen = screenRunning
+		} else if m.infraAgentOverlay.Back() {
+			m.dispatchMultiChoiceCancelled()
+			m.infraAgentOverlay = nil
 			m.screen = screenRunning
 		}
 		return m, cmd
@@ -603,6 +623,9 @@ func (m *rootModel) handleQuestionMsg(qMsg questionMsg) (tea.Model, tea.Cmd) {
 		case domain.QUtilityAgents:
 			agents := optionsToAgents(qMsg.choiceQ.Options)
 			m.agentOverlay = screens.NewUtilityAgentScreen(agents, m.width, m.height, style, "")
+		case domain.QInfrastructureAgents:
+			agents := optionsToAgents(qMsg.choiceQ.Options)
+			m.infraAgentOverlay = screens.NewInfrastructureAgentScreen(agents, m.width, m.height, style)
 		case domain.QHooks:
 			bundles, supported := optionsToHookBundles(qMsg.choiceQ.Options)
 			m.hookOverlay = screens.NewHookScreen(bundles, supported, m.width, m.height, style, "")
@@ -714,6 +737,9 @@ func (m *rootModel) viewQuestion() string {
 	}
 	if m.agentOverlay != nil {
 		return m.agentOverlay.View()
+	}
+	if m.infraAgentOverlay != nil {
+		return m.infraAgentOverlay.View()
 	}
 	if m.hookOverlay != nil {
 		return m.hookOverlay.View()

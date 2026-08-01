@@ -1203,3 +1203,105 @@ func TestClaudePathFlag_Accepted(t *testing.T) {
 		t.Error("session.Start was not called when --claude-path is provided")
 	}
 }
+
+// ============================================================
+// T7.1 (CLI): --infra-class flag tests
+// ============================================================
+//
+// These tests specify the --infra-class flag behaviour for non-interactive
+// agent-per-class selection (AC7.3). They compile and FAIL in the RED phase
+// because the flag is not yet recognised by the CLI (I7.3 not implemented):
+// cobra rejects --infra-class as an unknown flag, returning ExitUsage.
+//
+// In GREEN (after I7.3): the flag is accepted, parsed into
+// RunConfig.InfraClassSelections, and session.Start is called with the
+// populated map.
+
+// TestInfraClassFlag_SingleMapping_ParsedIntoRunConfig verifies that a single
+// key=value pair supplied via --infra-class is parsed into
+// RunConfig.InfraClassSelections with the correct class name and agent name.
+func TestInfraClassFlag_SingleMapping_ParsedIntoRunConfig(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	args := append(baseHarnessArgs(),
+		"--infra-class", "checkpoint=checkpoint-manager-git",
+	)
+	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want ExitSuccess; stderr: %q", code, errOut)
+	}
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+
+	got := sess.config.InfraClassSelections
+	if got == nil {
+		t.Fatal("InfraClassSelections is nil; want a non-nil map populated from --infra-class")
+	}
+	if got["checkpoint"] != "checkpoint-manager-git" {
+		t.Errorf("InfraClassSelections[checkpoint] = %q, want %q",
+			got["checkpoint"], "checkpoint-manager-git")
+	}
+}
+
+// TestInfraClassFlag_MultipleClassMappings_AllParsed verifies that when multiple
+// class=agent pairs are provided (either comma-separated in one flag or via multiple
+// --infra-class flags), all pairs are present in RunConfig.InfraClassSelections.
+func TestInfraClassFlag_MultipleClassMappings_AllParsed(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	// Comma-separated format: checkpoint=name1,commit=name2
+	args := append(baseHarnessArgs(),
+		"--infra-class", "checkpoint=checkpoint-manager-git,commit=commit-manager-git",
+	)
+	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want ExitSuccess; stderr: %q", code, errOut)
+	}
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+
+	got := sess.config.InfraClassSelections
+	if got == nil {
+		t.Fatal("InfraClassSelections is nil; want non-nil map with both class mappings")
+	}
+	if got["checkpoint"] != "checkpoint-manager-git" {
+		t.Errorf("InfraClassSelections[checkpoint] = %q, want %q",
+			got["checkpoint"], "checkpoint-manager-git")
+	}
+	if got["commit"] != "commit-manager-git" {
+		t.Errorf("InfraClassSelections[commit] = %q, want %q",
+			got["commit"], "commit-manager-git")
+	}
+}
+
+// TestInfraClassFlag_MalformedValue_RejectsWithUsageError verifies that an
+// --infra-class value that is not in "class=agent" format (no "=" separator)
+// causes the CLI to reject with ExitUsage and not call session.Start.
+func TestInfraClassFlag_MalformedValue_RejectsWithUsageError(t *testing.T) {
+	sess := &scriptedSession{}
+	args := append(baseHarnessArgs(),
+		"--infra-class", "not-a-valid-pair",
+	)
+	code, _, _ := runCLI(t, args, sess)
+
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage (%d) for malformed --infra-class value",
+			code, cli.ExitUsage)
+	}
+	if sess.called {
+		t.Error("session.Start must not be called when --infra-class value is malformed")
+	}
+}
+
+// TestInfraClassFlag_HelpTextMentionsFlag verifies that the --infra-class flag
+// appears in the run subcommand's help text after implementation.
+func TestInfraClassFlag_HelpTextMentionsFlag(t *testing.T) {
+	sess := &scriptedSession{}
+	_, _, errOut := runCLI(t, []string{"run", "--help"}, sess)
+
+	if !strings.Contains(errOut, "--infra-class") {
+		t.Errorf("help text does not mention --infra-class; got:\n%s", errOut)
+	}
+}

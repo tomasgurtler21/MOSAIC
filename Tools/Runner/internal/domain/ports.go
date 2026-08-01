@@ -40,6 +40,13 @@ type CompletedStep struct {
 	Timestamp       time.Time
 	Checkpoint      string   // empty unless a checkpoint was taken
 	OutputArtifacts []string // paths exactly as dispatched
+	// Inputs carries the formatted comma-separated input_artifacts for the
+	// Inputs column of the Execution Log row. Empty string when no inputs.
+	Inputs string
+	// IsInfrastructure is true when this step is an infrastructure agent
+	// dispatch. The dispatch loop uses this to enforce the no-cascades rule:
+	// when true, trigger evaluation is skipped after recording the step.
+	IsInfrastructure bool
 }
 
 // ArtifactStore is the single component that touches Orchestration.md.

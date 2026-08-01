@@ -46,6 +46,18 @@ func (c *catalogImpl) Orchestrator() domain.Agent { return c.orchestr }
 // UtilityAgents returns all utility agents.
 func (c *catalogImpl) UtilityAgents() []domain.Agent { return c.utilities }
 
+// InfrastructureAgents returns all worker agents with a non-empty Infrastructure field,
+// in the same sorted order as Agents().
+func (c *catalogImpl) InfrastructureAgents() []domain.Agent {
+	var result []domain.Agent
+	for _, a := range c.workers {
+		if a.Infrastructure != "" {
+			result = append(result, a)
+		}
+	}
+	return result
+}
+
 // Skills returns all skills.
 func (c *catalogImpl) Skills() []domain.Skill { return c.skills }
 

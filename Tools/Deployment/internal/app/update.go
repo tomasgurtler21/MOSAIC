@@ -103,7 +103,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	// Resolve the artifact set from the discovered workflow IDs so we can enumerate target
 	// paths for the full probe. Plan.Build will also resolve internally; this call is the
 	// app layer's own probe-preparation step, not a duplicate plan build.
-	set, err := plan.ResolveArtifacts(s.deps.Catalog, workflowIDs, nil, nil)
+	set, err := plan.ResolveArtifacts(s.deps.Catalog, workflowIDs, nil, nil, nil)
 	if err != nil {
 		return domain.RunSummary{}, err
 	}
@@ -176,7 +176,11 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	deployedReader := func(item domain.PlanItem) []byte {
 		return readDeployedFile(workspace, item.TargetPath)
 	}
-	contentFn := s.buildContent(module, agentByKey, modelSelections, req.CustomTools, nil, workflowBlocks, scope, deployedReader)
+	// Infrastructure agent selection is intentionally omitted from the update flow.
+	// Update re-deploys whatever was already deployed; it does not re-prompt for
+	// infrastructure agent choices. The InfrastructureAgents injection region is
+	// preserved from the deployed file via the InjectionProject preservation pass.
+	contentFn := s.buildContent(module, agentByKey, modelSelections, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader)
 
 	versionStamps := buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor())
 

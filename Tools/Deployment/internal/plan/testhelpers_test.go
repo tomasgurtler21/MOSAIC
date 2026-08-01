@@ -56,6 +56,7 @@ type fakeCatalog struct {
 	workers       []domain.Agent
 	orchestrator  domain.Agent
 	utilityAgents []domain.Agent
+	infraAgents   []domain.Agent // agents with non-empty Infrastructure field
 	skills        []domain.Skill
 	hooks         []domain.HookBundle
 	workflows     []domain.Workflow
@@ -66,7 +67,7 @@ func (f *fakeCatalog) Root() string { return f.root }
 func (f *fakeCatalog) Agents() []domain.Agent { return f.workers }
 
 func (f *fakeCatalog) Agent(key string) (domain.Agent, bool) {
-	// Check workers, orchestrator, and utility agents.
+	// Check workers, orchestrator, utility agents, and infrastructure agents.
 	for _, a := range f.workers {
 		if a.Key == key {
 			return a, true
@@ -80,12 +81,19 @@ func (f *fakeCatalog) Agent(key string) (domain.Agent, bool) {
 			return a, true
 		}
 	}
+	for _, a := range f.infraAgents {
+		if a.Key == key {
+			return a, true
+		}
+	}
 	return domain.Agent{}, false
 }
 
 func (f *fakeCatalog) Orchestrator() domain.Agent { return f.orchestrator }
 
 func (f *fakeCatalog) UtilityAgents() []domain.Agent { return f.utilityAgents }
+
+func (f *fakeCatalog) InfrastructureAgents() []domain.Agent { return f.infraAgents }
 
 func (f *fakeCatalog) Skills() []domain.Skill { return f.skills }
 
@@ -268,6 +276,22 @@ func makeUtilityAgent(key string) domain.Agent {
 		Name:           key + "-name",
 		Description:    key + "-description",
 		Role:           domain.RoleUtility,
+		RequiredSkills: []string{},
+		SourcePath:     "/fake/agents/" + key + ".md",
+	}
+}
+
+// makeInfrastructureAgent returns a minimal infrastructure agent with the given key and class.
+// The Infrastructure field is set to infraClass; the agent Role is RoleWorker (infrastructure
+// agents are regular workers distinguished by their non-empty Infrastructure field).
+func makeInfrastructureAgent(key, infraClass string) domain.Agent {
+	return domain.Agent{
+		Key:            key,
+		Version:        "1.0",
+		Name:           key + "-name",
+		Description:    key + "-description",
+		Role:           domain.RoleWorker,
+		Infrastructure: infraClass,
 		RequiredSkills: []string{},
 		SourcePath:     "/fake/agents/" + key + ".md",
 	}

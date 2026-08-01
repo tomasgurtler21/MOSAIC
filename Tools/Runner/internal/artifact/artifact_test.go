@@ -85,6 +85,23 @@ package artifact_test
 //   - Round-trip: Read after SetPhase returns the updated phase.
 //   - SetPhase preserves WorkflowNotes unchanged.
 //   - SetPhase with "COMPLETED" phase persists correctly (case preserved in output).
+//
+//   Inputs column (parse/write/round-trip):
+//   - Canonical fixture: Inputs column present with "-" → "" in ArtifactState.
+//   - Parse row with populated Inputs value: stored as-is in ExecutionLogEntry.Inputs.
+//   - Artifact without Inputs column (old format): parses without error; Inputs is "".
+//   - Apply with non-empty CompletedStep.Inputs: propagated to ExecutionLogEntry.Inputs.
+//   - Apply with empty CompletedStep.Inputs: ExecutionLogEntry.Inputs is "" (rendered as "-").
+//   - Round-trip: artifact with Inputs value → parse → render → re-parse preserves value.
+//
+//   infrastructure_overrides frontmatter:
+//   - Absent block → ArtifactState.InfrastructureOverrides is nil.
+//   - Single-agent override: InfrastructureOverrides has exactly one entry.
+//   - Agent name extracted correctly from the YAML map key.
+//   - Trigger name populated correctly in DeclaredInfraTrigger.Trigger.
+//   - trigger_param populated correctly in DeclaredInfraTrigger.Param.
+//   - Multiple triggers for one agent: all triggers parsed.
+//   - Round-trip: agent name survives Parse → Render → re-Parse.
 
 import (
 	"bytes"
@@ -1764,5 +1781,462 @@ func TestCreate_RunID_RoundTrip_PreservesAllOtherFields(t *testing.T) {
 	// And verify RunID is also correct.
 	if created.RunID != runID {
 		t.Errorf("RunID: want %q, got %q", runID, created.RunID)
+	}
+}
+
+// ============================================================
+// Inputs column — parse, write, and round-trip
+// ============================================================
+//
+// All tests in this section are in the RED phase: they compile but fail
+// because the parser/writer does not yet handle the Inputs column.
+
+// minimalArtifactWithExecutionRow builds minimal valid artifact bytes that
+// contain one execution log row. The inputs parameter is the raw cell value
+// to insert in the Inputs column; pass "" to render it as "-".
+func minimalArtifactWithExecutionRow(inputs string) []byte {
+	cell := inputs
+	if cell == "" {
+		cell = "-"
+	}
+	return []byte("---\n" +
+		"type: orchestration-artifact\n" +
+		"workflow: test\n" +
+		"workflow_version: \"1.0\"\n" +
+		"task: \"test\"\n" +
+		"started: 2026-01-01T00:00:00Z\n" +
+		"last_updated: 2026-01-01T01:00:00Z\n" +
+		"global_sequence: 1\n" +
+		"checkpoints: disabled\n" +
+		"current_state:\n" +
+		"  phase: PLANNING\n" +
+		"  stage: null\n" +
+		"  last_status: SUCCESS\n" +
+		"  last_agent: \"planner#1\"\n" +
+		"  error_code: null\n" +
+		"---\n" +
+		"\n" +
+		"[[SECTION:ExecutionLog]]\n" +
+		"| Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary      | Inputs | Checkpoint |\n" +
+		"| --- | --------- | -------- | ----- | ------- | -------------------- | ------------ | ------ | ---------- |\n" +
+		"| 1   | planner#1 | PLANNING | -     | SUCCESS | 2026-01-01T01:00:00Z | Plan created | " + cell + " | - |\n" +
+		"[[/SECTION:ExecutionLog]]\n" +
+		"\n" +
+		"[[SECTION:Artifacts]]\n" +
+		"| Artifact | Created In | Created By |\n" +
+		"| -------- | ---------- | ---------- |\n" +
+		"[[/SECTION:Artifacts]]\n" +
+		"\n" +
+		"[[SECTION:WorkflowNotes]]\n" +
+		"| Seq | Note |\n" +
+		"| --- | ---- |\n" +
+		"[[/SECTION:WorkflowNotes]]\n")
+}
+
+// TestParse_CanonicalFile_ExecutionLog_FirstRow_DashInputs_ReturnsEmptyString
+// verifies that the Inputs column value "-" is translated to "" in
+// ExecutionLogEntry.Inputs, following the same empty-value convention as Stage
+// and Checkpoint.
+func TestParse_CanonicalFile_ExecutionLog_FirstRow_DashInputs_ReturnsEmptyString(t *testing.T) {
+	// Canonical fixture now has Inputs column; row 0 has "-" (no inputs).
+	state := mustReadCanonical(t)
+
+	if state.ExecutionLog[0].Inputs != "" {
+		t.Errorf("ExecutionLog[0].Inputs: want %q for dash cell, got %q", "", state.ExecutionLog[0].Inputs)
+	}
+}
+
+// TestParse_ExecutionLog_InputsWithValue_Populated verifies that when the
+// Inputs column contains a non-dash value, ExecutionLogEntry.Inputs holds
+// that value exactly.
+func TestParse_ExecutionLog_InputsWithValue_Populated(t *testing.T) {
+	const want = "Plan.md, Design.md"
+	data := minimalArtifactWithExecutionRow(want)
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if len(state.ExecutionLog) == 0 {
+		t.Fatal("ExecutionLog: want at least 1 row, got 0")
+	}
+
+	if state.ExecutionLog[0].Inputs != want {
+		t.Errorf("ExecutionLog[0].Inputs: want %q, got %q", want, state.ExecutionLog[0].Inputs)
+	}
+}
+
+// TestParse_ExecutionLog_OldFormatWithoutInputsColumn_InputsIsEmpty verifies
+// backward compatibility: artifacts written before the Inputs column was
+// added must parse without error, and ExecutionLogEntry.Inputs must be ""
+// for every row (column bound by name; absent column = empty value).
+func TestParse_ExecutionLog_OldFormatWithoutInputsColumn_InputsIsEmpty(t *testing.T) {
+	data, err := os.ReadFile(fixturePath("no-inputs-column.md"))
+	if err != nil {
+		t.Fatalf("reading fixture: %v", err)
+	}
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse(no-inputs-column.md): unexpected error: %v", err)
+	}
+	if len(state.ExecutionLog) == 0 {
+		t.Fatal("ExecutionLog: want at least 1 row in backward-compat fixture, got 0")
+	}
+
+	for i, entry := range state.ExecutionLog {
+		if entry.Inputs != "" {
+			t.Errorf("ExecutionLog[%d].Inputs: want %q (absent column), got %q", i, "", entry.Inputs)
+		}
+	}
+}
+
+// TestApply_ExecutionLog_Entry_Inputs_Propagated verifies that a non-empty
+// CompletedStep.Inputs value is carried through Store.Apply into the
+// corresponding ExecutionLogEntry.Inputs.
+func TestApply_ExecutionLog_Entry_Inputs_Propagated(t *testing.T) {
+	store, state := mustCreateStore(t)
+	ctx := context.Background()
+
+	const wantInputs = "Plan.md, Stage-1/Design.md"
+	step := domain.CompletedStep{
+		Seq:           1,
+		AgentInstance: "implementation-tdd#1",
+		Phase:         "EXECUTION",
+		Stage:         "Stage-1",
+		Status:        domain.StatusSUCCESS,
+		Timestamp:     time.Now(),
+		Summary:       "implementation done",
+		Inputs:        wantInputs,
+	}
+
+	after, err := store.Apply(ctx, state, step)
+	if err != nil {
+		t.Fatalf("Apply: unexpected error: %v", err)
+	}
+
+	last := after.ExecutionLog[len(after.ExecutionLog)-1]
+	if last.Inputs != wantInputs {
+		t.Errorf("ExecutionLogEntry.Inputs: want %q, got %q", wantInputs, last.Inputs)
+	}
+}
+
+// TestApply_ExecutionLog_Entry_EmptyInputs_StoresEmptyString verifies that
+// when CompletedStep.Inputs is empty (no input artifacts), the resulting
+// ExecutionLogEntry.Inputs is also "" (which is rendered as "-" in the table).
+func TestApply_ExecutionLog_Entry_EmptyInputs_StoresEmptyString(t *testing.T) {
+	store, state := mustCreateStore(t)
+	ctx := context.Background()
+
+	step := domain.CompletedStep{
+		Seq:           1,
+		AgentInstance: "planner#1",
+		Phase:         "PLANNING",
+		Stage:         "",
+		Status:        domain.StatusSUCCESS,
+		Timestamp:     time.Now(),
+		Summary:       "planning done",
+		Inputs:        "", // no inputs
+	}
+
+	after, err := store.Apply(ctx, state, step)
+	if err != nil {
+		t.Fatalf("Apply: unexpected error: %v", err)
+	}
+
+	last := after.ExecutionLog[len(after.ExecutionLog)-1]
+	if last.Inputs != "" {
+		t.Errorf("ExecutionLogEntry.Inputs: want %q (empty → rendered as dash), got %q", "", last.Inputs)
+	}
+}
+
+// TestRoundTrip_InputsValue_Preserved verifies that a populated Inputs cell
+// survives Parse → Render → re-Parse unchanged.
+func TestRoundTrip_InputsValue_Preserved(t *testing.T) {
+	const wantInputs = "Plan.md, Design.md"
+	original := minimalArtifactWithExecutionRow(wantInputs)
+
+	state, err := artifact.Parse(original)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	rendered, err := artifact.Render(state)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	state2, err := artifact.Parse(rendered)
+	if err != nil {
+		t.Fatalf("Parse rendered bytes: %v", err)
+	}
+
+	if len(state2.ExecutionLog) == 0 {
+		t.Fatal("ExecutionLog after round-trip: want at least 1 row, got 0")
+	}
+	if state2.ExecutionLog[0].Inputs != wantInputs {
+		t.Errorf("ExecutionLog[0].Inputs after round-trip: want %q, got %q", wantInputs, state2.ExecutionLog[0].Inputs)
+	}
+}
+
+// ============================================================
+// infrastructure_overrides frontmatter — parse and round-trip
+// ============================================================
+//
+// All tests in this section are in the RED phase: they compile but fail
+// because the parser/writer does not yet handle the infrastructure_overrides
+// frontmatter block.
+
+// minimalArtifactWithSingleOverrideBytes builds minimal valid artifact bytes
+// that contain one infrastructure_overrides entry for "checkpoint-manager-git"
+// with a single STAGE_END trigger and no trigger_param.
+func minimalArtifactWithSingleOverrideBytes() []byte {
+	return []byte("---\n" +
+		"type: orchestration-artifact\n" +
+		"workflow: test\n" +
+		"workflow_version: \"1.0\"\n" +
+		"task: \"test\"\n" +
+		"started: 2026-01-01T00:00:00Z\n" +
+		"last_updated: 2026-01-01T00:00:00Z\n" +
+		"global_sequence: 0\n" +
+		"checkpoints: disabled\n" +
+		"infrastructure_overrides:\n" +
+		"  checkpoint-manager-git:\n" +
+		"    triggers:\n" +
+		"      - trigger: STAGE_END\n" +
+		"current_state:\n" +
+		"  phase: null\n" +
+		"  stage: null\n" +
+		"  last_status: null\n" +
+		"  last_agent: null\n" +
+		"  error_code: null\n" +
+		"---\n" +
+		"\n" +
+		"[[SECTION:ExecutionLog]]\n" +
+		"[[/SECTION:ExecutionLog]]\n" +
+		"\n" +
+		"[[SECTION:Artifacts]]\n" +
+		"[[/SECTION:Artifacts]]\n" +
+		"\n" +
+		"[[SECTION:WorkflowNotes]]\n" +
+		"[[/SECTION:WorkflowNotes]]\n")
+}
+
+// minimalArtifactWithMultiTriggerOverrideBytes builds minimal valid artifact
+// bytes that contain one infrastructure_overrides entry for
+// "orchestration-review" with two triggers: one with and one without a param.
+func minimalArtifactWithMultiTriggerOverrideBytes() []byte {
+	return []byte("---\n" +
+		"type: orchestration-artifact\n" +
+		"workflow: test\n" +
+		"workflow_version: \"1.0\"\n" +
+		"task: \"test\"\n" +
+		"started: 2026-01-01T00:00:00Z\n" +
+		"last_updated: 2026-01-01T00:00:00Z\n" +
+		"global_sequence: 0\n" +
+		"checkpoints: disabled\n" +
+		"infrastructure_overrides:\n" +
+		"  orchestration-review:\n" +
+		"    triggers:\n" +
+		"      - trigger: INVOCATION_INTERVAL\n" +
+		"        trigger_param: 15\n" +
+		"      - trigger: PHASE_END\n" +
+		"current_state:\n" +
+		"  phase: null\n" +
+		"  stage: null\n" +
+		"  last_status: null\n" +
+		"  last_agent: null\n" +
+		"  error_code: null\n" +
+		"---\n" +
+		"\n" +
+		"[[SECTION:ExecutionLog]]\n" +
+		"[[/SECTION:ExecutionLog]]\n" +
+		"\n" +
+		"[[SECTION:Artifacts]]\n" +
+		"[[/SECTION:Artifacts]]\n" +
+		"\n" +
+		"[[SECTION:WorkflowNotes]]\n" +
+		"[[/SECTION:WorkflowNotes]]\n")
+}
+
+// TestParse_InfrastructureOverrides_Absent_ReturnsNil verifies that
+// ArtifactState.InfrastructureOverrides is nil when the
+// infrastructure_overrides block is absent from the frontmatter (the common
+// case).
+func TestParse_InfrastructureOverrides_Absent_ReturnsNil(t *testing.T) {
+	// minimalArtifactBytes (no overrides block) is the common baseline.
+	data := minimalArtifactBytes("")
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+
+	if state.InfrastructureOverrides != nil {
+		t.Errorf("InfrastructureOverrides: want nil when block absent, got %v", state.InfrastructureOverrides)
+	}
+}
+
+// TestParse_InfrastructureOverrides_SingleEntry_Count verifies that a
+// single infrastructure_overrides entry produces exactly one element in
+// ArtifactState.InfrastructureOverrides.
+func TestParse_InfrastructureOverrides_SingleEntry_Count(t *testing.T) {
+	data := minimalArtifactWithSingleOverrideBytes()
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+
+	if len(state.InfrastructureOverrides) != 1 {
+		t.Errorf("InfrastructureOverrides count: want 1, got %d", len(state.InfrastructureOverrides))
+	}
+}
+
+// TestParse_InfrastructureOverrides_AgentName_Populated verifies that the
+// YAML map key (the agent name) is correctly extracted into
+// InfrastructureOverride.AgentName.
+func TestParse_InfrastructureOverrides_AgentName_Populated(t *testing.T) {
+	const wantAgent = "checkpoint-manager-git"
+	data := minimalArtifactWithSingleOverrideBytes()
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if len(state.InfrastructureOverrides) == 0 {
+		t.Fatal("InfrastructureOverrides: want 1 entry, got 0 (parser not yet implemented)")
+	}
+
+	if state.InfrastructureOverrides[0].AgentName != wantAgent {
+		t.Errorf("InfrastructureOverrides[0].AgentName: want %q, got %q",
+			wantAgent, state.InfrastructureOverrides[0].AgentName)
+	}
+}
+
+// TestParse_InfrastructureOverrides_Trigger_Populated verifies that the
+// trigger type string is correctly populated in DeclaredInfraTrigger.Trigger.
+func TestParse_InfrastructureOverrides_Trigger_Populated(t *testing.T) {
+	data := minimalArtifactWithSingleOverrideBytes()
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if len(state.InfrastructureOverrides) == 0 {
+		t.Fatal("InfrastructureOverrides: want 1 entry, got 0 (parser not yet implemented)")
+	}
+	if len(state.InfrastructureOverrides[0].Triggers) == 0 {
+		t.Fatal("InfrastructureOverrides[0].Triggers: want at least 1 trigger, got 0")
+	}
+
+	if state.InfrastructureOverrides[0].Triggers[0].Trigger != "STAGE_END" {
+		t.Errorf("Triggers[0].Trigger: want %q, got %q",
+			"STAGE_END", state.InfrastructureOverrides[0].Triggers[0].Trigger)
+	}
+}
+
+// TestParse_InfrastructureOverrides_TriggerParam_Populated verifies that the
+// trigger_param value is correctly populated in DeclaredInfraTrigger.Param.
+func TestParse_InfrastructureOverrides_TriggerParam_Populated(t *testing.T) {
+	// Uses the multi-trigger override fixture: INVOCATION_INTERVAL with trigger_param: 15.
+	data := minimalArtifactWithMultiTriggerOverrideBytes()
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if len(state.InfrastructureOverrides) == 0 {
+		t.Fatal("InfrastructureOverrides: want 1 entry, got 0 (parser not yet implemented)")
+	}
+	if len(state.InfrastructureOverrides[0].Triggers) == 0 {
+		t.Fatal("InfrastructureOverrides[0].Triggers: want at least 1 trigger, got 0")
+	}
+
+	// First trigger: INVOCATION_INTERVAL with trigger_param: 15.
+	if state.InfrastructureOverrides[0].Triggers[0].Param != "15" {
+		t.Errorf("Triggers[0].Param: want %q (from trigger_param: 15), got %q",
+			"15", state.InfrastructureOverrides[0].Triggers[0].Param)
+	}
+}
+
+// TestParse_InfrastructureOverrides_MultipleTriggers_Count verifies that all
+// triggers in an override entry are parsed, not just the first one.
+func TestParse_InfrastructureOverrides_MultipleTriggers_Count(t *testing.T) {
+	// orchestration-review override has two triggers: INVOCATION_INTERVAL and PHASE_END.
+	data := minimalArtifactWithMultiTriggerOverrideBytes()
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if len(state.InfrastructureOverrides) == 0 {
+		t.Fatal("InfrastructureOverrides: want 1 entry, got 0 (parser not yet implemented)")
+	}
+
+	if len(state.InfrastructureOverrides[0].Triggers) != 2 {
+		t.Errorf("Triggers count: want 2, got %d", len(state.InfrastructureOverrides[0].Triggers))
+	}
+}
+
+// TestParse_InfrastructureOverrides_SecondTrigger_NoParam verifies that a
+// trigger without trigger_param has Param == "" (not some default or error value).
+func TestParse_InfrastructureOverrides_SecondTrigger_NoParam(t *testing.T) {
+	// Second trigger in orchestration-review override is PHASE_END with no trigger_param.
+	data := minimalArtifactWithMultiTriggerOverrideBytes()
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if len(state.InfrastructureOverrides) == 0 {
+		t.Fatal("InfrastructureOverrides: want 1 entry, got 0 (parser not yet implemented)")
+	}
+	if len(state.InfrastructureOverrides[0].Triggers) < 2 {
+		t.Fatal("InfrastructureOverrides[0].Triggers: want 2 triggers, got fewer")
+	}
+
+	second := state.InfrastructureOverrides[0].Triggers[1]
+	if second.Trigger != "PHASE_END" {
+		t.Errorf("Triggers[1].Trigger: want %q, got %q", "PHASE_END", second.Trigger)
+	}
+	if second.Param != "" {
+		t.Errorf("Triggers[1].Param: want %q (no trigger_param), got %q", "", second.Param)
+	}
+}
+
+// TestRoundTrip_InfrastructureOverrides_AgentNamePreserved verifies that an
+// infrastructure_overrides agent name survives Parse → Render → re-Parse.
+func TestRoundTrip_InfrastructureOverrides_AgentNamePreserved(t *testing.T) {
+	const wantAgent = "checkpoint-manager-git"
+	data := minimalArtifactWithSingleOverrideBytes()
+
+	state, err := artifact.Parse(data)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	// Verify parse produced the expected override before exercising the
+	// round-trip. A failure here is an artifact of the RED phase, not a
+	// round-trip bug.
+	if len(state.InfrastructureOverrides) != 1 {
+		t.Fatalf("InfrastructureOverrides count: want 1, got %d (parser not yet implemented)", len(state.InfrastructureOverrides))
+	}
+
+	rendered, err := artifact.Render(state)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	state2, err := artifact.Parse(rendered)
+	if err != nil {
+		t.Fatalf("Parse rendered bytes: %v", err)
+	}
+
+	if len(state2.InfrastructureOverrides) != 1 {
+		t.Errorf("InfrastructureOverrides count after round-trip: want 1, got %d", len(state2.InfrastructureOverrides))
+	}
+	if len(state2.InfrastructureOverrides) > 0 && state2.InfrastructureOverrides[0].AgentName != wantAgent {
+		t.Errorf("InfrastructureOverrides[0].AgentName after round-trip: want %q, got %q",
+			wantAgent, state2.InfrastructureOverrides[0].AgentName)
 	}
 }

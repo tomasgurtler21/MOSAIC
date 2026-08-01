@@ -84,6 +84,7 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 		harnessFlag       string // --harness: adapter selection (fake|claude-code)
 		timeoutFlag       string // --timeout: invocation timeout duration string
 		claudePathFlag    string // --claude-path: Claude Code CLI executable path
+		infraClassFlag    string // --infra-class: comma-separated class=agent mappings
 	)
 
 	runCmd := &cobra.Command{
@@ -263,6 +264,30 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				}
 			}
 
+			// Parse --infra-class into a class-to-agent map.
+			var infraClassSelections map[string]string
+			if infraClassFlag != "" {
+				infraClassSelections = make(map[string]string)
+				for _, pair := range strings.Split(infraClassFlag, ",") {
+					pair = strings.TrimSpace(pair)
+					if pair == "" {
+						continue
+					}
+					eqIdx := strings.Index(pair, "=")
+					if eqIdx < 0 {
+						fmt.Fprintf(errOut, "error: invalid --infra-class value %q: expected format class=agent\n", pair)
+						exitCode = ExitUsage
+						return nil
+					}
+					class := strings.TrimSpace(pair[:eqIdx])
+					agent := strings.TrimSpace(pair[eqIdx+1:])
+					infraClassSelections[class] = agent
+				}
+				if len(infraClassSelections) == 0 {
+					infraClassSelections = nil
+				}
+			}
+
 			// Build the run configuration from parsed flags and resolved run identity.
 			config := domain.RunConfig{
 				OrchestratorFilePath: orchestratorFile,
@@ -274,6 +299,7 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				RunID:                resolvedRunID,
 				RunFolder:            resolvedRunFolder,
 				IsNewRun:             resolvedIsNewRun,
+				InfraClassSelections: infraClassSelections,
 			}
 
 			// Start the session and map the outcome to an exit code.
@@ -320,6 +346,7 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 	runCmd.Flags().StringVar(&harnessFlag, "harness", "fake", "Harness adapter to use (fake|claude-code)")
 	runCmd.Flags().StringVar(&timeoutFlag, "timeout", "30m", "Invocation timeout for the harness adapter (e.g. 30m, 1h)")
 	runCmd.Flags().StringVar(&claudePathFlag, "claude-path", "claude", "Path to the Claude Code CLI binary")
+	runCmd.Flags().StringVar(&infraClassFlag, "infra-class", "", "Comma-separated class=agent mappings for non-interactive agent-per-class selection (e.g. checkpoint=checkpoint-manager-git,commit=commit-manager-git)")
 
 	root.AddCommand(runCmd)
 	root.SetArgs(args)

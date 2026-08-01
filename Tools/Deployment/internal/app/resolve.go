@@ -125,6 +125,40 @@ func (s *service) askUtilityAgents(ctx context.Context) []string {
 	return ans.OptionIDs
 }
 
+// askInfrastructureAgents prompts for infrastructure-agent selection. All agents with a
+// non-empty Infrastructure field from the catalog are presented. Unlike utility agents,
+// infrastructure agents are not gated by an allow-list. Multiple agents of the same class
+// may be selected without restriction.
+func (s *service) askInfrastructureAgents(ctx context.Context) []string {
+	opts := make([]domain.Option, 0)
+	for _, a := range s.deps.Catalog.InfrastructureAgents() {
+		label := a.Name
+		if label == "" {
+			label = a.Key
+		}
+		label = label + " [" + a.Infrastructure + "]"
+		opts = append(opts, domain.Option{
+			ID:          a.Key,
+			Label:       label,
+			Description: a.Description,
+		})
+	}
+	q := domain.ChoiceQuestion{
+		Question: domain.Question{
+			ID:           domain.QInfrastructureAgents,
+			Title:        "Select infrastructure agents",
+			AllowSkip:    true,
+			AllowSkipAll: true,
+		},
+		Options: opts,
+	}
+	ans, err := s.deps.Interaction.SelectMany(ctx, q)
+	if err != nil || ans.Status != domain.Answered {
+		return []string{}
+	}
+	return ans.OptionIDs
+}
+
 // askHooks prompts for hook bundle selection from every bundle the catalog knows about.
 func (s *service) askHooks(ctx context.Context) []string {
 	opts := make([]domain.Option, 0)
@@ -442,6 +476,30 @@ func (s *service) buildWorkflowBlocks(workflowIDs []string) []transform.Workflow
 	return blocks
 }
 
+// buildInfrastructureBlocks assembles the InfrastructureBlock list for the orchestrator's
+// InfrastructureAgents injection from the catalog's infrastructure agent metadata. Agents
+// that are not found in the catalog (e.g. unknown keys) are silently skipped.
+func (s *service) buildInfrastructureBlocks(infraAgentIDs []string) []transform.InfrastructureBlock {
+	blocks := make([]transform.InfrastructureBlock, 0, len(infraAgentIDs))
+	for _, id := range infraAgentIDs {
+		a, ok := s.deps.Catalog.Agent(id)
+		if !ok {
+			continue
+		}
+		triggers := make([]domain.InfrastructureTrigger, len(a.Triggers))
+		copy(triggers, a.Triggers)
+		blocks = append(blocks, transform.InfrastructureBlock{
+			Key:         a.Key,
+			Version:     a.Version,
+			Class:       a.Infrastructure,
+			Description: a.Description,
+			OnFailure:   a.OnFailure,
+			Triggers:    triggers,
+		})
+	}
+	return blocks
+}
+
 // buildContent returns the deploy.ExecRequest.Content callback for one run. Agent items are
 // rendered through transform.Apply; skill items are copied verbatim from source. Hook items
 // bypass this callback entirely and are handled by deployHooks.
@@ -452,6 +510,7 @@ func (s *service) buildContent(
 	customTools map[string]string,
 	skippedTools map[string]bool,
 	workflowBlocks []transform.WorkflowBlock,
+	infrastructureBlocks []transform.InfrastructureBlock,
 	scope domain.Scope,
 	deployedReader func(domain.PlanItem) []byte,
 ) func(domain.PlanItem) ([]byte, error) {
@@ -471,14 +530,17 @@ func (s *service) buildContent(
 		if deployedReader != nil {
 			deployed = deployedReader(item)
 		}
-		var blocks []transform.WorkflowBlock
+		var wfBlocks []transform.WorkflowBlock
+		var infraBlocks []transform.InfrastructureBlock
 		if agent.Role == domain.RoleOrchestrator {
-			blocks = workflowBlocks
+			wfBlocks = workflowBlocks
+			infraBlocks = infrastructureBlocks
 		}
 		res, err := transform.Apply(transform.Request{
 			Source: src, Kind: domain.ArtifactAgent, Key: agent.Key, Module: module,
 			Model: models[agent.Key], CustomTools: customTools, SkippedTools: skippedTools,
-			Scope: scope, Deployed: deployed, Workflows: blocks,
+			Scope: scope, Deployed: deployed, Workflows: wfBlocks,
+			InfrastructureAgents: infraBlocks,
 		})
 		if err != nil {
 			return nil, err

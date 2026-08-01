@@ -42,19 +42,20 @@ type ProgressEvent = iport.ProgressEvent
 
 // QuestionID constants specific to the deployment tool.
 const (
-	QHarness           QuestionID = "harness"
-	QMode              QuestionID = "mode"
-	QWorkspace         QuestionID = "workspace"
-	QWorkflows         QuestionID = "workflows"
-	QUtilityAgents     QuestionID = "utility-agents"
-	QHooks             QuestionID = "hooks"
-	QTierModel         QuestionID = "tier-model"
-	QAgentModel        QuestionID = "agent-model"
-	QCustomModel       QuestionID = "custom-model"
-	QCustomTool        QuestionID = "custom-tool"
-	QLocalModification QuestionID = "local-modification"
-	QPlanConfirm       QuestionID = "plan-confirm"
-	QExternalOptIn     QuestionID = "external-opt-in"
+	QHarness               QuestionID = "harness"
+	QMode                  QuestionID = "mode"
+	QWorkspace             QuestionID = "workspace"
+	QWorkflows             QuestionID = "workflows"
+	QUtilityAgents         QuestionID = "utility-agents"
+	QInfrastructureAgents  QuestionID = "infrastructure-agents"
+	QHooks                 QuestionID = "hooks"
+	QTierModel             QuestionID = "tier-model"
+	QAgentModel            QuestionID = "agent-model"
+	QCustomModel           QuestionID = "custom-model"
+	QCustomTool            QuestionID = "custom-tool"
+	QLocalModification     QuestionID = "local-modification"
+	QPlanConfirm           QuestionID = "plan-confirm"
+	QExternalOptIn         QuestionID = "external-opt-in"
 )
 
 // PlanReviewer is the deployment-specific interface for plan review. The shared Interaction

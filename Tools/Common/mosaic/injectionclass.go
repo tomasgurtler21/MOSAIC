@@ -4,7 +4,8 @@ package mosaic
 type InjectionClass string
 
 const (
-	InjectionHarness  InjectionClass = "harness"  // filled from descriptor on every transform
-	InjectionProject  InjectionClass = "project"  // always empty on create, preserved on update
-	InjectionWorkflow InjectionClass = "workflow" // AvailableWorkflows, assembled from selections
+	InjectionHarness        InjectionClass = "harness"        // filled from descriptor on every transform
+	InjectionProject        InjectionClass = "project"        // always empty on create, preserved on update
+	InjectionWorkflow       InjectionClass = "workflow"       // AvailableWorkflows, assembled from selections
+	InjectionInfrastructure InjectionClass = "infrastructure" // InfrastructureAgents, assembled from selections
 )

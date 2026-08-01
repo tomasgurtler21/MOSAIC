@@ -68,6 +68,8 @@ func ClassifyInjection(name string) mosaic.InjectionClass {
 	switch name {
 	case "AvailableWorkflows":
 		return mosaic.InjectionWorkflow
+	case "InfrastructureAgents":
+		return mosaic.InjectionInfrastructure
 	case "HarnessConstraints", "LanguagePatterns", "CustomConstraints":
 		return mosaic.InjectionHarness
 	default:

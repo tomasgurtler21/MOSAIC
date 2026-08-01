@@ -31,6 +31,7 @@ type stubCatalog struct {
 	agents        []domain.Agent
 	orchestrator  domain.Agent
 	utilityAgents []domain.Agent
+	infraAgents   []domain.Agent // agents with non-empty Infrastructure field
 	skills        []domain.Skill
 	hooks         []domain.HookBundle
 	workflows     []domain.Workflow
@@ -43,7 +44,8 @@ type stubCatalog struct {
 func (c *stubCatalog) Root() string                                       { return c.root }
 func (c *stubCatalog) Agents() []domain.Agent                             { return c.agents }
 func (c *stubCatalog) Agent(key string) (domain.Agent, bool) {
-	for _, a := range append(c.agents, append(c.utilityAgents, c.orchestrator)...) {
+	all := append(c.agents, append(c.utilityAgents, append(c.infraAgents, c.orchestrator)...)...)
+	for _, a := range all {
 		if a.Key == key {
 			return a, true
 		}
@@ -52,6 +54,7 @@ func (c *stubCatalog) Agent(key string) (domain.Agent, bool) {
 }
 func (c *stubCatalog) Orchestrator() domain.Agent                         { return c.orchestrator }
 func (c *stubCatalog) UtilityAgents() []domain.Agent                      { return c.utilityAgents }
+func (c *stubCatalog) InfrastructureAgents() []domain.Agent               { return c.infraAgents }
 func (c *stubCatalog) Skills() []domain.Skill                             { return c.skills }
 func (c *stubCatalog) Skill(key string) (domain.Skill, bool) {
 	for _, sk := range c.skills {
@@ -159,6 +162,25 @@ type stubPlanner struct {
 
 func (p *stubPlanner) Build(ctx context.Context, in plan.Input) (domain.Plan, error) {
 	return p.plan, p.err
+}
+
+// ---------------------------------------------------------------------------
+// capturingPlanner — satisfies plan.Planner and records the Input it receives
+// ---------------------------------------------------------------------------
+
+// capturingPlanner records the last plan.Input passed to Build so tests can assert
+// that the deploy flow wires all selections (including InfrastructureAgentIDs) through
+// to the planner. It returns a pre-configured plan regardless of input.
+type capturingPlanner struct {
+	capturedInput *plan.Input
+	result        domain.Plan
+	err           error
+}
+
+func (p *capturingPlanner) Build(ctx context.Context, in plan.Input) (domain.Plan, error) {
+	cp := in
+	p.capturedInput = &cp
+	return p.result, p.err
 }
 
 // ---------------------------------------------------------------------------

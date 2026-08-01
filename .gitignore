@@ -35,7 +35,7 @@ opencode.json
 # The TEMPLATE lives at Agents/Generic/Orchestrator/Orchestration.template.md
 # and is tracked; instances are not.
 
-Orchestration/
+Orchestration-*/
 OrchestrationLogs/
 Orchestration.md
 !Orchestration.template.md

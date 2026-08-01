@@ -17,10 +17,10 @@ current_state:
 ---
 
 [[SECTION:ExecutionLog]]
-| Seq | Agent                | Phase     | Stage   | Status  | Timestamp            | Summary      | Checkpoint |
-| --- | -------------------- | --------- | ------- | ------- | -------------------- | ------------ | ---------- |
-| 1   | planner-tdd-soft#1   | PLANNING  | -       | SUCCESS | 2026-01-29T09:05:00Z | Plan created | -          |
-| 2   | implementation-tdd#2 | EXECUTION | Stage-1 | SUCCESS | 2026-01-29T10:00:00Z | Bug fixed    | -          |
+| Seq | Agent                | Phase     | Stage   | Status  | Timestamp            | Summary      | Inputs | Checkpoint |
+| --- | -------------------- | --------- | ------- | ------- | -------------------- | ------------ | ------ | ---------- |
+| 1   | planner-tdd-soft#1   | PLANNING  | -       | SUCCESS | 2026-01-29T09:05:00Z | Plan created | -      | -          |
+| 2   | implementation-tdd#2 | EXECUTION | Stage-1 | SUCCESS | 2026-01-29T10:00:00Z | Bug fixed    | -      | -          |
 [[/SECTION:ExecutionLog]]
 
 [[SECTION:Artifacts]]

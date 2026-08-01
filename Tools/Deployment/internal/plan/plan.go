@@ -39,9 +39,10 @@ type Input struct {
 	Scope           domain.Scope
 	GOOS            string
 	Manifest        manifest.Snapshot
-	WorkflowIDs     []string                         // selection order is preserved into Plan.Workflows
-	UtilityAgentIDs []string                         // must already be filtered by the tool config allow-list
-	HookIDs         []string
+	WorkflowIDs            []string                         // selection order is preserved into Plan.Workflows
+	UtilityAgentIDs        []string                         // must already be filtered by the tool config allow-list
+	InfrastructureAgentIDs []string                         // explicitly selected infrastructure agents
+	HookIDs                []string
 	Models          map[string]domain.ModelSelection // agent key -> resolved model selection
 	// DeployedState supplies the full probed state of every planned target path: presence,
 	// content hash, the version stamps read from the deployed file itself, and — for the

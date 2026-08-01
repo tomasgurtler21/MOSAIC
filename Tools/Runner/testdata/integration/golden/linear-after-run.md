@@ -16,10 +16,10 @@ current_state:
 ---
 
 [[SECTION:ExecutionLog]]
-| Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary       | Checkpoint |
-| --- | --------- | -------- | ----- | ------- | -------------------- | ------------- | ---------- |
-| 1   | agent-a#1 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | planning done | -          |
-| 2   | agent-b#2 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | review done   | -          |
+| Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary       | Inputs  | Checkpoint |
+| --- | --------- | -------- | ----- | ------- | -------------------- | ------------- | ------- | ---------- |
+| 1   | agent-a#1 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | planning done | -       | -          |
+| 2   | agent-b#2 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | review done   | plan.md | -          |
 [[/SECTION:ExecutionLog]]
 
 [[SECTION:Artifacts]]

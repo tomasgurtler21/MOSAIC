@@ -53,6 +53,11 @@ type Catalog interface {
 	// UtilityAgents returns all utility agents. They are never deployed automatically.
 	UtilityAgents() []domain.Agent
 
+	// InfrastructureAgents returns all worker agents that have a non-empty Infrastructure
+	// field, sorted by Key. This is a filtered view of Agents(); it does not return a
+	// separate agent class.
+	InfrastructureAgents() []domain.Agent
+
 	// Skills returns all skills.
 	Skills() []domain.Skill
 

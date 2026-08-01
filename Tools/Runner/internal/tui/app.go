@@ -474,6 +474,16 @@ func (m *rootModel) updateSetupFile(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.workflows = regions
 
+		// Enumerate infrastructure agents so the config screen can prompt the
+		// user to select one when multiple agents of the same gated class are
+		// declared. A parse error is treated as zero declared agents; the
+		// session layer will enforce a refusal at run start if needed.
+		infraAgents, err := orchfile.EnumerateInfrastructureAgents(path)
+		if err != nil {
+			infraAgents = nil
+		}
+		m.configScreen.SetDeclaredAgents(infraAgents)
+
 		style := stylesFromTheme(m.theme)
 		m.workflowScreen = screens.NewWorkflowSelectScreen(regions, m.width, m.height, style)
 		m.screen = screenSetupWorkflow
@@ -833,6 +843,7 @@ func (m *rootModel) startSession() tea.Cmd {
 			OnDeviation:          sel.config.DeviationMode,
 			AllowVersionDrift:    sel.config.AllowVersionDrift,
 			Checkpoints:          sel.config.Checkpoints,
+			InfraClassSelections: sel.config.InfraClassSelections,
 		}
 		outcome, err := sess.Start(ctx, config)
 		if err != nil {
