@@ -1,0 +1,72 @@
+# MosaicLogAnalyzer pricing configuration
+#
+# This file controls how mosaic-log-analyzer prices token usage in your
+# orchestration logs. Add one entry per model whose cost you want reported.
+# Models with no entry will still have their token counts shown; their money
+# columns will be labelled "unpriced" rather than $0.
+#
+# Location: MosaicLogAnalyzer/config/pricing.yaml (relative to the MOSAIC root)
+# The tool reads this file at startup and never modifies it unless you use the
+# interactive pricing-gap resolution flow, which appends or updates entries here.
+#
+# ---------------------------------------------------------------------------
+# Schema
+# ---------------------------------------------------------------------------
+#
+# models:
+#   <model-id>:            # the model identifier exactly as it appears in logs
+#     input: "<rate>"
+#     cached_input: "<rate>"
+#     cache_write: "<rate>"
+#     output_under_threshold: "<rate>"
+#     output_at_threshold: "<rate>"       # omit or set to null if no long-context tier
+#     context_length_threshold: <tokens>  # omit or set to null if no long-context tier
+#
+# All rate values are decimal USD per 1,000,000 tokens, written as quoted
+# strings with up to two decimal places (e.g. "3.00" or "0.30").
+# Quoting is required so YAML does not silently truncate precision.
+#
+# context_length_threshold is the total-context size (input + cache read +
+# cache creation tokens) at or above which the ENTIRE invocation's output is
+# repriced at output_at_threshold. Absent or null means the model has no
+# long-context tier and output_at_threshold is ignored.
+#
+# ---------------------------------------------------------------------------
+# Example (all lines commented out — no active prices defined)
+# ---------------------------------------------------------------------------
+#
+# models:
+#   claude-opus-4-5:
+#     input: "15.00"
+#     cached_input: "1.50"
+#     cache_write: "18.75"
+#     output_under_threshold: "75.00"
+#     output_at_threshold: "75.00"       # same rate; threshold still applies
+#     context_length_threshold: 200000
+#
+#   claude-sonnet-4-5:
+#     input: "3.00"
+#     cached_input: "0.30"
+#     cache_write: "3.75"
+#     output_under_threshold: "15.00"
+#     output_at_threshold: "15.00"
+#     context_length_threshold: 200000
+#
+#   claude-haiku-3-5:
+#     input: "0.80"
+#     cached_input: "0.08"
+#     cache_write: "1.00"
+#     output_under_threshold: "4.00"
+#     output_at_threshold: "8.00"
+#     context_length_threshold: 200000
+#
+#   some-model-without-long-context-tier:
+#     input: "1.00"
+#     cached_input: "0.10"
+#     cache_write: "1.25"
+#     output_under_threshold: "5.00"
+#     # output_at_threshold and context_length_threshold omitted:
+#     # the model has no long-context tier and a single output rate applies.
+
+# No active model prices are defined in this file.
+# Add entries above (uncomment or write new ones) to enable cost reporting.

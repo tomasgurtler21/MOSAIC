@@ -1,0 +1,8 @@
+Execute Phase 9 from roadmap.
+Given we are quite good on schedule, I would not go for bare minimum only.
+Currently mosaic has two helper tools in Go TUI - deployment and Runner, I see no reason to not use same tech stack again.
+Visibility of cost is primary delivery. It should be total for all run, then split by individual subagents, and within them by tools. Cost should be displayed both in tokens (total and by category) and money. Tokens cost is what logs deliver, we calculate money cost base on external config file in runtime root, probably yaml. Everytime logs are processed, either models is already confgured..if not, TUI should ask user to input prices, or point him to yaml. Ofc we track clasic cost, input, input cached, cache read, cache write, output <256k tokens, output 1M..I think thats all  what exists nowadays?
+Again this must work both at windows and linux, as self contained, same to existing tools.
+I suspect that Phase 10, test will have need to know cost of executed test run. Just the very basic, total cost for all, no separation by categories or subagents. Either we expose some basic CLI to do this, or mayeb move logic to Common modules, which already exist iirc....up to design phase.
+As other tools, this one should provide soem functionality via CLI. It can't be 1to1 though, many of features here is visual display, but CLI could give some agregated results, maybe in json format, somethign like that...
+Tool must be ofc have goodarchitecture for future expansion, there will be some, especially in UI/UX direction.

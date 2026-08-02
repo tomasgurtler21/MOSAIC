@@ -108,18 +108,26 @@ This is a narrower rule than the class system currently expresses, and §9 recor
 
 ### 4.3 Destination
 
-Two deployment variants, differing only in **who owns the branch being committed to** — and therefore in what a rollback is allowed to do to it.
+Two variants, chosen by the user at run start (§6), differing only in **who owns the branch being committed to** — and therefore in what a rollback is allowed to do to it.
 
 | Variant | Branch | Rewinding a committed stage | User integrates by |
 |---|---|---|---|
 | **MOSAIC-owned** (recommended) | `mosaic/run/{run_id}`, created at run start from the current tip | Permitted while unshared: the branch is moved back and the abandoned commits vanish | Merging when satisfied |
 | **User's own** | Whatever branch they are on at run start | Never: a revert commit is appended and the failed attempt persists | Nothing — it is already in their history |
 
-**The MOSAIC-owned variant switches to its branch once, at run start**, with a clean tree, and stays there for the run. This is the ordinary feature-branch flow, and it is done by run start-up rather than by this agent — the agent only ever commits. The branch name is recorded in `commit_branch` (§6) exactly as in the other variant, so everything downstream of that field is identical.
+**The MOSAIC-owned variant switches to its branch once, at run start**, and stays there for the run. This is the ordinary feature-branch flow. It is not done by a trigger-driven invocation of this agent — those only ever commit — but by the run-start setup dispatch specified in §4.9. The branch name is recorded in `commit_branch` (§6) exactly as in the other variant, so everything downstream of that field is identical.
+
+**The variant is a run-start choice, not a deployment property.** An earlier draft of this section called these "deployment variants", on the implicit model that a deployment expresses the choice by which agent it deploys — which is how every other deployment-time choice in this system works. That model does not apply here. One agent serves both variants, and it must: they differ only in who owns the branch named by `commit_branch`, and this agent reads that field without caring how it was populated, which is what the sentence above means by everything downstream being identical. There is consequently nothing for a deployment to select *between*, and no injection point could express the selection without duplicating the agent.
+
+Making it a run-start choice also costs nothing. The user is already being asked one question about this mode — whether to enable it at all — and the variant is the natural second half of that question. It keeps `commits` and `commit_branch` consistent as a pair, both set once at run start from an explicit user choice, rather than one being a user's answer and the other a deployment property leaking into the run artifact. And it is what lets §6's advisory be selected from the answer just given, rather than from configuration the orchestrator would otherwise have to be told about separately.
+
+**No variant field is recorded, because the branch name already carries it.** A run's variant is decidable from `commit_branch` alone: it is MOSAIC-owned exactly when the value is `mosaic/run/{run_id}`. This is the same derivability that makes branch *ownership* answerable by `checkpoint-restore-git` without configuration (below), and it means the choice needs no second field that could disagree with the first.
 
 **The MOSAIC-owned branch name is fixed as `mosaic/run/{run_id}`, and that is load-bearing rather than cosmetic.** Because it is derivable from a field every agent already holds, a second agent can determine *whether a branch is ours* without being told: `checkpoint-restore-git` decides between rewinding the branch and appending a revert by asking whether `refs/heads/mosaic/run/{run_id}` exists and `HEAD` is on it (`CheckpointAgents.md` §5.2). A memorable, task-derived name would read better in `git branch` and would make that question unanswerable without extra configuration, which is a poor trade for a branch that exists to be merged and deleted.
 
 **The user's-own branch is recorded by reading `HEAD` once at run start**, not by asking the user to type a name. The two are the same guarantee — what matters is that a value is *recorded*, so a later mismatch is detectable (§4.6) — and reading it costs the user nothing. The recorded name is stated back to them in §6's advisory, which is where a wrong branch gets caught, before any work has been committed.
+
+That read is also a git operation, performed by the same run-start setup dispatch (§4.9). This is worth stating because it is easy to assume only the MOSAIC-owned variant needs anything to happen at run start; both do, and the user's-own variant is the one where the requirement is least visible.
 
 An alternative was considered and rejected: leaving the user on their own branch and writing commits onto a side branch they are not on, using the `commit-tree` and `update-ref` mechanism the checkpoint agent uses. It works, but it leaves the working tree full of changes that are committed *somewhere the user is not*, so their `git status` shows the entire run's output as uncommitted, and the eventual merge collides with a dirty tree. Switching once is simpler and matches what the user would have done by hand.
 
@@ -229,6 +237,59 @@ A checkpoint reference is **durable by construction**. Nothing prunes it, nothin
 
 The structural statement underneath all of this: **a checkpoint needs a reference in the log because it is invisible everywhere else; a commit does not, because being visible everywhere else is its entire purpose.** The commit is in the user's branch where `git log` finds it with no MOSAIC knowledge at all.
 
+### 4.9 The run-start setup dispatch
+
+Everything above assumes `commit_branch` holds a branch name and that `HEAD` is already on it when the agent fires. Something has to establish both, once, before the first stage boundary. This section specifies what.
+
+**The agent has exactly two dispatch modes**, and they share nothing but the agent:
+
+| Mode | Reached by | Does |
+|---|---|---|
+| **Commit** (§4.1–§4.8) | Trigger evaluation, on `STAGE_END` | Commits the working tree to `commit_branch`. Never touches branches. |
+| **Setup** (this section) | One explicit out-of-band dispatch at run start, never a trigger | Establishes the commit destination and returns its name. Makes no commit. |
+
+**What setup does, by variant:**
+
+| Variant | Operation | Returns |
+|---|---|---|
+| MOSAIC-owned | Create `mosaic/run/{run_id}` from the current tip and switch to it | The branch name |
+| User's own | Read `HEAD` | The current branch name |
+
+Both are the same operation in the sense that matters: *determine where this run's commits will go, put the repository in that state, and report the name back*. The orchestrator records what comes back into `commit_branch` and never derives it itself.
+
+**The name travels in a tail-anchored marker**, on the same convention as §4.8's commit marker and `CheckpointAgents.md` §4.5's checkpoint marker:
+
+```
+[branch:{branch-name}]
+```
+
+A successful setup response ends `status_message` with it, containing the branch name exactly as git holds it. A `BLOCKED` setup carries no marker, since no destination was established.
+
+**Why a marker rather than prose or `result_data`.** The orchestrator has to obtain a machine-usable value from this response, and it has exactly one existing mechanism for that — tail-marker extraction, which it already performs for checkpoint references. Prose would require it to parse a sentence. `result_data` would work, but it is absent from the Execution Log, so the recorded branch would exist only in frontmatter with no trace in the run's history of where it came from; a marker lands in `Summary` as a side effect of the copy that already happens. The tail position earns its keep for the same reason as the other two markers: `Summary` truncation keeps the first and last 50 characters, and a branch name written mid-sentence is inside the part that gets dropped.
+
+**A missing or unreadable marker is a failed setup**, not a degraded one. Every other marker in this system degrades gracefully — a lost checkpoint reference leaves a hash a human can still read in `Summary`, because the structured column is an optimisation over a record that already exists. This one does not, because no other record of the branch exists anywhere: the orchestrator cannot fall back on deriving it (that is the inspection §4.9 exists to avoid, and it is impossible for the user's-own variant in any case), and a run with no destination fails every subsequent branch check. So the orchestrator treats an unmarked success as `BLOCKED` and does not start the run.
+
+**Why an agent rather than the orchestrator.** The orchestrator is the one component in this system specified to inspect nothing — §6 is explicit that even the advisory's branch name is read from the run artifact rather than from the repository, so that the orchestrator learns nothing about the workspace. Having it run `git checkout -b` would breach that for the MOSAIC-owned variant. The decisive point is that it would breach it for the **user's-own** variant too: recording that branch means reading `HEAD`, which is a repository inspection whoever performs it. There is no variant in which nothing has to touch git at run start, so the choice is not "agent or nothing" but "agent or orchestrator", and the agent is the component that already holds `terminal`, already reasons about this repository's state, and already owns what `commit_branch` means.
+
+**Why this agent rather than a new one.** A dedicated setup agent would exist to run one command, would need a class of its own or an awkward home in the class vocabulary, and would split ownership of `commit_branch` across two agents — one that decides the destination and one that enforces it. The preconditions the two would need are the same preconditions reasoned about from the same place. Splitting them invites the two halves to drift.
+
+**Out-of-band dispatch is established machinery, not a new concept.** `checkpoint-restore-git` is already dispatched this way: outside trigger evaluation, on explicit instruction, consuming a sequence number and taking an ordinary Execution Log row, with the orchestrator instructed that a log row for an agent the workflow table never names is expected rather than a routing error. Setup uses the same path. In particular it does **not** conflict with §4.2's rule that `commit` permits only `STAGE_END`: that rule constrains *trigger evaluation*, and setup is not a trigger.
+
+**Preconditions**, which are necessarily not §4.6's — there is no recorded branch yet to check `HEAD` against, and establishing one is the entire point of the invocation:
+
+| Condition | Behaviour |
+|---|---|
+| Not a git repository | `BLOCKED`. Commits were requested against something that cannot hold them, and the run must not start believing otherwise. |
+| Mid-rebase or mid-merge | `BLOCKED`. Same reasoning as §4.6 — the repository is in a state the user is in the middle of, and moving it is not ours to do. |
+| MOSAIC-owned, and `mosaic/run/{run_id}` already exists | `BLOCKED`. A run's branch is derived from its own id, so an existing one means either a colliding run id or a re-run against a used branch. Both need a human. |
+| MOSAIC-owned, detached `HEAD` | Proceed. Creating a branch at the current commit is exactly the right move here, and it resolves the detachment rather than inheriting it. |
+| User's own, detached `HEAD` | `BLOCKED`. There is no branch name to record, and inventing one would defeat the mismatch detection the field exists for. |
+| Dirty working tree | Proceed, both variants. Creating a branch at the current tip and switching to it carries changes across without conflict, and the user's outstanding edits are swept into the first commit in any case (§4.4) — which the advisory has already told them. |
+
+**Failure is fatal to the run, unlike a failed commit.** §4.7's argument for `on_failure: continue` is that nothing depends on any individual commit existing. Everything depends on this one invocation: without it there is no destination, and every subsequent trigger-driven invocation fails its branch check. A `BLOCKED` setup means the run does not start, and the user chooses between fixing the repository state and running with `commits: disabled`. This is not a change to the agent's declared `on_failure`, which governs trigger-driven firing; it is a property of the run-start sequence, in the same way that a failed configuration precondition stops a run without any agent's failure policy being consulted.
+
+**Setup takes an ordinary Execution Log row** and consumes a sequence number, like any invocation. Its `Summary` names the branch established and the variant it reflects, and ends with the branch marker. It emits no commit marker, because it makes no commit, and the `Checkpoint` column stays empty as on any commit-class row.
+
 ## 5. Execution Log Representation
 
 An ordinary row, like any infrastructure agent invocation:
@@ -248,6 +309,12 @@ The commit marker sits at the tail of `Summary`, where truncation cannot reach i
 
 `InfrastructureAgentConcept.md` §6.1 currently gates only the `checkpoint` class, on the argument that a `review`-class agent is cheap, non-destructive, and has no wrong answer, so asking the user about it would be a question with no content. That argument does not extend here. Committing to someone's branch is neither cheap to undo nor invisible, and there is emphatically a wrong answer. This class needs its own switch.
 
+**The question is asked only when a `commit`-class agent is declared.** A deployment with no such agent cannot commit, so the choice has one possible answer; asking anyway spends the user's attention on a decision they do not have and invites a "yes" the run must then refuse. In that deployment `commits` is recorded as `disabled` without the topic being raised. The precondition that `commits: enabled` requires a declared `commit`-class agent still exists, but it guards the paths that bypass the question — a value supplied in the starting prompt, carried in from a saved configuration, or present in a resumed artifact — rather than the user's own answer.
+
+**This deliberately differs from how `checkpoints` is handled, and the difference is not an inconsistency.** Checkpointing is asked unconditionally even where no `checkpoint`-class agent is declared, and the resulting refusal is the point: a user who wants rollback and is told the deployment cannot provide it has learned something worth knowing at a moment when they can still fix it, since checkpointing is safe, cheap, and something most runs benefit from. Commits are neither universally wanted nor safe by default — the mode writes permanently into the user's history — so surfacing an unavailable option there advertises a capability the user might not have wanted, to no benefit. The test is whether being told "not available here" is useful to the user, and it is only useful when the answer would likely have been yes.
+
+**When commits are enabled, the user also chooses the variant** (§4.3) — MOSAIC-owned or their own branch — as the second half of the same question. MOSAIC-owned is recommended, for the reason §4.3 gives: it is the only configuration in which redoing a committed stage stays clean.
+
 **The target branch is recorded at run start** alongside the switch:
 
 ```yaml
@@ -255,7 +322,20 @@ commits: enabled
 commit_branch: feature/profiles
 ```
 
-Recording it rather than re-deriving it is what makes §4.6's branch check possible at all. An agent that read the current branch each time it fired would happily follow the user wherever they went; an agent checking against a recorded value notices that they moved. It also keeps the run self-describing, for the same reason `infrastructure_overrides` is recorded in the artifact rather than passed as an executor argument: a run resumed by a different executor commits to the same branch it started on.
+Recording it rather than re-deriving it is what makes §4.6's branch check possible at all.
+
+**The value comes from the setup dispatch, not from the orchestrator.** §4.9 specifies the invocation: it establishes the destination the chosen variant implies and returns the name in a `[branch:{name}]` marker at the tail of `status_message`, and the orchestrator writes the marker's contents verbatim. The orchestrator neither derives `mosaic/run/{run_id}` itself nor reads `HEAD` to learn the user's current branch — both are repository inspections, and it performs none.
+
+**The half-derivable trap is why this is stated as a prohibition rather than a preference.** `mosaic/run/{run_id}` genuinely is reconstructible from a field the orchestrator already holds, so a reader who only considers the recommended variant will conclude that the marker is redundant. It is not: the user's-own branch is knowable only by reading `HEAD`. A rule permitting reconstruction where it is possible produces an orchestrator that derives one variant and extracts the other, which is the same wrong behaviour arriving silently rather than obviously.
+
+**Order matters within run start**, because two of these steps are irreversible in opposite directions:
+
+1. Ask whether commits are enabled, and if so, which variant.
+2. State the advisory (below), including what will be committed and what a rollback costs.
+3. Dispatch setup (§4.9); on `BLOCKED`, the run does not start.
+4. Record `commits` and the returned `commit_branch` in the artifact.
+
+The advisory precedes the dispatch because the dispatch may create a branch, and a user who has been told what the mode does should be told before anything in their repository moves. It cannot name the branch for the user's-own variant before the dispatch has read `HEAD`, so for that variant the recorded name is stated back immediately after step 4 — which is still before any commit exists, which is the guarantee §4.3 needs. An agent that read the current branch each time it fired would happily follow the user wherever they went; an agent checking against a recorded value notices that they moved. It also keeps the run self-describing, for the same reason `infrastructure_overrides` is recorded in the artifact rather than passed as an executor argument: a run resumed by a different executor commits to the same branch it started on.
 
 **The user must be told what they are enabling.** At run start, when `commits: enabled` is chosen, a fixed advisory — not a finding, not the result of any inspection — states:
 
@@ -264,7 +344,7 @@ Recording it rather than re-deriving it is what makes §4.6's branch check possi
 - what a rollback will cost, which depends on the variant. On a MOSAIC-owned branch, that rewinding stays clean while the branch is unmerged and unpushed, and that anything left behind afterwards is theirs to discard or squash at integration (§8). On their own branch, that a redone stage leaves its failed attempt in history permanently;
 - on the MOSAIC-owned variant only, that the branch is theirs to integrate afterwards, that a squash merge lands the run as one commit and carries no rollback residue, and that a squash should carry `Mosaic-Run-Id` if they want the run attributable later (§8).
 
-This costs the orchestrator nothing and tells it nothing about the workspace: it is a fixed string selected by the deployed variant, with the recorded branch name substituted into it. The name is read from the artifact, not from the repository — the orchestrator inspects nothing.
+This costs the orchestrator nothing and tells it nothing about the workspace: it is a fixed string selected by the variant the user just chose, with the branch name substituted into it. The name comes from the setup dispatch's return, or from the artifact once recorded — never from the repository. The orchestrator inspects nothing.
 
 ## 7. Rolling Back Committed Work
 
@@ -316,7 +396,9 @@ Applies to the MOSAIC-owned variant only. In the user's-own variant the work is 
 | `InfrastructureAgentConcept.md` | §6.1 | Only the `checkpoint` class is gated, on the argument that other classes have no wrong answer. | The `commit` class is gated by its own `commits` field. The stated rationale still holds for `review` and is now scoped to it rather than to "every other class". |
 | `InfrastructureAgentConcept.md` | §6.2 | A run may override any declared agent's `trigger` and `trigger_param`. | A class may restrict which triggers are valid for it. `commit` permits only `STAGE_END` (§4.2); an override naming another is a configuration error and the run must not start. |
 | `InfrastructureAgentConcept.md` | §12 | Open item: whether a third class beyond `checkpoint` and `review` is foreseeable. | Resolved. `commit` is the third, introduced with the two rules that distinguish it — its own activation gate and its trigger restriction. |
-| `OrchestrationArtifactFormat.md` | §4 | Frontmatter enumerates `checkpoints` among the run-start fields. | Adds `commits: enabled \| disabled` and `commit_branch`, both set once at run start and fixed for the run (§6). |
+| `OrchestrationArtifactFormat.md` | §4 | Frontmatter enumerates `checkpoints` among the run-start fields. | Adds `commits: enabled \| disabled` and `commit_branch`, both set once at run start and fixed for the run (§6). `commit_branch` is populated from the setup dispatch's return (§4.9), never derived by the orchestrator. No variant field is added: the variant is decidable from the branch name (§4.3). |
+| `InfrastructureAgentConcept.md` | §6.2 | A class may restrict which triggers are valid for it; `commit` permits `STAGE_END` only. | Scope clarified: a class trigger restriction governs **trigger evaluation** only. It does not constrain out-of-band dispatch, which reaches an agent by explicit instruction rather than by a trigger. `commit`'s setup mode (§4.9) and `restore`'s manual invocation are both out of band, and neither is an exception to the restriction — they are outside what it governs. |
+| `InfrastructureAgentConcept.md` | §12 | Open item list. | Adds: whether an agent having two dispatch modes with different preconditions and different failure consequences should be expressible in the declaration region, which currently describes only trigger-driven behaviour. `commit` is the first agent with such a mode. |
 | `InfrastructureAgentConcept.md` | §3.2, §4 | An agent declares one `trigger` and one `trigger_param`. | Replaced by a `triggers` list. Required by the checkpoint agent, which needs `STAGE_END` and `INVOCATION_INTERVAL` at once as soon as this class exists (§3). |
 | `InfrastructureAgentConcept.md` | §12 | Open item: whether an agent should be able to declare more than one trigger. | Resolved by the above, with a concrete consumer rather than in anticipation of one. |
 | `InfrastructureAgentConcept.md` | §5 | Declaration order is the tie-break when several triggers fire after the same invocation, described as arbitrary but deterministic. | Still arbitrary, but no longer inconsequential: where co-triggered agents differ in `on_failure`, order determines how much of a boundary's work is already done when a `halt` lands. `halt` agents are declared first. This pairing is the first case where it matters (§3). |
@@ -327,7 +409,8 @@ Applies to the MOSAIC-owned variant only. In the user's-own variant the work is 
 - **Rolling back committed work *by this agent*.** The reconciliation is performed, but by `checkpoint-restore-git`, in the same invocation as the restore itself (§7, and `CheckpointAgents.md` §5.2). This agent is never dispatched as part of a rollback — its message comes from a stage plan, and a rollback has none.
 - **Curating what goes into a commit.** The agent commits the whole tree minus run folders. Selecting hunks, splitting a stage into several commits, or separating the user's edits from MOSAIC's is not attempted, and §4.4 explains why it cannot be done reliably.
 - **Pushing.** Nothing here runs `git push`. Whether and when commits leave the machine is the user's decision — and in the MOSAIC-owned variant it is the decision that ends clean rollback (§4.3).
-- **Branch creation, switching, and merging.** *This agent* never creates a branch, switches, or merges: it commits to the branch recorded in `commit_branch` and refuses if `HEAD` is not there (§4.6). Creating and switching to a MOSAIC-owned branch happens once, at run start-up. Merging it afterwards is the user's own operation — §8 states the choices available to them and what each costs, without any of them being performed by anything here.
+- **Branch creation and switching on any trigger-driven invocation.** A commit-mode invocation never creates a branch or switches: it commits to the branch recorded in `commit_branch` and refuses if `HEAD` is not there (§4.6). Branch creation happens exactly once per run, in the setup dispatch (§4.9), which makes no commit. The two modes are disjoint, and neither ever does the other's job.
+- **Merging, rebasing, and branch deletion, in either mode.** Integration is the user's own operation — §8 states the choices available to them and what each costs, without any of them being performed by anything here.
 - **Pull requests, tags, or release artifacts.** Out of scope entirely.
 - **Serving as a checkpoint mechanism.** §3. A run wanting rollback declares a checkpoint agent.
 - **Commit message style configuration.** Conventional Commits, ticket prefixes, and house styles are real needs and are not addressed in this version. §10.
@@ -337,6 +420,14 @@ Applies to the MOSAIC-owned variant only. In the user's-own variant the work is 
 - Whether the executor should re-supply an earlier stage's plan when it knows a commit was skipped, so the next commit's message covers the work it actually contains (§4.7). The alternative is accepting the imprecision, which is traceable but wrong.
 - Whether commit message style should be configurable — a Conventional Commits prefix, a ticket reference, a house format. The mechanism would be an injection point rather than a run-time field, since it is a property of the project rather than the run. Deferred until someone asks.
 - Whether `PlanProgress.md` should be required in `input_artifacts` or merely used when present. Requiring it makes messages more accurate; making it optional keeps the agent usable in workflows that do not produce one.
+**Resolved:** whether the variant is a deployment choice or a run-start choice. Run-start (§4.3, §6). The deployment reading assumed a deployment expresses the choice by which agent it deploys, which is how deployment choices work elsewhere in this system; it does not hold here, because one agent serves both variants and reads `commit_branch` without caring how it was set. Nothing was left for a deployment to select between, and no injection point existed or could exist without duplicating the agent. This was found by deploying the design rather than by reading it.
+
+**Resolved:** how the established branch name reaches the orchestrator. A tail-anchored `[branch:{name}]` marker on the setup response (§4.9), extracted into `commit_branch` (§6). The design previously said only that setup "returns the name", which specified an obligation without a channel — and the two channels a reader would reach for are both worse: prose requires the orchestrator to parse a sentence, and `result_data` never reaches the Execution Log, leaving the recorded branch with no trace of its origin. The marker reuses extraction machinery the orchestrator already performs for checkpoint references. Found by writing the orchestrator's instructions against this section and discovering there was nothing to write.
+
+**Resolved:** whether the activation question is asked in a deployment with no `commit`-class agent. It is not (§6). The competing consideration is the `checkpoints` precedent, where the question is asked unconditionally and an unavailable capability produces an informative refusal. That precedent does not transfer: it is worth telling a user that safe, broadly useful rollback is missing, and not worth advertising a mode that writes irreversibly into their history to a user who never asked for it.
+
+**Resolved:** what creates the branch and records `commit_branch`. A single out-of-band setup dispatch of this agent at run start (§4.9). The alternative — the orchestrator running the git commands itself — was rejected on the ground that it is the one component specified to inspect nothing, and on the sharper ground that it would have to breach that in **both** variants: recording the user's own branch means reading `HEAD`, which is a repository inspection whoever does it. There is no variant in which nothing touches git at run start, so the real choice was which component does, not whether one does. A dedicated setup agent was also rejected: it would exist for one command and would split ownership of `commit_branch` across two agents that would then be free to drift.
+
 **Resolved:** what the MOSAIC-owned branch should be named. `mosaic/run/{run_id}` (§4.3). The competing option — a memorable name derived from the task — was rejected on a stronger ground than collision risk: a derivable name makes branch *ownership* decidable by a second agent from `run_id` alone, which is what lets `checkpoint-restore-git` choose between rewinding the branch and appending a revert without being configured. Readability in `git branch` is a weak return on losing that, for a branch whose purpose is to be merged and deleted.
 
 **Resolved:** whether a stage that ends in failure should be committed. Not a live question — no current workflow definition routes a stage to its end in a failed state, so the case does not arise. If a future workflow allows it, the default matters and the argument is real in both directions: the work exists on disk either way, but committing known-broken work into someone's history is a poor default. Revisit then rather than now.
