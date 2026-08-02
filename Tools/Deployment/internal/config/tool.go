@@ -58,10 +58,11 @@ type ToolConfigStore interface {
 // ---------------------------------------------------------------------------
 
 type toolConfigYAML struct {
-	SchemaVersion        string   `yaml:"schema_version"`
-	UtilityAgentAllowList []string `yaml:"utility_agent_allow_list"`
-	AllowExternalModules bool     `yaml:"allow_external_modules"`
-	LogRetentionRuns     int      `yaml:"log_retention_runs"`
+	SchemaVersion         string                         `yaml:"schema_version"`
+	UtilityAgentAllowList []string                       `yaml:"utility_agent_allow_list"`
+	AllowExternalModules  bool                           `yaml:"allow_external_modules"`
+	LogRetentionRuns      int                            `yaml:"log_retention_runs"`
+	ToolDestinations      map[string][]wireToolMapping   `yaml:"tool_destinations"`
 }
 
 // ---------------------------------------------------------------------------
@@ -104,11 +105,20 @@ func (s *toolConfigStore) Load() (ToolConfig, error) {
 
 	// Migration: preserve all recognisable field values and update SchemaVersion to current.
 	cfg := ToolConfig{
-		SchemaVersion:        toolConfigSchemaVersion,
+		SchemaVersion:         toolConfigSchemaVersion,
 		UtilityAgentAllowList: raw.UtilityAgentAllowList,
-		AllowExternalModules: raw.AllowExternalModules,
-		LogRetentionRuns:     raw.LogRetentionRuns,
+		AllowExternalModules:  raw.AllowExternalModules,
+		LogRetentionRuns:      raw.LogRetentionRuns,
 	}
+
+	if len(raw.ToolDestinations) > 0 {
+		dest, declErr := validateAndConvertToolDestinations(s.filePath, raw.ToolDestinations)
+		if declErr != nil {
+			return ToolConfig{}, *declErr
+		}
+		cfg.ToolDestinations = dest
+	}
+
 	return cfg, nil
 }
 

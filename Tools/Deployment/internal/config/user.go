@@ -68,9 +68,10 @@ type UserConfigStore interface {
 // string keys and values for YAML marshaling; conversion to/from domain.Tier happens
 // in Load and Save.
 type userConfigYAML struct {
-	SchemaVersion  string                       `yaml:"schema_version"`
-	TierModels     map[string]map[string]string `yaml:"tier_models"`
-	CustomModelIDs map[string][]string          `yaml:"custom_model_ids"`
+	SchemaVersion    string                       `yaml:"schema_version"`
+	TierModels       map[string]map[string]string `yaml:"tier_models"`
+	CustomModelIDs   map[string][]string          `yaml:"custom_model_ids"`
+	ToolDestinations map[string][]wireToolMapping `yaml:"tool_destinations"`
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +143,14 @@ func (s *userConfigStore) Load() (UserConfig, error) {
 		}
 	}
 
+	if len(raw.ToolDestinations) > 0 {
+		dest, declErr := validateAndConvertToolDestinations(s.filePath, raw.ToolDestinations)
+		if declErr != nil {
+			return UserConfig{}, *declErr
+		}
+		cfg.ToolDestinations = dest
+	}
+
 	return cfg, nil
 }
 
@@ -180,6 +189,14 @@ func (s *userConfigStore) Save(cfg UserConfig) error {
 			copy(copied, ids)
 			raw.CustomModelIDs[harness] = copied
 		}
+	}
+
+	if len(cfg.ToolDestinations) > 0 {
+		wireMap := make(map[string][]wireToolMapping, len(cfg.ToolDestinations))
+		for id, mappings := range cfg.ToolDestinations {
+			wireMap[id] = toWireToolMappings(mappings)
+		}
+		raw.ToolDestinations = wireMap
 	}
 
 	data, err := yaml.Marshal(&raw)
