@@ -38,6 +38,11 @@ type UserConfig struct {
 	// "no per-agent model persistence" design decision: these are option-pool entries,
 	// not per-agent mappings.
 	CustomModelIDs map[string][]string
+
+	// ToolDestinations maps harness id -> tool-destination mappings declared by this
+	// user. Entries here take precedence over the project-level declarations for the
+	// same harness id and generic tool. Nil or empty means no config-declared mappings.
+	ToolDestinations ToolDestinationsByHarness
 }
 
 // UserConfigStore loads and saves the per-user configuration.

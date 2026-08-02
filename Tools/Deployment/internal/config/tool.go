@@ -36,6 +36,10 @@ type ToolConfig struct {
 	// LogRetentionRuns is the maximum number of run log entries to keep in the history
 	// file. 0 means unbounded (keep all). Defaults to 0.
 	LogRetentionRuns int
+
+	// ToolDestinations maps harness id -> tool-destination mappings declared at the
+	// project level. Nil or empty means no config-declared mappings.
+	ToolDestinations ToolDestinationsByHarness
 }
 
 // ToolConfigStore loads the project-level tool configuration.
