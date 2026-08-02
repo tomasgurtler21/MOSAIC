@@ -1,11 +1,12 @@
 package domain
 
-// RunMode distinguishes the two top-level flows.
+// RunMode distinguishes the available top-level flows.
 type RunMode string
 
 const (
-	ModeDeployNew RunMode = "deploy-new"
-	ModeUpdate    RunMode = "update"
+	ModeDeployNew     RunMode = "deploy-new"
+	ModeUpdate        RunMode = "update"
+	ModeWorkflowsOnly RunMode = "workflows-only"
 )
 
 // PlanAction is the intended deployment action for one artifact.

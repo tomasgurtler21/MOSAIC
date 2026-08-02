@@ -160,11 +160,14 @@ func applyFrontmatter(
 		}
 	}
 
-	// Step 4: Stamp transform_version and injections_version from the harness descriptor.
+	// Step 4: Stamp transform_version, injections_version, and tool_mappings_version.
 	if c := applyVersionStamp(fm, "transform_version", desc.TransformVersion); c != nil {
 		changes = append(changes, *c)
 	}
 	if c := applyVersionStamp(fm, "injections_version", desc.InjectionsVersion); c != nil {
+		changes = append(changes, *c)
+	}
+	if c := applyVersionStamp(fm, "tool_mappings_version", req.ToolMappingsVersion); c != nil {
 		changes = append(changes, *c)
 	}
 

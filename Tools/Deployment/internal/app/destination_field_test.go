@@ -453,11 +453,11 @@ func TestDeployNew_UserConfigDestMapping_DestFieldHasCorrectName(t *testing.T) {
 //   → buildContent → catalog.ReadSource → transform.Apply (module.Tools → descriptor.MapTools)
 //   → output bytes contain mcp_servers field
 //
-// A stub planner is used because the real planner's staleness mechanism does not yet include
-// a signal for config-mapping-only changes (no version stamp captures the effective mapping
-// set). The stub simulates the desired planner behaviour once AC4.4's staleness detection is
-// implemented. The capturingContentExecutor records the bytes produced by the Content function
-// without performing any real file writes.
+// A stub planner is used to isolate the content-function wiring concern from the planner's
+// staleness classification logic. The staleness detection path — including the
+// ToolMappingsVersion comparison that detects config-mapping-only changes — is covered by
+// the dedicated tests in plan/dest_mapping_staleness_test.go. The capturingContentExecutor
+// records the bytes produced by the Content function without performing any real file writes.
 //
 // Before I4.1 adds registry.Options.ToolMappings, this test fails to compile (TDD RED).
 func TestUpdate_DestMappingInRegistry_ContentFunctionProducesDestinationField(t *testing.T) {
@@ -477,18 +477,18 @@ func TestUpdate_DestMappingInRegistry_ContentFunctionProducesDestinationField(t 
 	// → path.Join("agents", "dest-test-agent.md") = "agents/dest-test-agent.md"
 	const agentTargetPath = "agents/dest-test-agent.md"
 
-	// Stub planner simulates the desired outcome of AC4.4's staleness signal: a
-	// config-mapping-only change causes ActionUpdate for the affected agent. The real
-	// planner currently returns ActionUnchanged in this scenario (design gap: staleness.go
-	// only compares static version stamps, not the effective mapping set). This test
-	// documents the required end-to-end content-generation behaviour and will pass once
-	// the planner correctly detects mapping-set changes.
+	// Stub planner returns ActionUpdate for the agent, directly exercising the content
+	// path for an update scenario. The real planner detects config-mapping-only changes
+	// via ToolMappingsVersion staleness comparison (implemented in plan/staleness.go and
+	// covered by plan/dest_mapping_staleness_test.go). The stub is used here to isolate
+	// the content-function wiring — which is what this test is about — from the planner's
+	// classification logic.
 	staleItem := domain.PlanItem{
 		Ref:        domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: destTestAgentKey},
 		TargetPath: agentTargetPath,
 		Action:     domain.ActionUpdate,
 		// Stale is intentionally empty: this test verifies the content path, not staleness
-		// detection. Staleness detection for config-mapping changes is a separate design task.
+		// detection. Staleness detection for config-mapping changes is covered separately.
 	}
 
 	capExec := &capturingContentExecutor{}

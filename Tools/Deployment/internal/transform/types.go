@@ -25,6 +25,12 @@ type Request struct {
 	Deployed             []byte
 	Workflows            []WorkflowBlock        // non-empty only for the orchestrator agent
 	InfrastructureAgents []InfrastructureBlock  // non-empty only for the orchestrator agent
+	// ToolMappingsVersion is the hash of the effective tool-destination mapping set for this
+	// run, computed by config.HashToolDestinations. It is written to the deployed file as the
+	// `tool_mappings_version` frontmatter stamp so the planner can detect staleness on
+	// subsequent runs when the config-declared mapping set changes. An empty string means no
+	// config mappings are active and no stamp is written to the deployed file.
+	ToolMappingsVersion string
 }
 
 // Result is the output of a successful Apply call.

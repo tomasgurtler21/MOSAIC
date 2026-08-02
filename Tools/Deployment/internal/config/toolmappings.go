@@ -364,16 +364,23 @@ type hashableMapping struct {
 // (nil or empty maps), so that deployed files without a tool_mappings_version stamp
 // compare equal to the current run and produce no spurious staleness.
 func HashToolDestinations(project, user ToolDestinationsByHarness) string {
-	// Merge both maps into a single view keyed by harness ID. User entries take
-	// precedence over project entries at the harness level for the purpose of
-	// producing a single sorted list to hash.
+	// Merge both maps into a single per-harness view, applying the same per-tool
+	// precedence as MergeToolMappings (user wins per generic tool, not per harness).
+	// This ensures the hash faithfully reflects the config-layer contribution to the
+	// effective mapping set, matching what EffectiveToolMappings (without descriptor
+	// mappings) would produce.
 	combined := make(map[string][]domain.ToolMapping, len(project)+len(user))
 	for k, v := range project {
 		combined[k] = v
 	}
-	for k, v := range user {
-		// User overrides project at the whole-harness level for hash stability.
-		combined[k] = v
+	for k, userMs := range user {
+		if projMs, ok := combined[k]; ok {
+			// Both project and user declare mappings for this harness: merge with
+			// per-tool precedence (user wins for shared generic tool names).
+			combined[k] = MergeToolMappings(nil, projMs, userMs)
+		} else {
+			combined[k] = userMs
+		}
 	}
 	if len(combined) == 0 {
 		return ""

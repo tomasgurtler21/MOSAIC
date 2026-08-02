@@ -213,7 +213,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	}
 	workflowBlocks := s.buildWorkflowBlocks(workflowIDs)
 	infraBlocks := s.buildInfrastructureBlocks(infraAgentIDs)
-	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, workflowBlocks, infraBlocks, scope, nil)
+	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, workflowBlocks, infraBlocks, scope, nil, toolMappingsVersion)
 
 	now := s.now()
 	execReq := deploy.ExecRequest{

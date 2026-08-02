@@ -33,6 +33,22 @@ type Service interface {
 	// Update runs the update flow against an existing workspace deployment. Detects staleness,
 	// prompts for conflict decisions, and optionally adds new workflows in the same run.
 	Update(ctx context.Context, req UpdateRequest) (domain.RunSummary, error)
+
+	// UpdateWorkflows runs the workflow-only update flow against an existing workspace
+	// deployment. The selected workflow set fully replaces the set currently embedded in
+	// the deployed orchestrator; workflows that are not reselected are removed. Only the
+	// orchestrator artifact may be planned, written, or version-stamped — agent, skill,
+	// and hook artifacts are never touched, including when they are stale. The
+	// orchestrator itself is regenerated exactly as Update regenerates it: version stamps,
+	// injections, and workflow content are all rebuilt.
+	//
+	// Conflict handling for a locally-modified orchestrator file is identical to Update's:
+	// the same decision options, the same backup behaviour, and a skip decision records a
+	// GapSkippedFile gap.
+	//
+	// No tier-level and no per-agent model question is asked; the orchestrator's model is
+	// taken from its deployed file via the deployed-state probe.
+	UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest) (domain.RunSummary, error)
 }
 
 // New constructs a Service with the supplied dependency set.
@@ -119,6 +135,29 @@ type UpdateRequest struct {
 	TierModels      map[domain.Tier]string
 	AgentModels     map[string]string
 	CustomTools     map[string]string
+	SkipAll         map[domain.QuestionID]bool
+	AutoConfirmPlan bool
+	DryRun          bool
+}
+
+// WorkflowUpdateRequest carries the caller's pre-answers for the workflow-only update
+// flow. A set field is used directly without asking; an unset field causes the flow to ask
+// through Interaction (CD-6).
+//
+// No TierModels, AgentModels, or CustomTools fields: this mode asks no model questions,
+// and the field's absence from the type is what makes that guarantee structural rather
+// than merely behavioural.
+type WorkflowUpdateRequest struct {
+	HarnessID string
+	// WorkspacePath is the path to the existing deployment workspace.
+	WorkspacePath string
+	// WorkflowIDs is the complete replacement workflow set. When non-nil it is used
+	// directly and QWorkflows is not asked. A nil slice means "ask"; an explicitly empty
+	// non-nil slice means "deploy the orchestrator with no workflows" and is honoured.
+	WorkflowIDs []string
+	// ConflictDefault is the decision applied to a locally-modified orchestrator file when
+	// non-interactive. When zero, the flow asks through Interaction.
+	ConflictDefault domain.ConflictDecision
 	SkipAll         map[domain.QuestionID]bool
 	AutoConfirmPlan bool
 	DryRun          bool

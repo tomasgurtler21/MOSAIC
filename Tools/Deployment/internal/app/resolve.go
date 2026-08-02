@@ -628,6 +628,11 @@ func (s *service) buildInfrastructureBlocks(infraAgentIDs []string) []transform.
 // buildContent returns the deploy.ExecRequest.Content callback for one run. Agent items are
 // rendered through transform.Apply; skill items are copied verbatim from source. Hook items
 // bypass this callback entirely and are handled by deployHooks.
+//
+// toolMappingsVersion is the hash of the effective tool-destination mapping set for this run
+// (from config.HashToolDestinations). It is forwarded to transform.Apply so the transform
+// can stamp it into the deployed file frontmatter as `tool_mappings_version`, closing the
+// probe → planner → executor → frontmatter staleness loop for config-mapping changes.
 func (s *service) buildContent(
 	module domain.HarnessModule,
 	agentByKey map[string]domain.Agent,
@@ -638,6 +643,7 @@ func (s *service) buildContent(
 	infrastructureBlocks []transform.InfrastructureBlock,
 	scope domain.Scope,
 	deployedReader func(domain.PlanItem) []byte,
+	toolMappingsVersion string,
 ) func(domain.PlanItem) ([]byte, error) {
 	return func(item domain.PlanItem) ([]byte, error) {
 		if item.Ref.Kind != domain.ArtifactAgent {
@@ -666,6 +672,7 @@ func (s *service) buildContent(
 			Model: models[agent.Key], CustomTools: customTools, SkippedTools: skippedTools,
 			Scope: scope, Deployed: deployed, Workflows: wfBlocks,
 			InfrastructureAgents: infraBlocks,
+			ToolMappingsVersion:  toolMappingsVersion,
 		})
 		if err != nil {
 			return nil, err
