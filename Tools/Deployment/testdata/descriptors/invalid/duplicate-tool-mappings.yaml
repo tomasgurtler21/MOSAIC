@@ -11,8 +11,12 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read/readFile"
+      destinations:
+        - to: main
+          names:
+            - "read/readFile"
     - generic: "file_read"
-      harness_tools:
-        - "read/readFile"
+      destinations:
+        - to: main
+          names:
+            - "read/readFile"

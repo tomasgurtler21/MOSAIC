@@ -1,0 +1,18 @@
+# Invalid descriptor: destination declares to: main with an explicit format.
+# DestMain must not declare a value format; the harness's own tools format applies.
+# ValidateToolMappings must reject this with a ValidationError for rule R7.
+schema_version: "1"
+id: "dest-main-with-format"
+display_name: "Dest Main With Format"
+tools:
+  shape: list
+  universe: []
+  mappings:
+    - generic: "some_tool"
+      destinations:
+        - to: main
+          format: list-flow
+          names:
+            - "toolA"
+frontmatter:
+  tools_key: "tools"

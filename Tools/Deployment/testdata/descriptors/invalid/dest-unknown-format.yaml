@@ -1,0 +1,18 @@
+# Invalid descriptor: destination declares an unknown format value.
+# ValidateToolMappings must reject this with a ValidationError for rule R6.
+schema_version: "1"
+id: "dest-unknown-format"
+display_name: "Dest Unknown Format"
+tools:
+  shape: list
+  universe: []
+  mappings:
+    - generic: "some_tool"
+      destinations:
+        - to: field
+          field: myField
+          format: not-a-valid-format
+          names:
+            - "toolA"
+frontmatter:
+  tools_key: "tools"

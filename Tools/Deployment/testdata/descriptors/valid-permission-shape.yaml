@@ -18,10 +18,14 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read"
+      destinations:
+        - to: main
+          names:
+            - "read"
     - generic: "file_write"
-      harness_tools:
-        - "write"
+      destinations:
+        - to: main
+          names:
+            - "write"
 frontmatter:
   tools_key: "permission"

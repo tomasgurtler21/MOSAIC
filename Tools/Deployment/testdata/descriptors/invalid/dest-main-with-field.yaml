@@ -1,0 +1,17 @@
+# Invalid descriptor: destination declares to: main but also sets a field name.
+# ValidateToolMappings must reject this with a ValidationError for rule R5.
+schema_version: "1"
+id: "dest-main-with-field"
+display_name: "Dest Main With Field"
+tools:
+  shape: list
+  universe: []
+  mappings:
+    - generic: "some_tool"
+      destinations:
+        - to: main
+          field: unexpectedFieldName
+          names:
+            - "toolA"
+frontmatter:
+  tools_key: "tools"

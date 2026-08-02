@@ -13,7 +13,7 @@ models:
     - "provider/model-smart"
   format_hint: "provider/model-id"
 
-# Field group 3: tool mappings (including one-to-many and many-to-one examples)
+# Field group 3: tool mappings using the multi-destination destinations: schema
 tools:
   shape: list
   universe:
@@ -34,17 +34,23 @@ tools:
       by_convention: true
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read/readFile"
+      destinations:
+        - to: main
+          names:
+            - "read/readFile"
     - generic: "file_write"
-      harness_tools:
-        - "write/createFile"
-        - "write/editFile"
+      destinations:
+        - to: main
+          names:
+            - "write/createFile"
+            - "write/editFile"
     - generic: "content_search"
-      harness_tools:
-        - "search/textSearch"
+      destinations:
+        - to: main
+          names:
+            - "search/textSearch"
     - generic: "file_search"
-      harness_tools: []
+      destinations: []
   custom_tool_template: "mcp/%s"
   placeholder_expansion:
     - "read/readFile"

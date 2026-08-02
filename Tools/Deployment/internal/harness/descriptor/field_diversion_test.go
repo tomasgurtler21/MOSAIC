@@ -2,15 +2,18 @@ package descriptor_test
 
 // field_diversion_test.go tests two advanced MapTools behaviors at the descriptor layer:
 //
-// Field diversion (T9.3): a generic tool whose ToolMapping declares a non-empty Field
-// must be routed to a separate FrontmatterField rather than appearing in the main tools
-// value. MapTools must produce a FrontmatterField for each diversion key it encounters,
-// and must NOT include the diverted harness tool name in the main tools list.
+// Field diversion: a generic tool whose ToolMapping declares a DestField destination
+// must route its names to a separate FrontmatterField rather than appearing in the main tools
+// value. MapTools must produce a FrontmatterField for each DestField destination key it
+// encounters, and must NOT include the diverted harness tool names in the main tools list.
 //
-// Custom tool template (T9.5): when ToolSpec.CustomToolTemplate is non-empty, a
+// Custom tool template: when ToolSpec.CustomToolTemplate is non-empty, a
 // user-supplied MCP server name is formatted through the template before being stored
 // in HarnessTools. The formatted name must appear in the Fields output for list-shape
 // harnesses; the raw unformatted name must not.
+//
+// These tests use the multi-destination destinations: schema. They are RED until the
+// descriptor loader (I2.2) and field builder (I2.3) are updated.
 
 import (
 	"testing"
@@ -22,8 +25,9 @@ import (
 // --- Fixtures ---
 
 // fieldDiversionDescriptorYAML declares a list-shape harness with one standard mapping
-// (file_read → "read-file", placed in the main tools field) and one field-diverted
-// mapping (skill → "mcp-skill-tool", routed to the separate "mcp_servers" field).
+// (file_read → DestMain ["read-file"]) and one field-destination mapping
+// (skill → DestField "mcp_servers" ["mcp-skill-tool"]).
+// Uses the multi-destination destinations: schema.
 const fieldDiversionDescriptorYAML = `schema_version: "1"
 id: "field-diversion-harness"
 display_name: "Field Diversion Harness"
@@ -35,12 +39,16 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read-file"
+      destinations:
+        - to: main
+          names:
+            - "read-file"
     - generic: "skill"
-      harness_tools:
-        - "mcp-skill-tool"
-      field: "mcp_servers"
+      destinations:
+        - to: field
+          field: mcp_servers
+          names:
+            - "mcp-skill-tool"
 frontmatter:
   tools_key: "tools"
 `
@@ -60,6 +68,7 @@ func loadFieldDiversionDescriptor(t *testing.T) *domain.HarnessDescriptor {
 // customTemplateDescriptorYAML declares a harness whose custom_tool_template wraps any
 // user-supplied MCP server name with the prefix "mcp:". A custom name "my-server" must
 // therefore produce "mcp:my-server" in the harness tool output.
+// Uses the multi-destination destinations: schema.
 const customTemplateDescriptorYAML = `schema_version: "1"
 id: "custom-template-harness"
 display_name: "Custom Template Harness"
@@ -71,8 +80,10 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read-file"
+      destinations:
+        - to: main
+          names:
+            - "read-file"
   custom_tool_template: "mcp:%s"
 frontmatter:
   tools_key: "tools"
@@ -90,15 +101,15 @@ func loadCustomTemplateDescriptor(t *testing.T) *domain.HarnessDescriptor {
 	return d
 }
 
-// --- T9.3: Field diversion ---
+// --- Field diversion: DestField destination routes names to a separate frontmatter key ---
 
 // TestMapTools_FieldDiversion_DiversionFieldPresentInFields asserts that MapTools
-// returns a FrontmatterField whose Key matches the diversion field name declared in
-// the mapping. Without this entry, the transform stage has no field to write the
-// diverted tool into, and the tool is silently lost.
+// returns a FrontmatterField whose Key matches the DestField destination's declared field
+// name. Without this entry, the transform stage has no field to write the diverted tool
+// into, and the tool is silently lost.
 //
-// This test will be RED until buildListToolFields (or buildPermissionToolFields) is
-// updated to produce a separate FrontmatterField for each diversion destination.
+// This test is RED until buildListToolFields is updated to produce a separate
+// FrontmatterField for each DestField destination.
 func TestMapTools_FieldDiversion_DiversionFieldPresentInFields(t *testing.T) {
 	d := loadFieldDiversionDescriptor(t)
 	req := domain.ToolRequest{
@@ -214,11 +225,11 @@ func TestMapTools_FieldDiversion_DiversionToolAbsentFromMainToolsField(t *testin
 	}
 }
 
-// TestMapTools_FieldDiversion_ResolutionFieldMatchesMappingDeclaration asserts that the
-// ToolResolution for a field-diverted tool carries the same Field value as the descriptor's
-// mapping entry. Consumers of the resolution must be able to identify the diversion key
-// without re-reading the descriptor.
-func TestMapTools_FieldDiversion_ResolutionFieldMatchesMappingDeclaration(t *testing.T) {
+// TestMapTools_FieldDiversion_ResolutionDestinationMatchesMappingDeclaration asserts that the
+// ToolResolution for a field-destination tool carries a Destinations entry whose Field matches
+// the descriptor's mapping declaration. Consumers of the resolution must be able to identify
+// the destination key without re-reading the descriptor.
+func TestMapTools_FieldDiversion_ResolutionDestinationMatchesMappingDeclaration(t *testing.T) {
 	d := loadFieldDiversionDescriptor(t)
 	req := domain.ToolRequest{
 		AgentKey: "test-agent",
@@ -234,12 +245,21 @@ func TestMapTools_FieldDiversion_ResolutionFieldMatchesMappingDeclaration(t *tes
 		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
 	}
 	res := result.Resolutions[0]
-	if res.Field != "mcp_servers" {
-		t.Errorf("ToolResolution.Field: want %q (matching the mapping's field declaration), got %q", "mcp_servers", res.Field)
+	if len(res.Destinations) == 0 {
+		t.Fatal("ToolResolution.Destinations must be non-empty for a field-destination mapping; " +
+			"the resolution must record all destinations the generic tool resolved to")
+	}
+	// The skill mapping declares one DestField destination targeting "mcp_servers".
+	dest := res.Destinations[0]
+	if dest.Kind != domain.DestField {
+		t.Errorf("Destinations[0].Kind: want %q, got %q", domain.DestField, dest.Kind)
+	}
+	if dest.Field != "mcp_servers" {
+		t.Errorf("Destinations[0].Field: want %q (matching the mapping declaration), got %q", "mcp_servers", dest.Field)
 	}
 }
 
-// --- T9.5: Custom tool template ---
+// --- Custom tool template: ToolSpec.CustomToolTemplate formats user-supplied names ---
 
 // TestMapTools_CustomTemplate_NameIsFormattedThroughTemplate asserts that when
 // CustomToolTemplate is non-empty, a user-supplied MCP server name is substituted into

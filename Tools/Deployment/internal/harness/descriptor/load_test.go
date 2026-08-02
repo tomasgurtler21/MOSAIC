@@ -220,14 +220,28 @@ func TestLoad_WellFormedDescriptor_ToolMappingGenericNames(t *testing.T) {
 	}
 }
 
-func TestLoad_WellFormedDescriptor_OneToManyMappingPreservesAllTools(t *testing.T) {
+func TestLoad_WellFormedDescriptor_OneToManyMappingPreservesAllNames(t *testing.T) {
+	// file_write maps to two harness tool names via a DestMain destination in the fixture.
+	// After loading, ToolMapping.Destinations must be populated with that destination,
+	// and its Names slice must contain both names.
+	// This test is RED until the loader populates ToolMapping.Destinations.
 	d := loadFixture(t, "valid-full.yaml")
 
-	// file_write maps to ["write/createFile", "write/editFile"] in the fixture.
 	for _, m := range d.Tools.Mappings {
 		if m.Generic == "file_write" {
-			if len(m.HarnessTools) != 2 {
-				t.Fatalf("file_write mapping: want 2 harness tools, got %d: %v", len(m.HarnessTools), m.HarnessTools)
+			if len(m.Destinations) != 1 {
+				t.Fatalf("file_write mapping: want 1 Destination (one DestMain), got %d; "+
+					"the loader must populate ToolMapping.Destinations from the destinations: YAML block",
+					len(m.Destinations))
+			}
+			dest := m.Destinations[0]
+			if dest.Kind != domain.DestMain {
+				t.Errorf("file_write Destinations[0].Kind: want %q, got %q", domain.DestMain, dest.Kind)
+			}
+			const wantNames = 2
+			if len(dest.Names) != wantNames {
+				t.Fatalf("file_write Destinations[0].Names: want %d names, got %d: %v",
+					wantNames, len(dest.Names), dest.Names)
 			}
 			return
 		}

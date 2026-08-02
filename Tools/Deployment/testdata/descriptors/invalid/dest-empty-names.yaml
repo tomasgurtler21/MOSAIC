@@ -1,0 +1,18 @@
+# Invalid descriptor: a non-empty destinations list contains a destination with empty names.
+# To declare a tool unsupported, use destinations: [] (empty list); a present destination
+# entry must always contribute at least one name.
+# ValidateToolMappings must reject this with a ValidationError for rule R10.
+schema_version: "1"
+id: "dest-empty-names"
+display_name: "Dest Empty Names"
+tools:
+  shape: list
+  universe: []
+  mappings:
+    - generic: "some_tool"
+      destinations:
+        - to: field
+          field: myField
+          names: []
+frontmatter:
+  tools_key: "tools"

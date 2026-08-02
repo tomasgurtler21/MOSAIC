@@ -1,0 +1,16 @@
+# Invalid descriptor: destination declares an unknown "to" value.
+# ValidateToolMappings must reject this with a ValidationError for rule R3.
+schema_version: "1"
+id: "dest-unknown-kind"
+display_name: "Dest Unknown Kind"
+tools:
+  shape: list
+  universe: []
+  mappings:
+    - generic: "some_tool"
+      destinations:
+        - to: "invalid-kind"
+          names:
+            - "toolA"
+frontmatter:
+  tools_key: "tools"

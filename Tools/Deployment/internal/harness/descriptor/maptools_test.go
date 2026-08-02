@@ -22,12 +22,13 @@ import (
 )
 
 // mappingDescriptorYAML is the inline YAML for a descriptor used by all MapTools tests.
+// It uses the multi-destination schema (destinations:) introduced in Stage 2.
 // It contains:
-//   - file_write → ["write/createFile", "write/editFile"]  (one-to-many)
-//   - file_search → ["search/textSearch"]                  (one half of many-to-one pair)
-//   - content_search → ["search/textSearch"]               (other half of many-to-one pair)
-//   - file_read → ["read/readFile"]                        (one-to-one, for baseline)
-//   - user_interaction → []                                (explicitly unsupported, empty harness_tools)
+//   - file_write → DestMain ["write/createFile", "write/editFile"]  (one-to-many via single destination)
+//   - file_search → DestMain ["search/textSearch"]                  (one half of many-to-one pair)
+//   - content_search → DestMain ["search/textSearch"]               (other half of many-to-one pair)
+//   - file_read → DestMain ["read/readFile"]                        (one-to-one, for baseline)
+//   - user_interaction → destinations: []                           (explicitly unsupported)
 //   - "terminal" is absent from mappings (unmapped)
 const mappingDescriptorYAML = `schema_version: "1"
 id: "mapping-test-harness"
@@ -49,20 +50,28 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read/readFile"
+      destinations:
+        - to: main
+          names:
+            - "read/readFile"
     - generic: "file_write"
-      harness_tools:
-        - "write/createFile"
-        - "write/editFile"
+      destinations:
+        - to: main
+          names:
+            - "write/createFile"
+            - "write/editFile"
     - generic: "file_search"
-      harness_tools:
-        - "search/textSearch"
+      destinations:
+        - to: main
+          names:
+            - "search/textSearch"
     - generic: "content_search"
-      harness_tools:
-        - "search/textSearch"
+      destinations:
+        - to: main
+          names:
+            - "search/textSearch"
     - generic: "user_interaction"
-      harness_tools: []
+      destinations: []
 frontmatter:
   tools_key: "tools"
 `
@@ -120,7 +129,8 @@ func TestMapTools_OneToMany_AllHarnessToolsPresent(t *testing.T) {
 	if res.Generic != "file_write" {
 		t.Errorf("resolution Generic: want %q, got %q", "file_write", res.Generic)
 	}
-	// file_write maps to two harness tools in the fixture.
+	// file_write maps to two harness tools via a DestMain destination.
+	// HarnessTools is the flattened union of all Destinations' Names.
 	wantTools := []string{"write/createFile", "write/editFile"}
 	if len(res.HarnessTools) != len(wantTools) {
 		t.Fatalf("HarnessTools count: want %d, got %d: %v", len(wantTools), len(res.HarnessTools), res.HarnessTools)
@@ -129,6 +139,10 @@ func TestMapTools_OneToMany_AllHarnessToolsPresent(t *testing.T) {
 		if res.HarnessTools[i] != want {
 			t.Errorf("HarnessTools[%d]: want %q, got %q", i, want, res.HarnessTools[i])
 		}
+	}
+	// Destinations must also be populated: one DestMain destination carrying both names.
+	if len(res.Destinations) != 1 {
+		t.Errorf("Destinations count: want 1, got %d", len(res.Destinations))
 	}
 }
 
@@ -450,7 +464,7 @@ func TestMapTools_Fields_ToolsValueContainsMappedHarnessTool(t *testing.T) {
 // --- Explicitly unsupported tool: mapping entry with empty HarnessTools ---
 
 func TestMapTools_ExplicitlyUnsupported_OutcomeIsMappedWithEmptyHarnessTools(t *testing.T) {
-	// user_interaction has a mapping entry with harness_tools: [] in the descriptor.
+	// user_interaction has a mapping entry with destinations: [] in the descriptor.
 	// This is the "explicitly unsupported" case: the descriptor author acknowledged the tool
 	// and declared that this harness does not support it.
 	// The outcome must be ToolMapped (the tool was found in the mapping table), not ToolUnmapped.
@@ -577,6 +591,115 @@ func TestMapTools_Custom_HarnessToolsContainsCustomName(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("custom name %q not found in HarnessTools: %v", "my-mcp-server", res.HarnessTools)
+	}
+}
+
+func TestMapTools_Custom_DestinationsContainsSingleDestMain(t *testing.T) {
+	// For a ToolCustom outcome (no mapping, CustomNames supplies a name), the design contract
+	// requires MapTools to produce a single destination of kind DestMain carrying the templated
+	// name — preserving the pre-Destinations behaviour of putting the name into the main tools
+	// field. This test is RED until MapTools populates Destinations for the ToolCustom path.
+	d := loadMappingDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-mcp-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if res.Outcome != domain.ToolCustom {
+		t.Fatalf("expected ToolCustom outcome, got %q", res.Outcome)
+	}
+	// The design contract: "For a ToolCustom outcome, produce a single destination of kind
+	// DestMain carrying the templated name."
+	if len(res.Destinations) != 1 {
+		t.Fatalf("ToolCustom resolution Destinations: want exactly 1 (a single DestMain), got %d; "+
+			"MapTools must populate Destinations for the ToolCustom path", len(res.Destinations))
+	}
+	dest := res.Destinations[0]
+	if dest.Kind != domain.DestMain {
+		t.Errorf("ToolCustom Destinations[0].Kind: want %q, got %q; "+
+			"the custom name must go to the main tools destination", domain.DestMain, dest.Kind)
+	}
+	// The destination must carry the (possibly templated) custom name in its Names slice.
+	if len(dest.Names) == 0 {
+		t.Fatal("ToolCustom Destinations[0].Names is empty; must contain the custom harness tool name")
+	}
+	var found bool
+	for _, n := range dest.Names {
+		if n == "my-mcp-server" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("ToolCustom Destinations[0].Names does not contain %q: %v", "my-mcp-server", dest.Names)
+	}
+}
+
+// --- ToolSkipped / ToolUnmapped: no destinations produced ---
+
+func TestMapTools_Skipped_DestinationsIsEmpty(t *testing.T) {
+	// The design contract states: "For ToolSkipped and ToolUnmapped, produce no destinations."
+	// An empty (nil or zero-length) Destinations slice is the correct representation; any
+	// non-empty Destinations on a skipped tool would be spurious.
+	d := loadMappingDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:     "test-agent",
+		Generic:      []string{"file_read"},
+		SkippedTools: map[string]bool{"file_read": true},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if res.Outcome != domain.ToolSkipped {
+		t.Fatalf("expected ToolSkipped outcome, got %q", res.Outcome)
+	}
+	if len(res.Destinations) != 0 {
+		t.Errorf("ToolSkipped resolution Destinations: want empty, got %d destinations: %+v; "+
+			"skipped tools must produce no destinations", len(res.Destinations), res.Destinations)
+	}
+}
+
+func TestMapTools_Unmapped_DestinationsIsEmpty(t *testing.T) {
+	// The design contract states: "For ToolSkipped and ToolUnmapped, produce no destinations."
+	// "terminal" is absent from the mapping descriptor's Mappings list → ToolUnmapped.
+	d := loadMappingDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey: "test-agent",
+		Generic:  []string{"terminal"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if res.Outcome != domain.ToolUnmapped {
+		t.Fatalf("expected ToolUnmapped outcome, got %q", res.Outcome)
+	}
+	if len(res.Destinations) != 0 {
+		t.Errorf("ToolUnmapped resolution Destinations: want empty, got %d destinations: %+v; "+
+			"unmapped tools must produce no destinations", len(res.Destinations), res.Destinations)
 	}
 }
 
@@ -934,8 +1057,10 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read/readFile"
+      destinations:
+        - to: main
+          names:
+            - "read/readFile"
 frontmatter:
   tools_key: "tools"
 `
