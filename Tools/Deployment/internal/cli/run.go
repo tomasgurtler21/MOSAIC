@@ -42,7 +42,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 		SilenceUsage:  true,
 		// RunE on root handles the case where no subcommand is provided.
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return fmt.Errorf("a subcommand is required: deploy or update")
+			return fmt.Errorf("a subcommand is required: deploy, update, or workflows")
 		},
 	}
 	// Redirect cobra's own output (help, usage, errors) to errOut so it does not
@@ -184,7 +184,79 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 	updateCmd.Flags().BoolVar(&updateDryRun, "dry-run", false, "Dry run mode; no files are written")
 	updateCmd.Flags().BoolVar(&updateAutoConfirm, "auto-confirm", false, "Auto-confirm the deployment plan without prompting")
 
-	root.AddCommand(deployCmd, updateCmd)
+	// ------------------------------------------------------------------
+	// workflows subcommand
+	// ------------------------------------------------------------------
+	var (
+		workflowsHarness     string
+		workflowsWorkspace   string
+		workflowsWorkflows   string
+		workflowsConflict    string
+		workflowsOutput      string
+		workflowsDryRun      bool
+		workflowsAutoConfirm bool
+	)
+
+	workflowsCmd := &cobra.Command{
+		Use:           "workflows",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Parse --conflict (same valid values and "set only when explicitly provided" rule as update).
+			var conflictDefault domain.ConflictDecision
+			switch strings.ToLower(workflowsConflict) {
+			case "", "skip":
+				conflictDefault = domain.DecisionSkip
+			case "overwrite":
+				conflictDefault = domain.DecisionOverwrite
+			case "backup":
+				conflictDefault = domain.DecisionBackupThenOverwrite
+			default:
+				fmt.Fprintf(errOut, "invalid --conflict value %q; valid values: skip, overwrite, backup\n", workflowsConflict)
+				exitCode = ExitUsage
+				return nil
+			}
+
+			req := app.WorkflowUpdateRequest{
+				HarnessID:       workflowsHarness,
+				WorkspacePath:   workflowsWorkspace,
+				DryRun:          workflowsDryRun,
+				AutoConfirmPlan: workflowsAutoConfirm,
+			}
+
+			// Only set ConflictDefault when the flag was explicitly provided.
+			if workflowsConflict != "" {
+				req.ConflictDefault = conflictDefault
+			}
+
+			// Parse --workflows as a comma-separated list into WorkflowIDs. Nil when absent
+			// so the interactive selection fires (CD-6 pre-answer convention).
+			if workflowsWorkflows != "" {
+				parts := strings.Split(workflowsWorkflows, ",")
+				ids := make([]string, 0, len(parts))
+				for _, p := range parts {
+					if t := strings.TrimSpace(p); t != "" {
+						ids = append(ids, t)
+					}
+				}
+				req.WorkflowIDs = ids
+			}
+
+			summary, svcErr := svc.UpdateWorkflows(ctx, req)
+			exitCode = renderOutput(out, errOut, workflowsOutput, summary, svcErr)
+			return nil
+		},
+	}
+
+	workflowsCmd.Flags().StringVar(&workflowsHarness, "harness", "", "Harness ID")
+	workflowsCmd.Flags().StringVar(&workflowsWorkspace, "workspace", "", "Workspace path")
+	workflowsCmd.Flags().StringVar(&workflowsWorkflows, "workflows", "", "Comma-separated workflow IDs to deploy (replaces the current set)")
+	workflowsCmd.Flags().StringVar(&workflowsConflict, "conflict", "", "How to handle locally-modified files (skip|overwrite|backup)")
+	workflowsCmd.Flags().StringVar(&workflowsOutput, "output", "", "Output format (json)")
+	workflowsCmd.Flags().BoolVar(&workflowsDryRun, "dry-run", false, "Dry run mode; no files are written")
+	workflowsCmd.Flags().BoolVar(&workflowsAutoConfirm, "auto-confirm", false, "Auto-confirm the deployment plan without prompting")
+
+	root.AddCommand(deployCmd, updateCmd, workflowsCmd)
 	root.SetArgs(args)
 
 	if err := root.Execute(); err != nil {

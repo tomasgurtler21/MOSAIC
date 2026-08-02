@@ -31,9 +31,21 @@ var modeItems = []widgets.ListItem{
 			"Use this after updating the generic agents or when a harness\n" +
 			"descriptor has changed.",
 	},
+	{
+		ID:          string(domain.ModeWorkflowsOnly),
+		Label:       "Update workflows only",
+		Description: "Replace the workflow set in an already-deployed orchestrator.",
+		Detail: "Only the orchestrator file is rewritten — no agent, skill, or hook\n" +
+			"artifact is touched, even if stale.\n\n" +
+			"The selected workflow set fully replaces the currently deployed set;\n" +
+			"workflows that are not reselected are removed from the orchestrator.\n\n" +
+			"Use this to add, remove, or swap workflows without disturbing the rest\n" +
+			"of the deployment.",
+	},
 }
 
-// ModeScreen presents the two run modes: deploy-new and update-existing.
+// ModeScreen presents the available run modes: deploy-new, update-existing, and
+// workflows-only.
 //
 // Navigation contract:
 //   - Enter -> Done() == true, SelectedMode() returns the chosen RunMode.

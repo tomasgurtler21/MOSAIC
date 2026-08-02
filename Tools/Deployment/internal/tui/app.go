@@ -686,6 +686,17 @@ func (m *rootModel) startService() tea.Cmd {
 			}
 			return runDoneMsg{summary: summary}
 
+		case domain.ModeWorkflowsOnly:
+			// WorkflowIDs is left nil so the flow asks for workflow selection interactively.
+			summary, err := svc.UpdateWorkflows(ctx, app.WorkflowUpdateRequest{
+				HarnessID:     sel.harnessID,
+				WorkspacePath: sel.workspacePath,
+			})
+			if err != nil {
+				return runErrorMsg{err: err}
+			}
+			return runDoneMsg{summary: summary}
+
 		default:
 			return runErrorMsg{err: fmt.Errorf("unknown mode: %q", sel.mode)}
 		}

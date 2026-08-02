@@ -73,6 +73,8 @@ func buildReviewLines(p domain.Plan) []reviewLine {
 	mode := "Deploy new"
 	if p.Mode == domain.ModeUpdate {
 		mode = "Update"
+	} else if p.Mode == domain.ModeWorkflowsOnly {
+		mode = "Update workflows only"
 	}
 	add(fmt.Sprintf("Mode: %s  Harness: %s  Workspace: %s",
 		mode, p.Harness.DisplayName, p.WorkspacePath), "muted")

@@ -188,3 +188,7 @@ func (s *countingService) Update(ctx context.Context, req app.UpdateRequest) (do
 	}
 	return domain.RunSummary{Outcome: domain.OutcomeSuccess}, nil
 }
+
+func (s *countingService) UpdateWorkflows(ctx context.Context, req app.WorkflowUpdateRequest) (domain.RunSummary, error) {
+	return domain.RunSummary{Outcome: domain.OutcomeSuccess}, nil
+}

@@ -241,6 +241,140 @@ func TestModeScreen_View_ShowsBothModes(t *testing.T) {
 	}
 }
 
+// TestModeScreen_View_ShowsAllThreeModes verifies that the rendered view presents all three
+// run modes including the workflows-only mode so every available operation is discoverable
+// from the mode selection screen.
+func TestModeScreen_View_ShowsAllThreeModes(t *testing.T) {
+	// Arrange
+	s := newModeScreen()
+
+	// Act
+	view := s.View()
+
+	// Assert — all three modes must be visible.
+	collapsed := collapseWhitespace(view)
+	if !strings.Contains(collapsed, "Deploy new") {
+		t.Errorf("view does not mention 'Deploy new':\n%s", view)
+	}
+	if !strings.Contains(collapsed, "Update existing") {
+		t.Errorf("view does not mention 'Update existing':\n%s", view)
+	}
+	if !strings.Contains(collapsed, "workflows") && !strings.Contains(collapsed, "Workflows") {
+		t.Errorf("view does not mention 'workflows' for the third mode entry:\n%s", view)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Third mode — workflows-only
+// ---------------------------------------------------------------------------
+
+// TestModeScreen_DownDown_Enter_SelectsWorkflowsOnlyMode verifies that pressing Down twice
+// and then Enter selects the workflows-only mode, which is the third entry in the mode list.
+func TestModeScreen_DownDown_Enter_SelectsWorkflowsOnlyMode(t *testing.T) {
+	// Arrange
+	s := newModeScreen()
+
+	// Act — navigate to the third item and confirm.
+	s.Update(modeDownKey()) // deploy-new → update
+	s.Update(modeDownKey()) // update → workflows-only
+	s.Update(modeEnterKey())
+
+	// Assert
+	if !s.Done() {
+		t.Error("Done() = false after Down+Down+Enter; want true (third item must be selectable)")
+	}
+	if s.SelectedMode() != domain.ModeWorkflowsOnly {
+		t.Errorf("SelectedMode() = %q after Down+Down+Enter; want %q (workflows-only must be the third list entry)",
+			s.SelectedMode(), domain.ModeWorkflowsOnly)
+	}
+}
+
+// TestModeScreen_WorkflowsOnly_YieldsCorrectRunMode verifies that when the workflows-only
+// mode is selected, SelectedMode() returns exactly domain.ModeWorkflowsOnly. The string
+// value must match the constant so both frontends produce the same mode value.
+func TestModeScreen_WorkflowsOnly_YieldsCorrectRunMode(t *testing.T) {
+	// Arrange
+	s := newModeScreen()
+
+	// Act — navigate to workflows-only (third item) and confirm.
+	s.Update(modeDownKey())
+	s.Update(modeDownKey())
+	s.Update(modeEnterKey())
+
+	// Assert — the concrete string value must equal the domain constant, not just be non-empty.
+	got := s.SelectedMode()
+	want := domain.ModeWorkflowsOnly
+	if got != want {
+		t.Errorf("SelectedMode() = %q; want %q — the mode value must match the domain constant exactly", got, want)
+	}
+}
+
+// TestModeScreen_WorkflowsOnly_DetailMentionsOrchestratorAndRemoval verifies that after
+// navigating to the workflows-only entry, the detail text describes the key behaviour: only
+// the orchestrator is rewritten, and unselected workflows are removed. Users must be able to
+// understand the destructive nature of the operation from the detail pane alone.
+func TestModeScreen_WorkflowsOnly_DetailMentionsOrchestratorAndRemoval(t *testing.T) {
+	// Arrange — navigate to the third item so its detail text is shown.
+	s := newModeScreen()
+	s.Update(modeDownKey()) // deploy-new → update
+	s.Update(modeDownKey()) // update → workflows-only
+
+	// Act
+	view := s.View()
+
+	// Assert — the detail pane (shown in the right column) must mention both concepts.
+	collapsed := collapseWhitespace(view)
+	if !strings.Contains(collapsed, "orchestrator") {
+		t.Errorf("view after navigating to workflows-only does not mention 'orchestrator' in the detail text; "+
+			"the user must understand that only the orchestrator file is affected:\n%s", view)
+	}
+	if !strings.Contains(collapsed, "removed") && !strings.Contains(collapsed, "remove") {
+		t.Errorf("view after navigating to workflows-only does not mention workflow removal in the detail text; "+
+			"the user must be warned that unselected workflows are removed:\n%s", view)
+	}
+}
+
+// TestModeScreen_KeyboardOnly_CanSelectWorkflowsOnly verifies that the workflows-only mode
+// is reachable using the keyboard alone: navigate down twice with arrow keys and confirm
+// with Enter. No mouse event is required.
+func TestModeScreen_KeyboardOnly_CanSelectWorkflowsOnly(t *testing.T) {
+	// Arrange
+	s := newModeScreen()
+
+	// Act — keyboard-only: Down+Down+Enter
+	s.Update(tea.KeyMsg{Type: tea.KeyDown})
+	s.Update(tea.KeyMsg{Type: tea.KeyDown})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Assert
+	if !s.Done() {
+		t.Error("Done() = false after keyboard Down+Down+Enter; workflows-only must be reachable by keyboard alone")
+	}
+	if s.SelectedMode() != domain.ModeWorkflowsOnly {
+		t.Errorf("SelectedMode() = %q; want %q", s.SelectedMode(), domain.ModeWorkflowsOnly)
+	}
+}
+
+// TestModeScreen_ThirdEntry_DoesNotConfirmOnSecondDown verifies that the second Down press
+// does not confirm the selection prematurely — it moves to the third item. Only Enter
+// confirms. This guards against a bug where a three-item list wraps or stops at index 1.
+func TestModeScreen_ThirdEntry_DoesNotConfirmOnSecondDown(t *testing.T) {
+	// Arrange
+	s := newModeScreen()
+
+	// Act — press Down twice (moves to third item); do NOT press Enter.
+	s.Update(modeDownKey()) // first Down
+	s.Update(modeDownKey()) // second Down
+
+	// Assert — Done must still be false; only Enter can confirm.
+	if s.Done() {
+		t.Error("Done() = true after two Down presses without Enter; Down must navigate, not confirm")
+	}
+	if s.Back() {
+		t.Error("Back() = true after two Down presses; Down must not trigger back navigation")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Keyboard-only operability
 // ---------------------------------------------------------------------------

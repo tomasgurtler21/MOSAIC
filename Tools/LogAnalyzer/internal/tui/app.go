@@ -18,6 +18,11 @@ type Options struct {
 	Service     *app.Service
 	InitialPath string // from --path, may be empty
 	Version     string
+	// Interaction and Questions, when both non-nil, are used instead of creating
+	// a new pair internally. The composition root supplies them so the service and
+	// the TUI model share the same Interaction channel.
+	Interaction *Interaction
+	Questions   <-chan Pending
 }
 
 // screenName identifies the currently active screen.
@@ -47,7 +52,8 @@ type Model struct {
 	theme    tuicommon.Theme
 	interact *Interaction
 	questions <-chan Pending
-	cancel   context.CancelFunc
+	ctx    context.Context    // cancelled when the model tears down
+	cancel context.CancelFunc // call to stop in-flight analysis goroutines
 
 	// analysisPath is the explicit path for the next analysis run.
 	// An empty string means "no explicit path" (the service will prompt).
@@ -83,17 +89,29 @@ type Model struct {
 
 // New constructs the top-level model. The model owns the Interaction and its
 // question channel; both are wired before the bubbletea program starts.
+//
+// When opts.Interaction and opts.Questions are both non-nil (supplied by the
+// composition root), those values are used directly so the service and the model
+// share the same channel. Otherwise a new pair is created internally.
 func New(opts Options) Model {
 	ctx, cancel := context.WithCancel(context.Background())
-	_ = ctx // ctx is stored via cancel; individual commands capture it when needed
 	theme := tuicommon.DefaultTheme()
-	interact, questions := NewInteraction()
+
+	var interact *Interaction
+	var questions <-chan Pending
+	if opts.Interaction != nil && opts.Questions != nil {
+		interact = opts.Interaction
+		questions = opts.Questions
+	} else {
+		interact, questions = NewInteraction()
+	}
 
 	return Model{
 		opts:         opts,
 		theme:        theme,
 		interact:     interact,
 		questions:    questions,
+		ctx:          ctx,
 		cancel:       cancel,
 		analysisPath: opts.InitialPath,
 		screen:       screenLoading,
@@ -130,10 +148,11 @@ func (m Model) Init() tea.Cmd {
 }
 
 // buildAnalysisCmd returns a Cmd that runs Service.Analyze in a goroutine.
+// The analysis runs under m.ctx so it is cancelled when the model tears down.
 func (m Model) buildAnalysisCmd() tea.Cmd {
 	svc := m.opts.Service
 	path := m.analysisPath
-	ctx, _ := context.WithCancel(context.Background()) // individual command context
+	ctx := m.ctx
 	return func() tea.Msg {
 		result, err := svc.Analyze(ctx, app.Request{
 			ExplicitPath:       path,
@@ -161,8 +180,9 @@ func waitForPending(questions <-chan Pending, done <-chan struct{}) tea.Cmd {
 
 // Update processes an incoming message and drives the screen state machine.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Global ctrl+c: cancel and quit.
+	// Global ctrl+c: cancel in-flight analysis and quit.
 	if key, ok := msg.(tea.KeyMsg); ok && matchesKey(key, globalKeys.Cancel) {
+		m.cancel()
 		m.interact.Close()
 		m.replyToPending(answerMsg{
 			choiceAns: interaction.ChoiceAnswer{Status: interaction.Cancelled},

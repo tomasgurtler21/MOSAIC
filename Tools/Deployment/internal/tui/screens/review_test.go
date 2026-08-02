@@ -382,6 +382,63 @@ func TestReviewScreen_View_BackupHint_VisibleAtNonZeroScrollOffset(t *testing.T)
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Workflows-only mode rendering
+// ---------------------------------------------------------------------------
+
+// TestReviewScreen_WorkflowsOnlyMode_ShowsModeHeader verifies that the ReviewScreen renders
+// the correct mode name "Update workflows only" in its header when given a plan whose mode
+// is ModeWorkflowsOnly. The header must not fall through to the update-mode text.
+func TestReviewScreen_WorkflowsOnlyMode_ShowsModeHeader(t *testing.T) {
+	// Arrange: a plan whose mode is ModeWorkflowsOnly, with one item to give the screen
+	// content to render.
+	p := planWithItems(domain.ModeWorkflowsOnly, []domain.PlanItem{
+		{
+			Ref:        agentRef("orchestrator"),
+			Action:     domain.ActionUpdate,
+			TargetPath: "Agents/orchestrator.agent.md",
+			Stale:      []domain.VersionDelta{{Field: "workflows", Deployed: "a", Source: "b"}},
+		},
+	})
+	s := screens.NewReviewScreen(p, 80, 40, plainStyles())
+
+	// Act
+	view := collapseWhitespace(s.View())
+
+	// Assert: the mode header must say "workflows only", not the plain "Update" label.
+	if !strings.Contains(view, "workflows only") && !strings.Contains(view, "Workflows only") &&
+		!strings.Contains(view, "workflows-only") && !strings.Contains(view, "Update workflows") {
+		t.Errorf("review view for ModeWorkflowsOnly does not show the workflows-only mode name; "+
+			"the mode header must identify the operation clearly:\n%s", s.View())
+	}
+}
+
+// TestReviewScreen_WorkflowsOnlyMode_DoesNotFallThroughToUpdateText verifies that the review
+// screen for ModeWorkflowsOnly does not show the plain "Update" mode label that is used for
+// ModeUpdate plans. The two modes must not be visually indistinguishable.
+func TestReviewScreen_WorkflowsOnlyMode_DoesNotFallThroughToUpdateText(t *testing.T) {
+	// Arrange: two plans — one workflows-only, one plain update — rendered side-by-side.
+	workflowsPlan := planWithItems(domain.ModeWorkflowsOnly, []domain.PlanItem{
+		{Ref: agentRef("orchestrator"), Action: domain.ActionUpdate},
+	})
+	updatePlan := planWithItems(domain.ModeUpdate, []domain.PlanItem{
+		{Ref: agentRef("orchestrator"), Action: domain.ActionUpdate},
+	})
+
+	wfScreen := screens.NewReviewScreen(workflowsPlan, 80, 40, plainStyles())
+	upScreen := screens.NewReviewScreen(updatePlan, 80, 40, plainStyles())
+
+	wfView := collapseWhitespace(wfScreen.View())
+	upView := collapseWhitespace(upScreen.View())
+
+	// The mode portion of the header must differ between the two screens.
+	// If both say "Mode: Update" they are indistinguishable, which is wrong.
+	if wfView == upView {
+		t.Error("review screen for ModeWorkflowsOnly and ModeUpdate render identically; " +
+			"the two modes must produce visually distinct mode headers so the user knows which operation is planned")
+	}
+}
+
 // TestReviewScreen_View_BackupHint_FitsWithinConfiguredWidth verifies that the backup hint
 // renders within the configured terminal width, consistent with every other line on the screen.
 // Oversized lines would corrupt the layout on narrow terminals.

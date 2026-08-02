@@ -29,6 +29,9 @@ func (s *stubRoutingService) DeployNew(_ context.Context, _ app.DeployRequest) (
 func (s *stubRoutingService) Update(_ context.Context, _ app.UpdateRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{}, nil
 }
+func (s *stubRoutingService) UpdateWorkflows(_ context.Context, _ app.WorkflowUpdateRequest) (domain.RunSummary, error) {
+	return domain.RunSummary{}, nil
+}
 
 // newRoutingModel returns a rootModel in screenRunning state (simulating mid-flow) with a
 // nil service, since routing tests only exercise the question overlay system.

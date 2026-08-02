@@ -33,11 +33,13 @@ import (
 // without consulting Interaction. It lets flow tests verify keyboard navigation without
 // exercising the question overlay system, which is covered by interaction_routing_test.go.
 type stubFlowService struct {
-	harnesses []domain.HarnessRef
-	deploy    domain.RunSummary
-	update    domain.RunSummary
-	deployErr error
-	updateErr error
+	harnesses       []domain.HarnessRef
+	deploy          domain.RunSummary
+	update          domain.RunSummary
+	workflows       domain.RunSummary
+	deployErr       error
+	updateErr       error
+	workflowsErr    error
 }
 
 func (s *stubFlowService) ListHarnesses() []domain.HarnessRef { return s.harnesses }
@@ -46,6 +48,9 @@ func (s *stubFlowService) DeployNew(_ context.Context, _ app.DeployRequest) (dom
 }
 func (s *stubFlowService) Update(_ context.Context, _ app.UpdateRequest) (domain.RunSummary, error) {
 	return s.update, s.updateErr
+}
+func (s *stubFlowService) UpdateWorkflows(_ context.Context, _ app.WorkflowUpdateRequest) (domain.RunSummary, error) {
+	return s.workflows, s.workflowsErr
 }
 
 // ---------------------------------------------------------------------------
@@ -301,9 +306,9 @@ func TestFullKeyboardFlow_Update_BackAndReselect(t *testing.T) {
 		t.Fatalf("screen = %v after workspace Esc; want screenMode", m.screen)
 	}
 
-	// Re-select update and proceed.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // mode → workspace
+	// Re-select update and proceed. After back-navigation the cursor remains on the
+	// previously selected item (update = index 1); no Down press is needed.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // mode → workspace (cursor already on update)
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // workspace → running
 	_, _ = m.Update(runCmd(cmd))                        // run → done
@@ -352,6 +357,96 @@ func TestFullKeyboardFlow_ServiceError_IsKeyboardDismissible(t *testing.T) {
 	// Assert
 	if quit == nil {
 		t.Error("cmd = nil after 'q' on error screen; want tea.Quit command")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Workflows-only keyboard flow
+// ---------------------------------------------------------------------------
+
+// TestFullKeyboardFlow_WorkflowsOnly_StartService_CallsUpdateWorkflows verifies that when the
+// mode screen's third item (workflows-only) is selected and the workspace is confirmed,
+// startService dispatches to svc.UpdateWorkflows rather than DeployNew or Update.
+func TestFullKeyboardFlow_WorkflowsOnly_StartService_CallsUpdateWorkflows(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := newFlowSvc(workspace)
+	svc.workflows = domain.RunSummary{
+		Mode:           domain.ModeWorkflowsOnly,
+		WorkspacePath:  workspace,
+		DeploymentRoot: workspace + "/.ai",
+		Outcome:        domain.OutcomeSuccess,
+	}
+	m := newFlowModel(svc, workspace)
+
+	// Step 1: Harness screen.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.screen != screenMode {
+		t.Fatalf("screen = %v after harness Enter; want screenMode", m.screen)
+	}
+
+	// Step 2: Mode screen — Down twice moves to the third item (workflows-only); Enter confirms.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // deploy-new → update
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // update → workflows-only
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select
+
+	if m.screen != screenWorkspace {
+		t.Fatalf("screen = %v after two Down+Enter on mode; want screenWorkspace", m.screen)
+	}
+	if m.selections.mode != domain.ModeWorkflowsOnly {
+		t.Fatalf("selections.mode = %q; want ModeWorkflowsOnly", m.selections.mode)
+	}
+
+	// Step 3: Workspace screen — Enter confirms.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.screen != screenRunning {
+		t.Fatalf("screen = %v after workspace Enter; want screenRunning", m.screen)
+	}
+
+	// Step 4: Execute the service command; the stub returns a successful RunSummary.
+	msg := runCmd(cmd)
+	if msg == nil {
+		t.Fatal("startService returned nil message; want runDoneMsg or runErrorMsg")
+	}
+	_, _ = m.Update(msg)
+
+	// Assert: flow reached summary screen — UpdateWorkflows was dispatched correctly.
+	if m.screen != screenDone {
+		if m.errMsg != "" {
+			t.Fatalf("screen = %v with error %q; want screenDone (UpdateWorkflows must be called, not errored)", m.screen, m.errMsg)
+		}
+		t.Fatalf("screen = %v after workflows-only run; want screenDone", m.screen)
+	}
+}
+
+// TestModeScreen_HasThreeItems verifies that the mode screen presents three mode entries so
+// that the workflows-only mode is discoverable through the TUI.
+func TestModeScreen_HasThreeItems(t *testing.T) {
+	// Arrange — navigate to the mode screen.
+	workspace := t.TempDir()
+	m := newFlowModel(newFlowSvc(workspace), workspace)
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // advance to mode screen
+	if m.screen != screenMode {
+		t.Fatalf("precondition: screen = %v, want screenMode", m.screen)
+	}
+
+	// Move the cursor through all three items (Down twice) and verify none of the presses
+	// immediately commits the selection (i.e., the list has a third item rather than
+	// wrapping or stopping at the second).
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // deploy-new → update
+	if m.screen != screenMode {
+		t.Fatal("Down from first mode item left screenMode; expected second item")
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // update → workflows-only
+	if m.screen != screenMode {
+		t.Fatal("Down from second mode item left screenMode; expected third item")
+	}
+
+	// Confirm the third item and verify the mode is set to ModeWorkflowsOnly.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.selections.mode != domain.ModeWorkflowsOnly {
+		t.Errorf("selections.mode = %q after selecting third mode item; want ModeWorkflowsOnly — mode screen may be missing the third entry", m.selections.mode)
 	}
 }
 

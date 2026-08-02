@@ -321,3 +321,93 @@ func TestSummaryScreen_Scroll_DoesNotPanic(t *testing.T) {
 		t.Error("View() returned empty string after scrolling; want non-empty")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Workflows-only mode rendering
+// ---------------------------------------------------------------------------
+
+// TestSummaryScreen_WorkflowsOnlyMode_ShowsModeLabel verifies that the SummaryScreen renders
+// the correct mode label "Update workflows only" when the RunSummary carries ModeWorkflowsOnly.
+// The summary must not fall through to the plain "Update" label used for ModeUpdate runs.
+func TestSummaryScreen_WorkflowsOnlyMode_ShowsModeLabel(t *testing.T) {
+	// Arrange: a RunSummary for a workflows-only run.
+	summary := domain.RunSummary{
+		Mode:           domain.ModeWorkflowsOnly,
+		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
+		WorkspacePath:  "/workspace",
+		DeploymentRoot: "/workspace/.ai",
+		Fallback:       domain.FallbackNone,
+		Actions: []domain.ActionRecord{
+			{Ref: agentRef("orchestrator"), Taken: domain.TakenUpdated},
+		},
+		Outcome: domain.OutcomeSuccess,
+	}
+	s := screens.NewSummaryScreen(summary, 80, 40, plainStyles())
+
+	// Act
+	view := collapseWhitespace(s.View())
+
+	// Assert: the mode line must reflect "workflows only", not the generic "Update" or "Deploy new".
+	if !strings.Contains(view, "workflows only") && !strings.Contains(view, "Workflows only") &&
+		!strings.Contains(view, "workflows-only") && !strings.Contains(view, "Update workflows") {
+		t.Errorf("summary view for ModeWorkflowsOnly does not show the workflows-only mode label; "+
+			"Mode: must identify the operation as workflows-only, not as a generic update:\n%s", s.View())
+	}
+}
+
+// TestSummaryScreen_WorkflowsOnlyMode_DoesNotShowDeployNewLabel verifies that a workflows-only
+// run summary does not mistakenly display the "Deploy new" label. Each of the three run modes
+// must show its own distinct label.
+func TestSummaryScreen_WorkflowsOnlyMode_DoesNotShowDeployNewLabel(t *testing.T) {
+	// Arrange
+	summary := domain.RunSummary{
+		Mode:           domain.ModeWorkflowsOnly,
+		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
+		WorkspacePath:  "/workspace",
+		DeploymentRoot: "/workspace/.ai",
+		Fallback:       domain.FallbackNone,
+		Outcome:        domain.OutcomeSuccess,
+	}
+	s := screens.NewSummaryScreen(summary, 80, 40, plainStyles())
+
+	// Act
+	view := collapseWhitespace(s.View())
+
+	// Assert: "Deploy new" must not appear in the mode label for a workflows-only run.
+	if strings.Contains(view, "Deploy new") {
+		t.Errorf("summary view for ModeWorkflowsOnly shows 'Deploy new' mode label; "+
+			"workflows-only runs must use a distinct mode label:\n%s", s.View())
+	}
+}
+
+// TestSummaryScreen_AllThreeModes_ShowDistinctModeLabels is a table-driven test verifying
+// that each of the three run modes produces a distinct mode label in the summary view.
+// No two modes may render identically in the mode line.
+func TestSummaryScreen_AllThreeModes_ShowDistinctModeLabels(t *testing.T) {
+	baseSummary := func(mode domain.RunMode) domain.RunSummary {
+		return domain.RunSummary{
+			Mode:    mode,
+			Outcome: domain.OutcomeSuccess,
+		}
+	}
+
+	modes := []domain.RunMode{domain.ModeDeployNew, domain.ModeUpdate, domain.ModeWorkflowsOnly}
+	views := make(map[domain.RunMode]string, len(modes))
+	for _, mode := range modes {
+		s := screens.NewSummaryScreen(baseSummary(mode), 80, 40, plainStyles())
+		views[mode] = collapseWhitespace(s.View())
+	}
+
+	// Each pair must produce a different rendered view (at minimum, the mode line differs).
+	for i, a := range modes {
+		for j, b := range modes {
+			if i >= j {
+				continue
+			}
+			if views[a] == views[b] {
+				t.Errorf("summary views for %q and %q are identical; "+
+					"each run mode must produce a distinct mode label in the summary", a, b)
+			}
+		}
+	}
+}

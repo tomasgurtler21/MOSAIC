@@ -41,6 +41,9 @@ func (s *stubNavService) DeployNew(_ context.Context, _ app.DeployRequest) (doma
 func (s *stubNavService) Update(_ context.Context, _ app.UpdateRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{}, nil
 }
+func (s *stubNavService) UpdateWorkflows(_ context.Context, _ app.WorkflowUpdateRequest) (domain.RunSummary, error) {
+	return domain.RunSummary{}, nil
+}
 
 // ---------------------------------------------------------------------------
 // Helpers

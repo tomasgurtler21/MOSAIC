@@ -85,6 +85,8 @@ func buildSummaryLines(s domain.RunSummary) []summaryLine {
 	mode := "Deploy new"
 	if s.Mode == domain.ModeUpdate {
 		mode = "Update"
+	} else if s.Mode == domain.ModeWorkflowsOnly {
+		mode = "Update workflows only"
 	}
 	add(fmt.Sprintf("Mode:             %s", mode), "muted")
 	add(fmt.Sprintf("Harness:          %s", s.Harness.DisplayName), "muted")

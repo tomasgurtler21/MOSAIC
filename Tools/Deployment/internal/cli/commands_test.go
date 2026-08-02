@@ -625,3 +625,409 @@ func TestRun_OutputFlag_Json_IsRecognised(t *testing.T) {
 		t.Errorf("exit code = ExitUsage; --output json must be a valid flag value")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// workflows subcommand — dispatch and flag mapping
+// ---------------------------------------------------------------------------
+
+// TestRun_WorkflowsSubcommand_CallsUpdateWorkflows verifies that the "workflows" subcommand
+// dispatches to svc.UpdateWorkflows and does not call svc.DeployNew or svc.Update.
+func TestRun_WorkflowsSubcommand_CallsUpdateWorkflows(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{
+		workflowsResp: domain.RunSummary{
+			Mode: domain.ModeWorkflowsOnly, WorkspacePath: workspace,
+			Outcome: domain.OutcomeSuccess,
+		},
+	}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"workflows", "--harness", "stub-harness", "--workspace", workspace, "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
+	}
+	if svc.workflowsReq == nil {
+		t.Error("svc.UpdateWorkflows was not called; workflows subcommand must call svc.UpdateWorkflows")
+	}
+	if svc.deployReq != nil {
+		t.Error("svc.DeployNew was called; workflows subcommand must not call svc.DeployNew")
+	}
+	if svc.updateReq != nil {
+		t.Error("svc.Update was called; workflows subcommand must not call svc.Update")
+	}
+}
+
+// TestRun_WorkflowsSubcommand_HarnessFlag_PopulatesRequest verifies that --harness on the
+// workflows subcommand populates WorkflowUpdateRequest.HarnessID.
+func TestRun_WorkflowsSubcommand_HarnessFlag_PopulatesRequest(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{
+		workflowsResp: domain.RunSummary{Outcome: domain.OutcomeSuccess},
+	}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"workflows", "--harness", "my-harness", "--workspace", workspace, "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
+	}
+	if svc.workflowsReq == nil {
+		t.Fatal("UpdateWorkflows was not called")
+	}
+	if svc.workflowsReq.HarnessID != "my-harness" {
+		t.Errorf("HarnessID = %q, want %q", svc.workflowsReq.HarnessID, "my-harness")
+	}
+}
+
+// TestRun_WorkflowsSubcommand_WorkspacFlag_PopulatesRequest verifies that --workspace on the
+// workflows subcommand populates WorkflowUpdateRequest.WorkspacePath.
+func TestRun_WorkflowsSubcommand_WorkspacFlag_PopulatesRequest(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{
+		workflowsResp: domain.RunSummary{Outcome: domain.OutcomeSuccess},
+	}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"workflows", "--harness", "stub-harness", "--workspace", workspace, "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
+	}
+	if svc.workflowsReq == nil {
+		t.Fatal("UpdateWorkflows was not called")
+	}
+	if svc.workflowsReq.WorkspacePath != workspace {
+		t.Errorf("WorkspacePath = %q, want %q", svc.workflowsReq.WorkspacePath, workspace)
+	}
+}
+
+// TestRun_WorkflowsSubcommand_WorkflowsFlag_PopulatesWorkflowIDs verifies that --workflows
+// parses a comma-separated list into WorkflowUpdateRequest.WorkflowIDs.
+func TestRun_WorkflowsSubcommand_WorkflowsFlag_PopulatesWorkflowIDs(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{
+		workflowsResp: domain.RunSummary{Outcome: domain.OutcomeSuccess},
+	}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"workflows", "--harness", "stub-harness", "--workspace", workspace,
+			"--workflows", "wf-a,wf-b,wf-c", "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
+	}
+	if svc.workflowsReq == nil {
+		t.Fatal("UpdateWorkflows was not called")
+	}
+	want := []string{"wf-a", "wf-b", "wf-c"}
+	got := svc.workflowsReq.WorkflowIDs
+	if len(got) != len(want) {
+		t.Fatalf("WorkflowIDs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("WorkflowIDs[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestRun_WorkflowsSubcommand_WorkflowsFlag_Absent_WorkflowIDsIsNil verifies that omitting
+// --workflows leaves WorkflowUpdateRequest.WorkflowIDs nil so the interactive prompt fires.
+func TestRun_WorkflowsSubcommand_WorkflowsFlag_Absent_WorkflowIDsIsNil(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{
+		workflowsResp: domain.RunSummary{Outcome: domain.OutcomeSuccess},
+	}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"workflows", "--harness", "stub-harness", "--workspace", workspace, "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
+	}
+	if svc.workflowsReq == nil {
+		t.Fatal("UpdateWorkflows was not called")
+	}
+	if svc.workflowsReq.WorkflowIDs != nil {
+		t.Errorf("WorkflowIDs = %v, want nil; omitting --workflows must leave WorkflowIDs nil", svc.workflowsReq.WorkflowIDs)
+	}
+}
+
+// TestRun_WorkflowsSubcommand_ConflictFlag_InvalidValue_ReturnsExitUsage verifies that an
+// invalid --conflict value on the workflows subcommand returns ExitUsage.
+func TestRun_WorkflowsSubcommand_ConflictFlag_InvalidValue_ReturnsExitUsage(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"workflows", "--harness", "stub-harness", "--workspace", workspace,
+			"--conflict", "not-valid", "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want %d (ExitUsage); an invalid --conflict value must be rejected", code, cli.ExitUsage)
+	}
+}
+
+// TestRun_WorkflowsSubcommand_ConflictFlag_Overwrite_PopulatesConflictDefault verifies that
+// workflows --conflict overwrite populates WorkflowUpdateRequest.ConflictDefault.
+func TestRun_WorkflowsSubcommand_ConflictFlag_Overwrite_PopulatesConflictDefault(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{
+		workflowsResp: domain.RunSummary{Outcome: domain.OutcomeSuccess},
+	}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"workflows", "--harness", "stub-harness", "--workspace", workspace,
+			"--conflict", "overwrite", "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
+	}
+	if svc.workflowsReq == nil {
+		t.Fatal("UpdateWorkflows was not called")
+	}
+	if svc.workflowsReq.ConflictDefault != domain.DecisionOverwrite {
+		t.Errorf("ConflictDefault = %q, want %q", svc.workflowsReq.ConflictDefault, domain.DecisionOverwrite)
+	}
+}
+
+// TestRun_WorkflowsSubcommand_ConflictFlag_Backup_PopulatesConflictDefault verifies that
+// workflows --conflict backup populates WorkflowUpdateRequest.ConflictDefault with the
+// backup-then-overwrite decision value.
+func TestRun_WorkflowsSubcommand_ConflictFlag_Backup_PopulatesConflictDefault(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{
+		workflowsResp: domain.RunSummary{Outcome: domain.OutcomeSuccess},
+	}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"workflows", "--harness", "stub-harness", "--workspace", workspace,
+			"--conflict", "backup", "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
+	}
+	if svc.workflowsReq == nil {
+		t.Fatal("UpdateWorkflows was not called")
+	}
+	if svc.workflowsReq.ConflictDefault != domain.DecisionBackupThenOverwrite {
+		t.Errorf("ConflictDefault = %q, want %q (backup-then-overwrite)",
+			svc.workflowsReq.ConflictDefault, domain.DecisionBackupThenOverwrite)
+	}
+}
+
+// TestRun_WorkflowsSubcommand_ConflictFlag_Absent_DoesNotSetConflictDefault verifies the
+// "only set when the flag was explicitly provided" rule: omitting --conflict must leave
+// ConflictDefault at its zero value so that interactive conflict prompts fire at runtime.
+func TestRun_WorkflowsSubcommand_ConflictFlag_Absent_DoesNotSetConflictDefault(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{
+		workflowsResp: domain.RunSummary{Outcome: domain.OutcomeSuccess},
+	}
+
+	// Act — no --conflict flag
+	code := cli.Run(context.Background(),
+		[]string{"workflows", "--harness", "stub-harness", "--workspace", workspace, "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
+	}
+	if svc.workflowsReq == nil {
+		t.Fatal("UpdateWorkflows was not called")
+	}
+	// ConflictDefault must be the zero value (empty string) when the flag was not provided.
+	if svc.workflowsReq.ConflictDefault != "" {
+		t.Errorf("ConflictDefault = %q, want empty; omitting --conflict must leave the field at zero "+
+			"so the interactive conflict prompt fires rather than silently skipping", svc.workflowsReq.ConflictDefault)
+	}
+}
+
+// TestRun_WorkflowsSubcommand_DryRunFlag_SetsField verifies that --dry-run propagates to
+// WorkflowUpdateRequest.DryRun, matching the same flag convention used by the other subcommands.
+func TestRun_WorkflowsSubcommand_DryRunFlag_SetsField(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{
+		workflowsResp: domain.RunSummary{Outcome: domain.OutcomeSuccess},
+	}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"workflows", "--harness", "stub-harness", "--workspace", workspace,
+			"--dry-run", "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
+	}
+	if svc.workflowsReq == nil {
+		t.Fatal("UpdateWorkflows was not called")
+	}
+	if !svc.workflowsReq.DryRun {
+		t.Error("DryRun = false; --dry-run flag must populate WorkflowUpdateRequest.DryRun = true")
+	}
+}
+
+// TestRun_WorkflowsSubcommand_AutoConfirmFlag_SetsField verifies that --auto-confirm
+// propagates to WorkflowUpdateRequest.AutoConfirmPlan, matching the other subcommands.
+func TestRun_WorkflowsSubcommand_AutoConfirmFlag_SetsField(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{
+		workflowsResp: domain.RunSummary{Outcome: domain.OutcomeSuccess},
+	}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"workflows", "--harness", "stub-harness", "--workspace", workspace, "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
+	}
+	if svc.workflowsReq == nil {
+		t.Fatal("UpdateWorkflows was not called")
+	}
+	if !svc.workflowsReq.AutoConfirmPlan {
+		t.Error("AutoConfirmPlan = false; --auto-confirm must populate WorkflowUpdateRequest.AutoConfirmPlan = true")
+	}
+}
+
+// TestRun_WorkflowsSubcommand_WorkflowsFlag_TrimsWhitespace verifies that --workflows
+// trims whitespace from each comma-separated ID before populating WorkflowIDs. A user
+// supplying "wf-a, wf-b" (with a space after the comma) must get ["wf-a", "wf-b"].
+func TestRun_WorkflowsSubcommand_WorkflowsFlag_TrimsWhitespace(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{
+		workflowsResp: domain.RunSummary{Outcome: domain.OutcomeSuccess},
+	}
+
+	// Act
+	cli.Run(context.Background(),
+		[]string{"workflows", "--harness", "stub-harness", "--workspace", workspace,
+			"--workflows", "wf-a, wf-b , wf-c", "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if svc.workflowsReq == nil {
+		t.Fatal("UpdateWorkflows was not called")
+	}
+	want := []string{"wf-a", "wf-b", "wf-c"}
+	got := svc.workflowsReq.WorkflowIDs
+	if len(got) != len(want) {
+		t.Fatalf("WorkflowIDs = %v, want %v; whitespace around IDs must be trimmed", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("WorkflowIDs[%d] = %q, want %q; whitespace trimming failed", i, got[i], want[i])
+		}
+	}
+}
+
+// TestRun_WorkflowsSubcommand_NoModelQuestionsInRequest verifies that WorkflowUpdateRequest
+// has no tier-model or agent-model fields by observing that the CLI subcommand does not
+// expose --tier-models or --agent-models flags. This is the structural guarantee that the
+// workflows subcommand never asks model questions.
+func TestRun_WorkflowsSubcommand_NoModelFlags_AcceptsOnlyWorkflowFlags(t *testing.T) {
+	// Arrange: pass an unrecognised flag that would exist if model configuration were exposed.
+	svc := &spyService{}
+	var errOut bytes.Buffer
+
+	// Act: --tier-model is not a flag on the workflows subcommand; cobra must reject it.
+	code := cli.Run(context.Background(),
+		[]string{"workflows", "--tier-model", "HIGH=claude-opus-4", "--auto-confirm"},
+		svc, &bytes.Buffer{}, &errOut)
+
+	// Assert: the CLI must reject an unknown flag with a usage error, not silently ignore it.
+	if code == cli.ExitSuccess {
+		t.Error("exit code = ExitSuccess for unrecognised --tier-model flag on workflows; " +
+			"workflows subcommand must not accept model flags — the mode has no model questions")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TUI/CLI equivalence for the new mode
+// ---------------------------------------------------------------------------
+
+// TestCLIWorkflowsSubcommand_PassesSameRequestAsTUI verifies that when both the TUI
+// and CLI frontends process the same workflow-selection input, they construct an equivalent
+// WorkflowUpdateRequest: same HarnessID, WorkspacePath, and WorkflowIDs. This is the
+// structural half of the equivalence requirement.
+func TestCLIWorkflowsSubcommand_PassesSameRequestFieldsAsTUI(t *testing.T) {
+	// Arrange: use the CLI to make a workflows request with known inputs.
+	workspace := t.TempDir()
+	svc := &spyService{
+		workflowsResp: domain.RunSummary{Outcome: domain.OutcomeSuccess},
+	}
+
+	// Act: CLI path.
+	cli.Run(context.Background(),
+		[]string{"workflows",
+			"--harness", "claude-code",
+			"--workspace", workspace,
+			"--workflows", "wf-alpha,wf-beta",
+			"--auto-confirm",
+		},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert: the fields that the TUI would also set from its entry screens must be present.
+	if svc.workflowsReq == nil {
+		t.Fatal("UpdateWorkflows was not called")
+	}
+	if svc.workflowsReq.HarnessID != "claude-code" {
+		t.Errorf("HarnessID = %q, want %q — field must match what the TUI mode-entry screen provides",
+			svc.workflowsReq.HarnessID, "claude-code")
+	}
+	if svc.workflowsReq.WorkspacePath != workspace {
+		t.Errorf("WorkspacePath = %q, want %q — field must match what the TUI workspace screen provides",
+			svc.workflowsReq.WorkspacePath, workspace)
+	}
+	wantIDs := []string{"wf-alpha", "wf-beta"}
+	if len(svc.workflowsReq.WorkflowIDs) != len(wantIDs) {
+		t.Fatalf("WorkflowIDs = %v, want %v", svc.workflowsReq.WorkflowIDs, wantIDs)
+	}
+	for i, id := range wantIDs {
+		if svc.workflowsReq.WorkflowIDs[i] != id {
+			t.Errorf("WorkflowIDs[%d] = %q, want %q", i, svc.workflowsReq.WorkflowIDs[i], id)
+		}
+	}
+}

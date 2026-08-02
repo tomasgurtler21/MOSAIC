@@ -135,6 +135,39 @@ var rules = []rule{
 		},
 	},
 	{
+		dir:  "internal/logscan",
+		desc: "logscan is an I/O adapter: must not import frontend or use-case packages",
+		forbidPrefix: []string{
+			modulePrefix + "internal/app",
+			modulePrefix + "internal/cli",
+			modulePrefix + "internal/tui",
+			modulePrefix + "internal/logread",
+			modulePrefix + "internal/pricing",
+		},
+	},
+	{
+		dir:  "internal/logread",
+		desc: "logread is an I/O adapter: must not import frontend or use-case packages",
+		forbidPrefix: []string{
+			modulePrefix + "internal/app",
+			modulePrefix + "internal/cli",
+			modulePrefix + "internal/tui",
+			modulePrefix + "internal/logscan",
+			modulePrefix + "internal/pricing",
+		},
+	},
+	{
+		dir:  "internal/pricing",
+		desc: "pricing is an I/O adapter: must not import frontend or use-case packages",
+		forbidPrefix: []string{
+			modulePrefix + "internal/app",
+			modulePrefix + "internal/cli",
+			modulePrefix + "internal/tui",
+			modulePrefix + "internal/logscan",
+			modulePrefix + "internal/logread",
+		},
+	},
+	{
 		dir:  "internal/cli",
 		desc: "cli is an adapter frontend: must not import the tui sibling frontend",
 		forbidPrefix: []string{
