@@ -1,6 +1,6 @@
 ---
 id: 11
-version: 4.0.0
+version: 4.1.0
 name: plan-review
 description: Reviews plan quality, task sizing, dependency correctness, and validates TDD decisions against actual codebase - validating Plan.md (routing artifact) and all per-stage files (Stage-{N}/Plan.md, Stage-{N}/PlanProgress.md) before proceeding to design
 model: {model-identifier}
@@ -350,7 +350,7 @@ Your review artifact should follow this template:
 | Severity | Requires Rework | Notes (remove at injection) |
 |----------|-----------------|----------------------------|
 | CRITICAL | ✅ Always | Non-configurable |
-| MAJOR | ❌ No | Set to ✅ Yes for stricter reviews |
+| MAJOR | ✅ No | Set to ✅ Yes for stricter reviews |
 | MINOR | ❌ No | Set to ✅ Yes if all issues must be addressed |
 | SUGGESTION | ❌ No | Set to ✅ Yes to require action on suggestions |
 

@@ -1,6 +1,6 @@
 ---
 id: 10
-version: 3.0.0
+version: 3.1.0
 name: system-design-review
 description: Reviews system design quality for greenfield projects - ensuring architecture is complete, consistent, implementable, and aligned with requirements
 model: {model-identifier}
@@ -345,7 +345,7 @@ Your review artifact should follow this template:
 | Severity | Requires Rework | Notes (remove at injection) |
 |----------|-----------------|----------------------------|
 | CRITICAL | ✅ Always | Non-configurable |
-| MAJOR | ❌ No | Set to ✅ Yes for stricter reviews |
+| MAJOR | ✅ No | Set to ✅ Yes for stricter reviews |
 | MINOR | ❌ No | Set to ✅ Yes if all issues must be addressed |
 | SUGGESTION | ❌ No | Set to ✅ Yes to require action on suggestions |
 

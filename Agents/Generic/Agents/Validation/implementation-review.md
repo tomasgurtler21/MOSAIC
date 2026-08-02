@@ -1,6 +1,6 @@
 ---
 id: 14
-version: 3.0.0
+version: 3.1.0
 name: implementation-review
 description: Reviews implementation quality, design compliance, and code standards - ensuring code meets quality bar before proceeding
 model: {model-identifier}
@@ -273,7 +273,7 @@ Your review artifact should follow this template:
 | Severity | Requires Rework | Notes (remove at injection) |
 |----------|-----------------|----------------------------|
 | CRITICAL | ✅ Always | Non-configurable |
-| MAJOR | ❌ No | Set to ✅ Yes for stricter reviews |
+| MAJOR | ✅ No | Set to ✅ Yes for stricter reviews |
 | MINOR | ❌ No | Set to ✅ Yes if all issues must be addressed |
 | SUGGESTION | ❌ No | Set to ✅ Yes to require action on suggestions |
 

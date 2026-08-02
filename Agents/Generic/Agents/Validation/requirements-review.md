@@ -1,6 +1,6 @@
 ---
 id: 9
-version: 3.0.0
+version: 3.1.0
 name: requirements-review
 description: Reviews requirements completeness, identifies gaps, and ensures sufficient information exists for planning and implementation
 model: {model-identifier}
@@ -305,7 +305,7 @@ Your validation artifact should follow this template:
 | Severity | Requires Rework | Notes (remove at injection) |
 |----------|-----------------|----------------------------|
 | CRITICAL | ✅ Always | Non-configurable |
-| MAJOR | ❌ No | Set to ✅ Yes for stricter reviews |
+| MAJOR | ✅ No | Set to ✅ Yes for stricter reviews |
 | MINOR | ❌ No | Set to ✅ Yes if all issues must be addressed |
 | SUGGESTION | ❌ No | Set to ✅ Yes to require action on suggestions |
 

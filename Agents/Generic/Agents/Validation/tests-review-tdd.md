@@ -1,6 +1,6 @@
 ---
 id: 13
-version: 3.0.0
+version: 3.1.0
 name: tests-review-tdd
 description: Reviews test quality, coverage, and TDD RED phase correctness - ensuring tests fail appropriately before implementation and adequately verify design specifications
 model: {model-identifier}
@@ -304,7 +304,7 @@ Your review artifact should follow this template:
 | Severity | Requires Rework | Notes (remove at injection) |
 |----------|-----------------|----------------------------|
 | CRITICAL | ✅ Always | Non-configurable |
-| MAJOR | ❌ No | Set to ✅ Yes for stricter reviews |
+| MAJOR | ✅ No | Set to ✅ Yes for stricter reviews |
 | MINOR | ❌ No | Set to ✅ Yes if all issues must be addressed |
 | SUGGESTION | ❌ No | Set to ✅ Yes to require action on suggestions |
 
