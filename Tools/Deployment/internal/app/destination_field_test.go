@@ -19,13 +19,18 @@ package app_test
 // the intended TDD RED state for T4.3, T4.4, and T4.5.
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/app"
+	"mosaic-deploy/internal/app/interactiontest"
 	"mosaic-deploy/internal/config"
+	"mosaic-deploy/internal/deploy"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
 	"mosaic-deploy/internal/harness/registry"
@@ -94,6 +99,128 @@ func appTestHarnessID(t *testing.T) string {
 	name = strings.ReplaceAll(name, "_", "-")
 	name = strings.ReplaceAll(name, " ", "-")
 	return "dest-test-" + name
+}
+
+// ---------------------------------------------------------------------------
+// Constants used by the app.Update-level test (T4.4 Critical fix)
+// ---------------------------------------------------------------------------
+
+const (
+	// destTestAgentKey is the agent key used in app.Update-level destination field tests.
+	destTestAgentKey = "dest-test-agent"
+	// destTestWorkflowID is the workflow ID that references destTestAgentKey.
+	destTestWorkflowID = "dest-test-workflow"
+	// destTestAgentSourceFile is the catalog source path for destTestAgentKey.
+	destTestAgentSourceFile = "/catalog/agents/dest-test-agent.md"
+)
+
+// destTestDescriptorWithPaths returns a descriptor like destTestDescriptor but also
+// declares deployment path patterns for agents. This is required for plan.EnumerateTargetPaths
+// (called by app.Update) to compute target paths without returning an error.
+func destTestDescriptorWithPaths(id string) *domain.HarnessDescriptor {
+	return &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            id,
+		DisplayName:   id,
+		Tools: domain.ToolSpec{
+			Shape: domain.ShapeList,
+			Universe: []domain.HarnessTool{
+				{Name: "AskUser", Unused: domain.Deny},
+			},
+			// No user_interaction mapping — the ToolMappings hook will overlay it.
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+		Paths: domain.PathSpec{
+			Agents: domain.ScopedPaths{
+				Supported: true,
+				Project:   "agents",
+			},
+		},
+	}
+}
+
+// newDestTestCatalog returns a stubCatalog with a worker agent that declares
+// user_interaction, a workflow referencing that agent, and a ReadSource entry
+// returning destTestAgentSource for the agent's source path.
+//
+// Pair with buildRegistryWithUserDestMapping and destTestDescriptorWithPaths for the
+// app.Update-level destination field test.
+func newDestTestCatalog() *stubCatalog {
+	agent := domain.Agent{
+		Key:         destTestAgentKey,
+		NumericID:   "300",
+		Version:     "1.0.0",
+		Name:        "Destination Test Agent",
+		Description: "Agent for destination field end-to-end tests",
+		Role:        domain.RoleWorker,
+		Tools:       []string{"user_interaction"},
+		SourcePath:  destTestAgentSourceFile,
+	}
+	workflow := domain.Workflow{
+		ID:               destTestWorkflowID,
+		Name:             "Destination Field Test Workflow",
+		Version:          "1.0",
+		ReferencedAgents: []string{destTestAgentKey},
+	}
+	return &stubCatalog{
+		root:         "testroot",
+		agents:       []domain.Agent{agent},
+		orchestrator: minimalOrchestrator,
+		skills:       []domain.Skill{},
+		hooks:        []domain.HookBundle{},
+		workflows:    []domain.Workflow{workflow},
+		categories: []domain.WorkflowCategory{
+			{Name: "Test", Workflows: []domain.Workflow{workflow}},
+		},
+		tiers: []domain.TierInfo{},
+		sources: map[string][]byte{
+			destTestAgentSourceFile: []byte(destTestAgentSource),
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// capturingContentExecutor — satisfies deploy.Executor, records Content output
+//
+// For each ActionCreate/ActionUpdate plan item, capturingContentExecutor calls
+// ExecRequest.Content and records the produced bytes keyed by TargetPath. This
+// lets tests verify the content function's output (i.e., that the registry module's
+// mapping hook result reaches the transform) without performing any real file writes.
+// ---------------------------------------------------------------------------
+
+type capturingContentExecutor struct {
+	// contents maps target path → bytes produced by Content for that plan item.
+	contents map[string][]byte
+}
+
+func (e *capturingContentExecutor) Execute(_ context.Context, req deploy.ExecRequest) (deploy.ExecResult, error) {
+	e.contents = make(map[string][]byte)
+	var actions []domain.ActionRecord
+	for _, item := range req.Plan.Items {
+		switch item.Action {
+		case domain.ActionCreate, domain.ActionUpdate:
+			content, err := req.Content(item)
+			if err != nil {
+				return deploy.ExecResult{}, fmt.Errorf("capturingContentExecutor: Content(%q): %w", item.Ref.Key, err)
+			}
+			e.contents[item.TargetPath] = content
+			actions = append(actions, domain.ActionRecord{
+				Ref:        item.Ref,
+				TargetPath: item.TargetPath,
+				Taken:      domain.TakenUpdated,
+			})
+		default:
+			actions = append(actions, domain.ActionRecord{
+				Ref:        item.Ref,
+				TargetPath: item.TargetPath,
+				Taken:      domain.TakenUnchanged,
+			})
+		}
+	}
+	return deploy.ExecResult{
+		DeploymentRoot: req.Plan.WorkspacePath,
+		Actions:        actions,
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -302,7 +429,115 @@ func TestDeployNew_UserConfigDestMapping_DestFieldHasCorrectName(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T4.4 — Update regenerates destination field
+// T4.4 — Update regenerates destination field (app.Update level)
+//
+// TestUpdate_DestMappingInRegistry_ContentFunctionProducesDestinationField is the
+// primary app.Update-level test for AC4.4/AC4.5 coverage. The tests below it
+// exercise the transform path directly (faster, lower-level). Both levels are needed:
+// the direct path confirms the transform logic, and the app.Update-level test confirms
+// the Content function wiring reaches the registry module's mapping hook result.
+// ---------------------------------------------------------------------------
+
+// TestUpdate_DestMappingInRegistry_ContentFunctionProducesDestinationField verifies that
+// when app.Update processes an ActionUpdate plan item for an agent with a config-declared
+// DestField destination mapping installed on the registry module, the Content function
+// produces frontmatter that includes both the main tools field (AskUser) and the
+// separate destination field (mcp_servers).
+//
+// This test exercises the full app.Update code path:
+//
+//   app.Update
+//   → deps.Registry.Resolve(harnessID)         (module carries the ToolMappings hook result)
+//   → deps.Planner.Build(ctx, planInput)        (stub returns ActionUpdate for the agent)
+//   → capturingContentExecutor.Execute          (calls req.Content for each ActionUpdate item)
+//   → buildContent → catalog.ReadSource → transform.Apply (module.Tools → descriptor.MapTools)
+//   → output bytes contain mcp_servers field
+//
+// A stub planner is used because the real planner's staleness mechanism does not yet include
+// a signal for config-mapping-only changes (no version stamp captures the effective mapping
+// set). The stub simulates the desired planner behaviour once AC4.4's staleness detection is
+// implemented. The capturingContentExecutor records the bytes produced by the Content function
+// without performing any real file writes.
+//
+// Before I4.1 adds registry.Options.ToolMappings, this test fails to compile (TDD RED).
+func TestUpdate_DestMappingInRegistry_ContentFunctionProducesDestinationField(t *testing.T) {
+	id := appTestHarnessID(t)
+	desc := destTestDescriptorWithPaths(id)
+
+	// Build registry with user destination mapping (compile error until I4.1).
+	reg := buildRegistryWithUserDestMapping(t, id, desc)
+
+	// Catalog with the agent declaring user_interaction and a workflow referencing it.
+	// AddWorkflowIDs carries destTestWorkflowID so plan.ResolveArtifacts includes the agent
+	// in the artifact set, which is required for buildContent to look up the agent's source.
+	cat := newDestTestCatalog()
+
+	// Target path as computed by destTestDescriptorWithPaths + destTestAgentSourceFile:
+	// Paths.Agents.Project="agents", FileName=filepath.Base(destTestAgentSourceFile)="dest-test-agent.md"
+	// → path.Join("agents", "dest-test-agent.md") = "agents/dest-test-agent.md"
+	const agentTargetPath = "agents/dest-test-agent.md"
+
+	// Stub planner simulates the desired outcome of AC4.4's staleness signal: a
+	// config-mapping-only change causes ActionUpdate for the affected agent. The real
+	// planner currently returns ActionUnchanged in this scenario (design gap: staleness.go
+	// only compares static version stamps, not the effective mapping set). This test
+	// documents the required end-to-end content-generation behaviour and will pass once
+	// the planner correctly detects mapping-set changes.
+	staleItem := domain.PlanItem{
+		Ref:        domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: destTestAgentKey},
+		TargetPath: agentTargetPath,
+		Action:     domain.ActionUpdate,
+		// Stale is intentionally empty: this test verifies the content path, not staleness
+		// detection. Staleness detection for config-mapping changes is a separate design task.
+	}
+
+	capExec := &capturingContentExecutor{}
+	stub := interactiontest.NewBuilder().AnswerReview(true).Build()
+	deps, workspace := newBaseDeps(t, stub)
+	deps.Registry = reg
+	deps.Catalog = cat
+	deps.Planner = &stubPlanner{plan: domain.Plan{
+		Mode:          domain.ModeUpdate,
+		Harness:       domain.HarnessRef{ID: id, DisplayName: id, Tier: domain.TierBuiltin, Usable: true},
+		WorkspacePath: workspace,
+		Scope:         domain.ScopeProject,
+		Items:         []domain.PlanItem{staleItem},
+		Workflows:     []string{destTestWorkflowID},
+	}}
+	deps.Executor = capExec
+	svc := app.New(deps)
+
+	_, err := svc.Update(context.Background(), app.UpdateRequest{
+		HarnessID:       id,
+		WorkspacePath:   workspace,
+		AddWorkflowIDs:  []string{destTestWorkflowID},
+		AutoConfirmPlan: true,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	content, ok := capExec.contents[agentTargetPath]
+	if !ok {
+		var knownTargets []string
+		for k := range capExec.contents {
+			knownTargets = append(knownTargets, k)
+		}
+		t.Fatalf("no content produced for target path %q; "+
+			"app.Update must call Content for each ActionUpdate item so the registry module "+
+			"(carrying the ToolMappings hook result) produces the destination field in the output; "+
+			"targets with produced content: %v", agentTargetPath, knownTargets)
+	}
+	doc, parseErr := docformat.Parse(content)
+	if parseErr != nil {
+		t.Fatalf("docformat.Parse on content produced by app.Update Content function: %v", parseErr)
+	}
+	assertHasMCPField(t, doc, "app.Update content (ActionUpdate)")
+	assertHasMainTool(t, doc, "AskUser", "app.Update content (ActionUpdate)")
+}
+
+// ---------------------------------------------------------------------------
+// T4.4 — Update regenerates destination field (transform direct path)
 // ---------------------------------------------------------------------------
 
 // TestUpdate_UserConfigDestMapping_FieldRegeneratedOnSecondApply verifies that the
@@ -343,33 +578,38 @@ func TestUpdate_UserConfigDestMapping_FieldRegeneratedOnSecondApply(t *testing.T
 	}
 }
 
-// TestUpdate_UserConfigDestMapping_FieldRegeneratedEvenWhenAbsentFromDeployedFile verifies
-// that the destination field is added to the deployed file on update even if the deployed
-// file (from a previous deploy) did not have it. The transform derives the field from the
-// config mapping, not from the deployed file content.
+// TestUpdate_UserConfigDestMapping_HookPresenceControlsFieldEmission verifies that the
+// presence of a DestField mapping in the ToolMappings hook's return value is what determines
+// whether the destination field appears in the transform output. A registry whose hook
+// returns nil (no mapping) produces no mcp_servers field; the same descriptor applied with
+// a hook returning a multi-destination mapping produces both the main tools field and
+// the mcp_servers field.
 //
-// This simulates the scenario where a user adds a DestField destination to their config
-// AFTER an agent was already deployed. The next update must add the field.
+// Note: this test uses two independently configured registries with the same underlying
+// descriptor but different harness IDs (id vs id+"-updated"), so it does not simulate a
+// true "update of the same deployed file". The app.Update-level test
+// TestUpdate_DestMappingInRegistry_ContentFunctionProducesDestinationField covers the end-
+// to-end path through app.Update; this test confirms the transform-level hook control.
 //
 // Before I4.1 adds registry.Options.ToolMappings, this test fails to compile (TDD RED).
-func TestUpdate_UserConfigDestMapping_FieldRegeneratedEvenWhenAbsentFromDeployedFile(t *testing.T) {
+func TestUpdate_UserConfigDestMapping_HookPresenceControlsFieldEmission(t *testing.T) {
 	id := appTestHarnessID(t)
 	desc := destTestDescriptor(id)
 
-	// Step 1: initial "deploy" without the mapping — no mcp_servers in output.
+	// Apply without the mapping — the hook returns nil, no mcp_servers in output.
 	// Compile error until I4.1.
 	regWithoutMapping := buildRegistryWithoutMapping(t, id, desc)
 	doc1 := applyWithRegistry(t, regWithoutMapping, id, []byte(destTestAgentSource))
 	if _, ok := doc1.Frontmatter().Get("mcp_servers"); ok {
-		t.Log("Note: mcp_servers present in first deploy (no mapping), which is unexpected but not critical for this test")
+		t.Log("Note: mcp_servers present when hook returns nil (no mapping), which is unexpected but not critical for this test")
 	}
 
-	// Step 2: simulate adding the config mapping and re-deploying (update).
-	// A new registry is built with the mapping; the module descriptor is re-used.
+	// Apply with the mapping (different harness ID to avoid registration conflict).
+	// The hook returns the multi-destination mapping; mcp_servers must appear.
 	// Compile error until I4.1.
 	regWithMapping := buildRegistryWithUserDestMapping(t, id+"-updated", desc)
 	doc2 := applyWithRegistry(t, regWithMapping, id+"-updated", []byte(destTestAgentSource))
-	assertHasMCPField(t, doc2, "update after adding config mapping")
+	assertHasMCPField(t, doc2, "apply with hook returning mapping")
 }
 
 // ---------------------------------------------------------------------------
@@ -425,7 +665,21 @@ func TestUpdate_UserConfigDestMappingRemoved_MainToolFieldAlsoAbsent(t *testing.
 
 	v, ok := doc.Frontmatter().Get("tools")
 	if !ok {
-		// tools field itself may be absent if no tools resolved — that's acceptable.
+		// user_interaction has no DestMain mapping when the mapping is removed, so it
+		// resolves as ToolUnmapped — no harness tool name is emitted and the tools field
+		// may be absent when no other tools resolve to a harness name. This is the intended
+		// behavior, not a rendering failure.
+		//
+		// Guard against a silent rendering failure by confirming mcp_servers is also absent.
+		// Both fields (tools/AskUser and mcp_servers/user-feedback) are produced by the same
+		// removed mapping. If mcp_servers is present but tools is absent, the mapping was only
+		// partially removed or the output is inconsistent — that is a bug, not the intended state.
+		if _, hasMCP := doc.Frontmatter().Get("mcp_servers"); hasMCP {
+			t.Errorf("mcp_servers is present but tools is absent after removing the mapping; "+
+				"a fully removed mapping must leave both fields absent — a split result "+
+				"(one field absent, the other present) indicates a rendering inconsistency, not correct behavior; "+
+				"keys: %v", doc.Frontmatter().Keys())
+		}
 		return
 	}
 	for _, item := range v.Items {

@@ -70,6 +70,7 @@ type VersionStamps struct {
 	TransformVersion              string
 	InjectionsVersion             string
 	OrchestratorInjectionsVersion string // orchestrator-only; empty for subagents
+	ToolMappingsVersion           string // hash of the effective tool-destination mapping set; empty when no config mappings
 }
 
 // FrontmatterPlan is a declarative edit list that transform applies via docformat. The module

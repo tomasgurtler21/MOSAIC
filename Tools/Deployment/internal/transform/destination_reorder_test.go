@@ -59,7 +59,7 @@ tools:
             - "user-feedback"
 frontmatter:
   tools_key: "tools"
-  remove:
+  drop:
     - "legacy_tools"
     - "deprecated_field"
 `

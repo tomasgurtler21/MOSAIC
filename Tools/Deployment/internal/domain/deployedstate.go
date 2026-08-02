@@ -13,6 +13,7 @@ type DeployedArtifactState struct {
 	TransformVersion              string            // frontmatter `transform_version` scalar, verbatim
 	InjectionsVersion             string            // frontmatter `injections_version` scalar, verbatim
 	OrchestratorInjectionsVersion string            // frontmatter `orchestrator_injections_version` scalar, verbatim; "" when absent or subagent
+	ToolMappingsVersion           string            // frontmatter `tool_mappings_version` scalar, verbatim; "" when absent
 	ModelID                       string            // frontmatter model scalar under the harness's ModelKey, verbatim; "" when absent, unparseable, or the harness emits no model
 	Workflows                     DeployedWorkflows // non-nil only when the file carries workflow section markers
 }
