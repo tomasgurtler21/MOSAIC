@@ -161,10 +161,18 @@ type wireToolResult struct {
 }
 
 type wireToolResolution struct {
-	Generic      string   `json:"generic"`
-	Outcome      string   `json:"outcome"`
-	HarnessTools []string `json:"harness_tools,omitempty"`
-	Field        string   `json:"field,omitempty"`
+	Generic      string               `json:"generic"`
+	Outcome      string               `json:"outcome"`
+	HarnessTools []string             `json:"harness_tools,omitempty"`
+	Destinations []wireToolDest       `json:"destinations,omitempty"`
+}
+
+type wireToolDest struct {
+	To        string   `json:"to"`
+	Field     string   `json:"field,omitempty"`
+	Format    string   `json:"format,omitempty"`
+	Separator string   `json:"separator,omitempty"`
+	Names     []string `json:"names,omitempty"`
 }
 
 type wireFrontmatterPlan struct {
@@ -398,11 +406,26 @@ func handleRequest(mod domain.HarnessModule, req wireRequest) wireResponse {
 		}
 		resolutions := make([]wireToolResolution, len(toolResult.Resolutions))
 		for i, r := range toolResult.Resolutions {
+			var dests []wireToolDest
+			if len(r.Destinations) > 0 {
+				dests = make([]wireToolDest, len(r.Destinations))
+				for j, d := range r.Destinations {
+					names := make([]string, len(d.Names))
+					copy(names, d.Names)
+					dests[j] = wireToolDest{
+						To:        string(d.Kind),
+						Field:     d.Field,
+						Format:    string(d.Format),
+						Separator: d.Separator,
+						Names:     names,
+					}
+				}
+			}
 			resolutions[i] = wireToolResolution{
 				Generic:      r.Generic,
 				Outcome:      string(r.Outcome),
 				HarnessTools: r.HarnessTools,
-				Field:        r.Field,
+				Destinations: dests,
 			}
 		}
 		result := wireToolResult{

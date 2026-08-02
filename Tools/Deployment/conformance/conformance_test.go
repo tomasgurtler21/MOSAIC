@@ -372,30 +372,44 @@ tools:
       unused: deny
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read"
+      destinations:
+        - to: main
+          names:
+            - "read"
     - generic: "file_write"
-      harness_tools:
-        - "write"
+      destinations:
+        - to: main
+          names:
+            - "write"
     - generic: "file_edit"
-      harness_tools:
-        - "edit"
+      destinations:
+        - to: main
+          names:
+            - "edit"
     - generic: "file_search"
-      harness_tools:
-        - "search"
+      destinations:
+        - to: main
+          names:
+            - "search"
     - generic: "content_search"
-      harness_tools:
-        - "search"
+      destinations:
+        - to: main
+          names:
+            - "search"
     - generic: "terminal"
-      harness_tools:
-        - "execute"
+      destinations:
+        - to: main
+          names:
+            - "execute"
     - generic: "user_interaction"
-      harness_tools:
-        - "ask_user"
+      destinations:
+        - to: main
+          names:
+            - "ask_user"
     - generic: "skill"
-      harness_tools: []
+      destinations: []
     - generic: "subagent"
-      harness_tools: []
+      destinations: []
 frontmatter:
   model_key: "model"
   tools_key: "tools"

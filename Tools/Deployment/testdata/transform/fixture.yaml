@@ -45,26 +45,40 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read-file"
+      destinations:
+        - to: main
+          names:
+            - "read-file"
     - generic: "file_write"
-      harness_tools:
-        - "write-file"
+      destinations:
+        - to: main
+          names:
+            - "write-file"
     - generic: "file_edit"
-      harness_tools:
-        - "edit-file"
+      destinations:
+        - to: main
+          names:
+            - "edit-file"
     - generic: "file_search"
-      harness_tools:
-        - "search-file"
+      destinations:
+        - to: main
+          names:
+            - "search-file"
     - generic: "content_search"
-      harness_tools:
-        - "search-text"
+      destinations:
+        - to: main
+          names:
+            - "search-text"
     - generic: "terminal"
-      harness_tools:
-        - "run-terminal"
+      destinations:
+        - to: main
+          names:
+            - "run-terminal"
     - generic: "user_interaction"
-      harness_tools:
-        - "ask-user"
+      destinations:
+        - to: main
+          names:
+            - "ask-user"
   # placeholder_expansion: tools assigned when {tool-permissions} placeholder is present
   placeholder_expansion:
     - "read-file"

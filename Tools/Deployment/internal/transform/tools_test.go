@@ -103,14 +103,20 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read"
+      destinations:
+        - to: main
+          names:
+            - "read"
     - generic: "file_search"
-      harness_tools:
-        - "search"
+      destinations:
+        - to: main
+          names:
+            - "search"
     - generic: "content_search"
-      harness_tools:
-        - "search"
+      destinations:
+        - to: main
+          names:
+            - "search"
 frontmatter:
   tools_key: "tools"
 `
@@ -132,11 +138,15 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read"
+      destinations:
+        - to: main
+          names:
+            - "read"
     - generic: "file_write"
-      harness_tools:
-        - "write"
+      destinations:
+        - to: main
+          names:
+            - "write"
 frontmatter:
   tools_key: "tools"
 `
@@ -154,12 +164,16 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read-file"
+      destinations:
+        - to: main
+          names:
+            - "read-file"
     - generic: "skill"
-      harness_tools:
-        - "mcp-skill-tool"
-      field: "mcp_servers"
+      destinations:
+        - to: field
+          field: "mcp_servers"
+          names:
+            - "mcp-skill-tool"
 frontmatter:
   tools_key: "tools"
 `
@@ -200,8 +214,10 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read-file"
+      destinations:
+        - to: main
+          names:
+            - "read-file"
   custom_tool_template: "mcp:%s"
 frontmatter:
   tools_key: "tools"
@@ -224,9 +240,11 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_write"
-      harness_tools:
-        - "write/createFile"
-        - "write/editFile"
+      destinations:
+        - to: main
+          names:
+            - "write/createFile"
+            - "write/editFile"
 frontmatter:
   tools_key: "tools"
 `

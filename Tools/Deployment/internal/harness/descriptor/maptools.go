@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"sort"
+	"strings"
 
 	"mosaic-deploy/internal/domain"
 )
@@ -59,20 +60,44 @@ func MapTools(d *domain.HarnessDescriptor, req domain.ToolRequest) (domain.ToolR
 			}
 			res.Outcome = domain.ToolCustom
 			res.HarnessTools = []string{name}
+			// Custom tools go to the main tools destination.
+			res.Destinations = []domain.ToolDestination{
+				{Kind: domain.DestMain, Names: []string{name}},
+			}
 
 		default:
 			if mapping, ok := mappingByGeneric[genericTool]; ok {
-				// Found in mappings — whether HarnessTools is empty or not, the outcome is ToolMapped.
+				// Found in mappings — whether Destinations is empty or not, the outcome is ToolMapped.
 				res.Outcome = domain.ToolMapped
-				// Use a copy of the slice to avoid aliasing.
-				if len(mapping.HarnessTools) > 0 {
-					ht := make([]string, len(mapping.HarnessTools))
-					copy(ht, mapping.HarnessTools)
-					res.HarnessTools = ht
-				} else {
-					res.HarnessTools = []string{}
+				// Deep copy Destinations to avoid aliasing.
+				dests := make([]domain.ToolDestination, len(mapping.Destinations))
+				for i, dest := range mapping.Destinations {
+					names := make([]string, len(dest.Names))
+					copy(names, dest.Names)
+					dests[i] = domain.ToolDestination{
+						Kind:      dest.Kind,
+						Field:     dest.Field,
+						Format:    dest.Format,
+						Separator: dest.Separator,
+						Names:     names,
+					}
 				}
-				res.Field = mapping.Field
+				res.Destinations = dests
+				// HarnessTools is the flattened, deduplicated, first-seen union of all Names.
+				// Initialized as empty non-nil so that mappings with no names (explicitly
+				// unsupported) produce []string{} rather than nil, satisfying reflect.DeepEqual
+				// comparisons in contracttests.
+				seenNames := make(map[string]bool)
+				ht := make([]string, 0)
+				for _, dest := range dests {
+					for _, name := range dest.Names {
+						if !seenNames[name] {
+							seenNames[name] = true
+							ht = append(ht, name)
+						}
+					}
+				}
+				res.HarnessTools = ht
 			} else {
 				// Not in mappings at all.
 				res.Outcome = domain.ToolUnmapped
@@ -132,10 +157,70 @@ func buildToolFields(d *domain.HarnessDescriptor, resolutions []domain.ToolResol
 	return buildListToolFields(d, resolutions)
 }
 
+// destFieldBucket accumulates names for a single DestField destination key.
+// Format and Separator are established by the first contributing destination and cannot
+// be overridden by later contributions to the same key.
+type destFieldBucket struct {
+	format    domain.ToolValueFormat
+	separator string
+	names     map[string]bool
+}
+
+// emitFieldBuckets converts the collected DestField buckets into FrontmatterFields,
+// emitting them in first-seen order with names sorted lexicographically within each bucket.
+func emitFieldBuckets(buckets map[string]*destFieldBucket, order []string) []domain.FrontmatterField {
+	fields := make([]domain.FrontmatterField, 0, len(order))
+	for _, fieldKey := range order {
+		bucket := buckets[fieldKey]
+		sortedNames := make([]string, 0, len(bucket.names))
+		for name := range bucket.names {
+			sortedNames = append(sortedNames, name)
+		}
+		sort.Strings(sortedNames)
+
+		format := bucket.format
+		if format == "" {
+			format = domain.DefaultToolValueFormat // defaults to list-block
+		}
+
+		switch format {
+		case domain.FormatListBlock:
+			items := make([]domain.FieldValue, len(sortedNames))
+			for i, name := range sortedNames {
+				items[i] = domain.FieldValue{Kind: domain.KindScalar, Scalar: name}
+			}
+			fields = append(fields, domain.FrontmatterField{
+				Key:   fieldKey,
+				Value: domain.ListValue(items, domain.ListBlock),
+			})
+		case domain.FormatListFlow:
+			items := make([]domain.FieldValue, len(sortedNames))
+			for i, name := range sortedNames {
+				items[i] = domain.FieldValue{Kind: domain.KindScalar, Scalar: name}
+			}
+			fields = append(fields, domain.FrontmatterField{
+				Key:   fieldKey,
+				Value: domain.ListValue(items, domain.ListFlow),
+			})
+		case domain.FormatScalar:
+			sep := bucket.separator
+			if sep == "" {
+				sep = domain.DefaultScalarSeparator
+			}
+			fields = append(fields, domain.FrontmatterField{
+				Key:   fieldKey,
+				Value: domain.FieldValue{Kind: domain.KindScalar, Scalar: strings.Join(sortedNames, sep)},
+			})
+		}
+	}
+	return fields
+}
+
 // buildListToolFields assembles a flat KindList frontmatter field for the ShapeList (and
 // default) shape. By-convention tools are always included. ToolMapped and ToolCustom
-// resolutions contribute to the main list unless they carry a non-empty Field, in which
-// case each unique diversion key produces its own separate FrontmatterField.
+// resolutions contribute names to destinations: DestMain names go to the main tools field
+// (sorted by universe position), and DestField names each produce a separate FrontmatterField
+// (first-seen order, names sorted lexicographically within each field).
 func buildListToolFields(d *domain.HarnessDescriptor, resolutions []domain.ToolResolution) []domain.FrontmatterField {
 	// Build a position index from the Universe so we can sort by canonical order.
 	universePos := make(map[string]int, len(d.Tools.Universe))
@@ -148,14 +233,14 @@ func buildListToolFields(d *domain.HarnessDescriptor, resolutions []domain.ToolR
 		pos  int
 	}
 
-	seen := make(map[string]bool)
+	seenMain := make(map[string]bool)
 	var mainEntries []toolEntry
 
 	addMain := func(name string) {
-		if seen[name] {
+		if seenMain[name] {
 			return
 		}
-		seen[name] = true
+		seenMain[name] = true
 		pos, ok := universePos[name]
 		if !ok {
 			pos = len(universePos) // append after all Universe tools
@@ -170,28 +255,38 @@ func buildListToolFields(d *domain.HarnessDescriptor, resolutions []domain.ToolR
 		}
 	}
 
-	// Collect field-diverted tools: diversion key → set of harness tool names.
-	diversionNames := make(map[string]map[string]bool)
-	var diversionOrder []string // tracks first-seen order for deterministic output
+	// Collect DestField buckets in first-seen order.
+	fieldBuckets := make(map[string]*destFieldBucket)
+	var fieldOrder []string
 
-	// Add harness tools from ToolMapped and ToolCustom resolutions.
+	addToField := func(fieldKey, name string, format domain.ToolValueFormat, separator string) {
+		if _, exists := fieldBuckets[fieldKey]; !exists {
+			fieldBuckets[fieldKey] = &destFieldBucket{
+				format:    format,
+				separator: separator,
+				names:     make(map[string]bool),
+			}
+			fieldOrder = append(fieldOrder, fieldKey)
+		}
+		fieldBuckets[fieldKey].names[name] = true
+	}
+
+	// Add harness tools from ToolMapped and ToolCustom resolutions via Destinations.
 	for _, res := range resolutions {
 		if res.Outcome != domain.ToolMapped && res.Outcome != domain.ToolCustom {
 			continue
 		}
-		if res.Field != "" {
-			// Routed to a separate frontmatter key rather than the main tools list.
-			if _, exists := diversionNames[res.Field]; !exists {
-				diversionNames[res.Field] = make(map[string]bool)
-				diversionOrder = append(diversionOrder, res.Field)
+		for _, dest := range res.Destinations {
+			switch dest.Kind {
+			case domain.DestMain:
+				for _, name := range dest.Names {
+					addMain(name)
+				}
+			case domain.DestField:
+				for _, name := range dest.Names {
+					addToField(dest.Field, name, dest.Format, dest.Separator)
+				}
 			}
-			for _, ht := range res.HarnessTools {
-				diversionNames[res.Field][ht] = true
-			}
-			continue
-		}
-		for _, ht := range res.HarnessTools {
-			addMain(ht)
 		}
 	}
 
@@ -212,51 +307,58 @@ func buildListToolFields(d *domain.HarnessDescriptor, resolutions []domain.ToolR
 		},
 	}
 
-	// Emit one FrontmatterField per diversion destination, in first-seen order.
-	for _, fieldName := range diversionOrder {
-		toolSet := diversionNames[fieldName]
-		// Sort tool names within the diversion field for deterministic output.
-		sortedNames := make([]string, 0, len(toolSet))
-		for name := range toolSet {
-			sortedNames = append(sortedNames, name)
-		}
-		sort.Strings(sortedNames)
-		divItems := make([]domain.FieldValue, len(sortedNames))
-		for i, name := range sortedNames {
-			divItems[i] = domain.FieldValue{Kind: domain.KindScalar, Scalar: name}
-		}
-		fields = append(fields, domain.FrontmatterField{
-			Key:   fieldName,
-			Value: domain.FieldValue{Kind: domain.KindList, Items: divItems},
-		})
-	}
+	// Emit one FrontmatterField per DestField destination, in first-seen order.
+	fields = append(fields, emitFieldBuckets(fieldBuckets, fieldOrder)...)
 
 	return fields
 }
 
 // buildPermissionToolFields assembles a KindMapping frontmatter field for the ShapePermission
 // shape. Every tool in the Universe appears exactly once, ordered by Universe declaration order.
-// A tool is assigned the disposition "allow" when it appears in the resolved tool set (i.e. a
-// ToolMapped or ToolCustom resolution includes it), or when it is marked ByConvention. Otherwise
-// the tool's Unused disposition (from the descriptor) is used.
+// A tool is assigned the disposition "allow" when it appears in the resolved DestMain set (i.e.
+// a ToolMapped or ToolCustom resolution's DestMain destination names it), or when it is marked
+// ByConvention. Otherwise the tool's Unused disposition (from the descriptor) is used.
+// DestField destination names are emitted as separate FrontmatterFields and do not enter
+// the permission map.
 func buildPermissionToolFields(d *domain.HarnessDescriptor, resolutions []domain.ToolResolution) []domain.FrontmatterField {
-	// Build the resolved (allow) set from non-diverted mapped/custom resolutions plus
-	// by-convention tools.
+	// Build the resolved (allow) set from DestMain destinations plus by-convention tools.
 	resolved := make(map[string]bool, len(d.Tools.Universe))
-
 	for _, t := range d.Tools.Universe {
 		if t.ByConvention {
 			resolved[t.Name] = true
 		}
 	}
 
-	for _, res := range resolutions {
-		if res.Field != "" {
-			continue // diverted to a separate frontmatter key
+	// Collect DestField buckets in first-seen order (same rules as the list shape).
+	fieldBuckets := make(map[string]*destFieldBucket)
+	var fieldOrder []string
+
+	addToField := func(fieldKey, name string, format domain.ToolValueFormat, separator string) {
+		if _, exists := fieldBuckets[fieldKey]; !exists {
+			fieldBuckets[fieldKey] = &destFieldBucket{
+				format:    format,
+				separator: separator,
+				names:     make(map[string]bool),
+			}
+			fieldOrder = append(fieldOrder, fieldKey)
 		}
-		if res.Outcome == domain.ToolMapped || res.Outcome == domain.ToolCustom {
-			for _, ht := range res.HarnessTools {
-				resolved[ht] = true
+		fieldBuckets[fieldKey].names[name] = true
+	}
+
+	for _, res := range resolutions {
+		if res.Outcome != domain.ToolMapped && res.Outcome != domain.ToolCustom {
+			continue
+		}
+		for _, dest := range res.Destinations {
+			switch dest.Kind {
+			case domain.DestMain:
+				for _, name := range dest.Names {
+					resolved[name] = true
+				}
+			case domain.DestField:
+				for _, name := range dest.Names {
+					addToField(dest.Field, name, dest.Format, dest.Separator)
+				}
 			}
 		}
 	}
@@ -274,12 +376,17 @@ func buildPermissionToolFields(d *domain.HarnessDescriptor, resolutions []domain
 		}
 	}
 
-	return []domain.FrontmatterField{
+	fields := []domain.FrontmatterField{
 		{
 			Key:   d.Frontmatter.ToolsKey,
 			Value: domain.FieldValue{Kind: domain.KindMapping, Pairs: pairs},
 		},
 	}
+
+	// Emit separate fields for DestField destinations.
+	fields = append(fields, emitFieldBuckets(fieldBuckets, fieldOrder)...)
+
+	return fields
 }
 
 // ApplyFrontmatterSpec derives the FrontmatterPlan that expresses the harness's field shaping

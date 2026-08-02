@@ -219,10 +219,18 @@ type wireToolResult struct {
 }
 
 type wireToolResolution struct {
-	Generic      string   `json:"generic"`
-	Outcome      string   `json:"outcome"`
-	HarnessTools []string `json:"harness_tools,omitempty"`
-	Field        string   `json:"field,omitempty"`
+	Generic      string                  `json:"generic"`
+	Outcome      string                  `json:"outcome"`
+	HarnessTools []string                `json:"harness_tools,omitempty"`
+	Destinations []wireToolDestination   `json:"destinations,omitempty"`
+}
+
+type wireToolDestination struct {
+	To        string   `json:"to"`
+	Field     string   `json:"field,omitempty"`
+	Format    string   `json:"format,omitempty"`
+	Separator string   `json:"separator,omitempty"`
+	Names     []string `json:"names,omitempty"`
 }
 
 type wireFrontmatterPlan struct {
@@ -326,6 +334,55 @@ func fromWireFrontmatterFields(ws []wireFrontmatterField) []domain.FrontmatterFi
 		fs[i] = fromWireFrontmatterField(w)
 	}
 	return fs
+}
+
+// decodeWireToolResolution converts a wireToolResolution to domain.ToolResolution using the
+// three-row decision table for the multi-destination wire protocol:
+//
+//   - Row 1: destinations present and non-empty → decode each wireToolDestination, recompute
+//     HarnessTools as the flattened, deduplicated, first-seen union of all destination Names.
+//   - Row 2: destinations absent/empty + harness_tools non-empty → default to one DestMain
+//     destination carrying harness_tools; HarnessTools = deep copy of harness_tools.
+//   - Row 3: both absent/empty → nil Destinations and nil HarnessTools.
+func decodeWireToolResolution(r wireToolResolution) domain.ToolResolution {
+	res := domain.ToolResolution{
+		Generic: r.Generic,
+		Outcome: domain.ToolOutcome(r.Outcome),
+	}
+
+	if len(r.Destinations) > 0 {
+		// Row 1: destinations present and non-empty.
+		res.Destinations = make([]domain.ToolDestination, len(r.Destinations))
+		seenNames := make(map[string]bool)
+		var ht []string
+		for i, d := range r.Destinations {
+			names := make([]string, len(d.Names))
+			copy(names, d.Names)
+			res.Destinations[i] = domain.ToolDestination{
+				Kind:      domain.ToolDestinationKind(d.To),
+				Field:     d.Field,
+				Format:    domain.ToolValueFormat(d.Format),
+				Separator: d.Separator,
+				Names:     names,
+			}
+			for _, name := range names {
+				if !seenNames[name] {
+					seenNames[name] = true
+					ht = append(ht, name)
+				}
+			}
+		}
+		res.HarnessTools = ht
+	} else if len(r.HarnessTools) > 0 {
+		// Row 2: destinations absent/empty, harness_tools present → default to single DestMain.
+		htCopy := make([]string, len(r.HarnessTools))
+		copy(htCopy, r.HarnessTools)
+		res.Destinations = []domain.ToolDestination{{Kind: domain.DestMain, Names: htCopy}}
+		res.HarnessTools = htCopy
+	}
+	// Row 3: both absent/empty → nil Destinations and nil HarnessTools (zero values).
+
+	return res
 }
 
 func toWireHookBundle(b domain.HookBundle) wireHookBundle {
@@ -768,12 +825,7 @@ func (a *adapter) Tools(req domain.ToolRequest) (domain.ToolResult, error) {
 
 	resolutions := make([]domain.ToolResolution, len(result.Resolutions))
 	for i, r := range result.Resolutions {
-		resolutions[i] = domain.ToolResolution{
-			Generic:      r.Generic,
-			Outcome:      domain.ToolOutcome(r.Outcome),
-			HarnessTools: r.HarnessTools,
-			Field:        r.Field,
-		}
+		resolutions[i] = decodeWireToolResolution(r)
 	}
 
 	return domain.ToolResult{

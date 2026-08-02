@@ -62,32 +62,50 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read"
+      destinations:
+        - to: main
+          names:
+            - "read"
     - generic: "file_write"
-      harness_tools:
-        - "write"
+      destinations:
+        - to: main
+          names:
+            - "write"
     - generic: "file_edit"
-      harness_tools:
-        - "edit"
+      destinations:
+        - to: main
+          names:
+            - "edit"
     - generic: "file_search"
-      harness_tools:
-        - "glob"
+      destinations:
+        - to: main
+          names:
+            - "glob"
     - generic: "content_search"
-      harness_tools:
-        - "grep"
+      destinations:
+        - to: main
+          names:
+            - "grep"
     - generic: "terminal"
-      harness_tools:
-        - "bash"
+      destinations:
+        - to: main
+          names:
+            - "bash"
     - generic: "user_interaction"
-      harness_tools:
-        - "question"
+      destinations:
+        - to: main
+          names:
+            - "question"
     - generic: "subagent"
-      harness_tools:
-        - "task"
+      destinations:
+        - to: main
+          names:
+            - "task"
     - generic: "skill"
-      harness_tools:
-        - "skill"
+      destinations:
+        - to: main
+          names:
+            - "skill"
   placeholder_expansion:
     - "read"
     - "write"

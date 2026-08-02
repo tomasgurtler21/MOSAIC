@@ -56,32 +56,50 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read"
+      destinations:
+        - to: main
+          names:
+            - "read"
     - generic: "file_write"
-      harness_tools:
-        - "edit"
+      destinations:
+        - to: main
+          names:
+            - "edit"
     - generic: "file_edit"
-      harness_tools:
-        - "edit"
+      destinations:
+        - to: main
+          names:
+            - "edit"
     - generic: "file_search"
-      harness_tools:
-        - "search"
+      destinations:
+        - to: main
+          names:
+            - "search"
     - generic: "content_search"
-      harness_tools:
-        - "search"
+      destinations:
+        - to: main
+          names:
+            - "search"
     - generic: "terminal"
-      harness_tools:
-        - "execute"
+      destinations:
+        - to: main
+          names:
+            - "execute"
     - generic: "user_interaction"
-      harness_tools:
-        - "ask_user"
+      destinations:
+        - to: main
+          names:
+            - "ask_user"
     - generic: "subagent"
-      harness_tools:
-        - "agent"
+      destinations:
+        - to: main
+          names:
+            - "agent"
     - generic: "skill"
-      harness_tools:
-        - "skill"
+      destinations:
+        - to: main
+          names:
+            - "skill"
   placeholder_expansion:
     - "read"
     - "edit"

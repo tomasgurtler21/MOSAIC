@@ -55,8 +55,103 @@ func (e ValidationError) Error() string {
 // Line — the caller owns those. A nil or empty return means the mapping set is valid. Errors
 // are returned in mapping order, and within a mapping in destination order.
 func ValidateToolMappings(mappings []domain.ToolMapping, fieldPrefix string) []ValidationError {
-	// TODO(I2.2): implement — checks R1 through R10 as defined in the design specification.
-	return nil
+	var errs []ValidationError
+	seen := make(map[string]int) // R1: generic name → first-occurrence mapping index
+
+	for i, m := range mappings {
+		// R2: empty generic name.
+		if m.Generic == "" {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("%s[%d].generic", fieldPrefix, i),
+				Message: "required field is empty",
+			})
+		} else {
+			// R1: duplicate generic name (only meaningful when generic is non-empty).
+			if prev, dup := seen[m.Generic]; dup {
+				errs = append(errs, ValidationError{
+					Field:   fmt.Sprintf("%s[%d].generic", fieldPrefix, i),
+					Message: fmt.Sprintf("duplicate generic tool name %q (first seen at [%d])", m.Generic, prev),
+				})
+			} else {
+				seen[m.Generic] = i
+			}
+		}
+
+		// Destination-level rules: R3–R10.
+		seenDests := make(map[string]int) // (kind:field) → first-occurrence destination index
+
+		for j, d := range m.Destinations {
+			// R3: unknown destination kind. Skip remaining destination checks when kind is
+			// invalid to avoid spurious errors that assume a valid kind.
+			if d.Kind != domain.DestMain && d.Kind != domain.DestField {
+				errs = append(errs, ValidationError{
+					Field:   fmt.Sprintf("%s[%d].destinations[%d].to", fieldPrefix, i, j),
+					Message: fmt.Sprintf("unknown destination kind %q; valid values: main, field", d.Kind),
+				})
+				continue
+			}
+
+			// R4: DestField without a field name.
+			if d.Kind == domain.DestField && d.Field == "" {
+				errs = append(errs, ValidationError{
+					Field:   fmt.Sprintf("%s[%d].destinations[%d].field", fieldPrefix, i, j),
+					Message: `destination of kind "field" requires a non-empty field name`,
+				})
+			}
+
+			// R5: DestMain with a field name.
+			if d.Kind == domain.DestMain && d.Field != "" {
+				errs = append(errs, ValidationError{
+					Field:   fmt.Sprintf("%s[%d].destinations[%d].field", fieldPrefix, i, j),
+					Message: `destination of kind "main" must not declare a field name`,
+				})
+			}
+
+			// R6: unknown value format.
+			if d.Format != "" && d.Format != domain.FormatListBlock && d.Format != domain.FormatListFlow && d.Format != domain.FormatScalar {
+				errs = append(errs, ValidationError{
+					Field:   fmt.Sprintf("%s[%d].destinations[%d].format", fieldPrefix, i, j),
+					Message: fmt.Sprintf("unknown value format %q; valid values: list-block, list-flow, scalar", d.Format),
+				})
+			}
+
+			// R7: DestMain with a value format.
+			if d.Kind == domain.DestMain && d.Format != "" {
+				errs = append(errs, ValidationError{
+					Field:   fmt.Sprintf("%s[%d].destinations[%d].format", fieldPrefix, i, j),
+					Message: `destination of kind "main" must not declare a value format; the harness's own tools format applies`,
+				})
+			}
+
+			// R8: separator on a non-scalar format.
+			if d.Separator != "" && d.Format != domain.FormatScalar {
+				errs = append(errs, ValidationError{
+					Field:   fmt.Sprintf("%s[%d].destinations[%d].separator", fieldPrefix, i, j),
+					Message: `separator is only meaningful for the "scalar" value format`,
+				})
+			}
+
+			// R9: duplicate (kind, field) pair within one mapping.
+			kindField := string(d.Kind) + ":" + d.Field
+			if prevJ, dup := seenDests[kindField]; dup {
+				errs = append(errs, ValidationError{
+					Field:   fmt.Sprintf("%s[%d].destinations[%d]", fieldPrefix, i, j),
+					Message: fmt.Sprintf("duplicate destination %q (first seen at destinations[%d])", kindField, prevJ),
+				})
+			} else {
+				seenDests[kindField] = j
+			}
+
+			// R10: destination with empty names list inside a non-empty destinations list.
+			if len(d.Names) == 0 {
+				errs = append(errs, ValidationError{
+					Field:   fmt.Sprintf("%s[%d].destinations[%d].names", fieldPrefix, i, j),
+					Message: "destination contributes no names; omit the destination or declare an empty destinations list to mark the generic tool unsupported",
+				})
+			}
+		}
+	}
+	return errs
 }
 
 // Validate checks the logical constraints of an already-parsed HarnessDescriptor and returns
@@ -87,18 +182,8 @@ func Validate(d *domain.HarnessDescriptor) []ValidationError {
 		})
 	}
 
-	// Check for duplicate generic tool names in mappings.
-	seen := make(map[string]int) // generic name → first-occurrence index
-	for i, m := range d.Tools.Mappings {
-		if prev, dup := seen[m.Generic]; dup {
-			errs = append(errs, ValidationError{
-				Field:   fmt.Sprintf("tools.mappings[%d].generic", i),
-				Message: fmt.Sprintf("duplicate generic tool name %q (first seen at mappings[%d])", m.Generic, prev),
-			})
-		} else {
-			seen[m.Generic] = i
-		}
-	}
+	// Validate tool mappings (R1–R10 including duplicate generic name check).
+	errs = append(errs, ValidateToolMappings(d.Tools.Mappings, "tools.mappings")...)
 
 	return errs
 }

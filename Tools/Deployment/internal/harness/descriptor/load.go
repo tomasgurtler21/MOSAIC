@@ -45,9 +45,16 @@ type wireHarnessTool struct {
 }
 
 type wireToolMapping struct {
-	Generic      string   `yaml:"generic"`
-	HarnessTools []string `yaml:"harness_tools"`
-	Field        string   `yaml:"field"`
+	Generic      string                `yaml:"generic"`
+	Destinations []wireToolDestination `yaml:"destinations"`
+}
+
+type wireToolDestination struct {
+	To        string   `yaml:"to"`
+	Field     string   `yaml:"field"`
+	Format    string   `yaml:"format"`
+	Separator string   `yaml:"separator"`
+	Names     []string `yaml:"names"`
 }
 
 type wirePathSpec struct {
@@ -182,15 +189,32 @@ func mapWireToolSpec(w *wireToolSpec) domain.ToolSpec {
 
 	mappings := make([]domain.ToolMapping, len(w.Mappings))
 	for i, m := range w.Mappings {
-		// Preserve a nil/empty distinction: HarnessTools may be explicitly empty (unsupported).
-		harnessTools := m.HarnessTools
-		if harnessTools == nil {
-			harnessTools = []string{}
+		// make always produces a non-nil slice, so destinations: [] decodes as empty (non-nil).
+		dests := make([]domain.ToolDestination, len(m.Destinations))
+		for j, d := range m.Destinations {
+			names := make([]string, len(d.Names))
+			copy(names, d.Names)
+			dests[j] = domain.ToolDestination{
+				Kind:      domain.ToolDestinationKind(d.To),
+				Field:     d.Field,
+				Format:    domain.ToolValueFormat(d.Format),
+				Separator: d.Separator,
+				Names:     names,
+			}
+		}
+		// Compute HarnessTools from DestMain destinations as a backward-compatible
+		// summary field. Existing tests that read ToolMapping.HarnessTools directly
+		// rely on this value being populated after load.
+		var htNames []string
+		for _, d := range dests {
+			if d.Kind == domain.DestMain {
+				htNames = append(htNames, d.Names...)
+			}
 		}
 		mappings[i] = domain.ToolMapping{
 			Generic:      m.Generic,
-			HarnessTools: harnessTools,
-			Field:        m.Field,
+			HarnessTools: htNames,
+			Destinations: dests,
 		}
 	}
 

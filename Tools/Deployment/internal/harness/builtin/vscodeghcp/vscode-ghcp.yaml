@@ -65,32 +65,48 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read/readFile"
+      destinations:
+        - to: main
+          names:
+            - "read/readFile"
     - generic: "file_write"
-      harness_tools:
-        - "edit/createFile"
-        - "edit/editFiles"
+      destinations:
+        - to: main
+          names:
+            - "edit/createFile"
+            - "edit/editFiles"
     - generic: "file_edit"
-      harness_tools:
-        - "edit/editFiles"
+      destinations:
+        - to: main
+          names:
+            - "edit/editFiles"
     - generic: "file_search"
-      harness_tools:
-        - "search/fileSearch"
+      destinations:
+        - to: main
+          names:
+            - "search/fileSearch"
     - generic: "content_search"
-      harness_tools:
-        - "search/textSearch"
+      destinations:
+        - to: main
+          names:
+            - "search/textSearch"
     - generic: "terminal"
-      harness_tools:
-        - "execute/runInTerminal"
+      destinations:
+        - to: main
+          names:
+            - "execute/runInTerminal"
     - generic: "user_interaction"
-      harness_tools:
-        - "vscode/askQuestions"
+      destinations:
+        - to: main
+          names:
+            - "vscode/askQuestions"
     - generic: "subagent"
-      harness_tools:
-        - "agent"
+      destinations:
+        - to: main
+          names:
+            - "agent"
     - generic: "skill"
-      harness_tools: []
+      destinations: []
   placeholder_expansion:
     - "read/readFile"
     - "edit/createFile"

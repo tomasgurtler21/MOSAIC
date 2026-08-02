@@ -87,15 +87,13 @@ type HarnessTool struct {
 // ToolMapping declares how one generic tool name maps to harness-specific output.
 // An empty Destinations slice means "declared unsupported by this harness".
 //
-// Deprecated fields HarnessTools and Field are retained only while the implementation
-// migrates to the Destinations model. New code must use Destinations exclusively.
+// HarnessTools is retained for backward compatibility with existing test fixtures that
+// construct ToolMapping directly using struct literal syntax; new code must use Destinations.
 type ToolMapping struct {
 	Generic      string   // generic tool name
-	HarnessTools []string // deprecated: use Destinations instead
-	Field        string   // deprecated: use Destinations instead
+	HarnessTools []string // deprecated: retained for test-fixture compat; use Destinations instead
 	// Destinations is the ordered set of output targets for this generic tool.
-	// An empty slice means "declared unsupported by this harness" — the same
-	// meaning the empty HarnessTools slice carried before.
+	// An empty slice means "declared unsupported by this harness".
 	Destinations []ToolDestination
 }
 
@@ -118,9 +116,6 @@ type ToolResolution struct {
 	// first-seen order. It is the stable summary consumed by gap reporting, the transform
 	// report, and the external-module JSON protocol.
 	HarnessTools []string
-	// Field is deprecated: the diversion key is now expressed per-destination in Destinations.
-	// Retained only while the implementation migrates to the Destinations model.
-	Field string
 	// Destinations records every destination this generic tool resolved to, in declaration
 	// order. Empty for ToolSkipped and ToolUnmapped outcomes.
 	Destinations []ToolDestination

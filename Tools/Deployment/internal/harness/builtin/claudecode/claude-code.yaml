@@ -49,32 +49,48 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "Read"
+      destinations:
+        - to: main
+          names:
+            - "Read"
     - generic: "file_write"
-      harness_tools:
-        - "Write"
+      destinations:
+        - to: main
+          names:
+            - "Write"
     - generic: "file_edit"
-      harness_tools:
-        - "Edit"
+      destinations:
+        - to: main
+          names:
+            - "Edit"
     - generic: "terminal"
-      harness_tools:
-        - "Bash"
+      destinations:
+        - to: main
+          names:
+            - "Bash"
     - generic: "file_search"
-      harness_tools:
-        - "Glob"
+      destinations:
+        - to: main
+          names:
+            - "Glob"
     - generic: "content_search"
-      harness_tools:
-        - "Grep"
+      destinations:
+        - to: main
+          names:
+            - "Grep"
     - generic: "subagent"
-      harness_tools:
-        - "Task"
-        - "TaskStop"
+      destinations:
+        - to: main
+          names:
+            - "Task"
+            - "TaskStop"
     - generic: "user_interaction"
-      harness_tools:
-        - "AskUserQuestion"
+      destinations:
+        - to: main
+          names:
+            - "AskUserQuestion"
     - generic: "skill"
-      harness_tools: []
+      destinations: []
   placeholder_expansion:
     - "Read"
     - "Write"

@@ -308,11 +308,15 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read/readFile"
+      destinations:
+        - to: main
+          names:
+            - "read/readFile"
     - generic: "file_write"
-      harness_tools:
-        - "write/createFile"
+      destinations:
+        - to: main
+          names:
+            - "write/createFile"
 `, id)
 	root := makeDescriptorRoot(t, id, yaml)
 	m := resolveDescriptorOnly(t, root, id)
@@ -647,8 +651,10 @@ tools:
       by_convention: false
   mappings:
     - generic: "file_read"
-      harness_tools:
-        - "read/readFile"
+      destinations:
+        - to: main
+          names:
+            - "read/readFile"
 `, id)
 	root := makeDescriptorRoot(t, id, yaml)
 	m := resolveDescriptorOnly(t, root, id)
