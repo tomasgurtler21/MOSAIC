@@ -65,7 +65,7 @@ No other event types exist in schema version 1. A human prompt to the orchestrat
 | `schema_version` | string | Required | See §6. |
 | `event` | enum (§3.1) | Required | Discriminator field. |
 | `timestamp` | string (ISO 8601) | Required | Time the adapter captured/emitted the event. |
-| `harness` | enum: `"claude-code"` \| `"opencode"` \| `"vscode-ghcp"` | Required | Which harness adapter emitted this entry. |
+| `harness` | enum: `"claude-code"` \| `"opencode"` \| `"vscode-ghcp"` \| `"ghcp-cli"` | Required | Which harness adapter emitted this entry. |
 | `session_id` | string | Optional | Harness-native session identifier, normalized to this single field name regardless of the harness's native casing. |
 | `run_id` | string | Optional | Identifier of the orchestration run, when determinable. Primary correlation key for the merge utility — see §4. |
 

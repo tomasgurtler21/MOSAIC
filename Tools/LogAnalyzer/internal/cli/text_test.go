@@ -380,3 +380,114 @@ func TestEncodeText_DataQualityFindingsMentioned(t *testing.T) {
 		t.Errorf("output does not mention data-quality findings; output:\n%s", output)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Shared token-category label vocabulary
+// ---------------------------------------------------------------------------
+
+// TestEncodeText_TokenLabelsUseSharedVocabulary verifies the CLI text encoder
+// uses the same four shared category labels as the TUI, so the two presentations
+// cannot drift apart. The expected labels are the canonical plain-English strings
+// specified in the design: "input", "cache read", "cache write", "output".
+func TestEncodeText_TokenLabelsUseSharedVocabulary(t *testing.T) {
+	report := domain.Report{
+		Source:   domain.Source{Kind: domain.SourceLogsRoot, Path: "/logs"},
+		Currency: domain.Currency,
+		Runs: []domain.RunReport{
+			{
+				Run: domain.NamedRun(cliTestRunID),
+				Totals: domain.Totals{
+					Tokens: domain.TokenUsage{
+						Input:         domain.Tokens(100),
+						CacheRead:     domain.Tokens(200),
+						CacheCreation: domain.Tokens(300),
+						Output:        domain.Tokens(400),
+					},
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeText(&buf, report); err != nil {
+		t.Fatalf("EncodeText returned error: %v", err)
+	}
+	output := strings.ToLower(buf.String())
+
+	// All four shared labels must appear somewhere in the output.
+	for _, label := range []string{"input", "cache read", "cache write", "output"} {
+		if !strings.Contains(output, label) {
+			t.Errorf("EncodeText output does not contain shared label %q; output:\n%s", label, buf.String())
+		}
+	}
+}
+
+// TestEncodeText_TokenLabelsDoNotUseLegacyNames verifies the CLI no longer emits
+// the old camel-case identifiers "CacheRead" or "CacheCreation" as category
+// labels, since those expose internal domain names rather than human-readable text.
+func TestEncodeText_TokenLabelsDoNotUseLegacyNames(t *testing.T) {
+	report := domain.Report{
+		Source:   domain.Source{Kind: domain.SourceLogsRoot, Path: "/logs"},
+		Currency: domain.Currency,
+		Runs: []domain.RunReport{
+			{
+				Run: domain.NamedRun(cliTestRunID),
+				Totals: domain.Totals{
+					Tokens: domain.TokenUsage{
+						Input:         domain.Tokens(10),
+						CacheRead:     domain.Tokens(20),
+						CacheCreation: domain.Tokens(30),
+						Output:        domain.Tokens(40),
+					},
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeText(&buf, report); err != nil {
+		t.Fatalf("EncodeText returned error: %v", err)
+	}
+	output := buf.String()
+
+	for _, legacy := range []string{"CacheRead", "CacheCreation"} {
+		if strings.Contains(output, legacy) {
+			t.Errorf("EncodeText output contains legacy label %q; must use shared domain labels; output:\n%s",
+				legacy, output)
+		}
+	}
+}
+
+// TestEncodeText_CacheReadAndCacheWriteLabelsDistinguishable verifies the two
+// cache categories appear as distinct labels in the output, so a reader can
+// tell cache-read tokens apart from cache-write (creation) tokens.
+func TestEncodeText_CacheReadAndCacheWriteLabelsDistinguishable(t *testing.T) {
+	report := domain.Report{
+		Source:   domain.Source{Kind: domain.SourceLogsRoot, Path: "/logs"},
+		Currency: domain.Currency,
+		Runs: []domain.RunReport{
+			{
+				Run: domain.NamedRun(cliTestRunID),
+				Totals: domain.Totals{
+					Tokens: domain.TokenUsage{
+						CacheRead:     domain.Tokens(111),
+						CacheCreation: domain.Tokens(222),
+					},
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := cli.EncodeText(&buf, report); err != nil {
+		t.Fatalf("EncodeText returned error: %v", err)
+	}
+	output := strings.ToLower(buf.String())
+
+	if !strings.Contains(output, "cache read") {
+		t.Errorf("EncodeText output does not contain 'cache read' label; output:\n%s", buf.String())
+	}
+	if !strings.Contains(output, "cache write") {
+		t.Errorf("EncodeText output does not contain 'cache write' label; output:\n%s", buf.String())
+	}
+}

@@ -16,6 +16,9 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
+	"mosaic-log-analyzer/internal/app"
 	"mosaic-log-analyzer/internal/domain"
 	"mosaic-log-analyzer/internal/tui/screens"
 )
@@ -428,17 +431,21 @@ func TestRunDetailScreen_UnpricedModelsListed(t *testing.T) {
 // T10.3 continued: PricingScreen rendering
 // ---------------------------------------------------------------------------
 
-// TestPricingScreen_ShowsUnpricedModelList verifies that each unpriced model
-// name appears in the pricing screen's rendered output.
-func TestPricingScreen_ShowsUnpricedModelList(t *testing.T) {
-	models := []domain.ModelID{"model-alpha", "model-beta"}
+// TestPricingScreen_ShowsAllModelsInReport verifies that every model name
+// (priced and unpriced alike) appears in the pricing screen's rendered output.
+// The reworked screen lists ALL report models, not only the unpriced ones.
+func TestPricingScreen_ShowsAllModelsInReport(t *testing.T) {
+	models := []app.ModelPricingStatus{
+		{Model: "model-alpha", Priced: false},
+		{Model: "model-beta", Priced: true, Pricing: domain.ModelPricing{Model: "model-beta"}},
+	}
 	styles := plainStyles()
 	s := screens.NewPricingScreen(models, "/config/pricing.yaml", 100, 30, styles)
 	view := s.View(100, 30)
 
 	for _, m := range models {
-		if !strings.Contains(view, string(m)) {
-			t.Errorf("pricing screen view does not contain model %q; got:\n%s", m, view)
+		if !strings.Contains(view, string(m.Model)) {
+			t.Errorf("pricing screen view does not contain model %q; got:\n%s", m.Model, view)
 		}
 	}
 }
@@ -447,7 +454,7 @@ func TestPricingScreen_ShowsUnpricedModelList(t *testing.T) {
 // path is visible in the rendered output, satisfying the binding requirement
 // that the written path is displayed to the user.
 func TestPricingScreen_ShowsConfigFilePath(t *testing.T) {
-	models := []domain.ModelID{"some-model"}
+	models := []app.ModelPricingStatus{{Model: "some-model", Priced: false}}
 	configPath := "/home/user/.mosaic/MosaicLogAnalyzer/config/pricing.yaml"
 	styles := plainStyles()
 	s := screens.NewPricingScreen(models, configPath, 100, 30, styles)
@@ -459,7 +466,7 @@ func TestPricingScreen_ShowsConfigFilePath(t *testing.T) {
 }
 
 // TestPricingScreen_EmptyModelListRendersWithoutPanic verifies that the screen
-// renders without error even when no unpriced models are provided.
+// renders without error even when no models are provided (nil slice).
 func TestPricingScreen_EmptyModelListRendersWithoutPanic(t *testing.T) {
 	styles := plainStyles()
 	s := screens.NewPricingScreen(nil, "/config/pricing.yaml", 100, 30, styles)
@@ -467,6 +474,317 @@ func TestPricingScreen_EmptyModelListRendersWithoutPanic(t *testing.T) {
 
 	if view == "" {
 		t.Error("PricingScreen.View() returned empty string for nil model list")
+	}
+}
+
+// TestPricingScreen_DistinguishesPricedFromUnpriced verifies that the rendered
+// output lets a reader distinguish a priced entry from an unpriced one. The
+// design requires "a reader must be able to tell them apart from the rendered
+// text alone". This test uses neutral model names ("alpha", "beta") that do
+// not themselves contain pricing-related words, so the distinction must come
+// from the pricing state rendered by the screen.
+//
+// With the stub View (shows model name only, no priced/unpriced indicator),
+// the unpriced model's entry will have no no-price marker, so this test FAILS
+// (RED phase).
+func TestPricingScreen_DistinguishesPricedFromUnpriced(t *testing.T) {
+	models := []app.ModelPricingStatus{
+		{Model: "alpha", Priced: true, Pricing: domain.ModelPricing{Model: "alpha"}},
+		{Model: "beta", Priced: false},
+	}
+	styles := plainStyles()
+	s := screens.NewPricingScreen(models, "/config/pricing.yaml", 100, 30, styles)
+	view := s.View(100, 30)
+
+	lines := strings.Split(view, "\n")
+
+	// Locate the line(s) that contain each model name.
+	pricedLine, unpricedLine := "", ""
+	for _, line := range lines {
+		if strings.Contains(line, "alpha") {
+			pricedLine = line
+		}
+		if strings.Contains(line, "beta") {
+			unpricedLine = line
+		}
+	}
+	if pricedLine == "" {
+		t.Fatalf("could not find a line containing the priced model 'alpha' in view:\n%s", view)
+	}
+	if unpricedLine == "" {
+		t.Fatalf("could not find a line containing the unpriced model 'beta' in view:\n%s", view)
+	}
+
+	// The unpriced entry must show a visible indicator of missing pricing
+	// (e.g. AbsentMarker, the word "unpriced", or "no price").
+	unpricedIndicator := strings.Contains(unpricedLine, screens.AbsentMarker) ||
+		strings.Contains(unpricedLine, "unpriced") ||
+		strings.Contains(unpricedLine, "no price")
+	if !unpricedIndicator {
+		t.Errorf("unpriced model entry does not show a no-price indicator; "+
+			"line: %q\nExpect one of: %q, %q, %q",
+			unpricedLine, screens.AbsentMarker, "unpriced", "no price")
+	}
+}
+
+// TestPricingScreen_CursorMovement_SelectsCorrectModel verifies that the cursor
+// starts at the first model, moves down on 'j'/down and up on 'k'/up, and that
+// SelectedModel() returns the model at the cursor after Enter is pressed.
+//
+// With the stub (cursor logic present but selection not wired to Done/SelectedModel
+// correctly at runtime), pressing Enter should set Done()=true and SelectedModel()
+// should return the model at the cursor.
+func TestPricingScreen_CursorMovement_SelectsCorrectModel(t *testing.T) {
+	models := []app.ModelPricingStatus{
+		{Model: "model-first", Priced: true},
+		{Model: "model-second", Priced: false},
+		{Model: "model-third", Priced: true},
+	}
+	styles := plainStyles()
+	s := screens.NewPricingScreen(models, "/config/pricing.yaml", 100, 30, styles)
+
+	// Move cursor down twice to land on "model-third".
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+
+	// Verify the rendered view highlights "model-third" (cursor at index 2).
+	view := s.View(100, 30)
+	if !strings.Contains(view, "model-third") {
+		t.Errorf("after moving cursor to index 2, view does not contain 'model-third'; got:\n%s", view)
+	}
+
+	// Press Enter to confirm selection.
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !s.Done() {
+		t.Error("after Enter, Done() must be true")
+	}
+	if s.SelectedModel() != "model-third" {
+		t.Errorf("SelectedModel() = %q, want %q", s.SelectedModel(), "model-third")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// FormatTotalsLine: full-word category label tests
+// ---------------------------------------------------------------------------
+
+// TestFormatTotalsLine_UsesFullWordCategoryLabels verifies the compact summary
+// line names each token category in plain English rather than short codes like
+// "in:", "cr:", "cw:", "out:".
+func TestFormatTotalsLine_UsesFullWordCategoryLabels(t *testing.T) {
+	totals := domain.Totals{
+		Tokens: domain.TokenUsage{
+			Input:         domain.Tokens(12_345),
+			CacheRead:     domain.Tokens(6_789),
+			CacheCreation: domain.Tokens(1_234),
+			Output:        domain.Tokens(567),
+		},
+		Money: domain.CategoryMoney{
+			Total:    domain.KnownMoney(domain.Money(1_230_000_000)),
+			Complete: true,
+		},
+	}
+	line := screens.FormatTotalsLine(totals)
+
+	// All four full-word labels (with colon separator) must appear.
+	for _, want := range []string{"input:", "cache read:", "cache write:", "output:"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("FormatTotalsLine does not contain %q; got %q", want, line)
+		}
+	}
+}
+
+// TestFormatTotalsLine_DoesNotUseAbbreviatedLabels verifies the old two-letter
+// codes "cr:" and "cw:" no longer appear in the rendered line.
+func TestFormatTotalsLine_DoesNotUseAbbreviatedLabels(t *testing.T) {
+	totals := domain.Totals{
+		Tokens: domain.TokenUsage{
+			Input:         domain.Tokens(1),
+			CacheRead:     domain.Tokens(2),
+			CacheCreation: domain.Tokens(3),
+			Output:        domain.Tokens(4),
+		},
+		Money: domain.CategoryMoney{Total: domain.NoMoneyData()},
+	}
+	line := screens.FormatTotalsLine(totals)
+
+	for _, old := range []string{"in:", "cr:", "cw:", "out:"} {
+		if strings.Contains(line, old) {
+			t.Errorf("FormatTotalsLine still contains old abbreviated label %q; got %q", old, line)
+		}
+	}
+}
+
+// TestFormatTotalsLine_AbsentCategoryRendersAbsentMarker verifies absent token
+// categories still render as AbsentMarker and not as "0" after the label change.
+func TestFormatTotalsLine_AbsentCategoryRendersAbsentMarker(t *testing.T) {
+	totals := domain.Totals{
+		Tokens: domain.TokenUsage{
+			Input:         domain.Tokens(100),
+			CacheRead:     domain.AbsentTokens(),
+			CacheCreation: domain.AbsentTokens(),
+			Output:        domain.Tokens(50),
+		},
+		Money: domain.CategoryMoney{Total: domain.NoMoneyData()},
+	}
+	line := screens.FormatTotalsLine(totals)
+
+	if !strings.Contains(line, screens.AbsentMarker) {
+		t.Errorf("FormatTotalsLine did not render AbsentMarker %q for absent categories; got %q",
+			screens.AbsentMarker, line)
+	}
+}
+
+// TestFormatTotalsLine_PresentZeroRendersAsZero verifies that a present-zero
+// token count renders as "0" and does not trigger the AbsentMarker in the token
+// fields. Money is set to UnpricedMoney (renders as "unpriced", not AbsentMarker)
+// so the only AbsentMarker that could appear would be from absent token categories.
+func TestFormatTotalsLine_PresentZeroRendersAsZero(t *testing.T) {
+	totals := domain.Totals{
+		Tokens: domain.TokenUsage{
+			Input:         domain.Tokens(0),
+			CacheRead:     domain.Tokens(0),
+			CacheCreation: domain.Tokens(0),
+			Output:        domain.Tokens(0),
+		},
+		Money: domain.CategoryMoney{Total: domain.UnpricedMoney()},
+	}
+	line := screens.FormatTotalsLine(totals)
+
+	if !strings.Contains(line, "0") {
+		t.Errorf("FormatTotalsLine did not render '0' for present-zero categories; got %q", line)
+	}
+	// With all four categories present-zero and money unpriced (not NoData),
+	// AbsentMarker must not appear anywhere in the line.
+	if strings.Contains(line, screens.AbsentMarker) {
+		t.Errorf("FormatTotalsLine rendered AbsentMarker for a present-zero token category; got %q", line)
+	}
+}
+
+// TestFormatTotalsLine_IsSingleLine verifies the rendered output contains no
+// embedded newlines — it is a compact single-line summary.
+func TestFormatTotalsLine_IsSingleLine(t *testing.T) {
+	totals := domain.Totals{
+		Tokens: domain.TokenUsage{Input: domain.Tokens(1)},
+		Money:  domain.CategoryMoney{Total: domain.NoMoneyData()},
+	}
+	line := screens.FormatTotalsLine(totals)
+
+	if strings.Contains(line, "\n") {
+		t.Errorf("FormatTotalsLine returned a multi-line string; got %q", line)
+	}
+}
+
+// TestFormatTotalsLine_UnpricedMoneyPreserved verifies the unpriced money marker
+// still appears when a category has no pricing entry.
+func TestFormatTotalsLine_UnpricedMoneyPreserved(t *testing.T) {
+	totals := domain.Totals{
+		Tokens: domain.TokenUsage{Input: domain.Tokens(1)},
+		Money:  domain.CategoryMoney{Total: domain.UnpricedMoney()},
+	}
+	line := screens.FormatTotalsLine(totals)
+
+	if !strings.Contains(line, screens.UnpricedMarker) {
+		t.Errorf("FormatTotalsLine with UnpricedMoney does not contain UnpricedMarker %q; got %q",
+			screens.UnpricedMarker, line)
+	}
+}
+
+// TestFormatTotalsLine_PartialMoneyPreserved verifies the "(partial)" suffix
+// still appears when the money total is incomplete.
+func TestFormatTotalsLine_PartialMoneyPreserved(t *testing.T) {
+	totals := domain.Totals{
+		Tokens: domain.TokenUsage{Input: domain.Tokens(1)},
+		Money: domain.CategoryMoney{
+			Total:    domain.KnownMoney(domain.Money(1_000_000_000)),
+			Complete: false,
+		},
+	}
+	line := screens.FormatTotalsLine(totals)
+
+	if !strings.Contains(line, "partial") {
+		t.Errorf("FormatTotalsLine with incomplete money does not contain 'partial'; got %q", line)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Runs screen help bar: source-switch key advertising
+// ---------------------------------------------------------------------------
+
+// TestRunsScreen_HelpAndView_AdvertiseSourceSwitchKey verifies that both
+// RunsScreen.Help() and the help bar rendered by RunsScreen.View() contain
+// the source-switch key ('s') as a standalone key binding, satisfying the
+// contract that the two sources of key hints must stay in sync.
+//
+// The current help text ("↑/↓ navigate  enter open  p pricing  esc quit  ctrl+c quit")
+// does not contain the pattern "s " (standalone 's' key followed by its label).
+// This test therefore fails until the implementation adds the source-switch hint.
+func TestRunsScreen_HelpAndView_AdvertiseSourceSwitchKey(t *testing.T) {
+	report := domain.Report{
+		Runs:     nil,
+		AllRuns:  domain.Totals{},
+		Currency: domain.Currency,
+		Quality:  domain.NewQualitySummary(nil),
+	}
+	styles := plainStyles()
+	s := screens.NewRunsScreen(report, 100, 30, styles)
+
+	help := s.Help()
+	view := s.View(100, 30)
+
+	// Help() must advertise 's' as a standalone key binding.
+	// "s " (s followed by its description word) distinguishes the 's' key from
+	// substrings of other words like "esc" (e-s-c, no 's' followed by space).
+	if !strings.Contains(help, "s ") {
+		t.Errorf("Help() does not advertise 's' key binding; got %q", help)
+	}
+	// View()'s rendered help bar must carry the same key hint so the two sources
+	// of key information cannot drift apart.
+	if !strings.Contains(view, "s ") {
+		t.Errorf("View() help bar does not advertise 's' key binding; view:\n%s", view)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T5.5: Runs help bar advertises pricing unconditionally (T5.5)
+// ---------------------------------------------------------------------------
+
+// TestRunsScreen_HelpBar_AdvertisesPricingUnconditionally verifies that both
+// Help() and the help bar rendered by View() contain 'p' as a key binding even
+// when every model in the report is already priced (UnpricedModels is empty).
+// The pricing key must be unconditional: the old implementation silently swallowed
+// 'p' when nothing was unpriced, making the help bar misleading. This test pins
+// the corrected behaviour — the help bar must always advertise pricing truthfully.
+func TestRunsScreen_HelpBar_AdvertisesPricingUnconditionally(t *testing.T) {
+	// Report with no unpriced models — all models are priced.
+	report := domain.Report{
+		Runs: []domain.RunReport{{
+			Run:    domain.NamedRun("20260101T120000Z-abcd"),
+			Totals: domain.Totals{Money: domain.CategoryMoney{Total: domain.KnownMoney(domain.Money(1_000_000_000)), Complete: true}},
+		}},
+		AllRuns:  domain.Totals{},
+		Currency: domain.Currency,
+		Quality:  domain.NewQualitySummary(nil),
+		// UnpricedModels is empty: all models are priced.
+	}
+	styles := plainStyles()
+	s := screens.NewRunsScreen(report, 100, 30, styles)
+
+	help := s.Help()
+	view := s.View(100, 30)
+
+	// Help() must advertise 'p' as a standalone key binding.
+	// "p " (p followed by its description word) distinguishes the 'p' key from
+	// substrings like "up" or "open" (which contain 'p' but not as a standalone key).
+	if !strings.Contains(help, "p ") {
+		t.Errorf("Help() does not advertise 'p' key binding unconditionally; got %q", help)
+	}
+	// View()'s rendered help bar must carry the same key hint.
+	if !strings.Contains(view, "p ") {
+		t.Errorf("View() help bar does not advertise 'p' key binding unconditionally; view:\n%s", view)
+	}
+	// The hint must not imply pricing is conditional (e.g. 'p (if unpriced)').
+	if strings.Contains(help, "if unpriced") || strings.Contains(help, "when unpriced") {
+		t.Errorf("Help() pricing hint implies conditionality; got %q", help)
 	}
 }
 

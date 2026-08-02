@@ -58,16 +58,23 @@ func FormatTotal(c domain.CategoryMoney) string {
 }
 
 // FormatTotalsLine renders a compact single-line summary of a Totals value
-// showing token categories and money side by side.
+// showing token categories and money side by side. Category names come from
+// domain.TokenCategory.Label().
 func FormatTotalsLine(t domain.Totals) string {
-	return fmt.Sprintf(
-		"in: %s  cr: %s  cw: %s  out: %s  %s",
-		FormatTokens(t.Tokens.Input),
-		FormatTokens(t.Tokens.CacheRead),
-		FormatTokens(t.Tokens.CacheCreation),
-		FormatTokens(t.Tokens.Output),
-		FormatTotal(t.Money),
-	)
+	parts := make([]string, 0, len(domain.BillableCategories())+1)
+	for _, cat := range domain.BillableCategories() {
+		count, _ := t.Tokens.Get(cat)
+		parts = append(parts, fmt.Sprintf("%s: %s", cat.Label(), FormatTokens(count)))
+	}
+	parts = append(parts, FormatTotal(t.Money))
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += "  "
+		}
+		result += p
+	}
+	return result
 }
 
 // formatGrouped formats an int64 with comma grouping for readability.

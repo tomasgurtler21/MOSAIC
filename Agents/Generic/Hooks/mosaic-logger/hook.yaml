@@ -2,15 +2,16 @@ schema_version: "1"
 id: mosaic-logger
 version: 1.1.0
 description: >-
-  Captures all 12 Claude Code hook events for full MOSAIC orchestration log
-  capture: session lifecycle, user turns, assistant turns, tool calls, subagent
-  invocations, notifications, and compaction events. Produces structured JSONL
-  event streams, per-invocation markdown artifacts, and byte-identical transcript
-  exports under OrchestrationLogs/.
+  Captures hook events across three harnesses — Claude Code (12 events), GHCP
+  CLI (14 events), and VS Code Chat Extension (8 events) — for full MOSAIC
+  orchestration log capture: session lifecycle, user turns, assistant turns,
+  tool calls, subagent invocations, and compaction events. Produces structured
+  JSONL event streams, per-invocation markdown artifacts, and byte-identical
+  transcript exports under OrchestrationLogs/.
 
-# placeholder is absent: the claude-code variant carries a real, deployable Python
-# adapter. The opencode and vscode-ghcp variants remain placeholder stubs — see
-# README.md. The schema has no per-variant placeholder flag, so the whole-bundle
+# placeholder is absent: the claude-code, vscode-ghcp, and ghcp-cli variants each
+# carry a real, deployable Python adapter. The opencode variant remains a stub —
+# see README.md. The schema has no per-variant placeholder flag, so the whole-bundle
 # key is omitted rather than mislabelling a deployable adapter as unauthored.
 
 # content_hash is absent: the claude-code variant lists ../hook.yaml in its file
@@ -240,21 +241,52 @@ variants:
 
   vscode-ghcp:
     supported: true
-    # No reuses key: the deployment schema's reuse mechanism copies the referenced
-    # variant's entire file list verbatim. A reuses: claude-code link would
-    # silently ship the Python adapter into VS Code deployments. This variant
-    # carries its own placeholder file entry instead.
     files:
-      - source: README.md
-        target: README.md
+      - source: mosaic_logger.py
+        target: mosaic_logger.py
+      - source: mosaic_logger_core.py
+        target: mosaic_logger_core.py
+      - source: mosaic_logger_runstate.py
+        target: mosaic_logger_runstate.py
+      - source: mosaic_logger_export.py
+        target: mosaic_logger_export.py
+      - source: mosaic_logger_transcript.py
+        target: mosaic_logger_transcript.py
+      - source: mosaic_logger_handlers_session.py
+        target: mosaic_logger_handlers_session.py
+      - source: mosaic_logger_handlers_invocation.py
+        target: mosaic_logger_handlers_invocation.py
+      - source: mosaic_logger_handlers_tools.py
+        target: mosaic_logger_handlers_tools.py
+      - source: mosaic_logger_artifacts.py
+        target: mosaic_logger_artifacts.py
+      - source: ../hook.yaml
+        target: hook.yaml
     registration:
-      - id: enable-chat-hooks
-        target_path: ""
-        performable: false
+      - id: settings-fragment
+        target_path: .github/hooks/mosaic-logger.json
+        performable: true
         instruction: >-
-          Enable hooks in VS Code: open User Settings (JSON) and set
-          "chat.hooks.enabled": true. This is a user-level editor setting
-          and cannot be set by the deployment tool.
+          Write the hooks configuration to .github/hooks/mosaic-logger.json to
+          register the mosaic-logger dispatcher for the 8 supported VS Code Chat
+          Extension hook events. VS Code hooks are enabled by default; no
+          user-level setting controls this. If hooks do not fire, the enterprise
+          ChatHooks policy (surfacing as chat.useHooks) may have been disabled
+          by an administrator — this is an organization-wide setting that
+          per-project deployment tooling cannot modify.
+        fragment: |
+          {
+            "hooks": {
+              "SessionStart":     [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "UserPromptSubmit": [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "PreToolUse":       [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "PostToolUse":      [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "PreCompact":       [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "SubagentStart":    [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "SubagentStop":     [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "Stop":             [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ]
+            }
+          }
 
   ghcp-cli:
     supported: true

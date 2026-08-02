@@ -21,6 +21,7 @@ import (
 type RunsScreen struct {
 	report domain.Report
 	cursor int
+	offset int // scroll offset, clamped inside View
 	width  int
 	height int
 	styles Styles
@@ -80,55 +81,51 @@ func (s *RunsScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	return s, nil
 }
 
-// View renders the run-list screen.
+// View renders the run-list screen, clipped to the given height.
+// The scroll offset is clamped against the passed-in height on every render
+// so that terminal resizes are handled implicitly on the next call.
 func (s *RunsScreen) View(width, height int) string {
 	s.width = width
 	s.height = height
 
-	var sb strings.Builder
 	sep := s.styles.Border.Width(width).Render(strings.Repeat("─", width))
 
-	// Title.
-	sb.WriteString(s.styles.Title.Width(width).Render("Log Analyzer — Runs"))
-	sb.WriteByte('\n')
-	sb.WriteString(sep)
-	sb.WriteByte('\n')
-	sb.WriteByte('\n')
-
-	// All-runs totals (named runs only, per contract).
-	sb.WriteString(s.styles.Subtitle.Width(width).Render("All runs"))
-	sb.WriteByte('\n')
-	sb.WriteString(s.styles.Body.Width(width).Render("  " + FormatTotalsLine(s.report.AllRuns)))
-	sb.WriteByte('\n')
-	sb.WriteByte('\n')
-
-	// Per-run list.
+	// --- Fixed header ---
+	var headerSB strings.Builder
+	headerSB.WriteString(s.styles.Title.Width(width).Render("Log Analyzer — Runs"))
+	headerSB.WriteByte('\n')
+	headerSB.WriteString(sep)
+	headerSB.WriteByte('\n')
+	headerSB.WriteByte('\n')
+	headerSB.WriteString(s.styles.Subtitle.Width(width).Render("All runs"))
+	headerSB.WriteByte('\n')
+	headerSB.WriteString(s.styles.Body.Width(width).Render("  " + FormatTotalsLine(s.report.AllRuns)))
+	headerSB.WriteByte('\n')
+	headerSB.WriteByte('\n')
 	if len(s.report.Runs) == 0 {
-		sb.WriteString(s.styles.Muted.Width(width).Render("  (no named runs)"))
-		sb.WriteByte('\n')
+		headerSB.WriteString(s.styles.Muted.Width(width).Render("  (no named runs)"))
+		headerSB.WriteByte('\n')
 	} else {
-		sb.WriteString(s.styles.Subtitle.Width(width).Render(fmt.Sprintf("Runs (%d)", len(s.report.Runs))))
-		sb.WriteByte('\n')
-		for i, run := range s.report.Runs {
-			s.writeRunRow(&sb, i, run, width)
-		}
+		headerSB.WriteString(s.styles.Subtitle.Width(width).Render(fmt.Sprintf("Runs (%d)", len(s.report.Runs))))
+		headerSB.WriteByte('\n')
 	}
+	headerStr := headerSB.String()
+	headerLines := strings.Count(headerStr, "\n")
 
-	// Unattributable bucket (separate section, not in named-run total).
+	// --- Variable footer (after runs, before sep+help) ---
+	// Rendered now so we can count its lines for the available-line calculation.
+	var varFooterSB strings.Builder
 	if s.report.Unattributable != nil {
-		sb.WriteByte('\n')
-		sb.WriteString(sep)
-		sb.WriteByte('\n')
-		label := s.styles.Warning.Width(width).Render(UnattributableLabel)
-		sb.WriteString(label)
-		sb.WriteByte('\n')
-		sb.WriteString(s.styles.Body.Width(width).Render("  " + FormatTotalsLine(s.report.Unattributable.Totals)))
-		sb.WriteByte('\n')
+		varFooterSB.WriteByte('\n')
+		varFooterSB.WriteString(sep)
+		varFooterSB.WriteByte('\n')
+		varFooterSB.WriteString(s.styles.Warning.Width(width).Render(UnattributableLabel))
+		varFooterSB.WriteByte('\n')
+		varFooterSB.WriteString(s.styles.Body.Width(width).Render("  " + FormatTotalsLine(s.report.Unattributable.Totals)))
+		varFooterSB.WriteByte('\n')
 	}
-
-	// Data-quality findings summary.
 	if !s.report.Quality.IsClean() {
-		sb.WriteByte('\n')
+		varFooterSB.WriteByte('\n')
 		counts := s.report.Quality.Counts
 		total := 0
 		for _, c := range counts {
@@ -139,21 +136,48 @@ func (s *RunsScreen) View(width, height int) string {
 			incomplete = " — data is incomplete"
 		}
 		line := fmt.Sprintf("⚠ %d data-quality finding(s)%s", total, incomplete)
-		sb.WriteString(s.styles.Warning.Width(width).Render(line))
-		sb.WriteByte('\n')
+		varFooterSB.WriteString(s.styles.Warning.Width(width).Render(line))
+		varFooterSB.WriteByte('\n')
 	}
-
-	// Unpriced models notice.
 	if len(s.report.UnpricedModels) > 0 {
 		line := fmt.Sprintf("Some models have no pricing (%d model(s) unpriced). Press 'p' to enter prices.", len(s.report.UnpricedModels))
-		sb.WriteString(s.styles.Warning.Width(width).Render(line))
-		sb.WriteByte('\n')
+		varFooterSB.WriteString(s.styles.Warning.Width(width).Render(line))
+		varFooterSB.WriteByte('\n')
+	}
+	varFooterStr := varFooterSB.String()
+	varFooterLines := strings.Count(varFooterStr, "\n")
+
+	// --- Scroll arithmetic ---
+	const fixedFooterLines = 2 // sep + help bar
+	const linesPerRun = 2
+	overhead := headerLines + varFooterLines + fixedFooterLines
+	available := height - overhead
+	n := len(s.report.Runs)
+	visibleRuns := VisibleItems(available, linesPerRun)
+	w := ScrollWindow(s.offset, s.cursor, n, visibleRuns)
+	s.offset = w.Offset
+
+	// --- Visible run rows ---
+	var runsSB strings.Builder
+	for i := w.Offset; i < w.End() && i < n; i++ {
+		s.writeRunRow(&runsSB, i, s.report.Runs[i], width)
 	}
 
-	// Help bar.
+	// --- Scroll hint for the help bar ---
+	hint := FormatScrollHint(w, n)
+	helpText := "↑/↓ navigate  enter open  s source  p pricing  esc quit  ctrl+c quit"
+	if hint != "" {
+		helpText += "  " + hint
+	}
+
+	// --- Assemble ---
+	var sb strings.Builder
+	sb.WriteString(headerStr)
+	sb.WriteString(runsSB.String())
+	sb.WriteString(varFooterStr)
 	sb.WriteString(sep)
 	sb.WriteByte('\n')
-	sb.WriteString(s.styles.Help.Width(width).Render("↑/↓ navigate  enter open  p pricing  esc quit  ctrl+c quit"))
+	sb.WriteString(s.styles.Help.Width(width).Render(helpText))
 
 	return sb.String()
 }
@@ -179,7 +203,7 @@ func (s *RunsScreen) writeRunRow(sb *strings.Builder, idx int, run domain.RunRep
 
 // Help returns the key hints for this screen.
 func (s *RunsScreen) Help() string {
-	return "↑/↓ navigate  enter open  p pricing  esc quit  ctrl+c quit"
+	return "↑/↓ navigate  enter open  s source  p pricing  esc quit  ctrl+c quit"
 }
 
 // Done reports whether the user selected a run.

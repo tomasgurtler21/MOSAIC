@@ -101,6 +101,40 @@ func (u TokenUsage) TotalContext() TokenCount {
 	return SumTokens(u.Input, u.CacheRead, u.CacheCreation)
 }
 
+// Label returns the human-facing display name for a billable token category.
+// Both frontends render these exact strings so their vocabularies cannot drift.
+// Returns "" for an unrecognised category.
+//
+//	CategoryInput         -> "input"
+//	CategoryCacheRead     -> "cache read"
+//	CategoryCacheCreation -> "cache write"
+//	CategoryOutput        -> "output"
+func (c TokenCategory) Label() string {
+	switch c {
+	case CategoryInput:
+		return "input"
+	case CategoryCacheRead:
+		return "cache read"
+	case CategoryCacheCreation:
+		return "cache write"
+	case CategoryOutput:
+		return "output"
+	default:
+		return ""
+	}
+}
+
+// BillableCategories returns the four billable categories in canonical
+// presentation order: input, cache read, cache write, output.
+func BillableCategories() []TokenCategory {
+	return []TokenCategory{
+		CategoryInput,
+		CategoryCacheRead,
+		CategoryCacheCreation,
+		CategoryOutput,
+	}
+}
+
 // Get returns the count for a category; ok is false for an unrecognised category.
 func (u TokenUsage) Get(c TokenCategory) (TokenCount, bool) {
 	switch c {

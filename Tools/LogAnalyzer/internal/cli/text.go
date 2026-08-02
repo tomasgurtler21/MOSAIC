@@ -107,23 +107,16 @@ func writeTextTotals(w io.Writer, t domain.Totals, indent string) {
 }
 
 // writeTextTokens writes per-category token counts with thousand-separator grouping.
+// Labels come from domain.TokenCategory.Label() so the CLI and TUI vocabularies
+// cannot drift apart.
 func writeTextTokens(w io.Writer, u domain.TokenUsage, indent string) {
-	type cat struct {
-		name string
-		val  domain.TokenCount
-	}
-	cats := []cat{
-		{"Input", u.Input},
-		{"CacheRead", u.CacheRead},
-		{"CacheCreation", u.CacheCreation},
-		{"Output", u.Output},
-	}
-	for _, c := range cats {
-		v, ok := c.val.Value()
+	for _, cat := range domain.BillableCategories() {
+		count, _ := u.Get(cat)
+		v, ok := count.Value()
 		if ok {
-			fmt.Fprintf(w, "%s%s: %s tokens\n", indent, c.name, formatGrouped(v))
+			fmt.Fprintf(w, "%s%s: %s tokens\n", indent, cat.Label(), formatGrouped(v))
 		} else {
-			fmt.Fprintf(w, "%s%s: -\n", indent, c.name)
+			fmt.Fprintf(w, "%s%s: -\n", indent, cat.Label())
 		}
 	}
 }

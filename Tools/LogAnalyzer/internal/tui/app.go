@@ -45,6 +45,13 @@ type analysisDoneMsg struct {
 	err    error
 }
 
+// pricingEditDoneMsg is sent when the app-layer pricing editor completes.
+// It mirrors analysisDoneMsg exactly.
+type pricingEditDoneMsg struct {
+	result app.PricingEditResult
+	err    error
+}
+
 // Model is the top-level bubbletea model: screen registry, window-size
 // handling, key routing and screen transitions.
 type Model struct {
@@ -58,6 +65,11 @@ type Model struct {
 	// analysisPath is the explicit path for the next analysis run.
 	// An empty string means "no explicit path" (the service will prompt).
 	analysisPath string
+
+	// sourceFromRuns records that the source screen was opened from the Runs
+	// list (via 's'), not in response to a pending Interaction question.
+	// updateSource branches on this flag to take the correct action on Done/Back.
+	sourceFromRuns bool
 
 	screen  screenName
 	width   int
@@ -203,6 +215,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleAnalysisDone(done)
 	}
 
+	// Pricing editor complete.
+	if done, ok := msg.(pricingEditDoneMsg); ok {
+		return m.handlePricingEditDone(done)
+	}
+
 	// Pending question from the Interaction port.
 	if p, ok := msg.(Pending); ok {
 		return m.handlePending(p)
@@ -297,9 +314,14 @@ func (m Model) handlePending(p Pending) (tea.Model, tea.Cmd) {
 	case pendingSelectOne:
 		if p.id == app.QuestionPricingAction && m.result != nil {
 			// Show pricing context screen first, then overlay on top.
+			// TODO I5.6: verify background renders sensibly with reworked screen.
 			style := stylesFromTheme(m.theme)
+			var modelStates []app.ModelPricingStatus
+			if m.session != nil {
+				modelStates = app.ModelPricingStates(m.report, m.session.Table())
+			}
 			m.pricingScreen = screens.NewPricingScreen(
-				m.report.UnpricedModels,
+				modelStates,
 				m.opts.Service.PricingPath(),
 				m.width, m.height, style,
 			)
@@ -339,7 +361,13 @@ func (m Model) updateSource(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.sourceScreen = updated.(*screens.SourceScreen)
 	if m.sourceScreen.Back() {
 		m.sourceScreen.Reset()
-		// User skipped — return Cancelled answer.
+		if m.sourceFromRuns {
+			// Runs-initiated cancel: return to the Runs list, no analysis restart.
+			m.sourceFromRuns = false
+			m.screen = screenRuns
+			return m, nil
+		}
+		// Interaction-initiated cancel: reply Cancelled to the pending question.
 		m.replyToPending(answerMsg{
 			textAns: interaction.TextAnswer{Status: interaction.Cancelled},
 		})
@@ -349,6 +377,14 @@ func (m Model) updateSource(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.sourceScreen.Done() {
 		path := m.sourceScreen.Path()
 		m.sourceScreen.Reset()
+		if m.sourceFromRuns {
+			// Runs-initiated confirm: set the explicit path and restart analysis.
+			m.sourceFromRuns = false
+			m.analysisPath = path
+			m.screen = screenLoading
+			return m, m.buildAnalysisCmd()
+		}
+		// Interaction-initiated confirm: reply Answered to the pending question.
 		m.replyToPending(answerMsg{
 			textAns: interaction.TextAnswer{Status: interaction.Answered, Text: path},
 		})
@@ -362,17 +398,29 @@ func (m Model) updateRuns(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.runsScreen == nil {
 		return m, nil
 	}
+	// Intercept 's' to open the source-path entry screen from the Runs list.
+	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "s" {
+		style := stylesFromTheme(m.theme)
+		m.sourceScreen = screens.NewSourceScreen(m.width, m.height, style)
+		m.sourceFromRuns = true
+		m.screen = screenSource
+		return m, m.sourceScreen.Init()
+	}
+
 	// Intercept 'p' for pricing navigation.
+	// Guard: require an active session; do nothing if analysis has not yet produced one.
 	if key, ok := msg.(tea.KeyMsg); ok && key.String() == "p" {
-		if len(m.report.UnpricedModels) > 0 {
-			style := stylesFromTheme(m.theme)
-			m.pricingScreen = screens.NewPricingScreen(
-				m.report.UnpricedModels,
-				m.opts.Service.PricingPath(),
-				m.width, m.height, style,
-			)
-			m.screen = screenPricing
+		if m.result == nil || m.result.Session == nil {
+			return m, nil
 		}
+		style := stylesFromTheme(m.theme)
+		modelStates := app.ModelPricingStates(m.report, m.result.Session.Table())
+		m.pricingScreen = screens.NewPricingScreen(
+			modelStates,
+			m.opts.Service.PricingPath(),
+			m.width, m.height, style,
+		)
+		m.screen = screenPricing
 		return m, nil
 	}
 
@@ -423,7 +471,56 @@ func (m Model) updatePricing(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenRuns
 		return m, nil
 	}
+	if m.pricingScreen.Done() {
+		selected := m.pricingScreen.SelectedModel()
+		m.pricingScreen.Reset()
+		m.screen = screenLoading
+		return m, m.buildPricingEditCmd(selected)
+	}
 	return m, cmd
+}
+
+// buildPricingEditCmd returns a Cmd that runs Service.EditModelPricing in a
+// goroutine under m.ctx and returns a pricingEditDoneMsg.
+//
+// Binding rule: it returns ONLY that message. It must NOT start a second
+// waitForPending goroutine — the single long-lived waiter delivers the
+// editor's rate questions.
+func (m Model) buildPricingEditCmd(model domain.ModelID) tea.Cmd {
+	svc := m.opts.Service
+	sess := m.session
+	report := m.report
+	ctx := m.ctx
+	return func() tea.Msg {
+		result, err := svc.EditModelPricing(ctx, sess, report, model)
+		return pricingEditDoneMsg{result: result, err: err}
+	}
+}
+
+// handlePricingEditDone applies the result of a completed pricing-edit flow.
+// On PricingEditSaved, the repriced report is applied to the Runs screen (via
+// SetReport so the cursor position survives) and a confirmation is surfaced on
+// the pricing screen's status line. On other outcomes the report is unchanged.
+func (m Model) handlePricingEditDone(done pricingEditDoneMsg) (tea.Model, tea.Cmd) {
+	if done.err != nil {
+		m.errMsg = done.err.Error()
+		m.screen = screenError
+		return m, nil
+	}
+
+	result := done.result
+	m.report = result.Report
+
+	if m.runsScreen != nil {
+		m.runsScreen.SetReport(result.Report)
+	}
+
+	if result.Outcome == app.PricingEditSaved && m.pricingScreen != nil {
+		m.pricingScreen.SetStatus("Price written to " + result.ConfigPath)
+	}
+
+	m.screen = screenRuns
+	return m, nil
 }
 
 func (m Model) updateNoData(msg tea.Msg) (tea.Model, tea.Cmd) {

@@ -27,6 +27,12 @@ const (
 	// QuestionRunSelect asks which run to open when several are available.
 	// Shape: SelectOne over run ids. Skipped/cancelled => stay on the run list.
 	QuestionRunSelect interaction.QuestionID = "run-select"
+
+	// QuestionPricingModel asks which model to set or overwrite a price for.
+	// Shape: SelectOne whose OptionIDs are model id strings, one per model in
+	// ReportModels order, each Label carrying the model id and its current
+	// priced/unpriced state. Skipped/cancelled => no edit, report unchanged.
+	QuestionPricingModel interaction.QuestionID = "pricing-model"
 )
 
 // Option identifiers for QuestionPricingAction.

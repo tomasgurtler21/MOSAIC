@@ -8,6 +8,7 @@ package domain_test
 // can silently collapse the distinction.
 
 import (
+	"strings"
 	"testing"
 
 	"mosaic-log-analyzer/internal/domain"
@@ -516,5 +517,151 @@ func TestSumUsage_AbsentUsagesDoNotPoisonSum(t *testing.T) {
 	}
 	if result.Input.IsPresent() {
 		t.Error("SumUsage Input must remain absent when none of the inputs had it")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Display labels: TokenCategory.Label() and BillableCategories()
+// ---------------------------------------------------------------------------
+
+// TestTokenCategory_Label_InputCategory verifies the exact display label for
+// CategoryInput is "input".
+func TestTokenCategory_Label_InputCategory(t *testing.T) {
+	got := domain.CategoryInput.Label()
+	if got != "input" {
+		t.Errorf("CategoryInput.Label() = %q, want %q", got, "input")
+	}
+}
+
+// TestTokenCategory_Label_CacheReadCategory verifies the exact display label for
+// CategoryCacheRead is "cache read".
+func TestTokenCategory_Label_CacheReadCategory(t *testing.T) {
+	got := domain.CategoryCacheRead.Label()
+	if got != "cache read" {
+		t.Errorf("CategoryCacheRead.Label() = %q, want %q", got, "cache read")
+	}
+}
+
+// TestTokenCategory_Label_CacheCreationCategory verifies the display label for
+// CategoryCacheCreation is "cache write". The machine identifier stays
+// cache_creation; only the human-facing label changes to match pricing vocabulary.
+func TestTokenCategory_Label_CacheCreationCategory(t *testing.T) {
+	got := domain.CategoryCacheCreation.Label()
+	if got != "cache write" {
+		t.Errorf("CategoryCacheCreation.Label() = %q, want %q", got, "cache write")
+	}
+}
+
+// TestTokenCategory_Label_OutputCategory verifies the exact display label for
+// CategoryOutput is "output".
+func TestTokenCategory_Label_OutputCategory(t *testing.T) {
+	got := domain.CategoryOutput.Label()
+	if got != "output" {
+		t.Errorf("CategoryOutput.Label() = %q, want %q", got, "output")
+	}
+}
+
+// TestTokenCategory_Label_UnrecognisedCategory verifies that an unrecognised
+// category returns an empty string rather than panicking or returning a label.
+func TestTokenCategory_Label_UnrecognisedCategory(t *testing.T) {
+	got := domain.TokenCategory("nonexistent_category").Label()
+	if got != "" {
+		t.Errorf("unrecognised category Label() = %q, want empty string", got)
+	}
+}
+
+// TestTokenCategory_Label_AllBillableLabelsNonEmpty verifies every billable
+// category has a non-empty display label.
+func TestTokenCategory_Label_AllBillableLabelsNonEmpty(t *testing.T) {
+	billable := []domain.TokenCategory{
+		domain.CategoryInput,
+		domain.CategoryCacheRead,
+		domain.CategoryCacheCreation,
+		domain.CategoryOutput,
+	}
+	for _, cat := range billable {
+		if label := cat.Label(); label == "" {
+			t.Errorf("%q.Label() returned empty string — every billable category must have a label", cat)
+		}
+	}
+}
+
+// TestTokenCategory_Label_AllBillableLabelsAreDistinct verifies that no two
+// billable categories share a display label.
+func TestTokenCategory_Label_AllBillableLabelsAreDistinct(t *testing.T) {
+	billable := []domain.TokenCategory{
+		domain.CategoryInput,
+		domain.CategoryCacheRead,
+		domain.CategoryCacheCreation,
+		domain.CategoryOutput,
+	}
+	seen := make(map[string]domain.TokenCategory)
+	for _, cat := range billable {
+		label := cat.Label()
+		if prev, exists := seen[label]; exists {
+			t.Errorf("duplicate label %q: both %q and %q share it", label, prev, cat)
+		}
+		seen[label] = cat
+	}
+}
+
+// TestTokenCategory_Label_ContainsNoUnexplainedAbbreviations verifies that each
+// word in a label is at least 3 characters long. Short tokens like "cr", "cw",
+// "in", "out" are the abbreviations being replaced with full English words.
+func TestTokenCategory_Label_ContainsNoUnexplainedAbbreviations(t *testing.T) {
+	billable := []domain.TokenCategory{
+		domain.CategoryInput,
+		domain.CategoryCacheRead,
+		domain.CategoryCacheCreation,
+		domain.CategoryOutput,
+	}
+	for _, cat := range billable {
+		label := cat.Label()
+		words := strings.Fields(label)
+		for _, word := range words {
+			if len(word) < 3 {
+				t.Errorf("%q.Label() = %q contains short word %q — labels must use full English words, not abbreviations",
+					cat, label, word)
+			}
+		}
+	}
+}
+
+// TestBillableCategories_ReturnsFourCategories verifies BillableCategories
+// returns exactly four entries — one per billable token category.
+func TestBillableCategories_ReturnsFourCategories(t *testing.T) {
+	cats := domain.BillableCategories()
+	if len(cats) != 4 {
+		t.Errorf("BillableCategories() returned %d categories, want 4", len(cats))
+	}
+}
+
+// TestBillableCategories_CanonicalOrder verifies the canonical presentation
+// order: input, cache read (cache_read), cache write (cache_creation), output.
+func TestBillableCategories_CanonicalOrder(t *testing.T) {
+	cats := domain.BillableCategories()
+	if len(cats) < 4 {
+		t.Fatalf("BillableCategories() returned %d categories, want 4", len(cats))
+	}
+	want := []domain.TokenCategory{
+		domain.CategoryInput,
+		domain.CategoryCacheRead,
+		domain.CategoryCacheCreation,
+		domain.CategoryOutput,
+	}
+	for i, w := range want {
+		if cats[i] != w {
+			t.Errorf("BillableCategories()[%d] = %q, want %q", i, cats[i], w)
+		}
+	}
+}
+
+// TestBillableCategories_AllHaveNonEmptyLabels verifies that every category
+// returned by BillableCategories has a non-empty Label().
+func TestBillableCategories_AllHaveNonEmptyLabels(t *testing.T) {
+	for _, cat := range domain.BillableCategories() {
+		if label := cat.Label(); label == "" {
+			t.Errorf("BillableCategories includes %q which has an empty label", cat)
+		}
 	}
 }

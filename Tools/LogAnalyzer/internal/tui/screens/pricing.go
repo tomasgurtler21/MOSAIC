@@ -6,27 +6,34 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"mosaic-log-analyzer/internal/app"
 	"mosaic-log-analyzer/internal/domain"
 )
 
-// PricingScreen shows the list of models that have no pricing entry and
-// displays the config file path. It serves as the background context while
-// pricing questions arrive through the Interaction port.
+// PricingScreen lists every model in the current report with its priced /
+// unpriced state, and lets the user select one to set or overwrite its price.
+// It also still serves as the background context while pricing questions
+// arrive through the Interaction port.
 //
 // Navigation contract:
-//   - Esc -> Back() == true.
+//   - ↑/↓ (and k/j) move the cursor.
+//   - Enter -> Done() == true; SelectedModel() returns the chosen model.
+//   - Esc/q -> Back() == true.
 type PricingScreen struct {
-	models     []domain.ModelID
+	models     []app.ModelPricingStatus
 	configPath string
 	statusMsg  string
+	cursor     int
 	width      int
 	height     int
 	styles     Styles
+	done       bool
 	back       bool
 }
 
-// NewPricingScreen creates the pricing-entry background screen.
-func NewPricingScreen(models []domain.ModelID, configPath string, width, height int, styles Styles) *PricingScreen {
+// NewPricingScreen creates the pricing screen over the given per-model pricing
+// states. An empty or nil slice is valid and renders without panic.
+func NewPricingScreen(models []app.ModelPricingStatus, configPath string, width, height int, styles Styles) *PricingScreen {
 	return &PricingScreen{
 		models:     models,
 		configPath: configPath,
@@ -36,14 +43,47 @@ func NewPricingScreen(models []domain.ModelID, configPath string, width, height 
 	}
 }
 
+// SetModels replaces the model list (used after a reprice without re-navigating).
+// The cursor is clamped into range.
+func (s *PricingScreen) SetModels(models []app.ModelPricingStatus) {
+	s.models = models
+	if len(models) == 0 {
+		s.cursor = 0
+	} else if s.cursor >= len(models) {
+		s.cursor = len(models) - 1
+	}
+}
+
 // ID implements Screen.
 func (s *PricingScreen) ID() ScreenID { return ScreenPricing }
 
 // Init implements Screen.
 func (s *PricingScreen) Init() tea.Cmd { return nil }
 
-// SetStatus updates the status line shown below the model list.
+// SetStatus updates the status line shown below the model list. Used to
+// confirm that a price was written.
 func (s *PricingScreen) SetStatus(msg string) { s.statusMsg = msg }
+
+// Done reports whether the user chose a model with Enter.
+func (s *PricingScreen) Done() bool { return s.done }
+
+// SelectedModel returns the highlighted model. Only meaningful when Done() is
+// true; returns "" when the list is empty or the cursor is out of range.
+func (s *PricingScreen) SelectedModel() domain.ModelID {
+	if len(s.models) == 0 || s.cursor < 0 || s.cursor >= len(s.models) {
+		return ""
+	}
+	return s.models[s.cursor].Model
+}
+
+// Back reports whether the user pressed Esc.
+func (s *PricingScreen) Back() bool { return s.back }
+
+// Reset clears the done and back flags.
+func (s *PricingScreen) Reset() {
+	s.done = false
+	s.back = false
+}
 
 // Update processes key messages.
 func (s *PricingScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
@@ -54,11 +94,24 @@ func (s *PricingScreen) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch key.String() {
 	case "esc", "q":
 		s.back = true
+	case "up", "k":
+		if s.cursor > 0 {
+			s.cursor--
+		}
+	case "down", "j":
+		if s.cursor < len(s.models)-1 {
+			s.cursor++
+		}
+	case "enter":
+		if len(s.models) > 0 {
+			s.done = true
+		}
 	}
 	return s, nil
 }
 
-// View renders the pricing-entry background screen.
+// View renders the pricing screen. Stub: shows model names; priced/unpriced
+// distinction and full selectable-list rendering are added in I5.1.
 func (s *PricingScreen) View(width, height int) string {
 	s.width = width
 	s.height = height
@@ -66,19 +119,29 @@ func (s *PricingScreen) View(width, height int) string {
 	var sb strings.Builder
 	sep := s.styles.Border.Width(width).Render(strings.Repeat("─", width))
 
-	sb.WriteString(s.styles.Title.Width(width).Render("Log Analyzer — Pricing Entry"))
+	sb.WriteString(s.styles.Title.Width(width).Render("Log Analyzer — Pricing"))
 	sb.WriteByte('\n')
 	sb.WriteString(s.styles.Subtitle.Width(width).Render(
-		fmt.Sprintf("%d model(s) have no pricing entry", len(s.models)),
+		fmt.Sprintf("%d model(s) in report", len(s.models)),
 	))
 	sb.WriteByte('\n')
 	sb.WriteString(sep)
 	sb.WriteByte('\n')
 	sb.WriteByte('\n')
 
-	// List of unpriced models.
-	for _, m := range s.models {
-		sb.WriteString(s.styles.Body.Width(width).Render("  • " + string(m)))
+	// List models with priced/unpriced distinction.
+	for i, m := range s.models {
+		prefix := "  "
+		if i == s.cursor {
+			prefix = "> "
+		}
+		var status string
+		if m.Priced {
+			status = "  (priced)"
+		} else {
+			status = "  " + AbsentMarker + " unpriced"
+		}
+		sb.WriteString(s.styles.Body.Width(width).Render(prefix + string(m.Model) + status))
 		sb.WriteByte('\n')
 	}
 
@@ -96,18 +159,12 @@ func (s *PricingScreen) View(width, height int) string {
 
 	sb.WriteString(sep)
 	sb.WriteByte('\n')
-	sb.WriteString(s.styles.Help.Width(width).Render("Responding to pricing prompts…  esc skip  ctrl+c quit"))
+	sb.WriteString(s.styles.Help.Width(width).Render("↑/↓ select  enter price  esc back  ctrl+c quit"))
 
 	return sb.String()
 }
 
 // Help returns the key hints for this screen.
 func (s *PricingScreen) Help() string {
-	return "Responding to pricing prompts…  esc skip  ctrl+c quit"
+	return "↑/↓ select  enter price  esc back  ctrl+c quit"
 }
-
-// Back reports whether the user pressed Esc.
-func (s *PricingScreen) Back() bool { return s.back }
-
-// Reset clears the back flag.
-func (s *PricingScreen) Reset() { s.back = false }
