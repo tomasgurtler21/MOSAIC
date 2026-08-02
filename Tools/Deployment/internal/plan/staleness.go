@@ -49,6 +49,13 @@ func AgentStaleness(deployed domain.DeployedArtifactState, _ domain.Agent, stamp
 			Source:   stamps.OrchestratorInjectionsVersion,
 		})
 	}
+	if deployed.ToolMappingsVersion != stamps.ToolMappingsVersion {
+		deltas = append(deltas, domain.VersionDelta{
+			Field:    "tool_mappings_version",
+			Deployed: deployed.ToolMappingsVersion,
+			Source:   stamps.ToolMappingsVersion,
+		})
+	}
 
 	return deltas
 }

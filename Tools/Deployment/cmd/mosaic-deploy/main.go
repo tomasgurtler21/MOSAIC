@@ -25,6 +25,7 @@ import (
 	"mosaic-deploy/internal/cli"
 	"mosaic-deploy/internal/config"
 	"mosaic-deploy/internal/deploy"
+	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/registry"
 	"mosaic-deploy/internal/logging"
 	"mosaic-deploy/internal/manifest"
@@ -86,6 +87,17 @@ func main() {
 		os.Exit(cli.ExitFailure)
 	}
 
+	// Step 3b: Load user-local tool configuration. Absent file yields an empty
+	// config (no error); other I/O errors are fatal. Loaded here so that the
+	// ToolMappings hook below can capture both config stores at registry discovery
+	// time, before the app.Service is constructed.
+	userConfigStore := config.NewUserConfigStore(mosaicRoot)
+	userCfg, err := userConfigStore.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: load user config: %v\n", err)
+		os.Exit(cli.ExitFailure)
+	}
+
 	// Step 4: Construct the logger before catalog/registry (StartRun is called
 	// inside the app layer per run, not here).
 	logger := logging.New(mosaicRoot, toolCfg)
@@ -98,11 +110,17 @@ func main() {
 	}
 
 	// Step 6: Discover available harnesses. External modules are allowed when
-	// either the command-line flag or the tool config enables them.
+	// either the command-line flag or the tool config enables them. The ToolMappings
+	// hook wires config-declared tool-destination mappings into each harness module's
+	// descriptor at construction time, so that destination fields are emitted on every
+	// deploy and update without any further module-level knowledge of config stores.
 	reg, err := registry.Discover(registry.Options{
 		MosaicRoot:    mosaicRoot,
 		AllowExternal: allowExternal || toolCfg.AllowExternalModules,
 		GOOS:          runtime.GOOS,
+		ToolMappings: func(harnessID string, declared []domain.ToolMapping) []domain.ToolMapping {
+			return config.EffectiveToolMappings(harnessID, declared, toolCfg.ToolDestinations, userCfg.ToolDestinations)
+		},
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: discover harnesses: %v\n", err)
@@ -126,7 +144,7 @@ func main() {
 		Executor:   deploy.NewExecutor(manifestStore, logger, todoCollector),
 		Manifest:   manifestStore,
 		ToolConfig: toolConfigStore,
-		UserConfig: config.NewUserConfigStore(mosaicRoot),
+		UserConfig: userConfigStore,
 		Logger:     logger,
 		Todo:       todoCollector,
 		MosaicRoot: mosaicRoot,

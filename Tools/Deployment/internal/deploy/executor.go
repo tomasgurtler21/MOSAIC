@@ -511,6 +511,7 @@ func newManifestEntry(item domain.PlanItem, content []byte, stamp domain.Version
 		TransformVersion:              stamp.TransformVersion,
 		InjectionsVersion:             stamp.InjectionsVersion,
 		OrchestratorInjectionsVersion: stamp.OrchestratorInjectionsVersion,
+		ToolMappingsVersion:           stamp.ToolMappingsVersion,
 		ContentHash:                   manifest.Hash(content),
 		DeployedAt:                    time.Now(),
 	}
@@ -535,6 +536,8 @@ func resolveVersionStamp(item domain.PlanItem, stamps map[string]domain.VersionS
 				stamp.InjectionsVersion = delta.Source
 			case "orchestrator_injections_version":
 				stamp.OrchestratorInjectionsVersion = delta.Source
+			case "tool_mappings_version":
+				stamp.ToolMappingsVersion = delta.Source
 			}
 		}
 	}

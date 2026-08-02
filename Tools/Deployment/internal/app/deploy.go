@@ -7,6 +7,7 @@ package app
 import (
 	"context"
 
+	"mosaic-deploy/internal/config"
 	"mosaic-deploy/internal/deploy"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/plan"
@@ -140,13 +141,20 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	}
 	deployedState := probeDeployedState(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil)
 
+	// Compute the tool-mappings version hash from the loaded config stores so the planner
+	// can detect staleness when the user modifies their tool-destination configuration.
+	toolCfg, _ := s.deps.ToolConfig.Load()
+	userCfg, _ := s.deps.UserConfig.Load()
+	toolMappingsVersion := config.HashToolDestinations(toolCfg.ToolDestinations, userCfg.ToolDestinations)
+
 	planInput := plan.Input{
 		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeDeployNew,
 		WorkspacePath: workspace, Scope: scope, GOOS: s.deps.GOOS,
 		Manifest: snap, WorkflowIDs: workflowIDs, UtilityAgentIDs: utilityIDs,
 		InfrastructureAgentIDs: infraAgentIDs, HookIDs: hookIDs,
-		Models:        modelRes.models,
-		DeployedState: deployedState,
+		Models:              modelRes.models,
+		DeployedState:       deployedState,
+		ToolMappingsVersion: toolMappingsVersion,
 	}
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
@@ -213,7 +221,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		MosaicRoot:    s.deps.MosaicRoot,
 		Content:       contentFn,
 		Conflicts:     conflicts,
-		VersionStamps: buildVersionStamps(append(probeSet.Agents, infraAgents...), probeSet.Skills, probeSet.Hooks, p.Items, module.Descriptor()),
+		VersionStamps: buildVersionStamps(append(probeSet.Agents, infraAgents...), probeSet.Skills, probeSet.Hooks, p.Items, module.Descriptor(), toolMappingsVersion),
 		Hooks:         buildHookPlans(module, probeSet.Hooks, scope),
 		Todo:          s.deps.Todo.Items(),
 		TodoMeta: todo.Meta{

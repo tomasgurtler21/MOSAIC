@@ -86,12 +86,8 @@ type HarnessTool struct {
 
 // ToolMapping declares how one generic tool name maps to harness-specific output.
 // An empty Destinations slice means "declared unsupported by this harness".
-//
-// HarnessTools is retained for backward compatibility with existing test fixtures that
-// construct ToolMapping directly using struct literal syntax; new code must use Destinations.
 type ToolMapping struct {
-	Generic      string   // generic tool name
-	HarnessTools []string // deprecated: retained for test-fixture compat; use Destinations instead
+	Generic string // generic tool name
 	// Destinations is the ordered set of output targets for this generic tool.
 	// An empty slice means "declared unsupported by this harness".
 	Destinations []ToolDestination

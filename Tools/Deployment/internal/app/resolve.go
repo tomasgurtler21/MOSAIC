@@ -676,9 +676,13 @@ func (s *service) buildContent(
 
 // buildVersionStamps derives the version stamps for every plan item from the resolved
 // artifact set and harness descriptor, keyed by target path (as deploy.ExecRequest requires).
+// toolMappingsVersion is the hash of the effective tool-destination mapping set for this run
+// (from HashToolDestinations); it is stamped into agent entries so the executor can record it
+// in the manifest and surface it in VersionDelta comparisons.
 func buildVersionStamps(
 	agents []domain.Agent, skills []domain.Skill, hooks []domain.HookBundle,
 	items []domain.PlanItem, desc *domain.HarnessDescriptor,
+	toolMappingsVersion string,
 ) map[string]domain.VersionStamp {
 	agentByKey := make(map[string]domain.Agent, len(agents))
 	for _, a := range agents {
@@ -700,6 +704,7 @@ func buildVersionStamps(
 			if a, ok := agentByKey[item.Ref.Key]; ok {
 				stamp := domain.VersionStamp{
 					Version: a.Version, TransformVersion: desc.TransformVersion, InjectionsVersion: desc.InjectionsVersion,
+					ToolMappingsVersion: toolMappingsVersion,
 				}
 				if a.Role == domain.RoleOrchestrator {
 					stamp.OrchestratorInjectionsVersion = desc.OrchestratorInjectionsVersion

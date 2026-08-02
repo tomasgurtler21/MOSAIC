@@ -51,6 +51,12 @@ type Input struct {
 	// Keys are target paths relative to the deployment root. A missing key is equivalent to
 	// an absent artifact (Present: false).
 	DeployedState map[string]domain.DeployedArtifactState
+	// ToolMappingsVersion is the hash of the effective tool-destination mapping set computed
+	// from the user-local and project-level config stores at the composition point. When the
+	// deployed file carries a different stamp, the planner emits ActionUpdate so the
+	// destination field is regenerated from the updated registry module. Empty means no
+	// config-declared mappings are active for this run.
+	ToolMappingsVersion string
 	// WorkspaceFileExists reports whether a file at the given workspace-relative path exists.
 	// Build uses this function for hook registration target existence checks, keeping Build
 	// free of direct file-system access and enabling controlled unit tests without real disk

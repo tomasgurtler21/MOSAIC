@@ -41,6 +41,21 @@ type Options struct {
 	// GOOS is the target operating system string used for path resolution. If empty the host
 	// platform is used. Supplied explicitly so resolution stays testable on any host platform.
 	GOOS string
+
+	// ToolMappings, when non-nil, is invoked once per successfully constructed module during
+	// Discover. It receives the harness id and the descriptor's own declared tool mappings, and
+	// returns the effective mapping set to use for that module. Returning nil means "no config
+	// override for this harness; use the descriptor's own declared mappings unchanged."
+	//
+	// A non-nil return wraps the module in a thin shim whose Descriptor() reflects the
+	// effective mappings and whose Tools() temporarily installs the effective mappings on the
+	// inner descriptor for the duration of each call — preserving any module-specific
+	// post-processing (such as Claude Code's scalar conversion) — then restores.
+	//
+	// The hook is a function rather than a data map so that registry stays independent of the
+	// config package; the composition point supplies a closure over the loaded project-level
+	// and user-local configuration.
+	ToolMappings func(harnessID string, declared []domain.ToolMapping) []domain.ToolMapping
 }
 
 // Registry is the resolved set of harnesses available in a run. It is produced by Discover
@@ -65,6 +80,92 @@ func Register(id string, factory func() (domain.HarnessModule, error)) {
 	builtinMu.Lock()
 	defer builtinMu.Unlock()
 	builtinFactories[id] = factory
+}
+
+// toolMappingsModule wraps a HarnessModule with effective tool mappings computed by the
+// registry ToolMappings hook. It is created by applyToolMappingsHook when the hook returns
+// a non-nil effective mapping set.
+//
+// Descriptor() returns a shallow copy of the inner descriptor with effective mappings so
+// callers that inspect Descriptor().Tools.Mappings see the hook's result without
+// permanently mutating the inner's descriptor. Tools() borrows the inner descriptor —
+// temporarily installing the effective mappings, delegating to the inner's own Tools()
+// implementation (preserving any module-specific post-processing such as Claude Code's
+// scalar conversion), then restoring the original declared mappings. This borrow approach
+// is correct because the deploy flow is sequential within a single run; no two goroutines
+// share a registry module instance.
+type toolMappingsModule struct {
+	inner     domain.HarnessModule
+	desc      *domain.HarnessDescriptor // shallow copy with effective mappings, for Descriptor()
+	effective []domain.ToolMapping      // mapping set the hook returned
+	declared  []domain.ToolMapping      // inner's original declared mappings, saved for restore
+}
+
+func (m *toolMappingsModule) Ref() domain.HarnessRef { return m.inner.Ref() }
+func (m *toolMappingsModule) Descriptor() *domain.HarnessDescriptor { return m.desc }
+func (m *toolMappingsModule) Close() error { return m.inner.Close() }
+
+// Tools temporarily installs the effective mappings on the inner descriptor, delegates
+// to the inner's Tools() (so its own post-processing — e.g. Claude Code's scalar
+// conversion — runs with the effective mappings), then restores the declared mappings.
+func (m *toolMappingsModule) Tools(req domain.ToolRequest) (domain.ToolResult, error) {
+	innerDesc := m.inner.Descriptor()
+	innerDesc.Tools.Mappings = m.effective
+	defer func() { innerDesc.Tools.Mappings = m.declared }()
+	return m.inner.Tools(req)
+}
+
+func (m *toolMappingsModule) Frontmatter(req domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
+	return m.inner.Frontmatter(req)
+}
+func (m *toolMappingsModule) TargetPath(req domain.TargetPathRequest) (string, error) {
+	return m.inner.TargetPath(req)
+}
+func (m *toolMappingsModule) Injection(req domain.InjectionRequest) (string, bool) {
+	return m.inner.Injection(req)
+}
+func (m *toolMappingsModule) HookPlan(req domain.HookPlanRequest) (domain.HookPlan, error) {
+	return m.inner.HookPlan(req)
+}
+
+// applyToolMappingsHook calls the ToolMappings hook (if set) for the given harness module
+// and returns a module whose Descriptor() and Tools() reflect the effective mappings.
+//
+// When the hook is nil or returns nil, the module is returned unchanged and its descriptor
+// is not mutated — nil return means "no config override for this harness; use the
+// descriptor's own declared mappings."
+//
+// When the hook returns a non-nil effective mapping set, applyToolMappingsHook wraps the
+// module in a toolMappingsModule that presents the effective mappings without permanently
+// mutating the inner's descriptor. This is important for correctness: in tests (and
+// hypothetically in production) the same module or descriptor instance may be reused across
+// Discover calls, and a permanent mutation would bleed from one Discover into the next.
+//
+// applyToolMappingsHook is only called for built-in and descriptor-only modules. External
+// modules manage tool resolution through their subprocess protocol rather than through
+// Descriptor().Tools.Mappings, so the hook is not applied to them.
+func applyToolMappingsHook(id string, mod domain.HarnessModule, hook func(string, []domain.ToolMapping) []domain.ToolMapping) domain.HarnessModule {
+	if hook == nil {
+		return mod
+	}
+	declared := mod.Descriptor().Tools.Mappings
+	effective := hook(id, declared)
+	if effective == nil {
+		// Nil return means "no config override for this harness" — return the module
+		// unchanged so its declared mappings remain intact.
+		return mod
+	}
+	// Build a shallow copy of the descriptor with effective mappings installed.
+	// domain.HarnessDescriptor and domain.ToolSpec are value types, so the shallow copy
+	// produces an independent Mappings slice reference without deep-copying the other fields.
+	descCopy := *mod.Descriptor()
+	descCopy.Tools.Mappings = effective
+	return &toolMappingsModule{
+		inner:     mod,
+		desc:      &descCopy,
+		effective: effective,
+		declared:  declared,
+	}
 }
 
 // harnessEntry holds a discovered harness's public ref and its pre-constructed module.
@@ -146,8 +247,11 @@ func Discover(opts Options) (Registry, error) {
 			}
 			continue
 		}
+		// Apply the ToolMappings hook to each successfully constructed built-in module,
+		// wrapping it with a descriptor copy so the original descriptor is not mutated.
+		wrapped := applyToolMappingsHook(id, mod, opts.ToolMappings)
 		candidates[id] = entryWithTier{
-			entry: harnessEntry{ref: mod.Ref(), mod: mod},
+			entry: harnessEntry{ref: wrapped.Ref(), mod: wrapped},
 			tier:  domain.TierBuiltin,
 		}
 	}
@@ -211,6 +315,9 @@ func Discover(opts Options) (Registry, error) {
 				extInjections, _ := loadInjections(h.yamlPath)
 				extOrchInjections, _ := loadOrchInjections(h.yamlPath)
 				mod = newRuntimeModule(ref, h.desc, extInjections, extOrchInjections)
+				// External modules resolve tools through their subprocess protocol, not through
+				// Descriptor().Tools.Mappings. The ToolMappings hook is not applied to them so
+				// that their RPC-based Tools() implementation is preserved unchanged.
 			}
 			newEntry = harnessEntry{ref: ref, mod: mod}
 
@@ -230,7 +337,11 @@ func Discover(opts Options) (Registry, error) {
 				SourcePath:  h.yamlPath,
 				Usable:      true,
 			}
-			newEntry = harnessEntry{ref: ref, mod: newRuntimeModule(ref, h.desc, injections, orchInjections)}
+			mod := newRuntimeModule(ref, h.desc, injections, orchInjections)
+			// Apply the ToolMappings hook and wrap the descriptor-only module with a copy
+			// carrying the effective mappings.
+			wrapped := applyToolMappingsHook(id, mod, opts.ToolMappings)
+			newEntry = harnessEntry{ref: ref, mod: wrapped}
 		}
 
 		// Apply precedence: external > descriptor-only > built-in.

@@ -14,6 +14,7 @@ type VersionStamp struct {
 	TransformVersion              string // transform engine version (agents only)
 	InjectionsVersion             string // injections version (agents only)
 	OrchestratorInjectionsVersion string // orchestrator-only injections version; empty for subagents
+	ToolMappingsVersion           string // hash of the effective tool-destination mapping set; agents only; empty when no config mappings
 }
 
 // Manifest is the deployment tool's bookkeeping record for every artifact it has written to
@@ -37,6 +38,7 @@ type ManifestEntry struct {
 	TransformVersion              string    // agents only
 	InjectionsVersion             string    // agents only
 	OrchestratorInjectionsVersion string    // orchestrator-only; empty for subagents
+	ToolMappingsVersion           string    // agents only; hash of the effective tool-destination mapping set at deploy time
 	ContentHash                   string    // "sha256:<hex>" over the exact deployed bytes (CD-11)
 	DeployedAt                    time.Time
 }

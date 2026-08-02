@@ -56,7 +56,7 @@ func (p *planner) Build(ctx context.Context, in Input) (domain.Plan, error) {
 		deployed := in.DeployedState[targetPath]
 
 		// Classify before evaluating gaps: the GapNoModel emission rule depends on the action.
-		item := classifyAgentItem(agent, targetPath, model, manifestUsable, in.Manifest.Manifest, deployed, desc, selectedWorkflows)
+		item := classifyAgentItem(agent, targetPath, model, manifestUsable, in.Manifest.Manifest, deployed, desc, selectedWorkflows, in.ToolMappingsVersion)
 		items = append(items, item)
 
 		// Surface a GapNoModel gap only when the file write that would occur requires a model
@@ -215,6 +215,10 @@ func artifactKindOrder(k domain.ArtifactKind) int {
 // selectedWorkflows is the full list of workflows resolved from plan.Input.WorkflowIDs for
 // this run. It is only consulted for agents with Role == domain.RoleOrchestrator; it may
 // be nil or empty for other agents with no effect.
+//
+// toolMappingsVersion is the current effective mapping hash from plan.Input.ToolMappingsVersion.
+// When it differs from deployed.ToolMappingsVersion, a "tool_mappings_version" staleness
+// delta is produced so the destination field is regenerated on the next update.
 func classifyAgentItem(
 	agent domain.Agent,
 	targetPath string,
@@ -224,6 +228,7 @@ func classifyAgentItem(
 	deployed domain.DeployedArtifactState,
 	desc *domain.HarnessDescriptor,
 	selectedWorkflows []domain.Workflow,
+	toolMappingsVersion string,
 ) domain.PlanItem {
 	ref := domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: agent.Key}
 	item := domain.PlanItem{
@@ -277,9 +282,10 @@ func classifyAgentItem(
 
 	// Step 5: Compare version fields against the deployed-file versions.
 	stamps := domain.VersionStamps{
-		Version:           agent.Version,
-		TransformVersion:  desc.TransformVersion,
-		InjectionsVersion: desc.InjectionsVersion,
+		Version:             agent.Version,
+		TransformVersion:    desc.TransformVersion,
+		InjectionsVersion:   desc.InjectionsVersion,
+		ToolMappingsVersion: toolMappingsVersion,
 	}
 	if agent.Role == domain.RoleOrchestrator {
 		stamps.OrchestratorInjectionsVersion = desc.OrchestratorInjectionsVersion

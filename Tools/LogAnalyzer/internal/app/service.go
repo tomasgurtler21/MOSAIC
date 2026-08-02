@@ -58,6 +58,12 @@ type Result struct {
 	Session *Session
 }
 
+// PricingPath returns the config file path from the injected pricing store.
+// Used by the CLI's "pricing path" subcommand to display the file location.
+func (s *Service) PricingPath() string {
+	return s.deps.Pricing.Path()
+}
+
 // Analyze runs the whole flow: resolve source, load pricing, enumerate, read,
 // aggregate, price, optionally resolve pricing gaps, assemble the report.
 //

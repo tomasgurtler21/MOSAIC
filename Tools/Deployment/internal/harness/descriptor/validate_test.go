@@ -150,8 +150,8 @@ func TestValidate_DuplicateToolMappings_ReturnsAtLeastOneError(t *testing.T) {
 		Tools: domain.ToolSpec{
 			Shape: domain.ShapeList,
 			Mappings: []domain.ToolMapping{
-				{Generic: "file_read", HarnessTools: []string{"read/readFile"}},
-				{Generic: "file_read", HarnessTools: []string{"read/openFile"}}, // duplicate generic
+				{Generic: "file_read", Destinations: []domain.ToolDestination{{Kind: domain.DestMain, Names: []string{"read/readFile"}}}},
+				{Generic: "file_read", Destinations: []domain.ToolDestination{{Kind: domain.DestMain, Names: []string{"read/openFile"}}}}, // duplicate generic
 			},
 		},
 	}
@@ -171,8 +171,8 @@ func TestValidate_DuplicateToolMappings_ErrorMentionsDuplicateName(t *testing.T)
 		Tools: domain.ToolSpec{
 			Shape: domain.ShapeList,
 			Mappings: []domain.ToolMapping{
-				{Generic: "file_read", HarnessTools: []string{"read/readFile"}},
-				{Generic: "file_read", HarnessTools: []string{"read/openFile"}},
+				{Generic: "file_read", Destinations: []domain.ToolDestination{{Kind: domain.DestMain, Names: []string{"read/readFile"}}}},
+				{Generic: "file_read", Destinations: []domain.ToolDestination{{Kind: domain.DestMain, Names: []string{"read/openFile"}}}},
 			},
 		},
 	}
@@ -203,8 +203,8 @@ func TestValidate_DuplicateToolMappings_FieldPathContainsIndex(t *testing.T) {
 		Tools: domain.ToolSpec{
 			Shape: domain.ShapeList,
 			Mappings: []domain.ToolMapping{
-				{Generic: "file_read", HarnessTools: []string{"read/readFile"}},
-				{Generic: "file_read", HarnessTools: []string{"read/openFile"}},
+				{Generic: "file_read", Destinations: []domain.ToolDestination{{Kind: domain.DestMain, Names: []string{"read/readFile"}}}},
+				{Generic: "file_read", Destinations: []domain.ToolDestination{{Kind: domain.DestMain, Names: []string{"read/openFile"}}}},
 			},
 		},
 	}

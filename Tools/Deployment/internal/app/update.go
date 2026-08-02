@@ -8,6 +8,7 @@ import (
 	"context"
 	"path/filepath"
 
+	"mosaic-deploy/internal/config"
 	"mosaic-deploy/internal/deploy"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/plan"
@@ -162,12 +163,19 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		}
 	}
 
+	// Compute the tool-mappings version hash from the loaded config stores so the planner
+	// can detect staleness when the user modifies their tool-destination configuration.
+	toolCfg, _ := s.deps.ToolConfig.Load()
+	userCfg, _ := s.deps.UserConfig.Load()
+	toolMappingsVersion := config.HashToolDestinations(toolCfg.ToolDestinations, userCfg.ToolDestinations)
+
 	planInput := plan.Input{
 		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeUpdate,
 		WorkspacePath: workspace, Scope: scope, GOOS: s.deps.GOOS,
 		Manifest: snap, WorkflowIDs: workflowIDs,
-		DeployedState: deployedState,
-		Models:        allModels,
+		DeployedState:       deployedState,
+		Models:              allModels,
+		ToolMappingsVersion: toolMappingsVersion,
 	}
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
@@ -232,7 +240,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	// preserved from the deployed file via the InjectionProject preservation pass.
 	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader)
 
-	versionStamps := buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor())
+	versionStamps := buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor(), toolMappingsVersion)
 
 	now := s.now()
 	execReq := deploy.ExecRequest{

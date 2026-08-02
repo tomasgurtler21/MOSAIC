@@ -202,18 +202,8 @@ func mapWireToolSpec(w *wireToolSpec) domain.ToolSpec {
 				Names:     names,
 			}
 		}
-		// Compute HarnessTools from DestMain destinations as a backward-compatible
-		// summary field. Existing tests that read ToolMapping.HarnessTools directly
-		// rely on this value being populated after load.
-		var htNames []string
-		for _, d := range dests {
-			if d.Kind == domain.DestMain {
-				htNames = append(htNames, d.Names...)
-			}
-		}
 		mappings[i] = domain.ToolMapping{
 			Generic:      m.Generic,
-			HarnessTools: htNames,
 			Destinations: dests,
 		}
 	}

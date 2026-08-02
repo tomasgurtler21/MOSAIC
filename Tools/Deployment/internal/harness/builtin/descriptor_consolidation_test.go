@@ -300,10 +300,20 @@ func TestDescriptorConsolidation_ClaudeCode_SubagentMapsToTaskAndTaskStop(t *tes
 		t.Fatal("claude-code.yaml: no mapping found for generic tool \"subagent\"")
 	}
 
-	wantHarnessTools := []string{"Task", "TaskStop"}
-	if !slicesEqual(subagentMapping.HarnessTools, wantHarnessTools) {
-		t.Errorf("claude-code.yaml: subagent mapping HarnessTools = %v, want %v",
-			subagentMapping.HarnessTools, wantHarnessTools)
+	// The subagent mapping must have a single DestMain destination carrying Task and TaskStop.
+	wantNames := []string{"Task", "TaskStop"}
+	var mainDest *domain.ToolDestination
+	for i := range subagentMapping.Destinations {
+		if subagentMapping.Destinations[i].Kind == domain.DestMain {
+			mainDest = &subagentMapping.Destinations[i]
+			break
+		}
+	}
+	if mainDest == nil {
+		t.Errorf("claude-code.yaml: subagent mapping has no DestMain destination; Destinations = %v", subagentMapping.Destinations)
+	} else if !slicesEqual(mainDest.Names, wantNames) {
+		t.Errorf("claude-code.yaml: subagent DestMain destination Names = %v, want %v",
+			mainDest.Names, wantNames)
 	}
 }
 

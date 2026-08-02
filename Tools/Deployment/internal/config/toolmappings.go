@@ -1,6 +1,9 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -329,4 +332,91 @@ func EffectiveToolMappings(
 	project, user ToolDestinationsByHarness,
 ) []domain.ToolMapping {
 	return MergeToolMappings(descriptorMappings, project[harnessID], user[harnessID])
+}
+
+// ---------------------------------------------------------------------------
+// HashToolDestinations — stable hash for ToolMappingsVersion stamping
+// ---------------------------------------------------------------------------
+
+// hashableDest is a JSON-serialisable form of a destination used for hashing.
+// Field names match the YAML wire keys so the hash is human-interpretable in
+// debug contexts.
+type hashableDest struct {
+	To        string   `json:"to"`
+	Field     string   `json:"field,omitempty"`
+	Format    string   `json:"format,omitempty"`
+	Separator string   `json:"separator,omitempty"`
+	Names     []string `json:"names,omitempty"`
+}
+
+// hashableMapping is a JSON-serialisable form of a tool mapping used for hashing.
+type hashableMapping struct {
+	Generic      string         `json:"generic"`
+	Destinations []hashableDest `json:"destinations,omitempty"`
+}
+
+// HashToolDestinations computes a stable SHA-256 hash of the combined config-declared
+// tool-destination mappings from the project-level and user-local configuration stores.
+// The hash is deterministic: harness IDs are sorted, and within each harness the
+// declaration order is preserved.
+//
+// Returns an empty string when both project and user declare no tool destinations
+// (nil or empty maps), so that deployed files without a tool_mappings_version stamp
+// compare equal to the current run and produce no spurious staleness.
+func HashToolDestinations(project, user ToolDestinationsByHarness) string {
+	// Merge both maps into a single view keyed by harness ID. User entries take
+	// precedence over project entries at the harness level for the purpose of
+	// producing a single sorted list to hash.
+	combined := make(map[string][]domain.ToolMapping, len(project)+len(user))
+	for k, v := range project {
+		combined[k] = v
+	}
+	for k, v := range user {
+		// User overrides project at the whole-harness level for hash stability.
+		combined[k] = v
+	}
+	if len(combined) == 0 {
+		return ""
+	}
+
+	// Sort harness IDs for deterministic ordering.
+	harnessIDs := make([]string, 0, len(combined))
+	for id := range combined {
+		harnessIDs = append(harnessIDs, id)
+	}
+	sort.Strings(harnessIDs)
+
+	// Build a sorted, JSON-serialisable representation.
+	type harnessEntry struct {
+		ID       string            `json:"id"`
+		Mappings []hashableMapping `json:"mappings"`
+	}
+	entries := make([]harnessEntry, 0, len(harnessIDs))
+	for _, id := range harnessIDs {
+		ms := combined[id]
+		hms := make([]hashableMapping, len(ms))
+		for i, m := range ms {
+			dests := make([]hashableDest, len(m.Destinations))
+			for j, d := range m.Destinations {
+				dests[j] = hashableDest{
+					To:        string(d.Kind),
+					Field:     d.Field,
+					Format:    string(d.Format),
+					Separator: d.Separator,
+					Names:     d.Names,
+				}
+			}
+			hms[i] = hashableMapping{Generic: m.Generic, Destinations: dests}
+		}
+		entries = append(entries, harnessEntry{ID: id, Mappings: hms})
+	}
+
+	data, err := json.Marshal(entries)
+	if err != nil {
+		// json.Marshal only fails for un-marshallable types (channels, functions);
+		// our input is plain structs and strings, so this branch is unreachable.
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
