@@ -480,13 +480,13 @@ func TestContract_ClaudeCode(t *testing.T) {
 						Key: "tools",
 						Value: domain.FieldValue{
 							Kind:   domain.KindScalar,
-							Scalar: "Task",
+							Scalar: "Task, TaskStop",
 							Quote:  domain.QuotePlain,
 						},
 					},
 				},
 				Resolutions: []domain.ToolResolution{
-					{Generic: "subagent", Outcome: domain.ToolMapped, HarnessTools: []string{"Task"}},
+					{Generic: "subagent", Outcome: domain.ToolMapped, HarnessTools: []string{"Task", "TaskStop"}},
 				},
 			},
 		},

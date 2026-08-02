@@ -1,6 +1,6 @@
 ---
 id: 12
-version: 3.0.0
+version: 3.1.0
 transform_version: 3.0.0
 injections_version: 1.1.0
 name: contracts-review
@@ -301,7 +301,7 @@ Your review artifact should follow this template:
 | Severity | Requires Rework | Notes (remove at injection) |
 |----------|-----------------|----------------------------|
 | CRITICAL | ✅ Always | Non-configurable |
-| MAJOR | ❌ No | Set to ✅ Yes for stricter reviews |
+| MAJOR | ✅ No | Set to ✅ Yes for stricter reviews |
 | MINOR | ❌ No | Set to ✅ Yes if all issues must be addressed |
 | SUGGESTION | ❌ No | Set to ✅ Yes to require action on suggestions |
 
