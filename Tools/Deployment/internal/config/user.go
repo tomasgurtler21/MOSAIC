@@ -30,6 +30,14 @@ type UserConfig struct {
 	// against the tiers currently present in source (AC14.5): a tier that has since been
 	// renamed or removed in the agent files does not cause an error on load.
 	TierModels map[string]map[domain.Tier]string
+
+	// CustomModelIDs maps harness id -> list of custom model IDs entered in previous
+	// runs. These are offered as selectable options (not pre-answers) in future runs'
+	// QTierModel and QAgentModel questions. The list is append-only across runs and
+	// deduplicated by exact string match. This does not conflict with the existing
+	// "no per-agent model persistence" design decision: these are option-pool entries,
+	// not per-agent mappings.
+	CustomModelIDs map[string][]string
 }
 
 // UserConfigStore loads and saves the per-user configuration.
@@ -55,8 +63,9 @@ type UserConfigStore interface {
 // string keys and values for YAML marshaling; conversion to/from domain.Tier happens
 // in Load and Save.
 type userConfigYAML struct {
-	SchemaVersion string                       `yaml:"schema_version"`
-	TierModels    map[string]map[string]string `yaml:"tier_models"`
+	SchemaVersion  string                       `yaml:"schema_version"`
+	TierModels     map[string]map[string]string `yaml:"tier_models"`
+	CustomModelIDs map[string][]string          `yaml:"custom_model_ids"`
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +125,18 @@ func (s *userConfigStore) Load() (UserConfig, error) {
 		}
 	}
 
+	if len(raw.CustomModelIDs) > 0 {
+		cfg.CustomModelIDs = make(map[string][]string, len(raw.CustomModelIDs))
+		for harness, ids := range raw.CustomModelIDs {
+			if len(ids) == 0 {
+				continue
+			}
+			copied := make([]string, len(ids))
+			copy(copied, ids)
+			cfg.CustomModelIDs[harness] = copied
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -141,6 +162,18 @@ func (s *userConfigStore) Save(cfg UserConfig) error {
 			for tier, model := range tiers {
 				raw.TierModels[harness][string(tier)] = model
 			}
+		}
+	}
+
+	if len(cfg.CustomModelIDs) > 0 {
+		raw.CustomModelIDs = make(map[string][]string, len(cfg.CustomModelIDs))
+		for harness, ids := range cfg.CustomModelIDs {
+			if len(ids) == 0 {
+				continue
+			}
+			copied := make([]string, len(ids))
+			copy(copied, ids)
+			raw.CustomModelIDs[harness] = copied
 		}
 	}
 

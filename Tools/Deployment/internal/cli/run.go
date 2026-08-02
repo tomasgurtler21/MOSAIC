@@ -62,6 +62,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 		deployWorkspace   string
 		deploySelections  string
 		deployOutput      string
+		deployConflict    string
 		deployDryRun      bool
 		deployAutoConfirm bool
 	)
@@ -71,12 +72,33 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Parse --conflict
+			var conflictDefault domain.ConflictDecision
+			switch strings.ToLower(deployConflict) {
+			case "", "skip":
+				conflictDefault = domain.DecisionSkip
+			case "overwrite":
+				conflictDefault = domain.DecisionOverwrite
+			case "backup":
+				conflictDefault = domain.DecisionBackupThenOverwrite
+			default:
+				fmt.Fprintf(errOut, "invalid --conflict value %q; valid values: skip, overwrite, backup\n", deployConflict)
+				exitCode = ExitUsage
+				return nil
+			}
+
 			req := app.DeployRequest{
 				HarnessID:       deployHarness,
 				WorkspacePath:   deployWorkspace,
 				Scope:           domain.ScopeProject,
 				DryRun:          deployDryRun,
 				AutoConfirmPlan: deployAutoConfirm,
+			}
+
+			// Only set ConflictDefault when the flag was explicitly provided; an absent
+			// flag leaves the field at the zero value so interactive conflict prompts fire.
+			if deployConflict != "" {
+				req.ConflictDefault = conflictDefault
 			}
 
 			// Apply selections file when provided.
@@ -105,6 +127,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 	deployCmd.Flags().StringVar(&deployWorkspace, "workspace", "", "Workspace path")
 	deployCmd.Flags().StringVar(&deploySelections, "selections", "", "Path to selections YAML file")
 	deployCmd.Flags().StringVar(&deployOutput, "output", "", "Output format (json)")
+	deployCmd.Flags().StringVar(&deployConflict, "conflict", "", "How to handle locally-modified files (skip|overwrite|backup)")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Dry run mode; no files are written")
 	deployCmd.Flags().BoolVar(&deployAutoConfirm, "auto-confirm", false, "Auto-confirm the deployment plan without prompting")
 

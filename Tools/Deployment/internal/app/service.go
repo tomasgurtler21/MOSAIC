@@ -98,6 +98,12 @@ type DeployRequest struct {
 	SkipAll         map[domain.QuestionID]bool
 	AutoConfirmPlan bool
 	DryRun          bool
+
+	// ConflictDefault is the decision applied to locally-modified files when
+	// non-interactive. When zero (empty string), the flow asks through Interaction
+	// for each conflict (subject to the apply-to-all latch). This mirrors
+	// UpdateRequest.ConflictDefault and is populated by the deploy --conflict CLI flag.
+	ConflictDefault domain.ConflictDecision
 }
 
 // UpdateRequest carries the caller's pre-answers for the update flow.

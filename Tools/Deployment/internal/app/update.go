@@ -123,12 +123,51 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 
 	modelSelections := deployedModelSelections(set.Agents, plannedPaths, deployedState)
 
+	// Resolve models for agents that are newly being added in this run (those without a
+	// deployed file). The orchestrator is excluded: its model comes from the deployed file
+	// or is handled via gap reporting. Tier questions are always suppressed in the Update
+	// flow (tierSkipOverride=true) to preserve the invariant that Update never asks
+	// tier-level model questions.
+	var newAgentModelRes modelResolution
+	var newAgents []domain.Agent
+	for _, agent := range set.Agents {
+		if agent.Role == domain.RoleOrchestrator {
+			continue
+		}
+		ref := domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: agent.Key}
+		if tp, ok := plannedPaths.Path(ref); ok {
+			if state, exists := deployedState[tp]; exists && state.Present {
+				continue // agent already has a present deployed file; model comes from deployed state
+			}
+		}
+		newAgents = append(newAgents, agent)
+	}
+	if len(newAgents) > 0 {
+		newAgentModelRes = s.resolveModels(
+			ctx, req.TierModels, req.AgentModels, req.SkipAll,
+			harnessID, module, newAgents,
+			nil, true, false,
+		)
+	}
+
+	// Merge deployed model selections with newly resolved models for new agents.
+	var allModels map[string]domain.ModelSelection
+	if len(modelSelections) > 0 || len(newAgentModelRes.models) > 0 {
+		allModels = make(map[string]domain.ModelSelection)
+		for k, v := range modelSelections {
+			allModels[k] = v
+		}
+		for k, v := range newAgentModelRes.models {
+			allModels[k] = v
+		}
+	}
+
 	planInput := plan.Input{
 		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeUpdate,
 		WorkspacePath: workspace, Scope: scope, GOOS: s.deps.GOOS,
 		Manifest: snap, WorkflowIDs: workflowIDs,
 		DeployedState: deployedState,
-		Models:        modelSelections,
+		Models:        allModels,
 	}
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
@@ -139,13 +178,24 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	}
 
 	conflicts := map[string]domain.ConflictDecision{}
+	var latchedDecision domain.ConflictDecision
+	applyToAllLatch := false
 	for _, item := range p.Items {
 		if item.Action != domain.ActionConflict {
 			continue
 		}
-		decision := req.ConflictDefault
-		if decision == "" {
-			decision = s.askLocalModification(ctx, item)
+		var decision domain.ConflictDecision
+		if req.ConflictDefault != "" {
+			decision = req.ConflictDefault
+		} else if applyToAllLatch {
+			decision = latchedDecision
+		} else {
+			var setLatch bool
+			decision, setLatch = s.askLocalModification(ctx, item)
+			if setLatch {
+				applyToAllLatch = true
+				latchedDecision = decision
+			}
 		}
 		conflicts[item.TargetPath] = decision
 		if decision == domain.DecisionSkip {
@@ -180,7 +230,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	// Update re-deploys whatever was already deployed; it does not re-prompt for
 	// infrastructure agent choices. The InfrastructureAgents injection region is
 	// preserved from the deployed file via the InjectionProject preservation pass.
-	contentFn := s.buildContent(module, agentByKey, modelSelections, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader)
+	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader)
 
 	versionStamps := buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor())
 
@@ -204,6 +254,14 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	if err != nil {
 		return domain.RunSummary{}, err
 	}
+
+	// Persist any custom model IDs accumulated during this run (from model questions asked
+	// for newly-added agents). Also preserves any prior custom IDs already in UserConfig.
+	customIDs := make([]string, 0, len(newAgentModelRes.accumulatedOptions))
+	for _, opt := range newAgentModelRes.accumulatedOptions {
+		customIDs = append(customIDs, opt.ID)
+	}
+	_ = s.persistCustomModelIDs(harnessID, customIDs)
 
 	return s.buildSummary(domain.ModeUpdate, harnessRef, workspace, result), nil
 }

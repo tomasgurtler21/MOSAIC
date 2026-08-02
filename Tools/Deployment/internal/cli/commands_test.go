@@ -463,6 +463,151 @@ func TestRun_AllowExternalFlag_Inherited_ByUpdateSubcommand(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// deploy --conflict flag mapping (T2.3)
+// ---------------------------------------------------------------------------
+
+// TestRun_DeploySubcommand_ConflictFlag_Overwrite_PopulatesConflictDefault verifies that
+// deploy --conflict overwrite populates DeployRequest.ConflictDefault with DecisionOverwrite.
+//
+// RED: the --conflict flag is not yet registered on the deploy subcommand.
+func TestRun_DeploySubcommand_ConflictFlag_Overwrite_PopulatesConflictDefault(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{deployResp: successSummary(workspace)}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"deploy", "--harness", "stub-harness", "--workspace", workspace,
+			"--conflict", "overwrite", "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d; deploy --conflict overwrite must be a valid flag",
+			code, cli.ExitSuccess)
+	}
+	if svc.deployReq == nil {
+		t.Fatal("DeployNew was not called")
+	}
+	if svc.deployReq.ConflictDefault != domain.DecisionOverwrite {
+		t.Errorf("ConflictDefault = %q, want %q; deploy --conflict overwrite must populate "+
+			"DeployRequest.ConflictDefault with DecisionOverwrite",
+			svc.deployReq.ConflictDefault, domain.DecisionOverwrite)
+	}
+}
+
+// TestRun_DeploySubcommand_ConflictFlag_Skip_PopulatesConflictDefault verifies that
+// deploy --conflict skip populates DeployRequest.ConflictDefault with DecisionSkip.
+//
+// RED: the --conflict flag is not yet registered on the deploy subcommand.
+func TestRun_DeploySubcommand_ConflictFlag_Skip_PopulatesConflictDefault(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{deployResp: successSummary(workspace)}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"deploy", "--harness", "stub-harness", "--workspace", workspace,
+			"--conflict", "skip", "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d; deploy --conflict skip must be a valid flag",
+			code, cli.ExitSuccess)
+	}
+	if svc.deployReq == nil {
+		t.Fatal("DeployNew was not called")
+	}
+	if svc.deployReq.ConflictDefault != domain.DecisionSkip {
+		t.Errorf("ConflictDefault = %q, want %q; deploy --conflict skip must populate "+
+			"DeployRequest.ConflictDefault with DecisionSkip",
+			svc.deployReq.ConflictDefault, domain.DecisionSkip)
+	}
+}
+
+// TestRun_DeploySubcommand_ConflictFlag_Backup_PopulatesConflictDefault verifies that
+// deploy --conflict backup populates DeployRequest.ConflictDefault with DecisionBackupThenOverwrite.
+//
+// RED: the --conflict flag is not yet registered on the deploy subcommand.
+func TestRun_DeploySubcommand_ConflictFlag_Backup_PopulatesConflictDefault(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{deployResp: successSummary(workspace)}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"deploy", "--harness", "stub-harness", "--workspace", workspace,
+			"--conflict", "backup", "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d; deploy --conflict backup must be a valid flag",
+			code, cli.ExitSuccess)
+	}
+	if svc.deployReq == nil {
+		t.Fatal("DeployNew was not called")
+	}
+	if svc.deployReq.ConflictDefault != domain.DecisionBackupThenOverwrite {
+		t.Errorf("ConflictDefault = %q, want %q; deploy --conflict backup must populate "+
+			"DeployRequest.ConflictDefault with DecisionBackupThenOverwrite",
+			svc.deployReq.ConflictDefault, domain.DecisionBackupThenOverwrite)
+	}
+}
+
+// TestRun_DeploySubcommand_ConflictFlag_InvalidValue_ReturnsExitUsage verifies that an
+// invalid --conflict value on the deploy subcommand returns ExitUsage and does not call
+// DeployNew.
+//
+// RED: without the flag registered, any value currently returns ExitUsage (unknown flag),
+// but after registration the test verifies the value validation specifically.
+func TestRun_DeploySubcommand_ConflictFlag_InvalidValue_ReturnsExitUsage(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{deployResp: successSummary(workspace)}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"deploy", "--harness", "stub-harness", "--workspace", workspace,
+			"--conflict", "not-a-valid-value", "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want %d (ExitUsage); an invalid --conflict value must be rejected",
+			code, cli.ExitUsage)
+	}
+}
+
+// TestRun_DeploySubcommand_ConflictFlag_Absent_ConflictDefaultIsZero verifies that omitting
+// --conflict leaves DeployRequest.ConflictDefault at the zero value (empty string), preserving
+// the interactive conflict-prompt behavior.
+func TestRun_DeploySubcommand_ConflictFlag_Absent_ConflictDefaultIsZero(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := &spyService{deployResp: successSummary(workspace)}
+
+	// Act
+	code := cli.Run(context.Background(),
+		[]string{"deploy", "--harness", "stub-harness", "--workspace", workspace, "--auto-confirm"},
+		svc, &bytes.Buffer{}, &bytes.Buffer{})
+
+	// Assert
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitSuccess)
+	}
+	if svc.deployReq == nil {
+		t.Fatal("DeployNew was not called")
+	}
+	if svc.deployReq.ConflictDefault != "" {
+		t.Errorf("ConflictDefault = %q, want empty string; omitting --conflict must leave "+
+			"ConflictDefault at zero value to preserve interactive conflict behavior",
+			svc.deployReq.ConflictDefault)
+	}
+}
+
 // TestRun_OutputFlag_Json_IsRecognised verifies that --output json is accepted on the deploy
 // subcommand without producing a usage error.
 func TestRun_OutputFlag_Json_IsRecognised(t *testing.T) {

@@ -543,3 +543,118 @@ func TestUserConfig_Lookup_MissingHarness_ReturnsEmptyMap(t *testing.T) {
 		t.Errorf("TierModels[\"ghcp-cli\"] has %d entries, want 0; Load must not fabricate entries", len(inner))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// CustomModelIDs round-trip
+// ---------------------------------------------------------------------------
+
+// stringSliceContains reports whether s contains the target string.
+func stringSliceContains(s []string, target string) bool {
+	for _, v := range s {
+		if v == target {
+			return true
+		}
+	}
+	return false
+}
+
+// TestUserConfigStore_CustomModelIDs_SaveAndLoad_Preserved verifies that custom model IDs
+// saved for a harness are loaded back unchanged. This test will fail until the Save and Load
+// implementations are updated to handle the CustomModelIDs field.
+func TestUserConfigStore_CustomModelIDs_SaveAndLoad_Preserved(t *testing.T) {
+	root := makeRoot(t)
+	store := config.NewUserConfigStore(root)
+
+	cfg := config.UserConfig{
+		CustomModelIDs: map[string][]string{
+			"claude-code": {"claude-opus-special", "my-custom-v2"},
+			"ghcp-cli":    {"gpt-custom-1"},
+		},
+	}
+
+	if err := store.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	ccIDs := got.CustomModelIDs["claude-code"]
+	if len(ccIDs) < 2 {
+		t.Errorf("CustomModelIDs[\"claude-code\"] has %d entries after round-trip, want 2; "+
+			"Save+Load must preserve custom model IDs", len(ccIDs))
+	}
+	if !stringSliceContains(ccIDs, "claude-opus-special") {
+		t.Errorf("CustomModelIDs[\"claude-code\"] = %v; want to contain \"claude-opus-special\"", ccIDs)
+	}
+	if !stringSliceContains(ccIDs, "my-custom-v2") {
+		t.Errorf("CustomModelIDs[\"claude-code\"] = %v; want to contain \"my-custom-v2\"", ccIDs)
+	}
+
+	gcIDs := got.CustomModelIDs["ghcp-cli"]
+	if !stringSliceContains(gcIDs, "gpt-custom-1") {
+		t.Errorf("CustomModelIDs[\"ghcp-cli\"] = %v; want to contain \"gpt-custom-1\"", gcIDs)
+	}
+}
+
+// TestUserConfigStore_CustomModelIDs_MultiHarness_IndependentSlices verifies that custom
+// model IDs for one harness do not appear under another harness after a Save+Load cycle.
+func TestUserConfigStore_CustomModelIDs_MultiHarness_IndependentSlices(t *testing.T) {
+	root := makeRoot(t)
+	store := config.NewUserConfigStore(root)
+
+	cfg := config.UserConfig{
+		CustomModelIDs: map[string][]string{
+			"claude-code": {"special-model-for-cc"},
+			"ghcp-cli":    {"special-model-for-ghcp"},
+		},
+	}
+
+	if err := store.Save(cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	ccIDs := got.CustomModelIDs["claude-code"]
+	// Positive assertion: the list must be non-empty before independence can be verified.
+	// Without this, negative-only assertions trivially pass when Save/Load skip the field.
+	if len(ccIDs) == 0 {
+		t.Fatal("CustomModelIDs[\"claude-code\"] is empty after Save+Load; " +
+			"Save and Load must persist and restore custom model IDs before independence can be verified")
+	}
+	if stringSliceContains(ccIDs, "special-model-for-ghcp") {
+		t.Error("CustomModelIDs[\"claude-code\"] contains an ID that belongs to \"ghcp-cli\"; " +
+			"custom model IDs for different harnesses must be stored independently")
+	}
+	gcIDs := got.CustomModelIDs["ghcp-cli"]
+	// Positive assertion: same requirement for the second harness.
+	if len(gcIDs) == 0 {
+		t.Fatal("CustomModelIDs[\"ghcp-cli\"] is empty after Save+Load; " +
+			"Save and Load must persist and restore custom model IDs before independence can be verified")
+	}
+	if stringSliceContains(gcIDs, "special-model-for-cc") {
+		t.Error("CustomModelIDs[\"ghcp-cli\"] contains an ID that belongs to \"claude-code\"; " +
+			"custom model IDs for different harnesses must be stored independently")
+	}
+}
+
+// TestUserConfigStore_CustomModelIDs_AbsentFile_ReturnsNilMap verifies that loading an
+// absent user-config.yaml does not fabricate any CustomModelIDs entries.
+func TestUserConfigStore_CustomModelIDs_AbsentFile_ReturnsNilMap(t *testing.T) {
+	root := makeRoot(t)
+	store := config.NewUserConfigStore(root)
+
+	got, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(got.CustomModelIDs) != 0 {
+		t.Errorf("absent file: CustomModelIDs has %d harness entries, want 0; "+
+			"Load must not fabricate custom model ID entries", len(got.CustomModelIDs))
+	}
+}

@@ -85,14 +85,48 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	}
 
 	// Resolve the artifact set for probing deployed state and model/tool resolution.
-	// Infrastructure agents are excluded here and passed directly to plan.Input because
-	// they do not participate in model resolution or the pre-probe at deploy time.
+	// Infrastructure agents are excluded from probeSet (used only for target-path probing);
+	// they are resolved from the catalog directly below for model resolution and content generation.
 	probeSet, err := plan.ResolveArtifacts(s.deps.Catalog, workflowIDs, utilityIDs, nil, hookIDs)
 	if err != nil {
 		return domain.RunSummary{}, err
 	}
 
-	modelRes := s.resolveModels(ctx, req.TierModels, req.AgentModels, req.SkipAll, harnessID, module, probeSet.Agents)
+	orderedAgents := s.orderedAgentsForModelResolution(workflowIDs, probeSet.Agents)
+	modelRes := s.resolveModels(ctx, req.TierModels, req.AgentModels, req.SkipAll, harnessID, module, orderedAgents, nil, false, false)
+
+	// Resolve infrastructure agent structs from the catalog for model resolution and content generation.
+	infraAgents := make([]domain.Agent, 0, len(infraAgentIDs))
+	for _, id := range infraAgentIDs {
+		if a, ok := s.deps.Catalog.Agent(id); ok {
+			infraAgents = append(infraAgents, a)
+		}
+	}
+
+	// Second resolveModels call for infrastructure agents, threading accumulated state from the
+	// regular-agent call. This keeps infra-agent questions in a separate batch that follows all
+	// regular-agent questions (non-interleaved), and propagates custom model IDs, tier resolutions,
+	// and skip-all state from the first call so they are not re-asked for the infra batch.
+	var infraModelRes modelResolution
+	if len(infraAgents) > 0 {
+		infraModelRes = s.resolveModels(
+			ctx,
+			modelRes.tierModelsUsed, // already-resolved tiers are not re-asked
+			req.AgentModels,
+			req.SkipAll,
+			harnessID,
+			module,
+			infraAgents,
+			modelRes.accumulatedOptions, // custom model IDs entered in the regular batch
+			modelRes.tierSkippedAll,     // carry tier skip-all state from the regular batch
+			modelRes.agentSkippedAll,    // carry agent skip-all state from the regular batch
+		)
+		// Merge infra-agent model selections into the combined models map.
+		for k, v := range infraModelRes.models {
+			modelRes.models[k] = v
+		}
+	}
+
 	customTools, skippedTools := s.resolveCustomTools(ctx, req.CustomTools, req.SkipAll, module, probeSet.Agents)
 
 	snap, _ := s.deps.Manifest.Load(workspace)
@@ -123,11 +157,25 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	}
 
 	conflicts := map[string]domain.ConflictDecision{}
+	var latchedDecision domain.ConflictDecision
+	applyToAllLatch := false
 	for _, item := range p.Items {
 		if item.Action != domain.ActionConflict {
 			continue
 		}
-		decision := s.askLocalModification(ctx, item)
+		var decision domain.ConflictDecision
+		if req.ConflictDefault != "" {
+			decision = req.ConflictDefault
+		} else if applyToAllLatch {
+			decision = latchedDecision
+		} else {
+			var setLatch bool
+			decision, setLatch = s.askLocalModification(ctx, item)
+			if setLatch {
+				applyToAllLatch = true
+				latchedDecision = decision
+			}
+		}
 		conflicts[item.TargetPath] = decision
 		if decision == domain.DecisionSkip {
 			s.deps.Todo.AddGap(domain.Gap{
@@ -148,8 +196,11 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		return domain.RunSummary{}, ErrPlanNotConfirmed
 	}
 
-	agentByKey := make(map[string]domain.Agent, len(probeSet.Agents))
+	agentByKey := make(map[string]domain.Agent, len(probeSet.Agents)+len(infraAgents))
 	for _, a := range probeSet.Agents {
+		agentByKey[a.Key] = a
+	}
+	for _, a := range infraAgents {
 		agentByKey[a.Key] = a
 	}
 	workflowBlocks := s.buildWorkflowBlocks(workflowIDs)
@@ -162,7 +213,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		MosaicRoot:    s.deps.MosaicRoot,
 		Content:       contentFn,
 		Conflicts:     conflicts,
-		VersionStamps: buildVersionStamps(probeSet.Agents, probeSet.Skills, probeSet.Hooks, p.Items, module.Descriptor()),
+		VersionStamps: buildVersionStamps(append(probeSet.Agents, infraAgents...), probeSet.Skills, probeSet.Hooks, p.Items, module.Descriptor()),
 		Hooks:         buildHookPlans(module, probeSet.Hooks, scope),
 		Todo:          s.deps.Todo.Items(),
 		TodoMeta: todo.Meta{
@@ -179,5 +230,64 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 
 	_ = s.persistTierModels(harnessID, modelRes.tierModelsUsed)
 
+	// Merge accumulated custom model options from both resolveModels calls before persisting.
+	allAccumulatedOptions := append(modelRes.accumulatedOptions, infraModelRes.accumulatedOptions...)
+	customIDs := make([]string, 0, len(allAccumulatedOptions))
+	for _, opt := range allAccumulatedOptions {
+		customIDs = append(customIDs, opt.ID)
+	}
+	_ = s.persistCustomModelIDs(harnessID, customIDs)
+
 	return s.buildSummary(domain.ModeDeployNew, harnessRef, workspace, result), nil
+}
+
+// orderedAgentsForModelResolution reorders agents into a processing sequence suitable for
+// model-resolution questions: orchestrator first, then workflow-referenced agents in the
+// order each workflow lists them, then any remaining agents in their original sorted order.
+//
+// Processing agents in workflow-definition order means a custom model ID entered for one
+// agent is immediately visible as an option for the next agent in the same workflow, because
+// resolveModels appends custom IDs to harnessOptions in-place as each answer arrives.
+func (s *service) orderedAgentsForModelResolution(workflowIDs []string, sortedAgents []domain.Agent) []domain.Agent {
+	agentByKey := make(map[string]domain.Agent, len(sortedAgents))
+	for _, a := range sortedAgents {
+		agentByKey[a.Key] = a
+	}
+
+	seen := make(map[string]bool, len(sortedAgents))
+	ordered := make([]domain.Agent, 0, len(sortedAgents))
+
+	// Orchestrator always first.
+	orc := s.deps.Catalog.Orchestrator()
+	if a, ok := agentByKey[orc.Key]; ok {
+		seen[orc.Key] = true
+		ordered = append(ordered, a)
+	}
+
+	// Workflow-referenced agents in the order each workflow lists them.
+	for _, wfID := range workflowIDs {
+		wf, ok := s.deps.Catalog.Workflow(wfID)
+		if !ok {
+			continue
+		}
+		for _, agentKey := range wf.ReferencedAgents {
+			if seen[agentKey] {
+				continue
+			}
+			if a, ok := agentByKey[agentKey]; ok {
+				seen[agentKey] = true
+				ordered = append(ordered, a)
+			}
+		}
+	}
+
+	// Any remaining agents (utility, infrastructure, etc.) in their original sorted order.
+	for _, a := range sortedAgents {
+		if !seen[a.Key] {
+			seen[a.Key] = true
+			ordered = append(ordered, a)
+		}
+	}
+
+	return ordered
 }

@@ -181,17 +181,40 @@ func (s *service) askHooks(ctx context.Context) []string {
 // ---------------------------------------------------------------------------
 
 // modelResolution is the outcome of resolveModels: the per-agent model map ready for
-// plan.Input.Models, and the tier-to-model mappings used this run (pre-answered, persisted,
-// and freshly answered), which the caller persists to user config (AC18.3).
+// plan.Input.Models, the tier-to-model mappings used this run, and accumulated state
+// that can be threaded into a subsequent resolveModels invocation.
 type modelResolution struct {
 	models         map[string]domain.ModelSelection
 	tierModelsUsed map[domain.Tier]string
+
+	// accumulatedOptions holds every custom model ID that was entered during this
+	// resolveModels invocation (at both tier and agent granularity), merged with any
+	// custom IDs that were passed in via extraOptions. These are domain.Option values
+	// ready to be appended to harnessOptions in a subsequent invocation.
+	accumulatedOptions []domain.Option
+
+	// tierSkippedAll is true when the user chose SkippedAll for QTierModel during
+	// this invocation, or it was already true on entry.
+	tierSkippedAll bool
+
+	// agentSkippedAll is true when the user chose SkippedAll for QAgentModel during
+	// this invocation, or it was already true on entry.
+	agentSkippedAll bool
 }
 
 // resolveModels asks QTierModel once per discovered tier and QAgentModel once per agent
 // whose model could not be resolved from a tier mapping, honouring pre-answers, skip, and
-// skip-all. Agents left without a resolved model receive a GapNoModel gap solely via
-// plan.Build (Plan.Gaps), which is also what the Review screen renders.
+// skip-all. Custom model IDs entered during the invocation are appended to harnessOptions
+// in-place so subsequent agents in the same call see them. All accumulated state is returned
+// in modelResolution for optional downstream threading.
+//
+// extraOptions, if non-nil, contains custom model options accumulated from a prior invocation.
+// They are appended to harnessOptions (after deduplication) so custom entries from a previous
+// batch appear as selectable options.
+//
+// tierSkipOverride and agentSkipOverride, when true, pre-set the skip-all latches for
+// QTierModel and QAgentModel respectively. This lets a caller suppress interactive model
+// questions without setting SkipAll in the request.
 func (s *service) resolveModels(
 	ctx context.Context,
 	tierModels map[domain.Tier]string,
@@ -200,6 +223,9 @@ func (s *service) resolveModels(
 	harnessID string,
 	module domain.HarnessModule,
 	agents []domain.Agent,
+	extraOptions []domain.Option,
+	tierSkipOverride bool,
+	agentSkipOverride bool,
 ) modelResolution {
 	cfg, _ := s.deps.UserConfig.Load()
 	tierModelsUsed := make(map[domain.Tier]string)
@@ -212,7 +238,46 @@ func (s *service) resolveModels(
 
 	harnessOptions := buildModelOptions(module.Descriptor().Models.IDs)
 
-	tierSkippedAll := skipAll[domain.QTierModel]
+	// Track which option IDs are already in harnessOptions to enable deduplication.
+	optionSeen := make(map[string]bool, len(harnessOptions))
+	for _, opt := range harnessOptions {
+		optionSeen[opt.ID] = true
+	}
+
+	// Load persisted custom model IDs for this harness and merge into harnessOptions.
+	for _, id := range cfg.CustomModelIDs[harnessID] {
+		if !optionSeen[id] {
+			optionSeen[id] = true
+			harnessOptions = append(harnessOptions, domain.Option{ID: id, Label: id})
+		}
+	}
+
+	// Merge extraOptions from a prior invocation (deduplicated).
+	for _, opt := range extraOptions {
+		if !optionSeen[opt.ID] {
+			optionSeen[opt.ID] = true
+			harnessOptions = append(harnessOptions, opt)
+		}
+	}
+
+	// accumulatedCustomIDs tracks the custom IDs entered in this invocation for deduplication.
+	accumulatedCustomIDs := make(map[string]bool)
+	var accumulatedOptions []domain.Option
+
+	// appendCustomID adds a custom model ID to harnessOptions and accumulatedOptions if
+	// not already present, so subsequent questions within this invocation see it.
+	appendCustomID := func(id string) {
+		if !optionSeen[id] {
+			optionSeen[id] = true
+			harnessOptions = append(harnessOptions, domain.Option{ID: id, Label: id})
+		}
+		if !accumulatedCustomIDs[id] {
+			accumulatedCustomIDs[id] = true
+			accumulatedOptions = append(accumulatedOptions, domain.Option{ID: id, Label: id})
+		}
+	}
+
+	tierSkippedAll := skipAll[domain.QTierModel] || tierSkipOverride
 	for _, ti := range s.deps.Catalog.Tiers() {
 		if _, ok := tierModelsUsed[ti.Tier]; ok {
 			continue // pre-answered, either from this request or a prior persisted run
@@ -239,6 +304,7 @@ func (s *service) resolveModels(
 			modelID := ans.OptionID
 			if ans.Custom != "" {
 				modelID = ans.Custom
+				appendCustomID(modelID)
 			}
 			if modelID != "" {
 				tierModelsUsed[ti.Tier] = modelID
@@ -247,7 +313,7 @@ func (s *service) resolveModels(
 	}
 
 	models := make(map[string]domain.ModelSelection)
-	agentSkippedAll := skipAll[domain.QAgentModel]
+	agentSkippedAll := skipAll[domain.QAgentModel] || agentSkipOverride
 	for _, agent := range agents {
 		if modelID, ok := agentModels[agent.Key]; ok && modelID != "" {
 			origin := domain.OriginCustom
@@ -287,6 +353,7 @@ func (s *service) resolveModels(
 					if ans.Custom != "" {
 						modelID = ans.Custom
 						origin = domain.OriginCustom
+						appendCustomID(modelID)
 					}
 					if modelID != "" {
 						models[agent.Key] = domain.ModelSelection{ModelID: modelID, Origin: origin}
@@ -300,7 +367,13 @@ func (s *service) resolveModels(
 		// second one from this loop.
 	}
 
-	return modelResolution{models: models, tierModelsUsed: tierModelsUsed}
+	return modelResolution{
+		models:             models,
+		tierModelsUsed:     tierModelsUsed,
+		accumulatedOptions: accumulatedOptions,
+		tierSkippedAll:     tierSkippedAll,
+		agentSkippedAll:    agentSkippedAll,
+	}
 }
 
 // buildModelOptions converts a harness's declared model list into ChoiceQuestion options.
@@ -310,6 +383,37 @@ func buildModelOptions(ids []string) []domain.Option {
 		opts = append(opts, domain.Option{ID: id, Label: id})
 	}
 	return opts
+}
+
+// persistCustomModelIDs merges the custom model IDs accumulated during this run into
+// the persisted user config's CustomModelIDs list for the given harness, then saves.
+// Deduplication is by exact string match. Existing persisted IDs that are not in the
+// current run's set are preserved (the list is append-only across runs).
+func (s *service) persistCustomModelIDs(harnessID string, customIDs []string) error {
+	cfg, err := s.deps.UserConfig.Load()
+	if err != nil {
+		return err
+	}
+	if cfg.CustomModelIDs == nil {
+		cfg.CustomModelIDs = make(map[string][]string)
+	}
+	existing := cfg.CustomModelIDs[harnessID]
+	seen := make(map[string]bool, len(existing)+len(customIDs))
+	merged := make([]string, 0, len(existing)+len(customIDs))
+	for _, id := range existing {
+		if !seen[id] {
+			seen[id] = true
+			merged = append(merged, id)
+		}
+	}
+	for _, id := range customIDs {
+		if !seen[id] {
+			seen[id] = true
+			merged = append(merged, id)
+		}
+	}
+	cfg.CustomModelIDs[harnessID] = merged
+	return s.deps.UserConfig.Save(cfg)
 }
 
 // persistTierModels merges the tier mappings used this run into the persisted user config
@@ -433,13 +537,25 @@ func (s *service) resolveCustomTools(
 // ---------------------------------------------------------------------------
 
 // askLocalModification prompts for the per-file decision on a locally-modified artifact.
-// Any non-answered outcome (skip, skip-all, cancel) defaults to DecisionSkip, the safest
-// choice: it never discards the user's local edits without an explicit overwrite decision.
-func (s *service) askLocalModification(ctx context.Context, item domain.PlanItem) domain.ConflictDecision {
+// When applyToAll is true in the returned values, the caller must use the returned decision
+// for all remaining conflict items without asking again.
+//
+// The question presents six options: three per-file decisions (Overwrite, Skip,
+// Backup-then-overwrite) and three apply-to-all variants whose Option.ID carries the
+// prefix "all:" (e.g., "all:overwrite"). When the user selects a compound option the answer
+// arrives as Answered with the compound OptionID; the prefix is stripped to extract the
+// ConflictDecision and applyToAll is returned as true.
+//
+// Any non-Answered outcome (SkippedOne, Cancelled, error) defaults to DecisionSkip with
+// applyToAll=false, the safest choice: it never discards local edits without explicit consent.
+func (s *service) askLocalModification(ctx context.Context, item domain.PlanItem) (decision domain.ConflictDecision, applyToAll bool) {
 	opts := []domain.Option{
 		{ID: string(domain.DecisionOverwrite), Label: "Overwrite"},
 		{ID: string(domain.DecisionSkip), Label: "Skip"},
 		{ID: string(domain.DecisionBackupThenOverwrite), Label: "Back up then overwrite"},
+		{ID: "all:overwrite", Label: "Overwrite all remaining", Group: "Apply to all"},
+		{ID: "all:skip", Label: "Skip all remaining", Group: "Apply to all"},
+		{ID: "all:backup-then-overwrite", Label: "Back up then overwrite all remaining", Group: "Apply to all"},
 	}
 	q := domain.ChoiceQuestion{
 		Question: domain.Question{
@@ -450,12 +566,21 @@ func (s *service) askLocalModification(ctx context.Context, item domain.PlanItem
 	}
 	ans, err := s.deps.Interaction.SelectOne(ctx, q)
 	if err != nil || ans.Status != domain.Answered {
-		return domain.DecisionSkip
+		return domain.DecisionSkip, false
 	}
-	if d := domain.ConflictDecision(ans.OptionID); d != "" {
-		return d
+	optID := ans.OptionID
+	if strings.HasPrefix(optID, "all:") {
+		remainder := strings.TrimPrefix(optID, "all:")
+		d := domain.ConflictDecision(remainder)
+		if d == "" {
+			d = domain.DecisionSkip
+		}
+		return d, true
 	}
-	return domain.DecisionSkip
+	if d := domain.ConflictDecision(optID); d != "" {
+		return d, false
+	}
+	return domain.DecisionSkip, false
 }
 
 // ---------------------------------------------------------------------------
