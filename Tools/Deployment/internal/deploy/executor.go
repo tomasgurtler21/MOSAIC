@@ -60,6 +60,32 @@ type ExecRequest struct {
 	// DryRun disables all filesystem writes when true; the result still reports what would
 	// have happened.
 	DryRun bool
+	// Atomic opts this run into all-or-nothing execution. When false (the default and the
+	// behaviour of every pre-existing caller), a mid-plan failure is non-fatal: files already
+	// written stay on disk, ExecResult.Partial carries the first error, and the manifest is
+	// saved so it reflects real on-disk state.
+	//
+	// When true, every filesystem write the executor performs is journaled before it happens.
+	// On any failure the run reverses itself: files this run created are deleted, files this
+	// run overwrote are restored to their pre-run bytes, and the manifest and the deployment
+	// checklist file are left exactly as they were before the run started.
+	//
+	// Atomic has no effect when DryRun is true (no writes occur) or when a fallback tier is
+	// used (the workspace was unwritable, which is not a mid-plan stop).
+	Atomic bool
+}
+
+// RevertFailure names one journal entry the reversal could not apply.
+type RevertFailure struct {
+	// Path is the absolute filesystem path that could not be restored or deleted.
+	Path string
+	// Err is the underlying filesystem error.
+	Err error
+	// Restore is true when the entry described a file that existed before the run and could
+	// not be rewritten; false when it described a file the run created and could not be
+	// deleted. The distinction matters to the user: a failed restore means lost content, a
+	// failed delete means a stray file.
+	Restore bool
 }
 
 // ExecResult is the outcome of Executor.Execute.
@@ -79,6 +105,22 @@ type ExecResult struct {
 	// Partial is non-nil when the run stopped mid-plan due to a write failure. The manifest
 	// and Actions still reflect what is actually on disk.
 	Partial error
+	// Reverted is true when this run was executed in Atomic mode, hit a failure, and reversed
+	// its writes. Partial is always non-nil when Reverted is true and carries the original
+	// triggering error, so pre-existing consumers that only read Partial still see a failure.
+	// Reverted is the field that distinguishes "failed and rolled back" from "failed partway
+	// and disk reflects that".
+	//
+	// CALLER INVARIANT: a result with Reverted true must never be passed to buildSummary. A
+	// summary enumerates deployed artifacts, and after a reversal none of them exist, so the
+	// summary would describe files that are not on disk. Callers must branch on Reverted
+	// before summarising.
+	Reverted bool
+	// RevertFailures lists the journal entries the reversal itself could not apply. It is
+	// empty on a clean reversal. A non-empty slice means the workspace is in an intermediate
+	// state and the listed paths need manual recovery; the reversal always attempts every
+	// entry rather than aborting at the first error.
+	RevertFailures []RevertFailure
 }
 
 // NewExecutor constructs the production Executor.
@@ -126,12 +168,42 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 	}
 	prior := snap.Manifest
 
+	// In atomic mode, pre-record the probe item's path before resolveDeploymentRoot writes
+	// it. The probe is the executor's first filesystem write; journaling it here ensures the
+	// reversal can undo that initial write if the run later fails. A subsequent journal entry
+	// for the same path is recorded inside executeItem when the item loop processes the probe
+	// item; reversal applies both entries in reverse order, ending with a delete for new files
+	// or a restore to the true pre-run bytes for pre-existing files.
+	//
+	// Atomic has no effect during DryRun (no writes occur) or when a fallback tier is selected
+	// (the workspace was unwritable — a fallback run is not a mid-plan stop). The journal is
+	// discarded after resolveDeploymentRoot if a fallback is chosen.
+	var journal *writeJournal
+	if req.Atomic && !req.DryRun {
+		journal = &writeJournal{}
+		if probeItem, hasProbe := firstProbeItem(req.Plan.Items); hasProbe {
+			probePath := filepath.Join(req.Plan.WorkspacePath, probeItem.TargetPath)
+			// Best-effort pre-record: if the file is unreadable, the probe write will also
+			// likely fail (or a fallback will be chosen, making atomicMode false). Either way,
+			// the executeItem call for this same path re-probes and records correctly.
+			_ = journal.record(probePath)
+		}
+	}
+
 	// Resolve the deployment root once before any content write (CD-12, AC17.2).
 	// probeErr is non-nil when the workspace probe failed and a fallback was triggered;
 	// it is carried as the first partial error and the per-item Err in fallback mode.
 	deployRoot, fallback, probeErr, err := resolveDeploymentRoot(req)
 	if err != nil {
 		return ExecResult{}, err
+	}
+
+	// Atomic mode is active only when writing to the workspace (FallbackNone). A fallback
+	// run writes to an alternate location because the workspace was unwritable; that is not a
+	// mid-plan stop and keeps today's non-atomic semantics. DryRun performs no writes.
+	atomicMode := req.Atomic && !req.DryRun && fallback == domain.FallbackNone
+	if !atomicMode {
+		journal = nil // discard probe pre-record; only workspace writes are reversed
 	}
 
 	// Log the run start after the deployment root is known.
@@ -180,7 +252,7 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 			ar, entry = e.executeFallbackItem(item, req, deployRoot, probeErr)
 		} else {
 			// Normal mode: write to the workspace deployment root.
-			ar, entry = e.executeItem(item, req, deployRoot, prior)
+			ar, entry = e.executeItem(item, req, deployRoot, prior, journal)
 			if ar.Err != "" && partialErr == nil {
 				partialErr = fmt.Errorf("%s", ar.Err)
 			}
@@ -201,10 +273,38 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 		if entry != nil {
 			entryMap[item.Ref] = *entry
 		}
+
+		// In atomic mode, stop at the first failure. Continuing to write more items only
+		// enlarges the journal and widens the window for a reversal failure; the action records
+		// gathered so far are kept for diagnostics and are documented as describing writes that
+		// no longer exist on disk after the reversal.
+		if atomicMode && partialErr != nil {
+			break
+		}
 	}
 
-	// Deploy hook bundles and apply registration steps.
-	hookGaps := e.deployHooks(deployRoot, req.Plan.WorkspacePath, req.Hooks, req.DryRun)
+	// In atomic mode, reverse all journaled writes on any failure. Hook deployment, manifest
+	// save, and checklist write are all skipped when reverting — the run is all-or-nothing.
+	if atomicMode && partialErr != nil {
+		revertFailures := journal.revert()
+		outcome := computeOutcome(actions, partialErr, fallback)
+		e.log.EndRun(outcome)
+		return ExecResult{
+			DeploymentRoot: deployRoot,
+			Fallback:       fallback,
+			Actions:        actions,
+			Manifest:       prior, // return the prior manifest; nothing was saved to disk
+			TodoFilePath:   "",    // no checklist was written on a reverted run
+			Partial:        partialErr,
+			Reverted:       true,
+			RevertFailures: revertFailures,
+		}, nil
+	}
+
+	// Deploy hook bundles and apply registration steps. The journal is passed through so that
+	// hook file writes are covered by atomic reversal: if the manifest save below then fails,
+	// the hook files written here are reversed along with the plan item files.
+	hookGaps := e.deployHooks(deployRoot, req.Plan.WorkspacePath, req.Hooks, req.DryRun, journal)
 	for _, g := range hookGaps {
 		addGap(g)
 	}
@@ -215,6 +315,32 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 	// Persist the manifest and the TODO file (skipped for DryRun).
 	todoFilePath := ""
 	if !req.DryRun {
+		// In atomic mode, record the manifest path in the journal before saving it. The
+		// manifest store uses os.WriteFile (O_WRONLY|O_CREATE|O_TRUNC), which truncates the
+		// file before writing. A write failure after truncation begins leaves the manifest
+		// empty or corrupt on disk. Recording the path here ensures journal.revert() can
+		// restore the pre-run bytes from the snapshot taken now, returning the manifest to
+		// exactly the state it was in before this run started.
+		if atomicMode {
+			manifestPath := filepath.Join(req.Plan.WorkspacePath, manifest.Dir, manifest.FileName)
+			if recErr := journal.record(manifestPath); recErr != nil {
+				partialErr = fmt.Errorf("atomic journal record for manifest failed: %s", recErr)
+				revertFailures := journal.revert()
+				outcome := computeOutcome(actions, partialErr, fallback)
+				e.log.EndRun(outcome)
+				return ExecResult{
+					DeploymentRoot: deployRoot,
+					Fallback:       fallback,
+					Actions:        actions,
+					Manifest:       prior,
+					TodoFilePath:   "",
+					Partial:        partialErr,
+					Reverted:       true,
+					RevertFailures: revertFailures,
+				}, nil
+			}
+		}
+
 		if saveErr := e.store.Save(req.Plan.WorkspacePath, finalManifest); saveErr != nil {
 			e.log.Event(logging.Event{
 				Time:    time.Now(),
@@ -227,6 +353,29 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 				partialErr = saveErr
 			}
 		}
+
+		// In atomic mode, a manifest save failure is a triggering failure. All writes made so
+		// far — plan item files and hook files — are reversed. The TODO checklist is never
+		// written on a reverted run (we return here before reaching the write below). The
+		// manifest is left as it was before the run: the save failed, so nothing was durably
+		// changed on disk (or the write was incomplete and the file is stale, which is why the
+		// prior manifest is returned rather than the draft finalManifest).
+		if atomicMode && partialErr != nil {
+			revertFailures := journal.revert()
+			outcome := computeOutcome(actions, partialErr, fallback)
+			e.log.EndRun(outcome)
+			return ExecResult{
+				DeploymentRoot: deployRoot,
+				Fallback:       fallback,
+				Actions:        actions,
+				Manifest:       prior,
+				TodoFilePath:   "",
+				Partial:        partialErr,
+				Reverted:       true,
+				RevertFailures: revertFailures,
+			}, nil
+		}
+
 		var todoErr error
 		todoFilePath, todoErr = e.writeTodoFile(req, execGaps)
 		if todoErr != nil {
@@ -256,11 +405,15 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 // executeItem carries out one plan item in normal (workspace) mode and returns its action
 // record and optional manifest entry. A nil manifest entry means "do not alter the entry
 // for this item" — the caller leaves the prior entry intact in entryMap.
+//
+// journal is non-nil in atomic mode. When non-nil, the path of every write is recorded in
+// the journal immediately before the write so the executor can reverse the run on failure.
 func (e *executor) executeItem(
 	item domain.PlanItem,
 	req ExecRequest,
 	deployRoot string,
 	prior domain.Manifest,
+	journal *writeJournal,
 ) (domain.ActionRecord, *domain.ManifestEntry) {
 	ar := domain.ActionRecord{
 		Ref:        item.Ref,
@@ -298,6 +451,13 @@ func (e *executor) executeItem(
 			return ar, nil
 		}
 		destPath := filepath.Join(deployRoot, item.TargetPath)
+		if journal != nil {
+			if recErr := journal.record(destPath); recErr != nil {
+				ar.Taken = domain.TakenFailed
+				ar.Err = fmt.Sprintf("atomic journal record failed: %s", recErr)
+				return ar, nil
+			}
+		}
 		if writeErr := mkdirAndWrite(destPath, content); writeErr != nil {
 			ar.Taken = domain.TakenFailed
 			ar.Err = writeErr.Error()
@@ -314,7 +474,7 @@ func (e *executor) executeItem(
 
 	case domain.ActionConflict:
 		decision := req.Conflicts[item.TargetPath]
-		return e.executeConflict(item, ar, decision, req, deployRoot, prior)
+		return e.executeConflict(item, ar, decision, req, deployRoot, prior, journal)
 	}
 
 	ar.Taken = domain.TakenFailed
@@ -379,6 +539,12 @@ func (e *executor) executeFallbackItem(
 }
 
 // executeConflict handles the three conflict decisions for a locally-modified file.
+//
+// journal is non-nil in atomic mode. When non-nil, the target path is recorded before any
+// overwrite so the executor can restore the original content on reversal. The backup copy
+// written by DecisionBackupThenOverwrite is deliberately not journaled: backup files under
+// .mosaic/backups/ survive reversal by design (deleting a user's backup is the more
+// dangerous choice).
 func (e *executor) executeConflict(
 	item domain.PlanItem,
 	ar domain.ActionRecord,
@@ -386,6 +552,7 @@ func (e *executor) executeConflict(
 	req ExecRequest,
 	deployRoot string,
 	prior domain.Manifest,
+	journal *writeJournal,
 ) (domain.ActionRecord, *domain.ManifestEntry) {
 	switch decision {
 	case domain.DecisionSkip:
@@ -413,6 +580,13 @@ func (e *executor) executeConflict(
 			return ar, nil
 		}
 		destPath := filepath.Join(deployRoot, item.TargetPath)
+		if journal != nil {
+			if recErr := journal.record(destPath); recErr != nil {
+				ar.Taken = domain.TakenFailed
+				ar.Err = fmt.Sprintf("atomic journal record failed: %s", recErr)
+				return ar, nil
+			}
+		}
 		if writeErr := mkdirAndWrite(destPath, content); writeErr != nil {
 			ar.Taken = domain.TakenFailed
 			ar.Err = writeErr.Error()
@@ -434,8 +608,17 @@ func (e *executor) executeConflict(
 			entry := newManifestEntry(item, nil, stamp)
 			return ar, &entry
 		}
-		// Backup the current on-disk file before overwriting.
+		// Journal the target path before backup and overwrite. The backup file written to
+		// .mosaic/backups/ is deliberately not journaled: backup copies survive reversal by
+		// design (deleting a user's own backup is the more dangerous choice).
 		srcPath := filepath.Join(deployRoot, item.TargetPath)
+		if journal != nil {
+			if recErr := journal.record(srcPath); recErr != nil {
+				ar.Taken = domain.TakenFailed
+				ar.Err = fmt.Sprintf("atomic journal record failed: %s", recErr)
+				return ar, nil
+			}
+		}
 		backupPath, err := createBackup(req.Plan.WorkspacePath, item.TargetPath, srcPath)
 		if err != nil {
 			ar.Taken = domain.TakenFailed

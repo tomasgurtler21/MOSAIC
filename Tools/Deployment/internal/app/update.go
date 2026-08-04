@@ -263,11 +263,29 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 			GeneratedAt: now, Mode: domain.ModeUpdate,
 		},
 		DryRun: req.DryRun,
+		// Update opts into all-or-nothing execution so a failed run restores every overwritten
+		// file to its pre-run bytes and deletes every file the run created. Fallback runs are
+		// excluded from reversal by the executor and keep today's non-atomic semantics.
+		Atomic: true,
 	}
 
 	result, err := s.deps.Executor.Execute(ctx, execReq)
 	if err != nil {
 		return domain.RunSummary{}, err
+	}
+
+	// A reverted run must not be summarised: buildSummary enumerates deployed artifacts, and
+	// after a reversal none of them exist on disk. Return *RevertedRunError so the caller sees
+	// why the run failed and which paths (if any) the reversal could not restore.
+	if result.Reverted {
+		unrestored := make([]string, 0, len(result.RevertFailures))
+		for _, rf := range result.RevertFailures {
+			unrestored = append(unrestored, rf.Path)
+		}
+		return domain.RunSummary{}, &RevertedRunError{
+			Cause:           result.Partial,
+			UnrestoredPaths: unrestored,
+		}
 	}
 
 	// Persist any custom model IDs accumulated during this run (from model questions asked

@@ -1,7 +1,9 @@
 package app
 
 // workflow_update.go implements the workflow-only update use case: replacing the workflow set
-// embedded in an already-deployed orchestrator without touching any agent, skill, or hook artifact.
+// embedded in an already-deployed orchestrator. Agents, skills, and hooks that are already
+// deployed are never touched. Agents required by the selected workflows that have no file in
+// the workspace are deployed in the same run, using the deploy-new question flow.
 
 import (
 	"context"
@@ -15,6 +17,16 @@ import (
 )
 
 // UpdateWorkflows runs the workflow-only update flow. See Service.UpdateWorkflows for the contract.
+//
+// The narrowed contract:
+//   - Already-deployed artifacts (agent, skill, hook files that exist on disk) are never
+//     planned, written, or version-stamped, regardless of staleness or local modification.
+//   - Agents required by the selected workflows that have no file in the workspace are
+//     deployed using the deploy-new question flow: same questions, same order, including
+//     tier-level model questions and custom tool mapping.
+//   - Skills required by newly-deployed agents that have no file are deployed in the same run.
+//   - Model questions are asked only when there is at least one newly-required agent; when
+//     every workflow-required agent is already deployed, no model or tool question is asked.
 func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest) (domain.RunSummary, error) {
 	harnessID := req.HarnessID
 	if harnessID == "" {
@@ -52,7 +64,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 	snap, _ := s.deps.Manifest.Load(workspace)
 
 	// Probe the deployed orchestrator to discover its embedded model and existing workflow set.
-	// The orchestrator model is taken from the deployed file; no model questions are asked.
+	// The orchestrator model is taken from the deployed file.
 	var orchState domain.DeployedArtifactState
 	var orchTargetPath string
 	orchestrator := s.deps.Catalog.Orchestrator()
@@ -128,14 +140,44 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 	}
 	deployedState := probeDeployedState(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed)
 
-	// Orchestrator model comes from the deployed file. No tier-level or per-agent model
-	// questions are asked in this mode; the absence of TierModels/AgentModels from
-	// WorkflowUpdateRequest is what makes that guarantee structural.
-	var models map[string]domain.ModelSelection
+	// Detect agents required by the selected workflows that have no file in the workspace.
+	// These are the agents this run will deploy for the first time.
+	newAgents := newlyRequiredAgents(set.Agents, plannedPaths, deployedState, orchestrator.Key)
+
+	// Resolve models for new agents using the deploy-new question flow:
+	// - tierSkipOverride=false: tier questions are asked (same as deploy-new, unlike Update
+	//   which passes true to suppress them)
+	// - agentSkipOverride=false: per-agent questions are asked when no tier mapping resolves
+	// This whole step is gated on a non-empty new-agent set: when every workflow-required
+	// agent is already deployed, neither resolveModels nor resolveCustomTools is called, so
+	// no model or tool question of any kind is asked.
+	var newAgentModelRes modelResolution
+	var customTools map[string]string
+	var skippedTools map[string]bool
+	if len(newAgents) > 0 {
+		orderedNewAgents := s.orderedAgentsForModelResolution(workflowIDs, newAgents)
+		newAgentModelRes = s.resolveModels(
+			ctx, nil, nil, req.SkipAll,
+			harnessID, module, orderedNewAgents,
+			nil, false, false,
+			// tierSkipOverride=false, agentSkipOverride=false: deploy-new parity.
+			// Update passes true for tierSkipOverride to suppress tier questions; this
+			// flow deliberately does not, because the requirement is full deploy-new parity.
+		)
+		customTools, skippedTools = s.resolveCustomTools(ctx, nil, req.SkipAll, module, newAgents)
+	}
+
+	// Orchestrator model comes from the deployed file. Merge with newly resolved models
+	// for new agents (new-agent selections take precedence for their own keys).
+	models := make(map[string]domain.ModelSelection)
 	if orchState.ModelID != "" {
-		models = map[string]domain.ModelSelection{
-			orchestrator.Key: {ModelID: orchState.ModelID, Origin: domain.OriginDeployed},
-		}
+		models[orchestrator.Key] = domain.ModelSelection{ModelID: orchState.ModelID, Origin: domain.OriginDeployed}
+	}
+	for k, v := range newAgentModelRes.models {
+		models[k] = v
+	}
+	if len(models) == 0 {
+		models = nil
 	}
 
 	toolCfg, _ := s.deps.ToolConfig.Load()
@@ -156,12 +198,23 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		return domain.RunSummary{}, err
 	}
 
-	// Filter the plan to the orchestrator artifact only. Agent, skill, and hook artifacts
-	// must never be planned, written, or version-stamped in this mode — including when stale.
-	// Registrations are cleared because they relate to hook artifacts.
-	filteredItems := make([]domain.PlanItem, 0, 1)
+	// Compute the set of newly-required skill keys from the new agents and deployed state.
+	// This must happen after Planner.Build because it uses the same deployedState.
+	newSkillKeys := newlyRequiredSkillKeys(newAgents, set.Skills, plannedPaths, deployedState)
+
+	// Build the new-agent key set for the admission predicate.
+	newAgentKeys := make(map[string]bool, len(newAgents))
+	for _, a := range newAgents {
+		newAgentKeys[a.Key] = true
+	}
+
+	// Admit only the orchestrator, ActionCreate items for newly-required agents, and
+	// ActionCreate items for newly-required skills. Every other item (stale/unchanged/conflict
+	// non-orchestrator agents, all skills outside newSkillKeys, all hooks) is dropped.
+	// Registrations relate to hook artifacts and remain unconditionally cleared.
+	filteredItems := make([]domain.PlanItem, 0, len(p.Items))
 	for _, item := range p.Items {
-		if item.Ref.Kind == domain.ArtifactAgent && item.Ref.Key == orchestrator.Key {
+		if admitWorkflowUpdateItem(item, orchestrator.Key, newAgentKeys, newSkillKeys) {
 			filteredItems = append(filteredItems, item)
 		}
 	}
@@ -223,11 +276,14 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 	deployedReader := func(item domain.PlanItem) []byte {
 		return readDeployedFile(workspace, item.TargetPath)
 	}
-	// No infrastructure blocks and no custom tools: this mode does not add or update agents.
-	contentFn := s.buildContent(module, agentByKey, models, nil, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol)
+	// Custom tools resolved above for new agents; already-deployed agents are never in the
+	// input to resolveCustomTools so no already-deployed agent can trigger a tool question.
+	contentFn := s.buildContent(module, agentByKey, models, customTools, skippedTools, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol)
 
-	// Build version stamps only for the orchestrator item (the filtered plan's items).
-	versionStamps := buildVersionStamps(set.Agents, nil, nil, p.Items, module.Descriptor(), toolMappingsVersion)
+	// Version stamps cover the orchestrator and all admitted new-agent and new-skill items.
+	// set.Skills is passed so admitted skill items are stamped; set.Hooks is nil because hook
+	// artifacts are entirely out of scope for this flow.
+	versionStamps := buildVersionStamps(set.Agents, set.Skills, nil, p.Items, module.Descriptor(), toolMappingsVersion)
 
 	now := s.now()
 	execReq := deploy.ExecRequest{
@@ -243,11 +299,41 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 			GeneratedAt: now, Mode: domain.ModeWorkflowsOnly,
 		},
 		DryRun: req.DryRun,
+		// UpdateWorkflows opts into all-or-nothing execution so a failed run restores every
+		// written file to its pre-run bytes and leaves the workspace, orchestrator, manifest,
+		// and checklist exactly as they were before the run. Fallback runs are excluded from
+		// reversal by the executor and keep non-atomic semantics.
+		Atomic: true,
 	}
 
 	result, err := s.deps.Executor.Execute(ctx, execReq)
 	if err != nil {
 		return domain.RunSummary{}, err
+	}
+
+	// A reverted run must not be summarised: buildSummary enumerates deployed artifacts, and
+	// after a reversal none of them exist on disk. Return *RevertedRunError so the caller sees
+	// why the run failed and which paths (if any) the reversal could not restore.
+	if result.Reverted {
+		unrestored := make([]string, 0, len(result.RevertFailures))
+		for _, rf := range result.RevertFailures {
+			unrestored = append(unrestored, rf.Path)
+		}
+		return domain.RunSummary{}, &RevertedRunError{
+			Cause:           result.Partial,
+			UnrestoredPaths: unrestored,
+		}
+	}
+
+	// Persist tier models and custom model IDs collected during this run (from model
+	// questions asked for newly-required agents), matching deploy-new's persistence step.
+	if len(newAgents) > 0 {
+		_ = s.persistTierModels(harnessID, newAgentModelRes.tierModelsUsed)
+		customIDs := make([]string, 0, len(newAgentModelRes.accumulatedOptions))
+		for _, opt := range newAgentModelRes.accumulatedOptions {
+			customIDs = append(customIDs, opt.ID)
+		}
+		_ = s.persistCustomModelIDs(harnessID, customIDs)
 	}
 
 	return s.buildSummary(domain.ModeWorkflowsOnly, harnessRef, workspace, result), nil

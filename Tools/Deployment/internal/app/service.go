@@ -33,22 +33,50 @@ type Service interface {
 
 	// Update runs the update flow against an existing workspace deployment. Detects staleness,
 	// prompts for conflict decisions, and optionally adds new workflows in the same run.
+	//
+	// The run is all-or-nothing. Any failure during execution reverses every write: files this
+	// run created are deleted, files this run overwrote are restored to their pre-run bytes, and
+	// the manifest and checklist file are left exactly as they were before the run. On reversal
+	// the method returns a *RevertedRunError carrying the original cause and, when the reversal
+	// itself was incomplete, the paths that could not be restored. The workspace is otherwise
+	// unchanged and the run can simply be repeated.
+	//
+	// Conflict backup copies under .mosaic/backups/ survive a reversal by design. Fallback runs
+	// (workspace unwritable, files written to a fallback root) are excluded from reversal and
+	// behave as they do today.
+	//
+	// DeployNew keeps today's partial-failure semantics and does not opt in to atomic execution.
 	Update(ctx context.Context, req UpdateRequest) (domain.RunSummary, error)
 
 	// UpdateWorkflows runs the workflow-only update flow against an existing workspace
 	// deployment. The selected workflow set fully replaces the set currently embedded in
-	// the deployed orchestrator; workflows that are not reselected are removed. Only the
-	// orchestrator artifact may be planned, written, or version-stamped — agent, skill,
-	// and hook artifacts are never touched, including when they are stale. The
-	// orchestrator itself is regenerated exactly as Update regenerates it: version stamps,
-	// injections, and workflow content are all rebuilt.
+	// the deployed orchestrator; workflows that are not reselected are removed.
+	//
+	// Already-deployed artifacts are never planned, written, or version-stamped. An artifact
+	// counts as deployed when a file exists at its target path, regardless of staleness or
+	// local modification. This is the invariant that separates this mode from Update — it is
+	// no longer "only the orchestrator is ever written", but it remains the whole of that
+	// invariant.
+	//
+	// Agents required by the selected workflows that have no file in the workspace are
+	// deployed in the same run, using the deploy-new question flow: the same questions, in
+	// the same order, including tier-level model questions and custom tool mapping. A skipped
+	// or unanswered model question produces the same warning and gap outcome as deploy-new,
+	// and the run still completes.
+	//
+	// Skills required by those newly deployed agents that have no file in the workspace are
+	// deployed in the same run. Skills required only by already-deployed agents are not.
+	//
+	// No model question of any kind is asked when every workflow-required agent already has a
+	// deployed file. This replaces the former unconditional "no model questions" guarantee;
+	// the guarantee is now behavioural, enforced by gating the whole model-resolution call on
+	// a non-empty new-agent set.
 	//
 	// Conflict handling for a locally-modified orchestrator file is identical to Update's:
 	// the same decision options, the same backup behaviour, and a skip decision records a
 	// GapSkippedFile gap.
 	//
-	// No tier-level and no per-agent model question is asked; the orchestrator's model is
-	// taken from its deployed file via the deployed-state probe.
+	// Hook artifacts remain entirely out of scope and registrations are always cleared.
 	UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest) (domain.RunSummary, error)
 }
 
@@ -158,9 +186,12 @@ type UpdateRequest struct {
 // flow. A set field is used directly without asking; an unset field causes the flow to ask
 // through Interaction (CD-6).
 //
-// No TierModels, AgentModels, or CustomTools fields: this mode asks no model questions,
-// and the field's absence from the type is what makes that guarantee structural rather
-// than merely behavioural.
+// No TierModels, AgentModels, or CustomTools fields: this mode does not support headless
+// pre-answering of model selections. Model answers reach the flow through the Interaction
+// port and through tier models already persisted in user config. The "no model questions"
+// guarantee now holds only when every workflow-required agent is already deployed; when
+// newly-required agents are detected, model and tool questions are asked through Interaction,
+// exactly as the deploy-new flow asks them.
 type WorkflowUpdateRequest struct {
 	HarnessID string
 	// WorkspacePath is the path to the existing deployment workspace.
