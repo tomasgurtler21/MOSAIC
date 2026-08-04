@@ -84,7 +84,8 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 		harnessFlag       string // --harness: adapter selection (fake|claude-code)
 		timeoutFlag       string // --timeout: invocation timeout duration string
 		claudePathFlag    string // --claude-path: Claude Code CLI executable path
-		infraClassFlag    string // --infra-class: comma-separated class=agent mappings
+		infraClassFlag    string   // --infra-class: comma-separated class=agent mappings
+		inputFlags        []string // --input: seed source paths (repeatable)
 	)
 
 	runCmd := &cobra.Command{
@@ -113,6 +114,15 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 			// Check --run and --new-run mutual exclusivity.
 			if runIDFlag != "" && isNewRunFlag {
 				fmt.Fprintf(errOut, "error: --run and --new-run are mutually exclusive\n")
+				exitCode = ExitUsage
+				return nil
+			}
+
+			// Check --input and --run mutual exclusivity. Seeding only applies when
+			// creating a new run; silently ignoring --input on a resume would let a
+			// user believe inputs were seeded when they were not.
+			if len(inputFlags) > 0 && runIDFlag != "" {
+				fmt.Fprintf(errOut, "error: --input and --run are mutually exclusive\n")
 				exitCode = ExitUsage
 				return nil
 			}
@@ -300,6 +310,7 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				RunFolder:            resolvedRunFolder,
 				IsNewRun:             resolvedIsNewRun,
 				InfraClassSelections: infraClassSelections,
+				SeedInputs:           inputFlags,
 			}
 
 			// Start the session and map the outcome to an exit code.
@@ -347,6 +358,8 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 	runCmd.Flags().StringVar(&timeoutFlag, "timeout", "30m", "Invocation timeout for the harness adapter (e.g. 30m, 1h)")
 	runCmd.Flags().StringVar(&claudePathFlag, "claude-path", "claude", "Path to the Claude Code CLI binary")
 	runCmd.Flags().StringVar(&infraClassFlag, "infra-class", "", "Comma-separated class=agent mappings for non-interactive agent-per-class selection (e.g. checkpoint=checkpoint-manager-git,commit=commit-manager-git)")
+	runCmd.Flags().StringArrayVar(&inputFlags, "input", nil,
+		"Path to a file or directory to copy into a new run's folder before the first dispatch; repeatable. Not permitted with --run.")
 
 	root.AddCommand(runCmd)
 	root.SetArgs(args)

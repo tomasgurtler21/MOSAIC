@@ -6,6 +6,8 @@ package main
 // tests, which inject a pre-built session and never enter main's wiring path.
 
 import (
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -343,4 +345,168 @@ func TestBuildTUIDelegate_TypeAssert(t *testing.T) {
 	// Type is already *deviation.OrchestratorDelegate by the function signature;
 	// this compile-time assertion confirms the import resolves correctly.
 	var _ *deviation.OrchestratorDelegate = result
+}
+
+// ---------------------------------------------------------------------------
+// hasFlag
+//
+// hasFlag is the new pre-scan helper that reports whether a named flag appears
+// anywhere in args in either "--flag value" or "--flag=value" form. It is used
+// by resolveRunIdentityForCLI to detect --input presence before any run-folder
+// read, satisfying the requirement that the mutual-exclusion check precedes
+// filesystem access.
+//
+// Tests for the presence case are RED until hasFlag's logic is complete:
+// a stub returning false would pass the absence tests but fail the presence tests.
+// ---------------------------------------------------------------------------
+
+// TestHasFlag_FlagPresent_SpaceSeparated_ReturnsTrue verifies the common
+// "--flag value" form: flag name followed by a space and then the value.
+func TestHasFlag_FlagPresent_SpaceSeparated_ReturnsTrue(t *testing.T) {
+	if !hasFlag([]string{"run", "--input", "/some/path"}, "--input") {
+		t.Error("hasFlag should return true when --input appears in space-separated form")
+	}
+}
+
+// TestHasFlag_FlagPresent_EqualsSeparated_ReturnsTrue verifies the
+// "--flag=value" form: flag name and value joined with "=".
+func TestHasFlag_FlagPresent_EqualsSeparated_ReturnsTrue(t *testing.T) {
+	if !hasFlag([]string{"run", "--input=/some/path"}, "--input") {
+		t.Error("hasFlag should return true when --input appears in equals-separated form")
+	}
+}
+
+// TestHasFlag_FlagPresent_AmongOtherArgs_ReturnsTrue verifies that hasFlag
+// finds the flag even when surrounded by other flags and values.
+func TestHasFlag_FlagPresent_AmongOtherArgs_ReturnsTrue(t *testing.T) {
+	args := []string{"run", "--orchestrator-file", "orch.md", "--input", "/path", "--workflow", "w1"}
+	if !hasFlag(args, "--input") {
+		t.Error("hasFlag should find --input among other flags")
+	}
+}
+
+// TestHasFlag_FlagPresent_MultipleOccurrences_ReturnsTrue verifies that
+// hasFlag reports true when the flag appears more than once; only the first
+// occurrence needs to be found.
+func TestHasFlag_FlagPresent_MultipleOccurrences_ReturnsTrue(t *testing.T) {
+	args := []string{"--input", "/first", "--input", "/second"}
+	if !hasFlag(args, "--input") {
+		t.Error("hasFlag should return true when --input appears multiple times")
+	}
+}
+
+// TestHasFlag_FlagPresent_StandaloneWithNoValue_ReturnsTrue verifies that
+// --input appearing as the last token (no value token following) is still
+// detected: presence, not value, matters here.
+func TestHasFlag_FlagPresent_StandaloneWithNoValue_ReturnsTrue(t *testing.T) {
+	if !hasFlag([]string{"run", "--input"}, "--input") {
+		t.Error("hasFlag should return true when --input appears as the last arg with no following value")
+	}
+}
+
+// TestHasFlag_FlagAbsent_ReturnsFalse verifies that hasFlag returns false when
+// the named flag is not in args.
+func TestHasFlag_FlagAbsent_ReturnsFalse(t *testing.T) {
+	args := []string{"run", "--orchestrator-file", "orch.md", "--workflow", "w1"}
+	if hasFlag(args, "--input") {
+		t.Error("hasFlag should return false when --input is absent")
+	}
+}
+
+// TestHasFlag_EmptyArgs_ReturnsFalse verifies that hasFlag handles an empty
+// slice without panicking and returns false.
+func TestHasFlag_EmptyArgs_ReturnsFalse(t *testing.T) {
+	if hasFlag([]string{}, "--input") {
+		t.Error("hasFlag with empty args should return false")
+	}
+}
+
+// TestHasFlag_PartialPrefixDoesNotMatch verifies that "--inputx" is not
+// matched by a search for "--input": the flag name must match exactly.
+func TestHasFlag_PartialPrefixDoesNotMatch(t *testing.T) {
+	if hasFlag([]string{"--inputx", "/some/path"}, "--input") {
+		t.Error("hasFlag(--inputx, --input) must not match — exact flag name required")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// resolveRunIdentityForCLI: --input + --run pre-scan mutual-exclusion (T2.3)
+//
+// These tests prove that the mutual-exclusion check fires inside
+// resolveRunIdentityForCLI *before* any run-folder read. The technique: supply
+// a valid-format run_id whose folder does not exist on disk. If the refusal
+// came from the folder read, the error would say "no run found"; if it came
+// from the pre-scan check, the error must describe the mutual exclusion.
+// ---------------------------------------------------------------------------
+
+// mainTestRunID is a valid-format run_id whose folder is never created on disk
+// in these tests, so any attempt to read it would produce "no run found".
+const mainTestRunID = "20260727T170000Z-a3f9"
+
+// TestResolveRunIdentityForCLI_InputWithRun_RefusesMutuallyExclusive is the
+// core T2.3 assertion. It verifies that providing --input together with --run
+// causes resolveRunIdentityForCLI to return a mutual-exclusion error without
+// reading the run folder. The named run folder is absent from disk; if the
+// function reads the folder before checking the flags, it returns
+// "no run found" instead of the mutual-exclusion message — which fails this
+// test and proves the check came too late.
+func TestResolveRunIdentityForCLI_InputWithRun_RefusesMutuallyExclusive(t *testing.T) {
+	args := []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--input", "/some/seed.md",
+		"--run", mainTestRunID,
+	}
+
+	_, _, err := resolveRunIdentityForCLI(args)
+	if err == nil {
+		t.Fatal("resolveRunIdentityForCLI returned nil error; want a mutual-exclusion refusal")
+	}
+	// A "no run found" error means the folder was read before the flag check.
+	if strings.Contains(err.Error(), "no run found") {
+		t.Errorf("error %q suggests the run folder was read before the pre-scan check fired; "+
+			"the mutual-exclusion check must precede any os.ReadFile call", err.Error())
+	}
+	// The error must identify the conflict between --input and --run.
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("error %q does not contain \"mutually exclusive\"; "+
+			"the pre-scan check must produce a clear mutual-exclusion message", err.Error())
+	}
+}
+
+// TestResolveRunIdentityForCLI_InputAloneWithoutRun_DoesNotRefuse verifies
+// that --input by itself (no --run) does not trigger the mutual-exclusion check.
+// The scanner runs on an empty temp dir, finds zero candidates, and mints a new run.
+func TestResolveRunIdentityForCLI_InputAloneWithoutRun_DoesNotRefuse(t *testing.T) {
+	rootDir := t.TempDir()
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(rootDir); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	args := []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--input", "/some/seed.md",
+		// no --run flag
+	}
+
+	identity, _, err := resolveRunIdentityForCLI(args)
+	if err != nil {
+		t.Fatalf("resolveRunIdentityForCLI returned unexpected error: %v", err)
+	}
+	if identity == nil {
+		t.Fatal("resolveRunIdentityForCLI returned nil identity; want a new-run identity")
+	}
+	if !identity.IsNewRun {
+		t.Error("IsNewRun = false, want true when --input is given without --run (scanner mints new run)")
+	}
 }

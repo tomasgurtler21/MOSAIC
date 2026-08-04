@@ -299,6 +299,12 @@ func resolveRunIdentityForCLI(args []string) (*cli.RunIdentity, domain.ArtifactS
 	runIDFlag := scanFlag(args, "--run")
 	isNewRunFlag := scanBoolFlag(args, "--new-run")
 
+	// Refuse --input together with --run before any run-folder access. This check
+	// must precede the switch so the refusal cannot come from reading Orchestration.md.
+	if hasFlag(args, "--input") && runIDFlag != "" {
+		return nil, nil, fmt.Errorf("--input and --run are mutually exclusive")
+	}
+
 	var runID, runFolder string
 	var isNewRun bool
 
@@ -390,6 +396,23 @@ func resolveRunIdentityForCLI(args []string) (*cli.RunIdentity, domain.ArtifactS
 func scanBoolFlag(args []string, flag string) bool {
 	for _, arg := range args {
 		if arg == flag {
+			return true
+		}
+	}
+	return false
+}
+
+// hasFlag reports whether args contains the named flag in either the
+// "--flag value" or "--flag=value" form. Unlike scanFlag it returns no value,
+// and unlike scanBoolFlag it matches the "--flag=value" form; it exists for
+// flags whose mere presence is decisive during the pre-scan.
+func hasFlag(args []string, flag string) bool {
+	prefix := flag + "="
+	for _, arg := range args {
+		if arg == flag {
+			return true
+		}
+		if strings.HasPrefix(arg, prefix) {
 			return true
 		}
 	}

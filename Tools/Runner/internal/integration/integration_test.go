@@ -1653,6 +1653,500 @@ func TestIntegration_StageWildcardResolution_NonExecutionRow(t *testing.T) {
 	}
 }
 
+// ===== Seeding: files copied into run folder before first dispatch =====
+//
+// These integration tests exercise the session's seed-application step against
+// the real file-based artifact store. Seeded files must appear at their correct
+// relative paths inside the run folder, and they must be present before the
+// first agent row is dispatched (Apply runs before the dispatch loop).
+//
+// Run-folder layout used in all seeding tests:
+//   dir/                         ← orchestrator and agent definition files
+//   dir/run/                     ← run folder (created by fileStore.Create)
+//   dir/run/Orchestration.md     ← artifact (created by fileStore.Create)
+//   dir/run/<seeded files>       ← files placed by seed.Apply
+//
+// RED phase: all tests fail until seed.Apply is inserted into the session's
+// run-start sequence, after Store.Create and before the dispatch loop.
+
+// seedDispatchCallbackHarness wraps a FakeAdapter and calls onInvoke immediately
+// before each agent invocation. Used to inspect filesystem state at dispatch time.
+type seedDispatchCallbackHarness struct {
+	delegate *harness.FakeAdapter
+	onInvoke func(agentID string)
+}
+
+func (h *seedDispatchCallbackHarness) Invoke(ctx context.Context, agent domain.AgentReference, request domain.ProtocolRequest) (domain.ProtocolResponse, error) {
+	if h.onInvoke != nil {
+		h.onInvoke(agent.Identifier)
+	}
+	return h.delegate.Invoke(ctx, agent, request)
+}
+
+// TestIntegration_Seeding_SingleFile_PresentBeforeFirstDispatch verifies that a
+// single-file seed source is present in the run folder — with byte-identical
+// content to the source — when the first agent row is dispatched.
+func TestIntegration_Seeding_SingleFile_PresentBeforeFirstDispatch(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	seedContent := "# Requirements\n\nThis is the seeded content.\n"
+	srcFile := filepath.Join(dir, "Requirements.md")
+	if err := os.WriteFile(srcFile, []byte(seedContent), 0600); err != nil {
+		t.Fatalf("write seed source: %v", err)
+	}
+
+	runDir := filepath.Join(dir, "run")
+	artifactPath := filepath.Join(runDir, "Orchestration.md")
+
+	f := harness.NewFakeAdapter()
+
+	// Capture the run-folder state at the moment the first agent is dispatched.
+	var seededExistsAtDispatch bool
+	var seededContentAtDispatch []byte
+	cbH := &seedDispatchCallbackHarness{
+		delegate: f,
+		onInvoke: func(agentID string) {
+			if agentID == "agent-a" {
+				got, err := os.ReadFile(filepath.Join(runDir, "Requirements.md"))
+				seededExistsAtDispatch = err == nil
+				seededContentAtDispatch = got
+			}
+		},
+	}
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	store := artifact.NewFileStore(artifactPath)
+	sess := session.New(session.Deps{
+		Harness:   cbH,
+		Store:     store,
+		Deviation: &scriptedResolver{},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		OnDeviation:          domain.DeviationDelegate,
+		RunFolder:            runDir,
+		SeedInputs:           []string{srcFile},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// The seeded file must have been present when agent-a was dispatched.
+	if !seededExistsAtDispatch {
+		t.Error("seeded file must exist in the run folder before the first row is dispatched, but it was absent")
+	}
+	if string(seededContentAtDispatch) != seedContent {
+		t.Errorf("seeded file content at first dispatch: got %q, want %q",
+			string(seededContentAtDispatch), seedContent)
+	}
+}
+
+// TestIntegration_Seeding_DirectorySource_FilesAtCorrectRelativePaths verifies
+// that a directory seed source contributes one entry per regular file, with
+// destination paths preserving the relative structure of the source directory.
+func TestIntegration_Seeding_DirectorySource_FilesAtCorrectRelativePaths(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	// Source directory:
+	//   srcDir/
+	//     Top.md
+	//     Sub/
+	//       Nested.md
+	srcDir := filepath.Join(dir, "seed-src")
+	if err := os.MkdirAll(srcDir, 0700); err != nil {
+		t.Fatalf("mkdir srcDir: %v", err)
+	}
+	topContent := "# Top level\n"
+	if err := os.WriteFile(filepath.Join(srcDir, "Top.md"), []byte(topContent), 0600); err != nil {
+		t.Fatalf("write Top.md: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(srcDir, "Sub"), 0700); err != nil {
+		t.Fatalf("mkdir Sub: %v", err)
+	}
+	nestedContent := "# Nested\n"
+	if err := os.WriteFile(filepath.Join(srcDir, "Sub", "Nested.md"), []byte(nestedContent), 0600); err != nil {
+		t.Fatalf("write Nested.md: %v", err)
+	}
+
+	runDir := filepath.Join(dir, "run")
+	artifactPath := filepath.Join(runDir, "Orchestration.md")
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	store := artifact.NewFileStore(artifactPath)
+	sess := session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Deviation: &scriptedResolver{},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		OnDeviation:          domain.DeviationDelegate,
+		RunFolder:            runDir,
+		SeedInputs:           []string{srcDir},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// Top.md must be at the root of the run folder.
+	if gotTop, err := os.ReadFile(filepath.Join(runDir, "Top.md")); err != nil {
+		t.Errorf("want seeded Top.md in run folder: %v", err)
+	} else if string(gotTop) != topContent {
+		t.Errorf("Top.md content: got %q, want %q", string(gotTop), topContent)
+	}
+
+	// Nested.md must be at Sub/Nested.md relative to the run folder.
+	if gotNested, err := os.ReadFile(filepath.Join(runDir, "Sub", "Nested.md")); err != nil {
+		t.Errorf("want seeded Sub/Nested.md in run folder: %v", err)
+	} else if string(gotNested) != nestedContent {
+		t.Errorf("Sub/Nested.md content: got %q, want %q", string(gotNested), nestedContent)
+	}
+}
+
+// TestIntegration_Seeding_MultipleSources_AllFilesPresent verifies that when
+// several sources are provided, every seeded file from every source is present
+// in the run folder with byte-identical content to its source.
+func TestIntegration_Seeding_MultipleSources_AllFilesPresent(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	// Source 1: individual file.
+	content1 := "# Input 1\n"
+	src1 := filepath.Join(dir, "Input1.md")
+	if err := os.WriteFile(src1, []byte(content1), 0600); err != nil {
+		t.Fatalf("write src1: %v", err)
+	}
+
+	// Source 2: individual file.
+	content2 := "# Input 2\n"
+	src2 := filepath.Join(dir, "Input2.md")
+	if err := os.WriteFile(src2, []byte(content2), 0600); err != nil {
+		t.Fatalf("write src2: %v", err)
+	}
+
+	// Source 3: directory containing one file.
+	srcDir := filepath.Join(dir, "seed-dir")
+	if err := os.MkdirAll(srcDir, 0700); err != nil {
+		t.Fatalf("mkdir srcDir: %v", err)
+	}
+	content3 := "# Dir Input\n"
+	if err := os.WriteFile(filepath.Join(srcDir, "DirInput.md"), []byte(content3), 0600); err != nil {
+		t.Fatalf("write DirInput.md: %v", err)
+	}
+
+	runDir := filepath.Join(dir, "run")
+	artifactPath := filepath.Join(runDir, "Orchestration.md")
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	store := artifact.NewFileStore(artifactPath)
+	sess := session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Deviation: &scriptedResolver{},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		OnDeviation:          domain.DeviationDelegate,
+		RunFolder:            runDir,
+		SeedInputs:           []string{src1, src2, srcDir},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	for _, tc := range []struct{ name, dest, content string }{
+		{"src1", "Input1.md", content1},
+		{"src2", "Input2.md", content2},
+		{"srcDir/DirInput.md", "DirInput.md", content3},
+	} {
+		gotContent, err := os.ReadFile(filepath.Join(runDir, tc.dest))
+		if err != nil {
+			t.Errorf("want seeded %s at run folder/%s: %v", tc.name, tc.dest, err)
+			continue
+		}
+		if string(gotContent) != tc.content {
+			t.Errorf("%s content: got %q, want %q", tc.dest, string(gotContent), tc.content)
+		}
+	}
+}
+
+// ===== Seeding: resume does not re-seed =====
+
+// TestIntegration_Seeding_Resume_ExistingFilesPreservedByteIdentical verifies
+// that resuming a run (IsNewRun false) does not re-copy seed inputs into the
+// run folder. Any file already in the run folder retains its exact content
+// regardless of what SeedInputs contains.
+func TestIntegration_Seeding_Resume_ExistingFilesPreservedByteIdentical(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	// Pre-create the run folder with a valid Orchestration.md that encodes a
+	// partially completed run: agent-a done (seq=1), agent-b pending.
+	runDir := filepath.Join(dir, "run")
+	if err := os.MkdirAll(runDir, 0700); err != nil {
+		t.Fatalf("mkdir runDir: %v", err)
+	}
+	const seedingResumeArtifact = `---
+type: orchestration-artifact
+workflow: linear
+workflow_version: "1.0"
+task: "test task"
+started: 2026-01-01T00:00:00Z
+last_updated: 2026-01-01T00:00:00Z
+global_sequence: 1
+checkpoints: disabled
+current_state:
+  phase: PLANNING
+  stage: null
+  last_status: SUCCESS
+  last_agent: "agent-a#1"
+  error_code: null
+---
+
+[[SECTION:ExecutionLog]]
+| Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary | Checkpoint |
+| --- | --------- | -------- | ----- | ------- | -------------------- | ------- | ---------- |
+| 1   | agent-a#1 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | done    | -          |
+[[/SECTION:ExecutionLog]]
+
+[[SECTION:Artifacts]]
+| Artifact | Created In | Created By |
+| -------- | ---------- | ---------- |
+[[/SECTION:Artifacts]]
+
+[[SECTION:WorkflowNotes]]
+| Seq | Note |
+| --- | ---- |
+[[/SECTION:WorkflowNotes]]
+`
+	artifactPath := filepath.Join(runDir, "Orchestration.md")
+	if err := os.WriteFile(artifactPath, []byte(seedingResumeArtifact), 0600); err != nil {
+		t.Fatalf("write resume artifact: %v", err)
+	}
+
+	// A file already in the run folder simulating a seeded artifact from the
+	// original run that may have been partially modified by the agents.
+	preExistingContent := "# pre-existing: this content must survive the resume\n"
+	if err := os.WriteFile(filepath.Join(runDir, "seeded.md"), []byte(preExistingContent), 0600); err != nil {
+		t.Fatalf("write pre-existing seeded file: %v", err)
+	}
+
+	// Seed source: a file named "seeded.md" with different content.
+	// If seeding ran on resume, runDir/seeded.md would be overwritten.
+	srcFile := filepath.Join(dir, "seeded.md")
+	newSeedContent := "# new seed: must NOT overwrite on resume\n"
+	if err := os.WriteFile(srcFile, []byte(newSeedContent), 0600); err != nil {
+		t.Fatalf("write seed source: %v", err)
+	}
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	store := artifact.NewFileStore(artifactPath)
+	sess := session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Deviation: &scriptedResolver{},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             false,
+		OnDeviation:          domain.DeviationDelegate,
+		RunFolder:            runDir,
+		SeedInputs:           []string{srcFile}, // ignored on resume
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// seeded.md must retain its pre-resume content — the session must not have
+	// re-copied it from the seed source.
+	gotContent, readErr := os.ReadFile(filepath.Join(runDir, "seeded.md"))
+	if readErr != nil {
+		t.Fatalf("read seeded.md after resume: %v", readErr)
+	}
+	if string(gotContent) != preExistingContent {
+		t.Errorf("seeded.md after resume: got %q, want pre-existing %q (seeding must be skipped on resume)",
+			string(gotContent), preExistingContent)
+	}
+}
+
+// ===== Seeding: mid-copy failure removes the entire run folder =====
+
+// TestIntegration_Seeding_MidCopyFailure_RunFolderCompletelyRemoved verifies
+// that when seed.Apply fails partway through — after at least one file has
+// been written — the session removes the entire run folder, including
+// Orchestration.md and the already-copied files, and returns a RunRefused
+// naming the failing file. No trace of the failed attempt remains on disk.
+//
+// The copy failure is induced by pre-populating the run folder with a regular
+// file at a path that Apply's os.MkdirAll needs to turn into a directory.
+// This technique is cross-platform: os.MkdirAll returns an error whenever a
+// non-directory occupies any component of the target path.
+func TestIntegration_Seeding_MidCopyFailure_RunFolderCompletelyRemoved(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	// Source directory:
+	//   sources/
+	//     first.md       → dest "first.md"     (copies successfully)
+	//     sub/
+	//       second.md    → dest "sub/second.md" (fails — see sabotage below)
+	srcDir := filepath.Join(dir, "sources")
+	if err := os.MkdirAll(filepath.Join(srcDir, "sub"), 0700); err != nil {
+		t.Fatalf("mkdir sources/sub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "first.md"), []byte("first\n"), 0600); err != nil {
+		t.Fatalf("write first.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "sub", "second.md"), []byte("second\n"), 0600); err != nil {
+		t.Fatalf("write sub/second.md: %v", err)
+	}
+
+	runDir := filepath.Join(dir, "run")
+
+	// Pre-create the run folder so we can plant the sabotage file inside it.
+	// fileStore.Create will call os.MkdirAll(runDir), which succeeds even if the
+	// directory already exists, then write Orchestration.md.
+	if err := os.MkdirAll(runDir, 0700); err != nil {
+		t.Fatalf("pre-create runDir: %v", err)
+	}
+	// Sabotage: put a regular file at runDir/sub so that Apply's
+	// os.MkdirAll(runDir/sub) fails. The walk visits first.md before sub/second.md
+	// (lexical order), so first.md is successfully copied before the failure.
+	if err := os.WriteFile(filepath.Join(runDir, "sub"), []byte("not a directory"), 0600); err != nil {
+		t.Fatalf("write sabotage file: %v", err)
+	}
+
+	artifactPath := filepath.Join(runDir, "Orchestration.md")
+	f := harness.NewFakeAdapter()
+	// No responses queued: Apply fails before the dispatch loop begins.
+
+	store := artifact.NewFileStore(artifactPath)
+	sess := session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Deviation: &scriptedResolver{},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		OnDeviation:          domain.DeviationDelegate,
+		RunFolder:            runDir,
+		SeedInputs:           []string{srcDir},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+
+	msg := requireRefused(t, got, err)
+
+	// The entire run folder must be removed — including Orchestration.md and the
+	// successfully-copied first.md. A mid-copy failure leaves no trace on disk.
+	if _, statErr := os.Stat(runDir); !os.IsNotExist(statErr) {
+		t.Errorf("want run folder removed after mid-copy failure, but it still exists at %s", runDir)
+	}
+
+	// The refusal message must reference the seed component and name the
+	// specific entry that failed to copy. The failing entry is sub/second.md
+	// (Apply visits first.md before sub/second.md in lexical order; first.md
+	// copies successfully, then os.MkdirAll("runDir/sub") fails because the
+	// sabotage file occupies that path). Both the component tag and the
+	// failing source path must appear so the test distinguishes "named the
+	// right file" from "named some seed problem."
+	if !strings.Contains(msg, "seed") {
+		t.Errorf("want refusal message to reference the seed component; got %q", msg)
+	}
+	if !strings.Contains(msg, "second.md") {
+		t.Errorf("want refusal message to name the failing entry (second.md); got %q", msg)
+	}
+
+	// No agents must have been dispatched: the failure occurred before the dispatch loop.
+	if len(f.Invocations()) != 0 {
+		t.Errorf("want no harness invocations on seed copy failure, got %d", len(f.Invocations()))
+	}
+}
+
 // ---- small utilities ----
 
 // containsArtifact reports whether the slice contains the given artifact path.

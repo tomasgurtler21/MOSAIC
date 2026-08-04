@@ -23,6 +23,20 @@ type RunConfig struct {
 	// Non-gated classes (e.g. "review") are never in this map; all declared
 	// agents of non-gated classes have their triggers evaluated unconditionally.
 	InfraClassSelections map[string]string
+
+	// SeedInputs holds user-supplied seed source paths, each naming a file or a
+	// directory, in the order the user gave them. They are copied into the run
+	// folder after it is created and before the first dispatch.
+	//
+	// Applied only when creating a new run. On a resume (IsNewRun false) this
+	// field is ignored entirely — not validated, not copied — because files
+	// already in a resumed run folder encode run state that re-copying would
+	// silently rewind. A non-empty value on a resume is not an error at this
+	// layer; the CLI already refuses --input together with --run.
+	//
+	// The CLI --input flag populates this. It is nil for TUI-started runs,
+	// which therefore seed nothing.
+	SeedInputs []string
 }
 
 // DeviationMode controls non-interactive deviation handling.

@@ -50,6 +50,7 @@ import (
 	"mosaic-run/internal/engine"
 	"mosaic-run/internal/orchfile"
 	"mosaic-run/internal/planstages"
+	"mosaic-run/internal/seed"
 	"mosaic-run/internal/workflow"
 )
 
@@ -209,6 +210,18 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		return refusal("checkpoints requested but no checkpoint provider is available"), nil
 	}
 
+	// Step 7a: Build and validate the seed plan. New runs only: a resumed run
+	// ignores SeedInputs entirely. Validation precedes Store.Create so an invalid
+	// seed set leaves no run folder behind.
+	var seedPlan seed.Plan
+	if config.IsNewRun && len(config.SeedInputs) > 0 {
+		p, seedErr := seed.BuildPlan(config.SeedInputs)
+		if seedErr != nil {
+			return refusal(seedErr.Error()), nil
+		}
+		seedPlan = p
+	}
+
 	// Step 8: Create or resume the artifact.
 	var state domain.ArtifactState
 	var seq int
@@ -219,6 +232,17 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		state, err = s.deps.Store.Create(ctx, region.Info, config.Task, false, s.deps.Clock.Now(), config.RunID)
 		if err != nil {
 			return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
+		}
+		// Apply the seed plan into the run folder. If any copy fails, remove the
+		// entire run folder (including Orchestration.md and already-copied files)
+		// so no trace of the failed attempt remains. Only reachable on the new-run
+		// path, after a Create this attempt performed.
+		if applyErr := seed.Apply(seedPlan, config.RunFolder); applyErr != nil {
+			if rmErr := os.RemoveAll(config.RunFolder); rmErr != nil {
+				return refusal(fmt.Sprintf("%s; additionally, removing the run folder %s failed: %v",
+					applyErr.Error(), config.RunFolder, rmErr)), nil
+			}
+			return refusal(applyErr.Error()), nil
 		}
 		seq = 0
 	} else {
