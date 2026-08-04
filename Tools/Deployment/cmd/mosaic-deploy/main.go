@@ -138,17 +138,18 @@ func main() {
 	// CLI needs the non-interactive, pre-answers-only implementation. It is set
 	// below, per branch, before app.New(deps) is called.
 	deps := app.Deps{
-		Catalog:    cat,
-		Registry:   reg,
-		Planner:    plan.New(),
-		Executor:   deploy.NewExecutor(manifestStore, logger, todoCollector),
-		Manifest:   manifestStore,
-		ToolConfig: toolConfigStore,
-		UserConfig: userConfigStore,
-		Logger:     logger,
-		Todo:       todoCollector,
-		MosaicRoot: mosaicRoot,
-		GOOS:       runtime.GOOS,
+		Catalog:        cat,
+		Registry:       reg,
+		Planner:        plan.New(),
+		Executor:       deploy.NewExecutor(manifestStore, logger, todoCollector),
+		Manifest:       manifestStore,
+		ToolConfig:     toolConfigStore,
+		UserConfig:     userConfigStore,
+		Logger:         logger,
+		Todo:           todoCollector,
+		MosaicRoot:     mosaicRoot,
+		GOOS:           runtime.GOOS,
+		ProtocolLoader: catalog.FileProtocolLoader{},
 	}
 
 	if wantsTUI(args) {

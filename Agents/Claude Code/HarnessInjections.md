@@ -5,11 +5,11 @@ harness: claude-code
 
 # Harness Injections — Claude Code
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 
-[[INJECTION:LanguagePatterns]]
-[[/INJECTION:LanguagePatterns]]
+[[DEPLOYED:LanguagePatterns]]
+[[/DEPLOYED:LanguagePatterns]]
 
 ---
 

@@ -36,7 +36,7 @@ Executed once, in this fixed order, entirely inside `Start`:
 4. Apply the new-vs-resume contract: new runs refuse if an artifact already exists (race guard); resumes refuse if none exists (stale scan guard). Resumes also refuse on workflow-version mismatch unless version drift is explicitly allowed.
 5. Admit the workflow (`compat`) — validates the FR-18a subset and resolves execution groups.
 6. Resolve every agent identifier referenced in the routing table to a definition file (`agentresolve`).
-7. If the admitted workflow has a staged phase, read the stage set from `Plan.md` (`planstages`).
+7. If the admitted workflow has a staged phase, read the stage set from `Plan.md` (`planstages`), passing `admitted.GroupsDeclared` to indicate whether the `Approach` column is required. When `GroupsDeclared` is true, every stage must carry a non-empty `Approach` value; when false, the column is not read even if present.
 8. Enumerate declared infrastructure agents from the orchestrator file, then validate per-class agent selection (refusing non-interactive runs that have multiple agents in a gated class but no `--infra-class` selection).
 9. Settle checkpoints: refuse only when checkpoints were requested for the run **and** no checkpoint-class infrastructure agent is declared.
 10. Create a fresh artifact (new run) or determine the resume point via `engine.ResumePoint` (resume). A resume whose last step was interrupted mid-invocation (FR-33) has its `CurrentState` rewound so the interrupted row is re-dispatched rather than skipped.

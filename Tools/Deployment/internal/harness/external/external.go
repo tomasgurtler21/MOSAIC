@@ -49,6 +49,11 @@ type Options struct {
 	// Timeout is the per-request deadline. If zero, a default of 30 seconds is used.
 	// A module that does not respond within this period triggers ErrTimeout.
 	Timeout time.Duration
+
+	// MosaicRoot is the root of the MOSAIC repository. It is forwarded to external modules
+	// so they can locate harness content files at run time. May be empty for external modules
+	// that do not require repository access.
+	MosaicRoot string
 }
 
 // Sentinel errors returned by the external adapter. Tests use errors.Is to distinguish them.
@@ -539,9 +544,10 @@ func (c *liveConn) exitOrEmpty(writeErr error) error {
 // universal invariants and then continues exercising per-method behaviour.
 type adapter struct {
 	// Immutable configuration (used for reconnect).
-	execPath string
-	desc     *domain.HarnessDescriptor
-	timeout  time.Duration
+	execPath   string
+	desc       *domain.HarnessDescriptor
+	timeout    time.Duration
+	mosaicRoot string // forwarded to the child process as MOSAIC_ROOT; "" means do not inject
 
 	// Protected by mu.
 	mu   sync.Mutex
@@ -550,7 +556,10 @@ type adapter struct {
 }
 
 // startLiveConn creates and returns a new subprocess connection after performing the handshake.
-func startLiveConn(execPath string, desc *domain.HarnessDescriptor, timeout time.Duration) (*liveConn, domain.HarnessRef, error) {
+// When mosaicRoot is non-empty it is exported to the child process as the MOSAIC_ROOT
+// environment variable, merged with the inherited host environment. When mosaicRoot is empty
+// no MOSAIC_ROOT variable is injected, preserving any value already present in the host env.
+func startLiveConn(execPath string, desc *domain.HarnessDescriptor, timeout time.Duration, mosaicRoot string) (*liveConn, domain.HarnessRef, error) {
 	if _, err := os.Stat(execPath); os.IsNotExist(err) {
 		return nil, domain.HarnessRef{}, fmt.Errorf("%w: %s", ErrExecutableNotFound, execPath)
 	}
@@ -567,9 +576,9 @@ func startLiveConn(execPath string, desc *domain.HarnessDescriptor, timeout time
 	}
 
 	c := &liveConn{
-		stdinW: stdinW,
+		stdinW:  stdinW,
 		stdoutR: stdoutR,
-		waitCh: make(chan error, 1),
+		waitCh:  make(chan error, 1),
 	}
 	c.enc = json.NewEncoder(stdinW)
 	c.dec = json.NewDecoder(stdoutR)
@@ -583,6 +592,11 @@ func startLiveConn(execPath string, desc *domain.HarnessDescriptor, timeout time
 	cmd.Stdin = stdinR
 	cmd.Stdout = stdoutW
 	cmd.Stderr = &c.stderrBuf
+	// Export MOSAIC_ROOT to the child process only when a root was supplied. Merging with
+	// os.Environ() rather than replacing it preserves PATH and other variables the module needs.
+	if mosaicRoot != "" {
+		cmd.Env = append(os.Environ(), "MOSAIC_ROOT="+mosaicRoot)
+	}
 	c.cmd = cmd
 
 	if err := cmd.Start(); err != nil {
@@ -687,17 +701,18 @@ func New(execPath string, d *domain.HarnessDescriptor, opts Options) (domain.Har
 		timeout = 30 * time.Second
 	}
 
-	c, ref, err := startLiveConn(execPath, d, timeout)
+	c, ref, err := startLiveConn(execPath, d, timeout, opts.MosaicRoot)
 	if err != nil {
 		return nil, err
 	}
 
 	return &adapter{
-		execPath: execPath,
-		desc:     d,
-		timeout:  timeout,
-		ref:      ref,
-		conn:     c,
+		execPath:   execPath,
+		desc:       d,
+		timeout:    timeout,
+		mosaicRoot: opts.MosaicRoot,
+		ref:        ref,
+		conn:       c,
 	}, nil
 }
 
@@ -707,8 +722,9 @@ func (a *adapter) ensureConn() (*liveConn, error) {
 	if a.conn != nil {
 		return a.conn, nil
 	}
-	// Reconnect after a previous Close().
-	c, ref, err := startLiveConn(a.execPath, a.desc, a.timeout)
+	// Reconnect after a previous Close(), forwarding the same mosaicRoot so the respawned
+	// subprocess receives the same MOSAIC_ROOT environment variable as the original.
+	c, ref, err := startLiveConn(a.execPath, a.desc, a.timeout, a.mosaicRoot)
 	if err != nil {
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}

@@ -79,107 +79,8 @@ You operate within a multi-agent orchestration system where multiple sources pro
 [[/SECTION:Identity]]
 ---
 
-[[SECTION:CommunicationProtocol]]
-## Communication Protocol
-
-You operate under **Communication Protocol v1.8**. This protocol governs agent-to-agent communication, parsed programmatically by orchestration scripts. Both input and output are structured JSON - no conversational text.
-
-### Input Format
-```json
-{
-  "agent_instance_id": "{AgentName}#{Number}",
-  "run_id": "{run-identifier}",
-  "task_description": "What to do",
-  "input_artifacts": ["Orchestration-{run_id}/artifact1.md"],
-  "output_artifacts": ["Orchestration-{run_id}/output.md"],
-  "input_files": ["src/file1.ts"],
-  "output_files": ["src/file2.ts"],
-  "constraints": "Optional restrictions",
-  "include_result_summary": false,
-  "human_in_the_loop": false
-}
-```
-
-### Orchestration Artifacts vs Project Files
-- `input_artifacts`/`output_artifacts` = **Orchestration artifacts** (STRICT: only access what's listed)
-- `input_files`/`output_files` = **Hints** for project files. You have FULL autonomy over ANY file not listed as orchestration artifact.
-
-**Rule:** You can ONLY access orchestration artifacts in your lists. You can freely access ANY other file.
-
-### Human-in-the-Loop
-When `human_in_the_loop: true`:
-- You MUST present your complete output (artifacts AND project files you created/modified) to the user for review as your **final action** before returning your response
-- If the user requests changes, apply them and present the updated output again — the gate re-activates on every change
-- Mid-task user interactions (clarifications, questions) do NOT satisfy HITL — HITL = output review gate
-- If no user contact tools are available, return BLOCKED with error_code E503
-
-### Output Format
-
-For SUCCESS, COMPLETED_NEEDS_ACTION, PARTIALLY_DONE, NEEDS_CLARIFICATION, CAPABILITY_EXCEEDED:
-```json
-{
-  "agent_instance_id": "{AgentName}#{Number}",
-  "run_id": "{run-identifier}",
-  "status_code": "SUCCESS|COMPLETED_NEEDS_ACTION|PARTIALLY_DONE|NEEDS_CLARIFICATION|CAPABILITY_EXCEEDED",
-  "status_message": "1-2 sentence description of outcome. Describe what was modified.",
-  "result_data": "Only if include_result_summary was true in input"
-}
-```
-
-For BLOCKED (includes error fields):
-```json
-{
-  "agent_instance_id": "{AgentName}#{Number}",
-  "run_id": "{run-identifier}",
-  "status_code": "BLOCKED",
-  "status_message": "1-2 sentence description of blocker",
-  "error_code": "E101|E401|E501|E502|E503",
-  "error_reason": "Human-readable explanation"
-}
-```
-
-### Status Codes
-| Status | Meaning | Orchestrator Action |
-|--------|---------|---------------------|
-| `SUCCESS` | Task done, proceed | Auto-advance to next phase |
-| `COMPLETED_NEEDS_ACTION` | Task done, action items for another agent | Route to remediation agent |
-| `PARTIALLY_DONE` | Some items done, more of same work needed | Route to successor agent (same type) |
-| `NEEDS_CLARIFICATION` | Uncertain or context incomplete | Provide context or escalate |
-| `CAPABILITY_EXCEEDED` | Task exceeds agent capability | Try alternative or escalate |
-| `BLOCKED` | External factor preventing work | Resolve blocker or escalate |
-
-### Error Codes (BLOCKED Only)
-| Code | Name | Meaning |
-|------|------|---------|
-| `E101` | INPUT_NOT_FOUND | Required input file doesn't exist |
-| `E401` | DEPENDENCY_MISSING | Predecessor task not complete |
-| `E501` | TOOL_UNAVAILABLE | External tool/API unavailable |
-| `E502` | PERMISSION_DENIED | Cannot read/write required resource |
-| `E503` | USER_CONTACT_UNAVAILABLE | `human_in_the_loop: true` but no means to contact user |
-
-### Key Rules
-1. Echo `agent_instance_id` exactly as received
-2. Echo `run_id` exactly as received
-3. Always return `status_code`, `status_message`
-4. Describe what you modified in `status_message`
-5. Only include `result_data` if `include_result_summary: true` in input
-6. Only include `error_code` and `error_reason` if status is `BLOCKED`
-7. **Orchestration Artifacts (STRICT):** ONLY access orchestration artifacts listed in your `input_artifacts`/`output_artifacts`
-8. **Project Files (FULL AUTONOMY):** You MAY read/modify/create ANY file NOT listed as orchestration artifact
-9. **Human-in-the-loop:** If `human_in_the_loop: true`, present your complete output (artifacts + project files) to the user for review as your final action. The gate re-activates on every output change. Mid-task interactions don't satisfy HITL. (E503 if unable)
-10. Use `SUCCESS` when ALL requested work is complete
-11. Use `COMPLETED_NEEDS_ACTION` when your job IS to find issues (e.g., Review)
-12. Use `PARTIALLY_DONE` when stopping mid-task for quality (some items done, more needed)
-13. Use `NEEDS_CLARIFICATION` when uncertain or context is incomplete
-14. Use `BLOCKED` + error code for external blockers
-15. Use `CAPABILITY_EXCEEDED` when task is beyond your ability
-
-
-
-[[INJECTION:ProtocolExtension]]
-[[/INJECTION:ProtocolExtension]]
-
-[[/SECTION:CommunicationProtocol]]
+[[DEPLOYED:CommunicationProtocol]]
+[[/DEPLOYED:CommunicationProtocol]]
 ---
 
 [[SECTION:ArtifactProvenance]]
@@ -559,8 +460,8 @@ This template mirrors the Stage-{N}/Plan.md structure with checkboxes. Adapt sec
 <!-- ONLY for handoff context a successor agent needs AND that isn't stored elsewhere. Examples: blocked reasons with resolution hints, partial completion instructions (what to continue, discovered edge cases). Review/fix cycles are normal workflow - do NOT document them here. Leave empty unless handoff required. -->
 ```
 
-[[INJECTION:LanguagePatterns]]
-[[/INJECTION:LanguagePatterns]]
+[[DEPLOYED:LanguagePatterns]]
+[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -601,10 +502,10 @@ When called back for replanning (via COMPLETED_NEEDS_ACTION or explicit callback
 - Preserve completed stages' per-stage files as-is (their checkboxes reflect completed work)
 - New stages get new Stage-{N}/ folders with fresh Plan.md and PlanProgress.md
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
-[[INJECTION:CustomConstraints]]
-[[/INJECTION:CustomConstraints]]
+[[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
+[[DEPLOYED:CustomConstraints]]
+[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

@@ -67,9 +67,11 @@ import (
 	"testing"
 
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/catalog"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/builtin/opencode"
 	"mosaic-deploy/internal/harness/contracttest"
+	"mosaic-deploy/internal/harness/registry"
 	"mosaic-deploy/internal/transform"
 )
 
@@ -119,13 +121,13 @@ func goldenDir(t *testing.T) string {
 	return abs
 }
 
-// newModule constructs the OpenCode module, failing the test immediately if construction
-// fails. In TDD RED phase, opencode.New() returns ErrNotImplemented and the test fails here.
+// newModule constructs the OpenCode module against the real repository root, failing the
+// test immediately if construction fails.
 func newModule(t *testing.T) domain.HarnessModule {
 	t.Helper()
-	mod, err := opencode.New()
+	mod, err := opencode.New(registry.BuiltinOptions{MosaicRoot: repoRoot(t)})
 	if err != nil {
-		t.Fatalf("opencode.New(): %v", err) // RED: not implemented yet (I12.2)
+		t.Fatalf("opencode.New(): %v", err)
 	}
 	return mod
 }
@@ -189,6 +191,18 @@ func truncate(b []byte, n int) []byte {
 	return b[:n]
 }
 
+// loadProtocol loads the protocol content from the repository root for use in transform requests.
+// All agents in Agents/Generic/ carry a [[DEPLOYED:CommunicationProtocol]] region, so Protocol
+// must be populated for every transform.Apply call that processes those source files.
+func loadProtocol(t *testing.T, root string) domain.ProtocolContent {
+	t.Helper()
+	content, err := catalog.FileProtocolLoader{}.LoadProtocol(root)
+	if err != nil {
+		t.Fatalf("load protocol from %s: %v", root, err)
+	}
+	return content
+}
+
 // permissionPairs builds the complete 15-entry permission block for the given set of allowed
 // tools. Universe order is: read, write, edit, glob, grep, list (by_convention: always allow),
 // bash, patch, webfetch, question, lsp, task, todowrite, todoread, skill.
@@ -234,6 +248,7 @@ func permissionPairs(allowed map[string]bool) []domain.FieldPair {
 func TestGoldenFile_OpenCode_ContractsReviewAgent(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Validation", "contracts-review.md")
 	src, err := os.ReadFile(srcPath)
@@ -242,12 +257,14 @@ func TestGoldenFile_OpenCode_ContractsReviewAgent(t *testing.T) {
 	}
 
 	req := transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "contracts-review",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "contracts-review",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "contracts-review.md")
@@ -268,6 +285,7 @@ func TestGoldenFile_OpenCode_ContractsReviewAgent(t *testing.T) {
 func TestGoldenFile_OpenCode_TestRunnerAgent(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
@@ -276,12 +294,14 @@ func TestGoldenFile_OpenCode_TestRunnerAgent(t *testing.T) {
 	}
 
 	req := transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "test-runner",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "test-runner",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "test-runner.md")
@@ -302,6 +322,7 @@ func TestGoldenFile_OpenCode_TestRunnerAgent(t *testing.T) {
 func TestGoldenFile_OpenCode_PlannerTDDSoftAgent(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Planning", "planner-tdd-soft.md")
 	src, err := os.ReadFile(srcPath)
@@ -310,12 +331,14 @@ func TestGoldenFile_OpenCode_PlannerTDDSoftAgent(t *testing.T) {
 	}
 
 	req := transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "planner-tdd-soft",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "planner-tdd-soft",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "planner-tdd-soft.md")
@@ -337,6 +360,7 @@ func TestGoldenFile_OpenCode_PlannerTDDSoftAgent(t *testing.T) {
 func TestGoldenFile_OpenCode_Orchestrator(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Orchestrator", "orchestrator.md")
 	src, err := os.ReadFile(srcPath)
@@ -345,12 +369,14 @@ func TestGoldenFile_OpenCode_Orchestrator(t *testing.T) {
 	}
 
 	req := transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "orchestrator",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "orchestrator",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleOrchestrator,
+		Protocol: protocol,
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "orchestrator.md")
@@ -646,6 +672,7 @@ func TestPermission_AllToolsExplicitlyListed(t *testing.T) {
 func TestFrontmatter_NameFieldDropped(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
@@ -654,12 +681,14 @@ func TestFrontmatter_NameFieldDropped(t *testing.T) {
 	}
 
 	result, err := transform.Apply(transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "test-runner",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "test-runner",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -680,6 +709,7 @@ func TestFrontmatter_NameFieldDropped(t *testing.T) {
 func TestFrontmatter_ModeSubagentAdded(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
@@ -688,12 +718,14 @@ func TestFrontmatter_ModeSubagentAdded(t *testing.T) {
 	}
 
 	result, err := transform.Apply(transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "test-runner",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "test-runner",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -718,6 +750,7 @@ func TestFrontmatter_ModeSubagentAdded(t *testing.T) {
 func TestFrontmatter_OrchestratorGetsPrimaryMode(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Orchestrator", "orchestrator.md")
 	src, err := os.ReadFile(srcPath)
@@ -726,12 +759,14 @@ func TestFrontmatter_OrchestratorGetsPrimaryMode(t *testing.T) {
 	}
 
 	result, err := transform.Apply(transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "orchestrator",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "orchestrator",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleOrchestrator,
+		Protocol: protocol,
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -755,6 +790,7 @@ func TestFrontmatter_OrchestratorGetsPrimaryMode(t *testing.T) {
 func TestFrontmatter_GenericOnlyKeysDropped(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
@@ -763,12 +799,14 @@ func TestFrontmatter_GenericOnlyKeysDropped(t *testing.T) {
 	}
 
 	result, err := transform.Apply(transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "test-runner",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "test-runner",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -794,6 +832,7 @@ func TestFrontmatter_GenericOnlyKeysDropped(t *testing.T) {
 func TestFrontmatter_KeyOrderMatchesHarnessConvention(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
@@ -802,12 +841,14 @@ func TestFrontmatter_KeyOrderMatchesHarnessConvention(t *testing.T) {
 	}
 
 	result, err := transform.Apply(transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "test-runner",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "test-runner",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -851,6 +892,7 @@ func TestFrontmatter_KeyOrderMatchesHarnessConvention(t *testing.T) {
 func TestModelFormat_ProviderModelIDIsEmittedVerbatim(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
@@ -860,12 +902,14 @@ func TestModelFormat_ProviderModelIDIsEmittedVerbatim(t *testing.T) {
 
 	wantModelID := "github-copilot/claude-opus-4.6"
 	result, err := transform.Apply(transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "test-runner",
-		Module: mod,
-		Model:  domain.ModelSelection{ModelID: wantModelID, Origin: domain.OriginHarnessList},
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "test-runner",
+		Module:   mod,
+		Model:    domain.ModelSelection{ModelID: wantModelID, Origin: domain.OriginHarnessList},
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -891,6 +935,7 @@ func TestModelFormat_ProviderModelIDIsEmittedVerbatim(t *testing.T) {
 func TestModelFormat_CustomIDPassthrough(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
@@ -901,12 +946,14 @@ func TestModelFormat_CustomIDPassthrough(t *testing.T) {
 	// A model id that does not follow the "provider/model-id" convention.
 	customModelID := "my-custom-provider/my-special-model-v42"
 	result, err := transform.Apply(transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "test-runner",
-		Module: mod,
-		Model:  domain.ModelSelection{ModelID: customModelID, Origin: domain.OriginCustom},
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "test-runner",
+		Module:   mod,
+		Model:    domain.ModelSelection{ModelID: customModelID, Origin: domain.OriginCustom},
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -930,6 +977,7 @@ func TestModelFormat_CustomIDPassthrough(t *testing.T) {
 func TestModelFormat_NonConventionalIDNeverRewritten(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
@@ -940,12 +988,14 @@ func TestModelFormat_NonConventionalIDNeverRewritten(t *testing.T) {
 	// A model id with no provider prefix — user entered it without the convention.
 	bareModelID := "claude-opus-4.6"
 	result, err := transform.Apply(transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "test-runner",
-		Module: mod,
-		Model:  domain.ModelSelection{ModelID: bareModelID, Origin: domain.OriginCustom},
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "test-runner",
+		Module:   mod,
+		Model:    domain.ModelSelection{ModelID: bareModelID, Origin: domain.OriginCustom},
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)

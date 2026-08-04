@@ -30,6 +30,7 @@ import (
 	_ "embed"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"mosaic-deploy/internal/domain"
@@ -41,15 +42,9 @@ import (
 //go:embed claude-code.yaml
 var embeddedDescriptor []byte
 
-//go:embed HarnessInjections.md
-var embeddedInjections []byte
-
-//go:embed HarnessInjectionsOrchestrator.md
-var embeddedOrchestratorInjections []byte
-
 func init() {
-	registry.Register("claude-code", func() (domain.HarnessModule, error) {
-		return New()
+	registry.Register("claude-code", func(opts registry.BuiltinOptions) (domain.HarnessModule, error) {
+		return New(opts)
 	})
 }
 
@@ -61,30 +56,28 @@ type module struct {
 	orchInjections  map[string]string // parsed from HarnessInjectionsOrchestrator.md at construction time
 }
 
-// New parses the embedded claude-code.yaml descriptor, HarnessInjections.md, and
-// HarnessInjectionsOrchestrator.md, then returns the Claude Code HarnessModule.
-// The module formats tools as a comma-separated scalar string.
-func New() (domain.HarnessModule, error) {
+// New parses the embedded claude-code.yaml descriptor and reads HarnessInjections.md and
+// HarnessInjectionsOrchestrator.md from the declared repository directory at construction
+// time. Editing those files and rerunning the tool changes the injected content with no
+// rebuild required. The descriptor YAML remains embedded.
+func New(opts registry.BuiltinOptions) (domain.HarnessModule, error) {
 	desc, err := descriptor.Parse(embeddedDescriptor, "builtin:claude-code")
 	if err != nil {
 		return nil, fmt.Errorf("parse embedded claude-code descriptor: %w", err)
 	}
-	injections, err := injectionfile.ParseInjections(embeddedInjections)
+	contentDir := filepath.Join(opts.MosaicRoot, RepoContentDir)
+	content, err := injectionfile.LoadDir(contentDir)
 	if err != nil {
-		return nil, fmt.Errorf("parse embedded claude-code HarnessInjections.md: %w", err)
+		return nil, fmt.Errorf("claude-code: load harness content: %w", err)
 	}
-	orchInjections, orchVersion, err := injectionfile.ParseInjectionsWithVersion(embeddedOrchestratorInjections)
-	if err != nil {
-		return nil, fmt.Errorf("parse embedded claude-code HarnessInjectionsOrchestrator.md: %w", err)
-	}
-	desc.OrchestratorInjectionsVersion = orchVersion
+	desc.OrchestratorInjectionsVersion = content.OrchestratorVersion
 	ref := domain.HarnessRef{
 		ID:          desc.ID,
 		DisplayName: desc.DisplayName,
 		Tier:        domain.TierBuiltin,
 		Usable:      true,
 	}
-	return &module{ref: ref, desc: desc, injections: injections, orchInjections: orchInjections}, nil
+	return &module{ref: ref, desc: desc, injections: content.Shared, orchInjections: content.Orchestrator}, nil
 }
 
 // Ref returns identity and provenance. Two calls return equal values.

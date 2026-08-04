@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"mosaic-deploy/internal/catalog"
@@ -68,6 +69,15 @@ func (s *service) ListHarnesses() []domain.HarnessRef {
 	return s.deps.Registry.List()
 }
 
+// loadProtocol loads the protocol source document once for the run. It is called before
+// any plan is built and before any output is written; a failure aborts the run.
+func (s *service) loadProtocol() (domain.ProtocolContent, error) {
+	if s.deps.ProtocolLoader == nil {
+		return domain.ProtocolContent{}, fmt.Errorf("misconfigured service: ProtocolLoader dependency is nil")
+	}
+	return s.deps.ProtocolLoader.LoadProtocol(s.deps.MosaicRoot)
+}
+
 // now returns the injected clock, defaulting to time.Now when Deps.Now is nil.
 func (s *service) now() time.Time {
 	if s.deps.Now != nil {
@@ -79,18 +89,22 @@ func (s *service) now() time.Time {
 // Deps is the full dependency set the app service requires. Every field is mandatory except
 // Now (defaults to time.Now when nil).
 type Deps struct {
-	Catalog     catalog.Catalog
-	Registry    registry.Registry
-	Planner     plan.Planner
-	Executor    deploy.Executor
-	Manifest    manifest.Store
-	ToolConfig  config.ToolConfigStore
-	UserConfig  config.UserConfigStore
-	Logger      logging.Logger
-	Todo        todo.Collector
-	Interaction domain.Interaction
-	MosaicRoot  string
-	GOOS        string
+	Catalog        catalog.Catalog
+	Registry       registry.Registry
+	Planner        plan.Planner
+	Executor       deploy.Executor
+	Manifest       manifest.Store
+	ToolConfig     config.ToolConfigStore
+	UserConfig     config.UserConfigStore
+	Logger         logging.Logger
+	Todo           todo.Collector
+	Interaction    domain.Interaction
+	MosaicRoot     string
+	GOOS           string
+	// ProtocolLoader reads the canonical protocol source document once per run and returns
+	// the two role blocks and the source version. Mandatory; supplied at the composition root.
+	// Implementation is provided in I5.1; wiring into the flows is added in I5.2 and I5.3.
+	ProtocolLoader catalog.ProtocolLoader
 	// Now is injected so run records and backup filenames are deterministic in tests.
 	Now func() time.Time
 }

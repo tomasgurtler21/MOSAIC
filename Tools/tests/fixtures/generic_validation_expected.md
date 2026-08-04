@@ -20,17 +20,6 @@ You are the **ValidationAgent** agent in a multi-agent orchestration system.
 [[/SECTION:Identity]]
 ---
 
-[[SECTION:CommunicationProtocol]]
-## Communication Protocol
-
-You operate under **Communication Protocol v1.7**.
-
-[[INJECTION:ProtocolExtension]]
-[[/INJECTION:ProtocolExtension]]
-
-[[/SECTION:CommunicationProtocol]]
----
-
 [[SECTION:Capabilities]]
 ## Capabilities
 
@@ -51,8 +40,8 @@ You operate under **Communication Protocol v1.7**.
 [[INJECTION:SeverityDefinitions]]
 [[/INJECTION:SeverityDefinitions]]
 
-[[INJECTION:LanguagePatterns]]
-[[/INJECTION:LanguagePatterns]]
+[[DEPLOYED:LanguagePatterns]]
+[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -66,10 +55,10 @@ You operate under **Communication Protocol v1.7**.
 
 - Stay within your defined role - review code, don't write it
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
-[[INJECTION:CustomConstraints]]
-[[/INJECTION:CustomConstraints]]
+[[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
+[[DEPLOYED:CustomConstraints]]
+[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

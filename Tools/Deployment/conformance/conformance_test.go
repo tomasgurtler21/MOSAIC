@@ -37,6 +37,7 @@ import (
 	"testing"
 	"time"
 
+	"mosaic-deploy/internal/catalog"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/builtin/opencode"
 	"mosaic-deploy/internal/harness/contracttest"
@@ -173,21 +174,43 @@ var testModel = domain.ModelSelection{
 	Origin:  domain.OriginHarnessList,
 }
 
+// loadTestProtocol loads the protocol content from the repository's canonical protocol
+// source document. The protocol is loaded once per test using the real repo root so that
+// the conformance output matches what a real deploy run would produce.
+func loadTestProtocol(t *testing.T, repoRoot string) domain.ProtocolContent {
+	t.Helper()
+	loader := catalog.FileProtocolLoader{}
+	content, err := loader.LoadProtocol(repoRoot)
+	if err != nil {
+		t.Fatalf("load protocol from %s: %v", repoRoot, err)
+	}
+	return content
+}
+
 // applyTransform runs transform.Apply for one agent source file using the given module.
-func applyTransform(t *testing.T, mod domain.HarnessModule, tc goldenCase) []byte {
+// The role is inferred from the agent key: "orchestrator" uses RoleOrchestrator; all
+// other agents use RoleWorker.
+func applyTransform(t *testing.T, mod domain.HarnessModule, tc goldenCase, protocol domain.ProtocolContent) []byte {
 	t.Helper()
 	src, err := os.ReadFile(tc.sourcePath)
 	if err != nil {
 		t.Skipf("source file not found at %s: %v", tc.sourcePath, err)
 	}
 
+	role := domain.RoleWorker
+	if tc.key == "orchestrator" {
+		role = domain.RoleOrchestrator
+	}
+
 	result, err := transform.Apply(transform.Request{
-		Source: src,
-		Kind:   tc.kind,
-		Key:    tc.key,
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     tc.kind,
+		Key:      tc.key,
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     role,
+		Protocol: protocol,
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply for %s: %v", tc.name, err)
@@ -211,7 +234,7 @@ func TestConformance_BuiltinVsExternal_OpenCode(t *testing.T) {
 	moduleRoot := findRepoRoot(t)
 
 	// Construct the built-in OpenCode module (in-process path).
-	builtinMod, err := opencode.New()
+	builtinMod, err := opencode.New(registry.BuiltinOptions{MosaicRoot: findRepoRoot(t)})
 	if err != nil {
 		t.Fatalf("opencode.New: %v", err)
 	}
@@ -221,7 +244,10 @@ func TestConformance_BuiltinVsExternal_OpenCode(t *testing.T) {
 	binPath := buildReferenceExternalModule(t)
 	desc := builtinMod.Descriptor()
 
-	externalMod, err := external.New(binPath, desc, external.Options{Timeout: 15 * time.Second})
+	externalMod, err := external.New(binPath, desc, external.Options{
+		Timeout:    15 * time.Second,
+		MosaicRoot: moduleRoot,
+	})
 	if err != nil {
 		t.Fatalf("external.New with reference module binary: %v\n"+
 			"(In the RED phase the reference module exits without speaking the protocol; "+
@@ -229,12 +255,13 @@ func TestConformance_BuiltinVsExternal_OpenCode(t *testing.T) {
 	}
 	defer externalMod.Close() //nolint:errcheck
 
+	protocol := loadTestProtocol(t, moduleRoot)
 	cases := goldenCases(t, moduleRoot)
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			builtinOutput := applyTransform(t, builtinMod, tc)
-			externalOutput := applyTransform(t, externalMod, tc)
+			builtinOutput := applyTransform(t, builtinMod, tc, protocol)
+			externalOutput := applyTransform(t, externalMod, tc, protocol)
 
 			if !bytes.Equal(builtinOutput, externalOutput) {
 				firstDiff := findFirstDiff(builtinOutput, externalOutput)
@@ -264,17 +291,18 @@ func TestConformance_BuiltinVsExternal_OutputsMatchOpenCodeGoldenFiles(t *testin
 	goModRoot := findGoModuleRoot(t)
 	goldenDir := filepath.Join(goModRoot, "testdata", "golden", "opencode")
 
-	builtinMod, err := opencode.New()
+	builtinMod, err := opencode.New(registry.BuiltinOptions{MosaicRoot: findRepoRoot(t)})
 	if err != nil {
 		t.Fatalf("opencode.New: %v", err)
 	}
 	defer builtinMod.Close() //nolint:errcheck
 
+	protocol := loadTestProtocol(t, repoRoot)
 	cases := goldenCases(t, repoRoot)
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			output := applyTransform(t, builtinMod, tc)
+			output := applyTransform(t, builtinMod, tc, protocol)
 			goldenPath := filepath.Join(goldenDir, tc.goldenName)
 
 			golden, err := os.ReadFile(goldenPath)
@@ -294,7 +322,7 @@ func TestConformance_BuiltinVsExternal_OutputsMatchOpenCodeGoldenFiles(t *testin
 // external.New for the reference OpenCode binary reports TierExternal provenance. This is
 // a prerequisite for RunSummary.External to be populated correctly during a real run.
 func TestConformance_ExternalModule_RefIsCorrectTier(t *testing.T) {
-	builtinMod, err := opencode.New()
+	builtinMod, err := opencode.New(registry.BuiltinOptions{MosaicRoot: findRepoRoot(t)})
 	if err != nil {
 		t.Fatalf("opencode.New: %v", err)
 	}
@@ -303,7 +331,10 @@ func TestConformance_ExternalModule_RefIsCorrectTier(t *testing.T) {
 	binPath := buildReferenceExternalModule(t)
 	desc := builtinMod.Descriptor()
 
-	externalMod, err := external.New(binPath, desc, external.Options{Timeout: 10 * time.Second})
+	externalMod, err := external.New(binPath, desc, external.Options{
+		Timeout:    10 * time.Second,
+		MosaicRoot: findRepoRoot(t),
+	})
 	if err != nil {
 		t.Fatalf("external.New: %v", err)
 	}
@@ -573,11 +604,12 @@ func TestDescriptorOnly_ConformanceHarness_TransformOutputMatchesGolden(t *testi
 	m := resolveDescriptorOnly(t)
 	defer m.Close() //nolint:errcheck
 
+	protocol := loadTestProtocol(t, repoRoot)
 	cases := goldenCases(t, repoRoot)
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			output := applyTransform(t, m, tc)
+			output := applyTransform(t, m, tc, protocol)
 
 			goldenPath := filepath.Join(goldenDir, tc.goldenName)
 
@@ -612,6 +644,7 @@ func TestDescriptorOnly_ConformanceHarness_TransformOutputMatchesGolden(t *testi
 // structural sanity check independent of golden file comparison.
 func TestDescriptorOnly_TransformOutput_IsParseableByDocformat(t *testing.T) {
 	repoRoot := findRepoRoot(t)
+	protocol := loadTestProtocol(t, repoRoot)
 	cases := goldenCases(t, repoRoot)
 
 	m := resolveDescriptorOnly(t)
@@ -625,13 +658,20 @@ func TestDescriptorOnly_TransformOutput_IsParseableByDocformat(t *testing.T) {
 				t.Skipf("source file not found at %s: %v", tc.sourcePath, err)
 			}
 
+			role := domain.RoleWorker
+			if tc.key == "orchestrator" {
+				role = domain.RoleOrchestrator
+			}
+
 			result, err := transform.Apply(transform.Request{
-				Source: src,
-				Kind:   tc.kind,
-				Key:    tc.key,
-				Module: m,
-				Model:  testModel,
-				Scope:  domain.ScopeProject,
+				Source:   src,
+				Kind:     tc.kind,
+				Key:      tc.key,
+				Module:   m,
+				Model:    testModel,
+				Scope:    domain.ScopeProject,
+				Role:     role,
+				Protocol: protocol,
 			})
 			if err != nil {
 				t.Fatalf("transform.Apply: %v", err)
@@ -714,7 +754,7 @@ func TestDescriptorOnly_DescriptorLoaded_SchemaVersionIsOne(t *testing.T) {
 func TestAllThreeTiers_AreExercisedByThisSuite(t *testing.T) {
 	// Tier 1: built-in (in-process)
 	t.Run("builtin", func(t *testing.T) {
-		m, err := opencode.New()
+		m, err := opencode.New(registry.BuiltinOptions{MosaicRoot: findRepoRoot(t)})
 		if err != nil {
 			t.Fatalf("opencode.New (builtin tier): %v", err)
 		}
@@ -737,14 +777,17 @@ func TestAllThreeTiers_AreExercisedByThisSuite(t *testing.T) {
 	t.Run("external", func(t *testing.T) {
 		binPath := buildReferenceExternalModule(t)
 
-		builtinMod, err := opencode.New()
+		builtinMod, err := opencode.New(registry.BuiltinOptions{MosaicRoot: findRepoRoot(t)})
 		if err != nil {
 			t.Fatalf("opencode.New: %v", err)
 		}
 		defer builtinMod.Close() //nolint:errcheck
 		desc := builtinMod.Descriptor()
 
-		m, err := external.New(binPath, desc, external.Options{Timeout: 10 * time.Second})
+		m, err := external.New(binPath, desc, external.Options{
+			Timeout:    10 * time.Second,
+			MosaicRoot: findRepoRoot(t),
+		})
 		if err != nil {
 			t.Fatalf("external.New (external tier): %v\n"+
 				"(In the RED phase, the reference module does not implement the protocol;\n"+

@@ -44,7 +44,7 @@ func newRuntimeModule(ref domain.HarnessRef, desc *domain.HarnessDescriptor, inj
 }
 
 // loadInjections reads HarnessInjections.md from the same directory as the harness YAML file
-// and parses it using injectionfile.ParseInjections. If the file does not exist, an empty
+// and parses it using injectionfile.ParseDeployedRegions. If the file does not exist, an empty
 // map is returned (absence is treated as no harness-level injections). Any other read or
 // parse error is returned to the caller.
 func loadInjections(yamlPath string) (map[string]string, error) {
@@ -56,23 +56,24 @@ func loadInjections(yamlPath string) (map[string]string, error) {
 		}
 		return nil, err
 	}
-	return injectionfile.ParseInjections(data)
+	return injectionfile.ParseDeployedRegions(data)
 }
 
 // loadOrchInjections reads HarnessInjectionsOrchestrator.md from the same directory as the
-// harness YAML file and parses it using injectionfile.ParseInjections. If the file does not
-// exist, an empty map is returned (absence is treated as no orchestrator-only injections, which
-// is the common case). Any other read or parse error is returned to the caller.
-func loadOrchInjections(yamlPath string) (map[string]string, error) {
+// harness YAML file and parses it using injectionfile.ParseDeployedRegionsWithVersion. If the
+// file does not exist, an empty map and an empty version are returned (absence is treated as
+// no orchestrator-only injections, which is the common case). Any other read or parse error
+// is returned to the caller.
+func loadOrchInjections(yamlPath string) (regions map[string]string, version string, err error) {
 	mdPath := filepath.Join(filepath.Dir(yamlPath), "HarnessInjectionsOrchestrator.md")
-	data, err := os.ReadFile(mdPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]string), nil
+	data, readErr := os.ReadFile(mdPath)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return make(map[string]string), "", nil
 		}
-		return nil, err
+		return nil, "", readErr
 	}
-	return injectionfile.ParseInjections(data)
+	return injectionfile.ParseDeployedRegionsWithVersion(data)
 }
 
 // Ref returns the identity and provenance of this harness. The value is stable; calling Ref

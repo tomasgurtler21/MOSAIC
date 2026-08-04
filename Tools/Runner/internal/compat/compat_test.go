@@ -5,41 +5,60 @@ package compat_test
 // Coverage:
 //
 //   Admission success — five supported workflows:
-//   - brownfield-tdd-build-verified (two-group, 13 rows)
-//   - greenfield-tdd (two-group, 13 rows)
-//   - brownfield-tdd (two-group, 12 rows)
-//   - quick-fix (single-group, 4 rows)
-//   - implementation-only (single-group, 3 rows)
+//   - brownfield-tdd-build-verified (two named groups "Test"/"Implementation", 13 rows)
+//   - greenfield-tdd (two named groups "Test"/"Implementation", 13 rows)
+//   - brownfield-tdd (two named groups "Test"/"Implementation", 12 rows)
+//   - quick-fix (no groups declared, single implicit range, 4 rows)
+//   - implementation-only (no groups declared, single implicit range, 3 rows)
 //
-//   Two-group identification:
-//   - brownfield-tdd-build-verified → TwoGroup=true
-//   - greenfield-tdd → TwoGroup=true
-//   - brownfield-tdd → TwoGroup=true
-//   - quick-fix → TwoGroup=false
-//   - implementation-only → TwoGroup=false
+//   GroupsDeclared and ApproachTable carry-through:
+//   - brownfield-tdd-build-verified → GroupsDeclared=true, ApproachTable present
+//   - quick-fix → GroupsDeclared=false, ApproachTable not present
+//   - implementation-only → GroupsDeclared=false, ApproachTable not present
 //
 //   Execution group resolution — brownfield-tdd-build-verified:
 //   - Two execution groups (Groups has 2 elements).
-//   - Test group: Kind=GroupTest, StartRow=7, EndRow=10 (rows 7-9).
-//   - Implementation group: Kind=GroupImplementation, StartRow=10, EndRow=13 (rows 10-12).
+//   - Groups[0].Name="Test", StartRow=7, EndRow=10 (rows 7-9).
+//   - Groups[1].Name="Implementation", StartRow=10, EndRow=13 (rows 10-12).
 //   - Groups are contiguous and cover all 6 EXECUTION rows (no gaps, no overlap).
 //   - Duplicate agent identifier (build-review appears at rows 8 and 11) is allowed.
 //
-//   Execution group resolution — brownfield-tdd (two-group, no build-review):
-//   - Test group: Kind=GroupTest, StartRow=7, EndRow=9 (rows 7-8).
-//   - Implementation group: Kind=GroupImplementation, StartRow=9, EndRow=11 (rows 9-10).
+//   Execution group resolution — brownfield-tdd:
+//   - Groups[0].Name="Test", StartRow=7, EndRow=9.
+//   - Groups[1].Name="Implementation", StartRow=9, EndRow=11.
 //
 //   Execution group resolution — greenfield-tdd:
-//   - Test group: Kind=GroupTest, StartRow=8, EndRow=10 (rows 8-9).
-//   - Implementation group: Kind=GroupImplementation, StartRow=10, EndRow=12 (rows 10-11).
+//   - Groups[0].Name="Test", StartRow=8, EndRow=10.
+//   - Groups[1].Name="Implementation", StartRow=10, EndRow=12.
 //
-//   Execution group resolution — quick-fix (single-group):
-//   - One execution group (Groups has 1 element).
+//   Execution group resolution — quick-fix (no groups declared):
+//   - One execution group (Groups has 1 element), Name="" (empty, implicit).
 //   - Group covers the single EXECUTION row: StartRow=2, EndRow=3.
 //
-//   Execution group resolution — implementation-only (single-group):
-//   - One execution group (Groups has 1 element).
+//   Execution group resolution — implementation-only (no groups declared):
+//   - One execution group (Groups has 1 element), Name="" (empty, implicit).
 //   - Group covers the two EXECUTION rows: StartRow=0, EndRow=2.
+//
+//   GroupByName:
+//   - GroupByName("Test") returns the Test group with correct StartRow.
+//   - GroupByName for an absent name returns found=false.
+//
+//   Three or more groups:
+//   - Synthetic three-group workflow (Alpha, Beta, Gamma) is admitted.
+//   - Groups count=3, names correct (verbatim from Phase column), ranges correct.
+//
+//   Arbitrary group names / generic agent identifiers:
+//   - Synthetic workflow with generic agent names and opaque group tokens admitted.
+//   - Classification is driven purely by the Phase column, never by agent names.
+//
+//   No-groups-declared case:
+//   - GroupsDeclared=false for quick-fix and implementation-only.
+//   - Single implicit group has empty Name, covers all EXECUTION rows in listed order.
+//   - ApproachTable not present for bare workflows.
+//
+//   Bare EXECUTION rows with any agent mix:
+//   - Bare rows (no group segment) with any agent names form exactly one implicit group.
+//   - No escape hatch; no refusal; agent identifiers are never inspected.
 //
 //   PreExecution / PostExecution row ranges:
 //   - brownfield-tdd-build-verified: PreExecutionEndRow=7 (7 pre-EXECUTION rows),
@@ -55,9 +74,21 @@ package compat_test
 //   - Condition 2: More than one staged phase block (EXECUTION rows split by non-staged rows).
 //   - Condition 3: Staged phase with name other than "EXECUTION".
 //   - Condition 6: Agent-with-mode notation ("agent-name(mode)").
-//   - Condition 7: EXECUTION rows that cannot be resolved into 1 or 2 contiguous groups.
 //   - Condition 5: Parallel dispatch expressed via multiple agents in routing hints.
 //   - Condition 1: Stage source not from plan artifact (non-standard stage notation).
+//   - Condition 4: Dynamic/growing stage set (EXECUTION row outputs Stage-*/Plan.md).
+//
+//   Admission refusals A1–A5 (cross-consistency violations):
+//   - A1: non-contiguous group rows (a row re-opens a group that already ended).
+//   - A2: grouped EXECUTION rows but no approach table present.
+//   - A3: approach table present but an EXECUTION row carries no group segment.
+//   - A4: approach table names a group that no EXECUTION row belongs to.
+//   - A5: an EXECUTION row declares a group absent from every approach table row.
+//   - Each refusal message names the offending row index (as "row N") and/or group.
+//
+//   Case-sensitive group token matching:
+//   - A group token in the Phase column that differs only in case from an approach
+//     table entry must trigger a refusal, not a silent match.
 //
 //   RefusalError contract:
 //   - Component must be "compat".
@@ -87,9 +118,9 @@ func asRefusalError(t *testing.T, err error) *domain.RefusalError {
 // ---- Workflow content fixtures (extracted from real workflow files) ----
 
 // brownfieldBuildVerifiedContent is the routing table region from
-// Workflows/Build/brownfield-tdd-build-verified.md (version 2.0).
+// Workflows/Build/brownfield-tdd-build-verified.md (version 2.1).
 // This workflow has 13 rows: 7 pre-EXECUTION, 6 EXECUTION.
-const brownfieldBuildVerifiedContent = `<!-- workflow-version: 2.0 -->
+const brownfieldBuildVerifiedContent = `<!-- workflow-version: 2.1 -->
 ## Brownfield TDD Build-Verified Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
@@ -101,19 +132,28 @@ const brownfieldBuildVerifiedContent = `<!-- workflow-version: 2.0 -->
 | PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
 | DESIGN | contracts-designer | ✅ | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
 | DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.[StageNumber] | test-writer-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | build-review | ❌ | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-tests.md |
-| EXECUTION.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-tests.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | build-review | ❌ | implementation-review | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-impl.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-impl.md | Stage-{StageNumber}/implementation-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | build-review | ❌ | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-tests.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-tests.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | build-review | ❌ | implementation-review | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-impl.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-impl.md | Stage-{StageNumber}/implementation-review.md |
+
+**Execution Groups:**
+
+| Approach | Groups |
+|----------|--------|
+| TDD | Test, Implementation |
+| Implementation-First | Implementation, Test |
+| Implementation-Only | Implementation |
+| Tests-Only | Test |
 `
 
 // greenFieldTDDContent is the routing table region from
-// Workflows/Build/greenfield-tdd.md (version 3.3).
+// Workflows/Build/greenfield-tdd.md (version 3.4).
 // This workflow has 13 rows: 8 pre-EXECUTION (2 RESEARCH, 2 ARCHITECTURE, 2 PLANNING, 2 DESIGN),
 // 4 EXECUTION, 1 REVIEW.
-const greenFieldTDDContent = `<!-- workflow-version: 3.3 -->
+const greenFieldTDDContent = `<!-- workflow-version: 3.4 -->
 ## Greenfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
@@ -126,17 +166,26 @@ const greenFieldTDDContent = `<!-- workflow-version: 3.3 -->
 | PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
 | DESIGN | contracts-designer | ✅ | contracts-review | - | Requirements.md, Plan.md, Stage-*/Plan.md, SystemDesign.md | ContractsDesign.md |
 | DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
 | REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+
+**Execution Groups:**
+
+| Approach | Groups |
+|----------|--------|
+| TDD | Test, Implementation |
+| Implementation-First | Implementation, Test |
+| Implementation-Only | Implementation |
+| Tests-Only | Test |
 `
 
 // brownfieldTDDContent is the routing table region from
-// Workflows/Build/brownfield-tdd.md (version 3.4).
+// Workflows/Build/brownfield-tdd.md (version 3.6).
 // This workflow has 12 rows: 7 pre-EXECUTION, 4 EXECUTION, 1 REVIEW.
-const brownfieldTDDContent = `<!-- workflow-version: 3.4 -->
+const brownfieldTDDContent = `<!-- workflow-version: 3.6 -->
 ## Brownfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
@@ -148,11 +197,20 @@ const brownfieldTDDContent = `<!-- workflow-version: 3.4 -->
 | PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
 | DESIGN | contracts-designer | ✅ | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
 | DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
 | REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+
+**Execution Groups:**
+
+| Approach | Groups |
+|----------|--------|
+| TDD | Test, Implementation |
+| Implementation-First | Implementation, Test |
+| Implementation-Only | Implementation |
+| Tests-Only | Test |
 `
 
 // quickFixContent is the routing table region from
@@ -245,53 +303,6 @@ func TestAdmit_ImplementationOnly_Succeeds(t *testing.T) {
 	}
 }
 
-// ---- TwoGroup identification ----
-
-func TestAdmit_BrownfieldTDDBuildVerified_IsTwoGroup(t *testing.T) {
-	table := mustParseTable(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
-	aw := mustAdmit(t, table)
-
-	if !aw.TwoGroup {
-		t.Error("brownfield-tdd-build-verified: TwoGroup must be true (has separate test and implementation groups)")
-	}
-}
-
-func TestAdmit_GreenFieldTDD_IsTwoGroup(t *testing.T) {
-	table := mustParseTable(t, greenFieldTDDContent, "greenfield-tdd", "3.3")
-	aw := mustAdmit(t, table)
-
-	if !aw.TwoGroup {
-		t.Error("greenfield-tdd: TwoGroup must be true")
-	}
-}
-
-func TestAdmit_BrownfieldTDD_IsTwoGroup(t *testing.T) {
-	table := mustParseTable(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	aw := mustAdmit(t, table)
-
-	if !aw.TwoGroup {
-		t.Error("brownfield-tdd: TwoGroup must be true")
-	}
-}
-
-func TestAdmit_QuickFix_IsSingleGroup(t *testing.T) {
-	table := mustParseTable(t, quickFixContent, "quick-fix", "3.0")
-	aw := mustAdmit(t, table)
-
-	if aw.TwoGroup {
-		t.Error("quick-fix: TwoGroup must be false (single-group workflow)")
-	}
-}
-
-func TestAdmit_ImplementationOnly_IsSingleGroup(t *testing.T) {
-	table := mustParseTable(t, implOnlyContent, "implementation-only", "3.1")
-	aw := mustAdmit(t, table)
-
-	if aw.TwoGroup {
-		t.Error("implementation-only: TwoGroup must be false (single-group workflow)")
-	}
-}
-
 // ---- HasStagedPhase ----
 
 func TestAdmit_BrownfieldTDDBuildVerified_HasStagedPhase(t *testing.T) {
@@ -350,16 +361,17 @@ func TestAdmit_BrownfieldTDDBuildVerified_TwoGroups(t *testing.T) {
 	}
 }
 
-func TestAdmit_BrownfieldTDDBuildVerified_TestGroupKind(t *testing.T) {
-	// The first group must be the test group (test-writer-tdd, build-review, tests-review-tdd).
+func TestAdmit_BrownfieldTDDBuildVerified_TestGroupName(t *testing.T) {
+	// The first group carries "Test" as its workflow-defined name, taken verbatim
+	// from the EXECUTION.Test.[StageNumber] Phase column segment.
 	table := mustParseTable(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
 	aw := mustAdmit(t, table)
 
 	if len(aw.Groups) < 1 {
 		t.Fatal("Groups: want at least 1 group")
 	}
-	if aw.Groups[0].Kind != domain.GroupTest {
-		t.Errorf("Groups[0].Kind: want %q, got %q", domain.GroupTest, aw.Groups[0].Kind)
+	if aw.Groups[0].Name != "Test" {
+		t.Errorf("Groups[0].Name: want %q, got %q", "Test", aw.Groups[0].Name)
 	}
 }
 
@@ -391,17 +403,17 @@ func TestAdmit_BrownfieldTDDBuildVerified_TestGroupEndRow(t *testing.T) {
 	}
 }
 
-func TestAdmit_BrownfieldTDDBuildVerified_ImplementationGroupKind(t *testing.T) {
-	// The second group must be the implementation group
-	// (implementation-tdd, build-review, implementation-review).
+func TestAdmit_BrownfieldTDDBuildVerified_ImplementationGroupName(t *testing.T) {
+	// The second group carries "Implementation" as its workflow-defined name,
+	// taken verbatim from the EXECUTION.Implementation.[StageNumber] Phase column segment.
 	table := mustParseTable(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
 	aw := mustAdmit(t, table)
 
 	if len(aw.Groups) < 2 {
 		t.Fatal("Groups: want at least 2 groups")
 	}
-	if aw.Groups[1].Kind != domain.GroupImplementation {
-		t.Errorf("Groups[1].Kind: want %q, got %q", domain.GroupImplementation, aw.Groups[1].Kind)
+	if aw.Groups[1].Name != "Implementation" {
+		t.Errorf("Groups[1].Name: want %q, got %q", "Implementation", aw.Groups[1].Name)
 	}
 }
 
@@ -652,34 +664,31 @@ func TestAdmit_ImplementationOnly_GroupEndRow(t *testing.T) {
 
 // ---- GroupKind for single-group workflows ----
 
-func TestAdmit_QuickFix_GroupKind(t *testing.T) {
-	// quick-fix is a single-group workflow whose EXECUTION row runs implementation-tdd.
-	// The group kind must be GroupImplementation.
-	// An implementation that set Kind=GroupTest for single-group workflows would still
-	// pass the Groups count and row-range tests above — this test catches that mistake.
+func TestAdmit_QuickFix_GroupName(t *testing.T) {
+	// quick-fix is a bare workflow with no group segments in its Phase column.
+	// The single implicit group must have an empty Name (no workflow-defined group token).
 	table := mustParseTable(t, quickFixContent, "quick-fix", "3.0")
 	aw := mustAdmit(t, table)
 
 	if len(aw.Groups) < 1 {
 		t.Fatal("Groups: want at least 1")
 	}
-	if aw.Groups[0].Kind != domain.GroupImplementation {
-		t.Errorf("Groups[0].Kind: want %q for quick-fix, got %q",
-			domain.GroupImplementation, aw.Groups[0].Kind)
+	if aw.Groups[0].Name != "" {
+		t.Errorf("Groups[0].Name: want empty string for implicit group, got %q", aw.Groups[0].Name)
 	}
 }
 
-func TestAdmit_ImplementationOnly_GroupKind(t *testing.T) {
-	// implementation-only is a single-group workflow; the group kind must be GroupImplementation.
+func TestAdmit_ImplementationOnly_GroupName(t *testing.T) {
+	// implementation-only is a bare workflow with no group segments in its Phase column.
+	// The single implicit group must have an empty Name.
 	table := mustParseTable(t, implOnlyContent, "implementation-only", "3.1")
 	aw := mustAdmit(t, table)
 
 	if len(aw.Groups) < 1 {
 		t.Fatal("Groups: want at least 1")
 	}
-	if aw.Groups[0].Kind != domain.GroupImplementation {
-		t.Errorf("Groups[0].Kind: want %q for implementation-only, got %q",
-			domain.GroupImplementation, aw.Groups[0].Kind)
+	if aw.Groups[0].Name != "" {
+		t.Errorf("Groups[0].Name: want empty string for implicit group, got %q", aw.Groups[0].Name)
 	}
 }
 
@@ -1028,12 +1037,39 @@ func TestAdmit_AgentWithModeNotation_RefusalMessage_NamesAgent(t *testing.T) {
 
 // ---- FR-18a refusal: Condition 7 — unresolvable execution groups ----
 
-func TestAdmit_UnresolvableGroups_ThreeAgentTypes_RefusalMessage_NonEmpty(t *testing.T) {
-	// Each unresolvable-groups refusal must include a non-empty Reason naming the
-	// condition so users understand that the workflow's EXECUTION rows could not be
-	// partitioned into 1 or 2 contiguous groups.
+func TestAdmit_BareRowsMixedAgents_SingleImplicitGroup(t *testing.T) {
+	// Bare EXECUTION rows (no group segments) with any mix of agent identifiers
+	// form exactly one implicit group with an empty Name, covering all EXECUTION
+	// rows in listed order. Agent identifiers are never inspected for classification.
 	table := domain.RoutingTable{
-		Info: domain.WorkflowInfo{ID: "unresolvable-groups", Version: "1.0"},
+		Info: domain.WorkflowInfo{ID: "bare-rows-workflow", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true}, Agent: "test-writer-tdd", OutputArtifacts: []string{"tests.md"}},
+			{Index: 1, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true}, Agent: "unknown-agent", OutputArtifacts: []string{"unknown.md"}},
+			{Index: 2, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true}, Agent: "implementation-tdd", OutputArtifacts: []string{"impl.md"}},
+			{Index: 3, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true}, Agent: "unknown-agent-2", OutputArtifacts: []string{"other.md"}},
+		},
+	}
+
+	aw, err := compat.Admit(table)
+	if err != nil {
+		t.Fatalf("Admit: bare rows with mixed agents must be admitted: %v", err)
+	}
+
+	if len(aw.Groups) != 1 {
+		t.Errorf("Groups: want 1 implicit group, got %d", len(aw.Groups))
+	}
+	if len(aw.Groups) > 0 && aw.Groups[0].Name != "" {
+		t.Errorf("Groups[0].Name: want empty string for implicit group, got %q", aw.Groups[0].Name)
+	}
+}
+
+func TestAdmit_BareRowsMixedKnownUnknownAgents_Succeeds(t *testing.T) {
+	// Agent identifiers are never inspected for group classification. Bare EXECUTION
+	// rows (no group segment) with any combination of "known" and "unknown" agents
+	// must be admitted as a single implicit group — no escape hatch, no refusal.
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "bare-rows-mixed-agents", Version: "1.0"},
 		Rows: []domain.RoutingRow{
 			{Index: 0, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true}, Agent: "test-writer-tdd", OutputArtifacts: []string{"tests.md"}},
 			{Index: 1, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true}, Agent: "unknown-agent", OutputArtifacts: []string{"unknown.md"}},
@@ -1044,45 +1080,18 @@ func TestAdmit_UnresolvableGroups_ThreeAgentTypes_RefusalMessage_NonEmpty(t *tes
 
 	_, err := compat.Admit(table)
 
-	re := asRefusalError(t, err)
-	if re.Reason == "" {
-		t.Error("RefusalError.Reason must describe the unresolvable execution groups condition")
-	}
-	if !strings.Contains(re.Resource, "unresolvable-groups") {
-		t.Errorf("RefusalError.Resource must name the workflow ID %q, got %q", "unresolvable-groups", re.Resource)
+	if err != nil {
+		t.Errorf("Admit must admit bare EXECUTION rows with any agent identifiers: %v", err)
 	}
 }
 
-func TestAdmit_UnresolvableGroups_ThreeAgentTypes_ReturnsRefusalError(t *testing.T) {
-	// EXECUTION rows with three distinct agent types that cannot be partitioned
-	// into one or two contiguous groups based on their known roles.
-	// For example: test-writer, unknown-agent, implementation-tdd creates
-	// ambiguity about which group "unknown-agent" belongs to.
+func TestAdmit_BareRowsAlternatingAgents_Succeeds(t *testing.T) {
+	// Bare EXECUTION rows (no group segment) with alternating agent identifiers
+	// must be admitted as a single implicit group. The former "non-contiguous"
+	// test was based on agent-name classification, which is removed. Without
+	// group segments in the Phase column, grouping is never active.
 	table := domain.RoutingTable{
-		Info: domain.WorkflowInfo{ID: "unresolvable-groups", Version: "1.0"},
-		Rows: []domain.RoutingRow{
-			{Index: 0, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true}, Agent: "test-writer-tdd", OutputArtifacts: []string{"tests.md"}},
-			{Index: 1, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true}, Agent: "unknown-agent", OutputArtifacts: []string{"unknown.md"}},
-			{Index: 2, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true}, Agent: "implementation-tdd", OutputArtifacts: []string{"impl.md"}},
-			{Index: 3, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true}, Agent: "unknown-agent-2", OutputArtifacts: []string{"other.md"}},
-		},
-	}
-
-	_, err := compat.Admit(table)
-
-	if err == nil {
-		t.Fatal("Admit must refuse a workflow whose EXECUTION rows cannot be resolved into 1 or 2 contiguous groups")
-	}
-	asRefusalError(t, err)
-}
-
-func TestAdmit_UnresolvableGroups_NonContiguous_ReturnsRefusalError(t *testing.T) {
-	// EXECUTION rows that alternate between test and implementation agents cannot
-	// be partitioned into contiguous groups.
-	// test-writer, implementation-tdd, test-writer, implementation-tdd would
-	// require 4 groups, which exceeds the maximum of 2.
-	table := domain.RoutingTable{
-		Info: domain.WorkflowInfo{ID: "non-contiguous-groups", Version: "1.0"},
+		Info: domain.WorkflowInfo{ID: "alternating-agents", Version: "1.0"},
 		Rows: []domain.RoutingRow{
 			{Index: 0, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true}, Agent: "test-writer-tdd"},
 			{Index: 1, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true}, Agent: "implementation-tdd"},
@@ -1093,10 +1102,9 @@ func TestAdmit_UnresolvableGroups_NonContiguous_ReturnsRefusalError(t *testing.T
 
 	_, err := compat.Admit(table)
 
-	if err == nil {
-		t.Fatal("Admit must refuse a workflow with non-contiguous (alternating) execution groups")
+	if err != nil {
+		t.Errorf("Admit must admit bare rows with alternating agent identifiers: %v", err)
 	}
-	asRefusalError(t, err)
 }
 
 // ---- FR-18a refusal: Condition 5 — parallel dispatch ----
@@ -1314,5 +1322,623 @@ func TestAdmit_RefusalError_ReasonIsNonEmpty(t *testing.T) {
 	re := asRefusalError(t, err)
 	if re.Reason == "" {
 		t.Error("RefusalError.Reason must not be empty")
+	}
+}
+
+// ---- Phase-driven group resolution: workflow-defined names (T3.1) ----
+
+func TestAdmit_BrownfieldTDDBuildVerified_GroupsDeclared(t *testing.T) {
+	// brownfield-tdd-build-verified has EXECUTION rows with group segments.
+	// GroupsDeclared must be true.
+	table := mustParseTable(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	aw := mustAdmit(t, table)
+
+	if !aw.GroupsDeclared {
+		t.Error("GroupsDeclared: want true (workflow has EXECUTION rows with group segments)")
+	}
+}
+
+func TestAdmit_GreenFieldTDD_GroupsDeclared(t *testing.T) {
+	// greenfield-tdd EXECUTION rows carry group segments (Test, Implementation).
+	// GroupsDeclared must be true.
+	table := mustParseTable(t, greenFieldTDDContent, "greenfield-tdd", "3.3")
+	aw := mustAdmit(t, table)
+
+	if !aw.GroupsDeclared {
+		t.Error("GroupsDeclared: want true (greenfield-tdd EXECUTION rows carry group segments)")
+	}
+}
+
+func TestAdmit_BrownfieldTDD_GroupsDeclared(t *testing.T) {
+	// brownfield-tdd EXECUTION rows carry group segments (Test, Implementation).
+	// GroupsDeclared must be true.
+	table := mustParseTable(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
+	aw := mustAdmit(t, table)
+
+	if !aw.GroupsDeclared {
+		t.Error("GroupsDeclared: want true (brownfield-tdd EXECUTION rows carry group segments)")
+	}
+}
+
+func TestAdmit_BrownfieldTDDBuildVerified_ApproachTableCarriedThrough(t *testing.T) {
+	// The approach table declared in the workflow content must be carried onto the
+	// AdmittedWorkflow so downstream consumers can resolve group ordering.
+	table := mustParseTable(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	aw := mustAdmit(t, table)
+
+	if !aw.ApproachTable.Present() {
+		t.Error("ApproachTable: want present (workflow declares an Execution Groups table)")
+	}
+}
+
+func TestAdmit_GroupByName_FindsGroup(t *testing.T) {
+	table := mustParseTable(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	aw := mustAdmit(t, table)
+
+	g, ok := aw.GroupByName("Test")
+	if !ok {
+		t.Fatal(`GroupByName("Test"): want found=true, got false`)
+	}
+	if g.StartRow != 7 {
+		t.Errorf(`GroupByName("Test").StartRow: want 7, got %d`, g.StartRow)
+	}
+}
+
+func TestAdmit_GroupByName_MissingGroupReturnsFalse(t *testing.T) {
+	table := mustParseTable(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	aw := mustAdmit(t, table)
+
+	_, ok := aw.GroupByName("NoSuchGroup")
+	if ok {
+		t.Error(`GroupByName("NoSuchGroup"): want found=false, got true`)
+	}
+}
+
+// Three or more groups
+
+// threeGroupsContent is a synthetic workflow with three named groups (Alpha, Beta, Gamma)
+// and a single-row approach table. No fixed-vocabulary agent names appear.
+const threeGroupsContent = `<!-- workflow-version: 1.0 -->
+## Three Groups Workflow
+
+| Phase | Subagent | HITL | On Success | On Findings | Input | Output |
+|-------|----------|:----:|------------|-------------|-------|--------|
+| PLANNING | any-planner | ✅ | - | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| EXECUTION.Alpha.[StageNumber] | agent-a | ❌ | - | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Beta.[StageNumber] | agent-b | ❌ | - | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Gamma.[StageNumber] | agent-c | ❌ | - | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
+
+**Execution Groups:**
+
+| Approach | Groups |
+|----------|--------|
+| AllGroups | Alpha, Beta, Gamma |
+`
+
+func TestAdmit_ThreeGroups_Succeeds(t *testing.T) {
+	table := mustParseTable(t, threeGroupsContent, "three-groups", "1.0")
+	_, err := compat.Admit(table)
+	if err != nil {
+		t.Errorf("Admit(three-groups): unexpected error: %v", err)
+	}
+}
+
+func TestAdmit_ThreeGroups_GroupCount(t *testing.T) {
+	table := mustParseTable(t, threeGroupsContent, "three-groups", "1.0")
+	aw := mustAdmit(t, table)
+
+	if len(aw.Groups) != 3 {
+		t.Errorf("Groups: want 3 groups, got %d", len(aw.Groups))
+	}
+}
+
+func TestAdmit_ThreeGroups_GroupNames(t *testing.T) {
+	// Group names are taken verbatim from the Phase column; order is first-appearance.
+	table := mustParseTable(t, threeGroupsContent, "three-groups", "1.0")
+	aw := mustAdmit(t, table)
+
+	if len(aw.Groups) != 3 {
+		t.Fatalf("Groups: want 3, got %d", len(aw.Groups))
+	}
+	want := []domain.GroupName{"Alpha", "Beta", "Gamma"}
+	for i, w := range want {
+		if aw.Groups[i].Name != w {
+			t.Errorf("Groups[%d].Name: want %q, got %q", i, w, aw.Groups[i].Name)
+		}
+	}
+}
+
+func TestAdmit_ThreeGroups_GroupsDeclared(t *testing.T) {
+	table := mustParseTable(t, threeGroupsContent, "three-groups", "1.0")
+	aw := mustAdmit(t, table)
+
+	if !aw.GroupsDeclared {
+		t.Error("GroupsDeclared: want true for three-group workflow")
+	}
+}
+
+func TestAdmit_ThreeGroups_ContiguousRanges(t *testing.T) {
+	// PLANNING row is index 0; EXECUTION rows are indices 1 (Alpha), 2 (Beta), 3 (Gamma).
+	// Expected half-open ranges: Alpha=[1,2), Beta=[2,3), Gamma=[3,4).
+	table := mustParseTable(t, threeGroupsContent, "three-groups", "1.0")
+	aw := mustAdmit(t, table)
+
+	if len(aw.Groups) != 3 {
+		t.Fatalf("Groups: want 3, got %d", len(aw.Groups))
+	}
+	cases := []struct {
+		name     domain.GroupName
+		startRow int
+		endRow   int
+	}{
+		{"Alpha", 1, 2},
+		{"Beta", 2, 3},
+		{"Gamma", 3, 4},
+	}
+	for i, c := range cases {
+		g := aw.Groups[i]
+		if g.StartRow != c.startRow || g.EndRow != c.endRow {
+			t.Errorf("Groups[%d] (%q): want [%d,%d), got [%d,%d)",
+				i, c.name, c.startRow, c.endRow, g.StartRow, g.EndRow)
+		}
+	}
+}
+
+// Arbitrary group names / generic agent identifiers
+
+// genericAgentGroupsContent is a synthetic workflow whose agent identifiers appear
+// in no hardcoded list. The group partition comes entirely from the Phase column.
+const genericAgentGroupsContent = `<!-- workflow-version: 1.0 -->
+## Generic Agent Groups
+
+| Phase | Subagent | HITL | On Success | On Findings | Input | Output |
+|-------|----------|:----:|------------|-------------|-------|--------|
+| PLANNING | any-planner | ✅ | - | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| EXECUTION.Analysis.[StageNumber] | completely-unknown-agent-x | ❌ | - | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Analysis.[StageNumber] | another-unknown-agent-y | ❌ | - | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Synthesis.[StageNumber] | yet-another-unknown-z | ❌ | - | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
+
+**Execution Groups:**
+
+| Approach | Groups |
+|----------|--------|
+| Forward | Analysis, Synthesis |
+`
+
+func TestAdmit_GenericAgents_WithGroupNotation_Succeeds(t *testing.T) {
+	// Agent identifiers not in any hardcoded set can still form groups via the
+	// Phase column's group segment. The partition is driven purely by the Phase
+	// column, never by agent names.
+	table := mustParseTable(t, genericAgentGroupsContent, "generic-agent-groups", "1.0")
+	_, err := compat.Admit(table)
+	if err != nil {
+		t.Errorf("Admit: generic agents with group notation must be admitted: %v", err)
+	}
+}
+
+func TestAdmit_GenericAgents_WithGroupNotation_CorrectGroupCount(t *testing.T) {
+	table := mustParseTable(t, genericAgentGroupsContent, "generic-agent-groups", "1.0")
+	aw := mustAdmit(t, table)
+
+	if len(aw.Groups) != 2 {
+		t.Errorf("Groups: want 2, got %d", len(aw.Groups))
+	}
+}
+
+func TestAdmit_GenericAgents_WithGroupNotation_GroupNames(t *testing.T) {
+	// Group names are the workflow-defined tokens from the Phase column, verbatim.
+	table := mustParseTable(t, genericAgentGroupsContent, "generic-agent-groups", "1.0")
+	aw := mustAdmit(t, table)
+
+	if len(aw.Groups) < 2 {
+		t.Fatal("Groups: want at least 2")
+	}
+	if aw.Groups[0].Name != "Analysis" {
+		t.Errorf("Groups[0].Name: want %q, got %q", "Analysis", aw.Groups[0].Name)
+	}
+	if aw.Groups[1].Name != "Synthesis" {
+		t.Errorf("Groups[1].Name: want %q, got %q", "Synthesis", aw.Groups[1].Name)
+	}
+}
+
+// ---- No-groups-declared case (T3.3) ----
+
+func TestAdmit_QuickFix_GroupsDeclaredFalse(t *testing.T) {
+	// quick-fix has no EXECUTION rows with group segments.
+	// GroupsDeclared must be false.
+	table := mustParseTable(t, quickFixContent, "quick-fix", "3.0")
+	aw := mustAdmit(t, table)
+
+	if aw.GroupsDeclared {
+		t.Error("GroupsDeclared: want false for a workflow with no group segments")
+	}
+}
+
+func TestAdmit_QuickFix_SingleImplicitGroupEmptyName(t *testing.T) {
+	// When no groups are declared, the single implicit group has an empty Name.
+	table := mustParseTable(t, quickFixContent, "quick-fix", "3.0")
+	aw := mustAdmit(t, table)
+
+	if len(aw.Groups) < 1 {
+		t.Fatal("Groups: want 1 group for bare workflow")
+	}
+	if aw.Groups[0].Name != "" {
+		t.Errorf("Groups[0].Name: want empty string for implicit group, got %q", aw.Groups[0].Name)
+	}
+}
+
+func TestAdmit_QuickFix_NoApproachTable(t *testing.T) {
+	// A bare workflow's AdmittedWorkflow.ApproachTable must be zero-valued (not present).
+	table := mustParseTable(t, quickFixContent, "quick-fix", "3.0")
+	aw := mustAdmit(t, table)
+
+	if aw.ApproachTable.Present() {
+		t.Error("ApproachTable: want not present for a bare workflow")
+	}
+}
+
+func TestAdmit_ImplementationOnly_GroupsDeclaredFalse(t *testing.T) {
+	table := mustParseTable(t, implOnlyContent, "implementation-only", "3.1")
+	aw := mustAdmit(t, table)
+
+	if aw.GroupsDeclared {
+		t.Error("GroupsDeclared: want false for implementation-only (bare workflow)")
+	}
+}
+
+func TestAdmit_ImplementationOnly_SingleImplicitGroupEmptyName(t *testing.T) {
+	// The single implicit group for a bare workflow has an empty Name.
+	table := mustParseTable(t, implOnlyContent, "implementation-only", "3.1")
+	aw := mustAdmit(t, table)
+
+	if len(aw.Groups) < 1 {
+		t.Fatal("Groups: want 1 group for bare workflow")
+	}
+	if aw.Groups[0].Name != "" {
+		t.Errorf("Groups[0].Name: want empty string for implicit group, got %q", aw.Groups[0].Name)
+	}
+}
+
+func TestAdmit_ImplementationOnly_SingleGroupCoversAllExecutionRows(t *testing.T) {
+	// The single implicit group must span all EXECUTION rows in listed order.
+	// implementation-only: EXECUTION rows at indices 0 and 1.
+	table := mustParseTable(t, implOnlyContent, "implementation-only", "3.1")
+	aw := mustAdmit(t, table)
+
+	if len(aw.Groups) != 1 {
+		t.Fatalf("Groups: want 1, got %d", len(aw.Groups))
+	}
+	if aw.Groups[0].StartRow != 0 || aw.Groups[0].EndRow != 2 {
+		t.Errorf("Groups[0]: want [0,2), got [%d,%d)", aw.Groups[0].StartRow, aw.Groups[0].EndRow)
+	}
+}
+
+// ---- Admission refusals A1–A5 (T3.2) ----
+//
+// Each refusal targets a specific cross-consistency violation between the
+// EXECUTION rows' group segments and the workflow's approach table.
+// Fixtures use generic agent identifiers to prove that classification
+// is driven by the Phase column, not by agent names.
+
+// A1: a row re-opens a group that already ended (non-contiguous rows).
+
+func TestAdmit_A1_NonContiguousGroups_ReturnsRefusalError(t *testing.T) {
+	// Alpha, Beta, Alpha: row 3 re-opens group Alpha after Beta began.
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "non-contiguous", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "PLANNING", PhaseParsed: domain.PhaseParsed{Name: "PLANNING"}, Agent: "planner",
+				OutputArtifacts: []string{"Plan.md", "Stage-*/Plan.md", "Stage-*/PlanProgress.md"}},
+			{Index: 1, Phase: "EXECUTION.Alpha.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Alpha"}, Agent: "agent-a", OutputArtifacts: []string{"out.md"}},
+			{Index: 2, Phase: "EXECUTION.Beta.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Beta"}, Agent: "agent-b", OutputArtifacts: []string{"out.md"}},
+			{Index: 3, Phase: "EXECUTION.Alpha.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Alpha"}, Agent: "agent-c", OutputArtifacts: []string{"out.md"}},
+		},
+		ApproachTable: domain.ApproachTable{Rows: []domain.ApproachSequence{
+			{Approach: "Forward", Groups: []domain.GroupName{"Alpha", "Beta"}},
+		}},
+	}
+
+	_, err := compat.Admit(table)
+
+	if err == nil {
+		t.Fatal("Admit must refuse non-contiguous group rows (A1)")
+	}
+	asRefusalError(t, err)
+}
+
+func TestAdmit_A1_NonContiguousGroups_RefusalMessage_NamesRowAndGroup(t *testing.T) {
+	// The A1 message must name the offending row index and the group token.
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "non-contiguous", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "PLANNING", PhaseParsed: domain.PhaseParsed{Name: "PLANNING"}, Agent: "planner",
+				OutputArtifacts: []string{"Plan.md", "Stage-*/Plan.md", "Stage-*/PlanProgress.md"}},
+			{Index: 1, Phase: "EXECUTION.Alpha.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Alpha"}, Agent: "agent-a", OutputArtifacts: []string{"out.md"}},
+			{Index: 2, Phase: "EXECUTION.Beta.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Beta"}, Agent: "agent-b", OutputArtifacts: []string{"out.md"}},
+			{Index: 3, Phase: "EXECUTION.Alpha.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Alpha"}, Agent: "agent-c", OutputArtifacts: []string{"out.md"}},
+		},
+		ApproachTable: domain.ApproachTable{Rows: []domain.ApproachSequence{
+			{Approach: "Forward", Groups: []domain.GroupName{"Alpha", "Beta"}},
+		}},
+	}
+
+	_, err := compat.Admit(table)
+
+	re := asRefusalError(t, err)
+	// The refusal catalogue template uses "row %d" — check for "row 3" rather than
+	// the bare digit "3" to avoid a false match on unrelated numbers in the message.
+	if !strings.Contains(re.Reason, "row 3") {
+		t.Errorf("A1 refusal must name the offending row index as %q; got Reason: %q", "row 3", re.Reason)
+	}
+	if !strings.Contains(re.Reason, "Alpha") {
+		t.Errorf("A1 refusal must name the offending group %q; got Reason: %q", "Alpha", re.Reason)
+	}
+}
+
+// A2: group segments in EXECUTION rows but the workflow has no approach table.
+
+func TestAdmit_A2_GroupsWithoutApproachTable_ReturnsRefusalError(t *testing.T) {
+	// At least one EXECUTION row carries a group segment but the workflow
+	// has no **Execution Groups:** table.
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "groups-no-table", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "PLANNING", PhaseParsed: domain.PhaseParsed{Name: "PLANNING"}, Agent: "planner",
+				OutputArtifacts: []string{"Plan.md", "Stage-*/Plan.md", "Stage-*/PlanProgress.md"}},
+			{Index: 1, Phase: "EXECUTION.Test.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Test"}, Agent: "agent-a", OutputArtifacts: []string{"out.md"}},
+			{Index: 2, Phase: "EXECUTION.Implementation.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Implementation"}, Agent: "agent-b", OutputArtifacts: []string{"out.md"}},
+		},
+		// ApproachTable is zero value — no table declared.
+	}
+
+	_, err := compat.Admit(table)
+
+	if err == nil {
+		t.Fatal("Admit must refuse grouped EXECUTION rows when no approach table is present (A2)")
+	}
+	asRefusalError(t, err)
+}
+
+func TestAdmit_A2_GroupsWithoutApproachTable_RefusalMessage_NamesRowAndGroup(t *testing.T) {
+	// The A2 message must name the first offending row (index 1) and its group token.
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "groups-no-table", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "PLANNING", PhaseParsed: domain.PhaseParsed{Name: "PLANNING"}, Agent: "planner",
+				OutputArtifacts: []string{"Plan.md", "Stage-*/Plan.md", "Stage-*/PlanProgress.md"}},
+			{Index: 1, Phase: "EXECUTION.Test.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Test"}, Agent: "agent-a", OutputArtifacts: []string{"out.md"}},
+			{Index: 2, Phase: "EXECUTION.Implementation.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Implementation"}, Agent: "agent-b", OutputArtifacts: []string{"out.md"}},
+		},
+	}
+
+	_, err := compat.Admit(table)
+
+	re := asRefusalError(t, err)
+	// The refusal catalogue template uses "row %d" — check for "row 1" rather than
+	// the bare digit "1" to avoid a false match on unrelated numbers in the message.
+	if !strings.Contains(re.Reason, "row 1") {
+		t.Errorf("A2 refusal must name the offending row index as %q; got Reason: %q", "row 1", re.Reason)
+	}
+	if !strings.Contains(re.Reason, "Test") {
+		t.Errorf("A2 refusal must name the group %q; got Reason: %q", "Test", re.Reason)
+	}
+}
+
+// A3: approach table present but an EXECUTION row carries no group segment.
+
+func TestAdmit_A3_ApproachTableWithBareRow_ReturnsRefusalError(t *testing.T) {
+	// The workflow has an approach table, but row 1 is a bare staged row
+	// (no group segment). All EXECUTION rows must carry a group segment when
+	// an approach table is present.
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "table-bare-row", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "PLANNING", PhaseParsed: domain.PhaseParsed{Name: "PLANNING"}, Agent: "planner",
+				OutputArtifacts: []string{"Plan.md", "Stage-*/Plan.md", "Stage-*/PlanProgress.md"}},
+			// Bare row — no group segment.
+			{Index: 1, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: ""}, Agent: "agent-a", OutputArtifacts: []string{"out.md"}},
+			{Index: 2, Phase: "EXECUTION.Implementation.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Implementation"}, Agent: "agent-b", OutputArtifacts: []string{"out.md"}},
+		},
+		ApproachTable: domain.ApproachTable{Rows: []domain.ApproachSequence{
+			{Approach: "Forward", Groups: []domain.GroupName{"Test", "Implementation"}},
+		}},
+	}
+
+	_, err := compat.Admit(table)
+
+	if err == nil {
+		t.Fatal("Admit must refuse a bare EXECUTION row when an approach table is present (A3)")
+	}
+	asRefusalError(t, err)
+}
+
+func TestAdmit_A3_ApproachTableWithBareRow_RefusalMessage_NamesRow(t *testing.T) {
+	// The A3 message must name the offending bare row (index 1).
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "table-bare-row", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "PLANNING", PhaseParsed: domain.PhaseParsed{Name: "PLANNING"}, Agent: "planner",
+				OutputArtifacts: []string{"Plan.md", "Stage-*/Plan.md", "Stage-*/PlanProgress.md"}},
+			{Index: 1, Phase: "EXECUTION.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: ""}, Agent: "agent-a", OutputArtifacts: []string{"out.md"}},
+			{Index: 2, Phase: "EXECUTION.Implementation.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Implementation"}, Agent: "agent-b", OutputArtifacts: []string{"out.md"}},
+		},
+		ApproachTable: domain.ApproachTable{Rows: []domain.ApproachSequence{
+			{Approach: "Forward", Groups: []domain.GroupName{"Test", "Implementation"}},
+		}},
+	}
+
+	_, err := compat.Admit(table)
+
+	re := asRefusalError(t, err)
+	// The refusal catalogue template uses "row %d" — check for "row 1" rather than
+	// the bare digit "1" to avoid a false match on unrelated numbers in the message.
+	if !strings.Contains(re.Reason, "row 1") {
+		t.Errorf("A3 refusal must name the offending bare row index as %q; got Reason: %q", "row 1", re.Reason)
+	}
+}
+
+// A4: approach table names a group that no EXECUTION row belongs to.
+
+func TestAdmit_A4_ApproachTableGroupNotInExecutionRows_ReturnsRefusalError(t *testing.T) {
+	// The approach table lists "Ghost" which no EXECUTION row declares.
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "ghost-group", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "PLANNING", PhaseParsed: domain.PhaseParsed{Name: "PLANNING"}, Agent: "planner",
+				OutputArtifacts: []string{"Plan.md", "Stage-*/Plan.md", "Stage-*/PlanProgress.md"}},
+			{Index: 1, Phase: "EXECUTION.Test.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Test"}, Agent: "agent-a", OutputArtifacts: []string{"out.md"}},
+			{Index: 2, Phase: "EXECUTION.Implementation.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Implementation"}, Agent: "agent-b", OutputArtifacts: []string{"out.md"}},
+		},
+		ApproachTable: domain.ApproachTable{Rows: []domain.ApproachSequence{
+			// "Ghost" is listed in the table but no EXECUTION row carries it.
+			{Approach: "Forward", Groups: []domain.GroupName{"Test", "Implementation", "Ghost"}},
+		}},
+	}
+
+	_, err := compat.Admit(table)
+
+	if err == nil {
+		t.Fatal("Admit must refuse when the approach table names a group absent from all EXECUTION rows (A4)")
+	}
+	asRefusalError(t, err)
+}
+
+func TestAdmit_A4_ApproachTableGroupNotInExecutionRows_RefusalMessage_NamesGroup(t *testing.T) {
+	// The A4 message must name the phantom group "Ghost".
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "ghost-group", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "PLANNING", PhaseParsed: domain.PhaseParsed{Name: "PLANNING"}, Agent: "planner",
+				OutputArtifacts: []string{"Plan.md", "Stage-*/Plan.md", "Stage-*/PlanProgress.md"}},
+			{Index: 1, Phase: "EXECUTION.Test.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Test"}, Agent: "agent-a", OutputArtifacts: []string{"out.md"}},
+			{Index: 2, Phase: "EXECUTION.Implementation.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Implementation"}, Agent: "agent-b", OutputArtifacts: []string{"out.md"}},
+		},
+		ApproachTable: domain.ApproachTable{Rows: []domain.ApproachSequence{
+			{Approach: "Forward", Groups: []domain.GroupName{"Test", "Implementation", "Ghost"}},
+		}},
+	}
+
+	_, err := compat.Admit(table)
+
+	re := asRefusalError(t, err)
+	if !strings.Contains(re.Reason, "Ghost") {
+		t.Errorf("A4 refusal must name the phantom group %q; got Reason: %q", "Ghost", re.Reason)
+	}
+}
+
+// A5: an EXECUTION row declares a group absent from every approach table row.
+
+func TestAdmit_A5_ExecutionGroupNotInApproachTable_ReturnsRefusalError(t *testing.T) {
+	// Row 3 declares group "Mystery" which appears in no approach table row.
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "mystery-group", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "PLANNING", PhaseParsed: domain.PhaseParsed{Name: "PLANNING"}, Agent: "planner",
+				OutputArtifacts: []string{"Plan.md", "Stage-*/Plan.md", "Stage-*/PlanProgress.md"}},
+			{Index: 1, Phase: "EXECUTION.Test.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Test"}, Agent: "agent-a", OutputArtifacts: []string{"out.md"}},
+			{Index: 2, Phase: "EXECUTION.Implementation.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Implementation"}, Agent: "agent-b", OutputArtifacts: []string{"out.md"}},
+			// "Mystery" is not referenced in the approach table at all.
+			{Index: 3, Phase: "EXECUTION.Mystery.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Mystery"}, Agent: "agent-c", OutputArtifacts: []string{"out.md"}},
+		},
+		ApproachTable: domain.ApproachTable{Rows: []domain.ApproachSequence{
+			{Approach: "Forward", Groups: []domain.GroupName{"Test", "Implementation"}},
+		}},
+	}
+
+	_, err := compat.Admit(table)
+
+	if err == nil {
+		t.Fatal("Admit must refuse when an EXECUTION row's group is absent from every approach table row (A5)")
+	}
+	asRefusalError(t, err)
+}
+
+func TestAdmit_A5_ExecutionGroupNotInApproachTable_RefusalMessage_NamesRowAndGroup(t *testing.T) {
+	// The A5 message must name the offending row (index 3) and group "Mystery".
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "mystery-group", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "PLANNING", PhaseParsed: domain.PhaseParsed{Name: "PLANNING"}, Agent: "planner",
+				OutputArtifacts: []string{"Plan.md", "Stage-*/Plan.md", "Stage-*/PlanProgress.md"}},
+			{Index: 1, Phase: "EXECUTION.Test.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Test"}, Agent: "agent-a", OutputArtifacts: []string{"out.md"}},
+			{Index: 2, Phase: "EXECUTION.Implementation.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Implementation"}, Agent: "agent-b", OutputArtifacts: []string{"out.md"}},
+			{Index: 3, Phase: "EXECUTION.Mystery.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Mystery"}, Agent: "agent-c", OutputArtifacts: []string{"out.md"}},
+		},
+		ApproachTable: domain.ApproachTable{Rows: []domain.ApproachSequence{
+			{Approach: "Forward", Groups: []domain.GroupName{"Test", "Implementation"}},
+		}},
+	}
+
+	_, err := compat.Admit(table)
+
+	re := asRefusalError(t, err)
+	// The refusal catalogue template uses "row %d" — check for "row 3" rather than
+	// the bare digit "3" to avoid a false match on unrelated numbers in the message.
+	if !strings.Contains(re.Reason, "row 3") {
+		t.Errorf("A5 refusal must name the offending row index as %q; got Reason: %q", "row 3", re.Reason)
+	}
+	if !strings.Contains(re.Reason, "Mystery") {
+		t.Errorf("A5 refusal must name the offending group %q; got Reason: %q", "Mystery", re.Reason)
+	}
+}
+
+// ---- Case-sensitive group token matching ----
+
+func TestAdmit_GroupTokenMatching_IsCaseSensitive_ReturnsRefusalError(t *testing.T) {
+	// The Phase column carries group token "test" (all lowercase). The approach table
+	// declares "Test" (capital T). Because comparison is verbatim and case-sensitive
+	// everywhere (ContractsDesign.md File Format Contract), these two tokens are
+	// distinct: the EXECUTION row's group does not appear in the approach table (A5)
+	// and the approach table names a group absent from every EXECUTION row (A4).
+	// Either refusal fires; the invariant is that Admit must NOT silently treat
+	// "test" and "Test" as the same group.
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "case-mismatch", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "PLANNING", PhaseParsed: domain.PhaseParsed{Name: "PLANNING"}, Agent: "planner",
+				OutputArtifacts: []string{"Plan.md", "Stage-*/Plan.md", "Stage-*/PlanProgress.md"}},
+			// Group token is "test" (lowercase), which must not match "Test" in the approach table.
+			{Index: 1, Phase: "EXECUTION.test.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "test"}, Agent: "agent-a", OutputArtifacts: []string{"out.md"}},
+			{Index: 2, Phase: "EXECUTION.Implementation.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Implementation"}, Agent: "agent-b", OutputArtifacts: []string{"out.md"}},
+		},
+		ApproachTable: domain.ApproachTable{Rows: []domain.ApproachSequence{
+			// The table declares "Test" (capital T) — a different token from "test".
+			{Approach: "Forward", Groups: []domain.GroupName{"Test", "Implementation"}},
+		}},
+	}
+
+	_, err := compat.Admit(table)
+
+	if err == nil {
+		t.Fatal(`Admit must refuse: group token "test" in Phase column must not match "Test" in the approach table (comparison is case-sensitive)`)
+	}
+	asRefusalError(t, err)
+}
+
+func TestAdmit_GroupTokenMatching_IsCaseSensitive_RefusalMessage_NamesOffender(t *testing.T) {
+	// The refusal message must identify the mismatched token so the author can
+	// correct the capitalisation in the workflow file.
+	table := domain.RoutingTable{
+		Info: domain.WorkflowInfo{ID: "case-mismatch", Version: "1.0"},
+		Rows: []domain.RoutingRow{
+			{Index: 0, Phase: "PLANNING", PhaseParsed: domain.PhaseParsed{Name: "PLANNING"}, Agent: "planner",
+				OutputArtifacts: []string{"Plan.md", "Stage-*/Plan.md", "Stage-*/PlanProgress.md"}},
+			{Index: 1, Phase: "EXECUTION.test.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "test"}, Agent: "agent-a", OutputArtifacts: []string{"out.md"}},
+			{Index: 2, Phase: "EXECUTION.Implementation.[StageNumber]", PhaseParsed: domain.PhaseParsed{Name: "EXECUTION", IsStaged: true, Group: "Implementation"}, Agent: "agent-b", OutputArtifacts: []string{"out.md"}},
+		},
+		ApproachTable: domain.ApproachTable{Rows: []domain.ApproachSequence{
+			{Approach: "Forward", Groups: []domain.GroupName{"Test", "Implementation"}},
+		}},
+	}
+
+	_, err := compat.Admit(table)
+
+	re := asRefusalError(t, err)
+	if re.Reason == "" {
+		t.Error("RefusalError.Reason must not be empty for case-mismatch refusal")
+	}
+	// The reason must name the mismatched token ("test") so the author can act on it.
+	if !strings.Contains(re.Reason, "test") {
+		t.Errorf("refusal message must name the offending group token %q; got Reason: %q", "test", re.Reason)
 	}
 }

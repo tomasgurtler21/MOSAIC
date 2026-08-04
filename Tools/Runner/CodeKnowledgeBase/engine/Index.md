@@ -15,7 +15,7 @@ The package exposes two pure functions:
 - **`Next`** — the main per-invocation router: given the state after the most recent agent response (or no prior response at all), decide the next step.
 - **`ResumePoint`** — a separate, purely artifact-derived function used only when a run is resumed after a process restart: it reconstructs where execution left off, independent of `Next`'s response-driven routing.
 
-Both functions operate entirely on the routing table shape produced by **compat** (`AdmittedWorkflow`, with its resolved pre-execution/execution/post-execution row ranges and one or two ordered execution `Groups`) and the stage list produced by **planstages** (`StageSet`, one entry per stage carrying its `Approach` and per-stage HITL flag).
+Both functions operate entirely on the routing table shape produced by **compat** (`AdmittedWorkflow`, with its resolved pre-execution/execution/post-execution row ranges, named execution `Groups`, `GroupsDeclared` flag, and carried `ApproachTable`) and the stage list produced by **planstages** (`StageSet`, one entry per stage carrying its `Approach` and per-stage HITL flag).
 
 ## Components / Subdomains
 
@@ -23,7 +23,7 @@ Both functions operate entirely on the routing table shape produced by **compat*
 |-----------|---------|
 | **Next / routing dispatch** | Classifies the current situation (first call, non-SUCCESS response, non-EXECUTION SUCCESS, EXECUTION SUCCESS) and delegates to the matching handler. |
 | **Row location (`findCurrentRowIndex`, `findRowForLogEntry`, `findExecutionRowBySeq`)** | Maps an artifact's recorded agent/phase/stage/sequence back to a concrete routing-table row index — the inverse of dispatch. Needed because the same agent identifier can appear in multiple EXECUTION rows (e.g. a review agent used in both the test group and the implementation group). |
-| **Approach/group ordering (`orderedGroupsForApproach`, `computeNextFromExecution`)** | Encodes how the two EXECUTION groups (test, implementation) are sequenced per stage based on that stage's `Approach` value, and how execution advances across groups and stages. |
+| **Approach/group ordering (`orderedGroupsForStage`, `computeNextFromExecution`)** | Resolves which execution groups run and in what order for a given stage by looking up the stage's `Approach` token in the workflow's `ApproachTable`. Returns `*domain.UnresolvableApproachError` when the token has no matching table row; never falls back to any default. Also handles intra-/inter-stage advancement. |
 | **Dispatch step construction (`buildDispatchStep`, `resolveArtifacts`)** | Builds the concrete `DispatchStep` (protocol request, effective HITL, resolved artifact paths) for a target row, expanding `{StageNumber}` and `Stage-*` template variables in artifact paths. |
 | **ResumePoint** | Reconstructs a `ResumeInfo` purely from `ArtifactState` (no `lastResponse`), used at process-restart resume time before the dispatch loop's first `Next` call. |
 
@@ -37,7 +37,7 @@ Both functions operate entirely on the routing table shape produced by **compat*
 2. **Non-SUCCESS response**, two sub-cases:
    - `COMPLETED_NEEDS_ACTION` **with an unambiguous `On Findings` hint** (a plain agent identifier or `COMPLETE`, no spaces/parentheses): treated as a deliberate loop-back — dispatches directly to the named agent's row rather than escalating.
    - **Everything else non-SUCCESS** (including ambiguous/absent `On Findings`): returns a `Deviation` decision carrying the full response and current position, for session/deviation to resolve.
-3. **SUCCESS on a non-EXECUTION row**: routes via the row's `On Success` hint (`handleNonExecutionSuccess`). An unambiguous hint of `COMPLETE` ends the run; an unambiguous hint naming an agent that lives inside an EXECUTION row is treated as "entering the EXECUTION phase" — the actual first row dispatched is determined by stage 1's approach-driven group ordering, not literally the named agent's row (the named agent in the routing table reflects the default TDD ordering only). An unambiguous hint naming a non-EXECUTION agent dispatches that row directly. An ambiguous/absent hint returns a `Deviation` (`DeviationAmbiguousRoute`).
+3. **SUCCESS on a non-EXECUTION row**: routes via the row's `On Success` hint (`handleNonExecutionSuccess`). An unambiguous hint of `COMPLETE` ends the run; an unambiguous hint naming an agent that lives inside an EXECUTION row is treated as "entering the EXECUTION phase" — the actual first row dispatched is determined by stage 1's approach-table group ordering, not literally the named agent's row (the named agent in the routing table reflects the workflow author's documented ordering for humans, not a routing directive). An unambiguous hint naming a non-EXECUTION agent dispatches that row directly. An ambiguous/absent hint returns a `Deviation` (`DeviationAmbiguousRoute`).
 4. **SUCCESS on an EXECUTION row**: routes via `handleExecutionSuccess`/`computeNextFromExecution`, ignoring `On Success` entirely (`On Success` is intentionally not consulted inside EXECUTION — see Boundaries below).
 
 ```mermaid
@@ -65,7 +65,7 @@ flowchart TD
 
 This is the core state-machine logic for the staged EXECUTION phase, used by both `handleExecutionSuccess` (in `Next`) and indirectly mirrored by `ResumePoint`'s resume-after-restart logic:
 
-1. Determine the current stage's `Approach` (TDD, implementation-first, implementation-only, or tests-only) and derive the ordered group list for it (`orderedGroupsForApproach`). For single-group workflows, approach has no effect.
+1. Determine the ordered group list for the current stage via `orderedGroupsForStage`. For bare workflows (`GroupsDeclared = false`), the approach is ignored entirely and the single implicit group is returned. For grouped workflows, the stage's `Approach` token is looked up verbatim and case-sensitively in the workflow's `ApproachTable`; if no row matches, `*domain.UnresolvableApproachError` is returned and execution stops — there is no default approach and no fallback order.
 2. If the current row is not the last row of its group, advance to the next row within the same group.
 3. If it is the last row of its group but another group remains in the same stage, jump to the start of the next group.
 4. If it is the last row of the last group in the stage, look up the next stage number in the `StageSet` and, if found, jump to the first row of that stage's first ordered group (each stage's approach can differ, so group ordering is re-derived per stage).
@@ -96,7 +96,7 @@ Whenever a row is selected for dispatch (by any of the flows above), `buildDispa
 |----------|-----|
 | **domain** | Sole internal import — all types (`AdmittedWorkflow`, `StageSet`, `ArtifactState`, `ProtocolResponse`, `EngineDecision` and its variants, `ResumeInfo`) come from here. `engine` imports nothing else internal. |
 | **session** | The exclusive consumer. Session calls `ResumePoint` once at run-start, then calls `Next` in a loop, translating each `EngineDecision` into I/O: dispatching via `harness`, writing via `artifact`, or invoking `deviation`. |
-| **compat** (indirect, via inputs) | Supplies the `AdmittedWorkflow` shape (pre-execution/execution/post-execution row ranges, `Groups`, `TwoGroup`, `HasStagedPhase`) that all of the group/stage logic depends on. |
+| **compat** (indirect, via inputs) | Supplies the `AdmittedWorkflow` shape (pre-execution/execution/post-execution row ranges, `Groups`, `GroupsDeclared`, `ApproachTable`, `HasStagedPhase`) that all of the group/stage logic depends on. |
 | **planstages** (indirect, via inputs) | Supplies the `StageSet` (`Approach` and HITL per stage) that drives approach-based group ordering and effective HITL computation. |
 
 ## Key Concepts
@@ -105,8 +105,8 @@ Whenever a row is selected for dispatch (by any of the flows above), `buildDispa
 |---------|---------|
 | **EngineDecision** | The tagged-union return type of `Next`: exactly one of `Dispatch`, `Complete`, `Deviation`, `Stop` is non-nil. |
 | **Unambiguous hint** | An `On Success`/`On Findings` column value is "unambiguous" when the column is present, non-empty, and contains no spaces or parentheses — i.e. a bare agent identifier or the literal keyword `COMPLETE`. Anything else (free-form text, absent column) cannot be routed deterministically and produces a `Deviation`. |
-| **On Success is ignored inside EXECUTION** | Routing between EXECUTION rows is governed entirely by group/stage/approach progression, never by the `On Success` column value — that column's agent reference in EXECUTION rows exists only to describe the default TDD ordering for humans reading the workflow table, not to drive the engine. |
-| **Ordered groups per approach** | For two-group (test + implementation) workflows, `Approach` (TDD, implementation-first, implementation-only, tests-only) determines both which groups run and their order for a given stage; this is re-derived per stage since different stages may declare different approaches. |
+| **On Success is ignored inside EXECUTION** | Routing between EXECUTION rows is governed entirely by group/stage/approach progression, never by the `On Success` column value — that column's agent reference in EXECUTION rows exists only to describe the ordering for humans reading the workflow table, not to drive the engine. |
+| **Ordered groups per approach** | For grouped workflows (`GroupsDeclared = true`), the stage's `Approach` token is matched verbatim against the workflow's `ApproachTable` to determine which groups run and in what order for that stage; this lookup is repeated per stage since different stages may declare different approaches. A token with no matching table row produces `*domain.UnresolvableApproachError` — there is no TDD default and no fallback. For bare workflows the approach is ignored and the single implicit group is always returned. |
 | **Deviation kinds** | `DeviationNonSuccess` (any non-SUCCESS response without an unambiguous loop-back hint), `DeviationAmbiguousRoute` (a SUCCESS response whose `On Success` hint can't be resolved), `DeviationHarnessError` (declared in domain but not produced anywhere inside `engine` itself — it originates from session/harness before `Next` is even called). |
 | **Interruption / RerunLast** | Detected by `ResumePoint` when the last execution-log entry's agent doesn't match `CurrentState.LastAgent` — signals the process died between logging a dispatch and recording its completed response; the interrupted row must be re-dispatched rather than advanced past. |
 

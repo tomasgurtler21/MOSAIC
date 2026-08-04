@@ -46,8 +46,8 @@ required_skills: []
 [[SECTION:Constraints]]
 ## Constraints
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 [[/SECTION:Constraints]]
 `
 
@@ -216,7 +216,7 @@ func TestApply_OrchestratorContent_InOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse output: %v", err)
 	}
-	node, ok := outDoc.Body().Injection("HarnessConstraints")
+	node, ok := outDoc.Body().Deployed("HarnessConstraints")
 	if !ok {
 		t.Fatal("HarnessConstraints injection absent from output document")
 	}

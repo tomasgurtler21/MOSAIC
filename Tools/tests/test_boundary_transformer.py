@@ -63,14 +63,18 @@ class TestGenericStandard:
         assert result.success is True
         assert result.errors == []
 
-    def test_all_seven_sections_added(
+    def test_all_six_sections_added(
         self, generic_standard_input, tmp_path
     ):
-        """All 7 canonical section boundaries must be added to a standard generic file."""
+        """All 6 recognised section boundaries must be added to a standard generic file.
+
+        CommunicationProtocol is no longer an authored section heading; the protocol
+        slot is a top-level [[DEPLOYED:CommunicationProtocol]] boundary filled by the
+        deploy tool, not by the transformer.
+        """
         result, _ = _transform_to_tmp(generic_standard_input, tmp_path)
         expected_sections = [
             "Identity",
-            "CommunicationProtocol",
             "Capabilities",
             "Constraints",
             "ErrorHandling",
@@ -79,14 +83,20 @@ class TestGenericStandard:
         ]
         assert result.sections_added == expected_sections
 
-    def test_common_injections_added(
+    def test_common_regions_added(
         self, generic_standard_input, tmp_path
     ):
-        """All 9 common injection boundaries must be added."""
+        """All 8 managed region boundaries must be added (user-owned and tool-managed).
+
+        ProtocolExtension has been removed from the vocabulary entirely.
+        LanguagePatterns, HarnessConstraints, and CustomConstraints are now
+        tool-managed (emitted as [[DEPLOYED:...]]).  They still appear in
+        injections_added because TransformResult.injections_added tracks all
+        managed region names regardless of marker kind.
+        """
         result, _ = _transform_to_tmp(generic_standard_input, tmp_path)
         expected_injections = [
             "IdentityExtension",
-            "ProtocolExtension",
             "LanguagePatterns",
             "CodebaseContext",
             "OutputArtifactTemplate",
@@ -165,7 +175,6 @@ class TestGenericStandard:
         lines = _read(output_path).splitlines()
         heading_to_section = {
             "# ": "Identity",
-            "## Communication Protocol": "CommunicationProtocol",
             "## Capabilities": "Capabilities",
             "## Constraints": "Constraints",
             "## Error Handling": "ErrorHandling",
@@ -294,11 +303,16 @@ class TestGenericOrchestrator:
         result, _ = _transform_to_tmp(generic_orchestrator_input, tmp_path)
         assert result.success is True
 
-    def test_six_sections_added(self, generic_orchestrator_input, tmp_path):
-        """Orchestrator has no OutputFormat section — only 6 section boundaries."""
+    def test_five_sections_added(self, generic_orchestrator_input, tmp_path):
+        """Orchestrator has no OutputFormat section — only 5 section boundaries.
+
+        CommunicationProtocol is no longer an authored section, and the
+        orchestrator source also has no OutputFormat section, leaving
+        Identity, Capabilities, Constraints, ErrorHandling, ExecutionPhilosophy.
+        """
         result, _ = _transform_to_tmp(generic_orchestrator_input, tmp_path)
         assert "OutputFormat" not in result.sections_added
-        assert len(result.sections_added) == 6
+        assert len(result.sections_added) == 5
 
     def test_available_workflows_injection_added(
         self, generic_orchestrator_input, tmp_path
@@ -385,10 +399,10 @@ class TestGenericInterface:
         assert result.version_before == "4.2.0"
         assert result.version_after == "5.0.0"
 
-    def test_all_seven_sections_still_added(self, generic_interface_input, tmp_path):
-        """All 7 section boundaries must still be added even when injections are missing."""
+    def test_all_six_sections_still_added(self, generic_interface_input, tmp_path):
+        """All 6 recognised section boundaries must still be added even when injections are missing."""
         result, _ = _transform_to_tmp(generic_interface_input, tmp_path)
-        assert len(result.sections_added) == 7
+        assert len(result.sections_added) == 6
 
     def test_output_matches_expected_exactly(
         self, generic_interface_input, generic_interface_expected, tmp_path
@@ -431,27 +445,33 @@ class TestHarnessCodebaseAgnostic:
     def test_harness_constraints_boundary_added(
         self, harness_codebase_agnostic_input, generic_standard_input, tmp_path
     ):
-        """HarnessConstraints boundary must be inserted around the filled content."""
+        """HarnessConstraints boundary must be inserted around the filled content.
+
+        HarnessConstraints is a tool-managed name so it is emitted as [[DEPLOYED:]].
+        """
         result, output_path = _transform_to_tmp(
             harness_codebase_agnostic_input, tmp_path,
             generic_ref_path=generic_standard_input,
         )
         assert "HarnessConstraints" in result.injections_added
         content = _read(output_path)
-        assert "[[INJECTION:HarnessConstraints]]" in content
-        assert "[[/INJECTION:HarnessConstraints]]" in content
+        assert "[[DEPLOYED:HarnessConstraints]]" in content
+        assert "[[/DEPLOYED:HarnessConstraints]]" in content
 
     def test_filled_harness_content_preserved_inside_boundary(
         self, harness_codebase_agnostic_input, generic_standard_input, tmp_path
     ):
-        """Filled harness_constraints content must be preserved verbatim inside the boundary."""
+        """Filled harness_constraints content must be preserved verbatim inside the boundary.
+
+        HarnessConstraints is tool-managed so the boundary tags are [[DEPLOYED:]].
+        """
         _, output_path = _transform_to_tmp(
             harness_codebase_agnostic_input, tmp_path,
             generic_ref_path=generic_standard_input,
         )
         content = _read(output_path)
-        open_pos = content.find("[[INJECTION:HarnessConstraints]]")
-        close_pos = content.find("[[/INJECTION:HarnessConstraints]]")
+        open_pos = content.find("[[DEPLOYED:HarnessConstraints]]")
+        close_pos = content.find("[[/DEPLOYED:HarnessConstraints]]")
         assert open_pos != -1 and close_pos != -1 and open_pos < close_pos
         inner = content[open_pos:close_pos]
         assert "Use only the Read, Write, Edit, Bash" in inner
@@ -534,28 +554,32 @@ class TestHarnessExampleProject:
     def test_filled_injection_content_inside_boundaries(
         self, harness_example_project_input, generic_standard_input, tmp_path
     ):
-        """Filled injection content must appear between the open and close boundary tags."""
+        """Filled injection content must appear between the open and close boundary tags.
+
+        LanguagePatterns is tool-managed so its boundary uses [[DEPLOYED:]].
+        CodebaseContext and ContextLimits are user-owned so they use [[INJECTION:]].
+        """
         _, output_path = _transform_to_tmp(
             harness_example_project_input, tmp_path,
             generic_ref_path=generic_standard_input,
         )
         content = _read(output_path)
 
-        # LanguagePatterns content
-        lp_open = content.find("[[INJECTION:LanguagePatterns]]")
-        lp_close = content.find("[[/INJECTION:LanguagePatterns]]")
+        # LanguagePatterns is tool-managed — emitted as [[DEPLOYED:]]
+        lp_open = content.find("[[DEPLOYED:LanguagePatterns]]")
+        lp_close = content.find("[[/DEPLOYED:LanguagePatterns]]")
         assert lp_open != -1 and lp_close != -1
         lp_inner = content[lp_open:lp_close]
         assert "Use Python 3.10+" in lp_inner
 
-        # CodebaseContext content
+        # CodebaseContext is user-owned — emitted as [[INJECTION:]]
         cc_open = content.find("[[INJECTION:CodebaseContext]]")
         cc_close = content.find("[[/INJECTION:CodebaseContext]]")
         assert cc_open != -1 and cc_close != -1
         cc_inner = content[cc_open:cc_close]
         assert "MyProject API" in cc_inner
 
-        # ContextLimits content
+        # ContextLimits is user-owned — emitted as [[INJECTION:]]
         clim_open = content.find("[[INJECTION:ContextLimits]]")
         clim_close = content.find("[[/INJECTION:ContextLimits]]")
         assert clim_open != -1 and clim_close != -1
@@ -858,7 +882,7 @@ class TestCLI:
 def _heading_text(section_name: str) -> str:
     """Return the heading text (after '## ') for a canonical section name."""
     _map = {
-        "CommunicationProtocol": "Communication Protocol",
+        "ArtifactProvenance": "Artifact Provenance",
         "Capabilities": "Capabilities",
         "Constraints": "Constraints",
         "ErrorHandling": "Error Handling",
@@ -922,10 +946,12 @@ def _extract_body_lines_excluding_tags(content: str) -> list[str]:
                 continue
         if past_fm:
             stripped = line.strip()
-            # Skip new-format boundary tags (open and close)
+            # Skip new-format boundary tags (open and close) for all three kinds
             if stripped.startswith("[[SECTION:") or stripped.startswith("[[/SECTION:"):
                 continue
             if stripped.startswith("[[INJECTION:") or stripped.startswith("[[/INJECTION:"):
+                continue
+            if stripped.startswith("[[DEPLOYED:") or stripped.startswith("[[/DEPLOYED:"):
                 continue
             # Also skip lines that are ONLY a list-item wrapping an injection tag
             if stripped.startswith("- [[INJECTION:") or stripped.startswith("- [[/INJECTION:"):

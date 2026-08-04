@@ -5,20 +5,20 @@ harness: vscode-ghcp
 
 # Harness Injections — VS Code GHCP
 
-[[INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
 When reading a file with the intent to read it fully, **never assume the file is complete just because the last returned line is blank or ends a section.** Always verify you have reached the true end:
 - After reading a chunk, check if you received fewer lines than you requested — that signals the actual end of file
 - If you received as many lines as requested, the file likely continues — issue another read starting from where the last one ended
 - Keep paginating until you receive a short (or empty) response
 - **Exception:** If you are intentionally reading a specific range (e.g., to find a particular function or section), you do not need to read the rest of the file
-[[/INJECTION:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 
-[[INJECTION:CustomConstraints]]
+[[DEPLOYED:CustomConstraints]]
 **Parallel Tool Calls:** Issue multiple independent tool calls in a single response whenever possible. Sequential tool calls are only permitted when a later call depends on the result of an earlier one. This minimises inference API calls to improve speed and reduce cost.
-[[/INJECTION:CustomConstraints]]
+[[/DEPLOYED:CustomConstraints]]
 
-[[INJECTION:LanguagePatterns]]
-[[/INJECTION:LanguagePatterns]]
+[[DEPLOYED:LanguagePatterns]]
+[[/DEPLOYED:LanguagePatterns]]
 
 ---
 

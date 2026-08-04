@@ -19,6 +19,7 @@ from typing import Optional
 from boundary_constants import (
     BoundaryKind,
     CANONICAL_SECTIONS,
+    EXPECTED_MARKER,
     INJECTION_OLD_MARKER_MAP,
     MARKER_TO_INJECTION_NAME,
     SECTION_HEADING_MAP,
@@ -336,18 +337,19 @@ def _transform_generic_body(lines: list[str]) -> dict:
                     j += 1
                     continue
 
-                # Check for injection markers
-                injection_match = _match_injection_marker(line)
+                # Check for injection/deployed markers
+                injection_match = _match_region_marker(line)
                 if injection_match:
                     injection_name = injection_match["name"]
+                    marker_kind = injection_match["kind"]
                     injections_added.append(injection_name)
 
                     # Both standalone ("[INJECTION: name]") and list-item
                     # ("- [INJECTION: name]") markers become standalone boundary
                     # tags with no "- " prefix: a tag must occupy its own line to
                     # match TAG_PATTERN and be recognised by the validator.
-                    result_lines.append(f"{open_tag(BoundaryKind.INJECTION, injection_name)}\n")
-                    result_lines.append(f"{close_tag(BoundaryKind.INJECTION, injection_name)}\n")
+                    result_lines.append(f"{open_tag(marker_kind, injection_name)}\n")
+                    result_lines.append(f"{close_tag(marker_kind, injection_name)}\n")
                     j += 1
                     continue
 
@@ -521,20 +523,22 @@ def _canonical_section_for_heading(line: str) -> Optional[str]:
     return None
 
 
-def _match_injection_marker(line: str) -> Optional[dict]:
-    """Check if line is an injection marker (old- or new-style OPEN tag only).
+def _match_region_marker(line: str) -> Optional[dict]:
+    """Check if line is an injection or deployed marker (old- or new-style OPEN tag only).
 
     Matches:
     - Old-style standalone: "[INJECTION: name]"
     - Old-style list-item:  "- [INJECTION: name]"
-    - New-style open tag:   "[[INJECTION:Name]]" (present in already-transformed
-      generic reference files after Batch A)
+    - New-style INJECTION open tag: "[[INJECTION:Name]]"
+    - New-style DEPLOYED open tag:  "[[DEPLOYED:Name]]" (present in already-transformed
+      generic reference files for tool-managed names)
 
-    Does NOT match new-style close tags "[[/INJECTION:Name]]" -- those are
-    handled as generic-only lines and dropped.
+    Does NOT match new-style close tags — those are handled as generic-only lines
+    and dropped.
 
     Returns dict with:
-        name: str (canonical injection name)
+        name: str (canonical name)
+        kind: BoundaryKind (INJECTION or DEPLOYED)
         is_list_item: bool
     or None if no match.
     """
@@ -544,28 +548,39 @@ def _match_injection_marker(line: str) -> Optional[dict]:
     if stripped.startswith("- "):
         marker_part = stripped[2:].strip()
         if marker_part in MARKER_TO_INJECTION_NAME:
+            name = MARKER_TO_INJECTION_NAME[marker_part]
+            kind = EXPECTED_MARKER.get(name, BoundaryKind.INJECTION)
             return {
-                "name": MARKER_TO_INJECTION_NAME[marker_part],
-                "is_list_item": True
+                "name": name,
+                "kind": kind,
+                "is_list_item": True,
             }
 
     # Try old-style standalone format: "[INJECTION: name]"
     if stripped in MARKER_TO_INJECTION_NAME:
+        name = MARKER_TO_INJECTION_NAME[stripped]
+        kind = EXPECTED_MARKER.get(name, BoundaryKind.INJECTION)
         return {
-            "name": MARKER_TO_INJECTION_NAME[stripped],
-            "is_list_item": False
+            "name": name,
+            "kind": kind,
+            "is_list_item": False,
         }
 
-    # Try new-style open tag: "[[INJECTION:Name]]"
+    # Try new-style open tag: "[[INJECTION:Name]]" or "[[DEPLOYED:Name]]"
     # (present in already-transformed generic reference files)
     m = TAG_PATTERN.match(stripped)
-    if m and m.group("kind") == "INJECTION" and not m.group("close"):
+    if m and m.group("kind") in ("INJECTION", "DEPLOYED") and not m.group("close"):
         return {
             "name": m.group("name"),
-            "is_list_item": False
+            "kind": BoundaryKind(m.group("kind")),
+            "is_list_item": False,
         }
 
     return None
+
+
+# Keep the old name as an alias for backward compatibility with any external callers.
+_match_injection_marker = _match_region_marker
 
 
 def _transform_harness_body(harness_lines: list[str], generic_lines: list[str]) -> dict:
@@ -646,22 +661,26 @@ def _next_generic_anchor(generic_section: list[str], start: int) -> Optional[str
         line = generic_section[i]
         if not line.strip():
             continue
-        if _match_injection_marker(line):
+        if _match_region_marker(line):
             continue
         # Skip any new-style boundary tags ([[SECTION:...]], [[/SECTION:...]],
-        # [[/INJECTION:...]]) that appear in already-transformed generic refs.
+        # [[/INJECTION:...]], [[/DEPLOYED:...]]) that appear in already-transformed
+        # generic refs.
         if TAG_PATTERN.match(line.strip()):
             continue
         return line
     return None
 
 
-def _emit_injection(name: str, content: list[str], out: list[str]) -> None:
-    """Emit an injection boundary wrapping the collected harness fill content.
+def _emit_injection(name: str, content: list[str], out: list[str],
+                    kind: BoundaryKind = BoundaryKind.INJECTION) -> None:
+    """Emit a region boundary wrapping the collected harness fill content.
 
     A leading '### subsection' heading (and the blank line after it) stays
     OUTSIDE the boundary; trailing blank lines also stay outside. The remaining
-    lines become the injection body. Empty content yields an empty boundary.
+    lines become the region body. Empty content yields an empty boundary.
+
+    kind controls whether to emit [[INJECTION:...]] or [[DEPLOYED:...]].
     """
     lead_end = 0
     if content and _is_h3_heading(content[0]):
@@ -674,9 +693,9 @@ def _emit_injection(name: str, content: list[str], out: list[str]) -> None:
         trail_start -= 1
 
     out.extend(content[:lead_end])
-    out.append(open_tag(BoundaryKind.INJECTION, name) + "\n")
+    out.append(open_tag(kind, name) + "\n")
     out.extend(content[lead_end:trail_start])
-    out.append(close_tag(BoundaryKind.INJECTION, name) + "\n")
+    out.append(close_tag(kind, name) + "\n")
     out.extend(content[trail_start:])
 
 
@@ -705,27 +724,29 @@ def _merge_section(harness_section: list[str], generic_section: list[str]) -> tu
         gtok = generic_section[gi] if gi < len(generic_section) else None
         hline = harness_section[hi] if hi < len(harness_section) else None
 
-        if gtok is not None and _match_injection_marker(gtok):
-            name = _match_injection_marker(gtok)["name"]
-            harness_marker = _match_injection_marker(hline) if hline is not None else None
+        if gtok is not None and _match_region_marker(gtok):
+            gtok_match = _match_region_marker(gtok)
+            name = gtok_match["name"]
+            marker_kind = gtok_match["kind"]
+            harness_marker = _match_region_marker(hline) if hline is not None else None
 
             if harness_marker is not None and harness_marker["name"] == name:
                 # Marker still present in the harness -> empty boundary.
-                out.append(open_tag(BoundaryKind.INJECTION, name) + "\n")
-                out.append(close_tag(BoundaryKind.INJECTION, name) + "\n")
+                out.append(open_tag(marker_kind, name) + "\n")
+                out.append(close_tag(marker_kind, name) + "\n")
                 injections.append(name)
                 gi += 1
                 hi += 1
                 continue
 
-            # Marker removed in the harness: collect this injection's fill content.
+            # Marker removed in the harness: collect this region's fill content.
             anchor = _next_generic_anchor(generic_section, gi + 1)
             content: list[str] = []
             took_header = False
             has_body = False
             while hi < len(harness_section):
                 hl = harness_section[hi]
-                if _match_injection_marker(hl):
+                if _match_region_marker(hl):
                     break
                 if anchor is not None and hl == anchor:
                     break
@@ -738,7 +759,7 @@ def _merge_section(harness_section: list[str], generic_section: list[str]) -> tu
                 content.append(hl)
                 hi += 1
 
-            _emit_injection(name, content, out)
+            _emit_injection(name, content, out, kind=marker_kind)
             injections.append(name)
             gi += 1
             continue

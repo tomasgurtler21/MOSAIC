@@ -6,9 +6,8 @@ name: test-agent
 Identity section content.
 [[/SECTION:Identity]]
 
-[[SECTION:CommunicationProtocol]]
-Communication protocol content.
-[[/SECTION:CommunicationProtocol]]
+[[DEPLOYED:CommunicationProtocol]]
+[[/DEPLOYED:CommunicationProtocol]]
 
 [[SECTION:ArtifactProvenance]]
 Artifact provenance content.

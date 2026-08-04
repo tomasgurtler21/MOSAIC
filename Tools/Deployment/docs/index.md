@@ -29,7 +29,7 @@ then use the references below for deeper topics.
 
 | Document | What it covers |
 |----------|----------------|
-| [SOURCE-FORMAT.md](../../Agents/Generic/SOURCE-FORMAT.md) | Generic agent frontmatter fields, boundary tag conventions (`[[SECTION:...]]`, `[[INJECTION:...]]`), version bump rules. Read this before editing generic agent files. |
+| [SOURCE-FORMAT.md](../../Agents/Generic/SOURCE-FORMAT.md) | Generic agent frontmatter fields, boundary tag conventions (`[[SECTION:...]]`, `[[DEPLOYED:...]]`, `[[INJECTION:...]]`), version bump rules. Read this before editing generic agent files. |
 
 ---
 
@@ -76,7 +76,7 @@ The following table shows where each major concept is documented.
 | External protocol methods | [External Module Protocol — Methods](external-protocol.md) |
 | External protocol error handling | [External Module Protocol — Errors](external-protocol.md) |
 | Generic source frontmatter fields | [SOURCE-FORMAT.md](../../Agents/Generic/SOURCE-FORMAT.md) |
-| Boundary tag conventions | [SOURCE-FORMAT.md](../../Agents/Generic/SOURCE-FORMAT.md) |
+| Boundary tag conventions (`[[SECTION:]]`, `[[DEPLOYED:]]`, `[[INJECTION:]]`) | [SOURCE-FORMAT.md](../../Agents/Generic/SOURCE-FORMAT.md) |
 | Import-boundary guard | [README — Import-boundary guard](../README.md#import-boundary-guard) |
 | Relationship to boundary_transformer.py | [README — boundary_transformer.py](../README.md#relationship-to-boundary_transformerpy-and-boundary_validatorpy) |
 

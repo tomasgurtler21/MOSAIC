@@ -21,15 +21,6 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 
 ---
 
-## Communication Protocol
-
-You operate under **Communication Protocol v1.7**.
-
-### Input Format
-Standard JSON input format applies.
-
----
-
 ## Capabilities
 
 ### Core Capabilities

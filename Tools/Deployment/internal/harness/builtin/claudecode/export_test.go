@@ -10,7 +10,18 @@ import (
 
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
+	"mosaic-deploy/internal/harness/registry"
 )
+
+// NewWithOptsForTesting calls New(opts) and returns the module. It is the test-facing
+// entry point for the run-time construction path:
+//
+//	opts.MosaicRoot must point to a directory containing
+//	<MosaicRoot>/Agents/Claude Code/HarnessInjections.md and
+//	<MosaicRoot>/Agents/Claude Code/HarnessInjectionsOrchestrator.md.
+func NewWithOptsForTesting(_ testing.TB, opts registry.BuiltinOptions) (domain.HarnessModule, error) {
+	return New(opts)
+}
 
 // NewWithMapsForTesting creates a claudecode module configured with caller-supplied injection
 // maps for testing the Injection method's merge behavior. shared maps canonical injection

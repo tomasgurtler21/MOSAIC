@@ -20,15 +20,11 @@ package docformat_test
 //   - RequireCanonicalSections enforces order of present sections, not presence of all sections.
 //   - Workflow files with compound section names are excluded from AC4.4 Python-Go agreement scope.
 //   - InjectionParent maps each canonical injection to its expected parent section.
-//   - ClassifyInjection returns InjectionWorkflow for "AvailableWorkflows".
-//   - ClassifyInjection returns InjectionHarness for "HarnessConstraints".
-//   - ClassifyInjection returns InjectionProject for "IdentityExtension".
 
 import (
 	"testing"
 
 	"mosaic-common/docformat"
-	domain "mosaic-common/mosaic"
 )
 
 // boundaryMalformedFixture parses a malformed boundary fixture. The parse must succeed
@@ -64,12 +60,15 @@ func hasIssueWithCode(issues []docformat.Issue, code string) bool {
 // --- Well-formed document ---
 
 func TestValidate_WellFormedDocument_ReturnsNoIssues(t *testing.T) {
-	doc := parsedBoundaryFixture(t, "multiple-sections.md")
+	// Uses a Stage 2-compliant fixture: Identity section followed by a top-level
+	// [[DEPLOYED:CommunicationProtocol]] boundary, then ArtifactProvenance section.
+	// All names are canonical and correctly paired with their marker kinds.
+	doc := parsedBoundaryFixture(t, "canonical-order-with-deployed-protocol.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
-		RequireCanonicalSections:  true,
-		RequireInjectionParents:   true,
-		AllowUnknownInjections:    false,
+		RequireCanonicalSections: true,
+		RequireInjectionParents:  true,
+		AllowUnknownInjections:   false,
 	})
 
 	if len(issues) != 0 {
@@ -259,19 +258,18 @@ func TestValidate_UnbalancedOpenTag_IssueLineIsNonZero(t *testing.T) {
 // vocabulary_additions_test.go, which covers the 8-section and 13-injection contracts.
 
 func TestInjectionParent_MapsEachCanonicalInjectionToItsExpectedParent(t *testing.T) {
+	// After Stage 2, InjectionParent contains only user-owned names. Tool-managed names
+	// (HarnessConstraints, CustomConstraints, LanguagePatterns, AvailableWorkflows,
+	// InfrastructureAgents) moved to DeployedParent. ProtocolExtension was removed entirely.
 	wantMap := map[string]string{
-		"IdentityExtension":     "Identity",
-		"ProtocolExtension":     "CommunicationProtocol",
-		"LanguagePatterns":      "Capabilities",
-		"CodebaseContext":       "Capabilities",
-		"OutputArtifactTemplate": "Capabilities",
-		"SeverityThresholds":    "Capabilities",
-		"SeverityDefinitions":   "Capabilities",
-		"HarnessConstraints":    "Constraints",
-		"CustomConstraints":     "Constraints",
-		"ErrorHandlingExtension": "ErrorHandling",
-		"ContextLimits":         "ExecutionPhilosophy",
-		"AvailableWorkflows":    "Identity",
+		"IdentityExtension":           "Identity",
+		"ArtifactProvenanceExtension": "ArtifactProvenance",
+		"CodebaseContext":             "Capabilities",
+		"OutputArtifactTemplate":      "Capabilities",
+		"SeverityThresholds":          "Capabilities",
+		"SeverityDefinitions":         "Capabilities",
+		"ErrorHandlingExtension":      "ErrorHandling",
+		"ContextLimits":               "ExecutionPhilosophy",
 	}
 
 	got := docformat.InjectionParent
@@ -285,61 +283,6 @@ func TestInjectionParent_MapsEachCanonicalInjectionToItsExpectedParent(t *testin
 		} else if gotParent != wantParent {
 			t.Errorf("InjectionParent[%q]: want %q, got %q", inj, wantParent, gotParent)
 		}
-	}
-}
-
-// --- ClassifyInjection ---
-
-func TestClassifyInjection_AvailableWorkflows_IsWorkflow(t *testing.T) {
-	got := docformat.ClassifyInjection("AvailableWorkflows")
-	if got != domain.InjectionWorkflow {
-		t.Errorf("ClassifyInjection(\"AvailableWorkflows\"): want InjectionWorkflow, got %q", got)
-	}
-}
-
-func TestClassifyInjection_HarnessConstraints_IsHarness(t *testing.T) {
-	got := docformat.ClassifyInjection("HarnessConstraints")
-	if got != domain.InjectionHarness {
-		t.Errorf("ClassifyInjection(\"HarnessConstraints\"): want InjectionHarness, got %q", got)
-	}
-}
-
-func TestClassifyInjection_LanguagePatterns_IsHarness(t *testing.T) {
-	got := docformat.ClassifyInjection("LanguagePatterns")
-	if got != domain.InjectionHarness {
-		t.Errorf("ClassifyInjection(\"LanguagePatterns\"): want InjectionHarness, got %q", got)
-	}
-}
-
-func TestClassifyInjection_IdentityExtension_IsProject(t *testing.T) {
-	got := docformat.ClassifyInjection("IdentityExtension")
-	if got != domain.InjectionProject {
-		t.Errorf("ClassifyInjection(\"IdentityExtension\"): want InjectionProject, got %q", got)
-	}
-}
-
-func TestClassifyInjection_ProtocolExtension_IsProject(t *testing.T) {
-	got := docformat.ClassifyInjection("ProtocolExtension")
-	if got != domain.InjectionProject {
-		t.Errorf("ClassifyInjection(\"ProtocolExtension\"): want InjectionProject, got %q", got)
-	}
-}
-
-func TestClassifyInjection_CodebaseContext_IsProject(t *testing.T) {
-	got := docformat.ClassifyInjection("CodebaseContext")
-	if got != domain.InjectionProject {
-		t.Errorf("ClassifyInjection(\"CodebaseContext\"): want InjectionProject, got %q", got)
-	}
-}
-
-func TestClassifyInjection_CustomConstraints_IsHarness(t *testing.T) {
-	// CustomConstraints is InjectionHarness so that VS Code GHCP can fill it with the
-	// parallel tool calls instruction at the harness level. Other harnesses return ok=false
-	// for Injection("CustomConstraints") so applyHarnessInjection leaves it empty for them,
-	// which is consistent with project-level semantics everywhere except VS Code GHCP.
-	got := docformat.ClassifyInjection("CustomConstraints")
-	if got != domain.InjectionHarness {
-		t.Errorf("ClassifyInjection(\"CustomConstraints\"): want InjectionHarness, got %q", got)
 	}
 }
 
@@ -513,7 +456,8 @@ func TestValidate_RequireCanonicalSections_EnforcesOrderNotPresence(t *testing.T
 	//
 	// Implementor note: the option name could be misread as "require all canonical
 	// sections to be present." This test makes the semantics explicit: the fixture
-	// multiple-sections.md has only Identity and CommunicationProtocol (2 of 7), and
+	// multiple-sections.md has Identity and CommunicationProtocol (as a section,
+	// which occupies the same canonical-order index as the deployed boundary), and
 	// they appear in canonical order, so no issue must be reported.
 	doc := parsedBoundaryFixture(t, "multiple-sections.md") // has Identity and CommunicationProtocol only
 

@@ -43,6 +43,12 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 
 	scope := domain.ScopeProject
 
+	// Load the protocol source once for the run. Failure aborts before any file is written.
+	protocol, err := s.loadProtocol()
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
+
 	snap, _ := s.deps.Manifest.Load(workspace)
 
 	// Probe the deployed orchestrator to discover its embedded model and existing workflow set.
@@ -143,6 +149,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		DeployedState:       deployedState,
 		Models:              models,
 		ToolMappingsVersion: toolMappingsVersion,
+		ProtocolVersion:     protocol.Version,
 	}
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
@@ -217,7 +224,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		return readDeployedFile(workspace, item.TargetPath)
 	}
 	// No infrastructure blocks and no custom tools: this mode does not add or update agents.
-	contentFn := s.buildContent(module, agentByKey, models, nil, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion)
+	contentFn := s.buildContent(module, agentByKey, models, nil, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol)
 
 	// Build version stamps only for the orchestrator item (the filtered plan's items).
 	versionStamps := buildVersionStamps(set.Agents, nil, nil, p.Items, module.Descriptor(), toolMappingsVersion)

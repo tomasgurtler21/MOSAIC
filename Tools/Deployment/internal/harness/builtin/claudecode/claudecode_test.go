@@ -35,9 +35,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"mosaic-deploy/internal/catalog"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/builtin/claudecode"
 	"mosaic-deploy/internal/harness/contracttest"
+	"mosaic-deploy/internal/harness/registry"
 	"mosaic-deploy/internal/transform"
 )
 
@@ -78,15 +80,27 @@ func goldenDir(t *testing.T) string {
 	return abs
 }
 
-// newModule constructs the Claude Code module, failing the test immediately if construction
-// fails. In TDD RED phase, claudecode.New() returns an error and the test fails here.
+// newModule constructs the Claude Code module against the real repository root, failing the
+// test immediately if construction fails.
 func newModule(t *testing.T) domain.HarnessModule {
 	t.Helper()
-	mod, err := claudecode.New()
+	mod, err := claudecode.New(registry.BuiltinOptions{MosaicRoot: repoRoot(t)})
 	if err != nil {
-		t.Fatalf("claudecode.New(): %v", err) // RED: not implemented
+		t.Fatalf("claudecode.New(): %v", err)
 	}
 	return mod
+}
+
+// loadProtocol loads the protocol content from the repository root for use in transform requests.
+// All agents in Agents/Generic/ carry a [[DEPLOYED:CommunicationProtocol]] region, so Protocol
+// must be populated for every transform.Apply call that processes those source files.
+func loadProtocol(t *testing.T, root string) domain.ProtocolContent {
+	t.Helper()
+	content, err := catalog.FileProtocolLoader{}.LoadProtocol(root)
+	if err != nil {
+		t.Fatalf("load protocol from %s: %v", root, err)
+	}
+	return content
 }
 
 // applyAndCompare applies the harness transform to a generic source file and compares the
@@ -163,6 +177,7 @@ func truncate(b []byte, n int) []byte {
 func TestGoldenFile_ClaudeCode_ContractsReviewAgent(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Validation", "contracts-review.md")
 	src, err := os.ReadFile(srcPath)
@@ -171,12 +186,14 @@ func TestGoldenFile_ClaudeCode_ContractsReviewAgent(t *testing.T) {
 	}
 
 	req := transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "contracts-review",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "contracts-review",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "contracts-review.md")
@@ -194,6 +211,7 @@ func TestGoldenFile_ClaudeCode_ContractsReviewAgent(t *testing.T) {
 func TestGoldenFile_ClaudeCode_TestRunnerAgent(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
@@ -202,12 +220,14 @@ func TestGoldenFile_ClaudeCode_TestRunnerAgent(t *testing.T) {
 	}
 
 	req := transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "test-runner",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "test-runner",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "test-runner.md")
@@ -226,6 +246,7 @@ func TestGoldenFile_ClaudeCode_TestRunnerAgent(t *testing.T) {
 func TestGoldenFile_ClaudeCode_PlannerTDDSoftAgent(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Planning", "planner-tdd-soft.md")
 	src, err := os.ReadFile(srcPath)
@@ -234,12 +255,14 @@ func TestGoldenFile_ClaudeCode_PlannerTDDSoftAgent(t *testing.T) {
 	}
 
 	req := transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "planner-tdd-soft",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "planner-tdd-soft",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: protocol,
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "planner-tdd-soft.md")
@@ -256,6 +279,7 @@ func TestGoldenFile_ClaudeCode_PlannerTDDSoftAgent(t *testing.T) {
 func TestGoldenFile_ClaudeCode_Orchestrator(t *testing.T) {
 	mod := newModule(t)
 	root := repoRoot(t)
+	protocol := loadProtocol(t, root)
 
 	srcPath := filepath.Join(root, "Agents", "Generic", "Orchestrator", "orchestrator.md")
 	src, err := os.ReadFile(srcPath)
@@ -264,12 +288,14 @@ func TestGoldenFile_ClaudeCode_Orchestrator(t *testing.T) {
 	}
 
 	req := transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "orchestrator",
-		Module: mod,
-		Model:  testModel,
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "orchestrator",
+		Module:   mod,
+		Model:    testModel,
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleOrchestrator,
+		Protocol: protocol,
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "orchestrator.md")

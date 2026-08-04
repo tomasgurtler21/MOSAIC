@@ -7,20 +7,25 @@ description: Invalid file - injection nested inside wrong parent section (E008)
 
 [[SECTION:Identity]]
 # TestAgent Agent
-Content here. LanguagePatterns injection should be inside Capabilities, not Identity.
-[[INJECTION:LanguagePatterns]]
-Language patterns content placed in wrong parent section.
-[[/INJECTION:LanguagePatterns]]
+Content here. CodebaseContext injection should be inside Capabilities, not Identity.
+[[INJECTION:CodebaseContext]]
+Codebase context placed in wrong parent section.
+[[/INJECTION:CodebaseContext]]
 [[/SECTION:Identity]]
 ---
-[[SECTION:CommunicationProtocol]]
-## Communication Protocol
+
+[[DEPLOYED:CommunicationProtocol]]
+[[/DEPLOYED:CommunicationProtocol]]
+---
+
+[[SECTION:ArtifactProvenance]]
+## Artifact Provenance
 Content here.
-[[/SECTION:CommunicationProtocol]]
+[[/SECTION:ArtifactProvenance]]
 ---
 [[SECTION:Capabilities]]
 ## Capabilities
-Content here (no LanguagePatterns injection here because it was already placed above).
+Content here (CodebaseContext already placed incorrectly above).
 [[/SECTION:Capabilities]]
 ---
 [[SECTION:Constraints]]

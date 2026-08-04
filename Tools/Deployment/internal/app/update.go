@@ -79,6 +79,12 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 
 	scope := domain.ScopeProject
 
+	// Load the protocol source once for the run. Failure aborts before any file is written.
+	protocol, err := s.loadProtocol()
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
+
 	snap, _ := s.deps.Manifest.Load(workspace)
 
 	// Probe the deployed orchestrator early to discover which workflow IDs are already
@@ -176,6 +182,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		DeployedState:       deployedState,
 		Models:              allModels,
 		ToolMappingsVersion: toolMappingsVersion,
+		ProtocolVersion:     protocol.Version,
 	}
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
@@ -238,7 +245,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	// Update re-deploys whatever was already deployed; it does not re-prompt for
 	// infrastructure agent choices. The InfrastructureAgents injection region is
 	// preserved from the deployed file via the InjectionProject preservation pass.
-	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion)
+	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol)
 
 	versionStamps := buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor(), toolMappingsVersion)
 

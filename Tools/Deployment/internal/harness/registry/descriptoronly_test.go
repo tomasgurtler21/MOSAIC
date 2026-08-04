@@ -1,32 +1,41 @@
 package registry_test
 
-// Tests for the descriptor-only provision tier: a harness folder containing only harness.yaml
-// resolves to a fully functional domain.HarnessModule with no code.
+// Tests for the descriptor-only and external provision tiers.
 //
-// The descriptor-only adapter is the zero-code runtime harness tier (AC6.2). These tests
-// verify that it satisfies the domain.HarnessModule contract identically to a built-in,
-// as required by AC6.1 (tier-agnostic from the consumer's perspective).
+// The descriptor-only adapter is the zero-code runtime harness tier: placing a folder with a
+// valid harness.yaml under MosaicDeploy/harnesses/ makes it immediately available with no
+// rebuild. The external tier is the same implementation until Stage 23 adds the subprocess
+// protocol.
 //
-// Coverage:
-//   T6.3  A folder with only harness.yaml resolves to a working HarnessModule:
-//         - Tier and SourcePath provenance are correct.
-//         - Descriptor fields from harness.yaml are accessible via Descriptor().
-//         - Descriptor() returns the same pointer across calls (read-only contract).
-//         - Close() returns nil (no resources to release).
-//         - Tools() returns a result containing every requested generic tool, in order.
-//         - Frontmatter() returns a plan that applies descriptor shaping rules.
-//         - TargetPath() returns ErrArtifactUnsupported when the descriptor declares no
-//           path support for the requested artifact kind.
-//         - Injection() returns ok == false for names not declared in the descriptor.
-//         - Injection() returns content declared in the descriptor.
-//         - HookPlan() returns Supported == false with a reason when the descriptor has
-//           hooks.supported: false.
+// Coverage (descriptor-only tier):
+//   - Tier and SourcePath provenance are correct.
+//   - Descriptor fields from harness.yaml are accessible via Descriptor().
+//   - Descriptor() returns the same pointer across calls (read-only contract).
+//   - Close() returns nil (no resources to release).
+//   - Tools() returns a result containing every requested generic tool, in order.
+//   - Frontmatter() returns a plan that applies descriptor shaping rules.
+//   - TargetPath() returns ErrArtifactUnsupported when the descriptor declares no
+//     path support for the requested artifact kind.
+//   - Injection() returns ok == false for names not declared in any content file.
+//   - Injection() returns content declared with [[DEPLOYED:]] in HarnessInjections.md.
+//   - Content declared with [[DEPLOYED:]] in HarnessInjectionsOrchestrator.md is served
+//     to the "orchestrator" agent key and is not served to other agent keys.
+//   - A harness with no content file resolves without error and reports no content.
+//   - A [[INJECTION:]] region in a harness content file is not served as harness content.
+//   - HookPlan() returns Supported == false with a reason when the descriptor has
+//     hooks.supported: false.
+//
+// Coverage (external tier):
+//   - Injection() returns content declared with [[DEPLOYED:]] in HarnessInjections.md.
+//   - A harness with no content file resolves without error and reports no content.
+//   - A [[INJECTION:]] region in a harness content file is not served as harness content.
 
 import (
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"mosaic-deploy/internal/domain"
@@ -69,6 +78,66 @@ func makeDescriptorRootWithInjections(t *testing.T, id, yamlContent, injectionsM
 func resolveDescriptorOnly(t *testing.T, root, id string) domain.HarnessModule {
 	t.Helper()
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	m, err := reg.Resolve(id)
+	if err != nil {
+		t.Fatalf("Resolve(%q): %v", id, err)
+	}
+	if m == nil {
+		t.Fatalf("Resolve(%q): returned nil module with nil error", id)
+	}
+	return m
+}
+
+// makeDescriptorRootWithOrchestratorContent builds a MosaicRoot with a descriptor-only
+// harness whose harness.yaml, HarnessInjections.md, and HarnessInjectionsOrchestrator.md
+// are written from the provided content strings.
+func makeDescriptorRootWithOrchestratorContent(t *testing.T, id, yamlContent, injectionsMd, orchMd string) string {
+	t.Helper()
+	root := makeDescriptorRootWithInjections(t, id, yamlContent, injectionsMd)
+	dir := filepath.Join(root, "MosaicDeploy", "harnesses", id)
+	if err := os.WriteFile(filepath.Join(dir, "HarnessInjectionsOrchestrator.md"), []byte(orchMd), 0o644); err != nil {
+		t.Fatalf("write HarnessInjectionsOrchestrator.md: %v", err)
+	}
+	return root
+}
+
+// makeExternalRoot builds a MosaicRoot with a single external-tier harness. A
+// platform-appropriate executable stub is placed alongside harness.yaml so that the
+// discovery algorithm classifies the folder as external rather than descriptor-only.
+func makeExternalRoot(t *testing.T, id, yamlContent string) string {
+	t.Helper()
+	root := makeDescriptorRoot(t, id, yamlContent)
+	dir := filepath.Join(root, "MosaicDeploy", "harnesses", id)
+	execName := "harness-exec"
+	if runtime.GOOS == "windows" {
+		execName = "harness-exec.bat"
+	}
+	if err := os.WriteFile(filepath.Join(dir, execName), []byte("@echo off\n"), 0o755); err != nil {
+		t.Fatalf("write executable stub: %v", err)
+	}
+	return root
+}
+
+// makeExternalRootWithInjections builds an external-tier root and also writes
+// HarnessInjections.md with the provided content.
+func makeExternalRootWithInjections(t *testing.T, id, yamlContent, injectionsMd string) string {
+	t.Helper()
+	root := makeExternalRoot(t, id, yamlContent)
+	dir := filepath.Join(root, "MosaicDeploy", "harnesses", id)
+	if err := os.WriteFile(filepath.Join(dir, "HarnessInjections.md"), []byte(injectionsMd), 0o644); err != nil {
+		t.Fatalf("write HarnessInjections.md: %v", err)
+	}
+	return root
+}
+
+// resolveExternal calls Discover with AllowExternal: true and Resolve for an external-tier
+// harness, fatally failing if either step fails.
+func resolveExternal(t *testing.T, root, id string) domain.HarnessModule {
+	t.Helper()
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
@@ -491,9 +560,9 @@ harness: %s
 
 # Harness Injections — Test
 
-[[INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
 %s
-[[/INJECTION:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 `, id, wantContent)
 	root := makeDescriptorRootWithInjections(t, id, yamlContent, injectionsMd)
 	m := resolveDescriptorOnly(t, root, id)
@@ -628,6 +697,264 @@ hooks:
 	}
 	if len(plan.Files) != 0 {
 		t.Errorf("HookPlan.Files is non-empty (%v) when Supported is false; expect empty", plan.Files)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Determinism
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Orchestrator content overlay (descriptor-only tier)
+// ---------------------------------------------------------------------------
+
+// TestDescriptorOnly_OrchestratorContent_OverlaidForOrchestratorAgent verifies that content
+// from HarnessInjectionsOrchestrator.md declared with [[DEPLOYED:]] regions is served when
+// the "orchestrator" agent key is used. This is the AC17.3 positive case.
+//
+// TDD RED: fails until loadOrchInjections is updated to call ParseDeployedRegions instead of
+// ParseInjections, because the current code searches for [[INJECTION:]] markers and finds none
+// in a file that uses [[DEPLOYED:]] markers.
+func TestDescriptorOnly_OrchestratorContent_OverlaidForOrchestratorAgent(t *testing.T) {
+	id := "descriptor-orchoverlay-test"
+	wantContent := "orchestrator-tier-constraint"
+	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"Orch Overlay Test\"\n", id)
+	injectionsMd := "# Shared — no regions\n"
+	orchMd := fmt.Sprintf(`---
+version: "1.0.0"
+---
+
+# Orchestrator Injections
+
+[[DEPLOYED:HarnessConstraints]]
+%s
+[[/DEPLOYED:HarnessConstraints]]
+`, wantContent)
+	root := makeDescriptorRootWithOrchestratorContent(t, id, yamlContent, injectionsMd, orchMd)
+	m := resolveDescriptorOnly(t, root, id)
+
+	got, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
+	if !ok {
+		t.Errorf("Injection(HarnessConstraints, orchestrator) returned ok=false; " +
+			"[[DEPLOYED:]] content from HarnessInjectionsOrchestrator.md must be served to the orchestrator agent")
+	}
+	if ok && got != wantContent {
+		t.Errorf("Injection(HarnessConstraints, orchestrator) = %q, want %q", got, wantContent)
+	}
+}
+
+// TestDescriptorOnly_SharedContent_ServedToAllAgents verifies that content from
+// HarnessInjections.md declared with [[DEPLOYED:]] regions is returned for every agent key,
+// including non-orchestrator agents.
+//
+// TDD RED: fails until loadInjections is updated to call ParseDeployedRegions instead of
+// ParseInjections.
+func TestDescriptorOnly_SharedContent_ServedToAllAgents(t *testing.T) {
+	id := "descriptor-sharedtoall-test"
+	wantContent := "shared-language-patterns-for-all"
+	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"Shared To All Test\"\n", id)
+	injectionsMd := fmt.Sprintf(`---
+version: "1.0.0"
+---
+
+# Shared Injections
+
+[[DEPLOYED:LanguagePatterns]]
+%s
+[[/DEPLOYED:LanguagePatterns]]
+`, wantContent)
+	root := makeDescriptorRootWithInjections(t, id, yamlContent, injectionsMd)
+	m := resolveDescriptorOnly(t, root, id)
+
+	for _, agentKey := range []string{"worker", "orchestrator", "utility"} {
+		got, ok := m.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: agentKey})
+		if !ok {
+			t.Errorf("Injection(LanguagePatterns, %q) returned ok=false; "+
+				"shared [[DEPLOYED:]] content must be served to all agent keys", agentKey)
+			continue
+		}
+		if got != wantContent {
+			t.Errorf("Injection(LanguagePatterns, %q) = %q, want %q", agentKey, got, wantContent)
+		}
+	}
+}
+
+// TestDescriptorOnly_OrchestratorContent_NotServedToNonOrchestratorAgent verifies that
+// content from HarnessInjectionsOrchestrator.md is not accessible to non-orchestrator agent
+// keys. This is the AC17.3 negative case.
+//
+// This test passes before and after the fix because the Injection() routing logic already
+// excludes non-orchestrator agents from the orch map. The test documents the contract.
+func TestDescriptorOnly_OrchestratorContent_NotServedToNonOrchestratorAgent(t *testing.T) {
+	id := "descriptor-orchnoworker-test"
+	orchContent := "orchestrator-only-value"
+	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"Orch No Worker Test\"\n", id)
+	// Shared file is empty; orch file has content. Only orchestrator agent should see it.
+	injectionsMd := "# Shared — no regions\n"
+	orchMd := fmt.Sprintf(`---
+version: "1.0.0"
+---
+
+[[DEPLOYED:HarnessConstraints]]
+%s
+[[/DEPLOYED:HarnessConstraints]]
+`, orchContent)
+	root := makeDescriptorRootWithOrchestratorContent(t, id, yamlContent, injectionsMd, orchMd)
+	m := resolveDescriptorOnly(t, root, id)
+
+	// Non-orchestrator agent must not receive orchestrator-only content.
+	_, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "worker"})
+	if ok {
+		t.Errorf("Injection(HarnessConstraints, worker) returned ok=true; " +
+			"orchestrator-only content must not be served to non-orchestrator agents")
+	}
+}
+
+// TestDescriptorOnly_AbsentContentFileYieldsUsableModuleWithNoContent verifies that a
+// descriptor-only harness with no HarnessInjections.md resolves to a fully usable module
+// that reports no content. The absence of the content file must not be an error (AC17.2).
+func TestDescriptorOnly_AbsentContentFileYieldsUsableModuleWithNoContent(t *testing.T) {
+	id := "descriptor-nocontentfile-test"
+	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"No Content File Test\"\n", id)
+	// Only harness.yaml is written; no HarnessInjections.md.
+	root := makeDescriptorRoot(t, id, yamlContent)
+
+	// Discover and Resolve must succeed — an absent content file must not be an error.
+	m := resolveDescriptorOnly(t, root, id)
+
+	if !m.Ref().Usable {
+		t.Errorf("Ref().Usable = false for harness with absent content file; want true")
+	}
+
+	// No content is served for any name.
+	_, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "worker"})
+	if ok {
+		t.Errorf("Injection(HarnessConstraints) returned ok=true for harness with absent content file; want false")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// External tier: harness content serving
+// ---------------------------------------------------------------------------
+
+// TestExternal_Injection_ReturnsDeployedContent verifies that an external-tier harness serves
+// content declared with [[DEPLOYED:]] regions in HarnessInjections.md (AC17.1 for the external
+// tier).
+//
+// TDD RED: fails until loadInjections is updated to call ParseDeployedRegions instead of
+// ParseInjections. The current code finds no content because it searches for [[INJECTION:]]
+// markers in a file that uses [[DEPLOYED:]] markers.
+func TestExternal_Injection_ReturnsDeployedContent(t *testing.T) {
+	id := "external-deployed-content-test"
+	wantContent := "external-harness-language-patterns"
+	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"External Deployed Test\"\n", id)
+	injectionsMd := fmt.Sprintf(`---
+version: "1.0.0"
+---
+
+# Shared Injections
+
+[[DEPLOYED:LanguagePatterns]]
+%s
+[[/DEPLOYED:LanguagePatterns]]
+`, wantContent)
+	root := makeExternalRootWithInjections(t, id, yamlContent, injectionsMd)
+	m := resolveExternal(t, root, id)
+
+	got, ok := m.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: "worker"})
+	if !ok {
+		t.Errorf("Injection(LanguagePatterns, worker) returned ok=false for external tier; " +
+			"[[DEPLOYED:]] content must be served")
+	}
+	if ok && got != wantContent {
+		t.Errorf("Injection(LanguagePatterns, worker) = %q, want %q", got, wantContent)
+	}
+}
+
+// TestExternal_AbsentContentFileYieldsUsableModule verifies that an external-tier harness
+// with no HarnessInjections.md resolves to a usable module with no content, not an error
+// (AC17.2 for the external tier).
+func TestExternal_AbsentContentFileYieldsUsableModule(t *testing.T) {
+	id := "external-nocontentfile-test"
+	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"External No Content File Test\"\n", id)
+	// Only harness.yaml and the executable stub — no HarnessInjections.md.
+	root := makeExternalRoot(t, id, yamlContent)
+	m := resolveExternal(t, root, id)
+
+	if !m.Ref().Usable {
+		t.Errorf("Ref().Usable = false for external harness with absent content file; want true")
+	}
+	_, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "worker"})
+	if ok {
+		t.Errorf("Injection(HarnessConstraints) returned ok=true for external harness with absent content file; want false")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Marker kind distinguishability (T17.2)
+// ---------------------------------------------------------------------------
+
+// TestDescriptorOnly_InjectionMarkerNotServedAsHarnessContent verifies that a [[INJECTION:]]
+// region placed in a harness content file is NOT returned by Injection(). Only [[DEPLOYED:]]
+// regions are harness content; user-owned regions must not be mistaken for tool-managed ones
+// (AC17.4).
+//
+// TDD RED: fails until loadInjections is updated to call ParseDeployedRegions instead of
+// ParseInjections. The current code uses ParseInjections which reads [[INJECTION:]] regions,
+// so placing a [[INJECTION:X]] region in a harness content file erroneously serves its content.
+// After the fix, ParseDeployedRegions ignores [[INJECTION:]] regions entirely.
+func TestDescriptorOnly_InjectionMarkerNotServedAsHarnessContent(t *testing.T) {
+	id := "descriptor-injectionmarker-test"
+	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"Injection Marker Test\"\n", id)
+	// The region is declared with [[INJECTION:]] instead of [[DEPLOYED:]].
+	// This must not be served as harness content after the fix.
+	injectionsMd := `---
+version: "1.0.0"
+---
+
+# Harness Content (mis-marked)
+
+[[INJECTION:HarnessConstraints]]
+content-under-injection-marker
+[[/INJECTION:HarnessConstraints]]
+`
+	root := makeDescriptorRootWithInjections(t, id, yamlContent, injectionsMd)
+	m := resolveDescriptorOnly(t, root, id)
+
+	_, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "worker"})
+	if ok {
+		t.Errorf("Injection(HarnessConstraints) returned ok=true when the region uses [[INJECTION:]] marker; " +
+			"only [[DEPLOYED:]] regions must be served as harness content")
+	}
+}
+
+// TestExternal_InjectionMarkerNotServedAsHarnessContent verifies the same
+// marker-distinguishability requirement as
+// TestDescriptorOnly_InjectionMarkerNotServedAsHarnessContent, but for the external
+// provision tier (AC17.4).
+//
+// TDD RED: fails until loadInjections is updated to call ParseDeployedRegions instead of
+// ParseInjections, for the same reason as the descriptor-only counterpart.
+func TestExternal_InjectionMarkerNotServedAsHarnessContent(t *testing.T) {
+	id := "external-injectionmarker-test"
+	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"External Injection Marker Test\"\n", id)
+	injectionsMd := `---
+version: "1.0.0"
+---
+
+# Harness Content (mis-marked)
+
+[[INJECTION:HarnessConstraints]]
+content-under-injection-marker
+[[/INJECTION:HarnessConstraints]]
+`
+	root := makeExternalRootWithInjections(t, id, yamlContent, injectionsMd)
+	m := resolveExternal(t, root, id)
+
+	_, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "worker"})
+	if ok {
+		t.Errorf("Injection(HarnessConstraints) returned ok=true for external tier when the region uses [[INJECTION:]] marker; " +
+			"only [[DEPLOYED:]] regions must be served as harness content")
 	}
 }
 

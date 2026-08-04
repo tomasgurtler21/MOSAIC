@@ -1,14 +1,14 @@
 package transform_test
 
-// injection_test.go contains tests for the injection path of Apply. The full injection
-// behaviour spans two implementation stages:
+// injection_test.go contains tests for the region processing path of Apply. The full
+// region behaviour spans two implementation stages:
 //
-//   - Stage 8: injection regions are filled when the fixture harness has harness-level
-//     injection content (InjectionFilled), or left empty when the harness supplies nothing
-//     (InjectionEmptied, currently the default for the fixture).
+//   - Stage 8: regions are filled when the fixture harness has harness-level content
+//     (RegionFilled), or left empty when the harness supplies nothing (RegionEmptied,
+//     currently the default for the fixture).
 //
-//   - Stage 10: InjectionPreserved (lifting content from Deployed for project injections)
-//     and InjectionAssembled (assembling AvailableWorkflows from Request.Workflows) are
+//   - Stage 10: RegionPreserved (lifting content from Deployed for project regions)
+//     and RegionAssembled (assembling AvailableWorkflows from Request.Workflows) are
 //     implemented.
 
 import (
@@ -72,8 +72,8 @@ Domain logic lives in internal/domain; no third-party imports allowed there.
 // TestInjectionPreserved_ProjectInjectionContentLiftedByteIdentically asserts that when
 // Request.Deployed is non-nil, the content of a project-level injection (InjectionProject
 // class) from the deployed file is carried verbatim into the corresponding region of the
-// output. The corresponding InjectionOutcome has Action == InjectionPreserved and Bytes
-// equal to the length of the lifted content.
+// output. The corresponding RegionOutcome has Action == RegionPreserved and Bytes equal
+// to the length of the lifted content.
 //
 // This is the core contract of the injection merge policy: project-specific fill is never
 // discarded on an update, only on an explicit new deployment.
@@ -94,18 +94,18 @@ func TestInjectionPreserved_ProjectInjectionContentLiftedByteIdentically(t *test
 	}
 
 	// Locate the CodebaseContext injection outcome.
-	var outcome *transform.InjectionOutcome
-	for i := range result.Report.Injections {
-		if result.Report.Injections[i].Name == "CodebaseContext" {
-			outcome = &result.Report.Injections[i]
+	var outcome *transform.RegionOutcome
+	for i := range result.Report.Regions {
+		if result.Report.Regions[i].Name == "CodebaseContext" {
+			outcome = &result.Report.Regions[i]
 			break
 		}
 	}
 	if outcome == nil {
-		t.Fatalf("expected InjectionOutcome for CodebaseContext; got: %v", result.Report.Injections)
+		t.Fatalf("expected RegionOutcome for CodebaseContext; got: %v", result.Report.Regions)
 	}
-	if outcome.Action != transform.InjectionPreserved {
-		t.Errorf("CodebaseContext action: want %q, got %q", transform.InjectionPreserved, outcome.Action)
+	if outcome.Action != transform.RegionPreserved {
+		t.Errorf("CodebaseContext action: want %q, got %q", transform.RegionPreserved, outcome.Action)
 	}
 
 	// Parse the output and check that the injection content is byte-identical to the
@@ -134,12 +134,12 @@ func TestInjectionPreserved_ProjectInjectionContentLiftedByteIdentically(t *test
 			depNode.Content(), node.Content())
 	}
 	if outcome.Bytes != len(depNode.Content()) {
-		t.Errorf("InjectionOutcome.Bytes: want %d, got %d", len(depNode.Content()), outcome.Bytes)
+		t.Errorf("RegionOutcome.Bytes: want %d, got %d", len(depNode.Content()), outcome.Bytes)
 	}
 }
 
-// sourceWithAvailableWorkflows is an orchestrator-like source that contains an
-// [[INJECTION:AvailableWorkflows]] region inside the Identity section.
+// sourceWithAvailableWorkflows is an orchestrator-like source that contains a
+// [[DEPLOYED:AvailableWorkflows]] region inside the Identity section.
 const sourceWithAvailableWorkflows = `---
 version: 6.0.0
 name: orchestrator
@@ -156,20 +156,20 @@ required_skills: []
 
 You are the Orchestrator.
 
-[[INJECTION:AvailableWorkflows]]
-[[/INJECTION:AvailableWorkflows]]
+[[DEPLOYED:AvailableWorkflows]]
+[[/DEPLOYED:AvailableWorkflows]]
 [[/SECTION:Identity]]
 `
 
 // TestInjectionAssembled_WorkflowsAssembledIntoAvailableWorkflows asserts that when
-// Request.Workflows is non-empty, the AvailableWorkflows injection region of the output
-// contains the assembled workflow blocks and the corresponding InjectionOutcome in
-// Report.Injections has Action == InjectionAssembled.
+// Request.Workflows is non-empty, the AvailableWorkflows region of the output contains
+// the assembled workflow blocks and the corresponding RegionOutcome in Report.Regions
+// has Action == RegionAssembled.
 //
 // Expected behaviour:
 //   - Each WorkflowBlock in Request.Workflows is appended verbatim to the
-//     [[INJECTION:AvailableWorkflows]] region in the output, in the order provided.
-//   - Report.Injections contains an outcome with Action == InjectionAssembled for the
+//     [[DEPLOYED:AvailableWorkflows]] region in the output, in the order provided.
+//   - Report.Regions contains an outcome with Action == RegionAssembled for the
 //     AvailableWorkflows region.
 //   - Report.Workflows lists the IDs of each assembled workflow block, in emitted order.
 func TestInjectionAssembled_WorkflowsAssembledIntoAvailableWorkflows(t *testing.T) {
@@ -192,19 +192,19 @@ func TestInjectionAssembled_WorkflowsAssembledIntoAvailableWorkflows(t *testing.
 		t.Fatalf("Apply: %v", err)
 	}
 
-	// Assert InjectionAssembled outcome for AvailableWorkflows.
-	var outcome *transform.InjectionOutcome
-	for i := range result.Report.Injections {
-		if result.Report.Injections[i].Name == "AvailableWorkflows" {
-			outcome = &result.Report.Injections[i]
+	// Assert RegionAssembled outcome for AvailableWorkflows.
+	var outcome *transform.RegionOutcome
+	for i := range result.Report.Regions {
+		if result.Report.Regions[i].Name == "AvailableWorkflows" {
+			outcome = &result.Report.Regions[i]
 			break
 		}
 	}
 	if outcome == nil {
-		t.Fatalf("expected InjectionOutcome for AvailableWorkflows; got: %v", result.Report.Injections)
+		t.Fatalf("expected RegionOutcome for AvailableWorkflows; got: %v", result.Report.Regions)
 	}
-	if outcome.Action != transform.InjectionAssembled {
-		t.Errorf("AvailableWorkflows action: want %q, got %q", transform.InjectionAssembled, outcome.Action)
+	if outcome.Action != transform.RegionAssembled {
+		t.Errorf("AvailableWorkflows action: want %q, got %q", transform.RegionAssembled, outcome.Action)
 	}
 
 	// The workflow ID must appear in Report.Workflows.
@@ -225,7 +225,7 @@ func TestInjectionAssembled_WorkflowsAssembledIntoAvailableWorkflows(t *testing.
 	if err != nil {
 		t.Fatalf("parse output: %v", err)
 	}
-	node, ok := outDoc.Body().Injection("AvailableWorkflows")
+	node, ok := outDoc.Body().Deployed("AvailableWorkflows")
 	if !ok {
 		t.Fatal("AvailableWorkflows injection absent from output")
 	}

@@ -26,20 +26,6 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 [[/SECTION:Identity]]
 ---
 
-[[SECTION:CommunicationProtocol]]
-## Communication Protocol
-
-You operate under **Communication Protocol v1.7**.
-
-### Input Format
-Standard JSON input format applies.
-
-[[INJECTION:ProtocolExtension]]
-[[/INJECTION:ProtocolExtension]]
-
-[[/SECTION:CommunicationProtocol]]
----
-
 [[SECTION:Capabilities]]
 ## Capabilities
 
@@ -47,8 +33,8 @@ Standard JSON input format applies.
 - Do things efficiently
 - Do more things correctly
 
-[[INJECTION:LanguagePatterns]]
-[[/INJECTION:LanguagePatterns]]
+[[DEPLOYED:LanguagePatterns]]
+[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -62,14 +48,14 @@ Standard JSON input format applies.
 
 - Do NOT do bad things
 - Stay within defined scope
-[[INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
 - Use only the Read, Write, Edit, Bash, Glob, Grep, and AskUserQuestion tools.
 - Prefer Read over Bash for file reading.
 - Use Bash only for terminal commands and git operations.
-[[/INJECTION:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 
-[[INJECTION:CustomConstraints]]
-[[/INJECTION:CustomConstraints]]
+[[DEPLOYED:CustomConstraints]]
+[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

@@ -12,9 +12,27 @@ from enum import Enum
 class BoundaryKind(Enum):
     SECTION = "SECTION"
     INJECTION = "INJECTION"
+    DEPLOYED = "DEPLOYED"
 
 
+# Seven canonical section names in document order.
+# CommunicationProtocol is NOT a member — it is a tool-managed boundary name
+# declared with [[DEPLOYED:]] and occupies position 2 in CANONICAL_ORDER.
 CANONICAL_SECTIONS: tuple[str, ...] = (
+    "Identity",
+    "ArtifactProvenance",
+    "Capabilities",
+    "Constraints",
+    "ErrorHandling",
+    "OutputFormat",
+    "ExecutionPhilosophy",
+)
+
+# Eight canonical document slots in required order.  Entry at index 1 is
+# "CommunicationProtocol", satisfied by a top-level [[DEPLOYED:CommunicationProtocol]]
+# boundary; every other entry is a section name.  This is the list the
+# document-order check walks.
+CANONICAL_ORDER: tuple[str, ...] = (
     "Identity",
     "CommunicationProtocol",
     "ArtifactProvenance",
@@ -25,36 +43,58 @@ CANONICAL_SECTIONS: tuple[str, ...] = (
     "ExecutionPhilosophy",
 )
 
+# Eight user-owned injection names.  Tool-managed names and ProtocolExtension
+# are NOT members.
 CANONICAL_INJECTIONS: tuple[str, ...] = (
     "IdentityExtension",
-    "ProtocolExtension",
     "ArtifactProvenanceExtension",
-    "LanguagePatterns",
     "CodebaseContext",
     "OutputArtifactTemplate",
-    "HarnessConstraints",
-    "CustomConstraints",
     "ErrorHandlingExtension",
     "ContextLimits",
     "SeverityThresholds",
     "SeverityDefinitions",
-    "AvailableWorkflows",
 )
 
+# Six tool-managed boundary names.  These must be declared with [[DEPLOYED:]]
+# in any document that uses them.
+CANONICAL_DEPLOYED: tuple[str, ...] = (
+    "CommunicationProtocol",
+    "AvailableWorkflows",
+    "InfrastructureAgents",
+    "LanguagePatterns",
+    "HarnessConstraints",
+    "CustomConstraints",
+)
+
+# User-owned injection name -> required parent section.
+# Tool-managed names and ProtocolExtension are NOT members.
 INJECTION_PARENT_MAP: dict[str, str] = {
     "IdentityExtension": "Identity",
-    "ProtocolExtension": "CommunicationProtocol",
     "ArtifactProvenanceExtension": "ArtifactProvenance",
-    "LanguagePatterns": "Capabilities",
     "CodebaseContext": "Capabilities",
     "OutputArtifactTemplate": "Capabilities",
     "SeverityThresholds": "Capabilities",
     "SeverityDefinitions": "Capabilities",
-    "HarnessConstraints": "Constraints",
-    "CustomConstraints": "Constraints",
     "ErrorHandlingExtension": "ErrorHandling",
     "ContextLimits": "ExecutionPhilosophy",
+}
+
+# Tool-managed boundary name -> required parent section.
+# A value of None means the boundary must appear at body top level.
+DEPLOYED_PARENT_MAP: dict[str, str | None] = {
+    "CommunicationProtocol": None,   # top level — must not be nested in any section
     "AvailableWorkflows": "Identity",
+    "InfrastructureAgents": "Identity",
+    "LanguagePatterns": "Capabilities",
+    "HarnessConstraints": "Constraints",
+    "CustomConstraints": "Constraints",
+}
+
+# Canonical name -> the marker kind it must be declared with.
+EXPECTED_MARKER: dict[str, BoundaryKind] = {
+    **{name: BoundaryKind.INJECTION for name in CANONICAL_INJECTIONS},
+    **{name: BoundaryKind.DEPLOYED for name in CANONICAL_DEPLOYED},
 }
 
 KNOWN_FRONTMATTER_KEYS: frozenset[str] = frozenset({
@@ -80,11 +120,17 @@ KNOWN_FRONTMATTER_KEYS: frozenset[str] = frozenset({
     "mode",
     "permission",
     "mcpServers",
+    # Infrastructure-agent-specific fields: class, trigger schedule, failure policy.
+    "infrastructure",
+    "triggers",
+    "on_failure",
 })
 
+# Section name -> Markdown heading that introduces that section.
+# CommunicationProtocol is not present: its heading arrives inside the deployed
+# region content rather than being authored in the source file.
 SECTION_HEADING_MAP: dict[str, str] = {
     "Identity": "# ",           # H1 -- matches any "# ... Agent" line
-    "CommunicationProtocol": "## Communication Protocol",
     "ArtifactProvenance": "## Artifact Provenance",
     "Capabilities": "## Capabilities",
     "Constraints": "## Constraints",
@@ -93,6 +139,8 @@ SECTION_HEADING_MAP: dict[str, str] = {
     "ExecutionPhilosophy": "## Execution Philosophy",
 }
 
+# Legacy pre-boundary-tag migration aids.  Unrelated to the vocabulary split
+# and left unchanged.
 INJECTION_OLD_MARKER_MAP: dict[str, str] = {
     "IdentityExtension": "[INJECTION: identity_extension]",
     "ProtocolExtension": "[INJECTION: protocol_extension]",
@@ -113,16 +161,18 @@ MARKER_TO_INJECTION_NAME: dict[str, str] = {
     v: k for k, v in INJECTION_OLD_MARKER_MAP.items()
 }
 
+# Name restriction is [A-Za-z]+ (pre-existing; compound names with colons or
+# hyphens do not match and that is unchanged by this update).
 TAG_PATTERN: re.Pattern[str] = re.compile(
-    r"^\[\[(?P<close>/?)(?P<kind>SECTION|INJECTION):(?P<name>[A-Za-z]+)\]\]$"
+    r"^\[\[(?P<close>/?)(?P<kind>SECTION|INJECTION|DEPLOYED):(?P<name>[A-Za-z]+)\]\]$"
 )
 
 
 def open_tag(kind: BoundaryKind, name: str) -> str:
-    """Return e.g. '[[SECTION:Identity]]' or '[[INJECTION:ContextLimits]]'."""
+    """Return e.g. '[[SECTION:Identity]]', '[[INJECTION:ContextLimits]]', or '[[DEPLOYED:LanguagePatterns]]'."""
     return f"[[{kind.value}:{name}]]"
 
 
 def close_tag(kind: BoundaryKind, name: str) -> str:
-    """Return e.g. '[[/SECTION:Identity]]' or '[[/INJECTION:ContextLimits]]'."""
+    """Return e.g. '[[/SECTION:Identity]]', '[[/INJECTION:ContextLimits]]', or '[[/DEPLOYED:LanguagePatterns]]'."""
     return f"[[/{kind.value}:{name}]]"

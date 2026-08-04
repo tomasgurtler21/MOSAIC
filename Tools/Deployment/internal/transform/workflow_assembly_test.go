@@ -22,7 +22,7 @@ import (
 )
 
 // orchestratorWithWorkflows is an orchestrator-like source that has both an
-// [[INJECTION:IdentityExtension]] and an [[INJECTION:AvailableWorkflows]] inside the
+// [[INJECTION:IdentityExtension]] and a [[DEPLOYED:AvailableWorkflows]] inside the
 // Identity section. This is the canonical shape of the real orchestrator agent.
 const orchestratorWithWorkflows = `---
 version: 6.0.0
@@ -40,8 +40,8 @@ required_skills: []
 
 You are the Orchestrator.
 
-[[INJECTION:AvailableWorkflows]]
-[[/INJECTION:AvailableWorkflows]]
+[[DEPLOYED:AvailableWorkflows]]
+[[/DEPLOYED:AvailableWorkflows]]
 
 [[INJECTION:IdentityExtension]]
 [[/INJECTION:IdentityExtension]]
@@ -65,7 +65,7 @@ tools: [read-file, write-file, edit-file, search-file, search-text, run-terminal
 
 You are the Orchestrator.
 
-[[INJECTION:AvailableWorkflows]]
+[[DEPLOYED:AvailableWorkflows]]
 [[SECTION:Workflow:quick-fix]]
 <!-- workflow-version: 3.0 -->
 ## Quick Fix Workflow
@@ -77,7 +77,7 @@ You are the Orchestrator.
 | PLANNING | planner | ✅ |
 
 [[/SECTION:Workflow:quick-fix]]
-[[/INJECTION:AvailableWorkflows]]
+[[/DEPLOYED:AvailableWorkflows]]
 
 [[INJECTION:IdentityExtension]]
 [[/INJECTION:IdentityExtension]]
@@ -117,8 +117,8 @@ const greenfieldTDDBlock = `[[SECTION:Workflow:greenfield-tdd]]
 // ---------------------------------------------------------------------------
 
 // TestAvailableWorkflows_ZeroWorkflows_InjectionEmpty asserts that when Request.Workflows
-// is empty (or nil), the AvailableWorkflows injection region in the output is empty.
-// The corresponding InjectionOutcome has Action == InjectionEmptied (no content assembled).
+// is empty (or nil), the AvailableWorkflows region in the output is empty.
+// The corresponding RegionOutcome has Action == RegionEmptied (no content assembled).
 func TestAvailableWorkflows_ZeroWorkflows_InjectionEmpty(t *testing.T) {
 	req := transform.Request{
 		Source:    []byte(orchestratorWithWorkflows),
@@ -140,7 +140,7 @@ func TestAvailableWorkflows_ZeroWorkflows_InjectionEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse output: %v", err)
 	}
-	node, ok := outDoc.Body().Injection("AvailableWorkflows")
+	node, ok := outDoc.Body().Deployed("AvailableWorkflows")
 	if !ok {
 		t.Fatal("AvailableWorkflows injection absent from output")
 	}
@@ -179,7 +179,7 @@ func TestAvailableWorkflows_SingleWorkflow_BlockCopiedVerbatim(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse output: %v", err)
 	}
-	node, ok := outDoc.Body().Injection("AvailableWorkflows")
+	node, ok := outDoc.Body().Deployed("AvailableWorkflows")
 	if !ok {
 		t.Fatal("AvailableWorkflows injection absent from output")
 	}
@@ -198,19 +198,19 @@ func TestAvailableWorkflows_SingleWorkflow_BlockCopiedVerbatim(t *testing.T) {
 		}
 	}
 
-	// The InjectionOutcome must report InjectionAssembled.
-	var outcome *transform.InjectionOutcome
-	for i := range result.Report.Injections {
-		if result.Report.Injections[i].Name == "AvailableWorkflows" {
-			outcome = &result.Report.Injections[i]
+	// The RegionOutcome must report RegionAssembled.
+	var outcome *transform.RegionOutcome
+	for i := range result.Report.Regions {
+		if result.Report.Regions[i].Name == "AvailableWorkflows" {
+			outcome = &result.Report.Regions[i]
 			break
 		}
 	}
 	if outcome == nil {
-		t.Fatalf("InjectionOutcome for AvailableWorkflows absent")
+		t.Fatalf("RegionOutcome for AvailableWorkflows absent")
 	}
-	if outcome.Action != transform.InjectionAssembled {
-		t.Errorf("AvailableWorkflows action: want %q, got %q", transform.InjectionAssembled, outcome.Action)
+	if outcome.Action != transform.RegionAssembled {
+		t.Errorf("AvailableWorkflows action: want %q, got %q", transform.RegionAssembled, outcome.Action)
 	}
 
 	// Report.Workflows must contain exactly [quick-fix].
@@ -247,7 +247,7 @@ func TestAvailableWorkflows_MultipleWorkflows_ComposedInSelectionOrder(t *testin
 	if err != nil {
 		t.Fatalf("parse output: %v", err)
 	}
-	node, ok := outDoc.Body().Injection("AvailableWorkflows")
+	node, ok := outDoc.Body().Deployed("AvailableWorkflows")
 	if !ok {
 		t.Fatal("AvailableWorkflows injection absent from output")
 	}
@@ -282,7 +282,7 @@ func TestAvailableWorkflows_MultipleWorkflows_ComposedInSelectionOrder(t *testin
 	}
 }
 
-// TestAvailableWorkflows_InjectionClass_IsWorkflow asserts that the InjectionOutcome for
+// TestAvailableWorkflows_InjectionClass_IsWorkflow asserts that the RegionOutcome for
 // AvailableWorkflows carries Class == InjectionWorkflow regardless of whether any workflows
 // were selected.
 func TestAvailableWorkflows_InjectionClass_IsWorkflow(t *testing.T) {
@@ -311,15 +311,15 @@ func TestAvailableWorkflows_InjectionClass_IsWorkflow(t *testing.T) {
 				t.Fatalf("Apply: %v", err)
 			}
 
-			var outcome *transform.InjectionOutcome
-			for i := range result.Report.Injections {
-				if result.Report.Injections[i].Name == "AvailableWorkflows" {
-					outcome = &result.Report.Injections[i]
+			var outcome *transform.RegionOutcome
+			for i := range result.Report.Regions {
+				if result.Report.Regions[i].Name == "AvailableWorkflows" {
+					outcome = &result.Report.Regions[i]
 					break
 				}
 			}
 			if outcome == nil {
-				t.Fatalf("InjectionOutcome for AvailableWorkflows absent")
+				t.Fatalf("RegionOutcome for AvailableWorkflows absent")
 			}
 			if outcome.Class != domain.InjectionWorkflow {
 				t.Errorf("AvailableWorkflows Class: want %q, got %q",
@@ -363,7 +363,7 @@ func TestAvailableWorkflows_ReinjectionWithExpandedSet_NoDuplication(t *testing.
 	if err != nil {
 		t.Fatalf("parse output: %v", err)
 	}
-	node, ok := outDoc.Body().Injection("AvailableWorkflows")
+	node, ok := outDoc.Body().Deployed("AvailableWorkflows")
 	if !ok {
 		t.Fatal("AvailableWorkflows injection absent from output")
 	}
@@ -422,7 +422,7 @@ func TestAvailableWorkflows_SameWorkflowReinjected_NoDuplication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse output: %v", err)
 	}
-	node, ok := outDoc.Body().Injection("AvailableWorkflows")
+	node, ok := outDoc.Body().Deployed("AvailableWorkflows")
 	if !ok {
 		t.Fatal("AvailableWorkflows injection absent from output")
 	}
@@ -460,7 +460,7 @@ func TestAvailableWorkflows_BlockContentVerbatim_IncludesVersionComment(t *testi
 	if err != nil {
 		t.Fatalf("parse output: %v", err)
 	}
-	node, ok := outDoc.Body().Injection("AvailableWorkflows")
+	node, ok := outDoc.Body().Deployed("AvailableWorkflows")
 	if !ok {
 		t.Fatal("AvailableWorkflows injection absent from output")
 	}

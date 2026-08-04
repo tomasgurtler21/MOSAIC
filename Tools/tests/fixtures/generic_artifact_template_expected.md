@@ -18,17 +18,6 @@ You are the **ArtifactTemplateAgent** agent.
 [[/SECTION:Identity]]
 ---
 
-[[SECTION:CommunicationProtocol]]
-## Communication Protocol
-
-You operate under **Communication Protocol v1.7**.
-
-[[INJECTION:ProtocolExtension]]
-[[/INJECTION:ProtocolExtension]]
-
-[[/SECTION:CommunicationProtocol]]
----
-
 [[SECTION:Capabilities]]
 ## Capabilities
 
@@ -57,8 +46,8 @@ Your output artifact MUST follow this structure:
 **Key Points:**
 - Always include all sections above
 
-[[INJECTION:LanguagePatterns]]
-[[/INJECTION:LanguagePatterns]]
+[[DEPLOYED:LanguagePatterns]]
+[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -72,10 +61,10 @@ Your output artifact MUST follow this structure:
 
 - Stay within scope
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
-[[INJECTION:CustomConstraints]]
-[[/INJECTION:CustomConstraints]]
+[[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
+[[DEPLOYED:CustomConstraints]]
+[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

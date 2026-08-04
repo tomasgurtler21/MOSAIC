@@ -13,21 +13,25 @@ Content in identity section.
 [[INJECTION:IdentityExtension]]
 [[/INJECTION:IdentityExtension]]
 
-[[INJECTION:AvailableWorkflows]]
-[[/INJECTION:AvailableWorkflows]]
+[[DEPLOYED:AvailableWorkflows]]
+[[/DEPLOYED:AvailableWorkflows]]
 
 [[/SECTION:Identity]]
 ---
 
-[[SECTION:CommunicationProtocol]]
-## Communication Protocol
+[[DEPLOYED:CommunicationProtocol]]
+[[/DEPLOYED:CommunicationProtocol]]
+---
 
-Protocol content.
+[[SECTION:ArtifactProvenance]]
+## Artifact Provenance
 
-[[INJECTION:ProtocolExtension]]
-[[/INJECTION:ProtocolExtension]]
+Artifact provenance content.
 
-[[/SECTION:CommunicationProtocol]]
+[[INJECTION:ArtifactProvenanceExtension]]
+[[/INJECTION:ArtifactProvenanceExtension]]
+
+[[/SECTION:ArtifactProvenance]]
 ---
 
 [[SECTION:Capabilities]]
@@ -35,8 +39,8 @@ Protocol content.
 
 Capabilities content.
 
-[[INJECTION:LanguagePatterns]]
-[[/INJECTION:LanguagePatterns]]
+[[DEPLOYED:LanguagePatterns]]
+[[/DEPLOYED:LanguagePatterns]]
 
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
@@ -52,11 +56,11 @@ Capabilities content.
 
 Constraint content.
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 
-[[INJECTION:CustomConstraints]]
-[[/INJECTION:CustomConstraints]]
+[[DEPLOYED:CustomConstraints]]
+[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

@@ -31,6 +31,15 @@ type Request struct {
 	// subsequent runs when the config-declared mapping set changes. An empty string means no
 	// config mappings are active and no stamp is written to the deployed file.
 	ToolMappingsVersion string
+
+	// Role is the deploying agent's role. It selects the protocol variant for
+	// [[DEPLOYED:CommunicationProtocol]] regions.
+	Role domain.AgentRole
+
+	// Protocol carries the role-keyed protocol blocks and the protocol source version,
+	// loaded once per run by the app layer. Required for agents whose source declares a
+	// [[DEPLOYED:CommunicationProtocol]] region.
+	Protocol domain.ProtocolContent
 }
 
 // Result is the output of a successful Apply call.
@@ -44,7 +53,7 @@ type Result struct {
 type Report struct {
 	Fields               []FieldChange
 	Tools                []domain.ToolResolution
-	Injections           []InjectionOutcome
+	Regions              []RegionOutcome    // covers both [[INJECTION:]] and [[DEPLOYED:]] regions
 	Gaps                 []domain.Gap
 	Workflows            []string // workflow IDs present in the assembled injection, in emitted order
 	InfrastructureAgents []string // agent keys present in the assembled InfrastructureAgents injection, in emitted order
@@ -61,33 +70,3 @@ type FieldChange struct {
 	Reason string // human-readable rationale, e.g. "descriptor add", "model selection", "version stamp"
 }
 
-// InjectionAction classifies what happened to one injection region in the document body.
-type InjectionAction string
-
-const (
-	// InjectionFilled means the harness module supplied content and it was written to the region.
-	InjectionFilled InjectionAction = "filled-from-harness"
-	// InjectionPreserved means content from the deployed file was copied into the region.
-	InjectionPreserved InjectionAction = "preserved-from-deployed"
-	// InjectionEmptied means the region was left empty (no harness content, no deployed content).
-	InjectionEmptied InjectionAction = "left-empty"
-	// InjectionAssembled means the AvailableWorkflows injection was assembled from Workflows.
-	InjectionAssembled InjectionAction = "assembled-workflows"
-	// InjectionAssembledInfra means the InfrastructureAgents injection was assembled from
-	// selected infrastructure agents.
-	InjectionAssembledInfra InjectionAction = "assembled-infrastructure"
-	// InjectionOrphaned means content existed in the deployed file at an injection point that
-	// no longer exists in the source; the content has been discarded.
-	InjectionOrphaned InjectionAction = "orphaned"
-	// InjectionAdded means an injection point present in the source was absent from the deployed
-	// file; it starts empty.
-	InjectionAdded InjectionAction = "added"
-)
-
-// InjectionOutcome records what happened to one injection point in the document body.
-type InjectionOutcome struct {
-	Name   string
-	Class  domain.InjectionClass
-	Action InjectionAction
-	Bytes  int // byte length of the content placed in the region
-}

@@ -43,6 +43,12 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 
 	scope := domain.ScopeProject
 
+	// Load the protocol source once for the run. Failure aborts before any file is written.
+	protocol, err := s.loadProtocol()
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
+
 	workflowIDs := req.WorkflowIDs
 	if workflowIDs == nil {
 		if req.SkipAll[domain.QWorkflows] {
@@ -155,6 +161,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		Models:              modelRes.models,
 		DeployedState:       deployedState,
 		ToolMappingsVersion: toolMappingsVersion,
+		ProtocolVersion:     protocol.Version,
 	}
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
@@ -213,7 +220,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	}
 	workflowBlocks := s.buildWorkflowBlocks(workflowIDs)
 	infraBlocks := s.buildInfrastructureBlocks(infraAgentIDs)
-	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, workflowBlocks, infraBlocks, scope, nil, toolMappingsVersion)
+	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, workflowBlocks, infraBlocks, scope, nil, toolMappingsVersion, protocol)
 
 	now := s.now()
 	execReq := deploy.ExecRequest{

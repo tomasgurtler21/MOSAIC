@@ -22,6 +22,7 @@ import (
 
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/builtin/opencode"
+	"mosaic-deploy/internal/harness/registry"
 )
 
 // protocolVersion is the version this server speaks. It must equal external.ProtocolVersion.
@@ -344,7 +345,8 @@ func toWireHookPlanResult(plan domain.HookPlan) wireHookPlanResult {
 // ---------------------------------------------------------------------------
 
 func main() {
-	mod, err := opencode.New()
+	mosaicRoot := os.Getenv("MOSAIC_ROOT")
+	mod, err := opencode.New(registry.BuiltinOptions{MosaicRoot: mosaicRoot})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "harness-opencode-module: init: %v\n", err)
 		os.Exit(1)

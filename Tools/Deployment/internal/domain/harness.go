@@ -11,6 +11,7 @@ const (
 	InjectionProject        = mosaic.InjectionProject
 	InjectionWorkflow       = mosaic.InjectionWorkflow
 	InjectionInfrastructure = mosaic.InjectionInfrastructure
+	InjectionProtocol       = mosaic.InjectionProtocol
 )
 
 // ProvisionTier indicates how a harness implementation is provided.

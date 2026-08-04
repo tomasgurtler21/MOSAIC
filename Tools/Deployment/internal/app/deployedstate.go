@@ -73,6 +73,11 @@ func probeDeployedArtifact(workspace, targetPath, modelKey string) domain.Deploy
 	// Extract workflow section markers; nil when none are present.
 	state.Workflows = extractDeployedWorkflows(data)
 
+	// Extract the protocol version from the deployed [[DEPLOYED:CommunicationProtocol]] region.
+	// Returns "" when the region is absent or carries no version comment; both are treated as
+	// stale by the planner. This call never fails the scan.
+	state.ProtocolVersion = extractDeployedProtocolVersion(data)
+
 	return state
 }
 

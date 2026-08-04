@@ -10,7 +10,7 @@ description: Valid file with all 7 sections but only one injection
 
 You are the TestAgent agent in a multi-agent orchestration system.
 
-**Goal:** Test that not all 12 injections are required.
+**Goal:** Test that not all injections are required.
 
 [[INJECTION:IdentityExtension]]
 Only this injection is present in this file.
@@ -19,12 +19,16 @@ Only this injection is present in this file.
 [[/SECTION:Identity]]
 ---
 
-[[SECTION:CommunicationProtocol]]
-## Communication Protocol
+[[DEPLOYED:CommunicationProtocol]]
+[[/DEPLOYED:CommunicationProtocol]]
+---
 
-Protocol content without any injection.
+[[SECTION:ArtifactProvenance]]
+## Artifact Provenance
 
-[[/SECTION:CommunicationProtocol]]
+Artifact provenance content without any injection.
+
+[[/SECTION:ArtifactProvenance]]
 ---
 
 [[SECTION:Capabilities]]

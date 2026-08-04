@@ -15,10 +15,16 @@ type WorkflowInfo struct {
 	Version WorkflowVersion // from <!-- workflow-version: {version} --> comment
 }
 
+// ExecutionGroupsHeading is the reserved line that locates a workflow's
+// approach-to-group-sequence table inside its SECTION content.
+// An exact trimmed full-line match is required.
+const ExecutionGroupsHeading = "**Execution Groups:**"
+
 // PhaseParsed is the structured decomposition of a phase string.
 type PhaseParsed struct {
-	Name     string // e.g. "RESEARCH", "PLANNING", "DESIGN", "EXECUTION", "REVIEW"
-	IsStaged bool   // true when the phase is "EXECUTION.[StageNumber]"
+	Name     string    // e.g. "RESEARCH", "PLANNING", "DESIGN", "EXECUTION", "REVIEW"
+	IsStaged bool      // true when the phase is "EXECUTION.[StageNumber]"
+	Group    GroupName // group segment of a staged phase; "" when none declared
 }
 
 // OptionalHint represents an optional routing column value.
@@ -46,8 +52,9 @@ type RoutingRow struct {
 
 // RoutingTable is the complete routing model for one workflow.
 type RoutingTable struct {
-	Info WorkflowInfo
-	Rows []RoutingRow // declaration order, zero-based indexed
+	Info          WorkflowInfo
+	Rows          []RoutingRow  // declaration order, zero-based indexed
+	ApproachTable ApproachTable // zero value when the workflow declares none
 }
 
 // WorkflowRegion is one workflow definition found in an orchestrator agent file.

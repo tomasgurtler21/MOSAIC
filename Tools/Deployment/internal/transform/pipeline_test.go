@@ -41,17 +41,19 @@ func TestGoldenFile_TestRunnerAgent(t *testing.T) {
 	}
 
 	req := transform.Request{
-		Source: src,
-		Kind:   domain.ArtifactAgent,
-		Key:    "test-runner",
-		Module: newFixtureModule(t),
-		Model:  fixtureModel(),
-		Scope:  domain.ScopeProject,
+		Source:   src,
+		Kind:     domain.ArtifactAgent,
+		Key:      "test-runner",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: fixtureProtocol("1.9"),
 	}
 
 	result, err := transform.Apply(req)
 	if err != nil {
-		t.Fatalf("Apply: %v", err) // RED: fails here with ErrNotImplemented
+		t.Fatalf("Apply: %v", err)
 	}
 
 	goldenPath := filepath.Join(testdataDir, "golden", "test-runner.md")

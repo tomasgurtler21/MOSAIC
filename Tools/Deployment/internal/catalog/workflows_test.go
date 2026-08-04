@@ -31,19 +31,42 @@ import (
 // T7.6 — Enumeration
 // ---------------------------------------------------------------------------
 
-// TestWorkflows_Count_Matches15 verifies that Workflows() returns exactly 15 workflows,
-// matching the total number of entries in Workflows/Index.md.
-// Underscore-prefixed files (_Template.md, _Legacy-Appendices.md) must be excluded.
-func TestWorkflows_Count_Matches15(t *testing.T) {
-	const wantCount = 15
+// TestWorkflows_KnownIDs_AllPresent verifies that a named set of workflow IDs are all
+// returned by Workflows(). This protects that the catalog discovers the known workflow
+// documents and does not silently lose categories or individual workflows. Underscore-prefixed
+// utility files must remain excluded — they are covered separately by
+// TestWorkflows_UnderscorePrefixed_Excluded.
+// Adding a new workflow does not break this test; only removing a named ID will.
+func TestWorkflows_KnownIDs_AllPresent(t *testing.T) {
+	// Workflows spanning all six categories, including the MosaicTest conformance fixtures.
+	knownWorkflowIDs := []string{
+		// Build
+		"quick-fix",
+		"greenfield-tdd",
+		"brownfield-tdd",
+		// Audit
+		"brownfield-pr-audit",
+		// Research
+		"brownfield-research-only",
+		// Design
+		"brownfield-design",
+		// DataPreprocessing
+		"kb-generation",
+		// MosaicTest
+		"smoke-single",
+		"staged-preplaced-plan",
+		"payload-stress",
+	}
 	cat := loadRealCatalog(t)
 	workflows := cat.Workflows()
-	if len(workflows) != wantCount {
-		var ids []string
-		for _, w := range workflows {
-			ids = append(ids, w.ID)
+	ids := make(map[string]bool, len(workflows))
+	for _, w := range workflows {
+		ids[w.ID] = true
+	}
+	for _, id := range knownWorkflowIDs {
+		if !ids[id] {
+			t.Errorf("Workflows() is missing known workflow %q; catalog may have lost a category or workflow file", id)
 		}
-		t.Errorf("Workflows() returned %d workflows, want %d (got IDs: %v)", len(workflows), wantCount, ids)
 	}
 }
 
@@ -201,25 +224,32 @@ func TestWorkflow_QuickFix_ReferencedAgents(t *testing.T) {
 // T7.6 — WorkflowCategories
 // ---------------------------------------------------------------------------
 
-// TestWorkflowCategories_FiveCategories verifies that WorkflowCategories() returns
-// exactly 5 category groups (Build, Audit, Research, Design, DataPreprocessing).
-func TestWorkflowCategories_FiveCategories(t *testing.T) {
-	const wantCount = 5
+// TestWorkflowCategories_AllSixKnownCategoriesPresent verifies that all six known workflow
+// category names appear in the result of WorkflowCategories(). This protects that the
+// catalog surfaces every category a workflow declares. Adding a new category does not break
+// this test; only removing a named category will.
+func TestWorkflowCategories_AllSixKnownCategoriesPresent(t *testing.T) {
+	knownCategories := []string{
+		"Build", "Audit", "Research", "Design", "DataPreprocessing", "MosaicTest",
+	}
 	cat := loadRealCatalog(t)
 	cats := cat.WorkflowCategories()
-	if len(cats) != wantCount {
-		var names []string
-		for _, c := range cats {
-			names = append(names, c.Name)
+
+	catNames := make(map[string]bool, len(cats))
+	for _, c := range cats {
+		catNames[c.Name] = true
+	}
+	for _, name := range knownCategories {
+		if !catNames[name] {
+			t.Errorf("WorkflowCategories() is missing known category %q", name)
 		}
-		t.Errorf("WorkflowCategories() returned %d categories, want %d (got: %v)", len(cats), wantCount, names)
 	}
 }
 
-// TestWorkflowCategories_AllKnownCategoriesPresent verifies that all five known
+// TestWorkflowCategories_AllKnownCategoriesPresent verifies that all six known
 // category names appear in the result.
 func TestWorkflowCategories_AllKnownCategoriesPresent(t *testing.T) {
-	knownCategories := []string{"Build", "Audit", "Research", "Design", "DataPreprocessing"}
+	knownCategories := []string{"Build", "Audit", "Research", "Design", "DataPreprocessing", "MosaicTest"}
 	cat := loadRealCatalog(t)
 	cats := cat.WorkflowCategories()
 

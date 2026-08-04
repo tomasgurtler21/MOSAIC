@@ -20,12 +20,15 @@ import (
 )
 
 // TestBodyPreservation_AllGenericAgentsBodyUnchanged asserts that for every .md file under
-// Agents/Generic/, the body bytes (everything after the closing frontmatter delimiter) are
-// byte-identical to the source after a transformation with the fixture harness module.
+// Agents/Generic/, the body structure is byte-identical before and after transformation,
+// with tool-managed [[DEPLOYED:]] region content excluded from comparison.
 //
-// Agents with injection regions: the full body is compared. The fixture harness has no
-// injection content (injections: []), so injection regions remain empty, matching the
-// source.
+// [[DEPLOYED:]] regions (CommunicationProtocol, AvailableWorkflows, InfrastructureAgents,
+// HarnessConstraints, etc.) are unconditionally regenerated on every transform: their
+// content is expected to change. The invariant being asserted is that everything else —
+// section names, boundary tag lines, plain prose, and user-owned [[INJECTION:]] regions —
+// is never altered. Clearing DEPLOYED region content in both source and output before
+// comparison isolates exactly this structural invariant.
 func TestBodyPreservation_AllGenericAgentsBodyUnchanged(t *testing.T) {
 	mod := newFixtureModule(t)
 	model := fixtureModel()
@@ -45,34 +48,35 @@ func TestBodyPreservation_AllGenericAgentsBodyUnchanged(t *testing.T) {
 			}
 
 			agentKey := strings.TrimSuffix(filepath.Base(p), ".md")
+			// Determine role from agent key: only the orchestrator gets RoleOrchestrator.
+			role := domain.RoleWorker
+			if agentKey == "orchestrator" {
+				role = domain.RoleOrchestrator
+			}
 			req := transform.Request{
-				Source: src,
-				Kind:   domain.ArtifactAgent,
-				Key:    agentKey,
-				Module: mod,
-				Model:  model,
-				Scope:  domain.ScopeProject,
+				Source:   src,
+				Kind:     domain.ArtifactAgent,
+				Key:      agentKey,
+				Module:   mod,
+				Model:    model,
+				Scope:    domain.ScopeProject,
+				Role:     role,
+				Protocol: fixtureProtocol("1.9"),
 			}
 
 			result, err := transform.Apply(req)
 			if err != nil {
-				// RED phase: Apply returns ErrNotImplemented, causing every subtest to fail here.
 				t.Fatalf("Apply(%s): %v", rel, err)
 			}
 
-			// Extract body bytes from source and output using the same low-level split so the
-			// comparison is purely about content, independent of frontmatter serialisation.
-			_, srcBody, err := docformat.SplitFrontmatter(src)
-			if err != nil {
-				t.Fatalf("SplitFrontmatter (source, %s): %v", rel, err)
-			}
-			_, outBody, err := docformat.SplitFrontmatter(result.Output)
-			if err != nil {
-				t.Fatalf("SplitFrontmatter (output, %s): %v", rel, err)
-			}
+			// Compare body structure with [[DEPLOYED:]] content cleared in both operands.
+			// DEPLOYED region content is legitimately different before and after transform;
+			// the structural bytes surrounding those regions must remain identical.
+			srcBody := bodyWithDeployedContentCleared(t, src, rel+" (source)")
+			outBody := bodyWithDeployedContentCleared(t, result.Output, rel+" (output)")
 
 			if !bytes.Equal(srcBody, outBody) {
-				t.Errorf("body bytes changed after transformation of %s\n"+
+				t.Errorf("body structure changed after transformation of %s\n"+
 					"source body (%d bytes, first 200):\n%q\n"+
 					"output body (%d bytes, first 200):\n%q",
 					rel,
@@ -82,6 +86,29 @@ func TestBodyPreservation_AllGenericAgentsBodyUnchanged(t *testing.T) {
 			}
 		})
 	}
+}
+
+// bodyWithDeployedContentCleared parses src, clears every [[DEPLOYED:]] region's inner
+// content, and returns the resulting body bytes (everything after the frontmatter delimiter).
+// The boundary tag lines themselves are preserved; only the bytes between them are erased.
+// This lets the caller compare body structure while tolerating expected changes to
+// tool-managed region content across a transform.
+func bodyWithDeployedContentCleared(t *testing.T, src []byte, label string) []byte {
+	t.Helper()
+	doc, err := docformat.Parse(src)
+	if err != nil {
+		t.Fatalf("docformat.Parse(%s): %v", label, err)
+	}
+	for _, node := range doc.Body().DeployedRegions() {
+		if err := node.Clear(); err != nil {
+			t.Fatalf("clear deployed region %q in %s: %v", node.Name(), label, err)
+		}
+	}
+	_, body, err := docformat.SplitFrontmatter(doc.Bytes())
+	if err != nil {
+		t.Fatalf("SplitFrontmatter(%s): %v", label, err)
+	}
+	return body
 }
 
 // TestBodyPreservation_BodyLengthMatchesSource is a lighter check that can be run without
@@ -106,8 +133,8 @@ required_skills: []
 This body must arrive byte-for-byte in the output.
 No character may be altered, added, or removed.
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 
 [[/SECTION:Identity]]
 `

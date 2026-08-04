@@ -430,6 +430,11 @@ func newBaseDeps(t *testing.T, stub *interactiontest.Stub) (app.Deps, string) {
 		MosaicRoot:  t.TempDir(),
 		GOOS:        "linux",
 		Now:         func() time.Time { return time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC) },
+		// ProtocolLoader defaults to a success stub so that the ~194 call sites that do not
+		// exercise protocol loading are not broken when the implementation starts invoking
+		// Deps.ProtocolLoader unconditionally. Tests that exercise protocol behaviour
+		// (protocol_wiring_test.go) override this field explicitly.
+		ProtocolLoader: &stubProtocolLoader{content: minimalProtocolContent("1.9")},
 	}, workspace
 }
 

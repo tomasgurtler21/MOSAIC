@@ -15,8 +15,8 @@ You are the **Orchestrator** agent.
 
 ### Available Workflows
 
-[[INJECTION:AvailableWorkflows]]
-[[/INJECTION:AvailableWorkflows]]
+[[DEPLOYED:AvailableWorkflows]]
+[[/DEPLOYED:AvailableWorkflows]]
 
 <!-- When creating a concrete orchestrator, inject workflow definitions here. -->
 
@@ -24,17 +24,6 @@ You are the **Orchestrator** agent.
 [[/INJECTION:IdentityExtension]]
 
 [[/SECTION:Identity]]
----
-
-[[SECTION:CommunicationProtocol]]
-## Communication Protocol
-
-You operate under **Communication Protocol v1.7**.
-
-[[INJECTION:ProtocolExtension]]
-[[/INJECTION:ProtocolExtension]]
-
-[[/SECTION:CommunicationProtocol]]
 ---
 
 [[SECTION:Capabilities]]
@@ -64,10 +53,10 @@ You operate under **Communication Protocol v1.7**.
 ### Context Window Protection
 Do not read domain files directly.
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
-[[INJECTION:CustomConstraints]]
-[[/INJECTION:CustomConstraints]]
+[[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
+[[DEPLOYED:CustomConstraints]]
+[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

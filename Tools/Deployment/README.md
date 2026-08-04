@@ -375,6 +375,11 @@ by `mosaic-deploy`.
 
 `mosaic-deploy` reads generic source files that already have the correct
 boundary structure and transforms them into harness-specific deployed files.
+It introduces a third marker kind, `[[DEPLOYED:Name]]`, for regions it
+regenerates on every deploy (harness constraints, language patterns, the
+communication protocol, and similar tool-managed content). These are distinct
+from `[[INJECTION:Name]]` regions, which belong to the user and are preserved
+across updates.
 
 For the generic source-file format reference (fields, boundary conventions,
 version bump rules), see [Agents/Generic/SOURCE-FORMAT.md](../../Agents/Generic/SOURCE-FORMAT.md).

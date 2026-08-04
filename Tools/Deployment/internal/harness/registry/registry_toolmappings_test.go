@@ -123,7 +123,7 @@ func TestDiscover_ToolMappingsHookNil_DescriptorMappingsUntouched(t *testing.T) 
 		},
 	}
 	mod := newMappingsModule(id, originalMappings)
-	registry.Register(id, func() (domain.HarnessModule, error) { return mod, nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return mod, nil })
 
 	// ToolMappings is nil — the no-config case. The field does not exist yet, so this
 	// struct literal fails to compile until I4.1 adds it.
@@ -161,7 +161,7 @@ func TestDiscover_ToolMappingsHook_CalledWithHarnessID(t *testing.T) {
 	id := uniqueID(t, "hookid")
 
 	mod := newMappingsModule(id, nil)
-	registry.Register(id, func() (domain.HarnessModule, error) { return mod, nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return mod, nil })
 
 	rec := &hookRecorder{result: nil}
 	reg, err := registry.Discover(registry.Options{
@@ -207,7 +207,7 @@ func TestDiscover_ToolMappingsHook_CalledWithDeclaredMappings(t *testing.T) {
 		},
 	}
 	mod := newMappingsModule(id, declared)
-	registry.Register(id, func() (domain.HarnessModule, error) { return mod, nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return mod, nil })
 
 	rec := &hookRecorder{result: nil}
 	_, err := registry.Discover(registry.Options{
@@ -254,7 +254,7 @@ func TestDiscover_ToolMappingsHook_ReturnValueInstalledOnDescriptor(t *testing.T
 	// Module starts with no mappings — simulating a harness whose descriptor declares
 	// no user_interaction mapping (which is correct: FR-4 leaves it to user config).
 	mod := newMappingsModule(id, nil)
-	registry.Register(id, func() (domain.HarnessModule, error) { return mod, nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return mod, nil })
 
 	// The hook returns a multi-destination mapping: both a main destination (adding the
 	// tool to the harness's built-in tools field) and a field destination (producing a
@@ -318,7 +318,7 @@ func TestDiscover_ToolMappingsHook_ReturningNilLeavesDescriptorMappingsUntouched
 		},
 	}
 	mod := newMappingsModule(id, original)
-	registry.Register(id, func() (domain.HarnessModule, error) { return mod, nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return mod, nil })
 
 	// Hook returns nil → leave the descriptor's declared mappings unchanged.
 	rec := &hookRecorder{result: nil}

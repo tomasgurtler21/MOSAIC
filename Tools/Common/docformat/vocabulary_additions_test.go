@@ -1,19 +1,19 @@
 package docformat_test
 
-// Tests for ArtifactProvenance vocabulary additions (T1.2, T1.3).
+// Tests for ArtifactProvenance vocabulary additions (T1.2, T1.3), updated for Stage 2.
 //
-// Coverage (T1.2 — vocabulary constants):
-//   - CanonicalSections contains 8 entries after adding ArtifactProvenance.
-//   - CanonicalSections[2] is "ArtifactProvenance".
-//   - CanonicalSections lists all 8 entries in the precise canonical order.
-//   - CanonicalInjections contains 13 entries after adding ArtifactProvenanceExtension.
+// Coverage (T1.2 — vocabulary constants, Stage 2 values):
+//   - CanonicalSections contains 7 entries after Stage 2 removes CommunicationProtocol.
+//   - CanonicalSections[1] is "ArtifactProvenance" (immediately after Identity).
+//   - CanonicalSections lists all 7 entries in the precise canonical order.
+//   - CanonicalInjections contains 8 entries (user-owned names only) after Stage 2.
 //   - CanonicalInjections includes "ArtifactProvenanceExtension".
 //   - InjectionParent maps "ArtifactProvenanceExtension" to "ArtifactProvenance".
-//   - ClassifyInjection("ArtifactProvenanceExtension") returns InjectionProject.
 //
-// Coverage (T1.3 — validator behaviour with 8-section vocabulary):
-//   - A document with all 8 canonical sections in correct order passes validation
-//     (no "out-of-order-section" issue, no "unknown-injection" issue).
+// Coverage (T1.3 — validator behaviour with canonical vocabulary):
+//   - A document with all canonical sections and CommunicationProtocol as a top-level
+//     DEPLOYED boundary in correct order passes validation (no "out-of-order-section"
+//     issue, no "unknown-injection" issue).
 //   - A document with ArtifactProvenance placed after Capabilities produces an
 //     "out-of-order-section" issue when RequireCanonicalSections is true.
 
@@ -21,55 +21,30 @@ import (
 	"testing"
 
 	"mosaic-common/docformat"
-	domain "mosaic-common/mosaic"
 )
 
 // ---------------------------------------------------------------------------
 // T1.2 — CanonicalSections
 // ---------------------------------------------------------------------------
 
-func TestCanonicalSections_ContainsEightSections(t *testing.T) {
-	// After the ArtifactProvenance addition the slice grows from 7 to 8.
+func TestCanonicalSections_ContainsSevenSections(t *testing.T) {
+	// After Stage 2, CommunicationProtocol is removed from CanonicalSections and
+	// becomes a tool-managed boundary name declared with [[DEPLOYED:]].
 	got := docformat.CanonicalSections
-	if len(got) != 8 {
-		t.Fatalf("CanonicalSections length: want 8, got %d: %v", len(got), got)
+	if len(got) != 7 {
+		t.Fatalf("CanonicalSections length: want 7, got %d: %v", len(got), got)
 	}
 }
 
-func TestCanonicalSections_ArtifactProvenance_IsAtIndexTwo(t *testing.T) {
+func TestCanonicalSections_ArtifactProvenance_IsAtIndexOne(t *testing.T) {
+	// After Stage 2 removes CommunicationProtocol from CanonicalSections, ArtifactProvenance
+	// shifts from index 2 to index 1 (directly after Identity).
 	got := docformat.CanonicalSections
-	if len(got) <= 2 {
-		t.Fatalf("CanonicalSections too short to have index 2: %v", got)
+	if len(got) <= 1 {
+		t.Fatalf("CanonicalSections too short to have index 1: %v", got)
 	}
-	if got[2] != "ArtifactProvenance" {
-		t.Errorf("CanonicalSections[2]: want %q, got %q", "ArtifactProvenance", got[2])
-	}
-}
-
-func TestCanonicalSections_ArtifactProvenance_FollowsCommunicationProtocol(t *testing.T) {
-	// ArtifactProvenance must appear after CommunicationProtocol in the slice.
-	sections := docformat.CanonicalSections
-	cpIdx := -1
-	apIdx := -1
-	for i, s := range sections {
-		if s == "CommunicationProtocol" {
-			cpIdx = i
-		}
-		if s == "ArtifactProvenance" {
-			apIdx = i
-		}
-	}
-	if cpIdx < 0 {
-		t.Fatal("CommunicationProtocol not found in CanonicalSections")
-	}
-	if apIdx < 0 {
-		t.Fatal("ArtifactProvenance not found in CanonicalSections")
-	}
-	if cpIdx >= apIdx {
-		t.Errorf(
-			"ArtifactProvenance (index %d) must appear after CommunicationProtocol (index %d)",
-			apIdx, cpIdx,
-		)
+	if got[1] != "ArtifactProvenance" {
+		t.Errorf("CanonicalSections[1]: want %q, got %q", "ArtifactProvenance", got[1])
 	}
 }
 
@@ -100,11 +75,12 @@ func TestCanonicalSections_ArtifactProvenance_PrecedesCapabilities(t *testing.T)
 	}
 }
 
-func TestCanonicalSections_FullEightEntryOrder(t *testing.T) {
-	// This is the authoritative lockstep contract with boundary_constants.py.
+func TestCanonicalSections_FullSevenEntryOrder(t *testing.T) {
+	// This is the authoritative lockstep contract with boundary_constants.py after Stage 2.
+	// CommunicationProtocol has been removed; the remaining seven sections keep their
+	// relative order.
 	want := []string{
 		"Identity",
-		"CommunicationProtocol",
 		"ArtifactProvenance",
 		"Capabilities",
 		"Constraints",
@@ -129,11 +105,13 @@ func TestCanonicalSections_FullEightEntryOrder(t *testing.T) {
 // T1.2 — CanonicalInjections
 // ---------------------------------------------------------------------------
 
-func TestCanonicalInjections_ContainsThirteenInjections(t *testing.T) {
-	// After adding ArtifactProvenanceExtension the total rises from 12 to 13.
+func TestCanonicalInjections_ContainsEightInjections(t *testing.T) {
+	// After Stage 2, tool-managed names (HarnessConstraints, CustomConstraints, etc.)
+	// and ProtocolExtension are removed from CanonicalInjections, leaving exactly the
+	// 8 user-owned names.
 	got := docformat.CanonicalInjections
-	if len(got) != 13 {
-		t.Fatalf("CanonicalInjections length: want 13, got %d: %v", len(got), got)
+	if len(got) != 8 {
+		t.Fatalf("CanonicalInjections length: want 8, got %d: %v", len(got), got)
 	}
 }
 
@@ -177,33 +155,18 @@ func TestInjectionParent_ArtifactProvenanceExtension_MapsToArtifactProvenance(t 
 }
 
 // ---------------------------------------------------------------------------
-// T1.2 — ClassifyInjection
+// T1.3 — Validator: canonical document with DEPLOYED:CommunicationProtocol passes
 // ---------------------------------------------------------------------------
 
-func TestClassifyInjection_ArtifactProvenanceExtension_IsProject(t *testing.T) {
-	// ArtifactProvenanceExtension has no special harness role; it is a
-	// project-level injection (default case in ClassifyInjection).
-	got := docformat.ClassifyInjection("ArtifactProvenanceExtension")
-	if got != domain.InjectionProject {
-		t.Errorf(
-			"ClassifyInjection(\"ArtifactProvenanceExtension\"): want InjectionProject, got %q",
-			got,
-		)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// T1.3 — Validator: 8 canonical sections in correct order passes
-// ---------------------------------------------------------------------------
-
-func TestValidate_EightCanonicalSections_CorrectOrder_ReturnsNoOutOfOrderIssue(t *testing.T) {
-	// A document with all eight canonical sections in the correct order (ArtifactProvenance
-	// at position 2, between CommunicationProtocol and Capabilities) must not produce an
-	// "out-of-order-section" issue.
+func TestValidate_CanonicalDocument_CorrectOrder_ReturnsNoOutOfOrderIssue(t *testing.T) {
+	// A document with all canonical sections plus a top-level [[DEPLOYED:CommunicationProtocol]]
+	// in the correct second position must not produce an "out-of-order-section" issue.
 	//
-	// RED note: before vocabulary.go is updated, ArtifactProvenanceExtension is not a
-	// canonical injection, so the "unknown-injection" check fires — the test fails.
-	// After implementation both the order and injection checks are satisfied.
+	// Fixture: all-eight-sections.md layout (Stage 2):
+	//   [[SECTION:Identity]]
+	//   [[DEPLOYED:CommunicationProtocol]]   ← canonical slot 1 (top-level deployed)
+	//   [[SECTION:ArtifactProvenance]]
+	//   ... remaining sections in order ...
 	doc := parsedBoundaryFixture(t, "all-eight-sections.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
@@ -214,7 +177,7 @@ func TestValidate_EightCanonicalSections_CorrectOrder_ReturnsNoOutOfOrderIssue(t
 
 	if hasIssueWithCode(issues, "out-of-order-section") {
 		t.Errorf(
-			"expected no out-of-order-section issue for 8 canonical sections in correct order, got issues: %v",
+			"expected no out-of-order-section issue for canonical sections in correct order, got issues: %v",
 			issues,
 		)
 	}
@@ -226,9 +189,8 @@ func TestValidate_EightCanonicalSections_CorrectOrder_ReturnsNoOutOfOrderIssue(t
 	}
 }
 
-func TestValidate_EightCanonicalSections_CorrectOrder_ReturnsNoIssues(t *testing.T) {
-	// The fully canonical 8-section document must produce zero issues under the
-	// strictest validation options.
+func TestValidate_CanonicalDocument_CorrectOrder_ReturnsNoIssues(t *testing.T) {
+	// The canonical document must produce zero issues under the strictest validation options.
 	doc := parsedBoundaryFixture(t, "all-eight-sections.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
@@ -238,7 +200,7 @@ func TestValidate_EightCanonicalSections_CorrectOrder_ReturnsNoIssues(t *testing
 	})
 
 	if len(issues) != 0 {
-		t.Errorf("expected no issues for a well-formed 8-section document, got %d:", len(issues))
+		t.Errorf("expected no issues for a well-formed canonical document, got %d:", len(issues))
 		for _, iss := range issues {
 			t.Logf("  [%s] %s (line %d)", iss.Code, iss.Message, iss.Line)
 		}
@@ -251,12 +213,8 @@ func TestValidate_EightCanonicalSections_CorrectOrder_ReturnsNoIssues(t *testing
 
 func TestValidate_ArtifactProvenance_AfterCapabilities_ReportsOutOfOrderIssue(t *testing.T) {
 	// A document where ArtifactProvenance appears after Capabilities violates the
-	// canonical section order (ArtifactProvenance belongs at index 2, Capabilities
-	// at index 3). The validator must report an "out-of-order-section" issue.
-	//
-	// RED note: before vocabulary.go is updated, ArtifactProvenance is not a canonical
-	// section so canonicalSectionIndex returns -1 and the entry is skipped — no issue
-	// is produced and the test fails. After implementation the index comparison fires.
+	// canonical section order (ArtifactProvenance belongs at index 2 in CanonicalOrder,
+	// Capabilities at index 3). The validator must report an "out-of-order-section" issue.
 	doc := parsedBoundaryFixture(t, "malformed/artifact-provenance-out-of-order.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{

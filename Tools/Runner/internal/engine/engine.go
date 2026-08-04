@@ -61,7 +61,12 @@ func Next(
 	}
 
 	// Locate the row that was last completed.
-	currentRowIdx := findCurrentRowIndex(workflow, stages, state)
+	// Check for a routing error (e.g. unresolvable approach) before the generic
+	// "could not determine current row" check — the approach error is more specific.
+	currentRowIdx, rowFindErr := findCurrentRowIndex(workflow, stages, state)
+	if rowFindErr != nil {
+		return domain.EngineDecision{Stop: &domain.StopDecision{Reason: rowFindErr.Error()}}
+	}
 	if currentRowIdx < 0 {
 		return domain.EngineDecision{Stop: &domain.StopDecision{
 			Reason: fmt.Sprintf("could not determine current row from artifact state (LastAgent=%q)",
@@ -208,10 +213,12 @@ func ResumePoint(
 
 	// EXECUTION row: apply group/stage logic.
 	currentStageNum := parseStageNumber(lastEntry.Stage)
-	nextRowIdx, nextStageNum, nextStageStr, nextGroupIdxInGroups, complete :=
-		computeNextFromExecution(workflow, stages, currentRowIdx, currentStageNum)
+	adv, advErr := computeNextFromExecution(workflow, stages, currentRowIdx, currentStageNum)
+	if advErr != nil {
+		return domain.ResumeInfo{}, fmt.Errorf("resume: %w", advErr)
+	}
 
-	if complete || nextRowIdx < 0 {
+	if adv.Complete || adv.RowIndex < 0 {
 		return domain.ResumeInfo{
 			RowIndex:    len(workflow.Table.Rows),
 			Phase:       "",
@@ -223,19 +230,17 @@ func ResumePoint(
 		}, nil
 	}
 
-	nextRow := workflow.Table.Rows[nextRowIdx]
+	nextRow := workflow.Table.Rows[adv.RowIndex]
 	nextGroupIdx := -1
 	if nextRow.PhaseParsed.IsStaged {
-		// Map the approach-ordered group index to aw.Groups index.
-		nextGroupIdx = findGroupIndexInWorkflow(workflow, nextRowIdx)
-		_ = nextGroupIdxInGroups // approach-ordered index not needed for ResumeInfo
+		nextGroupIdx = findGroupIndexInWorkflow(workflow, adv.RowIndex)
 	}
 
 	return domain.ResumeInfo{
-		RowIndex:    nextRowIdx,
+		RowIndex:    adv.RowIndex,
 		Phase:       nextRow.Phase,
-		Stage:       nextStageStr,
-		StageNumber: nextStageNum,
+		Stage:       adv.StageString,
+		StageNumber: adv.StageNumber,
 		GroupIndex:  nextGroupIdx,
 		Seq:         state.GlobalSequence,
 		RerunLast:   false,
@@ -278,7 +283,10 @@ func initialDispatch(
 		return domain.EngineDecision{Stop: &domain.StopDecision{Reason: "no stage set available for staged workflow"}}
 	}
 	stage1 := stages.Entries[0]
-	ordGroups := orderedGroupsForApproach(workflow, stage1.Approach)
+	ordGroups, ordErr := orderedGroupsForStage(workflow, stages, stage1.Number)
+	if ordErr != nil {
+		return domain.EngineDecision{Stop: &domain.StopDecision{Reason: ordErr.Error()}}
+	}
 	if len(ordGroups) == 0 {
 		return domain.EngineDecision{Stop: &domain.StopDecision{Reason: "no active execution groups for stage 1"}}
 	}
@@ -345,7 +353,10 @@ func handleNonExecutionSuccess(
 			}}
 		}
 		stage1 := stages.Entries[0]
-		ordGroups := orderedGroupsForApproach(workflow, stage1.Approach)
+		ordGroups, ordErr := orderedGroupsForStage(workflow, stages, stage1.Number)
+		if ordErr != nil {
+			return domain.EngineDecision{Stop: &domain.StopDecision{Reason: ordErr.Error()}}
+		}
 		if len(ordGroups) == 0 {
 			return domain.EngineDecision{Stop: &domain.StopDecision{
 				Reason: "no active execution groups for stage 1",
@@ -399,16 +410,18 @@ func handleExecutionSuccess(
 ) domain.EngineDecision {
 
 	currentStageNum := parseStageNumber(state.CurrentState.Stage)
-	nextRowIdx, nextStageNum, nextStageStr, _, complete :=
-		computeNextFromExecution(workflow, stages, currentRowIdx, currentStageNum)
+	adv, advErr := computeNextFromExecution(workflow, stages, currentRowIdx, currentStageNum)
+	if advErr != nil {
+		return domain.EngineDecision{Stop: &domain.StopDecision{Reason: advErr.Error()}}
+	}
 
-	if complete {
+	if adv.Complete {
 		return domain.EngineDecision{Complete: &domain.CompleteDecision{
 			FinalState: state.CurrentState,
 		}}
 	}
 
-	step, err := buildDispatchStep(workflow, stages, nextRowIdx, nextStageNum, nextStageStr,
+	step, err := buildDispatchStep(workflow, stages, adv.RowIndex, adv.StageNumber, adv.StageString,
 		agents, seq, now, nil)
 	if err != nil {
 		return domain.EngineDecision{Stop: &domain.StopDecision{Reason: err.Error()}}
@@ -416,19 +429,28 @@ func handleExecutionSuccess(
 	return domain.EngineDecision{Dispatch: &domain.DispatchDecision{Steps: []domain.DispatchStep{step}}}
 }
 
-// computeNextFromExecution returns the next row after a successful EXECUTION dispatch.
-// Returns (rowIdx, stageNum, stageStr, groupIdxInOrdGroups, complete).
-// When complete=true, there are no more rows to dispatch.
-// When rowIdx < 0 and complete=false, there was an internal error.
+// executionAdvance is the outcome of advancing past a completed EXECUTION row.
+type executionAdvance struct {
+	RowIndex    int                // next row to dispatch; undefined when Complete is true
+	StageNumber domain.StageNumber
+	StageString string             // "Stage-N"
+	Complete    bool               // no further rows to dispatch
+}
+
+// computeNextFromExecution returns the next row after a successful EXECUTION
+// dispatch, or an error when group ordering cannot be resolved for the current
+// or the next stage.
 func computeNextFromExecution(
 	workflow domain.AdmittedWorkflow,
 	stages *domain.StageSet,
 	currentRowIdx int,
 	currentStageNum domain.StageNumber,
-) (rowIdx int, stageNum domain.StageNumber, stageStr string, groupIdx int, complete bool) {
+) (executionAdvance, error) {
 
-	approach := getApproachForStage(stages, currentStageNum)
-	ordGroups := orderedGroupsForApproach(workflow, approach)
+	ordGroups, err := orderedGroupsForStage(workflow, stages, currentStageNum)
+	if err != nil {
+		return executionAdvance{}, err
+	}
 
 	currentGroupIdx := -1
 	for gi, g := range ordGroups {
@@ -438,7 +460,7 @@ func computeNextFromExecution(
 		}
 	}
 	if currentGroupIdx < 0 {
-		return -1, 0, "", -1, false
+		return executionAdvance{RowIndex: -1}, nil
 	}
 
 	group := ordGroups[currentGroupIdx]
@@ -447,37 +469,38 @@ func computeNextFromExecution(
 	if currentRowIdx < group.EndRow-1 {
 		next := currentRowIdx + 1
 		ss := fmt.Sprintf("Stage-%d", currentStageNum)
-		return next, currentStageNum, ss, currentGroupIdx, false
+		return executionAdvance{RowIndex: next, StageNumber: currentStageNum, StageString: ss}, nil
 	}
 
 	// Last row in current group: try next group within the same stage.
 	if currentGroupIdx+1 < len(ordGroups) {
 		nextGroup := ordGroups[currentGroupIdx+1]
 		ss := fmt.Sprintf("Stage-%d", currentStageNum)
-		return nextGroup.StartRow, currentStageNum, ss, currentGroupIdx + 1, false
+		return executionAdvance{RowIndex: nextGroup.StartRow, StageNumber: currentStageNum, StageString: ss}, nil
 	}
 
 	// Last group in the current stage: try the next stage.
 	if stages != nil {
 		nextStageEntry, ok := stages.Entry(currentStageNum + 1)
 		if ok {
-			nextStageNum := nextStageEntry.Number
-			nextApproach := nextStageEntry.Approach
-			nextOrdGroups := orderedGroupsForApproach(workflow, nextApproach)
+			nextOrdGroups, nextErr := orderedGroupsForStage(workflow, stages, nextStageEntry.Number)
+			if nextErr != nil {
+				return executionAdvance{}, nextErr
+			}
 			if len(nextOrdGroups) > 0 {
-				ss := fmt.Sprintf("Stage-%d", nextStageNum)
-				return nextOrdGroups[0].StartRow, nextStageNum, ss, 0, false
+				ss := fmt.Sprintf("Stage-%d", nextStageEntry.Number)
+				return executionAdvance{RowIndex: nextOrdGroups[0].StartRow, StageNumber: nextStageEntry.Number, StageString: ss}, nil
 			}
 		}
 	}
 
 	// No more stages: dispatch the first post-EXECUTION row if any.
 	if workflow.PostExecutionStartRow < workflow.PostExecutionEndRow {
-		return workflow.PostExecutionStartRow, 0, "", -1, false
+		return executionAdvance{RowIndex: workflow.PostExecutionStartRow}, nil
 	}
 
 	// Nothing left: run is complete.
-	return -1, 0, "", -1, true
+	return executionAdvance{Complete: true}, nil
 }
 
 // ---- Dispatch step construction ----
@@ -595,12 +618,20 @@ func resolveArtifacts(
 // ---- Row location helpers ----
 
 // findCurrentRowIndex returns the routing table row index that was last dispatched,
-// derived from the artifact state. Returns -1 if the row cannot be identified.
+// derived from the artifact state.
+//
+// It returns (-1, nil) when the row simply cannot be identified from the state
+// (no matching agent+phase row, unparseable stage number) — an ambiguity, not a
+// contract violation.
+//
+// It returns (-1, err) when the row would have been identified by sequence
+// arithmetic but that arithmetic could not run (e.g. unresolvable approach).
+// The error is propagated verbatim, never collapsed into -1.
 func findCurrentRowIndex(
 	workflow domain.AdmittedWorkflow,
 	stages *domain.StageSet,
 	state domain.ArtifactState,
-) int {
+) (int, error) {
 	agentName := extractAgentName(state.CurrentState.LastAgent)
 	phase := state.CurrentState.Phase
 
@@ -608,10 +639,10 @@ func findCurrentRowIndex(
 	if !isExecutionPhase(phase) {
 		for _, row := range workflow.Table.Rows {
 			if row.Agent == agentName && row.Phase == phase {
-				return row.Index
+				return row.Index, nil
 			}
 		}
-		return -1
+		return -1, nil
 	}
 
 	// EXECUTION row: collect all matching rows.
@@ -622,11 +653,11 @@ func findCurrentRowIndex(
 		}
 	}
 	if len(matches) == 0 {
-		return -1
+		return -1, nil
 	}
 	if len(matches) == 1 {
 		// Unique agent in EXECUTION — no disambiguation needed.
-		return matches[0]
+		return matches[0], nil
 	}
 
 	// Multiple EXECUTION rows for this agent (e.g. build-review appears in both
@@ -635,9 +666,13 @@ func findCurrentRowIndex(
 	// per-stage approach variation so mixed-approach workflows are handled correctly.
 	stageNum := parseStageNumber(state.CurrentState.Stage)
 	if stageNum == 0 {
-		return -1
+		return -1, nil
 	}
-	return findExecutionRowBySeq(workflow, stages, stageNum, state.GlobalSequence)
+	rowIdx, err := findExecutionRowBySeq(workflow, stages, stageNum, state.GlobalSequence)
+	if err != nil {
+		return -1, err // propagate, do not collapse to ambiguous -1
+	}
+	return rowIdx, nil
 }
 
 // findRowForLogEntry returns the row index corresponding to an execution log entry.
@@ -677,7 +712,10 @@ func findRowForLogEntry(
 	if stageNum == 0 {
 		return -1, fmt.Errorf("cannot parse stage number from %q", entry.Stage)
 	}
-	rowIdx := findExecutionRowBySeq(workflow, stages, stageNum, entry.Seq)
+	rowIdx, seqErr := findExecutionRowBySeq(workflow, stages, stageNum, entry.Seq)
+	if seqErr != nil {
+		return -1, seqErr // propagate approach error verbatim
+	}
 	if rowIdx < 0 {
 		return -1, fmt.Errorf("cannot map seq=%d in stage %q to a routing row", entry.Seq, entry.Stage)
 	}
@@ -693,14 +731,20 @@ func findRowForLogEntry(
 // Previous stages may have used different approaches (and therefore different
 // active row counts). The offset is computed by summing the actual row counts
 // across all previous stages rather than assuming a uniform rows-per-stage value.
+//
+// Returns an error when any stage at or before stageNum has an unresolvable
+// approach, since the row-count arithmetic depends on every prior stage's
+// ordered sequence.
 func findExecutionRowBySeq(
 	workflow domain.AdmittedWorkflow,
 	stages *domain.StageSet,
 	stageNum domain.StageNumber,
 	seq int,
-) int {
-	approach := getApproachForStage(stages, stageNum)
-	ordGroups := orderedGroupsForApproach(workflow, approach)
+) (int, error) {
+	ordGroups, err := orderedGroupsForStage(workflow, stages, stageNum)
+	if err != nil {
+		return -1, err
+	}
 
 	preExecCount := workflow.PreExecutionEndRow - workflow.PreExecutionStartRow
 
@@ -712,31 +756,34 @@ func findExecutionRowBySeq(
 			if entry.Number >= stageNum {
 				break
 			}
-			prevGroups := orderedGroupsForApproach(workflow, entry.Approach)
+			prevGroups, prevErr := orderedGroupsForStage(workflow, stages, entry.Number)
+			if prevErr != nil {
+				return -1, prevErr
+			}
 			previousRowsTotal += countActiveRows(prevGroups)
 		}
 	}
 
 	rowsThisStage := countActiveRows(ordGroups)
 	if rowsThisStage == 0 {
-		return -1
+		return -1, nil
 	}
 
 	// 1-indexed position within the current stage.
 	posInStage := seq - preExecCount - previousRowsTotal
 	if posInStage <= 0 {
-		return -1
+		return -1, nil
 	}
 
 	pos := posInStage
 	for _, g := range ordGroups {
 		size := g.EndRow - g.StartRow
 		if pos <= size {
-			return g.StartRow + (pos - 1)
+			return g.StartRow + (pos - 1), nil
 		}
 		pos -= size
 	}
-	return -1
+	return -1, nil
 }
 
 // findFirstRowForAgent returns the index of the first routing table row
@@ -774,50 +821,57 @@ func findGroupIndexInWorkflow(workflow domain.AdmittedWorkflow, rowIdx int) int 
 
 // ---- Approach and group helpers ----
 
-// orderedGroupsForApproach returns the execution groups in the order they should
-// run for the given approach value.
+// orderedGroupsForStage returns the execution groups in the order they run for
+// the given stage, resolved from the workflow's approach table.
 //
-// For single-group workflows (TwoGroup=false) the approach has no effect on
-// ordering; the single group is returned as-is.
-func orderedGroupsForApproach(workflow domain.AdmittedWorkflow, approach domain.Approach) []domain.ExecutionGroup {
-	if !workflow.TwoGroup {
-		return workflow.Groups
+// When the workflow declares no groups, the approach is ignored entirely and the
+// workflow's single implicit group is returned without error.
+//
+// Returns *domain.UnresolvableApproachError when the stage's Approach value has
+// no matching table row. It never falls back to the declared order, to a default
+// approach, or to running every group.
+func orderedGroupsForStage(
+	workflow domain.AdmittedWorkflow,
+	stages *domain.StageSet,
+	stageNum domain.StageNumber,
+) ([]domain.ExecutionGroup, error) {
+	// No groups declared: ignore the approach entirely.
+	if !workflow.GroupsDeclared {
+		return workflow.Groups, nil
 	}
 
-	var testGroup, implGroup domain.ExecutionGroup
-	for _, g := range workflow.Groups {
-		switch g.Kind {
-		case domain.GroupTest:
-			testGroup = g
-		case domain.GroupImplementation:
-			implGroup = g
+	// Grouped workflow: look up the approach for this stage.
+	if stages == nil {
+		return nil, fmt.Errorf("stage %d: staged workflow requires a stage set but none is available", stageNum)
+	}
+	entry, ok := stages.Entry(stageNum)
+	if !ok {
+		return nil, fmt.Errorf("stage %d has no entry in stage set", stageNum)
+	}
+
+	// Look up the approach in the workflow's approach table.
+	groupNames, found := workflow.ApproachTable.Sequence(entry.Approach)
+	if !found {
+		return nil, &domain.UnresolvableApproachError{
+			WorkflowID: workflow.Table.Info.ID,
+			Stage:      stageNum,
+			Approach:   entry.Approach,
+			Declared:   workflow.ApproachTable.Approaches(),
 		}
 	}
 
-	switch approach {
-	case domain.ApproachTDD:
-		return []domain.ExecutionGroup{testGroup, implGroup}
-	case domain.ApproachImplementationFirst:
-		return []domain.ExecutionGroup{implGroup, testGroup}
-	case domain.ApproachImplementationOnly:
-		return []domain.ExecutionGroup{implGroup}
-	case domain.ApproachTestsOnly:
-		return []domain.ExecutionGroup{testGroup}
-	default:
-		return workflow.Groups
+	// Map group names to execution groups in sequence order.
+	result := make([]domain.ExecutionGroup, 0, len(groupNames))
+	for _, name := range groupNames {
+		g, ok := workflow.GroupByName(name)
+		if !ok {
+			// This should be unreachable for an admitted workflow (guaranteed by A4),
+			// but surface an error rather than silently skipping.
+			return nil, fmt.Errorf("approach %q references group %q, which no EXECUTION row declares", entry.Approach, name)
+		}
+		result = append(result, g)
 	}
-}
-
-// getApproachForStage returns the approach for the given stage number,
-// falling back to ApproachTDD when the stage set is nil or the stage is not found.
-func getApproachForStage(stages *domain.StageSet, stageNum domain.StageNumber) domain.Approach {
-	if stages == nil {
-		return domain.ApproachTDD
-	}
-	if entry, ok := stages.Entry(stageNum); ok {
-		return entry.Approach
-	}
-	return domain.ApproachTDD
+	return result, nil
 }
 
 // countActiveRows returns the total number of rows across all groups in the slice.

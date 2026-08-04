@@ -63,12 +63,12 @@ func Apply(req Request) (Result, error) {
 	// stamps, and tool fields. Returns FieldChange audit entries and any gaps.
 	fieldChanges, gaps := applyFrontmatter(fm, fmPlan, toolResult, req, desc)
 
-	// Process injection regions in the body, applying the injection merge policy:
-	// harness injections are filled from the module, project injections are lifted from
-	// the deployed file (or emptied on new deployment), AvailableWorkflows is assembled
-	// from req.Workflows, and InfrastructureAgents is assembled from
-	// req.InfrastructureAgents. Orphaned injection points produce gaps.
-	injectionOutcomes, injectionGaps, workflowIDs, infraAgentKeys, err := processInjections(doc, req)
+	// Process managed regions in the body, applying the merge policy:
+	//   [[INJECTION:]] (user-owned) — preserved from deployed on update, emptied on create.
+	//   [[DEPLOYED:]] (tool-managed) — regenerated every transform from harness/workflows/infra.
+	// Orphaned user-owned injection points produce gaps; tool-managed regions removed from
+	// the source produce no gap.
+	regionOutcomes, regionGaps, workflowIDs, infraAgentKeys, err := processRegions(doc, req)
 	if err != nil {
 		return Result{}, err
 	}
@@ -76,13 +76,13 @@ func Apply(req Request) (Result, error) {
 	// Serialise the transformed document to bytes.
 	output := doc.Bytes()
 
-	// Merge frontmatter gaps with injection gaps into one ordered slice.
-	allGaps := append(gaps, injectionGaps...)
+	// Merge frontmatter gaps with region gaps into one ordered slice.
+	allGaps := append(gaps, regionGaps...)
 
 	report := Report{
 		Fields:               fieldChanges,
 		Tools:                toolResult.Resolutions,
-		Injections:           injectionOutcomes,
+		Regions:              regionOutcomes,
 		Gaps:                 allGaps,
 		Workflows:            workflowIDs,
 		InfrastructureAgents: infraAgentKeys,

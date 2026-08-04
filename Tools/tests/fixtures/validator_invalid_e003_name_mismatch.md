@@ -8,6 +8,6 @@ description: Invalid file - open and close tags have different names (E003)
 [[SECTION:Identity]]
 # TestAgent Agent
 
-Content here. The open tag says Identity but the close tag says CommunicationProtocol.
+Content here. The open tag says Identity but the close tag says Capabilities.
 
-[[/SECTION:CommunicationProtocol]]
+[[/SECTION:Capabilities]]

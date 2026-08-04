@@ -1,11 +1,24 @@
 package docformat
 
-import "mosaic-common/mosaic"
-
 func init() {
-	// CanonicalSections lists the eight MOSAIC section names in their required document
-	// order, mirroring boundary_constants.py.
+	// CanonicalSections lists the seven canonical MOSAIC section names in their required
+	// document order, mirroring boundary_constants.py. CommunicationProtocol is NOT a
+	// member; it is a tool-managed boundary name declared with [[DEPLOYED:]].
 	CanonicalSections = []string{
+		"Identity",
+		"ArtifactProvenance",
+		"Capabilities",
+		"Constraints",
+		"ErrorHandling",
+		"OutputFormat",
+		"ExecutionPhilosophy",
+	}
+
+	// CanonicalOrder lists the eight canonical document slots in required order,
+	// mirroring boundary_constants.py. Entry at index 1 is "CommunicationProtocol",
+	// satisfied by a top-level [[DEPLOYED:CommunicationProtocol]] boundary; every other
+	// entry is a section name. This is the list the document-order check walks.
+	CanonicalOrder = []string{
 		"Identity",
 		"CommunicationProtocol",
 		"ArtifactProvenance",
@@ -16,63 +29,53 @@ func init() {
 		"ExecutionPhilosophy",
 	}
 
-	// CanonicalInjections lists the thirteen canonical MOSAIC injection names, mirroring
-	// boundary_constants.py.
-	CanonicalInjections = []string{
-		"IdentityExtension",
-		"ProtocolExtension",
-		"ArtifactProvenanceExtension",
+	// CanonicalDeployed lists the tool-managed boundary names that must be declared
+	// with [[DEPLOYED:]] in any document that uses them.
+	CanonicalDeployed = []string{
+		"CommunicationProtocol",
+		"AvailableWorkflows",
+		"InfrastructureAgents",
 		"LanguagePatterns",
-		"CodebaseContext",
-		"OutputArtifactTemplate",
 		"HarnessConstraints",
 		"CustomConstraints",
+	}
+
+	// DeployedParent maps each tool-managed boundary name to its required parent section.
+	// An entry whose value is "" means the boundary must appear at body top level
+	// (for example, CommunicationProtocol).
+	DeployedParent = map[string]string{
+		"CommunicationProtocol": "", // top level — must not be nested inside any section
+		"AvailableWorkflows":    "Identity",
+		"InfrastructureAgents": "Identity",
+		"LanguagePatterns":     "Capabilities",
+		"HarnessConstraints":   "Constraints",
+		"CustomConstraints":    "Constraints",
+	}
+
+	// CanonicalInjections lists the eight user-owned injection names, mirroring
+	// boundary_constants.py. Tool-managed names and ProtocolExtension are NOT members.
+	CanonicalInjections = []string{
+		"IdentityExtension",
+		"ArtifactProvenanceExtension",
+		"CodebaseContext",
+		"OutputArtifactTemplate",
 		"ErrorHandlingExtension",
 		"ContextLimits",
 		"SeverityThresholds",
 		"SeverityDefinitions",
-		"AvailableWorkflows",
 	}
 
-	// InjectionParent maps each canonical injection name to the name of the section in
-	// which it is expected to appear, mirroring boundary_constants.py.
+	// InjectionParent maps each user-owned injection name to the name of the section in
+	// which it is expected to appear, mirroring boundary_constants.py. Tool-managed names
+	// and ProtocolExtension are NOT members.
 	InjectionParent = map[string]string{
 		"IdentityExtension":           "Identity",
-		"ProtocolExtension":           "CommunicationProtocol",
 		"ArtifactProvenanceExtension": "ArtifactProvenance",
-		"LanguagePatterns":            "Capabilities",
-		"CodebaseContext":        "Capabilities",
-		"OutputArtifactTemplate": "Capabilities",
-		"SeverityThresholds":     "Capabilities",
-		"SeverityDefinitions":    "Capabilities",
-		"HarnessConstraints":     "Constraints",
-		"CustomConstraints":      "Constraints",
-		"ErrorHandlingExtension": "ErrorHandling",
-		"ContextLimits":          "ExecutionPhilosophy",
-		"AvailableWorkflows":     "Identity",
-	}
-}
-
-// ClassifyInjection returns the InjectionClass for a named injection.
-//
-// Classification rules (mirroring boundary_constants.py):
-//   - "AvailableWorkflows" → InjectionWorkflow (assembled from workflow selections)
-//   - "HarnessConstraints", "LanguagePatterns", "CustomConstraints" → InjectionHarness (filled from descriptor)
-//   - all other names (canonical or not) → InjectionProject (project-specific, always empty on create)
-//
-// "CustomConstraints" is InjectionHarness so that VS Code GHCP can fill it with the parallel
-// tool calls instruction at the harness level. Other harnesses return ok=false for
-// Injection("CustomConstraints"), so applyHarnessInjection leaves it empty for them —
-// consistent with project-level semantics everywhere except VS Code GHCP.
-func ClassifyInjection(name string) mosaic.InjectionClass {
-	switch name {
-	case "AvailableWorkflows":
-		return mosaic.InjectionWorkflow
-	case "InfrastructureAgents":
-		return mosaic.InjectionInfrastructure
-	case "HarnessConstraints", "LanguagePatterns", "CustomConstraints":
-		return mosaic.InjectionHarness
-	default:
-		return mosaic.InjectionProject
+		"CodebaseContext":             "Capabilities",
+		"OutputArtifactTemplate":      "Capabilities",
+		"SeverityThresholds":          "Capabilities",
+		"SeverityDefinitions":         "Capabilities",
+		"ErrorHandlingExtension":      "ErrorHandling",
+		"ContextLimits":               "ExecutionPhilosophy",
 	}
 }

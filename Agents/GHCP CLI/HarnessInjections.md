@@ -5,12 +5,12 @@ harness: ghcp-cli
 
 # Harness Injections — GHCP CLI
 
-[[INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
 **Parallel Tool Calls:** Issue multiple independent tool calls in a single response whenever possible. Sequential tool calls are only permitted when a later call depends on the result of an earlier one. This minimises inference API calls to improve speed and reduce cost.
-[[/INJECTION:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 
-[[INJECTION:LanguagePatterns]]
-[[/INJECTION:LanguagePatterns]]
+[[DEPLOYED:LanguagePatterns]]
+[[/DEPLOYED:LanguagePatterns]]
 
 ---
 

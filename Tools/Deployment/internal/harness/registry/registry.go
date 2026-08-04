@@ -25,7 +25,7 @@ var ErrExternalNotPermitted = errors.New("external harness modules require expli
 // harness packages; the factories are snapshotted by Discover at call time.
 var (
 	builtinMu        sync.RWMutex
-	builtinFactories = make(map[string]func() (domain.HarnessModule, error))
+	builtinFactories = make(map[string]BuiltinFactory)
 )
 
 // Options configures the Discover call.
@@ -75,8 +75,8 @@ type Registry interface {
 
 // Register adds a built-in harness factory to the package-level registry. It must be called
 // from the harness module's own init() function. Adding a built-in harness costs exactly one
-// call to Register (AC6.6).
-func Register(id string, factory func() (domain.HarnessModule, error)) {
+// call to Register.
+func Register(id string, factory BuiltinFactory) {
 	builtinMu.Lock()
 	defer builtinMu.Unlock()
 	builtinFactories[id] = factory
@@ -215,7 +215,7 @@ func Discover(opts Options) (Registry, error) {
 	// Snapshot the package-level built-in registry so concurrent Register calls do not
 	// interfere with the remainder of this function.
 	builtinMu.RLock()
-	factories := make(map[string]func() (domain.HarnessModule, error), len(builtinFactories))
+	factories := make(map[string]BuiltinFactory, len(builtinFactories))
 	for id, f := range builtinFactories {
 		factories[id] = f
 	}
@@ -231,8 +231,9 @@ func Discover(opts Options) (Registry, error) {
 
 	// Step 1 — Built-ins (lowest precedence). Invoke each factory now to obtain the ref
 	// needed for List(); built-in factories are cheap, in-memory constructions.
+	builtinOpts := BuiltinOptions{MosaicRoot: opts.MosaicRoot}
 	for id, factory := range factories {
-		mod, err := factory()
+		mod, err := factory(builtinOpts)
 		if err != nil {
 			candidates[id] = entryWithTier{
 				entry: harnessEntry{
@@ -313,7 +314,8 @@ func Discover(opts Options) (Registry, error) {
 			if usable {
 				// External tier: inject from HarnessInjections.md if present alongside harness.yaml.
 				extInjections, _ := loadInjections(h.yamlPath)
-				extOrchInjections, _ := loadOrchInjections(h.yamlPath)
+				extOrchInjections, extOrchVersion, _ := loadOrchInjections(h.yamlPath)
+				h.desc.OrchestratorInjectionsVersion = extOrchVersion
 				mod = newRuntimeModule(ref, h.desc, extInjections, extOrchInjections)
 				// External modules resolve tools through their subprocess protocol, not through
 				// Descriptor().Tools.Mappings. The ToolMappings hook is not applied to them so
@@ -329,7 +331,8 @@ func Discover(opts Options) (Registry, error) {
 			if injErr != nil {
 				injections = make(map[string]string)
 			}
-			orchInjections, _ := loadOrchInjections(h.yamlPath)
+			orchInjections, orchVersion, _ := loadOrchInjections(h.yamlPath)
+			h.desc.OrchestratorInjectionsVersion = orchVersion
 			ref := domain.HarnessRef{
 				ID:          id,
 				DisplayName: h.desc.DisplayName,

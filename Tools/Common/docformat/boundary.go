@@ -19,6 +19,12 @@ type bodyItem interface {
 	// visitSections calls fn on every NodeSection reachable from this item, in
 	// document order. It is a no-op for text spans.
 	visitSections(fn func(*Node))
+	// visitDeployed calls fn on every NodeDeployed reachable from this item, in
+	// document order. It is a no-op for text spans.
+	visitDeployed(fn func(*Node))
+	// visitRegions calls fn on every NodeInjection or NodeDeployed reachable from this
+	// item, in document order. It is a no-op for text spans.
+	visitRegions(fn func(*Node))
 }
 
 // textSpan holds a contiguous run of body bytes that contains no recognised boundary tags.
@@ -29,6 +35,8 @@ type textSpan struct {
 func (s *textSpan) bodyBytes() []byte              { return s.raw }
 func (s *textSpan) visitInjections(_ func(*Node)) {}
 func (s *textSpan) visitSections(_ func(*Node))   {}
+func (s *textSpan) visitDeployed(_ func(*Node))   {}
+func (s *textSpan) visitRegions(_ func(*Node))    {}
 
 // ---------------------------------------------------------------------------
 // Node — bodyItem implementation
@@ -62,6 +70,27 @@ func (n *Node) visitSections(fn func(*Node)) {
 	}
 	for _, item := range n.items {
 		item.visitSections(fn)
+	}
+}
+
+// visitDeployed calls fn on this node (if it is a deployed region) then recurses into items.
+func (n *Node) visitDeployed(fn func(*Node)) {
+	if n.kind == NodeDeployed {
+		fn(n)
+	}
+	for _, item := range n.items {
+		item.visitDeployed(fn)
+	}
+}
+
+// visitRegions calls fn on this node (if it is an injection or deployed region) then
+// recurses into items.
+func (n *Node) visitRegions(fn func(*Node)) {
+	if n.kind == NodeInjection || n.kind == NodeDeployed {
+		fn(n)
+	}
+	for _, item := range n.items {
+		item.visitRegions(fn)
 	}
 }
 
@@ -114,6 +143,20 @@ func parseBoundaryTag(line []byte) (kind NodeKind, isClose bool, name string, ma
 			return "", false, "", false
 		}
 		return NodeInjection, true, n, true
+
+	case strings.HasPrefix(inner, "DEPLOYED:"):
+		n := inner[9:]
+		if n == "" {
+			return "", false, "", false
+		}
+		return NodeDeployed, false, n, true
+
+	case strings.HasPrefix(inner, "/DEPLOYED:"):
+		n := inner[10:]
+		if n == "" {
+			return "", false, "", false
+		}
+		return NodeDeployed, true, n, true
 	}
 
 	return "", false, "", false
@@ -332,6 +375,61 @@ func (b *Body) Injections() []*Node {
 		})
 	}
 	return injections
+}
+
+// Deployed returns the first deployed region with the given name at any nesting depth.
+// The name is matched case-sensitively.
+func (b *Body) Deployed(name string) (*Node, bool) {
+	b.ensureParsed()
+	for _, item := range b.items {
+		if n, ok := item.(*Node); ok {
+			if result := findDeployed(n, name); result != nil {
+				return result, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// findDeployed performs a depth-first search for a deployed region named name within
+// the subtree rooted at n.
+func findDeployed(n *Node, name string) *Node {
+	if n.kind == NodeDeployed && n.name == name {
+		return n
+	}
+	for _, item := range n.items {
+		if child, ok := item.(*Node); ok {
+			if result := findDeployed(child, name); result != nil {
+				return result
+			}
+		}
+	}
+	return nil
+}
+
+// DeployedRegions returns every deployed region at any nesting depth, in document order.
+func (b *Body) DeployedRegions() []*Node {
+	b.ensureParsed()
+	var deployed []*Node
+	for _, item := range b.items {
+		item.visitDeployed(func(n *Node) {
+			deployed = append(deployed, n)
+		})
+	}
+	return deployed
+}
+
+// Regions returns every injection and deployed region at any nesting depth, interleaved
+// in document order.
+func (b *Body) Regions() []*Node {
+	b.ensureParsed()
+	var regions []*Node
+	for _, item := range b.items {
+		item.visitRegions(func(n *Node) {
+			regions = append(regions, n)
+		})
+	}
+	return regions
 }
 
 // ---------------------------------------------------------------------------

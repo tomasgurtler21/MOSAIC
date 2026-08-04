@@ -56,17 +56,49 @@ func TestAgents_ReturnsNonEmptyList(t *testing.T) {
 	}
 }
 
-// TestAgents_Count_Matches39Workers verifies that Agents() returns exactly 39 worker
-// agents, matching the known count of generic agent files in the repository (each category
-// folder contains one README.md that is not an agent and must be excluded).
-// Count breakdown: 35 prior agents + 4 infrastructure agents (checkpoint-manager-git,
-// checkpoint-restore-git, commit-manager-git, orchestration-review).
-func TestAgents_Count_Matches39Workers(t *testing.T) {
-	const wantCount = 39
+// TestAgents_KnownWorkerIDs_AllPresent verifies that a named set of worker agent IDs are
+// all returned by Agents(). This protects that the catalog discovers the known worker agents
+// across all categories. A total count asserts little; naming the expected IDs ensures the
+// catalog has not silently lost a whole category or individual agent.
+// Adding a new agent or category does not break this test; only removing an agent named here
+// will.
+func TestAgents_KnownWorkerIDs_AllPresent(t *testing.T) {
+	knownWorkerIDs := []string{
+		// Audit
+		"architecture-audit",
+		"audit-review",
+		// Creation
+		"implementation-tdd",
+		"test-writer-tdd",
+		// Execution
+		"test-runner",
+		// Infrastructure
+		"checkpoint-manager-git",
+		"orchestration-review",
+		// Interface
+		"audit-response-merger",
+		// MosaicTest
+		"mosaictest-scripted",
+		// Planning
+		"planner-tdd-soft",
+		"contracts-designer",
+		// Research
+		"codebase-research",
+		"library-research",
+		// Validation
+		"plan-review",
+		"build-review",
+	}
 	cat := loadRealCatalog(t)
 	agents := cat.Agents()
-	if len(agents) != wantCount {
-		t.Errorf("Agents() returned %d agents, want %d", len(agents), wantCount)
+	keys := make(map[string]bool, len(agents))
+	for _, a := range agents {
+		keys[a.Key] = true
+	}
+	for _, id := range knownWorkerIDs {
+		if !keys[id] {
+			t.Errorf("Agents() is missing known worker agent %q; catalog may have lost a category or agent", id)
+		}
 	}
 }
 

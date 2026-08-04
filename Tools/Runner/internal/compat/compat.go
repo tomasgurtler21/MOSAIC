@@ -1,10 +1,21 @@
 // Package compat implements workflow admission validation and execution group
 // resolution. It enforces that only supported workflow shapes are allowed to
-// run, and resolves the EXECUTION rows of admitted workflows into one or two
-// contiguous execution groups.
+// run, and resolves the EXECUTION rows of admitted workflows into contiguous
+// named execution groups driven by the Phase column.
 //
 // The single entry point is Admit. It checks each FR-18a condition individually
 // so that every refusal produces a distinct, named message.
+//
+// Groups are resolved by the group segment of each EXECUTION row's PhaseParsed.Group
+// field. Agent identifiers are never inspected for classification. Three or more
+// groups resolve correctly. The GroupsDeclared and ApproachTable fields are carried
+// onto the admitted workflow for downstream consumers.
+//
+// The GroupByName method on AdmittedWorkflow enables lookup by workflow-defined name.
+//
+// Admission refusals A1–A5 enforce cross-consistency between the EXECUTION rows'
+// group segments and the workflow's Execution Groups approach table.
+// Case-sensitive matching is required throughout.
 package compat
 
 import (
@@ -15,7 +26,7 @@ import (
 )
 
 // Admit validates that the routing table is inside the supported workflow subset
-// and resolves its EXECUTION rows into execution groups.
+// and resolves its EXECUTION rows into contiguous execution groups.
 //
 // Returns an AdmittedWorkflow on success. Returns *domain.RefusalError on failure,
 // with Component set to "compat" and Resource identifying the workflow and the
@@ -28,7 +39,7 @@ import (
 //  4. Dynamic or growing stage set.
 //  5. Any parallel dispatch (Waits For notation in routing hints).
 //  6. Agent-with-mode notation ("agent-name(mode)").
-//  7. EXECUTION rows that cannot be resolved into one or two contiguous groups.
+//  7. EXECUTION rows that cannot be resolved into contiguous execution groups.
 //
 // Duplicate agent identifiers in different rows are allowed (FR-26a).
 func Admit(table domain.RoutingTable) (domain.AdmittedWorkflow, error) {
@@ -170,8 +181,9 @@ func Admit(table domain.RoutingTable) (domain.AdmittedWorkflow, error) {
 	}
 
 	// --- Condition 7: Resolve execution groups ---
-	// Classify agents and partition EXECUTION rows into 1 or 2 contiguous groups.
-	groups, twoGroup, err := resolveGroups(execRows)
+	// Partition EXECUTION rows into contiguous named groups using the Phase column's
+	// group segment. Agent identifiers are never inspected for classification.
+	groups, groupsDeclared, err := resolveGroups(execRows, table.ApproachTable)
 	if err != nil {
 		return refuse(err.Error())
 	}
@@ -179,7 +191,8 @@ func Admit(table domain.RoutingTable) (domain.AdmittedWorkflow, error) {
 	return domain.AdmittedWorkflow{
 		Table:                 table,
 		Groups:                groups,
-		TwoGroup:              twoGroup,
+		GroupsDeclared:        groupsDeclared,
+		ApproachTable:         table.ApproachTable,
 		PreExecutionStartRow:  preExecStart,
 		PreExecutionEndRow:    preExecEnd,
 		PostExecutionStartRow: postExecStart,
@@ -188,115 +201,166 @@ func Admit(table domain.RoutingTable) (domain.AdmittedWorkflow, error) {
 	}, nil
 }
 
-// agentClass classifies an agent identifier for group resolution.
-type agentClass int
-
-const (
-	agentTest    agentClass = iota // test-writer-tdd, tests-review-tdd
-	agentImpl                      // implementation-tdd, implementation-review
-	agentNeutral                   // build-review (can appear in either group)
-	agentUnknown                   // not in the supported agent set
-)
-
-// classifyAgent returns the agentClass for the given agent identifier.
-func classifyAgent(agent string) agentClass {
-	switch agent {
-	case "test-writer-tdd", "tests-review-tdd":
-		return agentTest
-	case "implementation-tdd", "implementation-review":
-		return agentImpl
-	case "build-review":
-		return agentNeutral
-	default:
-		return agentUnknown
+// resolveGroups partitions the EXECUTION rows into contiguous execution groups
+// using each row's PhaseParsed.Group. Agent identifiers are never inspected.
+//
+// The bool result is GroupsDeclared: true iff at least one row carries a group
+// segment. When false the result is the single implicit group with an empty Name
+// spanning every staged row.
+//
+// Returns an error for catalogue rows A1–A5: A1 and A3 from the rows alone, and
+// A2, A4, A5 from cross-checking the declared group set against the approach
+// table (zero-valued when the workflow declares none).
+func resolveGroups(
+	execRows []domain.RoutingRow,
+	approach domain.ApproachTable,
+) ([]domain.ExecutionGroup, bool, error) {
+	if len(execRows) == 0 {
+		return nil, false, fmt.Errorf("EXECUTION rows cannot be resolved: no EXECUTION rows found")
 	}
-}
 
-// resolveGroups partitions the EXECUTION rows into 1 or 2 contiguous execution groups.
-// Returns a non-nil error message (for condition 7) when the rows cannot be resolved.
-func resolveGroups(execRows []domain.RoutingRow) ([]domain.ExecutionGroup, bool, error) {
-	// Classify all agents in the EXECUTION rows.
-	classes := make([]agentClass, len(execRows))
-	hasTest := false
-	hasKnownClassified := false // true when at least one test or impl agent is present
-	for i, row := range execRows {
-		cls := classifyAgent(row.Agent)
-		classes[i] = cls
-		if cls == agentTest {
-			hasTest = true
-			hasKnownClassified = true
-		} else if cls == agentImpl {
-			hasKnownClassified = true
+	// Determine if any EXECUTION row carries a group segment.
+	groupsDeclared := false
+	for _, row := range execRows {
+		if row.PhaseParsed.Group != "" {
+			groupsDeclared = true
+			break
 		}
 	}
 
-	// Unknown agents cause an error only when mixed with known classified agents.
-	// When ALL agents are unknown or neutral (no test/impl agents detected), the
-	// block is treated as a single implementation group. This allows generic agent
-	// names in test fixtures that exercise engine behaviour without using the full
-	// MOSAIC agent set.
-	if hasKnownClassified {
-		for i, row := range execRows {
-			if classes[i] == agentUnknown {
+	if !groupsDeclared {
+		// All rows are bare (no group segments declared).
+
+		// A3: approach table present but rows are bare.
+		if approach.Present() {
+			return nil, false, fmt.Errorf(
+				"workflow declares an %q table but EXECUTION row %d declares no group segment",
+				domain.ExecutionGroupsHeading, execRows[0].Index,
+			)
+		}
+
+		// Bare workflow: single implicit group with empty Name covering all EXECUTION rows.
+		start := execRows[0].Index
+		end := execRows[len(execRows)-1].Index + 1
+		return []domain.ExecutionGroup{
+			{Name: "", StartRow: start, EndRow: end},
+		}, false, nil
+	}
+
+	// groupsDeclared = true: at least one row has a group segment.
+
+	// A2: grouped rows but no approach table.
+	if !approach.Present() {
+		for _, row := range execRows {
+			if row.PhaseParsed.Group != "" {
 				return nil, false, fmt.Errorf(
-					"EXECUTION rows cannot be resolved into 1 or 2 contiguous groups: "+
-						"row %d has unrecognised agent %q (not in the supported agent set)",
-					row.Index, row.Agent,
+					"EXECUTION row %d declares group %q but the workflow has no %q table",
+					row.Index, row.PhaseParsed.Group, domain.ExecutionGroupsHeading,
 				)
 			}
 		}
 	}
 
-	if !hasTest {
-		// Single-group workflow: all EXECUTION rows form one GroupImplementation.
-		if len(execRows) == 0 {
+	// A3: approach table present but at least one EXECUTION row is bare.
+	for _, row := range execRows {
+		if row.PhaseParsed.Group == "" {
 			return nil, false, fmt.Errorf(
-				"EXECUTION rows cannot be resolved: no EXECUTION rows found",
-			)
-		}
-		start := execRows[0].Index
-		end := execRows[len(execRows)-1].Index + 1
-		return []domain.ExecutionGroup{
-			{Kind: domain.GroupImplementation, StartRow: start, EndRow: end},
-		}, false, nil
-	}
-
-	// Two-group workflow: find the first IMPL row and split there.
-	firstImplLocalIdx := -1
-	for i, cls := range classes {
-		if cls == agentImpl {
-			firstImplLocalIdx = i
-			break
-		}
-	}
-
-	if firstImplLocalIdx < 0 {
-		return nil, false, fmt.Errorf(
-			"EXECUTION rows cannot be resolved: test agents found but no implementation agent detected; " +
-				"a two-group workflow requires at least one implementation agent",
-		)
-	}
-
-	// Validate: no TEST agents appear after the split point.
-	for i := firstImplLocalIdx; i < len(classes); i++ {
-		if classes[i] == agentTest {
-			return nil, false, fmt.Errorf(
-				"EXECUTION rows cannot be resolved into contiguous groups: "+
-					"row %d agent %q (test group) appears after the start of the implementation group; "+
-					"test and implementation rows must be in contiguous blocks",
-				execRows[i].Index, execRows[i].Agent,
+				"workflow declares an %q table but EXECUTION row %d declares no group segment",
+				domain.ExecutionGroupsHeading, row.Index,
 			)
 		}
 	}
 
-	testStart := execRows[0].Index
-	testEnd := execRows[firstImplLocalIdx].Index // exclusive: start of impl group
-	implStart := execRows[firstImplLocalIdx].Index
-	implEnd := execRows[len(execRows)-1].Index + 1
-
-	groups := []domain.ExecutionGroup{
-		{Kind: domain.GroupTest, StartRow: testStart, EndRow: testEnd},
-		{Kind: domain.GroupImplementation, StartRow: implStart, EndRow: implEnd},
+	// Partition rows by group token, checking A1 (non-contiguous groups).
+	type groupState struct {
+		startRow int
+		endRow   int  // exclusive (last seen row index + 1)
+		ended    bool // true once a different group appeared after this one
 	}
+
+	var groupOrder []domain.GroupName
+	groupStates := map[domain.GroupName]*groupState{}
+	currentGroup := domain.GroupName("")
+
+	for _, row := range execRows {
+		g := row.PhaseParsed.Group
+
+		if g != currentGroup {
+			// Switching to a different group.
+			if currentGroup != "" {
+				// The previous group has now ended.
+				groupStates[currentGroup].ended = true
+			}
+
+			state, seen := groupStates[g]
+			if seen && state.ended {
+				// A1: this group already ended; a row is re-opening it.
+				return nil, false, fmt.Errorf(
+					"execution groups must be contiguous row ranges: row %d declares group %q, which already ended at row %d",
+					row.Index, g, state.endRow-1,
+				)
+			}
+
+			if !seen {
+				groupStates[g] = &groupState{startRow: row.Index, endRow: row.Index + 1}
+				groupOrder = append(groupOrder, g)
+			}
+			currentGroup = g
+		}
+
+		// Extend the current group to include this row.
+		groupStates[g].endRow = row.Index + 1
+	}
+
+	// Build the groups slice in first-appearance order.
+	groups := make([]domain.ExecutionGroup, len(groupOrder))
+	for i, name := range groupOrder {
+		s := groupStates[name]
+		groups[i] = domain.ExecutionGroup{
+			Name:     name,
+			StartRow: s.startRow,
+			EndRow:   s.endRow,
+		}
+	}
+
+	// Build the set of groups declared in EXECUTION rows.
+	execGroupSet := make(map[domain.GroupName]bool, len(groupOrder))
+	for _, name := range groupOrder {
+		execGroupSet[name] = true
+	}
+
+	// Build the set of groups named anywhere in the approach table.
+	tableGroupSet := make(map[domain.GroupName]bool)
+	for _, seq := range approach.Rows {
+		for _, g := range seq.Groups {
+			tableGroupSet[g] = true
+		}
+	}
+
+	// A5: an EXECUTION row declares a group absent from every approach table row.
+	// Check before A4 so the offending row's token (verbatim from the Phase column)
+	// appears in the refusal message, enabling the author to correct capitalisation.
+	for _, row := range execRows {
+		g := row.PhaseParsed.Group
+		if !tableGroupSet[g] {
+			return nil, false, fmt.Errorf(
+				"EXECUTION row %d declares group %q, which appears in no %q table row",
+				row.Index, g, domain.ExecutionGroupsHeading,
+			)
+		}
+	}
+
+	// A4: the approach table names a group that no EXECUTION row belongs to.
+	for _, seq := range approach.Rows {
+		for _, g := range seq.Groups {
+			if !execGroupSet[g] {
+				return nil, false, fmt.Errorf(
+					"%q table row %q lists group %q, which no EXECUTION row declares",
+					domain.ExecutionGroupsHeading, seq.Approach, g,
+				)
+			}
+		}
+	}
+
 	return groups, true, nil
 }

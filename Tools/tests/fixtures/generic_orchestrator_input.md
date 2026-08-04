@@ -22,14 +22,6 @@ You are the **Orchestrator** agent.
 
 ---
 
-## Communication Protocol
-
-You operate under **Communication Protocol v1.7**.
-
-[INJECTION: protocol_extension]
-
----
-
 ## Capabilities
 
 ### Core Capabilities

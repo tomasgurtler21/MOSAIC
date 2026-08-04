@@ -63,6 +63,11 @@ type Input struct {
 	// I/O. When nil, all registration targets are treated as absent (no GapHookRegistration
 	// gaps are surfaced for missing targets).
 	WorkspaceFileExists func(relPath string) bool
+
+	// ProtocolVersion is the version of the protocol source document loaded for this run.
+	// The planner compares it against each deployed artifact's ProtocolVersion to detect
+	// protocol staleness. Populated by the app layer in I5.3.
+	ProtocolVersion string
 }
 
 // ArtifactSet is the derived deployment set: the union of referenced agents across all

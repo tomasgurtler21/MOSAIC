@@ -25,6 +25,7 @@ import (
 
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/builtin/claudecode"
+	"mosaic-deploy/internal/harness/registry"
 )
 
 // ---------------------------------------------------------------------------
@@ -40,7 +41,7 @@ import (
 // This is the critical test for convertFieldsToScalar: it must be narrowly scoped to the
 // key identified by Descriptor().Frontmatter.ToolsKey and must not touch any other field.
 func TestClaudeCode_Tools_DestFieldNotConvertedToScalar(t *testing.T) {
-	mod, err := claudecode.New()
+	mod, err := claudecode.New(registry.BuiltinOptions{MosaicRoot: repoRoot(t)})
 	if err != nil {
 		t.Fatalf("claudecode.New(): %v", err)
 	}
@@ -132,7 +133,7 @@ func TestClaudeCode_Tools_DestFieldNotConvertedToScalar(t *testing.T) {
 // comma-separated scalar format. Adding a DestField destination must not suppress the
 // Claude Code-specific scalar conversion that applies to the main tools field.
 func TestClaudeCode_Tools_MainToolsFieldConvertedToScalarWithDestField(t *testing.T) {
-	mod, err := claudecode.New()
+	mod, err := claudecode.New(registry.BuiltinOptions{MosaicRoot: repoRoot(t)})
 	if err != nil {
 		t.Fatalf("claudecode.New(): %v", err)
 	}
@@ -182,7 +183,7 @@ func TestClaudeCode_Tools_MainToolsFieldConvertedToScalarWithDestField(t *testin
 // different field), both produced fields pass through convertFieldsToScalar as KindList
 // values without being converted to scalar.
 func TestClaudeCode_Tools_MultipleDestFieldsAllPassThroughUntouched(t *testing.T) {
-	mod, err := claudecode.New()
+	mod, err := claudecode.New(registry.BuiltinOptions{MosaicRoot: repoRoot(t)})
 	if err != nil {
 		t.Fatalf("claudecode.New(): %v", err)
 	}

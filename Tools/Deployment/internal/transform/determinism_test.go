@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"testing"
 
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/transform"
 )
@@ -35,8 +36,8 @@ required_skills: []
 
 Body content that must appear identically on every run.
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 
 [[/SECTION:Identity]]
 ---
@@ -46,8 +47,8 @@ Body content that must appear identically on every run.
 
 Some constraint text.
 
-[[INJECTION:CustomConstraints]]
-[[/INJECTION:CustomConstraints]]
+[[DEPLOYED:CustomConstraints]]
+[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 `
@@ -133,6 +134,106 @@ func TestDeterminism_RepeatedCallsProduceSameReport(t *testing.T) {
 	// Compare OutputBytes.
 	if r1.Report.OutputBytes != r2.Report.OutputBytes {
 		t.Errorf("Report.OutputBytes: %d vs %d", r1.Report.OutputBytes, r2.Report.OutputBytes)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.3: Regeneration on update — protocol content replaced, not lifted
+// ---------------------------------------------------------------------------
+
+// TestProtocol_RegenerationOnUpdate_ContentReplacedNotLifted verifies that on an update
+// (Request.Deployed non-nil), the content of the [[DEPLOYED:CommunicationProtocol]] region
+// is taken from Request.Protocol and not lifted from the deployed file. Tool-managed regions
+// are never preserved from the deployed file — they are always regenerated.
+func TestProtocol_RegenerationOnUpdate_ContentReplacedNotLifted(t *testing.T) {
+	// The deployed file has stale protocol content that differs from what the current
+	// protocol source would produce. After the update transform, the output must contain
+	// the new block and not the stale content.
+	const staleProtocolContent = "STALE PROTOCOL CONTENT — must not appear in updated output\n"
+	deployedWithStaleProtocol := "---\nid: 99\nversion: 1.0.0\ntransform_version: 3.0.0\ninjections_version: 1.2.0\n" +
+		"description: Agent for protocol region testing\nmode: subagent\nmodel: claude/claude-sonnet\ntools: [read-file]\n---\n\n" +
+		"[[SECTION:Identity]]\n## Identity\n\nProtocol test agent.\n\n[[/SECTION:Identity]]\n\n" +
+		"[[DEPLOYED:CommunicationProtocol]]\n" + staleProtocolContent + "[[/DEPLOYED:CommunicationProtocol]]\n"
+
+	req := transform.Request{
+		Source:   []byte(sourceWithProtocol),
+		Deployed: []byte(deployedWithStaleProtocol),
+		Kind:     domain.ArtifactAgent,
+		Key:      "protocol-test",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: fixtureProtocol("1.9"),
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	outDoc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	node, ok := outDoc.Body().Deployed("CommunicationProtocol")
+	if !ok {
+		t.Fatal("[[DEPLOYED:CommunicationProtocol]] absent from output")
+	}
+	regionContent := node.Content()
+
+	// The stale content from the deployed file must not appear in the output.
+	if bytes.Contains(regionContent, []byte(staleProtocolContent)) {
+		t.Errorf("protocol region contains stale content from deployed file; tool-managed regions must be regenerated:\ncontent: %q", regionContent)
+	}
+
+	// The fresh content from Protocol must appear in the output.
+	if !bytes.Contains(regionContent, []byte(subagentBlockContent)) {
+		t.Errorf("protocol region does not contain current subagent block; region content: %q", regionContent)
+	}
+}
+
+// TestProtocol_RegenerationOnUpdate_RepeatedTransformsAreByteIdentical verifies that
+// applying the same transform with protocol content produces byte-identical output on
+// every call. This is the determinism requirement applied to the protocol path.
+//
+// The test also asserts that the output actually contains the protocol block, so that
+// byte-identical determinism is not satisfied vacuously (two calls producing the same
+// empty output would be identical but not correct).
+func TestProtocol_RegenerationOnUpdate_RepeatedTransformsAreByteIdentical(t *testing.T) {
+	req := transform.Request{
+		Source:   []byte(sourceWithProtocol),
+		Kind:     domain.ArtifactAgent,
+		Key:      "protocol-test",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleOrchestrator,
+		Protocol: fixtureProtocol("2.1"),
+	}
+
+	result1, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply (first call): %v", err)
+	}
+	result2, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply (second call): %v", err)
+	}
+
+	// Both calls must contain the protocol block — ensures determinism is not satisfied
+	// vacuously (two empty outputs are trivially identical but indicate a missing feature).
+	if !bytes.Contains(result1.Output, []byte(orchestratorBlockContent)) {
+		t.Error("Apply (first call): output does not contain orchestrator block; determinism of empty output is vacuous")
+	}
+
+	if !bytes.Equal(result1.Output, result2.Output) {
+		diff := firstDiff(result1.Output, result2.Output)
+		t.Errorf("protocol transform is non-deterministic: identical inputs produced different outputs\n"+
+			"first call:  %d bytes\n"+
+			"second call: %d bytes\n"+
+			"first difference at byte %d",
+			len(result1.Output), len(result2.Output), diff)
 	}
 }
 

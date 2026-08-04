@@ -214,8 +214,8 @@ func TestReport_OutputBytesEqualsOutputLength(t *testing.T) {
 }
 
 // TestReport_InjectionOutcomesPresent asserts that the report lists at least one
-// InjectionOutcome for each injection region present in the source document. The outcome
-// entry allows logging to explain what happened to each injection point.
+// RegionOutcome for each region present in the source document. The outcome
+// entry allows logging to explain what happened to each region.
 func TestReport_InjectionOutcomesPresent(t *testing.T) {
 	const sourceWithInjections = `---
 id: 10
@@ -232,8 +232,8 @@ required_skills: []
 [[SECTION:Identity]]
 Body.
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 
 [[/SECTION:Identity]]
 `
@@ -252,18 +252,195 @@ Body.
 		t.Fatalf("Apply: %v", err)
 	}
 
-	// The source has one injection region (HarnessConstraints). The report must account for it.
-	if len(result.Report.Injections) == 0 {
-		t.Error("Report.Injections is empty; expected at least one entry for the HarnessConstraints injection region")
+	// The source has one managed region (HarnessConstraints). The report must account for it.
+	if len(result.Report.Regions) == 0 {
+		t.Error("Report.Regions is empty; expected at least one entry for the HarnessConstraints region")
 	}
-	for _, inj := range result.Report.Injections {
-		if inj.Name == "" {
-			t.Error("InjectionOutcome.Name must not be empty")
+	for _, r := range result.Report.Regions {
+		if r.Name == "" {
+			t.Error("RegionOutcome.Name must not be empty")
 		}
-		if inj.Action == "" {
-			t.Error("InjectionOutcome.Action must not be empty")
+		if r.Action == "" {
+			t.Error("RegionOutcome.Action must not be empty")
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.5: Transform report — protocol region as a distinct tool-managed outcome
+// ---------------------------------------------------------------------------
+
+// TestProtocol_Report_RegionOutcomePresentInReport verifies that the transform report
+// includes a RegionOutcome entry for the CommunicationProtocol region when the source
+// declares one. Report.Regions must account for every managed region in the source.
+func TestProtocol_Report_RegionOutcomePresentInReport(t *testing.T) {
+	req := transform.Request{
+		Source:   []byte(sourceWithProtocol),
+		Kind:     domain.ArtifactAgent,
+		Key:      "protocol-test",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: fixtureProtocol("1.9"),
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	outcome := findRegionOutcome(result.Report.Regions, "CommunicationProtocol")
+	if outcome == nil {
+		t.Fatalf("Report.Regions does not contain an entry for CommunicationProtocol; got: %v",
+			regionNames(result.Report.Regions))
+	}
+}
+
+// TestProtocol_Report_OutcomeIsToolManaged verifies that the CommunicationProtocol
+// RegionOutcome has Marker == NodeDeployed and ToolManaged() == true, distinguishing it
+// from user-owned injection regions in the same report.
+func TestProtocol_Report_OutcomeIsToolManaged(t *testing.T) {
+	req := transform.Request{
+		Source:   []byte(sourceWithProtocol),
+		Kind:     domain.ArtifactAgent,
+		Key:      "protocol-test",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: fixtureProtocol("1.9"),
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	outcome := findRegionOutcome(result.Report.Regions, "CommunicationProtocol")
+	if outcome == nil {
+		t.Fatalf("Report.Regions does not contain CommunicationProtocol; got: %v", regionNames(result.Report.Regions))
+	}
+
+	if !outcome.ToolManaged() {
+		t.Errorf("CommunicationProtocol outcome: ToolManaged() = false; want true (Marker = %q)", outcome.Marker)
+	}
+}
+
+// TestProtocol_Report_OutcomeActionIsProtocolFilled verifies that the RegionOutcome for
+// the CommunicationProtocol region carries Action == RegionProtocolFilled, distinguishing
+// the protocol fill from harness, workflow, and infrastructure fills.
+func TestProtocol_Report_OutcomeActionIsProtocolFilled(t *testing.T) {
+	req := transform.Request{
+		Source:   []byte(sourceWithProtocol),
+		Kind:     domain.ArtifactAgent,
+		Key:      "protocol-test",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleOrchestrator,
+		Protocol: fixtureProtocol("1.9"),
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	outcome := findRegionOutcome(result.Report.Regions, "CommunicationProtocol")
+	if outcome == nil {
+		t.Fatalf("Report.Regions does not contain CommunicationProtocol; got: %v", regionNames(result.Report.Regions))
+	}
+
+	if outcome.Action != transform.RegionProtocolFilled {
+		t.Errorf("CommunicationProtocol outcome Action: want %q, got %q",
+			transform.RegionProtocolFilled, outcome.Action)
+	}
+}
+
+// TestProtocol_Report_OutcomeBytesPositive verifies that the RegionOutcome for the
+// CommunicationProtocol region carries a positive Bytes count matching the length of the
+// written content. A zero byte count would indicate that an empty region was emitted.
+func TestProtocol_Report_OutcomeBytesPositive(t *testing.T) {
+	req := transform.Request{
+		Source:   []byte(sourceWithProtocol),
+		Kind:     domain.ArtifactAgent,
+		Key:      "protocol-test",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: fixtureProtocol("1.9"),
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	outcome := findRegionOutcome(result.Report.Regions, "CommunicationProtocol")
+	if outcome == nil {
+		t.Fatalf("Report.Regions does not contain CommunicationProtocol; got: %v", regionNames(result.Report.Regions))
+	}
+
+	if outcome.Bytes <= 0 {
+		t.Errorf("CommunicationProtocol outcome Bytes = %d; want > 0 (region must have content)", outcome.Bytes)
+	}
+}
+
+// TestProtocol_Report_BytesMatchActualRegionLength verifies that RegionOutcome.Bytes
+// equals the byte length of the content placed in the [[DEPLOYED:CommunicationProtocol]]
+// region. The report value and the serialised document must agree on region size.
+func TestProtocol_Report_BytesMatchActualRegionLength(t *testing.T) {
+	req := transform.Request{
+		Source:   []byte(sourceWithProtocol),
+		Kind:     domain.ArtifactAgent,
+		Key:      "protocol-test",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: fixtureProtocol("1.9"),
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	outcome := findRegionOutcome(result.Report.Regions, "CommunicationProtocol")
+	if outcome == nil {
+		t.Fatalf("Report.Regions does not contain CommunicationProtocol")
+	}
+
+	regionContent := extractProtocolRegionContent(t, result.Output)
+	if outcome.Bytes != len(regionContent) {
+		t.Errorf("RegionOutcome.Bytes = %d, actual region content length = %d; they must be equal",
+			outcome.Bytes, len(regionContent))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// report helpers
+// ---------------------------------------------------------------------------
+
+// findRegionOutcome returns the first RegionOutcome with the given name, or nil.
+func findRegionOutcome(outcomes []transform.RegionOutcome, name string) *transform.RegionOutcome {
+	for i := range outcomes {
+		if outcomes[i].Name == name {
+			return &outcomes[i]
+		}
+	}
+	return nil
+}
+
+// regionNames returns the Name field of each RegionOutcome for readable test diagnostics.
+func regionNames(outcomes []transform.RegionOutcome) []string {
+	names := make([]string, len(outcomes))
+	for i, o := range outcomes {
+		names[i] = o.Name
+	}
+	return names
 }
 
 // genericToolNames returns the Generic field of each ToolResolution for readable test output.

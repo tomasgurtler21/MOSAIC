@@ -90,7 +90,7 @@ func ReadStages(path string, needsApproach bool) (domain.StageSet, error) {
 		return domain.StageSet{}, &domain.RefusalError{
 			Component: "planstages",
 			Resource:  path,
-			Reason:    `required column "Approach" is absent from stage table (two-group workflow)`,
+			Reason:    `required column "Approach" is absent from stage table (workflow declares execution groups)`,
 		}
 	}
 
@@ -134,25 +134,18 @@ func ReadStages(path string, needsApproach bool) (domain.StageSet, error) {
 		}
 
 		// Parse Approach (only when column is present and needsApproach is true).
+		// Values are taken verbatim with no membership check against any fixed set.
 		var approach domain.Approach
 		if approachCol != -1 && needsApproach {
 			approachStr := strings.TrimSpace(row[approachCol])
-			switch approachStr {
-			case string(domain.ApproachTDD):
-				approach = domain.ApproachTDD
-			case string(domain.ApproachImplementationFirst):
-				approach = domain.ApproachImplementationFirst
-			case string(domain.ApproachImplementationOnly):
-				approach = domain.ApproachImplementationOnly
-			case string(domain.ApproachTestsOnly):
-				approach = domain.ApproachTestsOnly
-			default:
+			if approachStr == "" || approachStr == "-" {
 				return domain.StageSet{}, &domain.RefusalError{
 					Component: "planstages",
 					Resource:  path,
-					Reason:    fmt.Sprintf("unrecognised Approach value %q in stage %d", approachStr, stageNum),
+					Reason:    fmt.Sprintf("stage %d has an empty Approach value", stageNum),
 				}
 			}
+			approach = domain.Approach(approachStr)
 		}
 
 		entries = append(entries, domain.StageEntry{

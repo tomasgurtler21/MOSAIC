@@ -14,6 +14,7 @@ Agent definitions organized by function.
 | [Execution](./Execution/) | Running tests and tools | test-runner |
 | [Interface](./Interface/) | Bidirectional bridges with external systems | audit-to-pull-request, audit-response-merger, pull-request-comment-interface |
 | [Infrastructure](./Infrastructure/) | Orchestration support fired by triggers, not by routing | checkpoint-manager-git, checkpoint-restore-git, commit-manager-git, orchestration-review |
+| [MosaicTest](./MosaicTest/) | Deterministic stubs used as fixtures by the `mosaic-run` harness conformance suite — they do no work, and exist so end-to-end runs measure the harness rather than a model | mosaictest-scripted, mosaictest-checkpoint, mosaictest-review |
 
 ## Agent Summary
 
@@ -57,6 +58,9 @@ Agent definitions organized by function.
 | 37 | checkpoint-restore-git | Infrastructure | 1.0.0 | MEDIUM | Restores the working tree to a checkpoint and reconciles the branch with committed work |
 | 38 | commit-manager-git | Infrastructure | 1.0.0 | LOW | Commits completed stage work to the user's branch with a plan-derived message |
 | 39 | orchestration-review | Infrastructure | 1.0.0 | LOW | Advisory — checks a run's bookkeeping and routing against its declared workflow |
+| 40 | mosaictest-scripted | MosaicTest | 1.0.0 | LOW | Harness test fixture — reads the script fixture bound to its row and returns exactly the response it specifies |
+| 41 | mosaictest-checkpoint | MosaicTest | 1.0.0 | LOW | Harness test fixture — `checkpoint`-class stub returning a fake `[checkpoint:{sha}]` marker; performs no git operations |
+| 42 | mosaictest-review | MosaicTest | 1.0.0 | LOW | Harness test fixture — `review`-class stub returning SUCCESS on an interval trigger; inspects nothing |
 
 See [ModelSelectionGuide.md](../../../Documentation/ModelSelectionGuide.md) for tier definitions and model recommendations.
 

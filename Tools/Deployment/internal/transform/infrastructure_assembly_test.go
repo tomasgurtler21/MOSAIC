@@ -22,8 +22,8 @@ import (
 	"mosaic-deploy/internal/transform"
 )
 
-// orchestratorWithInfrastructureAgents is an orchestrator-like source with both an
-// [[INJECTION:InfrastructureAgents]] and an [[INJECTION:AvailableWorkflows]] inside the
+// orchestratorWithInfrastructureAgents is an orchestrator-like source with both a
+// [[DEPLOYED:InfrastructureAgents]] and a [[DEPLOYED:AvailableWorkflows]] inside the
 // Identity section. This mirrors the canonical shape the real orchestrator will have once
 // the InfrastructureAgents injection is wired in.
 const orchestratorWithInfrastructureAgents = `---
@@ -42,11 +42,11 @@ required_skills: []
 
 You are the Orchestrator.
 
-[[INJECTION:InfrastructureAgents]]
-[[/INJECTION:InfrastructureAgents]]
+[[DEPLOYED:InfrastructureAgents]]
+[[/DEPLOYED:InfrastructureAgents]]
 
-[[INJECTION:AvailableWorkflows]]
-[[/INJECTION:AvailableWorkflows]]
+[[DEPLOYED:AvailableWorkflows]]
+[[/DEPLOYED:AvailableWorkflows]]
 
 [[INJECTION:IdentityExtension]]
 [[/INJECTION:IdentityExtension]]
@@ -415,7 +415,7 @@ func TestInfrastructureAgents_ZeroAgents_InjectionEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse output: %v", err)
 	}
-	node, ok := outDoc.Body().Injection("InfrastructureAgents")
+	node, ok := outDoc.Body().Deployed("InfrastructureAgents")
 	if !ok {
 		t.Fatal("InfrastructureAgents injection absent from output")
 	}
@@ -463,7 +463,7 @@ func TestInfrastructureAgents_SingleAgent_BlockPresentInInjection(t *testing.T) 
 	if err != nil {
 		t.Fatalf("parse output: %v", err)
 	}
-	node, ok := outDoc.Body().Injection("InfrastructureAgents")
+	node, ok := outDoc.Body().Deployed("InfrastructureAgents")
 	if !ok {
 		t.Fatal("InfrastructureAgents injection absent from output")
 	}
@@ -486,7 +486,7 @@ func TestInfrastructureAgents_SingleAgent_BlockPresentInInjection(t *testing.T) 
 }
 
 // TestInfrastructureAgents_InjectionClass_IsInfrastructure verifies that the
-// InjectionOutcome for the InfrastructureAgents region carries
+// RegionOutcome for the InfrastructureAgents region carries
 // Class == domain.InjectionInfrastructure, regardless of whether any agents were selected.
 func TestInfrastructureAgents_InjectionClass_IsInfrastructure(t *testing.T) {
 	for _, withAgents := range []bool{false, true} {
@@ -521,15 +521,15 @@ func TestInfrastructureAgents_InjectionClass_IsInfrastructure(t *testing.T) {
 				t.Fatalf("Apply: %v", err)
 			}
 
-			var outcome *transform.InjectionOutcome
-			for i := range result.Report.Injections {
-				if result.Report.Injections[i].Name == "InfrastructureAgents" {
-					outcome = &result.Report.Injections[i]
+			var outcome *transform.RegionOutcome
+			for i := range result.Report.Regions {
+				if result.Report.Regions[i].Name == "InfrastructureAgents" {
+					outcome = &result.Report.Regions[i]
 					break
 				}
 			}
 			if outcome == nil {
-				t.Fatalf("InjectionOutcome for InfrastructureAgents absent from report")
+				t.Fatalf("RegionOutcome for InfrastructureAgents absent from report")
 			}
 			if outcome.Class != domain.InjectionInfrastructure {
 				t.Errorf("InfrastructureAgents Class: want %q, got %q",
@@ -540,8 +540,8 @@ func TestInfrastructureAgents_InjectionClass_IsInfrastructure(t *testing.T) {
 }
 
 // TestInfrastructureAgents_AssembledAction_WhenAgentsSupplied verifies that when
-// infrastructure agents are provided, the InjectionOutcome carries Action ==
-// InjectionAssembledInfra, analogous to InjectionAssembled for AvailableWorkflows.
+// infrastructure agents are provided, the RegionOutcome carries Action ==
+// RegionAssembledInfra, analogous to RegionAssembled for AvailableWorkflows.
 func TestInfrastructureAgents_AssembledAction_WhenAgentsSupplied(t *testing.T) {
 	req := transform.Request{
 		Source: []byte(orchestratorWithInfrastructureAgents),
@@ -567,17 +567,17 @@ func TestInfrastructureAgents_AssembledAction_WhenAgentsSupplied(t *testing.T) {
 		t.Fatalf("Apply: %v", err)
 	}
 
-	var outcome *transform.InjectionOutcome
-	for i := range result.Report.Injections {
-		if result.Report.Injections[i].Name == "InfrastructureAgents" {
-			outcome = &result.Report.Injections[i]
+	var outcome *transform.RegionOutcome
+	for i := range result.Report.Regions {
+		if result.Report.Regions[i].Name == "InfrastructureAgents" {
+			outcome = &result.Report.Regions[i]
 			break
 		}
 	}
 	if outcome == nil {
-		t.Fatalf("InjectionOutcome for InfrastructureAgents absent from report")
+		t.Fatalf("RegionOutcome for InfrastructureAgents absent from report")
 	}
-	if outcome.Action != transform.InjectionAssembledInfra {
-		t.Errorf("InfrastructureAgents action: want %q, got %q", transform.InjectionAssembledInfra, outcome.Action)
+	if outcome.Action != transform.RegionAssembledInfra {
+		t.Errorf("InfrastructureAgents action: want %q, got %q", transform.RegionAssembledInfra, outcome.Action)
 	}
 }

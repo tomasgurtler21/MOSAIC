@@ -103,6 +103,19 @@ func collectGenericAgentPaths(t *testing.T, dir string) []string {
 	return paths
 }
 
+// fixtureProtocol returns a ProtocolContent with distinct orchestrator and subagent blocks
+// for use in protocol region tests. The two blocks carry unique, non-overlapping content so
+// that tests can assert both the presence of the correct block and the absence of the wrong one.
+func fixtureProtocol(version string) domain.ProtocolContent {
+	return domain.ProtocolContent{
+		Version: version,
+		Blocks: map[domain.ProtocolVariant][]byte{
+			domain.ProtocolOrchestrator: []byte(orchestratorBlockContent),
+			domain.ProtocolSubagent:     []byte(subagentBlockContent),
+		},
+	}
+}
+
 // truncateBytes returns the first n bytes of b for use in diagnostic messages.
 func truncateBytes(b []byte, n int) []byte {
 	if len(b) <= n {

@@ -242,7 +242,7 @@ func buildRegistryWithUserDestMapping(t *testing.T, harnessID string, desc *doma
 	}
 
 	mod := &appTestModule{desc: desc}
-	registry.Register(harnessID, func() (domain.HarnessModule, error) { return mod, nil })
+	registry.Register(harnessID, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return mod, nil })
 
 	userDest := config.ToolDestinationsByHarness{
 		harnessID: []domain.ToolMapping{
@@ -282,7 +282,7 @@ func buildRegistryWithoutMapping(t *testing.T, harnessID string, desc *domain.Ha
 	}
 
 	mod := &appTestModule{desc: desc}
-	registry.Register(harnessID, func() (domain.HarnessModule, error) { return mod, nil })
+	registry.Register(harnessID, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return mod, nil })
 
 	// registry.Options.ToolMappings does not exist → compile error (TDD RED)
 	reg, err := registry.Discover(registry.Options{

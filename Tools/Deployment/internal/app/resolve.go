@@ -644,6 +644,7 @@ func (s *service) buildContent(
 	scope domain.Scope,
 	deployedReader func(domain.PlanItem) []byte,
 	toolMappingsVersion string,
+	protocol domain.ProtocolContent,
 ) func(domain.PlanItem) ([]byte, error) {
 	return func(item domain.PlanItem) ([]byte, error) {
 		if item.Ref.Kind != domain.ArtifactAgent {
@@ -673,6 +674,8 @@ func (s *service) buildContent(
 			Scope: scope, Deployed: deployed, Workflows: wfBlocks,
 			InfrastructureAgents: infraBlocks,
 			ToolMappingsVersion:  toolMappingsVersion,
+			Role:                 agent.Role,
+			Protocol:             protocol,
 		})
 		if err != nil {
 			return nil, err

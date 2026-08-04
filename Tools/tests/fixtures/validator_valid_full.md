@@ -2,7 +2,7 @@
 id: test-validator-full
 version: 1.0.0
 name: test-agent
-description: Valid file with all 7 sections and multiple non-empty injections
+description: Valid file with all 7 sections, the CommunicationProtocol deployed slot, and multiple non-empty regions
 ---
 
 [[SECTION:Identity]]
@@ -16,23 +16,32 @@ You are the TestAgent agent in a multi-agent orchestration system.
 Additional identity content injected here.
 [[/INJECTION:IdentityExtension]]
 
-[[INJECTION:AvailableWorkflows]]
+[[DEPLOYED:AvailableWorkflows]]
 Available workflows list injected here.
-[[/INJECTION:AvailableWorkflows]]
+[[/DEPLOYED:AvailableWorkflows]]
 
 [[/SECTION:Identity]]
 ---
 
-[[SECTION:CommunicationProtocol]]
+[[DEPLOYED:CommunicationProtocol]]
+<!-- protocol-version: 1.9 -->
 ## Communication Protocol
 
-You operate under the standard communication protocol.
+Standard protocol content delivered by the deploy tool.
 
-[[INJECTION:ProtocolExtension]]
-Protocol extension content injected here.
-[[/INJECTION:ProtocolExtension]]
+[[/DEPLOYED:CommunicationProtocol]]
+---
 
-[[/SECTION:CommunicationProtocol]]
+[[SECTION:ArtifactProvenance]]
+## Artifact Provenance
+
+Every output artifact carries run_id and created_by frontmatter fields.
+
+[[INJECTION:ArtifactProvenanceExtension]]
+Artifact provenance extension content injected here.
+[[/INJECTION:ArtifactProvenanceExtension]]
+
+[[/SECTION:ArtifactProvenance]]
 ---
 
 [[SECTION:Capabilities]]
@@ -42,9 +51,9 @@ Protocol extension content injected here.
 - Test valid boundary structures
 - Verify canonical names are accepted
 
-[[INJECTION:LanguagePatterns]]
+[[DEPLOYED:LanguagePatterns]]
 Language pattern content injected here.
-[[/INJECTION:LanguagePatterns]]
+[[/DEPLOYED:LanguagePatterns]]
 
 [[INJECTION:CodebaseContext]]
 Codebase context content injected here.
@@ -59,9 +68,9 @@ Codebase context content injected here.
 - Stay within scope
 - Do not modify fixtures
 
-[[INJECTION:CustomConstraints]]
+[[DEPLOYED:CustomConstraints]]
 Custom constraint content injected here.
-[[/INJECTION:CustomConstraints]]
+[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

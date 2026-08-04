@@ -18,8 +18,12 @@ import pathlib
 import re
 
 from boundary_constants import (
+    CANONICAL_DEPLOYED,
     CANONICAL_INJECTIONS,
+    CANONICAL_ORDER,
     CANONICAL_SECTIONS,
+    DEPLOYED_PARENT_MAP,
+    EXPECTED_MARKER,
     INJECTION_PARENT_MAP,
     KNOWN_FRONTMATTER_KEYS,
     TAG_PATTERN,
@@ -41,7 +45,7 @@ class ValidationError:
     """
     file_path: pathlib.Path
     line_number: int
-    error_code: str       # One of "E000" through "E009"
+    error_code: str       # One of "E000" through "E011"
     message: str
 
     def __str__(self) -> str:
@@ -122,15 +126,18 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
     Validation rules applied:
     1. Every [[SECTION:Name]] has a matching [[/SECTION:Name]] (E001/E002).
     2. Every [[INJECTION:Name]] has a matching [[/INJECTION:Name]] (E001/E002).
-    3. Open/close tag names match within each pair (E003).
-    4. Only the 19 canonical boundary names are used (E004).
-    5. All instructional content after YAML frontmatter falls within some
+    3. Every [[DEPLOYED:Name]] has a matching [[/DEPLOYED:Name]] (E001/E002).
+    4. Open/close tag names match within each pair (E003).
+    5. Only canonical boundary names are used under the right marker (E004/E010/E011).
+    6. All instructional content after YAML frontmatter falls within some
        boundary (E005). Blank lines and --- separators between sections
        are exempt.
-    6. No duplicate boundary names within a single file (E006).
-    7. Sections appear in canonical order (E007).
-    8. Injection boundaries are nested inside their correct parent section (E008).
-    9. No unexpected YAML frontmatter keys (E009).
+    7. No duplicate boundary names within a single file (E006).
+    8. Sections and top-level deployed names appear in canonical order (E007).
+    9. Injection boundaries are nested inside their correct parent section (E008).
+    10. No unexpected YAML frontmatter keys (E009).
+    11. A canonical name declared under the wrong marker (E010).
+    12. An unknown [[DEPLOYED:]] name (E011).
 
     Edge cases:
     - If YAML frontmatter is malformed (missing closing '---' or
@@ -166,10 +173,14 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
     # Stacks hold (name, line_number) for currently open boundaries.
     section_stack: list[tuple[str, int]] = []
     injection_stack: list[tuple[str, int]] = []
+    deployed_stack: list[tuple[str, int]] = []
     # All boundary names seen so far (for E006 duplicate detection).
     seen_names: set[str] = set()
-    # Index into CANONICAL_SECTIONS of the last section tag seen (for E007).
-    last_section_order_idx: int = -1
+    # Index into CANONICAL_ORDER of the last canonical slot seen (for E007).
+    # CANONICAL_ORDER covers both section opens and top-level deployed opens.
+    last_order_idx: int = -1
+    # Track fenced code blocks so tags inside them are not validated.
+    in_fenced_block: bool = False
 
     for i, line in enumerate(lines):
         # Skip frontmatter lines (indices 0 through fm_end_idx, inclusive).
@@ -178,6 +189,14 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
 
         line_num = i + 1
         stripped = line.strip()
+
+        # Track fenced code blocks; boundary tags inside them are not checked.
+        if stripped.startswith("```"):
+            in_fenced_block = not in_fenced_block
+
+        if in_fenced_block:
+            continue
+
         m = TAG_PATTERN.match(stripped)
 
         if m:
@@ -187,18 +206,50 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
             name = m.group("name")
             kind = BoundaryKind(kind_str)
 
-            # Check whether the name is canonical (E004).
-            is_canonical = (
-                (kind == BoundaryKind.SECTION and name in CANONICAL_SECTIONS)
-                or (kind == BoundaryKind.INJECTION and name in CANONICAL_INJECTIONS)
-            )
-            if not is_canonical:
+            # Check whether the name is canonical for its marker kind (E004/E010/E011).
+            expected = EXPECTED_MARKER.get(name)
+            if expected is not None and expected != kind:
+                # Canonical name declared under the wrong marker.
                 errors.append(ValidationError(
                     file_path=file_path,
                     line_number=line_num,
-                    error_code="E004",
-                    message=f"Non-canonical {kind_str} name: {name!r}",
+                    error_code="E010",
+                    message=(
+                        f"Name {name!r} must be declared with "
+                        f"[[{expected.value}:]] but found [[{kind_str}:]]"
+                    ),
                 ))
+                # Count as non-canonical for further checks below, but still
+                # track stacks so mismatched-name and unclosed errors are accurate.
+                is_canonical = False
+            elif kind == BoundaryKind.SECTION:
+                is_canonical = name in CANONICAL_SECTIONS
+                if not is_canonical:
+                    errors.append(ValidationError(
+                        file_path=file_path,
+                        line_number=line_num,
+                        error_code="E004",
+                        message=f"Non-canonical SECTION name: {name!r}",
+                    ))
+            elif kind == BoundaryKind.INJECTION:
+                is_canonical = name in CANONICAL_INJECTIONS
+                if not is_canonical:
+                    errors.append(ValidationError(
+                        file_path=file_path,
+                        line_number=line_num,
+                        error_code="E004",
+                        message=f"Non-canonical INJECTION name: {name!r}",
+                    ))
+            else:  # DEPLOYED
+                is_canonical = name in CANONICAL_DEPLOYED
+                if not is_canonical:
+                    # Unknown DEPLOYED name — no generator exists for it.
+                    errors.append(ValidationError(
+                        file_path=file_path,
+                        line_number=line_num,
+                        error_code="E011",
+                        message=f"Unrecognised tool-managed boundary name: {name!r}",
+                    ))
 
             if not is_close:
                 # --- Opening tag ---
@@ -214,23 +265,21 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                     seen_names.add(name)
 
                 if kind == BoundaryKind.SECTION:
-                    # Check canonical section order (E007) — only for canonical names.
+                    # Check canonical document order (E007) — only for canonical names.
                     if is_canonical:
-                        section_idx = CANONICAL_SECTIONS.index(name)
-                        if section_idx <= last_section_order_idx:
+                        order_idx = CANONICAL_ORDER.index(name)
+                        if order_idx <= last_order_idx:
                             errors.append(ValidationError(
                                 file_path=file_path,
                                 line_number=line_num,
                                 error_code="E007",
                                 message=(
                                     f"Section {name!r} appears out of canonical order "
-                                    f"(expected after index {last_section_order_idx} "
+                                    f"(expected after index {last_order_idx} "
                                     f"in canonical sequence)"
                                 ),
                             ))
-                        # Update order tracker even for out-of-order sections so
-                        # subsequent checks measure relative to the latest seen.
-                        last_section_order_idx = max(last_section_order_idx, section_idx)
+                        last_order_idx = max(last_order_idx, order_idx)
 
                     section_stack.append((name, line_num))
 
@@ -252,6 +301,55 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                             ))
 
                     injection_stack.append((name, line_num))
+
+                else:  # DEPLOYED
+                    if is_canonical:
+                        required_parent = DEPLOYED_PARENT_MAP.get(name)
+                        current_section = section_stack[-1][0] if section_stack else None
+
+                        if required_parent is None:
+                            # Must be at body top level (not inside any section).
+                            if current_section is not None:
+                                errors.append(ValidationError(
+                                    file_path=file_path,
+                                    line_number=line_num,
+                                    error_code="E008",
+                                    message=(
+                                        f"Deployed region {name!r} must be at body top level "
+                                        f"but is inside section {current_section!r}"
+                                    ),
+                                ))
+                            else:
+                                # Top-level deployed: participates in canonical order check.
+                                if name in CANONICAL_ORDER:
+                                    order_idx = CANONICAL_ORDER.index(name)
+                                    if order_idx <= last_order_idx:
+                                        errors.append(ValidationError(
+                                            file_path=file_path,
+                                            line_number=line_num,
+                                            error_code="E007",
+                                            message=(
+                                                f"Deployed region {name!r} appears out of "
+                                                f"canonical order (expected after index "
+                                                f"{last_order_idx} in canonical sequence)"
+                                            ),
+                                        ))
+                                    last_order_idx = max(last_order_idx, order_idx)
+                        else:
+                            # Must be inside the required parent section.
+                            if current_section != required_parent:
+                                errors.append(ValidationError(
+                                    file_path=file_path,
+                                    line_number=line_num,
+                                    error_code="E008",
+                                    message=(
+                                        f"Deployed region {name!r} must be inside "
+                                        f"section {required_parent!r}, "
+                                        f"but is inside {current_section!r}"
+                                    ),
+                                ))
+
+                    deployed_stack.append((name, line_num))
 
             else:
                 # --- Closing tag ---
@@ -299,11 +397,33 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                             ))
                         injection_stack.pop()
 
+                else:  # DEPLOYED
+                    if not deployed_stack:
+                        errors.append(ValidationError(
+                            file_path=file_path,
+                            line_number=line_num,
+                            error_code="E002",
+                            message=f"Unmatched closing tag [[/DEPLOYED:{name}]] (no open tag)",
+                        ))
+                    else:
+                        top_name, _top_line = deployed_stack[-1]
+                        if top_name != name:
+                            errors.append(ValidationError(
+                                file_path=file_path,
+                                line_number=line_num,
+                                error_code="E003",
+                                message=(
+                                    f"Mismatched open/close names: "
+                                    f"opened {top_name!r}, closed {name!r}"
+                                ),
+                            ))
+                        deployed_stack.pop()
+
         else:
             # Not a boundary tag — check for content outside boundaries (E005).
             # Blank lines and '---' section separators are exempt.
             if stripped and stripped != "---":
-                if not section_stack and not injection_stack:
+                if not section_stack and not injection_stack and not deployed_stack:
                     errors.append(ValidationError(
                         file_path=file_path,
                         line_number=line_num,
@@ -325,6 +445,13 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
             line_number=open_line_num,
             error_code="E001",
             message=f"Unmatched open tag [[INJECTION:{name}]] (no close tag found)",
+        ))
+    for name, open_line_num in deployed_stack:
+        errors.append(ValidationError(
+            file_path=file_path,
+            line_number=open_line_num,
+            error_code="E001",
+            message=f"Unmatched open tag [[DEPLOYED:{name}]] (no close tag found)",
         ))
 
     return errors

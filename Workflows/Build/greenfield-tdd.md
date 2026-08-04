@@ -1,5 +1,5 @@
 ---
-version: "3.3"
+version: "3.4"
 name: "Greenfield TDD Workflow"
 description: "Building a new project from scratch requiring system architecture, test-first development, and full design."
 hint: "Full greenfield with architecture, TDD, and design phases"
@@ -38,7 +38,7 @@ artifacts:
 ---
 
 [[SECTION:Workflow:greenfield-tdd]]
-<!-- workflow-version: 3.3 -->
+<!-- workflow-version: 3.4 -->
 ## Greenfield TDD Workflow
 
 **Use when:** Building a **new project from scratch** requiring system architecture, test-first development, and full design.
@@ -53,17 +53,22 @@ artifacts:
 | PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
 | DESIGN | contracts-designer | ✅ | contracts-review | - | Requirements.md, Plan.md, Stage-*/Plan.md, SystemDesign.md | ContractsDesign.md |
 | DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
 | REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
 
-**EXECUTION Stages:** Loop per stage (stages defined in Plan.md). Subagent sequence per stage determined by the `Approach` column in the stage table:
-- `TDD` — test-writer-tdd → tests-review-tdd → implementation-tdd → implementation-review
-- `Implementation-First` — implementation-tdd → implementation-review → test-writer-tdd → tests-review-tdd
-- `Implementation-Only` — implementation-tdd → implementation-review (no test agents)
-- `Tests-Only` — test-writer-tdd → tests-review-tdd (no implementation agents)
+**Execution Groups:**
+
+| Approach | Groups |
+|----------|--------|
+| TDD | Test, Implementation |
+| Implementation-First | Implementation, Test |
+| Implementation-Only | Implementation |
+| Tests-Only | Test |
+
+**EXECUTION Stages:** Loop per stage (stages defined in Plan.md). Subagent sequence per stage determined by the `Approach` column in the stage table.
 
 **Notes:**
 - **Greenfield** = no existing codebase, architecture created from scratch

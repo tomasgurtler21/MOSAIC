@@ -181,7 +181,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	var stages *domain.StageSet
 	if admitted.HasStagedPhase {
 		planPath := filepath.Join(orchDir, "Plan.md")
-		ss, stageErr := planstages.ReadStages(planPath, admitted.TwoGroup)
+		ss, stageErr := planstages.ReadStages(planPath, admitted.GroupsDeclared)
 		if stageErr != nil {
 			return refusal(stageErr.Error()), nil
 		}
@@ -424,7 +424,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 			// on the next row.
 			if hasStageStarArtifact(step.Request.OutputArtifacts) {
 				planPath := filepath.Join(orchDir, "Plan.md")
-				ss, ssErr := planstages.ReadStages(planPath, admitted.TwoGroup)
+				ss, ssErr := planstages.ReadStages(planPath, admitted.GroupsDeclared)
 				if ssErr != nil {
 					s.deps.Interact.Notify(ctx, interaction.Notice{
 						Level:   interaction.NoticeWarning,

@@ -72,6 +72,7 @@ package engine_test
 //   - Resume with no interruption at end of pre-execution rows → RowIndex = first EXECUTION row.
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -96,7 +97,7 @@ const quickFixContent = `<!-- workflow-version: 3.0 -->
 | REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
 `
 
-const brownfieldTDDContent = `<!-- workflow-version: 3.4 -->
+const brownfieldTDDContent = `<!-- workflow-version: 3.6 -->
 ## Brownfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
@@ -108,14 +109,23 @@ const brownfieldTDDContent = `<!-- workflow-version: 3.4 -->
 | PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
 | DESIGN | contracts-designer | ✅ | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
 | DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
 | REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+
+**Execution Groups:**
+
+| Approach | Groups |
+|----------|--------|
+| TDD | Test, Implementation |
+| Implementation-First | Implementation, Test |
+| Implementation-Only | Implementation |
+| Tests-Only | Test |
 `
 
-const brownfieldBuildVerifiedContent = `<!-- workflow-version: 2.0 -->
+const brownfieldBuildVerifiedContent = `<!-- workflow-version: 2.1 -->
 ## Brownfield TDD Build-Verified Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
@@ -127,12 +137,21 @@ const brownfieldBuildVerifiedContent = `<!-- workflow-version: 2.0 -->
 | PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
 | DESIGN | contracts-designer | ✅ | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
 | DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.[StageNumber] | test-writer-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | build-review | ❌ | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-tests.md |
-| EXECUTION.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-tests.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | build-review | ❌ | implementation-review | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-impl.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-impl.md | Stage-{StageNumber}/implementation-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | build-review | ❌ | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-tests.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-tests.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | build-review | ❌ | implementation-review | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-impl.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-impl.md | Stage-{StageNumber}/implementation-review.md |
+
+**Execution Groups:**
+
+| Approach | Groups |
+|----------|--------|
+| TDD | Test, Implementation |
+| Implementation-First | Implementation, Test |
+| Implementation-Only | Implementation |
+| Tests-Only | Test |
 `
 
 const implOnlyContent = `<!-- workflow-version: 3.1 -->
@@ -158,11 +177,20 @@ const greenfieldTDDContent = `<!-- workflow-version: 3.3 -->
 | PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
 | DESIGN | contracts-designer | ✅ | contracts-review | - | Requirements.md, Plan.md, Stage-*/Plan.md, SystemDesign.md | ContractsDesign.md |
 | DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
 | REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+
+**Execution Groups:**
+
+| Approach | Groups |
+|----------|--------|
+| TDD | Test, Implementation |
+| Implementation-First | Implementation, Test |
+| Implementation-Only | Implementation |
+| Tests-Only | Test |
 `
 
 // onSuccessDivergentContent is a minimal EXECUTION-only workflow used to test
@@ -360,7 +388,7 @@ func agentName(instanceID string) string {
 // the workflow (a pre-execution row when the workflow starts before EXECUTION).
 func TestNext_FirstCall_DispatchesFirstPreExecutionRow(t *testing.T) {
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
 	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
@@ -380,7 +408,7 @@ func TestNext_FirstCall_DispatchesFirstPreExecutionRow(t *testing.T) {
 // stage 1 on the initial call.
 func TestNext_FirstCall_StagedOnly_DispatchesFirstExecutionRow(t *testing.T) {
 	aw := mustParseAndAdmit(t, implOnlyContent, "implementation-only", "3.1")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
 
 	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
@@ -406,7 +434,7 @@ func TestNext_FirstCall_StagedOnly_DispatchesFirstExecutionRow(t *testing.T) {
 func TestNext_PreExecution_OnSuccess_AdvancesToNamedAgent(t *testing.T) {
 	// quick-fix row 0: planner-tdd-soft, OnSuccess="plan-review"
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
 
@@ -428,7 +456,7 @@ func TestNext_PreExecution_OnSuccess_AdvancesToNamedAgent(t *testing.T) {
 func TestNext_PostExecution_CompleteTarget_ReturnsComplete(t *testing.T) {
 	// quick-fix row 3: test-runner, OnSuccess="COMPLETE"
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("REVIEW", "", "test-runner#4", domain.StatusSUCCESS, 4)
 
@@ -476,7 +504,7 @@ func TestNext_PreExecution_AbsentOnSuccess_ReturnsDeviation(t *testing.T) {
 // dispatched AgentInstanceID uses seq+1, not seq (FR-11: increment before invocation).
 func TestNext_AgentInstanceID_SeqIncrementedBeforeDispatch(t *testing.T) {
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
 	// seq=5: the next dispatch should be #6.
@@ -493,7 +521,7 @@ func TestNext_AgentInstanceID_SeqIncrementedBeforeDispatch(t *testing.T) {
 // TestNext_AgentInstanceID_ZeroSeqProducesOne verifies seq=0 → ID uses #1.
 func TestNext_AgentInstanceID_ZeroSeqProducesOne(t *testing.T) {
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
 	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
@@ -512,7 +540,7 @@ func TestNext_AgentInstanceID_ZeroSeqProducesOne(t *testing.T) {
 func TestNext_HITL_RowTrue_EffectiveTrue(t *testing.T) {
 	// quick-fix row 0: planner-tdd-soft has HITL=✅ (true)
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
 	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
@@ -529,7 +557,7 @@ func TestNext_HITL_BothFalse_EffectiveFalse(t *testing.T) {
 	// quick-fix row 1: plan-review has HITL=❌ (false), stage HITL=false
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
 	stagesNoHITL := makeStageSet([]domain.StageEntry{
-		{Number: 1, HITL: false, Approach: domain.ApproachImplementationOnly},
+		{Number: 1, HITL: false, Approach: "Implementation-Only"},
 	})
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
@@ -549,7 +577,7 @@ func TestNext_HITL_StageTrue_InsideExecution_EffectiveTrue(t *testing.T) {
 	// quick-fix row 2: implementation-tdd has HITL=false, but stage HITL=true
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
 	stagesHITL := makeStageSet([]domain.StageEntry{
-		{Number: 1, HITL: true, Approach: domain.ApproachImplementationOnly},
+		{Number: 1, HITL: true, Approach: "Implementation-Only"},
 	})
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	// State: plan-review (row 1) just succeeded; next is EXECUTION row.
@@ -571,7 +599,7 @@ func TestNext_HITL_StageTrue_OutsideExecution_EffectiveFalse(t *testing.T) {
 	// Stage HITL=true should be ignored for this row.
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
 	stagesHITL := makeStageSet([]domain.StageEntry{
-		{Number: 1, HITL: true, Approach: domain.ApproachImplementationOnly},
+		{Number: 1, HITL: true, Approach: "Implementation-Only"},
 	})
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
@@ -592,7 +620,7 @@ func TestNext_Approach_TDD_DispatchesTestGroupFirst(t *testing.T) {
 	// brownfield-tdd: after contracts-review (row 6, last pre-execution row),
 	// with TDD approach, the first EXECUTION dispatch should be test-writer-tdd (row 7).
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -617,7 +645,7 @@ func TestNext_Approach_ImplementationFirst_DispatchesImplGroupFirst(t *testing.T
 	// approach, the first EXECUTION dispatch should be implementation-tdd (row 9),
 	// not test-writer-tdd.
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachImplementationFirst)
+	stages := singleStageSet("Implementation-First")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -640,7 +668,7 @@ func TestNext_Approach_ImplementationFirst_DispatchesImplGroupFirst(t *testing.T
 // After contracts-review, the first dispatch must be implementation-tdd.
 func TestNext_Approach_ImplementationOnly_SkipsTestGroup(t *testing.T) {
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -666,7 +694,7 @@ func TestNext_Approach_ImplementationOnly_SkipsTestGroup(t *testing.T) {
 // After contracts-review, the first dispatch must be test-writer-tdd.
 func TestNext_Approach_TestsOnly_SkipsImplGroup(t *testing.T) {
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTestsOnly)
+	stages := singleStageSet("Tests-Only")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -697,7 +725,7 @@ func TestNext_Staged_TDD_AfterTestGroup_DispatchesImplGroup(t *testing.T) {
 	// Test group: rows 7 (test-writer-tdd) and 8 (tests-review-tdd).
 	// After tests-review-tdd succeeds (row 8), next must be implementation-tdd (row 9).
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -722,7 +750,7 @@ func TestNext_Staged_TDD_AfterImplGroupLastStage_AdvancesToNextStage(t *testing.
 	// brownfield-tdd, TDD approach, two stages:
 	// After implementation-review (row 10) in Stage-1, advance to Stage-2 test group.
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := twoStageSet(domain.ApproachTDD)
+	stages := twoStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -752,7 +780,7 @@ func TestNext_Staged_AfterLastStage_DispatchesPostExecutionRow(t *testing.T) {
 	// After implementation-review (row 10, last impl-group row, only stage),
 	// engine must dispatch test-runner (row 11, the post-execution REVIEW row).
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -780,7 +808,7 @@ func TestNext_Staged_AfterLastStage_DispatchesPostExecutionRow(t *testing.T) {
 func TestNext_Staged_AfterLastStage_NoPostExecution_ReturnsComplete(t *testing.T) {
 	// brownfield-tdd-build-verified has no post-execution rows (table ends at row 12).
 	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -808,7 +836,7 @@ func TestNext_Staged_AfterLastStage_NoPostExecution_ReturnsComplete(t *testing.T
 // making a correct vs incorrect implementation distinguishable.
 func TestNext_Staged_OnSuccessIgnoredInsideExecution(t *testing.T) {
 	aw := mustParseAndAdmit(t, onSuccessDivergentContent, "on-success-divergent", "1.0")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents("test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review")
 	// test-writer-tdd is row 0; after it succeeds in Stage-1 (seq=1).
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "test-writer-tdd#1", domain.StatusSUCCESS, 1)
@@ -835,7 +863,7 @@ func TestNext_Paths_StageNumber_SubstitutedInInput(t *testing.T) {
 	// quick-fix row 2: implementation-tdd has input "Stage-{StageNumber}/Plan.md".
 	// When dispatched in Stage-1, it must resolve to "Stage-1/Plan.md".
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "plan-review#2", domain.StatusSUCCESS, 2)
 
@@ -862,7 +890,7 @@ func TestNext_Paths_StageNumber_SubstitutedInInput(t *testing.T) {
 func TestNext_Paths_StageNumber_SubstitutedInOutput(t *testing.T) {
 	// quick-fix row 2: implementation-tdd output is "Stage-{StageNumber}/PlanProgress.md".
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "plan-review#2", domain.StatusSUCCESS, 2)
 
@@ -890,9 +918,9 @@ func TestNext_Paths_StageStar_InputExpanded(t *testing.T) {
 	// With 3 stages, Stage-*/Plan.md expands to Stage-1/Plan.md, Stage-2/Plan.md, Stage-3/Plan.md.
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
 	threeStages := makeStageSet([]domain.StageEntry{
-		{Number: 1, HITL: false, Approach: domain.ApproachImplementationOnly},
-		{Number: 2, HITL: false, Approach: domain.ApproachImplementationOnly},
-		{Number: 3, HITL: false, Approach: domain.ApproachImplementationOnly},
+		{Number: 1, HITL: false, Approach: "Implementation-Only"},
+		{Number: 2, HITL: false, Approach: "Implementation-Only"},
+		{Number: 3, HITL: false, Approach: "Implementation-Only"},
 	})
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
@@ -929,7 +957,7 @@ func TestNext_Paths_StageStar_OutputPassedThrough(t *testing.T) {
 	// quick-fix row 0 (planner-tdd-soft) output includes "Stage-*/Plan.md" and
 	// "Stage-*/PlanProgress.md". These must pass through to the subagent unchanged.
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
 	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
@@ -956,11 +984,11 @@ func TestNext_Paths_NonExecution_StageStar_UsesRefreshedStages(t *testing.T) {
 	// Run-start stages has 1 stage; refreshedStages has 3 stages.
 	// The expansion must use the refreshed set (3 entries), not the run-start set.
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	runStartStages := singleStageSet(domain.ApproachImplementationOnly)
+	runStartStages := singleStageSet("Implementation-Only")
 	refreshed := makeStageSet([]domain.StageEntry{
-		{Number: 1, HITL: false, Approach: domain.ApproachImplementationOnly},
-		{Number: 2, HITL: false, Approach: domain.ApproachImplementationOnly},
-		{Number: 3, HITL: false, Approach: domain.ApproachImplementationOnly},
+		{Number: 1, HITL: false, Approach: "Implementation-Only"},
+		{Number: 2, HITL: false, Approach: "Implementation-Only"},
+		{Number: 3, HITL: false, Approach: "Implementation-Only"},
 	})
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
@@ -987,8 +1015,8 @@ func TestNext_Paths_NonExecution_StageStar_NilRefreshed_UsesRunStartStages(t *te
 	// quick-fix row 1: plan-review, Stage-*/Plan.md with run-start stages = 2.
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
 	runStartStages := makeStageSet([]domain.StageEntry{
-		{Number: 1, HITL: false, Approach: domain.ApproachImplementationOnly},
-		{Number: 2, HITL: false, Approach: domain.ApproachImplementationOnly},
+		{Number: 1, HITL: false, Approach: "Implementation-Only"},
+		{Number: 2, HITL: false, Approach: "Implementation-Only"},
 	})
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
@@ -1018,7 +1046,7 @@ func TestNext_OnFindings_UnambiguousHint_CNA_ReturnsDispatch(t *testing.T) {
 	// brownfield-tdd-build-verified row 8: build-review (in test group), OnFindings="test-writer-tdd".
 	// When build-review returns CNA, engine must dispatch test-writer-tdd (loop-back).
 	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1044,7 +1072,7 @@ func TestNext_OnFindings_UnambiguousHint_CNA_InsideExecution_ReturnsDispatch(t *
 	// brownfield-tdd-build-verified row 11: second build-review (in impl group), OnFindings="implementation-tdd".
 	// When it returns CNA, engine must dispatch implementation-tdd (loop-back), not Deviation.
 	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1098,7 +1126,7 @@ func TestNext_OnFindings_AbsentColumn_CNA_ReturnsDeviation(t *testing.T) {
 func TestNext_OnFindings_EmptyValue_CNA_ReturnsDeviation(t *testing.T) {
 	// brownfield-tdd row 7: test-writer-tdd has OnFindings="-" (no hint value).
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1119,7 +1147,7 @@ func TestNext_OnFindings_FreeFormHint_CNA_ReturnsDeviation(t *testing.T) {
 	// brownfield-tdd row 10: implementation-review has OnFindings=
 	// "implementation-tdd (or other based on issue)" — free-form, not unambiguous.
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1142,7 +1170,7 @@ func TestNext_OnFindings_NonCNA_NonSuccess_ReturnsDeviation(t *testing.T) {
 	// If it returns PARTIALLY_DONE (not CNA), the engine must return Deviation,
 	// even though On Findings names an agent.
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1160,7 +1188,7 @@ func TestNext_OnFindings_NonCNA_NonSuccess_ReturnsDeviation(t *testing.T) {
 // deviation info is set to DeviationNonSuccess for a non-SUCCESS response.
 func TestNext_Deviation_Kind_IsNonSuccess(t *testing.T) {
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1181,7 +1209,7 @@ func TestNext_Deviation_Kind_IsNonSuccess(t *testing.T) {
 // carries the current row index and phase for the resolver's context.
 func TestNext_Deviation_IncludesCurrentRowAndPhase(t *testing.T) {
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1198,8 +1226,8 @@ func TestNext_Deviation_IncludesCurrentRowAndPhase(t *testing.T) {
 	if dev.Info.CurrentRow != 8 {
 		t.Errorf("want CurrentRow=8 (tests-review-tdd), got %d", dev.Info.CurrentRow)
 	}
-	if dev.Info.CurrentPhase != "EXECUTION.[StageNumber]" {
-		t.Errorf("want CurrentPhase=EXECUTION.[StageNumber], got %q", dev.Info.CurrentPhase)
+	if dev.Info.CurrentPhase != "EXECUTION.Test.[StageNumber]" {
+		t.Errorf("want CurrentPhase=EXECUTION.Test.[StageNumber], got %q", dev.Info.CurrentPhase)
 	}
 	if dev.Info.CurrentStage != "Stage-1" {
 		t.Errorf("want CurrentStage=Stage-1, got %q", dev.Info.CurrentStage)
@@ -1216,7 +1244,7 @@ func TestNext_Approach_ImplementationFirst_AfterImplGroup_DispatchesTestGroup(t 
 	// After implementation-review (row 10) in Stage-1, the next dispatch must be
 	// test-writer-tdd (row 7, first test group row).
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachImplementationFirst)
+	stages := singleStageSet("Implementation-First")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1242,7 +1270,7 @@ func TestNext_Approach_TestsOnly_AfterTestGroup_AdvancesToNextStage(t *testing.T
 	// After tests-review-tdd (row 8, last test-group row) in Stage-1,
 	// advance to Stage-2 test-writer-tdd (no implementation group).
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := twoStageSet(domain.ApproachTestsOnly)
+	stages := twoStageSet("Tests-Only")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1270,7 +1298,7 @@ func TestNext_Approach_TestsOnly_AfterTestGroup_AdvancesToNextStage(t *testing.T
 // test-writer-tdd → build-review → tests-review-tdd.
 func TestNext_BuildVerified_TDD_TestGroupSequence(t *testing.T) {
 	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1324,7 +1352,7 @@ func TestNext_BuildVerified_TDD_TestGroupSequence(t *testing.T) {
 // implementation-tdd → build-review → implementation-review.
 func TestNext_BuildVerified_TDD_ImplGroupSequence(t *testing.T) {
 	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1380,7 +1408,7 @@ func TestNext_BuildVerified_TDD_ImplGroupSequence(t *testing.T) {
 func TestNext_DispatchStep_PhaseAndStageSet(t *testing.T) {
 	// quick-fix: dispatching implementation-tdd (row 2, EXECUTION.[StageNumber]) in Stage-1.
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "plan-review#2", domain.StatusSUCCESS, 2)
 
@@ -1399,7 +1427,7 @@ func TestNext_DispatchStep_PhaseAndStageSet(t *testing.T) {
 func TestNext_DispatchStep_RowIndex(t *testing.T) {
 	// quick-fix: row 0 = planner-tdd-soft.
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
 	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
@@ -1414,7 +1442,7 @@ func TestNext_DispatchStep_RowIndex(t *testing.T) {
 // matches the routing table's agent field.
 func TestNext_DispatchStep_AgentIdentifier(t *testing.T) {
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
 	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
@@ -1431,7 +1459,7 @@ func TestNext_DispatchStep_AgentIdentifier(t *testing.T) {
 // log entries, ResumePoint returns RowIndex=0 and RerunLast=false.
 func TestResumePoint_NoLogEntries_ReturnsFirstRow(t *testing.T) {
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 
 	info, err := engine.ResumePoint(aw, stages, emptyState())
 	if err != nil {
@@ -1454,7 +1482,7 @@ func TestResumePoint_NoLogEntries_ReturnsFirstRow(t *testing.T) {
 func TestResumePoint_LastEntrySuccess_AdvancesToNextRow(t *testing.T) {
 	// After planner-tdd-soft (row 0) completed with SUCCESS.
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
 
 	info, err := engine.ResumePoint(aw, stages, state)
@@ -1480,7 +1508,7 @@ func TestResumePoint_Interruption_RerunsLastRow(t *testing.T) {
 	// was interrupted before CurrentState was updated to reflect it. CurrentState
 	// still shows planner-tdd-soft from the prior step.
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 
 	// CurrentState reflects planner-tdd-soft (row 0), but the log has a second
 	// entry for plan-review (row 1) — meaning plan-review started but the artifact
@@ -1518,7 +1546,7 @@ func TestResumePoint_StagedWorkflow_DerivesGroupAndStage(t *testing.T) {
 	// After test-writer-tdd (row 7) in Stage-1 of brownfield-tdd.
 	// GroupIndex should be 0 (test group), StageNumber=1.
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "test-writer-tdd#8", domain.StatusSUCCESS, 8)
 
 	info, err := engine.ResumePoint(aw, stages, state)
@@ -1546,7 +1574,7 @@ func TestResumePoint_StagedWorkflow_DerivesGroupAndStage(t *testing.T) {
 func TestResumePoint_StagedWorkflow_NonExecutionRow_GroupIndexNegativeOne(t *testing.T) {
 	// After codebase-research (row 0) in brownfield-tdd (RESEARCH phase, pre-execution).
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	state := stateAfter("RESEARCH", "", "codebase-research#1", domain.StatusSUCCESS, 1)
 
 	info, err := engine.ResumePoint(aw, stages, state)
@@ -1569,7 +1597,7 @@ func TestResumePoint_MidStageInterruption_DerivesCorrectRow(t *testing.T) {
 	// Log says tests-review-tdd ran (row 8), but CurrentState only shows test-writer-tdd.
 	// This means tests-review-tdd was dispatched but the artifact update was lost.
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 
 	state := domain.ArtifactState{
 		GlobalSequence: 8,
@@ -1607,7 +1635,7 @@ func TestNext_Artifacts_PreExecutionRow_NoTemplateExpansion(t *testing.T) {
 	// quick-fix row 0: planner-tdd-soft output = "Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md"
 	// Plan.md has no template — must appear unchanged.
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
 	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
@@ -1630,7 +1658,7 @@ func TestNext_Artifacts_InputArtifactsMatchRow(t *testing.T) {
 	// quick-fix row 1 (plan-review): inputs are Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md.
 	// After Stage-* expansion with 1 stage: Plan.md, Stage-1/Plan.md, Stage-1/PlanProgress.md.
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
-	stages := singleStageSet(domain.ApproachImplementationOnly)
+	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
 
@@ -1732,7 +1760,7 @@ func TestNext_PreExecution_FreeFormOnSuccess_ReturnsDeviation(t *testing.T) {
 // fixtures and confirms the engine handles the greenfield row structure correctly.
 func TestNext_GreenfieldTDD_ArchitecturePhaseRouting(t *testing.T) {
 	aw := mustParseAndAdmit(t, greenfieldTDDContent, "greenfield-tdd", "3.3")
-	stages := singleStageSet(domain.ApproachTDD)
+	stages := singleStageSet("TDD")
 	agents := makeAgents(
 		"requirements-refinement", "requirements-review",
 		"system-designer", "system-design-review",
@@ -1770,7 +1798,7 @@ func TestNext_Approach_TestsOnly_LastStage_AdvancesToPostExecution(t *testing.T)
 	// more stages and no implementation group to run. Engine must dispatch
 	// test-runner (row 11, the post-execution REVIEW row).
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachTestsOnly)
+	stages := singleStageSet("Tests-Only")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1804,7 +1832,7 @@ func TestNext_Approach_ImplementationFirst_LastStageTestGroupComplete_AdvancesTo
 	// After tests-review-tdd (row 8, last row of the test group which runs second)
 	// in Stage-1 (the only stage), engine must advance to test-runner (post-execution).
 	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
-	stages := singleStageSet(domain.ApproachImplementationFirst)
+	stages := singleStageSet("Implementation-First")
 	agents := makeAgents(
 		"codebase-research", "requirements-refinement", "requirements-review",
 		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
@@ -1852,7 +1880,7 @@ func TestNext_HITL_RowTrue_StageTrue_EffectiveTrue(t *testing.T) {
 		t.Fatalf("Admit: %v", err)
 	}
 	stagesHITL := makeStageSet([]domain.StageEntry{
-		{Number: 1, HITL: true, Approach: domain.ApproachImplementationOnly},
+		{Number: 1, HITL: true, Approach: "Implementation-Only"},
 	})
 	agents := makeAgents("agent-a", "agent-b")
 
@@ -1865,5 +1893,568 @@ func TestNext_HITL_RowTrue_StageTrue_EffectiveTrue(t *testing.T) {
 	}
 	if !step.EffectiveHITL {
 		t.Error("want EffectiveHITL=true (row HITL=true AND stage HITL=true), got false")
+	}
+}
+
+// ===== T4.1: Table-driven group ordering (three or more groups) =====
+//
+// threeGroupContent is a minimal staged workflow with three named execution groups
+// (Alpha, Beta, Gamma) and a four-row approach table. It is used to verify that
+// the engine uses the approach table for ordering rather than the natural group
+// declaration order or any hardcoded mapping.
+//
+// Group layout (zero-based row indices in the routing table, no pre-execution rows):
+//   Row 0: EXECUTION.Alpha  agent-alpha
+//   Row 1: EXECUTION.Beta   agent-beta
+//   Row 2: EXECUTION.Gamma  agent-gamma
+//
+// Approach table:
+//   AlphaFirst       → Alpha, Beta, Gamma
+//   BetaFirst        → Beta, Alpha, Gamma
+//   GammaOnly        → Gamma
+//   AlphaBeta        → Alpha, Beta
+const threeGroupContent = `<!-- workflow-version: 1.0 -->
+## Three-Group Workflow
+
+| Phase | Subagent | HITL | On Success | On Findings | Input | Output |
+|-------|----------|:----:|------------|-------------|-------|--------|
+| EXECUTION.Alpha.[StageNumber] | agent-alpha | ❌ | - | - | - | - |
+| EXECUTION.Beta.[StageNumber] | agent-beta | ❌ | - | - | - | - |
+| EXECUTION.Gamma.[StageNumber] | agent-gamma | ❌ | - | - | - | - |
+
+**Execution Groups:**
+
+| Approach | Groups |
+|----------|--------|
+| AlphaFirst | Alpha, Beta, Gamma |
+| BetaFirst | Beta, Alpha, Gamma |
+| GammaOnly | Gamma |
+| AlphaBeta | Alpha, Beta |
+`
+
+// TestNext_ThreeGroups_BetaFirst_FirstDispatchIsBeta verifies that when the workflow
+// has three named groups and the stage uses the "BetaFirst" approach, the engine
+// dispatches agent-beta first (Beta group appears before Alpha in that row).
+//
+// This test is RED with the current implementation, which uses orderedGroupsForApproach
+// and falls back to the natural group order (Alpha first) when TwoGroup=false.
+// The new orderedGroupsForStage implementation must look up the approach table to
+// honour the row's group sequence.
+func TestNext_ThreeGroups_BetaFirst_FirstDispatchIsBeta(t *testing.T) {
+	aw := mustParseAndAdmit(t, threeGroupContent, "three-group", "1.0")
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "BetaFirst"},
+	})
+	agents := makeAgents("agent-alpha", "agent-beta", "agent-gamma")
+
+	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "agent-beta" {
+		t.Errorf("BetaFirst approach: want first dispatch to agent-beta (Beta group first in approach row), got %s",
+			step.Request.AgentInstanceID)
+	}
+	if step.Stage != "Stage-1" {
+		t.Errorf("want Stage-1, got %q", step.Stage)
+	}
+}
+
+// TestNext_ThreeGroups_GammaOnly_SkipsAlphaAndBeta verifies that with the "GammaOnly"
+// approach, only the Gamma group rows are dispatched. Alpha and Beta are omitted.
+//
+// This test is RED: the current implementation (TwoGroup=false) returns all groups
+// and would dispatch agent-alpha first, not agent-gamma.
+func TestNext_ThreeGroups_GammaOnly_SkipsAlphaAndBeta(t *testing.T) {
+	aw := mustParseAndAdmit(t, threeGroupContent, "three-group", "1.0")
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "GammaOnly"},
+	})
+	agents := makeAgents("agent-alpha", "agent-beta", "agent-gamma")
+
+	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "agent-gamma" {
+		t.Errorf("GammaOnly approach: want first (only) dispatch to agent-gamma, got %s",
+			step.Request.AgentInstanceID)
+	}
+}
+
+// TestNext_ThreeGroups_GammaOnly_AfterGamma_NextStageStartsWithGamma verifies
+// that after agent-gamma completes stage 1 under the GammaOnly approach, stage 2
+// begins with agent-gamma again (not agent-alpha). With the declared-order
+// fallback the single implicit group covers all rows, so stage 2 would start at
+// row 0 (agent-alpha); table-driven routing correctly starts at Gamma's row.
+//
+// RED: the current implementation (TwoGroup=false) uses a single implicit group
+// covering all rows, so stage 2 starts with agent-alpha rather than agent-gamma.
+func TestNext_ThreeGroups_GammaOnly_AfterGamma_NextStageStartsWithGamma(t *testing.T) {
+	aw := mustParseAndAdmit(t, threeGroupContent, "three-group", "1.0")
+	// Two stages with GammaOnly: Gamma is the only dispatched group each stage.
+	// After Gamma in stage 1 the engine must begin stage 2 with Gamma, not Alpha.
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "GammaOnly"},
+		{Number: 2, HITL: false, Approach: "GammaOnly"},
+	})
+	agents := makeAgents("agent-alpha", "agent-beta", "agent-gamma")
+	// agent-gamma is the only dispatched row (seq=1) under GammaOnly.
+	state := stateAfter("EXECUTION.Gamma.[StageNumber]", "Stage-1", "agent-gamma#1", domain.StatusSUCCESS, 1)
+
+	dec := engine.Next(aw, stages, state, successResponse("agent-gamma#1"), agents, 1, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	if step.Stage != "Stage-2" {
+		t.Errorf("GammaOnly: after stage 1 Gamma, want Stage-2, got %q", step.Stage)
+	}
+	if agentName(step.Request.AgentInstanceID) != "agent-gamma" {
+		t.Errorf("GammaOnly stage 2: want agent-gamma (table-driven), got %s", step.Request.AgentInstanceID)
+	}
+}
+
+// TestNext_ThreeGroups_AlphaBeta_SkipsGamma verifies that with the "AlphaBeta"
+// approach, Gamma is skipped. After agent-alpha and agent-beta complete the stage,
+// the engine should advance to the next stage (or complete), not dispatch agent-gamma.
+//
+// This test is RED: the current implementation (TwoGroup=false) returns all groups
+// and would dispatch agent-gamma after agent-beta.
+func TestNext_ThreeGroups_AlphaBeta_SkipsGamma(t *testing.T) {
+	aw := mustParseAndAdmit(t, threeGroupContent, "three-group", "1.0")
+	// Two stages: stage 1 AlphaBeta, stage 2 AlphaBeta.
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "AlphaBeta"},
+		{Number: 2, HITL: false, Approach: "AlphaBeta"},
+	})
+	agents := makeAgents("agent-alpha", "agent-beta", "agent-gamma")
+	// agent-beta is row 1 (last row in the Alpha+Beta sequence). After it completes
+	// in stage 1, the engine should advance to stage 2 Alpha (row 0), not dispatch
+	// Gamma (which is skipped by AlphaBeta).
+	state := stateAfter("EXECUTION.Beta.[StageNumber]", "Stage-1", "agent-beta#2", domain.StatusSUCCESS, 2)
+
+	dec := engine.Next(aw, stages, state, successResponse("agent-beta#2"), agents, 2, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	// Should advance to stage 2, starting with Alpha (first group in AlphaBeta order).
+	if agentName(step.Request.AgentInstanceID) != "agent-alpha" {
+		t.Errorf("AlphaBeta: after agent-beta in stage 1, want agent-alpha in stage 2, got %s",
+			step.Request.AgentInstanceID)
+	}
+	if step.Stage != "Stage-2" {
+		t.Errorf("AlphaBeta: want Stage-2 after Alpha+Beta complete in stage 1, got %q", step.Stage)
+	}
+}
+
+// TestNext_ThreeGroups_BetaFirst_FullSequence verifies that with "BetaFirst"
+// approach, all three groups are dispatched in the table-driven order (Beta,
+// Alpha, Gamma) — which diverges from the declared row order (Alpha, Beta, Gamma).
+// This test fails without table-driven routing because the current fallback runs
+// groups in declaration order (Alpha first), whereas the table says Beta first.
+//
+// RED: the current implementation (TwoGroup=false) uses declared order and
+// dispatches agent-alpha first rather than agent-beta.
+func TestNext_ThreeGroups_BetaFirst_FullSequence(t *testing.T) {
+	aw := mustParseAndAdmit(t, threeGroupContent, "three-group", "1.0")
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "BetaFirst"},
+	})
+	agents := makeAgents("agent-alpha", "agent-beta", "agent-gamma")
+
+	// BetaFirst → Beta (row 1), Alpha (row 0), Gamma (row 2): the order diverges
+	// from declared row order, so it cannot coincide with the declared-order fallback.
+	wantSequence := []string{"agent-beta", "agent-alpha", "agent-gamma"}
+	states := []domain.ArtifactState{
+		emptyState(),
+		stateAfter("EXECUTION.Beta.[StageNumber]", "Stage-1", "agent-beta#1", domain.StatusSUCCESS, 1),
+		stateAfter("EXECUTION.Alpha.[StageNumber]", "Stage-1", "agent-alpha#2", domain.StatusSUCCESS, 2),
+	}
+	responses := []*domain.ProtocolResponse{
+		nil,
+		successResponse("agent-beta#1"),
+		successResponse("agent-alpha#2"),
+	}
+
+	for i, want := range wantSequence {
+		dec := engine.Next(aw, stages, states[i], responses[i], agents, i, fixedNow, nil)
+		step := requireDispatch(t, dec)
+		if agentName(step.Request.AgentInstanceID) != want {
+			t.Errorf("BetaFirst step %d: want %s, got %s", i+1, want, step.Request.AgentInstanceID)
+		}
+	}
+}
+
+// TestNext_ThreeGroups_GroupInEveryApproachRow_RunsInEveryStage verifies that a
+// group present in an approach row is dispatched in every stage that uses that
+// approach. Both stages use BetaFirst (→ Beta, Alpha, Gamma), so after Gamma
+// completes stage 1 the engine must begin stage 2 with Beta, not with Alpha.
+// This fails without table-driven routing because the declared-order fallback
+// (single implicit group, all rows) always starts the next stage at row 0 (Alpha).
+//
+// RED: the current implementation uses declared row order and dispatches
+// agent-alpha at the start of stage 2 rather than agent-beta.
+func TestNext_ThreeGroups_GroupInEveryApproachRow_RunsInEveryStage(t *testing.T) {
+	// BetaFirst: Beta (row 1), Alpha (row 0), Gamma (row 2). Gamma is last.
+	// After Gamma finishes stage 1 the engine must pick up BetaFirst again for
+	// stage 2, dispatching Beta — not Alpha (row 0, which declared-order would use).
+	aw := mustParseAndAdmit(t, threeGroupContent, "three-group", "1.0")
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "BetaFirst"},
+		{Number: 2, HITL: false, Approach: "BetaFirst"},
+	})
+	agents := makeAgents("agent-alpha", "agent-beta", "agent-gamma")
+
+	// Stage 1 BetaFirst: Beta=seq1, Alpha=seq2, Gamma=seq3. After Gamma (#3) the
+	// engine advances to stage 2 and must dispatch Beta first.
+	state := stateAfter("EXECUTION.Gamma.[StageNumber]", "Stage-1", "agent-gamma#3", domain.StatusSUCCESS, 3)
+
+	dec := engine.Next(aw, stages, state, successResponse("agent-gamma#3"), agents, 3, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	if step.Stage != "Stage-2" {
+		t.Errorf("after Gamma in stage 1, want Stage-2, got %q", step.Stage)
+	}
+	if agentName(step.Request.AgentInstanceID) != "agent-beta" {
+		t.Errorf("stage 2 BetaFirst: want agent-beta first (table-driven), got %s",
+			step.Request.AgentInstanceID)
+	}
+}
+
+// ===== T4.2: Unresolvable approach at the routing decision =====
+//
+// These tests verify that when a stage's Approach value has no matching row in
+// the workflow's Execution Groups table, the engine surfaces a StopDecision (or
+// error from ResumePoint) rather than falling back to a default order.
+// All tests are RED with the current implementation, which falls back to ApproachTDD.
+
+// TestNext_UnresolvableApproach_InitialDispatch_ReturnsStop verifies that when the
+// very first EXECUTION dispatch has an approach not in the workflow's table, the
+// engine returns a StopDecision naming the unresolvable value.
+//
+// RED: current implementation falls back to ApproachTDD and dispatches normally.
+func TestNext_UnresolvableApproach_InitialDispatch_ReturnsStop(t *testing.T) {
+	// brownfield-tdd has an approach table with TDD, Implementation-First,
+	// Implementation-Only, Tests-Only. "UnknownApproach" is not in the table.
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "UnknownApproach"},
+	})
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review",
+		"test-runner",
+	)
+	// Simulate being at contracts-review (row 6, last pre-execution row) → entering EXECUTION.
+	state := stateAfter("DESIGN", "", "contracts-review#7", domain.StatusSUCCESS, 7)
+
+	dec := engine.Next(aw, stages, state, successResponse("contracts-review#7"), agents, 7, fixedNow, nil)
+
+	stop := requireStop(t, dec)
+	if stop.Reason == "" {
+		t.Error("want non-empty StopDecision.Reason for unresolvable approach")
+	}
+}
+
+// TestNext_UnresolvableApproach_StopReason_NamesApproachValue verifies that the
+// StopDecision reason string contains the unresolvable approach token so the user
+// can identify and fix the plan artifact.
+//
+// RED: current implementation produces no stop at all (falls back silently).
+func TestNext_UnresolvableApproach_StopReason_NamesApproachValue(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "UnknownApproach"},
+	})
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review",
+		"test-runner",
+	)
+	state := stateAfter("DESIGN", "", "contracts-review#7", domain.StatusSUCCESS, 7)
+
+	dec := engine.Next(aw, stages, state, successResponse("contracts-review#7"), agents, 7, fixedNow, nil)
+
+	stop := requireStop(t, dec)
+	if !strings.Contains(stop.Reason, "UnknownApproach") {
+		t.Errorf("StopDecision.Reason must name the unresolvable approach %q; got %q",
+			"UnknownApproach", stop.Reason)
+	}
+}
+
+// TestNext_UnresolvableApproach_InterStageAdvance_ReturnsStop verifies that an
+// unresolvable approach at stage N+1 produces a StopDecision when the engine tries
+// to advance from the last row of stage N.
+//
+// RED: current implementation falls back to ApproachTDD for the missing approach.
+func TestNext_UnresolvableApproach_InterStageAdvance_ReturnsStop(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
+	// Stage 1 uses TDD (valid), stage 2 uses "UnknownApproach" (not in table).
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "TDD"},
+		{Number: 2, HITL: false, Approach: "UnknownApproach"},
+	})
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review",
+		"test-runner",
+	)
+	// implementation-review (row 10) is the last row of the Implementation group in TDD stage 1.
+	// After it completes, the engine should try to advance to stage 2 but find "UnknownApproach" → stop.
+	state := stateAfter("EXECUTION.Implementation.[StageNumber]", "Stage-1", "implementation-review#11", domain.StatusSUCCESS, 11)
+
+	dec := engine.Next(aw, stages, state, successResponse("implementation-review#11"), agents, 11, fixedNow, nil)
+
+	stop := requireStop(t, dec)
+	if !strings.Contains(stop.Reason, "UnknownApproach") {
+		t.Errorf("StopDecision.Reason must name the unresolvable approach in stage 2; got %q", stop.Reason)
+	}
+}
+
+// TestNext_UnresolvableApproach_NoFallbackDispatch verifies that a StopDecision is
+// returned (not a DispatchDecision) when the approach is unresolvable. This proves
+// there is no silent fallback to a default ordering.
+//
+// RED: current implementation dispatches normally (silently falls back to TDD).
+func TestNext_UnresolvableApproach_NoFallbackDispatch(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "UnknownApproach"},
+	})
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review",
+		"test-runner",
+	)
+	state := stateAfter("DESIGN", "", "contracts-review#7", domain.StatusSUCCESS, 7)
+
+	dec := engine.Next(aw, stages, state, successResponse("contracts-review#7"), agents, 7, fixedNow, nil)
+
+	// Must be Stop, not Dispatch.
+	if dec.Dispatch != nil {
+		t.Errorf("unresolvable approach must not produce a DispatchDecision (got agent %s); want StopDecision",
+			agentName(dec.Dispatch.Steps[0].Request.AgentInstanceID))
+	}
+	if dec.Stop == nil {
+		t.Error("unresolvable approach must produce a StopDecision")
+	}
+}
+
+// TestResumePoint_UnresolvableApproach_ReturnsError verifies that ResumePoint
+// returns a non-nil error (not a silent -1 row index) when the approach used in
+// sequence-arithmetic disambiguation is unresolvable.
+//
+// The test uses brownfield-tdd-build-verified where build-review appears in both
+// the Test and Implementation groups. The sequence-based disambiguation calls
+// orderedGroupsForStage which must fail with an error for an unresolvable approach.
+//
+// RED: the current implementation collapses seq-arithmetic failures to -1, which
+// produces a "could not determine current row" stop rather than the approach error.
+func TestResumePoint_UnresolvableApproach_ReturnsError(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.1")
+	// "UnknownApproach" is not in brownfield-tdd-build-verified's Execution Groups table.
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "UnknownApproach"},
+	})
+
+	// build-review appears at rows 8 and 11. The sequence-based disambiguation
+	// uses orderedGroupsForStage, which must fail for "UnknownApproach".
+	// GlobalSequence=9 positions build-review as the second EXECUTION dispatch
+	// (after test-writer-tdd=seq 8), which triggers seq-based lookup.
+	state := domain.ArtifactState{
+		GlobalSequence: 9,
+		CurrentState: domain.CurrentState{
+			Phase:      "EXECUTION.Test.[StageNumber]",
+			Stage:      "Stage-1",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "build-review#9",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 8, Agent: "test-writer-tdd#8", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
+			{Seq: 9, Agent: "build-review#9", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
+		},
+	}
+
+	_, err := engine.ResumePoint(aw, stages, state)
+
+	if err == nil {
+		t.Fatal("ResumePoint must return an error when approach is unresolvable during seq disambiguation")
+	}
+}
+
+// TestResumePoint_UnresolvableApproach_ErrorContainsApproachValue verifies that the
+// error returned by ResumePoint wraps or chains an error containing the unresolvable
+// approach value for user diagnostics.
+//
+// RED: the current implementation returns nil error (collapses to -1, then the
+// caller sees a "could not determine current row" stop).
+func TestResumePoint_UnresolvableApproach_ErrorContainsApproachValue(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.1")
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "UnknownApproach"},
+	})
+
+	state := domain.ArtifactState{
+		GlobalSequence: 9,
+		CurrentState: domain.CurrentState{
+			Phase:      "EXECUTION.Test.[StageNumber]",
+			Stage:      "Stage-1",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "build-review#9",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 8, Agent: "test-writer-tdd#8", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
+			{Seq: 9, Agent: "build-review#9", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
+		},
+	}
+
+	_, err := engine.ResumePoint(aw, stages, state)
+	if err == nil {
+		t.Fatal("ResumePoint must return an error")
+	}
+
+	// The error chain must include *domain.UnresolvableApproachError.
+	var uae *domain.UnresolvableApproachError
+	if !errors.As(err, &uae) {
+		t.Errorf("error must wrap *domain.UnresolvableApproachError; got %T: %v", err, err)
+	}
+	if uae != nil && !strings.Contains(uae.Error(), "UnknownApproach") {
+		t.Errorf("UnresolvableApproachError must name the approach value; got %q", uae.Error())
+	}
+}
+
+// TestNext_UnresolvableApproach_InitialDispatch_StopViaNext verifies that the
+// unresolvable-approach failure surfaces through engine.Next as a StopDecision
+// when the initial EXECUTION dispatch itself has an unresolvable approach
+// (no pre-execution rows).
+//
+// RED: current engine falls back to TDD approach silently.
+func TestNext_UnresolvableApproach_InitialDispatch_StagedOnly_ReturnsStop(t *testing.T) {
+	// threeGroupContent has no pre-execution rows and its stage must have a
+	// matching approach. Use "NoSuchApproach" which is absent from the table.
+	aw := mustParseAndAdmit(t, threeGroupContent, "three-group", "1.0")
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "NoSuchApproach"},
+	})
+	agents := makeAgents("agent-alpha", "agent-beta", "agent-gamma")
+
+	// Initial dispatch (no prior log) → engine enters EXECUTION immediately.
+	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+
+	stop := requireStop(t, dec)
+	if !strings.Contains(stop.Reason, "NoSuchApproach") {
+		t.Errorf("StopDecision.Reason must name %q; got %q", "NoSuchApproach", stop.Reason)
+	}
+}
+
+// TestNext_UnresolvableApproach_WinsOverGenericRowStop verifies that when
+// findCurrentRowIndex cannot determine the current row because sequence
+// arithmetic fails due to an unresolvable approach, the resulting StopDecision
+// carries the approach error message — not the generic "could not determine
+// current row from artifact state" message. This locks in the ordering
+// requirement from the design: the error check precedes the < 0 check in Next.
+//
+// In brownfield-tdd-build-verified, build-review appears in both the Test and
+// Implementation groups. When build-review is the last agent in the execution
+// log, the engine cannot determine the current row by agent+phase match alone
+// (ambiguous) and falls back to sequence arithmetic via orderedGroupsForStage.
+// With an unresolvable approach, that arithmetic fails: findCurrentRowIndex
+// returns (-1, err) rather than (-1, nil). Without the ordered check, the engine
+// would produce the generic stop; with it, the approach stop wins.
+//
+// RED: the current implementation collapses sequence-arithmetic failures to
+// (-1, nil), so Next produces the generic "could not determine current row"
+// stop rather than the approach stop.
+func TestNext_UnresolvableApproach_WinsOverGenericRowStop(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.1")
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "UnknownApproach"},
+	})
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	// build-review appears in both the Test group (row 8) and the Implementation
+	// group (row 11). With seq=9, the engine uses sequence arithmetic to
+	// disambiguate — which calls orderedGroupsForStage and fails for
+	// "UnknownApproach". The StopDecision must name the approach, not emit the
+	// generic "could not determine current row" message.
+	state := domain.ArtifactState{
+		GlobalSequence: 9,
+		CurrentState: domain.CurrentState{
+			Phase:      "EXECUTION.Test.[StageNumber]",
+			Stage:      "Stage-1",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "build-review#9",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 8, Agent: "test-writer-tdd#8", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
+			{Seq: 9, Agent: "build-review#9", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
+		},
+	}
+
+	dec := engine.Next(aw, stages, state, successResponse("build-review#9"), agents, 9, fixedNow, nil)
+
+	stop := requireStop(t, dec)
+	// The stop reason must name the unresolvable approach value. The generic
+	// "could not determine current row" message is the wrong outcome here.
+	if !strings.Contains(stop.Reason, "UnknownApproach") {
+		t.Errorf("StopDecision.Reason must name the unresolvable approach %q (not emit the generic row-not-found message); got %q",
+			"UnknownApproach", stop.Reason)
+	}
+}
+
+// ===== T4.3: No-groups-declared path =====
+//
+// These tests verify that when a workflow declares no groups (bare EXECUTION rows,
+// no approach table), any Approach value in the StageSet is silently ignored and
+// all EXECUTION rows run in declaration order.
+
+// TestNext_NoGroups_UnknownApproachValue_DoesNotStop verifies that when the workflow
+// has no groups (GroupsDeclared=false), an approach value not present in any table
+// does NOT cause a StopDecision. The approach is simply ignored.
+func TestNext_NoGroups_UnknownApproachValue_DoesNotStop(t *testing.T) {
+	// implOnlyContent has no groups and no approach table.
+	aw := mustParseAndAdmit(t, implOnlyContent, "implementation-only", "3.1")
+	stages := makeStageSet([]domain.StageEntry{
+		// "CompletelyUnknownToken" is not a known approach, but with no groups
+		// declared the engine must ignore it rather than stopping.
+		{Number: 1, HITL: false, Approach: "CompletelyUnknownToken"},
+	})
+	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
+
+	// Fresh start: initial dispatch.
+	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+
+	// Must be a dispatch (rows run in order), not a Stop.
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "implementation-tdd" {
+		t.Errorf("no-groups workflow: want implementation-tdd (first EXECUTION row), got %s",
+			step.Request.AgentInstanceID)
+	}
+}
+
+// TestNext_NoGroups_AllExecutionRowsDispatchedInOrder verifies that all EXECUTION
+// rows in a bare (no-groups) workflow run in declaration order when the StageSet
+// carries an approach value.
+func TestNext_NoGroups_AllExecutionRowsDispatchedInOrder(t *testing.T) {
+	// implOnlyContent: EXECUTION rows are implementation-tdd (row 0), implementation-review (row 1).
+	aw := mustParseAndAdmit(t, implOnlyContent, "implementation-only", "3.1")
+	stages := makeStageSet([]domain.StageEntry{
+		{Number: 1, HITL: false, Approach: "SomeOpaqueValue"},
+	})
+	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
+
+	// After implementation-tdd (row 0, seq 1) completes, next must be implementation-review (row 1).
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-tdd#1", domain.StatusSUCCESS, 1)
+
+	dec := engine.Next(aw, stages, state, successResponse("implementation-tdd#1"), agents, 1, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "implementation-review" {
+		t.Errorf("no-groups: want implementation-review (second EXECUTION row), got %s",
+			step.Request.AgentInstanceID)
 	}
 }

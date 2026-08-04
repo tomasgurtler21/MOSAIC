@@ -4,21 +4,32 @@ package planstages_test
 //
 // Coverage:
 //
-//   Happy path - single-group workflow (needsApproach=false, no Approach column):
+//   Happy path - no-groups workflow (requireApproach=false, no Approach column):
 //   - three-stages-no-approach.md: returns 3 StageEntry values.
 //   - Stage numbers in returned entries start at 1 and are consecutive.
 //   - HITL column decoded: ✅ → true, ❌ → false.
 //   - Depends On column parsed: "-" produces empty DependsOn slice.
 //   - Depends On column parsed: "1, 2" produces []StageNumber{1, 2}.
-//   - Approach is zero value (empty string) when needsApproach is false.
+//   - Approach is zero value (empty string) when requireApproach is false.
 //   - single-stage.md: single entry returned with Number == 1.
 //
-//   Happy path - two-group workflow (needsApproach=true, Approach column present):
-//   - four-stages-with-approach.md: Approach column read and decoded on all entries.
-//   - "TDD" decoded to ApproachTDD.
-//   - "Implementation-First" decoded to ApproachImplementationFirst.
-//   - "Implementation-Only" decoded to ApproachImplementationOnly.
-//   - "Tests-Only" decoded to ApproachTestsOnly.
+//   Happy path - grouped workflow (requireApproach=true, Approach column present):
+//   - four-stages-with-approach.md: Approach column read verbatim on all entries.
+//   - "TDD" stored as domain.Approach("TDD").
+//   - "Implementation-First" stored as domain.Approach("Implementation-First").
+//   - "Implementation-Only" stored as domain.Approach("Implementation-Only").
+//   - "Tests-Only" stored as domain.Approach("Tests-Only").
+//
+//   Opaque approach tokens (requireApproach=true):
+//   - Arbitrary token "CustomFlow" accepted verbatim without error.
+//   - "CustomFlow" stored exactly as-is in StageEntry.Approach.
+//   - Two stages with the same opaque token both stored correctly.
+//   - Empty Approach cell when requireApproach=true returns *domain.RefusalError (S2).
+//   - Empty-cell RefusalError names the stage number.
+//   - Dash "-" Approach cell when requireApproach=true returns *domain.RefusalError (S2).
+//   - Missing Approach column when required returns *domain.RefusalError (S1).
+//   - Missing-column error message mentions "workflow declares execution groups".
+//   - no-approach-col.md with requireApproach=false is accepted (no-groups mode).
 //
 //   Dependency validation (FR-16a):
 //   - Valid backward dependencies accepted: stage 3 depends on 1,2 → no error.
@@ -30,11 +41,6 @@ package planstages_test
 //   Stage number consecutiveness validation:
 //   - Gap in stage numbers rejected (1, 3) → *domain.RefusalError.
 //   - Stage numbers not starting at 1 rejected → *domain.RefusalError.
-//
-//   Approach validation (needsApproach=true):
-//   - Unrecognised approach value rejected → *domain.RefusalError.
-//   - Missing Approach column when required rejected → *domain.RefusalError.
-//   - no-approach-col.md with needsApproach=false is accepted (single-group mode).
 //
 //   Error cases - missing file:
 //   - Missing file returns error.
@@ -218,9 +224,9 @@ func TestReadStages_SingleStage_ReturnsOneEntryWithNumberOne(t *testing.T) {
 	}
 }
 
-// --- Happy path: two-group, Approach column present ---
+// --- Happy path: grouped workflow, Approach column present (verbatim tokens) ---
 
-func TestReadStages_FourStagesWithApproach_AllApproachesDecoded(t *testing.T) {
+func TestReadStages_FourStagesWithApproach_AllApproachesRead(t *testing.T) {
 	set, err := planstages.ReadStages(planstagesFixture("four-stages-with-approach.md"), true)
 	if err != nil {
 		t.Fatalf("ReadStages: %v", err)
@@ -230,7 +236,10 @@ func TestReadStages_FourStagesWithApproach_AllApproachesDecoded(t *testing.T) {
 	}
 }
 
-func TestReadStages_FourStagesWithApproach_TDD_Decoded(t *testing.T) {
+func TestReadStages_FourStagesWithApproach_TDD_StoredVerbatim(t *testing.T) {
+	// Stage 1 in four-stages-with-approach.md has Approach "TDD". It must be
+	// stored as the verbatim string domain.Approach("TDD"), not decoded through
+	// any enum switch.
 	set, err := planstages.ReadStages(planstagesFixture("four-stages-with-approach.md"), true)
 	if err != nil {
 		t.Fatalf("ReadStages: %v", err)
@@ -240,12 +249,12 @@ func TestReadStages_FourStagesWithApproach_TDD_Decoded(t *testing.T) {
 	if !ok {
 		t.Fatal("stage 1 not found")
 	}
-	if entry.Approach != domain.ApproachTDD {
-		t.Errorf("stage 1 Approach: want %q, got %q", domain.ApproachTDD, entry.Approach)
+	if entry.Approach != "TDD" {
+		t.Errorf("stage 1 Approach: want %q (verbatim), got %q", "TDD", entry.Approach)
 	}
 }
 
-func TestReadStages_FourStagesWithApproach_ImplementationFirst_Decoded(t *testing.T) {
+func TestReadStages_FourStagesWithApproach_ImplementationFirst_StoredVerbatim(t *testing.T) {
 	set, err := planstages.ReadStages(planstagesFixture("four-stages-with-approach.md"), true)
 	if err != nil {
 		t.Fatalf("ReadStages: %v", err)
@@ -255,12 +264,12 @@ func TestReadStages_FourStagesWithApproach_ImplementationFirst_Decoded(t *testin
 	if !ok {
 		t.Fatal("stage 2 not found")
 	}
-	if entry.Approach != domain.ApproachImplementationFirst {
-		t.Errorf("stage 2 Approach: want %q, got %q", domain.ApproachImplementationFirst, entry.Approach)
+	if entry.Approach != "Implementation-First" {
+		t.Errorf("stage 2 Approach: want %q (verbatim), got %q", "Implementation-First", entry.Approach)
 	}
 }
 
-func TestReadStages_FourStagesWithApproach_ImplementationOnly_Decoded(t *testing.T) {
+func TestReadStages_FourStagesWithApproach_ImplementationOnly_StoredVerbatim(t *testing.T) {
 	set, err := planstages.ReadStages(planstagesFixture("four-stages-with-approach.md"), true)
 	if err != nil {
 		t.Fatalf("ReadStages: %v", err)
@@ -270,12 +279,12 @@ func TestReadStages_FourStagesWithApproach_ImplementationOnly_Decoded(t *testing
 	if !ok {
 		t.Fatal("stage 3 not found")
 	}
-	if entry.Approach != domain.ApproachImplementationOnly {
-		t.Errorf("stage 3 Approach: want %q, got %q", domain.ApproachImplementationOnly, entry.Approach)
+	if entry.Approach != "Implementation-Only" {
+		t.Errorf("stage 3 Approach: want %q (verbatim), got %q", "Implementation-Only", entry.Approach)
 	}
 }
 
-func TestReadStages_FourStagesWithApproach_TestsOnly_Decoded(t *testing.T) {
+func TestReadStages_FourStagesWithApproach_TestsOnly_StoredVerbatim(t *testing.T) {
 	set, err := planstages.ReadStages(planstagesFixture("four-stages-with-approach.md"), true)
 	if err != nil {
 		t.Fatalf("ReadStages: %v", err)
@@ -285,8 +294,8 @@ func TestReadStages_FourStagesWithApproach_TestsOnly_Decoded(t *testing.T) {
 	if !ok {
 		t.Fatal("stage 4 not found")
 	}
-	if entry.Approach != domain.ApproachTestsOnly {
-		t.Errorf("stage 4 Approach: want %q, got %q", domain.ApproachTestsOnly, entry.Approach)
+	if entry.Approach != "Tests-Only" {
+		t.Errorf("stage 4 Approach: want %q (verbatim), got %q", "Tests-Only", entry.Approach)
 	}
 }
 
@@ -370,29 +379,109 @@ func TestReadStages_StartsAtTwo_ReturnsRefusalError(t *testing.T) {
 	asRefusalError(t, err)
 }
 
-// --- Approach validation (needsApproach=true) ---
+// --- Opaque approach tokens (T4.4) ---
 
-func TestReadStages_UnrecognisedApproach_ReturnsRefusalError(t *testing.T) {
-	// bad-approach.md has Approach = "BDD" which is not in the recognised set.
-	_, err := planstages.ReadStages(planstagesFixture("bad-approach.md"), true)
+func TestReadStages_OpaqueApproachToken_Accepted(t *testing.T) {
+	// opaque-approach.md has Approach = "CustomFlow", which is not in any
+	// fixed set. Under Stage 4, arbitrary tokens are accepted verbatim.
+	// This test is RED: the current implementation rejects "CustomFlow" as
+	// unrecognised, but the new implementation accepts it without error.
+	_, err := planstages.ReadStages(planstagesFixture("opaque-approach.md"), true)
+
+	if err != nil {
+		t.Fatalf("opaque approach token must be accepted verbatim; got error: %v", err)
+	}
+}
+
+func TestReadStages_OpaqueApproachToken_StoredVerbatim(t *testing.T) {
+	// "CustomFlow" must appear verbatim in StageEntry.Approach.
+	// This test is RED: current implementation rejects "CustomFlow" before storing it.
+	set, err := planstages.ReadStages(planstagesFixture("opaque-approach.md"), true)
+	if err != nil {
+		t.Fatalf("ReadStages: %v", err)
+	}
+
+	entry, ok := set.Entry(1)
+	if !ok {
+		t.Fatal("stage 1 not found")
+	}
+	if entry.Approach != "CustomFlow" {
+		t.Errorf("stage 1 Approach: want %q (verbatim), got %q", "CustomFlow", entry.Approach)
+	}
+}
+
+func TestReadStages_OpaqueApproachToken_BothStagesStored(t *testing.T) {
+	// Both stages in opaque-approach.md have the same "CustomFlow" token.
+	// Both must be stored correctly.
+	// This test is RED: current implementation rejects "CustomFlow".
+	set, err := planstages.ReadStages(planstagesFixture("opaque-approach.md"), true)
+	if err != nil {
+		t.Fatalf("ReadStages: %v", err)
+	}
+
+	for _, num := range []domain.StageNumber{1, 2} {
+		entry, ok := set.Entry(num)
+		if !ok {
+			t.Fatalf("stage %d not found", num)
+		}
+		if entry.Approach != "CustomFlow" {
+			t.Errorf("stage %d Approach: want %q, got %q", num, "CustomFlow", entry.Approach)
+		}
+	}
+}
+
+func TestReadStages_EmptyApproachCell_WhenRequired_ReturnsRefusalError(t *testing.T) {
+	// empty-approach-cell.md has Approach column present but the cell is empty.
+	// An empty (whitespace) cell when requireApproach=true must be refused (S2).
+	// This test is RED: current implementation hits the switch default and produces
+	// a different error message ("unrecognised Approach value"). The new implementation
+	// must produce the S2 message naming the stage number.
+	_, err := planstages.ReadStages(planstagesFixture("empty-approach-cell.md"), true)
 
 	if err == nil {
-		t.Fatal("unrecognised approach value must return an error")
+		t.Fatal("empty Approach cell when requireApproach=true must return an error")
 	}
 	asRefusalError(t, err)
 }
 
-func TestReadStages_UnrecognisedApproach_RefusalError_NamesValue(t *testing.T) {
-	_, err := planstages.ReadStages(planstagesFixture("bad-approach.md"), true)
+func TestReadStages_EmptyApproachCell_RefusalError_NamesStage(t *testing.T) {
+	// The S2 error message must name the stage number so the user can locate it.
+	// This test is RED: the current implementation may return a different error message.
+	_, err := planstages.ReadStages(planstagesFixture("empty-approach-cell.md"), true)
 
 	re := asRefusalError(t, err)
-	if !strings.Contains(re.Error(), "BDD") {
-		t.Errorf("RefusalError must name the unrecognised value %q; got %q", "BDD", re.Error())
+	// Stage 1 has the empty cell.
+	if !strings.Contains(re.Error(), "1") {
+		t.Errorf("S2 RefusalError must mention stage 1; got %q", re.Error())
+	}
+}
+
+func TestReadStages_DashApproachCell_WhenRequired_ReturnsRefusalError(t *testing.T) {
+	// dash-approach-cell.md has Approach = "-" which is the conventional "no value"
+	// sentinel. A dash cell when requireApproach=true must be refused with the S2
+	// message ("has an empty Approach value"), matching the same contract as an
+	// explicitly empty cell. The current implementation refuses "-" as an
+	// "unrecognised" value, which produces a different message; adding the assertion
+	// below makes this test RED until Stage 4 introduces the S2 message for dash cells.
+	_, err := planstages.ReadStages(planstagesFixture("dash-approach-cell.md"), true)
+
+	if err == nil {
+		t.Fatal("dash Approach cell when requireApproach=true must return an error")
+	}
+	re := asRefusalError(t, err)
+	// S2 message must say "empty Approach value" (dash is treated as empty, same as
+	// the sibling TestReadStages_EmptyApproachCell_RefusalError_NamesStage test).
+	if !strings.Contains(re.Error(), "empty Approach value") {
+		t.Errorf("S2 RefusalError must say \"empty Approach value\" (dash treated as empty); got %q", re.Error())
+	}
+	// The message must identify the stage number (stage 1 in dash-approach-cell.md).
+	if !strings.Contains(re.Error(), "1") {
+		t.Errorf("S2 RefusalError must mention stage 1; got %q", re.Error())
 	}
 }
 
 func TestReadStages_MissingApproachColumn_WhenRequired_ReturnsRefusalError(t *testing.T) {
-	// no-approach-col.md has no Approach column; needsApproach=true must refuse.
+	// no-approach-col.md has no Approach column; requireApproach=true must refuse.
 	_, err := planstages.ReadStages(planstagesFixture("no-approach-col.md"), true)
 
 	if err == nil {
@@ -401,12 +490,27 @@ func TestReadStages_MissingApproachColumn_WhenRequired_ReturnsRefusalError(t *te
 	asRefusalError(t, err)
 }
 
+func TestReadStages_MissingApproachColumn_ErrorMentionsGroupsDeclared(t *testing.T) {
+	// The S1 error message must say "workflow declares execution groups" (not the
+	// Stage 3 wording "two-group workflow") to accurately reflect the activation rule.
+	// This test is RED: the current implementation produces the old message.
+	_, err := planstages.ReadStages(planstagesFixture("no-approach-col.md"), true)
+
+	re := asRefusalError(t, err)
+	if strings.Contains(re.Error(), "two-group") {
+		t.Errorf("S1 error must not say \"two-group workflow\"; got %q", re.Error())
+	}
+	if !strings.Contains(re.Error(), "execution groups") {
+		t.Errorf("S1 error must mention \"execution groups\"; got %q", re.Error())
+	}
+}
+
 func TestReadStages_MissingApproachColumn_WhenNotRequired_Accepted(t *testing.T) {
-	// The same file is valid when needsApproach is false (single-group workflow).
+	// The same file is valid when requireApproach is false (no-groups workflow).
 	_, err := planstages.ReadStages(planstagesFixture("no-approach-col.md"), false)
 
 	if err != nil {
-		t.Errorf("missing Approach column must be accepted when needsApproach=false; got: %v", err)
+		t.Errorf("missing Approach column must be accepted when requireApproach=false; got: %v", err)
 	}
 }
 

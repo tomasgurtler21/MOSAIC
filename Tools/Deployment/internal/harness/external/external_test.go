@@ -99,6 +99,10 @@ func TestMain(m *testing.M) {
 	case "multidest-legacy-field-key":
 		runFakeHarnessMultidestLegacyFieldKey()
 		os.Exit(0)
+	// Mosaic-root propagation fake mode:
+	case "env-echo":
+		runFakeHarnessEnvEcho()
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }
@@ -479,6 +483,67 @@ func runFakeHarnessMultidestLegacyFieldKey() {
 	}
 }
 
+// runFakeHarnessEnvEcho performs the handshake and then, for every "injection" request,
+// returns the value of the environment variable whose name matches the request's "name"
+// parameter. All other methods return an unsupported-method error. This fake mode is used
+// by the mosaic-root propagation tests so that test code can observe environment variables
+// that reached the child process via the injection channel.
+//
+//	MOSAIC_TEST_FAKE_HARNESS=env-echo
+func runFakeHarnessEnvEcho() {
+	dec := json.NewDecoder(os.Stdin)
+	enc := json.NewEncoder(os.Stdout)
+
+	for {
+		var req map[string]any
+		if err := dec.Decode(&req); err != nil {
+			return
+		}
+		id, _ := req["id"].(string)
+		method, _ := req["method"].(string)
+
+		switch method {
+		case "handshake":
+			_ = enc.Encode(map[string]any{
+				"protocol": external.ProtocolVersion,
+				"id":       id,
+				"result": map[string]any{
+					"protocol": external.ProtocolVersion,
+					"harness": map[string]any{
+						"id":           "env-echo",
+						"display_name": "Env Echo Harness",
+						"tier":         "external",
+						"usable":       true,
+					},
+				},
+			})
+		case "injection":
+			// Decode the name field from params so the caller can probe any env var.
+			params, _ := req["params"].(map[string]any)
+			name, _ := params["name"].(string)
+			val := os.Getenv(name)
+			ok := val != ""
+			_ = enc.Encode(map[string]any{
+				"protocol": external.ProtocolVersion,
+				"id":       id,
+				"result": map[string]any{
+					"content": val,
+					"ok":      ok,
+				},
+			})
+		default:
+			_ = enc.Encode(map[string]any{
+				"protocol": external.ProtocolVersion,
+				"id":       id,
+				"error": map[string]any{
+					"code":    "unsupported_method",
+					"message": fmt.Sprintf("env-echo: unsupported method %s", method),
+				},
+			})
+		}
+	}
+}
+
 // runFakeHarnessMismatch responds to the handshake with a different protocol version.
 func runFakeHarnessMismatch() {
 	dec := json.NewDecoder(os.Stdin)
@@ -589,6 +654,27 @@ func buildReferenceModule(t *testing.T) string {
 		t.Skip("reference module binary could not be built; skipping contract test against external adapter")
 	}
 	return outBin
+}
+
+// findRepoRoot walks up from the test source tree to find the MOSAIC repository root,
+// identified by the presence of the "Agents" directory. The repository root is distinct from
+// the Go module root (Tools/Deployment/); it is two levels higher.
+func findRepoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatalf("abs .: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "Agents")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("could not locate MOSAIC repo root (Agents/ directory) walking up from test directory")
+		}
+		dir = parent
+	}
 }
 
 // findModuleRoot walks up from the test source tree to find go.mod.
@@ -1292,7 +1378,10 @@ func TestContractTest_ExternalAdapter_PassesSharedContractSuite(t *testing.T) {
 	binPath := buildReferenceModule(t)
 	desc := openCodeDescriptor(t)
 
-	m, err := external.New(binPath, desc, external.Options{Timeout: 10 * time.Second})
+	m, err := external.New(binPath, desc, external.Options{
+		Timeout:    10 * time.Second,
+		MosaicRoot: findRepoRoot(t),
+	})
 	if err != nil {
 		t.Fatalf("external.New with reference module binary: %v\n"+
 			"(In the RED phase, the reference module exits immediately without speaking the protocol;\n"+
@@ -1514,6 +1603,147 @@ func TestContractTest_ExternalAdapter_PassesSharedContractSuite(t *testing.T) {
 			},
 		},
 	})
+}
+
+// ---------------------------------------------------------------------------
+// T18.1 / T18.2 — Mosaic root propagation to external module process
+// ---------------------------------------------------------------------------
+//
+// The external adapter spawns a child process. The child needs to know where the MOSAIC
+// repository is so it can read its harness content. The host passes this location as
+// Options.MosaicRoot; the adapter exports it as the MOSAIC_ROOT environment variable before
+// spawning the child.
+//
+// These tests use the "env-echo" fake harness mode, which reports the value of any named
+// environment variable back via the injection method, making propagation directly observable.
+
+// TestMosaicRoot_SuppliedRoot_ReachesSpawnedProcess verifies that the mosaic root supplied
+// in Options propagates to the spawned module process as the MOSAIC_ROOT environment variable.
+// The child process must receive the exact path the host provided: an empty or truncated value
+// would prevent the module from resolving its harness content.
+func TestMosaicRoot_SuppliedRoot_ReachesSpawnedProcess(t *testing.T) {
+	desc := minimalDescriptor(t, "env-echo")
+	exePath := fakeHarnessExe(t, "env-echo")
+
+	wantRoot := t.TempDir() // a real path that is unique to this test run
+
+	m, err := external.New(exePath, desc, external.Options{
+		Timeout:    5 * time.Second,
+		MosaicRoot: wantRoot,
+	})
+	if err != nil {
+		t.Fatalf("external.New: %v", err)
+	}
+	defer m.Close() //nolint:errcheck
+
+	got, ok := m.Injection(domain.InjectionRequest{Name: "MOSAIC_ROOT"})
+	if !ok {
+		t.Fatal("MOSAIC_ROOT is absent in child process environment; " +
+			"Options.MosaicRoot must be exported as MOSAIC_ROOT to the spawned module")
+	}
+	if got != wantRoot {
+		t.Errorf("MOSAIC_ROOT in child = %q, want %q; the mosaic root must reach the module unchanged", got, wantRoot)
+	}
+}
+
+// TestMosaicRoot_SuppliedRoot_HostEnvironmentPreserved verifies that adding MOSAIC_ROOT to
+// the child environment merges with rather than replaces the host environment. PATH is used
+// as a proxy for "existing inherited variables": it must still be present in the child after
+// the adapter adds MOSAIC_ROOT.
+func TestMosaicRoot_SuppliedRoot_HostEnvironmentPreserved(t *testing.T) {
+	hostPATH := os.Getenv("PATH")
+	if hostPATH == "" {
+		t.Skip("PATH is empty in host environment; cannot verify environment preservation")
+	}
+
+	desc := minimalDescriptor(t, "env-echo")
+	exePath := fakeHarnessExe(t, "env-echo")
+
+	m, err := external.New(exePath, desc, external.Options{
+		Timeout:    5 * time.Second,
+		MosaicRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("external.New: %v", err)
+	}
+	defer m.Close() //nolint:errcheck
+
+	got, ok := m.Injection(domain.InjectionRequest{Name: "PATH"})
+	if !ok || got == "" {
+		t.Error("PATH is absent from child environment after adding MOSAIC_ROOT; " +
+			"the adapter must merge MOSAIC_ROOT into the inherited environment, not replace it")
+	}
+}
+
+// TestMosaicRoot_Reconnect_PersistsRoot verifies that after the adapter reconnects (following
+// a Close() call that kills the first subprocess), the new subprocess receives the same mosaic
+// root as the original. The root must be stored on the adapter so reconnect can re-export it.
+func TestMosaicRoot_Reconnect_PersistsRoot(t *testing.T) {
+	desc := minimalDescriptor(t, "env-echo")
+	exePath := fakeHarnessExe(t, "env-echo")
+
+	wantRoot := t.TempDir()
+
+	m, err := external.New(exePath, desc, external.Options{
+		Timeout:    5 * time.Second,
+		MosaicRoot: wantRoot,
+	})
+	if err != nil {
+		t.Fatalf("external.New: %v", err)
+	}
+
+	// Confirm the first subprocess gets the root.
+	got, ok := m.Injection(domain.InjectionRequest{Name: "MOSAIC_ROOT"})
+	if !ok || got != wantRoot {
+		t.Fatalf("before reconnect: MOSAIC_ROOT = %q (ok=%v), want %q", got, ok, wantRoot)
+	}
+
+	// Kill the subprocess; the adapter must reconnect on the next method call.
+	if err := m.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// This call triggers reconnect. The new subprocess must also receive the root.
+	got2, ok2 := m.Injection(domain.InjectionRequest{Name: "MOSAIC_ROOT"})
+	if !ok2 {
+		t.Fatal("after reconnect: MOSAIC_ROOT absent from respawned module; " +
+			"the mosaic root must be carried through the reconnect path")
+	}
+	if got2 != wantRoot {
+		t.Errorf("after reconnect: MOSAIC_ROOT = %q, want %q; the same root must reach the respawned module", got2, wantRoot)
+	}
+}
+
+// TestMosaicRoot_NoRoot_DoesNotExportEmptyVariable verifies that when Options.MosaicRoot is
+// empty (the caller does not supply a root), the adapter does not inject an empty MOSAIC_ROOT
+// variable into the child environment. An empty variable would silently override a
+// user-provided MOSAIC_ROOT, breaking modules that look it up from their environment.
+//
+// This test is skipped when the host process already has MOSAIC_ROOT set, because in that
+// case the child inherits it regardless of the adapter's behaviour, making the assertion
+// unverifiable without mutating the host environment.
+func TestMosaicRoot_NoRoot_DoesNotExportEmptyVariable(t *testing.T) {
+	if os.Getenv("MOSAIC_ROOT") != "" {
+		t.Skip("host process has MOSAIC_ROOT set; cannot verify that adapter does not inject an empty variable")
+	}
+
+	desc := minimalDescriptor(t, "env-echo")
+	exePath := fakeHarnessExe(t, "env-echo")
+
+	m, err := external.New(exePath, desc, external.Options{
+		Timeout: 5 * time.Second,
+		// MosaicRoot is deliberately left empty.
+	})
+	if err != nil {
+		t.Fatalf("external.New: %v", err)
+	}
+	defer m.Close() //nolint:errcheck
+
+	content, ok := m.Injection(domain.InjectionRequest{Name: "MOSAIC_ROOT"})
+	if ok {
+		t.Errorf("MOSAIC_ROOT is set in child environment (value %q) even though Options.MosaicRoot is empty; "+
+			"an empty MosaicRoot must not be exported as MOSAIC_ROOT to the child process", content)
+	}
 }
 
 // ---------------------------------------------------------------------------

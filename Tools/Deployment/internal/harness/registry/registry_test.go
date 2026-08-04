@@ -16,9 +16,18 @@ package registry_test
 // Coverage:
 //   T6.1  Discovery across built-in and on-disk sources, including absent/empty directory.
 //   T6.2  Resolution precedence when the same harness id is offered by multiple tiers.
+//   T6.3  BuiltinFactory: MosaicRoot threading from Options to BuiltinOptions; factory error
+//         results in Usable: false rather than aborting Discover (see registry BuiltinFactory tests).
 //   T6.4  External-module opt-in gate: listing, resolution, and reason text.
 //   T6.5  Provenance: every resolved harness reports its tier and source path.
 //   T6.6  Listing: the full set of data the harness selection screen consumes.
+//
+// RED NOTE (registry BuiltinFactory tests):
+//   Tests in the "BuiltinFactory wiring" section call registry.Register with the BuiltinFactory
+//   signature func(registry.BuiltinOptions) (domain.HarnessModule, error). All existing call
+//   sites below have been updated to this signature as well. These tests will fail to compile
+//   until I6.2 changes Register's parameter from func() (domain.HarnessModule, error) to
+//   BuiltinFactory — that compilation failure IS the RED state for these tests.
 
 import (
 	"errors"
@@ -186,7 +195,7 @@ func (m *minimalModule) HookPlan(_ domain.HookPlanRequest) (domain.HookPlan, err
 func TestDiscover_NoHarnessesDirectory_SucceedsWithOnlyBuiltins(t *testing.T) {
 	root := t.TempDir() // no MosaicDeploy/harnesses sub-tree
 	id := uniqueID(t, "builtin")
-	registry.Register(id, func() (domain.HarnessModule, error) { return stubModule(id), nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
 	if err != nil {
@@ -207,7 +216,7 @@ func TestDiscover_NoHarnessesDirectory_SucceedsWithOnlyBuiltins(t *testing.T) {
 func TestDiscover_EmptyHarnessesDirectory_SucceedsWithOnlyBuiltins(t *testing.T) {
 	root := makeRoot(t) // empty harnesses dir
 	id := uniqueID(t, "builtin")
-	registry.Register(id, func() (domain.HarnessModule, error) { return stubModule(id), nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
 	if err != nil {
@@ -283,7 +292,7 @@ func TestDiscover_HarnessDirectoryWithInvalidDescriptor_DoesNotPanicOrHide(t *te
 func TestDiscover_RegisteredBuiltins_AreResolvable(t *testing.T) {
 	root := makeRoot(t)
 	id := uniqueID(t, "")
-	registry.Register(id, func() (domain.HarnessModule, error) { return stubModule(id), nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
 	if err != nil {
@@ -308,7 +317,7 @@ func TestDiscover_RegisteredBuiltins_AreResolvable(t *testing.T) {
 func TestResolve_BuiltinOnly_ReturnsBuiltinTier(t *testing.T) {
 	root := makeRoot(t)
 	id := uniqueID(t, "")
-	registry.Register(id, func() (domain.HarnessModule, error) { return stubModule(id), nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
 	if err != nil {
@@ -331,7 +340,7 @@ func TestResolve_DescriptorOnlyOverridesBuiltin_WhenSameID(t *testing.T) {
 	id := uniqueID(t, "conflict")
 
 	// Register a built-in with the same id.
-	registry.Register(id, func() (domain.HarnessModule, error) { return stubModule(id), nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 	// Add a descriptor-only on-disk harness with the same id.
 	addDescriptorOnly(t, root, id, "Descriptor Override")
 
@@ -384,7 +393,7 @@ func TestResolve_ExternalOverridesBuiltin_WhenOptedIn(t *testing.T) {
 	id := uniqueID(t, "conflict")
 
 	// Register a built-in.
-	registry.Register(id, func() (domain.HarnessModule, error) { return stubModule(id), nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 	// Add an external module with the same id.
 	addExternal(t, root, id, "External Override")
 
@@ -409,7 +418,7 @@ func TestResolve_PrecedenceIsDeterministic(t *testing.T) {
 	id := uniqueID(t, "conflict")
 
 	// Register a built-in and add a descriptor-only override.
-	registry.Register(id, func() (domain.HarnessModule, error) { return stubModule(id), nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 	addDescriptorOnly(t, root, id, "Descriptor Override")
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
@@ -629,7 +638,7 @@ func TestList_ExternalHarness_WithOptIn_UsableIsTrue(t *testing.T) {
 func TestProvenance_BuiltinHarness_TierIsBuiltin(t *testing.T) {
 	root := makeRoot(t)
 	id := uniqueID(t, "")
-	registry.Register(id, func() (domain.HarnessModule, error) { return stubModule(id), nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
 	if err != nil {
@@ -650,7 +659,7 @@ func TestProvenance_BuiltinHarness_TierIsBuiltin(t *testing.T) {
 func TestProvenance_BuiltinHarness_IDMatchesRegisteredID(t *testing.T) {
 	root := makeRoot(t)
 	id := uniqueID(t, "")
-	registry.Register(id, func() (domain.HarnessModule, error) { return stubModule(id), nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
 	if err != nil {
@@ -803,7 +812,7 @@ func TestProvenance_RefIDIsNonEmptyForAllTiers(t *testing.T) {
 	descriptorID := uniqueID(t, "descriptor")
 	externalID := uniqueID(t, "external")
 
-	registry.Register(builtinID, func() (domain.HarnessModule, error) { return stubModule(builtinID), nil })
+	registry.Register(builtinID, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(builtinID), nil })
 	addDescriptorOnly(t, root, descriptorID, "Descriptor")
 	addExternal(t, root, externalID, "External")
 
@@ -857,7 +866,7 @@ func TestProvenance_RefIsStable(t *testing.T) {
 func TestList_BuiltinHarness_AppearsInList(t *testing.T) {
 	root := makeRoot(t)
 	id := uniqueID(t, "")
-	registry.Register(id, func() (domain.HarnessModule, error) { return stubModule(id), nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
 	if err != nil {
@@ -873,7 +882,7 @@ func TestList_BuiltinHarness_AppearsInList(t *testing.T) {
 func TestList_BuiltinHarness_UsableIsTrue(t *testing.T) {
 	root := makeRoot(t)
 	id := uniqueID(t, "")
-	registry.Register(id, func() (domain.HarnessModule, error) { return stubModule(id), nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
 	if err != nil {
@@ -956,7 +965,7 @@ func TestList_AllHarnessesHaveNonEmptyID(t *testing.T) {
 	builtinID := uniqueID(t, "builtin")
 	descriptorID := uniqueID(t, "descriptor")
 
-	registry.Register(builtinID, func() (domain.HarnessModule, error) { return stubModule(builtinID), nil })
+	registry.Register(builtinID, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(builtinID), nil })
 	addDescriptorOnly(t, root, descriptorID, "Descriptor")
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
@@ -1099,7 +1108,7 @@ func TestDiscover_ExternalHarness_DetectedByExeOnWindows(t *testing.T) {
 func TestProvenance_BuiltinHarness_SourcePathIsEmpty(t *testing.T) {
 	root := makeRoot(t)
 	id := uniqueID(t, "srcpath")
-	registry.Register(id, func() (domain.HarnessModule, error) { return stubModule(id), nil })
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
 	if err != nil {
@@ -1175,6 +1184,82 @@ func TestDiscover_IDFromYAMLField_TakesPreferenceOverFolderName(t *testing.T) {
 	}
 	if _, err := reg.Resolve(yamlID); err != nil {
 		t.Errorf("Resolve(%q) by YAML id failed: %v; the YAML id must be the authoritative key", yamlID, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// BuiltinFactory wiring (registry-level, I6.2)
+// ---------------------------------------------------------------------------
+//
+// RED: These tests fail to compile until I6.2 changes Register's parameter type from
+// func() (domain.HarnessModule, error) to BuiltinFactory. The compilation failure is the
+// RED state — these tests define the expected API and will become GREEN when I6.2 lands.
+
+// TestDiscover_BuiltinFactory_MosaicRootThreadedToFactory verifies that Discover passes
+// Options.MosaicRoot to every registered BuiltinFactory via BuiltinOptions.MosaicRoot.
+// This is the key composition contract: without this threading, built-in modules cannot
+// locate their harness content files on disk. (ContractsDesign.md: "Discover invokes each
+// factory with BuiltinOptions{MosaicRoot: opts.MosaicRoot}.")
+func TestDiscover_BuiltinFactory_MosaicRootThreadedToFactory(t *testing.T) {
+	root := makeRoot(t)
+	id := uniqueID(t, "mosaic-root")
+
+	var receivedOpts registry.BuiltinOptions
+	registry.Register(id, func(opts registry.BuiltinOptions) (domain.HarnessModule, error) {
+		receivedOpts = opts
+		return stubModule(id), nil
+	})
+
+	_, err := registry.Discover(registry.Options{MosaicRoot: root})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	if receivedOpts.MosaicRoot != root {
+		t.Errorf("factory received BuiltinOptions.MosaicRoot = %q, want %q; "+
+			"Discover must thread Options.MosaicRoot into BuiltinOptions.MosaicRoot for every registered factory",
+			receivedOpts.MosaicRoot, root)
+	}
+}
+
+// TestDiscover_BuiltinFactory_Error_ListsHarnessAsUnusable verifies that a BuiltinFactory
+// returning an error causes the harness to be listed as Usable: false with a non-empty
+// UnusableReason, rather than aborting Discover. This matches the stated error handling
+// contract: "A factory error keeps its existing treatment: the harness is listed with
+// Usable: false and an UnusableReason naming the failure, rather than aborting discovery —
+// so a single broken harness does not prevent the user from selecting a working one."
+// (ContractsDesign.md registry section.)
+func TestDiscover_BuiltinFactory_Error_ListsHarnessAsUnusable(t *testing.T) {
+	root := makeRoot(t)
+	id := uniqueID(t, "factory-error")
+
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) {
+		return nil, errors.New("factory construction failed: missing content file")
+	})
+
+	// Discover must succeed even when a factory errors — a broken harness is a harness-level
+	// problem, not a registry-level failure.
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root})
+	if err != nil {
+		t.Fatalf("Discover returned error after factory failure; "+
+			"Discover must succeed and list the broken harness as Usable: false: %v", err)
+	}
+
+	ref, ok := findRef(reg.List(), id)
+	if !ok {
+		t.Fatalf("harness %q absent from List() after factory error; "+
+			"must be listed (with Usable: false) so the selection screen can explain the failure", id)
+	}
+	if ref.Usable {
+		t.Errorf("harness %q: Usable = true after factory error; want false", id)
+	}
+	if ref.UnusableReason == "" {
+		t.Errorf("harness %q: UnusableReason is empty after factory error; "+
+			"must contain a description of the failure for the harness selection screen", id)
 	}
 }
 

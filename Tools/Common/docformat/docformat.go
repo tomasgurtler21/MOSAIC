@@ -338,6 +338,7 @@ type NodeKind string
 const (
 	NodeSection   NodeKind = "section"
 	NodeInjection NodeKind = "injection"
+	NodeDeployed  NodeKind = "deployed" // tool-managed region
 )
 
 // Node is a section or injection block in the document body. The content between the

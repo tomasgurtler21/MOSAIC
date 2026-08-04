@@ -85,11 +85,11 @@ You are the MergeTest agent.
 
 Always be helpful.
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 
-[[INJECTION:CustomConstraints]]
-[[/INJECTION:CustomConstraints]]
+[[DEPLOYED:CustomConstraints]]
+[[/DEPLOYED:CustomConstraints]]
 [[/SECTION:Constraints]]
 `
 
@@ -122,13 +122,13 @@ User identity extension content line two.
 
 Always be helpful.
 
-[[INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
 Old harness constraint text that should be replaced on every transform.
-[[/INJECTION:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 
-[[INJECTION:CustomConstraints]]
+[[DEPLOYED:CustomConstraints]]
 User-defined custom constraint: never access /etc/passwd.
-[[/INJECTION:CustomConstraints]]
+[[/DEPLOYED:CustomConstraints]]
 [[/SECTION:Constraints]]
 `
 
@@ -150,8 +150,8 @@ required_skills: []
 [[SECTION:Constraints]]
 ## Constraints
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 [[/SECTION:Constraints]]
 `
 
@@ -189,19 +189,19 @@ func TestNewDeployment_HarnessInjection_FilledFromDescriptor(t *testing.T) {
 	}
 
 	// Locate the HarnessConstraints outcome.
-	var outcome *transform.InjectionOutcome
-	for i := range result.Report.Injections {
-		if result.Report.Injections[i].Name == "HarnessConstraints" {
-			outcome = &result.Report.Injections[i]
+	var outcome *transform.RegionOutcome
+	for i := range result.Report.Regions {
+		if result.Report.Regions[i].Name == "HarnessConstraints" {
+			outcome = &result.Report.Regions[i]
 			break
 		}
 	}
 	if outcome == nil {
-		t.Fatalf("expected InjectionOutcome for HarnessConstraints; outcomes: %v", result.Report.Injections)
+		t.Fatalf("expected RegionOutcome for HarnessConstraints; outcomes: %v", result.Report.Regions)
 	}
-	if outcome.Action != transform.InjectionFilled {
+	if outcome.Action != transform.RegionFilled {
 		t.Errorf("HarnessConstraints action on new deployment: want %q, got %q",
-			transform.InjectionFilled, outcome.Action)
+			transform.RegionFilled, outcome.Action)
 	}
 	if outcome.Class != domain.InjectionHarness {
 		t.Errorf("HarnessConstraints class: want %q, got %q", domain.InjectionHarness, outcome.Class)
@@ -212,7 +212,7 @@ func TestNewDeployment_HarnessInjection_FilledFromDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse output: %v", err)
 	}
-	node, nodeOK := outDoc.Body().Injection("HarnessConstraints")
+	node, nodeOK := outDoc.Body().Deployed("HarnessConstraints")
 	if !nodeOK {
 		t.Fatal("HarnessConstraints injection absent from output")
 	}
@@ -256,19 +256,19 @@ func TestNewDeployment_ProjectInjections_EmittedEmpty(t *testing.T) {
 		name := name
 		t.Run(name, func(t *testing.T) {
 			// The outcome must report the injection as emptied.
-			var outcome *transform.InjectionOutcome
-			for i := range result.Report.Injections {
-				if result.Report.Injections[i].Name == name {
-					outcome = &result.Report.Injections[i]
+			var outcome *transform.RegionOutcome
+			for i := range result.Report.Regions {
+				if result.Report.Regions[i].Name == name {
+					outcome = &result.Report.Regions[i]
 					break
 				}
 			}
 			if outcome == nil {
-				t.Fatalf("InjectionOutcome for %q absent from report", name)
+				t.Fatalf("RegionOutcome for %q absent from report", name)
 			}
-			if outcome.Action != transform.InjectionEmptied {
+			if outcome.Action != transform.RegionEmptied {
 				t.Errorf("%s action on new deployment: want %q, got %q",
-					name, transform.InjectionEmptied, outcome.Action)
+					name, transform.RegionEmptied, outcome.Action)
 			}
 
 			// The injection node itself must be empty (whitespace only).
@@ -375,24 +375,24 @@ func TestUpdate_ProjectInjection_ContentLiftedByteIdentically(t *testing.T) {
 	// InjectionEmptied for it — the deployed content is intentionally discarded.
 	cases := []struct {
 		name       string
-		wantAction transform.InjectionAction
+		wantAction transform.RegionAction
 	}{
-		{"IdentityExtension", transform.InjectionPreserved},
+		{"IdentityExtension", transform.RegionPreserved},
 	}
 
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			// Check the report outcome.
-			var outcome *transform.InjectionOutcome
-			for i := range result.Report.Injections {
-				if result.Report.Injections[i].Name == c.name {
-					outcome = &result.Report.Injections[i]
+			var outcome *transform.RegionOutcome
+			for i := range result.Report.Regions {
+				if result.Report.Regions[i].Name == c.name {
+					outcome = &result.Report.Regions[i]
 					break
 				}
 			}
 			if outcome == nil {
-				t.Fatalf("InjectionOutcome for %q absent from report", c.name)
+				t.Fatalf("RegionOutcome for %q absent from report", c.name)
 			}
 			if outcome.Action != c.wantAction {
 				t.Errorf("%s action: want %q, got %q", c.name, c.wantAction, outcome.Action)
@@ -412,7 +412,7 @@ func TestUpdate_ProjectInjection_ContentLiftedByteIdentically(t *testing.T) {
 					c.name, depNode.Content(), outNode.Content())
 			}
 			if outcome.Bytes != len(depNode.Content()) {
-				t.Errorf("%s InjectionOutcome.Bytes: want %d, got %d",
+				t.Errorf("%s RegionOutcome.Bytes: want %d, got %d",
 					c.name, len(depNode.Content()), outcome.Bytes)
 			}
 		})
@@ -435,9 +435,9 @@ tools: [read-file]
 [[SECTION:Constraints]]
 ## Constraints
 
-[[INJECTION:HarnessConstraints]]
+[[DEPLOYED:HarnessConstraints]]
 Old harness constraint text that should be replaced on every transform.
-[[/INJECTION:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 [[/SECTION:Constraints]]
 `
 
@@ -467,20 +467,20 @@ func TestUpdate_HarnessInjection_RefreshedFromDescriptorNotDeployed(t *testing.T
 		t.Fatalf("Apply: %v", err)
 	}
 
-	var outcome *transform.InjectionOutcome
-	for i := range result.Report.Injections {
-		if result.Report.Injections[i].Name == "HarnessConstraints" {
-			outcome = &result.Report.Injections[i]
+	var outcome *transform.RegionOutcome
+	for i := range result.Report.Regions {
+		if result.Report.Regions[i].Name == "HarnessConstraints" {
+			outcome = &result.Report.Regions[i]
 			break
 		}
 	}
 	if outcome == nil {
-		t.Fatalf("InjectionOutcome for HarnessConstraints absent")
+		t.Fatalf("RegionOutcome for HarnessConstraints absent")
 	}
 	// On update, the harness injection must still be filled from the descriptor.
-	if outcome.Action != transform.InjectionFilled {
+	if outcome.Action != transform.RegionFilled {
 		t.Errorf("HarnessConstraints action on update: want %q, got %q",
-			transform.InjectionFilled, outcome.Action)
+			transform.RegionFilled, outcome.Action)
 	}
 
 	// The output must NOT contain the stale deployed text.
@@ -778,18 +778,18 @@ func TestUpdate_AddedInjectionPoint_StartsEmpty(t *testing.T) {
 	}
 
 	// The report must record InjectionAdded for this injection.
-	var outcome *transform.InjectionOutcome
-	for i := range result.Report.Injections {
-		if result.Report.Injections[i].Name == "ErrorHandlingExtension" {
-			outcome = &result.Report.Injections[i]
+	var outcome *transform.RegionOutcome
+	for i := range result.Report.Regions {
+		if result.Report.Regions[i].Name == "ErrorHandlingExtension" {
+			outcome = &result.Report.Regions[i]
 			break
 		}
 	}
 	if outcome == nil {
-		t.Fatalf("InjectionOutcome for ErrorHandlingExtension absent from report")
+		t.Fatalf("RegionOutcome for ErrorHandlingExtension absent from report")
 	}
-	if outcome.Action != transform.InjectionAdded {
-		t.Errorf("ErrorHandlingExtension action: want %q, got %q", transform.InjectionAdded, outcome.Action)
+	if outcome.Action != transform.RegionAdded {
+		t.Errorf("ErrorHandlingExtension action: want %q, got %q", transform.RegionAdded, outcome.Action)
 	}
 
 	// Pre-existing project injection must still be preserved.
@@ -855,18 +855,18 @@ func TestUpdate_RemovedInjectionPoint_GapEmitted(t *testing.T) {
 	}
 
 	// The report must record InjectionOrphaned (the deployed had content; source does not).
-	var outcome *transform.InjectionOutcome
-	for i := range result.Report.Injections {
-		if result.Report.Injections[i].Name == "CustomConstraints" {
-			outcome = &result.Report.Injections[i]
+	var outcome *transform.RegionOutcome
+	for i := range result.Report.Regions {
+		if result.Report.Regions[i].Name == "CustomConstraints" {
+			outcome = &result.Report.Regions[i]
 			break
 		}
 	}
 	if outcome == nil {
-		t.Fatalf("InjectionOutcome for CustomConstraints absent; report: %v", result.Report.Injections)
+		t.Fatalf("RegionOutcome for CustomConstraints absent; report: %v", result.Report.Regions)
 	}
-	if outcome.Action != transform.InjectionOrphaned {
-		t.Errorf("CustomConstraints action: want %q, got %q", transform.InjectionOrphaned, outcome.Action)
+	if outcome.Action != transform.RegionOrphaned {
+		t.Errorf("CustomConstraints action: want %q, got %q", transform.RegionOrphaned, outcome.Action)
 	}
 }
 
@@ -965,28 +965,36 @@ func TestPurity_BodyProseOutsideInjections_ByteIdenticalToSource(t *testing.T) {
 }
 
 // stripInjectionContent replaces the content between every [[INJECTION:...]] /
-// [[/INJECTION:...]] pair with a fixed placeholder, so the surrounding prose can be
-// compared independently of injection content.
+// [[/INJECTION:...]] and every [[DEPLOYED:...]] / [[/DEPLOYED:...]] pair with a fixed
+// placeholder, so the surrounding prose can be compared independently of managed region
+// content. Both user-owned and tool-managed regions are stripped because the purity
+// invariant covers body bytes outside ALL managed regions.
 func stripInjectionContent(body []byte) []byte {
 	var out []byte
 	lines := bytes.Split(body, []byte("\n"))
 	inside := false
 	for _, line := range lines {
 		trimmed := bytes.TrimSpace(line)
-		if !inside && bytes.HasPrefix(trimmed, []byte("[[INJECTION:")) && !bytes.HasPrefix(trimmed, []byte("[[/INJECTION:")) {
-			inside = true
-			out = append(out, line...)
-			out = append(out, '\n')
-			continue
-		}
-		if inside && bytes.HasPrefix(trimmed, []byte("[[/INJECTION:")) {
-			inside = false
-			out = append(out, line...)
-			out = append(out, '\n')
-			continue
-		}
-		if inside {
-			// Skip injection content — this is what may differ.
+		if !inside {
+			isOpen := (bytes.HasPrefix(trimmed, []byte("[[INJECTION:")) ||
+				bytes.HasPrefix(trimmed, []byte("[[DEPLOYED:"))) &&
+				!bytes.HasPrefix(trimmed, []byte("[[/INJECTION:")) &&
+				!bytes.HasPrefix(trimmed, []byte("[[/DEPLOYED:"))
+			if isOpen {
+				inside = true
+				out = append(out, line...)
+				out = append(out, '\n')
+				continue
+			}
+		} else {
+			if bytes.HasPrefix(trimmed, []byte("[[/INJECTION:")) ||
+				bytes.HasPrefix(trimmed, []byte("[[/DEPLOYED:")) {
+				inside = false
+				out = append(out, line...)
+				out = append(out, '\n')
+				continue
+			}
+			// Skip managed region content — this is what may differ.
 			continue
 		}
 		out = append(out, line...)
