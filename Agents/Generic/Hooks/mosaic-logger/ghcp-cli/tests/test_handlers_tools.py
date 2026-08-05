@@ -290,6 +290,95 @@ class TestHandlePreToolUse(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# handle_pre_tool_use — run_id capture end-to-end wiring
+# ---------------------------------------------------------------------------
+
+_CAPTURE_RUN_ID = "20260804T150537Z-796a"
+_CAPTURE_SESSION_ID = "ghcp-sess-capture-e2e"
+_CAPTURE_PATH = f"C:/AI/MOSAIC/MOSAIC/Orchestration-{_CAPTURE_RUN_ID}/Stage-1/Plan.md"
+
+
+class TestHandlePreToolUseRunIdCapture(unittest.TestCase):
+    """handle_pre_tool_use must invoke capture_run_id_from_tool_args before
+    resolve_destination, so the triggering preToolUse event is routed correctly
+    and the session cache is populated as a side effect.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _make_capture_ctx(self, tool_args=None, run_id_preset=None):
+        """Build a preToolUse HookContext for the capture tests, without a pre-set run_id."""
+        payload = {"sessionId": _CAPTURE_SESSION_ID}
+        if tool_args is not None:
+            payload["toolArgs"] = tool_args
+        paths = core.build_paths(self.tmp_path)
+        ctx = core.HookContext("preToolUse", payload, self.tmp_path, paths, _TS)
+        ctx.run_id = run_id_preset
+        return ctx
+
+    def test_session_cache_is_populated_when_tool_args_contain_orchestration_path(self):
+        """Driving a preToolUse payload with an Orchestration-{run_id} path through
+        handle_pre_tool_use must populate the session run-id cache as a side effect.
+        """
+        ctx = self._make_capture_ctx(
+            tool_args={"filePath": _CAPTURE_PATH},
+        )
+        tools.handle_pre_tool_use(ctx)
+        cached = runstate.get_session_run_id(ctx.paths, _CAPTURE_SESSION_ID)
+        self.assertEqual(_CAPTURE_RUN_ID, cached)
+
+    def test_ctx_run_id_is_set_before_destination_resolution(self):
+        """When handle_pre_tool_use processes a path-bearing preToolUse event and
+        ctx.run_id is unset, ctx.run_id must be assigned the observed run_id so
+        the emitted tool_call_start event lands in the correct run folder.
+        """
+        ctx = self._make_capture_ctx(
+            tool_args={"filePath": _CAPTURE_PATH},
+            run_id_preset=None,
+        )
+        tools.handle_pre_tool_use(ctx)
+        # The event must have been written to the correct run folder, not unknown-run.
+        expected_orch = ctx.paths.orchestrator_events(_CAPTURE_RUN_ID)
+        self.assertTrue(
+            expected_orch.exists(),
+            f"Expected tool_call_start in run {_CAPTURE_RUN_ID!r} folder, "
+            f"but {expected_orch} was not created.",
+        )
+
+    def test_session_cache_not_written_when_tool_args_have_no_run_id(self):
+        """When toolArgs carry no Orchestration-{run_id} path, the cache must not
+        be written for that session.
+        """
+        ctx = self._make_capture_ctx(
+            tool_args={"filePath": "/workspace/src/main.py"},
+        )
+        tools.handle_pre_tool_use(ctx)
+        cached = runstate.get_session_run_id(ctx.paths, _CAPTURE_SESSION_ID)
+        self.assertIsNone(cached)
+
+    def test_capture_does_not_suppress_tool_call_start_event(self):
+        """A successful run_id capture must not prevent the tool_call_start event
+        from being written — the capture runs before destination resolution, inside
+        its own guard, so even if it were to fail the event write must still happen.
+        """
+        ctx = self._make_capture_ctx(
+            tool_args={"filePath": _CAPTURE_PATH},
+            run_id_preset=None,
+        )
+        tools.handle_pre_tool_use(ctx)
+        # After capture sets ctx.run_id, the event is written to the correct run folder.
+        orch_path = ctx.paths.orchestrator_events(_CAPTURE_RUN_ID)
+        events = [json.loads(ln) for ln in orch_path.read_text("utf-8").splitlines() if ln.strip()]
+        self.assertEqual(1, len(events))
+        self.assertEqual("tool_call_start", events[0]["event"])
+
+
+# ---------------------------------------------------------------------------
 # handle_post_tool_use
 # ---------------------------------------------------------------------------
 

@@ -23,6 +23,8 @@ HARNESS = "ghcp-cli"
 LOGS_DIRNAME = "OrchestrationLogs"
 AGENT_MAP_DIRNAME = ".agent-map"
 PENDING_DISPATCH_DIRNAME = ".pending-dispatch"
+SESSION_RUN_ID_DIRNAME = ".session-run-id"
+AGENT_RUN_DIRNAME = ".agent-run"
 RESERVED_FILENAME_CHARS = '<>:"/\\|?*'
 DEBUG_ENV_VAR = "MOSAIC_LOGGER_DEBUG"
 
@@ -250,6 +252,18 @@ class LogPaths:
 
     def pending_dispatch_entry(self, run_id: str, session_id: str) -> pathlib.Path:
         return self.pending_dispatch_dir(run_id) / f"{sanitize_component(session_id)}.jsonl"
+
+    def session_run_id_dir(self) -> pathlib.Path:
+        return self.root / SESSION_RUN_ID_DIRNAME
+
+    def session_run_id_entry(self, session_id: str) -> pathlib.Path:
+        return self.session_run_id_dir() / f"{sanitize_component(session_id)}.json"
+
+    def agent_run_dir(self) -> pathlib.Path:
+        return self.root / AGENT_RUN_DIRNAME
+
+    def agent_run_entry(self, agent_id: str) -> pathlib.Path:
+        return self.agent_run_dir() / f"{sanitize_component(agent_id)}.json"
 
 
 def build_paths(workspace_root: pathlib.Path) -> LogPaths:

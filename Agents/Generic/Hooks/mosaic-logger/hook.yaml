@@ -2,17 +2,17 @@ schema_version: "1"
 id: mosaic-logger
 version: 1.1.0
 description: >-
-  Captures hook events across three harnesses — Claude Code (12 events), GHCP
-  CLI (14 events), and VS Code Chat Extension (8 events) — for full MOSAIC
-  orchestration log capture: session lifecycle, user turns, assistant turns,
-  tool calls, subagent invocations, and compaction events. Produces structured
-  JSONL event streams, per-invocation markdown artifacts, and byte-identical
-  transcript exports under OrchestrationLogs/.
+  Captures hook events across four harnesses — Claude Code (12 events), GHCP
+  CLI (14 events), VS Code Chat Extension (8 events), and OpenCode (4 hooks) —
+  for full MOSAIC orchestration log capture: session lifecycle, user turns,
+  assistant turns, tool calls, subagent invocations, and compaction events.
+  Produces structured JSONL event streams, per-invocation markdown artifacts,
+  and byte-identical transcript exports under OrchestrationLogs/.
 
-# placeholder is absent: the claude-code, vscode-ghcp, and ghcp-cli variants each
-# carry a real, deployable Python adapter. The opencode variant remains a stub —
-# see README.md. The schema has no per-variant placeholder flag, so the whole-bundle
-# key is omitted rather than mislabelling a deployable adapter as unauthored.
+# placeholder is absent: all four variants — claude-code, vscode-ghcp, ghcp-cli, and
+# opencode — carry real, deployable adapters. The schema has no per-variant placeholder
+# flag, so the whole-bundle key is omitted rather than mislabelling any deployable
+# adapter as unauthored.
 
 # content_hash is absent: the claude-code variant lists ../hook.yaml in its file
 # set so the deployed adapter can read its own version at runtime (adapter_version
@@ -237,6 +237,8 @@ variants:
         target: lib/handlers_invocation.ts
       - source: lib/handlers_tools.ts
         target: lib/handlers_tools.ts
+      - source: ../hook.yaml
+        target: hook.yaml
     registration: []
 
   vscode-ghcp:

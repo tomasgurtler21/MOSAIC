@@ -1,15 +1,15 @@
 # mosaic-logger — Hook Adapter Bundle
 
-A stdlib-only Python 3 hook adapter bundle that captures hook events and writes
-structured logs under `OrchestrationLogs/` in your project root. Implemented for
-`claude-code` (12 events), `ghcp-cli` (14 events), and `vscode-ghcp` (8 events).
+A hook adapter bundle that captures hook events and writes structured logs under
+`OrchestrationLogs/` in your project root. Implemented for `claude-code` (12 events),
+`ghcp-cli` (14 events), `vscode-ghcp` (8 events), and `opencode` (4 hooks).
 
 ## Supported variants
 
 | Variant | Status |
 |---|---|
 | `claude-code` | Implemented — Python adapter deployed to `.claude/hooks/` |
-| `opencode` | Placeholder — plugin skeleton not yet authored |
+| `opencode` | Implemented — TypeScript plugin deployed to `.opencode/plugins/` |
 | `vscode-ghcp` | Implemented — Python adapter deployed to `.github/hooks/` |
 | `ghcp-cli` | Implemented — Python adapter deployed to `.github/hooks/` |
 
@@ -47,9 +47,10 @@ already exists. Make the one-line tweak before pasting.
 ## Why `placeholder` is absent
 
 The schema's `placeholder` flag is a single bundle-level boolean with no per-variant
-form. The `claude-code`, `vscode-ghcp`, and `ghcp-cli` variants are fully authored and
-deployable; marking the bundle as a placeholder would be inaccurate. The `opencode`
-variant remains a stub, but the schema provides no mechanism to flag it individually.
+form. All four variants — `claude-code`, `vscode-ghcp`, `ghcp-cli`, and `opencode` —
+are fully authored and deployable; marking the bundle as a placeholder would be
+inaccurate. The schema provides no per-variant mechanism to distinguish authoring
+states, so the whole-bundle key is omitted.
 
 ## Why `content_hash` is absent
 

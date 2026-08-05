@@ -114,12 +114,30 @@ export interface HandlerDependencies {
 /**
  * Extract the sessionId from an OpenCode event, trying common field names/locations.
  * OpenCode event payloads may carry the session identifier under different keys.
+ * The nested `properties.info` level (OpenCode's real bus payload shape) is checked
+ * first; flat levels are retained as fallbacks for backward compatibility.
  *
  * Exported so plugin.ts can reuse this logic without duplicating the field-cascade.
  */
 export function extractSessionId(event: OpenCodeEvent): string | undefined {
   const props = event.properties;
+
+  // Resolve properties.info only when it is a plain (non-array) object.
+  const infoRaw =
+    props != null && typeof props === "object" ? props["info"] : undefined;
+  const info: Record<string, unknown> | undefined =
+    infoRaw != null && typeof infoRaw === "object" && !Array.isArray(infoRaw)
+      ? (infoRaw as Record<string, unknown>)
+      : undefined;
+
+  // Nested levels — type-guarded to skip non-string values.
+  const infoId = typeof info?.["id"] === "string" ? (info["id"] as string) : undefined;
+  const infoSessionID =
+    typeof info?.["sessionID"] === "string" ? (info["sessionID"] as string) : undefined;
+
   return (
+    infoId ||
+    infoSessionID ||
     (props?.["sessionID"] as string | undefined) ||
     (props?.["sessionId"] as string | undefined) ||
     (props?.["id"] as string | undefined) ||
@@ -129,13 +147,32 @@ export function extractSessionId(event: OpenCodeEvent): string | undefined {
 }
 
 /**
- * Extract the parentID from a session.created event.
+ * Extract the parentID from a session event.
+ * The nested `properties.info` level (OpenCode's real bus payload shape) is checked
+ * first; flat levels are retained as fallbacks for backward compatibility.
  *
  * Exported so plugin.ts can reuse this logic without duplicating the field-cascade.
  */
 export function extractParentId(event: OpenCodeEvent): string | undefined {
   const props = event.properties;
+
+  // Resolve properties.info only when it is a plain (non-array) object.
+  const infoRaw =
+    props != null && typeof props === "object" ? props["info"] : undefined;
+  const info: Record<string, unknown> | undefined =
+    infoRaw != null && typeof infoRaw === "object" && !Array.isArray(infoRaw)
+      ? (infoRaw as Record<string, unknown>)
+      : undefined;
+
+  // Nested levels — type-guarded to skip non-string values.
+  const infoParentID =
+    typeof info?.["parentID"] === "string" ? (info["parentID"] as string) : undefined;
+  const infoParentId =
+    typeof info?.["parentId"] === "string" ? (info["parentId"] as string) : undefined;
+
   return (
+    infoParentID ||
+    infoParentId ||
     (props?.["parentID"] as string | undefined) ||
     (props?.["parentId"] as string | undefined) ||
     (event["parentID"] as string | undefined) ||
@@ -247,13 +284,35 @@ export function createSessionHandlers(deps: HandlerDependencies): {
       case "session.created": {
         const parentId = extractParentId(event);
         if (sessionId) {
-          // Always register in the correlation store (both orchestrator and subagent sessions)
-          store.register(sessionId, { parentId: parentId || undefined });
+          // Always register in the correlation store (both orchestrator and subagent sessions).
+          // Omit the parentId key entirely when no parent was extracted — passing
+          // { parentId: undefined } would overwrite a parentId already stored from an
+          // earlier event, which must be preserved.
+          const record = parentId !== undefined ? { parentId } : {};
+          store.register(sessionId, record);
 
           // For top-level (orchestrator) sessions: emit session_start + run_start
           // For subagent sessions: invocation handler takes over (wired in plugin.ts)
           if (!parentId) {
             await handleOrchestratorSessionCreated(sessionId);
+          }
+        }
+        break;
+      }
+
+      case "session.updated": {
+        // A session.updated event is a second opportunity to learn a parentID.
+        // Register only when the parentID is present or the session is already known —
+        // an updated event for an unseen session without a parentID must not create a
+        // parent-less record that would misclassify a subagent as an orchestrator.
+        // No lifecycle events are emitted here; session_start/run_start are exclusive
+        // to the session.created path.
+        if (sessionId) {
+          const parentId = extractParentId(event);
+          const alreadyKnown = store.get(sessionId) !== undefined;
+          if (parentId !== undefined || alreadyKnown) {
+            const record = parentId !== undefined ? { parentId } : {};
+            store.register(sessionId, record);
           }
         }
         break;

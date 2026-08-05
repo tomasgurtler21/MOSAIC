@@ -99,6 +99,7 @@ def handle_subagent_start(ctx: "core.HookContext") -> None:
     runstate.put_agent_mapping(
         ctx.paths, run_id, ctx.agent_id, agent_instance_id, agent_type
     )
+    runstate.put_agent_run(ctx.paths, ctx.agent_id, run_id)
 
     sink = ctx.paths.invocation_events(run_id, agent_instance_id)
 

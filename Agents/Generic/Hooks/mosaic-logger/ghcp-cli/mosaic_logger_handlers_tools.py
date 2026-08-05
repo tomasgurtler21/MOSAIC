@@ -12,11 +12,39 @@ import mosaic_logger_core as core
 import mosaic_logger_runstate as runstate
 
 
+def capture_run_id_from_tool_args(ctx: "core.HookContext") -> "str | None":
+    """Extract a run_id from preToolUse tool arguments and persist it to the session cache.
+
+    On a hit: persists the run_id via put_session_run_id and assigns ctx.run_id when
+    currently unset, so the triggering preToolUse event routes to the correct run folder.
+    Returns the run_id string on a hit, None on a miss. Never raises.
+    """
+    try:
+        tool_args = ctx.field("toolArgs")
+        run_id = runstate.extract_run_id_from_tool_args(tool_args)
+        if run_id:
+            runstate.put_session_run_id(ctx.paths, ctx.session_id, run_id)
+            if not ctx.run_id:
+                ctx.run_id = run_id
+            return run_id
+        return None
+    except Exception:
+        return None
+
+
 def resolve_destination(ctx: "core.HookContext") -> pathlib.Path:
-    """Route tool event to orchestrator or subagent stream based on agent_id."""
-    run_id = core.effective_run_id(ctx)
+    """Route tool event to orchestrator or subagent stream based on agent_id.
+
+    When agent_id is present, the workspace-level agent-to-run association is
+    consulted first; its run_id is authoritative for the destination path and
+    overrides core.effective_run_id(ctx). ctx is not mutated.
+    """
     if not ctx.agent_id:
-        return ctx.paths.orchestrator_events(run_id)
+        return ctx.paths.orchestrator_events(core.effective_run_id(ctx))
+    # Step 2: consult the association; authoritative when present.
+    assoc_run_id = runstate.resolve_run_for_agent(ctx.paths, ctx.agent_id)
+    run_id = assoc_run_id if assoc_run_id is not None else core.effective_run_id(ctx)
+    # Step 3: resolve agent_instance_id from the run-scoped map.
     agent_instance_id = runstate.resolve_invocation_id(
         ctx.paths, run_id, ctx.agent_id
     )
@@ -36,6 +64,13 @@ def handle_pre_tool_use(ctx: "core.HookContext") -> None:
     extract agent_instance_id from toolArgs.prompt and persist a pending dispatch.
     NEVER writes to stdout. NEVER emits permissionDecision. Never raises."""
     tool_name = ctx.field("toolName")
+
+    # Capture run_id from tool arguments BEFORE resolve_destination so the
+    # triggering preToolUse event itself routes to the correct run folder.
+    try:
+        capture_run_id_from_tool_args(ctx)
+    except Exception:
+        pass
 
     # Capture pending dispatch for agent/task tool invocations (GHCP CLI uses lowercase)
     if tool_name in ("agent", "task"):

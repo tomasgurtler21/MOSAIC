@@ -53,19 +53,52 @@ def build_context(event: str, payload: dict) -> core.HookContext:
 
 
 def resolve_run_identity(ctx: core.HookContext) -> None:
-    """Set ctx.run_id by extracting from the event-specific prompt field.
+    """Set ctx.run_id using the following precedence, then persist what was resolved.
 
-    For events with no prompt-bearing field, ctx.run_id remains None.
-    Uses ctx.field(field_name) with the standard normalization path for all
-    prompt fields -- no special-casing is needed for any particular field name.
-    Never raises.
+    1. Prompt-field extraction (highest). Extract run_id from the event-specific
+       prompt-bearing field listed in _RUN_ID_PROMPT_FIELDS. Unchanged from before.
+    2. Session cache (fallback). Only when step 1 yielded nothing: consult the
+       workspace-level session run-id cache keyed by ctx.session_id.
+    3. Write-back. When step 1 produced a run_id and ctx.session_id is present,
+       the value is written to the cache for this session. A value that came from
+       step 2 is not written back (it is already the cached value).
+    4. Miss. When both steps yield nothing, ctx.run_id stays None and
+       core.effective_run_id continues to produce 'unknown-run'.
+
+    Never raises. Reports unexpected failures through core.debug_log.
     """
     try:
+        # Step 1: prompt-field extraction (highest priority, unchanged)
+        prompt_run_id = None
         field_name = _RUN_ID_PROMPT_FIELDS.get(ctx.event)
-        if field_name is None:
+        if field_name is not None:
+            prompt = ctx.field(field_name)
+            prompt_run_id = runstate.extract_run_id(prompt)
+            ctx.run_id = prompt_run_id
+
+        # Step 3: write-back when step 1 found a run_id.
+        # Use ctx.timestamp (the hook-firing time) as created_at so staleness is
+        # evaluated relative to when the run_id was observed, not the write instant.
+        if prompt_run_id and ctx.session_id:
+            try:
+                runstate.put_session_run_id(
+                    ctx.paths, ctx.session_id, prompt_run_id,
+                    created_at=ctx.timestamp,
+                )
+            except Exception as wb_exc:
+                core.debug_log("resolve_run_identity write-back failed", wb_exc)
+            # Return early: prompt extraction is authoritative, no cache fallback needed
             return
-        prompt = ctx.field(field_name)
-        ctx.run_id = runstate.extract_run_id(prompt)
+
+        # Step 2: session cache fallback (only when step 1 yielded nothing)
+        if not ctx.run_id:
+            try:
+                cached = runstate.get_session_run_id(ctx.paths, ctx.session_id)
+                if cached:
+                    ctx.run_id = cached
+            except Exception as cache_exc:
+                core.debug_log("resolve_run_identity cache lookup failed", cache_exc)
+
     except Exception as exc:
         core.debug_log("resolve_run_identity failed", exc)
 
