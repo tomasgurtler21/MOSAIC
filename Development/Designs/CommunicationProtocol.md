@@ -1,7 +1,7 @@
 ---
 id: communication-protocol
 type: protocol
-version: "1.9"
+version: "1.10"
 name: "Communication Protocol"
 description: "JSON message contract between the orchestrator and its subagents: task invocation, task response, status codes, error codes."
 author: MOSAIC
@@ -135,7 +135,7 @@ Every file listed in `output_artifacts` must receive three frontmatter fields:
 
 - `run_id` — copied verbatim from the task invocation's `run_id` field
 - `created_by` — your own `agent_instance_id`
-- `hitl_confirmed` — `false`
+- `human_approved` — `false`
 
 Files listed in `output_files` are project source files. Do not add provenance fields to them.
 
@@ -143,22 +143,22 @@ When rewriting an artifact that already exists, overwrite all three fields with 
 
 When the artifact already has a YAML frontmatter block (`---` delimiters), merge the fields into the existing block rather than creating a second frontmatter block.
 
-When `run_id` is absent from the task invocation, omit the `run_id` field rather than inventing one. Still stamp `created_by` and `hitl_confirmed`.
+When `run_id` is absent from the task invocation, omit the `run_id` field rather than inventing one. Still stamp `created_by` and `human_approved`.
 
-#### The `hitl_confirmed` Field
+#### The `human_approved` Field
 
-**Write `hitl_confirmed: false` every time you write an artifact.** Every write, without exception, whatever the value of `human_in_the_loop` in your invocation.
+**Write `human_approved: false` every time you write an artifact.** Every write, without exception, whatever the value of `human_in_the_loop` in your invocation.
 
 You may set it to `true` only in a separate final write that changes nothing else in the file, and only when `human_in_the_loop: true` was set, you have presented your complete output to the user, and they have asked for no further changes.
 
-A write that changes only `hitl_confirmed` is not a content write and does not reset the field.
+A write that changes only `human_approved` is not a content write and does not reset the field.
 
 The full sequence when `human_in_the_loop: true`:
 
-1. Write the artifact with `hitl_confirmed: false`.
+1. Write the artifact with `human_approved: false`.
 2. Present your complete output — artifacts and project files both — to the user.
-3. If the user requests changes, apply them. That rewrite returns `hitl_confirmed` to `false`. Go back to step 2.
-4. Once the user asks for no further changes, set `hitl_confirmed: true` in every output artifact.
+3. If the user requests changes, apply them. That rewrite returns `human_approved` to `false`. Go back to step 2.
+4. Once the user asks for no further changes, set `human_approved: true` in every output artifact.
 5. Return your response.
 
 Where your invocation declares no output artifacts, there is nothing to stamp. Your review obligation is unchanged.
@@ -246,6 +246,33 @@ This protocol overrides any harness-supplied instruction about how to dispatch a
 Consumer enforcement is tiered:
 - **Core components** (runner, orchestrator): may reject the message or halt the orchestration run when `run_id` is absent or does not match expectations.
 - **Auxiliary consumers** (logger, future analyzers): must degrade gracefully when `run_id` is absent or unreadable. An auxiliary consumer must never fail or crash an orchestration run because `run_id` is missing.
+
+### Verifying the Human-in-the-Loop Gate
+
+Subagents stamp every file they list in `output_artifacts` with `human_approved`. It is `false` on every content write, and becomes `true` only after the subagent has presented its output and the user has asked for no further changes. You stamp nothing yourself; you read this field.
+
+**When:** immediately after any invocation you dispatched with `human_in_the_loop: true` returns, and before you route on its status code.
+
+**What you read:** the frontmatter of each file named in that invocation's `output_artifacts`, and nothing below it. Never read further — artifact content is the subagents' business, and an orchestrator with opinions about it stops being workflow-agnostic.
+
+**The check:** on an invocation dispatched `human_in_the_loop: true`, any output artifact carrying `human_approved: false`, or omitting the field, is a gate that was not discharged. An invocation declaring no output artifacts has nothing to check.
+
+**The response: re-dispatch the same agent type to discharge the gate.** This is not a failure route — the work is finished, only the review is missing. Send the same artifacts as both `input_artifacts` and `output_artifacts`, with `human_in_the_loop: true` and a task description asking for exactly the missing step:
+
+```json
+{
+  "agent_instance_id": "planner-tdd-soft#8",
+  "run_id": "20260129T090000Z-a3f9",
+  "task_description": "Present the artifacts listed in output_artifacts to the user for review. Apply any changes they request. Set human_approved: true only once the user asks for no further changes.",
+  "input_artifacts": ["Orchestration-20260129T090000Z-a3f9/Plan.md"],
+  "output_artifacts": ["Orchestration-20260129T090000Z-a3f9/Plan.md"],
+  "human_in_the_loop": true
+}
+```
+
+If the re-dispatch also returns `false`, escalate to the user. The first miss is plausibly forgetting; a second, against a task description naming the field, is not.
+
+**What this check cannot tell you.** A `true` is self-reported and can be written without presenting anything. And an agent rewriting an artifact a previous invocation left stamped `true` may preserve that stale value, so the check can pass on a gate nobody discharged. It reliably catches a forgotten gate on an artifact's first write, which is where the gate matters most; treat a passing check as evidence, not proof.
 [[/SECTION:CommunicationProtocol:Orchestrator]]
 
 ---
@@ -1003,7 +1030,7 @@ The information is, strictly speaking, recoverable elsewhere. The run's folder n
 |-------|------|----------|--------|-------------|
 | `run_id` | string | Conditional | The invocation's `run_id`, copied verbatim | Identity of the orchestration run that produced this artifact. Omitted when the invocation carried no `run_id` (§9.5). |
 | `created_by` | string | Yes | The invocation's `agent_instance_id`, copied verbatim | Identity of the invocation that most recently wrote this file. Format `{AgentName}#{GlobalSequence}`. |
-| `hitl_confirmed` | boolean | Yes | The constant `false` on every content write; `true` only via the flip described in §9.6 | Whether the human-in-the-loop output review gate was discharged for the write that produced this file's current content. |
+| `human_approved` | boolean | Yes | The constant `false` on every content write; `true` only via the flip described in §9.6 | Whether the human-in-the-loop output review gate was discharged for the write that produced this file's current content. |
 
 The first two values arrive in the task invocation message and are written out unchanged — not parsed, reformatted, shortened, or validated by the writing agent, since an agent that reformats a value it did not mint introduces a second spelling of one fact. The third is a constant on write and a state thereafter.
 
@@ -1013,7 +1040,7 @@ Example, on an artifact that had no frontmatter before:
 ---
 run_id: "20260129T090000Z-a3f9"
 created_by: "codebase-research#1"
-hitl_confirmed: false
+human_approved: false
 ---
 
 # Research: Authentication
@@ -1026,7 +1053,7 @@ hitl_confirmed: false
 
 ### 9.3 Rewrites overwrite
 
-When an agent writes an artifact that already exists — a successor continuing partially-done work, a planner revising a plan after review — it overwrites all three fields with its own values. `hitl_confirmed` is among them, so a rewrite returns it to `false` regardless of what a previous writer left there. The stamp names the **most recent** writer, not the original creator.
+When an agent writes an artifact that already exists — a successor continuing partially-done work, a planner revising a plan after review — it overwrites all three fields with its own values. `human_approved` is among them, so a rewrite returns it to `false` regardless of what a previous writer left there. The stamp names the **most recent** writer, not the original creator.
 
 This costs something: original-creation provenance is lost. It is still right. The question a reader actually asks of a file is "is this current, and who is answerable for what I am reading now" — and the current writer answers that. The full write history is not lost; it is in the execution log, where a full history belongs. Keeping a `created_by` alongside a `modified_by` in the frontmatter would replicate a chronology in the one place least equipped to hold it: two fields cannot record three writes.
 
@@ -1046,9 +1073,13 @@ The alternatives are both worse. Minting a value locally produces an identifier 
 
 An absent `run_id` is therefore not an error at any layer. Consumers must treat the field as optional and degrade accordingly — the same tiering this protocol applies to `run_id` in flight, applied here to `run_id` at rest.
 
-### 9.6 The human-in-the-loop confirmation flag
+### 9.6 The human approval flag
 
-`hitl_confirmed` reports whether the output review gate was discharged for the write that produced the file's current content.
+`human_approved` reports whether the output review gate was discharged for the write that produced the file's current content.
+
+**On the name.** The field was `hitl_confirmed` through v1.9. Two things were wrong with it. It named the field after the *dispatch flag* rather than after what is true of the file, which reads oddly in a stamp whose other two fields answer "which run" and "who wrote it" — and it does so in vocabulary only an orchestration reader holds, in the one place §9.1 justifies precisely by the reader who holds nothing else. And "confirmed" is weaker than the condition that produces the flip: the value goes `true` when the user has asked for no further changes, which is approval, not merely having looked. A name that understates the bar invites a flip that clears it.
+
+This is the same trade §9.3 declines for `created_by`, and it resolves the other way for a specific reason: `created_by` has live readers and this field has none yet (§15), so the migration cost is a sweep of text with no run, artifact, or tool depending on the old spelling. That window closes the moment §9.7's verification ships.
 
 **Why a gate flag belongs in a provenance stamp.** It is not provenance in the strict sense — it records whether a process obligation was discharged, not where the file came from. It earns its place by naming a consumer that cannot do its job without it. The orchestrator dispatches `human_in_the_loop: true` and otherwise has no way whatsoever to tell whether the gate was honoured: it receives a status code and a prose sentence, and a subagent that skipped the review returns exactly what one that honoured it returns. And the flag shares the stamp's scope exactly — it describes what happened during the write of this file, by the invocation named in `created_by`, for the run named in `run_id`. Same subject, same lifetime, same reader.
 
@@ -1066,13 +1097,13 @@ Recording after the fact asks the agent to remember an obligation it formed some
 
 The hardest-to-enforce clause of the gate is that it **re-arms on every output change**: present, absorb feedback, present again, until the user stops asking. It is the clause agents most often drop, because after two rounds the work feels finished.
 
-The rewrite rule enforces it without asking anyone to remember it. Applying requested changes rewrites the artifact; rewriting stamps `hitl_confirmed: false`; the gate is armed again as a property of the file. The loop is closable only by a write that changes nothing but the flag — which, by construction, cannot happen while the user is still requesting changes.
+The rewrite rule enforces it without asking anyone to remember it. Applying requested changes rewrites the artifact; rewriting stamps `human_approved: false`; the gate is armed again as a property of the file. The loop is closable only by a write that changes nothing but the flag — which, by construction, cannot happen while the user is still requesting changes.
 
 A prose rule became a state transition.
 
 #### The regress carve-out
 
-The flip to `true` is itself a write, so a literal reading of "every write stamps `false`" never terminates. §1.1 therefore states the exception outright: **a write that changes only `hitl_confirmed` is not a content write and does not reset the field.** This is stated rather than left to inference, because an agent reasoning its way to the exception is an agent that might instead reason its way into a loop, or into treating the whole rule as unworkable and abandoning it.
+The flip to `true` is itself a write, so a literal reading of "every write stamps `false`" never terminates. §1.1 therefore states the exception outright: **a write that changes only `human_approved` is not a content write and does not reset the field.** This is stated rather than left to inference, because an agent reasoning its way to the exception is an agent that might instead reason its way into a loop, or into treating the whole rule as unworkable and abandoning it.
 
 #### What it does not catch
 
@@ -1080,7 +1111,7 @@ Three limits, stated plainly, because a check believed to be stronger than it is
 
 **It is still self-reported.** An agent can write `true` without presenting anything. The mechanism catches *forgetting* — the observed failure — because an agent that loses the gate also loses the flip. It does not catch *fabrication*. The gain is that a skipped gate becomes an explicit false claim in a durable file rather than a silent omission in a discarded context.
 
-**Re-arm across invocations is weaker than within one.** Within an invocation the reset is mechanical. Across invocations it is not: a planner invoked to revise `Plan.md` after review opens a file a predecessor left stamped `true`, and the file's own state now argues against the rule rather than for it. If that agent skips the gate *and* preserves the stale `true`, the orchestrator's check passes on a gate nobody discharged — a false negative. Two things blunt it, neither decisive: the rule is unconditional and does not depend on the field's current value, and the three fields are written as one act, so the failure requires an agent that updates `created_by` to its own id while selectively preserving `hitl_confirmed` from another.
+**Re-arm across invocations is weaker than within one.** Within an invocation the reset is mechanical. Across invocations it is not: a planner invoked to revise `Plan.md` after review opens a file a predecessor left stamped `true`, and the file's own state now argues against the rule rather than for it. If that agent skips the gate *and* preserves the stale `true`, the orchestrator's check passes on a gate nobody discharged — a false negative. Two things blunt it, neither decisive: the rule is unconditional and does not depend on the field's current value, and the three fields are written as one act, so the failure requires an agent that updates `created_by` to its own id while selectively preserving `human_approved` from another.
 
 **Invocations producing no artifacts are invisible to it.** With `output_artifacts: []` there is nothing to stamp, while the gate still applies — it covers project files too. Every agent writing only source files is outside the check.
 
@@ -1102,26 +1133,19 @@ The flag has no effect unless something reads it. **The orchestrator verifies it
 
 Reading only the frontmatter is a deliberate narrowing, not a new permission. The orchestrator already reads certain artifacts for routing, so artifact access is established. What is at stake is context discipline: an orchestrator that reads plans and designs in full begins forming opinions about their content, and a workflow-agnostic router with opinions about domain content is on its way to making domain decisions. A frontmatter read costs a handful of lines and cannot produce an opinion about anything.
 
-**The check.** Dispatched `human_in_the_loop: true` and any output artifact carrying `hitl_confirmed: false` — or omitting the field — is a gate that was not discharged.
+**The check.** Dispatched `human_in_the_loop: true` and any output artifact carrying `human_approved: false` — or omitting the field — is a gate that was not discharged.
 
-**The response: re-dispatch the same agent type to discharge the gate.** Not a failure route. The invocation's work is finished and, so far as anything indicates, finished correctly. What is missing is a review, and a review is cheap to obtain against artifacts that already exist. The follow-up invocation carries the same artifacts as both inputs and outputs, `human_in_the_loop: true`, and a task description asking for exactly the missing step:
-
-```json
-{
-  "agent_instance_id": "planner-tdd-soft#8",
-  "run_id": "20260129T090000Z-a3f9",
-  "task_description": "Present the artifacts listed in output_artifacts to the user for review. Apply any changes they request. Set hitl_confirmed: true only once the user asks for no further changes.",
-  "input_artifacts": ["Orchestration-20260129T090000Z-a3f9/Plan.md"],
-  "output_artifacts": ["Orchestration-20260129T090000Z-a3f9/Plan.md"],
-  "human_in_the_loop": true
-}
-```
+**The response: re-dispatch the same agent type to discharge the gate.** Not a failure route. The invocation's work is finished and, so far as anything indicates, finished correctly. What is missing is a review, and a review is cheap to obtain against artifacts that already exist. The follow-up invocation carries the same artifacts as both inputs and outputs, `human_in_the_loop: true`, and a task description asking for exactly the missing step. The orchestrator variant of §1 carries the worked example.
 
 The alternatives were weighed and rejected. Routing it as a failed invocation would discard work completed correctly apart from the gate. Escalating to the user spends a human interruption on something the re-dispatch resolves by itself — and spends it to ask permission for a review the user was already meant to be given. Recording the discrepancy and advancing turns the field into an audit trail with no enforcement, surfacing skipped gates after the run rather than during it.
 
 **A re-dispatch that comes back still `false` is a different problem.** The first miss is plausibly forgetting; the second, against a task description naming the flag explicitly, is not. That is the point to escalate, and the point at which the run has learned something about the agent rather than about the invocation.
 
-**Where this obligation is written.** In the orchestrator's own instructions. The orchestrator stamps nothing and carries no provenance obligations of its own (§9.9); this document specifies the contract, and the orchestrator's instructions implement its side. §15 records that the implementation does not exist yet.
+**Where this obligation is written.** In the orchestrator variant of §1, alongside the routing table and the error-code responses.
+
+This was previously delegated to the orchestrator's own instructions, on the reasoning that a re-dispatch is a routing decision and routing is orchestration policy. That reasoning does not survive §10.6: a field the orchestrator reads and routes on is hard interop, and both halves of a handshake belong in one deployed contract or they drift apart per deployment (§10.1). The delegation also produced a concrete defect — the subagent variant told subagents the orchestrator performs this check while nothing on the orchestrator side was instructed to perform it. The block already carries routing content, including a HITL-triggered re-dispatch under `E503`, so this is not a new kind of text for it.
+
+The orchestrator still stamps nothing and carries no provenance obligations of its own (§9.9). Reading a field is not writing one.
 
 ### 9.8 Scope: which files are stamped
 
@@ -1151,9 +1175,9 @@ The stamp has readers, and enumerating them is what keeps the field list from gr
 | **A human auditor** | Both | Answering "what produced this" from the file alone, including after the file has been moved out of the run folder. |
 | **Log and artifact correlation tooling** | Both | Joining an artifact to its invocation's log events and execution-log row via `created_by`, and to the run via `run_id`. |
 | **Review and audit agents** | `created_by` | Attributing a finding to the invocation responsible for the material under review. |
-| **The dispatching orchestrator** | `hitl_confirmed` | Verifying that a gate it requested was actually discharged, immediately after the invocation returns (§9.7). |
+| **The dispatching orchestrator** | `human_approved` | Verifying that a gate it requested was actually discharged, immediately after the invocation returns (§9.7). |
 
-A proposal to add a fourth field should name a consumer that cannot do its job with these three, in the same way a proposed status code must name an orchestrator response none of the existing six triggers (§8.6). `hitl_confirmed` was itself admitted against that bar, not around it.
+A proposal to add a fourth field should name a consumer that cannot do its job with these three, in the same way a proposed status code must name an orchestrator response none of the existing six triggers (§8.6). `human_approved` was itself admitted against that bar, not around it.
 
 **The orchestrator carries no stamp obligations.** It writes exactly one file, the orchestration artifact, and the stamp text appears only in the subagent variant of §1. `run_id` is already a set-once frontmatter field of that artifact, minted at creation — a stamp rule would restate an obligation the artifact's own schema imposes, in a second document free to drift from the first. And `created_by` has no value it could carry: instance ids are minted *by* the orchestrator *for* subagents, so any orchestrator variant would have to invent a sentinel that exists to satisfy a schema rather than to inform a reader.
 
@@ -1231,7 +1255,7 @@ The same reasoning rules out a `message_format` field or anything else describin
 
 The artifact provenance stamp was formerly a second contract with its own document, its own version, and its own `[[DEPLOYED:ArtifactProvenance]]` region sitting immediately after this one. It is now part of this contract, deployed inside this region, and versioned once (§12, v1.10). Its reasoning is §9.
 
-**Why it merged.** The two were separated on the grounds that they govern different media — this protocol the JSON envelope in flight, the stamp the frontmatter at rest — with different lifetimes and different readers. That reasoning was sound while the stamp was an audit convenience that nothing in the run consulted. It stopped being sound when the orchestrator began verifying `hitl_confirmed` (§9.7): a field the orchestrator reads and routes on is hard interop, not documentation.
+**Why it merged.** The two were separated on the grounds that they govern different media — this protocol the JSON envelope in flight, the stamp the frontmatter at rest — with different lifetimes and different readers. That reasoning was sound while the stamp was an audit convenience that nothing in the run consulted. It stopped being sound when the orchestrator began verifying `human_approved` (§9.7): a field the orchestrator reads and routes on is hard interop, not documentation.
 
 That makes the stamp the **secondary layer beneath the JSON response**. The response can claim anything, and the orchestrator otherwise has to take it on trust. With the stamp verified, the orchestrator can establish that an artifact was produced, correctly attributed, and reviewed by the user — three facts the envelope alone cannot carry credibly, because the party making the claim is the party being checked.
 
@@ -1255,7 +1279,7 @@ Two things follow, and both are the point of merging rather than side effects. O
 
 | Version | Date | Summary |
 |---------|------|---------|
-| 1.10 | 2026-08-05 | **Artifact provenance merged in.** The provenance stamp — `run_id`, `created_by`, `hitl_confirmed`, written into every file named in `output_artifacts` — was a separate contract with its own document, version, and `[[DEPLOYED:ArtifactProvenance]]` region. It is now part of this contract: the text ships inside the subagent variant of §1.1, the reasoning is §9, and there is one version number where there were two. The merge is correct because the orchestrator **verifies** `hitl_confirmed` (§9.7) — a field it reads and routes on is hard interop, not an audit convenience, and it is the secondary layer under a JSON response that can otherwise claim anything. Consequences: canonical document order drops from eight top-level slots to seven, `[[DEPLOYED:ArtifactProvenance]]` and `[[INJECTION:ArtifactProvenanceExtension]]` cease to exist, and the orchestrator variant is unchanged because the orchestrator stamps nothing (§9.9). |
+| 1.10 | 2026-08-05 | **Artifact provenance merged in.** The provenance stamp — `run_id`, `created_by`, `human_approved`, written into every file named in `output_artifacts` — was a separate contract with its own document, version, and `[[DEPLOYED:ArtifactProvenance]]` region. It is now part of this contract: the text ships inside the subagent variant of §1.1, the reasoning is §9, and there is one version number where there were two. The merge is correct because the orchestrator **verifies** `human_approved` (§9.7) — a field it reads and routes on is hard interop, not an audit convenience, and it is the secondary layer under a JSON response that can otherwise claim anything. Two changes follow from the merge. The field formerly called `hitl_confirmed` is renamed **`human_approved`**: it is read from the artifact, where "HITL" is orchestration jargon a standalone reader does not hold, and "approved" is what the flip actually certifies — the user asked for no further changes. The rename is taken now because nothing yet reads the field, making this the cheapest it will ever be. And the **orchestrator variant gains a Verifying the Human-in-the-Loop Gate subsection** (§9.7), so the check the subagent variant promises is instructed on the side that must perform it; the orchestrator still stamps nothing (§9.9). Consequences: canonical document order drops from eight top-level slots to seven, and `[[DEPLOYED:ArtifactProvenance]]` and `[[INJECTION:ArtifactProvenanceExtension]]` cease to exist. |
 | 1.9 | 2026-08-03 | **Protocol authority over harness conventions.** Added a Protocol Authority subsection to both variants, establishing that MOSAIC-authored instructions outrank harness-authored ones on message shape. Subagents return the JSON object as their entire response regardless of harness guidance requesting a prose report or summary. Orchestrators put the whole protocol message in the payload field and treat harness metadata fields as bookkeeping carrying no task content, and must never infer a status code from prose when a response contains none. Added as Key Rule 1 in the subagent variant, renumbering the remaining rules. Motivated by harnesses whose subagent-invocation tool schema and injected reporting conventions partially duplicate — and contradict — this protocol. |
 | 1.8 | 2026-08-01 | **Run identity in the envelope.** Added `run_id` to both the Task Invocation and Task Response messages, echoed the same way `agent_instance_id` is. Introduced Field Obligation Semantics in the orchestrator variant: producers always emit `run_id`; core consumers may enforce it, auxiliary consumers must degrade gracefully. Artifact paths throughout now use the run-scoped `Orchestration-{run_id}/` prefix. |
 | 1.7 | 2026-04-05 | **HITL redefined as an output review gate.** `human_in_the_loop` now explicitly gates the agent's produced output — artifacts and project files both — which must be presented for review as the final action before returning. The gate re-arms on every output change. Mid-task interaction explicitly does not satisfy it. |
@@ -1284,7 +1308,7 @@ Two things follow, and both are the point of merging rather than side effects. O
 | **Run id** | `{YYYYMMDD}T{HHMMSS}Z-{4-char-hex}` — identity of one orchestration run. Minted once, carried in both message directions. |
 | **Phase** | A named stage of a workflow, tracked by name rather than by number. |
 | **Human-in-the-Loop (HITL)** | The output review gate. When active, the agent must present everything it produced for approval as its final action, re-arming on every change. Mid-task interaction does not satisfy it. |
-| **Provenance stamp** | The three frontmatter fields — `run_id`, `created_by`, `hitl_confirmed` — written into every file named in `output_artifacts` (§9). |
+| **Provenance stamp** | The three frontmatter fields — `run_id`, `created_by`, `human_approved` — written into every file named in `output_artifacts` (§9). |
 | **Producer obligation** | The requirement that a sender emit a given field. |
 | **Consumer enforcement** | What a receiver is permitted or required to do when a field is missing. Tiered: core components may halt, auxiliary consumers must degrade. |
 
@@ -1317,5 +1341,6 @@ Two things follow, and both are the point of merging rather than side effects. O
 - **The agent instance id pattern in §7.3 is broader than earlier drafts.** Agent names are kebab-case (`checkpoint-manager-git#4`), which a letters-only pattern rejects. The pattern here admits hyphens and digits. Any validator written against the narrower form must be updated, or it will reject valid ids from most of the agent catalogue.
 - **The v1.8 date in §12 should be confirmed** against when the `run_id` change actually landed in the agent files.
 - **One harness injection now duplicates canonical content.** `Agents/Claude Code/HarnessInjectionsOrchestrator.md` restates protocol precedence inside a `HarnessConstraints` block. With §2.4 canonical, that injection should shrink to naming the `Task` tool's metadata fields and drop the precedence claim, per the test in §10.3.
-- **The v1.10 merge is specified but not executed.** The stamp text now ships inside `[[DEPLOYED:CommunicationProtocol]]`, but nothing has been migrated: forty-two agent files still carry a separate `[[DEPLOYED:ArtifactProvenance]]` region and an `[[INJECTION:ArtifactProvenanceExtension]]`, and all three vocabulary copies — `Agents/Generic/SourceFilesFormat.md`, `Tools/Common/docformat/vocabulary.go`, `Tools/boundary_constants.py` — still list `ArtifactProvenance` as a canonical deployed name with eight-slot ordering. Those three must change together, along with the `Tools/Common/testdata/boundary/` fixtures that encode the old order.
-- **§9.7's verification is not implemented.** The orchestrator does not read `hitl_confirmed` from any artifact. Until it does, the field is written and never checked — and the verification is the reason the merge is correct at all, so this is the item that makes v1.10 more than a filing change.
+- **The v1.10 merge is specified but not executed.** The stamp text now ships inside `[[DEPLOYED:CommunicationProtocol]]`, but nothing has been migrated: forty-two agent files still carry a separate `[[DEPLOYED:ArtifactProvenance]]` region and an `[[INJECTION:ArtifactProvenanceExtension]]`, and all three vocabulary copies — `Agents/Generic/SourceFilesFormat.md`, `Tools/Common/docformat/vocabulary.go`, `Tools/OldAgentsTransform/boundary_constants.py` — still list `ArtifactProvenance` as a canonical deployed name with eight-slot ordering. Those three must change together, along with the `Tools/Common/testdata/boundary/` fixtures that encode the old order.
+- **§9.7's verification is specified but not implemented.** The orchestrator variant of §1 now carries the check, closing the gap where the subagent variant promised a verification nothing was instructed to perform. What remains is deployment: no orchestrator in the workspace has the new block, so no orchestrator yet reads the field. The verification is the reason the merge is correct at all, so this is the item that makes v1.10 more than a filing change.
+- **The `hitl_confirmed` → `human_approved` rename is swept everywhere it can reach an agent.** Done: `Agents/Generic/Agents/Interface/approval-presenter.md` (v1.0.1), its row in `Agents/Generic/Agents/README.md`, `Development/Designs/DeploymentBlocks/ClosingProcedure.md`, and `Workflows/Verification/requirements-to-test-cases.md` (v1.2). The 42 agent files and the orchestrator take the new text from `[[DEPLOYED:CommunicationProtocol]]` on redeploy and need no hand edit. Two deliberate exceptions remain: the fixtures under `Tools/Deployment/testdata/golden/`, which regenerate from a redeploy and must not be hand-edited, and the analysis note `OnSuccessHITL.md`, which records the decision in the vocabulary of its date. §9.6 and §12 name the old spelling on purpose, so the rename stays traceable.

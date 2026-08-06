@@ -31,7 +31,7 @@ from boundary_constants import (
 # Matches a top-level YAML frontmatter key at the start of a line (no leading
 # whitespace). Indented lines belong to a multi-line value (list items or nested
 # map entries) and are intentionally NOT matched.
-_FRONTMATTER_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:")
+_FRONTMATTER_KEY_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:")
 
 
 @dataclasses.dataclass
@@ -136,6 +136,19 @@ def transform_file(
         generic_content = generic_ref_path.read_text(encoding="utf-8")
         generic_lines = generic_content.splitlines(keepends=True)
         generic_fm_result = _parse_frontmatter(generic_lines)
+        if not generic_fm_result["success"]:
+            return TransformResult(
+                success=False,
+                errors=[TransformError(
+                    line_number=generic_fm_result.get("line_number", 1),
+                    message=f"Failed to parse frontmatter of generic reference {generic_ref_path}: {generic_fm_result['error']}"
+                )],
+                sections_added=[],
+                injections_added=[],
+                deployed_added=[],
+                version_before=version_before,
+                version_after=""
+            )
         generic_body_lines = generic_lines[generic_fm_result["end_line"]:]
 
         transformed_body = _transform_harness_body(body_lines, generic_body_lines)
@@ -324,6 +337,7 @@ def _transform_generic_body(lines: list[str]) -> dict:
     sections_result = _identify_sections(lines, strict_identity=True)
     sections = sections_result["sections"]
     provenance_region = sections_result.get("provenance_region")
+    comm_region = sections_result.get("communication_protocol_region")
     errors.extend(sections_result["errors"])
 
     # If there are errors, return immediately
@@ -332,6 +346,19 @@ def _transform_generic_body(lines: list[str]) -> dict:
             "success": False,
             "errors": errors
         }
+
+    # Pre-scan the Communication Protocol region for markers that must be
+    # relocated or emitted at top level rather than discarded with the prose.
+    found_identity_extension = False
+    found_protocol_extension = False
+    if comm_region is not None:
+        for _j in range(comm_region["start_line"], min(comm_region["end_line"], len(lines))):
+            _m = _match_region_marker(lines[_j])
+            if _m is not None:
+                if _m["name"] == "IdentityExtension":
+                    found_identity_extension = True
+                elif _m["name"] == "ProtocolExtension":
+                    found_protocol_extension = True
 
     current_section_idx = 0
     in_fenced_block = False
@@ -347,6 +374,13 @@ def _transform_generic_body(lines: list[str]) -> dict:
             i += 1
             continue
 
+        # While inside a fenced code block, append verbatim — no provenance
+        # region interception, no section detection, no marker matching.
+        if in_fenced_block:
+            result_lines.append(line)
+            i += 1
+            continue
+
         # Check if this is the start of an untagged provenance heading region.
         # ArtifactProvenance is retired: emit only the injection sibling, not the
         # deployed region. The heading prose is discarded as before.
@@ -354,6 +388,29 @@ def _transform_generic_body(lines: list[str]) -> dict:
             result_lines.extend(_build_injection_only(""))
             injections_added.append("ArtifactProvenanceExtension")
             i = provenance_region["end_line"]
+            continue
+
+        # Check if this is the start of an untagged Communication Protocol region.
+        # The entire region is replaced with a top-level DEPLOYED boundary pair.
+        # Markers found inside the region are handled via pre-scan: IdentityExtension
+        # is relocated into Identity (done below when the Identity section closes),
+        # and ProtocolExtension is emitted as an empty top-level injection sibling.
+        if comm_region is not None and i == comm_region["start_line"]:
+            result_lines.append("[[DEPLOYED:CommunicationProtocol]]\n")
+            result_lines.append("[[/DEPLOYED:CommunicationProtocol]]\n")
+            deployed_added.append("CommunicationProtocol")
+            if found_protocol_extension:
+                result_lines.append("\n")
+                result_lines.append("[[INJECTION:ProtocolExtension]]\n")
+                result_lines.append("[[/INJECTION:ProtocolExtension]]\n")
+                injections_added.append("ProtocolExtension")
+            # When the region ends with a '---' separator, emit it verbatim so the
+            # document structure (separator before next section) is preserved.
+            region_end = min(comm_region["end_line"], len(lines))
+            if (region_end > comm_region["start_line"]
+                    and lines[region_end - 1].strip() == "---"):
+                result_lines.append("---\n")
+            i = comm_region["end_line"]
             continue
 
         # Check if this is a section start
@@ -381,6 +438,13 @@ def _transform_generic_body(lines: list[str]) -> dict:
                     j += 1
                     continue
 
+                # While inside a fenced code block, append verbatim — no marker
+                # matching, no section detection.
+                if in_fenced_block:
+                    result_lines.append(line)
+                    j += 1
+                    continue
+
                 # Check for injection/deployed markers
                 injection_match = _match_region_marker(line)
                 if injection_match:
@@ -400,6 +464,19 @@ def _transform_generic_body(lines: list[str]) -> dict:
                 # Regular line
                 result_lines.append(line)
                 j += 1
+
+            # When an [INJECTION: identity_extension] marker was found in the
+            # Communication Protocol region (past Identity's end_line), relocate
+            # it to the end of the Identity body. The marker's source line lies
+            # outside Identity's range so in-place emission is impossible; instead,
+            # we inject it here immediately before the section close tag, preceded
+            # by one blank line when the current last result line is non-blank.
+            if section_name == "Identity" and found_identity_extension:
+                if result_lines and result_lines[-1].strip():
+                    result_lines.append("\n")
+                result_lines.append("[[INJECTION:IdentityExtension]]\n")
+                result_lines.append("[[/INJECTION:IdentityExtension]]\n")
+                injections_added.append("IdentityExtension")
 
             # Add section close tag. If the last content line has no trailing
             # newline (file ended without one), add it to keep the close tag
@@ -455,8 +532,11 @@ def _identify_sections(lines: list[str], strict_identity: bool = False) -> dict:
     # "## Core Orchestration Loop" lives inside the ErrorHandling section).
     # all_h2_lines records every H2 heading (canonical or not) so the strict
     # Identity rule can end Identity at the first following H2.
+    # comm_protocol_line records the first '## Communication Protocol' heading
+    # (outside fenced blocks) for use in the non-strict Identity end computation.
     section_starts = []
     all_h2_lines = []
+    comm_protocol_line = None  # line index of first unambiguous CP heading
     for i, line in enumerate(lines):
         if line.strip().startswith("```"):
             in_fenced_block = not in_fenced_block
@@ -471,6 +551,8 @@ def _identify_sections(lines: list[str], strict_identity: bool = False) -> dict:
             section_name = _canonical_section_for_heading(line)
             if section_name is not None:
                 section_starts.append({"name": section_name, "line": i})
+            elif line.strip() == "## Communication Protocol" and comm_protocol_line is None:
+                comm_protocol_line = i
             # Non-canonical H2: left for orphan detection / absorption below.
 
         # Check for H1 heading (Identity section)
@@ -497,6 +579,14 @@ def _identify_sections(lines: list[str], strict_identity: bool = False) -> dict:
                     if h2 > start_line:
                         boundary_line = h2
                         break
+            else:
+                # On the non-strict (harness) path, also treat '## Communication
+                # Protocol' as an Identity terminator when it appears before the
+                # next canonical heading. Without this guard, Identity absorbs the
+                # entire CP region body and the validator reports E008.
+                if (comm_protocol_line is not None
+                        and start_line < comm_protocol_line < boundary_line):
+                    boundary_line = comm_protocol_line
             end_line = boundary_line
             for i in range(boundary_line - 1, start_line, -1):
                 if lines[i].strip() == "---":
@@ -561,12 +651,55 @@ def _identify_sections(lines: list[str], strict_identity: bool = False) -> dict:
             provenance_region = {"start_line": prov_start, "end_line": prov_end}
             break  # only one provenance heading expected per file
 
+    # Detect any '## Communication Protocol' heading region. This scan carries
+    # its own fence tracking (unlike the provenance scan above) so that a literal
+    # '## Communication Protocol' line inside a fenced code block positioned
+    # outside every canonical section's range is not mistaken for a real region.
+    communication_protocol_region = None
+    _cp_fenced = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            _cp_fenced = not _cp_fenced
+        if stripped == "## Communication Protocol" and not covered[i] and not _cp_fenced:
+            cp_start = i
+            cp_end = len(lines)
+            # Forward scan for the region boundary. Carries its own fence state
+            # seeded from the current _cp_fenced value (which is False here since
+            # the heading itself is not inside a fence).
+            _cp_end_fenced = False
+            for j in range(i + 1, len(lines)):
+                jstripped = lines[j].strip()
+                if jstripped.startswith("```"):
+                    _cp_end_fenced = not _cp_end_fenced
+                if _cp_end_fenced:
+                    continue
+                if jstripped == "---":
+                    cp_end = j + 1  # include the separator in the region
+                    break
+                if j > i and (
+                    (lines[j].startswith("# ") and not lines[j].startswith("##"))
+                    or (lines[j].startswith("## ")
+                        and not lines[j].startswith("###")
+                        and _canonical_section_for_heading(lines[j]) is not None)
+                ):
+                    cp_end = j  # exclude the next heading
+                    break
+            for k in range(cp_start, min(cp_end, len(lines))):
+                covered[k] = True
+            communication_protocol_region = {"start_line": cp_start, "end_line": cp_end}
+            break  # at most one CP region per file
+
     in_fenced_block = False
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("```"):
             in_fenced_block = not in_fenced_block
         if covered[i] or not stripped or stripped == "---":
+            continue
+        # Fence delimiters and content inside fenced blocks outside every section
+        # range are not classifiable content — suppress orphan errors for them.
+        if stripped.startswith("```") or in_fenced_block:
             continue
         if line.startswith("## ") and not line.startswith("###"):
             errors.append(TransformError(
@@ -579,7 +712,12 @@ def _identify_sections(lines: list[str], strict_identity: bool = False) -> dict:
                 message=f"unclassifiable content: {stripped}"
             ))
 
-    return {"sections": sections, "errors": errors, "provenance_region": provenance_region}
+    return {
+        "sections": sections,
+        "errors": errors,
+        "provenance_region": provenance_region,
+        "communication_protocol_region": communication_protocol_region,
+    }
 
 
 def _canonical_section_for_heading(line: str) -> Optional[str]:
@@ -854,6 +992,78 @@ def _rewrite_old_provenance_to_new_shape(lines: list[str]) -> dict:
     }
 
 
+def _emit_comm_protocol_region(
+    lines: list[str],
+    region: dict,
+    found_protocol_extension: bool,
+    out: list[str],
+    deployed_added: list[str],
+    injections_added: list[str],
+) -> int:
+    """Replace an untagged Communication Protocol region with its new-shape tags.
+
+    The region's prose is discarded: its content is tool-managed and regenerated
+    on every deploy, so it is replaced by an empty top-level
+    ``[[DEPLOYED:CommunicationProtocol]]`` pair. A ``ProtocolExtension`` marker
+    found inside the region is re-emitted as an empty top-level injection
+    sibling. A trailing ``---`` separator is preserved so the document structure
+    around the following section is unchanged.
+
+    Appends to ``out`` and returns the line index to resume reading from.
+    """
+    out.append("[[DEPLOYED:CommunicationProtocol]]\n")
+    out.append("[[/DEPLOYED:CommunicationProtocol]]\n")
+    deployed_added.append("CommunicationProtocol")
+    if found_protocol_extension:
+        out.append("\n")
+        out.append("[[INJECTION:ProtocolExtension]]\n")
+        out.append("[[/INJECTION:ProtocolExtension]]\n")
+        injections_added.append("ProtocolExtension")
+    region_end = min(region["end_line"], len(lines))
+    if region_end > region["start_line"] and lines[region_end - 1].strip() == "---":
+        out.append("---\n")
+    return region["end_line"]
+
+
+def _scan_region_for_relocated_markers(
+    lines: list[str], region: Optional[dict]
+) -> tuple[bool, bool]:
+    """Return (found_identity_extension, found_protocol_extension) for a region.
+
+    Old-format injection markers can sit inside the Communication Protocol
+    region, which is discarded wholesale. Any marker found there must be
+    re-emitted elsewhere rather than lost with the prose, so callers pre-scan
+    for them before the region is consumed.
+    """
+    found_identity = False
+    found_protocol = False
+    if region is None:
+        return found_identity, found_protocol
+    for j in range(region["start_line"], min(region["end_line"], len(lines))):
+        marker = _match_region_marker(lines[j])
+        if marker is None:
+            continue
+        if marker["name"] == "IdentityExtension":
+            found_identity = True
+        elif marker["name"] == "ProtocolExtension":
+            found_protocol = True
+    return found_identity, found_protocol
+
+
+def _strip_deployed_pair(lines: list[str], name: str) -> list[str]:
+    """Return `lines` with any `[[DEPLOYED:name]]` / `[[/DEPLOYED:name]]` tag
+    lines removed, leaving everything between them untouched.
+
+    Sections are identified by heading range, so a section's range can extend
+    past its own closing tag and swallow a following top-level deployed region.
+    Callers that re-emit that region themselves strip it here first to avoid
+    emitting the boundary name twice.
+    """
+    open_line = open_tag(BoundaryKind.DEPLOYED, name)
+    close_line = close_tag(BoundaryKind.DEPLOYED, name)
+    return [ln for ln in lines if ln.strip() not in (open_line, close_line)]
+
+
 def _transform_harness_body(harness_lines: list[str], generic_lines: list[str]) -> dict:
     """Transform a harness file's body using the generic reference.
 
@@ -862,6 +1072,12 @@ def _transform_harness_body(harness_lines: list[str], generic_lines: list[str]) 
     function reconstructs the injection boundaries by walking the harness body
     section by section and, within each section, aligning the harness lines
     against the generic section's injection markers (see _merge_section).
+
+    Content between sections is copied verbatim, with one exception: an untagged
+    Communication Protocol region is intercepted and rewritten to the new
+    top-level deployed shape. Without that interception the region would be
+    copied out as untagged prose sitting outside every boundary (E005) while an
+    empty deployed pair was left nested inside Identity (E008).
     """
     harness_sections_result = _identify_sections(harness_lines)
     sections = harness_sections_result["sections"]
@@ -873,17 +1089,34 @@ def _transform_harness_body(harness_lines: list[str], generic_lines: list[str]) 
     generic_sections_result = _identify_sections(generic_lines)
     generic_by_name = {gs["name"]: gs for gs in generic_sections_result["sections"]}
 
+    comm_region = harness_sections_result.get("communication_protocol_region")
+    found_identity_extension, found_protocol_extension = (
+        _scan_region_for_relocated_markers(harness_lines, comm_region)
+    )
+
     result_lines = []
     sections_added = []
     injections_added = []
+    deployed_added: list[str] = []
 
     harness_idx = 0
 
-    for section in sections:
-        # Emit any lines that sit between sections (separators, blanks) verbatim.
-        while harness_idx < section["start_line"]:
+    def _copy_verbatim_until(stop: int) -> None:
+        """Copy harness lines up to `stop`, intercepting the protocol region."""
+        nonlocal harness_idx
+        while harness_idx < stop:
+            if comm_region is not None and harness_idx == comm_region["start_line"]:
+                harness_idx = _emit_comm_protocol_region(
+                    harness_lines, comm_region, found_protocol_extension,
+                    result_lines, deployed_added, injections_added,
+                )
+                continue
             result_lines.append(harness_lines[harness_idx])
             harness_idx += 1
+
+    for section in sections:
+        # Emit any lines that sit between sections (separators, blanks) verbatim.
+        _copy_verbatim_until(section["start_line"])
 
         sections_added.append(section["name"])
         result_lines.append(open_tag(BoundaryKind.SECTION, section["name"]) + "\n")
@@ -894,25 +1127,45 @@ def _transform_harness_body(harness_lines: list[str], generic_lines: list[str]) 
             generic_section = generic_lines[
                 generic_section_meta["start_line"]:generic_section_meta["end_line"]
             ]
+            if comm_region is not None:
+                # We emit CommunicationProtocol ourselves at top level; drop any
+                # copy the generic section range happens to overlap.
+                generic_section = _strip_deployed_pair(
+                    generic_section, "CommunicationProtocol"
+                )
             merged, injs = _merge_section(harness_section, generic_section)
             result_lines.extend(merged)
             injections_added.extend(injs)
         else:
             result_lines.extend(harness_section)
 
+        # An [INJECTION: identity_extension] marker found inside the discarded
+        # Communication Protocol region belongs to Identity, whose range ends
+        # before it. Relocate it to the end of the Identity body — but only if
+        # the section merge did not already produce the boundary from the
+        # generic reference, which would otherwise duplicate it.
+        if (section["name"] == "Identity"
+                and found_identity_extension
+                and "IdentityExtension" not in injections_added):
+            if result_lines and result_lines[-1].strip():
+                result_lines.append("\n")
+            result_lines.append("[[INJECTION:IdentityExtension]]\n")
+            result_lines.append("[[/INJECTION:IdentityExtension]]\n")
+            injections_added.append("IdentityExtension")
+
+        if result_lines and not result_lines[-1].endswith("\n"):
+            result_lines[-1] += "\n"
         result_lines.append(close_tag(BoundaryKind.SECTION, section["name"]) + "\n")
         harness_idx = section["end_line"]
 
-    while harness_idx < len(harness_lines):
-        result_lines.append(harness_lines[harness_idx])
-        harness_idx += 1
+    _copy_verbatim_until(len(harness_lines))
 
     return {
         "success": True,
         "lines": result_lines,
         "sections_added": sections_added,
         "injections_added": injections_added,
-        "deployed_added": [],
+        "deployed_added": deployed_added,
     }
 
 

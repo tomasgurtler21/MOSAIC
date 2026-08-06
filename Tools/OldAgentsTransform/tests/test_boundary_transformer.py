@@ -1228,6 +1228,131 @@ class TestMalformedFrontmatter:
 
 
 # ---------------------------------------------------------------------------
+# Malformed generic-reference guard
+# ---------------------------------------------------------------------------
+
+class TestMalformedGenericRef:
+    """Transforming a harness file against a generic ref with unparseable frontmatter
+    must return TransformResult(success=False) and must not raise any exception."""
+
+    def test_returns_failure_not_raises(
+        self,
+        harness_codebase_agnostic_input: pathlib.Path,
+        malformed_generic_ref_input: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """transform_file must return success=False rather than raising KeyError."""
+        output_path = tmp_path / harness_codebase_agnostic_input.name
+        result = transform_file(
+            harness_codebase_agnostic_input,
+            output_path,
+            generic_ref_path=malformed_generic_ref_input,
+        )
+        assert result.success is False
+
+    def test_errors_list_is_nonempty(
+        self,
+        harness_codebase_agnostic_input: pathlib.Path,
+        malformed_generic_ref_input: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """At least one TransformError must be reported for the generic-ref parse failure."""
+        output_path = tmp_path / harness_codebase_agnostic_input.name
+        result = transform_file(
+            harness_codebase_agnostic_input,
+            output_path,
+            generic_ref_path=malformed_generic_ref_input,
+        )
+        assert len(result.errors) >= 1
+
+    def test_error_message_references_generic_ref_path(
+        self,
+        harness_codebase_agnostic_input: pathlib.Path,
+        malformed_generic_ref_input: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """The TransformError message must contain the generic-ref path so the failure is traceable."""
+        output_path = tmp_path / harness_codebase_agnostic_input.name
+        result = transform_file(
+            harness_codebase_agnostic_input,
+            output_path,
+            generic_ref_path=malformed_generic_ref_input,
+        )
+        assert result.errors, "Precondition: at least one error must be present"
+        # At least one error must name the generic-ref file so the caller can identify it.
+        generic_ref_str = str(malformed_generic_ref_input)
+        assert any(generic_ref_str in err.message for err in result.errors), (
+            f"Expected at least one TransformError whose message contains the generic-ref path "
+            f"'{generic_ref_str}'; got: {[err.message for err in result.errors]!r}"
+        )
+
+    def test_no_output_file_written_on_failure(
+        self,
+        harness_codebase_agnostic_input: pathlib.Path,
+        malformed_generic_ref_input: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """No partial output file must be written when the generic-ref frontmatter is malformed."""
+        output_path = tmp_path / "malformed_ref_out.md"
+        transform_file(
+            harness_codebase_agnostic_input,
+            output_path,
+            generic_ref_path=malformed_generic_ref_input,
+        )
+        assert not output_path.exists(), (
+            "Partial output must not be written when the generic-ref frontmatter cannot be parsed."
+        )
+
+    def test_result_fields_populated_consistently(
+        self,
+        harness_codebase_agnostic_input: pathlib.Path,
+        malformed_generic_ref_input: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """Failure result fields must match the documented contract for this early-return path.
+
+        sections_added, injections_added, and deployed_added must all be empty lists.
+        version_after must be empty string.
+        version_before must be the input file's own version value (already parsed).
+        """
+        output_path = tmp_path / harness_codebase_agnostic_input.name
+        result = transform_file(
+            harness_codebase_agnostic_input,
+            output_path,
+            generic_ref_path=malformed_generic_ref_input,
+        )
+        assert result.sections_added == []
+        assert result.injections_added == []
+        assert result.deployed_added == []
+        assert result.version_after == ""
+        # version_before must be populated from the input file's already-parsed frontmatter.
+        assert result.version_before != "", (
+            "version_before must carry the input file's version even on generic-ref failure"
+        )
+
+    def test_error_line_number_is_one_based(
+        self,
+        harness_codebase_agnostic_input: pathlib.Path,
+        malformed_generic_ref_input: pathlib.Path,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """Each TransformError must carry a 1-based line_number >= 1."""
+        output_path = tmp_path / harness_codebase_agnostic_input.name
+        result = transform_file(
+            harness_codebase_agnostic_input,
+            output_path,
+            generic_ref_path=malformed_generic_ref_input,
+        )
+        assert result.errors, "Precondition: at least one error must be present"
+        for err in result.errors:
+            assert isinstance(err, TransformError)
+            assert err.line_number >= 1, (
+                f"line_number must be 1-based, got {err.line_number!r}"
+            )
+            assert err.message, "TransformError.message must be non-empty"
+
+
+# ---------------------------------------------------------------------------
 # Provenance migration helpers and test classes — deferred pending Stage 2 decision
 # ---------------------------------------------------------------------------
 #
@@ -1862,4 +1987,747 @@ class TestProvenanceValidatorIntegration:
             f"ArtifactProvenanceExtension must be at body top level (not inside any section). "
             f"Found {opens_before} section open tags and {closes_before} section close tags "
             f"before the injection — they must balance."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Hyphenated frontmatter key (Stage 1, Defect 3)
+# ---------------------------------------------------------------------------
+
+class TestHyphenatedFrontmatterKey:
+    """A file whose frontmatter contains a hyphenated key (base-version) must transform correctly.
+
+    The current transformer regex omits '-' from the character class, so 'base-version: 1.0.0'
+    fails to match and causes an early return with success=False.  After widening the regex
+    to r"^([A-Za-z_][A-Za-z0-9_-]*)\\s*:", the key round-trips verbatim and version is still
+    correctly bumped.
+
+    These tests are in TDD RED phase: they fail until _FRONTMATTER_KEY_RE is widened.
+    """
+
+    def test_transformation_succeeds(
+        self, generic_hyphenated_key_input, tmp_path
+    ):
+        """Transformation of a file with a hyphenated frontmatter key must succeed.
+
+        The current transformer's _FRONTMATTER_KEY_RE rejects 'base-version' as malformed,
+        so this test fails until the regex is widened to admit hyphens after the first char.
+        """
+        result, _ = _transform_to_tmp(generic_hyphenated_key_input, tmp_path)
+        assert result.success is True
+        assert result.errors == []
+
+    def test_hyphenated_key_preserved_verbatim_in_output(
+        self, generic_hyphenated_key_input, tmp_path
+    ):
+        """The 'base-version' line must appear byte-for-byte in the output frontmatter.
+
+        After widening the regex, the output-writing loop must fall through to
+        output_lines.append(raw) for 'base-version' because it does not equal
+        'version' or 'transform_version'.  Before the fix, transformation fails
+        entirely (success=False), so this assertion is never reached.
+        """
+        result, output_path = _transform_to_tmp(generic_hyphenated_key_input, tmp_path)
+        assert result.success is True, (
+            "Precondition: transformation must succeed before checking key preservation"
+        )
+        content = _read(output_path)
+        lines = content.splitlines()
+        # Locate frontmatter (between first and second '---')
+        in_fm = False
+        fm_lines: list[str] = []
+        for line in lines:
+            if line == "---":
+                if not in_fm:
+                    in_fm = True
+                    continue
+                else:
+                    break
+            if in_fm:
+                fm_lines.append(line)
+        assert "base-version: 1.0.0" in fm_lines, (
+            "The 'base-version: 1.0.0' frontmatter line must appear verbatim in the output. "
+            f"Frontmatter lines found: {fm_lines}"
+        )
+
+    def test_version_still_rewritten_alongside_hyphenated_key(
+        self, generic_hyphenated_key_input, tmp_path
+    ):
+        """The 'version' value must still be bumped even when a hyphenated key is present.
+
+        This guards the risk that widening the regex causes the output-writing loop to
+        mistake 'base-version' for 'version' and rewrite it.  The correct behaviour is:
+        - 'version' key: value is bumped from 2.2.0 to 3.0.0
+        - 'base-version' key: line is emitted verbatim (value 1.0.0 is unchanged)
+        """
+        result, _ = _transform_to_tmp(generic_hyphenated_key_input, tmp_path)
+        assert result.success is True
+        assert result.version_before == "2.2.0"
+        assert result.version_after == "3.0.0"
+
+    def test_output_matches_expected_exactly(
+        self, generic_hyphenated_key_input, generic_hyphenated_key_expected, tmp_path
+    ):
+        """The full output file must match the expected fixture byte-for-byte.
+
+        The expected fixture has 'base-version: 1.0.0' preserved verbatim and
+        'version: 3.0.0' (bumped from 2.2.0), with all section and injection
+        boundaries correctly added.
+        """
+        _, output_path = _transform_to_tmp(generic_hyphenated_key_input, tmp_path)
+        assert _read(output_path) == _read(generic_hyphenated_key_expected)
+
+
+# ---------------------------------------------------------------------------
+# Fenced code block protection (Stage 3)
+# ---------------------------------------------------------------------------
+
+class TestFencedMarkersInput:
+    """Lines inside a fenced code block must never be converted to boundary tags.
+
+    The input fixture contains a fenced block inside the Capabilities section
+    whose content includes old-style [INJECTION: ...] and new-style
+    [[INJECTION:...]] marker-like text.  One genuine [INJECTION: language_patterns]
+    marker sits outside the fence and must still be converted correctly.
+
+    These tests are in TDD RED phase: they fail until the in_fenced_block guard
+    is added to the inner section-processing loop in _transform_generic_body.
+    """
+
+    def test_transformation_succeeds(
+        self, generic_fenced_markers_input, tmp_path
+    ):
+        """Transformation of a file with a fenced block must succeed with no errors."""
+        result, _ = _transform_to_tmp(generic_fenced_markers_input, tmp_path)
+        assert result.success is True
+        assert result.errors == []
+
+    def test_output_matches_expected_exactly(
+        self, generic_fenced_markers_input, generic_fenced_markers_expected, tmp_path
+    ):
+        """The full output file must match the expected fixture byte-for-byte.
+
+        The expected fixture has the fenced block content identical to the input
+        and the outside marker converted to its boundary tag pair.
+        """
+        _, output_path = _transform_to_tmp(generic_fenced_markers_input, tmp_path)
+        assert _read(output_path) == _read(generic_fenced_markers_expected)
+
+    def test_no_boundary_tags_inside_fence(
+        self, generic_fenced_markers_input, tmp_path
+    ):
+        """Fenced block content must be passed through verbatim — the transformer must not
+        emit or inject boundary tags inside a fence.
+
+        The input fixture already contains a new-style [[INJECTION:IdentityExtension]] line
+        inside the fenced block as example syntax.  After transformation that line must
+        survive unchanged.  The correct invariant is therefore not "no [[ inside a fence"
+        but rather "fenced content in the output is byte-for-byte identical to fenced
+        content in the input".  If the transformer emits a spurious tag inside the fence,
+        the output fenced lines will differ from the input fenced lines and the assertion
+        fails.  If the transformer correctly passes the existing [[ line through verbatim,
+        both lists will be identical and the assertion passes.
+        """
+        _, output_path = _transform_to_tmp(generic_fenced_markers_input, tmp_path)
+
+        def _extract_fenced_lines(path: pathlib.Path) -> list[str]:
+            in_fence = False
+            fenced: list[str] = []
+            for line in _read(path).splitlines():
+                if line.strip().startswith("```"):
+                    in_fence = not in_fence
+                    continue
+                if in_fence:
+                    fenced.append(line)
+            return fenced
+
+        input_fenced = _extract_fenced_lines(generic_fenced_markers_input)
+        output_fenced = _extract_fenced_lines(output_path)
+        assert output_fenced == input_fenced, (
+            "Fenced block content changed during transformation.\n"
+            f"Input fenced lines:  {input_fenced!r}\n"
+            f"Output fenced lines: {output_fenced!r}\n"
+            "Lines inside fences must be passed through verbatim — "
+            "the transformer must neither add boundary tags nor alter any fenced line."
+        )
+
+    def test_fenced_old_style_marker_preserved_verbatim(
+        self, generic_fenced_markers_input, tmp_path
+    ):
+        """The old-style marker inside the fence must survive in the output unchanged.
+
+        [INJECTION: identity_extension] appears inside a fenced block in the input.
+        With the bug, the transformer converts it to a [[INJECTION:...]] pair,
+        altering the fenced content.  With the fix, it passes through as-is.
+        """
+        _, output_path = _transform_to_tmp(generic_fenced_markers_input, tmp_path)
+        lines = _read(output_path).splitlines()
+        in_fence = False
+        fenced_lines: list[str] = []
+        for line in lines:
+            if line.strip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                fenced_lines.append(line)
+        assert "[INJECTION: identity_extension]" in fenced_lines, (
+            "The old-style marker '[INJECTION: identity_extension]' must appear "
+            "verbatim inside the fenced block in the output.  If it is absent, "
+            "the transformer converted it when it should have left it alone."
+        )
+
+    def test_genuine_marker_outside_fence_converted(
+        self, generic_fenced_markers_input, tmp_path
+    ):
+        """The genuine [INJECTION: language_patterns] outside the fence must be converted.
+
+        This assertion confirms that suppressing conversion inside the fence does
+        not accidentally suppress conversion of markers that sit outside any fence.
+        """
+        result, output_path = _transform_to_tmp(generic_fenced_markers_input, tmp_path)
+        assert "LanguagePatterns" in result.injections_added, (
+            "'LanguagePatterns' must appear in result.injections_added; "
+            "the [INJECTION: language_patterns] marker outside the fence was not converted."
+        )
+        content = _read(output_path)
+        assert "[[DEPLOYED:LanguagePatterns]]" in content, (
+            "[[DEPLOYED:LanguagePatterns]] must appear in the output; "
+            "the genuine marker outside the fence was not converted to a boundary tag."
+        )
+
+    def test_fenced_content_does_not_duplicate_injection_names(
+        self, generic_fenced_markers_input, tmp_path
+    ):
+        """Marker-like text inside the fence must not create duplicate injection names in result.
+
+        IdentityExtension is referenced inside the fenced block as an example.
+        The transformer must not count that reference as a real marker conversion —
+        only the genuine [INJECTION: identity_extension] in the Identity section
+        should produce one IdentityExtension entry in injections_added.
+        """
+        result, _ = _transform_to_tmp(generic_fenced_markers_input, tmp_path)
+        identity_ext_count = result.injections_added.count("IdentityExtension")
+        assert identity_ext_count == 1, (
+            f"Expected exactly 1 'IdentityExtension' in injections_added "
+            f"(from the genuine marker in Identity section); got {identity_ext_count}. "
+            "Fenced marker-like text must not be counted as a real conversion."
+        )
+
+    def test_output_validates_cleanly(
+        self, generic_fenced_markers_input, tmp_path
+    ):
+        """The transformed output must pass validate_file with no errors.
+
+        In particular, boundary tags erroneously emitted inside a fenced block
+        by the buggy transformer cause E002 (unmatched closing tag) because the
+        validator's own fence guard would see the open tag inside the fence (and
+        skip it) while the corresponding close tag lands outside (and is checked).
+        After the fix, no tags are emitted inside fences, so no E002 appears.
+        """
+        result, output_path = _transform_to_tmp(generic_fenced_markers_input, tmp_path)
+        assert result.success is True, (
+            "Precondition: transformation must succeed before the validator check."
+        )
+        errors = validate_file(output_path)
+        assert errors == [], (
+            f"Transformer output must pass boundary_validator.py with no errors.\n"
+            f"Errors found in {output_path}:\n"
+            + "\n".join(f"  {e}" for e in errors)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Outer-loop provenance-region guard (I3.2 coverage)
+# ---------------------------------------------------------------------------
+
+class TestFencedProvenanceInput:
+    """The outer loop's provenance-region check must not fire while in_fenced_block is True.
+
+    The input fixture has a fenced code block whose opening delimiter appears as
+    the last content line inside the Capabilities section and whose closing
+    delimiter appears outside that section, in the outer loop territory.
+
+    Because _identify_sections' provenance heading scan is not fence-aware, it
+    detects the '## Artifact Provenance' line (which sits between the opening
+    and closing delimiters, outside any canonical section's covered range) as
+    provenance_region["start_line"].
+
+    When the outer loop reaches that line, in_fenced_block is True — carried
+    from the inner section loop that toggled the flag on the opening delimiter.
+    Without the I3.2 guard, the outer loop intercepts the provenance region,
+    emits a spurious [[INJECTION:ArtifactProvenanceExtension]] pair, skips the
+    closing fence delimiter (leaving in_fenced_block True for all subsequent
+    sections), and discards the fenced content.
+
+    These tests are in TDD RED phase: they fail until the in_fenced_block guard
+    is added to the outer loop in _transform_generic_body before the provenance-
+    region interception check.
+    """
+
+    def test_no_spurious_provenance_injection(
+        self, generic_fenced_provenance_input, tmp_path
+    ):
+        """ArtifactProvenanceExtension must not appear in injections_added.
+
+        The '## Artifact Provenance' text in the fixture sits inside a fence
+        span that the outer loop processes while in_fenced_block is True.
+        With the I3.2 guard, provenance-region interception is skipped for that
+        line, so no ArtifactProvenanceExtension injection is emitted and the
+        text passes through verbatim.  Without the guard, the interception fires
+        spuriously and pollutes injections_added.
+        """
+        result, _ = _transform_to_tmp(generic_fenced_provenance_input, tmp_path)
+        assert "ArtifactProvenanceExtension" not in result.injections_added, (
+            "'ArtifactProvenanceExtension' must NOT appear in injections_added.\n"
+            "The '## Artifact Provenance' line is reached by the outer loop while "
+            "in_fenced_block is True; the I3.2 guard must prevent provenance-region "
+            "interception in that state.\n"
+            f"Got injections_added={result.injections_added!r}"
+        )
+
+    def test_fenced_provenance_heading_preserved_verbatim(
+        self, generic_fenced_provenance_input, tmp_path
+    ):
+        """The '## Artifact Provenance' text must appear verbatim in the output.
+
+        Without the I3.2 guard, provenance-region interception consumes the
+        line (replacing it with [[INJECTION:ArtifactProvenanceExtension]] tags)
+        and skips the closing fence delimiter.  With the fix, the outer loop's
+        else branch appends the line verbatim.
+        """
+        _, output_path = _transform_to_tmp(generic_fenced_provenance_input, tmp_path)
+        content = _read(output_path)
+        assert "## Artifact Provenance" in content, (
+            "The literal text '## Artifact Provenance' must appear verbatim in "
+            "the output.\n"
+            "Without the I3.2 guard, the provenance-region interception replaces "
+            "it with [[INJECTION:ArtifactProvenanceExtension]] tags and discards "
+            "the fenced content entirely."
+        )
+
+    def test_output_matches_expected_exactly(
+        self, generic_fenced_provenance_input, generic_fenced_provenance_expected,
+        tmp_path
+    ):
+        """The full output file must match the expected fixture byte-for-byte.
+
+        The expected fixture has the '## Artifact Provenance' text and its closing
+        fence delimiter verbatim, and Constraints markers correctly converted to
+        boundary tag pairs.  Without the I3.2 guard, the output contains a spurious
+        ArtifactProvenanceExtension injection and unconverted Constraints markers.
+        """
+        _, output_path = _transform_to_tmp(generic_fenced_provenance_input, tmp_path)
+        assert _read(output_path) == _read(generic_fenced_provenance_expected)
+
+
+# ---------------------------------------------------------------------------
+# CommunicationProtocol region (Stage 4)
+# ---------------------------------------------------------------------------
+
+def _count_section_opens_before(content: str, pos: int) -> int:
+    """Return the number of [[SECTION:...]] open tags appearing before byte offset pos."""
+    return len(re.findall(r"\[\[SECTION:[A-Za-z]+\]\]", content[:pos]))
+
+
+def _count_section_closes_before(content: str, pos: int) -> int:
+    """Return the number of [[/SECTION:...]] close tags appearing before byte offset pos."""
+    return len(re.findall(r"\[\[/SECTION:[A-Za-z]+\]\]", content[:pos]))
+
+
+class TestCommunicationProtocolInput:
+    """Old-format '## Communication Protocol' heading is lifted to a top-level DEPLOYED boundary.
+
+    The input carries prose plus both [INJECTION: identity_extension] and
+    [INJECTION: protocol_extension] inside the '## Communication Protocol' region.
+    After transformation:
+    - [[DEPLOYED:CommunicationProtocol]] / [[/DEPLOYED:CommunicationProtocol]] appears at
+      top level between [[/SECTION:Identity]] and [[SECTION:Capabilities]].
+    - IdentityExtension is relocated inside [[SECTION:Identity]], at the end of the Identity
+      body, preceded by one blank line.
+    - ProtocolExtension is emitted as an empty top-level [[INJECTION:ProtocolExtension]] pair
+      immediately after the deployed block.
+    - Old prose is discarded; no untagged leftover text appears.
+
+    These tests are in TDD RED phase: they fail until the CommunicationProtocol region
+    handling is implemented in boundary_transformer.py.
+    """
+
+    def test_transformation_succeeds(
+        self, communication_protocol_input, tmp_path
+    ):
+        """Transformation of a file with '## Communication Protocol' must succeed with no errors."""
+        result, _ = _transform_to_tmp(communication_protocol_input, tmp_path)
+        assert result.success is True
+        assert result.errors == []
+
+    def test_output_matches_expected_exactly(
+        self, communication_protocol_input, communication_protocol_expected, tmp_path
+    ):
+        """The full output file must match the expected fixture byte-for-byte.
+
+        The expected fixture is authored from the CommunicationProtocol emission contract,
+        not derived from tool output, making this assertion an independent correctness oracle.
+        """
+        _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
+        assert _read(output_path) == _read(communication_protocol_expected)
+
+    def test_communication_protocol_in_deployed_added(
+        self, communication_protocol_input, tmp_path
+    ):
+        """'CommunicationProtocol' must appear in TransformResult.deployed_added."""
+        result, _ = _transform_to_tmp(communication_protocol_input, tmp_path)
+        assert "CommunicationProtocol" in result.deployed_added, (
+            "TransformResult.deployed_added must contain 'CommunicationProtocol' when a "
+            "'## Communication Protocol' region is detected and converted."
+        )
+
+    def test_deployed_boundary_not_nested_in_any_section(
+        self, communication_protocol_input, tmp_path
+    ):
+        """[[DEPLOYED:CommunicationProtocol]] must be at body top level, not inside any [[SECTION:]].
+
+        The structural invariant: at the byte offset of [[DEPLOYED:CommunicationProtocol]],
+        the number of [[SECTION:...]] open tags must equal the number of [[/SECTION:...]]
+        close tags that precede it — i.e. the nesting depth is zero.
+        """
+        _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
+        content = _read(output_path)
+        deployed_pos = content.find("[[DEPLOYED:CommunicationProtocol]]")
+        assert deployed_pos != -1, "[[DEPLOYED:CommunicationProtocol]] must be present in the output."
+        opens_before = _count_section_opens_before(content, deployed_pos)
+        closes_before = _count_section_closes_before(content, deployed_pos)
+        assert opens_before == closes_before, (
+            f"[[DEPLOYED:CommunicationProtocol]] is nested inside a [[SECTION:...]] block. "
+            f"Found {opens_before} section open tags and {closes_before} section close tags "
+            f"before it — they must balance for top-level placement."
+        )
+
+    def test_deployed_boundary_between_identity_and_capabilities(
+        self, communication_protocol_input, tmp_path
+    ):
+        """[[DEPLOYED:CommunicationProtocol]] must appear after [[/SECTION:Identity]] and before
+        [[SECTION:Capabilities]], satisfying CANONICAL_ORDER slot 1.
+        """
+        _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
+        content = _read(output_path)
+        identity_close_pos = content.find("[[/SECTION:Identity]]")
+        deployed_pos = content.find("[[DEPLOYED:CommunicationProtocol]]")
+        capabilities_open_pos = content.find("[[SECTION:Capabilities]]")
+        assert identity_close_pos != -1, "[[/SECTION:Identity]] must be present."
+        assert deployed_pos != -1, "[[DEPLOYED:CommunicationProtocol]] must be present."
+        assert capabilities_open_pos != -1, "[[SECTION:Capabilities]] must be present."
+        assert identity_close_pos < deployed_pos < capabilities_open_pos, (
+            "[[DEPLOYED:CommunicationProtocol]] must appear after [[/SECTION:Identity]] "
+            "and before [[SECTION:Capabilities]]."
+        )
+
+    def test_old_prose_not_in_output(
+        self, communication_protocol_input, tmp_path
+    ):
+        """Old '## Communication Protocol' prose body must be discarded.
+
+        The prose text from the region must not appear as untagged leftover text in the output.
+        Untagged leftovers would be reported by orphan detection and by the validator.
+        """
+        _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
+        content = _read(output_path)
+        assert "You operate under **Communication Protocol v1.0**" not in content, (
+            "Old Communication Protocol prose must be discarded; it must not appear as "
+            "untagged text in the output."
+        )
+        assert "Additional prose that gets discarded during migration." not in content, (
+            "Old Communication Protocol prose must be discarded; it must not appear as "
+            "untagged text in the output."
+        )
+
+    def test_old_heading_not_in_output_as_untagged_text(
+        self, communication_protocol_input, tmp_path
+    ):
+        """The raw '## Communication Protocol' heading line must not survive as bare Markdown.
+
+        After transformation, the heading is replaced by [[DEPLOYED:CommunicationProtocol]].
+        Its appearance as a literal Markdown heading in the output would indicate the region
+        was not intercepted and its prose was left as unclassifiable content.
+        """
+        _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
+        content = _read(output_path)
+        # The heading must not appear outside a fenced block
+        lines = content.splitlines()
+        in_fence = False
+        for line in lines:
+            if line.strip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if not in_fence:
+                assert line != "## Communication Protocol", (
+                    "The '## Communication Protocol' heading must not appear as a bare Markdown "
+                    "heading in the output — it should have been replaced by the DEPLOYED boundary."
+                )
+
+    def test_output_validates_cleanly(
+        self, communication_protocol_input, tmp_path
+    ):
+        """Transformer output must pass validate_file with no errors, specifically no E008.
+
+        E008 fires when a DEPLOYED boundary is nested inside a section rather than at top level.
+        A correct implementation places [[DEPLOYED:CommunicationProtocol]] at body top level
+        (after [[/SECTION:Identity]]), so E008 must not appear.
+        E007 (canonical order) is also covered: CommunicationProtocol is at CANONICAL_ORDER[1],
+        and the emission contract places it after Identity and before Capabilities, satisfying
+        the order check.
+        """
+        result, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
+        assert result.success is True, (
+            "Precondition: transformation must succeed before the validator check."
+        )
+        errors = validate_file(output_path)
+        assert errors == [], (
+            f"Transformer output must pass boundary_validator.py with no errors.\n"
+            f"Errors found in {output_path}:\n"
+            + "\n".join(f"  {e}" for e in errors)
+        )
+
+    def test_protocol_extension_pair_is_empty(
+        self, communication_protocol_input, tmp_path
+    ):
+        """[[INJECTION:ProtocolExtension]] open tag must be immediately followed by its close tag.
+
+        The ProtocolExtension pair is contractually empty: [INJECTION: protocol_extension] is
+        an old-style single-line sentinel with no wrapped body.  The open tag and close tag
+        must be adjacent lines with nothing between them.
+        """
+        _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
+        lines = _read(output_path).splitlines()
+        for i, line in enumerate(lines):
+            if line == "[[INJECTION:ProtocolExtension]]":
+                assert i + 1 < len(lines) and lines[i + 1] == "[[/INJECTION:ProtocolExtension]]", (
+                    "[[INJECTION:ProtocolExtension]] open tag must be immediately followed by "
+                    "[[/INJECTION:ProtocolExtension]] close tag with nothing between them. "
+                    f"Line after open tag: {lines[i + 1]!r}"
+                )
+                break
+        else:
+            pytest.fail(
+                "[[INJECTION:ProtocolExtension]] not found in output. "
+                "The [INJECTION: protocol_extension] marker must be preserved as a tagged "
+                "top-level region rather than discarded with the surrounding prose."
+            )
+
+    def test_protocol_extension_not_nested_in_any_section(
+        self, communication_protocol_input, tmp_path
+    ):
+        """[[INJECTION:ProtocolExtension]] must be at body top level, not inside any [[SECTION:]].
+
+        INJECTION_PARENT_MAP maps ProtocolExtension to None (top level). Emitting it inside
+        a section would violate the parent contract and cause the validator to report E008.
+        """
+        _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
+        content = _read(output_path)
+        ext_pos = content.find("[[INJECTION:ProtocolExtension]]")
+        assert ext_pos != -1, "[[INJECTION:ProtocolExtension]] must be present in the output."
+        opens_before = _count_section_opens_before(content, ext_pos)
+        closes_before = _count_section_closes_before(content, ext_pos)
+        assert opens_before == closes_before, (
+            f"[[INJECTION:ProtocolExtension]] is nested inside a [[SECTION:...]] block. "
+            f"Found {opens_before} section open tags and {closes_before} section close tags "
+            f"before it — they must balance for top-level placement."
+        )
+
+    def test_protocol_extension_in_injections_added(
+        self, communication_protocol_input, tmp_path
+    ):
+        """'ProtocolExtension' must appear in TransformResult.injections_added."""
+        result, _ = _transform_to_tmp(communication_protocol_input, tmp_path)
+        assert "ProtocolExtension" in result.injections_added, (
+            "TransformResult.injections_added must contain 'ProtocolExtension' when a "
+            "[INJECTION: protocol_extension] marker is found in the Communication Protocol region."
+        )
+
+    def test_identity_extension_emitted_inside_identity_section(
+        self, communication_protocol_input, tmp_path
+    ):
+        """[[INJECTION:IdentityExtension]] relocated from the CP region must appear inside
+        [[SECTION:Identity]], not at top level or inside a different section.
+
+        The marker's source line lies past Identity's end_line, so in-place emission is
+        impossible.  The transformer must relocate it to the end of the Identity body,
+        immediately before [[/SECTION:Identity]], preceded by one blank line.
+        """
+        _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
+        content = _read(output_path)
+        identity_open_pos = content.find("[[SECTION:Identity]]")
+        identity_close_pos = content.find("[[/SECTION:Identity]]")
+        ext_pos = content.find("[[INJECTION:IdentityExtension]]")
+        assert identity_open_pos != -1, "[[SECTION:Identity]] must be present."
+        assert identity_close_pos != -1, "[[/SECTION:Identity]] must be present."
+        assert ext_pos != -1, "[[INJECTION:IdentityExtension]] must be present in the output."
+        assert identity_open_pos < ext_pos < identity_close_pos, (
+            "[[INJECTION:IdentityExtension]] must appear between [[SECTION:Identity]] and "
+            "[[/SECTION:Identity]], i.e. inside the Identity section body."
+        )
+
+    def test_identity_extension_in_injections_added(
+        self, communication_protocol_input, tmp_path
+    ):
+        """'IdentityExtension' must appear in TransformResult.injections_added."""
+        result, _ = _transform_to_tmp(communication_protocol_input, tmp_path)
+        assert "IdentityExtension" in result.injections_added, (
+            "TransformResult.injections_added must contain 'IdentityExtension' when a "
+            "[INJECTION: identity_extension] marker is found in the Communication Protocol region."
+        )
+
+    def test_all_canonical_sections_added(
+        self, communication_protocol_input, tmp_path
+    ):
+        """All six canonical sections must be added despite the Communication Protocol region removal."""
+        result, _ = _transform_to_tmp(communication_protocol_input, tmp_path)
+        for name in ("Identity", "Capabilities", "Constraints",
+                     "ErrorHandling", "OutputFormat", "ExecutionPhilosophy"):
+            assert name in result.sections_added, (
+                f"Section '{name}' missing from sections_added; Communication Protocol region "
+                "handling must not affect other section boundaries."
+            )
+
+    def test_version_bumped(
+        self, communication_protocol_input, tmp_path
+    ):
+        """Version must be bumped from 2.2.0 to 3.0.0."""
+        result, _ = _transform_to_tmp(communication_protocol_input, tmp_path)
+        assert result.version_before == "2.2.0"
+        assert result.version_after == "3.0.0"
+
+
+# ---------------------------------------------------------------------------
+# Fence-detection guard for Communication Protocol region (Stage 4, T4.7/T4.8)
+# ---------------------------------------------------------------------------
+
+class TestFencedProtocolHeadingInput:
+    """A fenced '## Communication Protocol' line outside every section range must not be detected.
+
+    The input fixture places a fenced code block containing a literal
+    '## Communication Protocol' line in the outer loop territory (between
+    Identity's closing separator and the next canonical H2 heading).  This position
+    is outside every canonical section's line range, so covered[] cannot mask the
+    gap — the new scan must carry its own fence tracking to suppress detection.
+
+    A genuine '## Communication Protocol' region follows the fenced block and must
+    be detected and converted exactly once.
+
+    These tests are in TDD RED phase: they fail until the fence-aware detection scan
+    is implemented in _identify_sections.
+    """
+
+    def test_transformation_succeeds(
+        self, fenced_protocol_heading_input, tmp_path
+    ):
+        """Transformation must succeed with no errors.
+
+        A misdetection of the fenced '## Communication Protocol' line as a region would
+        cause the outer loop to intercept a fenced line while in_fenced_block=True, producing
+        a malformed output (the fence is never closed, desynchronising in_fenced_block for
+        all subsequent sections).  success=False or non-empty errors would indicate the bug.
+        """
+        result, _ = _transform_to_tmp(fenced_protocol_heading_input, tmp_path)
+        assert result.success is True
+        assert result.errors == []
+
+    def test_output_matches_expected_exactly(
+        self, fenced_protocol_heading_input, fenced_protocol_heading_expected, tmp_path
+    ):
+        """The full output file must match the expected fixture byte-for-byte.
+
+        The expected fixture has the fenced content identical to the input (the '## Communication
+        Protocol' line inside the fence is verbatim) and the genuine region transformed per the
+        emission contract.  A fence-blind scan would produce a different output (spurious
+        DEPLOYED block from the fenced line, missing DEPLOYED block for the genuine region),
+        failing this assertion.
+        """
+        _, output_path = _transform_to_tmp(fenced_protocol_heading_input, tmp_path)
+        assert _read(output_path) == _read(fenced_protocol_heading_expected)
+
+    def test_exactly_one_communication_protocol_in_deployed_added(
+        self, fenced_protocol_heading_input, tmp_path
+    ):
+        """TransformResult.deployed_added must contain exactly one 'CommunicationProtocol' entry.
+
+        The fenced '## Communication Protocol' line must not produce a second entry.  A
+        fence-blind detection scan would detect both the fenced and the genuine heading,
+        producing two entries and potentially doubling the emitted DEPLOYED blocks.
+        """
+        result, _ = _transform_to_tmp(fenced_protocol_heading_input, tmp_path)
+        count = result.deployed_added.count("CommunicationProtocol")
+        assert count == 1, (
+            f"Expected exactly one 'CommunicationProtocol' entry in deployed_added; "
+            f"got {count}.  The fenced line must not be detected as a region — only the "
+            f"genuine '## Communication Protocol' heading should produce an entry."
+        )
+
+    def test_fenced_content_preserved_verbatim(
+        self, fenced_protocol_heading_input, tmp_path
+    ):
+        """The '## Communication Protocol' text inside the fence must appear verbatim in the output.
+
+        If the fenced line is misdetected as a region start, the outer loop intercepts it,
+        discards its content, and emits [[DEPLOYED:CommunicationProtocol]] instead.  The
+        fenced line would then be absent from the output, failing this assertion.
+        """
+        _, output_path = _transform_to_tmp(fenced_protocol_heading_input, tmp_path)
+
+        def _extract_fenced_lines(path: pathlib.Path) -> list[str]:
+            in_fence = False
+            fenced: list[str] = []
+            for line in _read(path).splitlines():
+                if line.strip().startswith("```"):
+                    in_fence = not in_fence
+                    continue
+                if in_fence:
+                    fenced.append(line)
+            return fenced
+
+        input_fenced = _extract_fenced_lines(fenced_protocol_heading_input)
+        output_fenced = _extract_fenced_lines(output_path)
+        assert output_fenced == input_fenced, (
+            "Fenced block content changed during transformation.\n"
+            f"Input fenced lines:  {input_fenced!r}\n"
+            f"Output fenced lines: {output_fenced!r}\n"
+            "The '## Communication Protocol' line inside the fence must pass through verbatim."
+        )
+
+    def test_genuine_region_converted(
+        self, fenced_protocol_heading_input, tmp_path
+    ):
+        """The genuine '## Communication Protocol' region must be converted to a DEPLOYED boundary.
+
+        Suppressing the fenced heading must not accidentally suppress detection of the
+        genuine region that follows it.
+        """
+        result, output_path = _transform_to_tmp(fenced_protocol_heading_input, tmp_path)
+        assert "CommunicationProtocol" in result.deployed_added, (
+            "The genuine '## Communication Protocol' region must be detected and its name "
+            "recorded in deployed_added."
+        )
+        content = _read(output_path)
+        assert "[[DEPLOYED:CommunicationProtocol]]" in content, (
+            "[[DEPLOYED:CommunicationProtocol]] must appear in the output from the genuine region."
+        )
+
+    def test_output_validates_cleanly(
+        self, fenced_protocol_heading_input, tmp_path
+    ):
+        """Transformer output for the fenced fixture must pass validate_file with no errors.
+
+        Misdetecting the fenced heading would produce a malformed fence span (the fenced
+        content is consumed and the fence's closing delimiter is skipped), causing E002
+        (unmatched closing tag) or E008 (wrong-parent DEPLOYED) in the validator output.
+        After the fix, no such errors appear.
+        """
+        result, output_path = _transform_to_tmp(fenced_protocol_heading_input, tmp_path)
+        assert result.success is True, (
+            "Precondition: transformation must succeed before the validator check."
+        )
+        errors = validate_file(output_path)
+        assert errors == [], (
+            f"Transformer output must pass boundary_validator.py with no errors.\n"
+            f"Errors found in {output_path}:\n"
+            + "\n".join(f"  {e}" for e in errors)
         )

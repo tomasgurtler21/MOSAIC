@@ -32,7 +32,7 @@ from boundary_constants import (
 # Regex to extract a top-level YAML key from a frontmatter line.
 # Matches lines like: "key: value" or "key:" at the start of a line
 # (no leading whitespace, key is a valid YAML bare key).
-_YAML_KEY_PATTERN: re.Pattern[str] = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:")
+_YAML_KEY_PATTERN: re.Pattern[str] = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:")
 
 
 @dataclasses.dataclass
@@ -195,8 +195,12 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
         stripped = line.strip()
 
         # Track fenced code blocks; boundary tags inside them are not checked.
+        # The delimiter line itself is also skipped: the closing ``` toggles
+        # in_fenced_block to False before the continue check, so without an
+        # explicit skip here, it would fall through to the E005 check.
         if stripped.startswith("```"):
             in_fenced_block = not in_fenced_block
+            continue  # fence delimiters are structural, not instructional content
 
         if in_fenced_block:
             continue

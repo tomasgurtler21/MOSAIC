@@ -61,7 +61,7 @@ Agent definitions organized by function.
 | 34 | audit-response-merger | Interface | 1.0.0 | MEDIUM | Merges partial PR response queues from parallel audit-to-pull-request instances with cross-audit deduplication |
 | 18 | pull-request-comment-interface | Interface | 1.1.2 | LOW | Bridges PR comments with orchestration system |
 | 48 | test-case-export | Interface | 1.0.0 | LOW-MEDIUM | Transforms approved abstract test cases into a target test management system's import format |
-| 50 | approval-presenter | Interface | 1.0.0 | LOW-MEDIUM | Presents a converged artifact for human approval and stamps hitl_confirmed on it; performs no analysis |
+| 50 | approval-presenter | Interface | 1.0.1 | LOW-MEDIUM | Presents a converged artifact for human approval and stamps human_approved on it; performs no analysis |
 | 36 | checkpoint-manager-git | Infrastructure | 1.0.0 | LOW | Commits a restorable checkpoint of the working tree to a private git ref namespace |
 | 37 | checkpoint-restore-git | Infrastructure | 1.0.0 | MEDIUM | Restores the working tree to a checkpoint and reconciles the branch with committed work |
 | 38 | commit-manager-git | Infrastructure | 1.0.0 | LOW | Commits completed stage work to the user's branch with a plan-derived message |

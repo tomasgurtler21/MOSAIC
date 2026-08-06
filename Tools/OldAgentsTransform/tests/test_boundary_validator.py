@@ -1568,3 +1568,107 @@ class TestStage3InjectionParentAdvisory:
             "CLI must exit non-zero when an error-severity finding (deployed wrong-parent) exists. "
             f"Got returncode={result.returncode}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Hyphenated frontmatter key recognised by validator (Stage 1, Defect 3)
+# ---------------------------------------------------------------------------
+
+class TestHyphenatedFrontmatterKeyValidator:
+    """The validator must genuinely match hyphenated frontmatter keys, not silently skip them.
+
+    The current _YAML_KEY_PATTERN omits '-' so 'base-version' fails to match.  The
+    'if key_match:' branch is falsy, and the key is silently skipped — it is never
+    checked against KNOWN_FRONTMATTER_KEYS, so no E009 fires regardless of whether the
+    key is known or unknown.
+
+    After widening the pattern to r"^([A-Za-z_][A-Za-z0-9_-]*)\\s*:", hyphenated keys
+    are genuinely matched and routed into the KNOWN_FRONTMATTER_KEYS check:
+    - 'base-version' (already in KNOWN_FRONTMATTER_KEYS) → no E009
+    - An unknown hyphenated key → E009 (proof that matching is real, not vacuous)
+
+    test_known_hyphenated_key_base_version_produces_no_e009 would pass in both the
+    buggy and fixed states (silently skipped ≡ no E009, same as matched-and-known).
+    test_unknown_hyphenated_key_produces_e009 is the RED-phase discriminator: it
+    asserts E009 for an unknown hyphenated key, which the buggy silently-skip path
+    never raises.
+    """
+
+    def test_known_hyphenated_key_base_version_produces_no_e009(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        # Arrange
+        # A well-formed file whose frontmatter carries 'base-version: 1.0.0'.
+        # base-version is already in KNOWN_FRONTMATTER_KEYS; after the fix the key is
+        # matched, found in the allowlist, and accepted without E009.
+        content = (
+            "---\n"
+            "id: test-hyphen-known\n"
+            "version: 1.0.0\n"
+            "base-version: 1.0.0\n"
+            "name: test-agent\n"
+            "description: Agent with a known hyphenated frontmatter key.\n"
+            "---\n\n"
+            "[[SECTION:Identity]]\n"
+            "# TestAgent Agent\n"
+            "Content here.\n"
+            "[[/SECTION:Identity]]\n"
+        )
+        agent_file = tmp_path / "hyphen-known.md"
+        agent_file.write_text(content, encoding="utf-8")
+
+        # Act
+        errors = validate_file(agent_file)
+
+        # Assert
+        e009_errors = [e for e in errors if e.error_code == "E009"]
+        base_version_e009 = [e for e in e009_errors if "base-version" in e.message]
+        assert base_version_e009 == [], (
+            "Expected no E009 error for 'base-version' (a key in KNOWN_FRONTMATTER_KEYS). "
+            f"Got: {base_version_e009}"
+        )
+
+    def test_unknown_hyphenated_key_produces_e009(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        # Arrange
+        # A file whose frontmatter carries 'custom-hyphen-field: some-value', a hyphenated
+        # key that is NOT in KNOWN_FRONTMATTER_KEYS.
+        #
+        # Before the fix (buggy): _YAML_KEY_PATTERN does not match 'custom-hyphen-field',
+        # so the key is silently skipped — no E009 is raised.  This test FAILS in RED phase.
+        #
+        # After the fix (widened pattern): the key is matched, checked against
+        # KNOWN_FRONTMATTER_KEYS, found absent, and E009 is raised.  Test PASSES.
+        content = (
+            "---\n"
+            "id: test-hyphen-unknown\n"
+            "version: 1.0.0\n"
+            "custom-hyphen-field: some-value\n"
+            "name: test-agent\n"
+            "description: Agent with an unknown hyphenated frontmatter key.\n"
+            "---\n\n"
+            "[[SECTION:Identity]]\n"
+            "# TestAgent Agent\n"
+            "Content here.\n"
+            "[[/SECTION:Identity]]\n"
+        )
+        agent_file = tmp_path / "hyphen-unknown.md"
+        agent_file.write_text(content, encoding="utf-8")
+
+        # Act
+        errors = validate_file(agent_file)
+
+        # Assert
+        e009_errors = [e for e in errors if e.error_code == "E009"]
+        assert e009_errors, (
+            "Expected at least one E009 error for 'custom-hyphen-field' (not in "
+            "KNOWN_FRONTMATTER_KEYS). The buggy _YAML_KEY_PATTERN silently skips hyphenated "
+            "keys so no E009 fires; after widening the pattern the key is matched and "
+            "checked, producing E009 for an unknown hyphenated key."
+        )
+        hyphen_key_e009 = [e for e in e009_errors if "custom-hyphen-field" in e.message]
+        assert hyphen_key_e009, (
+            "The E009 error message must identify 'custom-hyphen-field' as the offending key. "
+            f"Got E009 messages: {[e.message for e in e009_errors]}"
+        )

@@ -150,6 +150,7 @@ func main() {
 		MosaicRoot:     mosaicRoot,
 		GOOS:           runtime.GOOS,
 		ProtocolLoader: catalog.FileProtocolLoader{},
+		BundleLoader:   catalog.FileBundleLoader{},
 	}
 
 	if wantsTUI(args) {

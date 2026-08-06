@@ -1,5 +1,5 @@
 ---
-version: "3.6"
+version: "3.7"
 name: "Brownfield TDD Workflow"
 description: "New features or significant changes to an existing codebase requiring test-first development with full research and design."
 hint: "Brownfield with research, TDD, and design phases"
@@ -36,7 +36,7 @@ artifacts:
 ---
 
 [[SECTION:Workflow:brownfield-tdd]]
-<!-- workflow-version: 3.6 -->
+<!-- workflow-version: 3.7 -->
 ## Brownfield TDD Workflow
 
 **Use when:** New features or significant changes to an **existing codebase** requiring test-first development with full research and design.
@@ -54,7 +54,7 @@ artifacts:
 | EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
 | EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
 | EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| REVIEW | test-runner | ❌ | COMPLETE | planner-tdd-soft  | - | TestResults.md |
 
 **Execution Groups:**
 
@@ -86,7 +86,8 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | | Initial version |
+| 3.7 | 2026-08-06 | Tomas Guertler | Make test-runner findings route back to planner |
+| 3.6 | 2026-08-05 | Tomas Guertler | Initial version |
 
 ---
 

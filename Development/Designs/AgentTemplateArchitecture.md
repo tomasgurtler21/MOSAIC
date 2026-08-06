@@ -675,7 +675,7 @@ Steps 2–6 are verifiable two ways: after deployment, each region must be byte-
 
 ### 10.1 Vocabulary tables
 
-Three files hold the boundary vocabulary in machine-readable form: `Agents/Generic/SourceFilesFormat.md`, `Tools/Common/docformat/vocabulary.go`, and `Tools/boundary_constants.py`. This document is their specification; they are copies of it, and a partial update leaves them disagreeing about what is valid.
+Three files hold the boundary vocabulary in machine-readable form: `Agents/Generic/SourceFilesFormat.md`, `Tools/Common/docformat/vocabulary.go`, and `Tools/OldAgentsTransform/boundary_constants.py`. This document is their specification; they are copies of it, and a partial update leaves them disagreeing about what is valid.
 
 Changes this document makes to them:
 

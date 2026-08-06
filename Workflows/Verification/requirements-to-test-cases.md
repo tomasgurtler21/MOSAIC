@@ -1,5 +1,5 @@
 ---
-version: "1.1"
+version: "1.2"
 name: "Requirements to Test Cases Workflow"
 description: "Derive abstract test cases from a requirement held in large external specification documents. Resolves the requirement to closure via runtime retrieval, models the test scenario space, authors test cases in a project-defined format, and exports them to the target system."
 hint: "Generate abstract test cases from specification documents via runtime retrieval — no implementation"
@@ -52,7 +52,7 @@ artifacts:
 - **Requirements.md is user-created** — names the target requirement identifier(s), the document set in scope, and any retrieval scope limits.
 - **`NEEDS_CLARIFICATION` from any row routes to `document-research`**, which is re-entrant and accepts a targeted "this is missing" invocation.
 - **Route findings one hop upstream**, to the agent that produced the artifact the finding is about — not further.
-- **`approval-presenter` rows are the only human gates.** Each is reachable only via `On Success` from its reviewer, so it runs once the loop has converged. Dispatch it with the approved artifact in **both** `input_artifacts` and `output_artifacts` — it stamps `hitl_confirmed` there and must be permitted to write it.
+- **`approval-presenter` rows are the only human gates.** Each is reachable only via `On Success` from its reviewer, so it runs once the loop has converged. Dispatch it with the approved artifact in **both** `input_artifacts` and `output_artifacts` — it stamps `human_approved` there and must be permitted to write it.
 
 [[/SECTION:Workflow:requirements-to-test-cases]]
 
@@ -126,17 +126,17 @@ The split is expected to be challenged during real use, and dropping `test-scena
 
 The protocol defines HITL as an approval gate on finished output. The library's existing convention of marking *creators* `✅` inverts that: the human does first-pass review of work no agent has checked, and the review agent then audits the human's judgement. This workflow never adopted that inversion.
 
-Version 1.0 moved the gate to the reviewers instead, which fixed the ordering but left two problems. The reviewer's gate fires on *every* invocation, including rounds whose findings guarantee rework and where there is nothing yet to approve. And more seriously, at a reviewer's gate the human is approving the **creator's** artifact — `TestScenarios.md`, `TestCases.md` — which is not among the reviewer's output artifacts. Per the protocol an agent stamps `hitl_confirmed` only on its own outputs, so the approved artifact would stay `hitl_confirmed: false` permanently and the orchestrator's stamp check could never see that a human had signed it off.
+Version 1.0 moved the gate to the reviewers instead, which fixed the ordering but left two problems. The reviewer's gate fires on *every* invocation, including rounds whose findings guarantee rework and where there is nothing yet to approve. And more seriously, at a reviewer's gate the human is approving the **creator's** artifact — `TestScenarios.md`, `TestCases.md` — which is not among the reviewer's output artifacts. Per the protocol an agent stamps `human_approved` only on its own outputs, so the approved artifact would stay `human_approved: false` permanently and the orchestrator's stamp check could never see that a human had signed it off.
 
 Version 1.1 uses a dedicated `approval-presenter` row per convergence loop, per the architect's decision in `OnSuccessHITL.md` §6/§7. Three properties make it the right mechanism rather than a workaround:
 
 **Convergence is expressed by table position.** The presenter row is reachable only via `On Success` from its reviewer. Routing already encodes "the agents agree" — so "fire the gate only at convergence" needs no new HITL value, no policy field, no change to the additive `row.hitl OR stage_hitl` merge, and no engine change.
 
-**It closes the provenance gap.** The approved artifact appears in the presenter's `output_artifacts`, so the presenter stamps `hitl_confirmed: true` on the artifact the human actually approved. Nothing else in the design achieves this.
+**It closes the provenance gap.** The approved artifact appears in the presenter's `output_artifacts`, so the presenter stamps `human_approved: true` on the artifact the human actually approved. Nothing else in the design achieves this.
 
 **It cannot contradict itself.** A reviewer re-dispatched to present would re-review, because that is what its instructions say to do — and a second pass that finds something new returns `COMPLETED_NEEDS_ACTION`, contradicting the `SUCCESS` that triggered it. A presenter performs no analysis, so it has nothing to disagree with. The absence of analysis is the feature.
 
-**The rework loop closes itself.** On objection the presenter returns `COMPLETED_NEEDS_ACTION`, `On Findings` routes to the creator, and the creator's rewrite resets `hitl_confirmed` to `false` by the protocol's own rule. Review then re-runs automatically and the loop re-converges back to the presenter. The human is consulted once per convergence, not once per round.
+**The rework loop closes itself.** On objection the presenter returns `COMPLETED_NEEDS_ACTION`, `On Findings` routes to the creator, and the creator's rewrite resets `human_approved` to `false` by the protocol's own rule. Review then re-runs automatically and the loop re-converges back to the presenter. The human is consulted once per convergence, not once per round.
 
 The cost is one extra row per loop, and that cost is the thing to watch: if it becomes noisy across the library, `OnSuccessHITL.md` §5.3 (a separate `Gate` column with a `gate_on` invocation field) is the parked alternative.
 
@@ -155,7 +155,8 @@ In a safety context an agent's plausible guess is the most dangerous possible ou
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0 | 2026-08-05 | MOSAIC | Initial version |
-| 1.1 | 2026-08-06 | MOSAIC | Human approval moved from the review rows to dedicated `approval-presenter` rows, per the architect decision in `OnSuccessHITL.md` §7. Reviews now converge automatically (`❌`); the presenter is reachable only on convergence and stamps `hitl_confirmed` on the artifact the human actually approved, closing the §4.5 provenance gap. `requirements-review` gate becomes `❌` with no presenter. |
+| 1.1 | 2026-08-06 | MOSAIC | Human approval moved from the review rows to dedicated `approval-presenter` rows, per the architect decision in `OnSuccessHITL.md` §7. Reviews now converge automatically (`❌`); the presenter is reachable only on convergence and stamps `human_approved` on the artifact the human actually approved, closing the §4.5 provenance gap. `requirements-review` gate becomes `❌` with no presenter. |
+| 1.2 | 2026-08-06 | MOSAIC | Terminology only, no routing or gate change. The provenance stamp field named throughout this document was renamed `hitl_confirmed` → `human_approved` in Communication Protocol v1.10; every reference here follows, including the two historical entries below, so the document carries one spelling of one field. |
 
 ---
 
@@ -173,5 +174,5 @@ In a safety context an agent's plausible guess is the most dangerous possible ou
 - **KB ingestion of the specification** — rejected; see Design Rationale.
 - **A `TestProfile.md` input artifact** carrying the output format, glossary and gold examples. Rejected: the agent template architecture already solves this with `[[INJECTION:OutputArtifactTemplate]]` and `[[INJECTION:IdentityExtension]]`, which bind at deploy rather than per run. Format is stable; making it a per-run artifact would be paying run-time cost for deploy-time data.
 - **A third HITL column value (`✅ˢ`, on-success)** firing the gate only on the converging pass, implemented by re-dispatching the reviewer. Rejected by architect review — see `OnSuccessHITL.md` §4. It encodes a *policy* into a flag that carries an *amount*, which breaks the additive `row.hitl OR stage_hitl` merge that stage HITL depends on; it needs `already_presented` state the orchestration artifact has nowhere to store; and the re-dispatched reviewer would re-review and could contradict its own prior `SUCCESS`. Superseded by the presenter row in 1.1.
-- **Reviewer-held approval gates (workflow v1.0).** Correct in ordering, but the human approved the *creator's* artifact while only the reviewer could stamp provenance — so the approved artifact stayed `hitl_confirmed: false` permanently. Superseded by the presenter row in 1.1.
+- **Reviewer-held approval gates (workflow v1.0).** Correct in ordering, but the human approved the *creator's* artifact while only the reviewer could stamp provenance — so the approved artifact stayed `human_approved: false` permanently. Superseded by the presenter row in 1.1.
 - **Specialising `document-research` per retrieval flavour** (vector / graph / hybrid). Rejected: would produce one agent per stack for a process that is identical across all of them.

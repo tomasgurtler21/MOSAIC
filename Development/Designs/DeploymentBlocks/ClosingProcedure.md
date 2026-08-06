@@ -41,7 +41,7 @@ The orchestration contract requires the agent's **complete output** — orchestr
 
 **Why that matters far more than 28/42 suggests.** An agent that writes only source files — implementation, test authoring, refactoring — has no orchestration artifacts at all. Reading that step, such an agent can correctly conclude there is nothing to present, skip the gate entirely, and believe it complied. The instruction did not fail; it was followed exactly, and it was wrong.
 
-This is a candidate root cause for the observed failure of subagents ignoring HITL. It is also precisely the population a `hitl_confirmed` stamp cannot detect, because those agents produce no artifact to stamp.
+This is a candidate root cause for the observed failure of subagents ignoring HITL. It is also precisely the population a `human_approved` stamp cannot detect, because those agents produce no artifact to stamp.
 
 The block states the complete-output obligation and then states the no-artifacts case explicitly, by name, rather than leaving it as an inference from "complete". The population that got this wrong is the population that would have to draw that inference.
 

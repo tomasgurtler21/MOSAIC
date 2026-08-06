@@ -8,7 +8,7 @@ agent instruction files, skill files, and hook bundle manifests.
 schema — frontmatter, region kinds, canonical order, per-section content, and
 the validator rules. This file restates the machine-readable parts of that
 schema for readers working from the tool side, alongside
-`Tools/Common/docformat/vocabulary.go` and `Tools/boundary_constants.py`.
+`Tools/Common/docformat/vocabulary.go` and `Tools/OldAgentsTransform/boundary_constants.py`.
 **All three are copies and must be updated together**; where any of them
 disagrees with the design document, the design document is right.
 

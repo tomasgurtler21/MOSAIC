@@ -367,11 +367,12 @@ git checkout internal/transform/transform.go  # restore
 
 ## Relationship to boundary_transformer.py and boundary_validator.py
 
-`Tools/boundary_transformer.py` and `Tools/boundary_validator.py` are separate
-tools that perform a different, completed task: a one-shot structural retrofit
-of MOSAIC generic source files to add `[[SECTION:...]]` and `[[INJECTION:...]]`
-boundary tags. They are not part of the deployment pipeline and are not invoked
-by `mosaic-deploy`.
+`Tools/OldAgentsTransform/boundary_transformer.py` and
+`Tools/OldAgentsTransform/boundary_validator.py` are separate tools that perform
+a different, completed task: a one-shot structural retrofit of MOSAIC generic
+source files to add `[[SECTION:...]]` and `[[INJECTION:...]]` boundary tags. They
+are not part of the deployment pipeline and are not invoked by `mosaic-deploy`.
+See [Tools/OldAgentsTransform/README.md](../OldAgentsTransform/README.md).
 
 `mosaic-deploy` reads generic source files that already have the correct
 boundary structure and transforms them into harness-specific deployed files.
