@@ -101,6 +101,18 @@ func (c *stubCatalog) ReadSource(path string) ([]byte, error) {
 	return []byte("stub source"), nil
 }
 func (c *stubCatalog) Issues() []catalog.Issue { return nil }
+func (c *stubCatalog) AgentByNumericID(id string) (domain.Agent, bool) {
+	if id == "" {
+		return domain.Agent{}, false
+	}
+	all := append(c.agents, append(c.utilityAgents, append(c.infraAgents, c.orchestrator)...)...)
+	for _, a := range all {
+		if a.NumericID == id {
+			return a, true
+		}
+	}
+	return domain.Agent{}, false
+}
 
 // ---------------------------------------------------------------------------
 // stubHarnessModule — satisfies domain.HarnessModule with a fixed descriptor
@@ -435,6 +447,11 @@ func newBaseDeps(t *testing.T, stub *interactiontest.Stub) (app.Deps, string) {
 		// Deps.ProtocolLoader unconditionally. Tests that exercise protocol behaviour
 		// (protocol_wiring_test.go) override this field explicitly.
 		ProtocolLoader: &stubProtocolLoader{content: minimalProtocolContent("1.9")},
+		// BundleLoader defaults to a success stub for the same reason: once the implementation
+		// calls Deps.BundleLoader unconditionally, every test that does not exercise bundle
+		// behaviour would panic with a nil-pointer dereference. Tests that exercise bundle
+		// behaviour (bundle_wiring_test.go) override this field explicitly.
+		BundleLoader: &stubBundleLoader{content: minimalBundleContent("1.0.0")},
 	}, workspace
 }
 

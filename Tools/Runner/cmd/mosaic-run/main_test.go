@@ -6,12 +6,16 @@ package main
 // tests, which inject a pre-built session and never enter main's wiring path.
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"mosaic-run/internal/deviation"
+	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
 )
 
@@ -508,5 +512,564 @@ func TestResolveRunIdentityForCLI_InputAloneWithoutRun_DoesNotRefuse(t *testing.
 	}
 	if !identity.IsNewRun {
 		t.Error("IsNewRun = false, want true when --input is given without --run (scanner mints new run)")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// resolveRunIdentityForTUI
+//
+// These tests drive the TDD RED phase for the new resolveRunIdentityForTUI
+// helper. All tests compile against the stub declarations in
+// tui_identity_stub.go and fail at runtime because the stubs return zero
+// values. They become GREEN when the real implementation is written.
+// ---------------------------------------------------------------------------
+
+// TestResolveRunIdentityForTUI_NewRunFlag_YieldsValidRunID verifies that
+// --new-run produces a non-empty run ID matching the canonical format.
+func TestResolveRunIdentityForTUI_NewRunFlag_YieldsValidRunID(t *testing.T) {
+	workDir := t.TempDir()
+	identity, err := resolveRunIdentityForTUI([]string{"--new-run"}, workDir)
+	if err != nil {
+		t.Fatalf("resolveRunIdentityForTUI(--new-run) error = %v, want nil", err)
+	}
+	if identity.RunID == "" {
+		t.Error("RunID is empty; want a non-empty run ID in canonical format")
+	}
+	if !domain.IsValidRunID(identity.RunID) {
+		t.Errorf("RunID %q does not match canonical format {YYYYMMDD}T{HHMMSS}Z-{4-hex}", identity.RunID)
+	}
+}
+
+// TestResolveRunIdentityForTUI_NewRunFlag_YieldsAbsoluteScopedFolder verifies
+// that --new-run produces an absolute run folder whose final path element is
+// Orchestration-{run_id}.
+func TestResolveRunIdentityForTUI_NewRunFlag_YieldsAbsoluteScopedFolder(t *testing.T) {
+	workDir := t.TempDir()
+	identity, err := resolveRunIdentityForTUI([]string{"--new-run"}, workDir)
+	if err != nil {
+		t.Fatalf("resolveRunIdentityForTUI(--new-run) error = %v, want nil", err)
+	}
+	if !filepath.IsAbs(identity.RunFolder) {
+		t.Errorf("RunFolder %q is not absolute", identity.RunFolder)
+	}
+	wantSuffix := domain.RunScopedFolder(identity.RunID)
+	if !strings.HasSuffix(identity.RunFolder, wantSuffix) {
+		t.Errorf("RunFolder %q does not end in %q", identity.RunFolder, wantSuffix)
+	}
+}
+
+// TestResolveRunIdentityForTUI_NewRunFlag_SetsIsNewRun verifies that --new-run
+// sets IsNewRun = true in the returned identity.
+func TestResolveRunIdentityForTUI_NewRunFlag_SetsIsNewRun(t *testing.T) {
+	workDir := t.TempDir()
+	identity, err := resolveRunIdentityForTUI([]string{"--new-run"}, workDir)
+	if err != nil {
+		t.Fatalf("resolveRunIdentityForTUI(--new-run) error = %v, want nil", err)
+	}
+	if !identity.IsNewRun {
+		t.Error("IsNewRun = false, want true for --new-run")
+	}
+}
+
+// TestResolveRunIdentityForTUI_NewRunFlag_ScanResultIsNil verifies that the
+// --new-run branch returns nil ScanResult: identity is resolved, not deferred
+// to the run-select screen.
+func TestResolveRunIdentityForTUI_NewRunFlag_ScanResultIsNil(t *testing.T) {
+	workDir := t.TempDir()
+	identity, err := resolveRunIdentityForTUI([]string{"--new-run"}, workDir)
+	if err != nil {
+		t.Fatalf("resolveRunIdentityForTUI(--new-run) error = %v, want nil", err)
+	}
+	if identity.ScanResult != nil {
+		t.Errorf("ScanResult = %v, want nil for --new-run (resolved, not deferred)", identity.ScanResult)
+	}
+}
+
+// TestResolveRunIdentityForTUI_ZeroCandidates_YieldsValidRunID verifies that
+// when the directory scan finds zero candidates, a run ID is minted in canonical
+// format — mirroring the --new-run branch.
+func TestResolveRunIdentityForTUI_ZeroCandidates_YieldsValidRunID(t *testing.T) {
+	workDir := t.TempDir() // empty directory → zero candidates
+	identity, err := resolveRunIdentityForTUI([]string{}, workDir)
+	if err != nil {
+		t.Fatalf("resolveRunIdentityForTUI(zero candidates) error = %v, want nil", err)
+	}
+	if identity.RunID == "" {
+		t.Error("RunID is empty; want a non-empty run ID in canonical format")
+	}
+	if !domain.IsValidRunID(identity.RunID) {
+		t.Errorf("RunID %q does not match canonical format {YYYYMMDD}T{HHMMSS}Z-{4-hex}", identity.RunID)
+	}
+}
+
+// TestResolveRunIdentityForTUI_ZeroCandidates_YieldsAbsoluteScopedFolder verifies
+// that the zero-candidate branch produces an absolute scoped folder under workDir.
+func TestResolveRunIdentityForTUI_ZeroCandidates_YieldsAbsoluteScopedFolder(t *testing.T) {
+	workDir := t.TempDir()
+	identity, err := resolveRunIdentityForTUI([]string{}, workDir)
+	if err != nil {
+		t.Fatalf("resolveRunIdentityForTUI(zero candidates) error = %v, want nil", err)
+	}
+	if !filepath.IsAbs(identity.RunFolder) {
+		t.Errorf("RunFolder %q is not absolute", identity.RunFolder)
+	}
+	wantSuffix := domain.RunScopedFolder(identity.RunID)
+	if !strings.HasSuffix(identity.RunFolder, wantSuffix) {
+		t.Errorf("RunFolder %q does not end in %q", identity.RunFolder, wantSuffix)
+	}
+}
+
+// TestResolveRunIdentityForTUI_ZeroCandidates_SetsIsNewRun verifies that the
+// zero-candidate branch sets IsNewRun = true and ScanResult = nil.
+func TestResolveRunIdentityForTUI_ZeroCandidates_SetsIsNewRun(t *testing.T) {
+	workDir := t.TempDir()
+	identity, err := resolveRunIdentityForTUI([]string{}, workDir)
+	if err != nil {
+		t.Fatalf("resolveRunIdentityForTUI(zero candidates) error = %v, want nil", err)
+	}
+	if !identity.IsNewRun {
+		t.Error("IsNewRun = false, want true when zero scan candidates")
+	}
+	if identity.ScanResult != nil {
+		t.Errorf("ScanResult = %v, want nil for zero-candidate new run", identity.ScanResult)
+	}
+}
+
+// TestResolveRunIdentityForTUI_ConsecutiveNewRuns_ProduceDistinctIdentities
+// verifies that two consecutive --new-run resolutions yield distinct run IDs
+// and distinct run folders, satisfying the successive-minting contract.
+func TestResolveRunIdentityForTUI_ConsecutiveNewRuns_ProduceDistinctIdentities(t *testing.T) {
+	workDir := t.TempDir()
+	id1, err := resolveRunIdentityForTUI([]string{"--new-run"}, workDir)
+	if err != nil {
+		t.Fatalf("first resolveRunIdentityForTUI call error = %v", err)
+	}
+	id2, err := resolveRunIdentityForTUI([]string{"--new-run"}, workDir)
+	if err != nil {
+		t.Fatalf("second resolveRunIdentityForTUI call error = %v", err)
+	}
+	if id1.RunID == id2.RunID {
+		t.Errorf("consecutive mints produced the same RunID %q; each call must yield a distinct ID", id1.RunID)
+	}
+	if id1.RunFolder == id2.RunFolder {
+		t.Errorf("consecutive mints produced the same RunFolder %q; each call must yield a distinct folder", id1.RunFolder)
+	}
+}
+
+// TestResolveRunIdentityForTUI_RunFlag_ResolvesToNamedFolder verifies that
+// --run <valid_id> resolves to the named run folder without minting, and
+// does not set IsNewRun.
+func TestResolveRunIdentityForTUI_RunFlag_ResolvesToNamedFolder(t *testing.T) {
+	workDir := t.TempDir()
+	const runID = "20260727T170000Z-a3f9"
+	identity, err := resolveRunIdentityForTUI([]string{"--run", runID}, workDir)
+	if err != nil {
+		t.Fatalf("resolveRunIdentityForTUI(--run %s) error = %v, want nil", runID, err)
+	}
+	if identity.RunID != runID {
+		t.Errorf("RunID = %q, want %q", identity.RunID, runID)
+	}
+	wantFolder := filepath.Join(workDir, domain.RunScopedFolder(runID))
+	if identity.RunFolder != wantFolder {
+		t.Errorf("RunFolder = %q, want %q", identity.RunFolder, wantFolder)
+	}
+	if identity.IsNewRun {
+		t.Error("IsNewRun = true, want false for --run <id>")
+	}
+	if identity.ScanResult != nil {
+		t.Errorf("ScanResult = %v, want nil for --run", identity.ScanResult)
+	}
+}
+
+// TestResolveRunIdentityForTUI_RunAndNewRunTogether_ReturnsUsageError verifies
+// that providing both --run and --new-run returns a usage error wrapping errTUIUsage.
+func TestResolveRunIdentityForTUI_RunAndNewRunTogether_ReturnsUsageError(t *testing.T) {
+	workDir := t.TempDir()
+	const runID = "20260727T170000Z-a3f9"
+	_, err := resolveRunIdentityForTUI([]string{"--run", runID, "--new-run"}, workDir)
+	if err == nil {
+		t.Fatal("resolveRunIdentityForTUI(--run + --new-run) returned nil error, want usage error")
+	}
+	if !errors.Is(err, errTUIUsage) {
+		t.Errorf("error %v does not wrap errTUIUsage; got errors.Is = false", err)
+	}
+}
+
+// TestResolveRunIdentityForTUI_InvalidRunID_ReturnsUsageError verifies that
+// --run with a malformed run ID returns an error wrapping errTUIUsage.
+func TestResolveRunIdentityForTUI_InvalidRunID_ReturnsUsageError(t *testing.T) {
+	workDir := t.TempDir()
+	_, err := resolveRunIdentityForTUI([]string{"--run", "not-a-valid-id"}, workDir)
+	if err == nil {
+		t.Fatal("resolveRunIdentityForTUI(--run <invalid>) returned nil error, want usage error")
+	}
+	if !errors.Is(err, errTUIUsage) {
+		t.Errorf("error %v does not wrap errTUIUsage; got errors.Is = false", err)
+	}
+}
+
+// TestResolveRunIdentityForTUI_MultipleCandidate_DefersToRunSelectScreen verifies
+// that when the scan finds multiple candidates, resolveRunIdentityForTUI returns
+// empty identity fields and a non-nil ScanResult, deferring to the run-select screen.
+func TestResolveRunIdentityForTUI_MultipleCandidate_DefersToRunSelectScreen(t *testing.T) {
+	workDir := t.TempDir()
+	// Create two directories with valid Orchestration-{run_id} names. Missing
+	// Orchestration.md causes the scanner to classify both as resumable candidates.
+	for _, id := range []string{"20260727T170000Z-a3f9", "20260727T180000Z-b1c2"} {
+		folder := filepath.Join(workDir, domain.RunScopedFolder(id))
+		if err := os.MkdirAll(folder, 0o755); err != nil {
+			t.Fatalf("MkdirAll %s: %v", folder, err)
+		}
+	}
+
+	identity, err := resolveRunIdentityForTUI([]string{}, workDir)
+	if err != nil {
+		t.Fatalf("resolveRunIdentityForTUI(multi-candidate) error = %v, want nil", err)
+	}
+	if identity.RunID != "" {
+		t.Errorf("RunID = %q, want empty string for multi-candidate deferral", identity.RunID)
+	}
+	if identity.RunFolder != "" {
+		t.Errorf("RunFolder = %q, want empty string for multi-candidate deferral", identity.RunFolder)
+	}
+	if identity.IsNewRun {
+		t.Error("IsNewRun = true, want false for multi-candidate deferral")
+	}
+	if identity.ScanResult == nil {
+		t.Error("ScanResult is nil, want non-nil scan result for multi-candidate deferral")
+	}
+}
+
+// TestResolveRunIdentityForTUI_SingleCandidate_AutoResumes verifies that when
+// the scan finds exactly one candidate, resolveRunIdentityForTUI resolves to
+// that candidate's identity without minting.
+func TestResolveRunIdentityForTUI_SingleCandidate_AutoResumes(t *testing.T) {
+	workDir := t.TempDir()
+	const runID = "20260727T170000Z-a3f9"
+	folder := filepath.Join(workDir, domain.RunScopedFolder(runID))
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatalf("MkdirAll %s: %v", folder, err)
+	}
+
+	identity, err := resolveRunIdentityForTUI([]string{}, workDir)
+	if err != nil {
+		t.Fatalf("resolveRunIdentityForTUI(single candidate) error = %v, want nil", err)
+	}
+	if identity.RunID != runID {
+		t.Errorf("RunID = %q, want %q", identity.RunID, runID)
+	}
+	if identity.RunFolder != folder {
+		t.Errorf("RunFolder = %q, want %q", identity.RunFolder, folder)
+	}
+	if identity.IsNewRun {
+		t.Error("IsNewRun = true, want false for single-candidate auto-resume")
+	}
+	if identity.ScanResult != nil {
+		t.Errorf("ScanResult = %v, want nil for single-candidate auto-resume", identity.ScanResult)
+	}
+}
+
+// TestResolveRunIdentityForTUI_ScanFails_ReturnsNonUsageError verifies that
+// when no flags are provided and the directory scan itself fails, the returned
+// error is non-nil and does not wrap errTUIUsage. A scan error is an
+// unexpected I/O failure, not a user-argument mistake, so it must exit with
+// code 1 rather than code 2 at the call site.
+//
+// Fixture: a regular file is supplied as workDir. Attempting to list directory
+// entries from a file path fails on all supported platforms (Linux, macOS,
+// Windows), making this a portable scan-failure fixture without requiring
+// OS-specific permission manipulation.
+func TestResolveRunIdentityForTUI_ScanFails_ReturnsNonUsageError(t *testing.T) {
+	dir := t.TempDir()
+	notADir := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(notADir, []byte("placeholder"), 0o644); err != nil {
+		t.Fatalf("WriteFile %s: %v", notADir, err)
+	}
+
+	_, err := resolveRunIdentityForTUI([]string{}, notADir)
+	if err == nil {
+		t.Fatal("resolveRunIdentityForTUI(scan fails) returned nil error, want a non-nil error")
+	}
+	if errors.Is(err, errTUIUsage) {
+		t.Errorf("error %v wraps errTUIUsage; scan errors must not be classified as usage errors", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// resolveTUIArtifactPath
+//
+// Tests drive the TDD RED phase for the resolveTUIArtifactPath helper.
+// The stub returns ("", nil) for all inputs; the real implementation will
+// return the joined path for non-empty folders and errUnresolvedRunFolder for
+// empty folders.
+// ---------------------------------------------------------------------------
+
+// TestResolveTUIArtifactPath_NonEmptyFolder_ReturnsJoinedPath verifies that a
+// non-empty run folder produces filepath.Join(runFolder, "Orchestration.md").
+func TestResolveTUIArtifactPath_NonEmptyFolder_ReturnsJoinedPath(t *testing.T) {
+	const runFolder = "/runs/Orchestration-20260727T170000Z-a3f9"
+	got, err := resolveTUIArtifactPath(runFolder)
+	if err != nil {
+		t.Fatalf("resolveTUIArtifactPath(%q) error = %v, want nil", runFolder, err)
+	}
+	want := filepath.Join(runFolder, "Orchestration.md")
+	if got != want {
+		t.Errorf("resolveTUIArtifactPath(%q) = %q, want %q", runFolder, got, want)
+	}
+}
+
+// TestResolveTUIArtifactPath_EmptyFolder_ReturnsUnresolvedError verifies that
+// an empty run folder returns errUnresolvedRunFolder. This is the contract
+// violation path that replaces the implicit "Orchestration.md" fallback.
+func TestResolveTUIArtifactPath_EmptyFolder_ReturnsUnresolvedError(t *testing.T) {
+	got, err := resolveTUIArtifactPath("")
+	if err == nil {
+		t.Fatalf("resolveTUIArtifactPath(\"\") returned nil error and %q, want errUnresolvedRunFolder", got)
+	}
+	if !errors.Is(err, errUnresolvedRunFolder) {
+		t.Errorf("error %v does not wrap errUnresolvedRunFolder; got errors.Is = false", err)
+	}
+}
+
+// TestResolveTUIArtifactPath_EmptyFolder_NeverReturnsBareRelativePath verifies
+// the core safety property: the function must never return the bare relative path
+// "Orchestration.md" under any input, eliminating the implicit CWD-relative fallback.
+func TestResolveTUIArtifactPath_EmptyFolder_NeverReturnsBareRelativePath(t *testing.T) {
+	got, _ := resolveTUIArtifactPath("")
+	if got == "Orchestration.md" {
+		t.Error("resolveTUIArtifactPath(\"\") returned bare \"Orchestration.md\"; this is the forbidden CWD-relative fallback")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// newTUIRunIdentityMinter
+//
+// Tests drive the TDD RED phase for the newTUIRunIdentityMinter helper.
+// The stub returns a minter that always returns ("", ""); the real
+// implementation returns valid, distinct pairs rooted at workDir.
+// ---------------------------------------------------------------------------
+
+// TestNewTUIRunIdentityMinter_YieldsValidRunID verifies that the minter
+// returned by newTUIRunIdentityMinter produces a run ID satisfying
+// domain.IsValidRunID.
+func TestNewTUIRunIdentityMinter_YieldsValidRunID(t *testing.T) {
+	workDir := t.TempDir()
+	minter := newTUIRunIdentityMinter(workDir)
+	runID, _ := minter()
+	if !domain.IsValidRunID(runID) {
+		t.Errorf("minter() runID %q does not satisfy domain.IsValidRunID", runID)
+	}
+}
+
+// TestNewTUIRunIdentityMinter_YieldsScopedFolderUnderWorkDir verifies that
+// the run folder equals filepath.Join(workDir, domain.RunScopedFolder(runID)).
+func TestNewTUIRunIdentityMinter_YieldsScopedFolderUnderWorkDir(t *testing.T) {
+	workDir := t.TempDir()
+	minter := newTUIRunIdentityMinter(workDir)
+	runID, runFolder := minter()
+	want := filepath.Join(workDir, domain.RunScopedFolder(runID))
+	if runFolder != want {
+		t.Errorf("minter() runFolder = %q, want %q", runFolder, want)
+	}
+}
+
+// TestNewTUIRunIdentityMinter_SuccessiveCallsProduceDistinctPairs verifies
+// that calling the minter twice yields distinct (runID, runFolder) pairs,
+// satisfying the successive-minting contract.
+func TestNewTUIRunIdentityMinter_SuccessiveCallsProduceDistinctPairs(t *testing.T) {
+	workDir := t.TempDir()
+	minter := newTUIRunIdentityMinter(workDir)
+	runID1, folder1 := minter()
+	runID2, folder2 := minter()
+	if runID1 == runID2 {
+		t.Errorf("successive mints produced the same runID %q; each call must yield a distinct ID", runID1)
+	}
+	if folder1 == folder2 {
+		t.Errorf("successive mints produced the same runFolder %q; each call must yield a distinct folder", folder1)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// recordingLogger
+//
+// recordingLogger is a test-only fake domain.DebugLogger that records every
+// Log call. It is thread-safe: the mutex guards the entries slice, which may
+// be appended from goroutines spawned by the code under test.
+// ---------------------------------------------------------------------------
+
+// logEntry holds one recorded call to recordingLogger.Log.
+type logEntry struct {
+	event   string
+	message string
+	fields  []domain.DebugField
+}
+
+// recordingLogger accumulates Log calls so tests can assert on the emitted
+// events and fields without touching the filesystem.
+type recordingLogger struct {
+	mu      sync.Mutex
+	entries []logEntry
+}
+
+// Log implements domain.DebugLogger. It appends one entry per call.
+func (r *recordingLogger) Log(event string, message string, fields ...domain.DebugField) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.entries = append(r.entries, logEntry{event: event, message: message, fields: append([]domain.DebugField(nil), fields...)})
+}
+
+// snapshot returns a copy of all recorded entries taken under the lock.
+func (r *recordingLogger) snapshot() []logEntry {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]logEntry(nil), r.entries...)
+}
+
+// ---------------------------------------------------------------------------
+// newLoggedArtifactStore (T6.1)
+//
+// Table-driven tests for the newLoggedArtifactStore composition-root helper.
+// The helper wraps artifact.NewFileStore and emits at most one artifact.path.*
+// debug event depending on the path shape. Tests cover the three mutually
+// exclusive cases defined in the emission contract:
+//
+//   relative path              → EventArtifactPathRejected with path field
+//   absolute, non-run-scoped   → EventArtifactPathNonRunScoped with path field
+//   absolute, run-scoped       → no event emitted
+//
+// In all three cases the returned store must be non-nil, and the path must
+// be passed through unchanged (no substitution or rewriting).
+//
+// These tests are in the RED state until I6.8 implements newLoggedArtifactStore.
+// ---------------------------------------------------------------------------
+
+func TestNewLoggedArtifactStore(t *testing.T) {
+	base := t.TempDir()
+
+	// A valid run_id to construct a run-scoped parent directory name.
+	const testRunID = "20260805T143029Z-9bc0"
+	runScopedParent := filepath.Join(base, domain.RunScopedFolder(testRunID))
+
+	cases := []struct {
+		name      string
+		path      string
+		wantEvent string // empty string means no event should be emitted
+	}{
+		{
+			// A relative path is a hard failure: every subsequent Create call will
+			// return an "must be absolute" error and nothing will be written.
+			name:      "relative path emits artifact.path.rejected",
+			path:      "Orchestration.md",
+			wantEvent: domain.EventArtifactPathRejected,
+		},
+		{
+			// An absolute path whose parent directory is not an Orchestration-{run_id}
+			// folder is informational: artifacts will be written, but the path is
+			// outside the expected run-scoped hierarchy.
+			name:      "absolute non-run-scoped path emits artifact.path.non_run_scoped",
+			path:      filepath.Join(base, "Orchestration.md"),
+			wantEvent: domain.EventArtifactPathNonRunScoped,
+		},
+		{
+			// An absolute path whose parent is Orchestration-{run_id} is the normal
+			// case. No event is emitted.
+			name:      "absolute run-scoped path emits no event",
+			path:      filepath.Join(runScopedParent, "Orchestration.md"),
+			wantEvent: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := &recordingLogger{}
+
+			store := newLoggedArtifactStore(tc.path, logger)
+
+			// The returned store must always be non-nil regardless of the path shape.
+			// The helper never rejects a path — it only observes and logs.
+			if store == nil {
+				t.Fatal("newLoggedArtifactStore returned nil; want a non-nil domain.ArtifactStore in all cases")
+			}
+
+			entries := logger.snapshot()
+
+			if tc.wantEvent == "" {
+				// Normal (run-scoped) case: the helper must emit nothing.
+				if len(entries) != 0 {
+					t.Errorf("run-scoped path: expected 0 events, got %d event(s): %v", len(entries), entries)
+				}
+				return
+			}
+
+			// Anomalous cases: exactly one event must be emitted.
+			if len(entries) != 1 {
+				t.Fatalf("expected exactly 1 event, got %d: %v", len(entries), entries)
+			}
+
+			if entries[0].event != tc.wantEvent {
+				t.Errorf("event = %q, want %q", entries[0].event, tc.wantEvent)
+			}
+
+			// The path field must be present and carry the original (unmodified) path.
+			var pathFieldValue string
+			pathFieldFound := false
+			for _, f := range entries[0].fields {
+				if f.Key == "path" {
+					pathFieldValue = f.Value
+					pathFieldFound = true
+					break
+				}
+			}
+			if !pathFieldFound {
+				t.Errorf("emitted entry for event %q carries no \"path\" field; fields = %v",
+					tc.wantEvent, entries[0].fields)
+			} else if pathFieldValue != tc.path {
+				// The helper must pass the path through unchanged — no substitution,
+				// no rewriting, no normalisation.
+				t.Errorf("path field = %q, want %q (path must not be rewritten)", pathFieldValue, tc.path)
+			}
+		})
+	}
+}
+
+// TestNewLoggedArtifactStore_AtMostOneEventPerCall verifies the mutual-exclusion
+// property: at most one artifact.path.* event is emitted per newLoggedArtifactStore
+// call, regardless of how many conditions are checked internally. This keeps a
+// log reader able to distinguish a hard failure (rejected) from a permitted-but-
+// unusual case (non_run_scoped) by event name alone.
+func TestNewLoggedArtifactStore_AtMostOneEventPerCall(t *testing.T) {
+	base := t.TempDir()
+	paths := []string{
+		"relative/Orchestration.md",
+		filepath.Join(base, "Orchestration.md"),
+		filepath.Join(base, domain.RunScopedFolder("20260805T143029Z-9bc0"), "Orchestration.md"),
+	}
+
+	for _, path := range paths {
+		logger := &recordingLogger{}
+		_ = newLoggedArtifactStore(path, logger)
+		entries := logger.snapshot()
+		if len(entries) > 1 {
+			t.Errorf("path %q: emitted %d events, want at most 1; mutual-exclusion contract violated",
+				path, len(entries))
+		}
+	}
+}
+
+// TestNewLoggedArtifactStore_NopLoggerDoesNotPanic verifies that passing
+// domain.NopDebugLogger{} as the logger (the production default when logging is
+// off) does not panic and still returns a non-nil store.
+func TestNewLoggedArtifactStore_NopLoggerDoesNotPanic(t *testing.T) {
+	base := t.TempDir()
+	paths := []string{
+		"relative/Orchestration.md",
+		filepath.Join(base, "Orchestration.md"),
+		filepath.Join(base, domain.RunScopedFolder("20260805T143029Z-9bc0"), "Orchestration.md"),
+	}
+	for _, path := range paths {
+		store := newLoggedArtifactStore(path, domain.NopDebugLogger{})
+		if store == nil {
+			t.Errorf("path %q: newLoggedArtifactStore with NopDebugLogger returned nil store", path)
+		}
 	}
 }

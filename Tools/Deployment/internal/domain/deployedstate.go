@@ -17,6 +17,7 @@ type DeployedArtifactState struct {
 	ModelID                       string            // frontmatter model scalar under the harness's ModelKey, verbatim; "" when absent, unparseable, or the harness emits no model
 	Workflows                     DeployedWorkflows // non-nil only when the file carries workflow section markers
 	ProtocolVersion               string            // version from <!-- protocol-version: X --> inside the deployed [[DEPLOYED:CommunicationProtocol]] region; "" when absent, region missing, or file unparseable
+	BundleVersion                 string            // frontmatter `bundle_version` scalar, verbatim; "" when absent, unparseable, or the file received no bundle region
 }
 
 // HasVersionInfo reports whether the deployed file carries at least one readable version stamp.

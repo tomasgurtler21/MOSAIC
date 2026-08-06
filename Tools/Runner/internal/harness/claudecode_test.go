@@ -45,8 +45,13 @@ package harness_test
 //     parsed into a domain.ProtocolResponse.
 //   - Empty CLI stdout returns ErrEmptyResponse.
 //   - Non-JSON CLI stdout returns ErrMalformedJSON.
+//   - Non-JSON CLI stdout error contains no internal Go type name "cliEnvelopeEntry".
 //   - Valid JSON envelope with no extractable protocol response returns
 //     ErrMalformedOutput.
+//
+//   Envelope recovery (bare and embedded JSON objects):
+//   - Bare JSON object that is a valid protocol response is recovered successfully.
+//   - Valid protocol response embedded in surrounding CLI text is recovered.
 
 import (
 	"context"
@@ -55,6 +60,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -117,6 +123,18 @@ func runHelperProcess() {
 		// Write valid JSON that contains no "result" type entry and therefore
 		// has no extractable protocol response.
 		os.Stdout.WriteString(`[{"type":"assistant","message":"hello there"}]`) //nolint:errcheck
+
+	case "bare-json":
+		// Write a bare JSON object (not a JSON array) that is a valid
+		// Communication Protocol response. The adapter should recover it.
+		os.Stdout.WriteString(`{"agent_instance_id":"test-agent#1","status_code":"SUCCESS","status_message":"ok"}`) //nolint:errcheck
+
+	case "embedded-json":
+		// Write CLI noise with a valid protocol response embedded within it.
+		// The adapter should scan and recover the embedded response.
+		os.Stdout.WriteString("Warning: pre-flight check failed\n") //nolint:errcheck
+		os.Stdout.WriteString(`{"agent_instance_id":"test-agent#1","status_code":"SUCCESS","status_message":"ok"}`) //nolint:errcheck
+		os.Stdout.WriteString("\nCLI exiting\n")                    //nolint:errcheck
 
 	case "hang":
 		// Block indefinitely so the test can exercise timeout and context
@@ -750,5 +768,360 @@ func TestClaudeCodeAdapter_ValidJSONNoProtocolResponse_ReturnsErrMalformedOutput
 
 	if !errors.Is(err, harness.ErrMalformedOutput) {
 		t.Errorf("want ErrMalformedOutput, got %v", err)
+	}
+}
+
+// TestClaudeCodeAdapter_NonJSONOutput_ErrorHasNoGoTypeName verifies that when
+// the CLI produces output that is not valid JSON and cannot be recovered, the
+// error message does not contain the internal Go type name "cliEnvelopeEntry".
+// That string originates in encoding/json's unmarshal error and must be
+// suppressed so the user sees a readable diagnostic.
+func TestClaudeCodeAdapter_NonJSONOutput_ErrorHasNoGoTypeName(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Setenv("GO_HELPER_CMD", "bad-json")
+
+	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
+
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if strings.Contains(err.Error(), "cliEnvelopeEntry") {
+		t.Errorf("want error message free of internal Go type name 'cliEnvelopeEntry', got: %q", err.Error())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Envelope recovery integration tests
+// ---------------------------------------------------------------------------
+
+// TestClaudeCodeAdapter_BareJSONProtocolResponse_Recovered verifies that when
+// the CLI outputs a bare JSON object (not a JSON array) that is a valid
+// Communication Protocol response, Invoke recovers it and returns the parsed
+// response rather than ErrMalformedJSON.
+func TestClaudeCodeAdapter_BareJSONProtocolResponse_Recovered(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Setenv("GO_HELPER_CMD", "bare-json")
+
+	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
+
+	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if err != nil {
+		t.Fatalf("want successful recovery of bare JSON protocol response, got error: %v", err)
+	}
+	if resp.StatusCode != domain.StatusSUCCESS {
+		t.Errorf("want StatusCode=SUCCESS, got %q", resp.StatusCode)
+	}
+	if resp.AgentInstanceID != "test-agent#1" {
+		t.Errorf("want AgentInstanceID=test-agent#1, got %q", resp.AgentInstanceID)
+	}
+}
+
+// TestClaudeCodeAdapter_EmbeddedProtocolResponseInCliText_Recovered verifies
+// that when the CLI outputs surrounding non-JSON text with a valid
+// Communication Protocol response embedded within it, Invoke recovers the
+// protocol response and returns it rather than ErrMalformedJSON.
+func TestClaudeCodeAdapter_EmbeddedProtocolResponseInCliText_Recovered(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Setenv("GO_HELPER_CMD", "embedded-json")
+
+	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
+
+	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if err != nil {
+		t.Fatalf("want successful recovery of embedded protocol response, got error: %v", err)
+	}
+	if resp.StatusCode != domain.StatusSUCCESS {
+		t.Errorf("want StatusCode=SUCCESS, got %q", resp.StatusCode)
+	}
+	if resp.AgentInstanceID != "test-agent#1" {
+		t.Errorf("want AgentInstanceID=test-agent#1, got %q", resp.AgentInstanceID)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// recordingLogger — fake domain.DebugLogger for logging tests (T5.1, T5.2, T5.6)
+// ---------------------------------------------------------------------------
+
+// harnessLogEntry is one captured call to recordingLogger.Log.
+type harnessLogEntry struct {
+	Event   string
+	Message string
+	Fields  []domain.DebugField
+}
+
+// recordingLogger is a thread-safe domain.DebugLogger that records every Log
+// call. Tests assert on the recorded entries after invoking the adapter.
+type recordingLogger struct {
+	mu      sync.Mutex
+	entries []harnessLogEntry
+}
+
+// Log implements domain.DebugLogger.
+func (r *recordingLogger) Log(event string, message string, fields ...domain.DebugField) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.entries = append(r.entries, harnessLogEntry{
+		Event:   event,
+		Message: message,
+		Fields:  append([]domain.DebugField{}, fields...),
+	})
+}
+
+// eventLogged reports whether at least one entry with the given event name
+// was recorded.
+func (r *recordingLogger) eventLogged(event string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.entries {
+		if e.Event == event {
+			return true
+		}
+	}
+	return false
+}
+
+// fieldValue returns the value for the given field key in the first entry
+// with the given event name. Returns ("", false) when not found.
+func (r *recordingLogger) fieldValue(event, key string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.entries {
+		if e.Event != event {
+			continue
+		}
+		for _, f := range e.Fields {
+			if f.Key == key {
+				return f.Value, true
+			}
+		}
+	}
+	return "", false
+}
+
+// allEvents returns the event names of all recorded entries in order.
+func (r *recordingLogger) allEvents() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	names := make([]string, len(r.entries))
+	for i, e := range r.entries {
+		names[i] = e.Event
+	}
+	return names
+}
+
+// ---------------------------------------------------------------------------
+// T5.1 — adapter logs invocation start, raw stdout, raw stderr, and outcome
+// ---------------------------------------------------------------------------
+
+// TestClaudeCodeAdapterWithLogger_SuccessfulInvocation_LogsInvokeStart verifies
+// that NewClaudeCodeAdapterWithLogger emits EventHarnessInvokeStart for each
+// call to Invoke.
+func TestClaudeCodeAdapterWithLogger_SuccessfulInvocation_LogsInvokeStart(t *testing.T) {
+	setHelperEnv(t, "success")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !logger.eventLogged(domain.EventHarnessInvokeStart) {
+		t.Errorf("want %s logged, got events: %v", domain.EventHarnessInvokeStart, logger.allEvents())
+	}
+}
+
+// TestClaudeCodeAdapterWithLogger_SuccessfulInvocation_LogsRawStdout verifies
+// that EventHarnessStdout is logged after the subprocess exits, capturing the
+// raw stdout content.
+func TestClaudeCodeAdapterWithLogger_SuccessfulInvocation_LogsRawStdout(t *testing.T) {
+	setHelperEnv(t, "success")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if !logger.eventLogged(domain.EventHarnessStdout) {
+		t.Errorf("want %s logged after process exits, got events: %v", domain.EventHarnessStdout, logger.allEvents())
+	}
+}
+
+// TestClaudeCodeAdapterWithLogger_SuccessfulInvocation_LogsRawStderr verifies
+// that EventHarnessStderr is logged after the subprocess exits, even when
+// stderr is empty (an empty log entry is still expected per invocation).
+func TestClaudeCodeAdapterWithLogger_SuccessfulInvocation_LogsRawStderr(t *testing.T) {
+	setHelperEnv(t, "success")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if !logger.eventLogged(domain.EventHarnessStderr) {
+		t.Errorf("want %s logged after process exits, got events: %v", domain.EventHarnessStderr, logger.allEvents())
+	}
+}
+
+// TestClaudeCodeAdapterWithLogger_SuccessfulInvocation_LogsInvokeOK verifies
+// that a successful invocation logs EventHarnessInvokeOK and does not log
+// EventHarnessInvokeError.
+func TestClaudeCodeAdapterWithLogger_SuccessfulInvocation_LogsInvokeOK(t *testing.T) {
+	setHelperEnv(t, "success")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !logger.eventLogged(domain.EventHarnessInvokeOK) {
+		t.Errorf("want %s logged on success, got events: %v", domain.EventHarnessInvokeOK, logger.allEvents())
+	}
+	if logger.eventLogged(domain.EventHarnessInvokeError) {
+		t.Errorf("want no %s on success, but it was logged", domain.EventHarnessInvokeError)
+	}
+}
+
+// TestClaudeCodeAdapterWithLogger_NonZeroExit_LogsInvokeError verifies that a
+// non-zero subprocess exit logs EventHarnessInvokeError and does not log
+// EventHarnessInvokeOK.
+func TestClaudeCodeAdapterWithLogger_NonZeroExit_LogsInvokeError(t *testing.T) {
+	setHelperEnv(t, "exit1")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if !logger.eventLogged(domain.EventHarnessInvokeError) {
+		t.Errorf("want %s logged on non-zero exit, got events: %v", domain.EventHarnessInvokeError, logger.allEvents())
+	}
+	if logger.eventLogged(domain.EventHarnessInvokeOK) {
+		t.Errorf("want no %s on error, but it was logged", domain.EventHarnessInvokeOK)
+	}
+}
+
+// TestClaudeCodeAdapterWithLogger_InvokeStart_CarriesAgentAndKindFields
+// verifies that the EventHarnessInvokeStart entry carries the agent instance ID
+// (from the request) and the invocation kind as structured fields.
+func TestClaudeCodeAdapterWithLogger_InvokeStart_CarriesAgentAndKindFields(t *testing.T) {
+	setHelperEnv(t, "success")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	agentVal, ok := logger.fieldValue(domain.EventHarnessInvokeStart, "agent")
+	if !ok {
+		t.Errorf("want 'agent' field on %s entry; events: %v",
+			domain.EventHarnessInvokeStart, logger.allEvents())
+	} else if agentVal != "test-agent#1" {
+		t.Errorf("want agent=test-agent#1 on %s, got %q", domain.EventHarnessInvokeStart, agentVal)
+	}
+
+	kindVal, ok := logger.fieldValue(domain.EventHarnessInvokeStart, "kind")
+	if !ok {
+		t.Errorf("want 'kind' field on %s entry", domain.EventHarnessInvokeStart)
+	} else if kindVal != "ordinary" {
+		t.Errorf("want kind=ordinary on %s, got %q", domain.EventHarnessInvokeStart, kindVal)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T5.2 — adapter logs envelope parse failure and recovery
+// ---------------------------------------------------------------------------
+
+// TestClaudeCodeAdapterWithLogger_NonJSONOutput_LogsParseFailed verifies that
+// when the CLI outputs non-JSON text and recovery also fails, the adapter logs
+// EventHarnessParseFailed. The error return remains ErrMalformedJSON.
+func TestClaudeCodeAdapterWithLogger_NonJSONOutput_LogsParseFailed(t *testing.T) {
+	setHelperEnv(t, "bad-json")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, _ = adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if !logger.eventLogged(domain.EventHarnessParseFailed) {
+		t.Errorf("want %s logged on non-JSON output with failed recovery, got events: %v",
+			domain.EventHarnessParseFailed, logger.allEvents())
+	}
+}
+
+// TestClaudeCodeAdapterWithLogger_BareJSONRecovery_LogsParseRecovered verifies
+// that when the CLI outputs a bare JSON object that is a valid protocol response
+// and recovery succeeds, EventHarnessParseRecovered is logged.
+func TestClaudeCodeAdapterWithLogger_BareJSONRecovery_LogsParseRecovered(t *testing.T) {
+	setHelperEnv(t, "bare-json")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	if err != nil {
+		t.Fatalf("unexpected error (bare-JSON recovery should succeed): %v", err)
+	}
+
+	if !logger.eventLogged(domain.EventHarnessParseRecovered) {
+		t.Errorf("want %s logged after successful bare-JSON recovery, got events: %v",
+			domain.EventHarnessParseRecovered, logger.allEvents())
+	}
+}
+
+// TestClaudeCodeAdapterWithLogger_EmbeddedJSONRecovery_LogsParseRecovered
+// verifies that when a valid protocol response embedded in surrounding CLI text
+// is recovered, EventHarnessParseRecovered is logged.
+func TestClaudeCodeAdapterWithLogger_EmbeddedJSONRecovery_LogsParseRecovered(t *testing.T) {
+	setHelperEnv(t, "embedded-json")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	if err != nil {
+		t.Fatalf("unexpected error (embedded-JSON recovery should succeed): %v", err)
+	}
+
+	if !logger.eventLogged(domain.EventHarnessParseRecovered) {
+		t.Errorf("want %s logged after successful embedded-JSON recovery, got events: %v",
+			domain.EventHarnessParseRecovered, logger.allEvents())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T5.6 — nil logger defaults to no-op; adapter behaviour unchanged
+// ---------------------------------------------------------------------------
+
+// TestClaudeCodeAdapterWithLogger_NilLogger_NormalisedToNop verifies that
+// passing nil as the logger is safe: nil is normalised to domain.NopDebugLogger,
+// Invoke does not panic, and the response is correct.
+func TestClaudeCodeAdapterWithLogger_NilLogger_NormalisedToNop(t *testing.T) {
+	setHelperEnv(t, "success")
+
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, nil)
+
+	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	if err != nil {
+		t.Fatalf("want no error with nil logger, got %v", err)
+	}
+	if resp.StatusCode != domain.StatusSUCCESS {
+		t.Errorf("want SUCCESS with nil logger, got %q", resp.StatusCode)
+	}
+}
+
+// TestClaudeCodeAdapter_BasicConstructor_UnchangedBehaviourAfterLoggerAdded
+// verifies that the original two-argument NewClaudeCodeAdapter constructor
+// continues to produce correct results after the logger field was introduced.
+// This regression guard ensures all existing call sites keep working unchanged.
+func TestClaudeCodeAdapter_BasicConstructor_UnchangedBehaviourAfterLoggerAdded(t *testing.T) {
+	setHelperEnv(t, "success")
+	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
+
+	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+	if err != nil {
+		t.Fatalf("want no error with basic constructor, got %v", err)
+	}
+	if resp.StatusCode != domain.StatusSUCCESS {
+		t.Errorf("want SUCCESS with basic constructor, got %q", resp.StatusCode)
 	}
 }

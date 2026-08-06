@@ -257,6 +257,7 @@ func TestGoldenFile_VSCodeGHCP_ContractsReviewAgent(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Validation", "contracts-review.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -271,7 +272,8 @@ func TestGoldenFile_VSCodeGHCP_ContractsReviewAgent(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "contracts-review.md")
@@ -295,6 +297,7 @@ func TestGoldenFile_VSCodeGHCP_TestRunnerAgent(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -309,7 +312,8 @@ func TestGoldenFile_VSCodeGHCP_TestRunnerAgent(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "test-runner.md")
@@ -328,6 +332,7 @@ func TestGoldenFile_VSCodeGHCP_PlannerTDDSoftAgent(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Planning", "planner-tdd-soft.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -342,7 +347,8 @@ func TestGoldenFile_VSCodeGHCP_PlannerTDDSoftAgent(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "planner-tdd-soft.md")
@@ -368,6 +374,7 @@ func TestGoldenFile_VSCodeGHCP_Orchestrator(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Orchestrator", "orchestrator.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -382,7 +389,8 @@ func TestGoldenFile_VSCodeGHCP_Orchestrator(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleOrchestrator,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "orchestrator.md")
@@ -816,6 +824,7 @@ func TestModel_CustomModelIDEmittedVerbatim(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -835,7 +844,8 @@ func TestModel_CustomModelIDEmittedVerbatim(t *testing.T) {
 		Model:    customModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)

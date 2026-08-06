@@ -88,15 +88,29 @@ type Deps struct {
 	// named no-op; tests inject a counter function to verify the hook is invoked
 	// exactly once per dispatch cycle (AC8.7).
 	OnInfrastructureTrigger func()
+
+	// Debug records dispatch events to the run's debug log, including run-start
+	// refusals and unresolved deviations that never reach Store.Apply and so
+	// leave no trace in Orchestration.md.
+	//
+	// Optional: nil is normalised to domain.NopDebugLogger in New. Behaviour is
+	// otherwise identical with and without a logger.
+	Debug domain.DebugLogger
 }
 
 // New creates a new Session with the given port dependencies.
+//
+// A nil Deps.Debug is replaced with domain.NopDebugLogger before the session
+// is returned, so the dispatch loop never nil-checks the logger.
 //
 // The returned session uses the following fixed-path dependencies from the
 // runner's package set: orchfile, workflow, compat, agentresolve, planstages,
 // and engine. These are not behind ports because they are pure functions or
 // read-only loaders that impose no testability burden of their own.
 func New(deps Deps) Session {
+	if deps.Debug == nil {
+		deps.Debug = domain.NopDebugLogger{}
+	}
 	return &sessionImpl{deps: deps}
 }
 
@@ -114,13 +128,13 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	// Step 1: Load orchestrator file and get the selected workflow region.
 	region, err := orchfile.GetWorkflow(config.OrchestratorFilePath, string(config.WorkflowID))
 	if err != nil {
-		return refusal(err.Error()), nil
+		return s.refusal(err.Error()), nil
 	}
 
 	// Step 2: Parse the routing table.
 	table, err := workflow.Parse(region.Content, region.Info)
 	if err != nil {
-		return refusal(err.Error()), nil
+		return s.refusal(err.Error()), nil
 	}
 
 	// Step 3: Read existing artifact (FR-7a: refuse non-canonical; ErrNotExist = no artifact).
@@ -129,7 +143,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		var refErr *domain.RefusalError
 		if errors.As(readErr, &refErr) {
 			// Non-canonical format: always refuse regardless of IsNewRun.
-			return refusal(refErr.Error()), nil
+			return s.refusal(refErr.Error()), nil
 		}
 		if !errors.Is(readErr, os.ErrNotExist) {
 			// Unexpected infrastructure error.
@@ -143,13 +157,19 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	if config.IsNewRun {
 		// New run: refuse if an artifact already exists (race condition guard).
 		if readErr == nil {
-			return refusal("run folder already contains an artifact; cannot create a new run here"), nil
+			refusalMsg := "run folder already contains an artifact; cannot create a new run here"
+			if config.RunFolder != "" {
+				refusalMsg = "run folder already contains an artifact at " +
+					filepath.Join(config.RunFolder, "Orchestration.md") +
+					"; cannot create a new run here"
+			}
+			return s.refusal(refusalMsg), nil
 		}
 		// Expected: os.ErrNotExist — proceed to create below.
 	} else {
 		// Resume: refuse if no artifact exists (stale scan guard).
 		if errors.Is(readErr, os.ErrNotExist) {
-			return refusal("no artifact found at the resolved run folder; cannot resume"), nil
+			return s.refusal("no artifact found at the resolved run folder; cannot resume"), nil
 		}
 		// Artifact exists — proceed to resume below.
 	}
@@ -157,7 +177,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	// FR-7b: version check for resume mode.
 	if !config.IsNewRun && !config.AllowVersionDrift {
 		if existingState.WorkflowVersion != region.Info.Version {
-			return refusal(fmt.Sprintf(
+			return s.refusal(fmt.Sprintf(
 				"workflow version mismatch: artifact has %q, selected workflow has %q",
 				existingState.WorkflowVersion, region.Info.Version,
 			)), nil
@@ -167,7 +187,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	// Step 4: Admit the workflow (FR-18a compat checks and group resolution).
 	admitted, err := compat.Admit(table)
 	if err != nil {
-		return refusal(err.Error()), nil
+		return s.refusal(err.Error()), nil
 	}
 
 	// Step 5: Resolve every agent identifier to a definition file.
@@ -175,7 +195,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	identifiers := uniqueAgentIdentifiers(table)
 	agents, err := agentresolve.ResolveAll(orchDir, identifiers)
 	if err != nil {
-		return refusal(err.Error()), nil
+		return s.refusal(err.Error()), nil
 	}
 
 	// Step 6: Read stage set if the workflow has a staged EXECUTION phase.
@@ -184,7 +204,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		planPath := filepath.Join(orchDir, "Plan.md")
 		ss, stageErr := planstages.ReadStages(planPath, admitted.GroupsDeclared)
 		if stageErr != nil {
-			return refusal(stageErr.Error()), nil
+			return s.refusal(stageErr.Error()), nil
 		}
 		stages = &ss
 	}
@@ -194,20 +214,20 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	// checkpoint-class agent. An empty slice is valid — no infrastructure agents deployed.
 	declaredInfraAgents, err := orchfile.EnumerateInfrastructureAgents(config.OrchestratorFilePath)
 	if err != nil {
-		return refusal(err.Error()), nil
+		return s.refusal(err.Error()), nil
 	}
 
 	// Step 6c: Validate per-class agent selection. When multiple agents of the
 	// same gated class are declared and no selection is provided in RunConfig,
 	// refuse at run start (non-interactive CLI runs must supply --infra-class).
 	if err := validateClassSelections(declaredInfraAgents, config.InfraClassSelections); err != nil {
-		return refusal(err.Error()), nil
+		return s.refusal(err.Error()), nil
 	}
 
 	// Step 7: Settle checkpoints (FR-9). Refuse only when checkpoints are enabled
 	// AND no checkpoint-class infrastructure agent is declared for this run.
 	if config.Checkpoints && !hasCheckpointClassAgent(declaredInfraAgents) {
-		return refusal("checkpoints requested but no checkpoint provider is available"), nil
+		return s.refusal("checkpoints requested but no checkpoint provider is available"), nil
 	}
 
 	// Step 7a: Build and validate the seed plan. New runs only: a resumed run
@@ -217,7 +237,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	if config.IsNewRun && len(config.SeedInputs) > 0 {
 		p, seedErr := seed.BuildPlan(config.SeedInputs)
 		if seedErr != nil {
-			return refusal(seedErr.Error()), nil
+			return s.refusal(seedErr.Error()), nil
 		}
 		seedPlan = p
 	}
@@ -239,10 +259,10 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		// path, after a Create this attempt performed.
 		if applyErr := seed.Apply(seedPlan, config.RunFolder); applyErr != nil {
 			if rmErr := os.RemoveAll(config.RunFolder); rmErr != nil {
-				return refusal(fmt.Sprintf("%s; additionally, removing the run folder %s failed: %v",
+				return s.refusal(fmt.Sprintf("%s; additionally, removing the run folder %s failed: %v",
 					applyErr.Error(), config.RunFolder, rmErr)), nil
 			}
-			return refusal(applyErr.Error()), nil
+			return s.refusal(applyErr.Error()), nil
 		}
 		seq = 0
 	} else {
@@ -267,7 +287,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	// The returned slice has replacement trigger lists applied (override semantics).
 	declaredInfraAgents, err = validateAndApplyOverrides(state.InfrastructureOverrides, declaredInfraAgents)
 	if err != nil {
-		return refusal(err.Error()), nil
+		return s.refusal(err.Error()), nil
 	}
 
 	// =========================================================================
@@ -321,6 +341,15 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 				hitlOverride = nil
 			}
 
+			// Log dispatch start so every invocation has a trace, including
+			// steps that fail or end unresolved and never reach Store.Apply.
+			s.deps.Debug.Log(domain.EventSessionDispatchStart, "dispatching step",
+				domain.F("agent", step.Request.AgentInstanceID),
+				domain.F("phase", step.Phase),
+				domain.F("stage", step.Stage),
+				domain.F("row", strconv.Itoa(step.RowIndex)),
+			)
+
 			// Notify the interaction port that a step is starting. The TUI frontend
 			// uses this to append a new progress row before the invocation blocks.
 			s.deps.Interact.Notify(ctx, interaction.Notice{
@@ -341,8 +370,13 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 				}
 				// Harness error: treat as a deviation rather than a run failure
 				// ("the caller treats this as a deviation, never a crash" per the
-				// HarnessAdapter port contract). Invoke the deviation resolver to
-				// decide whether to rejoin, dispatch a custom agent, or stop.
+				// HarnessAdapter port contract). Log it so that this path — which
+				// never reaches Store.Apply — leaves a trace in the debug log.
+				s.deps.Debug.Log(domain.EventSessionHarnessError, invokeErr.Error(),
+					domain.F("agent", step.Request.AgentInstanceID),
+				)
+				// Invoke the deviation resolver to decide whether to rejoin,
+				// dispatch a custom agent, or stop.
 				deviationInfo := domain.DeviationInfo{
 					Kind: domain.DeviationHarnessError,
 					Response: domain.ProtocolResponse{
@@ -357,8 +391,10 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 				}
 				instr, resolveErr := s.deps.Deviation.Resolve(ctx, deviationInfo)
 				if resolveErr != nil {
+					s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, resolveErr.Error())
 					return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: resolveErr.Error()}, nil
 				}
+				s.deps.Debug.Log(domain.EventSessionDeviation, "resolver returned instruction")
 				done, outcome, outErr := s.applyRejoinInstruction(ctx, instr, &state, &hitlOverride, &lastResponse, table)
 				if done {
 					return outcome, outErr
@@ -382,8 +418,14 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 			}
 			state, err = s.deps.Store.Apply(ctx, state, completedStep)
 			if err != nil {
+				s.deps.Debug.Log(domain.EventSessionApplyFailed, err.Error())
 				return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
 			}
+			s.deps.Debug.Log(domain.EventSessionStepDone, "step applied to artifact",
+				domain.F("agent", completedStep.AgentInstance),
+				domain.F("status", string(completedStep.Status)),
+				domain.F("error_code", string(completedStep.ErrorCode)),
+			)
 			seq = completedSeq
 			lastResponse = &response
 
@@ -473,8 +515,10 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 			// Invoke the deviation resolver.
 			instr, resolveErr := s.deps.Deviation.Resolve(ctx, decision.Deviation.Info)
 			if resolveErr != nil {
+				s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, resolveErr.Error())
 				return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: resolveErr.Error()}, nil
 			}
+			s.deps.Debug.Log(domain.EventSessionDeviation, "resolver returned instruction")
 			done, outcome, outErr := s.applyRejoinInstruction(ctx, instr, &state, &hitlOverride, &lastResponse, table)
 			if done {
 				return outcome, outErr
@@ -517,9 +561,11 @@ func (s *sessionImpl) applyRejoinInstruction(
 	}
 
 	if instr.Stop != nil {
+		msg := "deviation resolver returned stop: " + instr.Stop.Reason
+		s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, msg)
 		return true, domain.RunOutcome{
 			Status:  domain.RunDeviationUnresolved,
-			Message: "deviation resolver returned stop: " + instr.Stop.Reason,
+			Message: msg,
 		}, nil
 	}
 
@@ -564,6 +610,7 @@ func (s *sessionImpl) applyRejoinInstruction(
 		return false, domain.RunOutcome{}, nil
 	}
 
+	s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, "deviation resolver returned empty instruction")
 	return true, domain.RunOutcome{
 		Status:  domain.RunDeviationUnresolved,
 		Message: "deviation resolver returned empty instruction",
@@ -661,8 +708,11 @@ func rewindStateForRerun(state domain.ArtifactState) domain.ArtifactState {
 	return state
 }
 
-// refusal constructs a RunOutcome with RunRefused status and a message.
-func refusal(message string) domain.RunOutcome {
+// refusal logs the refusal reason and constructs a RunOutcome with RunRefused
+// status. Every run-start refusal (pre-Store.Create) passes through here so
+// that paths which never reach Store.Apply still leave a debug-log trace.
+func (s *sessionImpl) refusal(message string) domain.RunOutcome {
+	s.deps.Debug.Log(domain.EventSessionRefusal, message)
 	return domain.RunOutcome{
 		Status:  domain.RunRefused,
 		Message: message,

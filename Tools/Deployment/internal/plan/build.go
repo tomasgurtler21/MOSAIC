@@ -56,7 +56,7 @@ func (p *planner) Build(ctx context.Context, in Input) (domain.Plan, error) {
 		deployed := in.DeployedState[targetPath]
 
 		// Classify before evaluating gaps: the GapNoModel emission rule depends on the action.
-		item := classifyAgentItem(agent, targetPath, model, manifestUsable, in.Manifest.Manifest, deployed, desc, selectedWorkflows, in.ToolMappingsVersion, in.ProtocolVersion)
+		item := classifyAgentItem(agent, targetPath, model, manifestUsable, in.Manifest.Manifest, deployed, desc, selectedWorkflows, in.ToolMappingsVersion, in.ProtocolVersion, in.BundleVersion)
 		items = append(items, item)
 
 		// Surface a GapNoModel gap only when the file write that would occur requires a model
@@ -210,6 +210,7 @@ func artifactKindOrder(k domain.ArtifactKind) int {
 //  5. Version staleness check against deployed-file versions
 //  6a. For orchestrator-role agents: workflow staleness check; merged into deltas
 //  6b. For all agents: protocol staleness check; merged into deltas
+//  6c. For non-orchestrator agents: bundle staleness check; merged into deltas
 //  7. Stale or no version info → ActionUpdate
 //  8. → ActionUnchanged
 //
@@ -223,6 +224,9 @@ func artifactKindOrder(k domain.ArtifactKind) int {
 //
 // protocolVersion is the current protocol source version from plan.Input.ProtocolVersion.
 // Protocol staleness applies to every agent regardless of role.
+//
+// bundleVersion is the current bundle source version from plan.Input.BundleVersion.
+// Bundle staleness applies to subagent-role agents; the orchestrator carries no bundle blocks.
 func classifyAgentItem(
 	agent domain.Agent,
 	targetPath string,
@@ -234,6 +238,7 @@ func classifyAgentItem(
 	selectedWorkflows []domain.Workflow,
 	toolMappingsVersion string,
 	protocolVersion string,
+	bundleVersion string,
 ) domain.PlanItem {
 	ref := domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: agent.Key}
 	item := domain.PlanItem{
@@ -313,11 +318,19 @@ func classifyAgentItem(
 		deltas = append(deltas, delta)
 	}
 
+	// Step 6c: For non-orchestrator agents, compare the deployed bundle version against the
+	// source version. Bundle blocks apply to subagent role; the orchestrator is excluded.
+	bundleApplies := agent.Role != domain.RoleOrchestrator
+	bundleDrift := BundleStaleness(deployed, bundleVersion, bundleApplies)
+	if delta, ok := bundleDrift.Delta(); ok {
+		deltas = append(deltas, delta)
+	}
+
 	// Step 7: Stale or no version info → update.
 	if len(deltas) > 0 || !deployed.HasVersionInfo() {
 		item.Action = domain.ActionUpdate
 		item.Stale = deltas
-		reasons := buildAgentUpdateReasons(deltas, !deployed.HasVersionInfo(), drift, protocolDrift)
+		reasons := buildAgentUpdateReasons(deltas, !deployed.HasVersionInfo(), drift, protocolDrift, bundleDrift)
 		item.Reason = "stale: " + reasons
 		return item
 	}
@@ -492,23 +505,25 @@ func buildUpdateReasons(deltas []domain.VersionDelta, noVersionInfo bool) string
 }
 
 // buildAgentUpdateReasons composes the Reason string for an agent ActionUpdate item. It
-// extends buildUpdateReasons by also appending the workflow drift reason and protocol drift
-// reason when present. Both are formatted separately rather than through formatVersionDeltas,
-// which would produce unhelpful "workflow:x changed from..." or "protocol_version changed from..."
-// text.
+// extends buildUpdateReasons by also appending the workflow drift, protocol drift, and bundle
+// drift reasons when present. Each is formatted separately rather than through formatVersionDeltas,
+// which would produce unhelpful generic text.
 //
-// Reason part order: version-field deltas; no-version-info note; workflow drift; protocol drift.
-func buildAgentUpdateReasons(deltas []domain.VersionDelta, noVersionInfo bool, drift WorkflowDrift, protocolDrift ProtocolDrift) string {
+// Reason part order: version-field deltas; no-version-info note; workflow drift; protocol drift; bundle drift.
+func buildAgentUpdateReasons(deltas []domain.VersionDelta, noVersionInfo bool, drift WorkflowDrift, protocolDrift ProtocolDrift, bundleDrift BundleDrift) string {
 	var parts []string
 
-	// Version-field deltas only — exclude workflow-prefixed and protocol deltas from the
-	// generic field formatter; both have dedicated human-readable reason methods.
+	// Version-field deltas only — exclude workflow-prefixed, protocol, and bundle deltas from
+	// the generic field formatter; each has a dedicated human-readable reason method.
 	var versionDeltas []domain.VersionDelta
 	for _, d := range deltas {
 		if strings.HasPrefix(d.Field, WorkflowDeltaFieldPrefix) {
 			continue
 		}
 		if d.Field == ProtocolDeltaField {
+			continue
+		}
+		if d.Field == BundleDeltaField {
 			continue
 		}
 		versionDeltas = append(versionDeltas, d)
@@ -529,6 +544,11 @@ func buildAgentUpdateReasons(deltas []domain.VersionDelta, noVersionInfo bool, d
 	// Protocol drift reason is formatted separately so it names the protocol.
 	if protocolDrift.Stale() {
 		parts = append(parts, protocolDrift.Reason())
+	}
+
+	// Bundle drift reason is formatted separately so it names the bundle.
+	if bundleDrift.Stale() {
+		parts = append(parts, bundleDrift.Reason())
 	}
 
 	return strings.Join(parts, "; ")

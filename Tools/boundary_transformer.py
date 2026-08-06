@@ -48,6 +48,7 @@ class TransformResult:
     errors: list[TransformError]
     sections_added: list[str]      # Names of SECTION boundaries added
     injections_added: list[str]    # Names of INJECTION boundaries added
+    deployed_added: list[str]      # Names of DEPLOYED boundaries emitted
     version_before: str            # Original version string
     version_after: str             # New version string after bump
 
@@ -95,6 +96,7 @@ def transform_file(
             )],
             sections_added=[],
             injections_added=[],
+            deployed_added=[],
             version_before="",
             version_after=""
         )
@@ -114,6 +116,7 @@ def transform_file(
             )],
             sections_added=[],
             injections_added=[],
+            deployed_added=[],
             version_before=version_before,
             version_after=""
         )
@@ -145,6 +148,7 @@ def transform_file(
             errors=transformed_body["errors"],
             sections_added=[],
             injections_added=[],
+            deployed_added=[],
             version_before=version_before,
             version_after=version_after
         )
@@ -178,6 +182,7 @@ def transform_file(
         errors=[],
         sections_added=transformed_body["sections_added"],
         injections_added=transformed_body["injections_added"],
+        deployed_added=transformed_body.get("deployed_added", []),
         version_before=version_before,
         version_after=version_after
     )
@@ -273,22 +278,52 @@ def _bump_version(version_str: str) -> str:
 def _transform_generic_body(lines: list[str]) -> dict:
     """Transform a generic file's body by adding section and injection boundaries.
 
+    ArtifactProvenance is retired (Stage 5). Any input shape that carries it is
+    handled by stripping the deployed tags and preserving only the sibling injection:
+
+    - New shape already present (``[[DEPLOYED:ArtifactProvenance]]`` at top
+      level): deployed tags are stripped; the sibling injection is kept unchanged.
+    - Old shape (``[[SECTION:ArtifactProvenance]]``): the section block is
+      removed; any ``[[INJECTION:ArtifactProvenanceExtension]]`` content inside
+      is extracted and re-emitted as a top-level injection sibling (Contract T-B).
+    - Untagged source (``## Artifact Provenance`` heading): the heading region
+      is recognised and its prose body is discarded; the sibling injection is
+      emitted at canonical slot 3 without any deployed region (Contract T-A).
+    - No provenance region at all: normal pass-through (Contract T-C, absence).
+
     Returns dict with:
         success: bool
         lines: list[str] (if success)
         sections_added: list[str] (if success)
         injections_added: list[str] (if success)
+        deployed_added: list[str] (if success)
         errors: list[TransformError] (if not success)
     """
+    # Route based on what provenance shape (if any) is already present in the body.
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "[[DEPLOYED:ArtifactProvenance]]":
+            # ArtifactProvenance is retired. Strip its deployed tags; keep injection.
+            return _strip_artifact_provenance_deployed_tags(lines)
+        if stripped == "[[SECTION:ArtifactProvenance]]":
+            # Old shape — retire the section, preserving any injection content.
+            return _retire_old_provenance_section(lines)
+
+    # Untagged source (or no provenance region at all): run the normal
+    # section-tagging pass.  _identify_sections marks any '## Artifact Provenance'
+    # heading region as covered so orphan detection does not flag it.
+
     result_lines = []
     sections_added = []
     injections_added = []
+    deployed_added = []
     errors = []
 
     # Identify all sections first. Generic files use the strict Identity rule so
     # any non-canonical H2 immediately after Identity is flagged (FR-13).
     sections_result = _identify_sections(lines, strict_identity=True)
     sections = sections_result["sections"]
+    provenance_region = sections_result.get("provenance_region")
     errors.extend(sections_result["errors"])
 
     # If there are errors, return immediately
@@ -310,6 +345,15 @@ def _transform_generic_body(lines: list[str]) -> dict:
             in_fenced_block = not in_fenced_block
             result_lines.append(line)
             i += 1
+            continue
+
+        # Check if this is the start of an untagged provenance heading region.
+        # ArtifactProvenance is retired: emit only the injection sibling, not the
+        # deployed region. The heading prose is discarded as before.
+        if provenance_region is not None and i == provenance_region["start_line"]:
+            result_lines.extend(_build_injection_only(""))
+            injections_added.append("ArtifactProvenanceExtension")
+            i = provenance_region["end_line"]
             continue
 
         # Check if this is a section start
@@ -376,7 +420,8 @@ def _transform_generic_body(lines: list[str]) -> dict:
         "success": True,
         "lines": result_lines,
         "sections_added": sections_added,
-        "injections_added": injections_added
+        "injections_added": injections_added,
+        "deployed_added": deployed_added,
     }
 
 
@@ -487,6 +532,35 @@ def _identify_sections(lines: list[str], strict_identity: bool = False) -> dict:
         for i in range(section["start_line"], min(section["end_line"], len(lines))):
             covered[i] = True
 
+    # Before orphan detection: mark any '## Artifact Provenance' heading region as
+    # covered so it does not raise an unclassifiable-heading error.  This heading is
+    # no longer in SECTION_HEADING_MAP (ArtifactProvenance is a tool-managed deployed
+    # name), but untagged source files may still carry it.  The caller is responsible
+    # for replacing it with the new deployed-region shape (Contract T-A).
+    provenance_region = None
+    for i, line in enumerate(lines):
+        if line.strip() == "## Artifact Provenance" and not covered[i]:
+            prov_start = i
+            # Scan forward for the boundary: the next '---' separator (include it)
+            # or the start of the next canonical heading (exclude it).
+            prov_end = len(lines)
+            for j in range(i, len(lines)):
+                if lines[j].strip() == "---":
+                    prov_end = j + 1  # include the separator
+                    break
+                if j > i and (
+                    (lines[j].startswith("# ") and not lines[j].startswith("##"))
+                    or (lines[j].startswith("## ")
+                        and not lines[j].startswith("###")
+                        and _canonical_section_for_heading(lines[j]) is not None)
+                ):
+                    prov_end = j
+                    break
+            for k in range(prov_start, min(prov_end, len(lines))):
+                covered[k] = True
+            provenance_region = {"start_line": prov_start, "end_line": prov_end}
+            break  # only one provenance heading expected per file
+
     in_fenced_block = False
     for i, line in enumerate(lines):
         stripped = line.strip()
@@ -505,7 +579,7 @@ def _identify_sections(lines: list[str], strict_identity: bool = False) -> dict:
                 message=f"unclassifiable content: {stripped}"
             ))
 
-    return {"sections": sections, "errors": errors}
+    return {"sections": sections, "errors": errors, "provenance_region": provenance_region}
 
 
 def _canonical_section_for_heading(line: str) -> Optional[str]:
@@ -583,6 +657,203 @@ def _match_region_marker(line: str) -> Optional[dict]:
 _match_injection_marker = _match_region_marker
 
 
+def _strip_artifact_provenance_deployed_tags(lines: list[str]) -> dict:
+    """Remove ``[[DEPLOYED:ArtifactProvenance]]`` and its close tag from the body.
+
+    ArtifactProvenance is retired. When a file already carries the new-shape
+    deployed region, this function strips just those two tag lines (open and
+    close) while leaving every other line — including the sibling
+    ``[[INJECTION:ArtifactProvenanceExtension]]`` region — unchanged.
+
+    Returns a body-transform result dict (same shape as ``_transform_generic_body``).
+    """
+    DEPLOYED_OPEN = "[[DEPLOYED:ArtifactProvenance]]"
+    DEPLOYED_CLOSE = "[[/DEPLOYED:ArtifactProvenance]]"
+
+    result_lines = [
+        line for line in lines
+        if line.strip() not in (DEPLOYED_OPEN, DEPLOYED_CLOSE)
+    ]
+    return {
+        "success": True,
+        "lines": result_lines,
+        "sections_added": [],
+        "injections_added": [],
+        "deployed_added": [],
+        "errors": [],
+    }
+
+
+def _retire_old_provenance_section(lines: list[str]) -> dict:
+    """Remove the ``[[SECTION:ArtifactProvenance]]`` block, preserving injection content.
+
+    ArtifactProvenance is retired. When a file carries the old section shape,
+    this function finds the section span, extracts any nested
+    ``[[INJECTION:ArtifactProvenanceExtension]]`` content, and replaces the
+    entire section with only the injection sibling (using ``_build_injection_only``).
+    Every line before and after the span is passed through unchanged.
+
+    Returns a body-transform result dict (same shape as ``_transform_generic_body``).
+    """
+    OLD_OPEN = "[[SECTION:ArtifactProvenance]]"
+    OLD_CLOSE = "[[/SECTION:ArtifactProvenance]]"
+
+    sec_open_idx = None
+    sec_close_idx = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == OLD_OPEN and sec_open_idx is None:
+            sec_open_idx = i
+        elif stripped == OLD_CLOSE and sec_open_idx is not None:
+            sec_close_idx = i
+            break
+
+    if sec_open_idx is None or sec_close_idx is None:
+        return {
+            "success": False,
+            "errors": [TransformError(
+                line_number=1,
+                message="Could not locate [[SECTION:ArtifactProvenance]] block",
+            )],
+        }
+
+    inner_lines = lines[sec_open_idx + 1:sec_close_idx]
+    ext_content = _extract_provenance_extension_content(inner_lines)
+    injection_lines = _build_injection_only(ext_content)
+
+    result_lines = list(lines[:sec_open_idx]) + injection_lines + list(lines[sec_close_idx + 1:])
+    return {
+        "success": True,
+        "lines": result_lines,
+        "sections_added": [],
+        "injections_added": ["ArtifactProvenanceExtension"],
+        "deployed_added": [],
+        "errors": [],
+    }
+
+
+def _build_injection_only(ext_content: str) -> list[str]:
+    """Return lines that make up only the injection sibling (no deployed region).
+
+    ArtifactProvenance is retired. This function produces the injection without
+    the now-retired ``[[DEPLOYED:ArtifactProvenance]]`` region::
+
+        [[INJECTION:ArtifactProvenanceExtension]]
+        {ext_content}
+        [[/INJECTION:ArtifactProvenanceExtension]]
+
+    ``ext_content`` is spliced in verbatim; an empty string yields an empty region.
+    """
+    shape: list[str] = [
+        "[[INJECTION:ArtifactProvenanceExtension]]\n",
+    ]
+    if ext_content:
+        shape.append(ext_content)
+    shape.append("[[/INJECTION:ArtifactProvenanceExtension]]\n")
+    return shape
+
+
+def _extract_provenance_extension_content(inner_lines: list[str]) -> str:
+    """Extract content between [[INJECTION:ArtifactProvenanceExtension]] markers.
+
+    Scans ``inner_lines`` (the lines inside a provenance section or region) for the
+    injection open/close pair and returns the bytes between them as a single string.
+    Newlines on each content line are preserved exactly.  Returns ``""`` when the
+    markers are absent or when the injection is empty.
+    """
+    inj_open = "[[INJECTION:ArtifactProvenanceExtension]]"
+    inj_close = "[[/INJECTION:ArtifactProvenanceExtension]]"
+
+    inj_open_idx = None
+    inj_close_idx = None
+    for i, line in enumerate(inner_lines):
+        stripped = line.strip()
+        if stripped == inj_open and inj_open_idx is None:
+            inj_open_idx = i
+        elif stripped == inj_close and inj_open_idx is not None:
+            inj_close_idx = i
+            break
+
+    if inj_open_idx is None or inj_close_idx is None:
+        return ""
+    return "".join(inner_lines[inj_open_idx + 1:inj_close_idx])
+
+
+def _build_provenance_new_shape(ext_content: str) -> list[str]:
+    """Return the list of lines that make up the new-shape provenance region.
+
+    Produces::
+
+        [[DEPLOYED:ArtifactProvenance]]
+        [[/DEPLOYED:ArtifactProvenance]]
+
+        [[INJECTION:ArtifactProvenanceExtension]]
+        {ext_content}
+        [[/INJECTION:ArtifactProvenanceExtension]]
+
+    ``ext_content`` is spliced in verbatim between the injection markers; it
+    already ends with ``\\n`` when non-empty (it is extracted directly from the
+    input lines).  An empty ``ext_content`` yields an empty injection region.
+    """
+    shape: list[str] = [
+        "[[DEPLOYED:ArtifactProvenance]]\n",
+        "[[/DEPLOYED:ArtifactProvenance]]\n",
+        "\n",
+        "[[INJECTION:ArtifactProvenanceExtension]]\n",
+    ]
+    if ext_content:
+        shape.append(ext_content)
+    shape.append("[[/INJECTION:ArtifactProvenanceExtension]]\n")
+    return shape
+
+
+def _rewrite_old_provenance_to_new_shape(lines: list[str]) -> dict:
+    """Replace a [[SECTION:ArtifactProvenance]] block with the new deployed-region shape.
+
+    Finds the old ``[[SECTION:ArtifactProvenance]]`` … ``[[/SECTION:ArtifactProvenance]]``
+    span, extracts any nested ``[[INJECTION:ArtifactProvenanceExtension]]`` content
+    (preserving it byte-identically), and replaces the entire span with the new shape.
+    Every line before and after the span is passed through unchanged.
+
+    Returns a body-transform result dict (same shape as ``_transform_generic_body``).
+    """
+    OLD_OPEN = "[[SECTION:ArtifactProvenance]]"
+    OLD_CLOSE = "[[/SECTION:ArtifactProvenance]]"
+
+    sec_open_idx = None
+    sec_close_idx = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == OLD_OPEN and sec_open_idx is None:
+            sec_open_idx = i
+        elif stripped == OLD_CLOSE and sec_open_idx is not None:
+            sec_close_idx = i
+            break
+
+    if sec_open_idx is None or sec_close_idx is None:
+        return {
+            "success": False,
+            "errors": [TransformError(
+                line_number=1,
+                message="Could not locate [[SECTION:ArtifactProvenance]] block",
+            )],
+        }
+
+    inner_lines = lines[sec_open_idx + 1:sec_close_idx]
+    ext_content = _extract_provenance_extension_content(inner_lines)
+    new_shape = _build_provenance_new_shape(ext_content)
+
+    result_lines = list(lines[:sec_open_idx]) + new_shape + list(lines[sec_close_idx + 1:])
+    return {
+        "success": True,
+        "lines": result_lines,
+        "sections_added": [],
+        "injections_added": ["ArtifactProvenanceExtension"],
+        "deployed_added": ["ArtifactProvenance"],
+        "errors": [],
+    }
+
+
 def _transform_harness_body(harness_lines: list[str], generic_lines: list[str]) -> dict:
     """Transform a harness file's body using the generic reference.
 
@@ -641,6 +912,7 @@ def _transform_harness_body(harness_lines: list[str], generic_lines: list[str]) 
         "lines": result_lines,
         "sections_added": sections_added,
         "injections_added": injections_added,
+        "deployed_added": [],
     }
 
 

@@ -96,3 +96,27 @@ def malformed_no_closing_separator_input(fixtures_dir: pathlib.Path) -> pathlib.
 @pytest.fixture
 def malformed_no_version_field_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
     return fixtures_dir / "malformed_no_version_field_input.md"
+
+
+@pytest.fixture
+def provenance_untagged_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Untagged source file with a '## Artifact Provenance' heading at canonical slot 3."""
+    return fixtures_dir / "provenance_untagged_input.md"
+
+
+@pytest.fixture
+def provenance_old_shape_empty_ext_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Already-tagged file with [[SECTION:ArtifactProvenance]] and an empty extension injection."""
+    return fixtures_dir / "provenance_old_shape_empty_ext_input.md"
+
+
+@pytest.fixture
+def provenance_old_shape_nonempty_ext_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Already-tagged file with [[SECTION:ArtifactProvenance]] and non-empty extension content."""
+    return fixtures_dir / "provenance_old_shape_nonempty_ext_input.md"
+
+
+@pytest.fixture
+def provenance_new_shape_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Already-tagged file with the new [[DEPLOYED:ArtifactProvenance]] shape (idempotency case)."""
+    return fixtures_dir / "provenance_new_shape_input.md"

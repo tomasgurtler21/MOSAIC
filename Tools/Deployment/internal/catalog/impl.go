@@ -11,21 +11,22 @@ import (
 
 // catalogImpl is the concrete, immutable implementation of Catalog populated by loadCatalog.
 type catalogImpl struct {
-	root        string
-	workers     []domain.Agent  // sorted by Key
-	orchestr    domain.Agent
-	utilities   []domain.Agent
-	agentIdx    map[string]domain.Agent  // all agents by key (workers + orchestrator + utilities)
-	skills      []domain.Skill
-	skillIdx    map[string]domain.Skill
-	hooks       []domain.HookBundle
-	hookIdx     map[string]domain.HookBundle
-	workflows   []domain.Workflow
-	wfIdx       map[string]domain.Workflow
-	categories  []domain.WorkflowCategory // in index order
-	tiers       []domain.TierInfo
-	issues      []Issue
-	sourcePaths map[string]bool // every absolute path emitted by the catalog
+	root         string
+	workers      []domain.Agent  // sorted by Key
+	orchestr     domain.Agent
+	utilities    []domain.Agent
+	agentIdx     map[string]domain.Agent  // all agents by key (workers + orchestrator + utilities)
+	numericIDIdx map[string]domain.Agent  // agents by numeric frontmatter `id`; excludes empty-id agents
+	skills       []domain.Skill
+	skillIdx     map[string]domain.Skill
+	hooks        []domain.HookBundle
+	hookIdx      map[string]domain.HookBundle
+	workflows    []domain.Workflow
+	wfIdx        map[string]domain.Workflow
+	categories   []domain.WorkflowCategory // in index order
+	tiers        []domain.TierInfo
+	issues       []Issue
+	sourcePaths  map[string]bool // every absolute path emitted by the catalog
 }
 
 // Root returns the absolute MOSAIC repository root passed to Load.
@@ -146,6 +147,7 @@ func loadCatalog(root string) (Catalog, error) {
 	}
 
 	cat.issues = append(cat.issues, cat.loadAgents(absRoot)...)
+	cat.issues = append(cat.issues, buildNumericIDIndex(cat)...)
 	cat.issues = append(cat.issues, cat.loadSkills(absRoot)...)
 	cat.issues = append(cat.issues, cat.loadHooks(absRoot)...)
 	cat.issues = append(cat.issues, cat.loadWorkflows(absRoot)...)

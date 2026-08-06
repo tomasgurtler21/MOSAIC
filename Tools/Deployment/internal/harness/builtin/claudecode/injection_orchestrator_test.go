@@ -24,6 +24,7 @@ package claudecode_test
 //   - Cases (a), (c), (d), (e), (g): PASS in RED phase (existing behavior satisfies these).
 
 import (
+	"sort"
 	"strings"
 	"testing"
 
@@ -142,12 +143,22 @@ func TestInjection_NonCanonicalName_ReturnsFalse_ForAllAgentKeys(t *testing.T) {
 }
 
 // TestInjection_Deterministic verifies case (e): two calls with equal InjectionRequest
-// inputs return equal outputs, for all canonical injection names and all agent keys.
+// inputs return equal outputs, for a representative set of advisory injection names and
+// all agent keys. Injection names are open (no closed allowlist since Stage 2); the
+// advisory InjectionParent map keys serve as the representative set.
 func TestInjection_Deterministic(t *testing.T) {
 	mod := newModule(t)
 
+	// Collect advisory injection names from InjectionParent in sorted order for
+	// deterministic subtest execution.
+	var names []string
+	for name := range docformat.InjectionParent {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
 	agentKeys := []string{"", "some-subagent", "orchestrator"}
-	for _, name := range docformat.CanonicalInjections {
+	for _, name := range names {
 		for _, agentKey := range agentKeys {
 			req := domain.InjectionRequest{Name: name, AgentKey: agentKey}
 			c1, ok1 := mod.Injection(req)

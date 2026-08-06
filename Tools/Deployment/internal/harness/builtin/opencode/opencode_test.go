@@ -250,6 +250,7 @@ func TestGoldenFile_OpenCode_ContractsReviewAgent(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Validation", "contracts-review.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -264,7 +265,8 @@ func TestGoldenFile_OpenCode_ContractsReviewAgent(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "contracts-review.md")
@@ -287,6 +289,7 @@ func TestGoldenFile_OpenCode_TestRunnerAgent(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -301,7 +304,8 @@ func TestGoldenFile_OpenCode_TestRunnerAgent(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "test-runner.md")
@@ -324,6 +328,7 @@ func TestGoldenFile_OpenCode_PlannerTDDSoftAgent(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Planning", "planner-tdd-soft.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -338,7 +343,8 @@ func TestGoldenFile_OpenCode_PlannerTDDSoftAgent(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "planner-tdd-soft.md")
@@ -362,6 +368,7 @@ func TestGoldenFile_OpenCode_Orchestrator(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Orchestrator", "orchestrator.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -376,7 +383,8 @@ func TestGoldenFile_OpenCode_Orchestrator(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleOrchestrator,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	}
 
 	goldenPath := filepath.Join(goldenDir(t), "orchestrator.md")
@@ -674,6 +682,7 @@ func TestFrontmatter_NameFieldDropped(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -688,7 +697,8 @@ func TestFrontmatter_NameFieldDropped(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -711,6 +721,7 @@ func TestFrontmatter_ModeSubagentAdded(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -725,7 +736,8 @@ func TestFrontmatter_ModeSubagentAdded(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -752,6 +764,7 @@ func TestFrontmatter_OrchestratorGetsPrimaryMode(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Orchestrator", "orchestrator.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -766,7 +779,8 @@ func TestFrontmatter_OrchestratorGetsPrimaryMode(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleOrchestrator,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -792,6 +806,7 @@ func TestFrontmatter_GenericOnlyKeysDropped(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -806,7 +821,8 @@ func TestFrontmatter_GenericOnlyKeysDropped(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -834,6 +850,7 @@ func TestFrontmatter_KeyOrderMatchesHarnessConvention(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -848,7 +865,8 @@ func TestFrontmatter_KeyOrderMatchesHarnessConvention(t *testing.T) {
 		Model:    testModel,
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -894,6 +912,7 @@ func TestModelFormat_ProviderModelIDIsEmittedVerbatim(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -909,7 +928,8 @@ func TestModelFormat_ProviderModelIDIsEmittedVerbatim(t *testing.T) {
 		Model:    domain.ModelSelection{ModelID: wantModelID, Origin: domain.OriginHarnessList},
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -937,6 +957,7 @@ func TestModelFormat_CustomIDPassthrough(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -953,7 +974,8 @@ func TestModelFormat_CustomIDPassthrough(t *testing.T) {
 		Model:    domain.ModelSelection{ModelID: customModelID, Origin: domain.OriginCustom},
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)
@@ -979,6 +1001,7 @@ func TestModelFormat_NonConventionalIDNeverRewritten(t *testing.T) {
 	root := repoRoot(t)
 	protocol := loadProtocol(t, root)
 
+
 	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
@@ -995,7 +1018,8 @@ func TestModelFormat_NonConventionalIDNeverRewritten(t *testing.T) {
 		Model:    domain.ModelSelection{ModelID: bareModelID, Origin: domain.OriginCustom},
 		Scope:    domain.ScopeProject,
 		Role:     domain.RoleWorker,
-		Protocol: protocol,
+		Protocol:   protocol,
+
 	})
 	if err != nil {
 		t.Fatalf("transform.Apply: %v", err)

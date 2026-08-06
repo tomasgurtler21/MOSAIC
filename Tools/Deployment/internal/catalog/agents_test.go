@@ -119,13 +119,13 @@ func TestAgents_SortedByKey(t *testing.T) {
 	}
 }
 
-// TestAgents_AllHaveWorkerRole verifies that every agent returned by Agents() carries
-// RoleWorker. Orchestrator and utility agents must not appear in this list.
-func TestAgents_AllHaveWorkerRole(t *testing.T) {
+// TestAgents_AllHaveSubagentRole verifies that every agent returned by Agents() carries
+// RoleSubagent. Orchestrator and utility agents must not appear in this list.
+func TestAgents_AllHaveSubagentRole(t *testing.T) {
 	cat := loadRealCatalog(t)
 	for _, a := range cat.Agents() {
-		if a.Role != domain.RoleWorker {
-			t.Errorf("Agents()[%q].Role = %q, want RoleWorker", a.Key, a.Role)
+		if a.Role != domain.RoleSubagent {
+			t.Errorf("Agents()[%q].Role = %q, want RoleSubagent", a.Key, a.Role)
 		}
 	}
 }
@@ -292,8 +292,8 @@ func TestAgent_KnownAgent_TestRunner(t *testing.T) {
 	if a.Key != "test-runner" {
 		t.Errorf("test-runner Key = %q, want %q", a.Key, "test-runner")
 	}
-	if a.Role != domain.RoleWorker {
-		t.Errorf("test-runner Role = %q, want RoleWorker", a.Role)
+	if a.Role != domain.RoleSubagent {
+		t.Errorf("test-runner Role = %q, want RoleSubagent", a.Role)
 	}
 	if a.Category != "Execution" {
 		t.Errorf("test-runner Category = %q, want %q", a.Category, "Execution")
@@ -407,10 +407,10 @@ func TestOrchestrator_NotIncludedInAgents(t *testing.T) {
 // Utility agents — UtilityAgents()
 // ---------------------------------------------------------------------------
 
-// TestUtilityAgents_Count_Matches6 verifies that UtilityAgents() returns exactly 6
+// TestUtilityAgents_Count_Matches6 verifies that UtilityAgents() returns exactly 7
 // utility agents, matching the known count in the repository.
 func TestUtilityAgents_Count_Matches6(t *testing.T) {
-	const wantCount = 6
+	const wantCount = 7
 	cat := loadRealCatalog(t)
 	utility := cat.UtilityAgents()
 	if len(utility) != wantCount {
@@ -652,7 +652,7 @@ func allAgentKeys(agents []domain.Agent) []string {
 // Infrastructure, Triggers, and OnFailure fields on domain.Agent from the
 // infrastructure-agent source files in Agents/Generic/Agents/Infrastructure/.
 //
-// Infrastructure agents are loaded as ordinary RoleWorker agents with
+// Infrastructure agents are loaded as ordinary RoleSubagent agents with
 // Category = "Infrastructure". The new fields distinguish them from plain
 // worker agents at runtime.
 

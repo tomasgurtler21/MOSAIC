@@ -11,7 +11,20 @@ import (
 // Optional checks are gated behind ValidateOptions fields.
 func Validate(d *Document, opts ValidateOptions) []Issue {
 	raw := d.Body().bytes()
-	return validateBytes(raw, opts)
+	issues := validateBytes(raw, opts)
+	issues = append(issues, validateDocumentRules(d, opts)...)
+
+	// Strict mode: promote every SeverityWarning issue to SeverityError.
+	// SeverityAdvice is never promoted — advice that could fail a run is not advice.
+	if opts.Strict {
+		for i := range issues {
+			if issues[i].Severity == SeverityWarning {
+				issues[i].Severity = SeverityError
+			}
+		}
+	}
+
+	return issues
 }
 
 // validateBytes runs the full structural validation pipeline over raw body bytes.
@@ -107,9 +120,9 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 				}
 			}
 
-			// wrong-marker: a canonical name declared with the wrong marker kind.
-			// This is reported in preference to unknown-injection/unknown-deployed so
-			// that one mistake produces one actionable diagnostic.
+			// wrong-marker: a tool-managed name declared with the wrong marker kind.
+			// This is reported in preference to unknown-deployed so that one mistake
+			// produces one actionable diagnostic.
 			if kind == NodeInjection && isCanonicalDeployed(name) {
 				issues = append(issues, Issue{
 					Severity: SeverityError,
@@ -120,25 +133,37 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 					),
 					Line: lineNum,
 				})
-			} else if kind == NodeDeployed && isCanonicalInjection(name) {
-				issues = append(issues, Issue{
-					Severity: SeverityError,
-					Code:     "wrong-marker",
-					Message: fmt.Sprintf(
-						"boundary name %q is a user-owned name and must be declared with [[INJECTION:]] but was declared with [[DEPLOYED:]] (line %d)",
-						name, lineNum,
-					),
-					Line: lineNum,
-				})
 			}
 
 			// wrong-parent: canonical injections and deployed regions must appear inside
 			// their expected parent section.
+			//
+			// InjectionParent sentinel values:
+			//   absent key: no parent requirement — no check performed
+			//   "":         must be at body top level (not inside any section)
+			//   non-empty:  must be inside that named section
+			//
+			// The "" = top-level semantic mirrors the DeployedParent branch below.
+			// Presence-with-"" and absence are distinct: "" means top-level required,
+			// not "no requirement".
 			if opts.RequireInjectionParents {
 				if kind == NodeInjection {
 					if expectedParent, isCanonical := InjectionParent[name]; isCanonical {
 						current := enclosingSection()
-						if current != expectedParent {
+						if expectedParent == "" {
+							// Must be at body top level — not inside any section.
+							if current != "" {
+								issues = append(issues, Issue{
+									Severity: SeverityAdvice,
+									Code:     "wrong-parent",
+									Message: fmt.Sprintf(
+										"injection %q must be at body top level but appears inside %q (line %d)",
+										name, current, lineNum,
+									),
+									Line: lineNum,
+								})
+							}
+						} else if current != expectedParent {
 							var msg string
 							if current == "" {
 								msg = fmt.Sprintf(
@@ -152,7 +177,7 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 								)
 							}
 							issues = append(issues, Issue{
-								Severity: SeverityError,
+								Severity: SeverityAdvice,
 								Code:     "wrong-parent",
 								Message:  msg,
 								Line:     lineNum,
@@ -202,36 +227,17 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 				}
 			}
 
-			// unknown-injection: flag non-canonical injection names when the option is set.
-			// wrong-marker is raised in preference when the name is canonical-but-misplaced,
-			// so a single mistake produces one actionable diagnostic.
-			if kind == NodeInjection && !opts.AllowUnknownInjections {
-				if isCanonicalDeployed(name) {
-					// wrong-marker already raised; skip unknown-injection to avoid a second
-					// diagnostic for the same mistake.
-				} else if !isCanonicalInjection(name) {
-					issues = append(issues, Issue{
-						Severity: SeverityError,
-						Code:     "unknown-injection",
-						Message:  fmt.Sprintf("injection %q is not a recognised canonical injection name (line %d)", name, lineNum),
-						Line:     lineNum,
-					})
-				}
-			}
-
-			// unknown-deployed: flag unrecognised [[DEPLOYED:]] names when the option is set.
-			// wrong-marker is raised in preference when the name is canonical-but-misplaced.
-			if kind == NodeDeployed && !opts.AllowUnknownInjections {
-				if isCanonicalInjection(name) {
-					// wrong-marker already raised; skip unknown-deployed.
-				} else if !isCanonicalDeployed(name) {
-					issues = append(issues, Issue{
-						Severity: SeverityError,
-						Code:     "unknown-deployed",
-						Message:  fmt.Sprintf("deployed region %q is not a recognised canonical tool-managed name (line %d)", name, lineNum),
-						Line:     lineNum,
-					})
-				}
+			// unknown-deployed: flag unrecognised [[DEPLOYED:]] names unconditionally.
+			// Injection names are open and are never flagged.
+			// wrong-marker is raised in preference when a tool-managed name appears under
+			// [[INJECTION:]], so a single mistake produces one actionable diagnostic.
+			if kind == NodeDeployed && !isCanonicalDeployed(name) {
+				issues = append(issues, Issue{
+					Severity: SeverityError,
+					Code:     "unknown-deployed",
+					Message:  fmt.Sprintf("deployed region %q is not a recognised canonical tool-managed name (line %d)", name, lineNum),
+					Line:     lineNum,
+				})
 			}
 
 			stack = append(stack, stackEntry{kind: kind, name: name, lineNum: lineNum})
@@ -327,16 +333,6 @@ func canonicalOrderIndex(name string) int {
 		}
 	}
 	return -1
-}
-
-// isCanonicalInjection reports whether name appears in CanonicalInjections.
-func isCanonicalInjection(name string) bool {
-	for _, ci := range CanonicalInjections {
-		if ci == name {
-			return true
-		}
-	}
-	return false
 }
 
 // tagTypeName returns "SECTION", "INJECTION", or "DEPLOYED" for use in error messages.

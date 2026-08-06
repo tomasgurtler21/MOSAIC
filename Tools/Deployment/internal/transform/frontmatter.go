@@ -171,6 +171,23 @@ func applyFrontmatter(
 		changes = append(changes, *c)
 	}
 
+	// Step 4b: Stamp bundle_version for roles that receive bundle blocks. The stamp enables
+	// staleness detection on subsequent runs. Written only when AppliesToRole is true, so the
+	// orchestrator (which today receives no bundle blocks) is never stamped.
+	if req.Bundle.AppliesToRole(req.Role) && req.Bundle.Version != "" {
+		before := ""
+		if v, ok := fm.Get("bundle_version"); ok {
+			before = renderValue(v)
+		}
+		fm.Set("bundle_version", domain.ScalarValue(req.Bundle.Version, domain.QuotePlain))
+		changes = append(changes, FieldChange{
+			Key:    "bundle_version",
+			Before: before,
+			After:  req.Bundle.Version,
+			Reason: "bundle version stamp",
+		})
+	}
+
 	// Step 5: Set the resolved tool fields produced by Module.Tools (or PlaceholderExpansion).
 	for _, field := range toolResult.Fields {
 		before := ""

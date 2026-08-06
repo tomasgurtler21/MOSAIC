@@ -85,6 +85,20 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		return domain.RunSummary{}, err
 	}
 
+	// Load the deployed-sections bundle once for the run. Failure aborts before any file is written.
+	bundle, err := s.loadBundle()
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
+
+	// Build the deployed-agent id index once for this run, before any per-agent probing.
+	// Non-nil only when the harness declares a supported agents directory.
+	agentsDir := module.Descriptor().Paths.Agents.Project
+	var deployedAgentIndex DeployedAgentIndex
+	if module.Descriptor().Paths.Agents.Supported && agentsDir != "" {
+		deployedAgentIndex = buildDeployedAgentIndex(workspace, agentsDir)
+	}
+
 	snap, _ := s.deps.Manifest.Load(workspace)
 
 	// Probe the deployed orchestrator early to discover which workflow IDs are already
@@ -126,7 +140,17 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	if orchTargetPath != "" {
 		seed = map[string]domain.DeployedArtifactState{orchTargetPath: orchState}
 	}
-	deployedState := probeDeployedState(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed)
+
+	// Build the agent-by-key map for id-based probe resolution.
+	probeAgentByKey := make(map[string]domain.Agent, len(set.Agents))
+	for _, a := range set.Agents {
+		probeAgentByKey[a.Key] = a
+	}
+
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed, deployedAgentIndex, probeAgentByKey)
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
 
 	modelSelections := deployedModelSelections(set.Agents, plannedPaths, deployedState)
 
@@ -183,6 +207,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		Models:              allModels,
 		ToolMappingsVersion: toolMappingsVersion,
 		ProtocolVersion:     protocol.Version,
+		BundleVersion:       bundle.Version,
 	}
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
@@ -245,7 +270,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	// Update re-deploys whatever was already deployed; it does not re-prompt for
 	// infrastructure agent choices. The InfrastructureAgents injection region is
 	// preserved from the deployed file via the InjectionProject preservation pass.
-	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol)
+	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol, bundle)
 
 	versionStamps := buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor(), toolMappingsVersion)
 

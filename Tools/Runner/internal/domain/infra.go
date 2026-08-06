@@ -31,3 +31,13 @@ type InfraDispatchResult struct {
 	Response ProtocolResponse
 	Step     CompletedStep
 }
+
+// NopDebugLogger is the named no-op DebugLogger. It is the default whenever no
+// logger is injected, so consumers never hold a nil DebugLogger and never need
+// a nil check at a call site.
+//
+// The zero value is usable; NopDebugLogger{} may be copied freely and shared.
+type NopDebugLogger struct{}
+
+// Log implements DebugLogger. It discards the entry.
+func (NopDebugLogger) Log(event string, message string, fields ...DebugField) {}

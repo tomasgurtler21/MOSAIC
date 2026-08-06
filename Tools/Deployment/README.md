@@ -382,7 +382,7 @@ from `[[INJECTION:Name]]` regions, which belong to the user and are preserved
 across updates.
 
 For the generic source-file format reference (fields, boundary conventions,
-version bump rules), see [Agents/Generic/SOURCE-FORMAT.md](../../Agents/Generic/SOURCE-FORMAT.md).
+version bump rules), see [Agents/Generic/SourceFilesFormat.md](../../Agents/Generic/SourceFilesFormat.md).
 
 ---
 

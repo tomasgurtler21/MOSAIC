@@ -363,6 +363,7 @@ type Severity string
 const (
 	SeverityError   Severity = "error"
 	SeverityWarning Severity = "warning"
+	SeverityAdvice  Severity = "advice" // reported, never fatal; never promoted by Strict mode
 )
 
 // Issue is one structural finding produced by Validate.
@@ -378,19 +379,30 @@ type Issue struct {
 type ValidateOptions struct {
 	RequireCanonicalSections bool
 	RequireInjectionParents  bool
-	AllowUnknownInjections   bool
+	Strict                   bool // promotes every SeverityWarning issue to SeverityError; never promotes SeverityAdvice
+
+	// Kind distinguishes source files from deployed files for rule 12 (populated-source-region).
+	// When Kind is DocumentUnknown (the zero value), kind-specific rules are skipped.
+	Kind DocumentKind
+
+	// Role is the agent's declared role ("subagent" or "orchestrator"). It governs which
+	// conduct regions are required (rule 8b) and which the role forbids (rule 8c).
+	// An empty string skips role-specific rules.
+	Role string
+
+	// FileBaseName is the file's base name without the .md extension. Used by rule 3
+	// (name-path-mismatch) to verify that the frontmatter `name` field matches. An empty
+	// string skips rule 3.
+	FileBaseName string
 }
 
 // CanonicalSections lists the canonical section names in their expected document order.
 // Populated in vocabulary.go.
 var CanonicalSections []string
 
-// CanonicalInjections lists all recognised injection names.
-// Populated in vocabulary.go.
-var CanonicalInjections []string
-
-// InjectionParent maps each canonical injection name to its expected parent section name.
-// Populated in vocabulary.go.
+// InjectionParent maps each advisory injection name to its usual parent section name.
+// Injection names are open: an unlisted name is valid and preserved. This table is
+// consulted for advisory reporting only. Populated in vocabulary.go.
 var InjectionParent map[string]string
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 id: test-validator-full
 version: 1.0.0
 name: test-agent
-description: Valid file with all 7 sections, the CommunicationProtocol deployed slot, and multiple non-empty regions
+description: Valid file with 6 sections, one top-level DEPLOYED slot (CommunicationProtocol), and multiple non-empty regions
 ---
 
 [[SECTION:Identity]]
@@ -30,18 +30,6 @@ Available workflows list injected here.
 Standard protocol content delivered by the deploy tool.
 
 [[/DEPLOYED:CommunicationProtocol]]
----
-
-[[SECTION:ArtifactProvenance]]
-## Artifact Provenance
-
-Every output artifact carries run_id and created_by frontmatter fields.
-
-[[INJECTION:ArtifactProvenanceExtension]]
-Artifact provenance extension content injected here.
-[[/INJECTION:ArtifactProvenanceExtension]]
-
-[[/SECTION:ArtifactProvenance]]
 ---
 
 [[SECTION:Capabilities]]

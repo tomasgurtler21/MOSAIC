@@ -18,10 +18,9 @@ Codebase context placed in wrong parent section.
 [[/DEPLOYED:CommunicationProtocol]]
 ---
 
-[[SECTION:ArtifactProvenance]]
-## Artifact Provenance
-Content here.
-[[/SECTION:ArtifactProvenance]]
+[[DEPLOYED:ArtifactProvenance]]
+[[/DEPLOYED:ArtifactProvenance]]
+
 ---
 [[SECTION:Capabilities]]
 ## Capabilities

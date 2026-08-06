@@ -340,13 +340,23 @@ func TestFlow_ConfigScreen_InfraClassStep_PopulatesInfraClassSelections(t *testi
 		{Name: "checkpoint-manager-alt", Class: "checkpoint"},
 	})
 
-	// Drive through: deviation (enter), harness (enter → fake, skip timeout),
-	// versionDrift (enter), checkpoints (enter).
+	// Drive through: deviation (enter), harness (enter → claude-code, always goes to timeout),
+	// timeout (type+enter), versionDrift (enter), checkpoints (enter).
 	// After checkpoints, the infra-class step should appear for the checkpoint class.
-	driveConfigStepEnter(s)
-	driveConfigStepEnter(s)
-	driveConfigStepEnter(s)
-	driveConfigStepEnter(s)
+	driveConfigStepEnter(s) // deviation
+	driveConfigStepEnter(s) // harness → must advance to timeout step (not version drift)
+
+	// After harness Enter the screen must show the invocation-timeout entry step.
+	// This assertion fails until the fake-harness option is removed so that
+	// advance() always proceeds to configStepHarnessTimeout.
+	if !containsAny(s.View(), "timeout", "Timeout", "Invocation", "invocation") {
+		t.Fatalf("after harness Enter, expected invocation-timeout step; "+
+			"fake harness may still be skipping timeout:\n%s", s.View())
+	}
+
+	driveConfigStepTimeout(s) // timeout → version drift
+	driveConfigStepEnter(s)   // version drift
+	driveConfigStepEnter(s)   // checkpoints
 
 	// If the infra-class step is shown, drive it by selecting option 0
 	// (checkpoint-manager-git) and confirming.
@@ -389,12 +399,23 @@ func TestFlow_ConfigScreen_InfraClassStep_SkippedWhenSingleAgentPerClass(t *test
 		{Name: "checkpoint-manager-git", Class: "checkpoint"},
 	})
 
-	// Drive through: deviation, harness (fake), versionDrift, checkpoints.
+	// Drive through: deviation, harness (→ claude-code, timeout step always present),
+	// timeout (type+enter), versionDrift, checkpoints.
 	// Done() should be true immediately after — no infra-class step.
-	driveConfigStepEnter(s)
-	driveConfigStepEnter(s)
-	driveConfigStepEnter(s)
-	driveConfigStepEnter(s)
+	driveConfigStepEnter(s) // deviation
+	driveConfigStepEnter(s) // harness → must advance to timeout step (not version drift)
+
+	// After harness Enter the screen must show the invocation-timeout entry step.
+	// This assertion fails until the fake-harness option is removed so that
+	// advance() always proceeds to configStepHarnessTimeout.
+	if !containsAny(s.View(), "timeout", "Timeout", "Invocation", "invocation") {
+		t.Fatalf("after harness Enter, expected invocation-timeout step; "+
+			"fake harness may still be skipping timeout:\n%s", s.View())
+	}
+
+	driveConfigStepTimeout(s) // timeout → version drift
+	driveConfigStepEnter(s)   // version drift
+	driveConfigStepEnter(s)   // checkpoints
 
 	if !s.Done() {
 		t.Error("ConfigScreen did not reach Done() after the standard steps; configStepInfraClass must be skipped when only one agent per gated class is declared")
@@ -410,6 +431,16 @@ func TestFlow_ConfigScreen_InfraClassStep_SkippedWhenSingleAgentPerClass(t *test
 
 // driveConfigStepEnter sends one Enter key press to the ConfigScreen.
 func driveConfigStepEnter(s *screens.ConfigScreen) {
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+// driveConfigStepTimeout types a valid invocation timeout ("30m") into the
+// ConfigScreen and confirms it.  Must be called when the ConfigScreen is at
+// the invocation-timeout step (configStepHarnessTimeout).
+func driveConfigStepTimeout(s *screens.ConfigScreen) {
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
 	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
 }
 

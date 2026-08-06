@@ -15,12 +15,11 @@ class BoundaryKind(Enum):
     DEPLOYED = "DEPLOYED"
 
 
-# Seven canonical section names in document order.
+# Six canonical section names in document order.
 # CommunicationProtocol is NOT a member — it is a tool-managed boundary name
 # declared with [[DEPLOYED:]] and occupies position 2 in CANONICAL_ORDER.
 CANONICAL_SECTIONS: tuple[str, ...] = (
     "Identity",
-    "ArtifactProvenance",
     "Capabilities",
     "Constraints",
     "ErrorHandling",
@@ -28,14 +27,13 @@ CANONICAL_SECTIONS: tuple[str, ...] = (
     "ExecutionPhilosophy",
 )
 
-# Eight canonical document slots in required order.  Entry at index 1 is
+# Seven canonical document slots in required order. The entry at index 1 is
 # "CommunicationProtocol", satisfied by a top-level [[DEPLOYED:CommunicationProtocol]]
-# boundary; every other entry is a section name.  This is the list the
-# document-order check walks.
+# boundary; every other entry is a section name. ArtifactProvenance is removed.
+# This is the list the document-order check walks.
 CANONICAL_ORDER: tuple[str, ...] = (
     "Identity",
     "CommunicationProtocol",
-    "ArtifactProvenance",
     "Capabilities",
     "Constraints",
     "ErrorHandling",
@@ -43,35 +41,33 @@ CANONICAL_ORDER: tuple[str, ...] = (
     "ExecutionPhilosophy",
 )
 
-# Eight user-owned injection names.  Tool-managed names and ProtocolExtension
-# are NOT members.
-CANONICAL_INJECTIONS: tuple[str, ...] = (
-    "IdentityExtension",
-    "ArtifactProvenanceExtension",
-    "CodebaseContext",
-    "OutputArtifactTemplate",
-    "ErrorHandlingExtension",
-    "ContextLimits",
-    "SeverityThresholds",
-    "SeverityDefinitions",
-)
-
-# Six tool-managed boundary names.  These must be declared with [[DEPLOYED:]]
-# in any document that uses them.
+# Eleven tool-managed boundary names, a closed set.
+# These must be declared with [[DEPLOYED:]] in any document that uses them.
+# ArtifactProvenance is removed; AuthorityHierarchy, ClosingProcedure,
+# ProtocolConstraints, ErrorHandlingCommon, and ExecutionPhilosophyCommon are added.
 CANONICAL_DEPLOYED: tuple[str, ...] = (
     "CommunicationProtocol",
+    "AuthorityHierarchy",
+    "ClosingProcedure",
     "AvailableWorkflows",
     "InfrastructureAgents",
     "LanguagePatterns",
+    "ProtocolConstraints",
     "HarnessConstraints",
     "CustomConstraints",
+    "ErrorHandlingCommon",
+    "ExecutionPhilosophyCommon",
 )
 
-# User-owned injection name -> required parent section.
-# Tool-managed names and ProtocolExtension are NOT members.
-INJECTION_PARENT_MAP: dict[str, str] = {
+# Advisory injection name -> usual parent section.
+# Injection names are open: an unlisted name is valid and preserved like any other.
+# This table is consulted for advisory reporting only, never enforcement.
+# A value of None means the injection usually appears at body top level (not inside
+# any section). An absent key means no usual parent is recorded.
+# ArtifactProvenanceExtension is removed; ProtocolExtension is added.
+INJECTION_PARENT_MAP: dict[str, str | None] = {
+    "ProtocolExtension": None,      # top level
     "IdentityExtension": "Identity",
-    "ArtifactProvenanceExtension": "ArtifactProvenance",
     "CodebaseContext": "Capabilities",
     "OutputArtifactTemplate": "Capabilities",
     "SeverityThresholds": "Capabilities",
@@ -82,19 +78,25 @@ INJECTION_PARENT_MAP: dict[str, str] = {
 
 # Tool-managed boundary name -> required parent section.
 # A value of None means the boundary must appear at body top level.
+# Eleven entries mirroring the Go DeployedParent map.
 DEPLOYED_PARENT_MAP: dict[str, str | None] = {
-    "CommunicationProtocol": None,   # top level — must not be nested in any section
+    "CommunicationProtocol": None,      # top level — must not be nested in any section
+    "AuthorityHierarchy": "Identity",
+    "ClosingProcedure": "Identity",
     "AvailableWorkflows": "Identity",
     "InfrastructureAgents": "Identity",
     "LanguagePatterns": "Capabilities",
+    "ProtocolConstraints": "Constraints",
     "HarnessConstraints": "Constraints",
     "CustomConstraints": "Constraints",
+    "ErrorHandlingCommon": "ErrorHandling",
+    "ExecutionPhilosophyCommon": "ExecutionPhilosophy",
 }
 
 # Canonical name -> the marker kind it must be declared with.
+# Rebuilt from the deployed names only: injection names are open and have no allowlist.
 EXPECTED_MARKER: dict[str, BoundaryKind] = {
-    **{name: BoundaryKind.INJECTION for name in CANONICAL_INJECTIONS},
-    **{name: BoundaryKind.DEPLOYED for name in CANONICAL_DEPLOYED},
+    name: BoundaryKind.DEPLOYED for name in CANONICAL_DEPLOYED
 }
 
 KNOWN_FRONTMATTER_KEYS: frozenset[str] = frozenset({
@@ -110,6 +112,14 @@ KNOWN_FRONTMATTER_KEYS: frozenset[str] = frozenset({
     "recommended_tier",
     "tier_rationale",
     "required_skills",
+    # Source-declared role field: "subagent" or "orchestrator". Declared by every
+    # migrated agent source file. Added here before the migration batches run so the
+    # validator does not reject migrated files with E009.
+    "role",
+    # Tool-written stamp: the bundle version deployed into every subagent file.
+    # This key is never authored in source; it is stamped by the deployment tool.
+    # Registered here so the validator accepts deployed trees without E009.
+    "bundle_version",
     # Utility-agent-specific fields (e.g. base-version tracks the template version
     # the utility agent was built from).
     "base-version",
@@ -131,7 +141,6 @@ KNOWN_FRONTMATTER_KEYS: frozenset[str] = frozenset({
 # region content rather than being authored in the source file.
 SECTION_HEADING_MAP: dict[str, str] = {
     "Identity": "# ",           # H1 -- matches any "# ... Agent" line
-    "ArtifactProvenance": "## Artifact Provenance",
     "Capabilities": "## Capabilities",
     "Constraints": "## Constraints",
     "ErrorHandling": "## Error Handling",

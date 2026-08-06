@@ -47,7 +47,7 @@ func resolveRoot(dir string) (string, error) {
 // isMosaicRoot returns true when dir contains both required MOSAIC repository marker files.
 func isMosaicRoot(dir string) bool {
 	markers := []string{
-		filepath.Join("Agents", "Generic", "SOURCE-FORMAT.md"),
+		filepath.Join("Agents", "Generic", "SourceFilesFormat.md"),
 		filepath.Join("Workflows", "Index.md"),
 	}
 	for _, m := range markers {

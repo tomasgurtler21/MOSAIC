@@ -1,43 +1,54 @@
 package docformat_test
 
-// Tests for Stage 2 vocabulary split: tool-managed vs user-owned registries,
-// CanonicalOrder, CanonicalDeployed, DeployedParent, ExpectedMarker,
-// ClassifyRegion, and the InjectionProtocol class constant.
+// Tests for Stage 2 vocabulary: the seven-slot canonical order, eleven-name deployed
+// set, revised parent tables, and classification behaviour after CanonicalInjections
+// is removed.
 //
-// Coverage (split registries and classification):
-//   - CanonicalSections contains 7 entries with CommunicationProtocol absent.
-//   - CanonicalSections is the authoritative 7-name list in canonical order.
-//   - CanonicalOrder contains 8 entries with CommunicationProtocol at index 1.
-//   - CanonicalOrder is the authoritative 8-slot list in canonical document order.
-//   - CanonicalDeployed lists all 6 tool-managed boundary names.
-//   - CanonicalInjections lists exactly 8 user-owned names.
-//   - CanonicalInjections includes all expected user-owned names.
-//   - CanonicalInjections does not contain ProtocolExtension.
-//   - CanonicalInjections does not contain any tool-managed name.
-//   - The CanonicalDeployed and CanonicalInjections registries are disjoint.
-//   - DeployedParent maps each tool-managed name to its required parent section.
-//   - InjectionParent maps each user-owned name to its required parent section.
-//   - InjectionParent does not contain ProtocolExtension.
-//   - InjectionParent does not contain any tool-managed name.
-//   - ExpectedMarker returns (NodeDeployed, true) for every tool-managed name.
-//   - ExpectedMarker returns (NodeInjection, true) for every user-owned name.
-//   - ExpectedMarker returns known=false for ProtocolExtension and unknown names.
-//   - ClassifyRegion returns InjectionProtocol for CommunicationProtocol under NodeDeployed.
-//   - ClassifyRegion returns InjectionHarness for harness names under NodeDeployed.
-//   - ClassifyRegion returns InjectionWorkflow for AvailableWorkflows under NodeDeployed.
-//   - ClassifyRegion returns InjectionInfrastructure for InfrastructureAgents under NodeDeployed.
-//   - ClassifyRegion returns InjectionProject for all user-owned names under NodeInjection.
-//   - ClassifyRegion returns an error wrapping ErrMarkerMismatch for a tool-managed name under
-//     NodeInjection.
-//   - ClassifyRegion returns an error wrapping ErrMarkerMismatch for a user-owned name under
-//     NodeDeployed.
-//   - ClassifyRegion returns an error wrapping ErrUnknownDeployedName for an unrecognised name
-//     under NodeDeployed.
-//   - ClassifyRegion returns InjectionProject and a nil error for an unrecognised name under
-//     NodeInjection, preserving the existing default behaviour.
-//   - InjectionProtocol constant has value "protocol".
-//   - InfrastructureAgents is a fully declared tool-managed name with a required parent section
-//     and is no longer reported as unknown by ExpectedMarker.
+// Coverage (CanonicalSections — unchanged in Stage 2):
+//   - CanonicalSections contains exactly 6 entries in the correct order.
+//   - CommunicationProtocol and ArtifactProvenance are absent from CanonicalSections.
+//
+// Coverage (CanonicalOrder — 7 slots, ArtifactProvenance removed):
+//   - CanonicalOrder contains exactly 7 slots.
+//   - CanonicalOrder[0] is Identity, CanonicalOrder[1] is CommunicationProtocol.
+//   - ArtifactProvenance is absent from CanonicalOrder.
+//   - Every CanonicalSection appears in CanonicalOrder.
+//
+// Coverage (CanonicalDeployed — 11 names, ArtifactProvenance removed, 5 new bundle names added):
+//   - CanonicalDeployed contains exactly 11 names.
+//   - CanonicalDeployed includes all expected names including AuthorityHierarchy,
+//     ClosingProcedure, ProtocolConstraints, ErrorHandlingCommon, ExecutionPhilosophyCommon.
+//   - ArtifactProvenance is absent from CanonicalDeployed.
+//
+// Coverage (DeployedParent — 11 entries):
+//   - DeployedParent maps all 11 tool-managed names to their required parents.
+//   - ArtifactProvenance is absent from DeployedParent.
+//   - New bundle names map to their required parent sections.
+//
+// Coverage (InjectionParent — advisory, ArtifactProvenanceExtension removed, ProtocolExtension added):
+//   - InjectionParent contains ProtocolExtension mapped to "" (top level).
+//   - ArtifactProvenanceExtension is absent from InjectionParent.
+//   - Tool-managed names are absent from InjectionParent.
+//
+// Coverage (ExpectedMarker — only CanonicalDeployed names are known):
+//   - Every CanonicalDeployed name returns (NodeDeployed, true).
+//   - Injection-only names (IdentityExtension, CodebaseContext, etc.) return ("", false).
+//   - ArtifactProvenance returns ("", false) — no longer a canonical name.
+//   - Unknown names return ("", false).
+//
+// Coverage (ClassifyRegion — no user-owned registry, bundle class for new names):
+//   - CommunicationProtocol under NodeDeployed → InjectionProtocol.
+//   - AvailableWorkflows under NodeDeployed → InjectionWorkflow.
+//   - InfrastructureAgents under NodeDeployed → InjectionInfrastructure.
+//   - LanguagePatterns, HarnessConstraints, CustomConstraints under NodeDeployed → InjectionHarness.
+//   - AuthorityHierarchy, ClosingProcedure, ProtocolConstraints, ErrorHandlingCommon,
+//     ExecutionPhilosophyCommon under NodeDeployed → InjectionBundle.
+//   - Any tool-managed name under NodeInjection → ErrMarkerMismatch (new bundle names included).
+//   - Any name not in CanonicalDeployed under NodeDeployed → ErrUnknownDeployedName.
+//   - Any name not in CanonicalDeployed under NodeInjection → InjectionProject, nil.
+//
+// Coverage (InjectionBundle constant):
+//   - InjectionBundle has the string value "bundle".
 
 import (
 	"errors"
@@ -48,38 +59,21 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// CanonicalSections — 7 entries, CommunicationProtocol absent
+// CanonicalSections — 6 entries, unchanged in Stage 2
 // ---------------------------------------------------------------------------
 
-func TestCanonicalSections_Stage2_ContainsSevenSections(t *testing.T) {
-	// After Stage 2 CommunicationProtocol is removed from CanonicalSections and
-	// becomes a tool-managed boundary name, leaving exactly 7 section slots.
+func TestCanonicalSections_Stage2_ContainsSixSections(t *testing.T) {
 	got := docformat.CanonicalSections
-	if len(got) != 7 {
-		t.Fatalf("CanonicalSections length: want 7, got %d: %v", len(got), got)
+	if len(got) != 6 {
+		t.Fatalf("CanonicalSections length: want 6, got %d: %v", len(got), got)
 	}
 }
 
-func TestCanonicalSections_Stage2_DoesNotContainCommunicationProtocol(t *testing.T) {
-	// CommunicationProtocol must not appear in CanonicalSections after Stage 2;
-	// it is a tool-managed deployed boundary, not a section.
-	for i, s := range docformat.CanonicalSections {
-		if s == "CommunicationProtocol" {
-			t.Errorf(
-				"CanonicalSections[%d] is %q — CommunicationProtocol must not be in CanonicalSections; it is a tool-managed boundary name declared with [[DEPLOYED:]]",
-				i, s,
-			)
-		}
-	}
-}
-
-func TestCanonicalSections_Stage2_FullSevenEntryOrder(t *testing.T) {
-	// This is the authoritative lockstep contract with boundary_constants.py after Stage 2.
-	// CommunicationProtocol has been removed; the remaining seven sections keep their
-	// relative order.
+func TestCanonicalSections_Stage2_FullSixEntryOrder(t *testing.T) {
+	// CanonicalSections is unchanged in Stage 2 (ArtifactProvenance was already
+	// removed by Stage 1; it is now also absent from CanonicalDeployed).
 	want := []string{
 		"Identity",
-		"ArtifactProvenance",
 		"Capabilities",
 		"Constraints",
 		"ErrorHandling",
@@ -98,20 +92,20 @@ func TestCanonicalSections_Stage2_FullSevenEntryOrder(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// CanonicalOrder — 8 slots, CommunicationProtocol at index 1
+// CanonicalOrder — 7 slots, ArtifactProvenance removed
 // ---------------------------------------------------------------------------
 
-func TestCanonicalOrder_ContainsEightSlots(t *testing.T) {
-	// CanonicalOrder lists the eight document positions in required order.
-	// Slot 1 is CommunicationProtocol (a top-level deployed boundary); every other
-	// slot is a section name.
+func TestCanonicalOrder_Stage2_ContainsSevenSlots(t *testing.T) {
+	// Stage 2 removes ArtifactProvenance from CanonicalOrder, reducing the slot
+	// count from 8 to 7. Slot 1 is CommunicationProtocol (a top-level [[DEPLOYED:]]
+	// boundary); every other entry is a section name.
 	got := docformat.CanonicalOrder
-	if len(got) != 8 {
-		t.Fatalf("CanonicalOrder length: want 8, got %d: %v", len(got), got)
+	if len(got) != 7 {
+		t.Fatalf("CanonicalOrder length: want 7, got %d: %v", len(got), got)
 	}
 }
 
-func TestCanonicalOrder_IndexZero_IsIdentity(t *testing.T) {
+func TestCanonicalOrder_Stage2_IndexZero_IsIdentity(t *testing.T) {
 	got := docformat.CanonicalOrder
 	if len(got) == 0 {
 		t.Fatal("CanonicalOrder is empty")
@@ -121,7 +115,7 @@ func TestCanonicalOrder_IndexZero_IsIdentity(t *testing.T) {
 	}
 }
 
-func TestCanonicalOrder_IndexOne_IsCommunicationProtocol(t *testing.T) {
+func TestCanonicalOrder_Stage2_IndexOne_IsCommunicationProtocol(t *testing.T) {
 	// Slot 1 is satisfied by a top-level [[DEPLOYED:CommunicationProtocol]] boundary.
 	got := docformat.CanonicalOrder
 	if len(got) <= 1 {
@@ -132,12 +126,27 @@ func TestCanonicalOrder_IndexOne_IsCommunicationProtocol(t *testing.T) {
 	}
 }
 
-func TestCanonicalOrder_FullEightSlotList(t *testing.T) {
-	// This is the authoritative 8-slot canonical document order contract.
+func TestCanonicalOrder_Stage2_ArtifactProvenance_IsAbsent(t *testing.T) {
+	// ArtifactProvenance is removed from CanonicalOrder in Stage 2. It is also
+	// removed from CanonicalDeployed — it ceases to be part of the vocabulary.
+	for i, s := range docformat.CanonicalOrder {
+		if s == "ArtifactProvenance" {
+			t.Errorf(
+				"CanonicalOrder[%d] is %q — ArtifactProvenance must be removed from "+
+					"CanonicalOrder in Stage 2; the ArtifactProvenance slot is gone",
+				i, s,
+			)
+		}
+	}
+}
+
+func TestCanonicalOrder_Stage2_FullSevenSlotList(t *testing.T) {
+	// Authoritative 7-slot canonical document order contract.
+	// CommunicationProtocol occupies slot 1 as a top-level [[DEPLOYED:]] boundary;
+	// every other slot is a canonical section name. ArtifactProvenance is absent.
 	want := []string{
 		"Identity",
 		"CommunicationProtocol",
-		"ArtifactProvenance",
 		"Capabilities",
 		"Constraints",
 		"ErrorHandling",
@@ -155,25 +164,47 @@ func TestCanonicalOrder_FullEightSlotList(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// CanonicalDeployed — 6 tool-managed names
-// ---------------------------------------------------------------------------
-
-func TestCanonicalDeployed_ContainsSixToolManagedNames(t *testing.T) {
-	got := docformat.CanonicalDeployed
-	if len(got) != 6 {
-		t.Fatalf("CanonicalDeployed length: want 6, got %d: %v", len(got), got)
+func TestCanonicalOrder_Stage2_AllCanonicalSectionsPresent(t *testing.T) {
+	// Every CanonicalSection must appear in CanonicalOrder.
+	orderSet := make(map[string]bool, len(docformat.CanonicalOrder))
+	for _, n := range docformat.CanonicalOrder {
+		orderSet[n] = true
+	}
+	for _, s := range docformat.CanonicalSections {
+		if !orderSet[s] {
+			t.Errorf("canonical section %q is not in CanonicalOrder: %v", s, docformat.CanonicalOrder)
+		}
 	}
 }
 
-func TestCanonicalDeployed_IncludesAllExpectedToolManagedNames(t *testing.T) {
+// ---------------------------------------------------------------------------
+// CanonicalDeployed — 11 names, ArtifactProvenance removed, 5 bundle names added
+// ---------------------------------------------------------------------------
+
+func TestCanonicalDeployed_Stage2_ContainsElevenNames(t *testing.T) {
+	// Stage 2 removes ArtifactProvenance and adds AuthorityHierarchy, ClosingProcedure,
+	// AvailableWorkflows (already present), InfrastructureAgents (already present),
+	// ProtocolConstraints, ErrorHandlingCommon, ExecutionPhilosophyCommon.
+	// The closed set is now 11 names.
+	got := docformat.CanonicalDeployed
+	if len(got) != 11 {
+		t.Fatalf("CanonicalDeployed length: want 11, got %d: %v", len(got), got)
+	}
+}
+
+func TestCanonicalDeployed_Stage2_IncludesAllExpectedNames(t *testing.T) {
 	wantNames := []string{
 		"CommunicationProtocol",
+		"AuthorityHierarchy",
+		"ClosingProcedure",
 		"AvailableWorkflows",
 		"InfrastructureAgents",
 		"LanguagePatterns",
+		"ProtocolConstraints",
 		"HarnessConstraints",
 		"CustomConstraints",
+		"ErrorHandlingCommon",
+		"ExecutionPhilosophyCommon",
 	}
 	nameSet := make(map[string]bool, len(docformat.CanonicalDeployed))
 	for _, n := range docformat.CanonicalDeployed {
@@ -181,125 +212,69 @@ func TestCanonicalDeployed_IncludesAllExpectedToolManagedNames(t *testing.T) {
 	}
 	for _, want := range wantNames {
 		if !nameSet[want] {
-			t.Errorf("CanonicalDeployed is missing expected tool-managed name %q; got: %v", want, docformat.CanonicalDeployed)
+			t.Errorf("CanonicalDeployed is missing expected name %q; got: %v", want, docformat.CanonicalDeployed)
 		}
 	}
 }
 
-func TestCanonicalDeployed_DoesNotContainProtocolExtension(t *testing.T) {
-	// ProtocolExtension is removed entirely from all registries in Stage 2.
+func TestCanonicalDeployed_Stage2_ArtifactProvenance_IsAbsent(t *testing.T) {
+	// ArtifactProvenance is removed from CanonicalDeployed in Stage 2.
+	// It must not appear in any vocabulary copy after this stage.
 	for _, n := range docformat.CanonicalDeployed {
-		if n == "ProtocolExtension" {
-			t.Errorf("CanonicalDeployed must not contain ProtocolExtension — it is removed from all registries")
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// CanonicalInjections — 8 user-owned names
-// ---------------------------------------------------------------------------
-
-func TestCanonicalInjections_Stage2_ContainsEightUserOwnedNames(t *testing.T) {
-	// Tool-managed names and ProtocolExtension are removed from CanonicalInjections,
-	// leaving exactly the 8 user-owned names.
-	got := docformat.CanonicalInjections
-	if len(got) != 8 {
-		t.Fatalf("CanonicalInjections length: want 8, got %d: %v", len(got), got)
-	}
-}
-
-func TestCanonicalInjections_Stage2_IncludesAllUserOwnedNames(t *testing.T) {
-	// All 8 user-owned names must be present in CanonicalInjections.
-	wantNames := []string{
-		"IdentityExtension",
-		"ArtifactProvenanceExtension",
-		"CodebaseContext",
-		"OutputArtifactTemplate",
-		"SeverityThresholds",
-		"SeverityDefinitions",
-		"ErrorHandlingExtension",
-		"ContextLimits",
-	}
-	nameSet := make(map[string]bool, len(docformat.CanonicalInjections))
-	for _, n := range docformat.CanonicalInjections {
-		nameSet[n] = true
-	}
-	for _, want := range wantNames {
-		if !nameSet[want] {
-			t.Errorf("CanonicalInjections is missing expected user-owned name %q; got: %v", want, docformat.CanonicalInjections)
-		}
-	}
-}
-
-func TestCanonicalInjections_Stage2_DoesNotContainProtocolExtension(t *testing.T) {
-	// ProtocolExtension is removed entirely from all registries in Stage 2.
-	for _, n := range docformat.CanonicalInjections {
-		if n == "ProtocolExtension" {
-			t.Errorf("CanonicalInjections must not contain ProtocolExtension — it is removed from all registries")
-		}
-	}
-}
-
-func TestCanonicalInjections_Stage2_DoesNotContainToolManagedNames(t *testing.T) {
-	// Tool-managed names must not appear in the user-owned registry.
-	toolManaged := []string{
-		"HarnessConstraints",
-		"CustomConstraints",
-		"LanguagePatterns",
-		"AvailableWorkflows",
-		"InfrastructureAgents",
-		"CommunicationProtocol",
-	}
-	injSet := make(map[string]bool, len(docformat.CanonicalInjections))
-	for _, n := range docformat.CanonicalInjections {
-		injSet[n] = true
-	}
-	for _, toolName := range toolManaged {
-		if injSet[toolName] {
-			t.Errorf("CanonicalInjections must not contain tool-managed name %q (it belongs in CanonicalDeployed)", toolName)
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Disjointness — no name in both registries
-// ---------------------------------------------------------------------------
-
-func TestRegistries_Stage2_AreDisjoint_NoNameInBoth(t *testing.T) {
-	// The tool-managed and user-owned registries must not share any name.
-	deployedSet := make(map[string]bool, len(docformat.CanonicalDeployed))
-	for _, n := range docformat.CanonicalDeployed {
-		deployedSet[n] = true
-	}
-	for _, injName := range docformat.CanonicalInjections {
-		if deployedSet[injName] {
+		if n == "ArtifactProvenance" {
 			t.Errorf(
-				"name %q appears in both CanonicalDeployed and CanonicalInjections — registries must be disjoint",
-				injName,
+				"CanonicalDeployed must not contain %q — ArtifactProvenance is removed "+
+					"from the vocabulary entirely in Stage 2",
+				n,
 			)
 		}
 	}
 }
 
+func TestCanonicalDeployed_Stage2_IncludesNewBundleNames(t *testing.T) {
+	// Five new bundle-sourced deployed names are added in Stage 2.
+	bundleNames := []string{
+		"AuthorityHierarchy",
+		"ClosingProcedure",
+		"ProtocolConstraints",
+		"ErrorHandlingCommon",
+		"ExecutionPhilosophyCommon",
+	}
+	nameSet := make(map[string]bool, len(docformat.CanonicalDeployed))
+	for _, n := range docformat.CanonicalDeployed {
+		nameSet[n] = true
+	}
+	for _, name := range bundleNames {
+		if !nameSet[name] {
+			t.Errorf("CanonicalDeployed is missing new bundle name %q; got: %v", name, docformat.CanonicalDeployed)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
-// DeployedParent — tool-managed parent mapping
+// DeployedParent — 11 entries, ArtifactProvenance absent
 // ---------------------------------------------------------------------------
 
-func TestDeployedParent_IsNotNil(t *testing.T) {
+func TestDeployedParent_Stage2_IsNotNil(t *testing.T) {
 	if docformat.DeployedParent == nil {
 		t.Fatal("DeployedParent is nil — must be populated before first use")
 	}
 }
 
-func TestDeployedParent_MapsEachToolManagedNameToItsRequiredParent(t *testing.T) {
+func TestDeployedParent_Stage2_MapsAllElevenNames(t *testing.T) {
 	// An empty string value means the boundary must appear at body top level.
 	wantMap := map[string]string{
-		"CommunicationProtocol": "", // top level — empty means body top level
-		"AvailableWorkflows":    "Identity",
-		"InfrastructureAgents": "Identity",
-		"LanguagePatterns":     "Capabilities",
-		"HarnessConstraints":   "Constraints",
-		"CustomConstraints":    "Constraints",
+		"CommunicationProtocol":     "", // top level
+		"AuthorityHierarchy":        "Identity",
+		"ClosingProcedure":          "Identity",
+		"AvailableWorkflows":        "Identity",
+		"InfrastructureAgents":      "Identity",
+		"LanguagePatterns":          "Capabilities",
+		"ProtocolConstraints":       "Constraints",
+		"HarnessConstraints":        "Constraints",
+		"CustomConstraints":         "Constraints",
+		"ErrorHandlingCommon":       "ErrorHandling",
+		"ExecutionPhilosophyCommon": "ExecutionPhilosophy",
 	}
 	got := docformat.DeployedParent
 	if got == nil {
@@ -315,25 +290,107 @@ func TestDeployedParent_MapsEachToolManagedNameToItsRequiredParent(t *testing.T)
 	}
 }
 
+func TestDeployedParent_Stage2_ArtifactProvenance_IsAbsent(t *testing.T) {
+	// ArtifactProvenance must not appear in DeployedParent after Stage 2.
+	if got := docformat.DeployedParent; got != nil {
+		if _, ok := got["ArtifactProvenance"]; ok {
+			t.Error("DeployedParent must not contain \"ArtifactProvenance\" — it is removed from the vocabulary in Stage 2")
+		}
+	}
+}
+
+func TestDeployedParent_Stage2_ContainsExactlyElevenEntries(t *testing.T) {
+	got := docformat.DeployedParent
+	if got == nil {
+		t.Fatal("DeployedParent is nil")
+	}
+	if len(got) != 11 {
+		t.Fatalf("DeployedParent length: want 11, got %d: %v", len(got), got)
+	}
+}
+
+func TestDeployedParent_Stage2_NewBundleNames_HaveCorrectParents(t *testing.T) {
+	got := docformat.DeployedParent
+	if got == nil {
+		t.Fatal("DeployedParent is nil")
+	}
+	cases := []struct {
+		name       string
+		wantParent string
+	}{
+		{"AuthorityHierarchy", "Identity"},
+		{"ClosingProcedure", "Identity"},
+		{"ProtocolConstraints", "Constraints"},
+		{"ErrorHandlingCommon", "ErrorHandling"},
+		{"ExecutionPhilosophyCommon", "ExecutionPhilosophy"},
+	}
+	for _, tc := range cases {
+		p, ok := got[tc.name]
+		if !ok {
+			t.Errorf("DeployedParent missing entry for %q", tc.name)
+			continue
+		}
+		if p != tc.wantParent {
+			t.Errorf("DeployedParent[%q]: want %q, got %q", tc.name, tc.wantParent, p)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
-// InjectionParent — user-owned parent mapping (Stage 2 values)
+// InjectionParent — advisory map; ProtocolExtension added, ArtifactProvenanceExtension removed
 // ---------------------------------------------------------------------------
 
-func TestInjectionParent_Stage2_MapsEachUserOwnedNameToItsRequiredParent(t *testing.T) {
-	// Only user-owned names may appear in InjectionParent after Stage 2.
+func TestInjectionParent_Stage2_IsNotNil(t *testing.T) {
+	if docformat.InjectionParent == nil {
+		t.Fatal("InjectionParent is nil — must be populated before first use")
+	}
+}
+
+func TestInjectionParent_Stage2_ContainsProtocolExtension(t *testing.T) {
+	// ProtocolExtension is re-added to InjectionParent (as an advisory top-level entry)
+	// in Stage 2. It was removed from CanonicalInjections in a prior stage; in Stage 2
+	// it appears in the advisory InjectionParent table as the first new entry.
+	got := docformat.InjectionParent
+	if got == nil {
+		t.Fatal("InjectionParent is nil")
+	}
+	parent, ok := got["ProtocolExtension"]
+	if !ok {
+		t.Error("InjectionParent must contain \"ProtocolExtension\" after Stage 2 — it is added as a top-level advisory entry")
+	} else if parent != "" {
+		t.Errorf("InjectionParent[\"ProtocolExtension\"]: want %q (top-level sentinel), got %q", "", parent)
+	}
+}
+
+func TestInjectionParent_Stage2_ArtifactProvenanceExtension_IsAbsent(t *testing.T) {
+	// ArtifactProvenanceExtension is removed from InjectionParent in Stage 2 because
+	// ArtifactProvenance (its sibling) is removed from the vocabulary entirely.
+	got := docformat.InjectionParent
+	if got == nil {
+		t.Fatal("InjectionParent is nil")
+	}
+	if _, ok := got["ArtifactProvenanceExtension"]; ok {
+		t.Error("InjectionParent must not contain \"ArtifactProvenanceExtension\" — " +
+			"ArtifactProvenance is removed from the vocabulary in Stage 2, so its extension is also removed")
+	}
+}
+
+func TestInjectionParent_Stage2_FullAdvisoryMap(t *testing.T) {
+	// InjectionParent is now advisory only (no enforcement of an allowlist).
+	// The eight entries are usual parents used for advisory reporting.
 	wantMap := map[string]string{
-		"IdentityExtension":           "Identity",
-		"ArtifactProvenanceExtension": "ArtifactProvenance",
-		"CodebaseContext":             "Capabilities",
-		"OutputArtifactTemplate":     "Capabilities",
-		"SeverityThresholds":         "Capabilities",
-		"SeverityDefinitions":        "Capabilities",
-		"ErrorHandlingExtension":     "ErrorHandling",
-		"ContextLimits":              "ExecutionPhilosophy",
+		"ProtocolExtension":      "", // top level — new entry in Stage 2
+		"IdentityExtension":      "Identity",
+		"CodebaseContext":        "Capabilities",
+		"OutputArtifactTemplate": "Capabilities",
+		"SeverityThresholds":     "Capabilities",
+		"SeverityDefinitions":    "Capabilities",
+		"ErrorHandlingExtension": "ErrorHandling",
+		"ContextLimits":          "ExecutionPhilosophy",
 	}
 	got := docformat.InjectionParent
 	if got == nil {
-		t.Fatal("InjectionParent is nil — must be populated before first use")
+		t.Fatal("InjectionParent is nil")
 	}
 	for name, wantParent := range wantMap {
 		gotParent, ok := got[name]
@@ -345,51 +402,43 @@ func TestInjectionParent_Stage2_MapsEachUserOwnedNameToItsRequiredParent(t *test
 	}
 }
 
-func TestInjectionParent_Stage2_DoesNotContainProtocolExtension(t *testing.T) {
-	// ProtocolExtension is removed entirely from all registries in Stage 2.
-	if _, ok := docformat.InjectionParent["ProtocolExtension"]; ok {
-		t.Error("InjectionParent must not contain ProtocolExtension — it is removed from all registries")
-	}
-}
-
 func TestInjectionParent_Stage2_DoesNotContainToolManagedNames(t *testing.T) {
-	// Tool-managed names move to DeployedParent; they must not remain in InjectionParent.
+	// Tool-managed names must not appear in InjectionParent; they belong in DeployedParent.
 	toolManaged := []string{
-		"HarnessConstraints",
-		"CustomConstraints",
-		"LanguagePatterns",
+		"CommunicationProtocol",
+		"AuthorityHierarchy",
+		"ClosingProcedure",
 		"AvailableWorkflows",
 		"InfrastructureAgents",
-		"CommunicationProtocol",
+		"LanguagePatterns",
+		"ProtocolConstraints",
+		"HarnessConstraints",
+		"CustomConstraints",
+		"ErrorHandlingCommon",
+		"ExecutionPhilosophyCommon",
+	}
+	got := docformat.InjectionParent
+	if got == nil {
+		t.Fatal("InjectionParent is nil")
 	}
 	for _, name := range toolManaged {
-		if _, ok := docformat.InjectionParent[name]; ok {
-			t.Errorf(
-				"InjectionParent must not contain tool-managed name %q — it belongs in DeployedParent",
-				name,
-			)
+		if _, ok := got[name]; ok {
+			t.Errorf("InjectionParent must not contain tool-managed name %q — it belongs in DeployedParent", name)
 		}
 	}
 }
 
 // ---------------------------------------------------------------------------
-// ExpectedMarker — canonical name to required marker kind
+// ExpectedMarker — only CanonicalDeployed names return (NodeDeployed, true)
 // ---------------------------------------------------------------------------
 
-func TestExpectedMarker_ToolManagedNames_ReturnNodeDeployed(t *testing.T) {
-	// Every tool-managed name must be known and require the DEPLOYED marker.
-	toolManaged := []string{
-		"CommunicationProtocol",
-		"AvailableWorkflows",
-		"InfrastructureAgents",
-		"LanguagePatterns",
-		"HarnessConstraints",
-		"CustomConstraints",
-	}
-	for _, name := range toolManaged {
+func TestExpectedMarker_Stage2_AllCanonicalDeployed_ReturnNodeDeployedAndKnownTrue(t *testing.T) {
+	// Every name in CanonicalDeployed must be known and require the DEPLOYED marker.
+	// This includes the five new bundle names added in Stage 2.
+	for _, name := range docformat.CanonicalDeployed {
 		kind, known := docformat.ExpectedMarker(name)
 		if !known {
-			t.Errorf("ExpectedMarker(%q): known=false, want true (tool-managed name must be recognised)", name)
+			t.Errorf("ExpectedMarker(%q): known=false, want true (all CanonicalDeployed names must be recognised)", name)
 		}
 		if kind != docformat.NodeDeployed {
 			t.Errorf("ExpectedMarker(%q): kind=%q, want NodeDeployed", name, kind)
@@ -397,38 +446,58 @@ func TestExpectedMarker_ToolManagedNames_ReturnNodeDeployed(t *testing.T) {
 	}
 }
 
-func TestExpectedMarker_UserOwnedNames_ReturnNodeInjection(t *testing.T) {
-	// Every user-owned name must be known and require the INJECTION marker.
-	userOwned := []string{
+func TestExpectedMarker_Stage2_NewBundleNames_ReturnNodeDeployedAndKnownTrue(t *testing.T) {
+	// The five new bundle names added in Stage 2 must be recognised.
+	bundleNames := []string{
+		"AuthorityHierarchy",
+		"ClosingProcedure",
+		"ProtocolConstraints",
+		"ErrorHandlingCommon",
+		"ExecutionPhilosophyCommon",
+	}
+	for _, name := range bundleNames {
+		kind, known := docformat.ExpectedMarker(name)
+		if !known {
+			t.Errorf("ExpectedMarker(%q): known=false, want true (new bundle name must be recognised)", name)
+		}
+		if kind != docformat.NodeDeployed {
+			t.Errorf("ExpectedMarker(%q): kind=%q, want NodeDeployed", name, kind)
+		}
+	}
+}
+
+func TestExpectedMarker_Stage2_InjectionNames_AreNotKnown(t *testing.T) {
+	// Injection names are open in Stage 2 — they are not in any canonical registry.
+	// ExpectedMarker returns ("", false) for all of them.
+	injectionNames := []string{
 		"IdentityExtension",
-		"ArtifactProvenanceExtension",
 		"CodebaseContext",
 		"OutputArtifactTemplate",
 		"SeverityThresholds",
 		"SeverityDefinitions",
 		"ErrorHandlingExtension",
 		"ContextLimits",
+		"ProtocolExtension",
 	}
-	for _, name := range userOwned {
-		kind, known := docformat.ExpectedMarker(name)
-		if !known {
-			t.Errorf("ExpectedMarker(%q): known=false, want true (user-owned name must be recognised)", name)
-		}
-		if kind != docformat.NodeInjection {
-			t.Errorf("ExpectedMarker(%q): kind=%q, want NodeInjection", name, kind)
+	for _, name := range injectionNames {
+		_, known := docformat.ExpectedMarker(name)
+		if known {
+			t.Errorf("ExpectedMarker(%q): known=true, want false — injection names are not in any canonical registry", name)
 		}
 	}
 }
 
-func TestExpectedMarker_ProtocolExtension_IsNotKnown(t *testing.T) {
-	// ProtocolExtension is removed from all registries; it must not be known.
-	_, known := docformat.ExpectedMarker("ProtocolExtension")
+func TestExpectedMarker_Stage2_ArtifactProvenance_IsNotKnown(t *testing.T) {
+	// ArtifactProvenance is removed from the vocabulary entirely in Stage 2.
+	// ExpectedMarker must return ("", false) for it.
+	_, known := docformat.ExpectedMarker("ArtifactProvenance")
 	if known {
-		t.Error("ExpectedMarker(\"ProtocolExtension\"): known=true, want false — ProtocolExtension is removed from all registries")
-	}
+		t.Error("ExpectedMarker(\"ArtifactProvenance\"): known=true, want false — " +
+			"ArtifactProvenance is removed from the vocabulary in Stage 2")
+}
 }
 
-func TestExpectedMarker_UnknownName_IsNotKnown(t *testing.T) {
+func TestExpectedMarker_Stage2_UnknownName_IsNotKnown(t *testing.T) {
 	_, known := docformat.ExpectedMarker("SomeCompletelyUnknownBoundaryName")
 	if known {
 		t.Errorf("ExpectedMarker(\"SomeCompletelyUnknownBoundaryName\"): known=true, want false")
@@ -436,158 +505,85 @@ func TestExpectedMarker_UnknownName_IsNotKnown(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ClassifyRegion — marker-aware classification for each tool-managed class
+// ClassifyRegion — deployed names classified correctly; no user-owned registry
 // ---------------------------------------------------------------------------
 
-func TestClassifyRegion_Deployed_CommunicationProtocol_ReturnsProtocolClass(t *testing.T) {
+func TestClassifyRegion_Stage2_CommunicationProtocol_ReturnsProtocolClass(t *testing.T) {
 	class, err := docformat.ClassifyRegion(docformat.NodeDeployed, "CommunicationProtocol")
 	if err != nil {
 		t.Fatalf("ClassifyRegion(NodeDeployed, \"CommunicationProtocol\"): unexpected error: %v", err)
 	}
 	if class != domain.InjectionProtocol {
-		t.Errorf(
-			"ClassifyRegion(NodeDeployed, \"CommunicationProtocol\"): want InjectionProtocol (%q), got %q",
-			domain.InjectionProtocol, class,
-		)
+		t.Errorf("ClassifyRegion(NodeDeployed, \"CommunicationProtocol\"): want InjectionProtocol, got %q", class)
 	}
 }
 
-func TestClassifyRegion_Deployed_HarnessConstraints_ReturnsHarnessClass(t *testing.T) {
-	class, err := docformat.ClassifyRegion(docformat.NodeDeployed, "HarnessConstraints")
-	if err != nil {
-		t.Fatalf("ClassifyRegion(NodeDeployed, \"HarnessConstraints\"): unexpected error: %v", err)
-	}
-	if class != domain.InjectionHarness {
-		t.Errorf(
-			"ClassifyRegion(NodeDeployed, \"HarnessConstraints\"): want InjectionHarness, got %q",
-			class,
-		)
-	}
-}
-
-func TestClassifyRegion_Deployed_LanguagePatterns_ReturnsHarnessClass(t *testing.T) {
-	class, err := docformat.ClassifyRegion(docformat.NodeDeployed, "LanguagePatterns")
-	if err != nil {
-		t.Fatalf("ClassifyRegion(NodeDeployed, \"LanguagePatterns\"): unexpected error: %v", err)
-	}
-	if class != domain.InjectionHarness {
-		t.Errorf(
-			"ClassifyRegion(NodeDeployed, \"LanguagePatterns\"): want InjectionHarness, got %q",
-			class,
-		)
-	}
-}
-
-func TestClassifyRegion_Deployed_CustomConstraints_ReturnsHarnessClass(t *testing.T) {
-	class, err := docformat.ClassifyRegion(docformat.NodeDeployed, "CustomConstraints")
-	if err != nil {
-		t.Fatalf("ClassifyRegion(NodeDeployed, \"CustomConstraints\"): unexpected error: %v", err)
-	}
-	if class != domain.InjectionHarness {
-		t.Errorf(
-			"ClassifyRegion(NodeDeployed, \"CustomConstraints\"): want InjectionHarness, got %q",
-			class,
-		)
-	}
-}
-
-func TestClassifyRegion_Deployed_AvailableWorkflows_ReturnsWorkflowClass(t *testing.T) {
+func TestClassifyRegion_Stage2_AvailableWorkflows_ReturnsWorkflowClass(t *testing.T) {
 	class, err := docformat.ClassifyRegion(docformat.NodeDeployed, "AvailableWorkflows")
 	if err != nil {
 		t.Fatalf("ClassifyRegion(NodeDeployed, \"AvailableWorkflows\"): unexpected error: %v", err)
 	}
 	if class != domain.InjectionWorkflow {
-		t.Errorf(
-			"ClassifyRegion(NodeDeployed, \"AvailableWorkflows\"): want InjectionWorkflow, got %q",
-			class,
-		)
+		t.Errorf("ClassifyRegion(NodeDeployed, \"AvailableWorkflows\"): want InjectionWorkflow, got %q", class)
 	}
 }
 
-func TestClassifyRegion_Deployed_InfrastructureAgents_ReturnsInfrastructureClass(t *testing.T) {
+func TestClassifyRegion_Stage2_InfrastructureAgents_ReturnsInfrastructureClass(t *testing.T) {
 	class, err := docformat.ClassifyRegion(docformat.NodeDeployed, "InfrastructureAgents")
 	if err != nil {
 		t.Fatalf("ClassifyRegion(NodeDeployed, \"InfrastructureAgents\"): unexpected error: %v", err)
 	}
 	if class != domain.InjectionInfrastructure {
-		t.Errorf(
-			"ClassifyRegion(NodeDeployed, \"InfrastructureAgents\"): want InjectionInfrastructure, got %q",
-			class,
-		)
+		t.Errorf("ClassifyRegion(NodeDeployed, \"InfrastructureAgents\"): want InjectionInfrastructure, got %q", class)
 	}
 }
 
-func TestClassifyRegion_Injection_AllUserOwnedNames_ReturnProjectClass(t *testing.T) {
-	// All user-owned names declared under INJECTION return InjectionProject.
-	userOwned := []string{
-		"IdentityExtension",
-		"ArtifactProvenanceExtension",
-		"CodebaseContext",
-		"OutputArtifactTemplate",
-		"SeverityThresholds",
-		"SeverityDefinitions",
-		"ErrorHandlingExtension",
-		"ContextLimits",
-	}
-	for _, name := range userOwned {
-		class, err := docformat.ClassifyRegion(docformat.NodeInjection, name)
+func TestClassifyRegion_Stage2_HarnessNames_ReturnHarnessClass(t *testing.T) {
+	harnessNames := []string{"LanguagePatterns", "HarnessConstraints", "CustomConstraints"}
+	for _, name := range harnessNames {
+		class, err := docformat.ClassifyRegion(docformat.NodeDeployed, name)
 		if err != nil {
-			t.Errorf("ClassifyRegion(NodeInjection, %q): unexpected error: %v", name, err)
+			t.Errorf("ClassifyRegion(NodeDeployed, %q): unexpected error: %v", name, err)
 			continue
 		}
-		if class != domain.InjectionProject {
-			t.Errorf("ClassifyRegion(NodeInjection, %q): want InjectionProject, got %q", name, class)
+		if class != domain.InjectionHarness {
+			t.Errorf("ClassifyRegion(NodeDeployed, %q): want InjectionHarness, got %q", name, class)
 		}
 	}
 }
 
-// ---------------------------------------------------------------------------
-// ClassifyRegion — marker mismatch errors
-// ---------------------------------------------------------------------------
-
-func TestClassifyRegion_Injection_ToolManagedName_ReturnsMarkerMismatchError(t *testing.T) {
-	// A tool-managed name declared under INJECTION is a marker mismatch.
-	// HarnessConstraints requires [[DEPLOYED:]], so using [[INJECTION:HarnessConstraints]]
-	// must return an error wrapping ErrMarkerMismatch.
-	_, err := docformat.ClassifyRegion(docformat.NodeInjection, "HarnessConstraints")
-	if err == nil {
-		t.Fatal("ClassifyRegion(NodeInjection, \"HarnessConstraints\"): want error wrapping ErrMarkerMismatch, got nil")
+func TestClassifyRegion_Stage2_BundleNames_ReturnBundleClass(t *testing.T) {
+	// The five new bundle-sourced names must return InjectionBundle.
+	// The bundle branch is an explicit case list — a new tool-managed name falls to
+	// InjectionHarness and must be classified deliberately to avoid silently producing
+	// empty deployed regions.
+	bundleNames := []string{
+		"AuthorityHierarchy",
+		"ClosingProcedure",
+		"ProtocolConstraints",
+		"ErrorHandlingCommon",
+		"ExecutionPhilosophyCommon",
 	}
-	if !errors.Is(err, docformat.ErrMarkerMismatch) {
-		t.Errorf(
-			"ClassifyRegion(NodeInjection, \"HarnessConstraints\"): error does not wrap ErrMarkerMismatch: %v",
-			err,
-		)
-	}
-}
-
-func TestClassifyRegion_Deployed_UserOwnedName_ReturnsMarkerMismatchError(t *testing.T) {
-	// A user-owned name declared under DEPLOYED is a marker mismatch.
-	// IdentityExtension requires [[INJECTION:]], so using [[DEPLOYED:IdentityExtension]]
-	// must return an error wrapping ErrMarkerMismatch.
-	_, err := docformat.ClassifyRegion(docformat.NodeDeployed, "IdentityExtension")
-	if err == nil {
-		t.Fatal("ClassifyRegion(NodeDeployed, \"IdentityExtension\"): want error wrapping ErrMarkerMismatch, got nil")
-	}
-	if !errors.Is(err, docformat.ErrMarkerMismatch) {
-		t.Errorf(
-			"ClassifyRegion(NodeDeployed, \"IdentityExtension\"): error does not wrap ErrMarkerMismatch: %v",
-			err,
-		)
+	for _, name := range bundleNames {
+		class, err := docformat.ClassifyRegion(docformat.NodeDeployed, name)
+		if err != nil {
+			t.Errorf("ClassifyRegion(NodeDeployed, %q): unexpected error: %v", name, err)
+			continue
+		}
+		if class != domain.InjectionBundle {
+			t.Errorf(
+				"ClassifyRegion(NodeDeployed, %q): want InjectionBundle, got %q — "+
+					"bundle-sourced names must have InjectionBundle class, not fall through to InjectionHarness",
+				name, class,
+			)
+		}
 	}
 }
 
-func TestClassifyRegion_Injection_AllToolManagedNames_ReturnMarkerMismatchError(t *testing.T) {
-	// Every tool-managed name declared under INJECTION must produce a marker mismatch error.
-	toolManaged := []string{
-		"CommunicationProtocol",
-		"AvailableWorkflows",
-		"InfrastructureAgents",
-		"LanguagePatterns",
-		"HarnessConstraints",
-		"CustomConstraints",
-	}
-	for _, name := range toolManaged {
+func TestClassifyRegion_Stage2_AllToolManagedNames_UnderInjection_ReturnMarkerMismatch(t *testing.T) {
+	// Every CanonicalDeployed name declared under [[INJECTION:]] must produce a marker
+	// mismatch error. This includes the new bundle names added in Stage 2.
+	for _, name := range docformat.CanonicalDeployed {
 		_, err := docformat.ClassifyRegion(docformat.NodeInjection, name)
 		if err == nil {
 			t.Errorf("ClassifyRegion(NodeInjection, %q): want error wrapping ErrMarkerMismatch, got nil", name)
@@ -599,139 +595,93 @@ func TestClassifyRegion_Injection_AllToolManagedNames_ReturnMarkerMismatchError(
 	}
 }
 
-// ---------------------------------------------------------------------------
-// ClassifyRegion — unrecognised name under DEPLOYED
-// ---------------------------------------------------------------------------
-
-func TestClassifyRegion_Deployed_UnknownName_ReturnsUnknownDeployedError(t *testing.T) {
-	// An unrecognised name under DEPLOYED has no generator and cannot be filled.
-	// It must return an error wrapping ErrUnknownDeployedName.
+func TestClassifyRegion_Stage2_UnknownName_UnderDeployed_ReturnsUnknownDeployedError(t *testing.T) {
+	// An unrecognised name under [[DEPLOYED:]] must return ErrUnknownDeployedName.
+	// This applies to any name not in CanonicalDeployed, including names that were
+	// formerly in CanonicalInjections (the user-owned registry no longer exists).
 	_, err := docformat.ClassifyRegion(docformat.NodeDeployed, "SomeCompletelyUnknownBoundaryName")
 	if err == nil {
 		t.Fatal("ClassifyRegion(NodeDeployed, unknown): want error wrapping ErrUnknownDeployedName, got nil")
 	}
 	if !errors.Is(err, docformat.ErrUnknownDeployedName) {
-		t.Errorf(
-			"ClassifyRegion(NodeDeployed, unknown): error does not wrap ErrUnknownDeployedName: %v",
-			err,
-		)
+		t.Errorf("ClassifyRegion(NodeDeployed, unknown): error does not wrap ErrUnknownDeployedName: %v", err)
 	}
 }
 
-func TestClassifyRegion_Deployed_ProtocolExtension_ReturnsUnknownDeployedError(t *testing.T) {
-	// ProtocolExtension is absent from all registries. Using it under [[DEPLOYED:]] must
-	// return ErrUnknownDeployedName (not ErrMarkerMismatch, since the name is not canonical
-	// at all).
-	_, err := docformat.ClassifyRegion(docformat.NodeDeployed, "ProtocolExtension")
+func TestClassifyRegion_Stage2_InjectionName_UnderDeployed_ReturnsUnknownDeployedError(t *testing.T) {
+	// After Stage 2, IdentityExtension is not in any tool-managed registry, so
+	// [[DEPLOYED:IdentityExtension]] produces ErrUnknownDeployedName — not
+	// ErrMarkerMismatch (which requires a user-owned registry, which no longer exists).
+	_, err := docformat.ClassifyRegion(docformat.NodeDeployed, "IdentityExtension")
 	if err == nil {
-		t.Fatal("ClassifyRegion(NodeDeployed, \"ProtocolExtension\"): want error wrapping ErrUnknownDeployedName, got nil")
+		t.Fatal("ClassifyRegion(NodeDeployed, \"IdentityExtension\"): want error wrapping ErrUnknownDeployedName, got nil")
 	}
 	if !errors.Is(err, docformat.ErrUnknownDeployedName) {
 		t.Errorf(
-			"ClassifyRegion(NodeDeployed, \"ProtocolExtension\"): error does not wrap ErrUnknownDeployedName: %v",
-			err,
+			"ClassifyRegion(NodeDeployed, \"IdentityExtension\"): error does not wrap ErrUnknownDeployedName: %v", err,
 		)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// ClassifyRegion — unrecognised name under INJECTION defaults to project
-// ---------------------------------------------------------------------------
+func TestClassifyRegion_Stage2_ArtifactProvenance_UnderDeployed_ReturnsUnknownDeployedError(t *testing.T) {
+	// ArtifactProvenance is removed from CanonicalDeployed in Stage 2.
+	// [[DEPLOYED:ArtifactProvenance]] must produce ErrUnknownDeployedName.
+	_, err := docformat.ClassifyRegion(docformat.NodeDeployed, "ArtifactProvenance")
+	if err == nil {
+		t.Fatal("ClassifyRegion(NodeDeployed, \"ArtifactProvenance\"): want error wrapping ErrUnknownDeployedName, got nil")
+	}
+	if !errors.Is(err, docformat.ErrUnknownDeployedName) {
+		t.Errorf(
+			"ClassifyRegion(NodeDeployed, \"ArtifactProvenance\"): error does not wrap ErrUnknownDeployedName: %v", err,
+		)
+	}
+}
 
-func TestClassifyRegion_Injection_UnknownName_ReturnsProjectClassAndNilError(t *testing.T) {
-	// An unrecognised name under INJECTION returns InjectionProject and a nil error,
-	// preserving the existing "unknown injections default to project" behaviour that
-	// AllowUnknownInjections governs at validation time.
+func TestClassifyRegion_Stage2_UnknownName_UnderInjection_ReturnsProjectClassAndNilError(t *testing.T) {
+	// Any name not in CanonicalDeployed under [[INJECTION:]] returns InjectionProject
+	// and a nil error. Injection names are open: an unlisted name is preserved like any
+	// other and is never flagged or rejected.
 	class, err := docformat.ClassifyRegion(docformat.NodeInjection, "SomeCompletelyUnknownBoundaryName")
 	if err != nil {
 		t.Fatalf("ClassifyRegion(NodeInjection, unknown): unexpected error: %v", err)
 	}
 	if class != domain.InjectionProject {
-		t.Errorf(
-			"ClassifyRegion(NodeInjection, unknown): want InjectionProject, got %q",
-			class,
-		)
+		t.Errorf("ClassifyRegion(NodeInjection, unknown): want InjectionProject, got %q", class)
 	}
 }
 
-func TestClassifyRegion_Injection_ProtocolExtension_ReturnsProjectClassAndNilError(t *testing.T) {
-	// ProtocolExtension is absent from all registries. Using it under [[INJECTION:]] must
-	// return InjectionProject and a nil error (it falls through to the unknown-injection
-	// default; AllowUnknownInjections gates whether a validation issue is raised).
-	class, err := docformat.ClassifyRegion(docformat.NodeInjection, "ProtocolExtension")
+func TestClassifyRegion_Stage2_FormerlyUserOwnedName_UnderInjection_ReturnsProjectClass(t *testing.T) {
+	// IdentityExtension was previously in the user-owned registry; after Stage 2
+	// there is no user-owned registry. It is treated identically to any other
+	// unknown injection name: InjectionProject, nil error.
+	class, err := docformat.ClassifyRegion(docformat.NodeInjection, "IdentityExtension")
 	if err != nil {
-		t.Fatalf("ClassifyRegion(NodeInjection, \"ProtocolExtension\"): unexpected error: %v", err)
+		t.Fatalf("ClassifyRegion(NodeInjection, \"IdentityExtension\"): unexpected error: %v", err)
 	}
 	if class != domain.InjectionProject {
-		t.Errorf(
-			"ClassifyRegion(NodeInjection, \"ProtocolExtension\"): want InjectionProject, got %q",
-			class,
-		)
+		t.Errorf("ClassifyRegion(NodeInjection, \"IdentityExtension\"): want InjectionProject, got %q", class)
+	}
+}
+
+func TestClassifyRegion_Stage2_ArtifactProvenance_UnderInjection_ReturnsProjectClass(t *testing.T) {
+	// ArtifactProvenance is removed from all registries. Under [[INJECTION:]] it falls
+	// through to InjectionProject (open injection names are preserved).
+	class, err := docformat.ClassifyRegion(docformat.NodeInjection, "ArtifactProvenance")
+	if err != nil {
+		t.Fatalf("ClassifyRegion(NodeInjection, \"ArtifactProvenance\"): unexpected error: %v", err)
+	}
+	if class != domain.InjectionProject {
+		t.Errorf("ClassifyRegion(NodeInjection, \"ArtifactProvenance\"): want InjectionProject, got %q", class)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// InjectionProtocol constant
+// InjectionBundle constant
 // ---------------------------------------------------------------------------
 
-func TestInjectionProtocol_ValueIsProtocolString(t *testing.T) {
-	// The string value "protocol" is the class identifier used in the transform and plan layers.
-	const wantValue domain.InjectionClass = "protocol"
-	if domain.InjectionProtocol != wantValue {
-		t.Errorf("InjectionProtocol: want %q, got %q", wantValue, domain.InjectionProtocol)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// InfrastructureAgents — fully declared tool-managed name (no longer unknown)
-// ---------------------------------------------------------------------------
-
-func TestInfrastructureAgents_IsInCanonicalDeployed(t *testing.T) {
-	// InfrastructureAgents was previously classified by ClassifyInjection but absent from
-	// CanonicalInjections and InjectionParent. After Stage 2 it must be fully declared as
-	// a tool-managed name in CanonicalDeployed.
-	found := false
-	for _, n := range docformat.CanonicalDeployed {
-		if n == "InfrastructureAgents" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf(
-			"InfrastructureAgents must be in CanonicalDeployed — it was previously only classified but not registered as canonical; got CanonicalDeployed: %v",
-			docformat.CanonicalDeployed,
-		)
-	}
-}
-
-func TestInfrastructureAgents_IsInDeployedParentWithIdentityParent(t *testing.T) {
-	if docformat.DeployedParent == nil {
-		t.Fatal("DeployedParent is nil")
-	}
-	parent, ok := docformat.DeployedParent["InfrastructureAgents"]
-	if !ok {
-		t.Error("DeployedParent missing entry for \"InfrastructureAgents\"")
-	} else if parent != "Identity" {
-		t.Errorf("DeployedParent[\"InfrastructureAgents\"]: want %q, got %q", "Identity", parent)
-	}
-}
-
-func TestInfrastructureAgents_ExpectedMarker_ReturnsNodeDeployedAndKnownTrue(t *testing.T) {
-	// ExpectedMarker must recognise InfrastructureAgents as a tool-managed (DEPLOYED) name.
-	kind, known := docformat.ExpectedMarker("InfrastructureAgents")
-	if !known {
-		t.Error("ExpectedMarker(\"InfrastructureAgents\"): known=false — it must be recognised as a tool-managed name and no longer reported as unknown")
-	}
-	if kind != docformat.NodeDeployed {
-		t.Errorf("ExpectedMarker(\"InfrastructureAgents\"): kind=%q, want NodeDeployed", kind)
-	}
-}
-
-func TestInfrastructureAgents_IsNotInInjectionParent(t *testing.T) {
-	// InfrastructureAgents moves from ClassifyInjection classification to the tool-managed
-	// registry; it must not appear in the user-owned InjectionParent map.
-	if _, ok := docformat.InjectionParent["InfrastructureAgents"]; ok {
-		t.Error("InjectionParent must not contain \"InfrastructureAgents\" — it is a tool-managed name and belongs in DeployedParent")
+func TestInjectionBundle_ValueIsBundleString(t *testing.T) {
+	const wantValue domain.InjectionClass = "bundle"
+	if domain.InjectionBundle != wantValue {
+		t.Errorf("InjectionBundle: want %q, got %q", wantValue, domain.InjectionBundle)
 	}
 }

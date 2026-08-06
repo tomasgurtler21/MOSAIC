@@ -116,6 +116,7 @@ func fixtureProtocol(version string) domain.ProtocolContent {
 	}
 }
 
+
 // truncateBytes returns the first n bytes of b for use in diagnostic messages.
 func truncateBytes(b []byte, n int) []byte {
 	if len(b) <= n {

@@ -21,16 +21,25 @@ var ErrNotMosaicRoot = errors.New("working directory is not a MOSAIC repository"
 //
 // Defined codes:
 //
-//	"index-orphan"       — workflow appears in the index but has no corresponding file on disk
-//	"file-orphan"        — workflow file exists on disk but is not listed in the index
-//	"hook-hash-mismatch" — a hook bundle's content_hash field does not match the computed hash
-//	"missing-field"      — a required frontmatter field is absent from a source file
+//	"index-orphan"         — workflow appears in the index but has no corresponding file on disk
+//	"file-orphan"          — workflow file exists on disk but is not listed in the index
+//	"hook-hash-mismatch"   — a hook bundle's content_hash field does not match the computed hash
+//	"missing-field"        — a required frontmatter field is absent from a source file
+//	"duplicate-agent-id"   — two catalog agents declare the same numeric `id`
+//	"invalid-role"         — a frontmatter `role` value is not "subagent" or "orchestrator"
+//	"missing-skill-folder" — a required_skills entry names a key with no Agents/Generic/Skills/<key> folder
+//	"bundle-unknown-target"     — bundle block Target is not in docformat.CanonicalDeployed
+//	"bundle-unknown-applies-to" — bundle block AppliesTo is not "subagent" or "orchestrator"
+//	"bundle-missing-spec-doc"   — bundle block SpecifiedIn path does not exist under the MOSAIC root
+//	"bundle-version-mismatch"   — deployed file bundle_version stamp differs from bundle.Version
+//	"bundle-region-drift"       — deployed bundle region body differs from the bundle block content
 type Issue struct {
 	Severity docformat.Severity
 	Code     string // stable code; see above
-	Subject  string // agent key, bundle id, workflow id, or file path
+	Subject  string // agent key, bundle id, workflow id, file path, or duplicate id
 	Message  string // human-readable explanation
 	Path     string // absolute path of the file that produced the issue, when applicable
+	Node     string // region name (for bundle-region-drift) or other sub-object identifier
 }
 
 // Catalog is a read-only snapshot of the MOSAIC source tree. All methods are safe for
@@ -96,12 +105,23 @@ type Catalog interface {
 	// Issues reports any index/disk reconciliation mismatches and hook bundle integrity errors
 	// encountered during Load. A non-empty list is always reported; it is never silently ignored.
 	Issues() []Issue
+
+	// AgentByNumericID looks up any agent by its frontmatter `id` scalar, compared as the
+	// verbatim string the source declared. The second result is false when no agent declares
+	// that id, including when id is the empty string (the orchestrator and any agent with no
+	// `id` are never returned by this method).
+	//
+	// The index behind this method is built at load time alongside agentIdx. Agents with an
+	// empty NumericID are omitted from it. When two catalog agents declare the same `id`, Load
+	// reports a catalog.Issue with code "duplicate-agent-id" (severity error) and the index
+	// keeps the first by key order — the issue, not the silent pick, is the contract.
+	AgentByNumericID(id string) (domain.Agent, bool)
 }
 
 // ResolveRoot walks up the directory tree from dir until it finds a MOSAIC repository root
 // and returns its absolute path. If no root is found it returns ErrNotMosaicRoot.
 //
-// A directory is the MOSAIC root when it contains both Agents/Generic/SOURCE-FORMAT.md and
+// A directory is the MOSAIC root when it contains both Agents/Generic/SourceFilesFormat.md and
 // Workflows/Index.md. Other layouts are rejected.
 func ResolveRoot(dir string) (string, error) {
 	return resolveRoot(dir)

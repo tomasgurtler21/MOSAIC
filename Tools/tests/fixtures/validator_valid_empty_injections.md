@@ -23,17 +23,6 @@ Content in identity section.
 [[/DEPLOYED:CommunicationProtocol]]
 ---
 
-[[SECTION:ArtifactProvenance]]
-## Artifact Provenance
-
-Artifact provenance content.
-
-[[INJECTION:ArtifactProvenanceExtension]]
-[[/INJECTION:ArtifactProvenanceExtension]]
-
-[[/SECTION:ArtifactProvenance]]
----
-
 [[SECTION:Capabilities]]
 ## Capabilities
 

@@ -106,6 +106,15 @@ func (s *service) loadProtocol() (domain.ProtocolContent, error) {
 	return s.deps.ProtocolLoader.LoadProtocol(s.deps.MosaicRoot)
 }
 
+// loadBundle loads the deployed-sections bundle once for the run. It is called before
+// any plan is built and before any output is written; a failure aborts the run.
+func (s *service) loadBundle() (domain.BundleContent, error) {
+	if s.deps.BundleLoader == nil {
+		return domain.BundleContent{}, fmt.Errorf("misconfigured service: BundleLoader dependency is nil")
+	}
+	return s.deps.BundleLoader.LoadBundle(s.deps.MosaicRoot)
+}
+
 // now returns the injected clock, defaulting to time.Now when Deps.Now is nil.
 func (s *service) now() time.Time {
 	if s.deps.Now != nil {
@@ -131,8 +140,11 @@ type Deps struct {
 	GOOS           string
 	// ProtocolLoader reads the canonical protocol source document once per run and returns
 	// the two role blocks and the source version. Mandatory; supplied at the composition root.
-	// Implementation is provided in I5.1; wiring into the flows is added in I5.2 and I5.3.
 	ProtocolLoader catalog.ProtocolLoader
+	// BundleLoader reads the deployed-sections bundle once per run and returns its version
+	// and blocks. Mandatory; supplied at the composition root. A nil loader is a
+	// misconfiguration reported as an error, never a panic.
+	BundleLoader catalog.BundleLoader
 	// Now is injected so run records and backup filenames are deterministic in tests.
 	Now func() time.Time
 }

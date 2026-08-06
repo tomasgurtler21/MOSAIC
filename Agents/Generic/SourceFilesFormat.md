@@ -1,9 +1,19 @@
 # MOSAIC Generic Source Format Reference
 
 This document describes the conventions for MOSAIC generic source files:
-agent instruction files, skill files, and hook bundle manifests. It is the
-authoritative reference for the fields added in Stage 2 and the version bump
-rules that govern them.
+agent instruction files, skill files, and hook bundle manifests.
+
+**On agent files, this document is a tool-facing copy, not the authority.**
+`Development/Designs/AgentTemplateArchitecture.md` specifies the agent file
+schema — frontmatter, region kinds, canonical order, per-section content, and
+the validator rules. This file restates the machine-readable parts of that
+schema for readers working from the tool side, alongside
+`Tools/Common/docformat/vocabulary.go` and `Tools/boundary_constants.py`.
+**All three are copies and must be updated together**; where any of them
+disagrees with the design document, the design document is right.
+
+Unique to this document, and not specified anywhere else: skill frontmatter
+fields, hook bundle structure, and their version bump rules.
 
 ---
 
@@ -13,16 +23,29 @@ Every generic agent file (`Agents/Generic/Agents/**/*.md`), the orchestrator
 (`Agents/Generic/Orchestrator/orchestrator.md`), and every generic utility
 agent (`Agents/Generic/UtilityAgents/*.md`) carries the following frontmatter.
 
+Utility agents carry frontmatter only. They have no boundary tags, are never
+deployed into a run, and everything below about regions and canonical order
+does not apply to them.
+
 ### Standard identity fields (pre-existing)
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | integer string | Numeric agent identifier for round-tripping. Not present on utility agents or the orchestrator. |
-| `version` | semver string | Agent version. Bumped on any change to identity or body content. |
+| `version` | semver string | Agent version. Bumped on any change to identity or hand-authored body content. Tiers in `AgentTemplateArchitecture.md` §3.4. Content arriving in a `[[DEPLOYED:]]` region never bumps it. |
 | `name` | string | Agent slug (matches file base name). |
 | `description` | string | One-line description shown to users. |
+| `role` | enum | `subagent` or `orchestrator`. Declares what the agent is; selects which canonical text it receives. Not `utility` — utility agents are outside the schema. |
 | `model` | string | Model placeholder (`{model-identifier}`) or a concrete model id in a deployed file. |
 | `tools` | flow-list or placeholder | Generic tool vocabulary (`{tool-permissions}` for the orchestrator). |
+
+A deployed agent file additionally carries `bundle_version`, written by the
+deployment tool. It is not a source field.
+
+> **Not yet read by the tool.** `role` is specified but role is still inferred
+> from the file's path in `domain.AgentRole`, whose enum reads
+> `worker`/`orchestrator`/`utility`. The frontmatter vocabulary is `subagent`;
+> the code should follow or map explicitly at the boundary.
 
 ### Deployment metadata fields (added Stage 2)
 
@@ -152,30 +175,62 @@ A tag line matches when the trimmed line is exactly `[[` + marker body + `]]`.
 Each boundary name may appear at most once per file. `INJECTION` and `DEPLOYED`
 regions may be nested inside a `SECTION` or appear at body top level.
 
+**`DEPLOYED` names are a closed set; `INJECTION` names are open.** The tool must
+find content for a deployed region, so a name it does not recognise is an error.
+An injection region is preserved by matching its name between the deployed file
+and the source file, which needs no list — so any injection name is valid and is
+preserved. See `AgentTemplateArchitecture.md` §6.1.
+
 ### Tool-managed names — declare with `[[DEPLOYED:]]`
 
 The deploy tool writes and regenerates these regions on every deploy. Do not
 place user-authored content inside them; it will be overwritten.
 
-| Name | Required parent |
-|------|-----------------|
-| `CommunicationProtocol` | Body top level (second canonical slot) |
-| `AvailableWorkflows` | `Identity` |
-| `InfrastructureAgents` | `Identity` |
-| `LanguagePatterns` | `Capabilities` |
-| `HarnessConstraints` | `Constraints` |
-| `CustomConstraints` | `Constraints` |
+| Name | Required parent | Content source |
+|------|-----------------|----------------|
+| `CommunicationProtocol` | Body top level (second canonical slot) | `CommunicationProtocol.md` |
+| `AuthorityHierarchy` | `Identity` | Bundle |
+| `ClosingProcedure` | `Identity` | Bundle |
+| `AvailableWorkflows` | `Identity` | Assembled from selected workflows |
+| `InfrastructureAgents` | `Identity` | Assembled from selected declarations |
+| `LanguagePatterns` | `Capabilities` | Deployment configuration |
+| `ProtocolConstraints` | `Constraints` | Bundle |
+| `HarnessConstraints` | `Constraints` | Selected harness module |
+| `CustomConstraints` | `Constraints` | Deployment configuration |
+| `ErrorHandlingCommon` | `ErrorHandling` | Bundle |
+| `ExecutionPhilosophyCommon` | `ExecutionPhilosophy` | Bundle |
+
+"Bundle" means `Agents/Generic/DeployedSections.md`.
+
+> **Not yet read by the tool.** The five bundle-sourced names above are
+> specified but the deployment tool does not read the bundle. Until it does,
+> those regions have no content source and the agents are unmigrated.
+
+#### What an absent deployed region costs
+
+| Tier | Names | Absence is |
+|------|-------|-----------|
+| Contract | `CommunicationProtocol` | Error |
+| Conduct | `AuthorityHierarchy`, `ClosingProcedure`, `ProtocolConstraints`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon` | Warning |
+| Deployment | `LanguagePatterns`, `HarnessConstraints`, `CustomConstraints`, `AvailableWorkflows`, `InfrastructureAgents` | Silent |
+
+A region *present* with no content source for the file's role is always an error.
 
 ### User-owned names — declare with `[[INJECTION:]]`
 
 Users author content in these regions. The deploy tool preserves them
-byte-identically on every update. On first deploy, these regions are left
-empty and listed in the `TODO.md` checklist for the user to fill in.
+byte-identically on every update, **whatever they are named**. On first deploy
+they are left empty and listed in the `TODO.md` checklist. No injection is ever
+required to be filled.
 
-| Name | Required parent |
-|------|-----------------|
+The names below are the ones MOSAIC's own agents carry and ships TODO guidance
+for. They are a **suggestion, not an allowlist** — an unlisted name is valid and
+preserved like any other.
+
+| Name | Usual parent |
+|------|--------------|
 | `IdentityExtension` | `Identity` |
-| `ArtifactProvenanceExtension` | `ArtifactProvenance` |
+| `ProtocolExtension` | Body top level (sibling of `CommunicationProtocol`) |
 | `CodebaseContext` | `Capabilities` |
 | `OutputArtifactTemplate` | `Capabilities` |
 | `SeverityThresholds` | `Capabilities` |
@@ -183,22 +238,27 @@ empty and listed in the `TODO.md` checklist for the user to fill in.
 | `ErrorHandlingExtension` | `ErrorHandling` |
 | `ContextLimits` | `ExecutionPhilosophy` |
 
-`ProtocolExtension` is not a recognised name. Any `[[INJECTION:ProtocolExtension]]`
-region in a deployed file will be orphaned on the next update and its content
-moved to the `TODO.md` checklist.
+`ArtifactProvenanceExtension` is retired: the stamp it extended folded into the
+orchestration contract. A file still carrying it is stale, not invalid, and its
+content is preserved.
+
+The one hard rule about placement: **an injection is never nested inside a
+`[[DEPLOYED:]]` region**, which is regenerated wholesale and would destroy it.
+Everything else about placement is advice.
 
 ### Canonical document order
 
-A source file's top-level boundaries must appear in this order:
+A source file's top-level boundaries must form a **subsequence** of this list —
+sections may be absent, a file may add top-level sections of its own, and any
+two of these that are both present must appear in this relative order:
 
 1. `Identity` (section)
 2. `CommunicationProtocol` (top-level deployed)
-3. `ArtifactProvenance` (section)
-4. `Capabilities` (section)
-5. `Constraints` (section)
-6. `ErrorHandling` (section)
-7. `OutputFormat` (section)
-8. `ExecutionPhilosophy` (section)
+3. `Capabilities` (section)
+4. `Constraints` (section)
+5. `ErrorHandling` (section)
+6. `OutputFormat` (section)
+7. `ExecutionPhilosophy` (section)
 
 ---
 

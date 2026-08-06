@@ -29,6 +29,33 @@ func NewFileStore(path string) domain.ArtifactStore {
 	return &fileStore{path: path}
 }
 
+// IsRunScopedArtifactPath reports whether path's parent directory is a
+// run-scoped orchestration folder, i.e. named "Orchestration-{run_id}" where
+// run_id satisfies domain.IsValidRunID.
+//
+// Reports false for a relative path, for a parent that is not an
+// Orchestration-* folder, and for an Orchestration-* folder whose suffix is not
+// a canonical run_id.
+//
+// This is a predicate only. Non-run-scoped absolute paths remain legal for
+// Create (many existing tests build stores under t.TempDir()); the predicate
+// exists so the condition can be logged without changing behaviour.
+//
+// Its sole production consumer is newLoggedArtifactStore in cmd/mosaic-run,
+// which uses it to decide whether to emit EventArtifactPathNonRunScoped. The
+// artifact package itself never logs and never takes a DebugLogger.
+func IsRunScopedArtifactPath(path string) bool {
+	if !filepath.IsAbs(path) {
+		return false
+	}
+	parentDir := filepath.Base(filepath.Dir(path))
+	runID, ok := domain.ParseRunFolder(parentDir)
+	if !ok {
+		return false
+	}
+	return domain.IsValidRunID(runID)
+}
+
 // Parse parses the canonical orchestration artifact format from the given bytes
 // and returns the in-memory ArtifactState.
 //
@@ -308,6 +335,14 @@ func (f *fileStore) Read(ctx context.Context) (domain.ArtifactState, error) {
 }
 
 func (f *fileStore) Create(ctx context.Context, info domain.WorkflowInfo, task string, checkpoints bool, now time.Time, runID string) (domain.ArtifactState, error) {
+	// Reject a non-absolute store path before any filesystem side effects.
+	// A relative path would land in the process CWD, never in the intended
+	// run-scoped folder. Absolute non-run-scoped paths are permitted (many
+	// tests build stores under t.TempDir()).
+	if !filepath.IsAbs(f.path) {
+		return domain.ArtifactState{}, fmt.Errorf("artifact store path must be absolute, got %q", f.path)
+	}
+
 	// Fail if file already exists.
 	if _, err := os.Stat(f.path); err == nil {
 		return domain.ArtifactState{}, fmt.Errorf("artifact: file already exists at %s", f.path)

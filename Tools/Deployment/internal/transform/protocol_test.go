@@ -437,7 +437,7 @@ func extractProtocolRegionContent(t *testing.T, output []byte) []byte {
 //
 //  1. [[INJECTION:IdentityExtension]] — user-owned, inside the Identity section
 //  2. [[DEPLOYED:CommunicationProtocol]] — tool-managed, at the top level between sections
-//  3. [[INJECTION:ArtifactProvenanceExtension]] — user-owned, inside the ArtifactProvenance section
+//  3. [[INJECTION:CodebaseContext]] — user-owned, inside the Capabilities section
 //
 // This layout mirrors the canonical MOSAIC agent structure and pins the expected document
 // ordering of the protocol region in Report.Regions.
@@ -466,20 +466,22 @@ Protocol order test agent.
 [[DEPLOYED:CommunicationProtocol]]
 [[/DEPLOYED:CommunicationProtocol]]
 
-[[SECTION:ArtifactProvenance]]
-## ArtifactProvenance
+[[SECTION:Capabilities]]
+## Capabilities
 
-[[INJECTION:ArtifactProvenanceExtension]]
-[[/INJECTION:ArtifactProvenanceExtension]]
+Protocol order test capabilities.
 
-[[/SECTION:ArtifactProvenance]]
+[[INJECTION:CodebaseContext]]
+[[/INJECTION:CodebaseContext]]
+
+[[/SECTION:Capabilities]]
 `
 
 // TestProtocol_DocumentOrderProtocolRegionInterleaved verifies that the CommunicationProtocol
 // RegionOutcome appears in Report.Regions at the position matching its location in the source
-// document — after IdentityExtension and before ArtifactProvenanceExtension. This pins the
-// protocol region's ordering so that a future refactor of the region-processing loop is caught
-// by a test that directly owns the protocol stage's ordering contract.
+// document — after IdentityExtension and before CodebaseContext. This pins the protocol
+// region's ordering so that a future refactor of the region-processing loop is caught by a
+// test that directly owns the protocol stage's ordering contract.
 func TestProtocol_DocumentOrderProtocolRegionInterleaved(t *testing.T) {
 	req := transform.Request{
 		Source:   []byte(sourceWithProtocolInterleaved),
@@ -499,22 +501,22 @@ func TestProtocol_DocumentOrderProtocolRegionInterleaved(t *testing.T) {
 
 	regions := result.Report.Regions
 	if len(regions) < 3 {
-		t.Fatalf("Report.Regions: want at least 3 entries (IdentityExtension, CommunicationProtocol, ArtifactProvenanceExtension), got %d: %v",
+		t.Fatalf("Report.Regions: want at least 3 entries (IdentityExtension, CommunicationProtocol, CodebaseContext), got %d: %v",
 			len(regions), regionNames(regions))
 	}
 
 	// Find each region's position in the report.
 	idxIdentity := -1
 	idxProtocol := -1
-	idxProvenance := -1
+	idxCodebase := -1
 	for i, r := range regions {
 		switch r.Name {
 		case "IdentityExtension":
 			idxIdentity = i
 		case "CommunicationProtocol":
 			idxProtocol = i
-		case "ArtifactProvenanceExtension":
-			idxProvenance = i
+		case "CodebaseContext":
+			idxCodebase = i
 		}
 	}
 
@@ -524,22 +526,22 @@ func TestProtocol_DocumentOrderProtocolRegionInterleaved(t *testing.T) {
 	if idxProtocol == -1 {
 		t.Error("Report.Regions does not contain CommunicationProtocol")
 	}
-	if idxProvenance == -1 {
-		t.Error("Report.Regions does not contain ArtifactProvenanceExtension")
+	if idxCodebase == -1 {
+		t.Error("Report.Regions does not contain CodebaseContext")
 	}
 
-	if idxIdentity == -1 || idxProtocol == -1 || idxProvenance == -1 {
+	if idxIdentity == -1 || idxProtocol == -1 || idxCodebase == -1 {
 		t.FailNow() // positions unknown; ordering assertions below are meaningless
 	}
 
-	// Document order: IdentityExtension < CommunicationProtocol < ArtifactProvenanceExtension.
+	// Document order: IdentityExtension < CommunicationProtocol < CodebaseContext.
 	if idxProtocol <= idxIdentity {
 		t.Errorf("CommunicationProtocol (index %d) must appear after IdentityExtension (index %d) in Report.Regions",
 			idxProtocol, idxIdentity)
 	}
-	if idxProtocol >= idxProvenance {
-		t.Errorf("CommunicationProtocol (index %d) must appear before ArtifactProvenanceExtension (index %d) in Report.Regions",
-			idxProtocol, idxProvenance)
+	if idxProtocol >= idxCodebase {
+		t.Errorf("CommunicationProtocol (index %d) must appear before CodebaseContext (index %d) in Report.Regions",
+			idxProtocol, idxCodebase)
 	}
 }
 

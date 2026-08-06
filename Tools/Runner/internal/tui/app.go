@@ -10,6 +10,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,20 +29,29 @@ import (
 	"mosaic-run/internal/workflow"
 )
 
+// ArtifactNotYetCreatedMessage is shown in the artifact view when the run's
+// Orchestration.md does not exist yet — either because no run folder has been
+// resolved or because the run was refused before the store was created.
+//
+// The runner never guesses an artifact path. Tests assert on the stable
+// substring "not yet created", not on the full string.
+const ArtifactNotYetCreatedMessage = "Orchestration.md not yet created for this run."
+
 // screenID identifies the currently active screen.
 type screenID int
 
 const (
-	screenRunSelect     screenID = iota // run selection (shown when multiple resumable runs exist)
-	screenSetupFile                     // orchestrator file path entry
-	screenSetupWorkflow                 // workflow selection
-	screenSetupTask                     // task description entry
-	screenSetupConfig                   // run configuration prompts
-	screenProgress                      // live execution progress
-	screenDeviation                     // deviation resolution
-	screenArtifact                      // read-only artifact inspection
-	screenQuestion                      // generic overlay from Interaction port
-	screenDone                          // completion/error summary
+	screenRunSelect      screenID = iota // run selection (shown when multiple resumable runs exist)
+	screenSetupFile                      // orchestrator file path entry
+	screenSetupWorkflow                  // workflow selection
+	screenSetupTask                      // task description entry
+	screenSetupSeedInput                 // seed-input path entry (new runs only)
+	screenSetupConfig                    // run configuration prompts
+	screenProgress                       // live execution progress
+	screenDeviation                      // deviation resolution
+	screenArtifact                       // read-only artifact inspection
+	screenQuestion                       // generic overlay from Interaction port
+	screenDone                           // completion/error summary
 )
 
 // Options configures the TUI run. All fields are optional.
@@ -82,6 +92,13 @@ type Options struct {
 	// adapter selection and timeout from the config screen (zero value = fake adapter).
 	// When nil, the session passed to Run() is used directly (test/backward-compat path).
 	SessionFactory func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session
+
+	// MintRunIdentity, when non-nil, is called when the user chooses "new run"
+	// on the run-select screen, to resolve run identity before the session is
+	// reconstructed. When nil, the previous behaviour is preserved: identity
+	// is left empty and the session factory is called with an empty run folder.
+	// Production callers always supply it; tests may omit it.
+	MintRunIdentity RunIdentityMinter
 }
 
 // runSetupSelections holds all inputs collected during the setup phase.
@@ -89,7 +106,13 @@ type runSetupSelections struct {
 	orchestratorFile string
 	workflowID       domain.WorkflowID
 	task             string
-	config           screens.ConfigSelection
+
+	// seedInput is the optional seed-input path collected on the seed screen.
+	// Empty means no seeding. Only ever populated for a new run; a resumed run
+	// skips the seed screen and leaves this empty.
+	seedInput string
+
+	config screens.ConfigSelection
 
 	// Run identity resolved by RunSelectScreen or pre-launch flags.
 	runID     string // resolved run_id; empty if not yet resolved
@@ -141,9 +164,10 @@ type rootModel struct {
 	height    int
 
 	// Session dependencies.
-	sess           session.Session
-	sessionFactory func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session
-	interact       *ProgramRef
+	sess            session.Session
+	sessionFactory  func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session
+	mintRunIdentity RunIdentityMinter
+	interact        *ProgramRef
 
 	// Enumerated workflow regions (populated after orchestrator file is loaded).
 	workflows []domain.WorkflowRegion
@@ -156,10 +180,11 @@ type rootModel struct {
 	runSelectScreen *screens.RunSelectScreen
 
 	// Entry screens (concrete types so back-navigation preserves state).
-	fileScreen     *screens.OrchestratorFileScreen
-	workflowScreen *screens.WorkflowSelectScreen
-	taskScreen     *screens.TaskScreen
-	configScreen   *screens.ConfigScreen
+	fileScreen      *screens.OrchestratorFileScreen
+	workflowScreen  *screens.WorkflowSelectScreen
+	taskScreen      *screens.TaskScreen
+	seedInputScreen *screens.SeedInputScreen
+	configScreen    *screens.ConfigScreen
 
 	// Collected setup selections.
 	selections runSetupSelections
@@ -216,9 +241,10 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	style := stylesFromTheme(opts.Theme)
 	ctx, cancel := context.WithCancel(ctx)
 
-	fileScreen := screens.NewOrchestratorFileScreen(w, h, style)
-	taskScreen := screens.NewTaskScreen(w, h, style)
-	configScreen := screens.NewConfigScreen(w, h, style)
+	fileScreen      := screens.NewOrchestratorFileScreen(w, h, style)
+	taskScreen      := screens.NewTaskScreen(w, h, style)
+	seedInputScreen := screens.NewSeedInputScreen(w, h, style)
+	configScreen    := screens.NewConfigScreen(w, h, style)
 
 	interact := opts.Interaction
 	if interact == nil {
@@ -247,10 +273,12 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 		height:          h,
 		sess:            sess,
 		sessionFactory:  opts.SessionFactory,
+		mintRunIdentity: opts.MintRunIdentity,
 		interact:        interact,
 		runSelectScreen: runSelectScreen,
 		fileScreen:      fileScreen,
 		taskScreen:      taskScreen,
+		seedInputScreen: seedInputScreen,
 		configScreen:    configScreen,
 	}
 
@@ -352,6 +380,8 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSetupWorkflow(msg)
 	case screenSetupTask:
 		return m.updateSetupTask(msg)
+	case screenSetupSeedInput:
+		return m.updateSetupSeedInput(msg)
 	case screenSetupConfig:
 		return m.updateSetupConfig(msg)
 	case screenProgress:
@@ -380,6 +410,9 @@ func (m *rootModel) resizeScreens() {
 	}
 	if m.taskScreen != nil {
 		m.taskScreen.Resize(m.width, m.height)
+	}
+	if m.seedInputScreen != nil {
+		m.seedInputScreen.Resize(m.width, m.height)
 	}
 	if m.configScreen != nil {
 		m.configScreen.Resize(m.width, m.height)
@@ -414,9 +447,15 @@ func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if m.runSelectScreen.Done() {
 		if m.runSelectScreen.IsNewRun() {
-			m.selections.runID = ""
-			m.selections.runFolder = ""
 			m.selections.isNewRun = true
+			if m.mintRunIdentity != nil {
+				runID, runFolder := m.mintRunIdentity()
+				m.selections.runID = runID
+				m.selections.runFolder = runFolder
+			} else {
+				m.selections.runID = ""
+				m.selections.runFolder = ""
+			}
 		} else {
 			c := m.runSelectScreen.SelectedCandidate()
 			if c != nil {
@@ -430,11 +469,10 @@ func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// When "new run" is selected but no run folder is known yet, the session
-		// factory is called with an empty folder (the session layer will mint the ID
-		// when Store.Create is called in a later stage).
+		// When "new run" is selected, the session factory is called with the minted
+		// run folder (or empty string when no minter is provided, for backward compat).
 		if m.selections.isNewRun && m.sessionFactory != nil {
-			m.sess = m.sessionFactory("", true, "", screens.ConfigSelection{})
+			m.sess = m.sessionFactory(m.selections.runFolder, true, "", screens.ConfigSelection{})
 		}
 		m.runSelectScreen.Reset()
 		m.screen = screenSetupFile
@@ -528,6 +566,26 @@ func (m *rootModel) updateSetupTask(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.taskScreen.Done() {
 		m.selections.task = m.taskScreen.Task()
 		m.taskScreen.Reset()
+		if m.selections.isNewRun {
+			m.screen = screenSetupSeedInput
+			return m, m.seedInputScreen.InputInit()
+		}
+		m.screen = screenSetupConfig
+		return m, nil
+	}
+	return m, cmd
+}
+
+func (m *rootModel) updateSetupSeedInput(msg tea.Msg) (tea.Model, tea.Cmd) {
+	cmd := m.seedInputScreen.Update(msg)
+	if m.seedInputScreen.Back() {
+		m.seedInputScreen.Reset()
+		m.screen = screenSetupTask
+		return m, m.taskScreen.InputInit()
+	}
+	if m.seedInputScreen.Done() {
+		m.selections.seedInput = m.seedInputScreen.SeedInput()
+		m.seedInputScreen.Reset()
 		m.screen = screenSetupConfig
 		return m, nil
 	}
@@ -538,6 +596,10 @@ func (m *rootModel) updateSetupConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.configScreen.Update(msg)
 	if m.configScreen.Back() {
 		m.configScreen.Reset()
+		if m.selections.isNewRun {
+			m.screen = screenSetupSeedInput
+			return m, m.seedInputScreen.InputInit()
+		}
 		m.screen = screenSetupTask
 		return m, m.taskScreen.InputInit()
 	}
@@ -605,31 +667,24 @@ func extractField(msg, key string) string {
 	return ""
 }
 
-// readArtifactContent reads the Orchestration.md file at the canonical path.
-// When a run-scoped folder is known (resumed run or flag-resolved identity),
-// the artifact lives at {runFolder}/Orchestration.md. For new runs whose
-// run folder has not yet been minted, it falls back to the directory that
-// contains the orchestrator file.
+// readArtifactContent reads the Orchestration.md file from the canonical
+// run-scoped path. The orchestrator file's directory is never consulted.
+//
+// Decision table:
+//   - runFolder empty              → ArtifactNotYetCreatedMessage
+//   - runFolder set, file exists   → file content verbatim
+//   - runFolder set, file missing  → ArtifactNotYetCreatedMessage
+//   - runFolder set, other error   → "(could not read artifact: {err})"
 func (m *rootModel) readArtifactContent() string {
-	if m.selections.runFolder != "" {
-		artPath := filepath.Join(m.selections.runFolder, "Orchestration.md")
-		data, err := os.ReadFile(artPath)
-		if err != nil {
-			return fmt.Sprintf("(could not read artifact: %v)", err)
-		}
-		return string(data)
+	if m.selections.runFolder == "" {
+		return ArtifactNotYetCreatedMessage
 	}
-	// Fallback: artifact in the same directory as the orchestrator file.
-	path := m.selections.orchestratorFile
-	dir := ""
-	if idx := strings.LastIndexByte(path, '/'); idx >= 0 {
-		dir = path[:idx+1]
-	} else if idx := strings.LastIndexByte(path, '\\'); idx >= 0 {
-		dir = path[:idx+1]
-	}
-	artPath := dir + "Orchestration.md"
+	artPath := filepath.Join(m.selections.runFolder, "Orchestration.md")
 	data, err := os.ReadFile(artPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ArtifactNotYetCreatedMessage
+		}
 		return fmt.Sprintf("(could not read artifact: %v)", err)
 	}
 	return string(data)
@@ -833,6 +888,10 @@ func (m *rootModel) startSession() tea.Cmd {
 	ctx := m.ctx
 
 	return func() tea.Msg {
+		var seedInputs []string
+		if sel.isNewRun && sel.seedInput != "" {
+			seedInputs = []string{sel.seedInput}
+		}
 		config := domain.RunConfig{
 			OrchestratorFilePath: sel.orchestratorFile,
 			WorkflowID:           sel.workflowID,
@@ -844,6 +903,7 @@ func (m *rootModel) startSession() tea.Cmd {
 			AllowVersionDrift:    sel.config.AllowVersionDrift,
 			Checkpoints:          sel.config.Checkpoints,
 			InfraClassSelections: sel.config.InfraClassSelections,
+			SeedInputs:           seedInputs,
 		}
 		outcome, err := sess.Start(ctx, config)
 		if err != nil {
@@ -872,6 +932,8 @@ func (m *rootModel) View() string {
 		}
 	case screenSetupTask:
 		return m.taskScreen.View()
+	case screenSetupSeedInput:
+		return m.seedInputScreen.View()
 	case screenSetupConfig:
 		return m.configScreen.View()
 	case screenProgress:

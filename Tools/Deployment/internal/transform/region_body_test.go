@@ -354,7 +354,7 @@ func TestAllMarkerKinds_RepeatedTransformReportIsDeterministic(t *testing.T) {
 // orphaned user-owned regions in sorted name order. This ordering makes the report a faithful
 // audit trail that maps to the document's structure.
 func TestAllMarkerKinds_RegionsReportDocumentOrdered(t *testing.T) {
-	// deployedWithExtraInjection adds an injection (ArtifactProvenanceExtension) that is
+	// deployedWithExtraInjection adds an injection (ErrorHandlingExtension) that is
 	// absent from mixedMarkerSource, creating an orphan to appear at the end.
 	const deployedWithExtraInjection = `---
 id: 70
@@ -381,14 +381,6 @@ Identity content.
 More prose after the injection.
 [[/SECTION:Identity]]
 
-[[SECTION:ArtifactProvenance]]
-## ArtifactProvenance
-
-[[INJECTION:ArtifactProvenanceExtension]]
-Provenance content: will become orphan.
-[[/INJECTION:ArtifactProvenanceExtension]]
-[[/SECTION:ArtifactProvenance]]
-
 [[SECTION:Capabilities]]
 ## Capabilities
 
@@ -412,10 +404,18 @@ Old harness content.
 
 Final constraint prose.
 [[/SECTION:Constraints]]
+
+[[SECTION:ErrorHandling]]
+## ErrorHandling
+
+[[INJECTION:ErrorHandlingExtension]]
+Error handling extension content: will become orphan.
+[[/INJECTION:ErrorHandlingExtension]]
+[[/SECTION:ErrorHandling]]
 `
 
 	req := transform.Request{
-		Source:   []byte(mixedMarkerSource), // does not have ArtifactProvenanceExtension
+		Source:   []byte(mixedMarkerSource), // does not have ErrorHandlingExtension
 		Deployed: []byte(deployedWithExtraInjection),
 		Kind:     domain.ArtifactAgent,
 		Key:      "mixed-markers-test",
@@ -433,15 +433,15 @@ Final constraint prose.
 		t.Fatal("Report.Regions is empty; expected outcomes for source regions and the orphan")
 	}
 
-	// The last outcome must be the orphaned region (ArtifactProvenanceExtension), since
+	// The last outcome must be the orphaned region (ErrorHandlingExtension), since
 	// orphans are emitted after all source regions in sorted name order.
 	last := result.Report.Regions[len(result.Report.Regions)-1]
 	if last.Action != transform.RegionOrphaned {
 		t.Errorf("last entry in Report.Regions must be an orphaned outcome; got Action=%q Name=%q",
 			last.Action, last.Name)
 	}
-	if last.Name != "ArtifactProvenanceExtension" {
-		t.Errorf("orphaned outcome name: want %q, got %q", "ArtifactProvenanceExtension", last.Name)
+	if last.Name != "ErrorHandlingExtension" {
+		t.Errorf("orphaned outcome name: want %q, got %q", "ErrorHandlingExtension", last.Name)
 	}
 }
 

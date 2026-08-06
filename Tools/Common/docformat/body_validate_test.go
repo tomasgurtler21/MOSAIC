@@ -1,25 +1,24 @@
 package docformat_test
 
-// Tests for structural validation and canonical vocabulary (T4.5).
+// Tests for structural validation and canonical vocabulary.
 //
 // Coverage:
-//   - Validate returns an Issue with Code "unbalanced-tag" for a missing closing tag (E001).
-//   - Validate returns an Issue with Code "unbalanced-tag" for an unmatched closing tag (E002).
-//   - Validate returns an Issue with Code "mismatched-tag" for open/close names that do not match (E003).
-//   - Validate returns an Issue with Code "wrong-nesting" for a section nested inside another section (E004-style).
-//   - Validate returns an Issue with Code "wrong-parent" for an injection outside its expected parent section (E008-style).
-//   - Validate returns an Issue with Code "wrong-parent" for a canonical injection at body top level (no enclosing section) when RequireInjectionParents is true.
-//   - Validate returns an Issue with Code "content-outside-boundary" for non-blank content outside all boundaries.
-//   - Validate returns an Issue with Code "duplicate-name" for a boundary name used twice in the same file.
-//   - Validate returns an Issue with Code "out-of-order-section" for sections that appear outside canonical order.
-//   - Validate returns an Issue with Code "unknown-injection" for a non-canonical injection name when AllowUnknownInjections is false.
-//   - Validate returns no "unknown-injection" issue when AllowUnknownInjections is true.
+//   - Validate returns an Issue with Code "unbalanced-tag" for a missing closing tag.
+//   - Validate returns an Issue with Code "unbalanced-tag" for an unmatched closing tag.
+//   - Validate returns an Issue with Code "mismatched-tag" for open/close names that do not match.
+//   - Validate returns an Issue with Code "wrong-nesting" for a section nested inside another section.
+//   - Validate returns an Issue with Code "wrong-parent" for a canonical injection outside its
+//     advisory parent section (RequireInjectionParents is true).
+//   - Validate returns an Issue with Code "content-outside-boundary" for non-blank content
+//     outside all boundaries.
+//   - Validate returns an Issue with Code "duplicate-name" for a boundary name used twice.
+//   - Validate returns an Issue with Code "out-of-order-section" for sections outside canonical order.
 //   - Validate returns no Issues for a well-formed document.
-//   - All six structural issue codes carry SeverityError.
-//   - Issue.Node is non-empty for a mismatched-tag issue (offending section name is known).
+//   - All structural issue codes carry SeverityError.
+//   - Issue.Node is non-empty for a mismatched-tag issue.
 //   - RequireCanonicalSections enforces order of present sections, not presence of all sections.
-//   - Workflow files with compound section names are excluded from AC4.4 Python-Go agreement scope.
-//   - InjectionParent maps each canonical injection to its expected parent section.
+//   - Workflow files with compound section names are excluded from agreement checks.
+//   - InjectionParent maps each canonical injection name to its advisory parent section.
 
 import (
 	"testing"
@@ -60,15 +59,14 @@ func hasIssueWithCode(issues []docformat.Issue, code string) bool {
 // --- Well-formed document ---
 
 func TestValidate_WellFormedDocument_ReturnsNoIssues(t *testing.T) {
-	// Uses a Stage 2-compliant fixture: Identity section followed by a top-level
-	// [[DEPLOYED:CommunicationProtocol]] boundary, then ArtifactProvenance section.
-	// All names are canonical and correctly paired with their marker kinds.
+	// Uses a fixture with canonical sections and CommunicationProtocol as a top-level
+	// [[DEPLOYED:]] boundary. ArtifactProvenance and ArtifactProvenanceExtension are
+	// absent (removed from vocabulary in Stage 2).
 	doc := parsedBoundaryFixture(t, "canonical-order-with-deployed-protocol.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
 		RequireCanonicalSections: true,
 		RequireInjectionParents:  true,
-		AllowUnknownInjections:   false,
 	})
 
 	if len(issues) != 0 {
@@ -79,7 +77,7 @@ func TestValidate_WellFormedDocument_ReturnsNoIssues(t *testing.T) {
 	}
 }
 
-// --- Unbalanced open tag (E001 equivalent: unmatched-open → "unbalanced-tag") ---
+// --- Unbalanced open tag ---
 
 func TestValidate_UnbalancedOpenTag_ReportsUnbalancedTagIssue(t *testing.T) {
 	doc := boundaryMalformedFixture(t, "unbalanced-open.md")
@@ -105,7 +103,7 @@ func TestValidate_UnbalancedOpenTag_IssueSeverityIsError(t *testing.T) {
 	}
 }
 
-// --- Unmatched closing tag (E002 equivalent: unmatched-close → "unbalanced-tag") ---
+// --- Unmatched closing tag ---
 
 func TestValidate_UnmatchedCloseTag_ReportsUnbalancedTagIssue(t *testing.T) {
 	doc := boundaryMalformedFixture(t, "unmatched-close.md")
@@ -117,10 +115,9 @@ func TestValidate_UnmatchedCloseTag_ReportsUnbalancedTagIssue(t *testing.T) {
 	}
 }
 
-// --- Mismatched open/close names (E003 → "mismatched-tag") ---
+// --- Mismatched open/close names ---
 
 func TestValidate_MismatchedTagNames_ReportsMismatchedTagIssue(t *testing.T) {
-	// [[SECTION:Identity]] opened but [[/SECTION:Capabilities]] used to close it.
 	doc := boundaryMalformedFixture(t, "mismatched-names.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{})
@@ -147,7 +144,6 @@ func TestValidate_MismatchedTagNames_IssueSeverityIsError(t *testing.T) {
 // --- Wrong nesting: section inside section ---
 
 func TestValidate_SectionNestedInsideSection_ReportsWrongNestingIssue(t *testing.T) {
-	// Sections must not be nested inside other sections.
 	doc := boundaryMalformedFixture(t, "wrong-nesting.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{})
@@ -157,10 +153,11 @@ func TestValidate_SectionNestedInsideSection_ReportsWrongNestingIssue(t *testing
 	}
 }
 
-// --- Injection in wrong parent section (E008 → "wrong-parent") ---
+// --- Injection in wrong parent section ---
 
 func TestValidate_InjectionInWrongParent_ReportsWrongParentIssue(t *testing.T) {
-	// IdentityExtension must be inside the Identity section, not Capabilities.
+	// IdentityExtension is listed in InjectionParent with parent "Identity".
+	// Placing it inside Capabilities violates the advisory parent constraint.
 	doc := boundaryMalformedFixture(t, "wrong-parent.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
@@ -173,7 +170,6 @@ func TestValidate_InjectionInWrongParent_ReportsWrongParentIssue(t *testing.T) {
 }
 
 func TestValidate_InjectionInWrongParent_NotReportedWhenOptionDisabled(t *testing.T) {
-	// When RequireInjectionParents is false, wrong-parent is not flagged.
 	doc := boundaryMalformedFixture(t, "wrong-parent.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
@@ -185,7 +181,7 @@ func TestValidate_InjectionInWrongParent_NotReportedWhenOptionDisabled(t *testin
 	}
 }
 
-// --- Content outside all boundaries (E005 → "content-outside-boundary") ---
+// --- Content outside all boundaries ---
 
 func TestValidate_ContentOutsideBoundary_ReportsContentOutsideBoundaryIssue(t *testing.T) {
 	doc := boundaryMalformedFixture(t, "out-of-boundary.md")
@@ -197,7 +193,7 @@ func TestValidate_ContentOutsideBoundary_ReportsContentOutsideBoundaryIssue(t *t
 	}
 }
 
-// --- Duplicate boundary name (E006 → "duplicate-name") ---
+// --- Duplicate boundary name ---
 
 func TestValidate_DuplicateBoundaryName_ReportsDuplicateNameIssue(t *testing.T) {
 	doc := boundaryMalformedFixture(t, "duplicate-names.md")
@@ -209,10 +205,9 @@ func TestValidate_DuplicateBoundaryName_ReportsDuplicateNameIssue(t *testing.T) 
 	}
 }
 
-// --- Sections out of canonical order (E007 → "out-of-order-section") ---
+// --- Sections out of canonical order ---
 
 func TestValidate_SectionsOutOfCanonicalOrder_ReportsOutOfOrderIssue(t *testing.T) {
-	// Capabilities appears before Identity in the fixture; this violates canonical order.
 	doc := boundaryMalformedFixture(t, "out-of-order-sections.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
@@ -252,24 +247,20 @@ func TestValidate_UnbalancedOpenTag_IssueLineIsNonZero(t *testing.T) {
 	}
 }
 
-// --- Canonical vocabulary ---
+// --- InjectionParent advisory map ---
 
-// Note: CanonicalSections full-order and CanonicalInjections count tests have been moved to
-// vocabulary_additions_test.go, which covers the 8-section and 13-injection contracts.
-
-func TestInjectionParent_MapsEachCanonicalInjectionToItsExpectedParent(t *testing.T) {
-	// After Stage 2, InjectionParent contains only user-owned names. Tool-managed names
-	// (HarnessConstraints, CustomConstraints, LanguagePatterns, AvailableWorkflows,
-	// InfrastructureAgents) moved to DeployedParent. ProtocolExtension was removed entirely.
+func TestInjectionParent_MapsEachAdvisoryInjectionToItsParent(t *testing.T) {
+	// Stage 2: ArtifactProvenanceExtension is removed from InjectionParent;
+	// ProtocolExtension is added at top level. The map is now advisory only.
 	wantMap := map[string]string{
-		"IdentityExtension":           "Identity",
-		"ArtifactProvenanceExtension": "ArtifactProvenance",
-		"CodebaseContext":             "Capabilities",
-		"OutputArtifactTemplate":      "Capabilities",
-		"SeverityThresholds":          "Capabilities",
-		"SeverityDefinitions":         "Capabilities",
-		"ErrorHandlingExtension":      "ErrorHandling",
-		"ContextLimits":               "ExecutionPhilosophy",
+		"ProtocolExtension":      "", // top level — added in Stage 2
+		"IdentityExtension":      "Identity",
+		"CodebaseContext":        "Capabilities",
+		"OutputArtifactTemplate": "Capabilities",
+		"SeverityThresholds":     "Capabilities",
+		"SeverityDefinitions":    "Capabilities",
+		"ErrorHandlingExtension": "ErrorHandling",
+		"ContextLimits":          "ExecutionPhilosophy",
 	}
 
 	got := docformat.InjectionParent
@@ -286,39 +277,7 @@ func TestInjectionParent_MapsEachCanonicalInjectionToItsExpectedParent(t *testin
 	}
 }
 
-// --- AllowUnknownInjections option ---
-
-func TestValidate_UnknownInjection_AllowedWhenOptionIsTrue(t *testing.T) {
-	// When AllowUnknownInjections is true, a non-canonical injection name must NOT
-	// produce an "unknown-injection" issue. The option permits free-form injection
-	// names for documents that extend the canonical vocabulary.
-	doc := boundaryMalformedFixture(t, "unknown-injection.md")
-
-	issues := docformat.Validate(doc, docformat.ValidateOptions{
-		AllowUnknownInjections: true,
-	})
-
-	if hasIssueWithCode(issues, "unknown-injection") {
-		t.Error("unexpected \"unknown-injection\" issue when AllowUnknownInjections is true — the option must suppress this check")
-	}
-}
-
-func TestValidate_UnknownInjection_ReportedWhenOptionIsFalse(t *testing.T) {
-	// When AllowUnknownInjections is false (the default), a non-canonical injection name
-	// must produce an "unknown-injection" issue. The fixture contains
-	// [[INJECTION:NonExistentName]], which is not in CanonicalInjections.
-	doc := boundaryMalformedFixture(t, "unknown-injection.md")
-
-	issues := docformat.Validate(doc, docformat.ValidateOptions{
-		AllowUnknownInjections: false,
-	})
-
-	if !hasIssueWithCode(issues, "unknown-injection") {
-		t.Errorf("expected an \"unknown-injection\" issue for [[INJECTION:NonExistentName]] with AllowUnknownInjections false, got issues: %v", issues)
-	}
-}
-
-// --- Severity checks for all structural issue codes ---
+// --- Severity checks for structural issue codes ---
 
 func TestValidate_WrongNesting_IssueSeverityIsError(t *testing.T) {
 	doc := boundaryMalformedFixture(t, "wrong-nesting.md")
@@ -334,7 +293,9 @@ func TestValidate_WrongNesting_IssueSeverityIsError(t *testing.T) {
 	}
 }
 
-func TestValidate_WrongParent_IssueSeverityIsError(t *testing.T) {
+func TestValidate_WrongParent_IssueSeverityIsAdvice(t *testing.T) {
+	// Stage 3: injection wrong-parent is downgraded from SeverityError to SeverityAdvice.
+	// A misplaced injection harms nobody; it is reported but never fatal.
 	doc := boundaryMalformedFixture(t, "wrong-parent.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
@@ -345,8 +306,8 @@ func TestValidate_WrongParent_IssueSeverityIsError(t *testing.T) {
 	if iss == nil {
 		t.Skip("no wrong-parent issue returned — severity cannot be checked")
 	}
-	if iss.Severity != docformat.SeverityError {
-		t.Errorf("wrong-parent issue severity: want SeverityError, got %q", iss.Severity)
+	if iss.Severity != docformat.SeverityAdvice {
+		t.Errorf("wrong-parent issue severity: want SeverityAdvice, got %q", iss.Severity)
 	}
 }
 
@@ -397,9 +358,6 @@ func TestValidate_OutOfOrderSection_IssueSeverityIsError(t *testing.T) {
 // --- Issue.Node field ---
 
 func TestValidate_MismatchedTagNames_IssueNodeIsSet(t *testing.T) {
-	// Issue.Node must be non-empty for a mismatched-tag issue because the offending
-	// section name is unambiguous: the fixture opens [[SECTION:Identity]] but closes
-	// with [[/SECTION:Capabilities]]. The Node field must identify the problematic node.
 	doc := boundaryMalformedFixture(t, "mismatched-names.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{})
@@ -416,11 +374,7 @@ func TestValidate_MismatchedTagNames_IssueNodeIsSet(t *testing.T) {
 // --- Injection at body top level with RequireInjectionParents ---
 
 func TestValidate_InjectionAtTopLevel_WrongParentWhenParentsRequired(t *testing.T) {
-	// A canonical injection appearing at body top level (no enclosing section) must be
-	// reported as "wrong-parent" when RequireInjectionParents is true. At top level the
-	// enclosing section is nil, which differs from the expected parent (Identity for
-	// IdentityExtension). The fixture has [[INJECTION:IdentityExtension]] with no
-	// enclosing section.
+	// IdentityExtension inside no section but required to be inside Identity.
 	doc := boundaryMalformedFixture(t, "injection-outside-section.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
@@ -433,8 +387,6 @@ func TestValidate_InjectionAtTopLevel_WrongParentWhenParentsRequired(t *testing.
 }
 
 func TestValidate_InjectionAtTopLevel_NotReportedWhenParentsNotRequired(t *testing.T) {
-	// When RequireInjectionParents is false, a top-level canonical injection must not
-	// produce a "wrong-parent" issue.
 	doc := boundaryMalformedFixture(t, "injection-outside-section.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
@@ -449,17 +401,9 @@ func TestValidate_InjectionAtTopLevel_NotReportedWhenParentsNotRequired(t *testi
 // --- RequireCanonicalSections semantics ---
 
 func TestValidate_RequireCanonicalSections_EnforcesOrderNotPresence(t *testing.T) {
-	// RequireCanonicalSections enforces that present canonical sections appear in the
-	// canonical order; it does NOT require all seven canonical sections to be present.
-	// A document containing only a subset of sections (in the correct relative order)
-	// must produce no "out-of-order-section" issue.
-	//
-	// Implementor note: the option name could be misread as "require all canonical
-	// sections to be present." This test makes the semantics explicit: the fixture
-	// multiple-sections.md has Identity and CommunicationProtocol (as a section,
-	// which occupies the same canonical-order index as the deployed boundary), and
-	// they appear in canonical order, so no issue must be reported.
-	doc := parsedBoundaryFixture(t, "multiple-sections.md") // has Identity and CommunicationProtocol only
+	// A document with a subset of canonical sections in correct order must not
+	// produce an "out-of-order-section" issue.
+	doc := parsedBoundaryFixture(t, "multiple-sections.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
 		RequireCanonicalSections: true,
@@ -470,39 +414,20 @@ func TestValidate_RequireCanonicalSections_EnforcesOrderNotPresence(t *testing.T
 	}
 }
 
-// --- AC4.4 scope: workflow files excluded from Python-Go agreement checks ---
+// --- Compound section names: workflow files excluded from agreement checks ---
 
-func TestValidate_AC4_4_ScopeExcludesWorkflowFiles(t *testing.T) {
-	// AC4.4 requires the Go validator to agree with boundary_validator.py on which
-	// documents are invalid. This agreement is scoped to agent files, utility agents,
-	// orchestrators, and skill/hook files. Workflow files are EXCLUDED.
-	//
-	// Rationale: the Python TAG_PATTERN ([A-Za-z]+ for the name group) does not match
-	// compound section names that contain colons or hyphens, such as
-	// [[SECTION:Workflow:quick-fix]]. From the Python validator's perspective, a
-	// workflow file has all its content outside any recognised boundary, triggering
-	// E005 for every non-blank body line. The Go docformat package correctly parses
-	// compound names as opaque colon-bearing strings, so it considers the
-	// [[SECTION:Workflow:{id}]] block structurally valid.
-	//
-	// This disagreement is not a Go bug. The Python TAG_PATTERN restriction is a
-	// Python-side limitation that is out of scope for the docformat package to fix.
-	// The "repository-wide" phrasing in AC4.4 therefore means: every file in the
-	// repository whose body uses only simple (non-compound) section names.
-	//
-	// Observable contract: the Go parser must correctly address the compound section
-	// so that Body.Section("Workflow:my-workflow") succeeds. This is the key
-	// behaviour the Python validator cannot verify, and it is correct Go behaviour.
+func TestValidate_CompoundSectionNames_WorkflowFileExcluded(t *testing.T) {
+	// Compound section names (e.g. "Workflow:my-workflow") are addressable in Go
+	// but produce E005 content-outside-boundary in the Python validator (TAG_PATTERN
+	// limitation). The Python-Go agreement check excludes workflow files.
 	doc := parsedBoundaryFixture(t, "compound-section.md")
 
-	// The compound section must be addressable by the Go package.
 	_, ok := doc.Body().Section("Workflow:my-workflow")
 	if !ok {
 		t.Error("Body.Section(\"Workflow:my-workflow\") returned false — compound section names must be addressable")
 	}
 
-	// Calling Validate must not panic; the exact issues returned may differ from the
-	// Python validator's output because of the compound-name recognition difference,
-	// and that difference is within the documented scope exclusion.
+	// Calling Validate must not panic; the exact issues may differ from the Python
+	// validator's output within the documented scope exclusion.
 	_ = docformat.Validate(doc, docformat.ValidateOptions{})
 }

@@ -19,6 +19,7 @@ import (
 	"mosaic-common/interaction"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/runscan"
+	"mosaic-run/internal/session"
 	"mosaic-run/internal/tui/screens"
 )
 
@@ -583,10 +584,23 @@ func TestSetupSequence_ForwardNavigation_ReachesProgressScreen(t *testing.T) {
 		t.Fatalf("after task entry: screen = %v, want screenSetupConfig", m.screen)
 	}
 
-	// Accept all four configuration prompts with their default selections.
-	// (ExistingArtifact prompt was removed from ConfigScreen in Stage 6.)
+	// Accept all five configuration prompts.  The timeout step is always present
+	// now that the fake harness has been removed.
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation mode
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness (default: fake)
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → must advance to timeout
+
+	// Verify we are at the timeout step (not version drift) before supplying the value.
+	// This assertion fails until the fake-harness option is removed.
+	configView := m.configScreen.View()
+	if !containsAny(configView, "timeout", "Timeout", "Invocation", "invocation") {
+		t.Fatalf("after harness Enter, expected invocation-timeout step; "+
+			"fake harness may still be skipping timeout:\n%s", configView)
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // timeout → version drift
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → transitions to screenProgress
 
@@ -1157,25 +1171,202 @@ func TestRunSelect_EnterOnCandidate_SetsRunIDAndAdvances(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ConfigScreen: ExistingArtifact step removed
+// ConfigScreen: ExistingArtifact step removed; fake harness removed
 // ---------------------------------------------------------------------------
 
-// TestConfigScreen_PromptsCount verifies that the ConfigScreen presents exactly four
-// prompts: deviation handling, harness selection, version drift, and checkpoints.
-// (The ExistingArtifact prompt was removed in Stage 6; the harness prompt was added in Stage 3.)
+// TestConfigScreen_PromptsCount verifies that the ConfigScreen presents exactly five
+// prompts: deviation handling, harness selection, invocation timeout, version drift,
+// and checkpoints.  The timeout step is always present now that the fake harness has
+// been removed from the harness step.
 func TestConfigScreen_PromptsCount(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenSetupConfig
 
-	// Exactly four Enters are needed to complete the config screen when using the
-	// default (fake) harness — the timeout step is skipped for fake harness.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation mode
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness (default: fake, skips timeout)
+	// Step 1: accept deviation mode.
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Step 2: accept harness selection — must advance to the timeout step, not version drift.
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// After deviation + harness Enters, the config screen must be showing the
+	// invocation-timeout entry step.  This assertion fails until the fake-harness
+	// option is removed and advance() always proceeds to configStepHarnessTimeout.
+	configView := m.configScreen.View()
+	if !containsAny(configView, "timeout", "Timeout", "Invocation", "invocation") {
+		t.Fatalf("after deviation+harness Enters, expected invocation-timeout step; "+
+			"fake harness may still be skipping timeout:\n%s", configView)
+	}
+
+	// Step 3: enter a valid invocation timeout and confirm.
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Steps 4–5: version drift and checkpoints.
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → done
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → progress
 
 	if m.screen != screenProgress {
-		t.Errorf("screen = %v after four config Enters, want screenProgress (%v)", m.screen, screenProgress)
+		t.Errorf("screen = %v after five config steps, want screenProgress (%v)", m.screen, screenProgress)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ConfigScreen harness step: single option, no fake/scripted text (T2.1, T2.2)
+// ---------------------------------------------------------------------------
+
+// TestConfigScreen_HarnessStep_NoFakeOrScriptedText verifies that the harness
+// step's rendered output contains no reference to the fake or scripted harness.
+func TestConfigScreen_HarnessStep_NoFakeOrScriptedText(t *testing.T) {
+	style := stylesFromTheme(tuicommon.DefaultTheme())
+	s := screens.NewConfigScreen(80, 24, style)
+
+	// Advance past deviation to reach the harness step.
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	view := s.View()
+	if containsAny(view, "fake", "Fake", "scripted", "Scripted") {
+		t.Errorf("harness step view contains fake/scripted harness reference; want no such mention:\n%s", view)
+	}
+}
+
+// TestConfigScreen_HarnessStep_ContainsRealHarnessOption verifies that the harness
+// step shows the real harness option.
+func TestConfigScreen_HarnessStep_ContainsRealHarnessOption(t *testing.T) {
+	style := stylesFromTheme(tuicommon.DefaultTheme())
+	s := screens.NewConfigScreen(80, 24, style)
+
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation → harness step
+
+	view := s.View()
+	if !containsAny(view, "Claude Code CLI", "Claude Code", "claude-code") {
+		t.Errorf("harness step view does not contain real harness option:\n%s", view)
+	}
+}
+
+// TestConfigScreen_HarnessStep_CursorPinnedAtZero verifies that pressing Down on
+// the harness step does not move the cursor, because there is only one option.
+func TestConfigScreen_HarnessStep_CursorPinnedAtZero(t *testing.T) {
+	style := stylesFromTheme(tuicommon.DefaultTheme())
+	s := screens.NewConfigScreen(80, 24, style)
+
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation → harness step
+
+	viewBefore := s.View()
+	s.Update(tea.KeyMsg{Type: tea.KeyDown}) // attempt to advance cursor
+	viewAfter := s.View()
+
+	if viewBefore != viewAfter {
+		t.Errorf("pressing Down on the harness step changed the view; cursor must be pinned at 0 "+
+			"(only one option exists):\nbefore:\n%s\nafter:\n%s", viewBefore, viewAfter)
+	}
+}
+
+// TestConfigScreen_HarnessStep_AdvancesToTimeoutStep verifies that confirming the
+// harness step transitions to the invocation-timeout entry step.
+func TestConfigScreen_HarnessStep_AdvancesToTimeoutStep(t *testing.T) {
+	style := stylesFromTheme(tuicommon.DefaultTheme())
+	s := screens.NewConfigScreen(80, 24, style)
+
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → must go to timeout
+
+	view := s.View()
+	if !containsAny(view, "timeout", "Timeout", "Invocation", "invocation") {
+		t.Errorf("after confirming harness step, expected invocation-timeout step; "+
+			"fake harness may still be routing to version drift instead:\n%s", view)
+	}
+	if containsAny(view, "version drift", "Version drift", "drift") {
+		t.Errorf("after confirming harness step, view shows version-drift content instead of timeout step:\n%s", view)
+	}
+}
+
+// TestConfigScreen_HarnessStep_SelectionIsAlwaysClaudeCode verifies that after
+// driving through the full config screen, Selection().Harness is "claude-code".
+func TestConfigScreen_HarnessStep_SelectionIsAlwaysClaudeCode(t *testing.T) {
+	style := stylesFromTheme(tuicommon.DefaultTheme())
+	s := screens.NewConfigScreen(80, 24, style)
+
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → timeout
+	// Confirm a valid invocation timeout.
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // timeout → version drift
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → done
+
+	if !s.Done() {
+		t.Fatal("ConfigScreen did not reach Done() after driving through all steps; cannot verify Selection()")
+	}
+	sel := s.Selection()
+	if sel.Harness != "claude-code" {
+		t.Errorf("Selection().Harness = %q, want %q; the harness step must always produce claude-code",
+			sel.Harness, "claude-code")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ConfigScreen Esc backward navigation across harness/timeout/version-drift (T2.4)
+// ---------------------------------------------------------------------------
+
+// TestConfigScreen_EscBackNavigation_VersionDriftToTimeoutStep verifies that pressing
+// Esc from the version-drift step returns to the invocation-timeout step, not the
+// harness step.  This exercises the removal of the special-case Esc branch that
+// existed only because the timeout step was skipped for the fake harness.
+func TestConfigScreen_EscBackNavigation_VersionDriftToTimeoutStep(t *testing.T) {
+	style := stylesFromTheme(tuicommon.DefaultTheme())
+	s := screens.NewConfigScreen(80, 24, style)
+
+	// Advance deviation → harness.
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Confirm harness — must go to timeout step, not version drift.
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	view := s.View()
+	if !containsAny(view, "timeout", "Timeout", "Invocation", "invocation") {
+		t.Fatalf("precondition: after harness Enter, expected timeout step; "+
+			"fake harness skipping may still be present:\n%s", view)
+	}
+
+	// Type a valid timeout and advance to version drift.
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // timeout → version drift
+
+	// Esc from version drift must return to the timeout step, not harness.
+	s.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	view = s.View()
+	if !containsAny(view, "timeout", "Timeout", "Invocation", "invocation") {
+		t.Errorf("Esc from version-drift did not return to timeout step; "+
+			"the special-case harness branch may still be routing back to harness:\n%s", view)
+	}
+}
+
+// TestConfigScreen_EscBackNavigation_TimeoutToHarnessStep verifies that pressing
+// Esc from the invocation-timeout step returns to the harness step.
+func TestConfigScreen_EscBackNavigation_TimeoutToHarnessStep(t *testing.T) {
+	style := stylesFromTheme(tuicommon.DefaultTheme())
+	s := screens.NewConfigScreen(80, 24, style)
+
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → timeout
+
+	view := s.View()
+	if !containsAny(view, "timeout", "Timeout", "Invocation", "invocation") {
+		t.Fatalf("precondition: expected timeout step after harness Enter; view:\n%s", view)
+	}
+
+	// Esc from timeout → harness.
+	s.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	view = s.View()
+	if !containsAny(view, "Harness", "harness", "adapter", "Adapter") {
+		t.Errorf("Esc from timeout step did not return to harness step; view:\n%s", view)
+	}
+	if s.Back() {
+		t.Error("Back() = true after Esc from timeout to harness; must not exit the config screen")
 	}
 }
 
@@ -1256,6 +1447,228 @@ func TestRunSelectScreen_Back_TrueOnEsc(t *testing.T) {
 
 	if !s.Back() {
 		t.Error("Back() = false after Esc; want true")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Run selection screen: new-run identity minting (Stage 2 / T2.1)
+// ---------------------------------------------------------------------------
+
+// fixedMintedRunID and fixedMintedRunFolder are the deterministic values returned
+// by fixedMinter(). They satisfy domain.IsValidRunID and the scoped-folder naming
+// convention, making T2.1/T2.2 assertions precise and reproducible.
+const (
+	fixedMintedRunID     = "20260801T120000Z-ab12"
+	fixedMintedRunFolder = "/test/ws/Orchestration-20260801T120000Z-ab12"
+)
+
+// fixedMinter returns a RunIdentityMinter that always yields the fixed pair
+// (fixedMintedRunID, fixedMintedRunFolder). Use wherever tests must assert on
+// exact minted values rather than only checking validity.
+func fixedMinter() RunIdentityMinter {
+	return func() (string, string) {
+		return fixedMintedRunID, fixedMintedRunFolder
+	}
+}
+
+// factoryCall records the arguments received by a capturing session factory on
+// a single invocation.
+type factoryCall struct {
+	runFolder string
+	isNewRun  bool
+}
+
+// newModelWithScanMinterFactory creates a rootModel pre-wired with:
+//   - a multi-candidate scan result (shows the run-select screen),
+//   - an injectable RunIdentityMinter, and
+//   - a session factory that records each call in *calls and always returns capSess.
+//
+// This lets T2.1 tests drive the run-select "new run" path and inspect both
+// selections state and factory call arguments.
+func newModelWithScanMinterFactory(
+	candidates []runscan.RunCandidate,
+	minter RunIdentityMinter,
+	calls *[]factoryCall,
+	capSess *capturingSession,
+) *rootModel {
+	scanResult := &runscan.ScanResult{Candidates: candidates}
+	return newRootModel(context.Background(), capSess, Options{
+		Theme:           tuicommon.DefaultTheme(),
+		ScanResult:      scanResult,
+		MintRunIdentity: minter,
+		SessionFactory: func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session {
+			*calls = append(*calls, factoryCall{runFolder: runFolder, isNewRun: isNewRun})
+			return capSess
+		},
+	})
+}
+
+// TestRunSelect_NewRun_WithMinter_PopulatesCanonicalRunID verifies that when
+// MintRunIdentity is provided and the user picks "new run" on the run-select screen,
+// the minted run ID is written to selections.runID in canonical format.
+//
+// In RED: updateRunSelect does not call the minter, so selections.runID stays "".
+// In GREEN: the minter is called and selections.runID == fixedMintedRunID.
+func TestRunSelect_NewRun_WithMinter_PopulatesCanonicalRunID(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	calls := make([]factoryCall, 0)
+	capSess := newCapturingSession()
+	m := newModelWithScanMinterFactory(candidates, fixedMinter(), &calls, capSess)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	// "Start a new run" is the first item on the run-select list. Enter selects it.
+	sendKey(m, tea.KeyEnter)
+
+	if m.selections.runID == "" {
+		t.Error("selections.runID is empty after 'new run' with minter; want minted run ID")
+	}
+	if m.selections.runID != fixedMintedRunID {
+		t.Errorf("selections.runID = %q, want minted value %q", m.selections.runID, fixedMintedRunID)
+	}
+	if !domain.IsValidRunID(m.selections.runID) {
+		t.Errorf("selections.runID %q does not satisfy domain.IsValidRunID", m.selections.runID)
+	}
+}
+
+// TestRunSelect_NewRun_WithMinter_PopulatesMintedRunFolder verifies that when
+// MintRunIdentity is provided and the user picks "new run", the minted run folder
+// is written to selections.runFolder.
+//
+// In RED: minter is not called; selections.runFolder stays "".
+// In GREEN: selections.runFolder == fixedMintedRunFolder.
+func TestRunSelect_NewRun_WithMinter_PopulatesMintedRunFolder(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	calls := make([]factoryCall, 0)
+	capSess := newCapturingSession()
+	m := newModelWithScanMinterFactory(candidates, fixedMinter(), &calls, capSess)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	sendKey(m, tea.KeyEnter)
+
+	if m.selections.runFolder == "" {
+		t.Error("selections.runFolder is empty after 'new run' with minter; want minted run folder")
+	}
+	if m.selections.runFolder != fixedMintedRunFolder {
+		t.Errorf("selections.runFolder = %q, want minted value %q", m.selections.runFolder, fixedMintedRunFolder)
+	}
+}
+
+// TestRunSelect_NewRun_WithMinter_SessionFactoryCalledWithMintedFolder verifies that
+// when MintRunIdentity is provided and the user picks "new run", the session factory is
+// called with the minted run folder — not with an empty string.
+//
+// In RED: factory is called with "" (current code passes "" for new runs).
+// In GREEN: factory is called with fixedMintedRunFolder.
+func TestRunSelect_NewRun_WithMinter_SessionFactoryCalledWithMintedFolder(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	calls := make([]factoryCall, 0)
+	capSess := newCapturingSession()
+	m := newModelWithScanMinterFactory(candidates, fixedMinter(), &calls, capSess)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	sendKey(m, tea.KeyEnter)
+
+	// The session factory must have been called at least once for the "new run" selection.
+	if len(calls) == 0 {
+		t.Fatal("session factory was not called after 'new run' selection; want at least one call")
+	}
+	// Find the new-run factory call and verify its run folder argument.
+	var found bool
+	for _, c := range calls {
+		if c.isNewRun {
+			found = true
+			if c.runFolder != fixedMintedRunFolder {
+				t.Errorf("session factory (isNewRun=true) received runFolder = %q, want minted %q; "+
+					"an empty folder must never reach the factory when a minter is provided",
+					c.runFolder, fixedMintedRunFolder)
+			}
+		}
+	}
+	if !found {
+		t.Error("no session factory call with isNewRun=true found; " +
+			"factory must be called when 'new run' is selected on the run-select screen")
+	}
+}
+
+// TestRunSelect_NewRun_NilMinter_PreservesEmptySelections verifies that when
+// MintRunIdentity is nil (the legacy/test path), selecting "new run" on the
+// run-select screen leaves selections.runID and selections.runFolder empty,
+// preserving backward-compatible behaviour and not panicking.
+//
+// This test passes in both RED and GREEN: it guards against accidental regression
+// where a nil-minter check is removed and the code panics on nil dereference.
+func TestRunSelect_NewRun_NilMinter_PreservesEmptySelections(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	// newModelWithScan does not set MintRunIdentity; field is nil.
+	m := newModelWithScan(candidates)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	sendKey(m, tea.KeyEnter)
+
+	if m.selections.runID != "" {
+		t.Errorf("selections.runID = %q, want empty string (nil minter must preserve legacy empty-selection behaviour)",
+			m.selections.runID)
+	}
+	if m.selections.runFolder != "" {
+		t.Errorf("selections.runFolder = %q, want empty string (nil minter must preserve legacy empty-selection behaviour)",
+			m.selections.runFolder)
+	}
+	if !m.selections.isNewRun {
+		t.Error("selections.isNewRun = false after 'new run' selection; want true")
+	}
+}
+
+// TestRunSelect_Resume_WithMinter_MinterNotCalled verifies that when the user selects
+// an existing candidate on the run-select screen (the resume path), the MintRunIdentity
+// function is never invoked — minting is exclusive to the "new run" branch.
+func TestRunSelect_Resume_WithMinter_MinterNotCalled(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	mintCalled := false
+	countingMinter := RunIdentityMinter(func() (string, string) {
+		mintCalled = true
+		return fixedMintedRunID, fixedMintedRunFolder
+	})
+	calls := make([]factoryCall, 0)
+	capSess := newCapturingSession()
+	m := newModelWithScanMinterFactory(candidates, countingMinter, &calls, capSess)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	// Navigate down once to move past "Start a new run" to the first candidate, then select.
+	sendKey(m, tea.KeyDown)
+	sendKey(m, tea.KeyEnter)
+
+	if mintCalled {
+		t.Error("minter was called when a candidate was selected (resume path); " +
+			"minting must only occur in the 'new run' branch")
+	}
+	if m.selections.runID != "20260701T120000Z-a3f9" {
+		t.Errorf("selections.runID = %q, want candidate run ID %q (resume path must use candidate identity)",
+			m.selections.runID, "20260701T120000Z-a3f9")
 	}
 }
 

@@ -9,11 +9,11 @@ Identity section content.
 [[DEPLOYED:CommunicationProtocol]]
 [[/DEPLOYED:CommunicationProtocol]]
 
-[[SECTION:ArtifactProvenance]]
-Artifact provenance content.
+[[DEPLOYED:ArtifactProvenance]]
+[[/DEPLOYED:ArtifactProvenance]]
+
 [[INJECTION:ArtifactProvenanceExtension]]
 [[/INJECTION:ArtifactProvenanceExtension]]
-[[/SECTION:ArtifactProvenance]]
 
 [[SECTION:Capabilities]]
 Capabilities content.

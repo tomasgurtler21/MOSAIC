@@ -1,6 +1,6 @@
 # Workflow Index
 
-Workflow definitions organized by category. This file is the canonical registry — all 18 workflows are listed here with their metadata aligned to the frontmatter of each individual workflow file.
+Workflow definitions organized by category. This file is the canonical registry — all 19 workflows are listed here with their metadata aligned to the frontmatter of each individual workflow file.
 
 ## How to Use Workflows
 
@@ -10,12 +10,13 @@ Workflow definitions organized by category. This file is the canonical registry 
 
 ### Finding a Workflow
 
-Workflows are organized into six categories reflecting their primary purpose:
+Workflows are organized into seven categories reflecting their primary purpose:
 
 - **Build** — Feature development and implementation (new projects, existing codebases, fixes)
 - **Audit** — Quality assessment of existing code (PR reviews, system-level audits)
 - **Research** — Codebase exploration and feasibility analysis without implementation
 - **Design** — Architecture review and design proposals without implementation
+- **Verification** — Deriving verification artifacts (test scenarios, test cases) from specifications; no implementation
 - **DataPreprocessing** — Knowledge base generation, verification, and correction
 - **MosaicTest** — Harness conformance fixtures for `mosaic-run`; not for productive work
 
@@ -40,6 +41,7 @@ Orchestrators that support auto-discovery can parse this index programmatically:
 | Audit | `Workflows/Audit/` | Evidence-based quality analysis of existing code |
 | Research | `Workflows/Research/` | Exploration and feasibility — no implementation |
 | Design | `Workflows/Design/` | Architecture and design — no implementation |
+| Verification | `Workflows/Verification/` | Deriving verification artifacts from specifications — no implementation |
 | DataPreprocessing | `Workflows/DataPreprocessing/` | Knowledge base lifecycle (generate, verify, correct) |
 | MosaicTest | `Workflows/MosaicTest/` | Harness conformance fixtures — each workflow is one test case for `mosaic-run` |
 
@@ -75,6 +77,12 @@ Orchestrators that support auto-discovery can parse this index programmatically:
 | ID | Category | Version | Name | Description | Hint | Author | File |
 |----|----------|---------|------|-------------|------|--------|------|
 | brownfield-design | Design | 3.2 | Brownfield Design Workflow | Architecture review, design proposals, or planning large features for an existing codebase without implementation. | Full design workflow for existing codebase — research, requirements, planning, and design | MOSAIC | `Design/brownfield-design.md` |
+
+### Verification
+
+| ID | Category | Version | Name | Description | Hint | Author | File |
+|----|----------|---------|------|-------------|------|--------|------|
+| requirements-to-test-cases | Verification | 1.1 | Requirements to Test Cases Workflow | Derive abstract test cases from a requirement held in large external specification documents. Resolves the requirement to closure via runtime retrieval, models the test scenario space, authors test cases in a project-defined format, and exports them to the target system. | Generate abstract test cases from specification documents via runtime retrieval — no implementation | MOSAIC | `Verification/requirements-to-test-cases.md` |
 
 ### DataPreprocessing
 

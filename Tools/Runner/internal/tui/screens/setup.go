@@ -48,8 +48,25 @@ func NewOrchestratorFileScreen(width, height int, styles Styles) *OrchestratorFi
 	}
 }
 
+// normalizeOrchestratorPath applies the standard normalisation rules to a raw
+// orchestrator file path:
+//  1. Trim surrounding whitespace (including trailing newlines from paste).
+//  2. If the result is at least two characters long and begins and ends with
+//     the same quote character (" or '), remove that matched pair.
+//  3. No further processing — interior quotes, separators, etc. are left intact.
+func normalizeOrchestratorPath(raw string) string {
+	s := strings.TrimSpace(raw)
+	if len(s) >= 2 {
+		first, last := s[0], s[len(s)-1]
+		if (first == '"' || first == '\'') && first == last {
+			s = s[1 : len(s)-1]
+		}
+	}
+	return s
+}
+
 func validateOrchestratorFile(path string) error {
-	path = strings.TrimSpace(path)
+	path = normalizeOrchestratorPath(path)
 	if path == "" {
 		return errors.New("path cannot be empty")
 	}
@@ -85,7 +102,9 @@ func (s *OrchestratorFileScreen) Done() bool { return s.input.Done() }
 func (s *OrchestratorFileScreen) Back() bool { return s.input.Back() }
 
 // FilePath returns the entered file path. Only valid when Done() is true.
-func (s *OrchestratorFileScreen) FilePath() string { return strings.TrimSpace(s.input.Value()) }
+func (s *OrchestratorFileScreen) FilePath() string {
+	return normalizeOrchestratorPath(s.input.Value())
+}
 
 // Reset clears the done and back flags.
 func (s *OrchestratorFileScreen) Reset() { s.input.Reset() }
@@ -355,7 +374,7 @@ func NewTaskScreen(width, height int, styles Styles) *TaskScreen {
 	}
 	input := widgets.NewTextInput(
 		"Task description:",
-		"Describe what this workflow run should accomplish",
+		"A short label identifying this run (shown in run history, not sent to agents)",
 		width,
 		inputStyles,
 	)
@@ -381,7 +400,7 @@ func (s *TaskScreen) Update(msg tea.Msg) tea.Cmd {
 // View renders the task entry screen.
 func (s *TaskScreen) View() string {
 	title := s.styles.Title.Width(s.width).Render("Task Description")
-	subtitle := s.styles.Subtitle.Width(s.width).Render("Describe what this workflow run should accomplish.")
+	subtitle := s.styles.Subtitle.Width(s.width).Render("Enter a short label to identify this run in history. This text is not sent to agents as an instruction.")
 	border := s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width))
 	inputView := s.input.View()
 	help := s.styles.Help.Width(s.width).Render("enter confirm  esc back  ctrl+c quit")
@@ -419,8 +438,14 @@ type ConfigSelection struct {
 	DeviationMode     domain.DeviationMode
 	AllowVersionDrift bool
 	Checkpoints       bool
-	Harness           string        // "fake" or "claude-code"
-	Timeout           time.Duration // invocation timeout (only relevant when Harness == "claude-code")
+
+	// Harness names the harness adapter. The TUI only ever produces
+	// "claude-code". The CLI --harness flag additionally accepts "fake", and an
+	// unrecognised or zero value maps to the fake adapter for test and
+	// backward-compatibility paths.
+	Harness string
+
+	Timeout time.Duration // invocation timeout
 
 	// InfraClassSelections maps gated infrastructure class names (e.g. "checkpoint",
 	// "commit") to the selected agent name for this run. Populated by the
@@ -552,7 +577,7 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 		}
 	case "down", "j":
 		switch s.step {
-		case configStepDeviation, configStepHarness, configStepVersionDrift, configStepCheckpoints:
+		case configStepDeviation, configStepVersionDrift, configStepCheckpoints:
 			if s.cursor < 1 {
 				s.cursor++
 			}
@@ -569,10 +594,6 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 	case "esc":
 		if s.step == configStepDeviation {
 			s.back = true
-		} else if s.step == configStepVersionDrift && s.sel.Harness != "claude-code" {
-			// When fake harness was chosen, the timeout step was skipped; go back to harness.
-			s.step = configStepHarness
-			s.cursor = 0
 		} else {
 			s.step--
 			s.cursor = 0
@@ -594,16 +615,11 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		s.step = configStepHarness
 		s.cursor = 0
 	case configStepHarness:
-		if s.cursor == 0 {
-			s.sel.Harness = "fake"
-			s.step = configStepVersionDrift // skip timeout for fake harness
-		} else {
-			s.sel.Harness = "claude-code"
-			s.step = configStepHarnessTimeout
-			s.timeoutInput.Reset()
-			return s.timeoutInput.Init() // start cursor blink in text input
-		}
+		s.sel.Harness = "claude-code"
+		s.step = configStepHarnessTimeout
+		s.timeoutInput.Reset()
 		s.cursor = 0
+		return s.timeoutInput.Init() // start cursor blink in text input
 	case configStepVersionDrift:
 		s.sel.AllowVersionDrift = s.cursor == 0
 		s.step = configStepCheckpoints
@@ -687,8 +703,7 @@ func (s *ConfigScreen) View() string {
 		body.WriteString(s.renderOption(1, "Stop the run"))
 	case configStepHarness:
 		body.WriteString(s.styles.Body.Width(s.width).Render("Harness adapter:") + "\n")
-		body.WriteString(s.renderOption(0, "Fake (scripted) (default)"))
-		body.WriteString(s.renderOption(1, "Claude Code CLI"))
+		body.WriteString(s.renderOption(0, "Claude Code CLI"))
 	case configStepHarnessTimeout:
 		body.WriteString(s.timeoutInput.View())
 	case configStepVersionDrift:

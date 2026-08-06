@@ -4,21 +4,24 @@ package conformance_test
 // produced a consistent result across the whole Agents/Generic/ tree, with no file left behind
 // and no batch having applied the naming rules differently from the others.
 //
-// Three invariants are swept for every .md file under Agents/Generic/:
+// Invariants swept for every .md file under Agents/Generic/:
 //
 //   (1) No tool-managed name under [[INJECTION:]].
-//       Tool-managed names (CommunicationProtocol, AvailableWorkflows, InfrastructureAgents,
-//       LanguagePatterns, HarnessConstraints, CustomConstraints) are owned by the deployment
+//       Tool-managed names (all eleven CanonicalDeployed names) are owned by the deployment
 //       tool and must appear under [[DEPLOYED:]], never [[INJECTION:]].
 //
 //   (2) No user-owned name under [[DEPLOYED:]].
-//       User-owned names (IdentityExtension, ArtifactProvenanceExtension, CodebaseContext,
-//       OutputArtifactTemplate, SeverityThresholds, SeverityDefinitions, ErrorHandlingExtension,
-//       ContextLimits) are owned by each project and must appear under [[INJECTION:]], never
-//       [[DEPLOYED:]].
+//       Injection names are open as of Stage 2. Names that happen to be injection-only
+//       (IdentityExtension, CodebaseContext, OutputArtifactTemplate, SeverityThresholds,
+//       SeverityDefinitions, ErrorHandlingExtension, ContextLimits) must never appear
+//       under [[DEPLOYED:]] — they have no tool generator.
 //
-//   (3) No ProtocolExtension.
-//       ProtocolExtension is removed from the vocabulary; its presence in any file is an error.
+//   (3) No [[INJECTION:ProtocolExtension]] in any file.
+//       Note: the original doc-comment reason ("ProtocolExtension is removed from the
+//       vocabulary") is stale — ProtocolExtension was re-added to the advisory InjectionParent
+//       map in Stage 2. The assertion remains a valid safeguard: no current agent file should
+//       declare [[INJECTION:ProtocolExtension]] until a later stage explicitly migrates one.
+//       The test is not retired here.
 //
 //   (4) No leftover hardcoded protocol section.
 //       The old [[SECTION:CommunicationProtocol]] marker is replaced by
@@ -44,28 +47,41 @@ import (
 // Canonical vocabulary
 // ---------------------------------------------------------------------------
 
-// toolManagedNames are the deployment-tool-owned region names. They must appear under
-// [[DEPLOYED:]] and must never appear under [[INJECTION:]] in agent source files.
+// toolManagedNames are the deployment-tool-owned region names (all CanonicalDeployed names).
+// They must appear under [[DEPLOYED:]] and must never appear under [[INJECTION:]] in agent
+// source files.
 var toolManagedNames = []string{
 	"CommunicationProtocol",
+	"AuthorityHierarchy",
+	"ClosingProcedure",
 	"AvailableWorkflows",
 	"InfrastructureAgents",
 	"LanguagePatterns",
+	"ProtocolConstraints",
 	"HarnessConstraints",
 	"CustomConstraints",
+	"ErrorHandlingCommon",
+	"ExecutionPhilosophyCommon",
 }
 
-// userOwnedNames are the project-owner names. They must appear under [[INJECTION:]] and
-// must never appear under [[DEPLOYED:]] in agent source files.
+// userOwnedNames are the project-owner customisation names. They must never appear under
+// [[DEPLOYED:]] in agent source files — they have no tool generator and must be preserved
+// as-is via [[INJECTION:]].
 var userOwnedNames = []string{
 	"IdentityExtension",
-	"ArtifactProvenanceExtension",
 	"CodebaseContext",
 	"OutputArtifactTemplate",
 	"SeverityThresholds",
 	"SeverityDefinitions",
 	"ErrorHandlingExtension",
 	"ContextLimits",
+}
+
+// deprecatedInjectionNames are names that are migrating out of all agent files entirely.
+// They must never appear under [[DEPLOYED:]] (no tool generator exists for them) and are
+// expected to disappear from [[INJECTION:]] use as well as migration proceeds.
+var deprecatedInjectionNames = []string{
+	"ArtifactProvenanceExtension",
 }
 
 // ---------------------------------------------------------------------------
@@ -169,13 +185,39 @@ func TestMigrationSweep_NoUserOwnedNameUnderDeployed(t *testing.T) {
 	}
 }
 
+// TestMigrationSweep_NoDeprecatedNameUnderDeployed verifies that deprecated injection names
+// (those migrating out of files entirely) never appear under [[DEPLOYED:]] in any
+// Agents/Generic/ file. These names have no tool generator and must not be tool-managed.
+func TestMigrationSweep_NoDeprecatedNameUnderDeployed(t *testing.T) {
+	paths := genericAgentPaths(t)
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Errorf("read %s: %v", p, err)
+			continue
+		}
+		rel := relPath(t, findRepoRoot(t), p)
+		for _, name := range deprecatedInjectionNames {
+			forbidden := []byte("[[DEPLOYED:" + name + "]]")
+			if bytes.Contains(data, forbidden) {
+				t.Errorf("%s: deprecated name %q found under [[DEPLOYED:]]; "+
+					"deprecated names have no tool generator and must not be tool-managed",
+					rel, name)
+			}
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
-// (3) No ProtocolExtension
+// (3) No [[INJECTION:ProtocolExtension]]
 // ---------------------------------------------------------------------------
 
-// TestMigrationSweep_NoProtocolExtension verifies that the removed ProtocolExtension name
-// does not appear in any Agents/Generic/ file. ProtocolExtension was removed from the
-// canonical vocabulary; its presence indicates an unmigrated or incorrectly migrated file.
+// TestMigrationSweep_NoProtocolExtension verifies that no Agents/Generic/ file declares
+// [[INJECTION:ProtocolExtension]]. The original reason ("ProtocolExtension is removed from
+// the vocabulary; its presence in any file is an error") is stale as of Stage 2 —
+// ProtocolExtension was re-added to the advisory InjectionParent map. The assertion is
+// retained as a safety net: no current agent file should declare this injection, and the
+// test will fail if one does before a later stage explicitly authorises it.
 func TestMigrationSweep_NoProtocolExtension(t *testing.T) {
 	paths := genericAgentPaths(t)
 	for _, p := range paths {
@@ -185,9 +227,9 @@ func TestMigrationSweep_NoProtocolExtension(t *testing.T) {
 			continue
 		}
 		rel := relPath(t, findRepoRoot(t), p)
-		if bytes.Contains(data, []byte("ProtocolExtension")) {
-			t.Errorf("%s: removed name 'ProtocolExtension' found; "+
-				"this name was eliminated from the canonical vocabulary and must not appear in any file",
+		if bytes.Contains(data, []byte("[[INJECTION:ProtocolExtension]]")) {
+			t.Errorf("%s: [[INJECTION:ProtocolExtension]] found; "+
+				"no agent file should declare this injection before explicit stage authorisation",
 				rel)
 		}
 	}
@@ -222,6 +264,7 @@ func TestMigrationSweep_NoLegacyProtocolSection(t *testing.T) {
 // ---------------------------------------------------------------------------
 // (5) Protocol boundary is empty in source files
 // ---------------------------------------------------------------------------
+// (Formerly numbered (4) before sweep (3) was restored above.)
 
 // TestMigrationSweep_ProtocolBoundaryIsEmptyInSources verifies that every
 // [[DEPLOYED:CommunicationProtocol]] boundary in a source file contains no non-whitespace
@@ -262,6 +305,74 @@ func TestMigrationSweep_ProtocolBoundaryIsEmptyInSources(t *testing.T) {
 			t.Errorf("%s: [[DEPLOYED:CommunicationProtocol]] boundary has non-empty content in source file;\n"+
 				"source files must have an empty protocol boundary (content between tags, first 120 bytes):\n%q",
 				rel, preview)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// (6) No old marker filename string in source, test, or documentation files
+// ---------------------------------------------------------------------------
+
+// TestNoLegacySourceFormatReference verifies that no source, test, or documentation
+// file under Tools/, Agents/, or Development/ contains the old marker filename string.
+// The marker file was renamed to SourceFilesFormat.md; all references to the old name
+// must be eliminated so that a future edit cannot silently reintroduce a stale reference.
+// This test directly operationalises AC1.3 (no old marker string in source/test/docs).
+//
+// Exclusions:
+//   - Files ending in .exe (build outputs / binary artifacts)
+//   - Directories whose name begins with "Orchestration-" (prior orchestration and log folders)
+//
+// The forbidden string is constructed at runtime so that this source file does not
+// itself contain the literal and falsely trigger the check.
+func TestNoLegacySourceFormatReference(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+
+	// Construct the forbidden string at runtime. Joining two parts avoids having the
+	// literal contiguous in this source file, which would cause the test to flag itself.
+	forbidden := []byte("SOURCE" + "-" + "FORMAT")
+
+	treeDirs := []string{"Tools", "Agents", "Development"}
+
+	for _, tree := range treeDirs {
+		treePath := filepath.Join(repoRoot, tree)
+		if _, err := os.Stat(treePath); err != nil {
+			t.Logf("directory %s not found at %s, skipping: %v", tree, treePath, err)
+			continue
+		}
+
+		err := filepath.WalkDir(treePath, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				// Skip prior orchestration and log folders.
+				if strings.HasPrefix(d.Name(), "Orchestration-") {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			// Skip binary build artifacts.
+			if strings.HasSuffix(p, ".exe") {
+				return nil
+			}
+
+			data, err := os.ReadFile(p)
+			if err != nil {
+				t.Errorf("read %s: %v", relPath(t, repoRoot, p), err)
+				return nil
+			}
+
+			if bytes.Contains(data, forbidden) {
+				t.Errorf("%s: contains old marker filename string %q; "+
+					"rename all occurrences to SourceFilesFormat.md "+
+					"(the old marker name must not appear in any source, test, or documentation file — AC1.3)",
+					relPath(t, repoRoot, p), string(forbidden))
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s/: %v", tree, err)
 		}
 	}
 }

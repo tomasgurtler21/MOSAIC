@@ -40,6 +40,11 @@ type Request struct {
 	// loaded once per run by the app layer. Required for agents whose source declares a
 	// [[DEPLOYED:CommunicationProtocol]] region.
 	Protocol domain.ProtocolContent
+
+	// Bundle carries the canonical blocks and the bundle version, loaded once per run by
+	// the app layer. Required for agents whose source declares any bundle-sourced
+	// [[DEPLOYED:]] region; ignored for agents that declare none.
+	Bundle domain.BundleContent
 }
 
 // Result is the output of a successful Apply call.

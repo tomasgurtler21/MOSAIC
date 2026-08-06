@@ -6,14 +6,16 @@ name: test-agent
 Identity section content.
 [[/SECTION:Identity]]
 
-[[SECTION:CommunicationProtocol]]
-Communication protocol content.
-[[/SECTION:CommunicationProtocol]]
+[[DEPLOYED:CommunicationProtocol]]
+[[/DEPLOYED:CommunicationProtocol]]
 
 [[SECTION:Capabilities]]
-Capabilities content.
+Capabilities content — appears before ArtifactProvenance, which is out of canonical order.
 [[/SECTION:Capabilities]]
 
-[[SECTION:ArtifactProvenance]]
-ArtifactProvenance appears after Capabilities — out of canonical order.
-[[/SECTION:ArtifactProvenance]]
+[[DEPLOYED:ArtifactProvenance]]
+ArtifactProvenance appears after Capabilities — out of canonical order (should be at slot 2, before Capabilities at slot 3).
+[[/DEPLOYED:ArtifactProvenance]]
+
+[[INJECTION:ArtifactProvenanceExtension]]
+[[/INJECTION:ArtifactProvenanceExtension]]

@@ -9,7 +9,7 @@
 //   - Tools: every entry in ToolRequest.Generic appears exactly once in Resolutions, same order.
 //   - Frontmatter: KeyOrder never contains a key that is also in Remove.
 //   - TargetPath for an unsupported artifact kind returns domain.ErrArtifactUnsupported.
-//   - Injection returns ok==false for any name outside docformat.CanonicalInjections.
+//   - Injection returns ok==false for any unrecognised name (not in the tool-managed registry).
 //   - HookPlan with Supported==false returns a non-empty Reason and no Files.
 //   - Determinism: every method called twice with equal input returns equal output.
 //   - Close() returns nil; a second Close() call also returns nil.
@@ -347,7 +347,7 @@ func runUniversalInvariants(t *testing.T, m domain.HarnessModule) {
 	})
 
 	t.Run("Injection_unknown_name_returns_false", func(t *testing.T) {
-		// Any name outside CanonicalInjections must return ok==false regardless of agent key.
+		// Names that are clearly not in any tool-managed registry must return ok==false.
 		nonCanonical := []string{
 			"NotAnInjection",
 			"",
@@ -360,7 +360,7 @@ func runUniversalInvariants(t *testing.T, m domain.HarnessModule) {
 				req := domain.InjectionRequest{Name: name, AgentKey: agentKey}
 				_, ok := m.Injection(req)
 				if ok {
-					t.Errorf("Injection(%q, agentKey=%q) returned ok=true; must return ok=false for non-canonical injection names", name, agentKey)
+					t.Errorf("Injection(%q, agentKey=%q) returned ok=true; must return ok=false for unrecognised names", name, agentKey)
 				}
 			}
 		}
@@ -368,7 +368,7 @@ func runUniversalInvariants(t *testing.T, m domain.HarnessModule) {
 
 	t.Run("Injection_deterministic", func(t *testing.T) {
 		agentKeys := []string{"", "some-subagent", "orchestrator"}
-		for _, name := range docformat.CanonicalInjections {
+		for _, name := range docformat.CanonicalDeployed {
 			for _, agentKey := range agentKeys {
 				req := domain.InjectionRequest{Name: name, AgentKey: agentKey}
 				c1, ok1 := m.Injection(req)

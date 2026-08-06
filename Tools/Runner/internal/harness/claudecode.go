@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,19 +70,35 @@ var (
 type ClaudeCodeAdapter struct {
 	executablePath string
 	timeout        time.Duration
+	logger         domain.DebugLogger
 }
 
-// NewClaudeCodeAdapter creates a ClaudeCodeAdapter.
+// NewClaudeCodeAdapter creates a ClaudeCodeAdapter with debug logging disabled.
+// UNCHANGED SIGNATURE — existing call sites and tests keep compiling.
+// Equivalent to NewClaudeCodeAdapterWithLogger(executablePath, timeout, nil).
 //
 // executablePath is the path/name of the Claude Code CLI binary (e.g. "claude").
 // timeout is the maximum duration for a single Invoke call; zero means 30 minutes.
 func NewClaudeCodeAdapter(executablePath string, timeout time.Duration) *ClaudeCodeAdapter {
+	return NewClaudeCodeAdapterWithLogger(executablePath, timeout, nil)
+}
+
+// NewClaudeCodeAdapterWithLogger creates a ClaudeCodeAdapter that records every
+// invocation's raw stdout, raw stderr and outcome to the debug log.
+//
+// A nil logger is normalised to domain.NopDebugLogger here, so the adapter's
+// logger field is never nil and Invoke never nil-checks it.
+func NewClaudeCodeAdapterWithLogger(executablePath string, timeout time.Duration, logger domain.DebugLogger) *ClaudeCodeAdapter {
 	if timeout == 0 {
 		timeout = 30 * time.Minute
+	}
+	if logger == nil {
+		logger = domain.NopDebugLogger{}
 	}
 	return &ClaudeCodeAdapter{
 		executablePath: executablePath,
 		timeout:        timeout,
+		logger:         logger,
 	}
 }
 
@@ -101,6 +118,12 @@ func NewClaudeCodeAdapter(executablePath string, timeout time.Duration) *ClaudeC
 //
 // On context cancellation, terminates the subprocess and returns ctx.Err().
 func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentReference, request domain.ProtocolRequest) (domain.ProtocolResponse, error) {
+	// Log invocation start with the agent identifier and invocation kind.
+	a.logger.Log(domain.EventHarnessInvokeStart, "dispatching invocation",
+		domain.F("agent", request.AgentInstanceID),
+		domain.F("kind", string(agent.InvocationKind)),
+	)
+
 	// Serialize the request.
 	reqBytes, err := MarshalRequest(request)
 	if err != nil {
@@ -161,25 +184,57 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 		// Adapter timeout: kill and return ErrTimeout.
 		cmd.Process.Kill() //nolint:errcheck
 		<-waitCh
-		return domain.ProtocolResponse{}, fmt.Errorf("%w", ErrTimeout)
+		timeoutErr := fmt.Errorf("%w", ErrTimeout)
+		a.logger.Log(domain.EventHarnessInvokeError, timeoutErr.Error(),
+			domain.F("agent", request.AgentInstanceID),
+		)
+		return domain.ProtocolResponse{}, timeoutErr
 	case waitErr = <-waitCh:
 	}
 
-	// Process exited. Check for non-zero exit status.
+	// Process exited via waitCh. Log raw stdout and stderr in full.
+	a.logger.Log(domain.EventHarnessStdout, stdout.String(),
+		domain.F("agent", request.AgentInstanceID),
+		domain.F("bytes", strconv.Itoa(stdout.Len())),
+	)
+	a.logger.Log(domain.EventHarnessStderr, stderr.String(),
+		domain.F("agent", request.AgentInstanceID),
+		domain.F("bytes", strconv.Itoa(stderr.Len())),
+	)
+
+	// Check for non-zero exit status.
 	if waitErr != nil {
 		var exitErr *exec.ExitError
+		var exitErrResult error
 		if errors.As(waitErr, &exitErr) {
 			stderrContent := strings.TrimSpace(stderr.String())
 			if stderrContent != "" {
-				return domain.ProtocolResponse{}, fmt.Errorf("%w: exit status %d: %s", ErrNonZeroExit, exitErr.ExitCode(), stderrContent)
+				exitErrResult = fmt.Errorf("%w: exit status %d: %s", ErrNonZeroExit, exitErr.ExitCode(), stderrContent)
+			} else {
+				exitErrResult = fmt.Errorf("%w: exit status %d", ErrNonZeroExit, exitErr.ExitCode())
 			}
-			return domain.ProtocolResponse{}, fmt.Errorf("%w: exit status %d", ErrNonZeroExit, exitErr.ExitCode())
+		} else {
+			exitErrResult = fmt.Errorf("%w: %v", ErrNonZeroExit, waitErr)
 		}
-		return domain.ProtocolResponse{}, fmt.Errorf("%w: %v", ErrNonZeroExit, waitErr)
+		a.logger.Log(domain.EventHarnessInvokeError, exitErrResult.Error(),
+			domain.F("agent", request.AgentInstanceID),
+		)
+		return domain.ProtocolResponse{}, exitErrResult
 	}
 
 	// Parse the --output-format json envelope and extract the protocol response.
-	return parseEnvelope(stdout.Bytes())
+	resp, parseErr := parseEnvelopeWithLogger(stdout.Bytes(), a.logger)
+	if parseErr != nil {
+		a.logger.Log(domain.EventHarnessInvokeError, parseErr.Error(),
+			domain.F("agent", request.AgentInstanceID),
+		)
+		return domain.ProtocolResponse{}, parseErr
+	}
+	a.logger.Log(domain.EventHarnessInvokeOK, "invocation succeeded",
+		domain.F("agent", request.AgentInstanceID),
+		domain.F("status", string(resp.StatusCode)),
+	)
+	return resp, nil
 }
 
 // buildCommand constructs an exec.Cmd for the given executable and args.
@@ -212,20 +267,57 @@ type cliEnvelopeEntry struct {
 }
 
 // parseEnvelope extracts a domain.ProtocolResponse from the CLI's JSON output.
+// Its signature is unchanged from the original; it delegates to
+// parseEnvelopeWithLogger with the no-op logger so the in-package unit tests
+// continue to compile and run unchanged.
 //
 // Extraction strategy:
 //  1. Empty output → ErrEmptyResponse.
-//  2. Not valid JSON → ErrMalformedJSON.
-//  3. No "result" type entry in the array → ErrMalformedOutput.
+//  2. Try to unmarshal as a JSON array envelope (the normal --output-format json shape):
+//     a. On success → scan backward for the last "result" entry → extract via
+//        extractProtocolResponse → return on success, or ErrMalformedOutput on failure.
+//     b. On failure → attempt recovery by calling extractProtocolResponse on the raw
+//        output text directly. If recovery succeeds, return the response.
+//        If recovery also fails → ErrMalformedJSON wrapping the raw CLI output text
+//        (trimmed, capped at 2000 characters with a visible truncation indicator when
+//        exceeded). The Go unmarshal error string and internal type names are never
+//        included in this message.
+//  3. No "result" type entry in the successfully-parsed array → ErrMalformedOutput.
 //  4. Protocol response not parseable from the result text → ErrMalformedOutput.
 func parseEnvelope(data []byte) (domain.ProtocolResponse, error) {
+	return parseEnvelopeWithLogger(data, domain.NopDebugLogger{})
+}
+
+// parseEnvelopeWithLogger is the implementation of parseEnvelope that also emits
+// EventHarnessParseFailed and EventHarnessParseRecovered to the supplied logger.
+// Invoke calls this variant directly so recovery and failure events reach the log.
+func parseEnvelopeWithLogger(data []byte, logger domain.DebugLogger) (domain.ProtocolResponse, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return domain.ProtocolResponse{}, ErrEmptyResponse
 	}
 
 	var entries []cliEnvelopeEntry
 	if err := json.Unmarshal(data, &entries); err != nil {
-		return domain.ProtocolResponse{}, fmt.Errorf("%w: %v", ErrMalformedJSON, err)
+		// Array unmarshal failed. Attempt recovery: try extracting a valid
+		// protocol response directly from the raw output text.
+		rawText := string(data)
+		if resp, recErr := extractProtocolResponse(strings.TrimSpace(rawText)); recErr == nil {
+			logger.Log(domain.EventHarnessParseRecovered, "envelope array parse failed; direct protocol response recovered")
+			return resp, nil
+		}
+
+		// Recovery also failed. Log the full raw output for diagnosis, then
+		// return ErrMalformedJSON with the raw output text instead of the Go
+		// unmarshal error (which would expose the internal type name
+		// cliEnvelopeEntry). Trim and cap for TUI readability.
+		logger.Log(domain.EventHarnessParseFailed, rawText)
+		const rawCap = 2000
+		trimmed := strings.TrimSpace(rawText)
+		if len(trimmed) > rawCap {
+			total := len(trimmed)
+			trimmed = trimmed[:rawCap] + fmt.Sprintf("... [truncated, %d bytes total]", total)
+		}
+		return domain.ProtocolResponse{}, fmt.Errorf("%w: %s", ErrMalformedJSON, trimmed)
 	}
 
 	// Scan backward for the last "result" type entry.

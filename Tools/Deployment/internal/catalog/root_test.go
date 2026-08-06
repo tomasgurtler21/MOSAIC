@@ -58,7 +58,7 @@ func TestResolveRoot_FromPackageDirectory_RootIsAbsolute(t *testing.T) {
 
 // TestResolveRoot_FromPackageDirectory_RootContainsExpectedMarkers verifies that
 // the resolved root directory actually contains the MOSAIC repository markers:
-// Agents/Generic/SOURCE-FORMAT.md and Workflows/Index.md.
+// Agents/Generic/SourceFilesFormat.md and Workflows/Index.md.
 func TestResolveRoot_FromPackageDirectory_RootContainsExpectedMarkers(t *testing.T) {
 	root, err := catalog.ResolveRoot(".")
 	if err != nil {
@@ -66,7 +66,7 @@ func TestResolveRoot_FromPackageDirectory_RootContainsExpectedMarkers(t *testing
 	}
 
 	markers := []string{
-		filepath.Join("Agents", "Generic", "SOURCE-FORMAT.md"),
+		filepath.Join("Agents", "Generic", "SourceFilesFormat.md"),
 		filepath.Join("Workflows", "Index.md"),
 	}
 	for _, marker := range markers {
@@ -208,5 +208,72 @@ func TestResolveRoot_KnownNonMosaicFixture_ReturnsErrNotMosaicRoot(t *testing.T)
 	_, err := catalog.ResolveRoot(fixtureDir)
 	if !errors.Is(err, catalog.ErrNotMosaicRoot) {
 		t.Errorf("ResolveRoot(%q): got error %v, want ErrNotMosaicRoot", fixtureDir, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Marker filename: new name recognized, old name rejected
+// ---------------------------------------------------------------------------
+
+// TestResolveRoot_NewMarkerFilename_RecognizedAsMosaicRoot verifies that a directory
+// containing Agents/Generic/SourceFilesFormat.md (the current marker name) together with
+// Workflows/Index.md is resolved as a valid MOSAIC root. This is the primary assertion for
+// the marker rename: the tool must recognise exactly the file that exists on disk.
+func TestResolveRoot_NewMarkerFilename_RecognizedAsMosaicRoot(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create the new marker file and the Workflows index marker.
+	if err := os.MkdirAll(filepath.Join(dir, "Agents", "Generic"), 0o755); err != nil {
+		t.Fatalf("setup MkdirAll Agents/Generic: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Agents", "Generic", "SourceFilesFormat.md"), []byte("# Source Files Format\n"), 0o644); err != nil {
+		t.Fatalf("setup WriteFile SourceFilesFormat.md: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "Workflows"), 0o755); err != nil {
+		t.Fatalf("setup MkdirAll Workflows: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Workflows", "Index.md"), []byte("# Workflows Index\n"), 0o644); err != nil {
+		t.Fatalf("setup WriteFile Workflows/Index.md: %v", err)
+	}
+
+	root, err := catalog.ResolveRoot(dir)
+	if err != nil {
+		t.Fatalf("ResolveRoot returned error for a dir with SourceFilesFormat.md: %v; "+
+			"a tree containing the new marker must be recognised as the MOSAIC root", err)
+	}
+	if root == "" {
+		t.Fatal("ResolveRoot returned an empty root with nil error")
+	}
+}
+
+// TestResolveRoot_OldMarkerFilenameOnly_NotRecognizedAsMosaicRoot verifies that a directory
+// containing only the legacy marker file under Agents/Generic/ (the old filename before
+// the rename to SourceFilesFormat.md) is NOT recognised as a MOSAIC root. The root-detection
+// heuristic must probe for the current filename only; the old name must not satisfy the check.
+func TestResolveRoot_OldMarkerFilenameOnly_NotRecognizedAsMosaicRoot(t *testing.T) {
+	dir := t.TempDir()
+
+	// Build the old marker filename at runtime so this test file does not contain the literal
+	// string as a contiguous byte sequence, which would trigger TestNoLegacySourceFormatReference.
+	oldMarkerFile := "SOURCE" + "-" + "FORMAT" + ".md"
+
+	// Create the old marker file (not the new one) and the Workflows index marker.
+	if err := os.MkdirAll(filepath.Join(dir, "Agents", "Generic"), 0o755); err != nil {
+		t.Fatalf("setup MkdirAll Agents/Generic: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Agents", "Generic", oldMarkerFile), []byte("# Source Format\n"), 0o644); err != nil {
+		t.Fatalf("setup WriteFile %s: %v", oldMarkerFile, err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "Workflows"), 0o755); err != nil {
+		t.Fatalf("setup MkdirAll Workflows: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Workflows", "Index.md"), []byte("# Workflows Index\n"), 0o644); err != nil {
+		t.Fatalf("setup WriteFile Workflows/Index.md: %v", err)
+	}
+
+	_, err := catalog.ResolveRoot(dir)
+	if !errors.Is(err, catalog.ErrNotMosaicRoot) {
+		t.Errorf("ResolveRoot returned %v for a dir with only the old %s marker; "+
+			"want ErrNotMosaicRoot — the old filename must not satisfy the root check", err, oldMarkerFile)
 	}
 }

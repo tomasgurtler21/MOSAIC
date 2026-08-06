@@ -62,6 +62,9 @@ func probeDeployedArtifact(workspace, targetPath, modelKey string) domain.Deploy
 			if v, ok := fm.Get("tool_mappings_version"); ok && v.Kind == domain.KindScalar {
 				state.ToolMappingsVersion = v.Scalar
 			}
+			if v, ok := fm.Get("bundle_version"); ok && v.Kind == domain.KindScalar {
+				state.BundleVersion = v.Scalar
+			}
 			if modelKey != "" {
 				if v, ok := fm.Get(modelKey); ok && v.Kind == domain.KindScalar {
 					state.ModelID = v.Scalar
@@ -102,6 +105,63 @@ func probeDeployedState(
 	}
 
 	return result
+}
+
+// probeDeployedStateWithIndex probes every path in paths, using id-based agent resolution
+// when index is non-nil. It is the id-aware successor to probeDeployedState.
+//
+// When index is nil (the harness does not declare an agents directory), behavior is identical
+// to probeDeployedState: every artifact is probed at its harness-computed planned path.
+//
+// When index is non-nil, agent artifacts whose catalog entry carries a non-empty NumericID
+// are located via resolveDeployedPath. The id-resolved path may differ from the planned path
+// when the deployed file was renamed after initial deployment. In all cases the state is stored
+// under the planned path key so the planner can look it up by its expected path.
+//
+// Seed entries are always reused verbatim and bypass both name-based and id-based probing;
+// this preserves the orchestrator's single-read invariant in the update and workflow-update flows.
+//
+// Returns an error if resolveDeployedPath encounters two or more deployed files with the same id.
+func probeDeployedStateWithIndex(
+	workspace string,
+	paths plan.PlannedPaths,
+	modelKey string,
+	seed map[string]domain.DeployedArtifactState,
+	index DeployedAgentIndex,
+	agentByKey map[string]domain.Agent,
+) (map[string]domain.DeployedArtifactState, error) {
+	result := make(map[string]domain.DeployedArtifactState, len(paths))
+
+	for _, pp := range paths {
+		// Seeded entries are reused without re-reading or re-resolving.
+		if seeded, ok := seed[pp.TargetPath]; ok {
+			result[pp.TargetPath] = seeded
+			continue
+		}
+
+		// Id-based resolution: only for agent artifacts when the index is active.
+		if index != nil && pp.Ref.Kind == domain.ArtifactAgent {
+			if agent, ok := agentByKey[pp.Ref.Key]; ok && agent.NumericID != "" {
+				resolved, err := resolveDeployedPath(agent, index, pp.TargetPath)
+				if err != nil {
+					return nil, err
+				}
+				if resolved == "" {
+					// Agent has a numeric id but no deployed file matches it: not deployed.
+					result[pp.TargetPath] = domain.DeployedArtifactState{Present: false}
+				} else {
+					// Probe at the id-resolved path (may differ from planned path if renamed).
+					result[pp.TargetPath] = probeDeployedArtifact(workspace, resolved, modelKey)
+				}
+				continue
+			}
+		}
+
+		// Non-agent artifacts, id-less agents, and the no-index case: probe at planned path.
+		result[pp.TargetPath] = probeDeployedArtifact(workspace, pp.TargetPath, modelKey)
+	}
+
+	return result, nil
 }
 
 // extractDeployedWorkflows scans deployed content for [[SECTION:Workflow:<id>]] blocks and

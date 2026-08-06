@@ -2240,3 +2240,166 @@ func TestRoundTrip_InfrastructureOverrides_AgentNamePreserved(t *testing.T) {
 			wantAgent, state2.InfrastructureOverrides[0].AgentName)
 	}
 }
+
+// ============================================================
+// Create — non-absolute path rejection (T3.3)
+// ============================================================
+//
+// All tests in this block are in the RED phase: they compile but fail because
+// Create does not yet reject non-absolute store paths (implementation in I3.3).
+
+// mustBeAbsoluteSubstring is the stable substring asserted in the error message
+// from Create when given a non-absolute store path.
+const mustBeAbsoluteSubstring = "must be absolute"
+
+// TestCreate_RelativePath_ReturnsError verifies that Create returns a non-nil
+// error when the store was constructed with a relative (non-absolute) path.
+// The error message must name the offending path.
+func TestCreate_RelativePath_ReturnsError(t *testing.T) {
+	relativePath := "Orchestration.md"
+	store := artifact.NewFileStore(relativePath)
+	ctx := context.Background()
+	info := domain.WorkflowInfo{ID: "quick-fix", Version: "1.0"}
+
+	_, err := store.Create(ctx, info, "task", false, time.Now(), "")
+
+	// Defensive cleanup: in the RED phase Create may succeed and write the file.
+	// Remove it so subsequent test runs are not affected by a leftover artifact.
+	wd, wdErr := os.Getwd()
+	if wdErr == nil {
+		_ = os.Remove(filepath.Join(wd, relativePath))
+	}
+
+	if err == nil {
+		t.Fatal("Create with relative store path: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), mustBeAbsoluteSubstring) {
+		t.Errorf("Create error = %q; want substring %q", err.Error(), mustBeAbsoluteSubstring)
+	}
+	// The error message must name the offending path so the caller can diagnose it.
+	if !strings.Contains(err.Error(), relativePath) {
+		t.Errorf("Create error = %q; want the offending path %q to appear in the message",
+			err.Error(), relativePath)
+	}
+}
+
+// TestCreate_RelativePath_WritesNoFile verifies that Create with a non-absolute
+// store path writes no file. The working directory is queried before the call so
+// that the test can confirm the expected file location was not created.
+func TestCreate_RelativePath_WritesNoFile(t *testing.T) {
+	relativePath := "Orchestration.md"
+	store := artifact.NewFileStore(relativePath)
+	ctx := context.Background()
+	info := domain.WorkflowInfo{ID: "quick-fix", Version: "1.0"}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+
+	_, _ = store.Create(ctx, info, "task", false, time.Now(), "") // error expected; ignore
+
+	// Verify no file was written at the relative path (resolved against the test's CWD).
+	candidate := filepath.Join(wd, relativePath)
+	if _, statErr := os.Stat(candidate); statErr == nil {
+		// File exists — clean it up and fail.
+		_ = os.Remove(candidate)
+		t.Errorf("Create with relative path wrote a file at %s; want no file created", candidate)
+	}
+}
+
+// ============================================================
+// IsRunScopedArtifactPath predicate (T3.4)
+// ============================================================
+//
+// T3.4a will fail in RED phase (stub returns false for all paths).
+// T3.4b, T3.4c, T3.4d pass in both RED and GREEN (all expect false).
+// T3.4a becomes the canonical RED canary for this predicate.
+
+// TestIsRunScopedArtifactPath_RunScopedParent_ReturnsTrue verifies that a path
+// whose parent directory is named "Orchestration-{valid_run_id}" is recognised
+// as run-scoped.
+func TestIsRunScopedArtifactPath_RunScopedParent_ReturnsTrue(t *testing.T) {
+	// Construct a synthetic absolute path under a run-scoped folder.
+	// filepath.Join normalises separators for the platform.
+	base := t.TempDir()
+	runScopedDir := filepath.Join(base, "Orchestration-20260805T143029Z-9bc0")
+	path := filepath.Join(runScopedDir, "Orchestration.md")
+
+	got := artifact.IsRunScopedArtifactPath(path)
+
+	if !got {
+		t.Errorf("IsRunScopedArtifactPath(%q) = false; want true (run-scoped parent directory)",
+			path)
+	}
+}
+
+// TestIsRunScopedArtifactPath_NonRunScopedAbsoluteParent_ReturnsFalse verifies
+// that an absolute path whose parent directory is a plain temp directory (not an
+// Orchestration-* folder) is not recognised as run-scoped.
+func TestIsRunScopedArtifactPath_NonRunScopedAbsoluteParent_ReturnsFalse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Orchestration.md")
+
+	got := artifact.IsRunScopedArtifactPath(path)
+
+	if got {
+		t.Errorf("IsRunScopedArtifactPath(%q) = true; want false (non-run-scoped absolute parent)",
+			path)
+	}
+}
+
+// TestIsRunScopedArtifactPath_InvalidRunIDShape_ReturnsFalse verifies that a path
+// whose parent directory starts with "Orchestration-" but is followed by a
+// suffix that does not match the canonical run_id format is not recognised.
+func TestIsRunScopedArtifactPath_InvalidRunIDShape_ReturnsFalse(t *testing.T) {
+	base := t.TempDir()
+	// "invalid-id" does not match ^\d{8}T\d{6}Z-[0-9a-f]{4}$
+	path := filepath.Join(base, "Orchestration-invalid-id", "Orchestration.md")
+
+	got := artifact.IsRunScopedArtifactPath(path)
+
+	if got {
+		t.Errorf("IsRunScopedArtifactPath(%q) = true; want false (invalid run_id shape after prefix)",
+			path)
+	}
+}
+
+// TestIsRunScopedArtifactPath_RelativePath_ReturnsFalse verifies that a relative
+// path is never reported as run-scoped, even if its directory component looks
+// like an Orchestration-* folder.
+func TestIsRunScopedArtifactPath_RelativePath_ReturnsFalse(t *testing.T) {
+	path := filepath.Join("Orchestration-20260805T143029Z-9bc0", "Orchestration.md")
+
+	got := artifact.IsRunScopedArtifactPath(path)
+
+	if got {
+		t.Errorf("IsRunScopedArtifactPath(%q) = true; want false (relative path must never be run-scoped)",
+			path)
+	}
+}
+
+// ============================================================
+// Create — absolute non-run-scoped path regression (T3.5)
+// ============================================================
+//
+// T3.5 guards the permissive behaviour: Create must still succeed for absolute
+// paths that are not run-scoped (e.g. t.TempDir()), because ~25 existing tests
+// rely on this. If I3.3 accidentally rejects absolute non-run-scoped paths this
+// test will fail, making the regression visible immediately.
+
+// TestCreate_AbsoluteNonRunScopedPath_Succeeds verifies that Create succeeds
+// when the store path is absolute but its parent directory is not a run-scoped
+// Orchestration-{run_id} folder. This is the pattern used by all existing store
+// tests that build a store under t.TempDir().
+func TestCreate_AbsoluteNonRunScopedPath_Succeeds(t *testing.T) {
+	// A plain temp directory — absolute but not run-scoped.
+	store := artifact.NewFileStore(filepath.Join(t.TempDir(), "Orchestration.md"))
+	ctx := context.Background()
+	info := domain.WorkflowInfo{ID: "quick-fix", Version: "1.0"}
+
+	_, err := store.Create(ctx, info, "regression guard task", false, time.Now(), "")
+
+	if err != nil {
+		t.Errorf("Create with absolute non-run-scoped path: unexpected error: %v", err)
+	}
+}

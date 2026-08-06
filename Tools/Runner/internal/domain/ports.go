@@ -103,3 +103,68 @@ type Clock interface {
 	// Now returns the current time.
 	Now() time.Time
 }
+
+// DebugLogger is the seam between the runner and its always-on file-based
+// debug log. It exists so that harness I/O, parse failures and dispatch events
+// — including steps that never reach Orchestration.md — leave a diagnosable
+// trace on disk.
+//
+// Contract: implementations never return an error, never panic, and never
+// block a run. A logging failure (unwritable folder, closed file, disk full)
+// must degrade silently to a no-op. Callers therefore never check a result and
+// never guard a Log call.
+//
+// Implementations must be safe for concurrent use by multiple goroutines.
+//
+// This port is intentionally minimal: one method, no levels, no rotation, no
+// retention. It is a diagnostic record, not a logging framework.
+type DebugLogger interface {
+	// Log records one entry. event is a short dotted category from the
+	// documented vocabulary (e.g. "harness.invoke.start"). message is the
+	// entry body and may be multi-line and arbitrarily large (raw CLI output
+	// is written in full, never truncated). fields carry optional structured
+	// context and may be empty.
+	Log(event string, message string, fields ...DebugField)
+}
+
+// DebugField is one key/value pair of structured context on a debug log entry.
+// Values are rendered as-is; keep them short and single-line. Large or
+// multi-line payloads belong in the entry message, not in a field.
+//
+// Value is a string and the caller is responsible for formatting. Numeric and
+// duration values are pre-formatted by the caller as plain base-10 decimals
+// with no unit suffix, no thousands separators and no padding.
+type DebugField struct {
+	Key   string
+	Value string
+}
+
+// F is a shorthand constructor for a DebugField.
+func F(key, value string) DebugField {
+	return DebugField{Key: key, Value: value}
+}
+
+// Event name constants for the debug log. These are the only valid event names;
+// emitters and tests use these constants so the vocabulary is a closed set.
+// Adding an event requires extending this list.
+const (
+	EventRunnerStart                = "runner.start"
+	EventRunnerRunID                = "runner.run_id"
+	EventRunnerError                = "runner.error"
+	EventHarnessInvokeStart         = "harness.invoke.start"
+	EventHarnessStdout              = "harness.stdout"
+	EventHarnessStderr              = "harness.stderr"
+	EventHarnessInvokeOK            = "harness.invoke.ok"
+	EventHarnessInvokeError         = "harness.invoke.error"
+	EventHarnessParseFailed         = "harness.parse.failed"
+	EventHarnessParseRecovered      = "harness.parse.recovered"
+	EventSessionRefusal             = "session.refusal"
+	EventSessionDispatchStart       = "session.dispatch.start"
+	EventSessionStepDone            = "session.step.done"
+	EventSessionHarnessError        = "session.harness.error"
+	EventSessionDeviation           = "session.deviation"
+	EventSessionDeviationUnresolved = "session.deviation.unresolved"
+	EventSessionApplyFailed         = "session.apply.failed"
+	EventArtifactPathRejected       = "artifact.path.rejected"
+	EventArtifactPathNonRunScoped   = "artifact.path.non_run_scoped"
+)

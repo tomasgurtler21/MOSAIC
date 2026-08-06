@@ -119,15 +119,22 @@ required_skills: []
 }
 
 // ---------------------------------------------------------------------------
-// T3.4: User-owned name under [[DEPLOYED:]] fails with ErrMarkerMismatch
+// T3.4: Name with no tool-managed generator under [[DEPLOYED:]] fails with ErrUnknownDeployedName
 // ---------------------------------------------------------------------------
+//
+// In Stage 2, the user-owned injection registry (CanonicalInjections) is removed.
+// Names such as CodebaseContext and IdentityExtension are no longer in any canonical
+// registry. [[DEPLOYED:CodebaseContext]] is now an unknown deployed name (not a marker
+// mismatch), because there is no user-owned registry to detect the mismatch against.
+// The transform still rejects them — only the error type changes.
 
 // TestMarkerMismatch_UserOwnedNameUnderDeployed_Rejected asserts that a source document
-// that declares CodebaseContext with [[DEPLOYED:]] — the wrong marker for a user-owned
-// name — causes Apply to return an error wrapping ErrMarkerMismatch.
+// that declares CodebaseContext with [[DEPLOYED:]] — a name with no tool-managed generator —
+// causes Apply to return an error wrapping ErrUnknownDeployedName.
 func TestMarkerMismatch_UserOwnedNameUnderDeployed_Rejected(t *testing.T) {
-	// sourceWithCodebaseContextUnderDeployed uses [[DEPLOYED:CodebaseContext]] for a user-owned
-	// name. This is the wrong marker: CodebaseContext must be declared with [[INJECTION:]].
+	// sourceWithCodebaseContextUnderDeployed uses [[DEPLOYED:CodebaseContext]] for a name
+	// that has no tool-managed generator. After Stage 2 there is no user-owned registry,
+	// so the name is unknown-deployed rather than a marker mismatch.
 	const sourceWithCodebaseContextUnderDeployed = `---
 id: 60
 version: 1.0.0
@@ -160,15 +167,15 @@ required_skills: []
 
 	_, err := transform.Apply(req)
 	if err == nil {
-		t.Fatal("Apply must return an error when a user-owned name is declared under [[DEPLOYED:]], got nil")
+		t.Fatal("Apply must return an error when a name with no tool-managed generator is declared under [[DEPLOYED:]], got nil")
 	}
-	if !errors.Is(err, transform.ErrMarkerMismatch) {
-		t.Errorf("expected error wrapping transform.ErrMarkerMismatch; got: %v", err)
+	if !errors.Is(err, transform.ErrUnknownDeployedName) {
+		t.Errorf("expected error wrapping transform.ErrUnknownDeployedName; got: %v", err)
 	}
 }
 
 // TestMarkerMismatch_IdentityExtensionUnderDeployed_Rejected asserts that
-// [[DEPLOYED:IdentityExtension]] — a user-owned name under the wrong marker — is rejected.
+// [[DEPLOYED:IdentityExtension]] — a name with no tool-managed generator — is rejected.
 func TestMarkerMismatch_IdentityExtensionUnderDeployed_Rejected(t *testing.T) {
 	const sourceWithIdentityExtensionUnderDeployed = `---
 id: 60
@@ -204,8 +211,8 @@ required_skills: []
 	if err == nil {
 		t.Fatal("Apply must return an error when IdentityExtension is declared under [[DEPLOYED:]], got nil")
 	}
-	if !errors.Is(err, transform.ErrMarkerMismatch) {
-		t.Errorf("expected error wrapping transform.ErrMarkerMismatch; got: %v", err)
+	if !errors.Is(err, transform.ErrUnknownDeployedName) {
+		t.Errorf("expected error wrapping transform.ErrUnknownDeployedName; got: %v", err)
 	}
 }
 

@@ -61,6 +61,20 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		return domain.RunSummary{}, err
 	}
 
+	// Load the deployed-sections bundle once for the run. Failure aborts before any file is written.
+	bundle, err := s.loadBundle()
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
+
+	// Build the deployed-agent id index once for this run, before any per-agent probing.
+	// Non-nil only when the harness declares a supported agents directory.
+	agentsDir := module.Descriptor().Paths.Agents.Project
+	var deployedAgentIndex DeployedAgentIndex
+	if module.Descriptor().Paths.Agents.Supported && agentsDir != "" {
+		deployedAgentIndex = buildDeployedAgentIndex(workspace, agentsDir)
+	}
+
 	snap, _ := s.deps.Manifest.Load(workspace)
 
 	// Probe the deployed orchestrator to discover its embedded model and existing workflow set.
@@ -138,7 +152,17 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 	if orchTargetPath != "" {
 		seed = map[string]domain.DeployedArtifactState{orchTargetPath: orchState}
 	}
-	deployedState := probeDeployedState(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed)
+
+	// Build the agent-by-key map for id-based probe resolution.
+	probeAgentByKey := make(map[string]domain.Agent, len(set.Agents))
+	for _, a := range set.Agents {
+		probeAgentByKey[a.Key] = a
+	}
+
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed, deployedAgentIndex, probeAgentByKey)
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
 
 	// Detect agents required by the selected workflows that have no file in the workspace.
 	// These are the agents this run will deploy for the first time.
@@ -192,6 +216,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		Models:              models,
 		ToolMappingsVersion: toolMappingsVersion,
 		ProtocolVersion:     protocol.Version,
+		BundleVersion:       bundle.Version,
 	}
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
@@ -278,7 +303,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 	}
 	// Custom tools resolved above for new agents; already-deployed agents are never in the
 	// input to resolveCustomTools so no already-deployed agent can trigger a tool question.
-	contentFn := s.buildContent(module, agentByKey, models, customTools, skippedTools, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol)
+	contentFn := s.buildContent(module, agentByKey, models, customTools, skippedTools, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol, bundle)
 
 	// Version stamps cover the orchestrator and all admitted new-agent and new-skill items.
 	// set.Skills is passed so admitted skill items are stamped; set.Hooks is nil because hook

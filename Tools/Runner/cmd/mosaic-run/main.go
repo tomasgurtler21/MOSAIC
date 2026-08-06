@@ -22,6 +22,7 @@ import (
 
 	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/cli"
+	"mosaic-run/internal/debuglog"
 	"mosaic-run/internal/deviation"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
@@ -57,6 +58,22 @@ func main() {
 		return
 	}
 
+	// Resolve the working directory as early as possible so the debug logger can
+	// be constructed before any other operation, capturing failures that occur
+	// before run identity is known.
+	workDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: getting working directory: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Construct the process-level debug logger. One logger per process; the file
+	// is created lazily on first use so that a failed run that never reaches the
+	// store still produces a log entry. Closed via defer so writes are flushed
+	// before the process exits along non-os.Exit paths.
+	logger := debuglog.New(workDir)
+	defer logger.Close()
+
 	// CLI mode: pre-scan flags needed for dependency wiring before cobra parses them,
 	// then resolve run identity (run_id, run folder, is-new-run) before constructing
 	// the session. Resolving run identity here ensures the session's ArtifactStore is
@@ -86,26 +103,30 @@ func main() {
 		invocationTimeout = d
 	}
 
-	// Resolve run identity and construct the store from the run-scoped path.
-	// This pre-scan mirrors the --orchestrator-file and --on-deviation pre-scans:
-	// it reads the same flags (--run / --new-run) that cli.Run will parse via cobra,
-	// so both this site and cli.Run converge on the same run folder.
-	// When cli.Run receives a non-nil identity, it skips its own resolution step.
-	runIdentity, store, identErr := resolveRunIdentityForCLI(args)
+	// Resolve run identity. The working directory is passed explicitly to avoid a
+	// redundant os.Getwd call. The store return value is always nil; the
+	// authoritative store is constructed below with the process logger.
+	runIdentity, _, identErr := resolveRunIdentityForCLI(args, workDir)
 	if identErr != nil {
+		logger.Log(domain.EventRunnerError, identErr.Error())
 		fmt.Fprintf(os.Stderr, "error: %v\n", identErr)
 		os.Exit(2)
 	}
+
+	// Associate the run_id with the log file now that identity is resolved.
+	logger.SetRunID(runIdentity.RunID)
+
+	// Build the artifact store with the process logger so that path anomalies
+	// (non-absolute or non-run-scoped paths) are captured in the debug log.
+	store := newLoggedArtifactStore(filepath.Join(runIdentity.RunFolder, "Orchestration.md"), logger)
 
 	// Build the CLI Interaction port. The same instance is used as the session's
 	// Interaction (for per-step progress and notices) and writes to os.Stdout.
 	interact := cli.NewInteraction(os.Stdout)
 
-	// Build the harness adapter based on the --harness flag.
-	// When --harness=claude-code, construct the real adapter with the configured
-	// executable path and timeout. The fake adapter is the default and is used
-	// for development/testing without an actual Claude Code CLI.
-	h := buildAdapter(harnessStr, claudePathStr, invocationTimeout)
+	// Build the harness adapter via buildAdapter, passing the process logger
+	// so that invocation I/O is captured in the debug log.
+	h := buildAdapter(harnessStr, claudePathStr, invocationTimeout, logger)
 
 	// Build the deviation resolver based on the --on-deviation flag.
 	artifactPath := filepath.Join(runIdentity.RunFolder, "Orchestration.md")
@@ -145,6 +166,7 @@ func main() {
 		Deviation: dev,
 		Clock:     &realClock{},
 		Interact:  interact,
+		Debug:     logger,
 	})
 
 	// Pass the pre-resolved store and identity so that cli.Run skips its own
@@ -162,6 +184,13 @@ func runTUIMode(args []string) {
 		os.Exit(1)
 	}
 
+	// Construct the process-level debug logger once here, before any other
+	// operation, so that failures occurring before run identity is resolved are
+	// still captured. The logger is shared across all sessFactory calls (sessFactory
+	// runs more than once per process), ensuring exactly one log file per run.
+	logger := debuglog.New(workDir)
+	defer logger.Close()
+
 	// Pre-scan --claude-path so it is available to the session factory.
 	claudePathTUI := scanFlag(args, "--claude-path")
 	if claudePathTUI == "" {
@@ -178,13 +207,25 @@ func runTUIMode(args []string) {
 		Program: programRef,
 	}
 
+	// minter mints run identity for new runs created from inside the TUI (run-select
+	// screen's "new run" choice). It is also used as the defensive fallback inside
+	// sessFactory when an unresolved run folder is encountered.
+	minter := newTUIRunIdentityMinter(workDir)
+
 	// SessionFactory builds the session with the run-scoped artifact store and the
 	// harness adapter selected in the config screen. orchFile is the path to the
 	// orchestrator agent file (empty when called before the file screen completes).
 	// cfg carries the harness selection and timeout from the config screen.
+	//
+	// The process logger (defined above) is closed over and shared across all calls.
+	// sessFactory is invoked more than once per process (once eagerly with a
+	// placeholder config and again when the config screen completes), so the logger
+	// must not be constructed here — doing so would produce multiple log files.
 	sessFactory := func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session {
-		// Build the harness adapter based on the user's selection.
-		h := buildAdapter(cfg.Harness, claudePathTUI, cfg.Timeout)
+		// Build the harness adapter via buildAdapter, passing the process logger
+		// so that invocation I/O is captured in the debug log. buildAdapter
+		// handles the timeout default and the logger injection internally.
+		h := buildAdapter(cfg.Harness, claudePathTUI, cfg.Timeout, logger)
 
 		// Wire OrchestratorDelegate into tuiDev when using the real adapter and
 		// the orchestrator file path is known (entered in the file screen).
@@ -193,86 +234,61 @@ func runTUIMode(args []string) {
 		// orchestrator invocation.
 		tuiDev.Delegate = buildTUIDelegate(h, cfg.Harness, orchFile, runFolder)
 
-		artifactPath := "Orchestration.md"
-		if runFolder != "" {
-			artifactPath = filepath.Join(runFolder, "Orchestration.md")
+		artifactPath, err := resolveTUIArtifactPath(runFolder)
+		if errors.Is(err, errUnresolvedRunFolder) {
+			// Defensive branch: an unresolved run folder is a contract violation
+			// by the caller. Mint a fresh identity, write a notice, and build the
+			// store at the minted scoped path rather than a bare CWD-relative path.
+			_, mintedFolder := minter()
+			logger.Log(domain.EventRunnerError, "run folder unresolved; minting new run",
+				domain.F("path", mintedFolder))
+			fmt.Fprintf(os.Stderr, "notice: run folder unresolved; minting new run at %s\n", mintedFolder)
+			artifactPath = filepath.Join(mintedFolder, "Orchestration.md")
 		}
-		store := artifact.NewFileStore(artifactPath)
+		store := newLoggedArtifactStore(artifactPath, logger)
 		return session.New(session.Deps{
 			Harness:   h,
 			Store:     store,
 			Deviation: tuiDev,
 			Clock:     &realClock{},
 			Interact:  programRef,
+			Debug:     logger,
 		})
 	}
 
-	// Resolve run identity from --run / --new-run flags.
-	runIDFlag := scanFlag(args, "--run")
-	isNewRunFlag := scanBoolFlag(args, "--new-run")
-
-	if runIDFlag != "" && isNewRunFlag {
-		fmt.Fprintf(os.Stderr, "error: --run and --new-run are mutually exclusive\n")
-		os.Exit(2)
-	}
-
-	var resolvedRunID, resolvedRunFolder string
-	var isNewRun bool
-	var scanResult *runscan.ScanResult
-
-	switch {
-	case runIDFlag != "":
-		// --run <run_id>: validate format and resolve the run folder.
-		if !domain.IsValidRunID(runIDFlag) {
-			fmt.Fprintf(os.Stderr, "error: invalid run_id format %q; expected {YYYYMMDD}T{HHMMSS}Z-{4-hex}\n", runIDFlag)
+	// Resolve run identity from flags and working-directory scan.
+	identity, identErr := resolveRunIdentityForTUI(args, workDir)
+	if identErr != nil {
+		logger.Log(domain.EventRunnerError, identErr.Error())
+		if errors.Is(identErr, errTUIUsage) {
+			fmt.Fprintf(os.Stderr, "error: %v\n", identErr)
 			os.Exit(2)
 		}
-		resolvedRunID = runIDFlag
-		resolvedRunFolder = filepath.Join(workDir, domain.RunScopedFolder(runIDFlag))
-		isNewRun = false
+		fmt.Fprintf(os.Stderr, "error: %v\n", identErr)
+		os.Exit(1)
+	}
 
-	case isNewRunFlag:
-		// --new-run: identity will be minted by the session factory (runFolder="").
-		resolvedRunID = ""
-		resolvedRunFolder = ""
-		isNewRun = true
-
-	default:
-		// Neither flag: scan the working directory for resumable candidates.
-		scanner := runscan.NewDirScanner()
-		result, scanErr := scanner.Scan(workDir)
-		if scanErr != nil {
-			fmt.Fprintf(os.Stderr, "error: scanning for runs: %v\n", scanErr)
-			os.Exit(1)
-		}
-		switch len(result.Candidates) {
-		case 0:
-			// No candidates: new run (identity minted by session factory).
-			isNewRun = true
-		case 1:
-			// Single candidate: auto-resume.
-			resolvedRunID = result.Candidates[0].RunID
-			resolvedRunFolder = result.Candidates[0].FolderPath
-			isNewRun = false
-		default:
-			// Multiple candidates: show the RunSelectScreen.
-			scanResult = &result
-		}
+	// Associate the run_id with the log file if identity is already resolved
+	// (single-candidate auto-resume, --run flag, or --new-run flag). When
+	// identity is deferred to the run-select screen (multi-candidate), the
+	// run_id will be associated via a separate SetRunID call once selected.
+	if identity.RunID != "" {
+		logger.SetRunID(identity.RunID)
 	}
 
 	// Construct the initial session using the resolved identity (or placeholder for multi-candidate).
 	// Harness config is not yet known (config screen has not run); defaults to fake adapter.
-	initialFolder := resolvedRunFolder
-	initSess := sessFactory(initialFolder, isNewRun, "", screens.ConfigSelection{})
+	initSess := sessFactory(identity.RunFolder, identity.IsNewRun, "", screens.ConfigSelection{})
 
 	ctx := context.Background()
 	if err := tui.Run(ctx, initSess, tui.Options{
 		Interaction:      programRef,
-		ScanResult:       scanResult,
-		ResolvedRunID:    resolvedRunID,
-		IsNewRun:         isNewRun,
-		InitialRunFolder: resolvedRunFolder,
+		ScanResult:       identity.ScanResult,
+		ResolvedRunID:    identity.RunID,
+		IsNewRun:         identity.IsNewRun,
+		InitialRunFolder: identity.RunFolder,
 		SessionFactory:   sessFactory,
+		MintRunIdentity:  minter,
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "tui: %v\n", err)
 		os.Exit(1)
@@ -290,10 +306,25 @@ func runTUIMode(args []string) {
 // candidates; zero candidates mints a new run_id, one candidate uses that folder,
 // and multiple candidates return an error (the multi-candidate rejection cannot be
 // deferred to cli.Run because a non-nil identity skips cli.Run's internal check).
-func resolveRunIdentityForCLI(args []string) (*cli.RunIdentity, domain.ArtifactStore, error) {
-	workDir, err := os.Getwd()
-	if err != nil {
-		return nil, nil, fmt.Errorf("getting working directory: %w", err)
+//
+// The second return value is always nil. Callers are responsible for constructing
+// the artifact store after identity is resolved, using the process logger so that
+// path anomalies are captured in the debug log. The nil return preserves the
+// three-value signature for call-site compatibility.
+//
+// An optional workDir may be passed as the last argument to avoid a redundant
+// os.Getwd syscall when the caller has already resolved the working directory.
+// When omitted, os.Getwd is called internally.
+func resolveRunIdentityForCLI(args []string, workDirs ...string) (*cli.RunIdentity, domain.ArtifactStore, error) {
+	var workDir string
+	if len(workDirs) > 0 {
+		workDir = workDirs[0]
+	} else {
+		var err error
+		workDir, err = os.Getwd()
+		if err != nil {
+			return nil, nil, fmt.Errorf("getting working directory: %w", err)
+		}
 	}
 
 	runIDFlag := scanFlag(args, "--run")
@@ -388,8 +419,12 @@ func resolveRunIdentityForCLI(args []string) (*cli.RunIdentity, domain.ArtifactS
 		RunFolder: runFolder,
 		IsNewRun:  isNewRun,
 	}
-	store := artifact.NewFileStore(filepath.Join(runFolder, "Orchestration.md"))
-	return identity, store, nil
+	// Return nil for the store. The caller constructs the authoritative store
+	// via newLoggedArtifactStore with the process logger, ensuring path anomalies
+	// are captured in the debug log. Store construction here would require a
+	// no-op logger (process logger not in scope) and would be immediately
+	// discarded at the call site anyway.
+	return identity, nil, nil
 }
 
 // scanBoolFlag reports whether a boolean flag (e.g. "--tui") appears anywhere in args.
@@ -450,6 +485,33 @@ func scanFlag(args []string, flag string) string {
 	return ""
 }
 
+// newLoggedArtifactStore builds the run's artifact store and records a debug
+// entry when the store path is anomalous. It is the single owner of the
+// artifact.path.* event family: no other function in any package emits those
+// events, and the artifact package itself never logs.
+//
+// Behaviour is identical to calling artifact.NewFileStore(path) directly — the
+// returned store is always non-nil and no path is ever rewritten, substituted
+// or rejected here. Emission is a pure side effect.
+//
+// At most one event is emitted per call; the two conditions are mutually
+// exclusive so a log reader can distinguish a hard failure from an informational
+// note by event name alone.
+func newLoggedArtifactStore(path string, logger domain.DebugLogger) domain.ArtifactStore {
+	if !filepath.IsAbs(path) {
+		// Non-absolute path: every subsequent Create call will return an error
+		// and nothing will be written. Record this so the failure is diagnosable.
+		logger.Log(domain.EventArtifactPathRejected, "artifact store path is not absolute",
+			domain.F("path", path))
+	} else if !artifact.IsRunScopedArtifactPath(path) {
+		// Absolute but not under an Orchestration-{run_id} folder: artifacts will
+		// be written, but the path is outside the expected run-scoped hierarchy.
+		logger.Log(domain.EventArtifactPathNonRunScoped, "artifact store path is not run-scoped",
+			domain.F("path", path))
+	}
+	return artifact.NewFileStore(path)
+}
+
 // buildAdapter constructs the HarnessAdapter specified by harnessStr.
 //
 // When harnessStr is "claude-code", a ClaudeCodeAdapter is created with
@@ -458,13 +520,22 @@ func scanFlag(args []string, flag string) string {
 // For any other value (including "fake" and unknown strings), FakeAdapter is
 // returned. Unknown values are not rejected here; cli.Run validates the
 // --harness flag and surfaces usage errors for unknown values (AC3.8).
-func buildAdapter(harnessStr, claudePathStr string, timeout time.Duration) domain.HarnessAdapter {
+//
+// An optional logger may be passed as the last argument. When provided, the
+// ClaudeCodeAdapter is constructed with the logger so that invocation I/O is
+// captured in the debug log. When omitted, the adapter uses a no-op logger.
+// The fake adapter ignores the logger in all cases.
+func buildAdapter(harnessStr, claudePathStr string, timeout time.Duration, loggers ...domain.DebugLogger) domain.HarnessAdapter {
+	var logger domain.DebugLogger = domain.NopDebugLogger{}
+	if len(loggers) > 0 && loggers[0] != nil {
+		logger = loggers[0]
+	}
 	switch harnessStr {
 	case "claude-code":
 		if timeout <= 0 {
 			timeout = 30 * time.Minute
 		}
-		return harness.NewClaudeCodeAdapter(claudePathStr, timeout)
+		return harness.NewClaudeCodeAdapterWithLogger(claudePathStr, timeout, logger)
 	default: // "fake" or unknown
 		return harness.NewFakeAdapter()
 	}
@@ -482,9 +553,13 @@ func buildTUIDelegate(h domain.HarnessAdapter, harnessStr, orchFile, runFolder s
 		return nil
 	}
 	orchDir := orchFileDir(orchFile)
-	artifactPath := "Orchestration.md"
-	if runFolder != "" {
-		artifactPath = filepath.Join(runFolder, "Orchestration.md")
+	artifactPath, err := resolveTUIArtifactPath(runFolder)
+	if err != nil {
+		// runFolder is empty; fall back to a path relative to the orchestrator
+		// file's directory. This branch is defensive: by the time buildTUIDelegate
+		// is called, sessFactory has already minted a run folder, so runFolder
+		// should always be non-empty in production.
+		artifactPath = filepath.Join(orchDir, "Orchestration.md")
 	}
 	var orchSeq int
 	return &deviation.OrchestratorDelegate{

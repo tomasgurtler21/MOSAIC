@@ -19,7 +19,6 @@ import re
 
 from boundary_constants import (
     CANONICAL_DEPLOYED,
-    CANONICAL_INJECTIONS,
     CANONICAL_ORDER,
     CANONICAL_SECTIONS,
     DEPLOYED_PARENT_MAP,
@@ -38,15 +37,20 @@ _YAML_KEY_PATTERN: re.Pattern[str] = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:"
 
 @dataclasses.dataclass
 class ValidationError:
-    """Represents a single validation error found in an agent instruction file.
+    """Represents a single validation finding found in an agent instruction file.
 
     The __str__ method produces the CLI output format:
         <filepath>:<line>: <error-code> <message>
+
+    severity is "error" for findings that fail validation, or "advice" for
+    informational findings that are reported but never fatal. The CLI exits 1
+    only when at least one finding has severity "error".
     """
     file_path: pathlib.Path
     line_number: int
     error_code: str       # One of "E000" through "E011"
     message: str
+    severity: str = "error"  # "error" or "advice"; defaults to "error"
 
     def __str__(self) -> str:
         """Format as '<filepath>:<line>: <error-code> <message>'.
@@ -232,14 +236,8 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                         message=f"Non-canonical SECTION name: {name!r}",
                     ))
             elif kind == BoundaryKind.INJECTION:
-                is_canonical = name in CANONICAL_INJECTIONS
-                if not is_canonical:
-                    errors.append(ValidationError(
-                        file_path=file_path,
-                        line_number=line_num,
-                        error_code="E004",
-                        message=f"Non-canonical INJECTION name: {name!r}",
-                    ))
+                # Injection names are open: any name is valid and is preserved.
+                is_canonical = True
             else:  # DEPLOYED
                 is_canonical = name in CANONICAL_DEPLOYED
                 if not is_canonical:
@@ -285,20 +283,41 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
 
                 elif kind == BoundaryKind.INJECTION:
                     # Check that the injection is inside its required parent section (E008).
-                    if is_canonical:
-                        required_parent = INJECTION_PARENT_MAP.get(name)
-                        current_section = section_stack[-1][0] if section_stack else None
-                        if required_parent is not None and current_section != required_parent:
+                    # INJECTION_PARENT_MAP sentinel values:
+                    #   None (absent key): no parent requirement — no check performed
+                    #   ""   (present, empty): must be at body top level (not inside any section)
+                    #   str  (non-empty): must be inside that named section
+                    # Injection names are open (is_canonical is always True for INJECTION), so
+                    # the parent-map lookup runs unconditionally for any name present in the map.
+                    required_parent = INJECTION_PARENT_MAP.get(name)
+                    current_section = section_stack[-1][0] if section_stack else None
+                    if required_parent is None:
+                        pass  # no parent requirement
+                    elif required_parent == "":
+                        # Must be at body top level — not nested inside any section.
+                        if current_section is not None:
                             errors.append(ValidationError(
                                 file_path=file_path,
                                 line_number=line_num,
                                 error_code="E008",
                                 message=(
-                                    f"Injection {name!r} must be inside "
-                                    f"section {required_parent!r}, "
-                                    f"but is inside {current_section!r}"
+                                    f"Injection {name!r} must be at body top level "
+                                    f"but is inside section {current_section!r}"
                                 ),
+                                severity="advice",
                             ))
+                    elif current_section != required_parent:
+                        errors.append(ValidationError(
+                            file_path=file_path,
+                            line_number=line_num,
+                            error_code="E008",
+                            message=(
+                                f"Injection {name!r} must be inside "
+                                f"section {required_parent!r}, "
+                                f"but is inside {current_section!r}"
+                            ),
+                            severity="advice",
+                        ))
 
                     injection_stack.append((name, line_num))
 
@@ -512,12 +531,16 @@ if __name__ == "__main__":
 
     if args.batch:
         results = validate_batch(args.path)
+        has_error = False
         for _file_path, file_errors in sorted(results.items()):
             for error in file_errors:
                 print(str(error))
-        sys.exit(1 if results else 0)
+                if error.severity == "error":
+                    has_error = True
+        sys.exit(1 if has_error else 0)
     else:
         errors = validate_file(args.path)
         for error in errors:
             print(str(error))
-        sys.exit(1 if errors else 0)
+        has_error = any(e.severity == "error" for e in errors)
+        sys.exit(1 if has_error else 0)

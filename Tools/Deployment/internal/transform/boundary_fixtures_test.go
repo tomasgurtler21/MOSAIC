@@ -82,8 +82,10 @@ func TestDeploymentBoundaryFixtures_WrongMarkerToolAsInjection(t *testing.T) {
 }
 
 // TestDeploymentBoundaryFixtures_WrongMarkerUserAsDeployed asserts that a fixture
-// declaring a canonical user-owned name (IdentityExtension) under [[DEPLOYED:]] produces
-// a "wrong-marker" validation issue. User-owned names must use [[INJECTION:]].
+// declaring a non-tool-managed name (IdentityExtension) under [[DEPLOYED:]] produces
+// an "unknown-deployed" validation issue. Injection names are open (no allowlist), so
+// an unrecognised [[DEPLOYED:]] name is always flagged as unknown-deployed regardless
+// of whether it happens to be a known injection name.
 func TestDeploymentBoundaryFixtures_WrongMarkerUserAsDeployed(t *testing.T) {
 	src := readDeploymentBoundaryFixture(t, "malformed/wrong-marker-user-as-deployed.md")
 
@@ -93,8 +95,8 @@ func TestDeploymentBoundaryFixtures_WrongMarkerUserAsDeployed(t *testing.T) {
 	}
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{})
-	if !deploymentBoundaryHasCode(issues, "wrong-marker") {
-		t.Errorf("expected a 'wrong-marker' issue for IdentityExtension under [[DEPLOYED:]]; got: %s",
+	if !deploymentBoundaryHasCode(issues, "unknown-deployed") {
+		t.Errorf("expected an 'unknown-deployed' issue for IdentityExtension under [[DEPLOYED:]]; got: %s",
 			deploymentBoundaryFormatIssues(issues))
 	}
 }
@@ -167,8 +169,9 @@ func TestDeploymentBoundaryFixtures_CommunicationProtocolInSection(t *testing.T)
 // ---------------------------------------------------------------------------
 
 // TestDeploymentBoundaryFixtures_DeployedProtocolOutOfOrder asserts that a fixture where
-// [[DEPLOYED:CommunicationProtocol]] appears after [[SECTION:ArtifactProvenance]] — out of
+// [[DEPLOYED:CommunicationProtocol]] appears after [[SECTION:Capabilities]] — out of
 // the canonical document order — produces an "out-of-order-section" validation issue.
+// CommunicationProtocol must appear at slot 1 (before Capabilities at slot 2).
 func TestDeploymentBoundaryFixtures_DeployedProtocolOutOfOrder(t *testing.T) {
 	src := readDeploymentBoundaryFixture(t, "malformed/deployed-protocol-out-of-order.md")
 
@@ -179,15 +182,17 @@ func TestDeploymentBoundaryFixtures_DeployedProtocolOutOfOrder(t *testing.T) {
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{RequireCanonicalSections: true})
 	if !deploymentBoundaryHasCode(issues, "out-of-order-section") {
-		t.Errorf("expected an 'out-of-order-section' issue for CommunicationProtocol appearing after ArtifactProvenance; got: %s",
+		t.Errorf("expected an 'out-of-order-section' issue for CommunicationProtocol appearing after Capabilities; got: %s",
 			deploymentBoundaryFormatIssues(issues))
 	}
 }
 
-// TestDeploymentBoundaryFixtures_ArtifactProvenanceOutOfOrder asserts that a fixture where
-// [[SECTION:ArtifactProvenance]] appears after [[SECTION:Capabilities]] — out of the
-// canonical document order — produces an "out-of-order-section" validation issue.
-func TestDeploymentBoundaryFixtures_ArtifactProvenanceOutOfOrder(t *testing.T) {
+// TestDeploymentBoundaryFixtures_ConstraintsOutOfOrder asserts that a fixture where
+// [[SECTION:Constraints]] appears after [[SECTION:ErrorHandling]] — out of the canonical
+// document order — produces an "out-of-order-section" validation issue.
+// This replaces the former ArtifactProvenanceOutOfOrder test: ArtifactProvenance was
+// removed from the canonical vocabulary in Stage 2 and is now unknown-deployed.
+func TestDeploymentBoundaryFixtures_ConstraintsOutOfOrder(t *testing.T) {
 	src := readDeploymentBoundaryFixture(t, "malformed/artifact-provenance-out-of-order.md")
 
 	doc, err := docformat.Parse(src)
@@ -197,7 +202,7 @@ func TestDeploymentBoundaryFixtures_ArtifactProvenanceOutOfOrder(t *testing.T) {
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{RequireCanonicalSections: true})
 	if !deploymentBoundaryHasCode(issues, "out-of-order-section") {
-		t.Errorf("expected an 'out-of-order-section' issue for ArtifactProvenance appearing after Capabilities; got: %s",
+		t.Errorf("expected an 'out-of-order-section' issue for Constraints appearing after ErrorHandling; got: %s",
 			deploymentBoundaryFormatIssues(issues))
 	}
 }

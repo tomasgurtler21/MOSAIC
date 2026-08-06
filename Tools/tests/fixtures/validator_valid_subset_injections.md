@@ -2,7 +2,7 @@
 id: test-validator-subset
 version: 1.0.0
 name: test-agent
-description: Valid file with all 7 sections but only one injection
+description: Valid file with 6 sections, one top-level DEPLOYED slot, and only one user-owned injection
 ---
 
 [[SECTION:Identity]]
@@ -21,14 +21,7 @@ Only this injection is present in this file.
 
 [[DEPLOYED:CommunicationProtocol]]
 [[/DEPLOYED:CommunicationProtocol]]
----
 
-[[SECTION:ArtifactProvenance]]
-## Artifact Provenance
-
-Artifact provenance content without any injection.
-
-[[/SECTION:ArtifactProvenance]]
 ---
 
 [[SECTION:Capabilities]]

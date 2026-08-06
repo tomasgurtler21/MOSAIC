@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 
@@ -59,6 +60,13 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 			return nil, nil, nil, nil, classErr
 		}
 
+		// Reject any [[DEPLOYED:]] region that carries non-empty content in the source file.
+		// Source regions are empty by definition; content here is either a hand-edit about to
+		// be discarded or a deployed file mistakenly committed as source.
+		if node.Kind() == docformat.NodeDeployed && len(bytes.TrimSpace(node.Content())) > 0 {
+			return nil, nil, nil, nil, fmt.Errorf("region %q: %w", name, ErrSourceDeployedRegionNotEmpty)
+		}
+
 		switch class {
 		case domain.InjectionHarness:
 			outcome := applyHarnessRegion(node, name, class, req)
@@ -85,6 +93,13 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 			outcome, protoErr := applyProtocolRegion(node, name, req)
 			if protoErr != nil {
 				return nil, nil, nil, nil, protoErr
+			}
+			outcomes = append(outcomes, outcome)
+
+		case domain.InjectionBundle:
+			outcome, bundleErr := applyBundleRegion(node, name, req)
+			if bundleErr != nil {
+				return nil, nil, nil, nil, bundleErr
 			}
 			outcomes = append(outcomes, outcome)
 		}
@@ -277,6 +292,45 @@ func applyProtocolRegion(node *docformat.Node, name string, req Request) (Region
 		Class:  domain.InjectionProtocol,
 		Action: RegionProtocolFilled,
 		Bytes:  len(content),
+	}, nil
+}
+
+// applyBundleRegion fills a bundle-sourced [[DEPLOYED:]] region with the role-matched block
+// from req.Bundle.
+//
+// When req.Bundle is the zero value (not loaded), the region is cleared and recorded as
+// emptied. This matches the pre-bundle behavior and keeps pre-migration call sites working:
+// the app layer always loads the bundle before calling transform, so a zero-value Bundle
+// only appears in tests that do not exercise bundle filling.
+//
+// When req.Bundle is loaded but has no block matching the region name and the file's role,
+// the error ErrBundleBlockMissingForRole is returned. Deploying an empty region would produce
+// an agent that appears complete and instructs nothing.
+func applyBundleRegion(node *docformat.Node, name string, req Request) (RegionOutcome, error) {
+	// Zero-value bundle: not loaded for this run. Leave region empty; no error.
+	if req.Bundle.Version == "" && len(req.Bundle.Blocks) == 0 {
+		node.Clear() //nolint:errcheck // Node.Clear always returns nil; forward-compatible error return.
+		return RegionOutcome{
+			Name:   name,
+			Marker: node.Kind(),
+			Class:  domain.InjectionBundle,
+			Action: RegionEmptied,
+			Bytes:  0,
+		}, nil
+	}
+
+	block, ok := req.Bundle.BlockFor(name, req.Role)
+	if !ok {
+		return RegionOutcome{}, fmt.Errorf("region %q: %w", name, ErrBundleBlockMissingForRole)
+	}
+
+	node.SetContent(block) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
+	return RegionOutcome{
+		Name:   name,
+		Marker: node.Kind(),
+		Class:  domain.InjectionBundle,
+		Action: RegionBundleFilled,
+		Bytes:  len(block),
 	}, nil
 }
 

@@ -6,14 +6,18 @@ name: test-agent
 Identity section content.
 [[/SECTION:Identity]]
 
-[[SECTION:CommunicationProtocol]]
+[[DEPLOYED:CommunicationProtocol]]
 Communication protocol content.
-[[/SECTION:CommunicationProtocol]]
+[[/DEPLOYED:CommunicationProtocol]]
 
 [[SECTION:Capabilities]]
 Capabilities content.
 [[/SECTION:Capabilities]]
 
-[[SECTION:ArtifactProvenance]]
-ArtifactProvenance appears after Capabilities — out of canonical order.
-[[/SECTION:ArtifactProvenance]]
+[[SECTION:ErrorHandling]]
+ErrorHandling content.
+[[/SECTION:ErrorHandling]]
+
+[[SECTION:Constraints]]
+Constraints appears after ErrorHandling — out of canonical order.
+[[/SECTION:Constraints]]

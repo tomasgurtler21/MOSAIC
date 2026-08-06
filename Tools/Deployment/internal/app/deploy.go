@@ -49,6 +49,12 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		return domain.RunSummary{}, err
 	}
 
+	// Load the deployed-sections bundle once for the run. Failure aborts before any file is written.
+	bundle, err := s.loadBundle()
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
+
 	workflowIDs := req.WorkflowIDs
 	if workflowIDs == nil {
 		if req.SkipAll[domain.QWorkflows] {
@@ -138,6 +144,21 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 
 	snap, _ := s.deps.Manifest.Load(workspace)
 
+	// Build the deployed-agent id index once for this run. The index is non-nil only when
+	// the harness declares a supported agents directory; otherwise id-based resolution is
+	// skipped and all agents are probed at their harness-computed planned paths.
+	agentsDir := module.Descriptor().Paths.Agents.Project
+	var deployedAgentIndex DeployedAgentIndex
+	if module.Descriptor().Paths.Agents.Supported && agentsDir != "" {
+		deployedAgentIndex = buildDeployedAgentIndex(workspace, agentsDir)
+	}
+
+	// Build the agent-by-key map for id-based probe resolution (covers workflow + utility agents).
+	probeAgentByKey := make(map[string]domain.Agent, len(probeSet.Agents))
+	for _, a := range probeSet.Agents {
+		probeAgentByKey[a.Key] = a
+	}
+
 	// Enumerate every planned target path and probe the workspace for each one.
 	// plan.Input.DeployedState is the single carrier of presence, content hash, and version
 	// stamps for all planned target paths.
@@ -145,7 +166,10 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	if pathErr != nil {
 		return domain.RunSummary{}, pathErr
 	}
-	deployedState := probeDeployedState(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil)
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, nil, deployedAgentIndex, probeAgentByKey)
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
 
 	// Compute the tool-mappings version hash from the loaded config stores so the planner
 	// can detect staleness when the user modifies their tool-destination configuration.
@@ -162,6 +186,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		DeployedState:       deployedState,
 		ToolMappingsVersion: toolMappingsVersion,
 		ProtocolVersion:     protocol.Version,
+		BundleVersion:       bundle.Version,
 	}
 	p, err := s.deps.Planner.Build(ctx, planInput)
 	if err != nil {
@@ -220,7 +245,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	}
 	workflowBlocks := s.buildWorkflowBlocks(workflowIDs)
 	infraBlocks := s.buildInfrastructureBlocks(infraAgentIDs)
-	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, workflowBlocks, infraBlocks, scope, nil, toolMappingsVersion, protocol)
+	contentFn := s.buildContent(module, agentByKey, modelRes.models, customTools, skippedTools, workflowBlocks, infraBlocks, scope, nil, toolMappingsVersion, protocol, bundle)
 
 	now := s.now()
 	execReq := deploy.ExecRequest{

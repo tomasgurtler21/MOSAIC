@@ -7,6 +7,7 @@ This directory contains utility agents for creating and maintaining the multi-ag
 | `anthropic-agent-creator` | Creates general-purpose AI agent instructions through iterative collaboration |
 | `anthropic-subagent-creator` | Creates subagent instructions compliant with the orchestration system architecture |
 | `workflow-creator` | Creates and modifies orchestration workflow definitions |
+| `injections-helper` | Fills and adds `[[INJECTION:]]` regions in a deployed workspace's agent files, from project context the user supplies |
 | `harness-bug-hunter` | Discovers, validates, and maintains a knowledge base of harness bugs and workarounds |
 | `system-prompt-capturer` | Captures and maintains harness-injected system prompts, built-in tool definitions, and tool output formats |
 

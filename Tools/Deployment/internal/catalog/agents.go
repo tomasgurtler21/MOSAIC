@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,10 +18,11 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 
 	// Orchestrator: single file at Agents/Generic/Orchestrator/orchestrator.md
 	orchPath := filepath.Join(root, "Agents", "Generic", "Orchestrator", "orchestrator.md")
-	if orch, err := parseAgentFile(orchPath, domain.RoleOrchestrator, ""); err == nil {
+	if orch, orchIssues, err := parseAgentFile(orchPath, domain.RoleOrchestrator, ""); err == nil {
 		c.orchestr = orch
 		c.agentIdx[orch.Key] = orch
 		c.sourcePaths[orchPath] = true
+		issues = append(issues, orchIssues...)
 	}
 	// Missing orchestrator is not a hard error — loadCatalog still returns successfully.
 
@@ -46,10 +48,11 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 					continue
 				}
 				agentPath := filepath.Join(catDir, name)
-				agent, err := parseAgentFile(agentPath, domain.RoleWorker, category)
+				agent, agentIssues, err := parseAgentFile(agentPath, domain.RoleSubagent, category)
 				if err != nil {
 					continue
 				}
+				issues = append(issues, agentIssues...)
 				c.workers = append(c.workers, agent)
 				c.agentIdx[agent.Key] = agent
 				c.sourcePaths[agentPath] = true
@@ -72,10 +75,11 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 				continue
 			}
 			utilPath := filepath.Join(utilDir, name)
-			agent, err := parseAgentFile(utilPath, domain.RoleUtility, "")
+			agent, utilIssues, err := parseAgentFile(utilPath, domain.RoleUtility, "")
 			if err != nil {
 				continue
 			}
+			issues = append(issues, utilIssues...)
 			c.utilities = append(c.utilities, agent)
 			c.agentIdx[agent.Key] = agent
 			c.sourcePaths[utilPath] = true
@@ -90,18 +94,43 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 
 // parseAgentFile reads and parses a single agent markdown file, populating an Agent struct
 // from its frontmatter. The key is derived from the file's base name without the .md extension.
-func parseAgentFile(path string, role domain.AgentRole, category string) (domain.Agent, error) {
+//
+// When frontmatter carries a `role` scalar, ParseAgentRole decides the agent's role and the
+// path-derived role (the fallback parameter) is ignored. When the field is absent, the
+// path-derived role is used. When the field is present but unrecognised, the path-derived
+// role is used and a catalog.Issue with code "invalid-role" (severity error) is returned —
+// a malformed role must not silently drop an agent from the catalog.
+func parseAgentFile(path string, role domain.AgentRole, category string) (domain.Agent, []Issue, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return domain.Agent{}, err
+		return domain.Agent{}, nil, err
 	}
 	doc, err := docformat.Parse(data)
 	if err != nil {
-		return domain.Agent{}, err
+		return domain.Agent{}, nil, err
 	}
 	fm := doc.Frontmatter()
 
 	key := strings.TrimSuffix(filepath.Base(path), ".md")
+
+	var issues []Issue
+
+	// Read role from frontmatter when present; fall back to the path-derived role otherwise.
+	if v, ok := fm.Get("role"); ok && v.Kind == domain.KindScalar {
+		if parsed, ok := domain.ParseAgentRole(v.Scalar); ok {
+			role = parsed
+		} else {
+			// Unrecognised role: keep path-derived role and record an issue.
+			issues = append(issues, Issue{
+				Severity: docformat.SeverityError,
+				Code:     "invalid-role",
+				Subject:  key,
+				Message:  fmt.Sprintf("agent %q has unrecognised frontmatter role %q; expected \"subagent\" or \"orchestrator\"", key, v.Scalar),
+				Path:     path,
+			})
+		}
+	}
+
 	agent := domain.Agent{
 		Key:            key,
 		Role:           role,
@@ -188,5 +217,5 @@ func parseAgentFile(path string, role domain.AgentRole, category string) (domain
 		agent.OnFailure = v.Scalar
 	}
 
-	return agent, nil
+	return agent, issues, nil
 }

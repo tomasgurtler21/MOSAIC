@@ -151,6 +151,18 @@ func (f *fakeCatalog) ReadSource(path string) ([]byte, error) {
 }
 
 func (f *fakeCatalog) Issues() []catalog.Issue { return nil }
+func (f *fakeCatalog) AgentByNumericID(id string) (domain.Agent, bool) {
+	if id == "" {
+		return domain.Agent{}, false
+	}
+	all := append(f.workers, append(f.utilityAgents, append(f.infraAgents, f.orchestrator)...)...)
+	for _, a := range all {
+		if a.NumericID == id {
+			return a, true
+		}
+	}
+	return domain.Agent{}, false
+}
 
 // ---------------------------------------------------------------------------
 // fakeModule — implements domain.HarnessModule for isolated unit tests

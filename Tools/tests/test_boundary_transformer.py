@@ -5,6 +5,9 @@ must contain the correct boundaries in the correct order with body text preserve
 Tests do NOT test individual methods — they test end-to-end transformation outcomes.
 
 All tests are in TDD RED phase: they will fail until boundary_transformer.py is implemented.
+The Stage 4 test classes (TestProvenanceUntaggedInput, TestProvenanceOldShapeMigration,
+TestProvenanceIdempotency, TestProvenanceValidatorIntegration) will fail until the
+transformer's provenance migration contracts (T-A through T-D) are implemented.
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ _TOOLS_DIR = pathlib.Path(__file__).parent.parent
 sys.path.insert(0, str(_TOOLS_DIR))
 
 from boundary_transformer import TransformError, TransformResult, transform_file  # noqa: E402
+from boundary_validator import validate_file  # noqa: E402
 
 # Matches old-format injection marker lines in their two allowed forms:
 #   standalone:  [INJECTION: name]
@@ -1221,3 +1225,641 @@ class TestMalformedFrontmatter:
         )
         assert "NotImplementedError" not in proc.stderr
         assert proc.returncode != 0
+
+
+# ---------------------------------------------------------------------------
+# Provenance migration helpers and test classes — deferred pending Stage 2 decision
+# ---------------------------------------------------------------------------
+#
+# The test classes below (TestProvenanceUntaggedInput, TestProvenanceOldShapeMigration,
+# TestProvenanceIdempotency, TestProvenanceValidatorIntegration) and the helpers in this
+# section test the transformer's provenance migration behavior: converting old
+# [[SECTION:ArtifactProvenance]] files or untagged '## Artifact Provenance' headings into
+# the [[DEPLOYED:ArtifactProvenance]] + [[INJECTION:ArtifactProvenanceExtension]] shape.
+#
+# These classes are deliberately out of scope for Stage 2 tests for the following reason:
+# Stage 2 removes ArtifactProvenance from the vocabulary entirely (not from CANONICAL_DEPLOYED,
+# CANONICAL_ORDER, or DEPLOYED_PARENT_MAP). The transformer's provenance migration feature
+# produces files that carry [[DEPLOYED:ArtifactProvenance]], which becomes an E011
+# (unrecognised tool-managed boundary name) after Stage 2 implementation is complete.
+# Whether the transformer should continue to do provenance migration (placing a now-retired
+# name) or should be updated to remove that migration path entirely is a design decision
+# that belongs to the stage that retires or removes provenance migration from
+# boundary_transformer.py — not to Stage 2's vocabulary-sync task I2.4, which only updates
+# the transformer for the removed CANONICAL_INJECTIONS constant.
+#
+# Until that decision is made and implemented, these test classes remain in the file as a
+# record of the provenance migration contract (T-A through T-D). They will continue to
+# fail against the pre-implementation baseline and must be reconciled before they can be
+# included in a passing test run.
+
+_TARGET_DEPLOYED_OPEN = "[[DEPLOYED:ArtifactProvenance]]"
+_TARGET_DEPLOYED_CLOSE = "[[/DEPLOYED:ArtifactProvenance]]"
+_TARGET_INJECTION_OPEN = "[[INJECTION:ArtifactProvenanceExtension]]"
+_TARGET_INJECTION_CLOSE = "[[/INJECTION:ArtifactProvenanceExtension]]"
+_OLD_SECTION_OPEN = "[[SECTION:ArtifactProvenance]]"
+_OLD_SECTION_CLOSE = "[[/SECTION:ArtifactProvenance]]"
+
+
+def _body(content: str) -> str:
+    """Return the content after the closing frontmatter '---' (body only)."""
+    lines = content.splitlines(keepends=True)
+    in_fm = False
+    for i, line in enumerate(lines):
+        if line.strip() == "---":
+            if not in_fm:
+                in_fm = True
+            else:
+                return "".join(lines[i + 1:])
+    return content
+
+
+def _body_lines_outside_provenance(body: str) -> list[str]:
+    """Return body lines with the entire provenance-related region stripped out.
+
+    Removes every line from the first line of a provenance open tag
+    (``[[SECTION:ArtifactProvenance]]``, ``[[DEPLOYED:ArtifactProvenance]]``,
+    or ``[[INJECTION:ArtifactProvenanceExtension]]`` when at top level)
+    through the corresponding close tag.  All other lines are returned
+    preserving their exact bytes.
+
+    After ArtifactProvenance retirement, transformer output uses only the
+    injection sibling (no deployed region). This helper strips the injection
+    block in output the same way it strips the old section block in input,
+    so callers get a stable basis for comparing the non-provenance body.
+
+    NOTE: This function is only correct when the injection is NOT nested inside
+    a ``[[SECTION:ArtifactProvenance]]`` block. Do not use with old-shape inputs
+    that have a non-empty ``[[INJECTION:ArtifactProvenanceExtension]]`` inside
+    their section — the injection close tag would prematurely end the skip.
+    """
+    lines = body.splitlines(keepends=True)
+    result = []
+    skip = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped in (_TARGET_DEPLOYED_OPEN, _OLD_SECTION_OPEN, _TARGET_INJECTION_OPEN):
+            if not skip:
+                skip = True
+        if not skip:
+            result.append(line)
+        if skip and stripped in (_TARGET_INJECTION_CLOSE, _OLD_SECTION_CLOSE, _TARGET_DEPLOYED_CLOSE):
+            skip = False
+    return result
+
+
+def _extract_injection_content(body: str) -> str:
+    """Return the bytes between [[INJECTION:ArtifactProvenanceExtension]] and its close tag.
+
+    Returns '' if the markers are absent or the region is empty.  Preserves
+    newlines exactly as they appear in the body, including any trailing newline
+    on the last content line.
+    """
+    open_marker = _TARGET_INJECTION_OPEN + "\n"
+    close_marker = _TARGET_INJECTION_CLOSE
+    start = body.find(open_marker)
+    if start == -1:
+        return ""
+    content_start = start + len(open_marker)
+    end = body.find(close_marker, content_start)
+    if end == -1:
+        return ""
+    return body[content_start:end]
+
+
+# ---------------------------------------------------------------------------
+# Untagged input (Contract T-A)
+# ---------------------------------------------------------------------------
+
+class TestProvenanceUntaggedInput:
+    """A source file with '## Artifact Provenance' heading transforms to the new deployed-region shape.
+
+    Contract T-A: the heading region is recognised, its prose body is discarded,
+    and the empty deployed region plus sibling injection are emitted at canonical
+    slot 3 (after Identity, before Capabilities).  No unclassifiable-heading error
+    is reported.
+    """
+
+    def test_transformation_succeeds(self, provenance_untagged_input, tmp_path):
+        """Transformation must succeed: no unclassifiable-heading error for '## Artifact Provenance'."""
+        result, _ = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        assert result.success is True
+        assert result.errors == []
+
+    def test_provenance_heading_not_in_sections_added(
+        self, provenance_untagged_input, tmp_path
+    ):
+        """ArtifactProvenance must appear in deployed_added, never in sections_added."""
+        result, _ = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        assert "ArtifactProvenance" not in result.sections_added, (
+            "ArtifactProvenance is a tool-managed deployed name; it must not appear in sections_added."
+        )
+
+    def test_provenance_in_deployed_added(self, provenance_untagged_input, tmp_path):
+        """ArtifactProvenance is retired; it must not appear in deployed_added."""
+        result, _ = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        assert "ArtifactProvenance" not in result.deployed_added, (
+            "ArtifactProvenance is retired and must not appear in deployed_added."
+        )
+
+    def test_provenance_extension_in_injections_added(
+        self, provenance_untagged_input, tmp_path
+    ):
+        """ArtifactProvenanceExtension must appear in injections_added when the sibling is emitted."""
+        result, _ = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        assert "ArtifactProvenanceExtension" in result.injections_added
+
+    def test_output_contains_deployed_open_tag(
+        self, provenance_untagged_input, tmp_path
+    ):
+        """ArtifactProvenance is retired; its deployed open tag must NOT appear in the output."""
+        _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        assert _TARGET_DEPLOYED_OPEN not in _read(output_path), (
+            "ArtifactProvenance is retired; [[DEPLOYED:ArtifactProvenance]] must not appear in output."
+        )
+
+    def test_output_contains_deployed_close_tag(
+        self, provenance_untagged_input, tmp_path
+    ):
+        """ArtifactProvenance is retired; its deployed close tag must NOT appear in the output."""
+        _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        assert _TARGET_DEPLOYED_CLOSE not in _read(output_path), (
+            "ArtifactProvenance is retired; [[/DEPLOYED:ArtifactProvenance]] must not appear in output."
+        )
+
+    def test_output_contains_sibling_injection_open_tag(
+        self, provenance_untagged_input, tmp_path
+    ):
+        """Output must contain the [[INJECTION:ArtifactProvenanceExtension]] open tag."""
+        _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        assert _TARGET_INJECTION_OPEN in _read(output_path)
+
+    def test_output_contains_sibling_injection_close_tag(
+        self, provenance_untagged_input, tmp_path
+    ):
+        """Output must contain the [[/INJECTION:ArtifactProvenanceExtension]] close tag."""
+        _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        assert _TARGET_INJECTION_CLOSE in _read(output_path)
+
+    def test_deployed_region_is_empty_in_output(
+        self, provenance_untagged_input, tmp_path
+    ):
+        """ArtifactProvenance is retired; no deployed region must appear in the output."""
+        _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        content = _read(output_path)
+        assert _TARGET_DEPLOYED_OPEN not in content, (
+            "ArtifactProvenance is retired; no [[DEPLOYED:ArtifactProvenance]] region should appear in output."
+        )
+
+    def test_deployed_region_before_sibling_injection(
+        self, provenance_untagged_input, tmp_path
+    ):
+        """ArtifactProvenance is retired; the injection appears without a preceding deployed region."""
+        _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        content = _read(output_path)
+        deployed_pos = content.find(_TARGET_DEPLOYED_OPEN)
+        injection_pos = content.find(_TARGET_INJECTION_OPEN)
+        assert deployed_pos == -1, (
+            "ArtifactProvenance is retired; [[DEPLOYED:ArtifactProvenance]] must not appear in output."
+        )
+        assert injection_pos != -1, (
+            "[[INJECTION:ArtifactProvenanceExtension]] must still appear in the output."
+        )
+
+    def test_provenance_region_at_canonical_slot_3(
+        self, provenance_untagged_input, tmp_path
+    ):
+        """The injection sibling must appear after Identity and before Capabilities (canonical slot 3)."""
+        _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        content = _read(output_path)
+        identity_close_pos = content.find("[[/SECTION:Identity]]")
+        injection_pos = content.find(_TARGET_INJECTION_OPEN)
+        capabilities_open_pos = content.find("[[SECTION:Capabilities]]")
+        assert identity_close_pos != -1, "[[/SECTION:Identity]] must be present"
+        assert injection_pos != -1, "[[INJECTION:ArtifactProvenanceExtension]] must be present"
+        assert capabilities_open_pos != -1, "[[SECTION:Capabilities]] must be present"
+        assert identity_close_pos < injection_pos < capabilities_open_pos, (
+            "ArtifactProvenanceExtension injection must appear after Identity and before Capabilities."
+        )
+
+    def test_no_old_section_tag_in_output(self, provenance_untagged_input, tmp_path):
+        """The output must not contain the old [[SECTION:ArtifactProvenance]] tag."""
+        _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        assert _OLD_SECTION_OPEN not in _read(output_path), (
+            "Old [[SECTION:ArtifactProvenance]] tag must not appear in the output; "
+            "the section was migrated to a deployed region."
+        )
+
+    def test_provenance_prose_discarded(self, provenance_untagged_input, tmp_path):
+        """The old prose body of the Artifact Provenance section must be discarded."""
+        _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        content = _read(output_path)
+        assert "Every output file produced by this agent must carry two provenance fields" \
+               not in content, (
+            "The old Artifact Provenance prose body must be discarded by the transformer."
+        )
+
+    def test_other_sections_added(self, provenance_untagged_input, tmp_path):
+        """All six canonical sections must still be added despite the provenance heading removal."""
+        result, _ = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        for name in ("Identity", "Capabilities", "Constraints",
+                     "ErrorHandling", "OutputFormat", "ExecutionPhilosophy"):
+            assert name in result.sections_added, (
+                f"Section '{name}' missing from sections_added; provenance handling "
+                "must not affect other section boundaries."
+            )
+
+    def test_version_bumped(self, provenance_untagged_input, tmp_path):
+        """The version must be bumped from 2.2.0 to 3.0.0."""
+        result, _ = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        assert result.version_before == "2.2.0"
+        assert result.version_after == "3.0.0"
+
+
+# ---------------------------------------------------------------------------
+# Old-shape migration (Contract T-B)
+# ---------------------------------------------------------------------------
+
+class TestProvenanceOldShapeMigration:
+    """A [[SECTION:ArtifactProvenance]] block is rewritten to the new deployed-region shape.
+
+    Contract T-B: the [[SECTION:ArtifactProvenance]] ... [[/SECTION:ArtifactProvenance]]
+    block is replaced by [[DEPLOYED:ArtifactProvenance]] + [[INJECTION:ArtifactProvenanceExtension]],
+    the extension injection's inner content is carried across byte-identically, and every
+    byte outside the provenance region and its sibling injection is unchanged apart from
+    the frontmatter version bump.
+    """
+
+    def test_empty_ext_transformation_succeeds(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """Transformation of the old [[SECTION:ArtifactProvenance]] shape must succeed."""
+        result, _ = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        assert result.success is True
+        assert result.errors == []
+
+    def test_nonempty_ext_transformation_succeeds(
+        self, provenance_old_shape_nonempty_ext_input, tmp_path
+    ):
+        """Transformation with non-empty extension content must also succeed."""
+        result, _ = _transform_to_tmp(provenance_old_shape_nonempty_ext_input, tmp_path)
+        assert result.success is True
+        assert result.errors == []
+
+    def test_provenance_in_deployed_added(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """ArtifactProvenance is retired; it must not appear in deployed_added after old-shape migration."""
+        result, _ = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        assert "ArtifactProvenance" not in result.deployed_added, (
+            "ArtifactProvenance is retired; the old section must be stripped, not converted to deployed."
+        )
+
+    def test_old_section_tag_absent_in_output(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """The old [[SECTION:ArtifactProvenance]] open tag must be absent from the output."""
+        _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        assert _OLD_SECTION_OPEN not in _read(output_path), (
+            "[[SECTION:ArtifactProvenance]] must be replaced; the old open tag must not survive."
+        )
+
+    def test_old_section_close_tag_absent_in_output(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """The old [[/SECTION:ArtifactProvenance]] close tag must be absent from the output."""
+        _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        assert _OLD_SECTION_CLOSE not in _read(output_path), (
+            "[[/SECTION:ArtifactProvenance]] must be replaced; the old close tag must not survive."
+        )
+
+    def test_new_deployed_open_tag_present(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """ArtifactProvenance is retired; its deployed open tag must NOT appear in the output."""
+        _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        assert _TARGET_DEPLOYED_OPEN not in _read(output_path), (
+            "ArtifactProvenance is retired; [[DEPLOYED:ArtifactProvenance]] must not appear in output."
+        )
+
+    def test_new_deployed_close_tag_present(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """ArtifactProvenance is retired; its deployed close tag must NOT appear in the output."""
+        _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        assert _TARGET_DEPLOYED_CLOSE not in _read(output_path), (
+            "ArtifactProvenance is retired; [[/DEPLOYED:ArtifactProvenance]] must not appear in output."
+        )
+
+    def test_sibling_injection_open_tag_present(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """The sibling [[INJECTION:ArtifactProvenanceExtension]] open tag must be in the output."""
+        _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        assert _TARGET_INJECTION_OPEN in _read(output_path)
+
+    def test_sibling_injection_close_tag_present(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """The sibling [[/INJECTION:ArtifactProvenanceExtension]] close tag must be in the output."""
+        _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        assert _TARGET_INJECTION_CLOSE in _read(output_path)
+
+    def test_extension_content_preserved_when_empty(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """When the extension injection has no content, the output region must also be empty."""
+        _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        output_body = _body(_read(output_path))
+        carried = _extract_injection_content(output_body)
+        assert carried == "", (
+            f"Empty extension content must round-trip as empty; got: {carried!r}"
+        )
+
+    def test_extension_content_preserved_byte_identically(
+        self, provenance_old_shape_nonempty_ext_input, tmp_path
+    ):
+        """Non-empty extension content must be carried across byte-identically."""
+        input_body = _body(_read(provenance_old_shape_nonempty_ext_input))
+        _, output_path = _transform_to_tmp(provenance_old_shape_nonempty_ext_input, tmp_path)
+        output_body = _body(_read(output_path))
+
+        # Extract the original content from the input's nested injection.
+        orig_open = _OLD_SECTION_OPEN
+        orig_inj_open = _TARGET_INJECTION_OPEN + "\n"
+        orig_inj_close = _TARGET_INJECTION_CLOSE
+        sec_start = input_body.find(orig_open)
+        assert sec_start != -1, "Precondition: input must contain [[SECTION:ArtifactProvenance]]"
+        region = input_body[sec_start:]
+        inj_start = region.find(orig_inj_open)
+        assert inj_start != -1, "Precondition: input must contain [[INJECTION:ArtifactProvenanceExtension]]"
+        content_start = inj_start + len(orig_inj_open)
+        inj_end = region.find(orig_inj_close, content_start)
+        assert inj_end != -1, "Precondition: extension injection must have a close tag"
+        original_ext_content = region[content_start:inj_end]
+
+        carried = _extract_injection_content(output_body)
+        assert carried == original_ext_content, (
+            f"Extension injection content must be preserved byte-identically.\n"
+            f"  Original: {original_ext_content!r}\n"
+            f"  Carried:  {carried!r}"
+        )
+
+    def test_isolation_body_outside_provenance_region_unchanged(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """Every byte of the body outside the provenance region must be identical to the input.
+
+        Comparison excludes the provenance region and its sibling injection.
+        The frontmatter version bump is excluded from the comparison (body only).
+        """
+        input_content = _read(provenance_old_shape_empty_ext_input)
+        _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        output_content = _read(output_path)
+
+        input_outside = _body_lines_outside_provenance(_body(input_content))
+        output_outside = _body_lines_outside_provenance(_body(output_content))
+
+        assert input_outside == output_outside, (
+            "Body content outside the provenance region must be byte-identical to the input.\n"
+            f"First differing segment:\n"
+            f"  Input:  {input_outside[:3]!r}\n"
+            f"  Output: {output_outside[:3]!r}"
+        )
+
+    def test_version_bumped(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """Version must be bumped from 3.0.0 to 4.0.0."""
+        result, _ = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        assert result.version_before == "3.0.0"
+        assert result.version_after == "4.0.0"
+
+    def test_provenance_in_deployed_added_not_sections_added(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """ArtifactProvenance is retired; it must not appear in deployed_added or sections_added."""
+        result, _ = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        assert "ArtifactProvenance" not in result.deployed_added, (
+            "ArtifactProvenance is retired and must not appear in deployed_added."
+        )
+        assert "ArtifactProvenance" not in result.sections_added, (
+            "ArtifactProvenance must not appear in sections_added."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Idempotency and no-region (Contract T-C)
+# ---------------------------------------------------------------------------
+
+class TestProvenanceIdempotency:
+    """Files already in the new shape or with no provenance region transform without structural change.
+
+    Contract T-C: a body already in the target shape transforms to a byte-identical
+    body; a body with no provenance region gains none and is not an error.
+    """
+
+    def test_new_shape_transformation_succeeds(
+        self, provenance_new_shape_input, tmp_path
+    ):
+        """Transforming a file already in the new shape must succeed."""
+        result, _ = _transform_to_tmp(provenance_new_shape_input, tmp_path)
+        assert result.success is True
+        assert result.errors == []
+
+    def test_new_shape_body_is_byte_identical(
+        self, provenance_new_shape_input, tmp_path
+    ):
+        """ArtifactProvenance is retired; its deployed tags are stripped from a new-shape input.
+
+        The frontmatter version bump and the deployed-tag removal are the two permitted
+        changes; the rest of the body (including the injection sibling) must be identical.
+        """
+        _, output_path = _transform_to_tmp(provenance_new_shape_input, tmp_path)
+        output_body = _body(_read(output_path))
+        assert _TARGET_DEPLOYED_OPEN not in output_body, (
+            "ArtifactProvenance is retired; [[DEPLOYED:ArtifactProvenance]] must be stripped "
+            "even when the input already carried the new-shape deployed region."
+        )
+        assert _TARGET_INJECTION_OPEN in output_body, (
+            "The sibling injection must remain in the output after stripping the deployed tags."
+        )
+
+    def test_new_shape_deployed_still_empty(
+        self, provenance_new_shape_input, tmp_path
+    ):
+        """ArtifactProvenance is retired; the deployed region is absent (stripped) in the output."""
+        _, output_path = _transform_to_tmp(provenance_new_shape_input, tmp_path)
+        output_body = _body(_read(output_path))
+        assert _TARGET_DEPLOYED_OPEN not in output_body, (
+            "ArtifactProvenance is retired; its deployed region must not appear in the output "
+            "even when the input carried the new-shape deployed region."
+        )
+
+    def test_new_shape_no_old_section_tag_introduced(
+        self, provenance_new_shape_input, tmp_path
+    ):
+        """A second transformation must not introduce [[SECTION:ArtifactProvenance]] tags."""
+        _, output_path = _transform_to_tmp(provenance_new_shape_input, tmp_path)
+        assert _OLD_SECTION_OPEN not in _read(output_path)
+        assert _OLD_SECTION_CLOSE not in _read(output_path)
+
+    def test_new_shape_exactly_one_deployed_open_tag(
+        self, provenance_new_shape_input, tmp_path
+    ):
+        """ArtifactProvenance is retired; zero [[DEPLOYED:ArtifactProvenance]] tags must appear."""
+        _, output_path = _transform_to_tmp(provenance_new_shape_input, tmp_path)
+        content = _read(output_path)
+        count = content.count(_TARGET_DEPLOYED_OPEN)
+        assert count == 0, (
+            f"Expected 0 [[DEPLOYED:ArtifactProvenance]] open tags (retired); "
+            f"found {count}."
+        )
+
+    def test_new_shape_exactly_one_sibling_injection_open_tag(
+        self, provenance_new_shape_input, tmp_path
+    ):
+        """Exactly one [[INJECTION:ArtifactProvenanceExtension]] open tag must appear."""
+        _, output_path = _transform_to_tmp(provenance_new_shape_input, tmp_path)
+        content = _read(output_path)
+        count = content.count(_TARGET_INJECTION_OPEN)
+        assert count == 1, (
+            f"Expected exactly 1 [[INJECTION:ArtifactProvenanceExtension]] open tag; "
+            f"found {count}. Idempotency failure: double-tagging detected."
+        )
+
+    def test_no_region_transformation_succeeds(
+        self, generic_standard_input, tmp_path
+    ):
+        """A file with no provenance region at all must transform without error."""
+        result, _ = _transform_to_tmp(generic_standard_input, tmp_path)
+        assert result.success is True
+        assert result.errors == []
+
+    def test_no_region_gains_no_provenance_region(
+        self, generic_standard_input, tmp_path
+    ):
+        """A file with no provenance region must not gain one after transformation."""
+        _, output_path = _transform_to_tmp(generic_standard_input, tmp_path)
+        content = _read(output_path)
+        assert _TARGET_DEPLOYED_OPEN not in content, (
+            "A file with no provenance region must not gain [[DEPLOYED:ArtifactProvenance]]."
+        )
+        assert _TARGET_INJECTION_OPEN not in content, (
+            "A file with no provenance region must not gain [[INJECTION:ArtifactProvenanceExtension]]."
+        )
+
+    def test_no_region_deployed_added_is_empty(
+        self, generic_standard_input, tmp_path
+    ):
+        """deployed_added must be empty for a file with no provenance region."""
+        result, _ = _transform_to_tmp(generic_standard_input, tmp_path)
+        assert result.deployed_added == [], (
+            "A file with no provenance region must not report any deployed_added entries."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Validator integration (Contract T-D)
+# ---------------------------------------------------------------------------
+
+class TestProvenanceValidatorIntegration:
+    """Transformer output for each provenance path must pass boundary_validator.py.
+
+    Contract T-D (isolation): this class validates that the transformer's output
+    for all four input shapes (untagged, old-shape empty ext, old-shape non-empty
+    ext, new-shape, no-region) contains no validator errors.
+    """
+
+    def _assert_validates_clean(self, output_path: pathlib.Path) -> None:
+        """Assert that validate_file(output_path) returns an empty error list."""
+        errors = validate_file(output_path)
+        assert errors == [], (
+            f"Transformer output must pass boundary_validator.py with no errors.\n"
+            f"Errors found in {output_path}:\n"
+            + "\n".join(f"  {e}" for e in errors)
+        )
+
+    def test_untagged_input_output_validates(
+        self, provenance_untagged_input, tmp_path
+    ):
+        """Transformer output for the untagged '## Artifact Provenance' path must pass the validator."""
+        result, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        assert result.success is True, (
+            "Precondition: transformation must succeed before validator check."
+        )
+        self._assert_validates_clean(output_path)
+
+    def test_old_shape_empty_ext_output_validates(
+        self, provenance_old_shape_empty_ext_input, tmp_path
+    ):
+        """Transformer output for the old [[SECTION:ArtifactProvenance]] shape (empty ext) must pass."""
+        result, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
+        assert result.success is True, (
+            "Precondition: transformation must succeed before validator check."
+        )
+        self._assert_validates_clean(output_path)
+
+    def test_old_shape_nonempty_ext_output_validates(
+        self, provenance_old_shape_nonempty_ext_input, tmp_path
+    ):
+        """Transformer output for the old [[SECTION:ArtifactProvenance]] shape (non-empty ext) must pass."""
+        result, output_path = _transform_to_tmp(
+            provenance_old_shape_nonempty_ext_input, tmp_path
+        )
+        assert result.success is True, (
+            "Precondition: transformation must succeed before validator check."
+        )
+        self._assert_validates_clean(output_path)
+
+    def test_new_shape_output_validates(
+        self, provenance_new_shape_input, tmp_path
+    ):
+        """Transformer output for the new-shape (idempotency) path must pass the validator."""
+        result, output_path = _transform_to_tmp(provenance_new_shape_input, tmp_path)
+        assert result.success is True, (
+            "Precondition: transformation must succeed before validator check."
+        )
+        self._assert_validates_clean(output_path)
+
+    def test_no_region_output_validates(
+        self, generic_standard_input, tmp_path
+    ):
+        """Transformer output for a file with no provenance region must pass the validator."""
+        result, output_path = _transform_to_tmp(generic_standard_input, tmp_path)
+        assert result.success is True, (
+            "Precondition: transformation must succeed before validator check."
+        )
+        self._assert_validates_clean(output_path)
+
+    def test_sibling_injection_at_body_top_level_in_output(
+        self, provenance_untagged_input, tmp_path
+    ):
+        """The ArtifactProvenanceExtension injection must be at body top level, not inside a section.
+
+        This is the 'wrong-parent' invariant from the validator: INJECTION_PARENT_MAP maps
+        ArtifactProvenanceExtension to "" (top level).  A transformer that emits it nested
+        inside [[SECTION:Identity]] or any other section would fail E008.
+        """
+        _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
+        content = _read(output_path)
+
+        # The injection must appear after all section close tags and before any section open tag
+        # that follows it — i.e., it must be at body top level.
+        injection_pos = content.find(_TARGET_INJECTION_OPEN)
+        assert injection_pos != -1, "ArtifactProvenanceExtension must be present in the output."
+
+        # Any [[SECTION:X]] open tag that precedes the injection's position must be
+        # closed before the injection (i.e., a [[/SECTION:X]] must exist between it
+        # and the injection position).
+        import re as _re
+        section_open_re = _re.compile(r"\[\[SECTION:[A-Za-z]+\]\]")
+        section_close_re = _re.compile(r"\[\[/SECTION:[A-Za-z]+\]\]")
+        before_injection = content[:injection_pos]
+        opens_before = len(section_open_re.findall(before_injection))
+        closes_before = len(section_close_re.findall(before_injection))
+        assert opens_before == closes_before, (
+            f"ArtifactProvenanceExtension must be at body top level (not inside any section). "
+            f"Found {opens_before} section open tags and {closes_before} section close tags "
+            f"before the injection — they must balance."
+        )

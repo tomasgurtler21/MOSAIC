@@ -32,6 +32,10 @@ const (
 	// RegionAdded means an injection point present in the source was absent from the
 	// deployed file; it starts empty.
 	RegionAdded RegionAction = "added"
+
+	// RegionBundleFilled means a bundle-sourced region was filled with its role-matched
+	// block content, verbatim.
+	RegionBundleFilled RegionAction = "filled-from-bundle"
 )
 
 // RegionOutcome records what happened to one managed region in the document body.
@@ -52,9 +56,24 @@ func (o RegionOutcome) ToolManaged() bool { return o.Marker == docformat.NodeDep
 // canonical name is declared under the wrong boundary marker.
 var ErrMarkerMismatch = docformat.ErrMarkerMismatch
 
+// ErrUnknownDeployedName wraps docformat.ErrUnknownDeployedName for a source document
+// region that declares a [[DEPLOYED:]] boundary whose name is not in the tool-managed
+// registry. An unrecognised name has no generator and cannot be filled.
+var ErrUnknownDeployedName = docformat.ErrUnknownDeployedName
+
 // ErrProtocolContentMissing reports that no protocol block was supplied for the agent's role,
 // or that the supplied block is empty (whitespace-only counts as empty).
 var ErrProtocolContentMissing = errors.New("no protocol content for agent role")
+
+// ErrBundleBlockMissingForRole reports a bundle-sourced region present in the document for
+// which the bundle declares no block matching the file's role. Deploying it empty would ship
+// an agent that appears complete and instructs nothing, so this is a hard error.
+var ErrBundleBlockMissingForRole = errors.New("no bundle block for region and role")
+
+// ErrSourceDeployedRegionNotEmpty reports a [[DEPLOYED:]] region carrying content in a
+// source file. Source regions are empty by definition; content there is either a hand-edit
+// about to be discarded or a deployed file mistakenly committed as source.
+var ErrSourceDeployedRegionNotEmpty = errors.New("source file carries a populated deployed region")
 
 // ProtocolVersionComment renders the version marker line written as the first line of the
 // deployed protocol region: "<!-- protocol-version: 1.9 -->\n".

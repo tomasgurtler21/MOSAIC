@@ -66,8 +66,13 @@ type Input struct {
 
 	// ProtocolVersion is the version of the protocol source document loaded for this run.
 	// The planner compares it against each deployed artifact's ProtocolVersion to detect
-	// protocol staleness. Populated by the app layer in I5.3.
+	// protocol staleness.
 	ProtocolVersion string
+
+	// BundleVersion is the version of the deployed-sections bundle loaded for this run.
+	// The planner compares it against each deployed artifact's BundleVersion to detect
+	// bundle staleness.
+	BundleVersion string
 }
 
 // ArtifactSet is the derived deployment set: the union of referenced agents across all
