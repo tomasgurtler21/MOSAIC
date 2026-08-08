@@ -56,6 +56,37 @@ const (
 	QLocalModification     QuestionID = "local-modification"
 	QPlanConfirm           QuestionID = "plan-confirm"
 	QExternalOptIn         QuestionID = "external-opt-in"
+	// QHarnessOnlyRefreshScope is asked once per harness-only agent during an Update run
+	// when at least one eligible agent with no generic counterpart is discovered. It
+	// presents two scope options and their apply-to-all variants, mirroring the
+	// askLocalModification convention.
+	QHarnessOnlyRefreshScope QuestionID = "harness-only-refresh-scope"
+	// QPromoteCategory is asked when Service.Promote is called without a pre-answered
+	// category. The options are derived from the subdirectories present under
+	// Agents/Generic/Agents/ plus the UtilityAgents sentinel.
+	QPromoteCategory QuestionID = "promote-category"
+
+	// QPromoteCustomTool is asked once per distinct harness-side tool entry that has no
+	// reverse mapping to a generic tool. It is the inverse of QCustomTool: that question
+	// asks for a harness-side name given a generic tool, this one asks for a generic name
+	// given a harness-side tool. Subject is the harness-side tool name. It is a text
+	// question and therefore reaches the existing TextPromptScreen overlay with no TUI
+	// routing change.
+	QPromoteCustomTool QuestionID = "promote-custom-tool"
+
+	// QPromoteRecommendedTier is asked during promote when the deployed file carries no
+	// recommended_tier. It is a choice question over the catalog's discovered tiers, with
+	// a custom entry allowed. Subject is the source file path.
+	QPromoteRecommendedTier QuestionID = "promote-recommended-tier"
+
+	// QPromoteTierRationale is asked during promote when the deployed file carries no
+	// tier_rationale. Text question; Subject is the source file path.
+	QPromoteTierRationale QuestionID = "promote-tier-rationale"
+
+	// QPromoteRequiredSkills is asked during promote when the deployed file carries no
+	// required_skills. Text question taking a comma-separated list; Subject is the source
+	// file path.
+	QPromoteRequiredSkills QuestionID = "promote-required-skills"
 )
 
 // PlanReviewer is the deployment-specific interface for plan review. The shared Interaction

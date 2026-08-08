@@ -21,6 +21,12 @@ It never modifies MOSAIC sources.
 - [The two flows](#the-two-flows)
   - [Deploy — create a new workspace](#deploy--create-a-new-workspace)
   - [Update — bring a workspace up to date](#update--bring-a-workspace-up-to-date)
+- [Harness-only agents](#harness-only-agents)
+  - [How Update detects harness-only agents](#how-update-detects-harness-only-agents)
+  - [Refresh-scope prompt](#refresh-scope-prompt)
+  - [What is never touched](#what-is-never-touched)
+  - [Version staleness](#version-staleness)
+- [Promote — generate a generic agent from a harness-only file](#promote--generate-a-generic-agent-from-a-harness-only-file)
 - [Config file reference](#config-file-reference)
   - [tool-config.yaml](#tool-configyaml)
   - [user-config.yaml](#user-configyaml)
@@ -174,6 +180,207 @@ The update flow updates an existing workspace to the latest agent versions. It:
   --conflict backup \
   --auto-confirm
 ```
+
+---
+
+## Harness-only agents
+
+A *harness-only agent* is an agent file that lives in the workspace's
+deployed-agents directory but has no counterpart in `Agents/Generic/` — it was
+authored specifically for one harness without a generic source backing it. The
+Update flow detects and refreshes these agents automatically, without any
+additional flag or configuration.
+
+Harness-only **orchestrators** are out of scope. A file named `orchestrator.md`
+or `orchestrator.agent.md` (matched case-insensitively by filename) is never
+treated as a harness-only agent by the Update flow, regardless of its contents.
+
+### How Update detects harness-only agents
+
+Before running the conflict loop, the Update flow scans the active harness's
+deployed-agents directory. A file is recognised as a harness-only agent only when
+**both** detection signals are present:
+
+1. **`transform_version` in frontmatter.** This field is stamped by
+   `Tools/OldAgentsTransform/boundary_transformer.py` on every file it
+   processes. A hand-authored file that was never run through that tool lacks
+   this field and is left completely untouched.
+
+2. **A structurally valid set of canonical boundary tags.** The body must
+   contain at least one `[[SECTION:Name]]` tag whose name is in the MOSAIC
+   canonical vocabulary, and the document must pass structural validation
+   (no unbalanced tags, no mismatched tags, no unknown `[[DEPLOYED:]]` names,
+   no duplicate boundary names).
+
+A file that fails either signal is skipped silently and receives no treatment
+during the run. "Untouched" is an assertable property of the run, not an
+implication.
+
+**Prerequisite:** a hand-authored agent file must be run through
+`Tools/OldAgentsTransform/boundary_transformer.py` before `mosaic-deploy update`
+will recognise and maintain it. The transform stamps `transform_version` and
+adds the boundary tag structure that satisfies signal two. Without that step the
+file is invisible to the Update flow.
+
+### Refresh-scope prompt
+
+When one or more harness-only agents are found, the Update flow asks for each
+how much of its content to regenerate. Two options are presented:
+
+| Option | What it regenerates |
+|--------|---------------------|
+| **Refresh CommunicationProtocol only** | Only the `[[DEPLOYED:CommunicationProtocol]]` region |
+| **Refresh all tool-managed DEPLOYED regions** | Every canonical `[[DEPLOYED:...]]` region in the MOSAIC vocabulary |
+
+An "Apply to all" variant of each option applies the chosen scope to every
+remaining harness-only agent in the run without asking again, matching the
+conflict loop's apply-to-all behaviour.
+
+When the question is cancelled, skipped, or otherwise not answered, the tool
+defaults to **Refresh CommunicationProtocol only**. The scope is never widened
+without an explicit affirmative answer.
+
+The prompt fires at most once per harness-only agent (or once total when the
+apply-to-all option is used). It is suppressed entirely when no eligible
+harness-only agents are found in the scan.
+
+### What is never touched
+
+For harness-only agents the tool owns only the regions it regenerates. Every
+other byte in the file is left unchanged:
+
+- **`[[INJECTION:...]]` content is preserved verbatim.** Injection regions
+  are never merged, compared, diffed, or replaced. There is no generic source
+  to validate them against, so they are carried through byte-identical. This is
+  a hard guarantee, not a best effort.
+- **`[[SECTION:...]]` tag structure and section body prose are not
+  reformatted or validated.** Without a generic counterpart there is nothing to
+  align section structure against, so section tags, their order, and all content
+  between them are left exactly as they are under every scope.
+- **`[[DEPLOYED:...]]` regions that are not in scope** are preserved
+  byte-identical. Only the regions the chosen scope names are rewritten.
+- **Frontmatter is not touched at all.** No field is added, removed, reordered,
+  or restamped: no `version`, `protocol_version`, `bundle_version`, or other
+  stamp is written for harness-only agents. Stamping implies a catalog source
+  version to stamp from; harness-only agents have none, and writing a stamp would
+  make the file appear catalog-backed on the next run.
+- **No manifest entry is written.** Harness-only agents remain invisible to the
+  deployment manifest. Detection stays purely the two-signal rule described
+  above.
+
+### Version staleness
+
+Harness-only agents are always eligible for refresh regardless of whether their
+frontmatter carries a `version` field. The Update flow never performs a staleness
+comparison for these agents: they bypass the planner that compares deployed
+versions against catalog source versions. The user's explicit scope answer (or
+the default when the question goes unanswered) is the sole gate on whether the
+file is written.
+
+---
+
+## Promote — generate a generic agent from a harness-only file
+
+The `promote` command produces a generic source file from a harness-only agent,
+so that a one-off agent can be shared across harnesses through the normal
+Deploy / Update flow. It is a separate, opt-in command and is never triggered
+by an Update run.
+
+### Eligibility
+
+The source file must satisfy the same two-signal detection rule the Update flow
+uses: `transform_version` in frontmatter and a structurally valid set of
+canonical boundary tags. An ineligible file is rejected with an error; nothing
+is written.
+
+### What promote generates
+
+The generated generic file:
+
+- **Strips every `[[INJECTION:...]]` region to an empty tag pair.** No
+  harness-specific injection content is carried over. Generic source files use
+  empty injection placeholders, which `mosaic-deploy` fills with
+  project-specific content at deploy time.
+- **Strips every `[[DEPLOYED:...]]` region to an empty tag pair.** This is
+  required: the deployment pipeline's `transform.Apply` rejects a source file
+  whose deployed regions already carry content, so a generated file with filled
+  regions would be unusable by the very pipeline it is generated for.
+- **Carries over `[[SECTION:...]]` tag structure and section body prose
+  from the source as-is.**
+- **Writes frontmatter per a defined field policy:**
+  - `id` — assigned automatically as one greater than the largest numeric id
+    currently in the catalog.
+  - `version` — taken from the source file's `version` field, or `"1.0.0"`
+    when the field is absent (common in hand-authored harness-only agents).
+  - `name` — taken from the source `name` field when present; otherwise derived
+    from the output filename.
+  - `role` — taken from the source `role` field.
+  - All other source fields not in the drop set are carried over verbatim (e.g.
+    `description`, `recommended_tier`, `tools`, `required_skills`).
+  - Deployment and transform stamps are **dropped**: `transform_version`,
+    `injections_version`, `bundle_version`, `protocol_version`,
+    `tool_mappings_version`, `model`. These are per-deployment artifacts that
+    have no place in a generic source.
+
+The source (harness-only) file is **never modified or deleted**.
+
+### Target category
+
+The target category is required and is never inferred from the source file.
+The tool asks interactively when `--category` is absent. Available categories
+are derived from the subdirectories present under `Agents/Generic/Agents/`, plus
+a special `UtilityAgents` option that places the file under
+`Agents/Generic/UtilityAgents/`.
+
+Registration is automatic: writing a well-formed file into the chosen directory
+IS the registration — the catalog discovers agents by scanning those directories.
+No catalog file is edited.
+
+### Collision policy
+
+When a file already exists at the destination path, promote refuses to overwrite
+it unless `--overwrite` is given explicitly. There is no silent overwrite and no
+automatic renaming.
+
+### Deploying after promote
+
+Promote writes the generic file only. Deploying that agent out to a harness
+workspace is a separate, user-initiated step:
+
+```sh
+./mosaic-deploy update --harness <harness> --workspace /path/to/workspace
+```
+
+### CLI
+
+```
+mosaic-deploy promote --file <path> [--category <category>] [--overwrite] [--dry-run] [--output json]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--file <path>` | Path to a single harness-only agent file to promote. Must be an existing regular file, not a directory. Required. |
+| `--category <name>` | Destination category. When absent, the tool asks interactively. |
+| `--overwrite` | Replace an existing generic file at the destination path. |
+| `--dry-run` | Validate and compute everything; write no file. |
+| `--output json` | Emit the result as a single JSON document instead of human-readable text. |
+
+Exit codes: `0` on success (or dry-run validation pass), `1` on any service
+error (source path does not exist, source path is a directory rather than a
+regular file, ineligible source, refused collision, category not provided),
+`3` on a missing `--file` flag or unparseable flag value.
+
+### Interactive (TUI)
+
+The TUI mode screen includes a **Promote** option. When promote is selected,
+the path screen asks for the harness-only agent **file** path (not a
+directory). It validates the entry inline before advancing: a path that does
+not exist or that points to a directory is rejected with an inline error
+message, and the user stays on the path screen until a valid regular file path
+is entered. This validation happens before any service call is made. Once a
+valid file path is confirmed, the category question is presented interactively.
+Both the CLI and TUI paths call the same `Service.Promote` method, so their
+behaviour cannot diverge.
 
 ---
 

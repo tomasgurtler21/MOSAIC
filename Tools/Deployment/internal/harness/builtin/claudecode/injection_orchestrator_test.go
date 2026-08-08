@@ -95,25 +95,31 @@ func TestInjection_OrchestratorKey_ReceivesMergedContent(t *testing.T) {
 }
 
 // TestInjection_OrchestratorKey_DeclaredButBothEmpty_ReturnsOkTrueEmptyString verifies case (c):
-// when an injection name is declared in HarnessInjections.md but both the shared content and
-// the orchestrator-only content are empty (e.g. LanguagePatterns for Claude Code), the
-// orchestrator receives ok=true with an empty string — not ok=false.
+// when an injection name is declared but both the shared content and the orchestrator-only
+// content are empty, the orchestrator receives ok=true with an empty string — not ok=false.
 //
 // This is the "declared-but-empty" scenario (Case 6 of the design merge strategy). It is
 // distinct from Case 4 (shared non-empty, orch absent), which is tested separately in
 // TestInjection_OrchestratorKey_SharedContentOnly_NoOrchContent_ReturnsSharedUnmodified.
+//
+// Uses NewWithMapsForTesting to supply a declared-but-empty shared entry directly: real
+// Claude Code content no longer has a canonical name that is declared-but-empty in both
+// HarnessInjections.md and HarnessInjectionsOrchestrator.md (LanguagePatterns, formerly used
+// here, is no longer a tool-managed name and is not declared by this harness at all), so the
+// scenario is constructed rather than sourced from the actual harness files.
 func TestInjection_OrchestratorKey_DeclaredButBothEmpty_ReturnsOkTrueEmptyString(t *testing.T) {
-	mod := newModule(t)
+	mod := claudecode.NewWithMapsForTesting(t,
+		map[string]string{"HarnessConstraints": ""},
+		nil, // no orchestrator-only content declared
+	)
 
-	// LanguagePatterns is declared-but-empty in HarnessInjections.md and has no
-	// orchestrator-specific content in HarnessInjectionsOrchestrator.md.
-	content, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: "orchestrator"})
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
 	if !ok {
-		t.Fatal("Injection(LanguagePatterns, orchestrator) returned ok=false; declared-but-empty injection must return ok=true")
+		t.Fatal("Injection(HarnessConstraints, orchestrator) returned ok=false; declared-but-empty injection must return ok=true")
 	}
 	// No shared content and no orchestrator-only content → result is empty string.
 	if content != "" {
-		t.Errorf("orchestrator LanguagePatterns should be empty (no shared or orchestrator-only content declared); got %q", content)
+		t.Errorf("orchestrator HarnessConstraints should be empty (no shared or orchestrator-only content declared); got %q", content)
 	}
 }
 

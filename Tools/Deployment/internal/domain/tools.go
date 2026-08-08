@@ -131,3 +131,17 @@ type ToolResult struct {
 	Fields      []FrontmatterField // ready to place into frontmatter, in emission order
 	Resolutions []ToolResolution   // one per entry in ToolRequest.Generic, same order
 }
+
+// ReverseToolResolution is the per-harness-tool audit record produced when promoting a
+// deployed agent back to generic. It is the mirror of ToolResolution, which records the
+// forward generic → harness direction.
+type ReverseToolResolution struct {
+	// Harness is the harness-side tool name found in the deployed file.
+	Harness string
+	// Generic is the generic tool name it resolved to. Empty when Outcome is ToolUnmapped.
+	Generic string
+	// Outcome is ToolMapped when a descriptor mapping named this harness tool, and
+	// ToolUnmapped when none did — including when the harness declares no mapping data.
+	// No other ToolOutcome value is produced by reverse mapping.
+	Outcome ToolOutcome
+}

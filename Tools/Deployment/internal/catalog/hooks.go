@@ -8,45 +8,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/goccy/go-yaml"
-
 	"mosaic-common/docformat"
+	"mosaic-common/hookbundle"
 	"mosaic-deploy/internal/domain"
 )
-
-// ---------------------------------------------------------------------------
-// YAML wire types for hook.yaml
-// ---------------------------------------------------------------------------
-
-type hookYAML struct {
-	SchemaVersion string                      `yaml:"schema_version"`
-	ID            string                      `yaml:"id"`
-	Version       string                      `yaml:"version"`
-	Description   string                      `yaml:"description"`
-	Placeholder   bool                        `yaml:"placeholder"`
-	ContentHash   string                      `yaml:"content_hash"`
-	Variants      map[string]*hookVariantYAML `yaml:"variants"`
-}
-
-type hookVariantYAML struct {
-	Supported    bool           `yaml:"supported"`
-	Reuses       string         `yaml:"reuses"`
-	Files        []hookFileYAML `yaml:"files"`
-	Registration []hookRegYAML  `yaml:"registration"`
-}
-
-type hookFileYAML struct {
-	Source string `yaml:"source"`
-	Target string `yaml:"target"`
-}
-
-type hookRegYAML struct {
-	ID          string `yaml:"id"`
-	TargetPath  string `yaml:"target_path"`
-	Performable bool   `yaml:"performable"`
-	Instruction string `yaml:"instruction"`
-	Fragment    string `yaml:"fragment"`
-}
 
 // ---------------------------------------------------------------------------
 // Scanner
@@ -86,34 +51,29 @@ func (c *catalogImpl) loadHooks(root string) []Issue {
 	return issues
 }
 
-// parseHookBundle reads hook.yaml from bundleDir, builds the HookBundle, resolves variant
-// reuse, and validates the content_hash when present.
+// parseHookBundle reads hook.yaml from bundleDir via mosaic-common/hookbundle, maps the
+// shared model onto the deployment tool's own domain types, resolves variant reuse, and
+// validates the content_hash when present. Content-hash validation, catalog scanning and
+// all plan-building policy remain here: mosaic-common/hookbundle owns only the manifest's
+// meaning.
 func parseHookBundle(bundleDir string) (domain.HookBundle, []Issue, error) {
 	yamlPath := filepath.Join(bundleDir, "hook.yaml")
-	data, err := os.ReadFile(yamlPath)
+	mw, err := hookbundle.Load(bundleDir)
 	if err != nil {
 		return domain.HookBundle{}, nil, err
 	}
 
-	var hw hookYAML
-	if err := yaml.Unmarshal(data, &hw); err != nil {
-		return domain.HookBundle{}, nil, fmt.Errorf("hooks: parse %s: %w", yamlPath, err)
-	}
-
 	bundle := domain.HookBundle{
-		Key:         hw.ID,
-		Version:     hw.Version,
-		Description: hw.Description,
+		Key:         mw.ID,
+		Version:     mw.Version,
+		Description: mw.Description,
 		SourceDir:   bundleDir,
-		Placeholder: hw.Placeholder,
+		Placeholder: mw.Placeholder,
 		Variants:    make(map[string]domain.HookVariant),
 	}
 
 	// First pass: build own-file variants.
-	for varName, vy := range hw.Variants {
-		if vy == nil {
-			continue
-		}
+	for varName, vy := range mw.Variants {
 		variant := domain.HookVariant{
 			HarnessID:     varName,
 			Supported:     vy.Supported,
@@ -159,8 +119,8 @@ func parseHookBundle(bundleDir string) (domain.HookBundle, []Issue, error) {
 
 	// Validate content_hash when present.
 	var issues []Issue
-	if hw.ContentHash != "" {
-		issues = validateContentHash(bundle, hw, bundleDir)
+	if mw.ContentHash != "" {
+		issues = validateContentHash(bundle, mw, bundleDir, yamlPath)
 	}
 
 	return bundle, issues, nil
@@ -168,18 +128,18 @@ func parseHookBundle(bundleDir string) (domain.HookBundle, []Issue, error) {
 
 // validateContentHash computes the expected hash of all variant files and compares it
 // against the stored hash. Reports a hook-hash-mismatch issue on mismatch.
-func validateContentHash(bundle domain.HookBundle, hw hookYAML, bundleDir string) []Issue {
+func validateContentHash(bundle domain.HookBundle, mw hookbundle.Manifest, bundleDir, yamlPath string) []Issue {
 	// Sort variant names for a deterministic byte order.
-	varNames := make([]string, 0, len(hw.Variants))
-	for name := range hw.Variants {
+	varNames := make([]string, 0, len(mw.Variants))
+	for name := range mw.Variants {
 		varNames = append(varNames, name)
 	}
 	sort.Strings(varNames)
 
 	h := sha256.New()
 	for _, varName := range varNames {
-		vy := hw.Variants[varName]
-		if vy == nil || !vy.Supported || vy.Reuses != "" {
+		vy := mw.Variants[varName]
+		if !vy.Supported || vy.Reuses != "" {
 			continue
 		}
 		variantDir := filepath.Join(bundleDir, varName)
@@ -194,17 +154,17 @@ func validateContentHash(bundle domain.HookBundle, hw hookYAML, bundleDir string
 	}
 	computed := fmt.Sprintf("sha256:%x", h.Sum(nil))
 
-	stored := strings.TrimSpace(hw.ContentHash)
+	stored := strings.TrimSpace(mw.ContentHash)
 	if computed != stored {
 		return []Issue{{
 			Severity: docformat.SeverityError,
 			Code:     "hook-hash-mismatch",
-			Subject:  hw.ID,
+			Subject:  mw.ID,
 			Message: fmt.Sprintf(
 				"hook bundle %q content_hash mismatch: stored %q, computed %q",
-				hw.ID, stored, computed,
+				mw.ID, stored, computed,
 			),
-			Path: filepath.Join(bundleDir, "hook.yaml"),
+			Path: yamlPath,
 		}}
 	}
 	return nil

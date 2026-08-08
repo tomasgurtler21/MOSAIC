@@ -111,6 +111,15 @@ func (b *Builder) AnswerText(id domain.QuestionID, subject, text string) *Builde
 	return b
 }
 
+// AnswerCancelledText scripts a Cancelled response for an AskText call matching id and
+// subject. The service must treat Cancelled the same way it treats SkippedOne: carry the
+// subject verbatim into the output without blocking. This allows tests to verify that every
+// non-answered outcome (skip, skip-all, cancellation) is handled identically.
+func (b *Builder) AnswerCancelledText(id domain.QuestionID, subject string) *Builder {
+	b.s.texts[scriptKey{id, subject}] = domain.TextAnswer{Status: domain.Cancelled}
+	return b
+}
+
 // AnswerConfirm scripts the answer returned when Confirm is called with the given id and subject.
 func (b *Builder) AnswerConfirm(id domain.QuestionID, subject string, confirm bool) *Builder {
 	b.s.confirms[scriptKey{id, subject}] = domain.ConfirmAnswer{

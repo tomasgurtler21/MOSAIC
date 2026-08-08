@@ -216,7 +216,7 @@ Return the harness-level content for one canonical injection name.
 
 Set `"ok": false` (and `"content": ""`) for injection names your harness does not fill. MOSAIC leaves those injection points empty.
 
-Canonical injection names: `HarnessConstraints`, `LanguagePatterns`, `IdentityExtension`, `ProtocolExtension`, `CodebaseContext`, `OutputArtifactTemplate`, `CustomConstraints`, `ErrorHandlingExtension`, `ContextLimits`, `AvailableWorkflows`.
+Canonical injection names: `HarnessConstraints`, `LanguagePatterns`, `IdentityExtension`, `ProtocolExtension`, `CodebaseContext`, `OutputArtifactTemplate`, `ErrorHandlingExtension`, `ContextLimits`, `AvailableWorkflows`.
 
 ### hook_plan
 

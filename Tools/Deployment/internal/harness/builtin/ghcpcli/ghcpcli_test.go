@@ -35,7 +35,8 @@ package ghcpcli_test
 //
 //   Harness-level injections:
 //   - HarnessConstraints is filled with the parallel tool calls instruction text.
-//   - LanguagePatterns is filled with empty content.
+//   - LanguagePatterns is not filled — it is a project-authored injection name, not declared
+//     by this harness.
 //   - injections_version is "1.2.0" per the GHCP CLI descriptor.
 //   - Project-class injections are not filled by the harness.
 //
@@ -667,26 +668,16 @@ func TestInjection_GHCP_HarnessConstraintsFilled(t *testing.T) {
 	}
 }
 
-// TestInjection_GHCP_LanguagePatternsIsEmpty verifies that LanguagePatterns is declared but empty.
-func TestInjection_GHCP_LanguagePatternsIsEmpty(t *testing.T) {
-	mod := newModule(t)
-	content, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns"})
-	if !ok {
-		t.Fatal("Injection(\"LanguagePatterns\") returned ok=false; GHCP CLI must declare this injection")
-	}
-	if content != "" {
-		t.Errorf("Injection(\"LanguagePatterns\") = %q; want empty string", content)
-	}
-}
-
 // TestInjection_GHCP_ProjectInjectionsNotFilled verifies that project-class injections are
-// not filled by the GHCP CLI harness.
+// not filled by the GHCP CLI harness. LanguagePatterns is included here: it is a
+// project-authored injection name, not a harness-declared one, so GHCP CLI must not fill it.
 func TestInjection_GHCP_ProjectInjectionsNotFilled(t *testing.T) {
 	mod := newModule(t)
 	projectInjections := []string{
 		"IdentityExtension",
 		"ProtocolExtension",
 		"CodebaseContext",
+		"LanguagePatterns",
 		"OutputArtifactTemplate",
 		"CustomConstraints",
 		"ErrorHandlingExtension",
@@ -854,13 +845,13 @@ func TestContract_GHCP(t *testing.T) {
 
 		InjectionCases: map[string]string{
 			"HarnessConstraints": ghcpHarnessConstraints,
-			"LanguagePatterns":   "",
 		},
 
 		NotFilled: []string{
 			"IdentityExtension",
 			"ProtocolExtension",
 			"CodebaseContext",
+			"LanguagePatterns",
 			"OutputArtifactTemplate",
 			"CustomConstraints",
 			"ErrorHandlingExtension",

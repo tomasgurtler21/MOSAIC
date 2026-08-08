@@ -11,13 +11,30 @@ import (
 	"mosaic-deploy/internal/tui/widgets"
 )
 
+// PathKind selects what kind of filesystem object a path-entry screen accepts.
+// The zero value is PathKindDirectory, so a screen that is never told otherwise keeps
+// the directory behaviour it has always had.
+type PathKind int
+
+const (
+	// PathKindDirectory accepts an existing, writable directory.
+	PathKindDirectory PathKind = iota
+	// PathKindFile accepts an existing, readable regular file.
+	PathKindFile
+)
+
 // WorkspaceScreen prompts the user for a workspace directory path and validates it before
 // proceeding. Feedback is shown inline so the user never sees a silent failure or a crash.
 //
-// Validation rules:
+// Validation rules (PathKindDirectory, the default):
 //   1. Path must not be empty.
 //   2. Path must point to an existing directory.
 //   3. The directory must be writable (checked by probing a temporary file).
+//
+// Validation rules (PathKindFile):
+//   1. Path must not be empty.
+//   2. Path must point to an existing regular file (not a directory).
+//   3. The file must be readable (checked by opening it for reading).
 //
 // Navigation contract:
 //   - Enter on a valid path -> Done() == true, WorkspacePath() returns the entered path.
@@ -25,7 +42,8 @@ import (
 //                              the previously entered value so prior valid input is not lost).
 type WorkspaceScreen struct {
 	input    *widgets.TextInput
-	lastPath string // the last value the user entered, preserved across back navigation
+	lastPath string   // the last value the user entered, preserved across back navigation
+	pathKind PathKind // selects validation rules and on-screen wording; zero value is directory
 	width    int
 	height   int
 	styles   Styles
@@ -52,6 +70,43 @@ func NewWorkspaceScreen(width, height int, styles Styles) *WorkspaceScreen {
 		height: height,
 		styles: styles,
 	}
+}
+
+// SetPathKind selects the validation rules and the wording used by the screen.
+// Call it before the first Update, and before or after SetPrefilledPath — the value
+// currently held in the input field is preserved across the call.
+// Calling it repeatedly is allowed; the last call before the next Update wins.
+func (s *WorkspaceScreen) SetPathKind(kind PathKind) {
+	s.pathKind = kind
+
+	// Rebuild the input widget with label, placeholder, and validator matching the new kind.
+	// The currently entered text is carried over so any pre-filled path is not lost.
+	currentValue := s.input.Value()
+
+	inputStyles := widgets.TextInputStyles{
+		Label:  s.styles.Subtitle,
+		Input:  s.styles.Body,
+		ErrMsg: s.styles.Error,
+	}
+
+	var label, placeholder string
+	var validateFn func(string) error
+
+	switch kind {
+	case PathKindFile:
+		label = "Agent file path:"
+		placeholder = "/path/to/agent.md"
+		validateFn = validateFilePath
+	default: // PathKindDirectory
+		label = "Workspace directory path:"
+		placeholder = "/path/to/workspace"
+		validateFn = validateWorkspacePath
+	}
+
+	input := widgets.NewTextInput(label, placeholder, s.width, inputStyles)
+	input.SetValidate(validateFn)
+	input.SetValue(currentValue)
+	s.input = input
 }
 
 // stripMatchedOuterQuotes removes a single surrounding pair of double-quote characters when
@@ -100,6 +155,39 @@ func validateWorkspacePath(path string) error {
 	return nil
 }
 
+// validateFilePath runs the three-step validation on the file path the user typed.
+func validateFilePath(path string) error {
+	path = stripMatchedOuterQuotes(strings.TrimSpace(path))
+	if path == "" {
+		return errors.New("path cannot be empty")
+	}
+
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return errors.New("path is not valid: " + err.Error())
+	}
+
+	info, err := os.Stat(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return errors.New("file does not exist: " + abs)
+		}
+		return errors.New("cannot access path: " + err.Error())
+	}
+	if info.IsDir() {
+		return errors.New("path is not a file: " + abs)
+	}
+
+	// Probe readability by opening the file for reading and immediately closing it.
+	f, err := os.Open(abs)
+	if err != nil {
+		return errors.New("file is not readable: " + abs)
+	}
+	f.Close()
+
+	return nil
+}
+
 // Update processes a key message and delegates to the text input widget.
 func (s *WorkspaceScreen) Update(msg tea.Msg) tea.Cmd {
 	cmd := s.input.Update(msg)
@@ -109,21 +197,31 @@ func (s *WorkspaceScreen) Update(msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// View renders the workspace entry screen.
+// View renders the path entry screen with wording appropriate to the active path kind.
 func (s *WorkspaceScreen) View() string {
-	title := s.styles.Title.Width(s.width).Render("Workspace Path")
-	subtitle := s.styles.Subtitle.Width(s.width).Render("Enter the directory where agents will be deployed.")
+	var title, subtitle, guidanceText string
+
+	switch s.pathKind {
+	case PathKindFile:
+		title = "Agent File Path"
+		subtitle = "Enter the path to the harness-only agent file to promote."
+		guidanceText = "The path must be an existing, readable regular file.\n" +
+			"This is typically a .md file describing the agent.\n"
+	default: // PathKindDirectory
+		title = "Workspace Path"
+		subtitle = "Enter the directory where agents will be deployed."
+		guidanceText = "The workspace must be an existing, writable directory.\n" +
+			"This is typically the root of your project repository.\n"
+	}
+
+	titleLine := s.styles.Title.Width(s.width).Render(title)
+	subtitleLine := s.styles.Subtitle.Width(s.width).Render(subtitle)
 	border := s.styles.Border.Width(s.width).Render(strings.Repeat("─", s.width))
-
-	guidance := s.styles.Muted.Width(s.width).Render(
-		"The workspace must be an existing, writable directory.\n" +
-			"This is typically the root of your project repository.\n",
-	)
-
+	guidance := s.styles.Muted.Width(s.width).Render(guidanceText)
 	inputView := s.input.View()
 	help := s.styles.Help.Width(s.width).Render("enter confirm  esc back  ctrl+c quit")
 
-	return strings.Join([]string{title, subtitle, border, guidance, inputView, border, help}, "\n")
+	return strings.Join([]string{titleLine, subtitleLine, border, guidance, inputView, border, help}, "\n")
 }
 
 // Done reports whether the user confirmed a valid workspace path.

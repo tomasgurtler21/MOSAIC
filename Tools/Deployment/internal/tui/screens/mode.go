@@ -42,10 +42,21 @@ var modeItems = []widgets.ListItem{
 			"Use this to add, remove, or swap workflows without disturbing the rest\n" +
 			"of the deployment.",
 	},
+	{
+		ID:          string(domain.ModePromote),
+		Label:       "Promote harness-only agent",
+		Description: "Generate a generic agent source file from an already-transformed harness-only agent.",
+		Detail: "Reads a harness-only agent file (one with transform_version and canonical\n" +
+			"boundary tags) and generates a generic source file under Agents/Generic/.\n\n" +
+			"After promotion the new agent is immediately available to the Deploy/Update\n" +
+			"flow. The original harness-only source file is left untouched.\n\n" +
+			"Use this to turn a one-off harness-specific agent into a reusable generic\n" +
+			"agent that can be deployed to any harness.",
+	},
 }
 
-// ModeScreen presents the available run modes: deploy-new, update-existing, and
-// workflows-only.
+// ModeScreen presents the available run modes: deploy-new, update-existing,
+// workflows-only, and promote.
 //
 // Navigation contract:
 //   - Enter -> Done() == true, SelectedMode() returns the chosen RunMode.

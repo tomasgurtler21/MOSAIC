@@ -21,7 +21,8 @@ package claudecode_test
 //
 //   Harness-level injections:
 //   - HarnessConstraints injection is filled with empty content (Claude Code has no constraint)
-//   - LanguagePatterns injection is filled with empty content
+//   - LanguagePatterns is not filled — it is a project-authored injection name, not declared
+//     by this harness
 //   - injections_version is stamped from the descriptor's injections_version field
 //   - Project-class injections (IdentityExtension, ProtocolExtension, etc.) are not filled
 //
@@ -393,27 +394,17 @@ func TestInjection_ClaudeCode_HarnessConstraintsIsEmpty(t *testing.T) {
 	}
 }
 
-// TestInjection_ClaudeCode_LanguagePatternsIsEmpty verifies that Claude Code declares
-// LanguagePatterns with empty content (no language pattern injection).
-func TestInjection_ClaudeCode_LanguagePatternsIsEmpty(t *testing.T) {
-	mod := newModule(t)
-	content, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: ""})
-	if !ok {
-		t.Fatal("Injection(\"LanguagePatterns\") returned ok=false; Claude Code must declare this injection")
-	}
-	if content != "" {
-		t.Errorf("Injection(\"LanguagePatterns\") = %q; want empty string", content)
-	}
-}
-
 // TestInjection_ClaudeCode_ProjectInjectionsNotFilled verifies that project-class injections
-// are not filled by the Claude Code harness (they remain empty on create).
+// are not filled by the Claude Code harness (they remain empty on create). LanguagePatterns
+// is included here: it is a project-authored injection name, not a harness-declared one, so
+// Claude Code must not fill it.
 func TestInjection_ClaudeCode_ProjectInjectionsNotFilled(t *testing.T) {
 	mod := newModule(t)
 	projectInjections := []string{
 		"IdentityExtension",
 		"ProtocolExtension",
 		"CodebaseContext",
+		"LanguagePatterns",
 		"OutputArtifactTemplate",
 		"CustomConstraints",
 		"ErrorHandlingExtension",
@@ -557,13 +548,13 @@ func TestContract_ClaudeCode(t *testing.T) {
 
 		InjectionCases: map[string]string{
 			"HarnessConstraints": "",
-			"LanguagePatterns":   "",
 		},
 
 		NotFilled: []string{
 			"IdentityExtension",
 			"ProtocolExtension",
 			"CodebaseContext",
+			"LanguagePatterns",
 			"OutputArtifactTemplate",
 			"CustomConstraints",
 			"ErrorHandlingExtension",

@@ -47,8 +47,8 @@ Body content that must appear identically on every run.
 
 Some constraint text.
 
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
+[[DEPLOYED:ProtocolConstraints]]
+[[/DEPLOYED:ProtocolConstraints]]
 
 [[/SECTION:Constraints]]
 `

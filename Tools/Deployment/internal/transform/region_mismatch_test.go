@@ -246,11 +246,11 @@ required_skills: []
 [[SECTION:Constraints]]
 ## Constraints
 
-[[INJECTION:CustomConstraints]]
-[[/INJECTION:CustomConstraints]]
+[[INJECTION:ProtocolConstraints]]
+[[/INJECTION:ProtocolConstraints]]
 [[/SECTION:Constraints]]
 `,
-			regionName: "CustomConstraints",
+			regionName: "ProtocolConstraints",
 		},
 		{
 			name: "user-owned under deployed",

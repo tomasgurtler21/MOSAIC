@@ -625,6 +625,26 @@ func (s *service) buildInfrastructureBlocks(infraAgentIDs []string) []transform.
 	return blocks
 }
 
+// harnessOnlyContentPlan pairs a discovered harness-only agent with the refresh scope the
+// user chose for it. The Update flow builds one per eligible agent and keys them by
+// TargetPath so the content callback can route a plan item without a catalog lookup.
+//
+// Conflict-loop decision: harness-only agents never enter the conflict loop. They are
+// appended to the plan with ActionUpdate after the loop, because a harness-only agent is
+// user-authored by definition and would trip the local-modification prompt on every run.
+// The refresh-scope prompt (askHarnessOnlyRefreshScope) is the sole consent mechanism.
+//
+// Version-stamping decision: no entry is added to ExecRequest.VersionStamps for a
+// harness-only agent's TargetPath. Stamping implies a source version to stamp from; there
+// is none, and inventing one would make the file appear catalog-backed on the next run.
+//
+// Manifest decision: harness-only agents remain manifest-invisible; detection stays purely
+// the two-signal rule.
+type harnessOnlyContentPlan struct {
+	Agent HarnessOnlyAgent
+	Scope RefreshScope
+}
+
 // buildContent returns the deploy.ExecRequest.Content callback for one run. Agent items are
 // rendered through transform.Apply; skill items are copied verbatim from source. Hook items
 // bypass this callback entirely and are handled by deployHooks.
@@ -646,8 +666,35 @@ func (s *service) buildContent(
 	toolMappingsVersion string,
 	protocol domain.ProtocolContent,
 	bundle domain.BundleContent,
+	// harnessOnly maps a plan item's TargetPath to its refresh plan. A nil or empty map
+	// means no harness-only agents are in this run and the callback behaves exactly as
+	// it does today.
+	harnessOnly map[string]harnessOnlyContentPlan,
 ) func(domain.PlanItem) ([]byte, error) {
 	return func(item domain.PlanItem) ([]byte, error) {
+		// Harness-only route: checked first, before the artifact-kind switch. A harness-only
+		// agent has no catalog entry and no SourcePath. Catalog.ReadSource is deliberately
+		// bypassed: it rejects any path the catalog did not emit, and a harness-only agent
+		// has no catalog entry and no SourcePath.
+		if plan, ok := harnessOnly[item.TargetPath]; ok {
+			var deployed []byte
+			if deployedReader != nil {
+				deployed = deployedReader(item)
+			}
+			res, err := refreshHarnessOnly(HarnessOnlyRefreshRequest{
+				Deployed: deployed,
+				Scope:    plan.Scope,
+				Role:     plan.Agent.Role,
+				Protocol: protocol,
+				Bundle:   bundle,
+				Subject:  item.TargetPath,
+			})
+			if err != nil {
+				return nil, err
+			}
+			return res.Output, nil
+		}
+
 		if item.Ref.Kind != domain.ArtifactAgent {
 			return s.deps.Catalog.ReadSource(item.SourcePath)
 		}

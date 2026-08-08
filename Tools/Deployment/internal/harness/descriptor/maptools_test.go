@@ -1149,3 +1149,675 @@ func permissionPairs(t *testing.T, result domain.ToolResult) []domain.FieldPair 
 	t.Fatalf("no FrontmatterField with Key=\"permission\" found in Fields (len=%d)", len(result.Fields))
 	return nil
 }
+
+// =============================================================================
+// ExtractToolEntries tests (T3.1)
+//
+// Coverage:
+//   - Permission-shaped harness: only entries with disposition "allow" are returned;
+//     entries with deny or other dispositions are excluded.
+//   - Permission-shaped harness: by-convention tools are excluded even when their
+//     disposition is "allow", because the forward direction emits them unconditionally.
+//   - List-shaped harness: every scalar item is returned (no disposition filter).
+//   - List-shaped harness: by-convention tools are excluded regardless.
+//   - A zero FieldValue (absent tools key) returns an empty slice without error.
+//   - A descriptor with an empty ToolsKey returns an empty slice.
+//   - Duplicate entries in a list-shaped value are deduplicated first-seen.
+//   - Document order of the input is preserved in the returned slice.
+// =============================================================================
+
+// permExtractDescriptorYAML declares a permission-shaped harness with:
+//   - "read/readFile"  — allow disposition, not by-convention (expected to be returned)
+//   - "write/createFile" — allow disposition, not by-convention (expected to be returned)
+//   - "list"           — allow disposition, by_convention: true  (expected to be excluded)
+//   - "execute"        — deny disposition, not by-convention    (expected to be excluded)
+const permExtractDescriptorYAML = `schema_version: "1"
+id: "perm-extract-harness"
+display_name: "Permission Extraction Test Harness"
+tools:
+  shape: permission
+  universe:
+    - name: "read/readFile"
+      unused: deny
+      by_convention: false
+    - name: "write/createFile"
+      unused: deny
+      by_convention: false
+    - name: "list"
+      unused: allow
+      by_convention: true
+    - name: "execute"
+      unused: deny
+      by_convention: false
+  mappings:
+    - generic: "file_read"
+      destinations:
+        - to: main
+          names:
+            - "read/readFile"
+    - generic: "file_write"
+      destinations:
+        - to: main
+          names:
+            - "write/createFile"
+frontmatter:
+  tools_key: "permission"
+`
+
+// listExtractDescriptorYAML declares a list-shaped harness with:
+//   - "read/readFile"         — not by-convention (expected to be returned)
+//   - "write/editFile"        — not by-convention (expected to be returned)
+//   - "search/listDirectory"  — by_convention: true (expected to be excluded)
+const listExtractDescriptorYAML = `schema_version: "1"
+id: "list-extract-harness"
+display_name: "List Extraction Test Harness"
+tools:
+  shape: list
+  universe:
+    - name: "read/readFile"
+      unused: deny
+      by_convention: false
+    - name: "write/editFile"
+      unused: deny
+      by_convention: false
+    - name: "search/listDirectory"
+      unused: deny
+      by_convention: true
+  mappings:
+    - generic: "file_read"
+      destinations:
+        - to: main
+          names:
+            - "read/readFile"
+    - generic: "file_write"
+      destinations:
+        - to: main
+          names:
+            - "write/editFile"
+frontmatter:
+  tools_key: "tools"
+`
+
+// noToolsKeyDescriptorYAML declares a descriptor with no tools_key, so ExtractToolEntries
+// must return an empty slice without error.
+const noToolsKeyDescriptorYAML = `schema_version: "1"
+id: "no-tools-key-harness"
+display_name: "No Tools Key Harness"
+tools:
+  shape: list
+  universe:
+    - name: "read/readFile"
+      unused: deny
+      by_convention: false
+frontmatter:
+  tools_key: ""
+`
+
+func loadPermExtractDescriptor(t *testing.T) *domain.HarnessDescriptor {
+	t.Helper()
+	d, err := descriptor.Parse([]byte(permExtractDescriptorYAML), "inline:perm-extract-harness")
+	if err != nil {
+		t.Fatalf("Parse perm-extract descriptor: %v", err)
+	}
+	return d
+}
+
+func loadListExtractDescriptor(t *testing.T) *domain.HarnessDescriptor {
+	t.Helper()
+	d, err := descriptor.Parse([]byte(listExtractDescriptorYAML), "inline:list-extract-harness")
+	if err != nil {
+		t.Fatalf("Parse list-extract descriptor: %v", err)
+	}
+	return d
+}
+
+// buildPermValue constructs a KindMapping FieldValue representing a deployed agent's
+// permission block. Each pair is (toolName, disposition) where disposition is "allow"
+// or "deny".
+func buildPermValue(pairs ...struct{ name, disposition string }) domain.FieldValue {
+	fp := make([]domain.FieldPair, len(pairs))
+	for i, p := range pairs {
+		fp[i] = domain.FieldPair{
+			Key:   p.name,
+			Value: domain.ScalarValue(p.disposition, domain.QuotePlain),
+		}
+	}
+	return domain.MappingValue(fp)
+}
+
+// buildListValue constructs a KindList FieldValue representing a deployed agent's tools list.
+func buildListValue(names ...string) domain.FieldValue {
+	items := make([]domain.FieldValue, len(names))
+	for i, n := range names {
+		items[i] = domain.ScalarValue(n, domain.QuotePlain)
+	}
+	return domain.ListValue(items, domain.ListBlock)
+}
+
+// --- Permission shape: only allow entries returned ---
+
+func TestExtractToolEntries_PermissionShape_AllowEntriesReturned(t *testing.T) {
+	// Allow entries that are not by-convention must appear in the returned slice.
+	d := loadPermExtractDescriptor(t)
+	toolsValue := buildPermValue(
+		struct{ name, disposition string }{"read/readFile", "allow"},
+		struct{ name, disposition string }{"write/createFile", "allow"},
+		struct{ name, disposition string }{"list", "allow"},
+		struct{ name, disposition string }{"execute", "deny"},
+	)
+
+	got := descriptor.ExtractToolEntries(d, toolsValue)
+
+	// "read/readFile" and "write/createFile" are allow and not by-convention.
+	for _, want := range []string{"read/readFile", "write/createFile"} {
+		found := false
+		for _, g := range got {
+			if g == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("ExtractToolEntries: allow entry %q absent from result %v", want, got)
+		}
+	}
+}
+
+func TestExtractToolEntries_PermissionShape_DenyEntriesExcluded(t *testing.T) {
+	// Deny entries represent tools the agent does not use; they must not appear.
+	d := loadPermExtractDescriptor(t)
+	toolsValue := buildPermValue(
+		struct{ name, disposition string }{"read/readFile", "allow"},
+		struct{ name, disposition string }{"execute", "deny"},
+	)
+
+	got := descriptor.ExtractToolEntries(d, toolsValue)
+
+	for _, g := range got {
+		if g == "execute" {
+			t.Errorf("ExtractToolEntries: deny entry %q must not appear in result, but got %v", "execute", got)
+		}
+	}
+}
+
+func TestExtractToolEntries_PermissionShape_ByConventionExcluded(t *testing.T) {
+	// By-convention entries carry allow disposition unconditionally in the forward direction;
+	// their presence in a deployed file carries no information about the agent's generic tools.
+	// They must be excluded regardless of disposition.
+	d := loadPermExtractDescriptor(t)
+	toolsValue := buildPermValue(
+		struct{ name, disposition string }{"read/readFile", "allow"},
+		struct{ name, disposition string }{"list", "allow"}, // list is by_convention: true
+	)
+
+	got := descriptor.ExtractToolEntries(d, toolsValue)
+
+	for _, g := range got {
+		if g == "list" {
+			t.Errorf("ExtractToolEntries: by-convention entry %q must not appear in result, but got %v", "list", got)
+		}
+	}
+}
+
+func TestExtractToolEntries_PermissionShape_ExactResultCount(t *testing.T) {
+	// With one allow+not-by-convention, one allow+by-convention, and one deny: exactly
+	// one entry should be returned.
+	d := loadPermExtractDescriptor(t)
+	toolsValue := buildPermValue(
+		struct{ name, disposition string }{"read/readFile", "allow"},
+		struct{ name, disposition string }{"list", "allow"},
+		struct{ name, disposition string }{"execute", "deny"},
+	)
+
+	got := descriptor.ExtractToolEntries(d, toolsValue)
+
+	if len(got) != 1 {
+		t.Errorf("ExtractToolEntries: want 1 entry (only read/readFile), got %d: %v", len(got), got)
+	}
+	if len(got) == 1 && got[0] != "read/readFile" {
+		t.Errorf("ExtractToolEntries: want [read/readFile], got %v", got)
+	}
+}
+
+// --- List shape: every entry returned (except by-convention) ---
+
+func TestExtractToolEntries_ListShape_NonByConventionEntriesReturned(t *testing.T) {
+	// A list-shaped harness contributes every listed entry that is not by-convention.
+	d := loadListExtractDescriptor(t)
+	toolsValue := buildListValue("read/readFile", "write/editFile", "search/listDirectory")
+
+	got := descriptor.ExtractToolEntries(d, toolsValue)
+
+	for _, want := range []string{"read/readFile", "write/editFile"} {
+		found := false
+		for _, g := range got {
+			if g == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("ExtractToolEntries list shape: entry %q absent from result %v", want, got)
+		}
+	}
+}
+
+func TestExtractToolEntries_ListShape_ByConventionExcluded(t *testing.T) {
+	// search/listDirectory is by_convention: true in the list-extract descriptor.
+	// It must be excluded even though it appears in the list.
+	d := loadListExtractDescriptor(t)
+	toolsValue := buildListValue("read/readFile", "search/listDirectory", "write/editFile")
+
+	got := descriptor.ExtractToolEntries(d, toolsValue)
+
+	for _, g := range got {
+		if g == "search/listDirectory" {
+			t.Errorf("ExtractToolEntries list shape: by-convention entry %q must not appear in result %v",
+				"search/listDirectory", got)
+		}
+	}
+}
+
+func TestExtractToolEntries_ListShape_ExactResultCount(t *testing.T) {
+	// With two non-by-convention entries and one by-convention, exactly two entries returned.
+	d := loadListExtractDescriptor(t)
+	toolsValue := buildListValue("read/readFile", "write/editFile", "search/listDirectory")
+
+	got := descriptor.ExtractToolEntries(d, toolsValue)
+
+	if len(got) != 2 {
+		t.Errorf("ExtractToolEntries list shape: want 2 entries, got %d: %v", len(got), got)
+	}
+}
+
+// --- Absent or zero FieldValue ---
+
+func TestExtractToolEntries_ZeroFieldValue_ReturnsEmpty(t *testing.T) {
+	// A zero FieldValue represents an absent tools key. No entries can be extracted.
+	d := loadListExtractDescriptor(t)
+	var toolsValue domain.FieldValue // zero value
+
+	got := descriptor.ExtractToolEntries(d, toolsValue)
+
+	if len(got) != 0 {
+		t.Errorf("ExtractToolEntries with zero FieldValue: want empty, got %v", got)
+	}
+}
+
+func TestExtractToolEntries_ZeroFieldValue_ReturnsNonNilSlice(t *testing.T) {
+	// A nil return would be acceptable (design says "empty slice — never an error"),
+	// but callers should be able to range safely; len(nil) == 0 so nil is fine here.
+	// This test only verifies the empty guarantee (not nil vs empty distinction).
+	d := loadListExtractDescriptor(t)
+	var toolsValue domain.FieldValue
+
+	got := descriptor.ExtractToolEntries(d, toolsValue)
+
+	if got != nil && len(got) != 0 {
+		t.Errorf("ExtractToolEntries with zero FieldValue: want empty, got %v", got)
+	}
+}
+
+func TestExtractToolEntries_EmptyToolsKey_ReturnsEmpty(t *testing.T) {
+	// A descriptor with an empty ToolsKey declares no tools field; no entries can exist.
+	d, err := descriptor.Parse([]byte(noToolsKeyDescriptorYAML), "inline:no-tools-key-harness")
+	if err != nil {
+		t.Fatalf("Parse no-tools-key descriptor: %v", err)
+	}
+	toolsValue := buildListValue("read/readFile")
+
+	got := descriptor.ExtractToolEntries(d, toolsValue)
+
+	if len(got) != 0 {
+		t.Errorf("ExtractToolEntries with empty ToolsKey: want empty, got %v", got)
+	}
+}
+
+// --- Document order and deduplication ---
+
+func TestExtractToolEntries_ListShape_DocumentOrderMaintained(t *testing.T) {
+	// The returned slice must preserve the document order of the input list, not sort
+	// or reorder the entries. This pins the "extraction order" guarantee that the service
+	// layer relies on for stable question ordering.
+	d := loadListExtractDescriptor(t)
+	toolsValue := buildListValue("write/editFile", "read/readFile") // write before read
+
+	got := descriptor.ExtractToolEntries(d, toolsValue)
+
+	if len(got) != 2 {
+		t.Fatalf("ExtractToolEntries: want 2 entries, got %d: %v", len(got), got)
+	}
+	if got[0] != "write/editFile" {
+		t.Errorf("ExtractToolEntries: [0] want %q (document order), got %q", "write/editFile", got[0])
+	}
+	if got[1] != "read/readFile" {
+		t.Errorf("ExtractToolEntries: [1] want %q (document order), got %q", "read/readFile", got[1])
+	}
+}
+
+func TestExtractToolEntries_ListShape_DeduplicatedFirstSeen(t *testing.T) {
+	// Duplicate entries in the input are collapsed to the first occurrence. The deduplication
+	// must be first-seen so the output order is deterministic.
+	d := loadListExtractDescriptor(t)
+	toolsValue := buildListValue("read/readFile", "write/editFile", "read/readFile")
+
+	got := descriptor.ExtractToolEntries(d, toolsValue)
+
+	if len(got) != 2 {
+		t.Errorf("ExtractToolEntries deduplication: want 2 entries (first-seen), got %d: %v", len(got), got)
+	}
+	if len(got) >= 1 && got[0] != "read/readFile" {
+		t.Errorf("ExtractToolEntries deduplication: got[0] want %q, got %q", "read/readFile", got[0])
+	}
+	if len(got) >= 2 && got[1] != "write/editFile" {
+		t.Errorf("ExtractToolEntries deduplication: got[1] want %q, got %q", "write/editFile", got[1])
+	}
+}
+
+// =============================================================================
+// ReverseMapTool and ReverseMapTools tests (T3.2)
+//
+// Coverage:
+//   - A harness tool named by exactly one mapping resolves to that mapping's generic name.
+//   - Many-to-one: multiple generics mapping to the same harness name → first mapping in
+//     declaration order wins (AD-5), so the result is deterministic.
+//   - One-to-many: one generic maps to multiple harness names → each harness name resolves
+//     to the same generic independently (the result is the same generic for both).
+//   - An unmapped harness entry returns ok=false and an empty generic name.
+//   - A harness with nil or empty Mappings returns ok=false for every input.
+//   - ReverseMapTools returns one resolution per input entry in the same order.
+//   - ReverseMapTools sets Outcome=ToolMapped for resolved entries and ToolUnmapped otherwise.
+//   - ReverseMapTools preserves the Harness field in every resolution.
+//   - ReverseMapTools with an empty input returns an empty (or nil) slice.
+//   - ReverseMapTools with a descriptor carrying no mapping data → all ToolUnmapped.
+// =============================================================================
+
+// noMappingsDescriptorYAML declares a descriptor with no mappings at all.
+// ReverseMapTool must return ok=false for any harness name against this descriptor.
+const noMappingsDescriptorYAML = `schema_version: "1"
+id: "no-mappings-harness"
+display_name: "No Mappings Harness"
+tools:
+  shape: list
+  universe:
+    - name: "read/readFile"
+      unused: deny
+      by_convention: false
+frontmatter:
+  tools_key: "tools"
+`
+
+func loadNoMappingsDescriptor(t *testing.T) *domain.HarnessDescriptor {
+	t.Helper()
+	d, err := descriptor.Parse([]byte(noMappingsDescriptorYAML), "inline:no-mappings-harness")
+	if err != nil {
+		t.Fatalf("Parse no-mappings descriptor: %v", err)
+	}
+	return d
+}
+
+// --- ReverseMapTool: basic resolution ---
+
+func TestReverseMapTool_MappedEntry_OkIsTrue(t *testing.T) {
+	// A harness tool named in exactly one mapping must be resolved; ok must be true.
+	d := loadMappingDescriptor(t) // file_read → read/readFile
+	_, ok := descriptor.ReverseMapTool(d, "read/readFile")
+	if !ok {
+		t.Error("ReverseMapTool: ok must be true for a mapped harness entry; got false")
+	}
+}
+
+func TestReverseMapTool_MappedEntry_ReturnsCorrectGenericName(t *testing.T) {
+	// file_read maps to read/readFile in the mapping descriptor. The reverse must return
+	// "file_read" when given "read/readFile".
+	d := loadMappingDescriptor(t)
+	got, ok := descriptor.ReverseMapTool(d, "read/readFile")
+	if !ok {
+		t.Fatalf("ReverseMapTool(read/readFile): ok=false; expected a mapped result")
+	}
+	if got != "file_read" {
+		t.Errorf("ReverseMapTool(read/readFile): want %q, got %q", "file_read", got)
+	}
+}
+
+// --- ReverseMapTool: unmapped entry ---
+
+func TestReverseMapTool_UnmappedEntry_OkIsFalse(t *testing.T) {
+	// An entry that appears in no mapping must return ok=false.
+	// "read/readFile" does not appear in the no-mappings descriptor.
+	d := loadNoMappingsDescriptor(t)
+	_, ok := descriptor.ReverseMapTool(d, "read/readFile")
+	if ok {
+		t.Error("ReverseMapTool with no mappings: ok must be false; got true")
+	}
+}
+
+func TestReverseMapTool_UnmappedEntry_GenericIsEmpty(t *testing.T) {
+	// An unmapped entry must return an empty generic name — never an invented name.
+	d := loadNoMappingsDescriptor(t)
+	got, _ := descriptor.ReverseMapTool(d, "read/readFile")
+	if got != "" {
+		t.Errorf("ReverseMapTool unmapped: generic must be empty, got %q", got)
+	}
+}
+
+func TestReverseMapTool_EntryAbsentFromMappings_OkIsFalse(t *testing.T) {
+	// "terminal" appears in the mapping descriptor's Universe but not in any mapping.
+	// It is genuinely unmapped: ok must be false.
+	d := loadMappingDescriptor(t)
+	_, ok := descriptor.ReverseMapTool(d, "terminal")
+	if ok {
+		t.Error("ReverseMapTool(terminal): ok must be false for a harness tool absent from all mappings")
+	}
+}
+
+// --- ReverseMapTool: many-to-one (AD-5 — first mapping wins) ---
+
+func TestReverseMapTool_ManyToOne_FirstMappingDeclarationOrderWins(t *testing.T) {
+	// file_search and content_search both map to search/textSearch in the mapping descriptor,
+	// with file_search declared first. ReverseMapTool must resolve search/textSearch to
+	// "file_search" (the first-declared mapping), not "content_search".
+	d := loadMappingDescriptor(t)
+	got, ok := descriptor.ReverseMapTool(d, "search/textSearch")
+	if !ok {
+		t.Fatal("ReverseMapTool(search/textSearch): ok=false; expected mapped result")
+	}
+	if got != "file_search" {
+		t.Errorf("ReverseMapTool many-to-one: want %q (first declaration), got %q", "file_search", got)
+	}
+}
+
+func TestReverseMapTool_ManyToOne_ResultIsDeterministic(t *testing.T) {
+	// Repeated calls with the same input must produce the same result.
+	d := loadMappingDescriptor(t)
+	got1, ok1 := descriptor.ReverseMapTool(d, "search/textSearch")
+	got2, ok2 := descriptor.ReverseMapTool(d, "search/textSearch")
+	if ok1 != ok2 || got1 != got2 {
+		t.Errorf("ReverseMapTool many-to-one is non-deterministic: call1=(%q,%v) call2=(%q,%v)",
+			got1, ok1, got2, ok2)
+	}
+}
+
+// --- ReverseMapTool: one-to-many (file_write → write/createFile and write/editFile) ---
+
+func TestReverseMapTool_OneToMany_FirstHarnessToolResolvesToGeneric(t *testing.T) {
+	// file_write maps to both write/createFile and write/editFile. Each harness tool must
+	// independently resolve to "file_write".
+	d := loadMappingDescriptor(t)
+	got, ok := descriptor.ReverseMapTool(d, "write/createFile")
+	if !ok {
+		t.Fatal("ReverseMapTool(write/createFile): ok=false; expected mapped result")
+	}
+	if got != "file_write" {
+		t.Errorf("ReverseMapTool(write/createFile): want %q, got %q", "file_write", got)
+	}
+}
+
+func TestReverseMapTool_OneToMany_SecondHarnessToolResolvesToSameGeneric(t *testing.T) {
+	d := loadMappingDescriptor(t)
+	got, ok := descriptor.ReverseMapTool(d, "write/editFile")
+	if !ok {
+		t.Fatal("ReverseMapTool(write/editFile): ok=false; expected mapped result")
+	}
+	if got != "file_write" {
+		t.Errorf("ReverseMapTool(write/editFile): want %q, got %q", "file_write", got)
+	}
+}
+
+// --- ReverseMapTool: no mapping data ---
+
+func TestReverseMapTool_NoMappingData_OkIsFalse(t *testing.T) {
+	// A descriptor with no mappings cannot resolve any harness tool; ok must always be false.
+	d := loadNoMappingsDescriptor(t)
+	_, ok := descriptor.ReverseMapTool(d, "read/readFile")
+	if ok {
+		t.Error("ReverseMapTool with empty mappings: ok must be false; got true")
+	}
+}
+
+// --- ReverseMapTools: sequence, ordering, and outcome fields ---
+
+func TestReverseMapTools_EmptyInput_ReturnsEmptyOrNilSlice(t *testing.T) {
+	// An empty input slice must produce an empty (or nil) result; never a non-empty one.
+	d := loadMappingDescriptor(t)
+	got := descriptor.ReverseMapTools(d, []string{})
+	if len(got) != 0 {
+		t.Errorf("ReverseMapTools with empty input: want empty, got %d resolutions: %v", len(got), got)
+	}
+}
+
+func TestReverseMapTools_CountMatchesInputCount(t *testing.T) {
+	// ReverseMapTools returns exactly one resolution per input entry, matching
+	// the contract stated in the design: "one ReverseToolResolution per input entry".
+	d := loadMappingDescriptor(t)
+	inputs := []string{"read/readFile", "search/textSearch", "terminal"}
+
+	got := descriptor.ReverseMapTools(d, inputs)
+
+	if len(got) != len(inputs) {
+		t.Errorf("ReverseMapTools: want %d resolutions (one per input), got %d: %v",
+			len(inputs), len(got), got)
+	}
+}
+
+func TestReverseMapTools_PreservesInputOrder(t *testing.T) {
+	// The resolution at index i must correspond to inputs[i]. Input order is preserved so
+	// the service layer can prompt in a stable, predictable sequence.
+	d := loadMappingDescriptor(t)
+	inputs := []string{"read/readFile", "search/textSearch", "terminal"}
+
+	got := descriptor.ReverseMapTools(d, inputs)
+
+	if len(got) != 3 {
+		t.Fatalf("ReverseMapTools: want 3 resolutions, got %d", len(got))
+	}
+	for i, input := range inputs {
+		if got[i].Harness != input {
+			t.Errorf("ReverseMapTools: got[%d].Harness = %q, want %q (input order not preserved)",
+				i, got[i].Harness, input)
+		}
+	}
+}
+
+func TestReverseMapTools_MappedEntry_OutcomeIsToolMapped(t *testing.T) {
+	// A harness tool that resolves to a generic name must have Outcome = ToolMapped.
+	d := loadMappingDescriptor(t)
+	got := descriptor.ReverseMapTools(d, []string{"read/readFile"})
+	if len(got) != 1 {
+		t.Fatalf("ReverseMapTools: want 1 resolution, got %d", len(got))
+	}
+	if got[0].Outcome != domain.ToolMapped {
+		t.Errorf("ReverseMapTools mapped entry Outcome: want %q, got %q", domain.ToolMapped, got[0].Outcome)
+	}
+}
+
+func TestReverseMapTools_MappedEntry_GenericFieldIsSet(t *testing.T) {
+	// The Generic field of a resolved entry must hold the generic tool name.
+	d := loadMappingDescriptor(t)
+	got := descriptor.ReverseMapTools(d, []string{"read/readFile"})
+	if len(got) != 1 {
+		t.Fatalf("ReverseMapTools: want 1 resolution, got %d", len(got))
+	}
+	if got[0].Generic != "file_read" {
+		t.Errorf("ReverseMapTools mapped entry Generic: want %q, got %q", "file_read", got[0].Generic)
+	}
+}
+
+func TestReverseMapTools_UnmappedEntry_OutcomeIsToolUnmapped(t *testing.T) {
+	// An entry absent from all mappings must have Outcome = ToolUnmapped.
+	d := loadMappingDescriptor(t)
+	got := descriptor.ReverseMapTools(d, []string{"terminal"})
+	if len(got) != 1 {
+		t.Fatalf("ReverseMapTools: want 1 resolution, got %d", len(got))
+	}
+	if got[0].Outcome != domain.ToolUnmapped {
+		t.Errorf("ReverseMapTools unmapped entry Outcome: want %q, got %q", domain.ToolUnmapped, got[0].Outcome)
+	}
+}
+
+func TestReverseMapTools_UnmappedEntry_GenericIsEmpty(t *testing.T) {
+	// The Generic field of an unmapped entry must be empty — no invented name.
+	d := loadMappingDescriptor(t)
+	got := descriptor.ReverseMapTools(d, []string{"terminal"})
+	if len(got) != 1 {
+		t.Fatalf("ReverseMapTools: want 1 resolution, got %d", len(got))
+	}
+	if got[0].Generic != "" {
+		t.Errorf("ReverseMapTools unmapped entry Generic: want empty, got %q", got[0].Generic)
+	}
+}
+
+func TestReverseMapTools_HarnessFieldMatchesInput(t *testing.T) {
+	// The Harness field of every resolution must equal the corresponding input entry.
+	d := loadMappingDescriptor(t)
+	inputs := []string{"read/readFile", "terminal"}
+	got := descriptor.ReverseMapTools(d, inputs)
+	if len(got) != 2 {
+		t.Fatalf("ReverseMapTools: want 2 resolutions, got %d", len(got))
+	}
+	for i, input := range inputs {
+		if got[i].Harness != input {
+			t.Errorf("ReverseMapTools: got[%d].Harness = %q, want %q", i, got[i].Harness, input)
+		}
+	}
+}
+
+func TestReverseMapTools_MixedInput_CorrectOutcomesPerEntry(t *testing.T) {
+	// A mixed input containing both mapped and unmapped entries must produce the correct
+	// outcome for each: mapped entries get ToolMapped, unmapped get ToolUnmapped.
+	d := loadMappingDescriptor(t)
+	// read/readFile: mapped (file_read); terminal: unmapped.
+	got := descriptor.ReverseMapTools(d, []string{"read/readFile", "terminal"})
+	if len(got) != 2 {
+		t.Fatalf("ReverseMapTools: want 2 resolutions, got %d", len(got))
+	}
+	if got[0].Outcome != domain.ToolMapped {
+		t.Errorf("ReverseMapTools mixed: got[0] (read/readFile) Outcome want %q, got %q",
+			domain.ToolMapped, got[0].Outcome)
+	}
+	if got[1].Outcome != domain.ToolUnmapped {
+		t.Errorf("ReverseMapTools mixed: got[1] (terminal) Outcome want %q, got %q",
+			domain.ToolUnmapped, got[1].Outcome)
+	}
+}
+
+func TestReverseMapTools_NoMappingData_AllOutcomesAreToolUnmapped(t *testing.T) {
+	// A harness declaring no mapping data cannot resolve any tool. Every entry must be
+	// ToolUnmapped — the implementation must not guess or return ok=true for any entry.
+	d := loadNoMappingsDescriptor(t)
+	inputs := []string{"read/readFile", "write/editFile"}
+	got := descriptor.ReverseMapTools(d, inputs)
+	if len(got) != len(inputs) {
+		t.Fatalf("ReverseMapTools no-mapping-data: want %d resolutions, got %d", len(inputs), len(got))
+	}
+	for i, res := range got {
+		if res.Outcome != domain.ToolUnmapped {
+			t.Errorf("ReverseMapTools no-mapping-data: got[%d] (%q) Outcome want %q, got %q",
+				i, inputs[i], domain.ToolUnmapped, res.Outcome)
+		}
+		if res.Generic != "" {
+			t.Errorf("ReverseMapTools no-mapping-data: got[%d] (%q) Generic must be empty, got %q",
+				i, inputs[i], res.Generic)
+		}
+	}
+}

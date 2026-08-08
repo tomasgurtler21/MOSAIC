@@ -256,7 +256,56 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 	workflowsCmd.Flags().BoolVar(&workflowsDryRun, "dry-run", false, "Dry run mode; no files are written")
 	workflowsCmd.Flags().BoolVar(&workflowsAutoConfirm, "auto-confirm", false, "Auto-confirm the deployment plan without prompting")
 
-	root.AddCommand(deployCmd, updateCmd, workflowsCmd)
+	// ------------------------------------------------------------------
+	// promote subcommand
+	// ------------------------------------------------------------------
+	var (
+		promoteFile     string
+		promoteHarness  string
+		promoteCategory string
+		promoteOverwrite bool
+		promoteDryRun   bool
+		promoteOutput   string
+	)
+
+	promoteCmd := &cobra.Command{
+		Use:           "promote",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if promoteFile == "" {
+				fmt.Fprintf(errOut, "error: --file is required for the promote subcommand\n")
+				exitCode = ExitUsage
+				return nil
+			}
+			if promoteHarness == "" {
+				fmt.Fprintf(errOut, "error: --harness is required for the promote subcommand\n")
+				exitCode = ExitUsage
+				return nil
+			}
+
+			req := app.PromoteRequest{
+				FilePath:  promoteFile,
+				HarnessID: promoteHarness,
+				Category:  promoteCategory,
+				Overwrite: promoteOverwrite,
+				DryRun:    promoteDryRun,
+			}
+
+			result, svcErr := svc.Promote(ctx, req)
+			exitCode = renderPromoteOutput(out, errOut, promoteOutput, result, svcErr)
+			return nil
+		},
+	}
+
+	promoteCmd.Flags().StringVar(&promoteFile, "file", "", "Harness-only agent file to promote (required)")
+	promoteCmd.Flags().StringVar(&promoteHarness, "harness", "", "Harness that produced the deployed file (required)")
+	promoteCmd.Flags().StringVar(&promoteCategory, "category", "", "Target category (absent = ask interactively)")
+	promoteCmd.Flags().BoolVar(&promoteOverwrite, "overwrite", false, "Overwrite an existing generic agent at the destination path")
+	promoteCmd.Flags().BoolVar(&promoteDryRun, "dry-run", false, "Validate and compute without writing any file")
+	promoteCmd.Flags().StringVar(&promoteOutput, "output", "", "Output format (json)")
+
+	root.AddCommand(deployCmd, updateCmd, workflowsCmd, promoteCmd)
 	root.SetArgs(args)
 
 	if err := root.Execute(); err != nil {

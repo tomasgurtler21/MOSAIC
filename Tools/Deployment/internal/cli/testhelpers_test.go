@@ -32,6 +32,10 @@ type spyService struct {
 	workflowsReq  *app.WorkflowUpdateRequest
 	workflowsResp domain.RunSummary
 	workflowsErr  error
+
+	promoteReq  *app.PromoteRequest
+	promoteResp app.PromoteResult
+	promoteErr  error
 }
 
 func (s *spyService) ListHarnesses() []domain.HarnessRef { return s.harnessRefs }
@@ -49,6 +53,11 @@ func (s *spyService) Update(ctx context.Context, req app.UpdateRequest) (domain.
 func (s *spyService) UpdateWorkflows(ctx context.Context, req app.WorkflowUpdateRequest) (domain.RunSummary, error) {
 	s.workflowsReq = &req
 	return s.workflowsResp, s.workflowsErr
+}
+
+func (s *spyService) Promote(ctx context.Context, req app.PromoteRequest) (app.PromoteResult, error) {
+	s.promoteReq = &req
+	return s.promoteResp, s.promoteErr
 }
 
 // ---------------------------------------------------------------------------

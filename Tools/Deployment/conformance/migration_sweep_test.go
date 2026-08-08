@@ -7,14 +7,16 @@ package conformance_test
 // Invariants swept for every .md file under Agents/Generic/:
 //
 //   (1) No tool-managed name under [[INJECTION:]].
-//       Tool-managed names (all eleven CanonicalDeployed names) are owned by the deployment
+//       Tool-managed names (all nine CanonicalDeployed names) are owned by the deployment
 //       tool and must appear under [[DEPLOYED:]], never [[INJECTION:]].
 //
 //   (2) No user-owned name under [[DEPLOYED:]].
 //       Injection names are open as of Stage 2. Names that happen to be injection-only
-//       (IdentityExtension, CodebaseContext, OutputArtifactTemplate, SeverityThresholds,
-//       SeverityDefinitions, ErrorHandlingExtension, ContextLimits) must never appear
-//       under [[DEPLOYED:]] — they have no tool generator.
+//       (IdentityExtension, CodebaseContext, LanguagePatterns, OutputArtifactTemplate,
+//       SeverityThresholds, SeverityDefinitions, ErrorHandlingExtension, ContextLimits)
+//       must never appear under [[DEPLOYED:]] — they have no tool generator.
+//       LanguagePatterns is a catalogued, project-authored injection name (parent
+//       Capabilities) — it was never a tool-managed name and belongs here, not above.
 //
 //   (3) No [[INJECTION:ProtocolExtension]] in any file.
 //       Note: the original doc-comment reason ("ProtocolExtension is removed from the
@@ -56,20 +58,20 @@ var toolManagedNames = []string{
 	"ClosingProcedure",
 	"AvailableWorkflows",
 	"InfrastructureAgents",
-	"LanguagePatterns",
 	"ProtocolConstraints",
 	"HarnessConstraints",
-	"CustomConstraints",
 	"ErrorHandlingCommon",
 	"ExecutionPhilosophyCommon",
 }
 
 // userOwnedNames are the project-owner customisation names. They must never appear under
 // [[DEPLOYED:]] in agent source files — they have no tool generator and must be preserved
-// as-is via [[INJECTION:]].
+// as-is via [[INJECTION:]]. LanguagePatterns is a catalogued, project-authored injection
+// name (advisory parent Capabilities), not a tool-managed one.
 var userOwnedNames = []string{
 	"IdentityExtension",
 	"CodebaseContext",
+	"LanguagePatterns",
 	"OutputArtifactTemplate",
 	"SeverityThresholds",
 	"SeverityDefinitions",
@@ -80,8 +82,11 @@ var userOwnedNames = []string{
 // deprecatedInjectionNames are names that are migrating out of all agent files entirely.
 // They must never appear under [[DEPLOYED:]] (no tool generator exists for them) and are
 // expected to disappear from [[INJECTION:]] use as well as migration proceeds.
+// CustomConstraints has no generator and is deleted outright — it is not re-catalogued
+// as an advisory injection name, unlike LanguagePatterns above.
 var deprecatedInjectionNames = []string{
 	"ArtifactProvenanceExtension",
+	"CustomConstraints",
 }
 
 // ---------------------------------------------------------------------------

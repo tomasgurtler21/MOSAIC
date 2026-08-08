@@ -1,0 +1,576 @@
+package app
+
+// promote_service.go contains the service-level Promote flow: the Service.Promote method,
+// the promoteHarnessDropKeys helper, the category prompt helper, the nextNumericID helper,
+// and the promoteDestinationPath helper. All I/O for the promote capability belongs here;
+// the pure generation core lives in promote.go (buildGenericAgent).
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+
+	"mosaic-deploy/internal/catalog"
+	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/harness/descriptor"
+)
+
+// promoteHarnessDropKeys derives the harness-specific frontmatter keys to drop from a
+// promoted generic file, using only the identified harness's own contract:
+//
+//   - Descriptor().Frontmatter.ModelKey — the key the harness writes the model to
+//   - Descriptor().Frontmatter.ToolsKey — the key the harness writes its tools to
+//   - the Key of every entry in the harness's own FrontmatterPlan.Set
+//
+// Only key names are taken from the plan; values are never read. FrontmatterSpec.Drop and
+// FrontmatterPlan.Remove are deliberately excluded: they name generic fields the harness
+// removes at deploy time, which is what promote is trying to restore, not remove again.
+// Empty key names are ignored. Keys in promoteProtectedGenericKeys are excluded.
+//
+// The plan is requested for the promoted agent's own kind and key so a harness that shapes
+// its plan per artifact contributes the keys it would actually have added to this file.
+// A module whose Frontmatter call fails contributes only its descriptor keys, and the error
+// is returned so the caller can decide; it never panics or silently drops the whole set.
+//
+// Pure with respect to the filesystem: it calls only module.Descriptor() and
+// module.Frontmatter(...), both of which the HarnessModule contract requires to be
+// deterministic and side-effect free.
+func promoteHarnessDropKeys(
+	module domain.HarnessModule,
+	kind domain.ArtifactKind,
+	agentKey string,
+) (map[string]bool, error) {
+	result := make(map[string]bool)
+
+	desc := module.Descriptor()
+
+	// Collect the descriptor-level keys: the key the harness writes the model to and the
+	// key it writes its tool entries to. Empty strings and collisions with the protected
+	// generic keys are silently ignored (AD-4).
+	if k := desc.Frontmatter.ModelKey; k != "" && !promoteProtectedGenericKeys[k] {
+		result[k] = true
+	}
+	if k := desc.Frontmatter.ToolsKey; k != "" && !promoteProtectedGenericKeys[k] {
+		result[k] = true
+	}
+
+	// Request the frontmatter plan for this specific agent kind and key. Only the key names
+	// from FrontmatterPlan.Set are taken; values are never read. FrontmatterSpec.Drop and
+	// FrontmatterPlan.Remove are deliberately excluded: they name generic fields the harness
+	// removes at deploy time, which is exactly what promote is trying to restore (AD-3).
+	plan, err := module.Frontmatter(domain.FrontmatterRequest{
+		Kind:     kind,
+		AgentKey: agentKey,
+	})
+	if err != nil {
+		// Return whatever descriptor-level keys we already have alongside the error, so the
+		// caller can decide whether to proceed or abort. We never panic or silently discard.
+		return result, err
+	}
+
+	for _, field := range plan.Set {
+		if field.Key == "" || promoteProtectedGenericKeys[field.Key] {
+			continue
+		}
+		result[field.Key] = true
+	}
+
+	return result, nil
+}
+
+// promoteRecoveredFields carries the generic-only frontmatter values recovered from the user
+// during a promote run. A zero-valued member means "not supplied" and is omitted from the
+// promoted file entirely — never written as an empty value.
+type promoteRecoveredFields struct {
+	RecommendedTier string
+	TierRationale   string
+	RequiredSkills  []string
+	// Supplied names the fields the user actually answered, in ask order, for
+	// PromoteResult.RecoveredFields.
+	Supplied []string
+}
+
+// resolvePromoteTools turns the harness-side tool entries of a deployed agent into the
+// authoritative generic tools list.
+//
+// Entries that reverse-map are resolved silently and never prompt. Each distinct unmapped
+// entry is asked once through QPromoteCustomTool, in extraction order, mirroring
+// resolveCustomTools. Every non-answered outcome — SkippedOne, SkippedAll, Cancelled, or a
+// transport error — carries the harness name into the generic list verbatim and unmodified;
+// SkippedAll additionally latches so no further question is asked this run. This is what
+// makes the non-interactive path complete with zero user interaction.
+//
+// The returned tools slice is deduplicated first-seen in extraction order and is always
+// non-nil, so the caller may pass it straight into PromoteInput.Tools as an authoritative
+// replacement. verbatim lists the entries that were carried through unchanged, in the same
+// order, for PromoteResult.VerbatimTools.
+func (s *service) resolvePromoteTools(
+	ctx context.Context,
+	module domain.HarnessModule,
+	entries []string,
+	subject string,
+) (tools []string, verbatim []string) {
+	tools = make([]string, 0, len(entries))
+	seen := make(map[string]bool, len(entries))
+
+	resolutions := descriptor.ReverseMapTools(module.Descriptor(), entries)
+
+	skippedAll := false
+
+	addTool := func(name string) {
+		if !seen[name] {
+			seen[name] = true
+			tools = append(tools, name)
+		}
+	}
+
+	for _, res := range resolutions {
+		if res.Outcome == domain.ToolMapped {
+			// Resolved via descriptor mapping — add silently, no question asked.
+			addTool(res.Generic)
+			continue
+		}
+
+		// Unmapped entry — ask the user for a generic name, or carry verbatim.
+		harnessName := res.Harness
+
+		if skippedAll {
+			// SkippedAll was already latched; carry verbatim without asking.
+			addTool(harnessName)
+			verbatim = append(verbatim, harnessName)
+			continue
+		}
+
+		q := domain.TextQuestion{
+			Question: domain.Question{
+				ID:           domain.QPromoteCustomTool,
+				Subject:      harnessName,
+				Title:        "Generic tool name for harness tool " + harnessName,
+				AllowSkip:    true,
+				AllowSkipAll: true,
+			},
+		}
+		ans, err := s.deps.Interaction.AskText(ctx, q)
+		if err != nil {
+			// Transport error — carry verbatim (AD-8).
+			addTool(harnessName)
+			verbatim = append(verbatim, harnessName)
+			continue
+		}
+
+		switch ans.Status {
+		case domain.Answered:
+			if ans.Text != "" {
+				addTool(ans.Text)
+			} else {
+				// Empty answer treated as non-answered — carry verbatim.
+				addTool(harnessName)
+				verbatim = append(verbatim, harnessName)
+			}
+		case domain.SkippedAll:
+			skippedAll = true
+			addTool(harnessName)
+			verbatim = append(verbatim, harnessName)
+		default:
+			// SkippedOne, Cancelled, or any other non-answered status — carry verbatim (AD-8).
+			addTool(harnessName)
+			verbatim = append(verbatim, harnessName)
+		}
+	}
+
+	return tools, verbatim
+}
+
+// resolvePromoteGenericFields asks for the generic-only frontmatter fields the harness drops
+// at deploy time and that cannot be derived from the deployed file: recommended_tier,
+// tier_rationale, and required_skills.
+//
+// A field the source already carries is not asked about — a harness that does not drop it
+// carried it through, and re-asking would be noise. Each remaining field is asked at most
+// once per run. A field the user does not supply (skipped, cancelled, unresolvable, or
+// answered with empty text) is returned as its zero value, which the generation core omits
+// from the output rather than writing blank.
+func (s *service) resolvePromoteGenericFields(
+	ctx context.Context,
+	facts promoteSourceFacts,
+	subject string,
+) promoteRecoveredFields {
+	var result promoteRecoveredFields
+
+	// recommended_tier — only asked when the source does not already carry it.
+	if !facts.Keys["recommended_tier"] {
+		opts := s.buildPromoteTierOptions()
+		ans, err := s.deps.Interaction.SelectOne(ctx, domain.ChoiceQuestion{
+			Question: domain.Question{
+				ID:          domain.QPromoteRecommendedTier,
+				Subject:     subject,
+				Title:       "Recommended tier for the promoted agent",
+				AllowSkip:   true,
+				AllowCustom: true,
+			},
+			Options: opts,
+		})
+		if err == nil && ans.Status == domain.Answered {
+			tier := ans.OptionID
+			if tier == "" {
+				tier = ans.Custom
+			}
+			if tier != "" {
+				result.RecommendedTier = tier
+				result.Supplied = append(result.Supplied, "recommended_tier")
+			}
+		}
+	}
+
+	// tier_rationale — only asked when the source does not already carry it.
+	if !facts.Keys["tier_rationale"] {
+		ans, err := s.deps.Interaction.AskText(ctx, domain.TextQuestion{
+			Question: domain.Question{
+				ID:        domain.QPromoteTierRationale,
+				Subject:   subject,
+				Title:     "Tier rationale for the promoted agent",
+				AllowSkip: true,
+			},
+		})
+		if err == nil && ans.Status == domain.Answered && ans.Text != "" {
+			result.TierRationale = ans.Text
+			result.Supplied = append(result.Supplied, "tier_rationale")
+		}
+	}
+
+	// required_skills — only asked when the source does not already carry it.
+	if !facts.Keys["required_skills"] {
+		ans, err := s.deps.Interaction.AskText(ctx, domain.TextQuestion{
+			Question: domain.Question{
+				ID:        domain.QPromoteRequiredSkills,
+				Subject:   subject,
+				Title:     "Required skills (comma-separated)",
+				AllowSkip: true,
+			},
+		})
+		if err == nil && ans.Status == domain.Answered && ans.Text != "" {
+			// Split on commas, trim whitespace, discard empty entries (AD-11).
+			parts := strings.Split(ans.Text, ",")
+			skills := make([]string, 0, len(parts))
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					skills = append(skills, p)
+				}
+			}
+			if len(skills) > 0 {
+				result.RequiredSkills = skills
+				result.Supplied = append(result.Supplied, "required_skills")
+			}
+		}
+	}
+
+	return result
+}
+
+// buildPromoteTierOptions returns the SelectOne options for QPromoteRecommendedTier, one per
+// tier the catalog has discovered, sorted by tier string for determinism.
+//
+// The source is Deps.Catalog.Tiers() []domain.TierInfo, whose Tier field is the only one used:
+// each entry becomes domain.Option{ID: string(ti.Tier), Label: string(ti.Tier)}. TierInfo's
+// Rationale and AgentKeys are deliberately not surfaced — Rationale is the existing rationale
+// of other agents and must not be presented as a suggestion for this one. A nil or empty
+// Tiers() yields an empty option slice, which is legitimate: the question sets AllowCustom so
+// a tier no catalog agent declares yet can still be entered.
+func (s *service) buildPromoteTierOptions() []domain.Option {
+	tiers := s.deps.Catalog.Tiers()
+	opts := make([]domain.Option, 0, len(tiers))
+	for _, ti := range tiers {
+		opts = append(opts, domain.Option{
+			ID:    string(ti.Tier),
+			Label: string(ti.Tier),
+		})
+	}
+	sort.Slice(opts, func(i, j int) bool {
+		return opts[i].ID < opts[j].ID
+	})
+	return opts
+}
+
+// nextNumericID returns the numeric agent id to assign to a newly promoted agent: one
+// greater than the largest numeric id currently declared by any agent in the catalog,
+// rendered in decimal. When the catalog declares no parseable numeric id, it returns "1".
+//
+// Non-numeric and empty id values are ignored rather than treated as errors. The result
+// is deterministic for a given catalog state, which is what makes the write assertable in
+// a test.
+func nextNumericID(c catalog.Catalog) string {
+	max := 0
+	all := make([]domain.Agent, 0)
+	all = append(all, c.Agents()...)
+	all = append(all, c.UtilityAgents()...)
+	orch := c.Orchestrator()
+	if orch.Key != "" {
+		all = append(all, orch)
+	}
+	for _, a := range all {
+		if a.NumericID == "" {
+			continue
+		}
+		n, err := strconv.Atoi(a.NumericID)
+		if err != nil {
+			continue
+		}
+		if n > max {
+			max = n
+		}
+	}
+	return strconv.Itoa(max + 1)
+}
+
+// promoteDestinationPath computes where the generated generic file is written, relative
+// to the MOSAIC root:
+//
+//	category == PromoteCategoryUtility → Agents/Generic/UtilityAgents/{key}.md
+//	otherwise                          → Agents/Generic/Agents/{category}/{key}.md
+//
+// key is the source file's base name with a trailing ".agent.md" or ".md" removed — the
+// same derivation the catalog uses to key an agent, so the promoted file lands under the
+// key the user expects.
+func promoteDestinationPath(mosaicRoot, category, key string) string {
+	if category == PromoteCategoryUtility {
+		return filepath.Join(mosaicRoot, "Agents", "Generic", "UtilityAgents", key+".md")
+	}
+	return filepath.Join(mosaicRoot, "Agents", "Generic", "Agents", category, key+".md")
+}
+
+// Promote generates a generic agent source file from a single already boundary-tagged
+// harness-only agent file, so that a one-off harness-specific agent becomes reusable
+// across harnesses through the normal Deploy/Update flow.
+//
+// Collision policy: when a file already exists at the destination and req.Overwrite is
+// false, Promote returns ErrPromoteDestinationExists and writes nothing. With req.Overwrite
+// true it replaces the file. There is no silent overwrite and no automatic renaming.
+//
+// Registration is automatic: writing a well-formed file into the chosen generic agent
+// directory IS the registration — the catalog discovers agents by scanning those directories.
+func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResult, error) {
+	// Validate FilePath — there is no interactive fallback for a missing file path.
+	if req.FilePath == "" {
+		return PromoteResult{}, ErrPromoteFileRequired
+	}
+
+	// Stat the source path (following symlinks) before reading it. A missing or non-file
+	// path produces a domain error with the offending path in the message, so the user knows
+	// what to fix without seeing a localized OS error. Any other stat failure is wrapped with
+	// path information but left as an access error rather than a domain sentinel.
+	if info, statErr := os.Stat(req.FilePath); statErr != nil {
+		if os.IsNotExist(statErr) {
+			return PromoteResult{}, fmt.Errorf("promote source %s: %w", req.FilePath, ErrPromoteSourceNotFound)
+		}
+		return PromoteResult{}, fmt.Errorf("cannot access source file %s: %w", req.FilePath, statErr)
+	} else if info.IsDir() {
+		return PromoteResult{}, fmt.Errorf("promote source %s: %w", req.FilePath, ErrPromoteSourceNotFile)
+	}
+
+	// Validate and resolve the harness — runs after source-path validation, before reading.
+	// HarnessID has no interactive fallback; the caller must supply the harness it already knows.
+	if req.HarnessID == "" {
+		return PromoteResult{}, ErrPromoteHarnessRequired
+	}
+	module, resolveErr := s.deps.Registry.Resolve(req.HarnessID)
+	if resolveErr != nil {
+		return PromoteResult{}, fmt.Errorf("%w: %w", ErrPromoteHarnessUnresolvable, resolveErr)
+	}
+	defer module.Close() //nolint:errcheck // close error must not fail an otherwise complete run
+
+	// Read the source file bytes. The source is never modified or deleted by this function.
+	src, err := os.ReadFile(req.FilePath)
+	if err != nil {
+		return PromoteResult{}, fmt.Errorf("reading source file %s: %w", req.FilePath, err)
+	}
+
+	// Apply the shared two-signal eligibility rule. Reject with ErrPromoteNotTransformed
+	// when either signal is absent, so the caller learns which signal failed.
+	verdict := eligibleHarnessOnly(src)
+	if !verdict.Eligible {
+		return PromoteResult{}, fmt.Errorf("%w: %s", ErrPromoteNotTransformed, verdict.Reason)
+	}
+
+	// Derive the agent key from the source filename — the same derivation the catalog uses
+	// so the promoted file is reachable under the key the user expects.
+	key := agentKeyFromFileName(filepath.Base(req.FilePath))
+
+	// Inspect the deployed source for harness-side facts (tool entries and key presence set)
+	// before asking any questions. This is a pure parse — no I/O, no questions.
+	facts, factsErr := inspectPromoteSource(src, module.Descriptor())
+	if factsErr != nil {
+		return PromoteResult{}, factsErr
+	}
+
+	// Resolve category: use the pre-answered value (pre-answer convention — a non-empty
+	// value suppresses the interactive question entirely) or ask through Interaction.
+	category := req.Category
+	if category == "" {
+		category, err = s.askPromoteCategory(ctx, req.FilePath)
+		if err != nil {
+			return PromoteResult{}, err
+		}
+	}
+
+	// Compute the destination path before checking for collisions.
+	destPath := promoteDestinationPath(s.deps.MosaicRoot, category, key)
+
+	// Collision policy: refuse to overwrite an existing file without explicit consent.
+	// Promote never silently overwrites a generic agent; the caller must set Overwrite: true.
+	if !req.Overwrite {
+		if _, statErr := os.Stat(destPath); statErr == nil {
+			return PromoteResult{}, ErrPromoteDestinationExists
+		}
+	}
+
+	// Derive the artifact kind for the harness drop-key computation. All promoted agents
+	// use ArtifactAgent regardless of their role; the orchestrator-vs-subagent distinction
+	// reaches the harness's FrontmatterPlan through key (AD-15), not through kind.
+	kind := domain.ArtifactAgent
+
+	// Derive the harness-specific frontmatter drop-set from the resolved module's own
+	// contract (descriptor keys and plan-added key names). A plan failure is fatal:
+	// proceeding without the full drop-set would leak the harness's own added fields into
+	// the generic file — the exact defect this flow was designed to fix.
+	dropKeys, dropErr := promoteHarnessDropKeys(module, kind, key)
+	if dropErr != nil {
+		return PromoteResult{}, fmt.Errorf("deriving harness frontmatter drop-set: %w", dropErr)
+	}
+
+	// Reverse-map the harness tool entries to the authoritative generic tools list.
+	// resolvePromoteTools returns a non-nil slice (AD-7) so it is always authoritative.
+	resolvedTools, verbatimTools := s.resolvePromoteTools(ctx, module, facts.HarnessTools, req.FilePath)
+
+	// Recover the generic-only fields the harness dropped at deploy time.
+	recovered := s.resolvePromoteGenericFields(ctx, facts, req.FilePath)
+
+	// Assign a unique numeric id: one greater than the largest id in the loaded catalog.
+	// This is deterministic for a given catalog state and the test asserts no collision.
+	numericID := nextNumericID(s.deps.Catalog)
+
+	// Generate the generic agent bytes from the harness-only source. The generation core
+	// is pure: src is not modified and no file is written here.
+	genericBytes, err := buildGenericAgent(PromoteInput{
+		Source:          src,
+		NumericID:       numericID,
+		Key:             key,
+		Role:            verdict.Meta.Role,
+		Version:         verdict.Meta.Version,
+		DropKeys:        dropKeys,
+		Tools:           resolvedTools,
+		RecommendedTier: recovered.RecommendedTier,
+		TierRationale:   recovered.TierRationale,
+		RequiredSkills:  recovered.RequiredSkills,
+	})
+	if err != nil {
+		return PromoteResult{}, err
+	}
+
+	// Write the generated file to the destination, unless this is a dry run. A dry run
+	// validates and computes everything but writes no file. DestinationPath is always
+	// populated — for dry-run it reflects the path that would have been written.
+	if req.DryRun {
+		return PromoteResult{
+			SourcePath:      req.FilePath,
+			DestinationPath: destPath,
+			Key:             key,
+			NumericID:       numericID,
+			Category:        category,
+			DryRun:          true,
+			HarnessID:       req.HarnessID,
+			Tools:           resolvedTools,
+			VerbatimTools:   verbatimTools,
+			RecoveredFields: recovered.Supplied,
+		}, nil
+	}
+
+	if mkErr := os.MkdirAll(filepath.Dir(destPath), 0o755); mkErr != nil {
+		return PromoteResult{}, fmt.Errorf("creating destination directory: %w", mkErr)
+	}
+	if writeErr := os.WriteFile(destPath, genericBytes, 0o644); writeErr != nil {
+		return PromoteResult{}, fmt.Errorf("writing promoted agent file: %w", writeErr)
+	}
+
+	return PromoteResult{
+		SourcePath:      req.FilePath,
+		DestinationPath: destPath,
+		Key:             key,
+		NumericID:       numericID,
+		Category:        category,
+		DryRun:          false,
+		HarnessID:       req.HarnessID,
+		Tools:           resolvedTools,
+		VerbatimTools:   verbatimTools,
+		RecoveredFields: recovered.Supplied,
+	}, nil
+}
+
+// askPromoteCategory asks the user to select a target category for the promoted agent.
+// It returns ErrPromoteCategoryRequired when the question is cancelled, skipped, or unanswered.
+// Placement is never guessed: any non-Answered outcome becomes a hard error.
+func (s *service) askPromoteCategory(ctx context.Context, srcPath string) (string, error) {
+	opts, err := s.buildPromoteCategoryOptions()
+	if err != nil {
+		return "", fmt.Errorf("reading promote category options: %w", err)
+	}
+
+	ans, err := s.deps.Interaction.SelectOne(ctx, domain.ChoiceQuestion{
+		Question: domain.Question{
+			ID:        domain.QPromoteCategory,
+			Subject:   srcPath,
+			Title:     "Select a target category for the promoted agent",
+			AllowSkip: true,
+		},
+		Options: opts,
+	})
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrPromoteCategoryRequired, err)
+	}
+	if ans.Status != domain.Answered {
+		return "", ErrPromoteCategoryRequired
+	}
+	return ans.OptionID, nil
+}
+
+// buildPromoteCategoryOptions returns the SelectOne options for QPromoteCategory.
+// Options are derived from the subdirectories present under Agents/Generic/Agents/ in the
+// MOSAIC root, each with Option.ID equal to the directory name, plus one option with
+// Option.ID equal to PromoteCategoryUtility. Options are sorted by ID so the presented
+// list is deterministic regardless of filesystem ordering.
+func (s *service) buildPromoteCategoryOptions() ([]domain.Option, error) {
+	agentsDir := filepath.Join(s.deps.MosaicRoot, "Agents", "Generic", "Agents")
+	entries, err := os.ReadDir(agentsDir)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("reading Agents/Generic/Agents/: %w", err)
+	}
+
+	var opts []domain.Option
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		opts = append(opts, domain.Option{
+			ID:    name,
+			Label: name,
+		})
+	}
+
+	// Add the utility-agents placement option.
+	opts = append(opts, domain.Option{
+		ID:    PromoteCategoryUtility,
+		Label: "Utility Agents (Agents/Generic/UtilityAgents/)",
+	})
+
+	// Sort by ID for deterministic ordering regardless of filesystem readdir order.
+	sort.Slice(opts, func(i, j int) bool {
+		return opts[i].ID < opts[j].ID
+	})
+
+	return opts, nil
+}

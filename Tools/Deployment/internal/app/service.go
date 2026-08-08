@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -78,6 +79,137 @@ type Service interface {
 	//
 	// Hook artifacts remain entirely out of scope and registrations are always cleared.
 	UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest) (domain.RunSummary, error)
+
+	// Promote generates a generic agent source file from a single already boundary-tagged
+	// harness-only agent file, so that a one-off harness-specific agent becomes reusable
+	// across harnesses through the normal Deploy/Update flow.
+	//
+	// The source file must satisfy the two-signal eligibility rule — `transform_version` in
+	// frontmatter AND a structurally valid set of canonical boundary tags. An ineligible file
+	// is rejected with an error wrapping ErrPromoteNotTransformed and nothing is written.
+	//
+	// The target category is asked through Interaction when req.Category is empty; it is
+	// never inferred from the source file.
+	//
+	// Registration is automatic and is a consequence of placement: the catalog discovers
+	// agents by scanning Agents/Generic/Orchestrator/, Agents/Generic/Agents/{category}/, and
+	// Agents/Generic/UtilityAgents/, so writing a well-formed file into the chosen directory
+	// with a unique numeric id IS the registration. No catalog file is edited.
+	//
+	// The harness-only source file is never modified or deleted. Deploying the promoted agent
+	// out to a harness is a separate, user-initiated step.
+	//
+	// Promote is never invoked by Update.
+	//
+	// Unlike DeployNew/Update/UpdateWorkflows, Promote has no partial-success state: it either
+	// produces the generic file (or, under DryRun, fully validates it) or it produces nothing.
+	// Returns a populated PromoteResult with a nil error on success, and the zero-value
+	// PromoteResult with a non-nil error on every failure. A caller may therefore treat
+	// err != nil as "nothing was written" without inspecting the result.
+	//
+	// Error set:
+	//   - req.FilePath == ""                          → ErrPromoteFileRequired
+	//   - req.FilePath does not exist                 → wraps ErrPromoteSourceNotFound
+	//   - req.FilePath exists but is not a file       → wraps ErrPromoteSourceNotFile
+	//   - req.HarnessID == ""                         → ErrPromoteHarnessRequired
+	//   - req.HarnessID names no registered harness   → wraps ErrPromoteHarnessUnresolvable
+	//   - source ineligible                           → wraps ErrPromoteNotTransformed
+	//   - destination occupied and Overwrite false    → wraps ErrPromoteDestinationExists
+	//   - no category supplied and none obtained      → ErrPromoteCategoryRequired
+	//
+	// Source-path validation (not-found, not-a-file) runs before any read, before eligibility
+	// evaluation, before the category question, and before any destination computation.
+	// Neither source-path failure writes any file or asks the category question. Harness
+	// validation runs after source-path validation and before the source read, eligibility
+	// evaluation, and the category question.
+	Promote(ctx context.Context, req PromoteRequest) (PromoteResult, error)
+}
+
+// PromoteCategoryUtility is the sentinel Category value selecting
+// Agents/Generic/UtilityAgents/ rather than a subdirectory of Agents/Generic/Agents/.
+const PromoteCategoryUtility = "UtilityAgents"
+
+// ErrPromoteFileRequired reports a PromoteRequest with an empty FilePath.
+var ErrPromoteFileRequired = errors.New("promote requires a source file path")
+
+// ErrPromoteHarnessRequired reports a PromoteRequest with an empty HarnessID. Promote has
+// no interactive harness fallback; the caller must supply the harness it already knows.
+var ErrPromoteHarnessRequired = errors.New("promote requires a harness id")
+
+// ErrPromoteHarnessUnresolvable reports a HarnessID that names no registered harness.
+// The wrapping error carries the registry's own failure reason.
+var ErrPromoteHarnessUnresolvable = errors.New("promote harness id names no registered harness")
+
+// ErrPromoteDestinationExists reports a generic file already present at the computed
+// destination path when req.Overwrite is false. Promote never silently overwrites an
+// existing generic agent.
+var ErrPromoteDestinationExists = errors.New("a generic agent already exists at the destination path")
+
+// ErrPromoteSourceNotFound reports a PromoteRequest whose FilePath does not exist.
+var ErrPromoteSourceNotFound = errors.New("promote source file does not exist")
+
+// ErrPromoteSourceNotFile reports a PromoteRequest whose FilePath exists but is not a
+// regular file — most commonly a directory. Promote takes exactly one harness-only agent
+// file; a directory is never valid input.
+var ErrPromoteSourceNotFile = errors.New("promote source path is not a file; a single agent file is required")
+
+// ErrPromoteCategoryRequired reports that no category was supplied and none was obtained
+// from the user (the question was cancelled or skipped).
+var ErrPromoteCategoryRequired = errors.New("promote requires a target category")
+
+// PromoteRequest carries the caller's pre-answers for the promote flow. A set field is
+// used directly without asking; an unset field causes the flow to ask through Interaction.
+type PromoteRequest struct {
+	// FilePath is the harness-only agent file to promote. Required; there is no
+	// interactive fallback for it.
+	FilePath string
+	// Category is the destination placement. An empty value causes QPromoteCategory to
+	// be asked. A value of PromoteCategoryUtility places the file under
+	// Agents/Generic/UtilityAgents/; any other value names a subdirectory under
+	// Agents/Generic/Agents/.
+	Category string
+	// Overwrite is explicit consent to replace an existing file at the destination
+	// path. Without it a collision is refused.
+	Overwrite bool
+	// DryRun computes and validates everything but writes no file.
+	DryRun bool
+	// HarnessID names the harness that produced the deployed file being promoted. It is
+	// required and has no interactive fallback: the TUI supplies its already-selected
+	// harness and the CLI supplies the --harness flag. An empty value is
+	// ErrPromoteHarnessRequired; a value naming no registered harness is
+	// ErrPromoteHarnessUnresolvable. Neither writes a file.
+	HarnessID string
+}
+
+// PromoteResult describes what a successful promote produced. It is returned populated only
+// when Service.Promote returns a nil error; on any failure it is the zero value.
+type PromoteResult struct {
+	// SourcePath is the harness-only file that was read. It is never modified or deleted.
+	SourcePath string `json:"sourcePath"`
+	// DestinationPath is the generic file written, relative to the MOSAIC root.
+	DestinationPath string `json:"destinationPath"`
+	// Key is the agent key the catalog will derive from the written file.
+	Key string `json:"key"`
+	// NumericID is the id assigned to the new agent.
+	NumericID string `json:"numericId"`
+	// Category is the resolved placement, either PromoteCategoryUtility or a
+	// subdirectory name under Agents/Generic/Agents/.
+	Category string `json:"category"`
+	// DryRun reports that nothing was written.
+	DryRun bool `json:"dryRun"`
+	// HarnessID echoes the harness the promotion was interpreted against, so a caller
+	// can confirm the outcome without re-reading the file.
+	HarnessID string `json:"harnessId"`
+	// Tools is the generic tools list written to the promoted file, in written order.
+	// Empty when the source declared no harness-side tool entries.
+	Tools []string `json:"tools,omitempty"`
+	// VerbatimTools names the harness-side tool entries that reached the generic tools
+	// list unchanged because no reverse mapping existed and no generic name was supplied.
+	// A non-empty value is the documented limitation of the autonomous path, not an error.
+	VerbatimTools []string `json:"verbatimTools,omitempty"`
+	// RecoveredFields names the generic-only frontmatter fields the user supplied during
+	// this run, in ask order. Fields left absent are not listed.
+	RecoveredFields []string `json:"recoveredFields,omitempty"`
 }
 
 // New constructs a Service with the supplied dependency set.

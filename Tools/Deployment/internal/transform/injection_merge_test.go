@@ -51,14 +51,17 @@ func newInjectionFixtureModule(t *testing.T) domain.HarnessModule {
 //
 // The injection vocabulary used in these fixtures:
 //   HarnessConstraints  — InjectionHarness (filled from descriptor every time)
-//   CustomConstraints   — InjectionHarness (filled from descriptor if declared, emptied if not)
 //   CodebaseContext     — InjectionProject (preserved on update, empty on create)
 //   IdentityExtension   — InjectionProject (preserved on update, empty on create)
+//
+// HarnessConstraints is the sole InjectionHarness canonical name. CustomConstraints, which
+// this fixture set formerly used as a second harness-class region to exercise the
+// "declared but left empty by the module" path, has been removed from the canonical
+// vocabulary entirely and can no longer appear under [[DEPLOYED:]].
 // ---------------------------------------------------------------------------
 
-// mergeSourceBase is a generic source that has one harness injection (HarnessConstraints),
-// one harness injection left empty by the fixture module (CustomConstraints), and one
-// project injection (IdentityExtension) across two sections.
+// mergeSourceBase is a generic source that has one harness injection (HarnessConstraints)
+// and one project injection (IdentityExtension) across two sections.
 const mergeSourceBase = `---
 id: 10
 version: 2.0.0
@@ -87,9 +90,6 @@ Always be helpful.
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 [[/SECTION:Constraints]]
 `
 
@@ -125,10 +125,6 @@ Always be helpful.
 [[DEPLOYED:HarnessConstraints]]
 Old harness constraint text that should be replaced on every transform.
 [[/DEPLOYED:HarnessConstraints]]
-
-[[DEPLOYED:CustomConstraints]]
-User-defined custom constraint: never access /etc/passwd.
-[[/DEPLOYED:CustomConstraints]]
 [[/SECTION:Constraints]]
 `
 
@@ -242,9 +238,6 @@ func TestNewDeployment_ProjectInjections_EmittedEmpty(t *testing.T) {
 	}
 
 	// Project injections in mergeSourceBase that must be empty on first deployment.
-	// CustomConstraints is InjectionHarness (not project-level); it is omitted here
-	// because the fixture harness does not declare CustomConstraints content, so it is
-	// emptied via the harness path (not the project path), and it produces no gap.
 	projectInjections := []string{"IdentityExtension"}
 
 	outDoc, err := docformat.Parse(result.Output)
@@ -311,10 +304,7 @@ func TestNewDeployment_ProjectInjections_GapsEmitted(t *testing.T) {
 		}
 	}
 
-	// Only project-class injections produce GapEmptyInjection gaps. CustomConstraints is
-	// InjectionHarness (reclassified globally so VS Code GHCP can fill it at the harness
-	// level); harness injections never emit gaps even when the fixture harness leaves them
-	// empty.
+	// Only project-class injections produce GapEmptyInjection gaps.
 	projectInjections := []string{"IdentityExtension"}
 	for _, name := range projectInjections {
 		if !emptyGaps[name] {
@@ -324,13 +314,9 @@ func TestNewDeployment_ProjectInjections_GapsEmitted(t *testing.T) {
 	}
 
 	// Harness-level injections must NOT produce GapEmptyInjection gaps (they are always filled
-	// or intentionally empty from the harness). Both HarnessConstraints and CustomConstraints
-	// are InjectionHarness.
+	// or intentionally empty from the harness).
 	if emptyGaps["HarnessConstraints"] {
 		t.Error("HarnessConstraints must not produce a GapEmptyInjection gap; it is a harness injection")
-	}
-	if emptyGaps["CustomConstraints"] {
-		t.Error("CustomConstraints must not produce a GapEmptyInjection gap; it is a harness injection")
 	}
 }
 
@@ -369,10 +355,6 @@ func TestUpdate_ProjectInjection_ContentLiftedByteIdentically(t *testing.T) {
 	}
 
 	// Verify each project injection in turn.
-	// CustomConstraints is InjectionHarness and is excluded here: on update the harness
-	// path refreshes it from the module (not from the deployed file). The fixture harness
-	// does not declare CustomConstraints content, so applyHarnessInjection returns
-	// InjectionEmptied for it — the deployed content is intentionally discarded.
 	cases := []struct {
 		name       string
 		wantAction transform.RegionAction

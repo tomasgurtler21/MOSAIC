@@ -17,6 +17,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -37,9 +38,11 @@ type stubFlowService struct {
 	deploy          domain.RunSummary
 	update          domain.RunSummary
 	workflows       domain.RunSummary
+	promote         app.PromoteResult
 	deployErr       error
 	updateErr       error
 	workflowsErr    error
+	promoteErr      error
 }
 
 func (s *stubFlowService) ListHarnesses() []domain.HarnessRef { return s.harnesses }
@@ -51,6 +54,9 @@ func (s *stubFlowService) Update(_ context.Context, _ app.UpdateRequest) (domain
 }
 func (s *stubFlowService) UpdateWorkflows(_ context.Context, _ app.WorkflowUpdateRequest) (domain.RunSummary, error) {
 	return s.workflows, s.workflowsErr
+}
+func (s *stubFlowService) Promote(_ context.Context, _ app.PromoteRequest) (app.PromoteResult, error) {
+	return s.promote, s.promoteErr
 }
 
 // ---------------------------------------------------------------------------
@@ -484,5 +490,130 @@ func TestFullKeyboardFlow_CtrlC_CancelsFromAnyEntryScreen(t *testing.T) {
 				t.Errorf("cmd = nil after ctrl+c on %s screen; want tea.Quit", tc.name)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stage 3 — T3.2: Regression tests — non-promote modes keep directory kind
+// ---------------------------------------------------------------------------
+
+// TestDeployMode_PathScreen_AcceptsWorkspaceDirectory verifies that entering an existing
+// writable workspace directory in deploy-new mode advances to screenRunning. This is a
+// regression test confirming that adding file-kind validation to promote mode does not
+// accidentally change the path kind for deploy-new.
+func TestDeployMode_PathScreen_AcceptsWorkspaceDirectory(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	m := newFlowModel(newFlowSvc(workspace), workspace)
+
+	// Navigate to deploy-new workspace screen.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select deploy-new → workspace
+
+	if m.screen != screenWorkspace {
+		t.Fatalf("precondition: screen = %v, want screenWorkspace", m.screen)
+	}
+
+	// Act: Enter on the workspace directory.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Assert: directory accepted.
+	if m.screen != screenRunning {
+		t.Errorf("screen = %v after Enter on directory in deploy-new mode; want screenRunning; "+
+			"deploy-new must keep directory-kind validation after the promote path-kind fix", m.screen)
+	}
+}
+
+// TestUpdateMode_PathScreen_AcceptsWorkspaceDirectory verifies that entering an existing
+// writable workspace directory in update mode advances to screenRunning. This is a regression
+// test ensuring the path-kind fix for promote mode does not affect update mode.
+func TestUpdateMode_PathScreen_AcceptsWorkspaceDirectory(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	m := newFlowModel(newFlowSvc(workspace), workspace)
+
+	// Navigate to update workspace screen.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select update → workspace
+
+	if m.screen != screenWorkspace {
+		t.Fatalf("precondition: screen = %v, want screenWorkspace", m.screen)
+	}
+
+	// Act: Enter on the workspace directory.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Assert: directory accepted.
+	if m.screen != screenRunning {
+		t.Errorf("screen = %v after Enter on directory in update mode; want screenRunning; "+
+			"update must keep directory-kind validation after the promote path-kind fix", m.screen)
+	}
+}
+
+// TestWorkflowsOnlyMode_PathScreen_AcceptsWorkspaceDirectory verifies that entering an
+// existing writable workspace directory in workflows-only mode advances to screenRunning. This
+// is a regression test ensuring the path-kind fix for promote mode does not affect
+// workflows-only mode.
+func TestWorkflowsOnlyMode_PathScreen_AcceptsWorkspaceDirectory(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := newFlowSvc(workspace)
+	svc.workflows = domain.RunSummary{
+		Mode:           domain.ModeWorkflowsOnly,
+		WorkspacePath:  workspace,
+		DeploymentRoot: workspace + "/.ai",
+		Outcome:        domain.OutcomeSuccess,
+	}
+	m := newFlowModel(svc, workspace)
+
+	// Navigate to workflows-only workspace screen.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select workflows-only → workspace
+
+	if m.screen != screenWorkspace {
+		t.Fatalf("precondition: screen = %v, want screenWorkspace", m.screen)
+	}
+
+	// Act: Enter on the workspace directory.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Assert: directory accepted.
+	if m.screen != screenRunning {
+		t.Errorf("screen = %v after Enter on directory in workflows-only mode; want screenRunning; "+
+			"workflows-only must keep directory-kind validation after the promote path-kind fix", m.screen)
+	}
+}
+
+// TestDeployMode_PathScreen_View_ContainsDirectoryWording verifies that the path screen in
+// deploy-new mode shows directory-oriented wording. This is a regression test guarding against
+// the path kind for deploy-new being accidentally changed to file kind, which would change the
+// wording even if the validator were somehow still accepting directories.
+func TestDeployMode_PathScreen_View_ContainsDirectoryWording(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	m := newFlowModel(newFlowSvc(workspace), workspace)
+
+	// Navigate to deploy-new workspace screen.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select deploy-new → workspace
+
+	if m.screen != screenWorkspace {
+		t.Fatalf("precondition: screen = %v, want screenWorkspace", m.screen)
+	}
+
+	// Act
+	lower := strings.ToLower(m.View())
+
+	// Assert: directory-oriented wording must be present; file-only wording must be absent.
+	if !strings.Contains(lower, "directory") && !strings.Contains(lower, "workspace") {
+		t.Errorf("path screen view in deploy-new mode contains neither 'directory' nor 'workspace' wording; "+
+			"want directory-oriented wording:\n%s", m.View())
+	}
+	if strings.Contains(lower, "agent file") {
+		t.Errorf("path screen view in deploy-new mode contains 'agent file' wording; "+
+			"want directory-oriented wording only:\n%s", m.View())
 	}
 }

@@ -110,6 +110,11 @@ type rootModel struct {
 	// Post-run summary screen (shown on screenDone after a successful or partial run).
 	summaryScreen *screens.SummaryScreen
 
+	// Post-promote summary screen (shown on screenDone after a successful promote run).
+	// Exactly one of summaryScreen and promoteScreen is non-nil in screenDone, decided by
+	// which completion message arrived. The other is nil.
+	promoteScreen *screens.PromoteSummaryScreen
+
 	// Status / error shown during screenRunning.
 	statusMsg string
 	errMsg    string
@@ -209,6 +214,9 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.summaryScreen != nil {
 			m.summaryScreen.Resize(m.width, m.height)
 		}
+		if m.promoteScreen != nil {
+			m.promoteScreen.Resize(m.width, m.height)
+		}
 		return m, nil
 	}
 
@@ -222,6 +230,12 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenDone
 		style := stylesFromTheme(m.theme)
 		m.summaryScreen = screens.NewSummaryScreen(doneMsg.summary, m.width, m.height, style)
+		return m, nil
+	}
+	if doneMsg, ok := msg.(promoteDoneMsg); ok {
+		m.screen = screenDone
+		style := stylesFromTheme(m.theme)
+		m.promoteScreen = screens.NewPromoteSummaryScreen(doneMsg.result, m.width, m.height, style)
 		return m, nil
 	}
 	if errMsg, ok := msg.(runErrorMsg); ok {
@@ -254,6 +268,13 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// No navigation while running.
 		return m, nil
 	case screenDone:
+		if m.promoteScreen != nil {
+			done := m.promoteScreen.Update(msg)
+			if done {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
 		if m.summaryScreen != nil {
 			done := m.summaryScreen.Update(msg)
 			if done {
@@ -333,6 +354,13 @@ func (m *rootModel) updateMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.modeScreen.Done() {
 		m.selections.mode = m.modeScreen.SelectedMode()
 		m.modeScreen.Reset()
+		// Set the path kind on every mode→path transition so that back-navigation
+		// followed by a different mode selection always applies the correct kind.
+		if m.selections.mode == domain.ModePromote {
+			m.wsScreen.SetPathKind(screens.PathKindFile)
+		} else {
+			m.wsScreen.SetPathKind(screens.PathKindDirectory)
+		}
 		m.screen = screenWorkspace
 		// Start the text input cursor blink.
 		return m, m.wsScreen.InputInit()
@@ -352,7 +380,11 @@ func (m *rootModel) updateWorkspace(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selections.workspacePath = m.wsScreen.WorkspacePath()
 		m.wsScreen.Reset()
 		m.screen = screenRunning
-		m.statusMsg = "Running deployment…"
+		if m.selections.mode == domain.ModePromote {
+			m.statusMsg = "Running promote…"
+		} else {
+			m.statusMsg = "Running deployment…"
+		}
 		return m, m.startService()
 	}
 	return m, cmd
@@ -697,6 +729,19 @@ func (m *rootModel) startService() tea.Cmd {
 			}
 			return runDoneMsg{summary: summary}
 
+		case domain.ModePromote:
+			// Category is left empty so the interactive QPromoteCategory question is asked.
+			// workspacePath carries the agent file path collected by the file-kind path screen.
+			// harnessID comes from the harness screen selection — no additional harness question is asked.
+			result, err := svc.Promote(ctx, app.PromoteRequest{
+				FilePath:  sel.workspacePath,
+				HarnessID: sel.harnessID,
+			})
+			if err != nil {
+				return runErrorMsg{err: err}
+			}
+			return promoteDoneMsg{result: result}
+
 		default:
 			return runErrorMsg{err: fmt.Errorf("unknown mode: %q", sel.mode)}
 		}
@@ -706,6 +751,12 @@ func (m *rootModel) startService() tea.Cmd {
 // runDoneMsg signals that the service call completed and carries the run summary.
 type runDoneMsg struct {
 	summary domain.RunSummary
+}
+
+// promoteDoneMsg signals that Service.Promote completed and carries the promote result.
+// It is the promote-mode counterpart of runDoneMsg, which remains RunSummary-only.
+type promoteDoneMsg struct {
+	result app.PromoteResult
 }
 
 // runErrorMsg signals that the service call returned an error.
@@ -774,6 +825,9 @@ func (m *rootModel) viewRunning() string {
 }
 
 func (m *rootModel) viewDone() string {
+	if m.promoteScreen != nil {
+		return m.promoteScreen.View()
+	}
 	if m.summaryScreen != nil {
 		return m.summaryScreen.View()
 	}

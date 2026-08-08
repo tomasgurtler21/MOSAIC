@@ -64,10 +64,13 @@ package vscodeghcp_test
 //   - The step is present with a non-empty Instruction so the TODO checklist can render it.
 //
 //   Harness-level injection content and injections_version:
-//   - HarnessConstraints is filled with the file-reading behavioral constraint text.
-//   - CustomConstraints is filled with the parallel tool calls instruction text.
-//     (VS Code GHCP declares both as harness-level injections in its descriptor.)
-//   - LanguagePatterns is declared with empty content (no language pattern injection).
+//   - HarnessConstraints is filled with the file-reading behavioral constraint text followed
+//     by the parallel tool calls instruction text, joined by a blank line. The parallel tool
+//     calls text was formerly under CustomConstraints; that region has been removed from the
+//     canonical vocabulary and the text now lives in HarnessConstraints alongside the
+//     file-reading guidance.
+//   - LanguagePatterns is not filled — it is a project-authored injection name, not declared
+//     by this harness.
 //   - injections_version is "1.3.0" per the VS Code GHCP HarnessInjections.md.
 //   - Project-class injections not declared by the descriptor are not filled.
 //
@@ -103,22 +106,30 @@ var testModel = domain.ModelSelection{
 	Origin:  domain.OriginHarnessList,
 }
 
-// vscodeGHCPFileReadingConstraint is the expected content of the HarnessConstraints injection.
-// VS Code GHCP injects the file-reading behavioral constraint as a harness-level injection
-// because agents running on this platform commonly stop reading mid-file.
-// Source: Agents/VS code GHCP/HarnessInjections.md (harness_constraints section, item 1).
+// vscodeGHCPFileReadingConstraint is the file-reading behavioral constraint text. VS Code
+// GHCP injects it as part of the harness-level HarnessConstraints injection because agents
+// running on this platform commonly stop reading mid-file. It is the first of two paragraphs
+// in the merged HarnessConstraints content; see vscodeGHCPHarnessConstraints.
+// Source: Agents/VS code GHCP/HarnessInjections.md (HarnessConstraints section, first paragraph).
 const vscodeGHCPFileReadingConstraint = "When reading a file with the intent to read it fully, **never assume the file is complete just because the last returned line is blank or ends a section.** Always verify you have reached the true end:\n" +
 	"- After reading a chunk, check if you received fewer lines than you requested — that signals the actual end of file\n" +
 	"- If you received as many lines as requested, the file likely continues — issue another read starting from where the last one ended\n" +
 	"- Keep paginating until you receive a short (or empty) response\n" +
 	"- **Exception:** If you are intentionally reading a specific range (e.g., to find a particular function or section), you do not need to read the rest of the file"
 
-// vscodeGHCPParallelToolCalls is the expected content of the CustomConstraints injection.
-// VS Code GHCP declares CustomConstraints as a harness-level injection (unlike other harnesses
-// that leave it project-level) because the parallel tool call pattern is a behavioural requirement
-// imposed by this platform's cost model, not by any individual project.
-// Source: Agents/VS code GHCP/HarnessInjections.md (harness_constraints section, item 2).
+// vscodeGHCPParallelToolCalls is the parallel tool calls instruction text. VS Code GHCP
+// merges this into the HarnessConstraints injection (unlike other harnesses, which leave it
+// project-level) because the parallel tool call pattern is a behavioural requirement imposed
+// by this platform's cost model, not by any individual project. It formerly lived under a
+// separate CustomConstraints region; that name has been removed from the canonical vocabulary
+// and the text now lives alongside the file-reading guidance in HarnessConstraints.
+// Source: Agents/VS code GHCP/HarnessInjections.md (HarnessConstraints section, second paragraph).
 const vscodeGHCPParallelToolCalls = "**Parallel Tool Calls:** Issue multiple independent tool calls in a single response whenever possible. Sequential tool calls are only permitted when a later call depends on the result of an earlier one. This minimises inference API calls to improve speed and reduce cost."
+
+// vscodeGHCPHarnessConstraints is the full expected content of the merged HarnessConstraints
+// injection: the file-reading constraint followed by the parallel tool calls instruction,
+// joined by a blank line, matching the single HarnessConstraints block in HarnessInjections.md.
+const vscodeGHCPHarnessConstraints = vscodeGHCPFileReadingConstraint + "\n\n" + vscodeGHCPParallelToolCalls
 
 // repoRoot returns the absolute path to the repository root, navigating up from this
 // package's directory. The test is skipped if the root cannot be located.
@@ -1153,43 +1164,35 @@ func TestInjection_VSCodeGHCP_HarnessConstraintsFilledWithFileReadingWarning(t *
 }
 
 // TestInjection_VSCodeGHCP_HarnessConstraintsExactContent verifies the full expected content
-// of the HarnessConstraints injection against the reference in HarnessInjections.md.
+// of the HarnessConstraints injection against the reference in HarnessInjections.md: the
+// file-reading constraint followed by the parallel tool calls instruction, joined by a blank
+// line. The parallel tool calls text formerly lived under a separate CustomConstraints region;
+// that region has been removed from the canonical vocabulary and merged back into
+// HarnessConstraints, so this single assertion now covers both paragraphs.
 func TestInjection_VSCodeGHCP_HarnessConstraintsExactContent(t *testing.T) {
 	mod := newModule(t)
 	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints"})
 	if !ok {
 		t.Fatal("Injection(\"HarnessConstraints\") returned ok=false")
 	}
-	if content != vscodeGHCPFileReadingConstraint {
-		t.Errorf("Injection(\"HarnessConstraints\"):\n  got:  %q\n  want: %q", content, vscodeGHCPFileReadingConstraint)
+	if content != vscodeGHCPHarnessConstraints {
+		t.Errorf("Injection(\"HarnessConstraints\"):\n  got:  %q\n  want: %q", content, vscodeGHCPHarnessConstraints)
 	}
 }
 
-// TestInjection_VSCodeGHCP_CustomConstraintsFilledWithParallelToolCalls verifies that
-// CustomConstraints is filled with the parallel tool calls instruction. VS Code GHCP declares
-// this as a harness-level injection because parallel tool call behaviour is a platform cost
-// optimisation, not a project-specific constraint.
-func TestInjection_VSCodeGHCP_CustomConstraintsFilledWithParallelToolCalls(t *testing.T) {
+// TestInjection_VSCodeGHCP_HarnessConstraintsContainsParallelToolCalls verifies that the
+// parallel tool calls instruction is present within the merged HarnessConstraints injection.
+// This content previously lived under a separate CustomConstraints region; CustomConstraints
+// has been removed from the canonical vocabulary and the text relocated here rather than
+// dropped, so coverage of it must survive under its new home.
+func TestInjection_VSCodeGHCP_HarnessConstraintsContainsParallelToolCalls(t *testing.T) {
 	mod := newModule(t)
-	content, ok := mod.Injection(domain.InjectionRequest{Name: "CustomConstraints"})
+	content, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints"})
 	if !ok {
-		t.Fatal("Injection(\"CustomConstraints\") returned ok=false; VS Code GHCP fills CustomConstraints at the harness level with the parallel tool calls instruction")
+		t.Fatal("Injection(\"HarnessConstraints\") returned ok=false; VS Code GHCP fills HarnessConstraints at the harness level, now including the parallel tool calls instruction")
 	}
-	if content != vscodeGHCPParallelToolCalls {
-		t.Errorf("Injection(\"CustomConstraints\"):\n  got:  %q\n  want: %q", content, vscodeGHCPParallelToolCalls)
-	}
-}
-
-// TestInjection_VSCodeGHCP_LanguagePatternsIsEmpty verifies that LanguagePatterns is declared
-// with empty content (VS Code GHCP has no language-specific pattern injection).
-func TestInjection_VSCodeGHCP_LanguagePatternsIsEmpty(t *testing.T) {
-	mod := newModule(t)
-	content, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns"})
-	if !ok {
-		t.Fatal("Injection(\"LanguagePatterns\") returned ok=false; VS Code GHCP must declare this injection")
-	}
-	if content != "" {
-		t.Errorf("Injection(\"LanguagePatterns\") = %q; want empty string (no language pattern injection)", content)
+	if !strings.Contains(content, vscodeGHCPParallelToolCalls) {
+		t.Errorf("Injection(\"HarnessConstraints\") does not contain the parallel tool calls text.\ngot: %q\nwant content containing: %q", content, vscodeGHCPParallelToolCalls)
 	}
 }
 
@@ -1198,11 +1201,17 @@ func TestInjection_VSCodeGHCP_LanguagePatternsIsEmpty(t *testing.T) {
 func TestInjection_VSCodeGHCP_ProjectInjectionsNotFilled(t *testing.T) {
 	mod := newModule(t)
 	// These project-class injections are not declared by VS Code GHCP as harness-level.
+	// LanguagePatterns and CustomConstraints are both included: neither is declared by this
+	// harness — CustomConstraints has been removed from the canonical vocabulary entirely
+	// (its content merged into HarnessConstraints), and LanguagePatterns is a
+	// project-authored injection name, not a harness-declared one.
 	projectInjections := []string{
 		"IdentityExtension",
 		"ProtocolExtension",
 		"CodebaseContext",
+		"LanguagePatterns",
 		"OutputArtifactTemplate",
+		"CustomConstraints",
 		"ErrorHandlingExtension",
 		"ContextLimits",
 	}
@@ -1404,16 +1413,16 @@ func TestContract_VSCodeGHCP(t *testing.T) {
 		},
 
 		InjectionCases: map[string]string{
-			"HarnessConstraints": vscodeGHCPFileReadingConstraint,
-			"CustomConstraints":  vscodeGHCPParallelToolCalls,
-			"LanguagePatterns":   "",
+			"HarnessConstraints": vscodeGHCPHarnessConstraints,
 		},
 
 		NotFilled: []string{
 			"IdentityExtension",
 			"ProtocolExtension",
 			"CodebaseContext",
+			"LanguagePatterns",
 			"OutputArtifactTemplate",
+			"CustomConstraints",
 			"ErrorHandlingExtension",
 			"ContextLimits",
 			"AvailableWorkflows",

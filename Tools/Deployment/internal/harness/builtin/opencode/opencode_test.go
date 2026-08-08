@@ -52,7 +52,8 @@ package opencode_test
 //
 //   Harness-level injections:
 //   - HarnessConstraints is filled with the parallel tool calls and working directory note.
-//   - LanguagePatterns is declared but empty.
+//   - LanguagePatterns is not filled — it is a project-authored injection name, not declared
+//     by this harness.
 //   - injections_version is "1.3.1" per the OpenCode descriptor.
 //   - Project-class injections (IdentityExtension, ProtocolExtension, etc.) are not filled.
 //
@@ -1187,27 +1188,17 @@ func TestInjection_OpenCode_HarnessConstraintsFilled(t *testing.T) {
 	}
 }
 
-// TestInjection_OpenCode_LanguagePatternsIsEmpty verifies that LanguagePatterns is
-// declared but empty (no language-specific pattern guidance for OpenCode agents).
-func TestInjection_OpenCode_LanguagePatternsIsEmpty(t *testing.T) {
-	mod := newModule(t)
-	content, ok := mod.Injection(domain.InjectionRequest{Name: "LanguagePatterns"})
-	if !ok {
-		t.Fatal("Injection(\"LanguagePatterns\") returned ok=false; OpenCode must declare this injection")
-	}
-	if content != "" {
-		t.Errorf("Injection(\"LanguagePatterns\") = %q; want empty string", content)
-	}
-}
-
 // TestInjection_OpenCode_ProjectInjectionsNotFilled verifies that project-class injections
 // are not filled by the OpenCode harness (they are preserved on update, empty on create).
+// LanguagePatterns is included here: it is a project-authored injection name, not a
+// harness-declared one, so OpenCode must not fill it.
 func TestInjection_OpenCode_ProjectInjectionsNotFilled(t *testing.T) {
 	mod := newModule(t)
 	projectInjections := []string{
 		"IdentityExtension",
 		"ProtocolExtension",
 		"CodebaseContext",
+		"LanguagePatterns",
 		"OutputArtifactTemplate",
 		"CustomConstraints",
 		"ErrorHandlingExtension",
@@ -1444,13 +1435,13 @@ func TestContract_OpenCode(t *testing.T) {
 
 		InjectionCases: map[string]string{
 			"HarnessConstraints": opencodeHarnessConstraints,
-			"LanguagePatterns":   "",
 		},
 
 		NotFilled: []string{
 			"IdentityExtension",
 			"ProtocolExtension",
 			"CodebaseContext",
+			"LanguagePatterns",
 			"OutputArtifactTemplate",
 			"CustomConstraints",
 			"ErrorHandlingExtension",

@@ -1538,13 +1538,13 @@ func TestContractTest_ExternalAdapter_PassesSharedContractSuite(t *testing.T) {
 
 		InjectionCases: map[string]string{
 			"HarnessConstraints": opencodeHarnessConstraints,
-			"LanguagePatterns":   "",
 		},
 
 		NotFilled: []string{
 			"IdentityExtension",
 			"ProtocolExtension",
 			"CodebaseContext",
+			"LanguagePatterns",
 			"OutputArtifactTemplate",
 			"CustomConstraints",
 			"ErrorHandlingExtension",

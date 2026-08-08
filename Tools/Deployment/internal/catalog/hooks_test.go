@@ -189,10 +189,11 @@ func TestHook_Variant_GhcpCli_IsSupported(t *testing.T) {
 // T7.4 — File sets
 // ---------------------------------------------------------------------------
 
-// TestHook_Variant_ClaudeCode_Files_TenFiles verifies that the claude-code variant has
-// exactly 10 files as declared in hook.yaml: the 9 Python adapter modules plus hook.yaml.
-func TestHook_Variant_ClaudeCode_Files_TenFiles(t *testing.T) {
-	const wantCount = 10
+// TestHook_Variant_ClaudeCode_Files_MatchesDeclaredInventory verifies that the claude-code
+// variant has exactly 11 files as declared in hook.yaml: 10 Python adapter modules plus
+// hook.yaml.
+func TestHook_Variant_ClaudeCode_Files_MatchesDeclaredInventory(t *testing.T) {
+	const wantCount = 11
 	cat := loadRealCatalog(t)
 	h, _ := cat.Hook("mosaic-logger")
 
@@ -210,7 +211,7 @@ func TestHook_Variant_ClaudeCode_Files_TenFiles(t *testing.T) {
 }
 
 // TestHook_Variant_ClaudeCode_Files_TargetNames verifies the exact target file names
-// for the claude-code variant: the 9 Python adapter modules plus the self-deployed hook.yaml.
+// for the claude-code variant: the 10 Python adapter modules plus the self-deployed hook.yaml.
 func TestHook_Variant_ClaudeCode_Files_TargetNames(t *testing.T) {
 	cat := loadRealCatalog(t)
 	h, _ := cat.Hook("mosaic-logger")
@@ -221,16 +222,17 @@ func TestHook_Variant_ClaudeCode_Files_TargetNames(t *testing.T) {
 	}
 
 	wantTargets := map[string]bool{
-		"mosaic_logger.py":                  true,
-		"mosaic_logger_core.py":             true,
-		"mosaic_logger_runstate.py":         true,
-		"mosaic_logger_export.py":           true,
-		"mosaic_logger_transcript.py":       true,
-		"mosaic_logger_handlers_session.py": true,
+		"mosaic_logger.py":                     true,
+		"mosaic_logger_core.py":                true,
+		"mosaic_logger_runstate.py":            true,
+		"mosaic_logger_export.py":              true,
+		"mosaic_logger_transcript.py":          true,
+		"mosaic_logger_handlers_session.py":    true,
 		"mosaic_logger_handlers_invocation.py": true,
-		"mosaic_logger_handlers_tools.py":   true,
-		"mosaic_logger_artifacts.py":        true,
-		"hook.yaml":                         true,
+		"mosaic_logger_handlers_tools.py":      true,
+		"mosaic_logger_artifacts.py":           true,
+		"mosaic_logger_usage.py":               true,
+		"hook.yaml":                            true,
 	}
 	for _, f := range v.Files {
 		if !wantTargets[f.TargetName] {

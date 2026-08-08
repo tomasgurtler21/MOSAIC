@@ -29,6 +29,9 @@ func (s *stubRoutingService) DeployNew(_ context.Context, _ app.DeployRequest) (
 func (s *stubRoutingService) Update(_ context.Context, _ app.UpdateRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{}, nil
 }
+func (s *stubRoutingService) Promote(_ context.Context, _ app.PromoteRequest) (app.PromoteResult, error) {
+	return app.PromoteResult{}, nil
+}
 func (s *stubRoutingService) UpdateWorkflows(_ context.Context, _ app.WorkflowUpdateRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{}, nil
 }
@@ -576,5 +579,35 @@ func TestInteractionRouting_ModelOverlay_IsNonNilAfterQTierModel(t *testing.T) {
 	view := m.modelOverlay.View()
 	if view == "" {
 		t.Error("ModelSelectScreen.View() returned empty string after creation")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// QPromoteCustomTool routing (T4.3)
+// ---------------------------------------------------------------------------
+
+// TestInteractionRouting_QPromoteCustomTool_ShowsTextPromptScreen verifies that the
+// QPromoteCustomTool text question is routed to the existing TextPromptScreen overlay.
+// The TUI routes text questions by question kind (AskText), not by question id, so a
+// new text question id reaches the existing overlay with no routing change or new screen.
+// This confirms that the reverse custom-tool dialog reuses the text-prompt overlay as
+// required by the design.
+func TestInteractionRouting_QPromoteCustomTool_ShowsTextPromptScreen(t *testing.T) {
+	m := newRoutingModel()
+	qMsg := buildTextMsg(domain.QPromoteCustomTool)
+
+	m.Update(qMsg)
+
+	if m.screen != screenQuestion {
+		t.Errorf("screen = %v after QPromoteCustomTool; want screenQuestion", m.screen)
+	}
+	if m.textOverlay == nil {
+		t.Error("textOverlay is nil after QPromoteCustomTool; want a TextPromptScreen — routing is by question kind (text), not id")
+	}
+	if m.selectOverlay != nil {
+		t.Error("selectOverlay is non-nil after QPromoteCustomTool; must use textOverlay for text questions")
+	}
+	if m.modelOverlay != nil {
+		t.Error("modelOverlay is non-nil after QPromoteCustomTool; must use textOverlay, not modelOverlay")
 	}
 }

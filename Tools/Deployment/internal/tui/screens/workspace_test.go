@@ -499,3 +499,396 @@ func TestWorkspaceScreen_Enter_DoubleNestedQuotes_DoesNotSetDone(t *testing.T) {
 		t.Error("Done() = true after double-nested quote input; want false (only one outer matched pair must be stripped, leaving inner quotes intact)")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// File-kind path entry — T1.1
+//
+// These tests exercise SetPathKind(PathKindFile), which selects file validation
+// rules: the screen must accept an existing readable regular file and reject
+// directories, non-existent paths, empty paths, and whitespace-only paths.
+// ---------------------------------------------------------------------------
+
+// newWSFileScreen returns a WorkspaceScreen configured for file-kind validation.
+func newWSFileScreen() *screens.WorkspaceScreen {
+	s := screens.NewWorkspaceScreen(80, 24, plainStyles())
+	s.SetPathKind(screens.PathKindFile)
+	return s
+}
+
+// createTempFile creates a regular file with the given name and content in dir.
+func createTempFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to create temp file %q: %v", p, err)
+	}
+	return p
+}
+
+// TestWorkspaceScreen_FileKind_Enter_ExistingFile_SetsDone verifies that a file-kind screen
+// accepts an existing, readable regular file and sets Done().
+func TestWorkspaceScreen_FileKind_Enter_ExistingFile_SetsDone(t *testing.T) {
+	// Arrange
+	filePath := createTempFile(t, t.TempDir(), "agent.md", "content")
+	s := newWSFileScreen()
+	s.SetPrefilledPath(filePath)
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if !s.Done() {
+		t.Errorf("Done() = false for existing regular file %q with file-kind validation; want true", filePath)
+	}
+}
+
+// TestWorkspaceScreen_FileKind_WorkspacePath_ExistingFile_ReturnsAbsolutePath verifies that
+// WorkspacePath() returns the absolute form of the confirmed file path so the caller always
+// works with an unambiguous path.
+func TestWorkspaceScreen_FileKind_WorkspacePath_ExistingFile_ReturnsAbsolutePath(t *testing.T) {
+	// Arrange
+	filePath := createTempFile(t, t.TempDir(), "agent.md", "content")
+	s := newWSFileScreen()
+	s.SetPrefilledPath(filePath)
+	s.Update(wsEnterKey())
+
+	// Act
+	got := s.WorkspacePath()
+
+	// Assert
+	if !filepath.IsAbs(got) {
+		t.Errorf("WorkspacePath() = %q; want an absolute path after file-kind confirmation", got)
+	}
+}
+
+// TestWorkspaceScreen_FileKind_Enter_DirectoryPath_DoesNotSetDone verifies that a file-kind
+// screen rejects a directory path because a directory is never a valid file input.
+func TestWorkspaceScreen_FileKind_Enter_DirectoryPath_DoesNotSetDone(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	s := newWSFileScreen()
+	s.SetPrefilledPath(dir)
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if s.Done() {
+		t.Errorf("Done() = true for directory path %q with file-kind validation; want false (a directory is not a file)", dir)
+	}
+}
+
+// TestWorkspaceScreen_FileKind_Enter_DirectoryPath_ShowsNotAFileError verifies that when a
+// directory path is entered in file-kind, the inline error names the path-is-not-a-file
+// condition so the user understands exactly what is wrong.
+func TestWorkspaceScreen_FileKind_Enter_DirectoryPath_ShowsNotAFileError(t *testing.T) {
+	// Arrange
+	dir := t.TempDir()
+	s := newWSFileScreen()
+	s.SetPrefilledPath(dir)
+
+	// Act
+	s.Update(wsEnterKey())
+	view := s.View()
+
+	// Assert — the error must name the not-a-file condition, not the legacy not-a-directory wording.
+	if !strings.Contains(view, "not a file") {
+		t.Errorf("view does not contain 'not a file' after directory-path rejection in file-kind mode:\n%s", view)
+	}
+}
+
+// TestWorkspaceScreen_FileKind_Enter_NonExistentPath_DoesNotSetDone verifies that a
+// file-kind screen rejects a path that does not exist on the filesystem.
+func TestWorkspaceScreen_FileKind_Enter_NonExistentPath_DoesNotSetDone(t *testing.T) {
+	// Arrange
+	nonExistent := filepath.Join(t.TempDir(), "no-such-agent.md")
+	s := newWSFileScreen()
+	s.SetPrefilledPath(nonExistent)
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if s.Done() {
+		t.Errorf("Done() = true for non-existent path %q with file-kind validation; want false", nonExistent)
+	}
+}
+
+// TestWorkspaceScreen_FileKind_Enter_NonExistentPath_ShowsFileDoesNotExistError verifies
+// that a missing path in file-kind produces feedback that names the file-does-not-exist
+// condition, not the directory equivalent, so the user knows which rule was violated.
+func TestWorkspaceScreen_FileKind_Enter_NonExistentPath_ShowsFileDoesNotExistError(t *testing.T) {
+	// Arrange
+	nonExistent := filepath.Join(t.TempDir(), "no-such-agent.md")
+	s := newWSFileScreen()
+	s.SetPrefilledPath(nonExistent)
+
+	// Act
+	s.Update(wsEnterKey())
+	view := s.View()
+
+	// Assert — the error should mention that the file does not exist (not a directory).
+	if !strings.Contains(view, "file does not exist") {
+		t.Errorf("view does not contain 'file does not exist' after missing-path rejection in file-kind mode:\n%s", view)
+	}
+}
+
+// TestWorkspaceScreen_FileKind_Enter_EmptyPath_DoesNotSetDone verifies that an empty path
+// is rejected in file-kind mode, matching the directory-kind empty-path rule.
+func TestWorkspaceScreen_FileKind_Enter_EmptyPath_DoesNotSetDone(t *testing.T) {
+	// Arrange
+	s := newWSFileScreen()
+	s.SetPrefilledPath("")
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if s.Done() {
+		t.Error("Done() = true for empty path with file-kind validation; want false (empty path must be rejected)")
+	}
+}
+
+// TestWorkspaceScreen_FileKind_Enter_WhitespaceOnlyPath_DoesNotSetDone verifies that a
+// whitespace-only path is treated as empty and rejected in file-kind mode.
+func TestWorkspaceScreen_FileKind_Enter_WhitespaceOnlyPath_DoesNotSetDone(t *testing.T) {
+	// Arrange
+	s := newWSFileScreen()
+	s.SetPrefilledPath("   ")
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if s.Done() {
+		t.Error("Done() = true for whitespace-only path with file-kind validation; want false (whitespace must be treated as empty)")
+	}
+}
+
+// TestWorkspaceScreen_FileKind_Enter_QuotedFilePath_SetsDone verifies that a quoted file
+// path (as produced by Windows Explorer "Copy as path") is accepted in file-kind mode after
+// the outer double quotes are stripped.
+func TestWorkspaceScreen_FileKind_Enter_QuotedFilePath_SetsDone(t *testing.T) {
+	// Arrange
+	filePath := createTempFile(t, t.TempDir(), "agent.md", "content")
+	s := newWSFileScreen()
+	s.SetPrefilledPath(`"` + filePath + `"`)
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if !s.Done() {
+		t.Errorf("Done() = false for quoted file path %q with file-kind validation; want true (outer quotes must be stripped before validation)", `"`+filePath+`"`)
+	}
+}
+
+// TestWorkspaceScreen_FileKind_WorkspacePath_QuotedFilePath_ReturnsUnquotedAbsPath verifies
+// that WorkspacePath() returns the absolute, unquoted path when the user entered a
+// Windows-Explorer-style quoted value in file-kind mode.
+func TestWorkspaceScreen_FileKind_WorkspacePath_QuotedFilePath_ReturnsUnquotedAbsPath(t *testing.T) {
+	// Arrange
+	filePath := createTempFile(t, t.TempDir(), "agent.md", "content")
+	s := newWSFileScreen()
+	s.SetPrefilledPath(`"` + filePath + `"`)
+	s.Update(wsEnterKey())
+
+	// Act
+	got := s.WorkspacePath()
+
+	// Assert — the returned path must equal the absolute form of the bare file path.
+	want, _ := filepath.Abs(filePath)
+	if got != want {
+		t.Errorf("WorkspacePath() = %q; want %q (outer quotes must be stripped and path resolved to absolute in file-kind mode)", got, want)
+	}
+}
+
+// TestWorkspaceScreen_FileKind_View_ContainsNoDirectoryWording verifies that when the screen
+// is in file-kind mode, the rendered view contains neither "directory" nor "workspace" wording.
+// The design's Path-Kind Presentation Contract requires the file-kind input label to name an
+// agent file path and contain neither of those words — a label such as "Enter workspace file
+// path:" would violate the contract even though it omits "directory".
+func TestWorkspaceScreen_FileKind_View_ContainsNoDirectoryWording(t *testing.T) {
+	// Arrange
+	s := newWSFileScreen()
+
+	// Act
+	view := s.View()
+	lower := strings.ToLower(view)
+
+	// Assert — neither "directory" nor "workspace" must appear anywhere in the file-kind view.
+	if strings.Contains(lower, "directory") {
+		t.Errorf("file-kind view contains 'directory' wording; want no occurrence of 'directory':\n%s", view)
+	}
+	if strings.Contains(lower, "workspace") {
+		t.Errorf("file-kind view contains 'workspace' wording; want no occurrence of 'workspace':\n%s", view)
+	}
+}
+
+// TestWorkspaceScreen_FileKind_Enter_UnreadableFile_DoesNotSetDone verifies that a file that
+// exists but is not readable is rejected by the file-kind access probe. This exercises the
+// "file is not readable: <abs>" error branch, mirroring the non-writable-directory test for
+// the directory kind.
+//
+// On Windows, file read permissions are governed by ACLs which chmod cannot modify portably,
+// so this test is skipped on that platform.
+func TestWorkspaceScreen_FileKind_Enter_UnreadableFile_DoesNotSetDone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file read permissions use Windows ACLs; chmod-based setup is not portable to this platform")
+	}
+
+	// Arrange — create a regular file, remove its read permission, then restore on cleanup.
+	filePath := createTempFile(t, t.TempDir(), "agent.md", "content")
+	if err := os.Chmod(filePath, 0o222); err != nil { // write-only, not readable
+		t.Fatalf("failed to remove read permission from temp file: %v", err)
+	}
+	// Restore read permission so TempDir cleanup can read and remove the file.
+	t.Cleanup(func() { os.Chmod(filePath, 0o644) }) //nolint:errcheck
+
+	s := newWSFileScreen()
+	s.SetPrefilledPath(filePath)
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if s.Done() {
+		t.Errorf("Done() = true for unreadable file %q; want false (unreadable file must be rejected by the access probe)", filePath)
+	}
+}
+
+// TestWorkspaceScreen_FileKind_Enter_UnreadableFile_ShowsNotReadableError verifies that when
+// a file exists but is not readable, the inline error names the not-readable condition so the
+// user understands exactly why the path was rejected.
+//
+// On Windows, this test is skipped for the same reason as the companion Done() test.
+func TestWorkspaceScreen_FileKind_Enter_UnreadableFile_ShowsNotReadableError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file read permissions use Windows ACLs; chmod-based setup is not portable to this platform")
+	}
+
+	// Arrange
+	filePath := createTempFile(t, t.TempDir(), "agent.md", "content")
+	if err := os.Chmod(filePath, 0o222); err != nil {
+		t.Fatalf("failed to remove read permission from temp file: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(filePath, 0o644) }) //nolint:errcheck
+
+	s := newWSFileScreen()
+	s.SetPrefilledPath(filePath)
+
+	// Act
+	s.Update(wsEnterKey())
+	view := s.View()
+
+	// Assert — the view must mention readability so the user understands how to fix it.
+	if !strings.Contains(view, "readable") && !strings.Contains(view, "read") {
+		t.Errorf("view does not mention readability after unreadable-file rejection:\n%s", view)
+	}
+}
+
+// TestWorkspaceScreen_FileKind_Enter_SymlinkToDirectory_DoesNotSetDone verifies that a
+// symlink pointing to a directory is rejected in file-kind mode. The design states: "Both
+// kinds resolve symlinks by stat-ing the effective target, so a symlink to a directory fails
+// the file kind." This test closes that explicitly named design edge case.
+func TestWorkspaceScreen_FileKind_Enter_SymlinkToDirectory_DoesNotSetDone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks on Windows requires elevated privileges; skipping on this platform")
+	}
+
+	// Arrange — create a real directory and a symlink pointing to it.
+	targetDir := t.TempDir()
+	linkPath := filepath.Join(t.TempDir(), "link-to-dir")
+	if err := os.Symlink(targetDir, linkPath); err != nil {
+		t.Fatalf("failed to create symlink to directory: %v", err)
+	}
+
+	s := newWSFileScreen()
+	s.SetPrefilledPath(linkPath)
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert — stat follows the symlink and sees a directory; file-kind must reject it.
+	if s.Done() {
+		t.Errorf("Done() = true for symlink-to-directory %q in file-kind mode; want false (symlink resolves to a directory, which is not a regular file)", linkPath)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Directory-kind regression tests — T1.2
+//
+// These tests call SetPathKind(PathKindDirectory) explicitly to confirm that the
+// default directory-kind behaviour is preserved when a path kind is given
+// explicitly. They complement the pre-existing tests that omit SetPathKind
+// entirely and confirm both entry points produce identical behaviour.
+// ---------------------------------------------------------------------------
+
+// TestWorkspaceScreen_DirKind_Explicit_ValidDir_SetsDone verifies that calling
+// SetPathKind(PathKindDirectory) explicitly still accepts an existing writable directory,
+// confirming that the default directory behaviour is not altered by setting it explicitly.
+func TestWorkspaceScreen_DirKind_Explicit_ValidDir_SetsDone(t *testing.T) {
+	// Arrange
+	validDir := t.TempDir()
+	s := newWSScreen()
+	s.SetPathKind(screens.PathKindDirectory) // explicit, not relying on zero value
+	s.SetPrefilledPath(validDir)
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if !s.Done() {
+		t.Errorf("Done() = false for valid writable directory %q with explicit PathKindDirectory; want true", validDir)
+	}
+}
+
+// TestWorkspaceScreen_DirKind_Explicit_FilePath_DoesNotSetDone verifies that calling
+// SetPathKind(PathKindDirectory) explicitly still rejects a regular file, confirming the
+// directory-kind rule "must be a directory" is not accidentally removed.
+func TestWorkspaceScreen_DirKind_Explicit_FilePath_DoesNotSetDone(t *testing.T) {
+	// Arrange
+	filePath := createTempFile(t, t.TempDir(), "regular-file.txt", "content")
+	s := newWSScreen()
+	s.SetPathKind(screens.PathKindDirectory) // explicit
+	s.SetPrefilledPath(filePath)
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if s.Done() {
+		t.Errorf("Done() = true for file path %q with explicit PathKindDirectory; want false (directory-kind must reject files)", filePath)
+	}
+}
+
+// TestWorkspaceScreen_DirKind_Explicit_NonWritableDir_DoesNotSetDone verifies that calling
+// SetPathKind(PathKindDirectory) explicitly still rejects a non-writable directory, confirming
+// the writability probe is not accidentally removed.
+//
+// On Windows, directory write permissions are governed by ACLs which chmod cannot modify
+// portably, so this test is skipped on that platform.
+func TestWorkspaceScreen_DirKind_Explicit_NonWritableDir_DoesNotSetDone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory write permissions use Windows ACLs; chmod-based setup is not portable to this platform")
+	}
+
+	// Arrange
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatalf("failed to remove write permission from temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) }) //nolint:errcheck
+
+	s := newWSScreen()
+	s.SetPathKind(screens.PathKindDirectory) // explicit
+	s.SetPrefilledPath(dir)
+
+	// Act
+	s.Update(wsEnterKey())
+
+	// Assert
+	if s.Done() {
+		t.Errorf("Done() = true for non-writable directory %q with explicit PathKindDirectory; want false", dir)
+	}
+}

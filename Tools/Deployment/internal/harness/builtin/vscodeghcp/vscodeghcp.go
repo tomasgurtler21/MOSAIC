@@ -273,8 +273,8 @@ func (m *module) skillTargetPath(req domain.TargetPathRequest) (string, error) {
 
 // Injection returns the harness-level content for a canonical injection name.
 //
-// VS Code GHCP declares HarnessConstraints (file-reading constraint), CustomConstraints
-// (parallel tool calls), and LanguagePatterns (empty) as harness-level injections.
+// VS Code GHCP declares HarnessConstraints (file-reading constraint plus the parallel
+// tool calls instruction) as its sole harness-level injection.
 // For the "orchestrator" agent key, shared content is merged with orchestrator-only content
 // from HarnessInjectionsOrchestrator.md. For all other agent keys, only shared content is returned.
 func (m *module) Injection(req domain.InjectionRequest) (string, bool) {

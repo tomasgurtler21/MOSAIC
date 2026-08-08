@@ -436,6 +436,125 @@ func ResolveTargetPath(d *domain.HarnessDescriptor, req domain.TargetPathRequest
 	return path.Join(sp.Project, filename), nil
 }
 
+// ExtractToolEntries returns the harness-side tool names a deployed agent declares, read
+// from the value stored under the harness's own Frontmatter.ToolsKey, interpreted according
+// to d.Tools.Shape. It is the exact inverse of buildToolFields.
+//
+//   - ShapePermission: value is a mapping of tool name to disposition. Only entries whose
+//     disposition equals string(domain.Allow) are returned; every other entry is the
+//     harness's universe listing and must not become a generic tool.
+//   - ShapeList (and any other shape): value is a list; every scalar item is returned.
+//
+// Regardless of shape, an entry naming a d.Tools.Universe tool whose ByConvention is true is
+// excluded (AD-14). Names are returned in document order, deduplicated first-seen. A zero
+// FieldValue, a value of an unexpected kind, or a descriptor with an empty ToolsKey returns
+// an empty slice — never an error, because an absent tools key is a legitimate deployed shape.
+func ExtractToolEntries(d *domain.HarnessDescriptor, toolsValue domain.FieldValue) []string {
+	// An empty ToolsKey means the harness declares no tools field; nothing to extract.
+	if d.Frontmatter.ToolsKey == "" {
+		return nil
+	}
+
+	// Build a lookup set of by-convention tool names. Their presence in a deployed file
+	// carries no information about the agent's generic tools (AD-14).
+	byConvention := make(map[string]bool, len(d.Tools.Universe))
+	for _, t := range d.Tools.Universe {
+		if t.ByConvention {
+			byConvention[t.Name] = true
+		}
+	}
+
+	var result []string
+	seen := make(map[string]bool)
+
+	// addEntry applies the by-convention exclusion and first-seen deduplication.
+	addEntry := func(name string) {
+		if name == "" || byConvention[name] || seen[name] {
+			return
+		}
+		seen[name] = true
+		result = append(result, name)
+	}
+
+	if d.Tools.Shape == domain.ShapePermission {
+		// Permission shape: value is a KindMapping. Only allow-dispositioned entries count.
+		if toolsValue.Kind != domain.KindMapping {
+			return nil
+		}
+		allowStr := string(domain.Allow)
+		for _, pair := range toolsValue.Pairs {
+			if pair.Value.Kind == domain.KindScalar && pair.Value.Scalar == allowStr {
+				addEntry(pair.Key)
+			}
+		}
+	} else {
+		// List shape (and any other shape): value is a KindList; every scalar item counts.
+		if toolsValue.Kind != domain.KindList {
+			return nil
+		}
+		for _, item := range toolsValue.Items {
+			if item.Kind == domain.KindScalar {
+				addEntry(item.Scalar)
+			}
+		}
+	}
+
+	return result
+}
+
+// ReverseMapTool resolves one harness-side tool name to the generic tool name that maps to
+// it. A mapping matches when any of its Destinations lists the name in Destination.Names,
+// regardless of destination Kind — a generic tool routed to a DestField destination is
+// still that generic tool.
+//
+// Many-to-one: when several mappings name the same harness tool, the first match in
+// d.Tools.Mappings declaration order wins (AD-5). Declaration order is the ordering authority.
+//
+// ok is false when no mapping names the tool, including the case where d.Tools.Mappings is
+// nil or empty — a harness with no mapping data resolves nothing and guesses nothing.
+func ReverseMapTool(d *domain.HarnessDescriptor, harnessName string) (generic string, ok bool) {
+	// Iterate in declaration order so the first match wins for many-to-one cases (AD-5).
+	for i := range d.Tools.Mappings {
+		mapping := &d.Tools.Mappings[i]
+		for _, dest := range mapping.Destinations {
+			for _, name := range dest.Names {
+				if name == harnessName {
+					return mapping.Generic, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+// ReverseMapTools resolves a sequence of harness-side tool names, returning one
+// ReverseToolResolution per input entry in the same order. Input order is preserved even
+// for unmapped entries so the caller can prompt in a stable order; deduplication of the
+// resulting generic names is the caller's responsibility.
+func ReverseMapTools(d *domain.HarnessDescriptor, harnessNames []string) []domain.ReverseToolResolution {
+	if len(harnessNames) == 0 {
+		return []domain.ReverseToolResolution{}
+	}
+	result := make([]domain.ReverseToolResolution, len(harnessNames))
+	for i, name := range harnessNames {
+		genericName, ok := ReverseMapTool(d, name)
+		if ok {
+			result[i] = domain.ReverseToolResolution{
+				Harness: name,
+				Generic: genericName,
+				Outcome: domain.ToolMapped,
+			}
+		} else {
+			result[i] = domain.ReverseToolResolution{
+				Harness: name,
+				Generic: "",
+				Outcome: domain.ToolUnmapped,
+			}
+		}
+	}
+	return result
+}
+
 // scopedPathsForKind returns the ScopedPaths for the requested artifact kind, or
 // domain.ErrArtifactUnsupported when the kind is not supported by this descriptor.
 func scopedPathsForKind(d *domain.HarnessDescriptor, kind domain.ArtifactKind) (domain.ScopedPaths, error) {

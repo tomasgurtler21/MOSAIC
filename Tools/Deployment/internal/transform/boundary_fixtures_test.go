@@ -129,8 +129,8 @@ func TestDeploymentBoundaryFixtures_UnknownDeployedName(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestDeploymentBoundaryFixtures_DeployedOutsideRequiredParent asserts that a fixture
-// declaring [[DEPLOYED:LanguagePatterns]] inside [[SECTION:Identity]] — instead of the
-// required [[SECTION:Capabilities]] — produces a "wrong-parent" validation issue.
+// declaring [[DEPLOYED:ProtocolConstraints]] inside [[SECTION:Identity]] — instead of the
+// required [[SECTION:Constraints]] — produces a "wrong-parent" validation issue.
 func TestDeploymentBoundaryFixtures_DeployedOutsideRequiredParent(t *testing.T) {
 	src := readDeploymentBoundaryFixture(t, "malformed/deployed-outside-required-parent.md")
 
@@ -141,7 +141,7 @@ func TestDeploymentBoundaryFixtures_DeployedOutsideRequiredParent(t *testing.T) 
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{RequireInjectionParents: true})
 	if !deploymentBoundaryHasCode(issues, "wrong-parent") {
-		t.Errorf("expected a 'wrong-parent' issue for LanguagePatterns inside Identity; got: %s",
+		t.Errorf("expected a 'wrong-parent' issue for ProtocolConstraints inside Identity; got: %s",
 			deploymentBoundaryFormatIssues(issues))
 	}
 }

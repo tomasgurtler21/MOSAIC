@@ -7,6 +7,9 @@ const (
 	ModeDeployNew     RunMode = "deploy-new"
 	ModeUpdate        RunMode = "update"
 	ModeWorkflowsOnly RunMode = "workflows-only"
+	// ModePromote generates a generic agent source file from a harness-only agent.
+	// It is never triggered by an Update run; it is always an explicit, opt-in command.
+	ModePromote RunMode = "promote"
 )
 
 // PlanAction is the intended deployment action for one artifact.

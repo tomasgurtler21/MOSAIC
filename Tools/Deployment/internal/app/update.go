@@ -7,10 +7,12 @@ package app
 import (
 	"context"
 	"path/filepath"
+	"strings"
 
 	"mosaic-deploy/internal/config"
 	"mosaic-deploy/internal/deploy"
 	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/logging"
 	"mosaic-deploy/internal/plan"
 	"mosaic-deploy/internal/todo"
 )
@@ -97,6 +99,16 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	var deployedAgentIndex DeployedAgentIndex
 	if module.Descriptor().Paths.Agents.Supported && agentsDir != "" {
 		deployedAgentIndex = buildDeployedAgentIndex(workspace, agentsDir)
+	}
+
+	// Scan for harness-only agents — those present in the deployed-agents directory with no
+	// counterpart in the generic catalog. Guarded on the harness declaring a supported
+	// agents directory; a harness with no agents directory has nothing to scan.
+	// Discovery guard: a harness with no deployed-agents directory has nothing to scan.
+	var harnessOnlyAgents []HarnessOnlyAgent
+	if module.Descriptor().Paths.Agents.Supported && agentsDir != "" {
+		catalogKeys := catalogAgentKeys(s.deps.Catalog)
+		harnessOnlyAgents = scanHarnessOnlyAgents(workspace, agentsDir, catalogKeys)
 	}
 
 	snap, _ := s.deps.Manifest.Load(workspace)
@@ -246,6 +258,72 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		}
 	}
 
+	// Build the harness-only refresh plan. Each eligible agent is asked once for its scope,
+	// with apply-to-all latching mirroring the conflict loop's applyToAllLatch pattern.
+	//
+	// Prompt guard: the scope question is suppressed entirely when no eligible agent exists.
+	// Never prompt for an empty set.
+	//
+	// Conflict-loop interaction: harness-only agents never enter the conflict loop above.
+	// They are appended here with ActionUpdate because a harness-only agent is user-authored
+	// by definition, so it would trip the local-modification prompt on every run. The
+	// refresh-scope prompt is the sole consent mechanism; asking both for the same file
+	// would be redundant noise.
+	//
+	// Version-stamping decision: no entry is added to versionStamps for harness-only agents.
+	// Stamping implies a source version to stamp from; there is none for a harness-only
+	// agent, and inventing a stamp would make the file appear catalog-backed on the next run.
+	//
+	// Manifest decision: harness-only agents remain manifest-invisible; detection stays
+	// purely the two-signal rule.
+	//
+	// Dry-run decision: discovery and prompting still occur when DryRun is true; no byte is
+	// written because DryRun is forwarded to the executor via ExecRequest.DryRun.
+	harnessOnlyPlan := make(map[string]harnessOnlyContentPlan, len(harnessOnlyAgents))
+	if len(harnessOnlyAgents) > 0 {
+		var latchedHarnessScope RefreshScope
+		harnessApplyToAllLatch := false
+		for _, agent := range harnessOnlyAgents {
+			var scope RefreshScope
+			if harnessApplyToAllLatch {
+				scope = latchedHarnessScope
+			} else {
+				var setLatch bool
+				scope, setLatch = s.askHarnessOnlyRefreshScope(ctx, agent)
+				if setLatch {
+					harnessApplyToAllLatch = true
+					latchedHarnessScope = scope
+				}
+			}
+			harnessOnlyPlan[agent.TargetPath] = harnessOnlyContentPlan{Agent: agent, Scope: scope}
+
+			// Emit an observability event identifying this agent as harness-only and its scope.
+			// The harness_only and scope fields are the contract a caller or a test reads to
+			// determine which agents received degraded-quality treatment and at what breadth.
+			s.deps.Logger.Event(logging.Event{
+				Kind:    "transform",
+				Subject: agent.TargetPath,
+				Message: "harness-only agent refreshed (degraded: no generic counterpart)",
+				Fields: map[string]string{
+					"harness_only": "true",
+					"scope":        string(scope),
+					"regions":      strings.Join(scope.Regions(), ","),
+				},
+			})
+
+			// Append the harness-only agent to the plan. SourcePath is deliberately empty:
+			// it is the visible marker that this item has no catalog source and must never
+			// be passed to Catalog.ReadSource.
+			p.Items = append(p.Items, domain.PlanItem{
+				Ref:        domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: agent.Key},
+				SourcePath: "",
+				TargetPath: agent.TargetPath,
+				Action:     domain.ActionUpdate,
+				Reason:     "harness-only agent (no generic counterpart): refreshing " + string(scope),
+			})
+		}
+	}
+
 	// Review is always shown; AutoConfirmPlan only controls whether a decline/cancel answer
 	// aborts the run (see deploy.go for the same rationale).
 	ans, rerr := s.deps.Interaction.Review(ctx, p)
@@ -270,7 +348,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	// Update re-deploys whatever was already deployed; it does not re-prompt for
 	// infrastructure agent choices. The InfrastructureAgents injection region is
 	// preserved from the deployed file via the InjectionProject preservation pass.
-	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol, bundle)
+	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol, bundle, harnessOnlyPlan)
 
 	versionStamps := buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor(), toolMappingsVersion)
 
