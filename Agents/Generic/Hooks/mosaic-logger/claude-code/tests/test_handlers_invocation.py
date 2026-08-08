@@ -385,6 +385,68 @@ class TestInvocationStartEventAndTurn(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# T5.2 / T5.3  handle_subagent_start emits usage_record from the orchestrator
+# transcript (ctx.transcript_path), routed to the orchestrator stream.
+# ---------------------------------------------------------------------------
+
+class TestSubagentStartUsageEmission(unittest.TestCase):
+    """handle_subagent_start reads ctx.transcript_path (the orchestrator
+    transcript, not the subagent's) and emits usage_record to the
+    orchestrator stream -- never to the invocation stream it also writes to."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run(self, **kwargs):
+        ctx = _make_start_ctx(self.tmp.name, **kwargs)
+        invocation.handle_subagent_start(ctx)
+        return ctx
+
+    def test_usage_records_written_to_orchestrator_stream(self):
+        transcript_path = _write_transcript_file(self.tmp.name, [
+            {"type": "assistant", "message": {
+                "id": "msg_start", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10},
+            }},
+        ])
+        prompt = '{"agent_instance_id": "PlanWriter#20"}'
+        self._run(agent_id="aid-20", agent_type="PlanWriter", agent_prompt=prompt,
+                   transcript_path=transcript_path)
+        orc_path = self.paths.orchestrator_events(_RUN_ID)
+        self.assertTrue(orc_path.exists(), "usage_record must be written to the orchestrator stream")
+        events = _read_jsonl(orc_path)
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events))
+
+    def test_usage_records_not_written_to_invocation_stream(self):
+        transcript_path = _write_transcript_file(self.tmp.name, [
+            {"type": "assistant", "message": {
+                "id": "msg_start2", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10},
+            }},
+        ])
+        prompt = '{"agent_instance_id": "PlanWriter#21"}'
+        self._run(agent_id="aid-21", agent_type="PlanWriter", agent_prompt=prompt,
+                   transcript_path=transcript_path)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "PlanWriter#21"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events))
+
+    def test_no_usage_records_when_transcript_path_absent(self):
+        prompt = '{"agent_instance_id": "PlanWriter#22"}'
+        self._run(agent_id="aid-22", agent_type="PlanWriter", agent_prompt=prompt)
+        # No orchestrator events file at all -- nothing else writes there.
+        orc_path = self.paths.orchestrator_events(_RUN_ID)
+        if orc_path.exists():
+            events = _read_jsonl(orc_path)
+            self.assertEqual(0, len([e for e in events if e["event"] == "usage_record"]))
+
+
+# ---------------------------------------------------------------------------
 # T4.3  invocation_end event and final assistant turn
 # ---------------------------------------------------------------------------
 
@@ -631,6 +693,212 @@ class TestInvocationEndEventAndTurn(unittest.TestCase):
             "SubagentStop must emit exactly one final turn, not one per assistant "
             "record in the subagent transcript",
         )
+
+
+# ---------------------------------------------------------------------------
+# T5.2 / T5.3  handle_subagent_stop emits usage_record from BOTH transcripts
+# it has access to: the agent transcript (routed to the invocation stream)
+# and the orchestrator transcript (routed to the orchestrator stream) --
+# each record reaching exactly one of the two.
+# ---------------------------------------------------------------------------
+
+class TestSubagentStopUsageEmission(unittest.TestCase):
+    """handle_subagent_stop's agent-transcript read lands on the invocation
+    stream; its orchestrator-transcript read lands on the orchestrator
+    stream. Neither leaks into the other."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _setup_mapping(self, agent_id, agent_instance_id, agent_type=None):
+        _register_mapping(self.tmp.name, _RUN_ID, agent_id, agent_instance_id, agent_type)
+
+    def _run_stop(self, agent_id, **kwargs):
+        ctx = _make_stop_ctx(self.tmp.name, agent_id=agent_id, **kwargs)
+        invocation.handle_subagent_stop(ctx)
+        return ctx
+
+    def test_agent_transcript_usage_records_land_on_invocation_stream(self):
+        agent_transcript_path = _write_transcript_file(self.tmp.name, [
+            {"type": "assistant", "message": {
+                "id": "msg_agent", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10},
+            }},
+        ])
+        self._setup_mapping("aid-30", "Reviewer#30", "Reviewer")
+        self._run_stop("aid-30", agent_type="Reviewer",
+                       last_assistant_message='{"status_code": "SUCCESS"}',
+                       agent_transcript_path=agent_transcript_path)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "Reviewer#30"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events))
+        self.assertEqual("Reviewer#30", usage_events[0].get("agent_instance_id"))
+        self.assertEqual("agent_transcript", usage_events[0].get("source"))
+
+    def test_agent_transcript_usage_records_do_not_reach_orchestrator_stream(self):
+        agent_transcript_path = _write_transcript_file(self.tmp.name, [
+            {"type": "assistant", "message": {
+                "id": "msg_agent2", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10},
+            }},
+        ])
+        self._setup_mapping("aid-31", "Reviewer#31", "Reviewer")
+        self._run_stop("aid-31", agent_type="Reviewer",
+                       last_assistant_message='{"status_code": "SUCCESS"}',
+                       agent_transcript_path=agent_transcript_path)
+        orc_path = self.paths.orchestrator_events(_RUN_ID)
+        if orc_path.exists():
+            events = _read_jsonl(orc_path)
+            self.assertEqual(0, len([e for e in events if e["event"] == "usage_record"]))
+
+    def test_orchestrator_transcript_usage_records_land_on_orchestrator_stream(self):
+        orch_transcript_path = _write_transcript_file(self.tmp.name, [
+            {"type": "assistant", "message": {
+                "id": "msg_orch", "model": "claude-opus-4-5",
+                "usage": {"output_tokens": 20},
+            }},
+        ])
+        self._setup_mapping("aid-32", "Reviewer#32", "Reviewer")
+        self._run_stop("aid-32", agent_type="Reviewer",
+                       last_assistant_message='{"status_code": "SUCCESS"}',
+                       transcript_path=orch_transcript_path)
+        orc_path = self.paths.orchestrator_events(_RUN_ID)
+        self.assertTrue(orc_path.exists(), "usage_record must be written to the orchestrator stream")
+        events = _read_jsonl(orc_path)
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events))
+        self.assertNotIn("agent_instance_id", usage_events[0])
+        self.assertEqual("orchestrator_transcript", usage_events[0].get("source"))
+
+    def test_orchestrator_transcript_usage_records_do_not_reach_invocation_stream(self):
+        orch_transcript_path = _write_transcript_file(self.tmp.name, [
+            {"type": "assistant", "message": {
+                "id": "msg_orch2", "model": "claude-opus-4-5",
+                "usage": {"output_tokens": 20},
+            }},
+        ])
+        self._setup_mapping("aid-33", "Reviewer#33", "Reviewer")
+        self._run_stop("aid-33", agent_type="Reviewer",
+                       last_assistant_message='{"status_code": "SUCCESS"}',
+                       transcript_path=orch_transcript_path)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "Reviewer#33"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events))
+
+    def test_both_transcripts_present_emit_to_both_distinct_streams(self):
+        """A single SubagentStop firing carrying both transcript paths
+        emits its usage records to each stream independently -- never
+        crossing over -- satisfying the single-stream-per-record invariant."""
+        agent_transcript_path = _write_transcript_file(
+            pathlib.Path(self.tmp.name) / "agent", [
+                {"type": "assistant", "message": {
+                    "id": "msg_both_agent", "model": "claude-opus-4-5",
+                    "usage": {"input_tokens": 5},
+                }},
+            ])
+        orch_transcript_path = _write_transcript_file(
+            pathlib.Path(self.tmp.name) / "orch", [
+                {"type": "assistant", "message": {
+                    "id": "msg_both_orch", "model": "claude-opus-4-5",
+                    "usage": {"output_tokens": 9},
+                }},
+            ])
+        self._setup_mapping("aid-34", "Reviewer#34", "Reviewer")
+        self._run_stop("aid-34", agent_type="Reviewer",
+                       last_assistant_message='{"status_code": "SUCCESS"}',
+                       agent_transcript_path=agent_transcript_path,
+                       transcript_path=orch_transcript_path)
+        invocation_events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "Reviewer#34"))
+        orc_path = self.paths.orchestrator_events(_RUN_ID)
+        orch_events = _read_jsonl(orc_path) if orc_path.exists() else []
+        invocation_usage_ids = {e["record_id"] for e in invocation_events
+                                 if e["event"] == "usage_record"}
+        orch_usage_ids = {e["record_id"] for e in orch_events
+                           if e["event"] == "usage_record"}
+        self.assertEqual({"msg_both_agent"}, invocation_usage_ids)
+        self.assertEqual({"msg_both_orch"}, orch_usage_ids)
+        self.assertEqual(set(), invocation_usage_ids & orch_usage_ids)
+
+    def test_repeated_stop_firings_re_emit_without_error(self):
+        """T5.4: two SubagentStop firings against the same transcripts are
+        tolerated -- no exception, and the record is re-emitted."""
+        agent_transcript_path = _write_transcript_file(self.tmp.name, [
+            {"type": "assistant", "message": {
+                "id": "msg_repeat", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 5},
+            }},
+        ])
+        self._setup_mapping("aid-35", "Reviewer#35", "Reviewer")
+        self._run_stop("aid-35", agent_type="Reviewer",
+                       last_assistant_message='{"status_code": "SUCCESS"}',
+                       agent_transcript_path=agent_transcript_path)
+        self._run_stop("aid-35", agent_type="Reviewer",
+                       last_assistant_message='{"status_code": "SUCCESS"}',
+                       agent_transcript_path=agent_transcript_path)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "Reviewer#35"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(2, len(usage_events))
+
+
+# ---------------------------------------------------------------------------
+# T5.2 / A5  Quarantine routing: an unmapped-but-genuine SubagentStop's
+# agent-transcript usage records follow the invocation_end/output/raw
+# destination to the quarantine location, never the ordinary invocation dir.
+# ---------------------------------------------------------------------------
+
+class TestSubagentStopQuarantineUsageEmission(unittest.TestCase):
+    """Where SubagentStop is quarantined, its agent-transcript usage_record
+    events go to the quarantine events file under the same single-stream
+    rule -- the destination changes, the one-stream-per-record property
+    does not."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run_stop(self, agent_id, **kwargs):
+        ctx = _make_stop_ctx(self.tmp.name, agent_id=agent_id, **kwargs)
+        invocation.handle_subagent_stop(ctx)
+        return ctx
+
+    def test_quarantined_agent_transcript_usage_records_land_in_quarantine_events(self):
+        agent_transcript_path = _write_transcript_file(self.tmp.name, [
+            {"type": "assistant", "message": {
+                "id": "msg_quarantine", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10},
+            }},
+        ])
+        self._run_stop("aid-quarantine-usage-1", last_assistant_message="Genuine but unmapped.",
+                       agent_transcript_path=agent_transcript_path)
+        events = _read_jsonl(self.paths.quarantine_events(_RUN_ID, "aid-quarantine-usage-1"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events))
+
+    def test_quarantined_agent_transcript_usage_records_absent_from_ordinary_invocation_dir(self):
+        agent_transcript_path = _write_transcript_file(self.tmp.name, [
+            {"type": "assistant", "message": {
+                "id": "msg_quarantine2", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10},
+            }},
+        ])
+        self._run_stop("aid-quarantine-usage-2", last_assistant_message="Genuine but unmapped.",
+                       agent_transcript_path=agent_transcript_path)
+        # The unmapped agent_id has no real agent_instance_id to look up an
+        # ordinary invocation dir under, so the only place usage_record can
+        # legitimately appear is the quarantine destination.
+        quarantine_events = _read_jsonl(
+            self.paths.quarantine_events(_RUN_ID, "aid-quarantine-usage-2")
+        )
+        record_ids = {e["record_id"] for e in quarantine_events
+                      if e["event"] == "usage_record"}
+        self.assertIn("msg_quarantine2", record_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -1488,7 +1756,7 @@ def _iso_ms_now() -> str:
 
 
 def _write_dispatch_entry_for_prompt_tests(
-    paths, run_id: str, session_id: str,
+    paths, session_id: str,
     agent_instance_id: str, prompt=None, extracted_run_id=None
 ) -> None:
     """Write a raw pending-dispatch JSONL entry directly into the queue file.
@@ -1500,7 +1768,7 @@ def _write_dispatch_entry_for_prompt_tests(
     When prompt is given it is included in the entry. When prompt is None the
     'prompt' key is omitted, simulating an old-format pre-fix entry.
     """
-    entry_path = paths.pending_dispatch_entry(run_id, session_id)
+    entry_path = paths.pending_dispatch_entry(session_id)
     entry_path.parent.mkdir(parents=True, exist_ok=True)
     entry: dict = {
         "agent_instance_id": agent_instance_id,
@@ -1549,7 +1817,7 @@ class TestSubagentStartPromptFromDispatch(unittest.TestCase):
     def _setup_dispatch(self):
         """Write a dispatch entry carrying the test prompt into the unknown-run bucket."""
         _write_dispatch_entry_for_prompt_tests(
-            self.paths, "unknown-run", _PROMPT_THREADING_SESSION,
+            self.paths, _PROMPT_THREADING_SESSION,
             _PROMPT_THREADING_INSTANCE_ID, prompt=_PROMPT_THREADING_TEXT,
         )
 
@@ -1770,7 +2038,7 @@ class TestSubagentStartPromptDegradeNeverFabricate(unittest.TestCase):
         """When the dispatch entry has no 'prompt' field (old-format entry), 'prompt'
         must be absent from invocation_start (backward-compatible degrade path)."""
         _write_dispatch_entry_for_prompt_tests(
-            self.paths, "unknown-run", self._DEGRADE_SESSION,
+            self.paths, self._DEGRADE_SESSION,
             "unknown-agent",
             # prompt omitted -> old-format entry
         )
@@ -1789,7 +2057,7 @@ class TestSubagentStartPromptDegradeNeverFabricate(unittest.TestCase):
     def test_no_user_turn_when_dispatch_has_no_prompt_field(self):
         """No user turn must be emitted when the dispatch entry has no 'prompt' field."""
         _write_dispatch_entry_for_prompt_tests(
-            self.paths, "unknown-run", self._DEGRADE_SESSION,
+            self.paths, self._DEGRADE_SESSION,
             "unknown-agent",
         )
         ctx = self._start_ctx("harness-dg-005", session_id=self._DEGRADE_SESSION)
@@ -1807,7 +2075,7 @@ class TestSubagentStartPromptDegradeNeverFabricate(unittest.TestCase):
     def test_no_prompt_section_in_input_artifact_when_dispatch_has_no_prompt_field(self):
         """01_input.md must not have '## Prompt' when the dispatch entry has no prompt."""
         _write_dispatch_entry_for_prompt_tests(
-            self.paths, "unknown-run", self._DEGRADE_SESSION,
+            self.paths, self._DEGRADE_SESSION,
             "unknown-agent",
         )
         ctx = self._start_ctx("harness-dg-006", session_id=self._DEGRADE_SESSION)
@@ -1817,6 +2085,388 @@ class TestSubagentStartPromptDegradeNeverFabricate(unittest.TestCase):
             "## Prompt", text,
             "01_input.md must not have '## Prompt' when dispatch has no 'prompt' field",
         )
+
+
+# ---------------------------------------------------------------------------
+# T3.2  resolve_invocation — mapped flag and agent-map miss diagnostic
+# ---------------------------------------------------------------------------
+
+class TestResolveInvocationMappedFlag(unittest.TestCase):
+    """runstate.resolve_invocation(paths, run_id, agent_id) returns
+    (agent_instance_id, mapped): mapped is True when an agent-map entry
+    supplied the identity, False when the deterministic 'unmapped_<agent_id>'
+    fallback was used. A miss emits an 'agent-map: miss' diagnostic naming
+    run_id and agent_id."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+        self.paths = core.build_paths(self.tmp_path)
+        self._orig_debug = os.environ.get("MOSAIC_LOGGER_DEBUG")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        if self._orig_debug is None:
+            os.environ.pop("MOSAIC_LOGGER_DEBUG", None)
+        else:
+            os.environ["MOSAIC_LOGGER_DEBUG"] = self._orig_debug
+
+    def test_mapped_true_when_mapping_exists(self):
+        runstate.put_agent_mapping(self.paths, _RUN_ID, "aid-map-1", "Reviewer#9", "Reviewer")
+        identity, mapped = runstate.resolve_invocation(self.paths, _RUN_ID, "aid-map-1")
+        self.assertEqual("Reviewer#9", identity)
+        self.assertTrue(mapped)
+
+    def test_mapped_false_when_mapping_absent(self):
+        identity, mapped = runstate.resolve_invocation(self.paths, _RUN_ID, "aid-map-missing-1")
+        self.assertEqual("unmapped_aid-map-missing-1", identity)
+        self.assertFalse(mapped)
+
+    def test_resolve_invocation_id_wraps_first_tuple_element(self):
+        """resolve_invocation_id keeps returning just the identity string."""
+        runstate.put_agent_mapping(self.paths, _RUN_ID, "aid-map-2", "Reviewer#10", "Reviewer")
+        identity, _mapped = runstate.resolve_invocation(self.paths, _RUN_ID, "aid-map-2")
+        self.assertEqual(identity, runstate.resolve_invocation_id(self.paths, _RUN_ID, "aid-map-2"))
+
+    def test_never_returns_none_identity_on_miss(self):
+        identity, _mapped = runstate.resolve_invocation(self.paths, _RUN_ID, "aid-map-missing-2")
+        self.assertIsNotNone(identity)
+
+    def test_never_misattributes_to_orchestrator(self):
+        """A miss must never resolve to an identity indistinguishable from the
+        orchestrator (no agent_id at all)."""
+        identity, _mapped = runstate.resolve_invocation(self.paths, _RUN_ID, "aid-map-missing-3")
+        self.assertNotEqual("", identity)
+        self.assertTrue(identity.startswith("unmapped_"))
+
+    def test_agent_map_miss_emits_diagnostic_with_run_id_and_agent_id(self):
+        debug_file = self.tmp_path / "debug.log"
+        os.environ["MOSAIC_LOGGER_DEBUG"] = str(debug_file)
+        runstate.resolve_invocation(self.paths, _RUN_ID, "aid-diag-miss-1")
+        self.assertTrue(debug_file.exists(), "Diagnostic file must be written on a miss")
+        text = debug_file.read_text(encoding="utf-8")
+        self.assertIn("agent-map: miss", text)
+        self.assertIn(_RUN_ID, text)
+        self.assertIn("aid-diag-miss-1", text)
+
+    def test_agent_map_hit_emits_no_miss_diagnostic(self):
+        debug_file = self.tmp_path / "debug.log"
+        os.environ["MOSAIC_LOGGER_DEBUG"] = str(debug_file)
+        runstate.put_agent_mapping(self.paths, _RUN_ID, "aid-diag-hit-1", "Reviewer#11", "Reviewer")
+        runstate.resolve_invocation(self.paths, _RUN_ID, "aid-diag-hit-1")
+        if debug_file.exists():
+            text = debug_file.read_text(encoding="utf-8")
+            self.assertNotIn("agent-map: miss", text)
+
+    def test_resolve_invocation_never_raises(self):
+        try:
+            runstate.resolve_invocation(self.paths, "nonexistent-run", "aid-never-raise")
+        except Exception as exc:
+            self.fail(f"resolve_invocation raised: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# T3.3  classify_unmapped_stop — genuine vs spurious pure classification
+# ---------------------------------------------------------------------------
+
+class TestClassifyUnmappedStop(unittest.TestCase):
+    """classify_unmapped_stop(ctx) returns 'spurious' only when the firing
+    carries neither an agent_transcript_path nor a last_assistant_message.
+    Every other case is 'genuine'. The distinction is biased toward
+    recording: ambiguity resolves to 'genuine'."""
+
+    def _ctx(self, tmp_path, **kwargs):
+        return _make_stop_ctx(tmp_path, agent_id="aid-classify", **kwargs)
+
+    def test_spurious_when_neither_field_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._ctx(tmp)
+            self.assertEqual("spurious", invocation.classify_unmapped_stop(ctx))
+
+    def test_genuine_when_transcript_path_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._ctx(tmp, agent_transcript_path="/some/transcript.jsonl")
+            self.assertEqual("genuine", invocation.classify_unmapped_stop(ctx))
+
+    def test_genuine_when_last_assistant_message_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._ctx(tmp, last_assistant_message="Some final response.")
+            self.assertEqual("genuine", invocation.classify_unmapped_stop(ctx))
+
+    def test_genuine_when_both_fields_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._ctx(
+                tmp,
+                agent_transcript_path="/some/transcript.jsonl",
+                last_assistant_message="Some final response.",
+            )
+            self.assertEqual("genuine", invocation.classify_unmapped_stop(ctx))
+
+    def test_empty_string_fields_are_treated_as_absent_and_classify_spurious(self):
+        """HookContext normalizes empty strings to None, so an empty-string
+        transcript path or message must classify the same as absent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._ctx(tmp, agent_transcript_path="", last_assistant_message="")
+            self.assertEqual("spurious", invocation.classify_unmapped_stop(ctx))
+
+    def test_whitespace_only_last_assistant_message_classifies_genuine(self):
+        """A whitespace-only last_assistant_message is a present (non-empty)
+        string, not an absent field -- classification must be biased toward
+        recording, so this classifies 'genuine' rather than 'spurious'."""
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._ctx(tmp, last_assistant_message="   ")
+            self.assertEqual("genuine", invocation.classify_unmapped_stop(ctx))
+
+    def test_never_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ctx = self._ctx(tmp)
+            try:
+                invocation.classify_unmapped_stop(ctx)
+            except Exception as exc:
+                self.fail(f"classify_unmapped_stop raised: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# T3.3 / T3.4  handle_subagent_stop — genuine-unmapped quarantine outcome
+# ---------------------------------------------------------------------------
+
+class TestSubagentStopQuarantineGenuine(unittest.TestCase):
+    """An unmapped SubagentStop classified 'genuine' must still produce its
+    invocation_end event, its 02_output.md artifact, and its transcript
+    export -- at the quarantine destination, with attribution='quarantined'
+    on the event and a diagnostic emitted."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+        self.paths = core.build_paths(self.tmp_path)
+        self._orig_debug = os.environ.get("MOSAIC_LOGGER_DEBUG")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        if self._orig_debug is None:
+            os.environ.pop("MOSAIC_LOGGER_DEBUG", None)
+        else:
+            os.environ["MOSAIC_LOGGER_DEBUG"] = self._orig_debug
+
+    def _run_stop(self, agent_id, **kwargs):
+        ctx = _make_stop_ctx(str(self.tmp_path), agent_id=agent_id, **kwargs)
+        invocation.handle_subagent_stop(ctx)
+        return ctx
+
+    def test_quarantine_events_file_receives_invocation_end(self):
+        self._run_stop("aid-quarantine-1", last_assistant_message="Genuine but unmapped.")
+        events = _read_jsonl(self.paths.quarantine_events(_RUN_ID, "aid-quarantine-1"))
+        self.assertIn("invocation_end", [e["event"] for e in events])
+
+    def test_quarantine_invocation_end_has_attribution_quarantined(self):
+        self._run_stop("aid-quarantine-2", last_assistant_message="Genuine but unmapped.")
+        events = _read_jsonl(self.paths.quarantine_events(_RUN_ID, "aid-quarantine-2"))
+        event = next(e for e in events if e["event"] == "invocation_end")
+        self.assertEqual("quarantined", event.get("attribution"))
+
+    def test_quarantine_final_turn_is_written(self):
+        self._run_stop("aid-quarantine-3", last_assistant_message="Final quarantined response.")
+        events = _read_jsonl(self.paths.quarantine_events(_RUN_ID, "aid-quarantine-3"))
+        turns = [e for e in events if e["event"] == "turn" and e.get("role") == "assistant"]
+        self.assertEqual(1, len(turns))
+
+    def test_quarantine_output_artifact_is_written(self):
+        self._run_stop("aid-quarantine-4", last_assistant_message="Output goes to quarantine.")
+        output_path = self.paths.quarantine_output(_RUN_ID, "aid-quarantine-4")
+        self.assertTrue(output_path.exists(), "02_output.md must be written to the quarantine location")
+
+    def test_quarantine_transcript_export_is_attempted(self):
+        """04_session.raw at the quarantine destination must be a
+        byte-identical copy of agent_transcript_path, mirroring the
+        mapped-path export contract."""
+        transcript_path = _write_transcript_file(self.tmp_path, [
+            {"type": "assistant", "message": {"model": "claude-opus-4-5",
+                                              "usage": {"input_tokens": 5, "output_tokens": 3}}}
+        ])
+        self._run_stop(
+            "aid-quarantine-5",
+            agent_transcript_path=transcript_path,
+            last_assistant_message="Response with transcript.",
+        )
+        raw_path = self.paths.quarantine_raw(_RUN_ID, "aid-quarantine-5")
+        self.assertTrue(raw_path.exists(),
+                        "Quarantine transcript export must be written to quarantine_raw")
+        original_bytes = pathlib.Path(transcript_path).read_bytes()
+        self.assertEqual(original_bytes, raw_path.read_bytes(),
+                         "Quarantine transcript export must be byte-identical to the source transcript")
+
+    def test_no_unmapped_prefixed_directory_is_created(self):
+        """AC3.4 boundary: the genuine-unmapped case must not fall back to the
+        legacy unmapped_* directory; it must land in quarantine instead."""
+        self._run_stop("aid-quarantine-6", last_assistant_message="No legacy unmapped dir.")
+        run_root = self.paths.run_root(_RUN_ID)
+        if run_root.exists():
+            legacy_dirs = [
+                d for d in run_root.iterdir()
+                if d.is_dir() and d.name.startswith("unmapped_")
+            ]
+            self.assertEqual(
+                0, len(legacy_dirs),
+                "Genuine-unmapped stop must not create a legacy unmapped_* directory",
+            )
+
+    def test_quarantine_directory_is_dot_prefixed(self):
+        """D5: the quarantine destination lives under a dot-prefixed directory
+        inside the run folder."""
+        self._run_stop("aid-quarantine-7", last_assistant_message="Dot-prefixed check.")
+        quarantine_path = self.paths.quarantine_events(_RUN_ID, "aid-quarantine-7")
+        run_root = self.paths.run_root(_RUN_ID)
+        relative = quarantine_path.relative_to(run_root)
+        self.assertTrue(
+            relative.parts[0].startswith("."),
+            "Quarantine destination must be dot-prefixed so the analyzer's scanner skips it",
+        )
+
+    def test_emits_quarantine_diagnostic(self):
+        debug_file = self.tmp_path / "debug.log"
+        os.environ["MOSAIC_LOGGER_DEBUG"] = str(debug_file)
+        self._run_stop("aid-quarantine-8", last_assistant_message="Diagnostic check.")
+        self.assertTrue(debug_file.exists())
+        text = debug_file.read_text(encoding="utf-8")
+        self.assertIn("subagent-stop: quarantined", text)
+        self.assertIn("aid-quarantine-8", text,
+                      "Diagnostic must name the agent_id so a warm-up miss can be told apart from a genuine failure")
+        self.assertIn(_RUN_ID, text)
+
+    def test_never_raises(self):
+        try:
+            self._run_stop("aid-quarantine-9", last_assistant_message="No crash.")
+        except Exception as exc:
+            self.fail(f"handle_subagent_stop raised on genuine-unmapped input: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# T3.3 / T3.4  handle_subagent_stop — spurious narration discard outcome
+# ---------------------------------------------------------------------------
+
+class TestSubagentStopSpuriousDiscard(unittest.TestCase):
+    """An unmapped SubagentStop classified 'spurious' (no agent_transcript_path
+    and no last_assistant_message) is discarded: no event, no artifact, no
+    quarantine directory, no legacy unmapped_* directory -- but a diagnostic
+    is still emitted."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+        self.paths = core.build_paths(self.tmp_path)
+        self._orig_debug = os.environ.get("MOSAIC_LOGGER_DEBUG")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        if self._orig_debug is None:
+            os.environ.pop("MOSAIC_LOGGER_DEBUG", None)
+        else:
+            os.environ["MOSAIC_LOGGER_DEBUG"] = self._orig_debug
+
+    def _run_stop(self, agent_id, **kwargs):
+        ctx = _make_stop_ctx(str(self.tmp_path), agent_id=agent_id, **kwargs)
+        invocation.handle_subagent_stop(ctx)
+        return ctx
+
+    def test_no_quarantine_directory_is_created(self):
+        self._run_stop("aid-spurious-1")
+        self.assertFalse(
+            self.paths.quarantine_events(_RUN_ID, "aid-spurious-1").exists(),
+            "A spurious narration firing must not create a quarantine entry",
+        )
+
+    def test_no_legacy_unmapped_directory_is_created(self):
+        self._run_stop("aid-spurious-2")
+        run_root = self.paths.run_root(_RUN_ID)
+        if run_root.exists():
+            legacy_dirs = [
+                d for d in run_root.iterdir()
+                if d.is_dir() and d.name.startswith("unmapped_")
+            ]
+            self.assertEqual(0, len(legacy_dirs))
+
+    def test_no_output_artifact_is_written(self):
+        self._run_stop("aid-spurious-3")
+        self.assertFalse(
+            self.paths.quarantine_output(_RUN_ID, "aid-spurious-3").exists(),
+        )
+
+    def test_emits_discard_diagnostic(self):
+        debug_file = self.tmp_path / "debug.log"
+        os.environ["MOSAIC_LOGGER_DEBUG"] = str(debug_file)
+        self._run_stop("aid-spurious-4")
+        self.assertTrue(debug_file.exists())
+        text = debug_file.read_text(encoding="utf-8")
+        self.assertIn("subagent-stop: discarded", text)
+        self.assertIn("aid-spurious-4", text,
+                      "Diagnostic must name the agent_id so a warm-up miss can be told apart from a genuine failure")
+        self.assertIn(_RUN_ID, text)
+
+    def test_never_raises(self):
+        try:
+            self._run_stop("aid-spurious-5")
+        except Exception as exc:
+            self.fail(f"handle_subagent_stop raised on spurious input: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# T3.5  Regression: the mapped path is unaffected by the quarantine change
+# ---------------------------------------------------------------------------
+
+class TestSubagentStopRegressionMappedPathUnaffected(unittest.TestCase):
+    """A SubagentStop whose agent_id resolves via a real agent-map entry must
+    behave exactly as it did before this stage: normal invocation directory,
+    no attribution field, and no quarantine/discard diagnostic."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+        self.paths = core.build_paths(self.tmp_path)
+        self._orig_debug = os.environ.get("MOSAIC_LOGGER_DEBUG")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        if self._orig_debug is None:
+            os.environ.pop("MOSAIC_LOGGER_DEBUG", None)
+        else:
+            os.environ["MOSAIC_LOGGER_DEBUG"] = self._orig_debug
+
+    def test_mapped_stop_writes_invocation_end_without_attribution_field(self):
+        _register_mapping(str(self.tmp_path), _RUN_ID, "aid-regress-1", "Reviewer#20", "Reviewer")
+        ctx = _make_stop_ctx(str(self.tmp_path), agent_id="aid-regress-1",
+                             last_assistant_message="Mapped and normal.")
+        invocation.handle_subagent_stop(ctx)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "Reviewer#20"))
+        event = next(e for e in events if e["event"] == "invocation_end")
+        self.assertNotIn("attribution", event,
+                         "The mapped path must never carry the quarantine attribution field")
+
+    def test_mapped_stop_does_not_create_quarantine_directory(self):
+        _register_mapping(str(self.tmp_path), _RUN_ID, "aid-regress-2", "Reviewer#21", "Reviewer")
+        ctx = _make_stop_ctx(str(self.tmp_path), agent_id="aid-regress-2",
+                             last_assistant_message="Mapped and normal.")
+        invocation.handle_subagent_stop(ctx)
+        self.assertFalse(self.paths.quarantine_events(_RUN_ID, "Reviewer#21").exists())
+
+    def test_mapped_stop_emits_no_quarantine_or_discard_diagnostic(self):
+        debug_file = self.tmp_path / "debug.log"
+        os.environ["MOSAIC_LOGGER_DEBUG"] = str(debug_file)
+        _register_mapping(str(self.tmp_path), _RUN_ID, "aid-regress-3", "Reviewer#22", "Reviewer")
+        ctx = _make_stop_ctx(str(self.tmp_path), agent_id="aid-regress-3",
+                             last_assistant_message="Mapped and normal.")
+        invocation.handle_subagent_stop(ctx)
+        if debug_file.exists():
+            text = debug_file.read_text(encoding="utf-8")
+            self.assertNotIn("subagent-stop: quarantined", text)
+            self.assertNotIn("subagent-stop: discarded", text)
+
+    def test_mapped_stop_still_writes_output_artifact_at_ordinary_location(self):
+        _register_mapping(str(self.tmp_path), _RUN_ID, "aid-regress-4", "Reviewer#23", "Reviewer")
+        ctx = _make_stop_ctx(str(self.tmp_path), agent_id="aid-regress-4",
+                             last_assistant_message="Mapped and normal.")
+        invocation.handle_subagent_stop(ctx)
+        self.assertTrue(self.paths.invocation_output(_RUN_ID, "Reviewer#23").exists())
 
 
 if __name__ == "__main__":

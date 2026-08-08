@@ -24,6 +24,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 import time
 import unittest
@@ -33,9 +34,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import mosaic_logger
 import mosaic_logger_core as core
 
-_ADAPTER_PATH = str(
-    pathlib.Path(__file__).parent.parent / "mosaic_logger.py"
-)
+_ADAPTER_ROOT = pathlib.Path(__file__).parent.parent
+_ADAPTER_PATH = str(_ADAPTER_ROOT / "mosaic_logger.py")
 
 _FIXTURE_DIR = pathlib.Path(__file__).parent / "fixtures"
 _SAMPLE_TRANSCRIPT = _FIXTURE_DIR / "sample_transcript.jsonl"
@@ -497,6 +497,102 @@ class TestConcurrentDispatchers(unittest.TestCase):
             _assert_jsonl_integrity(
                 self, events_path, f"{instance_id!r} 03_events.jsonl after SubagentStop"
             )
+
+
+# ---------------------------------------------------------------------------
+# T1.5 — Concurrent session-run binding writes from multiple processes
+# ---------------------------------------------------------------------------
+
+class TestConcurrentSessionRunBindingWrites(unittest.TestCase):
+    """Multiple concurrent put_session_run_binding calls for the SAME session
+    must not lose entries. Uses real subprocesses to exercise the
+    platform-appropriate locking path (POSIX O_APPEND / Windows msvcrt lock),
+    following the same direct-call subprocess pattern as
+    TestConcurrentPutPendingDispatch in test_pending_dispatch.py -- Stage 1
+    has no handler wiring yet, so the binding functions are called directly
+    rather than through the full adapter dispatcher.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_concurrent_writes_preserve_every_appended_entry(self):
+        """Every concurrently-appended run_id must be present and intact in
+        the resulting timeline -- no lost writes, no torn lines."""
+        n_concurrent = 6
+        workspace = self.tmp.name
+        session_id = "concurrency-session-binding-001"
+
+        helper_script = textwrap.dedent(f"""\
+            import sys, pathlib
+            sys.path.insert(0, {str(_ADAPTER_ROOT)!r})
+            import mosaic_logger_core as core
+            import mosaic_logger_runstate as runstate
+            idx = sys.argv[1]
+            workspace_root = pathlib.Path({workspace!r})
+            paths = core.build_paths(workspace_root)
+            runstate.put_session_run_binding(
+                paths, {session_id!r},
+                f"20260101T090000Z-{{idx.zfill(4)}}",
+                f"2026-01-01T09:00:0{{idx}}.000Z",
+            )
+        """)
+
+        results = [None] * n_concurrent
+        threads = []
+
+        def run_subprocess(idx):
+            try:
+                r = subprocess.run(
+                    ["py", "-c", helper_script, str(idx)],
+                    capture_output=True,
+                    timeout=15,
+                )
+                results[idx] = r
+            except Exception as exc:
+                results[idx] = exc
+
+        for i in range(n_concurrent):
+            t = threading.Thread(target=run_subprocess, args=(i,), daemon=True)
+            threads.append(t)
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=20)
+
+        for i, r in enumerate(results):
+            if isinstance(r, Exception):
+                self.fail(f"Subprocess {i} raised: {r}")
+            self.assertEqual(0, r.returncode,
+                             f"Subprocess {i} failed: {r.stderr.decode()[:300]}")
+
+        paths = core.build_paths(pathlib.Path(workspace))
+        entry_path = paths.session_binding_entry(session_id)
+        self.assertTrue(entry_path.exists(),
+                        "Binding file must exist after concurrent puts")
+
+        lines = entry_path.read_text("utf-8").splitlines()
+        non_empty = [ln for ln in lines if ln.strip()]
+        self.assertEqual(n_concurrent, len(non_empty),
+                         f"Expected {n_concurrent} entries, got {len(non_empty)}")
+
+        seen_run_ids = set()
+        for i, ln in enumerate(non_empty):
+            try:
+                obj = json.loads(ln)
+            except json.JSONDecodeError as exc:
+                self.fail(f"Line {i+1} is not valid JSON (torn write?): "
+                         f"{exc!r} | raw: {ln[:80]!r}")
+            self.assertIn("run_id", obj, f"Line {i+1} missing run_id")
+            self.assertIn("start_time", obj, f"Line {i+1} missing start_time")
+            seen_run_ids.add(obj["run_id"])
+
+        self.assertEqual(n_concurrent, len(seen_run_ids),
+                         "Every concurrently-written run_id must be distinct and present "
+                         "-- no entry may be lost to a torn or overwritten write")
 
 
 if __name__ == "__main__":

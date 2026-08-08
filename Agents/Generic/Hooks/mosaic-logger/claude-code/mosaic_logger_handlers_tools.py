@@ -8,6 +8,7 @@ High-frequency path: performs no transcript reads and no directory scanning.
 
 import mosaic_logger_core as core
 import mosaic_logger_runstate as runstate
+import mosaic_logger_usage as usage
 
 
 def resolve_destination(ctx: "core.HookContext"):
@@ -15,10 +16,33 @@ def resolve_destination(ctx: "core.HookContext"):
     run_id = core.effective_run_id(ctx)
     if not ctx.agent_id:
         return ctx.paths.orchestrator_events(run_id)
-    agent_instance_id = runstate.resolve_invocation_id(
+    agent_instance_id, _mapped = runstate.resolve_invocation(
         ctx.paths, run_id, ctx.agent_id
     )
     return ctx.paths.invocation_events(run_id, agent_instance_id)
+
+
+def _resolve_usage_scope(ctx: "core.HookContext"):
+    """Return (agent_instance_id, source) matching resolve_destination's own
+    routing decision, so a tool firing's usage_record lands on exactly the
+    same stream as the tool event it accompanies."""
+    if not ctx.agent_id:
+        return None, "orchestrator_transcript"
+    run_id = core.effective_run_id(ctx)
+    agent_instance_id, _mapped = runstate.resolve_invocation(
+        ctx.paths, run_id, ctx.agent_id
+    )
+    return agent_instance_id, "agent_transcript"
+
+
+def _emit_tool_usage_records(ctx: "core.HookContext") -> None:
+    """Emit usage_record events from ctx.transcript_path when
+    tool_capture_enabled() allows it, routed to the same destination as the
+    tool event itself. Never suppresses the surrounding tool event."""
+    if not usage.tool_capture_enabled():
+        return
+    agent_instance_id, source = _resolve_usage_scope(ctx)
+    usage.emit_usage_records(ctx, ctx.transcript_path, agent_instance_id, source)
 
 
 def resolve_call_id(ctx: "core.HookContext") -> str:
@@ -31,17 +55,33 @@ def resolve_call_id(ctx: "core.HookContext") -> str:
 
 def handle_pre_tool_use(ctx: "core.HookContext") -> None:
     """Emit tool_call_start. Additionally, when tool_name is 'Agent' or 'Task',
-    extract agent_instance_id and run_id from tool_input.prompt and
-    persist a pending dispatch for the current session_id.
+    extract agent_instance_id and run_id from tool_input.prompt, adopt any
+    extracted run_id into the session-run binding, and persist a pending
+    dispatch for the current session_id.
 
     Both 'Agent' and 'Task' tool names are accepted because Claude Code may
     dispatch subagents under either name depending on the harness version.
 
+    tool_call_start's own destination is resolved before the Agent/Task
+    capture runs, so an extraction that adopts a new run_id for this session
+    extends the binding for LATER firings without changing where THIS
+    firing's own event lands -- that decision was already made by
+    resolve_run_identity ahead of this handler.
+
     The pending-dispatch write is best-effort; failure does not prevent
     the tool_call_start event from being emitted. Never raises.
     """
-    # Capture pending dispatch for Agent/Task tool invocations.
     tool_name = ctx.field("tool_name")
+
+    event = core.build_event(
+        "tool_call_start", ctx,
+        call_id=resolve_call_id(ctx),
+        tool_name=tool_name,
+        tool_input=ctx.field("tool_input"),
+    )
+    core.append_event(resolve_destination(ctx), event)
+
+    # Capture pending dispatch for Agent/Task tool invocations.
     if tool_name in ("Agent", "Task"):
         try:
             tool_input = ctx.field("tool_input")
@@ -52,9 +92,9 @@ def handle_pre_tool_use(ctx: "core.HookContext") -> None:
                 agent_instance_id = runstate.extract_instance_id(prompt)
                 if agent_instance_id:
                     extracted_run_id = runstate.extract_run_id(prompt)
+                    runstate.adopt_run_id(ctx, extracted_run_id)
                     runstate.put_pending_dispatch(
                         ctx.paths,
-                        core.effective_run_id(ctx),
                         ctx.session_id,
                         agent_instance_id,
                         extracted_run_id,
@@ -63,13 +103,11 @@ def handle_pre_tool_use(ctx: "core.HookContext") -> None:
         except Exception:
             pass  # Never let dispatch capture suppress the tool_call_start event.
 
-    event = core.build_event(
-        "tool_call_start", ctx,
-        call_id=resolve_call_id(ctx),
-        tool_name=tool_name,
-        tool_input=ctx.field("tool_input"),
-    )
-    core.append_event(resolve_destination(ctx), event)
+    # Deliberate reversal of the "no transcript reads" property on this
+    # high-frequency path, gated by tool_capture_enabled() (design decision,
+    # not incidental). Runs after tool_call_start so an emission failure
+    # can never suppress it.
+    _emit_tool_usage_records(ctx)
 
 
 def handle_post_tool_use(ctx: "core.HookContext") -> None:
@@ -81,6 +119,7 @@ def handle_post_tool_use(ctx: "core.HookContext") -> None:
         tool_output=ctx.field("tool_output"),
     )
     core.append_event(resolve_destination(ctx), event)
+    _emit_tool_usage_records(ctx)
 
 
 def handle_post_tool_use_failure(ctx: "core.HookContext") -> None:
@@ -95,6 +134,7 @@ def handle_post_tool_use_failure(ctx: "core.HookContext") -> None:
         error=error,
     )
     core.append_event(resolve_destination(ctx), event)
+    _emit_tool_usage_records(ctx)
 
 
 HANDLERS = {

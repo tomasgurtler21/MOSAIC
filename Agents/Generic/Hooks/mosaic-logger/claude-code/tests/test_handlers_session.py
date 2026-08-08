@@ -693,6 +693,144 @@ class TestHandleStop(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# T5.2 / T5.3 / T5.6 – handle_stop emits usage_record events to the
+# orchestrator stream, one per assistant record, alongside the unchanged
+# turn event.
+# ---------------------------------------------------------------------------
+
+class TestHandleStopUsageEmission(unittest.TestCase):
+    """handle_stop emits one usage_record per assistant record in
+    ctx.transcript_path to the orchestrator stream, without disturbing the
+    pre-existing turn event."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _usage_events(self, ctx):
+        return [e for e in _read_events(ctx) if e["event"] == "usage_record"]
+
+    def test_two_assistant_records_produce_two_usage_records(self):
+        transcript_path = self.tmp_path / "transcript.jsonl"
+        _write_transcript(transcript_path, [
+            {"type": "assistant", "message": {
+                "id": "msg_1", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }},
+            {"type": "assistant", "message": {
+                "id": "msg_2", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 20, "output_tokens": 8},
+            }},
+        ])
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": TEST_SESSION_ID,
+            "last_assistant_message": "Done.",
+            "transcript_path": str(transcript_path),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_stop(ctx)
+        usage_events = self._usage_events(ctx)
+        self.assertEqual(2, len(usage_events))
+
+    def test_usage_records_omit_agent_instance_id_on_orchestrator_stream(self):
+        transcript_path = self.tmp_path / "transcript.jsonl"
+        _write_transcript(transcript_path, [
+            {"type": "assistant", "message": {
+                "id": "msg_orch", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10},
+            }},
+        ])
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": TEST_SESSION_ID,
+            "last_assistant_message": "Done.",
+            "transcript_path": str(transcript_path),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_stop(ctx)
+        usage_event = self._usage_events(ctx)[0]
+        self.assertNotIn("agent_instance_id", usage_event)
+
+    def test_usage_record_source_is_orchestrator_transcript(self):
+        transcript_path = self.tmp_path / "transcript.jsonl"
+        _write_transcript(transcript_path, [
+            {"type": "assistant", "message": {
+                "id": "msg_src", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10},
+            }},
+        ])
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": TEST_SESSION_ID,
+            "last_assistant_message": "Done.",
+            "transcript_path": str(transcript_path),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_stop(ctx)
+        usage_event = self._usage_events(ctx)[0]
+        self.assertEqual("orchestrator_transcript", usage_event["source"])
+
+    def test_no_usage_records_when_transcript_missing(self):
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": TEST_SESSION_ID,
+            "last_assistant_message": "Done.",
+            "transcript_path": str(self.tmp_path / "nonexistent.jsonl"),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_stop(ctx)
+        self.assertEqual(0, len(self._usage_events(ctx)))
+
+    def test_turn_event_still_emitted_alongside_usage_records(self):
+        """T5.6 regression: the pre-existing turn event is unaffected by
+        the new usage_record emission."""
+        transcript_path = self.tmp_path / "transcript.jsonl"
+        _write_transcript(transcript_path, [
+            {"type": "assistant", "message": {
+                "id": "msg_turn", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            }},
+        ])
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": TEST_SESSION_ID,
+            "last_assistant_message": "Here is my response.",
+            "transcript_path": str(transcript_path),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_stop(ctx)
+        events = _read_events(ctx)
+        turn_events = [e for e in events if e["event"] == "turn"]
+        self.assertEqual(1, len(turn_events))
+        self.assertEqual("Here is my response.", turn_events[0]["content"])
+        self.assertEqual("claude-opus-4-5", turn_events[0]["model"])
+
+    def test_repeated_stop_firings_do_not_error_and_re_emit(self):
+        """T5.4: two Stop firings against the same transcript are tolerated."""
+        transcript_path = self.tmp_path / "transcript.jsonl"
+        _write_transcript(transcript_path, [
+            {"type": "assistant", "message": {
+                "id": "msg_repeat", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10},
+            }},
+        ])
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": TEST_SESSION_ID,
+            "last_assistant_message": "Done.",
+            "transcript_path": str(transcript_path),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_stop(ctx)
+        session_handlers.handle_stop(ctx)
+        self.assertEqual(2, len(self._usage_events(ctx)))
+
+
+# ---------------------------------------------------------------------------
 # T3.5 – Notification → notification event
 # ---------------------------------------------------------------------------
 
@@ -963,6 +1101,55 @@ class TestHandleCompaction(unittest.TestCase):
         event = _read_events(ctx)[0]
         self.assertIn("tokens_after", event)
         self.assertEqual(0, event["tokens_after"])
+
+    def test_pre_compact_emits_usage_records_from_transcript(self):
+        """T5.3: PreCompact has transcript access and must emit usage_record
+        per assistant record, alongside its own compaction event."""
+        transcript_path = self.tmp_path / "transcript.jsonl"
+        _write_transcript(transcript_path, [
+            {"type": "assistant", "message": {
+                "id": "msg_pre", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10},
+            }},
+        ])
+        payload = {
+            "hook_event_name": "PreCompact",
+            "session_id": TEST_SESSION_ID,
+            "trigger": "auto",
+            "tokens_before": 180000,
+            "transcript_path": str(transcript_path),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_pre_compact(ctx)
+        events = _read_events(ctx)
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events))
+        compaction_events = [e for e in events if e["event"] == "compaction"]
+        self.assertEqual(1, len(compaction_events))
+
+    def test_post_compact_emits_usage_records_from_transcript(self):
+        """T5.3: PostCompact has transcript access and must emit usage_record
+        per assistant record, alongside its own compaction event."""
+        transcript_path = self.tmp_path / "transcript.jsonl"
+        _write_transcript(transcript_path, [
+            {"type": "assistant", "message": {
+                "id": "msg_post", "model": "claude-opus-4-5",
+                "usage": {"output_tokens": 8},
+            }},
+        ])
+        payload = {
+            "hook_event_name": "PostCompact",
+            "session_id": TEST_SESSION_ID,
+            "tokens_after": 5000,
+            "transcript_path": str(transcript_path),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_post_compact(ctx)
+        events = _read_events(ctx)
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events))
+        compaction_events = [e for e in events if e["event"] == "compaction"]
+        self.assertEqual(1, len(compaction_events))
 
 
 # ---------------------------------------------------------------------------

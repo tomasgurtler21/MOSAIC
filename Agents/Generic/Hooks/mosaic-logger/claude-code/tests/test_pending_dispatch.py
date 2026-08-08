@@ -1,33 +1,39 @@
-"""Tests for the pending-dispatch correlation mechanism (Stage 1: Agent-ID Attribution).
+"""Tests for the pending-dispatch correlation mechanism.
 
 Covers:
-  - LogPaths extensions for pending-dispatch directory/entry paths
+  - LogPaths: pending_dispatch_dir/pending_dispatch_entry are relocated to a
+    run-id-independent path at the OrchestrationLogs root (Design D4/A3),
+    dot-prefixed and keyed only by session_id.
   - put_pending_dispatch: persistence, JSONL append (FIFO), parent-dir creation,
-    success/failure return, never-raises contract, None run_id serialization
+    success/failure return, never-raises contract, None run_id serialization.
+    Signature no longer takes a path_run_id argument.
   - pop_pending_dispatch: FIFO ordering, stale-entry eviction, empty-queue
     resilience, corrupt-file resilience, absent-file resilience, concurrent
-    session isolation, max_age_seconds parameter
-  - Concurrent write safety for put_pending_dispatch (real subprocesses)
+    session isolation, max_age_seconds parameter. Signature no longer takes
+    a path_run_id argument.
+  - Concurrent write safety for put_pending_dispatch (real subprocesses).
+  - The put/pop pair is unconditionally consistent across the transition from
+    an unresolved to a resolved run_id, because the queue path never carries
+    a run_id component (Design D4) -- this eliminates the Stage 1/2 hazard
+    rather than merely mitigating it.
   - handle_pre_tool_use Agent branch: pending dispatch created when
     tool_name == "Agent", correct extraction, existing tool_call_start event
-    still emitted, non-Agent calls unaffected
+    still emitted, non-Agent calls unaffected.
   - handle_subagent_start consuming pending dispatch: uses dispatch's
     agent_instance_id for mapping, consumes the entry, falls back to
-    "unknown-agent" when no dispatch exists, optionally updates ctx.run_id,
-    guard-then-pop ordering (no agent_id guard triggers early return before pop),
-    path_run_id bucket-mismatch fallback
+    "unknown-agent" when no dispatch exists, adopts the dispatch's run_id via
+    adopt_run_id when ctx.run_id is not yet set, guard-then-pop ordering.
   - End-to-end correlation: PreToolUse Agent -> SubagentStart produces correct
-    agent_instance_id in the mapping store
+    agent_instance_id in the mapping store.
   - Unmapped SubagentStop filtering: no files/events written when
-    resolve_invocation_id returns "unmapped_*"
-  - handle_stop guard removal: Stop with agent_id present still emits turn event
+    resolve_invocation_id returns "unmapped_*".
+  - handle_stop guard removal: Stop with agent_id present still emits turn event.
 
-RED-phase note: All tests in this file will FAIL until the Stage 1 implementation
-is complete. Functions put_pending_dispatch and pop_pending_dispatch do not exist
-yet in mosaic_logger_runstate. The LogPaths pending_dispatch_dir/pending_dispatch_entry
-methods do not exist yet. The Agent-branch in handle_pre_tool_use, the
-pending-dispatch pop in handle_subagent_start, the unmapped guard in
-handle_subagent_stop, and the guard removal in handle_stop are all unimplemented.
+RED-phase note: put_pending_dispatch and pop_pending_dispatch still accept a
+path_run_id positional argument in the current implementation; every call in
+this file that omits it will fail (TypeError) until the relocation lands.
+LogPaths.pending_dispatch_dir/entry still require a run_id argument; every
+call in this file that omits it will fail until the relocation lands.
 """
 
 import datetime
@@ -76,10 +82,6 @@ _DISPATCH_PROMPT_NO_RUN_ID = (
 
 # A prompt that contains no extractable agent_instance_id.
 _PLAIN_PROMPT = "Here are the instructions for the task. Please proceed."
-
-_ISO8601_Z_RE = __import__("re").compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$"
-)
 
 # Path to the adapter root (parent of this test file's directory).
 _ADAPTER_ROOT = pathlib.Path(__file__).parent.parent
@@ -162,7 +164,8 @@ def _write_pending_dispatch_file(path, entries):
 # ---------------------------------------------------------------------------
 
 class TestLogPathsPendingDispatch(unittest.TestCase):
-    """LogPaths must expose pending_dispatch_dir and pending_dispatch_entry methods."""
+    """LogPaths must expose pending_dispatch_dir and pending_dispatch_entry
+    at a run-id-independent path, keyed only by session_id (Design D4/A3)."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -171,38 +174,56 @@ class TestLogPathsPendingDispatch(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_pending_dispatch_dir_returns_path_under_run_root(self):
-        """pending_dispatch_dir must return a path inside the run root."""
-        d = self.paths.pending_dispatch_dir(_RUN_ID)
-        self.assertTrue(str(d).startswith(str(self.paths.run_root(_RUN_ID))))
+    def test_pending_dispatch_dir_takes_no_run_id_argument(self):
+        """pending_dispatch_dir must be callable with zero arguments."""
+        try:
+            self.paths.pending_dispatch_dir()
+        except TypeError as exc:
+            self.fail(f"pending_dispatch_dir still requires a run_id argument: {exc}")
+
+    def test_pending_dispatch_dir_is_sibling_of_run_folders(self):
+        """pending_dispatch_dir must hang directly off the LogPaths root,
+        NOT under any run_root(run_id) -- a firing that has not yet resolved
+        a run_id must still be able to reach it."""
+        d = self.paths.pending_dispatch_dir()
+        self.assertEqual(self.paths.root, d.parent)
 
     def test_pending_dispatch_dir_uses_dot_prefix_dirname(self):
         """The pending-dispatch directory must use the documented dirname."""
-        d = self.paths.pending_dispatch_dir(_RUN_ID)
+        d = self.paths.pending_dispatch_dir()
         self.assertEqual(".pending-dispatch", d.name)
+
+    def test_pending_dispatch_entry_takes_only_session_id(self):
+        """pending_dispatch_entry must be callable with a single session_id
+        argument -- the path_run_id parameter is removed."""
+        try:
+            self.paths.pending_dispatch_entry(_SESSION_ID)
+        except TypeError as exc:
+            self.fail(f"pending_dispatch_entry still requires path_run_id: {exc}")
 
     def test_pending_dispatch_entry_is_inside_pending_dispatch_dir(self):
         """pending_dispatch_entry must be inside pending_dispatch_dir."""
-        entry = self.paths.pending_dispatch_entry(_RUN_ID, _SESSION_ID)
-        expected_dir = self.paths.pending_dispatch_dir(_RUN_ID)
+        entry = self.paths.pending_dispatch_entry(_SESSION_ID)
+        expected_dir = self.paths.pending_dispatch_dir()
         self.assertEqual(expected_dir, entry.parent)
 
     def test_pending_dispatch_entry_has_jsonl_suffix(self):
         """The pending-dispatch queue file must have a .jsonl extension."""
-        entry = self.paths.pending_dispatch_entry(_RUN_ID, _SESSION_ID)
+        entry = self.paths.pending_dispatch_entry(_SESSION_ID)
         self.assertEqual(".jsonl", entry.suffix)
 
     def test_different_sessions_produce_different_entry_paths(self):
         """Two different session_ids must map to different queue files."""
-        e1 = self.paths.pending_dispatch_entry(_RUN_ID, "session-a")
-        e2 = self.paths.pending_dispatch_entry(_RUN_ID, "session-b")
+        e1 = self.paths.pending_dispatch_entry("session-a")
+        e2 = self.paths.pending_dispatch_entry("session-b")
         self.assertNotEqual(e1, e2)
 
-    def test_same_session_different_runs_produce_different_paths(self):
-        """Same session_id under different run_ids must be in different directories."""
-        e1 = self.paths.pending_dispatch_entry(_RUN_ID, _SESSION_ID)
-        e2 = self.paths.pending_dispatch_entry("other-run-id", _SESSION_ID)
-        self.assertNotEqual(e1, e2)
+    def test_same_session_produces_the_same_path_regardless_of_run_id(self):
+        """The whole point of the relocation: a single session_id always maps
+        to the same file. There is no run_id parameter left to diverge on."""
+        e1 = self.paths.pending_dispatch_entry(_SESSION_ID)
+        e2 = self.paths.pending_dispatch_entry(_SESSION_ID)
+        self.assertEqual(e1, e2)
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +231,9 @@ class TestLogPathsPendingDispatch(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestPutPendingDispatch(unittest.TestCase):
-    """put_pending_dispatch persists a pending-dispatch entry for the given session."""
+    """put_pending_dispatch persists a pending-dispatch entry for the given
+    session. Signature: (paths, session_id, agent_instance_id,
+    extracted_run_id, prompt=None) -- no path_run_id."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -220,13 +243,13 @@ class TestPutPendingDispatch(unittest.TestCase):
         self.tmp.cleanup()
 
     def _put(self, session_id=_SESSION_ID, agent_instance_id=_AGENT_INSTANCE_ID,
-             extracted_run_id=_EXTRACTED_RUN_ID, path_run_id=_RUN_ID):
+             extracted_run_id=_EXTRACTED_RUN_ID):
         return runstate.put_pending_dispatch(
-            self.paths, path_run_id, session_id, agent_instance_id, extracted_run_id
+            self.paths, session_id, agent_instance_id, extracted_run_id
         )
 
-    def _read_queue(self, session_id=_SESSION_ID, path_run_id=_RUN_ID):
-        entry_path = self.paths.pending_dispatch_entry(path_run_id, session_id)
+    def _read_queue(self, session_id=_SESSION_ID):
+        entry_path = self.paths.pending_dispatch_entry(session_id)
         return _read_jsonl(entry_path)
 
     def test_returns_true_on_success(self):
@@ -235,7 +258,7 @@ class TestPutPendingDispatch(unittest.TestCase):
 
     def test_creates_entry_file(self):
         self._put()
-        entry_path = self.paths.pending_dispatch_entry(_RUN_ID, _SESSION_ID)
+        entry_path = self.paths.pending_dispatch_entry(_SESSION_ID)
         self.assertTrue(entry_path.exists())
 
     def test_entry_has_agent_instance_id(self):
@@ -269,7 +292,7 @@ class TestPutPendingDispatch(unittest.TestCase):
 
     def test_creates_parent_directory(self):
         """put_pending_dispatch must create the .pending-dispatch directory if absent."""
-        pending_dir = self.paths.pending_dispatch_dir(_RUN_ID)
+        pending_dir = self.paths.pending_dispatch_dir()
         self.assertFalse(pending_dir.exists(), "Pre-condition: dir must not exist yet")
         self._put()
         self.assertTrue(pending_dir.exists())
@@ -299,7 +322,7 @@ class TestPutPendingDispatch(unittest.TestCase):
     def test_returns_false_on_io_failure(self):
         """Returns False when the file cannot be written (parent is a file, not dir)."""
         # Block directory creation by placing a file where the dir would be.
-        pending_dir = self.paths.pending_dispatch_dir(_RUN_ID)
+        pending_dir = self.paths.pending_dispatch_dir()
         pending_dir.parent.mkdir(parents=True, exist_ok=True)
         # Write a regular file where the directory should be.
         pending_dir.write_bytes(b"blocker")
@@ -308,12 +331,12 @@ class TestPutPendingDispatch(unittest.TestCase):
 
     def test_never_raises(self):
         """put_pending_dispatch must never raise, even on total I/O failure."""
-        pending_dir = self.paths.pending_dispatch_dir(_RUN_ID)
+        pending_dir = self.paths.pending_dispatch_dir()
         pending_dir.parent.mkdir(parents=True, exist_ok=True)
         pending_dir.write_bytes(b"blocker")
         try:
             runstate.put_pending_dispatch(
-                self.paths, _RUN_ID, _SESSION_ID, _AGENT_INSTANCE_ID, None
+                self.paths, _SESSION_ID, _AGENT_INSTANCE_ID, None
             )
         except Exception as exc:
             self.fail(f"put_pending_dispatch raised unexpectedly: {exc}")
@@ -324,7 +347,8 @@ class TestPutPendingDispatch(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestPopPendingDispatch(unittest.TestCase):
-    """pop_pending_dispatch: FIFO, stale eviction, resilience."""
+    """pop_pending_dispatch: FIFO, stale eviction, resilience. Signature:
+    (paths, session_id, max_age_seconds=...) -- no path_run_id."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -334,17 +358,17 @@ class TestPopPendingDispatch(unittest.TestCase):
         self.tmp.cleanup()
 
     def _entry_path(self, session_id=_SESSION_ID):
-        return self.paths.pending_dispatch_entry(_RUN_ID, session_id)
+        return self.paths.pending_dispatch_entry(session_id)
 
     def _pop(self, session_id=_SESSION_ID, max_age_seconds=120):
         return runstate.pop_pending_dispatch(
-            self.paths, _RUN_ID, session_id, max_age_seconds=max_age_seconds
+            self.paths, session_id, max_age_seconds=max_age_seconds
         )
 
     def _put(self, session_id=_SESSION_ID, agent_instance_id=_AGENT_INSTANCE_ID,
              extracted_run_id=_EXTRACTED_RUN_ID):
         runstate.put_pending_dispatch(
-            self.paths, _RUN_ID, session_id, agent_instance_id, extracted_run_id
+            self.paths, session_id, agent_instance_id, extracted_run_id
         )
 
     def test_returns_none_when_file_absent(self):
@@ -467,7 +491,7 @@ class TestPopPendingDispatch(unittest.TestCase):
 
     def test_never_raises_on_absent_file(self):
         try:
-            runstate.pop_pending_dispatch(self.paths, _RUN_ID, _SESSION_ID)
+            runstate.pop_pending_dispatch(self.paths, _SESSION_ID)
         except Exception as exc:
             self.fail(f"pop_pending_dispatch raised on absent file: {exc}")
 
@@ -476,7 +500,7 @@ class TestPopPendingDispatch(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("}{totally broken{{", encoding="utf-8")
         try:
-            runstate.pop_pending_dispatch(self.paths, _RUN_ID, _SESSION_ID)
+            runstate.pop_pending_dispatch(self.paths, _SESSION_ID)
         except Exception as exc:
             self.fail(f"pop_pending_dispatch raised on corrupt file: {exc}")
 
@@ -485,34 +509,100 @@ class TestPopPendingDispatch(unittest.TestCase):
         self._put(session_id="session-alpha", agent_instance_id="alpha-agent#1")
         self._put(session_id="session-beta", agent_instance_id="beta-agent#2")
         # Pop only from session-alpha
-        runstate.pop_pending_dispatch(self.paths, _RUN_ID, "session-alpha")
+        runstate.pop_pending_dispatch(self.paths, "session-alpha")
         # session-beta queue must be unaffected
-        result = runstate.pop_pending_dispatch(self.paths, _RUN_ID, "session-beta")
+        result = runstate.pop_pending_dispatch(self.paths, "session-beta")
         self.assertIsNotNone(result)
         self.assertEqual("beta-agent#2", result["agent_instance_id"])
 
-    def test_path_run_id_mismatch_returns_none(self):
-        """put and pop targeting different path_run_ids land in different buckets.
 
-        When a dispatch is written under one run_id bucket and popped under a
-        different run_id bucket, pop returns None (the entry was not found).
-        This guards against the path_run_id consistency invariant regression
-        documented in the design: if put and pop diverge, correlation silently
-        fails and the fallback to 'unknown-agent' is the correct behavior.
-        """
+# ---------------------------------------------------------------------------
+# Run-id-independent transition consistency (Stage 2, Design D4)
+# ---------------------------------------------------------------------------
+
+class TestPendingDispatchRunIdIndependentTransitionConsistency(unittest.TestCase):
+    """The pending-dispatch queue is relocated to a run-id-independent path
+    (Design D4/A3), so put and pop always address the same file regardless
+    of what either firing resolved for run_id. This eliminates the put/pop
+    transition hazard entirely rather than merely mitigating it -- there is
+    no longer a 'bucket' for the two firings to disagree about.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_entry_path_has_no_run_id_parameter_to_diverge_on(self):
+        """pending_dispatch_entry accepts only session_id; there is no
+        run_id-shaped argument through which a writer and a reader could
+        address different files."""
+        import inspect
+        sig = inspect.signature(self.paths.pending_dispatch_entry)
+        self.assertEqual(["session_id"], list(sig.parameters.keys()))
+
+    def test_put_while_unresolved_then_pop_after_resolution_succeeds(self):
+        """A dispatch written by a firing that had no resolved run_id must
+        still be popped by a later firing that has since resolved a real
+        run_id -- both address the same file because the path never carried
+        a run_id component."""
         runstate.put_pending_dispatch(
-            self.paths, "run-bucket-A", _SESSION_ID, _AGENT_INSTANCE_ID, None
+            self.paths, _SESSION_ID, "transition-agent#1", None
         )
-        result = runstate.pop_pending_dispatch(
-            self.paths, "run-bucket-B", _SESSION_ID
+        result = runstate.pop_pending_dispatch(self.paths, _SESSION_ID)
+        self.assertIsNotNone(
+            result,
+            "Entry written while run_id was unresolved must still be poppable "
+            "once the session has since acquired a real run_id",
         )
-        self.assertIsNone(result,
-                           "pop from a different run_id bucket must return None")
+        self.assertEqual("transition-agent#1", result["agent_instance_id"])
 
+    def test_put_while_resolved_then_pop_while_still_resolved_succeeds(self):
+        """Symmetric direction: both firings already have a resolved run_id.
+        This must keep working exactly as it does for the unresolved case,
+        since the path is unconditionally the same file either way."""
+        runstate.put_pending_dispatch(
+            self.paths, _SESSION_ID, "transition-agent#2", _EXTRACTED_RUN_ID
+        )
+        result = runstate.pop_pending_dispatch(self.paths, _SESSION_ID)
+        self.assertIsNotNone(result)
+        self.assertEqual("transition-agent#2", result["agent_instance_id"])
 
-# ---------------------------------------------------------------------------
-# Concurrent write safety
-# ---------------------------------------------------------------------------
+    def test_end_to_end_writer_unresolved_reader_resolved_via_binding(self):
+        """PreToolUse fires before any run_id is bound for the session
+        (ctx.run_id is None). Before SubagentStart fires, the session
+        acquires a real run_id binding (e.g. from an intervening
+        UserPromptSubmit extraction). handle_subagent_start must still find
+        and consume the dispatch written by the earlier, unresolved firing.
+        """
+        pre_ctx = _make_pre_tool_ctx(
+            self.tmp.name, run_id=None, session_id=_SESSION_ID,
+            tool_name="Agent", tool_input={"prompt": _DISPATCH_PROMPT_NO_RUN_ID},
+        )
+        tools.handle_pre_tool_use(pre_ctx)
+
+        # The session acquires a real run_id binding in between the two firings.
+        runstate.put_session_run_binding(self.paths, _SESSION_ID, _RUN_ID, _TS)
+
+        start_ctx = _make_ctx(
+            self.tmp.name, "SubagentStart",
+            run_id=_RUN_ID, session_id=_SESSION_ID,
+            agent_id="harness-transition-001",
+        )
+        invocation.handle_subagent_start(start_ctx)
+
+        mapping = runstate.get_agent_mapping(
+            self.paths, _RUN_ID, "harness-transition-001"
+        )
+        self.assertIsNotNone(
+            mapping,
+            "The dispatch written before run_id resolution must still be "
+            "consumed by the SubagentStart that fires after resolution",
+        )
+        self.assertEqual("test-writer-tdd#3", mapping["agent_instance_id"])
+
 
 # ---------------------------------------------------------------------------
 # Prompt field round-trip through put_pending_dispatch / pop_pending_dispatch
@@ -521,13 +611,8 @@ class TestPopPendingDispatch(unittest.TestCase):
 class TestPendingDispatchPromptField(unittest.TestCase):
     """put_pending_dispatch must accept and persist a 'prompt' keyword argument.
     pop_pending_dispatch must return the stored prompt value (or None via
-    .get() access for backward-compatible old-format entries that lack the field).
-
-    All tests that call put with a prompt or that assert the 'prompt' key is
-    present in the popped dict will FAIL until the implementation is updated:
-    - put_pending_dispatch does not yet accept a 'prompt' keyword argument.
-    - pop_pending_dispatch does not yet include 'prompt' in its returned dict.
-    """
+    .get() access for backward-compatible old-format entries that lack the
+    field)."""
 
     # A realistic dispatch JSON, the same text that would come from tool_input.prompt.
     _SAMPLE_PROMPT = (
@@ -544,18 +629,15 @@ class TestPendingDispatchPromptField(unittest.TestCase):
         self.tmp.cleanup()
 
     def _pop(self, session_id=_SESSION_ID):
-        return runstate.pop_pending_dispatch(self.paths, _RUN_ID, session_id)
+        return runstate.pop_pending_dispatch(self.paths, session_id)
 
     # --- put_pending_dispatch: prompt acceptance and persistence ---
 
     def test_put_accepts_prompt_keyword_argument(self):
-        """put_pending_dispatch must accept a 'prompt' keyword argument without raising.
-
-        Currently FAILS with TypeError ('prompt' is not an accepted parameter).
-        """
+        """put_pending_dispatch must accept a 'prompt' keyword argument without raising."""
         try:
             result = runstate.put_pending_dispatch(
-                self.paths, _RUN_ID, _SESSION_ID,
+                self.paths, _SESSION_ID,
                 _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID,
                 prompt=self._SAMPLE_PROMPT,
             )
@@ -568,16 +650,13 @@ class TestPendingDispatchPromptField(unittest.TestCase):
 
     def test_put_persists_prompt_text_in_queue_entry(self):
         """When a prompt is given, the JSONL queue entry must contain the full
-        prompt text under the 'prompt' key.
-
-        Currently FAILS because put_pending_dispatch does not accept prompt.
-        """
+        prompt text under the 'prompt' key."""
         runstate.put_pending_dispatch(
-            self.paths, _RUN_ID, _SESSION_ID,
+            self.paths, _SESSION_ID,
             _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID,
             prompt=self._SAMPLE_PROMPT,
         )
-        entry_path = self.paths.pending_dispatch_entry(_RUN_ID, _SESSION_ID)
+        entry_path = self.paths.pending_dispatch_entry(_SESSION_ID)
         self.assertTrue(entry_path.exists(), "Queue file must exist after put")
         line = entry_path.read_text("utf-8").strip().splitlines()[0]
         entry = json.loads(line)
@@ -590,15 +669,11 @@ class TestPendingDispatchPromptField(unittest.TestCase):
 
     def test_put_prompt_key_absent_from_entry_when_not_given(self):
         """When no prompt is given (default None), the queue entry must not
-        contain a 'prompt' key (degrade-never-fabricate: no null fields).
-
-        This test exercises the current API, so it passes before the fix too,
-        but it specifies the invariant that must hold after the fix as well.
-        """
+        contain a 'prompt' key (degrade-never-fabricate: no null fields)."""
         runstate.put_pending_dispatch(
-            self.paths, _RUN_ID, _SESSION_ID, _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID
+            self.paths, _SESSION_ID, _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID
         )
-        entry_path = self.paths.pending_dispatch_entry(_RUN_ID, _SESSION_ID)
+        entry_path = self.paths.pending_dispatch_entry(_SESSION_ID)
         line = entry_path.read_text("utf-8").strip().splitlines()[0]
         entry = json.loads(line)
         self.assertNotIn(
@@ -611,12 +686,9 @@ class TestPendingDispatchPromptField(unittest.TestCase):
 
     def test_pop_includes_prompt_key_in_returned_dict(self):
         """pop_pending_dispatch must always include a 'prompt' key in the
-        returned dict, even when the stored value is None.
-
-        Currently FAILS because the returned dict does not contain 'prompt'.
-        """
+        returned dict, even when the stored value is None."""
         runstate.put_pending_dispatch(
-            self.paths, _RUN_ID, _SESSION_ID,
+            self.paths, _SESSION_ID,
             _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID,
             prompt=self._SAMPLE_PROMPT,
         )
@@ -628,12 +700,9 @@ class TestPendingDispatchPromptField(unittest.TestCase):
         )
 
     def test_pop_returns_correct_prompt_value(self):
-        """The 'prompt' value in the popped dict must match the stored text.
-
-        Currently FAILS because pop_pending_dispatch does not return 'prompt'.
-        """
+        """The 'prompt' value in the popped dict must match the stored text."""
         runstate.put_pending_dispatch(
-            self.paths, _RUN_ID, _SESSION_ID,
+            self.paths, _SESSION_ID,
             _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID,
             prompt=self._SAMPLE_PROMPT,
         )
@@ -650,11 +719,9 @@ class TestPendingDispatchPromptField(unittest.TestCase):
 
         The returned dict must still contain the 'prompt' key (set to None),
         so callers can always access result.get('prompt') without a KeyError.
-
-        Currently FAILS because the returned dict does not contain 'prompt'.
         """
         # Write an old-format entry directly, without a 'prompt' field.
-        entry_path = self.paths.pending_dispatch_entry(_RUN_ID, _SESSION_ID)
+        entry_path = self.paths.pending_dispatch_entry(_SESSION_ID)
         entry_path.parent.mkdir(parents=True, exist_ok=True)
         entry_path.write_text(
             json.dumps({
@@ -664,7 +731,7 @@ class TestPendingDispatchPromptField(unittest.TestCase):
             }) + "\n",
             encoding="utf-8",
         )
-        result = runstate.pop_pending_dispatch(self.paths, _RUN_ID, _SESSION_ID)
+        result = runstate.pop_pending_dispatch(self.paths, _SESSION_ID)
         self.assertIsNotNone(result)
         self.assertIn(
             "prompt", result,
@@ -677,12 +744,9 @@ class TestPendingDispatchPromptField(unittest.TestCase):
 
     def test_pop_returns_none_for_prompt_when_put_called_without_prompt(self):
         """When put is called without a prompt argument, pop must include a
-        'prompt' key set to None in the returned dict.
-
-        Currently FAILS because the returned dict does not contain 'prompt'.
-        """
+        'prompt' key set to None in the returned dict."""
         runstate.put_pending_dispatch(
-            self.paths, _RUN_ID, _SESSION_ID, _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID
+            self.paths, _SESSION_ID, _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID
         )
         result = self._pop()
         self.assertIsNotNone(result)
@@ -694,12 +758,9 @@ class TestPendingDispatchPromptField(unittest.TestCase):
 
     def test_prompt_does_not_affect_other_fields_in_popped_dict(self):
         """Storing a prompt must not alter agent_instance_id or run_id in the
-        popped dict.
-
-        Currently FAILS because put does not accept prompt (TypeError).
-        """
+        popped dict."""
         runstate.put_pending_dispatch(
-            self.paths, _RUN_ID, _SESSION_ID,
+            self.paths, _SESSION_ID,
             _AGENT_INSTANCE_ID, _EXTRACTED_RUN_ID,
             prompt=self._SAMPLE_PROMPT,
         )
@@ -739,7 +800,7 @@ class TestConcurrentPutPendingDispatch(unittest.TestCase):
             workspace_root = pathlib.Path({workspace!r})
             paths = core.build_paths(workspace_root)
             runstate.put_pending_dispatch(
-                paths, {_RUN_ID!r}, {_SESSION_ID!r},
+                paths, {_SESSION_ID!r},
                 f"concurrent-agent#{{idx}}", None
             )
         """)
@@ -775,7 +836,7 @@ class TestConcurrentPutPendingDispatch(unittest.TestCase):
 
         # Verify structural integrity of the resulting JSONL file.
         paths = core.build_paths(pathlib.Path(workspace))
-        entry_path = paths.pending_dispatch_entry(_RUN_ID, _SESSION_ID)
+        entry_path = paths.pending_dispatch_entry(_SESSION_ID)
         self.assertTrue(entry_path.exists(), "Queue file must exist after concurrent puts")
 
         lines = entry_path.read_text("utf-8").splitlines()
@@ -816,8 +877,7 @@ class TestPreToolUseAgentCapture(unittest.TestCase):
         )
 
     def _read_queue(self, session_id=_SESSION_ID):
-        # Under PreToolUse, effective_run_id returns "unknown-run".
-        entry_path = self.paths.pending_dispatch_entry("unknown-run", session_id)
+        entry_path = self.paths.pending_dispatch_entry(session_id)
         if not entry_path.exists():
             return []
         return _read_jsonl(entry_path)
@@ -875,7 +935,7 @@ class TestPreToolUseAgentCapture(unittest.TestCase):
         )
         tools.handle_pre_tool_use(ctx)
         # The .pending-dispatch directory must not be created at all.
-        pending_dir = self.paths.pending_dispatch_dir("unknown-run")
+        pending_dir = self.paths.pending_dispatch_dir()
         if pending_dir.exists():
             files = list(pending_dir.iterdir())
             self.assertEqual(0, len(files),
@@ -935,6 +995,22 @@ class TestPreToolUseAgentCapture(unittest.TestCase):
         except Exception as exc:
             self.fail(f"handle_pre_tool_use raised: {exc}")
 
+    def test_extracted_run_id_is_adopted_into_the_session_binding(self):
+        """When handle_pre_tool_use extracts a run_id from an Agent/Task
+        prompt, it must call runstate.adopt_run_id so the extraction also
+        becomes the session's binding (Design A4: 'handle_pre_tool_use gains
+        one call ... before writing the pending dispatch')."""
+        ctx = self._agent_ctx(prompt=_DISPATCH_PROMPT)
+        tools.handle_pre_tool_use(ctx)
+        bound = runstate.get_session_run_binding(
+            self.paths, _SESSION_ID, at="2026-01-01T12:00:01.000Z"
+        )
+        self.assertEqual(
+            "20260101T110000Z-a1b2", bound,
+            "The run_id extracted from the Agent/Task prompt must be adopted "
+            "into the session-run binding",
+        )
+
 
 # ---------------------------------------------------------------------------
 # handle_subagent_start consuming pending dispatch
@@ -952,11 +1028,10 @@ class TestSubagentStartConsumingPendingDispatch(unittest.TestCase):
 
     def _pre_populate(self, session_id=_SESSION_ID,
                       agent_instance_id=_AGENT_INSTANCE_ID,
-                      extracted_run_id=None,
-                      path_run_id="unknown-run"):
+                      extracted_run_id=None):
         """Write a pending dispatch as if handle_pre_tool_use already ran."""
         runstate.put_pending_dispatch(
-            self.paths, path_run_id, session_id,
+            self.paths, session_id,
             agent_instance_id, extracted_run_id
         )
 
@@ -1014,7 +1089,7 @@ class TestSubagentStartConsumingPendingDispatch(unittest.TestCase):
         ctx = self._start_ctx(agent_id="harness-aaa")
         invocation.handle_subagent_start(ctx)
         # A second pop must return None (entry was consumed).
-        result = runstate.pop_pending_dispatch(self.paths, "unknown-run", _SESSION_ID)
+        result = runstate.pop_pending_dispatch(self.paths, _SESSION_ID)
         self.assertIsNone(result,
                            "Pending dispatch must be consumed by handle_subagent_start")
 
@@ -1047,12 +1122,30 @@ class TestSubagentStartConsumingPendingDispatch(unittest.TestCase):
         self.assertEqual(_EXTRACTED_RUN_ID, ctx.run_id,
                          "ctx.run_id must be set from pending dispatch's run_id")
 
+    def test_run_id_adopted_from_dispatch_extends_the_session_binding(self):
+        """Design A4: handle_subagent_start's late upgrade becomes
+        runstate.adopt_run_id(ctx, dispatch.get('run_id')), so the popped
+        dispatch's run_id also becomes the session's binding, not just
+        ctx.run_id for this one firing."""
+        self._pre_populate(
+            agent_instance_id="planner-tdd-soft#9",
+            extracted_run_id=_EXTRACTED_RUN_ID,
+        )
+        ctx = self._start_ctx(agent_id="harness-adopt-001")
+        invocation.handle_subagent_start(ctx)
+        bound = runstate.get_session_run_binding(
+            self.paths, _SESSION_ID, at="2026-01-01T12:00:01.000Z"
+        )
+        self.assertEqual(
+            _EXTRACTED_RUN_ID, bound,
+            "The dispatch's run_id must be adopted into the session-run binding",
+        )
+
     def test_does_not_override_existing_ctx_run_id(self):
         """When ctx.run_id is already set, the pending dispatch's run_id must not override it."""
         self._pre_populate(
             agent_instance_id="planner-tdd-soft#9",
             extracted_run_id=_EXTRACTED_RUN_ID,
-            path_run_id=_RUN_ID,
         )
         ctx = self._start_ctx(agent_id="harness-eee", run_id=_RUN_ID)
         # ctx.run_id is pre-set to _RUN_ID.
@@ -1093,7 +1186,7 @@ class TestSubagentStartGuardThenPop(unittest.TestCase):
 
     def _pre_populate(self, agent_instance_id=_AGENT_INSTANCE_ID):
         runstate.put_pending_dispatch(
-            self.paths, "unknown-run", _SESSION_ID, agent_instance_id, None
+            self.paths, _SESSION_ID, agent_instance_id, None
         )
 
     def test_guard_triggered_call_does_not_consume_pending_dispatch(self):
@@ -1262,8 +1355,16 @@ class TestEndToEndPreToolUseToSubagentStart(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestUnmappedSubagentStopFiltering(unittest.TestCase):
-    """handle_subagent_stop must return early (no files, no events) when
-    resolve_invocation_id returns an 'unmapped_*' value."""
+    """handle_subagent_stop must not create a legacy 'unmapped_*' invocation
+    directory when resolve_invocation_id/resolve_invocation cannot map the
+    agent_id. A genuine-but-unattributable stop (one carrying a
+    last_assistant_message, as these fixtures do) must still be recorded --
+    at the dot-prefixed quarantine destination, not the ordinary invocation
+    directory -- rather than silently discarded. Only a firing with neither
+    an agent_transcript_path nor a last_assistant_message classifies as
+    spurious and is discarded; see TestClassifyUnmappedStop and
+    TestHandleSubagentStopQuarantine in test_handlers_invocation.py for that
+    coverage."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -1279,55 +1380,60 @@ class TestUnmappedSubagentStopFiltering(unittest.TestCase):
             **kwargs,
         )
 
-    def test_no_events_written_for_unmapped_agent_id(self):
-        """When agent_id has no mapping, resolve_invocation_id returns 'unmapped_*'
-        and handle_subagent_stop must write no event files."""
+    def test_no_legacy_unmapped_directory_for_unmapped_agent_id(self):
+        """When agent_id has no mapping, handle_subagent_stop must not create
+        the legacy 'unmapped_<agent_id>' invocation directory alongside the
+        ordinary invocation directories -- any recording of a genuine
+        unmapped stop happens under the dot-prefixed quarantine tree instead."""
         # agent_id has no prior put_agent_mapping call -> unmapped.
         ctx = self._stop_ctx(agent_id="unmapped-harness-xyz")
         invocation.handle_subagent_stop(ctx)
-        # No invocation directory must be created under the run root.
         run_root = self.paths.run_root(_RUN_ID)
         if run_root.exists():
             invocation_dirs = [
                 d for d in run_root.iterdir()
                 if d.is_dir() and not d.name.startswith(".")
             ]
-            self.assertEqual(0, len(invocation_dirs),
-                             "No invocation directory must be created for unmapped SubagentStop")
-            # No artifact or transcript export files must exist (explicit AC2.1 coverage).
-            md_files = list(run_root.rglob("*.md"))
-            raw_files = list(run_root.rglob("*.raw"))
-            self.assertEqual(0, len(md_files),
-                             f"No .md artifact (02_output.md) must be written for unmapped "
-                             f"SubagentStop; found: {md_files}")
-            self.assertEqual(0, len(raw_files),
-                             f"No .raw transcript export (04_session.raw) must be written for "
-                             f"unmapped SubagentStop; found: {raw_files}")
+            self.assertEqual(
+                0, len(invocation_dirs),
+                "No non-quarantine invocation directory must be created for an "
+                "unmapped SubagentStop; genuine-but-unmapped stops are recorded "
+                "under the dot-prefixed quarantine tree, not a top-level "
+                "'unmapped_*' directory")
 
-    def test_no_invocation_end_event_for_unmapped_agent_id(self):
-        """No invocation_end event must be written when the agent_id is unmapped."""
+    def test_invocation_end_for_unmapped_agent_id_lands_in_quarantine(self):
+        """A genuine-but-unmapped SubagentStop still produces an invocation_end
+        event, but at the quarantine destination -- never in a non-quarantine
+        (dot-prefixed) location -- with attribution='quarantined'."""
         ctx = self._stop_ctx(agent_id="unmapped-harness-abc")
         invocation.handle_subagent_stop(ctx)
         run_root = self.paths.run_root(_RUN_ID)
-        # Traverse all jsonl files under the run root and check no invocation_end.
-        if run_root.exists():
-            for jsonl_file in run_root.rglob("*.jsonl"):
-                events = _read_jsonl(jsonl_file)
-                for e in events:
-                    self.assertNotEqual(
-                        "invocation_end", e.get("event"),
-                        f"invocation_end must not be written for unmapped SubagentStop "
-                        f"(found in {jsonl_file})"
-                    )
-            # No artifact or transcript export files must exist (explicit AC2.1 coverage).
-            md_files = list(run_root.rglob("*.md"))
-            raw_files = list(run_root.rglob("*.raw"))
-            self.assertEqual(0, len(md_files),
-                             f"No .md artifact (02_output.md) must be written for unmapped "
-                             f"SubagentStop; found: {md_files}")
-            self.assertEqual(0, len(raw_files),
-                             f"No .raw transcript export (04_session.raw / 00_orchestrator_session.raw) "
-                             f"must be written for unmapped SubagentStop; found: {raw_files}")
+        self.assertTrue(run_root.exists(), "Run root must exist after a genuine-unmapped stop")
+
+        quarantine_events = self.paths.quarantine_events(_RUN_ID, "unmapped-harness-abc")
+        self.assertTrue(quarantine_events.exists(),
+                        "invocation_end for a genuine-unmapped stop must be recorded "
+                        "at the quarantine destination")
+        events = _read_jsonl(quarantine_events)
+        end_events = [e for e in events if e.get("event") == "invocation_end"]
+        self.assertEqual(1, len(end_events),
+                         "Exactly one invocation_end event must be written to quarantine")
+        self.assertEqual("quarantined", end_events[0].get("attribution"),
+                         "The quarantined invocation_end must be tagged attribution='quarantined'")
+
+        # No jsonl file outside the dot-prefixed quarantine tree may carry this
+        # invocation_end -- the legacy blanket-discard/unmapped-directory
+        # behavior must not resurface elsewhere.
+        for jsonl_file in run_root.rglob("*.jsonl"):
+            relative_parts = jsonl_file.relative_to(run_root).parts
+            if relative_parts and relative_parts[0].startswith("."):
+                continue
+            for e in _read_jsonl(jsonl_file):
+                self.assertNotEqual(
+                    "invocation_end", e.get("event"),
+                    f"invocation_end for an unmapped SubagentStop must not be "
+                    f"written outside the quarantine tree (found in {jsonl_file})"
+                )
 
     def test_genuine_mapped_stop_still_processed(self):
         """A SubagentStop with a genuine mapping must still be processed normally."""

@@ -473,5 +473,185 @@ class TestFailureModeInProcess(unittest.TestCase):
         )
 
 
+# ---------------------------------------------------------------------------
+# T3.1 / T3.4 / T3.5  Attribution cascade and stop quarantine (in-process)
+# ---------------------------------------------------------------------------
+
+class TestAttributionCascadeAndStopQuarantine(unittest.TestCase):
+    """Full dispatch()-driven flows covering: a resolvable run's tool events
+    landing in the same invocation directory as invocation_start with no
+    unmapped_* orphan (AC3.2), the diagnostic on both SubagentStop outcomes
+    (T3.4), and the regression guarantee that today's succeeding capture
+    paths keep succeeding (T3.5 / AC3.6)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+        self._orig_env = os.environ.get("CLAUDE_PROJECT_DIR")
+        os.environ["CLAUDE_PROJECT_DIR"] = str(self.tmp_path)
+        self._orig_debug = os.environ.get("MOSAIC_LOGGER_DEBUG")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        if self._orig_env is None:
+            os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        else:
+            os.environ["CLAUDE_PROJECT_DIR"] = self._orig_env
+        if self._orig_debug is None:
+            os.environ.pop("MOSAIC_LOGGER_DEBUG", None)
+        else:
+            os.environ["MOSAIC_LOGGER_DEBUG"] = self._orig_debug
+
+    def _dispatch(self, payload: dict) -> None:
+        mosaic_logger.dispatch(json.dumps(payload))
+
+    def test_resolvable_run_tool_event_lands_in_same_dir_as_invocation_start(self):
+        """AC3.2: for a session with a resolvable run, a subagent's tool event
+        lands in the same invocation directory as its invocation_start, and no
+        unmapped_* directory is created."""
+        session_id = "e2e-cascade-001"
+        run_id = "20260808T063000Z-cafe"
+        agent_id = "agt-cascade-001"
+        instance_id = "TestWriter#77"
+        prompt = f'{{"agent_instance_id": "{instance_id}", "run_id": "{run_id}"}}'
+
+        # Establishes the session-run binding for this session (D4/A4).
+        self._dispatch({
+            "hook_event_name": "PreToolUse",
+            "session_id": session_id,
+            "tool_name": "Task",
+            "tool_use_id": "call-cascade-dispatch",
+            "tool_input": {"prompt": prompt},
+        })
+        self._dispatch({
+            "hook_event_name": "SubagentStart",
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "agent_type": "TestWriter",
+        })
+        self._dispatch({
+            "hook_event_name": "PreToolUse",
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "tool_name": "Read",
+            "tool_use_id": "call-cascade-tool",
+            "tool_input": {"file_path": "/some/file.py"},
+        })
+
+        paths = core.build_paths(self.tmp_path)
+        run_root = paths.run_root(run_id)
+        self.assertTrue(run_root.exists(), "The resolvable run's own directory must exist")
+
+        unmapped_dirs = [
+            d for d in run_root.iterdir()
+            if d.is_dir() and d.name.startswith("unmapped_")
+        ] if run_root.exists() else []
+        self.assertEqual(
+            0, len(unmapped_dirs),
+            "No unmapped_* directory may be created for a session with a resolvable run",
+        )
+
+        invocation_events = paths.invocation_events(run_id, instance_id)
+        self.assertTrue(
+            invocation_events.exists(),
+            "The subagent's tool event must land in its own invocation directory",
+        )
+        events = [
+            json.loads(ln) for ln in invocation_events.read_text("utf-8").splitlines()
+            if ln.strip()
+        ]
+        event_names = [e.get("event") for e in events]
+        self.assertIn("invocation_start", event_names)
+        self.assertIn("tool_call_start", event_names)
+
+    def test_genuine_unmapped_stop_diagnostic_through_full_dispatch(self):
+        """T3.4: dispatching a genuine (agent_transcript_path present) but
+        unmapped SubagentStop emits the quarantine diagnostic through the real
+        dispatch() path, not just the unit-level handler call."""
+        debug_file = self.tmp_path / "debug.log"
+        os.environ["MOSAIC_LOGGER_DEBUG"] = str(debug_file)
+        session_id = "e2e-cascade-genuine-001"
+        self._dispatch({
+            "hook_event_name": "SubagentStop",
+            "session_id": session_id,
+            "agent_id": "agt-cascade-genuine-001",
+            "last_assistant_message": "Genuine unmapped completion.",
+        })
+        self.assertTrue(debug_file.exists())
+        text = debug_file.read_text(encoding="utf-8")
+        self.assertIn("subagent-stop: quarantined", text)
+        self.assertIn("agt-cascade-genuine-001", text,
+                      "Diagnostic must name the agent_id so a warm-up miss can be told apart from a genuine failure")
+
+    def test_spurious_unmapped_stop_diagnostic_through_full_dispatch(self):
+        """T3.4: dispatching a spurious narration SubagentStop (no transcript
+        path, no last_assistant_message) emits the discard diagnostic through
+        the real dispatch() path."""
+        debug_file = self.tmp_path / "debug.log"
+        os.environ["MOSAIC_LOGGER_DEBUG"] = str(debug_file)
+        session_id = "e2e-cascade-spurious-001"
+        self._dispatch({
+            "hook_event_name": "SubagentStop",
+            "session_id": session_id,
+            "agent_id": "agt-cascade-spurious-001",
+        })
+        self.assertTrue(debug_file.exists())
+        text = debug_file.read_text(encoding="utf-8")
+        self.assertIn("subagent-stop: discarded", text)
+        self.assertIn("agt-cascade-spurious-001", text,
+                      "Diagnostic must name the agent_id so a warm-up miss can be told apart from a genuine failure")
+
+    def test_mapped_subagent_lifecycle_still_succeeds_end_to_end(self):
+        """T3.5 / AC3.6: a normal, fully-mapped SubagentStart -> PreToolUse ->
+        SubagentStop lifecycle must keep producing every artifact it produces
+        today: invocation_start, tool_call_start, invocation_end, and
+        02_output.md -- none of it lost as a side effect of this stage."""
+        session_id = "e2e-cascade-regress-001"
+        run_id = "20260808T063500Z-beef"
+        agent_id = "agt-cascade-regress-001"
+        instance_id = "Reviewer#88"
+        prompt = f'{{"agent_instance_id": "{instance_id}", "run_id": "{run_id}"}}'
+
+        self._dispatch({
+            "hook_event_name": "PreToolUse",
+            "session_id": session_id,
+            "tool_name": "Task",
+            "tool_use_id": "call-regress-dispatch",
+            "tool_input": {"prompt": prompt},
+        })
+        self._dispatch({
+            "hook_event_name": "SubagentStart",
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "agent_type": "Reviewer",
+        })
+        self._dispatch({
+            "hook_event_name": "PreToolUse",
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "tool_name": "Read",
+            "tool_use_id": "call-regress-tool",
+            "tool_input": {"file_path": "/some/other/file.py"},
+        })
+        self._dispatch({
+            "hook_event_name": "SubagentStop",
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "last_assistant_message": '{"status_code": "SUCCESS"}',
+        })
+
+        paths = core.build_paths(self.tmp_path)
+        events = [
+            json.loads(ln)
+            for ln in paths.invocation_events(run_id, instance_id).read_text("utf-8").splitlines()
+            if ln.strip()
+        ]
+        event_names = [e.get("event") for e in events]
+        self.assertIn("invocation_start", event_names)
+        self.assertIn("tool_call_start", event_names)
+        self.assertIn("invocation_end", event_names)
+        self.assertTrue(paths.invocation_output(run_id, instance_id).exists())
+
+
 if __name__ == "__main__":
     unittest.main()

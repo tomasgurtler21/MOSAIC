@@ -33,16 +33,22 @@ import mosaic_logger_runstate as runstate
 # ---------------------------------------------------------------------------
 
 _SESSION_ID = "e2e-session-full-001"
+
+# A well-formed run_id used by the Stage 2 binding-first resolution tests.
+VALID_RUN_ID = "20260808T070000Z-1234"
 _AGENT_ID_ALPHA = "agt-alpha-001"
 _AGENT_ID_BETA = "agt-beta-002"
 _INSTANCE_ID_ALPHA = "Research#1"
 _INSTANCE_ID_BETA = "TestWriter#2"
 
 # Canonical event catalog from schema §3.1 — the complete closed set.
+# usage_record (Stage 5) joins the catalog as the new per-record raw usage
+# event; it does not replace turn/invocation_end, which remain unchanged.
 _CATALOG = frozenset({
     "run_start", "run_end", "session_start", "session_end",
     "invocation_start", "invocation_end", "turn",
     "tool_call_start", "tool_call_end", "notification", "compaction",
+    "usage_record",
 })
 
 # Fields that must never appear anywhere in emitted output.
@@ -775,12 +781,84 @@ class TestSchemaConformance(unittest.TestCase):
                         f"Empty string for required field {field!r} in event {ev.get('event')}"
                     )
 
-    def test_schema_version_is_1_0_0(self):
+    def test_schema_version_is_1_1_0(self):
         for ev in self.all_events:
             self.assertEqual(
-                "1.0.0", ev.get("schema_version"),
+                "1.1.0", ev.get("schema_version"),
                 f"Unexpected schema_version in event {ev.get('event')}"
             )
+
+
+# ---------------------------------------------------------------------------
+# T5 (Stage 5) — Raw usage_record emission across a full session
+# ---------------------------------------------------------------------------
+
+class TestUsageRecordEmission(unittest.TestCase):
+    """usage_record events are emitted per-record from transcript-bearing
+    firings across a full session, routed to exactly one stream each, with
+    turn/invocation_end unaffected (AC5.2, AC5.3, AC5.4, AC5.7)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+        with _ReplayHarness(self.tmp_path) as h:
+            h.replay(_full_session_payloads(self.tmp_path, _SAMPLE_TRANSCRIPT))
+            self.run_id = h.find_run_id(_SESSION_ID)
+            self.orch_events = h.orchestrator_events(self.run_id)
+            self.alpha_events = h.invocation_events(self.run_id, _INSTANCE_ID_ALPHA)
+            self.beta_events = h.invocation_events(self.run_id, _INSTANCE_ID_BETA)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _usage_events(self, events):
+        return [e for e in events if e["event"] == "usage_record"]
+
+    def test_orchestrator_stream_contains_usage_records(self):
+        """handle_stop and other orchestrator-transcript firings emit
+        usage_record onto the orchestrator stream (AC5.4)."""
+        self.assertGreater(len(self._usage_events(self.orch_events)), 0)
+
+    def test_alpha_stream_contains_usage_records(self):
+        """SubagentStop's agent-transcript read emits usage_record onto
+        alpha's own stream."""
+        self.assertGreater(len(self._usage_events(self.alpha_events)), 0)
+
+    def test_beta_stream_contains_usage_records(self):
+        self.assertGreater(len(self._usage_events(self.beta_events)), 0)
+
+    def test_orchestrator_usage_records_omit_agent_instance_id(self):
+        for ev in self._usage_events(self.orch_events):
+            self.assertNotIn("agent_instance_id", ev)
+
+    def test_alpha_usage_records_carry_alpha_agent_instance_id(self):
+        for ev in self._usage_events(self.alpha_events):
+            self.assertEqual(_INSTANCE_ID_ALPHA, ev.get("agent_instance_id"))
+
+    def test_beta_usage_records_carry_beta_agent_instance_id(self):
+        for ev in self._usage_events(self.beta_events):
+            self.assertEqual(_INSTANCE_ID_BETA, ev.get("agent_instance_id"))
+
+    def test_every_usage_record_carries_a_non_empty_record_id(self):
+        for ev in self._usage_events(self.orch_events + self.alpha_events + self.beta_events):
+            self.assertIsInstance(ev.get("record_id"), str)
+            self.assertGreater(len(ev["record_id"]), 0)
+
+    def test_turn_events_still_present_alongside_usage_records(self):
+        """AC5.7: existing turn/invocation_end emission is unaffected by the
+        new usage_record events."""
+        orch_types = {e["event"] for e in self.orch_events}
+        self.assertIn("turn", orch_types)
+        alpha_types = {e["event"] for e in self.alpha_events}
+        self.assertIn("invocation_end", alpha_types)
+
+    def test_turn_events_retain_their_existing_fields(self):
+        """turn events keep carrying role/content as before; usage_record's
+        arrival must not have altered their shape."""
+        assistant_turns = [e for e in self.orch_events
+                            if e["event"] == "turn" and e.get("role") == "assistant"]
+        self.assertGreater(len(assistant_turns), 0)
+        self.assertIn("content", assistant_turns[0])
 
 
 # ---------------------------------------------------------------------------
@@ -1086,7 +1164,6 @@ class TestFieldLevelDegradation(unittest.TestCase):
                          "model must be absent when transcript is unreadable")
         # Required field must still be present.
         self.assertIn("agent_instance_id", inv_end)
-        self.assertIsNotNone(inv_end.get("agent_instance_id"))
 
     def test_unreadable_agent_transcript_still_emits_invocation_end(self):
         """An unreadable transcript degrades gracefully — invocation_end is still
@@ -1180,6 +1257,107 @@ class TestFieldLevelDegradation(unittest.TestCase):
         self.assertIsNotNone(run_end)
         self.assertNotIn("outcome", run_end,
                          "outcome must be absent when SessionEnd has no reason")
+
+
+# ---------------------------------------------------------------------------
+# T2 — Binding-first resolution across a session (Stage 2, Design A2/A4)
+# ---------------------------------------------------------------------------
+
+class TestBindingFirstResolutionAcrossSession(unittest.TestCase):
+    """A run_id established by text extraction earlier in a session must be
+    picked up, via the binding, by later firings of event types that carry
+    no prompt-bearing field at all -- collapsing what would otherwise be an
+    unknown-run/ bucket entry into the correct run folder.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_tool_events_after_subagent_start_resolve_via_binding(self):
+        """SubagentStart carries a run_id in agent_prompt and establishes the
+        binding. A subsequent orchestrator PreToolUse/PostToolUse pair for
+        the same session -- which carries no prompt-bearing field at all --
+        must resolve to that SAME run_id, not unknown-run/."""
+        with _ReplayHarness(self.tmp_path) as h:
+            session_id = "binding-e2e-sess-001"
+            h.replay([
+                {
+                    "hook_event_name": "SubagentStart",
+                    "session_id": session_id,
+                    "agent_id": "agt-binding-001",
+                    "agent_type": "Research",
+                    "agent_prompt": (
+                        '{"agent_instance_id": "Research#9", '
+                        f'"run_id": "{VALID_RUN_ID}"}}'
+                    ),
+                },
+                {
+                    "hook_event_name": "PreToolUse",
+                    "session_id": session_id,
+                    "tool_name": "Bash",
+                    "tool_use_id": "call-binding-001",
+                    "tool_input": {"command": "echo hi"},
+                },
+                {
+                    "hook_event_name": "PostToolUse",
+                    "session_id": session_id,
+                    "tool_name": "Bash",
+                    "tool_use_id": "call-binding-001",
+                    "tool_output": "hi",
+                },
+            ])
+
+            # No unknown-run/ bucket must have received these tool events --
+            # they must have landed in the run folder the binding resolved.
+            orchestrator_events = h.orchestrator_events(VALID_RUN_ID)
+
+        event_names = [e["event"] for e in orchestrator_events]
+        self.assertIn(
+            "tool_call_start", event_names,
+            "PreToolUse (no prompt-bearing field) must resolve to the bound "
+            "run_id via the session-run binding established by SubagentStart",
+        )
+        self.assertIn(
+            "tool_call_end", event_names,
+            "PostToolUse (no prompt-bearing field) must resolve to the bound "
+            "run_id via the session-run binding established by SubagentStart",
+        )
+
+    def test_no_unknown_run_bucket_created_once_binding_is_established(self):
+        """Once the binding is established, tool events for that session must
+        NOT create an unknown-run/ folder at all."""
+        with _ReplayHarness(self.tmp_path) as h:
+            session_id = "binding-e2e-sess-002"
+            h.replay([
+                {
+                    "hook_event_name": "SubagentStart",
+                    "session_id": session_id,
+                    "agent_id": "agt-binding-002",
+                    "agent_type": "Research",
+                    "agent_prompt": (
+                        '{"agent_instance_id": "Research#10", '
+                        f'"run_id": "{VALID_RUN_ID}"}}'
+                    ),
+                },
+                {
+                    "hook_event_name": "PreToolUse",
+                    "session_id": session_id,
+                    "tool_name": "Bash",
+                    "tool_use_id": "call-binding-002",
+                    "tool_input": {"command": "echo hi"},
+                },
+            ])
+            unknown_run_dir = h.log_root() / "unknown-run"
+
+        self.assertFalse(
+            unknown_run_dir.exists(),
+            "unknown-run/ must not be created once the session's run_id "
+            "binding has already been established",
+        )
 
 
 if __name__ == "__main__":

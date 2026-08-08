@@ -11,6 +11,7 @@ import mosaic_logger_runstate as runstate
 import mosaic_logger_export as export
 import mosaic_logger_transcript as transcript
 import mosaic_logger_artifacts as artifacts
+import mosaic_logger_usage as usage
 
 
 # ---------------------------------------------------------------------------
@@ -78,21 +79,23 @@ def handle_subagent_start(ctx: "core.HookContext") -> None:
     Falls back to 'unknown-agent' when no pending dispatch is available.
 
     If the pending dispatch also carried a run_id and ctx.run_id is not
-    yet set, sets ctx.run_id to improve run-scoped routing.
+    yet set, adopts it via runstate.adopt_run_id so ctx.run_id and the
+    session-run binding cannot disagree.
 
     Never raises.
     """
     if not ctx.agent_id:
         return
 
-    # 1. Pop pending dispatch (after guard, before path resolution).
-    dispatch = runstate.pop_pending_dispatch(
-        ctx.paths, core.effective_run_id(ctx), ctx.session_id
-    )
+    # 1. Pop pending dispatch (after guard, before path resolution). The
+    #    queue path no longer carries a run_id component (Design D4), so
+    #    this always addresses the same file the writer used regardless of
+    #    what either firing resolved for run_id.
+    dispatch = runstate.pop_pending_dispatch(ctx.paths, ctx.session_id)
 
-    # 2. Optionally set ctx.run_id from the dispatch's run_id when not yet set.
+    # 2. Optionally adopt ctx.run_id from the dispatch's run_id when not yet set.
     if dispatch and dispatch.get("run_id") and not ctx.run_id:
-        ctx.run_id = dispatch["run_id"]
+        runstate.adopt_run_id(ctx, dispatch.get("run_id"))
 
     # 3. Compute effective run_id for all downstream path routing.
     run_id = core.effective_run_id(ctx)
@@ -139,6 +142,14 @@ def handle_subagent_start(ctx: "core.HookContext") -> None:
     input_text = artifacts.render_input(ctx, agent_instance_id, agent_prompt)
     artifacts.write_artifact(ctx.paths.invocation_input(run_id, agent_instance_id), input_text)
 
+    # 10. Emit raw usage_record events from the orchestrator transcript
+    #     (ctx.transcript_path, NOT the subagent's) to the orchestrator
+    #     stream. SubagentStart has orchestrator-transcript access and is
+    #     one of the every-transcript-bearing-firing capture points.
+    usage.emit_usage_records(
+        ctx, ctx.transcript_path, None, "orchestrator_transcript"
+    )
+
     # 6. Refresh 00_orchestrator_session.raw from the orchestrator transcript
     export.export_transcript(
         ctx.transcript_path,
@@ -147,16 +158,43 @@ def handle_subagent_start(ctx: "core.HookContext") -> None:
     )
 
 
+def classify_unmapped_stop(ctx: "core.HookContext") -> str:
+    """Classify a SubagentStop firing whose agent mapping did not resolve.
+
+    Returns 'spurious' ONLY when the firing carries neither an
+    agent_transcript_path nor a last_assistant_message -- a shape consistent
+    with Claude Code's internal activity-narration snapshots and with no
+    genuine invocation behind it.
+
+    Returns 'genuine' in every other case. The classification is
+    deliberately biased toward recording: ambiguity resolves to 'genuine'
+    and is quarantined rather than discarded, per the data-integrity
+    requirement.
+
+    Never raises.
+    """
+    try:
+        if ctx.field("agent_transcript_path") or ctx.field("last_assistant_message"):
+            return "genuine"
+        return "spurious"
+    except Exception:
+        return "genuine"
+
+
 def handle_subagent_stop(ctx: "core.HookContext") -> None:
     """Handle SubagentStop: emit invocation_end and final assistant turn,
     write 02_output.md, export agent transcript, and refresh
     00_orchestrator_session.raw.
 
-    Guard: returns immediately (no events, no artifacts, no exports)
-    when resolve_invocation_id returns an 'unmapped_*' value, indicating
-    this firing has no corresponding SubagentStart mapping and is likely
-    a Claude Code internal activity-narration snapshot rather than a
-    genuine subagent completion.
+    Three-way outcome based on agent-map resolution:
+      - Mapped: unchanged behaviour, writing to the ordinary invocation
+        directory.
+      - Unmapped and classified 'genuine': the same event, artifact, and
+        export are still written, but to the dot-prefixed quarantine
+        destination, with attribution='quarantined' added to invocation_end.
+        Emits a 'subagent-stop: quarantined' diagnostic.
+      - Unmapped and classified 'spurious': nothing is written, no directory
+        is created. Emits a 'subagent-stop: discarded' diagnostic.
 
     Never raises.
     """
@@ -166,24 +204,41 @@ def handle_subagent_stop(ctx: "core.HookContext") -> None:
     run_id = core.effective_run_id(ctx)
 
     # 1. Resolve agent_instance_id via mapping (so start and end agree on folder)
-    agent_instance_id = runstate.resolve_invocation_id(
+    agent_instance_id, mapped = runstate.resolve_invocation(
         ctx.paths, run_id, ctx.agent_id
     )
 
-    # Guard: skip unmapped SubagentStop firings (activity-narration snapshots).
-    if agent_instance_id.startswith("unmapped_"):
-        return
+    quarantined = False
+    if not mapped:
+        outcome = classify_unmapped_stop(ctx)
+        if outcome == "spurious":
+            core.debug_log(
+                f"subagent-stop: discarded for run_id={run_id!r} "
+                f"agent_id={ctx.agent_id!r}"
+            )
+            return
+        quarantined = True
 
-    sink = ctx.paths.invocation_events(run_id, agent_instance_id)
+    # 2. Resolve the events/output/raw destinations for this outcome.
+    if quarantined:
+        events_path = ctx.paths.quarantine_events(run_id, ctx.agent_id)
+        output_path = ctx.paths.quarantine_output(run_id, ctx.agent_id)
+        raw_path = ctx.paths.quarantine_raw(run_id, ctx.agent_id)
+    else:
+        events_path = ctx.paths.invocation_events(run_id, agent_instance_id)
+        output_path = ctx.paths.invocation_output(run_id, agent_instance_id)
+        raw_path = ctx.paths.invocation_raw(run_id, agent_instance_id)
 
-    # 2. Read transcript facts once; reuse for both invocation_end and final turn
+    sink = events_path
+
+    # 3. Read transcript facts once; reuse for both invocation_end and final turn
     agent_transcript_path = ctx.field("agent_transcript_path")
     facts = transcript.read_last_assistant_facts(agent_transcript_path)
 
     last_msg = ctx.field("last_assistant_message")
     status_code = extract_status_code(last_msg)
 
-    # 3. Emit invocation_end
+    # 4. Emit invocation_end
     event = core.build_event(
         "invocation_end", ctx,
         agent_instance_id=agent_instance_id,
@@ -191,10 +246,11 @@ def handle_subagent_stop(ctx: "core.HookContext") -> None:
         response=last_msg,
         model=facts.model,
         token_usage=facts.token_usage,
+        attribution="quarantined" if quarantined else None,
     )
     core.append_event(sink, event)
 
-    # 4. Emit final assistant turn (only when last_assistant_message is present)
+    # 5. Emit final assistant turn (only when last_assistant_message is present)
     if last_msg is not None:
         turn = core.build_event(
             "turn", ctx,
@@ -205,23 +261,46 @@ def handle_subagent_stop(ctx: "core.HookContext") -> None:
         )
         core.append_event(sink, turn)
 
-    # 5. Write 02_output.md
+    # 6. Write 02_output.md
     output_text = artifacts.render_output(ctx, agent_instance_id, last_msg, status_code, facts)
-    artifacts.write_artifact(ctx.paths.invocation_output(run_id, agent_instance_id), output_text)
+    artifacts.write_artifact(output_path, output_text)
 
-    # 6. Export agent transcript to 04_session.raw + 04_session.meta.json
+    # 6b. Emit raw usage_record events from both transcripts this firing has
+    #     access to, each routed to exactly one stream:
+    #       - the agent transcript -> this invocation's own destination
+    #         (events_path, which is the quarantine events file when
+    #         quarantined, so the one-stream-per-record property holds even
+    #         then)
+    #       - the orchestrator transcript -> always the orchestrator stream,
+    #         regardless of quarantine status
+    usage.emit_usage_records(
+        ctx, agent_transcript_path, agent_instance_id, "agent_transcript",
+        sink_override=events_path,
+    )
+    usage.emit_usage_records(
+        ctx, ctx.transcript_path, None, "orchestrator_transcript"
+    )
+
+    # 7. Export agent transcript to 04_session.raw + 04_session.meta.json
     export.export_transcript(
         agent_transcript_path,
-        ctx.paths.invocation_raw(run_id, agent_instance_id),
+        raw_path,
         "agent_transcript_path",
     )
 
-    # 7. Refresh 00_orchestrator_session.raw from the orchestrator's transcript
+    # 8. Refresh 00_orchestrator_session.raw from the orchestrator's transcript
     export.export_transcript(
         ctx.transcript_path,
         ctx.paths.orchestrator_raw(run_id),
         "transcript_path",
     )
+
+    # 9. Emit the quarantine diagnostic last, once the write is complete.
+    if quarantined:
+        core.debug_log(
+            f"subagent-stop: quarantined for run_id={run_id!r} "
+            f"agent_id={ctx.agent_id!r}"
+        )
 
 
 HANDLERS = {

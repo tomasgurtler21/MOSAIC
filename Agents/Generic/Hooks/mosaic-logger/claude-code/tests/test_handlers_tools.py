@@ -555,7 +555,7 @@ class TestSubagentScopedRouting(unittest.TestCase):
         tools.handle_pre_tool_use(ctx)
         events = self._invocation_events("SubAgent#7")
         event = events[0]
-        self.assertEqual("1.0.0", event.get("schema_version"))
+        self.assertEqual("1.1.0", event.get("schema_version"))
         self.assertEqual("claude-code", event.get("harness"))
 
     def test_orchestrator_events_and_subagent_events_are_independent(self):
@@ -964,7 +964,7 @@ class TestPreToolUseToolNameGate(unittest.TestCase):
 
     def _read_queue(self):
         """Read all pending-dispatch queue entries for the default session."""
-        entry_path = self.paths.pending_dispatch_entry("unknown-run", _SESSION_ID)
+        entry_path = self.paths.pending_dispatch_entry(_SESSION_ID)
         if not entry_path.exists():
             return []
         return [
@@ -1114,6 +1114,182 @@ class TestPreToolUseToolNameGate(unittest.TestCase):
             tools.handle_pre_tool_use(ctx)
         except Exception as exc:
             self.fail(f"handle_pre_tool_use raised for tool_name='Task': {exc}")
+
+
+# ---------------------------------------------------------------------------
+# T3.1 / T3.2  resolve_destination — agent-map miss diagnostic
+# ---------------------------------------------------------------------------
+
+class TestResolveDestinationAgentMapDiagnostic(unittest.TestCase):
+    """resolve_destination routes through runstate.resolve_invocation, so an
+    agent-map miss on a tool event emits the 'agent-map: miss' diagnostic --
+    the same miss path exercised by SubagentStop, now covered for the
+    high-frequency tool route."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+        self._orig_debug = os.environ.get("MOSAIC_LOGGER_DEBUG")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        if self._orig_debug is None:
+            os.environ.pop("MOSAIC_LOGGER_DEBUG", None)
+        else:
+            os.environ["MOSAIC_LOGGER_DEBUG"] = self._orig_debug
+
+    def test_missing_mapping_emits_agent_map_miss_diagnostic(self):
+        debug_file = pathlib.Path(self.tmp.name) / "debug.log"
+        os.environ["MOSAIC_LOGGER_DEBUG"] = str(debug_file)
+        ctx = _pre_tool_ctx(self.tmp.name, agent_id="aid-tool-miss-1",
+                            tool_name="Read", tool_use_id="tu-miss-1")
+        tools.resolve_destination(ctx)
+        self.assertTrue(debug_file.exists(), "Diagnostic file must be written on a miss")
+        text = debug_file.read_text(encoding="utf-8")
+        self.assertIn("agent-map: miss", text)
+        self.assertIn("aid-tool-miss-1", text)
+
+    def test_present_mapping_emits_no_miss_diagnostic(self):
+        debug_file = pathlib.Path(self.tmp.name) / "debug.log"
+        os.environ["MOSAIC_LOGGER_DEBUG"] = str(debug_file)
+        _register_mapping(self.tmp.name, _RUN_ID, "aid-tool-hit-1", "ToolAgent#9")
+        ctx = _pre_tool_ctx(self.tmp.name, agent_id="aid-tool-hit-1",
+                            tool_name="Read", tool_use_id="tu-hit-1")
+        tools.resolve_destination(ctx)
+        if debug_file.exists():
+            text = debug_file.read_text(encoding="utf-8")
+            self.assertNotIn("agent-map: miss", text)
+
+    def test_no_agent_id_emits_no_agent_map_diagnostic(self):
+        """Orchestrator-scoped events never touch the agent map at all."""
+        debug_file = pathlib.Path(self.tmp.name) / "debug.log"
+        os.environ["MOSAIC_LOGGER_DEBUG"] = str(debug_file)
+        ctx = _pre_tool_ctx(self.tmp.name, tool_name="Read", tool_use_id="tu-noagent-1")
+        tools.resolve_destination(ctx)
+        if debug_file.exists():
+            text = debug_file.read_text(encoding="utf-8")
+            self.assertNotIn("agent-map: miss", text)
+
+    def test_still_routes_to_unmapped_folder_despite_diagnostic(self):
+        """Emitting the diagnostic must not change the routing decision --
+        the destination is still the deterministic unmapped_ folder."""
+        ctx = _pre_tool_ctx(self.tmp.name, agent_id="aid-tool-miss-2",
+                            tool_name="Read", tool_use_id="tu-miss-2")
+        dest = tools.resolve_destination(ctx)
+        self.assertEqual(
+            self.paths.invocation_events(_RUN_ID, "unmapped_aid-tool-miss-2"), dest
+        )
+
+
+# ---------------------------------------------------------------------------
+# T5.3  Tool-firing usage_record emission, gated by tool_capture_enabled()
+# ---------------------------------------------------------------------------
+
+def _write_tool_transcript(dir_path, records):
+    """Write a minimal transcript JSONL for the tool-firing tests."""
+    dir_path = pathlib.Path(dir_path)
+    dir_path.mkdir(parents=True, exist_ok=True)
+    path = dir_path / "tool_transcript.jsonl"
+    with open(path, "w", encoding="utf-8") as fh:
+        for record in records:
+            fh.write(json.dumps(record) + "\n")
+    return str(path)
+
+
+class TestToolFiringUsageEmission(unittest.TestCase):
+    """PreToolUse/PostToolUse/PostToolUseFailure emit usage_record from
+    ctx.transcript_path, routed to the same destination as the tool event
+    itself, but only when tool_capture_enabled() allows it -- the deliberate
+    performance-sensitive reversal of the 'no transcript reads' property on
+    this high-frequency path."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+        self._orig_capture = os.environ.get("MOSAIC_LOGGER_USAGE_CAPTURE")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        if self._orig_capture is None:
+            os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        else:
+            os.environ["MOSAIC_LOGGER_USAGE_CAPTURE"] = self._orig_capture
+
+    def _transcript(self):
+        return _write_tool_transcript(self.tmp.name, [
+            {"type": "assistant", "message": {
+                "id": "msg_tool", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10},
+            }},
+        ])
+
+    def test_pre_tool_use_emits_usage_record_by_default(self):
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        ctx = _pre_tool_ctx(self.tmp.name, tool_name="Read", tool_use_id="tu-usage-1",
+                            transcript_path=self._transcript())
+        tools.handle_pre_tool_use(ctx)
+        events = _read_jsonl(self.paths.orchestrator_events(_RUN_ID))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events))
+
+    def test_post_tool_use_emits_usage_record_by_default(self):
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        ctx = _post_tool_ctx(self.tmp.name, tool_name="Read", tool_use_id="tu-usage-2",
+                             transcript_path=self._transcript())
+        tools.handle_post_tool_use(ctx)
+        events = _read_jsonl(self.paths.orchestrator_events(_RUN_ID))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events))
+
+    def test_post_tool_use_failure_emits_usage_record_by_default(self):
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        ctx = _failure_ctx(self.tmp.name, tool_name="Bash", tool_use_id="tu-usage-3",
+                           transcript_path=self._transcript())
+        tools.handle_post_tool_use_failure(ctx)
+        events = _read_jsonl(self.paths.orchestrator_events(_RUN_ID))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events))
+
+    def test_no_usage_record_when_capture_mode_is_boundaries(self):
+        os.environ["MOSAIC_LOGGER_USAGE_CAPTURE"] = "boundaries"
+        ctx = _pre_tool_ctx(self.tmp.name, tool_name="Read", tool_use_id="tu-usage-4",
+                            transcript_path=self._transcript())
+        tools.handle_pre_tool_use(ctx)
+        orc_path = self.paths.orchestrator_events(_RUN_ID)
+        events = _read_jsonl(orc_path) if orc_path.exists() else []
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events))
+
+    def test_tool_call_start_still_emitted_when_capture_disabled(self):
+        """Gating the usage_record must never suppress the tool event itself."""
+        os.environ["MOSAIC_LOGGER_USAGE_CAPTURE"] = "boundaries"
+        ctx = _pre_tool_ctx(self.tmp.name, tool_name="Read", tool_use_id="tu-usage-5",
+                            transcript_path=self._transcript())
+        tools.handle_pre_tool_use(ctx)
+        events = _read_jsonl(self.paths.orchestrator_events(_RUN_ID))
+        self.assertIn("tool_call_start", [e["event"] for e in events])
+
+    def test_usage_record_routes_with_the_tool_event_for_subagent_scope(self):
+        """A subagent-scoped tool firing's usage_record lands on that
+        invocation's stream, matching resolve_destination -- never the
+        orchestrator stream."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        _register_mapping(self.tmp.name, _RUN_ID, "aid-usage-6", "ToolAgent#6")
+        ctx = _pre_tool_ctx(self.tmp.name, agent_id="aid-usage-6",
+                            tool_name="Read", tool_use_id="tu-usage-6",
+                            transcript_path=self._transcript())
+        tools.handle_pre_tool_use(ctx)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "ToolAgent#6"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events))
+
+    def test_no_usage_record_when_transcript_path_absent(self):
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        ctx = _pre_tool_ctx(self.tmp.name, tool_name="Read", tool_use_id="tu-usage-7")
+        tools.handle_pre_tool_use(ctx)
+        events = _read_jsonl(self.paths.orchestrator_events(_RUN_ID))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events))
 
 
 if __name__ == "__main__":

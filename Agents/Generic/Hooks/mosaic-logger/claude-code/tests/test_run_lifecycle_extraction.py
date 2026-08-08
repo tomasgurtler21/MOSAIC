@@ -59,17 +59,6 @@ def _read_events(path: pathlib.Path) -> list:
     return [json.loads(line) for line in lines if line.strip()]
 
 
-def _make_ctx(event_name: str, **fields) -> "core.HookContext":
-    """Build a HookContext for the given event with the supplied payload fields.
-    Does not use a real workspace; safe for resolve_run_identity unit tests."""
-    payload = {"hook_event_name": event_name, "session_id": "test-sess"}
-    payload.update(fields)
-    root = pathlib.Path(tempfile.gettempdir())
-    paths = core.build_paths(root)
-    timestamp = "2026-07-27T17:00:00.000Z"
-    return core.HookContext(payload, root, paths, timestamp)
-
-
 # ---------------------------------------------------------------------------
 # resolve_run_identity — per-event extraction unit tests
 # ---------------------------------------------------------------------------
@@ -80,12 +69,33 @@ class TestResolveRunIdentityPerEvent(unittest.TestCase):
 
     Targets mosaic_logger.resolve_run_identity — this function does not yet exist.
     All tests in this class fail with AttributeError in TDD RED phase.
+
+    Each test gets its own isolated workspace root and a session_id unique to
+    the test method: text extraction now durably binds the session id to a
+    run id (Design A4's adopt_run_id), so sharing either a tempdir or a
+    session_id literal across methods would let one test's binding leak into
+    another's resolution.
     """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+        self.paths = core.build_paths(self.tmp_path)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _make_ctx(self, event_name: str, session_id: str, **fields) -> "core.HookContext":
+        """Build a HookContext isolated to this test's own tempdir and session_id."""
+        payload = {"hook_event_name": event_name, "session_id": session_id}
+        payload.update(fields)
+        timestamp = "2026-07-27T17:00:00.000Z"
+        return core.HookContext(payload, self.tmp_path, self.paths, timestamp)
 
     def test_subagent_start_extracts_from_agent_prompt(self):
         """SubagentStart: run_id is extracted from the agent_prompt field."""
-        ctx = _make_ctx(
-            "SubagentStart",
+        ctx = self._make_ctx(
+            "SubagentStart", "per-event-subagent-start",
             agent_prompt=(
                 f'{{"agent_instance_id": "TestAgent#1", '
                 f'"run_id": "{VALID_RUN_ID}", '
@@ -97,8 +107,8 @@ class TestResolveRunIdentityPerEvent(unittest.TestCase):
 
     def test_subagent_stop_extracts_from_last_assistant_message(self):
         """SubagentStop: run_id is extracted from the last_assistant_message field."""
-        ctx = _make_ctx(
-            "SubagentStop",
+        ctx = self._make_ctx(
+            "SubagentStop", "per-event-subagent-stop",
             last_assistant_message=(
                 f'{{"agent_instance_id": "TestAgent#1", '
                 f'"run_id": "{VALID_RUN_ID}", '
@@ -110,8 +120,8 @@ class TestResolveRunIdentityPerEvent(unittest.TestCase):
 
     def test_user_prompt_submit_extracts_from_user_prompt(self):
         """UserPromptSubmit: run_id is extracted from the user_prompt field."""
-        ctx = _make_ctx(
-            "UserPromptSubmit",
+        ctx = self._make_ctx(
+            "UserPromptSubmit", "per-event-user-prompt-submit",
             user_prompt=f'"run_id": "{VALID_RUN_ID}" — process this please',
         )
         mosaic_logger.resolve_run_identity(ctx)
@@ -119,8 +129,8 @@ class TestResolveRunIdentityPerEvent(unittest.TestCase):
 
     def test_stop_extracts_from_last_assistant_message(self):
         """Stop: run_id is extracted from the last_assistant_message field."""
-        ctx = _make_ctx(
-            "Stop",
+        ctx = self._make_ctx(
+            "Stop", "per-event-stop",
             last_assistant_message=(
                 f'{{"run_id": "{VALID_RUN_ID}", '
                 '"status_code": "SUCCESS", "status_message": "Done"}}'
@@ -131,8 +141,8 @@ class TestResolveRunIdentityPerEvent(unittest.TestCase):
 
     def test_notification_extracts_from_message_field(self):
         """Notification: run_id is extracted from the message field."""
-        ctx = _make_ctx(
-            "Notification",
+        ctx = self._make_ctx(
+            "Notification", "per-event-notification",
             notification_type="info",
             message=f"Dispatch complete for run_id: {VALID_RUN_ID}",
         )
@@ -142,50 +152,53 @@ class TestResolveRunIdentityPerEvent(unittest.TestCase):
     def test_session_start_yields_none_no_prompt_bearing_field(self):
         """SessionStart has no prompt-bearing field; ctx.run_id stays None after
         resolve_run_identity. This is expected and accepted behavior."""
-        ctx = _make_ctx("SessionStart")
+        ctx = self._make_ctx("SessionStart", "per-event-session-start")
         mosaic_logger.resolve_run_identity(ctx)
         self.assertIsNone(ctx.run_id)
 
     def test_session_end_yields_none(self):
         """SessionEnd has no prompt-bearing field; ctx.run_id stays None."""
-        ctx = _make_ctx("SessionEnd")
+        ctx = self._make_ctx("SessionEnd", "per-event-session-end")
         mosaic_logger.resolve_run_identity(ctx)
         self.assertIsNone(ctx.run_id)
 
     def test_pre_tool_use_yields_none(self):
         """PreToolUse has no prompt-bearing field; ctx.run_id stays None."""
-        ctx = _make_ctx("PreToolUse", tool_name="Bash", tool_input={})
+        ctx = self._make_ctx("PreToolUse", "per-event-pre-tool-use",
+                              tool_name="Bash", tool_input={})
         mosaic_logger.resolve_run_identity(ctx)
         self.assertIsNone(ctx.run_id)
 
     def test_post_tool_use_yields_none(self):
         """PostToolUse has no prompt-bearing field; ctx.run_id stays None."""
-        ctx = _make_ctx("PostToolUse", tool_name="Bash", tool_output="output")
+        ctx = self._make_ctx("PostToolUse", "per-event-post-tool-use",
+                              tool_name="Bash", tool_output="output")
         mosaic_logger.resolve_run_identity(ctx)
         self.assertIsNone(ctx.run_id)
 
     def test_post_tool_use_failure_yields_none(self):
         """PostToolUseFailure has no prompt-bearing field; ctx.run_id stays None."""
-        ctx = _make_ctx("PostToolUseFailure", tool_name="Bash", tool_error="err")
+        ctx = self._make_ctx("PostToolUseFailure", "per-event-post-tool-use-failure",
+                              tool_name="Bash", tool_error="err")
         mosaic_logger.resolve_run_identity(ctx)
         self.assertIsNone(ctx.run_id)
 
     def test_pre_compact_yields_none(self):
         """PreCompact has no prompt-bearing field; ctx.run_id stays None."""
-        ctx = _make_ctx("PreCompact")
+        ctx = self._make_ctx("PreCompact", "per-event-pre-compact")
         mosaic_logger.resolve_run_identity(ctx)
         self.assertIsNone(ctx.run_id)
 
     def test_post_compact_yields_none(self):
         """PostCompact has no prompt-bearing field; ctx.run_id stays None."""
-        ctx = _make_ctx("PostCompact")
+        ctx = self._make_ctx("PostCompact", "per-event-post-compact")
         mosaic_logger.resolve_run_identity(ctx)
         self.assertIsNone(ctx.run_id)
 
     def test_subagent_start_with_no_run_id_in_prompt_yields_none(self):
         """SubagentStart where agent_prompt has no valid run_id yields None."""
-        ctx = _make_ctx(
-            "SubagentStart",
+        ctx = self._make_ctx(
+            "SubagentStart", "per-event-subagent-start-no-run-id",
             agent_prompt='{"agent_instance_id": "TestAgent#1", "task_description": "no run id"}',
         )
         mosaic_logger.resolve_run_identity(ctx)
@@ -193,13 +206,13 @@ class TestResolveRunIdentityPerEvent(unittest.TestCase):
 
     def test_subagent_start_with_none_agent_prompt_yields_none(self):
         """SubagentStart where agent_prompt is absent yields None without raising."""
-        ctx = _make_ctx("SubagentStart")
+        ctx = self._make_ctx("SubagentStart", "per-event-subagent-start-none-prompt")
         mosaic_logger.resolve_run_identity(ctx)
         self.assertIsNone(ctx.run_id)
 
     def test_resolve_run_identity_never_raises(self):
         """resolve_run_identity must never raise regardless of payload content."""
-        ctx = _make_ctx("SubagentStart", agent_prompt=None)
+        ctx = self._make_ctx("SubagentStart", "per-event-never-raises", agent_prompt=None)
         try:
             mosaic_logger.resolve_run_identity(ctx)
         except Exception as e:
@@ -207,7 +220,10 @@ class TestResolveRunIdentityPerEvent(unittest.TestCase):
 
     def test_resolve_run_identity_never_raises_for_malformed_content(self):
         """resolve_run_identity is robust against malformed prompt content."""
-        ctx = _make_ctx("UserPromptSubmit", user_prompt="\x00\x01 {broken")
+        ctx = self._make_ctx(
+            "UserPromptSubmit", "per-event-never-raises-malformed",
+            user_prompt="\x00\x01 {broken",
+        )
         try:
             mosaic_logger.resolve_run_identity(ctx)
         except Exception as e:
@@ -617,6 +633,282 @@ class TestMarkerDirectoryNeverCreated(unittest.TestCase):
         self.assertEqual(
             0, len(marker_dirs),
             f"Found .run-markers directories in log tree: {marker_dirs}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# resolve_run_identity — binding-first resolution (Stage 2, Design A4)
+# ---------------------------------------------------------------------------
+
+class TestResolveRunIdentityBindingFirst(unittest.TestCase):
+    """Events with no prompt-bearing field resolve ctx.run_id from an
+    existing session-run binding rather than falling back to unknown-run.
+
+    Targets the rewritten mosaic_logger.resolve_run_identity (Design A4)
+    together with mosaic_logger_runstate.put_session_run_binding /
+    get_session_run_binding (Design A2, Stage 1).
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+        self.paths = core.build_paths(self.tmp_path)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _ctx(self, event_name, session_id, timestamp, **fields):
+        payload = {"hook_event_name": event_name, "session_id": session_id}
+        payload.update(fields)
+        return core.HookContext(payload, self.tmp_path, self.paths, timestamp)
+
+    def _bind(self, session_id, run_id, start_time):
+        runstate.put_session_run_binding(self.paths, session_id, run_id, start_time)
+
+    def test_session_start_resolves_from_existing_binding(self):
+        session_id = "binding-sess-session-start"
+        self._bind(session_id, VALID_RUN_ID, "2026-07-27T16:00:00.000Z")
+        ctx = self._ctx("SessionStart", session_id, "2026-07-27T17:00:00.000Z")
+        mosaic_logger.resolve_run_identity(ctx)
+        self.assertEqual(VALID_RUN_ID, ctx.run_id)
+
+    def test_session_end_resolves_from_existing_binding(self):
+        session_id = "binding-sess-session-end"
+        self._bind(session_id, VALID_RUN_ID, "2026-07-27T16:00:00.000Z")
+        ctx = self._ctx("SessionEnd", session_id, "2026-07-27T17:00:00.000Z")
+        mosaic_logger.resolve_run_identity(ctx)
+        self.assertEqual(VALID_RUN_ID, ctx.run_id)
+
+    def test_pre_tool_use_resolves_from_existing_binding(self):
+        session_id = "binding-sess-pre-tool"
+        self._bind(session_id, VALID_RUN_ID, "2026-07-27T16:00:00.000Z")
+        ctx = self._ctx("PreToolUse", session_id, "2026-07-27T17:00:00.000Z",
+                         tool_name="Bash", tool_input={})
+        mosaic_logger.resolve_run_identity(ctx)
+        self.assertEqual(VALID_RUN_ID, ctx.run_id)
+
+    def test_post_tool_use_resolves_from_existing_binding(self):
+        session_id = "binding-sess-post-tool"
+        self._bind(session_id, VALID_RUN_ID, "2026-07-27T16:00:00.000Z")
+        ctx = self._ctx("PostToolUse", session_id, "2026-07-27T17:00:00.000Z",
+                         tool_name="Bash", tool_output="ok")
+        mosaic_logger.resolve_run_identity(ctx)
+        self.assertEqual(VALID_RUN_ID, ctx.run_id)
+
+    def test_post_tool_use_failure_resolves_from_existing_binding(self):
+        session_id = "binding-sess-post-tool-fail"
+        self._bind(session_id, VALID_RUN_ID, "2026-07-27T16:00:00.000Z")
+        ctx = self._ctx("PostToolUseFailure", session_id, "2026-07-27T17:00:00.000Z",
+                         tool_name="Bash", tool_error="boom")
+        mosaic_logger.resolve_run_identity(ctx)
+        self.assertEqual(VALID_RUN_ID, ctx.run_id)
+
+    def test_pre_compact_resolves_from_existing_binding(self):
+        session_id = "binding-sess-pre-compact"
+        self._bind(session_id, VALID_RUN_ID, "2026-07-27T16:00:00.000Z")
+        ctx = self._ctx("PreCompact", session_id, "2026-07-27T17:00:00.000Z")
+        mosaic_logger.resolve_run_identity(ctx)
+        self.assertEqual(VALID_RUN_ID, ctx.run_id)
+
+    def test_post_compact_resolves_from_existing_binding(self):
+        session_id = "binding-sess-post-compact"
+        self._bind(session_id, VALID_RUN_ID, "2026-07-27T16:00:00.000Z")
+        ctx = self._ctx("PostCompact", session_id, "2026-07-27T17:00:00.000Z")
+        mosaic_logger.resolve_run_identity(ctx)
+        self.assertEqual(VALID_RUN_ID, ctx.run_id)
+
+    def test_binding_lookup_respects_firing_timestamp_not_now(self):
+        """The binding lookup must use ctx.timestamp (the firing's own
+        instant), not wall-clock 'now'. A firing timestamped BEFORE the
+        binding's start_time must not resolve to that binding."""
+        session_id = "binding-sess-before-start"
+        self._bind(session_id, VALID_RUN_ID, "2026-07-27T18:00:00.000Z")
+        ctx = self._ctx("PreToolUse", session_id, "2026-07-27T17:00:00.000Z",
+                         tool_name="Bash", tool_input={})
+        mosaic_logger.resolve_run_identity(ctx)
+        self.assertIsNone(
+            ctx.run_id,
+            "A firing before the binding's start_time must not resolve to it",
+        )
+
+    def test_no_binding_and_no_prompt_field_still_yields_none(self):
+        """Genuine fallback: with no binding recorded for the session at all,
+        ctx.run_id stays None for an event with no prompt-bearing field."""
+        session_id = "binding-sess-none-at-all"
+        ctx = self._ctx("PreToolUse", session_id, "2026-07-27T17:00:00.000Z",
+                         tool_name="Bash", tool_input={})
+        mosaic_logger.resolve_run_identity(ctx)
+        self.assertIsNone(ctx.run_id)
+
+
+class TestResolveRunIdentityEstablishesBinding(unittest.TestCase):
+    """The first firing that carries a run_id in its text establishes the
+    session-run binding (via adopt_run_id), so a later firing with no
+    prompt-bearing field can resolve it from the binding (Design A2/A4).
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+        self.paths = core.build_paths(self.tmp_path)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _ctx(self, event_name, session_id, timestamp, **fields):
+        payload = {"hook_event_name": event_name, "session_id": session_id}
+        payload.update(fields)
+        return core.HookContext(payload, self.tmp_path, self.paths, timestamp)
+
+    def test_subagent_start_extraction_establishes_binding(self):
+        session_id = "establish-sess-subagent-start"
+        ctx = self._ctx(
+            "SubagentStart", session_id, "2026-07-27T17:00:00.000Z",
+            agent_prompt=(
+                f'{{"agent_instance_id": "TestAgent#1", "run_id": "{VALID_RUN_ID}"}}'
+            ),
+        )
+        mosaic_logger.resolve_run_identity(ctx)
+        bound = runstate.get_session_run_binding(
+            self.paths, session_id, at="2026-07-27T17:00:01.000Z"
+        )
+        self.assertEqual(VALID_RUN_ID, bound)
+
+    def test_user_prompt_submit_extraction_establishes_binding(self):
+        session_id = "establish-sess-user-prompt"
+        ctx = self._ctx(
+            "UserPromptSubmit", session_id, "2026-07-27T17:00:00.000Z",
+            user_prompt=f'"run_id": "{VALID_RUN_ID}" — please proceed',
+        )
+        mosaic_logger.resolve_run_identity(ctx)
+        bound = runstate.get_session_run_binding(
+            self.paths, session_id, at="2026-07-27T17:00:01.000Z"
+        )
+        self.assertEqual(VALID_RUN_ID, bound)
+
+    def test_later_event_with_no_prompt_field_resolves_from_established_binding(self):
+        """End-to-end within resolve_run_identity: a SubagentStart establishes
+        the binding, then a later PreToolUse (no prompt-bearing field) for
+        the same session resolves it from that binding."""
+        session_id = "establish-sess-later-event"
+        ctx1 = self._ctx(
+            "SubagentStart", session_id, "2026-07-27T17:00:00.000Z",
+            agent_prompt=(
+                f'{{"agent_instance_id": "TestAgent#1", "run_id": "{VALID_RUN_ID}"}}'
+            ),
+        )
+        mosaic_logger.resolve_run_identity(ctx1)
+
+        ctx2 = self._ctx(
+            "PreToolUse", session_id, "2026-07-27T17:05:00.000Z",
+            tool_name="Bash", tool_input={},
+        )
+        mosaic_logger.resolve_run_identity(ctx2)
+        self.assertEqual(VALID_RUN_ID, ctx2.run_id)
+
+
+class TestResolveRunIdentityRefinementOverride(unittest.TestCase):
+    """A run_id extracted from event text that differs from the currently
+    bound run_id wins for that firing and extends the session timeline
+    (Design A4 resolution order, AC2.4).
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+        self.paths = core.build_paths(self.tmp_path)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _ctx(self, event_name, session_id, timestamp, **fields):
+        payload = {"hook_event_name": event_name, "session_id": session_id}
+        payload.update(fields)
+        return core.HookContext(payload, self.tmp_path, self.paths, timestamp)
+
+    def test_differing_extracted_run_id_overrides_binding_for_this_firing(self):
+        session_id = "override-sess-this-firing"
+        runstate.put_session_run_binding(
+            self.paths, session_id, VALID_RUN_ID, "2026-07-27T16:00:00.000Z"
+        )
+        new_run_id = "20260727T180000Z-bbbb"
+        ctx = self._ctx(
+            "UserPromptSubmit", session_id, "2026-07-27T18:00:00.000Z",
+            user_prompt=f'"run_id": "{new_run_id}"',
+        )
+        mosaic_logger.resolve_run_identity(ctx)
+        self.assertEqual(
+            new_run_id, ctx.run_id,
+            "A differing extracted run_id must win over the existing binding "
+            "for this firing",
+        )
+
+    def test_differing_extracted_run_id_extends_timeline_for_later_firings(self):
+        session_id = "override-sess-later-firings"
+        runstate.put_session_run_binding(
+            self.paths, session_id, VALID_RUN_ID, "2026-07-27T16:00:00.000Z"
+        )
+        new_run_id = "20260727T180000Z-bbbb"
+        ctx1 = self._ctx(
+            "UserPromptSubmit", session_id, "2026-07-27T18:00:00.000Z",
+            user_prompt=f'"run_id": "{new_run_id}"',
+        )
+        mosaic_logger.resolve_run_identity(ctx1)
+
+        ctx2 = self._ctx(
+            "PreToolUse", session_id, "2026-07-27T18:05:00.000Z",
+            tool_name="Bash", tool_input={},
+        )
+        mosaic_logger.resolve_run_identity(ctx2)
+        self.assertEqual(
+            new_run_id, ctx2.run_id,
+            "The overriding run_id must extend the session timeline so later "
+            "firings with no prompt-bearing field resolve to it too",
+        )
+
+
+class TestResolveRunIdentityGenuineFallbackDiagnostic(unittest.TestCase):
+    """With no binding and no extractable run_id, resolution still yields
+    the unknown-run bucket, and this genuine-fallback outcome emits a
+    'run-identity: unresolved' diagnostic (Design A8, AC2.5).
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+        self.paths = core.build_paths(self.tmp_path)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_unresolved_run_id_emits_run_identity_diagnostic(self):
+        debug_file = self.tmp_path / "debug.log"
+        orig = os.environ.get("MOSAIC_LOGGER_DEBUG")
+        os.environ["MOSAIC_LOGGER_DEBUG"] = str(debug_file)
+        try:
+            payload = {
+                "hook_event_name": "PreToolUse",
+                "session_id": "diag-sess-unresolved",
+                "tool_name": "Bash",
+                "tool_input": {},
+            }
+            ctx = core.HookContext(
+                payload, self.tmp_path, self.paths, "2026-07-27T17:00:00.000Z"
+            )
+            mosaic_logger.resolve_run_identity(ctx)
+        finally:
+            if orig is None:
+                os.environ.pop("MOSAIC_LOGGER_DEBUG", None)
+            else:
+                os.environ["MOSAIC_LOGGER_DEBUG"] = orig
+
+        self.assertIsNone(ctx.run_id)
+        self.assertTrue(debug_file.exists(), "Diagnostic file must be written")
+        text = debug_file.read_text(encoding="utf-8")
+        self.assertIn(
+            "run-identity: unresolved", text,
+            "Unresolved run_id must emit the documented 'run-identity: unresolved' "
+            "diagnostic prefix",
         )
 
 

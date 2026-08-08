@@ -18,11 +18,13 @@ import tempfile
 # Constants
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 HARNESS = "claude-code"
 LOGS_DIRNAME = "OrchestrationLogs"
 AGENT_MAP_DIRNAME = ".agent-map"
 PENDING_DISPATCH_DIRNAME = ".pending-dispatch"
+SESSION_BINDING_DIRNAME = ".session-runs"
+QUARANTINE_DIRNAME = ".quarantine"
 RESERVED_FILENAME_CHARS = '<>:"/\\|?*'
 DEBUG_ENV_VAR = "MOSAIC_LOGGER_DEBUG"
 WORKSPACE_ENV_VAR = "CLAUDE_PROJECT_DIR"
@@ -258,13 +260,63 @@ class LogPaths:
     def invocation_raw(self, run_id: str, agent_instance_id: str) -> pathlib.Path:
         return self.invocation_dir(run_id, agent_instance_id) / "04_session.raw"
 
-    def pending_dispatch_dir(self, run_id: str) -> pathlib.Path:
-        """Directory for pending-dispatch queue files."""
-        return self.run_root(run_id) / PENDING_DISPATCH_DIRNAME
+    def session_binding_dir(self) -> pathlib.Path:
+        """<workspace>/OrchestrationLogs/.session-runs/
 
-    def pending_dispatch_entry(self, run_id: str, session_id: str) -> pathlib.Path:
-        """Per-session pending-dispatch queue file."""
-        return self.pending_dispatch_dir(run_id) / f"{sanitize_component(session_id)}.jsonl"
+        A sibling of the run folders, hung directly off self.root rather
+        than run_root(run_id), so it is reachable by a firing that has not
+        yet resolved a run id. Dot-prefixed so the analyzer's scanner skips it.
+        """
+        return self.root / SESSION_BINDING_DIRNAME
+
+    def session_binding_entry(self, session_id: str) -> pathlib.Path:
+        """<...>/.session-runs/<sanitize_component(session_id)>.jsonl
+
+        One file per session. Two sessions never share a file, so parallel
+        sessions never contend and never observe each other.
+        """
+        return self.session_binding_dir() / f"{sanitize_component(session_id)}.jsonl"
+
+    def pending_dispatch_dir(self) -> pathlib.Path:
+        """<workspace>/OrchestrationLogs/.pending-dispatch/
+
+        A sibling of the run folders, hung directly off self.root rather than
+        run_root(run_id), so a firing that has not yet resolved a run_id can
+        still reach it. Dot-prefixed so the analyzer's scanner skips it.
+        """
+        return self.root / PENDING_DISPATCH_DIRNAME
+
+    def pending_dispatch_entry(self, session_id: str) -> pathlib.Path:
+        """<...>/.pending-dispatch/<sanitize_component(session_id)>.jsonl
+
+        Keyed only by session_id, so the writer and the reader always address
+        the same file regardless of what either firing resolved for run_id.
+        """
+        return self.pending_dispatch_dir() / f"{sanitize_component(session_id)}.jsonl"
+
+    def quarantine_dir(self, run_id: str) -> pathlib.Path:
+        """<root>/<run_id>/.quarantine/
+
+        Dot-prefixed so the analyzer's directory scan skips it (Stage 7).
+        """
+        return self.run_root(run_id) / QUARANTINE_DIRNAME
+
+    def quarantine_invocation_dir(self, run_id: str, agent_id: str) -> pathlib.Path:
+        """<root>/<run_id>/.quarantine/<sanitize_component(agent_id)>/
+
+        Keyed by agent_id (the harness-native identifier), since a genuine
+        unmapped stop has no resolved agent_instance_id to key by.
+        """
+        return self.quarantine_dir(run_id) / sanitize_component(agent_id)
+
+    def quarantine_events(self, run_id: str, agent_id: str) -> pathlib.Path:
+        return self.quarantine_invocation_dir(run_id, agent_id) / "03_events.jsonl"
+
+    def quarantine_output(self, run_id: str, agent_id: str) -> pathlib.Path:
+        return self.quarantine_invocation_dir(run_id, agent_id) / "02_output.md"
+
+    def quarantine_raw(self, run_id: str, agent_id: str) -> pathlib.Path:
+        return self.quarantine_invocation_dir(run_id, agent_id) / "04_session.raw"
 
 
 def build_paths(workspace_root: pathlib.Path) -> LogPaths:

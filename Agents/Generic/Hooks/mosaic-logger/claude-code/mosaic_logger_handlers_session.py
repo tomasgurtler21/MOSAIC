@@ -10,6 +10,7 @@ run-identity resolution.
 import mosaic_logger_core as core
 import mosaic_logger_export as export
 import mosaic_logger_transcript as transcript
+import mosaic_logger_usage as usage
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +124,13 @@ def handle_stop(ctx: "core.HookContext") -> None:
     )
     core.append_event(ctx.paths.orchestrator_events(run_id), event)
 
+    # Emit one raw usage_record per assistant record observed in the
+    # orchestrator transcript. Runs after the turn event so an emission
+    # failure can never suppress it (never raises; see mosaic_logger_usage).
+    usage.emit_usage_records(
+        ctx, ctx.transcript_path, None, "orchestrator_transcript"
+    )
+
     # Refresh the orchestrator raw transcript export (best-effort).
     export.export_transcript(
         ctx.transcript_path,
@@ -146,7 +154,13 @@ def handle_notification(ctx: "core.HookContext") -> None:
 
 
 def handle_pre_compact(ctx: "core.HookContext") -> None:
-    """Emit partial compaction with trigger and tokens_before."""
+    """Emit partial compaction with trigger and tokens_before.
+
+    Also emits raw usage_record events from the orchestrator transcript:
+    PreCompact fires just before compaction may remove records, so capturing
+    here minimises the window in which a record is lost before any firing
+    observes it.
+    """
     run_id = core.effective_run_id(ctx)
     event = core.build_event(
         "compaction", ctx,
@@ -155,15 +169,28 @@ def handle_pre_compact(ctx: "core.HookContext") -> None:
     )
     core.append_event(ctx.paths.orchestrator_events(run_id), event)
 
+    usage.emit_usage_records(
+        ctx, ctx.transcript_path, None, "orchestrator_transcript"
+    )
+
 
 def handle_post_compact(ctx: "core.HookContext") -> None:
-    """Emit partial compaction with tokens_after."""
+    """Emit partial compaction with tokens_after.
+
+    Also emits raw usage_record events from the (post-compaction) orchestrator
+    transcript, per the same every-transcript-bearing-firing requirement as
+    handle_pre_compact.
+    """
     run_id = core.effective_run_id(ctx)
     event = core.build_event(
         "compaction", ctx,
         tokens_after=ctx.field("tokens_after"),
     )
     core.append_event(ctx.paths.orchestrator_events(run_id), event)
+
+    usage.emit_usage_records(
+        ctx, ctx.transcript_path, None, "orchestrator_transcript"
+    )
 
 
 # ---------------------------------------------------------------------------

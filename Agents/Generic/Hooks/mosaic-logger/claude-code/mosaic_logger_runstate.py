@@ -149,7 +149,6 @@ PENDING_DISPATCH_MAX_AGE_SECONDS = 120
 
 def put_pending_dispatch(
     paths: "core.LogPaths",
-    path_run_id: str,
     session_id: str,
     agent_instance_id: str,
     extracted_run_id: "str | None",
@@ -183,7 +182,7 @@ def put_pending_dispatch(
         }
         if prompt is not None:
             entry["prompt"] = prompt
-        path = paths.pending_dispatch_entry(path_run_id, session_id)
+        path = paths.pending_dispatch_entry(session_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         data = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
 
@@ -215,7 +214,6 @@ def put_pending_dispatch(
 
 def pop_pending_dispatch(
     paths: "core.LogPaths",
-    path_run_id: str,
     session_id: str,
     max_age_seconds: int = PENDING_DISPATCH_MAX_AGE_SECONDS,
 ) -> "dict | None":
@@ -228,7 +226,7 @@ def pop_pending_dispatch(
     Never raises.
     """
     try:
-        path = paths.pending_dispatch_entry(path_run_id, session_id)
+        path = paths.pending_dispatch_entry(session_id)
         if not path.exists():
             return None
 
@@ -288,6 +286,263 @@ def pop_pending_dispatch(
 
 
 # ---------------------------------------------------------------------------
+# Session-run binding store
+# ---------------------------------------------------------------------------
+
+def _tail_run_id_from_bytes(data: bytes) -> "str | None":
+    """Return the run_id named by the last non-empty line of `data`, or None.
+
+    Used to re-check the timeline's tail while holding the write lock, so
+    the idempotence decision and the append happen atomically. A trailing
+    line that fails to decode or parse is treated as unknown (returns
+    None) rather than raising -- the caller then appends, which is the
+    safe default. Never raises.
+    """
+    try:
+        text = data.decode("utf-8")
+    except Exception:
+        return None
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return None
+    try:
+        entry = json.loads(lines[-1])
+        if isinstance(entry, dict):
+            return entry.get("run_id")
+    except Exception:
+        pass
+    return None
+
+
+def put_session_run_binding(
+    paths: "core.LogPaths",
+    session_id: "str | None",
+    run_id: "str | None",
+    start_time: "str | None" = None,
+) -> bool:
+    """Record run_id as the run active for session_id from start_time onward.
+
+    Appends one timeline entry under the same platform-branched lock used
+    for the read-check-write sequence, so the idempotence check below is
+    atomic with the append: on Windows an msvcrt byte-range lock is held
+    across the tail read and the seek-to-end write; on POSIX an advisory
+    fcntl.flock is held across the same read-check-write sequence (a bare
+    O_APPEND write is not enough here because the tail must be inspected
+    under the lock, not just appended atomically).
+
+    Idempotence is against the TAIL of the timeline, not the whole timeline:
+    when the last entry already names run_id, nothing is appended and its
+    recorded start_time is left unchanged. A run id that reappears after a
+    different run has intervened (A, B, A) is appended again as a new entry.
+
+    start_time defaults to now (UTC). Callers pass ctx.timestamp so the
+    recorded instant is the firing's own instant, not the write's.
+
+    Returns True when the timeline names run_id at its tail after the call,
+    whether appended now or already present. Returns False on any failure.
+    A falsy session_id or run_id is a no-op returning False.
+
+    Never raises.
+    """
+    try:
+        if not session_id or not run_id:
+            return False
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        entry = {
+            "run_id": run_id,
+            "start_time": start_time if start_time else _iso_ms(now),
+        }
+        line = (json.dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+        path = paths.session_binding_entry(session_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        if sys.platform == "win32":
+            import msvcrt
+            fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o666)
+            try:
+                os.lseek(fd, 0, 0)
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                try:
+                    os.lseek(fd, 0, 0)
+                    existing = b"".join(iter(lambda: os.read(fd, 65536), b""))
+                    if _tail_run_id_from_bytes(existing) == run_id:
+                        return True
+                    os.lseek(fd, 0, 2)
+                    os.write(fd, line)
+                finally:
+                    os.lseek(fd, 0, 0)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+            finally:
+                os.close(fd)
+        else:
+            import fcntl
+            fd = os.open(str(path), os.O_RDWR | os.O_CREAT, 0o666)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                try:
+                    os.lseek(fd, 0, 0)
+                    existing = b"".join(iter(lambda: os.read(fd, 65536), b""))
+                    if _tail_run_id_from_bytes(existing) == run_id:
+                        return True
+                    os.lseek(fd, 0, 2)
+                    os.write(fd, line)
+                finally:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+
+        return True
+    except Exception as exc:
+        core.debug_log(
+            f"session-binding: write failed for session_id={session_id!r} "
+            f"run_id={run_id!r}", exc,
+        )
+        return False
+
+
+def read_session_run_timeline(
+    paths: "core.LogPaths",
+    session_id: "str | None",
+) -> list:
+    """Return the session's timeline in file order.
+
+    Each element is a dict with keys 'run_id' (non-empty str) and
+    'start_time' (non-empty str). Entries that are unparseable, non-object,
+    missing either key, or carrying an unparseable timestamp are skipped
+    with a diagnostic; the remaining entries are still returned. An absent,
+    unreadable or empty file returns [].
+
+    Never raises.
+    """
+    result = []
+    try:
+        if not session_id:
+            return []
+        path = paths.session_binding_entry(session_id)
+        if not path.exists() or not path.is_file():
+            return []
+        text = path.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+                if not isinstance(entry, dict):
+                    core.debug_log(
+                        f"session-binding: skipped corrupt entry (non-object) "
+                        f"for session_id={session_id!r}"
+                    )
+                    continue
+                run_id = entry.get("run_id")
+                start_time = entry.get("start_time")
+                if not run_id or not start_time:
+                    core.debug_log(
+                        f"session-binding: skipped corrupt entry (missing key) "
+                        f"for session_id={session_id!r}"
+                    )
+                    continue
+                # Validate the timestamp is parseable.
+                datetime.datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+                result.append({"run_id": run_id, "start_time": start_time})
+            except Exception:
+                core.debug_log(
+                    f"session-binding: skipped corrupt entry for "
+                    f"session_id={session_id!r}"
+                )
+                continue
+        return result
+    except Exception as exc:
+        core.debug_log(
+            f"session-binding: read failed for session_id={session_id!r}",
+            exc,
+        )
+        return []
+
+
+def get_session_run_binding(
+    paths: "core.LogPaths",
+    session_id: "str | None",
+    at: "str | None" = None,
+) -> "str | None":
+    """Resolve the run that was active for session_id at instant `at`.
+
+    Returns the run_id of the entry with the greatest start_time that is
+    <= at. Returns None when the timeline is empty, when every entry starts
+    after `at` (the before-first-entry case), or on any failure. `at`
+    defaults to now (UTC); callers pass ctx.timestamp.
+
+    Emits a diagnostic on the unresolved outcome as a normal diagnostic
+    path, not only on exceptions.
+
+    Never raises.
+    """
+    try:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        at_str = at if at else _iso_ms(now)
+        try:
+            at_dt = datetime.datetime.fromisoformat(at_str.replace("Z", "+00:00"))
+        except Exception:
+            core.debug_log(
+                f"session-binding: unresolved (unparseable 'at') for "
+                f"session_id={session_id!r} at={at_str!r}"
+            )
+            return None
+
+        timeline = read_session_run_timeline(paths, session_id)
+        best_run_id = None
+        best_dt = None
+        for entry in timeline:
+            try:
+                entry_dt = datetime.datetime.fromisoformat(
+                    entry["start_time"].replace("Z", "+00:00")
+                )
+            except Exception:
+                continue
+            if entry_dt <= at_dt:
+                if best_dt is None or entry_dt > best_dt:
+                    best_dt = entry_dt
+                    best_run_id = entry["run_id"]
+
+        if best_run_id is None:
+            core.debug_log(
+                f"session-binding: unresolved for session_id={session_id!r} "
+                f"at={at_str!r}"
+            )
+        return best_run_id
+    except Exception as exc:
+        core.debug_log(
+            f"session-binding: unresolved for session_id={session_id!r}", exc
+        )
+        return None
+
+
+def adopt_run_id(ctx: "core.HookContext", run_id: "str | None") -> bool:
+    """The single reconciliation point between ctx.run_id and the binding.
+
+    Sets ctx.run_id to run_id and records the binding for ctx.session_id at
+    ctx.timestamp. Every site that newly learns a run id calls this rather
+    than assigning ctx.run_id directly, so the in-context value and the
+    persisted timeline can never disagree.
+
+    A falsy run_id is a no-op returning False. Returns True when ctx.run_id
+    is set to run_id, regardless of whether the persist succeeded.
+
+    No outer try/except here: `ctx.run_id = run_id` is a plain attribute
+    assignment that cannot raise, and put_session_run_binding already
+    swallows its own exceptions and emits the documented
+    "session-binding: write failed" diagnostic on persist failure.
+
+    Never raises.
+    """
+    if not run_id:
+        return False
+    ctx.run_id = run_id
+    put_session_run_binding(ctx.paths, ctx.session_id, run_id, ctx.timestamp)
+    return True
+
+
+# ---------------------------------------------------------------------------
 # agent_id -> agent_instance_id mapping
 # ---------------------------------------------------------------------------
 
@@ -334,17 +589,40 @@ def get_agent_mapping(paths: "core.LogPaths",
         return None
 
 
+def resolve_invocation(paths: "core.LogPaths",
+                       run_id: str,
+                       agent_id: str) -> tuple:
+    """Return (agent_instance_id, mapped).
+
+    mapped is True when an agent-map entry supplied the identity, False when
+    the deterministic 'unmapped_<agent_id>' fallback was used. The False
+    outcome emits an 'agent-map: miss' diagnostic naming run_id and agent_id.
+
+    Never returns None for the identity. Never misattributes to the
+    orchestrator. Never raises.
+    """
+    try:
+        mapping = get_agent_mapping(paths, run_id, agent_id)
+        if mapping is not None:
+            iid = mapping.get("agent_instance_id")
+            if iid:
+                return iid, True
+    except Exception:
+        pass
+    core.debug_log(
+        f"agent-map: miss for run_id={run_id!r} agent_id={agent_id!r}"
+    )
+    return f"unmapped_{agent_id}", False
+
+
 def resolve_invocation_id(paths: "core.LogPaths",
                           run_id: str,
                           agent_id: str) -> str:
     """Return the agent_instance_id for routing a subagent-scoped event.
 
-    Falls back to the deterministic 'unmapped_{agent_id}' string when no
-    mapping exists. Never returns None. Never misattributes to the orchestrator.
+    Unchanged signature and return value; a thin wrapper over
+    resolve_invocation. Falls back to the deterministic
+    'unmapped_{agent_id}' string when no mapping exists. Never returns
+    None. Never misattributes to the orchestrator.
     """
-    mapping = get_agent_mapping(paths, run_id, agent_id)
-    if mapping is not None:
-        iid = mapping.get("agent_instance_id")
-        if iid:
-            return iid
-    return f"unmapped_{agent_id}"
+    return resolve_invocation(paths, run_id, agent_id)[0]

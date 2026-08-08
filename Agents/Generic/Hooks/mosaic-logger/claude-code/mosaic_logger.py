@@ -50,21 +50,44 @@ def build_context(payload: dict) -> core.HookContext:
 
 
 def resolve_run_identity(ctx: core.HookContext) -> None:
-    """Set ctx.run_id by extracting from the event-specific prompt field.
+    """Populate ctx.run_id before any handler runs.
 
-    For events with no prompt-bearing field (SessionStart, SessionEnd, tool
-    events, compaction, etc.), ctx.run_id remains None. Routing to the
-    appropriate bucket (run_id folder or unknown-run/) is handled by
-    effective_run_id() in the core module.
+    Resolution order:
+      1. Text extraction. When ctx.event has a prompt-bearing field and
+         extract_run_id yields a value, that value is adopted via
+         runstate.adopt_run_id -- it takes effect for this firing AND
+         extends the session timeline. A value differing from the currently
+         bound run therefore wins for this firing and every later firing.
+      2. Binding lookup. Otherwise the run active at ctx.timestamp is read
+         from the session timeline and assigned to ctx.run_id. This is the
+         path that resolves the event types carrying no prompt-bearing
+         field.
+      3. Unresolved. ctx.run_id stays None, core.effective_run_id returns
+         'unknown-run', and a 'run-identity: unresolved' diagnostic is
+         emitted.
 
     Never raises.
     """
     try:
         field_name = _RUN_ID_PROMPT_FIELDS.get(ctx.event)
-        if field_name is None:
-            return  # No prompt-bearing field for this event
-        prompt = ctx.field(field_name)
-        ctx.run_id = runstate.extract_run_id(prompt)
+        extracted = None
+        if field_name is not None:
+            prompt = ctx.field(field_name)
+            extracted = runstate.extract_run_id(prompt)
+
+        if extracted:
+            runstate.adopt_run_id(ctx, extracted)
+            return
+
+        bound = runstate.get_session_run_binding(ctx.paths, ctx.session_id, at=ctx.timestamp)
+        if bound:
+            ctx.run_id = bound
+            return
+
+        core.debug_log(
+            f"run-identity: unresolved for session_id={ctx.session_id!r} "
+            f"event={ctx.event!r}"
+        )
     except Exception as exc:
         core.debug_log("resolve_run_identity failed", exc)
 

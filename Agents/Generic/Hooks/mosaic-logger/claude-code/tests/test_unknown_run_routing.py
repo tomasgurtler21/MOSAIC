@@ -682,5 +682,53 @@ class TestKnownRunIdUnknownAgentRouting(unittest.TestCase):
                 )
 
 
+# ---------------------------------------------------------------------------
+# Genuine fallback with diagnostic (Stage 2, Design A8, AC2.5)
+# ---------------------------------------------------------------------------
+
+class TestGenuineFallbackEmitsDiagnostic(unittest.TestCase):
+    """With no session-run binding and no extractable run_id, dispatch still
+    routes to unknown-run/ (as before) AND emits a 'run-identity: unresolved'
+    diagnostic through the existing MOSAIC_LOGGER_DEBUG mechanism -- the
+    genuine-fallback case becomes a health signal, not a silent default."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_session_start_with_no_binding_emits_run_identity_diagnostic(self):
+        debug_file = self.tmp_path / "debug.log"
+        orig_debug = os.environ.get("MOSAIC_LOGGER_DEBUG")
+        os.environ["MOSAIC_LOGGER_DEBUG"] = str(debug_file)
+        try:
+            payload = {
+                "hook_event_name": "SessionStart",
+                "session_id": "diag-route-sess-001",
+                "cwd": str(self.tmp_path),
+            }
+            _dispatch_with_env(payload, self.tmp_path)
+        finally:
+            if orig_debug is None:
+                os.environ.pop("MOSAIC_LOGGER_DEBUG", None)
+            else:
+                os.environ["MOSAIC_LOGGER_DEBUG"] = orig_debug
+
+        unknown_run_dir = self.tmp_path / "OrchestrationLogs" / "unknown-run"
+        self.assertTrue(
+            unknown_run_dir.exists(),
+            "Genuine fallback must still route to unknown-run/",
+        )
+        self.assertTrue(debug_file.exists(), "Diagnostic file must be written")
+        text = debug_file.read_text(encoding="utf-8")
+        self.assertIn(
+            "run-identity: unresolved", text,
+            "The genuine-fallback outcome must emit the 'run-identity: unresolved' "
+            "diagnostic prefix",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

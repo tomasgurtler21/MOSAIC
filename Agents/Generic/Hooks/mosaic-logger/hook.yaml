@@ -1,6 +1,6 @@
 schema_version: "1"
 id: mosaic-logger
-version: 1.1.0
+version: 1.2.0
 description: >-
   Captures hook events across four harnesses — Claude Code (12 events), GHCP
   CLI (14 events), VS Code Chat Extension (8 events), and OpenCode (4 hooks) —
@@ -42,6 +42,8 @@ variants:
         target: mosaic_logger_handlers_tools.py
       - source: mosaic_logger_artifacts.py
         target: mosaic_logger_artifacts.py
+      - source: mosaic_logger_usage.py
+        target: mosaic_logger_usage.py
       - source: ../hook.yaml
         target: hook.yaml
     registration:

@@ -128,6 +128,63 @@ class TestLogPathsLayout(unittest.TestCase):
         new_tmp.cleanup()
 
 
+class TestLogPathsQuarantine(unittest.TestCase):
+    """build_paths returns a LogPaths whose quarantine path-builders match the
+    documented layout: a dot-prefixed directory inside the run folder, laid
+    out like an ordinary invocation directory (ContractsDesign.md A1/D5)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name)
+        self.paths = core.build_paths(self.root)
+        self.run_id = "20260101T170000Z-ab12"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_quarantine_dir_is_dot_prefixed_child_of_run_root(self):
+        result = self.paths.quarantine_dir(self.run_id)
+        expected = self.paths.run_root(self.run_id) / ".quarantine"
+        self.assertEqual(expected, result)
+
+    def test_quarantine_invocation_dir_is_under_quarantine_dir(self):
+        result = self.paths.quarantine_invocation_dir(self.run_id, "aid-1")
+        self.assertEqual(self.paths.quarantine_dir(self.run_id), result.parent)
+
+    def test_quarantine_invocation_dir_sanitizes_agent_id_with_reserved_chars(self):
+        result = self.paths.quarantine_invocation_dir(self.run_id, 'agent"id')
+        self.assertNotIn('"', str(result))
+
+    def test_quarantine_events_filename(self):
+        result = self.paths.quarantine_events(self.run_id, "aid-1")
+        self.assertEqual("03_events.jsonl", result.name)
+
+    def test_quarantine_output_filename(self):
+        result = self.paths.quarantine_output(self.run_id, "aid-1")
+        self.assertEqual("02_output.md", result.name)
+
+    def test_quarantine_raw_filename(self):
+        result = self.paths.quarantine_raw(self.run_id, "aid-1")
+        self.assertEqual("04_session.raw", result.name)
+
+    def test_quarantine_events_and_output_are_siblings(self):
+        events = self.paths.quarantine_events(self.run_id, "aid-1")
+        output = self.paths.quarantine_output(self.run_id, "aid-1")
+        self.assertEqual(events.parent, output.parent)
+
+    def test_quarantine_events_is_under_run_root(self):
+        result = self.paths.quarantine_events(self.run_id, "aid-1")
+        self.assertTrue(str(result).startswith(str(self.paths.run_root(self.run_id))))
+
+    def test_quarantine_path_is_distinct_from_ordinary_invocation_path(self):
+        """The same agent_id must resolve to different paths depending on
+        whether it is routed through the ordinary invocation tree or the
+        quarantine tree -- quarantine never aliases a mapped invocation."""
+        quarantine_events = self.paths.quarantine_events(self.run_id, "aid-1")
+        ordinary_events = self.paths.invocation_events(self.run_id, "aid-1")
+        self.assertNotEqual(ordinary_events, quarantine_events)
+
+
 class TestSanitizeComponent(unittest.TestCase):
     """sanitize_component replaces reserved/control chars, strips trailing dots and spaces."""
 
@@ -339,3 +396,59 @@ class TestAtomicReplace(unittest.TestCase):
         blocker.write_bytes(b"")
         result = core.atomic_replace_text(blocker / "file.json", "data")
         self.assertFalse(result)
+
+
+class TestLogPathsSessionBinding(unittest.TestCase):
+    """LogPaths must expose session_binding_dir and session_binding_entry,
+    both hung directly off self.root -- NOT off run_root(run_id) -- so the
+    binding is reachable by a firing that has not yet resolved a run id."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_session_binding_dir_is_a_direct_child_of_root(self):
+        d = self.paths.session_binding_dir()
+        self.assertEqual(self.paths.root, d.parent)
+
+    def test_session_binding_dir_uses_dot_prefixed_dirname(self):
+        d = self.paths.session_binding_dir()
+        self.assertEqual(".session-runs", d.name)
+
+    def test_session_binding_entry_is_inside_session_binding_dir(self):
+        entry = self.paths.session_binding_entry("some-session")
+        self.assertEqual(self.paths.session_binding_dir(), entry.parent)
+
+    def test_session_binding_entry_has_jsonl_suffix(self):
+        entry = self.paths.session_binding_entry("some-session")
+        self.assertEqual(".jsonl", entry.suffix)
+
+    def test_session_binding_entry_path_has_no_run_id_component(self):
+        """Below the root, the path must be exactly '.session-runs/<file>' --
+        no run-folder layer, since no run id is known yet at this call site."""
+        entry = self.paths.session_binding_entry("some-session")
+        relative = entry.relative_to(self.paths.root)
+        self.assertEqual(2, len(relative.parts),
+                         f"Expected '.session-runs/<file>.jsonl', got {relative}")
+
+    def test_session_binding_entry_is_a_sibling_of_run_root_not_nested_in_it(self):
+        """The binding directory must sit alongside run folders, not inside one."""
+        run_root = self.paths.run_root("20260101T170000Z-ab12")
+        entry = self.paths.session_binding_entry("some-session")
+        self.assertFalse(str(entry).startswith(str(run_root)))
+
+    def test_different_sessions_produce_different_entry_paths(self):
+        e1 = self.paths.session_binding_entry("session-a")
+        e2 = self.paths.session_binding_entry("session-b")
+        self.assertNotEqual(e1, e2)
+
+    def test_entry_filename_uses_sanitized_session_id(self):
+        """A session id containing reserved filesystem characters must not
+        leak those characters into the resulting path."""
+        entry = self.paths.session_binding_entry('sess"ion<id>')
+        self.assertNotIn('"', str(entry))
+        self.assertNotIn('<', str(entry))
+        self.assertNotIn('>', str(entry))

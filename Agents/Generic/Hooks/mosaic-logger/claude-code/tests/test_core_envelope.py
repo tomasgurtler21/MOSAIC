@@ -31,9 +31,12 @@ class TestEnvelopeRequiredFields(unittest.TestCase):
     def setUp(self):
         self.ctx = _ctx()
 
-    def test_schema_version_is_1_0_0(self):
+    def test_schema_version_is_1_1_0(self):
+        # Bumped from "1.0.0" to "1.1.0" (D-B3): the new usage_record wire
+        # shape is a schema-level change, so every emitted event carries the
+        # bumped version, not only usage_record itself.
         result = core.build_event("session_start", self.ctx)
-        self.assertEqual("1.0.0", result["schema_version"])
+        self.assertEqual("1.1.0", result["schema_version"])
 
     def test_event_field_matches_argument(self):
         result = core.build_event("run_start", self.ctx)
