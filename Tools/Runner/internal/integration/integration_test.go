@@ -314,6 +314,7 @@ func TestIntegration_StagedWorkflow_TwoStages_Completes(t *testing.T) {
 		Task:                 "two-stage task",
 		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
+		RunFolder:            dir, // Plan.md was written into dir; the session must resolve it here.
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
@@ -460,17 +461,21 @@ func TestIntegration_VersionDrift_AllowOverride_Resumes(t *testing.T) {
 
 // ===== No Plan.md for staged workflow =====
 
-// TestIntegration_StagedWorkflow_NoPlanMd_ReturnsRefusal verifies that when a
-// staged workflow is requested but the Plan.md adjacent to the orchestrator
-// file does not exist, the session returns RunRefused with a message that names
-// Plan.md (FR-16).
-func TestIntegration_StagedWorkflow_NoPlanMd_ReturnsRefusal(t *testing.T) {
+// TestIntegration_StagedWorkflow_NoPlanMd_StopsCleanlyAtExecution verifies
+// that when a staged workflow with no pre-EXECUTION rows is requested but no
+// Plan.md exists in the run folder, the session does not refuse to start —
+// absence of a plan file is a normal state, never a run-start refusal. The
+// run proceeds to the point where the workflow's topology requires a stage
+// set (its first, and here only, row is EXECUTION), where it stops cleanly
+// with a message naming the missing stage set, instead of panicking or
+// dispatching an agent it cannot route.
+func TestIntegration_StagedWorkflow_NoPlanMd_StopsCleanlyAtExecution(t *testing.T) {
 	dir := t.TempDir()
 	orchPath := copyFile(t, dir, "orchestrator.md",
 		filepath.Join(sessionTestdataDir, "staged-orch.md"))
 	writeAgentFile(t, dir, "implementation-tdd")
 	writeAgentFile(t, dir, "implementation-review")
-	// Deliberately do NOT write Plan.md — the session should refuse.
+	// Deliberately do NOT write Plan.md — absence must not refuse the run.
 
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	sess := newSession(harness.NewFakeAdapter(), artifactPath, &scriptedResolver{})
@@ -480,14 +485,20 @@ func TestIntegration_StagedWorkflow_NoPlanMd_ReturnsRefusal(t *testing.T) {
 		WorkflowID:           "staged",
 		Task:                 "task",
 		IsNewRun:             true,
+		OnDeviation:          domain.DeviationDelegate,
+		RunFolder:            dir, // no Plan.md ever appears here
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
-	msg := requireRefused(t, got, err)
 
-	// The refusal message must mention Plan.md (the resource that could not be read).
-	if !strings.Contains(msg, "Plan.md") {
-		t.Errorf("want refusal message to name Plan.md, got %q", msg)
+	if err != nil {
+		t.Fatalf("want nil error, got %v", err)
+	}
+	if got.Status != domain.RunStopped {
+		t.Errorf("want RunStopped when EXECUTION is reached with no stage set, got %q (message: %q)", got.Status, got.Message)
+	}
+	if !strings.Contains(got.Message, "stage set") {
+		t.Errorf("want stop message to name the missing stage set, got %q", got.Message)
 	}
 }
 
@@ -809,6 +820,7 @@ func TestIntegration_AllFourApproaches_StagedWorkflow_GoldenFileMatch(t *testing
 		Task:                 "four-approach task",
 		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
+		RunFolder:            dir, // Plan.md was written into dir; the session must resolve it here.
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
@@ -1160,6 +1172,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 				Task:                 tc.name + " task",
 				IsNewRun:             true,
 				OnDeviation:          domain.DeviationDelegate,
+				RunFolder:            dir, // Plan.md was written into dir; the session must resolve it here.
 			}
 
 			got, err := sess.Start(context.Background(), cfg)
@@ -1622,6 +1635,7 @@ func TestIntegration_StageWildcardResolution_NonExecutionRow(t *testing.T) {
 		Task:                 "task",
 		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
+		RunFolder:            dir, // Plan.md was written into dir; the session must resolve it here.
 	}
 
 	got, err := sess.Start(context.Background(), cfg)

@@ -198,10 +198,15 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		return s.refusal(err.Error()), nil
 	}
 
-	// Step 6: Read stage set if the workflow has a staged EXECUTION phase.
+	// Step 6: Read the stage set from the run folder, if a plan file is
+	// present there. Absence is a normal state for any run that has not yet
+	// reached the EXECUTION phase (new or resumed) and is never a run-start
+	// refusal; the engine enforces the stage set precondition at the point it
+	// is actually required (routing an EXECUTION row). A plan file that
+	// exists but cannot be parsed remains a refusal.
 	var stages *domain.StageSet
-	if admitted.HasStagedPhase {
-		planPath := filepath.Join(orchDir, "Plan.md")
+	planPath := filepath.Join(config.RunFolder, "Plan.md")
+	if _, statErr := os.Stat(planPath); statErr == nil {
 		ss, stageErr := planstages.ReadStages(planPath, admitted.GroupsDeclared)
 		if stageErr != nil {
 			return s.refusal(stageErr.Error()), nil
@@ -489,8 +494,8 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 			// output artifacts contain Stage-* so the engine can expand wildcards
 			// on the next row.
 			if hasStageStarArtifact(step.Request.OutputArtifacts) {
-				planPath := filepath.Join(orchDir, "Plan.md")
-				ss, ssErr := planstages.ReadStages(planPath, admitted.GroupsDeclared)
+				rederivePlanPath := filepath.Join(config.RunFolder, "Plan.md")
+				ss, ssErr := planstages.ReadStages(rederivePlanPath, admitted.GroupsDeclared)
 				if ssErr != nil {
 					s.deps.Interact.Notify(ctx, interaction.Notice{
 						Level:   interaction.NoticeWarning,
@@ -498,6 +503,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 					})
 				} else {
 					refreshedStages = &ss
+					stages = &ss
 				}
 			}
 
