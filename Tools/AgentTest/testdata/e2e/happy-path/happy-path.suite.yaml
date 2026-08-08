@@ -1,0 +1,15 @@
+schema_version: 1
+id: happy-path-e2e
+description: >
+  End-to-end happy-path scenario (T18.1): one collaborator invocation is
+  substituted directly by the scripted adapter, its declared side effect is
+  created, and the run passes end to end through the tool's real
+  non-interactive entry point.
+defaults:
+  harness: fake
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: greet.test.yaml

@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "test_id": "full-workflow",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "Task", "agent": "requirements-refinement", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "requirements-refinement#1",
+        "status_code": "SUCCESS",
+        "status_message": "Requirements refined."
+      }
+    },
+    {
+      "match": { "tool": "Task", "agent": "researcher", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "researcher#2",
+        "status_code": "SUCCESS",
+        "status_message": "Research complete."
+      },
+      "side_effects": {
+        "create_files": [
+          { "path": "Orchestration-{run_id}/Research.md", "content": "# Research\n" }
+        ]
+      }
+    },
+    {
+      "match": { "tool": "Task", "agent": "library-researcher", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "library-researcher#3",
+        "status_code": "SUCCESS",
+        "status_message": "Library research complete."
+      },
+      "side_effects": {
+        "create_files": [
+          { "path": "Orchestration-{run_id}/LibraryResearch.md", "content": "# Library Research\n" }
+        ]
+      }
+    },
+    {
+      "match": { "tool": "Task", "agent": "planner", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "planner#4",
+        "status_code": "SUCCESS",
+        "status_message": "Plan complete."
+      },
+      "side_effects": {
+        "create_files": [
+          { "path": "Orchestration-{run_id}/Plan.md", "content": "# Plan\n" }
+        ]
+      }
+    }
+  ]
+}

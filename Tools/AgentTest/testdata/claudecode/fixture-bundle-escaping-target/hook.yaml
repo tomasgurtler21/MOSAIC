@@ -1,0 +1,24 @@
+schema_version: "1"
+id: fixture-logger-escaping-target
+version: 0.1.0
+description: Fixture bundle whose claude-code variant declares a file target that escapes the workspace hooks directory, for the target-path-escape refusal test.
+
+variants:
+  claude-code:
+    supported: true
+    files:
+      - source: hook_a.py
+        target: ../../../../escaped-hook.py
+    registration:
+      - id: settings-fragment
+        target_path: .claude/settings.json
+        performable: true
+        instruction: Merge the hooks fragment into .claude/settings.json.
+        fragment: |
+          {
+            "hooks": {
+              "PreToolUse": [
+                { "hooks": [ { "type": "command", "command": "python3", "args": ["hook_a.py"], "async": true, "timeout": 30 } ] }
+              ]
+            }
+          }

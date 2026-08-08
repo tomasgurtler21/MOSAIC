@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "test_id": "single-decision",
+  "on_unmatched": "halt",
+  "stubs": []
+}

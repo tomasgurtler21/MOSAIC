@@ -1,0 +1,29 @@
+schema_version: 1
+id: greet
+description: >
+  The scripted subject dispatches one collaborator, substituted directly by
+  the scripted adapter; the collaborator's declared side effect must exist
+  and the observed invocation sequence must match exactly.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Greet the collaborator and finish.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: greet.stubs.json
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: Task, agent: greeter }
+  artifact_created:
+    - greeting.txt

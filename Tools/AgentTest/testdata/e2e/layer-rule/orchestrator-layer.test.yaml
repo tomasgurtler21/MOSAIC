@@ -1,0 +1,25 @@
+schema_version: 1
+id: orchestrator-layer
+description: >
+  Declares layer: orchestrator against a run whose one collaborator response
+  carries an invented status code (the true violation count is 1), with
+  protocol_violations declared as 0 — wrong for a layer that applies
+  validation, correct-by-suppression for the orchestrator layer.
+layer: orchestrator
+negative: false
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Dispatch the helper, then finish.
+  invocation_kind: orchestrator
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: orchestrator-layer.stubs.json
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  protocol_violations: 0

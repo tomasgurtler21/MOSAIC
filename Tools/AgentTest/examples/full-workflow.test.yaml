@@ -1,0 +1,65 @@
+schema_version: 1
+id: full-workflow
+description: >
+  Documentation-grade example of a full-workflow orchestrator-layer test: it
+  exercises every declared concept a test definition carries — a
+  parallel-invocation group, an exact invocation-sequence assertion, a
+  seeded final orchestration state and execution log, a clean protocol
+  (zero violations), created and never-created artifacts, a reconstructed
+  concurrency minimum, and a task-message check — against one fixed,
+  deterministic scripted run.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  definition: .claude/agents/orchestrator.md
+  opening_message: |
+    Build the thing described in Requirements.md.
+  invocation_kind: orchestrator
+  model: default
+  allowed_tools: [Task, Read, Write, Edit]
+
+stub_registry: full-workflow.stubs.json
+timeout: 15m
+turn_limit: 60
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: orchestration-full-workflow.md
+
+parallel_groups:
+  - name: research-fanout
+    members:
+      - { tool: Task, agent: researcher }
+      - { tool: Task, agent: library-researcher }
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: Task, agent: requirements-refinement }
+      - group: research-fanout
+        members:
+          - { tool: Task, agent: researcher }
+          - { tool: Task, agent: library-researcher }
+      - { tool: Task, agent: planner }
+  final_state:
+    phase: COMPLETED
+    last_status: SUCCESS
+  execution_log:
+    agent_ids: ["requirements-refinement#1", "researcher#2", "library-researcher#3", "planner#4"]
+    all_status: SUCCESS
+  protocol_violations: 0
+  artifact_created:
+    - Requirements.md
+    - Research.md
+  artifact_not_created:
+    - Design.md
+  min_concurrency:
+    research-fanout: 2
+  task_messages:
+    - at: 4
+      identity: { tool: Task, agent: planner }
+      task_description_contains: ["plan"]

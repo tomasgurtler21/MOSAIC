@@ -1,0 +1,26 @@
+schema_version: 1
+id: sequence-pass
+description: >
+  The observed invocation sequence (greeter then helper) matches the declared exact sequence.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Greet the collaborator, then have the helper assist without creating files.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: sequence-pass.stubs.json
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: Task, agent: greeter }
+      - { tool: Task, agent: helper }

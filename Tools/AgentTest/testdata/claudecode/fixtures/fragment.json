@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      { "hooks": [ { "type": "command", "command": "python3", "args": ["hook.py"], "async": true, "timeout": 30 } ] }
+    ],
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "python3", "args": ["hook.py"], "async": true, "timeout": 30 } ] }
+    ]
+  }
+}

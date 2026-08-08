@@ -1,0 +1,22 @@
+schema_version: 1
+id: protocol-violations-fail
+description: >
+  The declared count (0) does not match the true violation count (1) the helper's malformed response produces, so protocol_violations must fail by name.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Greet the collaborator, then have the helper assist without creating files.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: protocol-violations-fail.stubs.json
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  protocol_violations: 0

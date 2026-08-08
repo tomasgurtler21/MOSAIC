@@ -1,0 +1,25 @@
+schema_version: 1
+id: isolation-b-test
+description: >
+  This run's one collaborator creates artifact-b.txt and nothing else.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Ask worker-b to do its one thing, then finish.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: isolation-b-test.stubs.json
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  artifact_created:
+    - artifact-b.txt
+  artifact_not_created:
+    - artifact-a.txt

@@ -1,0 +1,14 @@
+schema_version: 1
+id: echo-fidelity-e2e
+description: >
+  End-to-end echo-fidelity scenario (T18.3): the scripted collaborator's
+  reply, delivered on the rewrite-prompt path, is compared against what the
+  stub declared, and a mismatch fails the run unconditionally.
+defaults:
+  harness: fake
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: echo-mismatch.test.yaml

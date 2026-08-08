@@ -1,0 +1,15 @@
+schema_version: 1
+id: side-effects-e2e
+description: >
+  End-to-end side-effect and teardown scenario (T18.7): a single collaborator
+  whose stub declares one created file, so a scenario can probe the file's
+  existence mid-run (before the collaborator's reply is delivered) and, after
+  the run, confirm the whole sandbox — the file included — is gone.
+defaults:
+  harness: fake
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: effect-timing.test.yaml

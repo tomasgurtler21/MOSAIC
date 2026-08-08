@@ -1,0 +1,25 @@
+schema_version: 1
+id: underlying-fails
+description: >
+  A negative test declares an artifact that is never created. The
+  underlying artifact_created assertion fails as this negative test
+  expects, so the overall verdict must be a pass.
+layer: subagent
+negative: true
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Greet the collaborator and finish.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: underlying-fails.stubs.json
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  artifact_created:
+    - never-created.txt

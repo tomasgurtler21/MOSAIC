@@ -1,0 +1,28 @@
+schema_version: 1
+id: final-state-pass
+description: >
+  The seeded orchestration document's phase and last_status match what is declared.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Greet the collaborator, then have the helper assist without creating files.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: final-state-pass.stubs.json
+timeout: 30s
+turn_limit: 5
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: orchestration.md
+
+assertions:
+  final_state:
+    phase: EXECUTION
+    last_status: SUCCESS

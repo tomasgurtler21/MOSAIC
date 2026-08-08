@@ -1,0 +1,14 @@
+schema_version: 1
+id: isolation-b-e2e
+description: >
+  End-to-end run-isolation scenario (T18.7), second of two independent runs:
+  its own collaborator creates artifact-b.txt only. See
+  testdata/e2e/isolation-a's own description for the pairing.
+defaults:
+  harness: fake
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: isolation-b-test.test.yaml

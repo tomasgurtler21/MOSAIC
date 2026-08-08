@@ -1,0 +1,22 @@
+schema_version: 1
+id: layer-rule-e2e
+description: >
+  End-to-end layer-rule scenario (T18.5, layer half): the same facts — one
+  collaborator response carrying an invented status code, the one
+  Communication Protocol violation these facts contain — are evaluated under
+  three different declared layers. The subagent and integration layers apply
+  protocol-message validation in full, so a declared count of 0 fails
+  against the true count of 1. The orchestrator layer suppresses it, so the
+  same declaration of 0 is not_evaluated and the run passes regardless of
+  what actually happened — proving suppression is real and not a
+  coincidence of the facts.
+defaults:
+  harness: fake
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: subagent-layer.test.yaml
+  - path: integration-layer.test.yaml
+  - path: orchestrator-layer.test.yaml

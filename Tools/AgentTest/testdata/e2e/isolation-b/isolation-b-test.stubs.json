@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "test_id": "isolation-b-test",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "Task", "agent": "worker-b", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "worker-b#1",
+        "run_id": "isolation-b-run",
+        "status_code": "SUCCESS",
+        "status_message": "Done."
+      },
+      "side_effects": {
+        "create_files": [
+          { "path": "artifact-b.txt", "content": "b\n" }
+        ]
+      }
+    }
+  ]
+}

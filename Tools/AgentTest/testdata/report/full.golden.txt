@@ -1,0 +1,14 @@
+Suite: checkout-suite
+Started: 2026-08-07T12:00:00Z
+Finished: 2026-08-07T12:05:00Z
+
+checkout-happy-path: PASS
+checkout-rejects-invalid-cart: FAIL [assertion_failure]
+  - final_state.last_status: expected "REJECTED", got "COMPLETED" (final status did not match)
+checkout-times-out: TIMEOUT [timeout]
+checkout-state-integrity-fault: FAIL [state_integrity] (infrastructure failure)
+checkout-cost-unattributed: PASS [cost_unattributed]
+
+Totals: FAIL=2 PASS=2 TIMEOUT=1
+Infrastructure failures: 1
+Total cost: $0.17 (unavailable)

@@ -1,0 +1,23 @@
+schema_version: 1
+id: artifact-created-pass
+description: >
+  The greeter's declared side effect (greeting.txt) really exists after the run.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Greet the collaborator, then have the helper assist without creating files.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: artifact-created-pass.stubs.json
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  artifact_created:
+    - greeting.txt

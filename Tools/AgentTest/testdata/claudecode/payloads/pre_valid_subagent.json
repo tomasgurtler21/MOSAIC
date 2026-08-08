@@ -1,0 +1,11 @@
+{
+  "hook_event_name": "PreToolUse",
+  "session_id": "sess-pre-1",
+  "cwd": "/somewhere/the/harness/happened/to/launch/from",
+  "tool_name": "Task",
+  "tool_input": {
+    "subagent_type": "Worker",
+    "description": "do the work",
+    "prompt": "{\"agent_instance_id\":\"Worker#1\",\"run_id\":\"run-1\",\"task_description\":\"do the work\",\"input_artifacts\":[],\"output_artifacts\":[],\"include_result_summary\":false,\"human_in_the_loop\":false}"
+  }
+}

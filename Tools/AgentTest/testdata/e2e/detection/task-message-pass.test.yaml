@@ -1,0 +1,25 @@
+schema_version: 1
+id: task-message-pass
+description: >
+  The first invocation's task description really contains the declared phrase.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Greet the collaborator, then have the helper assist without creating files.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: task-message-pass.stubs.json
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  task_messages:
+    - at: 1
+      identity: { tool: Task, agent: greeter }
+      task_description_contains: ["Greet"]

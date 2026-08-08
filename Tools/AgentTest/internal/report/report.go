@@ -1,0 +1,166 @@
+// Package report defines the single result model both renderings and both
+// frontends consume, and the two renderings built from it.
+//
+// Two renderings built from two traversals of the evidence eventually
+// disagree, and a test tool whose human answer and machine answer differ is
+// worse than one that only has the machine answer. report.Result is the
+// only model a rendering or a frontend may traverse: no consumer computes a
+// count, a total or an outcome class of its own.
+package report
+
+import (
+	"io"
+	"time"
+
+	"mosaic-agent-test/internal/domain"
+)
+
+// SchemaVersion is the machine-readable report's version. The shape is
+// additive-only: a field is never removed or retyped, so a caller parsing
+// today's output keeps working.
+const SchemaVersion = "1"
+
+// Result is the one model every rendering and every frontend derives from.
+type Result struct {
+	SchemaVersion string
+	SuiteID       string
+	StartedAt     time.Time
+	FinishedAt    time.Time
+	Tests         []TestReport
+	Counts        map[domain.Verdict]int
+	TotalCost     domain.CostReport
+	// InfrastructureFailures counts tests ended by a repeated state-integrity
+	// fault, kept separate from the verdict counts because it is a statement
+	// about the tool rather than about the subject.
+	InfrastructureFailures int
+}
+
+// TestReport is one test's aggregate outcome plus its per-repetition detail.
+type TestReport struct {
+	TestID      string
+	Description string
+	Layer       domain.TestLayer
+	Aggregate   domain.AggregateResult
+	Runs        []RunReport
+}
+
+// RunReport is one repetition's outcome.
+type RunReport struct {
+	Key             domain.RunKey
+	Verdict         domain.Verdict
+	Reasons         []domain.FailureReason
+	Assertions      []domain.AssertionResult
+	Conditions      []domain.RunCondition
+	Duration        time.Duration
+	Cost            domain.CostReport
+	NegativeApplied bool
+}
+
+// Build assembles the model from what the suite produced. Pure, so both
+// renderers can be golden-tested from a fixture model with no run behind it.
+//
+// Counts, TotalCost and InfrastructureFailures are derived here, once, from
+// each test's aggregate — the same rule report.Result documents: no other
+// consumer computes a count or a total of its own.
+func Build(suiteID string, started, finished time.Time, tests []TestReport) Result {
+	counts := map[domain.Verdict]int{}
+	total := domain.CostReport{Attribution: domain.AttributionAttributed}
+	infra := 0
+
+	for _, t := range tests {
+		counts[t.Aggregate.Verdict]++
+		total = total.Add(t.Aggregate.TotalCost)
+		if t.Aggregate.InfrastructureFailure {
+			infra++
+		}
+	}
+
+	return Result{
+		SchemaVersion:          SchemaVersion,
+		SuiteID:                suiteID,
+		StartedAt:              started,
+		FinishedAt:             finished,
+		Tests:                  tests,
+		Counts:                 counts,
+		TotalCost:              total,
+		InfrastructureFailures: infra,
+	}
+}
+
+// RenderText writes the human-readable terminal report.
+//
+// Both RenderText and RenderJSON are total functions over Result: an empty
+// suite and an all-excluded suite render a well-formed document rather than
+// a special case, so a caller parsing the output never has to branch on "no
+// tests ran".
+func RenderText(w io.Writer, r Result) error {
+	return renderText(w, r)
+}
+
+// RenderJSON writes the versioned machine-readable report.
+func RenderJSON(w io.Writer, r Result) error {
+	return renderJSON(w, r)
+}
+
+// OutcomeClass names one visibly distinct outcome a run can exhibit.
+//
+// The obligation that an infrastructure fault must not read like a subject
+// regression appears in the terminal report, in the machine-readable report
+// and in the interactive frontend's detail view. Deriving it three times
+// would let the three drift, so it is derived once, here.
+type OutcomeClass string
+
+const (
+	ClassPass             OutcomeClass = "pass"
+	ClassAssertionFailure OutcomeClass = "assertion_failure"
+	ClassTimeout          OutcomeClass = "timeout"
+	ClassStateIntegrity   OutcomeClass = "state_integrity"
+	ClassCostUnattributed OutcomeClass = "cost_unattributed"
+	ClassEchoMismatch     OutcomeClass = "echo_mismatch"
+)
+
+// Classify reports every class a run exhibits, in a stable order. A run can
+// exhibit more than one — a timed-out run whose cost was also unattributed
+// is two facts, not a precedence question.
+func Classify(r RunReport) []OutcomeClass {
+	var out []OutcomeClass
+	for _, reason := range r.Reasons {
+		switch reason {
+		case domain.ReasonAssertion:
+			out = append(out, ClassAssertionFailure)
+		case domain.ReasonTimeout:
+			out = append(out, ClassTimeout)
+		case domain.ReasonStateIntegrity:
+			out = append(out, ClassStateIntegrity)
+		case domain.ReasonEchoMismatch:
+			out = append(out, ClassEchoMismatch)
+		}
+	}
+	for _, c := range r.Conditions {
+		if c.Kind == domain.ConditionCostUnattributed {
+			out = append(out, ClassCostUnattributed)
+		}
+	}
+	if len(out) == 0 && r.Verdict == domain.VerdictPass {
+		out = append(out, ClassPass)
+	}
+	return out
+}
+
+// testClasses reports every non-pass class any of t's runs exhibits, unique
+// and in first-occurrence order — the set the terminal and machine-readable
+// reports both surface for one test.
+func testClasses(t TestReport) []OutcomeClass {
+	seen := map[OutcomeClass]bool{}
+	var out []OutcomeClass
+	for _, run := range t.Runs {
+		for _, c := range Classify(run) {
+			if c == ClassPass || seen[c] {
+				continue
+			}
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	return out
+}

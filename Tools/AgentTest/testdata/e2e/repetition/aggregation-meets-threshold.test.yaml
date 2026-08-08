@@ -1,0 +1,27 @@
+schema_version: 1
+id: aggregation-meets-threshold
+description: >
+  Two repetitions, one passing and one failing (the second skips dispatching
+  the collaborator entirely). The declared pass rate (0.5) is exactly what
+  the mixed outcome achieves, so the aggregate verdict is a pass.
+layer: subagent
+negative: false
+repetitions: 2
+pass_rate: 0.5
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Ask the effecter to do its one thing, then finish.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: aggregation-meets-threshold.stubs.json
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  artifact_created:
+    - effect.txt

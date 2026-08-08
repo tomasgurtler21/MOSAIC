@@ -1,0 +1,9 @@
+[
+  {
+    "type": "result",
+    "subtype": "success",
+    "is_error": false,
+    "num_turns": 3,
+    "result": "{\"agent_instance_id\":\"orchestrator#1\",\"run_id\":\"run-1\",\"status_code\":\"SUCCESS\",\"status_message\":\"done\"}"
+  }
+]

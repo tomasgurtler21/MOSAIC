@@ -1,0 +1,14 @@
+schema_version: 1
+id: timeout-e2e
+description: >
+  End-to-end disposition scenario (T18.6): a run whose declared timeout
+  elapses before the scripted subject ever reaches a Result turn must earn
+  the timeout verdict rather than being reported as an ordinary failure.
+defaults:
+  harness: fake
+  timeout: 200ms
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: never-finishes.test.yaml

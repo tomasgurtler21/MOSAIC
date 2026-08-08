@@ -1,0 +1,27 @@
+schema_version: 1
+id: single-decision
+description: >
+  The scripted subject dispatches one collaborator that completes normally,
+  then a second whose pre-invocation call arrives after the declared
+  early-exit threshold is reached. The second call halts on entry; the
+  run's own disposition must read as an early exit, not as a fault.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Greet the first collaborator, then attempt a second.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: single-decision.stubs.json
+timeout: 30s
+turn_limit: 5
+stop_after_invocations: 1
+
+assertions:
+  artifact_created:
+    - greeting.txt

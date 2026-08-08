@@ -1,0 +1,28 @@
+schema_version: 1
+id: execution-log-pass
+description: >
+  The seeded execution log's agent ids and statuses match what is declared.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Greet the collaborator, then have the helper assist without creating files.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: execution-log-pass.stubs.json
+timeout: 30s
+turn_limit: 5
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: orchestration.md
+
+assertions:
+  execution_log:
+    agent_ids: ["greeter#1", "helper#2"]
+    all_status: SUCCESS

@@ -1,0 +1,9 @@
+[
+  {
+    "type": "result",
+    "subtype": "error_max_turns",
+    "is_error": true,
+    "num_turns": 10,
+    "result": "the agent reached the maximum number of turns before finishing"
+  }
+]

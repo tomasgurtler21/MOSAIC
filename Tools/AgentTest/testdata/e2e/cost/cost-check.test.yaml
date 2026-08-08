@@ -1,0 +1,27 @@
+schema_version: 1
+id: cost-check
+description: >
+  One collaborator dispatched normally; the assertion suite deliberately
+  declares nothing beyond the collaborator's own artifact, so the run's
+  verdict stays a pass regardless of which cost figure the scenario's
+  CostProvider double reports — only the report's own cost/condition fields
+  are under test here.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Ask the effecter to do its one thing, then finish.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: cost-check.stubs.json
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  artifact_created:
+    - effect.txt

@@ -1,0 +1,21 @@
+schema_version: 1
+id: concurrency-e2e
+description: >
+  End-to-end peak-concurrency scenario (T18.4): the scripted subject
+  dispatches two collaborators as one declared parallel group whose
+  pre-invocation interceptions both fire before either's post-invocation
+  interception does, so their recorded intervals genuinely overlap. Two
+  tests assert against the same reconstructed peak: one names the true
+  value (2) and passes; the other names a minimum the run never reached (3)
+  and fails, proving the assertion is capable of both outcomes rather than
+  the first-generation defect this test exists to demonstrate absent,
+  where the assertion always reported zero and could never pass.
+defaults:
+  harness: fake
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: min-concurrency-pass.test.yaml
+  - path: min-concurrency-fail.test.yaml
