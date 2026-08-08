@@ -1,10 +1,13 @@
 ---
 id: 4
-version: 2.0.0
+version: 1.1.0
 name: artifact-template-agent
 description: An agent whose Capabilities section contains a fenced code block with lookalike headings followed by empty injection markers
-model: {model-identifier}
 tools: [file_read, file_write]
+role: subagent
+required_skills: []
+recommended_tier: TODO
+tier_rationale: "TODO: state why this tier"
 ---
 
 [[SECTION:Identity]]
@@ -14,6 +17,10 @@ You are the **ArtifactTemplateAgent** agent.
 
 [[INJECTION:IdentityExtension]]
 [[/INJECTION:IdentityExtension]]
+[[DEPLOYED:ClosingProcedure]]
+[[/DEPLOYED:ClosingProcedure]]
+[[DEPLOYED:AuthorityHierarchy]]
+[[/DEPLOYED:AuthorityHierarchy]]
 
 [[/SECTION:Identity]]
 ---
@@ -46,8 +53,8 @@ Your output artifact MUST follow this structure:
 **Key Points:**
 - Always include all sections above
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
+[[INJECTION:LanguagePatterns]]
+[[/INJECTION:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -58,19 +65,21 @@ Your output artifact MUST follow this structure:
 
 [[SECTION:Constraints]]
 ## Constraints
+[[DEPLOYED:ProtocolConstraints]]
+[[/DEPLOYED:ProtocolConstraints]]
 
 - Stay within scope
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---
 
 [[SECTION:ErrorHandling]]
 ## Error Handling
+[[DEPLOYED:ErrorHandlingCommon]]
+[[/DEPLOYED:ErrorHandlingCommon]]
 
 - Retry transient errors
 
@@ -92,6 +101,8 @@ Always end with a JSON status block.
 ## Execution Philosophy
 
 - Context Management: Dedicate full context window.
+[[DEPLOYED:ExecutionPhilosophyCommon]]
+[[/DEPLOYED:ExecutionPhilosophyCommon]]
 [[INJECTION:ContextLimits]]
 [[/INJECTION:ContextLimits]]
 - Quality over Completeness.

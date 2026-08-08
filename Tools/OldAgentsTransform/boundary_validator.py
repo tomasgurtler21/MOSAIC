@@ -23,11 +23,13 @@ from boundary_constants import (
     CANONICAL_SECTIONS,
     DEPLOYED_PARENT_MAP,
     EXPECTED_MARKER,
+    FRONTMATTER_KEYS_BY_KIND,
     INJECTION_PARENT_MAP,
     KNOWN_FRONTMATTER_KEYS,
     TAG_PATTERN,
     BoundaryKind,
 )
+from document_kind import DocumentKind, classify_document as _classify_document_for_validator
 
 # Regex to extract a top-level YAML key from a frontmatter line.
 # Matches lines like: "key: value" or "key:" at the start of a line
@@ -62,6 +64,32 @@ class ValidationError:
         return f"{self.file_path}:{self.line_number}: {self.error_code} {self.message}"
 
 
+def _is_bundle_document(lines: list[str], fm_end_idx: int | None) -> bool:
+    """Return True when the frontmatter indicates a bundle document.
+
+    Delegates to classify_document() so bundle detection uses a single canonical
+    code path shared between the validator and the transformer. Rule-application
+    decisions (E004, E005, E007, E008, E010, E011) and E009 key-allowlist
+    selection therefore always agree about which files are bundles.
+
+    Used to select which validation rules apply. A bundle document is validated
+    for pairing, duplication, and frontmatter keys only; rules that assume agent
+    structure (E004, E005, E007, E008, E010, E011) are skipped.
+    """
+    if fm_end_idx is None:
+        return False
+    fm_keys: list[str] = []
+    fm_values: dict[str, str] = {}
+    for i in range(1, fm_end_idx):
+        key_match = _YAML_KEY_PATTERN.match(lines[i])
+        if key_match:
+            key = key_match.group(1)
+            fm_keys.append(key)
+            if key not in fm_values:
+                fm_values[key] = lines[i][key_match.end():].strip()
+    return _classify_document_for_validator(fm_keys, fm_values) is DocumentKind.BUNDLE
+
+
 def _parse_frontmatter(
     lines: list[str],
     file_path: pathlib.Path,
@@ -90,19 +118,32 @@ def _parse_frontmatter(
     # Find the closing '---'
     for i in range(1, len(lines)):
         if lines[i].strip() == "---":
-            # Found closing separator at index i. Extract and validate keys.
-            errors: list[ValidationError] = []
+            # Found closing separator at index i.
+            # Collect all top-level keys and values for kind classification.
+            fm_keys_list: list[tuple[int, str]] = []  # (0-based line index, key)
+            fm_values: dict[str, str] = {}
             for j in range(1, i):
                 key_match = _YAML_KEY_PATTERN.match(lines[j])
                 if key_match:
                     key = key_match.group(1)
-                    if key not in KNOWN_FRONTMATTER_KEYS:
-                        errors.append(ValidationError(
-                            file_path=file_path,
-                            line_number=j + 1,  # 1-based
-                            error_code="E009",
-                            message=f"Unexpected frontmatter key: {key!r}",
-                        ))
+                    fm_keys_list.append((j, key))
+                    if key not in fm_values:
+                        # Extract value (text after 'key:'), stripped
+                        fm_values[key] = lines[j][key_match.end():].strip()
+
+            # Determine document kind and select the per-kind key allowlist.
+            _kind = _classify_document_for_validator(list(fm_values.keys()), fm_values)
+            _allowed_keys = FRONTMATTER_KEYS_BY_KIND.get(_kind, KNOWN_FRONTMATTER_KEYS)
+
+            errors: list[ValidationError] = []
+            for j, key in fm_keys_list:
+                if key not in _allowed_keys:
+                    errors.append(ValidationError(
+                        file_path=file_path,
+                        line_number=j + 1,  # 1-based
+                        error_code="E009",
+                        message=f"Unexpected frontmatter key: {key!r}",
+                    ))
             return i, errors
 
     # No closing '---' found — malformed frontmatter
@@ -173,6 +214,11 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
         return fm_errors
     errors.extend(fm_errors)
 
+    # Detect bundle documents (type: bundle in frontmatter). For a bundle,
+    # rules E004, E005, E007, E008, E010, E011 do not apply — compound block
+    # names are intentional and prose between blocks is expected.
+    is_bundle = _is_bundle_document(lines, fm_end_idx)
+
     # --- Validate boundary structure ---
     # Stacks hold (name, line_number) for currently open boundaries.
     section_stack: list[tuple[str, int]] = []
@@ -215,8 +261,10 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
             kind = BoundaryKind(kind_str)
 
             # Check whether the name is canonical for its marker kind (E004/E010/E011).
+            # Bundle documents skip these checks — their compound SECTION names are
+            # intentional and do not require the agent canonical vocabulary.
             expected = EXPECTED_MARKER.get(name)
-            if expected is not None and expected != kind:
+            if not is_bundle and expected is not None and expected != kind:
                 # Canonical name declared under the wrong marker.
                 errors.append(ValidationError(
                     file_path=file_path,
@@ -232,7 +280,7 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                 is_canonical = False
             elif kind == BoundaryKind.SECTION:
                 is_canonical = name in CANONICAL_SECTIONS
-                if not is_canonical:
+                if not is_canonical and not is_bundle:
                     errors.append(ValidationError(
                         file_path=file_path,
                         line_number=line_num,
@@ -244,7 +292,7 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                 is_canonical = True
             else:  # DEPLOYED
                 is_canonical = name in CANONICAL_DEPLOYED
-                if not is_canonical:
+                if not is_canonical and not is_bundle:
                     # Unknown DEPLOYED name — no generator exists for it.
                     errors.append(ValidationError(
                         file_path=file_path,
@@ -267,8 +315,9 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                     seen_names.add(name)
 
                 if kind == BoundaryKind.SECTION:
-                    # Check canonical document order (E007) — only for canonical names.
-                    if is_canonical:
+                    # Check canonical document order (E007) — only for canonical names,
+                    # and skipped for bundle documents which use compound names.
+                    if is_canonical and not is_bundle:
                         order_idx = CANONICAL_ORDER.index(name)
                         if order_idx <= last_order_idx:
                             errors.append(ValidationError(
@@ -287,46 +336,48 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
 
                 elif kind == BoundaryKind.INJECTION:
                     # Check that the injection is inside its required parent section (E008).
+                    # Bundle documents skip this check — their structure is not agent structure.
                     # INJECTION_PARENT_MAP sentinel values:
                     #   None (absent key): no parent requirement — no check performed
                     #   ""   (present, empty): must be at body top level (not inside any section)
                     #   str  (non-empty): must be inside that named section
                     # Injection names are open (is_canonical is always True for INJECTION), so
                     # the parent-map lookup runs unconditionally for any name present in the map.
-                    required_parent = INJECTION_PARENT_MAP.get(name)
-                    current_section = section_stack[-1][0] if section_stack else None
-                    if required_parent is None:
-                        pass  # no parent requirement
-                    elif required_parent == "":
-                        # Must be at body top level — not nested inside any section.
-                        if current_section is not None:
+                    if not is_bundle:
+                        required_parent = INJECTION_PARENT_MAP.get(name)
+                        current_section = section_stack[-1][0] if section_stack else None
+                        if required_parent is None:
+                            pass  # no parent requirement
+                        elif required_parent == "":
+                            # Must be at body top level — not nested inside any section.
+                            if current_section is not None:
+                                errors.append(ValidationError(
+                                    file_path=file_path,
+                                    line_number=line_num,
+                                    error_code="E008",
+                                    message=(
+                                        f"Injection {name!r} must be at body top level "
+                                        f"but is inside section {current_section!r}"
+                                    ),
+                                    severity="advice",
+                                ))
+                        elif current_section != required_parent:
                             errors.append(ValidationError(
                                 file_path=file_path,
                                 line_number=line_num,
                                 error_code="E008",
                                 message=(
-                                    f"Injection {name!r} must be at body top level "
-                                    f"but is inside section {current_section!r}"
+                                    f"Injection {name!r} must be inside "
+                                    f"section {required_parent!r}, "
+                                    f"but is inside {current_section!r}"
                                 ),
                                 severity="advice",
                             ))
-                    elif current_section != required_parent:
-                        errors.append(ValidationError(
-                            file_path=file_path,
-                            line_number=line_num,
-                            error_code="E008",
-                            message=(
-                                f"Injection {name!r} must be inside "
-                                f"section {required_parent!r}, "
-                                f"but is inside {current_section!r}"
-                            ),
-                            severity="advice",
-                        ))
 
                     injection_stack.append((name, line_num))
 
                 else:  # DEPLOYED
-                    if is_canonical:
+                    if is_canonical and not is_bundle:
                         required_parent = DEPLOYED_PARENT_MAP.get(name)
                         current_section = section_stack[-1][0] if section_stack else None
 
@@ -445,7 +496,8 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
         else:
             # Not a boundary tag — check for content outside boundaries (E005).
             # Blank lines and '---' section separators are exempt.
-            if stripped and stripped != "---":
+            # Bundle documents skip this check — prose between blocks is expected.
+            if not is_bundle and stripped and stripped != "---":
                 if not section_stack and not injection_stack and not deployed_stack:
                     errors.append(ValidationError(
                         file_path=file_path,

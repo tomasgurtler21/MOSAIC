@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 from enum import Enum
 
+from document_kind import DocumentKind
+
 
 class BoundaryKind(Enum):
     SECTION = "SECTION"
@@ -41,20 +43,20 @@ CANONICAL_ORDER: tuple[str, ...] = (
     "ExecutionPhilosophy",
 )
 
-# Eleven tool-managed boundary names, a closed set.
+# Nine tool-managed boundary names, a closed set.
 # These must be declared with [[DEPLOYED:]] in any document that uses them.
 # ArtifactProvenance is removed; AuthorityHierarchy, ClosingProcedure,
 # ProtocolConstraints, ErrorHandlingCommon, and ExecutionPhilosophyCommon are added.
+# LanguagePatterns moves to INJECTION_PARENT_MAP; CustomConstraints is deleted
+# outright (it is never tool-managed, only an advisory old-marker name).
 CANONICAL_DEPLOYED: tuple[str, ...] = (
     "CommunicationProtocol",
     "AuthorityHierarchy",
     "ClosingProcedure",
     "AvailableWorkflows",
     "InfrastructureAgents",
-    "LanguagePatterns",
     "ProtocolConstraints",
     "HarnessConstraints",
-    "CustomConstraints",
     "ErrorHandlingCommon",
     "ExecutionPhilosophyCommon",
 )
@@ -64,7 +66,8 @@ CANONICAL_DEPLOYED: tuple[str, ...] = (
 # This table is consulted for advisory reporting only, never enforcement.
 # A value of None means the injection usually appears at body top level (not inside
 # any section). An absent key means no usual parent is recorded.
-# ArtifactProvenanceExtension is removed; ProtocolExtension is added.
+# ArtifactProvenanceExtension is removed; ProtocolExtension and LanguagePatterns
+# are added.
 INJECTION_PARENT_MAP: dict[str, str | None] = {
     "ProtocolExtension": None,      # top level
     "IdentityExtension": "Identity",
@@ -72,23 +75,22 @@ INJECTION_PARENT_MAP: dict[str, str | None] = {
     "OutputArtifactTemplate": "Capabilities",
     "SeverityThresholds": "Capabilities",
     "SeverityDefinitions": "Capabilities",
+    "LanguagePatterns": "Capabilities",
     "ErrorHandlingExtension": "ErrorHandling",
     "ContextLimits": "ExecutionPhilosophy",
 }
 
 # Tool-managed boundary name -> required parent section.
 # A value of None means the boundary must appear at body top level.
-# Eleven entries mirroring the Go DeployedParent map.
+# Nine entries mirroring the Go DeployedParent map.
 DEPLOYED_PARENT_MAP: dict[str, str | None] = {
     "CommunicationProtocol": None,      # top level — must not be nested in any section
     "AuthorityHierarchy": "Identity",
     "ClosingProcedure": "Identity",
     "AvailableWorkflows": "Identity",
     "InfrastructureAgents": "Identity",
-    "LanguagePatterns": "Capabilities",
     "ProtocolConstraints": "Constraints",
     "HarnessConstraints": "Constraints",
-    "CustomConstraints": "Constraints",
     "ErrorHandlingCommon": "ErrorHandling",
     "ExecutionPhilosophyCommon": "ExecutionPhilosophy",
 }
@@ -134,6 +136,13 @@ KNOWN_FRONTMATTER_KEYS: frozenset[str] = frozenset({
     "infrastructure",
     "triggers",
     "on_failure",
+    # Bundle document keys (DeployedSections.md and any other type: bundle file).
+    # These four keys are also the members of BUNDLE_FRONTMATTER_KEYS, included
+    # here so KNOWN_FRONTMATTER_KEYS remains the union of all per-kind key sets.
+    "type",
+    "author",
+    "status",
+    "blocks",
 })
 
 # Section name -> Markdown heading that introduces that section.
@@ -170,11 +179,83 @@ MARKER_TO_INJECTION_NAME: dict[str, str] = {
     v: k for k, v in INJECTION_OLD_MARKER_MAP.items()
 }
 
-# Name restriction is [A-Za-z]+ (pre-existing; compound names with colons or
-# hyphens do not match and that is unchanged by this update).
+# Name admits compound forms `Prefix:id` and hyphenated segments, matching the
+# Go parser in Tools/Common/docformat/boundary.go. Each segment must start with
+# a letter; digits and hyphens are allowed after the first character of a segment.
+# A trailing colon or a segment starting with a digit or hyphen does not match.
 TAG_PATTERN: re.Pattern[str] = re.compile(
-    r"^\[\[(?P<close>/?)(?P<kind>SECTION|INJECTION|DEPLOYED):(?P<name>[A-Za-z]+)\]\]$"
+    r"^\[\[(?P<close>/?)(?P<kind>SECTION|INJECTION|DEPLOYED):"
+    r"(?P<name>[A-Za-z][A-Za-z0-9-]*(?::[A-Za-z][A-Za-z0-9-]*)*)\]\]$"
 )
+
+
+def tag_base_name(name: str) -> str:
+    """Return the portion of a tag name before the first colon.
+
+    'AuthorityHierarchy:Subagent' -> 'AuthorityHierarchy'
+    'Identity'                    -> 'Identity'
+
+    Used where a compound name should be treated as an instance of its base
+    name (the idempotency guard). NOT used by the validator's canonical-name
+    check, which is deliberately strict for agent documents.
+    """
+    colon_pos = name.find(":")
+    if colon_pos == -1:
+        return name
+    return name[:colon_pos]
+
+
+def tag_qualifier(name: str) -> str | None:
+    """Return the portion after the first colon, or None when the name is simple.
+
+    'AuthorityHierarchy:Subagent' -> 'Subagent'
+    'Identity'                    -> None
+    """
+    colon_pos = name.find(":")
+    if colon_pos == -1:
+        return None
+    return name[colon_pos + 1:]
+
+
+# Keys that only a bundle document carries; no agent file uses these.
+BUNDLE_FRONTMATTER_KEYS: frozenset[str] = frozenset({
+    "type", "author", "status", "blocks",
+})
+
+# ---------------------------------------------------------------------------
+# Stage 6: per-kind frontmatter key sets
+#
+# These three constants are stubs; their values are populated by Stage 6's
+# implementation (I6.5). Tests asserting on their contents are in TDD RED
+# phase and will fail until I6.5 is complete.
+#
+# Contract:
+#   KNOWN_FRONTMATTER_KEYS == set().union(*FRONTMATTER_KEYS_BY_KIND.values())
+# ---------------------------------------------------------------------------
+
+# Keys that only a harness-path file may carry.  On the generic transform
+# path, these are stripped from the output.  On the harness path, they are
+# preserved verbatim.
+HARNESS_ONLY_FRONTMATTER_KEYS: frozenset[str] = frozenset({
+    "mode", "permission", "model", "transform_version",
+})
+
+# Keys legal on any agent file (generic or harness) regardless of path.
+# Equivalent to KNOWN_FRONTMATTER_KEYS minus HARNESS_ONLY_FRONTMATTER_KEYS
+# minus BUNDLE_FRONTMATTER_KEYS.
+AGENT_COMMON_FRONTMATTER_KEYS: frozenset[str] = (
+    KNOWN_FRONTMATTER_KEYS - HARNESS_ONLY_FRONTMATTER_KEYS - BUNDLE_FRONTMATTER_KEYS
+)
+
+# Per-kind allowlist consulted by the validator.
+# Contract: KNOWN_FRONTMATTER_KEYS == set().union(*FRONTMATTER_KEYS_BY_KIND.values())
+FRONTMATTER_KEYS_BY_KIND: dict[DocumentKind, frozenset[str]] = {
+    DocumentKind.AGENT_GENERIC: AGENT_COMMON_FRONTMATTER_KEYS,
+    DocumentKind.AGENT_HARNESS: AGENT_COMMON_FRONTMATTER_KEYS | HARNESS_ONLY_FRONTMATTER_KEYS,
+    DocumentKind.BUNDLE: BUNDLE_FRONTMATTER_KEYS | frozenset({
+        "id", "name", "description", "bundle_version",
+    }),
+}
 
 
 def open_tag(kind: BoundaryKind, name: str) -> str:

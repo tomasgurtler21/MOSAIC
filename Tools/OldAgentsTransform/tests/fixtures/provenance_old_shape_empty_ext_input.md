@@ -37,8 +37,8 @@ overwrite both fields with the current writer's values.
 - Do things efficiently
 - Do more things correctly
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
+[[INJECTION:LanguagePatterns]]
+[[/INJECTION:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -50,19 +50,22 @@ overwrite both fields with the current writer's values.
 [[SECTION:Constraints]]
 ## Constraints
 
+[[DEPLOYED:ProtocolConstraints]]
+[[/DEPLOYED:ProtocolConstraints]]
+
 - Do NOT do bad things
 - Stay within defined scope
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---
 
 [[SECTION:ErrorHandling]]
 ## Error Handling
+[[DEPLOYED:ErrorHandlingCommon]]
+[[/DEPLOYED:ErrorHandlingCommon]]
 
 - **Retry transient errors once** before escalating
 - **Return BLOCKED** if prerequisites are missing
@@ -84,8 +87,10 @@ Always end with a JSON status block.
 [[SECTION:ExecutionPhilosophy]]
 ## Execution Philosophy
 
-- **Context Management:** Dedicate your full context window to this task.
+[[DEPLOYED:ExecutionPhilosophyCommon]]
+[[/DEPLOYED:ExecutionPhilosophyCommon]]
 [[INJECTION:ContextLimits]]
 [[/INJECTION:ContextLimits]]
+- **Context Management:** Dedicate your full context window to this task.
 - **Quality over Completeness:** Stop at a good stopping point.
 [[/SECTION:ExecutionPhilosophy]]

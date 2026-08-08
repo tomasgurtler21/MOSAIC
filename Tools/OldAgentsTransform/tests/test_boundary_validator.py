@@ -1501,8 +1501,14 @@ class TestStage3InjectionParentAdvisory:
         self, tmp_path: pathlib.Path
     ) -> None:
         # Arrange
-        # LanguagePatterns inside Identity — deployed region in wrong parent. Must remain
-        # a hard error. The advisory relaxation applies only to [[INJECTION:]] regions.
+        # ProtocolConstraints (canonical parent: Constraints) placed inside Identity --
+        # deployed region in wrong parent. Must remain a hard error. The advisory
+        # relaxation applies only to [[INJECTION:]] regions.
+        # LanguagePatterns is no longer usable as this sample: it left CANONICAL_DEPLOYED
+        # entirely, so a [[DEPLOYED:LanguagePatterns]] tag now signals an unknown/unclassified
+        # deployed name rather than a wrong-parent placement -- a different structural
+        # meaning. ProtocolConstraints is a surviving canonical name with a non-empty
+        # parent, preserving the original wrong-parent scenario.
         content = (
             "---\n"
             "id: test-deployed-parent\n"
@@ -1512,8 +1518,8 @@ class TestStage3InjectionParentAdvisory:
             "---\n\n"
             "[[SECTION:Identity]]\n"
             "# TestAgent Agent\n"
-            "[[DEPLOYED:LanguagePatterns]]\n"
-            "[[/DEPLOYED:LanguagePatterns]]\n"
+            "[[DEPLOYED:ProtocolConstraints]]\n"
+            "[[/DEPLOYED:ProtocolConstraints]]\n"
             "[[/SECTION:Identity]]\n"
         )
         agent_file = tmp_path / "deployed-wrong-parent.md"
@@ -1525,7 +1531,7 @@ class TestStage3InjectionParentAdvisory:
         # Assert
         e008_findings = [
             f for f in findings
-            if f.error_code == "E008" and "LanguagePatterns" in f.message
+            if f.error_code == "E008" and "ProtocolConstraints" in f.message
         ]
         assert e008_findings, (
             "A misplaced [[DEPLOYED:]] region must still produce an E008 finding after Stage 3"
@@ -1544,6 +1550,9 @@ class TestStage3InjectionParentAdvisory:
     ) -> None:
         # Arrange
         # A document with a misplaced deployed region (hard error). CLI must exit 1.
+        # ProtocolConstraints is a surviving canonical name with a non-empty parent
+        # (Constraints); see test_deployed_wrong_parent_severity_remains_error for why
+        # LanguagePatterns no longer serves this purpose.
         content = (
             "---\n"
             "id: test-deployed-err\n"
@@ -1553,8 +1562,8 @@ class TestStage3InjectionParentAdvisory:
             "---\n\n"
             "[[SECTION:Identity]]\n"
             "# TestAgent Agent\n"
-            "[[DEPLOYED:LanguagePatterns]]\n"
-            "[[/DEPLOYED:LanguagePatterns]]\n"
+            "[[DEPLOYED:ProtocolConstraints]]\n"
+            "[[/DEPLOYED:ProtocolConstraints]]\n"
             "[[/SECTION:Identity]]\n"
         )
         agent_file = tmp_path / "deployed-error.md"
@@ -1671,4 +1680,313 @@ class TestHyphenatedFrontmatterKeyValidator:
         assert hyphen_key_e009, (
             "The E009 error message must identify 'custom-hyphen-field' as the offending key. "
             f"Got E009 messages: {[e.message for e in e009_errors]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bundle document validation (Stage 1)
+# ---------------------------------------------------------------------------
+
+# Repository root is three levels up from this test file
+# (tests/ -> OldAgentsTransform/ -> Tools/ -> repo root)
+_REPO_ROOT = pathlib.Path(__file__).parent.parent.parent.parent
+_DEPLOYED_SECTIONS_PATH = _REPO_ROOT / "Agents" / "Generic" / "DeployedSections.md"
+
+
+class TestBundleDocumentValidation:
+    """The canonical block bundle (Agents/Generic/DeployedSections.md) must validate
+    with no errors after Stage 1 fixes compound-name matching and bundle frontmatter keys.
+
+    Current failures:
+    - E009 for every bundle-specific frontmatter key (type, author, status, blocks)
+      that is absent from KNOWN_FRONTMATTER_KEYS.
+    - E005 (content outside boundaries) repeated ~60 times because compound SECTION
+      names do not match TAG_PATTERN, making all block body content appear to lie
+      outside any boundary.
+
+    After Stage 1:
+    - TAG_PATTERN admits compound names so block delimiters are recognised.
+    - KNOWN_FRONTMATTER_KEYS includes bundle keys so E009 is suppressed.
+    - The bundle document (type: bundle) is validated with rules appropriate to its
+      kind — compound block names are legal and prose between blocks is expected.
+    """
+
+    def test_deployed_sections_bundle_file_exists(self) -> None:
+        """Precondition: the canonical bundle file must be present in the repository."""
+        assert _DEPLOYED_SECTIONS_PATH.exists(), (
+            f"Canonical bundle file not found at {_DEPLOYED_SECTIONS_PATH}. "
+            "This test cannot run without it."
+        )
+
+    def test_validate_bundle_returns_no_errors(self) -> None:
+        """validate_file on the canonical bundle must return an empty error list.
+
+        This is the AC1.2 assertion: the bundle must validate cleanly after Stage 1.
+        Any errors here identify exactly what Stage 1's implementation must still fix.
+        """
+        if not _DEPLOYED_SECTIONS_PATH.exists():
+            import pytest
+            pytest.skip("Bundle file not found — precondition test covers this")
+
+        # Act
+        errors = validate_file(_DEPLOYED_SECTIONS_PATH)
+
+        # Assert
+        error_summary = [
+            f"  L{e.line_number} [{e.error_code}] {e.message}"
+            for e in errors
+        ]
+        assert errors == [], (
+            f"validate_file on DeployedSections.md must return no errors after Stage 1, "
+            f"but got {len(errors)} error(s):\n" + "\n".join(error_summary)
+        )
+
+    def test_validate_bundle_produces_no_e009_for_type_key(self) -> None:
+        """The 'type: bundle' frontmatter key must not trigger E009 after Stage 1."""
+        if not _DEPLOYED_SECTIONS_PATH.exists():
+            import pytest
+            pytest.skip("Bundle file not found")
+
+        errors = validate_file(_DEPLOYED_SECTIONS_PATH)
+        e009_for_type = [
+            e for e in errors
+            if e.error_code == "E009" and "type" in e.message
+        ]
+        assert e009_for_type == [], (
+            "The 'type' frontmatter key must not raise E009; it must be in KNOWN_FRONTMATTER_KEYS"
+        )
+
+    def test_validate_bundle_produces_no_e009_for_author_key(self) -> None:
+        """The 'author' frontmatter key must not trigger E009 after Stage 1."""
+        if not _DEPLOYED_SECTIONS_PATH.exists():
+            import pytest
+            pytest.skip("Bundle file not found")
+
+        errors = validate_file(_DEPLOYED_SECTIONS_PATH)
+        e009_for_author = [
+            e for e in errors
+            if e.error_code == "E009" and "author" in e.message
+        ]
+        assert e009_for_author == [], (
+            "The 'author' frontmatter key must not raise E009"
+        )
+
+    def test_validate_bundle_produces_no_e009_for_status_key(self) -> None:
+        """The 'status' frontmatter key must not trigger E009 after Stage 1."""
+        if not _DEPLOYED_SECTIONS_PATH.exists():
+            import pytest
+            pytest.skip("Bundle file not found")
+
+        errors = validate_file(_DEPLOYED_SECTIONS_PATH)
+        e009_for_status = [
+            e for e in errors
+            if e.error_code == "E009" and "status" in e.message
+        ]
+        assert e009_for_status == [], (
+            "The 'status' frontmatter key must not raise E009"
+        )
+
+    def test_validate_bundle_produces_no_e009_for_blocks_key(self) -> None:
+        """The 'blocks' frontmatter key must not trigger E009 after Stage 1."""
+        if not _DEPLOYED_SECTIONS_PATH.exists():
+            import pytest
+            pytest.skip("Bundle file not found")
+
+        errors = validate_file(_DEPLOYED_SECTIONS_PATH)
+        e009_for_blocks = [
+            e for e in errors
+            if e.error_code == "E009" and "blocks" in e.message
+        ]
+        assert e009_for_blocks == [], (
+            "The 'blocks' frontmatter key must not raise E009"
+        )
+
+
+
+# ===========================================================================
+# Stage 6: Per-kind frontmatter key allowlist (T6.5)
+# ===========================================================================
+#
+# These tests verify that validate_file applies different key allowlists
+# depending on the document kind (AGENT_GENERIC, AGENT_HARNESS, BUNDLE).
+#
+# Fail (TDD RED) until Stage 6 implementation tasks I6.5 are complete:
+# — A generic-kind file with a harness-only key is currently accepted
+#   (no E009), so assertions that expect E009 will fail until Stage 6
+#   differentiates the allowlist by kind.
+# ---------------------------------------------------------------------------
+
+import boundary_constants as _bc_s6  # noqa: E402 (already imported as boundary_constants above)
+
+# Stage 6 constants — stubs in boundary_constants.py until I6.5 is complete.
+# Importing here so the tests fail at assertion time (wrong values), not at
+# import time (missing names).
+from boundary_constants import (  # noqa: E402
+    HARNESS_ONLY_FRONTMATTER_KEYS,
+    AGENT_COMMON_FRONTMATTER_KEYS,
+    FRONTMATTER_KEYS_BY_KIND,
+    KNOWN_FRONTMATTER_KEYS,
+)
+from document_kind import DocumentKind  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# T6.5: FRONTMATTER_KEYS_BY_KIND constants
+# ---------------------------------------------------------------------------
+
+class TestFrontmatterKeyConstantsStage6:
+    """Stage 6 must add per-kind frontmatter key sets to boundary_constants."""
+
+    def test_harness_only_keys_contains_mode(self) -> None:
+        """HARNESS_ONLY_FRONTMATTER_KEYS must include 'mode'."""
+        assert "mode" in HARNESS_ONLY_FRONTMATTER_KEYS, (
+            "'mode' must be in HARNESS_ONLY_FRONTMATTER_KEYS after Stage 6"
+        )
+
+    def test_harness_only_keys_contains_permission(self) -> None:
+        """HARNESS_ONLY_FRONTMATTER_KEYS must include 'permission'."""
+        assert "permission" in HARNESS_ONLY_FRONTMATTER_KEYS
+
+    def test_harness_only_keys_contains_model(self) -> None:
+        """HARNESS_ONLY_FRONTMATTER_KEYS must include 'model'."""
+        assert "model" in HARNESS_ONLY_FRONTMATTER_KEYS
+
+    def test_harness_only_keys_contains_transform_version(self) -> None:
+        """HARNESS_ONLY_FRONTMATTER_KEYS must include 'transform_version'."""
+        assert "transform_version" in HARNESS_ONLY_FRONTMATTER_KEYS
+
+    def test_harness_only_keys_is_frozenset(self) -> None:
+        """HARNESS_ONLY_FRONTMATTER_KEYS must be a frozenset."""
+        assert isinstance(HARNESS_ONLY_FRONTMATTER_KEYS, frozenset)
+
+    def test_agent_common_keys_does_not_contain_harness_only_keys(self) -> None:
+        """AGENT_COMMON_FRONTMATTER_KEYS must not overlap with HARNESS_ONLY_FRONTMATTER_KEYS."""
+        overlap = AGENT_COMMON_FRONTMATTER_KEYS & HARNESS_ONLY_FRONTMATTER_KEYS
+        assert overlap == frozenset(), (
+            f"AGENT_COMMON and HARNESS_ONLY must be disjoint but share: {overlap}"
+        )
+
+    def test_agent_common_keys_is_frozenset(self) -> None:
+        """AGENT_COMMON_FRONTMATTER_KEYS must be a frozenset."""
+        assert isinstance(AGENT_COMMON_FRONTMATTER_KEYS, frozenset)
+
+    def test_frontmatter_keys_by_kind_has_all_three_document_kinds(self) -> None:
+        """FRONTMATTER_KEYS_BY_KIND must have entries for all three DocumentKind values."""
+        assert DocumentKind.AGENT_GENERIC in FRONTMATTER_KEYS_BY_KIND
+        assert DocumentKind.AGENT_HARNESS in FRONTMATTER_KEYS_BY_KIND
+        assert DocumentKind.BUNDLE in FRONTMATTER_KEYS_BY_KIND
+
+    def test_known_frontmatter_keys_equals_union_of_all_kind_sets(self) -> None:
+        """KNOWN_FRONTMATTER_KEYS must equal the union of all per-kind key sets.
+
+        This identity ensures a key added to one kind never falls out of the union
+        (which is imported by existing code).
+        """
+        union = frozenset().union(*FRONTMATTER_KEYS_BY_KIND.values())
+        assert KNOWN_FRONTMATTER_KEYS == union, (
+            f"KNOWN_FRONTMATTER_KEYS must equal the union of FRONTMATTER_KEYS_BY_KIND values.\n"
+            f"In KNOWN but not in union: {KNOWN_FRONTMATTER_KEYS - union}\n"
+            f"In union but not in KNOWN: {union - KNOWN_FRONTMATTER_KEYS}"
+        )
+
+    def test_agent_generic_kind_does_not_include_harness_only_keys(self) -> None:
+        """FRONTMATTER_KEYS_BY_KIND[AGENT_GENERIC] must not contain any harness-only key."""
+        generic_keys = FRONTMATTER_KEYS_BY_KIND.get(DocumentKind.AGENT_GENERIC, frozenset())
+        overlap = generic_keys & HARNESS_ONLY_FRONTMATTER_KEYS
+        assert overlap == frozenset(), (
+            f"AGENT_GENERIC key set must not contain harness-only keys but contains: {overlap}"
+        )
+
+    def test_agent_harness_kind_includes_harness_only_keys(self) -> None:
+        """FRONTMATTER_KEYS_BY_KIND[AGENT_HARNESS] must include all harness-only keys."""
+        harness_keys = FRONTMATTER_KEYS_BY_KIND.get(DocumentKind.AGENT_HARNESS, frozenset())
+        assert HARNESS_ONLY_FRONTMATTER_KEYS.issubset(harness_keys), (
+            f"AGENT_HARNESS key set must contain all harness-only keys. "
+            f"Missing: {HARNESS_ONLY_FRONTMATTER_KEYS - harness_keys}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T6.5: validate_file per-kind allowlist — generic-kind file with harness key
+# ---------------------------------------------------------------------------
+
+class TestValidateFileGenericKindWithHarnessKey:
+    """validate_file flags E009 when a generic-kind file carries a harness-only key."""
+
+    def test_generic_file_with_mode_key_fails_e009(
+        self, s6_validator_generic_harness_key: pathlib.Path
+    ) -> None:
+        """A generic-kind file (no transform_version) carrying 'mode' must fail E009."""
+        errors = validate_file(s6_validator_generic_harness_key)
+        e009_for_mode = [
+            e for e in errors
+            if e.error_code == "E009" and "mode" in e.message
+        ]
+        assert len(e009_for_mode) >= 1, (
+            f"Expected E009 for 'mode' in a generic-kind file but got: "
+            f"{[str(e) for e in errors]}"
+        )
+
+    def test_generic_file_with_mode_key_e009_has_correct_line_number(
+        self, s6_validator_generic_harness_key: pathlib.Path
+    ) -> None:
+        """The E009 error for 'mode' must reference a positive line number."""
+        errors = validate_file(s6_validator_generic_harness_key)
+        e009_for_mode = [e for e in errors if e.error_code == "E009" and "mode" in e.message]
+        assert e009_for_mode, "Expected at least one E009 for 'mode'"
+        assert all(e.line_number > 0 for e in e009_for_mode)
+
+
+# ---------------------------------------------------------------------------
+# T6.5: validate_file per-kind allowlist — harness-kind file with harness key
+# ---------------------------------------------------------------------------
+
+class TestValidateFileHarnessKindWithHarnessKey:
+    """validate_file accepts harness-only keys in a harness-kind file without E009."""
+
+    def test_harness_file_with_mode_key_passes_e009_check(
+        self, s6_validator_harness_harness_key: pathlib.Path
+    ) -> None:
+        """A harness-kind file (has transform_version) carrying 'mode' must not fail E009 for it."""
+        errors = validate_file(s6_validator_harness_harness_key)
+        e009_for_mode = [
+            e for e in errors
+            if e.error_code == "E009" and "mode" in e.message
+        ]
+        assert e009_for_mode == [], (
+            f"A harness-kind file must not receive E009 for 'mode' but got: "
+            f"{[str(e) for e in e009_for_mode]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T6.5: validate_file per-kind allowlist — bundle still validates clean
+# ---------------------------------------------------------------------------
+
+class TestValidateFileBundleStillValidatesCleanAfterStage6:
+    """The bundle (DeployedSections.md) must continue to validate with no errors after Stage 6.
+
+    Stage 6 introduces FRONTMATTER_KEYS_BY_KIND; the bundle document kind (BUNDLE)
+    must be checked against its own key set, not the agent key set, so bundle-only
+    keys like 'type', 'author', 'status', 'blocks' do not trigger E009.
+    """
+
+    _DEPLOYED_SECTIONS_PATH = (
+        pathlib.Path(__file__).parent.parent.parent.parent
+        / "Agents" / "Generic" / "DeployedSections.md"
+    )
+
+    def test_bundle_validates_clean_after_stage_6_allowlist_split(self) -> None:
+        """validate_file on DeployedSections.md must return no errors after Stage 6."""
+        if not self._DEPLOYED_SECTIONS_PATH.exists():
+            import pytest
+            pytest.skip("Bundle file not found")
+
+        errors = validate_file(self._DEPLOYED_SECTIONS_PATH)
+        error_summary = [
+            f"  L{e.line_number} [{e.error_code}] {e.message}" for e in errors
+        ]
+        assert errors == [], (
+            f"Bundle must validate clean after Stage 6 allowlist split but got "
+            f"{len(errors)} error(s):\n" + "\n".join(error_summary)
         )

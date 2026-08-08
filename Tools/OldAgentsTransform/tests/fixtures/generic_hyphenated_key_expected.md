@@ -1,11 +1,14 @@
 ---
 id: 1
-version: 3.0.0
+version: 2.3.0
 base-version: 1.0.0
 name: test-agent
 description: A generic agent with all common injections for testing the boundary transformer
-model: {model-identifier}
 tools: [file_read, file_write]
+role: subagent
+required_skills: []
+recommended_tier: TODO
+tier_rationale: "TODO: state why this tier"
 ---
 
 [[SECTION:Identity]]
@@ -21,6 +24,10 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 
 [[INJECTION:IdentityExtension]]
 [[/INJECTION:IdentityExtension]]
+[[DEPLOYED:ClosingProcedure]]
+[[/DEPLOYED:ClosingProcedure]]
+[[DEPLOYED:AuthorityHierarchy]]
+[[/DEPLOYED:AuthorityHierarchy]]
 
 [[/SECTION:Identity]]
 ---
@@ -32,8 +39,8 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 - Do things efficiently
 - Do more things correctly
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
+[[INJECTION:LanguagePatterns]]
+[[/INJECTION:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -44,20 +51,22 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 
 [[SECTION:Constraints]]
 ## Constraints
+[[DEPLOYED:ProtocolConstraints]]
+[[/DEPLOYED:ProtocolConstraints]]
 
 - Do NOT do bad things
 - Stay within defined scope
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---
 
 [[SECTION:ErrorHandling]]
 ## Error Handling
+[[DEPLOYED:ErrorHandlingCommon]]
+[[/DEPLOYED:ErrorHandlingCommon]]
 
 - **Retry transient errors once** before escalating
 - **Return BLOCKED** if prerequisites are missing
@@ -80,6 +89,8 @@ Always end with a JSON status block.
 ## Execution Philosophy
 
 - **Context Management:** Dedicate your full context window to this task.
+[[DEPLOYED:ExecutionPhilosophyCommon]]
+[[/DEPLOYED:ExecutionPhilosophyCommon]]
 [[INJECTION:ContextLimits]]
 [[/INJECTION:ContextLimits]]
 - **Quality over Completeness:** Stop at a good stopping point.

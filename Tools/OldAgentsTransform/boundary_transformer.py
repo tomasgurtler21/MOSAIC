@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import enum
 import pathlib
 import re
 import sys
+from collections.abc import Mapping
 from typing import Optional
 
 from boundary_constants import (
     BoundaryKind,
+    CANONICAL_DEPLOYED,
     CANONICAL_SECTIONS,
     EXPECTED_MARKER,
     INJECTION_OLD_MARKER_MAP,
@@ -26,6 +29,49 @@ from boundary_constants import (
     TAG_PATTERN,
     close_tag,
     open_tag,
+    tag_base_name,
+)
+from region_insertion import apply_conduct_regions, find_section_spans
+
+import file_classification as _fc
+
+from document_kind import classify_document as _classify_document
+from non_conformance import NonConformance, detect_output_non_conformances
+from frontmatter_build import (
+    DerivedFrontmatter,
+    build_output_frontmatter,
+    derive_name,
+    derive_required_skills,
+    derive_role,
+    read_generic_id,
+)
+
+# ---------------------------------------------------------------------------
+# Module constants
+# ---------------------------------------------------------------------------
+
+# Default version assigned when the degraded path finds no `version` in frontmatter.
+DEFAULT_VERSION: str = "1.0.0"
+
+
+class SkipReason(enum.Enum):
+    """Reason a file was skipped without transformation."""
+    ALREADY_TRANSFORMED = "already-transformed"
+    UTILITY_AGENT       = "utility-agent"
+    NON_AGENT           = "non-agent-file"
+
+# Warning texts emitted to stderr and carried in TransformResult.warnings.
+WARN_NO_GENERIC_REF: str = (
+    "No generic reference found for {path}; running degraded-quality transform"
+)
+WARN_ALREADY_TRANSFORMED: str = (
+    "{path} already carries canonical boundary tags; skipping"
+)
+
+# The harness hard-error message, kept as a constant so both the single-file
+# path and any test can assert it without duplicating the literal.
+ERR_HARNESS_NO_GENERIC_REF: str = (
+    "Harness file detected (transform_version in frontmatter) but --generic-ref not provided"
 )
 
 # Matches a top-level YAML frontmatter key at the start of a line (no leading
@@ -51,7 +97,166 @@ class TransformResult:
     deployed_added: list[str]      # Names of DEPLOYED boundaries emitted
     version_before: str            # Original version string
     version_after: str             # New version string after bump
+    # --- added by harness-only support; all default so existing constructions compile ---
+    degraded: bool = False
+    """True when the transform ran through the degraded (no generic reference) path."""
+    skipped: bool = False
+    """True when the file was left untouched because it is already transformed.
+    When skipped is True, success is True, no output file was written, and
+    version_after == version_before."""
+    warnings: list[str] = dataclasses.field(default_factory=list)
+    """Human-readable warnings emitted during this transform, in emission order."""
+    skip_reason: SkipReason | None = None
+    """When skipped is True, identifies why the file was skipped. None for a normal transform."""
+    non_conformances: list[NonConformance] = dataclasses.field(default_factory=list)
+    """Non-conformance findings produced during this transform (e.g. NC_TIER_PLACEHOLDER)."""
 
+
+# ---------------------------------------------------------------------------
+# Stage 1 detection helpers
+# ---------------------------------------------------------------------------
+
+def is_orchestrator_file(path: pathlib.Path) -> bool:
+    """Return True when path names the orchestrator agent.
+
+    Classification is canonical by filename: True if and only if the base name is
+    exactly "orchestrator.md" or "orchestrator.agent.md" (compared case-insensitively).
+    Frontmatter is not consulted; a `role: orchestrator` value in a file whose name does
+    not match returns False.
+    """
+    name = path.name.lower()
+    return name in ("orchestrator.md", "orchestrator.agent.md")
+
+
+def has_canonical_boundary_tags(body: str) -> bool:
+    """Return True when body already carries a structurally valid set of canonical
+    [[SECTION:...]] boundary tags.
+
+    True requires ALL of:
+      - at least one [[SECTION:Name]] open tag whose Name is in
+        boundary_constants.CANONICAL_SECTIONS;
+      - every [[SECTION:Name]] open tag present has a matching [[/SECTION:Name]] close
+        tag, and no close tag is unmatched;
+      - every SECTION name present is in CANONICAL_SECTIONS;
+      - every [[DEPLOYED:Name]] name present is in boundary_constants.CANONICAL_DEPLOYED
+        and is likewise correctly paired.
+
+    [[INJECTION:...]] names are open vocabulary and are not checked for membership, only
+    for pairing.
+
+    An incidental "[[...]]"-shaped string in prose that is not a well-formed tag line,
+    an unpaired tag, or a non-canonical SECTION/DEPLOYED name each make this False.
+    A tag is recognised only when it occupies a whole line (after stripping the line
+    terminator), matching how the Go docformat lexer recognises tags.
+    """
+    canonical_sections_set = set(CANONICAL_SECTIONS)
+    canonical_deployed_set = set(CANONICAL_DEPLOYED)
+
+    open_sections: list[str] = []
+    open_deployed: list[str] = []
+    open_injections: list[str] = []
+    has_canonical_section = False
+
+    for line in body.splitlines():
+        m = TAG_PATTERN.match(line)
+        if m is None:
+            continue
+
+        is_close = bool(m.group("close"))
+        kind = m.group("kind")
+        name = m.group("name")
+
+        if kind == "SECTION":
+            if not is_close:
+                # Membership check uses the base name so compound names like
+                # 'Identity:Something' are still recognised as canonical Identity.
+                if tag_base_name(name) not in canonical_sections_set:
+                    return False
+                open_sections.append(name)
+                has_canonical_section = True
+            else:
+                # Pairing check uses the full name — the close tag must match
+                # the exact open tag name, not just the base name.
+                if not open_sections or open_sections[-1] != name:
+                    return False
+                open_sections.pop()
+
+        elif kind == "DEPLOYED":
+            if not is_close:
+                # Membership check uses the base name for the same reason.
+                if tag_base_name(name) not in canonical_deployed_set:
+                    return False
+                open_deployed.append(name)
+            else:
+                # Pairing check uses the full name.
+                if not open_deployed or open_deployed[-1] != name:
+                    return False
+                open_deployed.pop()
+
+        elif kind == "INJECTION":
+            if not is_close:
+                open_injections.append(name)
+            else:
+                if not open_injections or open_injections[-1] != name:
+                    return False
+                open_injections.pop()
+
+    if open_sections or open_deployed or open_injections:
+        return False
+
+    return has_canonical_section
+
+
+def default_version() -> str:
+    """Return the version value to assign when frontmatter carries none.
+
+    Returns DEFAULT_VERSION. Provided as a function rather than only a constant so the
+    generation policy has one call site to change.
+    """
+    return DEFAULT_VERSION
+
+
+def bump_version(version_str: str) -> str:
+    """Return the minor-bumped version.
+
+    'M.m.p' -> 'M.(m+1).0'.  '2.5.0' -> '2.6.0'.  '3' -> '3.1.0'.  '1.2' -> '1.3.0'.
+    A string whose first dot-separated part is not a non-negative integer returns
+    DEFAULT_VERSION.  Extra parts beyond the third are discarded.
+
+    Replaces the always-major behaviour. `_bump_version` is retained as a thin
+    alias delegating here so existing internal call sites keep working; the alias's
+    behaviour changes with it, which is the intent.
+    """
+    if not version_str:
+        return DEFAULT_VERSION
+    parts = version_str.split(".")
+    try:
+        major = int(parts[0])
+    except ValueError:
+        return DEFAULT_VERSION
+    if major < 0:
+        return DEFAULT_VERSION
+    try:
+        minor = int(parts[1]) if len(parts) >= 2 else 0
+    except ValueError:
+        return DEFAULT_VERSION
+    return f"{major}.{minor + 1}.0"
+
+
+def resolve_version(frontmatter: Mapping[str, str]) -> str:
+    """Return frontmatter['version'] when present and non-empty, else default_version().
+
+    Applies on every path — generic, harness and degraded — replacing the
+    hard-fail on a missing 'version'. A file carrying neither 'version' nor
+    'transform_version' is therefore transformed, not rejected.
+    """
+    v = frontmatter.get("version", "")
+    return v if v else default_version()
+
+
+# ---------------------------------------------------------------------------
+# Main transform entry point
+# ---------------------------------------------------------------------------
 
 def transform_file(
     input_path: pathlib.Path,
@@ -82,11 +287,37 @@ def transform_file(
     if output_path is None:
         output_path = input_path
 
+    # Classify by filename before touching the file content.  Utility agents
+    # and non-MOSAIC-agent files are skipped entirely — no output is written.
+    _file_class = _fc.classify_file(input_path)
+    if _fc.is_skippable(_file_class):
+        msg = _fc.skip_message(input_path, _file_class)
+        print(msg, file=sys.stderr)
+        _skip_reason = (
+            SkipReason.UTILITY_AGENT
+            if _file_class is _fc.FileClass.UTILITY
+            else SkipReason.NON_AGENT
+        )
+        return TransformResult(
+            success=True,
+            errors=[],
+            sections_added=[],
+            injections_added=[],
+            deployed_added=[],
+            version_before="",
+            version_after="",
+            skipped=True,
+            skip_reason=_skip_reason,
+            warnings=[msg],
+        )
+
     content = input_path.read_text(encoding="utf-8")
     lines = content.splitlines(keepends=True)
 
-    # Parse frontmatter
-    frontmatter_result = _parse_frontmatter(lines)
+    # Parse frontmatter leniently (without version requirement) so we can
+    # detect transform_version and route the degraded path before deciding
+    # whether to enforce the version field.
+    frontmatter_result = _parse_frontmatter(lines, require_version=False)
     if not frontmatter_result["success"]:
         return TransformResult(
             success=False,
@@ -103,23 +334,143 @@ def transform_file(
 
     frontmatter = frontmatter_result["frontmatter"]
     frontmatter_end = frontmatter_result["end_line"]
-    version_before = frontmatter.get("version", "")
 
-    # Check if this is a harness file
+    # Check if this is a harness file (has transform_version in frontmatter).
     is_harness = "transform_version" in frontmatter
+
+    # --- Degraded path dispatch ---
+    # When a harness file arrives with no generic reference, we automatically
+    # fall back to a degraded-quality transform rather than hard-failing.
+    # Orchestrator files (detected by filename) are the sole exception.
     if is_harness and generic_ref_path is None:
-        return TransformResult(
-            success=False,
-            errors=[TransformError(
-                line_number=1,
-                message="Harness file detected (transform_version in frontmatter) but --generic-ref not provided"
-            )],
-            sections_added=[],
-            injections_added=[],
-            deployed_added=[],
-            version_before=version_before,
-            version_after=""
+        version_before_raw = frontmatter.get("version", "")
+
+        # 1. Orchestrator check: preserve the existing hard-error for orchestrators.
+        if is_orchestrator_file(input_path):
+            return TransformResult(
+                success=False,
+                errors=[TransformError(
+                    line_number=1,
+                    message=ERR_HARNESS_NO_GENERIC_REF,
+                )],
+                sections_added=[],
+                injections_added=[],
+                deployed_added=[],
+                version_before=version_before_raw,
+                version_after="",
+                degraded=False,
+                skipped=False,
+                warnings=[],
+            )
+
+        # 2. Idempotency guard: if the file already carries valid canonical
+        #    boundary tags, skip it rather than re-running the transform.
+        body_lines = lines[frontmatter_end:]
+        body_str = "".join(body_lines)
+        if has_canonical_boundary_tags(body_str):
+            warn = WARN_ALREADY_TRANSFORMED.format(path=input_path)
+            print(warn, file=sys.stderr)
+            return TransformResult(
+                success=True,
+                errors=[],
+                sections_added=[],
+                injections_added=[],
+                deployed_added=[],
+                version_before=version_before_raw,
+                version_after=version_before_raw,
+                degraded=False,
+                skipped=True,
+                skip_reason=SkipReason.ALREADY_TRANSFORMED,
+                warnings=[warn],
+            )
+
+        # 3. Degraded transform: apply the generic-body logic with non-strict
+        #    identity classification. When version is absent, default_version()
+        #    supplies a substitute so the transform can proceed.
+        version_before = resolve_version(frontmatter)
+        version_after = _bump_version(version_before)
+        transform_version_after = _bump_version(frontmatter["transform_version"])
+
+        transformed_body = _transform_generic_body(body_lines, strict_identity=False)
+        if not transformed_body["success"]:
+            return TransformResult(
+                success=False,
+                errors=transformed_body["errors"],
+                sections_added=[],
+                injections_added=[],
+                deployed_added=[],
+                version_before=version_before,
+                version_after=version_after,
+            )
+
+        # Apply conduct-region insertion on the degraded path, matching the
+        # behaviour of the non-degraded paths so that ClosingProcedure and
+        # AuthorityHierarchy are emitted and their superseded prose is deleted.
+        _body_for_regions = transformed_body["lines"]
+        _section_spans = find_section_spans(_body_for_regions)
+        _region_result = apply_conduct_regions(_body_for_regions, _section_spans)
+        transformed_body = dict(transformed_body)
+        transformed_body["lines"] = _region_result.lines
+        transformed_body["deployed_added"] = (
+            transformed_body.get("deployed_added", []) + _region_result.deployed_added
         )
+        _region_ncs = [
+            dataclasses.replace(nc, file=input_path)
+            for nc in _region_result.non_conformances
+        ]
+
+        # Emit the degraded-path warning to stderr (also carried in the result).
+        warn = WARN_NO_GENERIC_REF.format(path=input_path)
+        print(warn, file=sys.stderr)
+
+        # Build frontmatter using build_output_frontmatter so all Stage 6 rules
+        # apply on the degraded path too: derived fields, tier placeholders, and
+        # harness-only key handling.
+        _deg_kind = _classify_document(list(frontmatter.keys()), frontmatter)
+        _deg_derived = DerivedFrontmatter(
+            name=derive_name(input_path),
+            role=derive_role(input_path),
+            required_skills=derive_required_skills(body_lines),
+        )
+        _deg_fm_lines, _deg_fm_ncs = build_output_frontmatter(
+            frontmatter_result["raw_lines"],
+            kind=_deg_kind,
+            derived=_deg_derived,
+            version_after=version_after,
+            transform_version_after=transform_version_after,
+            generic_id=None,
+        )
+        _deg_fm_ncs = [dataclasses.replace(nc, file=input_path) for nc in _deg_fm_ncs]
+
+        _deg_final_sections = find_section_spans(transformed_body["lines"])
+        _deg_output_ncs = detect_output_non_conformances(
+            input_path, transformed_body["lines"], _deg_final_sections
+        )
+
+        output_lines = ["---\n"] + _deg_fm_lines + ["---\n"]
+        output_lines.extend(transformed_body["lines"])
+
+        output_path.write_text("".join(output_lines), encoding="utf-8")
+
+        return TransformResult(
+            success=True,
+            errors=[],
+            sections_added=transformed_body["sections_added"],
+            injections_added=transformed_body["injections_added"],
+            deployed_added=transformed_body.get("deployed_added", []),
+            version_before=version_before,
+            version_after=version_after,
+            degraded=True,
+            skipped=False,
+            warnings=[warn],
+            non_conformances=_region_ncs + _deg_fm_ncs + _deg_output_ncs,
+        )
+
+    # --- Non-degraded paths ---
+    # Use resolve_version to supply a default when 'version' is absent, rather
+    # than hard-failing. A file missing 'version' is transformed with the
+    # default version as version_before.
+    version_before = resolve_version(frontmatter)
 
     # Compute bumped version values. These are applied to the verbatim
     # frontmatter block below; no other field is touched.
@@ -166,26 +517,53 @@ def transform_file(
             version_after=version_after
         )
 
-    # Write output. The frontmatter is emitted verbatim -- every field is
-    # preserved in its original order and formatting (including multi-line
-    # `permission:` maps and `mcpServers:` lists) -- with only the version and
-    # transform_version VALUES rewritten in place.
-    output_lines = []
-    output_lines.append("---\n")
-    for raw in frontmatter_result["raw_lines"]:
-        eol = "\n" if raw.endswith("\n") else ""
-        if raw[:1] not in (" ", "\t") and raw.strip():
-            match = _FRONTMATTER_KEY_RE.match(raw.strip())
-            if match:
-                key = match.group(1)
-                if key == "version":
-                    output_lines.append(f"version: {version_after}{eol}")
-                    continue
-                if key == "transform_version" and transform_version_after is not None:
-                    output_lines.append(f"transform_version: {transform_version_after}{eol}")
-                    continue
-        output_lines.append(raw)
-    output_lines.append("---\n")
+    # Apply conduct-region insertion on both generic and harness paths.
+    # find_section_spans locates sections in the already-tagged output body so that
+    # apply_conduct_regions can anchor against headings and existing boundary tags.
+    _body_for_regions = transformed_body["lines"]
+    _section_spans = find_section_spans(_body_for_regions)
+    _region_result = apply_conduct_regions(_body_for_regions, _section_spans)
+    transformed_body = dict(transformed_body)
+    transformed_body["lines"] = _region_result.lines
+    transformed_body["deployed_added"] = (
+        transformed_body.get("deployed_added", []) + _region_result.deployed_added
+    )
+    _region_ncs = [
+        dataclasses.replace(nc, file=input_path)
+        for nc in _region_result.non_conformances
+    ]
+
+    # Determine the generic id for id reconciliation (harness path only).
+    _generic_id: str | None = None
+    if is_harness:
+        _generic_id = read_generic_id(generic_lines)
+
+    # Build output frontmatter using build_output_frontmatter so all Stage 6
+    # rules apply: derived fields, tier placeholders, harness-only key stripping,
+    # id reconciliation.  Keys not touched by any rule are preserved verbatim in
+    # their original order and formatting (including multi-line maps and lists).
+    _kind = _classify_document(list(frontmatter.keys()), frontmatter)
+    _derived = DerivedFrontmatter(
+        name=derive_name(input_path),
+        role=derive_role(input_path),
+        required_skills=derive_required_skills(body_lines),
+    )
+    _fm_lines, _fm_ncs = build_output_frontmatter(
+        frontmatter_result["raw_lines"],
+        kind=_kind,
+        derived=_derived,
+        version_after=version_after,
+        transform_version_after=transform_version_after,
+        generic_id=_generic_id,
+    )
+    _fm_ncs = [dataclasses.replace(nc, file=input_path) for nc in _fm_ncs]
+
+    _final_sections = find_section_spans(transformed_body["lines"])
+    _output_ncs = detect_output_non_conformances(
+        input_path, transformed_body["lines"], _final_sections
+    )
+
+    output_lines = ["---\n"] + _fm_lines + ["---\n"]
     output_lines.extend(transformed_body["lines"])
 
     output_path.write_text("".join(output_lines), encoding="utf-8")
@@ -197,11 +575,12 @@ def transform_file(
         injections_added=transformed_body["injections_added"],
         deployed_added=transformed_body.get("deployed_added", []),
         version_before=version_before,
-        version_after=version_after
+        version_after=version_after,
+        non_conformances=_region_ncs + _fm_ncs + _output_ncs,
     )
 
 
-def _parse_frontmatter(lines: list[str]) -> dict:
+def _parse_frontmatter(lines: list[str], require_version: bool = True) -> dict:
     """Parse YAML frontmatter from lines.
 
     The frontmatter block is preserved verbatim (returned as ``raw_lines``); the
@@ -211,6 +590,12 @@ def _parse_frontmatter(lines: list[str]) -> dict:
     whether the file is a harness variant. Indented lines belong to a multi-line
     value (e.g. a ``permission:`` map or an ``mcpServers:`` list) and are left
     untouched.
+
+    Args:
+        lines: file lines including frontmatter.
+        require_version: when True (the default), returns failure if the
+            frontmatter carries no ``version`` field. Pass False on the
+            degraded path so a missing version can be supplied by default_version().
 
     Returns dict with:
         success: bool
@@ -264,7 +649,7 @@ def _parse_frontmatter(lines: list[str]) -> dict:
         value = stripped[match.end():].strip()
         frontmatter[key] = value
 
-    if "version" not in frontmatter:
+    if require_version and "version" not in frontmatter:
         return {
             "success": False,
             "error": "Missing 'version' field in frontmatter",
@@ -280,15 +665,11 @@ def _parse_frontmatter(lines: list[str]) -> dict:
 
 
 def _bump_version(version_str: str) -> str:
-    """Bump major version, reset minor and patch to 0."""
-    parts = version_str.split(".")
-    if len(parts) >= 1:
-        major = int(parts[0])
-        return f"{major + 1}.0.0"
-    return "1.0.0"
+    """Thin alias for bump_version. Retained for internal call-site compatibility."""
+    return bump_version(version_str)
 
 
-def _transform_generic_body(lines: list[str]) -> dict:
+def _transform_generic_body(lines: list[str], strict_identity: bool = True) -> dict:
     """Transform a generic file's body by adding section and injection boundaries.
 
     ArtifactProvenance is retired (Stage 5). Any input shape that carries it is
@@ -334,7 +715,9 @@ def _transform_generic_body(lines: list[str]) -> dict:
 
     # Identify all sections first. Generic files use the strict Identity rule so
     # any non-canonical H2 immediately after Identity is flagged (FR-13).
-    sections_result = _identify_sections(lines, strict_identity=True)
+    # The degraded path passes strict_identity=False to absorb non-canonical
+    # H2 headings inside Identity rather than flagging them as unclassifiable.
+    sections_result = _identify_sections(lines, strict_identity=strict_identity)
     sections = sections_result["sections"]
     provenance_region = sections_result.get("provenance_region")
     comm_region = sections_result.get("communication_protocol_region")
@@ -450,6 +833,24 @@ def _transform_generic_body(lines: list[str]) -> dict:
                 if injection_match:
                     injection_name = injection_match["name"]
                     marker_kind = injection_match["kind"]
+
+                    # Deliberate, name-scoped rule: the legacy custom_constraints
+                    # marker is preserved as [[INJECTION:CustomConstraints]] only
+                    # when content immediately follows it; an empty marker is
+                    # dropped entirely (no open or close tag emitted). Every other
+                    # old marker keeps the unconditional empty-pair behaviour below.
+                    if injection_name == "CustomConstraints":
+                        content_lines, next_j = _collect_custom_constraints_content(
+                            lines, j + 1, section_end
+                        )
+                        if content_lines:
+                            result_lines.append(f"{open_tag(marker_kind, injection_name)}\n")
+                            result_lines.extend(content_lines)
+                            result_lines.append(f"{close_tag(marker_kind, injection_name)}\n")
+                            injections_added.append(injection_name)
+                        j = next_j
+                        continue
+
                     injections_added.append(injection_name)
 
                     # Both standalone ("[INJECTION: name]") and list-item
@@ -793,6 +1194,30 @@ def _match_region_marker(line: str) -> Optional[dict]:
 
 # Keep the old name as an alias for backward compatibility with any external callers.
 _match_injection_marker = _match_region_marker
+
+
+def _collect_custom_constraints_content(
+    lines: list[str], start: int, section_end: int
+) -> tuple[list[str], int]:
+    """Collect the fill content immediately following a legacy custom_constraints
+    marker, stopping at the first blank line, the next marker, or section_end.
+
+    Returns (content_lines, next_index): content_lines is empty when the marker
+    is immediately followed by a blank line (or nothing at all) -- the "empty
+    region" case that the caller drops entirely. next_index is the index to
+    resume the outer scan from, one past whatever was consumed here.
+    """
+    content_lines: list[str] = []
+    k = start
+    while k < section_end:
+        line = lines[k]
+        if not line.strip():
+            break
+        if _match_region_marker(line):
+            break
+        content_lines.append(line)
+        k += 1
+    return content_lines, k
 
 
 def _strip_artifact_provenance_deployed_tags(lines: list[str]) -> dict:
@@ -1244,6 +1669,20 @@ def _merge_section(harness_section: list[str], generic_section: list[str]) -> tu
     injections: list[str] = []
     gi = 0
     hi = 0
+    # Set when a CustomConstraints drop leaves `out` ending on a blank line:
+    # the next blank line this loop would otherwise emit is skipped once, so
+    # dropping the region never leaves two blank lines where the marker's
+    # own surrounding blanks and the section's trailing blank now abut.
+    collapse_next_blank = False
+
+    def _append_line(line: str) -> None:
+        nonlocal collapse_next_blank
+        if collapse_next_blank and not line.strip():
+            collapse_next_blank = False
+            return
+        if line.strip():
+            collapse_next_blank = False
+        out.append(line)
 
     while gi < len(generic_section) or hi < len(harness_section):
         gtok = generic_section[gi] if gi < len(generic_section) else None
@@ -1256,15 +1695,23 @@ def _merge_section(harness_section: list[str], generic_section: list[str]) -> tu
             harness_marker = _match_region_marker(hline) if hline is not None else None
 
             if harness_marker is not None and harness_marker["name"] == name:
-                # Marker still present in the harness -> empty boundary.
-                out.append(open_tag(marker_kind, name) + "\n")
-                out.append(close_tag(marker_kind, name) + "\n")
-                injections.append(name)
+                # Marker still present in the harness -> empty boundary, except
+                # the deliberate CustomConstraints rule: an empty legacy marker
+                # is dropped entirely rather than emitted as an empty injection.
+                if name != "CustomConstraints":
+                    out.append(open_tag(marker_kind, name) + "\n")
+                    out.append(close_tag(marker_kind, name) + "\n")
+                    injections.append(name)
+                elif out and not out[-1].strip():
+                    collapse_next_blank = True
                 gi += 1
                 hi += 1
                 continue
 
-            # Marker removed in the harness: collect this region's fill content.
+            # Marker removed in the harness: collect this region's fill content,
+            # advancing `hi` exactly as far as it would have gone before (so any
+            # literal marker text further down the harness is still matched at
+            # the right position on a later iteration).
             anchor = _next_generic_anchor(generic_section, gi + 1)
             content: list[str] = []
             took_header = False
@@ -1284,13 +1731,41 @@ def _merge_section(harness_section: list[str], generic_section: list[str]) -> tu
                 content.append(hl)
                 hi += 1
 
-            _emit_injection(name, content, out, kind=marker_kind)
-            injections.append(name)
+            if marker_kind == BoundaryKind.DEPLOYED:
+                # A DEPLOYED region's body is always empty (AD-8): the deployment
+                # tool fills it later, so collected harness text is never this
+                # region's fill, unlike an INJECTION marker. A leading '### sub-
+                # heading' (and the blank line after it) stays outside and before
+                # the tag, matching _emit_injection's convention; the remaining
+                # collected text -- what would have been the fill body -- is
+                # placed after the close tag, verbatim, as ordinary section
+                # content rather than as the region's body.
+                lead_end = 0
+                if content and _is_h3_heading(content[0]):
+                    lead_end = 1
+                    while lead_end < len(content) and not content[lead_end].strip():
+                        lead_end += 1
+                out.extend(content[:lead_end])
+                out.append(open_tag(marker_kind, name) + "\n")
+                out.append(close_tag(marker_kind, name) + "\n")
+                out.extend(content[lead_end:])
+                injections.append(name)
+            elif name == "CustomConstraints" and not any(c.strip() for c in content):
+                # Deliberate CustomConstraints rule: no fill content was collected
+                # (harness omitted the marker and supplied nothing in its place),
+                # so the region is dropped entirely rather than emitted empty.
+                for c in content:
+                    _append_line(c)
+                if out and not out[-1].strip():
+                    collapse_next_blank = True
+            else:
+                _emit_injection(name, content, out, kind=marker_kind)
+                injections.append(name)
             gi += 1
             continue
 
         if gtok is not None and hline is not None and gtok == hline:
-            out.append(hline)
+            _append_line(hline)
             gi += 1
             hi += 1
             continue
@@ -1305,15 +1780,22 @@ def _merge_section(harness_section: list[str], generic_section: list[str]) -> tu
                     if generic_section[k].strip():
                         prev_nonblank = generic_section[k]
                         break
-                if (prev_nonblank is not None
-                        and _match_injection_marker(prev_nonblank)
+                prev_marker = (
+                    _match_injection_marker(prev_nonblank)
+                    if prev_nonblank is not None else None
+                )
+                # CustomConstraints is always dropped when its collected fill is
+                # empty (never emitted as a region), so there is no injection to
+                # separate from what follows -- the trailing blank is not preserved.
+                if (prev_marker is not None
+                        and prev_marker["name"] != "CustomConstraints"
                         and (not out or out[-1].strip())):
-                    out.append(gtok)
+                    _append_line(gtok)
             gi += 1
             continue
 
         # Harness-only line (extra blank or content not present in generic).
-        out.append(hline)
+        _append_line(hline)
         hi += 1
 
     return out, injections

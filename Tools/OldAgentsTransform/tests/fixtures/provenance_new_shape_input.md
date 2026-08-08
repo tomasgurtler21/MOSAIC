@@ -32,8 +32,8 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 - Do things efficiently
 - Do more things correctly
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
+[[INJECTION:LanguagePatterns]]
+[[/INJECTION:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -50,8 +50,6 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

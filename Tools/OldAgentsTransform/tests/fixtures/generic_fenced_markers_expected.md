@@ -1,10 +1,13 @@
 ---
 id: 10
-version: 3.0.0
+version: 2.3.0
 name: fenced-markers-agent
 description: Agent with a fenced code block containing injection-marker-like text, to test that fenced lines are never converted to boundary tags
-model: {model-identifier}
 tools: [file_read, file_write]
+role: subagent
+required_skills: []
+recommended_tier: TODO
+tier_rationale: "TODO: state why this tier"
 ---
 
 [[SECTION:Identity]]
@@ -14,6 +17,10 @@ You are the **FencedMarkersAgent** agent.
 
 [[INJECTION:IdentityExtension]]
 [[/INJECTION:IdentityExtension]]
+[[DEPLOYED:ClosingProcedure]]
+[[/DEPLOYED:ClosingProcedure]]
+[[DEPLOYED:AuthorityHierarchy]]
+[[/DEPLOYED:AuthorityHierarchy]]
 
 [[/SECTION:Identity]]
 ---
@@ -30,27 +37,29 @@ The following lines appear verbatim inside a fenced code block and must not be c
 [[INJECTION:IdentityExtension]]
 ```
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
+[[INJECTION:LanguagePatterns]]
+[[/INJECTION:LanguagePatterns]]
 
 [[/SECTION:Capabilities]]
 ---
 
 [[SECTION:Constraints]]
 ## Constraints
+[[DEPLOYED:ProtocolConstraints]]
+[[/DEPLOYED:ProtocolConstraints]]
 
 - Stay within scope
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---
 
 [[SECTION:ErrorHandling]]
 ## Error Handling
+[[DEPLOYED:ErrorHandlingCommon]]
+[[/DEPLOYED:ErrorHandlingCommon]]
 
 - Retry errors once before escalating
 
@@ -72,6 +81,8 @@ Return a JSON status block.
 ## Execution Philosophy
 
 - Context Management: Dedicate full context window.
+[[DEPLOYED:ExecutionPhilosophyCommon]]
+[[/DEPLOYED:ExecutionPhilosophyCommon]]
 [[INJECTION:ContextLimits]]
 [[/INJECTION:ContextLimits]]
 [[/SECTION:ExecutionPhilosophy]]

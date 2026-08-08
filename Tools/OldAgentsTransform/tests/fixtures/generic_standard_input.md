@@ -3,8 +3,11 @@ id: 1
 version: 2.2.0
 name: test-agent
 description: A generic agent with all common injections for testing the boundary transformer
-model: {model-identifier}
 tools: [file_read, file_write]
+role: subagent
+required_skills: []
+recommended_tier: MEDIUM
+tier_rationale: A general-purpose test fixture agent
 ---
 
 # TestAgent Agent

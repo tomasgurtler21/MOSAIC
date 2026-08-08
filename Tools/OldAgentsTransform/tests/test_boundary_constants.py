@@ -1,17 +1,19 @@
 """Tests for the boundary vocabulary defined in boundary_constants.
 
 Verifies the canonical section list, the canonical document order, the
-tool-managed deployed set, and the parent mappings — as defined after
-Stage 2 (Boundary Vocabulary Sync):
+tool-managed deployed set, and the parent mappings — as defined after the
+vocabulary correction that drops `LanguagePatterns` and `CustomConstraints`
+from the tool-managed set:
 
   - CANONICAL_SECTIONS: 6 section names (unchanged)
   - CANONICAL_ORDER: 7 document slots (ArtifactProvenance removed)
-  - CANONICAL_DEPLOYED: 11 tool-managed names (ArtifactProvenance removed,
-    5 bundle names added: AuthorityHierarchy, ClosingProcedure,
-    ProtocolConstraints, ErrorHandlingCommon, ExecutionPhilosophyCommon)
-  - DEPLOYED_PARENT_MAP: 11 entries
-  - INJECTION_PARENT_MAP: 8 advisory entries (ArtifactProvenanceExtension
-    removed, ProtocolExtension added)
+  - CANONICAL_DEPLOYED: 9 tool-managed names (ArtifactProvenance removed
+    earlier; LanguagePatterns and CustomConstraints removed by this change)
+  - DEPLOYED_PARENT_MAP: 9 entries
+  - INJECTION_PARENT_MAP: 9 advisory entries (ArtifactProvenanceExtension
+    removed, ProtocolExtension added earlier; LanguagePatterns added by
+    this change with parent Capabilities. CustomConstraints is NOT
+    re-catalogued here — it is deleted outright.)
   - EXPECTED_MARKER: built from CANONICAL_DEPLOYED only (no injection allowlist)
   - CANONICAL_INJECTIONS: absent — removed in Stage 2
 """
@@ -23,6 +25,8 @@ import sys
 _TOOLS_DIR = pathlib.Path(__file__).parent.parent
 sys.path.insert(0, str(_TOOLS_DIR))
 
+import boundary_constants  # noqa: E402  (used for deferred symbol access in new tests)
+
 from boundary_constants import (  # noqa: E402
     CANONICAL_SECTIONS,
     CANONICAL_ORDER,
@@ -32,6 +36,7 @@ from boundary_constants import (  # noqa: E402
     EXPECTED_MARKER,
     KNOWN_FRONTMATTER_KEYS,
     SECTION_HEADING_MAP,
+    TAG_PATTERN,
     BoundaryKind,
 )
 
@@ -128,17 +133,22 @@ class TestCanonicalOrder:
 
 
 # ---------------------------------------------------------------------------
-# CANONICAL_DEPLOYED: 11 tool-managed names after Stage 2
+# CANONICAL_DEPLOYED: 9 tool-managed names after the vocabulary correction
 # ---------------------------------------------------------------------------
 
 
 class TestCanonicalDeployed:
-    """CANONICAL_DEPLOYED: 11 tool-managed boundary names after Stage 2."""
+    """CANONICAL_DEPLOYED: 9 tool-managed boundary names.
 
-    def test_canonical_deployed_contains_eleven_entries(self) -> None:
-        assert len(CANONICAL_DEPLOYED) == 11, (
-            f"Expected 11 canonical tool-managed boundary names after Stage 2 "
-            f"(ArtifactProvenance removed, 5 bundle names added), "
+    LanguagePatterns and CustomConstraints are removed by this change:
+    LanguagePatterns moves to the advisory injection catalogue, CustomConstraints
+    is deleted outright with no replacement.
+    """
+
+    def test_canonical_deployed_contains_nine_entries(self) -> None:
+        assert len(CANONICAL_DEPLOYED) == 9, (
+            f"Expected 9 canonical tool-managed boundary names "
+            f"(LanguagePatterns and CustomConstraints removed), "
             f"got {len(CANONICAL_DEPLOYED)}: {CANONICAL_DEPLOYED}"
         )
 
@@ -147,33 +157,35 @@ class TestCanonicalDeployed:
             "ArtifactProvenance must NOT be in CANONICAL_DEPLOYED — removed in Stage 2"
         )
 
+    def test_language_patterns_absent_from_canonical_deployed(self) -> None:
+        assert "LanguagePatterns" not in CANONICAL_DEPLOYED, (
+            "LanguagePatterns must NOT be in CANONICAL_DEPLOYED — it moves to the "
+            "advisory injection catalogue in this change"
+        )
+
+    def test_custom_constraints_absent_from_canonical_deployed(self) -> None:
+        assert "CustomConstraints" not in CANONICAL_DEPLOYED, (
+            "CustomConstraints must NOT be in CANONICAL_DEPLOYED — deleted outright "
+            "with no replacement in this change"
+        )
+
     def test_communication_protocol_is_in_canonical_deployed(self) -> None:
         assert "CommunicationProtocol" in CANONICAL_DEPLOYED
 
     def test_authority_hierarchy_is_in_canonical_deployed(self) -> None:
-        assert "AuthorityHierarchy" in CANONICAL_DEPLOYED, (
-            "AuthorityHierarchy must be in CANONICAL_DEPLOYED — new bundle name in Stage 2"
-        )
+        assert "AuthorityHierarchy" in CANONICAL_DEPLOYED
 
     def test_closing_procedure_is_in_canonical_deployed(self) -> None:
-        assert "ClosingProcedure" in CANONICAL_DEPLOYED, (
-            "ClosingProcedure must be in CANONICAL_DEPLOYED — new bundle name in Stage 2"
-        )
+        assert "ClosingProcedure" in CANONICAL_DEPLOYED
 
     def test_protocol_constraints_is_in_canonical_deployed(self) -> None:
-        assert "ProtocolConstraints" in CANONICAL_DEPLOYED, (
-            "ProtocolConstraints must be in CANONICAL_DEPLOYED — new bundle name in Stage 2"
-        )
+        assert "ProtocolConstraints" in CANONICAL_DEPLOYED
 
     def test_error_handling_common_is_in_canonical_deployed(self) -> None:
-        assert "ErrorHandlingCommon" in CANONICAL_DEPLOYED, (
-            "ErrorHandlingCommon must be in CANONICAL_DEPLOYED — new bundle name in Stage 2"
-        )
+        assert "ErrorHandlingCommon" in CANONICAL_DEPLOYED
 
     def test_execution_philosophy_common_is_in_canonical_deployed(self) -> None:
-        assert "ExecutionPhilosophyCommon" in CANONICAL_DEPLOYED, (
-            "ExecutionPhilosophyCommon must be in CANONICAL_DEPLOYED — new bundle name in Stage 2"
-        )
+        assert "ExecutionPhilosophyCommon" in CANONICAL_DEPLOYED
 
     def test_available_workflows_is_in_canonical_deployed(self) -> None:
         assert "AvailableWorkflows" in CANONICAL_DEPLOYED
@@ -181,27 +193,20 @@ class TestCanonicalDeployed:
     def test_infrastructure_agents_is_in_canonical_deployed(self) -> None:
         assert "InfrastructureAgents" in CANONICAL_DEPLOYED
 
-    def test_language_patterns_is_in_canonical_deployed(self) -> None:
-        assert "LanguagePatterns" in CANONICAL_DEPLOYED
-
     def test_harness_constraints_is_in_canonical_deployed(self) -> None:
         assert "HarnessConstraints" in CANONICAL_DEPLOYED
 
-    def test_custom_constraints_is_in_canonical_deployed(self) -> None:
-        assert "CustomConstraints" in CANONICAL_DEPLOYED
-
     def test_canonical_deployed_full_sequence(self) -> None:
-        """CANONICAL_DEPLOYED must equal the exact 11-name ordered tuple."""
+        """CANONICAL_DEPLOYED must equal the exact 9-name ordered tuple, matching
+        the Go copy name-for-name and index-for-index (AC2.1)."""
         expected: tuple[str, ...] = (
             "CommunicationProtocol",
             "AuthorityHierarchy",
             "ClosingProcedure",
             "AvailableWorkflows",
             "InfrastructureAgents",
-            "LanguagePatterns",
             "ProtocolConstraints",
             "HarnessConstraints",
-            "CustomConstraints",
             "ErrorHandlingCommon",
             "ExecutionPhilosophyCommon",
         )
@@ -217,21 +222,31 @@ class TestCanonicalDeployed:
 
 
 # ---------------------------------------------------------------------------
-# DEPLOYED_PARENT_MAP: 11 entries
+# DEPLOYED_PARENT_MAP: 9 entries
 # ---------------------------------------------------------------------------
 
 
 class TestDeployedParentMap:
-    """DEPLOYED_PARENT_MAP: 11 entries mapping each tool-managed name to its required parent."""
+    """DEPLOYED_PARENT_MAP: 9 entries mapping each tool-managed name to its required parent."""
 
-    def test_deployed_parent_map_contains_eleven_entries(self) -> None:
-        assert len(DEPLOYED_PARENT_MAP) == 11, (
-            f"Expected 11 entries in DEPLOYED_PARENT_MAP, got {len(DEPLOYED_PARENT_MAP)}"
+    def test_deployed_parent_map_contains_nine_entries(self) -> None:
+        assert len(DEPLOYED_PARENT_MAP) == 9, (
+            f"Expected 9 entries in DEPLOYED_PARENT_MAP, got {len(DEPLOYED_PARENT_MAP)}"
         )
 
     def test_artifact_provenance_absent_from_deployed_parent_map(self) -> None:
         assert "ArtifactProvenance" not in DEPLOYED_PARENT_MAP, (
             "ArtifactProvenance must NOT be in DEPLOYED_PARENT_MAP — removed in Stage 2"
+        )
+
+    def test_language_patterns_absent_from_deployed_parent_map(self) -> None:
+        assert "LanguagePatterns" not in DEPLOYED_PARENT_MAP, (
+            "LanguagePatterns must NOT be in DEPLOYED_PARENT_MAP — no longer tool-managed"
+        )
+
+    def test_custom_constraints_absent_from_deployed_parent_map(self) -> None:
+        assert "CustomConstraints" not in DEPLOYED_PARENT_MAP, (
+            "CustomConstraints must NOT be in DEPLOYED_PARENT_MAP — deleted outright"
         )
 
     def test_communication_protocol_has_none_parent(self) -> None:
@@ -251,17 +266,11 @@ class TestDeployedParentMap:
     def test_infrastructure_agents_parent_is_identity(self) -> None:
         assert DEPLOYED_PARENT_MAP.get("InfrastructureAgents") == "Identity"
 
-    def test_language_patterns_parent_is_capabilities(self) -> None:
-        assert DEPLOYED_PARENT_MAP.get("LanguagePatterns") == "Capabilities"
-
     def test_protocol_constraints_parent_is_constraints(self) -> None:
         assert DEPLOYED_PARENT_MAP.get("ProtocolConstraints") == "Constraints"
 
     def test_harness_constraints_parent_is_constraints(self) -> None:
         assert DEPLOYED_PARENT_MAP.get("HarnessConstraints") == "Constraints"
-
-    def test_custom_constraints_parent_is_constraints(self) -> None:
-        assert DEPLOYED_PARENT_MAP.get("CustomConstraints") == "Constraints"
 
     def test_error_handling_common_parent_is_error_handling(self) -> None:
         assert DEPLOYED_PARENT_MAP.get("ErrorHandlingCommon") == "ErrorHandling"
@@ -270,17 +279,15 @@ class TestDeployedParentMap:
         assert DEPLOYED_PARENT_MAP.get("ExecutionPhilosophyCommon") == "ExecutionPhilosophy"
 
     def test_deployed_parent_map_full_exact_values(self) -> None:
-        """DEPLOYED_PARENT_MAP must have exactly these 11 entries. None = top level."""
+        """DEPLOYED_PARENT_MAP must have exactly these 9 entries. None = top level."""
         expected: dict[str, str | None] = {
             "CommunicationProtocol":     None,
             "AuthorityHierarchy":        "Identity",
             "ClosingProcedure":          "Identity",
             "AvailableWorkflows":        "Identity",
             "InfrastructureAgents":      "Identity",
-            "LanguagePatterns":          "Capabilities",
             "ProtocolConstraints":       "Constraints",
             "HarnessConstraints":        "Constraints",
-            "CustomConstraints":         "Constraints",
             "ErrorHandlingCommon":       "ErrorHandling",
             "ExecutionPhilosophyCommon": "ExecutionPhilosophy",
         }
@@ -290,16 +297,19 @@ class TestDeployedParentMap:
 
 
 # ---------------------------------------------------------------------------
-# INJECTION_PARENT_MAP: 8 advisory entries in Stage 2
+# INJECTION_PARENT_MAP: 9 advisory entries after the vocabulary correction
 # ---------------------------------------------------------------------------
 
 
 class TestInjectionParentMap:
-    """INJECTION_PARENT_MAP: 8 advisory entries after Stage 2 changes."""
+    """INJECTION_PARENT_MAP: 9 advisory entries. LanguagePatterns is added with
+    parent Capabilities; CustomConstraints is NOT re-catalogued here — it is
+    deleted outright, not moved to the injection side."""
 
-    def test_injection_parent_map_contains_eight_entries(self) -> None:
-        assert len(INJECTION_PARENT_MAP) == 8, (
-            f"Expected 8 advisory entries in INJECTION_PARENT_MAP, "
+    def test_injection_parent_map_contains_nine_entries(self) -> None:
+        assert len(INJECTION_PARENT_MAP) == 9, (
+            f"Expected 9 advisory entries in INJECTION_PARENT_MAP "
+            f"(LanguagePatterns added), "
             f"got {len(INJECTION_PARENT_MAP)}: {list(INJECTION_PARENT_MAP)}"
         )
 
@@ -307,6 +317,22 @@ class TestInjectionParentMap:
         assert "ArtifactProvenanceExtension" not in INJECTION_PARENT_MAP, (
             "ArtifactProvenanceExtension must NOT be in INJECTION_PARENT_MAP — "
             "removed in Stage 2 along with ArtifactProvenance"
+        )
+
+    def test_custom_constraints_absent_from_injection_parent_map(self) -> None:
+        assert "CustomConstraints" not in INJECTION_PARENT_MAP, (
+            "CustomConstraints must NOT be in INJECTION_PARENT_MAP — it is deleted "
+            "outright, not re-catalogued as an advisory injection name"
+        )
+
+    def test_language_patterns_present_in_injection_parent_map(self) -> None:
+        assert "LanguagePatterns" in INJECTION_PARENT_MAP, (
+            "LanguagePatterns must be in INJECTION_PARENT_MAP — added by this change"
+        )
+
+    def test_language_patterns_maps_to_capabilities(self) -> None:
+        assert INJECTION_PARENT_MAP.get("LanguagePatterns") == "Capabilities", (
+            "INJECTION_PARENT_MAP['LanguagePatterns'] must be 'Capabilities'"
         )
 
     def test_protocol_extension_present_in_injection_parent_map(self) -> None:
@@ -341,11 +367,12 @@ class TestInjectionParentMap:
         assert INJECTION_PARENT_MAP.get("ContextLimits") == "ExecutionPhilosophy"
 
     def test_injection_parent_map_full_exact_values(self) -> None:
-        """INJECTION_PARENT_MAP must have exactly these 8 advisory entries."""
+        """INJECTION_PARENT_MAP must have exactly these 9 advisory entries."""
         expected: dict[str, str | None] = {
             "ProtocolExtension":      None,
             "IdentityExtension":      "Identity",
             "CodebaseContext":        "Capabilities",
+            "LanguagePatterns":       "Capabilities",
             "OutputArtifactTemplate": "Capabilities",
             "SeverityThresholds":     "Capabilities",
             "SeverityDefinitions":    "Capabilities",
@@ -399,11 +426,25 @@ class TestExpectedMarker:
             "ArtifactProvenanceExtension must NOT be in EXPECTED_MARKER — removed in Stage 2"
         )
 
+    def test_language_patterns_absent_from_expected_marker(self) -> None:
+        assert EXPECTED_MARKER.get("LanguagePatterns") is None, (
+            "EXPECTED_MARKER.get('LanguagePatterns') must miss (None) now that "
+            "LanguagePatterns has left CANONICAL_DEPLOYED — this is the exact "
+            "mechanism that makes old-marker resolution fall to BoundaryKind.INJECTION"
+        )
+
+    def test_custom_constraints_absent_from_expected_marker(self) -> None:
+        assert EXPECTED_MARKER.get("CustomConstraints") is None, (
+            "EXPECTED_MARKER.get('CustomConstraints') must miss (None) now that "
+            "CustomConstraints has left CANONICAL_DEPLOYED"
+        )
+
     def test_injection_names_absent_from_expected_marker(self) -> None:
-        # Injection names are open in Stage 2 and are not in EXPECTED_MARKER.
+        # Injection names are open and are not in EXPECTED_MARKER.
         advisory_names = [
             "IdentityExtension",
             "CodebaseContext",
+            "LanguagePatterns",
             "OutputArtifactTemplate",
             "SeverityThresholds",
             "SeverityDefinitions",
@@ -414,7 +455,7 @@ class TestExpectedMarker:
         for name in advisory_names:
             assert name not in EXPECTED_MARKER, (
                 f"Advisory injection name {name!r} must NOT be in EXPECTED_MARKER — "
-                f"injection names are open in Stage 2 and are not registered"
+                f"injection names are open and are not registered"
             )
 
     def test_new_bundle_names_map_to_deployed_in_expected_marker(self) -> None:
@@ -518,3 +559,374 @@ class TestKnownFrontmatterKeys_ContainsRoleAndBundleVersion:
             "An arbitrary invented key must not appear in KNOWN_FRONTMATTER_KEYS; "
             "the set must remain bounded so E009 can still fire for genuine unknowns."
         )
+
+
+# ---------------------------------------------------------------------------
+# TAG_PATTERN — compound-name acceptance (Stage 1)
+# ---------------------------------------------------------------------------
+
+
+class TestTagPatternCompoundNameAcceptance:
+    """TAG_PATTERN must match compound tag names of the form Prefix:id and Prefix:hyphen-id.
+
+    The current name class [A-Za-z]+ excludes colons and hyphens, so compound
+    names do not match.  After the Stage 1 fix the name class admits them, and
+    the group layout (close, kind, name) is preserved — name yields the full
+    compound string.
+    """
+
+    # --- Regression: simple names must still match -----------------------
+
+    def test_simple_section_open_tag_still_matches(self) -> None:
+        assert TAG_PATTERN.match("[[SECTION:Identity]]") is not None, (
+            "Simple SECTION open tag must still match TAG_PATTERN after the name-class relaxation"
+        )
+
+    def test_simple_deployed_open_tag_still_matches(self) -> None:
+        assert TAG_PATTERN.match("[[DEPLOYED:CommunicationProtocol]]") is not None, (
+            "Simple DEPLOYED open tag must still match TAG_PATTERN"
+        )
+
+    def test_simple_injection_open_tag_still_matches(self) -> None:
+        assert TAG_PATTERN.match("[[INJECTION:IdentityExtension]]") is not None, (
+            "Simple INJECTION open tag must still match TAG_PATTERN"
+        )
+
+    def test_simple_section_close_tag_still_matches(self) -> None:
+        assert TAG_PATTERN.match("[[/SECTION:Identity]]") is not None, (
+            "Simple SECTION close tag must still match TAG_PATTERN"
+        )
+
+    # --- Compound-name acceptance (currently RED) ------------------------
+
+    def test_compound_section_name_with_colon_matches(self) -> None:
+        m = TAG_PATTERN.match("[[SECTION:AuthorityHierarchy:Subagent]]")
+        assert m is not None, (
+            "TAG_PATTERN must match a compound SECTION name like "
+            "'[[SECTION:AuthorityHierarchy:Subagent]]'"
+        )
+
+    def test_compound_deployed_name_with_colon_matches(self) -> None:
+        m = TAG_PATTERN.match("[[DEPLOYED:ClosingProcedure:Subagent]]")
+        assert m is not None, (
+            "TAG_PATTERN must match a compound DEPLOYED name like "
+            "'[[DEPLOYED:ClosingProcedure:Subagent]]'"
+        )
+
+    def test_compound_injection_name_with_colon_matches(self) -> None:
+        m = TAG_PATTERN.match("[[INJECTION:Workflow:quick-fix]]")
+        assert m is not None, (
+            "TAG_PATTERN must match a compound INJECTION name like "
+            "'[[INJECTION:Workflow:quick-fix]]'"
+        )
+
+    def test_compound_close_tag_with_colon_matches(self) -> None:
+        m = TAG_PATTERN.match("[[/SECTION:AuthorityHierarchy:Subagent]]")
+        assert m is not None, (
+            "TAG_PATTERN must match a compound close SECTION tag"
+        )
+
+    def test_hyphenated_segment_in_compound_name_matches(self) -> None:
+        m = TAG_PATTERN.match("[[SECTION:Workflow:quick-fix]]")
+        assert m is not None, (
+            "TAG_PATTERN must match a compound name whose qualifier contains a hyphen"
+        )
+
+    def test_compound_name_yields_full_compound_string_in_name_group(self) -> None:
+        m = TAG_PATTERN.match("[[SECTION:AuthorityHierarchy:Subagent]]")
+        assert m is not None, "Must match before checking groups"
+        assert m.group("name") == "AuthorityHierarchy:Subagent", (
+            "The 'name' capture group must yield the full compound string including the colon"
+        )
+
+    def test_compound_deployed_name_yields_correct_name_group(self) -> None:
+        m = TAG_PATTERN.match("[[DEPLOYED:ClosingProcedure:Subagent]]")
+        assert m is not None, "Must match before checking groups"
+        assert m.group("name") == "ClosingProcedure:Subagent"
+
+    def test_compound_name_kind_group_is_preserved(self) -> None:
+        m = TAG_PATTERN.match("[[DEPLOYED:ClosingProcedure:Subagent]]")
+        assert m is not None, "Must match before checking groups"
+        assert m.group("kind") == "DEPLOYED"
+
+    def test_compound_close_tag_close_group_is_slash(self) -> None:
+        m = TAG_PATTERN.match("[[/DEPLOYED:ClosingProcedure:Subagent]]")
+        assert m is not None, "Must match before checking groups"
+        assert m.group("close") == "/", "Close group must be '/' for a close tag"
+
+    def test_compound_open_tag_close_group_is_empty(self) -> None:
+        m = TAG_PATTERN.match("[[DEPLOYED:ClosingProcedure:Subagent]]")
+        assert m is not None, "Must match before checking groups"
+        assert m.group("close") == "", "Close group must be empty for an open tag"
+
+    def test_all_five_bundle_section_open_tags_match(self) -> None:
+        """All five DeployedSections.md block tags must match TAG_PATTERN."""
+        bundle_section_tags = [
+            "[[SECTION:AuthorityHierarchy:Subagent]]",
+            "[[SECTION:ClosingProcedure:Subagent]]",
+            "[[SECTION:ProtocolConstraints:Subagent]]",
+            "[[SECTION:ErrorHandlingCommon:Subagent]]",
+            "[[SECTION:ExecutionPhilosophyCommon:Subagent]]",
+        ]
+        for tag in bundle_section_tags:
+            assert TAG_PATTERN.match(tag) is not None, (
+                f"TAG_PATTERN must match bundle section open tag {tag!r}"
+            )
+
+    def test_all_five_bundle_section_close_tags_match(self) -> None:
+        """All five DeployedSections.md close tags must match TAG_PATTERN."""
+        bundle_section_close_tags = [
+            "[[/SECTION:AuthorityHierarchy:Subagent]]",
+            "[[/SECTION:ClosingProcedure:Subagent]]",
+            "[[/SECTION:ProtocolConstraints:Subagent]]",
+            "[[/SECTION:ErrorHandlingCommon:Subagent]]",
+            "[[/SECTION:ExecutionPhilosophyCommon:Subagent]]",
+        ]
+        for tag in bundle_section_close_tags:
+            assert TAG_PATTERN.match(tag) is not None, (
+                f"TAG_PATTERN must match bundle section close tag {tag!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# TAG_PATTERN — rejection guards after relaxation (Stage 1)
+# ---------------------------------------------------------------------------
+
+
+class TestTagPatternRejectionAfterRelaxation:
+    """TAG_PATTERN must still reject malformed tag lines after the name-class relaxation.
+
+    These tests guard against over-widening: accepting compound names must not
+    silently accept adjacent malformed forms.
+    """
+
+    def test_name_starting_with_digit_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[SECTION:1invalid]]") is None, (
+            "A name starting with a digit must not match TAG_PATTERN"
+        )
+
+    def test_name_starting_with_hyphen_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[SECTION:-invalid]]") is None, (
+            "A name starting with a hyphen must not match TAG_PATTERN"
+        )
+
+    def test_trailing_colon_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[SECTION:trailing:]]") is None, (
+            "A name with a trailing colon (empty segment after it) must not match TAG_PATTERN"
+        )
+
+    def test_doubled_colon_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[SECTION::doubled]]") is None, (
+            "A name starting with a colon (doubled separator) must not match TAG_PATTERN"
+        )
+
+    def test_empty_name_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[SECTION:]]") is None, (
+            "An empty name must not match TAG_PATTERN"
+        )
+
+    def test_leading_space_inside_brackets_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[ SECTION:Identity]]") is None, (
+            "Leading whitespace inside the brackets must prevent a match"
+        )
+
+    def test_trailing_space_inside_brackets_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[SECTION:Identity ]]") is None, (
+            "Trailing whitespace inside the brackets must prevent a match"
+        )
+
+    def test_qualifier_starting_with_digit_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[SECTION:Valid:1bad]]") is None, (
+            "A compound qualifier starting with a digit must not match TAG_PATTERN"
+        )
+
+    def test_qualifier_starting_with_hyphen_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[SECTION:Valid:-bad]]") is None, (
+            "A compound qualifier starting with a hyphen must not match TAG_PATTERN"
+        )
+
+
+# ---------------------------------------------------------------------------
+# tag_base_name() — base name extraction (Stage 1)
+# ---------------------------------------------------------------------------
+
+
+class TestTagBaseName:
+    """tag_base_name() returns the portion of a tag name before the first colon.
+
+    Used by the idempotency guard so a file carrying compound names is still
+    recognised as already-transformed.  NOT used by the validator's canonical-name
+    check (which is strict for agent documents).
+    """
+
+    def test_compound_name_returns_base_before_colon(self) -> None:
+        # Arrange / Act
+        result = boundary_constants.tag_base_name("AuthorityHierarchy:Subagent")
+
+        # Assert
+        assert result == "AuthorityHierarchy", (
+            "tag_base_name must return the portion before the first colon"
+        )
+
+    def test_simple_name_returns_the_name_itself(self) -> None:
+        result = boundary_constants.tag_base_name("Identity")
+        assert result == "Identity", (
+            "tag_base_name on a simple (non-compound) name must return the name unchanged"
+        )
+
+    def test_multi_segment_compound_name_returns_first_segment(self) -> None:
+        result = boundary_constants.tag_base_name("Workflow:quick-fix")
+        assert result == "Workflow", (
+            "tag_base_name must return only the segment before the first colon, "
+            "not the full remainder"
+        )
+
+    def test_base_name_of_all_five_bundle_block_names(self) -> None:
+        """Each bundle block name's base must match an entry in CANONICAL_DEPLOYED."""
+        bundle_names = [
+            ("AuthorityHierarchy:Subagent",       "AuthorityHierarchy"),
+            ("ClosingProcedure:Subagent",          "ClosingProcedure"),
+            ("ProtocolConstraints:Subagent",       "ProtocolConstraints"),
+            ("ErrorHandlingCommon:Subagent",       "ErrorHandlingCommon"),
+            ("ExecutionPhilosophyCommon:Subagent", "ExecutionPhilosophyCommon"),
+        ]
+        for full_name, expected_base in bundle_names:
+            result = boundary_constants.tag_base_name(full_name)
+            assert result == expected_base, (
+                f"tag_base_name({full_name!r}) must return {expected_base!r}, got {result!r}"
+            )
+            assert result in CANONICAL_DEPLOYED, (
+                f"Base name {result!r} from {full_name!r} must be in CANONICAL_DEPLOYED "
+                "so the idempotency guard can recognise it"
+            )
+
+
+# ---------------------------------------------------------------------------
+# tag_qualifier() — qualifier extraction (Stage 1)
+# ---------------------------------------------------------------------------
+
+
+class TestTagQualifier:
+    """tag_qualifier() returns the portion after the first colon, or None for simple names."""
+
+    def test_compound_name_returns_qualifier_after_colon(self) -> None:
+        result = boundary_constants.tag_qualifier("AuthorityHierarchy:Subagent")
+        assert result == "Subagent", (
+            "tag_qualifier must return the portion after the first colon"
+        )
+
+    def test_simple_name_returns_none(self) -> None:
+        result = boundary_constants.tag_qualifier("Identity")
+        assert result is None, (
+            "tag_qualifier on a simple name must return None"
+        )
+
+    def test_hyphenated_qualifier_is_returned_intact(self) -> None:
+        result = boundary_constants.tag_qualifier("Workflow:quick-fix")
+        assert result == "quick-fix", (
+            "tag_qualifier must preserve hyphens in the qualifier"
+        )
+
+
+# ---------------------------------------------------------------------------
+# BUNDLE_FRONTMATTER_KEYS constant (Stage 1)
+# ---------------------------------------------------------------------------
+
+
+class TestBundleFrontmatterKeyConstant:
+    """BUNDLE_FRONTMATTER_KEYS must be a frozenset containing the four bundle-only keys."""
+
+    def test_bundle_frontmatter_keys_constant_exists(self) -> None:
+        assert hasattr(boundary_constants, "BUNDLE_FRONTMATTER_KEYS"), (
+            "boundary_constants must export BUNDLE_FRONTMATTER_KEYS after Stage 1"
+        )
+
+    def test_bundle_frontmatter_keys_is_a_frozenset(self) -> None:
+        keys = boundary_constants.BUNDLE_FRONTMATTER_KEYS
+        assert isinstance(keys, frozenset), (
+            "BUNDLE_FRONTMATTER_KEYS must be a frozenset (immutable shared constant)"
+        )
+
+    def test_type_key_is_in_bundle_frontmatter_keys(self) -> None:
+        assert "type" in boundary_constants.BUNDLE_FRONTMATTER_KEYS, (
+            "'type' must be in BUNDLE_FRONTMATTER_KEYS — used in DeployedSections.md frontmatter"
+        )
+
+    def test_author_key_is_in_bundle_frontmatter_keys(self) -> None:
+        assert "author" in boundary_constants.BUNDLE_FRONTMATTER_KEYS, (
+            "'author' must be in BUNDLE_FRONTMATTER_KEYS"
+        )
+
+    def test_status_key_is_in_bundle_frontmatter_keys(self) -> None:
+        assert "status" in boundary_constants.BUNDLE_FRONTMATTER_KEYS, (
+            "'status' must be in BUNDLE_FRONTMATTER_KEYS"
+        )
+
+    def test_blocks_key_is_in_bundle_frontmatter_keys(self) -> None:
+        assert "blocks" in boundary_constants.BUNDLE_FRONTMATTER_KEYS, (
+            "'blocks' must be in BUNDLE_FRONTMATTER_KEYS — the list of block declarations"
+        )
+
+    def test_bundle_frontmatter_keys_has_exactly_four_members(self) -> None:
+        keys = boundary_constants.BUNDLE_FRONTMATTER_KEYS
+        assert len(keys) == 4, (
+            f"BUNDLE_FRONTMATTER_KEYS must have exactly 4 members, got {len(keys)}: {keys}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# KNOWN_FRONTMATTER_KEYS — bundle keys included (Stage 1)
+# ---------------------------------------------------------------------------
+
+
+class TestKnownFrontmatterKeysBundleKeys:
+    """The four bundle-document keys must be members of KNOWN_FRONTMATTER_KEYS after Stage 1.
+
+    Without them the validator raises E009 for every key in the DeployedSections.md
+    frontmatter that is not already in the allowlist.
+    """
+
+    def test_type_key_in_known_frontmatter_keys(self) -> None:
+        assert "type" in KNOWN_FRONTMATTER_KEYS, (
+            "'type' must be in KNOWN_FRONTMATTER_KEYS; without it the validator raises "
+            "E009 for DeployedSections.md which carries 'type: bundle'"
+        )
+
+    def test_author_key_in_known_frontmatter_keys(self) -> None:
+        assert "author" in KNOWN_FRONTMATTER_KEYS, (
+            "'author' must be in KNOWN_FRONTMATTER_KEYS; DeployedSections.md carries 'author: MOSAIC'"
+        )
+
+    def test_status_key_in_known_frontmatter_keys(self) -> None:
+        assert "status" in KNOWN_FRONTMATTER_KEYS, (
+            "'status' must be in KNOWN_FRONTMATTER_KEYS; DeployedSections.md carries 'status: Draft'"
+        )
+
+    def test_blocks_key_in_known_frontmatter_keys(self) -> None:
+        assert "blocks" in KNOWN_FRONTMATTER_KEYS, (
+            "'blocks' must be in KNOWN_FRONTMATTER_KEYS; DeployedSections.md carries "
+            "a 'blocks:' list"
+        )
+
+    def test_known_frontmatter_keys_is_still_a_frozenset(self) -> None:
+        assert isinstance(KNOWN_FRONTMATTER_KEYS, frozenset), (
+            "KNOWN_FRONTMATTER_KEYS must remain a frozenset after adding bundle keys; "
+            "it is imported as an immutable shared constant"
+        )
+
+    def test_pre_existing_keys_not_removed_by_bundle_key_addition(self) -> None:
+        """Adding bundle keys must not evict any key that was already present."""
+        pre_existing = {"id", "version", "name", "description", "role", "bundle_version"}
+        for key in pre_existing:
+            assert key in KNOWN_FRONTMATTER_KEYS, (
+                f"Pre-existing key {key!r} is missing from KNOWN_FRONTMATTER_KEYS after "
+                "Stage 1 bundle key additions"
+            )
+
+    def test_bundle_frontmatter_keys_is_subset_of_known_frontmatter_keys(self) -> None:
+        """Every member of BUNDLE_FRONTMATTER_KEYS must be reachable via KNOWN_FRONTMATTER_KEYS."""
+        for key in boundary_constants.BUNDLE_FRONTMATTER_KEYS:
+            assert key in KNOWN_FRONTMATTER_KEYS, (
+                f"Bundle key {key!r} is in BUNDLE_FRONTMATTER_KEYS but not in "
+                "KNOWN_FRONTMATTER_KEYS; the union property is violated"
+            )

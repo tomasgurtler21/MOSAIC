@@ -1,12 +1,16 @@
 ---
 id: 1
-version: 3.0.0
-transform_version: 3.0.0
+version: 2.3.0
+transform_version: 2.3.0
 injections_version: 1.1.0
 name: test-agent
 description: A generic agent with all common injections for testing the boundary transformer
 model: claude-sonnet-4-5
 tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+role: subagent
+required_skills: []
+recommended_tier: TODO
+tier_rationale: "TODO: state why this tier"
 ---
 
 [[SECTION:Identity]]
@@ -22,6 +26,10 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 
 [[INJECTION:IdentityExtension]]
 [[/INJECTION:IdentityExtension]]
+[[DEPLOYED:ClosingProcedure]]
+[[/DEPLOYED:ClosingProcedure]]
+[[DEPLOYED:AuthorityHierarchy]]
+[[/DEPLOYED:AuthorityHierarchy]]
 
 [[/SECTION:Identity]]
 ---
@@ -35,9 +43,9 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 
 ### Domain-Specific Patterns
 
-[[DEPLOYED:LanguagePatterns]]
+[[INJECTION:LanguagePatterns]]
 Use Python 3.10+ with type hints and pytest for testing.
-[[/DEPLOYED:LanguagePatterns]]
+[[/INJECTION:LanguagePatterns]]
 
 ### Codebase Context
 
@@ -57,23 +65,24 @@ Follow the standard output template structure.
 
 [[SECTION:Constraints]]
 ## Constraints
+[[DEPLOYED:ProtocolConstraints]]
+[[/DEPLOYED:ProtocolConstraints]]
 
 - Do NOT do bad things
 - Stay within defined scope
 [[DEPLOYED:HarnessConstraints]]
+[[/DEPLOYED:HarnessConstraints]]
 - Use only the Read, Write, Edit, Bash, Glob, Grep, and AskUserQuestion tools.
 - Prefer Read over Bash for file reading.
 - Use Bash only for terminal commands and git operations.
-[[/DEPLOYED:HarnessConstraints]]
-
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---
 
 [[SECTION:ErrorHandling]]
 ## Error Handling
+[[DEPLOYED:ErrorHandlingCommon]]
+[[/DEPLOYED:ErrorHandlingCommon]]
 
 - **Retry transient errors once** before escalating
 - **Return BLOCKED** if prerequisites are missing
@@ -96,6 +105,8 @@ Always end with a JSON status block.
 ## Execution Philosophy
 
 - **Context Management:** Dedicate your full context window to this task.
+[[DEPLOYED:ExecutionPhilosophyCommon]]
+[[/DEPLOYED:ExecutionPhilosophyCommon]]
 [[INJECTION:ContextLimits]]
 - Context window is 200k tokens; stop at 180k tokens used.
 [[/INJECTION:ContextLimits]]

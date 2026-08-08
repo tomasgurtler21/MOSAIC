@@ -39,9 +39,9 @@ Standard protocol content delivered by the deploy tool.
 - Test valid boundary structures
 - Verify canonical names are accepted
 
-[[DEPLOYED:LanguagePatterns]]
+[[INJECTION:LanguagePatterns]]
 Language pattern content injected here.
-[[/DEPLOYED:LanguagePatterns]]
+[[/INJECTION:LanguagePatterns]]
 
 [[INJECTION:CodebaseContext]]
 Codebase context content injected here.
@@ -56,9 +56,9 @@ Codebase context content injected here.
 - Stay within scope
 - Do not modify fixtures
 
-[[DEPLOYED:CustomConstraints]]
+[[INJECTION:CustomConstraints]]
 Custom constraint content injected here.
-[[/DEPLOYED:CustomConstraints]]
+[[/INJECTION:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

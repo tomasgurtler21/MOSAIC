@@ -28,8 +28,8 @@ Content in identity section.
 
 Capabilities content.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
+[[INJECTION:LanguagePatterns]]
+[[/INJECTION:LanguagePatterns]]
 
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
@@ -47,9 +47,6 @@ Constraint content.
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

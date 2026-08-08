@@ -1,9 +1,12 @@
 ---
-version: 6.0.0
+version: 5.4.0
 name: orchestrator
 description: Coordinates multi-agent workflow execution
-model: {model-identifier}
 tools: {tool-permissions}
+role: subagent
+required_skills: []
+recommended_tier: TODO
+tier_rationale: "TODO: state why this tier"
 ---
 
 [[SECTION:Identity]]
@@ -22,6 +25,10 @@ You are the **Orchestrator** agent.
 
 [[INJECTION:IdentityExtension]]
 [[/INJECTION:IdentityExtension]]
+[[DEPLOYED:ClosingProcedure]]
+[[/DEPLOYED:ClosingProcedure]]
+[[DEPLOYED:AuthorityHierarchy]]
+[[/DEPLOYED:AuthorityHierarchy]]
 
 [[/SECTION:Identity]]
 ---
@@ -49,20 +56,22 @@ You are the **Orchestrator** agent.
 
 [[SECTION:Constraints]]
 ## Constraints
+[[DEPLOYED:ProtocolConstraints]]
+[[/DEPLOYED:ProtocolConstraints]]
 
 ### Context Window Protection
 Do not read domain files directly.
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---
 
 [[SECTION:ErrorHandling]]
 ## Error Handling
+[[DEPLOYED:ErrorHandlingCommon]]
+[[/DEPLOYED:ErrorHandlingCommon]]
 
 ### Tiered Error Strategy
 
@@ -116,6 +125,8 @@ After any restart, validate state before continuing.
 
 - **Configuration over Code:** Workflow sequences are defined in configuration.
 - **Status-Driven Routing:** All routing decisions derive from status codes.
+[[DEPLOYED:ExecutionPhilosophyCommon]]
+[[/DEPLOYED:ExecutionPhilosophyCommon]]
 [[INJECTION:ContextLimits]]
 [[/INJECTION:ContextLimits]]
 [[/SECTION:ExecutionPhilosophy]]

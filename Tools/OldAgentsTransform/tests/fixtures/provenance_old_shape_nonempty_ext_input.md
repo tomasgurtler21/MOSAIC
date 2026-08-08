@@ -43,8 +43,8 @@ Do not trim, re-wrap, or re-indent this content.
 - Do things efficiently
 - Do more things correctly
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
+[[INJECTION:LanguagePatterns]]
+[[/INJECTION:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -61,8 +61,6 @@ Do not trim, re-wrap, or re-indent this content.
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

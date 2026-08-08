@@ -10,16 +10,32 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import pathlib
 import sys
-import re
 
 # Add Tools/ to sys.path so boundary_transformer can be imported
 TOOLS_DIR = pathlib.Path(__file__).parent
 sys.path.insert(0, str(TOOLS_DIR))
-from boundary_transformer import transform_file
+from boundary_transformer import SkipReason, is_orchestrator_file, transform_file
+from non_conformance import NonConformance, render_report
 
 REPO_ROOT = TOOLS_DIR.parent
+
+
+@dataclasses.dataclass
+class BatchSummary:
+    """Outcome counts for one batch run."""
+    processed: int   # files for which a transform was attempted (excludes skipped-orchestrator)
+    degraded: int    # subset of processed that went through the degraded path
+    skipped: int     # already-transformed files left untouched
+    errors: int      # failed transforms plus harness-only orchestrators
+    non_conformances: int = 0   # count of NonConformance items accumulated across the batch
+
+    def ok(self) -> bool:
+        """True when the batch produced no errors."""
+        return self.errors == 0
+
 
 # Build a mapping: base_name -> Path of the generic file
 def build_generic_map() -> dict[str, pathlib.Path]:
@@ -71,33 +87,77 @@ def file_base(path: pathlib.Path) -> str:
 
 
 def run_batch(harness_dirs: list[pathlib.Path], generic_map: dict[str, pathlib.Path],
-              batch_label: str) -> bool:
-    """Transform all files in the given harness dirs. Returns True if all succeeded."""
-    total = 0
+              batch_label: str) -> BatchSummary:
+    """Transform all files in the given harness dirs. Returns a BatchSummary."""
+    processed = 0
+    degraded = 0
+    skipped = 0
     errors = 0
+    all_ncs: list[NonConformance] = []
 
     for hdir in harness_dirs:
         files = get_harness_files(hdir)
         for hfile in files:
             base = file_base(hfile)
             generic_ref = generic_map.get(base)
-            if generic_ref is None:
-                print(f"  [WARN] No generic ref for {hfile.relative_to(REPO_ROOT)}", file=sys.stderr)
-                errors += 1
+
+            if generic_ref is not None:
+                # Generic counterpart found: transform normally.
+                result = transform_file(hfile, generic_ref_path=generic_ref)
+            else:
+                # No generic counterpart found.
+                # Harness-only orchestrators are skipped and counted as errors.
+                if is_orchestrator_file(hfile):
+                    print(f"  [WARN]    {hfile}  harness-only orchestrator requires --generic-ref")
+                    errors += 1
+                    continue
+
+                # Regular harness-only agent: route through the degraded-quality transform.
+                result = transform_file(hfile)
+
+            all_ncs.extend(result.non_conformances)
+
+            # Utility-agent and non-agent skips: increment skipped only, not processed.
+            if result.skip_reason in (SkipReason.UTILITY_AGENT, SkipReason.NON_AGENT):
+                skip_msg = result.warnings[0] if result.warnings else str(hfile)
+                print(f"  [SKIP]    {hfile}  {skip_msg}")
+                skipped += 1
                 continue
 
-            result = transform_file(hfile, generic_ref_path=generic_ref)
-            total += 1
+            processed += 1
             if result.success:
-                print(f"  [OK]   {hfile.relative_to(REPO_ROOT)}  {result.version_before} -> {result.version_after}")
+                if result.skipped:
+                    print(f"  [SKIP]    {hfile}  already transformed")
+                    skipped += 1
+                else:
+                    if generic_ref is not None:
+                        print(f"  [OK]      {hfile}  {result.version_before} -> {result.version_after}")
+                    else:
+                        print(
+                            f"  [DEGRADED]  {hfile}  "
+                            f"{result.version_before} -> {result.version_after}"
+                            f"   (no generic reference)"
+                        )
+                        if result.degraded:
+                            degraded += 1
             else:
                 errors += 1
                 for err in result.errors:
-                    print(f"  [ERR]  {hfile.relative_to(REPO_ROOT)}:{err.line_number}: {err.message}",
+                    print(f"  [ERR]     {hfile}:{err.line_number}: {err.message}",
                           file=sys.stderr)
 
-    print(f"\nBatch {batch_label}: {total} files processed, {errors} errors.")
-    return errors == 0
+    print(
+        f"\nBatch {batch_label}: {processed} files processed "
+        f"({degraded} degraded, {skipped} skipped), {errors} errors."
+    )
+    print(render_report(all_ncs))
+    return BatchSummary(
+        processed=processed,
+        degraded=degraded,
+        skipped=skipped,
+        errors=errors,
+        non_conformances=len(all_ncs),
+    )
 
 
 BATCH_DIRS: dict[str, list[pathlib.Path]] = {
@@ -137,8 +197,8 @@ def main() -> int:
 
     for batch in batches_to_run:
         print(f"\n=== Batch {batch} ===")
-        ok = run_batch(BATCH_DIRS[batch], generic_map, batch)
-        if not ok:
+        summary = run_batch(BATCH_DIRS[batch], generic_map, batch)
+        if not summary.ok():
             all_ok = False
 
     return 0 if all_ok else 1
