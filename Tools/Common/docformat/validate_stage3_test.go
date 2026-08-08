@@ -318,8 +318,8 @@ func TestValidate_DeployedInWrongParent_StillReportsSeverityError(t *testing.T) 
 	// A misplaced [[DEPLOYED:]] region must still produce "wrong-parent" at SeverityError.
 	// The advisory downgrade in Stage 3 applies only to [[INJECTION:]] regions.
 	//
-	// Fixture: deployed-outside-required-parent.md has [[DEPLOYED:LanguagePatterns]]
-	// inside Identity (requires Capabilities parent).
+	// Fixture: deployed-outside-required-parent.md has [[DEPLOYED:ProtocolConstraints]]
+	// inside Identity (requires Constraints parent).
 	doc := parsedBoundaryFixture(t, "malformed/deployed-outside-required-parent.md")
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{

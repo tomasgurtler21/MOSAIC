@@ -4,7 +4,7 @@ name: test-agent
 
 [[SECTION:Identity]]
 Identity content.
-[[DEPLOYED:LanguagePatterns]]
-Language patterns content.
-[[/DEPLOYED:LanguagePatterns]]
+[[DEPLOYED:ProtocolConstraints]]
+Protocol constraints content.
+[[/DEPLOYED:ProtocolConstraints]]
 [[/SECTION:Identity]]

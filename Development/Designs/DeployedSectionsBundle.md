@@ -1,7 +1,7 @@
 ---
 id: deployed-sections-bundle
 type: specification
-version: "1.1"
+version: "1.2"
 name: "Deployed Sections Bundle"
 description: "The design of the canonical block bundle: what qualifies as a block, why contracts are excluded, how bundle_version works, how the tool deploys blocks, and how staleness is detected."
 author: MOSAIC
@@ -61,7 +61,7 @@ That is why `bundle_version` is never a compatibility number, and why an agent a
 
 Mixing it into the bundle would make every wording fix in an unrelated block look like a contract change. That is not a cosmetic problem: everything downstream that reasons about protocol compatibility would be reasoning about noise, and a contract version that moves without the contract moving is worse than no version at all.
 
-**Per-deployment assembled regions.** `AvailableWorkflows`, `InfrastructureAgents`, `LanguagePatterns`, `HarnessConstraints`, and `CustomConstraints` are `[[DEPLOYED:]]` regions too, but their content comes from a deployment's own selections. There is no canonical text for the bundle to hold. The full list of deployed names and their sources is in `AgentTemplateArchitecture.md` §2.5.
+**Per-deployment assembled regions.** `AvailableWorkflows`, `InfrastructureAgents`, and `HarnessConstraints` are `[[DEPLOYED:]]` regions too, but their content comes from a deployment's own selections. There is no canonical text for the bundle to hold. The full list of deployed names and their sources is in `AgentTemplateArchitecture.md` §2.5.
 
 ---
 
@@ -192,6 +192,7 @@ Rule 22 catches a hand-edited deployed file. Rule 23 catches a design document t
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.2 | 2026-08-08 | **Per-deployment region list corrected** to follow `AgentTemplateArchitecture.md` v1.4. `LanguagePatterns` and `CustomConstraints` are removed from §4's list of assembled `[[DEPLOYED:]]` regions: neither had a generator, both were listed under a content source that was never implemented, and both leave the deployed vocabulary entirely. No change to the bundle itself — it never held either one, and the five blocks are untouched. |
 | 1.1 | 2026-08-05 | **Aligned with the conformance rework** in `AgentTemplateArchitecture.md` v1.2. An absent deployed region is graded rather than uniformly permitted: the five bundle blocks fill conduct-tier regions, whose absence is a warning (§4). Bundle rules 20–23 gain severities and mechanisms — 20 errors, 21–23 warn, since a stale or hand-edited deployment still runs and `bundle_version` carries no wire semantics (§9). |
 | 1.0 | 2026-08-05 | **Initial specification.** Split from `AgentTemplateArchitecture.md` §10. Establishes the bundle as the single source and single version for all verbatim-deployed MOSAIC text, with the three-part membership test and its decidable contract criterion. Records that the bundle holds **no contracts** — the orchestration contract, including the artifact provenance stamp, deploys from its own source — so per-block contract versions in the bundle frontmatter are removed from the design. Moves the `bundle_version` stamp from a region-body comment to the deployed file's frontmatter, and states the one-version-per-deployment invariant. |
 

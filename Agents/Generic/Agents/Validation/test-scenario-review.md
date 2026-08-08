@@ -182,8 +182,6 @@ An objection you judge to be already answered by the scenario space is still rec
 
 Where the project declares a standing set of coverage dimensions above, every one of them must appear in the scenario space or be explicitly excluded with a reason, in addition to the dimensions the requirement itself implies. Where nothing is declared, derive the expected dimensions from the requirement and the dossier alone.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 
 [[INJECTION:OutputArtifactTemplate]]
 [[/INJECTION:OutputArtifactTemplate]]
@@ -207,8 +205,6 @@ Where the project declares a standing set of coverage dimensions above, every on
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
 
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

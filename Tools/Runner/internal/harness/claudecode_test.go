@@ -52,6 +52,13 @@ package harness_test
 //   Envelope recovery (bare and embedded JSON objects):
 //   - Bare JSON object that is a valid protocol response is recovered successfully.
 //   - Valid protocol response embedded in surrounding CLI text is recovered.
+//
+//   Envelope recovery — unrecoverable cases (formerly direct, in-package
+//   coverage of the unexported parseEnvelope helper; now asserted only
+//   through Invoke because that helper is moving to mosaic-common/harness):
+//   - Bare JSON object missing required protocol fields returns ErrMalformedJSON
+//     and the error contains the raw CLI output.
+//   - Large unrecoverable output is truncated with a visible "[truncated" indicator.
 
 import (
 	"context"
@@ -132,9 +139,21 @@ func runHelperProcess() {
 	case "embedded-json":
 		// Write CLI noise with a valid protocol response embedded within it.
 		// The adapter should scan and recover the embedded response.
-		os.Stdout.WriteString("Warning: pre-flight check failed\n") //nolint:errcheck
+		os.Stdout.WriteString("Warning: pre-flight check failed\n")                                                 //nolint:errcheck
 		os.Stdout.WriteString(`{"agent_instance_id":"test-agent#1","status_code":"SUCCESS","status_message":"ok"}`) //nolint:errcheck
-		os.Stdout.WriteString("\nCLI exiting\n")                    //nolint:errcheck
+		os.Stdout.WriteString("\nCLI exiting\n")                                                                    //nolint:errcheck
+
+	case "json-object-no-protocol-fields":
+		// Write a bare JSON object missing the required protocol fields
+		// (agent_instance_id, status_code). Not recoverable: exercises the
+		// "recovery also fails" branch for an object that IS valid JSON but
+		// isn't a protocol response.
+		os.Stdout.WriteString(`{"hello":"world","foo":"bar"}`) //nolint:errcheck
+
+	case "large-garbage":
+		// Write output well beyond the 2000-character readability cap, none
+		// of it JSON. Exercises the truncation-with-indicator behaviour.
+		os.Stdout.WriteString(strings.Repeat("x", 3000)) //nolint:errcheck
 
 	case "hang":
 		// Block indefinitely so the test can exercise timeout and context
@@ -789,6 +808,67 @@ func TestClaudeCodeAdapter_NonJSONOutput_ErrorHasNoGoTypeName(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "cliEnvelopeEntry") {
 		t.Errorf("want error message free of internal Go type name 'cliEnvelopeEntry', got: %q", err.Error())
+	}
+}
+
+// TestClaudeCodeAdapter_JSONObjectWithoutProtocolFields_ReturnsErrMalformedOutput
+// verifies that a bare JSON object that IS valid JSON but is missing the
+// required protocol fields (agent_instance_id, status_code) is not
+// recoverable and returns an error wrapping ErrMalformedJSON.
+//
+// This test (and the two below it) supersede what was previously direct,
+// in-package coverage of the unexported parseEnvelope helper. That helper is
+// moving to mosaic-common/harness, so this behaviour is now asserted only
+// through Invoke — the adapter's observable behaviour — which is what keeps
+// this suite compiling and passing once the adapter starts delegating.
+func TestClaudeCodeAdapter_JSONObjectWithoutProtocolFields_ReturnsErrMalformedOutput(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Setenv("GO_HELPER_CMD", "json-object-no-protocol-fields")
+
+	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
+
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if !errors.Is(err, harness.ErrMalformedJSON) {
+		t.Errorf("want ErrMalformedJSON, got %v", err)
+	}
+}
+
+// TestClaudeCodeAdapter_JSONObjectWithoutProtocolFields_ErrorContainsRawOutput
+// verifies that the error carries the raw CLI output for traceability.
+func TestClaudeCodeAdapter_JSONObjectWithoutProtocolFields_ErrorContainsRawOutput(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Setenv("GO_HELPER_CMD", "json-object-no-protocol-fields")
+
+	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
+
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if err == nil {
+		t.Fatal("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), `{"hello":"world","foo":"bar"}`) {
+		t.Errorf("want error to contain the raw CLI output, got %q", err.Error())
+	}
+}
+
+// TestClaudeCodeAdapter_LargeUnrecoverableOutput_TruncatedWithIndicator
+// verifies that when unrecoverable CLI output exceeds the 2000-character
+// readability cap, the error message contains a visible truncation
+// indicator beginning with "[truncated".
+func TestClaudeCodeAdapter_LargeUnrecoverableOutput_TruncatedWithIndicator(t *testing.T) {
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Setenv("GO_HELPER_CMD", "large-garbage")
+
+	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
+
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if !errors.Is(err, harness.ErrMalformedJSON) {
+		t.Errorf("want ErrMalformedJSON, got %v", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "[truncated") {
+		t.Errorf("want a truncation indicator '[truncated' in the error message, got %v", err)
 	}
 }
 

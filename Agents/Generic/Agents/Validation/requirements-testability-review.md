@@ -189,8 +189,6 @@ You write to the same output artifact name as the generic requirements review ag
 [[INJECTION:SeverityDefinitions]]
 [[/INJECTION:SeverityDefinitions]]
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:OutputArtifactTemplate]]
 [[/INJECTION:OutputArtifactTemplate]]
 
@@ -213,8 +211,6 @@ You write to the same output artifact name as the generic requirements review ag
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

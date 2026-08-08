@@ -187,8 +187,6 @@ Your validation artifact should follow this template:
 [[INJECTION:SeverityDefinitions]]
 [[/INJECTION:SeverityDefinitions]]
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -212,8 +210,6 @@ Your validation artifact should follow this template:
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

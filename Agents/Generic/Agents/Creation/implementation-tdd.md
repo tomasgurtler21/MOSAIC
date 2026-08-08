@@ -110,8 +110,6 @@ You are the **Implementation** agent in a multi-agent orchestration system.
 ### Agent-Specific Artifact Behavior
 - **Progress Tracking:** Update output artifacts to track implementation progress
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -137,8 +135,6 @@ You are the **Implementation** agent in a multi-agent orchestration system.
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

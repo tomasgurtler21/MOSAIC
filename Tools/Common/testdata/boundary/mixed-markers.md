@@ -12,12 +12,12 @@ Identity content.
 Protocol content.
 [[/DEPLOYED:CommunicationProtocol]]
 
-[[SECTION:Capabilities]]
-Capabilities content.
-[[DEPLOYED:LanguagePatterns]]
+[[SECTION:Constraints]]
+Constraints content.
+[[DEPLOYED:ProtocolConstraints]]
 Harness content.
-[[/DEPLOYED:LanguagePatterns]]
+[[/DEPLOYED:ProtocolConstraints]]
 [[INJECTION:CodebaseContext]]
 Project context.
 [[/INJECTION:CodebaseContext]]
-[[/SECTION:Capabilities]]
+[[/SECTION:Constraints]]

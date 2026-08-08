@@ -148,8 +148,6 @@ Your test files should include:
 - Verify changes compile — pass/fail state depends on implementation and is expected either way
 - When adding missing test cases, follow the existing test file's patterns and conventions
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -173,8 +171,6 @@ Your test files should include:
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

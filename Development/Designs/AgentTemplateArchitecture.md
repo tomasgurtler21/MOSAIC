@@ -1,7 +1,7 @@
 ---
 id: agent-template-architecture
 type: specification
-version: "1.3"
+version: "1.4"
 name: "Agent Template Architecture"
 description: "The structure of a MOSAIC agent file: frontmatter schema, the three region kinds and their ownership, canonical document order, the per-role region matrix, and what each section must contain."
 author: MOSAIC
@@ -132,11 +132,9 @@ Seven slots. There is no separate provenance slot: the artifact provenance stamp
 | `[[DEPLOYED:InfrastructureAgents]]` | Absent | Required |
 | `[[DEPLOYED:CommunicationProtocol]]` | Required | Required |
 | `Capabilities` section | Required | Required |
-| `[[DEPLOYED:LanguagePatterns]]` | Required | Absent |
 | `Constraints` section | Required | Required |
 | `[[DEPLOYED:ProtocolConstraints]]` | Required | Absent (§8) |
 | `[[DEPLOYED:HarnessConstraints]]` | Required | Required |
-| `[[DEPLOYED:CustomConstraints]]` | Required | Required |
 | `ErrorHandling` section | Required | Required |
 | `[[DEPLOYED:ErrorHandlingCommon]]` | Required | Absent (§8) |
 | `OutputFormat` section | Required | Absent |
@@ -153,7 +151,7 @@ A region present with no canonical block matching the file's role **is** an erro
 |------|---------|-----------|---------|
 | **Contract** | `CommunicationProtocol` | **Error** | The agent receives no message shape, no status vocabulary, no HITL gate. It cannot produce a response the orchestrator can parse. This is interop, not style. |
 | **Conduct** | `ClosingProcedure`, `AuthorityHierarchy`, `ProtocolConstraints`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon` | **Warning** | The agent still speaks the contract and still works. It works *worse*: no artifact-access imperatives, no retry rule, no ranking when the harness contradicts MOSAIC. Degradation an author should be told about and may knowingly accept. |
-| **Deployment** | `LanguagePatterns`, `HarnessConstraints`, `CustomConstraints`, `AvailableWorkflows`, `InfrastructureAgents` | **Silent** | Content comes from a deployment's own selections. Most deployments select nothing for most of them, so absence is the ordinary case and flagging it is noise. |
+| **Deployment** | `HarnessConstraints`, `AvailableWorkflows`, `InfrastructureAgents` | **Silent** | Content comes from a deployment's own selections. Most deployments select nothing for most of them, so absence is the ordinary case and flagging it is noise. |
 
 The tiers are about the *agent's* absence, not the block's. A bundle block with no matching region in a given agent remains normal (`DeployedSectionsBundle.md` §4).
 
@@ -168,18 +166,29 @@ Every `[[DEPLOYED:]]` name, its required parent, and where its content comes fro
 | `ClosingProcedure` | `Identity` | Bundle | `DeploymentBlocks/ClosingProcedure.md` |
 | `AvailableWorkflows` | `Identity` | Assembled from selected workflow files | Workflow schema |
 | `InfrastructureAgents` | `Identity` | Assembled from selected infrastructure declarations | `InfrastructureAgentConcept.md` |
-| `LanguagePatterns` | `Capabilities` | Deployment configuration | — |
 | `ProtocolConstraints` | `Constraints` | Bundle | `DeploymentBlocks/ProtocolConstraints.md` |
-| `HarnessConstraints` | `Constraints` | The selected harness module | — |
-| `CustomConstraints` | `Constraints` | Deployment configuration | — |
+| `HarnessConstraints` | `Constraints` | The selected harness module | Harness module |
 | `ErrorHandlingCommon` | `ErrorHandling` | Bundle | `DeploymentBlocks/ErrorHandlingCommon.md` |
 | `ExecutionPhilosophyCommon` | `ExecutionPhilosophy` | Bundle | `DeploymentBlocks/ExecutionPhilosophyCommon.md` |
 
-Three sources, and the distinction matters:
+Nine names. Three sources, and the distinction matters:
 
 - **Bundle** — `Agents/Generic/DeployedSections.md`, the five blocks whose text is identical across every agent of a role and which are not contracts. Governed by `DeployedSectionsBundle.md`.
 - **Contract source** — `CommunicationProtocol.md` ships its own text. It is a contract, so it is deliberately not in the bundle and carries its own version.
-- **Assembled or configured** — no canonical text exists; the content is built from a deployment's own selections.
+- **Assembled** — no canonical text exists; the content is built from a deployment's own selections. `AvailableWorkflows` and `InfrastructureAgents` are assembled from what the deployment selected; `HarnessConstraints` comes from the one harness module in play.
+
+#### 2.5.1 Every Deployed Name Names Its Generator
+
+**A name belongs in this table only if an implemented generator fills it.** The `Content comes from` column is not a description of intent — it is the requirement, and a name whose generator does not exist does not belong in `CanonicalDeployed`.
+
+This rule exists because its absence caused a real defect. v1.3 and earlier listed `LanguagePatterns` and `CustomConstraints` with the source *"Deployment configuration"* and an em-dash under `Specified in`. No such mechanism was ever built, and no document specified one. The implementation had to route them somewhere, so they fell through a permissive `default:` branch and were classified as harness-sourced — content wiped and refilled from the harness descriptor on every deploy. Nothing in the harness layer had any business supplying either one.
+
+The rest followed mechanically. §2.4 required present deployed regions to have a content source, so all four harnesses had to declare `[[DEPLOYED:LanguagePatterns]]` empty purely to satisfy the check. The rationale written into those files records the contradiction in plain words — *"no harness-level content is appropriate here regardless of harness. Declared empty to satisfy the canonical injection list."* An author documented that the classification was wrong and satisfied the validator instead of fixing it, because this document gave them no name for what was wrong.
+
+Two consequences are binding:
+
+- **An unrecognised or unclassified deployed name is an error, never a fallback.** A classifier that assigns a default class to a name nobody classified deliberately will assign the wrong one silently, and the closed-set check will then propagate it into every harness and every agent. There is no safe default here; the safe behaviour is to refuse.
+- **A name with nothing to fill it is not a deployed name.** If content is authored per project, it is an injection (§6.1). If it is authored per agent, it is body text. Neither is a `[[DEPLOYED:]]` region, and giving one a region that no generator fills produces a permanently empty block that every agent carries and no tool can populate.
 
 ---
 
@@ -328,9 +337,9 @@ in the output artifact". Omit the subsection entirely where there is nothing to 
 
 Capabilities is the least constrained section by design. It is where an agent's actual expertise lives, and expertise does not have a common shape — a research agent needs an output template, an implementation agent needs its method's principles, an interface agent needs neither.
 
-**Deployed:** `[[DEPLOYED:LanguagePatterns]]`.
+**Deployed:** none. The section carries no tool-managed region.
 
-**Injections:** `[[INJECTION:CodebaseContext]]`, `[[INJECTION:OutputArtifactTemplate]]`, and for validation agents `[[INJECTION:SeverityThresholds]]` and `[[INJECTION:SeverityDefinitions]]` (§6.2).
+**Injections:** `[[INJECTION:CodebaseContext]]`, `[[INJECTION:OutputArtifactTemplate]]`, and for validation agents `[[INJECTION:SeverityThresholds]]` and `[[INJECTION:SeverityDefinitions]]` (§6.2). `[[INJECTION:LanguagePatterns]]` is available to a project with language-specific patterns to state, and is not carried by MOSAIC's own sources (§6.1).
 
 **Tool access is not described here.** It is the `tools` frontmatter field. A prose list of tools in the body is a second statement that goes stale the first time the field changes.
 
@@ -345,7 +354,7 @@ Capabilities is the least constrained section by design. It is where an agent's 
 - **Every constraint carries its justification.** "Do NOT make assumptions about technology choices — document options instead, because downstream agents need unbiased options to evaluate against broader context." A bare prohibition invites a model to find the edge of it; a prohibition with a reason gives it grounds to generalise correctly to a case the rule did not anticipate.
 - **Do not restate the contract.** Artifact access, status code discipline, and JSON response discipline are already stated twice above — once in the contract region, once in `ProtocolConstraints`. A third copy in the agent's own list is the copy that drifts.
 
-**Deployed last:** `[[DEPLOYED:HarnessConstraints]]`, then `[[DEPLOYED:CustomConstraints]]`.
+**Deployed last:** `[[DEPLOYED:HarnessConstraints]]`.
 
 ### 4.5 ErrorHandling
 
@@ -448,12 +457,15 @@ The orchestrator's `Capabilities` contains nested `[[SECTION:]]` regions — `Ex
 
 Preservation does not need a list. On update the tool matches injection names between the deployed file and the source file; a name the author put in their source is a name that will be there next time. A closed vocabulary would add nothing to that and would cost an author the ability to name a region after their own project's concept. `[[DEPLOYED:]]` names are the opposite case and stay closed (§2.5) — those the tool must find *content* for, and a name it does not recognise has no source.
 
-**The catalogue below is a suggestion, not a constraint.** These are the names MOSAIC's own agents carry, the names it ships `TODO.md` guidance for, and the names that mean the same thing across projects. An author with a use for one should prefer it over inventing a synonym; an author with a genuine need for something else should invent it.
+**The catalogue below is a suggestion, not a constraint.** These are the names that mean the same thing across projects and that MOSAIC ships `TODO.md` guidance for. An author with a use for one should prefer it over inventing a synonym; an author with a genuine need for something else should invent it.
+
+Most are also carried by MOSAIC's own sources, declared empty so a project can see the slot exists. `LanguagePatterns` is the exception and is deliberately **not** declared anywhere in `Agents/Generic/`: a language pattern is meaningful only once a project has a language, so pre-declaring it in every agent would ship an empty region and a `TODO.md` line to fifty-odd files on the chance that one project fills them. A project that wants it adds the region to its own sources like any other name it invents. Being catalogued costs nothing; being declared costs every agent.
 
 | Name | Usual parent | Purpose |
 |------|--------------|---------|
 | `IdentityExtension` | `Identity` | Project or domain expertise added to the agent's identity |
 | `CodebaseContext` | `Capabilities` | Knowledge of the project's codebase |
+| `LanguagePatterns` | `Capabilities` | Language-specific coding patterns the project expects this agent to follow |
 | `OutputArtifactTemplate` | `Capabilities` | The project's expected structure for this agent's output artifact |
 | `SeverityThresholds` | `Capabilities` | Which issue severities require rework (validation agents) |
 | `SeverityDefinitions` | `Capabilities` | What each severity means in this project (validation agents) |
@@ -681,6 +693,8 @@ Changes this document makes to them:
 
 - `CanonicalDeployed` gains `AuthorityHierarchy`, `ClosingProcedure`, `ProtocolConstraints`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon`. It remains a closed set (rule 14).
 - `CanonicalDeployed` loses `ArtifactProvenance`, and `CanonicalSections` does not gain it — the region ceases to exist on the provenance merge.
+- `CanonicalDeployed` loses `LanguagePatterns` and `CustomConstraints` (§2.5.1), leaving nine names. `DeployedParent` loses the same two entries. `LanguagePatterns` becomes a catalogued injection name (§6.1); `CustomConstraints` ceases to exist in any vocabulary.
+- The deployed-name classifier's `default:` branch stops resolving to the harness class. `HarnessConstraints` becomes an explicit case, and an unclassified name is an error (§2.5.1).
 - `DeployedParent` gains the five new names with the parents in §2.5.
 - `CanonicalOrder` becomes seven slots, of which slot 2 is deployed, and is consumed as a subsequence rather than an equality check (§2.3).
 - `InjectionParent` **stops being an allowlist.** Injection names are open (§6.1): an unlisted name is preserved like any other. What remains is a table of usual parents for the suggested names, consulted for advice-level reporting only. `ArtifactProvenanceExtension` leaves it, `ProtocolExtension` enters it with an empty parent (top level).
@@ -729,6 +743,7 @@ Changes this document makes to them:
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.4 | 2026-08-08 | **`LanguagePatterns` and `CustomConstraints` removed from the deployed vocabulary.** Both were listed in §2.5 with the content source *"Deployment configuration"* — a category this document named and never specified, and that no tool ever implemented. Lacking a generator, both fell through the classifier's permissive `default:` branch to the harness class, which meant every harness had to declare them empty solely to satisfy §2.4's content-source check; the rationale text in those files records an author noting the classification was wrong and complying anyway. `CanonicalDeployed` drops from eleven names to nine and the phantom source disappears, leaving the three §2.5 actually describes. `LanguagePatterns` becomes a catalogued injection name (§6.1), deliberately not declared in MOSAIC's own sources. `CustomConstraints` is deleted outright — it had no definition, no specification, and served as an escape hatch for content that belonged in `HarnessConstraints`. New §2.5.1 makes the underlying rule explicit: a deployed name must name an implemented generator, and an unclassified name is an error rather than a default. Role matrix, tier table, §4.3, §4.4 and §10.1 follow. |
 | 1.3 | 2026-08-05 | **`OutputFormat` corrected to two varying fields.** v1.0 reduced the section to `status_message` on the premise that nothing else in the response envelope varied between agents. A survey of the forty-two sources disproves it: `error_code` varies too — most agents return `E101`, but `test-runner` returns `E501`, `pull-request-comment-interface` `E502`, `requirements-refinement` `E503`, and `audit-to-pull-request` `E401`. The contract region supplies the code vocabulary and can never supply an agent's choice from it, so §4.6's table gains an `error_code` column and permits multiple `BLOCKED` rows. Migration step 7 amended accordingly — as written it would have discarded every one of those choices in its least verifiable step. Rule 17r extended to review the code choice alongside the message. The envelope deletion itself is unchanged and rule 17 is untouched: the widened table contains no JSON fence. |
 | 1.0 | 2026-08-05 | **Initial specification.** Established the agent file schema: frontmatter fields including a declared `role`, the three region kinds and their ownership semantics, canonical document order, a per-role region matrix, and a section-by-section content specification. Settled the canonical-fragment question: five fragments become `[[DEPLOYED:]]` regions, one is deleted. Rewrote `OutputFormat` as a `status_message` table with no JSON envelope. Corrected three live defects structurally. |
 | 1.2 | 2026-08-05 | **Conformance made proportionate.** §9 rewritten: every rule now carries a severity (error / warning / advice) and an enforcement mechanism (tool / review / guidance), and a strict/lenient mode holds MOSAIC's own sources to all of it while a project's agents are blocked only by what would otherwise break. Injection names opened — no allowlist, all injections preserved whatever they are called, none ever required to be filled; the catalogue is a suggestion. `ProtocolExtension` un-banned and specified as a top-level sibling of the contract region, since extending protocol *mechanics* is a legitimate deployment need. Canonical order relaxed from an equality check to a subsequence: absent sections and additional ones are both fine, relative order is not. Deployed-region absence graded into contract / conduct / deployment tiers. Two principles added: a check that flags legitimate work gets switched off, and not every rule is a tool's to enforce. | 
@@ -757,6 +772,8 @@ Changes this document makes to them:
 - **Keeping worked JSON response examples per agent.** Outside `status_message` and `error_code` they were identical, and thirty-five of forty-two had gone stale against the contract they shipped beside. Both varying fields survive as columns of the §4.6 table; the envelope does not.
 - **Reducing §4.6 to `status_message` alone.** Held until v1.3, on the premise that it was the only field varying between agents. It was not: `error_code` varies too, and the contract region can only supply the five-code vocabulary, never this agent's choice from it (§4.6). The premise also reached into migration step 7, where acting on it would have destroyed the choices rather than merely omitted them.
 - **A `[[DEPLOYED:]]` region for the Process list itself.** Every Process list is agent-specific; only its closing steps were shared. Deploying the whole list would have meant no list at all.
+- **"Deployment configuration" as a content source.** Held until v1.4 as the source for `LanguagePatterns` and `CustomConstraints`. It described no mechanism, had no specification behind it, and was never implemented — the `Specified in` column carried an em-dash for both rows, which is this document admitting in its own table that nobody had written the thing down. A source that exists only as a phrase in a table is worse than an acknowledged gap: the closed-set rule forced every harness to satisfy it with empty declarations, so the fiction propagated into four harness files and every deployed agent. §2.5.1 now requires a named, implemented generator.
+- **A per-agent `LanguagePatterns` region in MOSAIC's own sources.** Considered when reclassifying it as an injection in v1.4, on the precedent of `CodebaseContext`, which is declared empty in thirty-seven sources. Rejected: `CodebaseContext` describes a codebase every project has, while language patterns are meaningful only to a project that has settled on a language and wants its agents constrained by it. Declaring it everywhere would ship fifty-odd empty regions and `TODO.md` lines to make one project's case marginally easier. It stays catalogued and undeclared (§6.1).
 - **A separate `ArtifactProvenance` canonical slot.** Held slot 3 in v1.0. Removed: the stamp is verified by the orchestrator, which makes it hard interop rather than an audit convenience, and a contract with two version numbers in two regions is a contract that can disagree with itself.
 
 ---
@@ -772,6 +789,6 @@ Changes this document makes to them:
 - **The tool's role enum says `worker`; every design document says `subagent`.** `domain.AgentRole` is `worker` / `orchestrator` / `utility`. The frontmatter field uses `subagent` (§3.2); the code should follow, or map explicitly at the boundary.
 - **Role is still inferred from path in the tool.** The frontmatter field is specified here but nothing reads it. Until it does, `role` is documentation, and a file moved between folders still changes what it is.
 - **`SourceFilesFormat.md` and this document overlap.** That file states the agent format from the tool's side, with no rationale, and has already drifted. It should be reduced to a pointer plus the skill and hook conventions it uniquely covers (§10.1).
-- **`InfrastructureAgentConcept.md` §3.1 shows `[[INJECTION:InfrastructureAgents]]`.** The vocabulary has it as `[[DEPLOYED:]]`, and the orchestrator source uses `[[DEPLOYED:]]`. The design document is the one that is wrong, and it is the document a reader would trust.
+- **`InfrastructureAgentConcept.md` §3.1 shows `[[INJECTION:InfrastructureAgents]]`.** The vocabulary has it as `[[DEPLOYED:]]`, and the orchestrator source uses `[[DEPLOYED:]]`. The design document is the one that is wrong, and it is the document a reader would trust. `Agents/Generic/Agents/Infrastructure/README.md` line 7 carries the same error and should be corrected with it.
 - **The orchestrator's `ErrorHandling` section extends far past its injection.** `[[INJECTION:ErrorHandlingExtension]]` closes around line 493 and the section continues to line 715 with the Core Orchestration Loop, which is neither error handling nor an extension of it. The current arrangement means a project injection lands in the middle of unrelated material.
 - **The `MosaicTest` agents were not surveyed.** Three agents under `Agents/Generic/Agents/MosaicTest/` exist to exercise the harness rather than to do work. Whether they conform to this schema, and whether they should, is unexamined.

@@ -163,8 +163,6 @@ The review artifact name is derived from the audit artifact being reviewed, usin
 
 The output artifact path is provided by the orchestrator in `output_artifacts` â€” you write to it, you don't decide the name.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
@@ -189,8 +187,6 @@ The output artifact path is provided by the orchestrator in `output_artifacts` â
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

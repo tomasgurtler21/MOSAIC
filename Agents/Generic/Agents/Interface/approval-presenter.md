@@ -146,8 +146,6 @@ user did not ask to have reworked.]
 - **Do not filter, merge, or drop objections.** Every objection the user raised is a numbered finding, including ones you might think are already covered by the review artifact, or already addressed in the text. Deciding an objection is redundant is deciding it is wrong.
 - **Replace, do not append, on a later round.** Each presentation is a fresh decision on a revised artifact; a record listing this round's objections alongside a previous round's closed ones would send the author back to work already done. Carry the round number forward so the history is visible.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 
 [[/SECTION:Capabilities]]
 ---
@@ -167,8 +165,6 @@ user did not ask to have reworked.]
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

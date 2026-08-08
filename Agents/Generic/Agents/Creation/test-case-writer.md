@@ -95,8 +95,6 @@ You do not add scenarios. If, while writing, you conceive of a case the model do
 
 In revision mode, preserve test cases the findings do not concern. Rewriting conforming test cases churns identifiers that the downstream system and prior review rounds already reference.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:TestCaseFormatSpecification]]
 [[/INJECTION:TestCaseFormatSpecification]]
 
@@ -120,8 +118,6 @@ In revision mode, preserve test cases the findings do not concern. Rewriting con
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

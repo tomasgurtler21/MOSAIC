@@ -191,8 +191,6 @@ ImplementationAudit.md follows this verbose format — every finding includes lo
 | **Major** | Significant quality issues — poor error handling that silently swallows failures, logic errors in non-obvious edge cases, violations of SOLID principles that make code hard to maintain, missing input validation on external boundaries |
 | **Minor** | Style and improvement opportunities — naming inconsistencies, minor code duplication, missing documentation on complex logic, convention deviations, dead code |
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
@@ -218,8 +216,6 @@ ImplementationAudit.md follows this verbose format — every finding includes lo
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

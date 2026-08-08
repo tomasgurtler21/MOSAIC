@@ -1,0 +1,16 @@
+schema_version: "1"
+id: resolution-bundle
+version: 1.0.0
+description: A bundle for testing variant resolution rules — default, override, reuses, unsupported, missing.
+variants:
+  claude-code:
+    supported: true
+    files:
+      - source: adapter.py
+        target: adapter.py
+    registration: []
+  legacy-harness:
+    supported: true
+    reuses: claude-code
+  disabled-harness:
+    supported: false

@@ -28,37 +28,34 @@ func init() {
 		"ExecutionPhilosophy",
 	}
 
-	// CanonicalDeployed lists the eleven tool-managed boundary names, a closed set.
+	// CanonicalDeployed lists the nine tool-managed boundary names, a closed set.
 	// Every name here must be declared with [[DEPLOYED:]] in any document that uses it.
-	// ArtifactProvenance is removed; AuthorityHierarchy, ClosingProcedure,
-	// ProtocolConstraints, ErrorHandlingCommon, and ExecutionPhilosophyCommon are added.
+	// ArtifactProvenance, LanguagePatterns, and CustomConstraints are removed;
+	// AuthorityHierarchy, ClosingProcedure, ProtocolConstraints, ErrorHandlingCommon,
+	// and ExecutionPhilosophyCommon are added.
 	CanonicalDeployed = []string{
 		"CommunicationProtocol",
 		"AuthorityHierarchy",
 		"ClosingProcedure",
 		"AvailableWorkflows",
 		"InfrastructureAgents",
-		"LanguagePatterns",
 		"ProtocolConstraints",
 		"HarnessConstraints",
-		"CustomConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
 	}
 
 	// DeployedParent maps each tool-managed boundary name to its required parent section.
 	// An entry whose value is "" means the boundary must appear at body top level
-	// (for example, CommunicationProtocol). Eleven entries, mirroring boundary_constants.py.
+	// (for example, CommunicationProtocol). Nine entries, mirroring boundary_constants.py.
 	DeployedParent = map[string]string{
 		"CommunicationProtocol":     "", // top level — must not be nested inside any section
 		"AuthorityHierarchy":        "Identity",
 		"ClosingProcedure":          "Identity",
 		"AvailableWorkflows":        "Identity",
 		"InfrastructureAgents":      "Identity",
-		"LanguagePatterns":          "Capabilities",
 		"ProtocolConstraints":       "Constraints",
 		"HarnessConstraints":        "Constraints",
-		"CustomConstraints":         "Constraints",
 		"ErrorHandlingCommon":       "ErrorHandling",
 		"ExecutionPhilosophyCommon": "ExecutionPhilosophy",
 	}
@@ -67,11 +64,13 @@ func init() {
 	// mirroring boundary_constants.py. This is an advisory table only: injection names
 	// are open, and an unlisted name is preserved like any other and is never flagged.
 	// An entry whose value is "" means the injection usually appears at body top level.
-	// ArtifactProvenanceExtension is removed; ProtocolExtension is added.
+	// ArtifactProvenanceExtension and CustomConstraints are removed; ProtocolExtension
+	// and LanguagePatterns are added — LanguagePatterns moved here from CanonicalDeployed.
 	InjectionParent = map[string]string{
 		"ProtocolExtension":      "", // top level
 		"IdentityExtension":      "Identity",
 		"CodebaseContext":        "Capabilities",
+		"LanguagePatterns":       "Capabilities", // moved from CanonicalDeployed
 		"OutputArtifactTemplate": "Capabilities",
 		"SeverityThresholds":     "Capabilities",
 		"SeverityDefinitions":    "Capabilities",

@@ -193,14 +193,19 @@ place user-authored content inside them; it will be overwritten.
 | `ClosingProcedure` | `Identity` | Bundle |
 | `AvailableWorkflows` | `Identity` | Assembled from selected workflows |
 | `InfrastructureAgents` | `Identity` | Assembled from selected declarations |
-| `LanguagePatterns` | `Capabilities` | Deployment configuration |
 | `ProtocolConstraints` | `Constraints` | Bundle |
 | `HarnessConstraints` | `Constraints` | Selected harness module |
-| `CustomConstraints` | `Constraints` | Deployment configuration |
 | `ErrorHandlingCommon` | `ErrorHandling` | Bundle |
 | `ExecutionPhilosophyCommon` | `ExecutionPhilosophy` | Bundle |
 
 "Bundle" means `Agents/Generic/DeployedSections.md`.
+
+Nine names, and every one of them names a generator that exists. A name with
+nothing to fill it does not belong here — see `AgentTemplateArchitecture.md`
+§2.5.1. `LanguagePatterns` and `CustomConstraints` were listed here until
+2026-08-08 with the source "Deployment configuration", which was never a real
+mechanism; `LanguagePatterns` is now an injection name and `CustomConstraints`
+no longer exists.
 
 > **Not yet read by the tool.** The five bundle-sourced names above are
 > specified but the deployment tool does not read the bundle. Until it does,
@@ -212,7 +217,7 @@ place user-authored content inside them; it will be overwritten.
 |------|-------|-----------|
 | Contract | `CommunicationProtocol` | Error |
 | Conduct | `AuthorityHierarchy`, `ClosingProcedure`, `ProtocolConstraints`, `ErrorHandlingCommon`, `ExecutionPhilosophyCommon` | Warning |
-| Deployment | `LanguagePatterns`, `HarnessConstraints`, `CustomConstraints`, `AvailableWorkflows`, `InfrastructureAgents` | Silent |
+| Deployment | `HarnessConstraints`, `AvailableWorkflows`, `InfrastructureAgents` | Silent |
 
 A region *present* with no content source for the file's role is always an error.
 
@@ -223,20 +228,27 @@ byte-identically on every update, **whatever they are named**. On first deploy
 they are left empty and listed in the `TODO.md` checklist. No injection is ever
 required to be filled.
 
-The names below are the ones MOSAIC's own agents carry and ships TODO guidance
-for. They are a **suggestion, not an allowlist** — an unlisted name is valid and
-preserved like any other.
+The names below are the ones MOSAIC ships TODO guidance for. They are a
+**suggestion, not an allowlist** — an unlisted name is valid and preserved like
+any other.
 
 | Name | Usual parent |
 |------|--------------|
 | `IdentityExtension` | `Identity` |
 | `ProtocolExtension` | Body top level (sibling of `CommunicationProtocol`) |
 | `CodebaseContext` | `Capabilities` |
+| `LanguagePatterns` | `Capabilities` |
 | `OutputArtifactTemplate` | `Capabilities` |
 | `SeverityThresholds` | `Capabilities` |
 | `SeverityDefinitions` | `Capabilities` |
 | `ErrorHandlingExtension` | `ErrorHandling` |
 | `ContextLimits` | `ExecutionPhilosophy` |
+
+Most of these are declared empty in MOSAIC's own generic sources so a project
+can see the slot exists. `LanguagePatterns` is the exception: it is catalogued
+but **not declared anywhere in `Agents/Generic/`**, because a language pattern
+means nothing until a project has a language. A project that wants it adds the
+region to its own sources.
 
 `ArtifactProvenanceExtension` is retired: the stamp it extended folded into the
 orchestration contract. A file still carrying it is stale, not invalid, and its

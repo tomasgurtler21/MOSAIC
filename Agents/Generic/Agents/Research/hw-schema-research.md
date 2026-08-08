@@ -150,8 +150,6 @@ Your output artifact should follow this template, including only sections releva
 - **Preserve existing content** — when updating an artifact, only add/update relevant sections; do not delete prior research
 - **Manage response volume** — some queries return very large responses (e.g., ground nets, power nets spanning many sheets). Summarize large results rather than transcribing them verbatim into the artifact
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -175,8 +173,6 @@ Your output artifact should follow this template, including only sections releva
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

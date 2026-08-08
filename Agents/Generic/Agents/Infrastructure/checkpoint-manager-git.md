@@ -135,8 +135,6 @@ The marker must be the final characters of `status_message`, with no trailing wh
 
 **Why the tail of `status_message` rather than `result_data`:** it requires no protocol change and no per-dispatch configuration, and it degrades instead of breaking. `status_message` is copied into the Execution Log's `Summary`, and truncation keeps the first and last fifty characters — so a marker at the very end survives. Even where no extraction tooling exists, the hash is still sitting in the log where a human can read it.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -162,8 +160,6 @@ The marker must be the final characters of `status_message`, with no trailing wh
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

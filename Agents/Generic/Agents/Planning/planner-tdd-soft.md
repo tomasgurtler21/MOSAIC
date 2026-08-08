@@ -425,8 +425,6 @@ This template mirrors the Stage-{N}/Plan.md structure with checkboxes. Adapt sec
 <!-- ONLY for handoff context a successor agent needs AND that isn't stored elsewhere. Examples: blocked reasons with resolution hints, partial completion instructions (what to continue, discovered edge cases). Review/fix cycles are normal workflow - do NOT document them here. Leave empty unless handoff required. -->
 ```
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -467,8 +465,6 @@ When called back for replanning (via COMPLETED_NEEDS_ACTION or explicit callback
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

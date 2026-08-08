@@ -221,8 +221,6 @@ For a plan with S stages, you create 1 + 2S files.
 
 **Stage Numbering:** Always use consecutive whole numbers (1, 2, 3).
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -249,8 +247,6 @@ For a plan with S stages, you create 1 + 2S files.
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

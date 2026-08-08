@@ -74,8 +74,6 @@ You are the **BuildReview** agent in a multi-agent orchestration system.
 - **Import before compile:** Source files on the orchestration filesystem are NOT automatically available in the build system — always perform the import step
 - **Dependency order matters:** Some platforms require specific compilation sequences — respect compilation order manifests
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -97,8 +95,6 @@ You are the **BuildReview** agent in a multi-agent orchestration system.
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

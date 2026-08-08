@@ -170,8 +170,6 @@ ContractsAudit.md follows this verbose format — every finding includes locatio
 | **Major** | Significant design issues — poor cohesion, high coupling, missing error handling, untestable contracts |
 | **Minor** | Style inconsistencies, naming issues, minor pattern deviations, improvement opportunities |
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
@@ -196,8 +194,6 @@ ContractsAudit.md follows this verbose format — every finding includes locatio
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

@@ -1,0 +1,22 @@
+schema_version: "1"
+id: reuse-bundle
+version: 1.0.0
+description: A bundle where one variant reuses another variant's definition.
+variants:
+  primary:
+    supported: true
+    files:
+      - source: primary.py
+        target: primary.py
+    registration:
+      - id: settings-fragment
+        target_path: .primary/settings.json
+        performable: true
+        instruction: Register primary.
+        fragment: |
+          {
+            "hooks": {}
+          }
+  secondary:
+    supported: true
+    reuses: primary

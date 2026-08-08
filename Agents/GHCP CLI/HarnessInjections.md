@@ -1,5 +1,5 @@
 ---
-version: "1.2.0"
+version: "1.3.0"
 harness: ghcp-cli
 ---
 
@@ -9,15 +9,11 @@ harness: ghcp-cli
 **Parallel Tool Calls:** Issue multiple independent tool calls in a single response whenever possible. Sequential tool calls are only permitted when a later call depends on the result of an earlier one. This minimises inference API calls to improve speed and reduce cost.
 [[/DEPLOYED:HarnessConstraints]]
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
-
 ---
 
 ## Design Rationale
 
 - **HarnessConstraints:** GHCP CLI does not automatically encourage parallel tool calls. The constraint is injected at harness level so every subagent deployed to GHCP CLI receives it without requiring per-agent duplication.
-- **LanguagePatterns:** Language-specific coding patterns are agent-domain concerns, not harness concerns. No harness-level content is appropriate here regardless of harness. Declared empty to satisfy the canonical injection list.
 - **ProtocolExtension, ErrorHandlingExtension, ContextLimits:** Not declared in this harness's yaml injections block. Removed at harness level — these are agent-level concerns.
 
 ---
@@ -27,3 +23,4 @@ harness: ghcp-cli
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.2.0 | 2026-07-31 | MOSAIC | Reformat to workflows-style boundary-tag format; content preserved verbatim from ghcp-cli.yaml injections block |
+| 1.3.0 | 2026-08-08 | MOSAIC | Remove the LanguagePatterns block: it is now a project-authored injection name rather than a tool-managed deployed region, so this harness no longer declares it |

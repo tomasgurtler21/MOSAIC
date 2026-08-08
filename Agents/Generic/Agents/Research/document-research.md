@@ -156,8 +156,6 @@ successor invocation to see the frontier as it was left.]
 - **Keep the retrieval log current.** It is how a successor invocation knows what has already been asked and what came back empty, so the same dead-end queries are not repeated.
 - **Record unretrievable content as unretrievable.** A named gap in the dossier is actionable by the workflow. A silently omitted one is not.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:SourceLocatorConventions]]
@@ -184,8 +182,6 @@ successor invocation to see the frontier as it was left.]
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

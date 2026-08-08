@@ -212,17 +212,17 @@ func TestBody_Deployed_AbsentName_ReturnsFalse(t *testing.T) {
 }
 
 func TestBody_Deployed_FindsNodeAtAnyNestingDepth(t *testing.T) {
-	// LanguagePatterns is nested inside [[SECTION:Capabilities]]; Deployed() must find it
+	// ProtocolConstraints is nested inside [[SECTION:Constraints]]; Deployed() must find it
 	// regardless of nesting depth.
 	doc := parsedBoundaryFixture(t, "deployed-in-section.md")
 
-	node, ok := doc.Body().Deployed("LanguagePatterns")
+	node, ok := doc.Body().Deployed("ProtocolConstraints")
 
 	if !ok {
-		t.Fatal("Deployed(\"LanguagePatterns\") returned false for a deployed node nested inside a section")
+		t.Fatal("Deployed(\"ProtocolConstraints\") returned false for a deployed node nested inside a section")
 	}
-	if node.Name() != "LanguagePatterns" {
-		t.Errorf("Name: want %q, got %q", "LanguagePatterns", node.Name())
+	if node.Name() != "ProtocolConstraints" {
+		t.Errorf("Name: want %q, got %q", "ProtocolConstraints", node.Name())
 	}
 }
 
@@ -230,13 +230,13 @@ func TestBody_Deployed_NestedNode_ParentIsContainingSection(t *testing.T) {
 	// A deployed node nested inside a section must have that section as its Parent.
 	doc := parsedBoundaryFixture(t, "deployed-in-section.md")
 
-	deployed, ok := doc.Body().Deployed("LanguagePatterns")
+	deployed, ok := doc.Body().Deployed("ProtocolConstraints")
 	if !ok {
-		t.Fatal("Deployed(\"LanguagePatterns\") not found")
+		t.Fatal("Deployed(\"ProtocolConstraints\") not found")
 	}
-	section, ok := doc.Body().Section("Capabilities")
+	section, ok := doc.Body().Section("Constraints")
 	if !ok {
-		t.Fatal("Section(\"Capabilities\") not found")
+		t.Fatal("Section(\"Constraints\") not found")
 	}
 
 	parent := deployed.Parent()
@@ -263,8 +263,8 @@ func TestBody_Deployed_TopLevelNode_HasNilParent(t *testing.T) {
 
 func TestBody_DeployedRegions_ReturnsAllDeployedNodesInDocumentOrder(t *testing.T) {
 	// mixed-markers.md has two deployed regions in document order:
-	//   1. CommunicationProtocol (top level, before Capabilities section)
-	//   2. LanguagePatterns (nested inside Capabilities section)
+	//   1. CommunicationProtocol (top level, before Constraints section)
+	//   2. ProtocolConstraints (nested inside Constraints section)
 	doc := parsedBoundaryFixture(t, "mixed-markers.md")
 
 	regions := doc.Body().DeployedRegions()
@@ -275,8 +275,8 @@ func TestBody_DeployedRegions_ReturnsAllDeployedNodesInDocumentOrder(t *testing.
 	if regions[0].Name() != "CommunicationProtocol" {
 		t.Errorf("regions[0].Name: want %q, got %q", "CommunicationProtocol", regions[0].Name())
 	}
-	if regions[1].Name() != "LanguagePatterns" {
-		t.Errorf("regions[1].Name: want %q, got %q", "LanguagePatterns", regions[1].Name())
+	if regions[1].Name() != "ProtocolConstraints" {
+		t.Errorf("regions[1].Name: want %q, got %q", "ProtocolConstraints", regions[1].Name())
 	}
 }
 
@@ -316,8 +316,8 @@ func TestBody_Injections_DoesNotReturnDeployedNodes(t *testing.T) {
 	if names["CommunicationProtocol"] {
 		t.Error("Injections() must not include the deployed node \"CommunicationProtocol\"")
 	}
-	if names["LanguagePatterns"] {
-		t.Error("Injections() must not include the deployed node \"LanguagePatterns\"")
+	if names["ProtocolConstraints"] {
+		t.Error("Injections() must not include the deployed node \"ProtocolConstraints\"")
 	}
 }
 
@@ -353,8 +353,8 @@ func TestBody_Regions_ReturnsInjectionAndDeployedNodesInterleavedInDocumentOrder
 	// mixed-markers.md layout (document order):
 	//   [[INJECTION:IdentityExtension]]  — inside [[SECTION:Identity]]
 	//   [[DEPLOYED:CommunicationProtocol]] — top level
-	//   [[DEPLOYED:LanguagePatterns]]    — inside [[SECTION:Capabilities]]
-	//   [[INJECTION:CodebaseContext]]    — inside [[SECTION:Capabilities]]
+	//   [[DEPLOYED:ProtocolConstraints]]    — inside [[SECTION:Constraints]]
+	//   [[INJECTION:CodebaseContext]]    — inside [[SECTION:Constraints]]
 	doc := parsedBoundaryFixture(t, "mixed-markers.md")
 
 	regions := doc.Body().Regions()
@@ -370,7 +370,7 @@ func TestBody_Regions_ReturnsInjectionAndDeployedNodesInterleavedInDocumentOrder
 	expected := []want{
 		{"IdentityExtension", docformat.NodeInjection},
 		{"CommunicationProtocol", docformat.NodeDeployed},
-		{"LanguagePatterns", docformat.NodeDeployed},
+		{"ProtocolConstraints", docformat.NodeDeployed},
 		{"CodebaseContext", docformat.NodeInjection},
 	}
 	for i, e := range expected {

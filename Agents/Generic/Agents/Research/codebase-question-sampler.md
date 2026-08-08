@@ -154,8 +154,6 @@ The typical format is:
 ### Agent-Specific Artifact Behavior
 - Read existing content in output artifacts to determine current numbering and format. Append new pairs — never overwrite existing content. Preserve the header structure and any existing VALID/INVALID markings from prior validation passes.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -179,8 +177,6 @@ The typical format is:
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

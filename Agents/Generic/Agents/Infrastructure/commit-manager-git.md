@@ -195,8 +195,6 @@ The marker must be the **final characters** of `status_message` — no trailing 
 
 Nothing needs one. The restore agent reads commit state from the branch and never from the Execution Log. A human choosing a rollback target chooses a checkpoint, not one of your commits. And the mapping from sequence number to hash is already in git, via the trailers you stamp. A checkpoint needs a reference in the log because it is invisible everywhere else; your commits are in the user's branch, which is the entire point of them.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -224,8 +222,6 @@ Nothing needs one. The restore agent reads commit state from the branch and neve
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

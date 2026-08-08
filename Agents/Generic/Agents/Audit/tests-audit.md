@@ -190,8 +190,6 @@ TestsAudit.md follows this verbose format — every finding includes location, e
 | **Major** | Significant quality gaps — weak assertions providing false confidence, missing error scenario coverage, tests coupled to implementation details (fragile), poor isolation with shared mutable state |
 | **Minor** | Style and improvement opportunities — naming inconsistencies, minor missing edge cases, code duplication in tests, documentation gaps |
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
@@ -217,8 +215,6 @@ TestsAudit.md follows this verbose format — every finding includes location, e
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

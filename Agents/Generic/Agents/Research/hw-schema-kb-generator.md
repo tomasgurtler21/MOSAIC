@@ -256,8 +256,6 @@ When creating or appending to KBFlags.md:
 - **Reasoning:** {why this correction is needed, based on your research}
 ```
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 
@@ -279,8 +277,6 @@ When creating or appending to KBFlags.md:
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

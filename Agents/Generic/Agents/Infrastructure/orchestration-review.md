@@ -186,8 +186,6 @@ The orchestrator receives the full text, and the Execution Log keeps the first a
 
 **Clean runs report cleanly and briefly** — *"Artifact consistent, routing matches workflow through Seq 30."* Silence is not an option, because "checked and found nothing" and "did not check" must be distinguishable in the log.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -213,8 +211,6 @@ The orchestrator receives the full text, and the Execution Log keeps the first a
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

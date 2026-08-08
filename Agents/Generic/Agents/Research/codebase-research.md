@@ -116,8 +116,6 @@ Your research artifact should follow this template:
 ### Agent-Specific Artifact Behavior
 - **Preserve existing content** - only add/update relevant sections, don't delete prior research
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -142,8 +140,6 @@ Your research artifact should follow this template:
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

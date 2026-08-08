@@ -15,7 +15,7 @@ import (
 // Populated in vocabulary.go init().
 var CanonicalOrder []string
 
-// CanonicalDeployed lists the tool-managed boundary names, a closed set of eleven.
+// CanonicalDeployed lists the tool-managed boundary names, a closed set of nine.
 // A name in this list must be declared with [[DEPLOYED:]] in any document that uses it.
 //
 // Populated in vocabulary.go init().
@@ -37,6 +37,11 @@ var ErrMarkerMismatch = errors.New("boundary name declared with the wrong marker
 // and cannot be filled.
 var ErrUnknownDeployedName = errors.New("unrecognised tool-managed boundary name")
 
+// ErrUnclassifiedDeployedName reports a canonical tool-managed name for which the
+// classifier holds no explicit case. Such a name has no registered generator and
+// must never be given a class by default.
+var ErrUnclassifiedDeployedName = errors.New("tool-managed boundary name has no registered generator")
+
 // ExpectedMarker returns the marker kind a canonical name must be declared with,
 // and whether the name is in the tool-managed registry.
 //
@@ -56,6 +61,8 @@ func ExpectedMarker(name string) (kind NodeKind, known bool) {
 // marker kind and name.
 //
 //   - A tool-managed name under NodeDeployed returns its class and a nil error.
+//   - A tool-managed name under NodeDeployed with no registered classifier case returns
+//     an error wrapping ErrUnclassifiedDeployedName.
 //   - A tool-managed name under NodeInjection returns an error wrapping ErrMarkerMismatch.
 //   - A name not in CanonicalDeployed under NodeDeployed returns an error wrapping
 //     ErrUnknownDeployedName — an unrecognised tool-managed name has no generator.
@@ -70,7 +77,7 @@ func ClassifyRegion(kind NodeKind, name string) (mosaic.InjectionClass, error) {
 			return "", fmt.Errorf("name %q is not a recognised tool-managed boundary name: %w", name, ErrUnknownDeployedName)
 		}
 		// Correctly declared tool-managed name — determine class by name.
-		return classifyDeployedName(name), nil
+		return classifyDeployedName(name)
 	}
 
 	// kind == NodeInjection (or NodeSection, but ClassifyRegion is not called for sections).
@@ -84,23 +91,25 @@ func ClassifyRegion(kind NodeKind, name string) (mosaic.InjectionClass, error) {
 }
 
 // classifyDeployedName returns the InjectionClass for a name that is in CanonicalDeployed.
-// The bundle branch is an explicit case list: a new tool-managed name falls to InjectionHarness
-// and must be classified deliberately to avoid silently inheriting bundle behaviour.
-func classifyDeployedName(name string) mosaic.InjectionClass {
+// Every case is explicit: a canonical name with no registered case returns an error
+// wrapping ErrUnclassifiedDeployedName rather than silently inheriting a default class.
+func classifyDeployedName(name string) (mosaic.InjectionClass, error) {
 	switch name {
 	case "CommunicationProtocol":
-		return mosaic.InjectionProtocol
+		return mosaic.InjectionProtocol, nil
 	case "AvailableWorkflows":
-		return mosaic.InjectionWorkflow
+		return mosaic.InjectionWorkflow, nil
 	case "InfrastructureAgents":
-		return mosaic.InjectionInfrastructure
+		return mosaic.InjectionInfrastructure, nil
 	case "AuthorityHierarchy", "ClosingProcedure", "ProtocolConstraints",
 		"ErrorHandlingCommon", "ExecutionPhilosophyCommon":
-		return mosaic.InjectionBundle
+		return mosaic.InjectionBundle, nil
+	case "HarnessConstraints":
+		return mosaic.InjectionHarness, nil
 	default:
-		// LanguagePatterns, HarnessConstraints, CustomConstraints, and any future
-		// tool-managed harness names.
-		return mosaic.InjectionHarness
+		// A canonical tool-managed name with no registered generator. This must never
+		// silently answer a class by default.
+		return "", fmt.Errorf("name %q has no registered classifier case: %w", name, ErrUnclassifiedDeployedName)
 	}
 }
 

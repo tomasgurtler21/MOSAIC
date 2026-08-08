@@ -20,9 +20,10 @@ package docformat_test
 // Coverage (T2.4 — exact table pinning for cross-copy drift detection):
 //   - CanonicalSections exact 6-entry sequence.
 //   - CanonicalOrder exact 7-slot sequence (ArtifactProvenance absent).
-//   - CanonicalDeployed exact 11-name sequence.
-//   - DeployedParent exact 11-entry map (values are the primary drift signal).
-//   - InjectionParent exact 8-entry advisory map.
+//   - CanonicalDeployed exact 9-name sequence (LanguagePatterns and CustomConstraints
+//     removed from the tool-managed vocabulary).
+//   - DeployedParent exact 9-entry map (values are the primary drift signal).
+//   - InjectionParent exact 9-entry advisory map (gains LanguagePatterns under Capabilities).
 
 import (
 	"errors"
@@ -291,8 +292,11 @@ func TestVocabulary_CanonicalOrder_ExactSevenSlotSequence(t *testing.T) {
 	}
 }
 
-func TestVocabulary_CanonicalDeployed_ExactElevenNameSequence(t *testing.T) {
-	// Authoritative 11-name closed set. Order matters for cross-copy comparison.
+func TestVocabulary_CanonicalDeployed_ExactNineNameSequence(t *testing.T) {
+	// Authoritative 9-name closed set. Order matters for cross-copy comparison.
+	// LanguagePatterns and CustomConstraints are removed from the tool-managed
+	// vocabulary; LanguagePatterns moves to the advisory InjectionParent catalogue,
+	// CustomConstraints is deleted outright.
 	// Any deviation is a drift from boundary_constants.py.
 	want := []string{
 		"CommunicationProtocol",
@@ -300,10 +304,8 @@ func TestVocabulary_CanonicalDeployed_ExactElevenNameSequence(t *testing.T) {
 		"ClosingProcedure",
 		"AvailableWorkflows",
 		"InfrastructureAgents",
-		"LanguagePatterns",
 		"ProtocolConstraints",
 		"HarnessConstraints",
-		"CustomConstraints",
 		"ErrorHandlingCommon",
 		"ExecutionPhilosophyCommon",
 	}
@@ -318,9 +320,10 @@ func TestVocabulary_CanonicalDeployed_ExactElevenNameSequence(t *testing.T) {
 	}
 }
 
-func TestVocabulary_DeployedParent_ExactElevenEntryMap(t *testing.T) {
-	// Authoritative 11-entry parent map. Values are the primary drift signal: a wrong
+func TestVocabulary_DeployedParent_ExactNineEntryMap(t *testing.T) {
+	// Authoritative 9-entry parent map. Values are the primary drift signal: a wrong
 	// parent silently misroutes validation without any other symptom.
+	// LanguagePatterns and CustomConstraints are removed.
 	// Any deviation is a drift from boundary_constants.py (where "" in Go is None in Python).
 	want := map[string]string{
 		"CommunicationProtocol":     "", // top level
@@ -328,10 +331,8 @@ func TestVocabulary_DeployedParent_ExactElevenEntryMap(t *testing.T) {
 		"ClosingProcedure":          "Identity",
 		"AvailableWorkflows":        "Identity",
 		"InfrastructureAgents":      "Identity",
-		"LanguagePatterns":          "Capabilities",
 		"ProtocolConstraints":       "Constraints",
 		"HarnessConstraints":        "Constraints",
-		"CustomConstraints":         "Constraints",
 		"ErrorHandlingCommon":       "ErrorHandling",
 		"ExecutionPhilosophyCommon": "ExecutionPhilosophy",
 	}
@@ -358,14 +359,17 @@ func TestVocabulary_DeployedParent_ExactElevenEntryMap(t *testing.T) {
 	}
 }
 
-func TestVocabulary_InjectionParent_ExactEightEntryAdvisoryMap(t *testing.T) {
-	// Authoritative 8-entry advisory map. InjectionParent is no longer an allowlist;
+func TestVocabulary_InjectionParent_ExactNineEntryAdvisoryMap(t *testing.T) {
+	// Authoritative 9-entry advisory map. InjectionParent is no longer an allowlist;
 	// an absent name is preserved, never flagged. The values are the drift signal.
+	// LanguagePatterns is a new entry: it moved from the tool-managed CanonicalDeployed
+	// set to this advisory catalogue, keeping its Capabilities parent.
 	// Any deviation is a drift from boundary_constants.py (where "" in Go is None in Python).
 	want := map[string]string{
 		"ProtocolExtension":      "", // top level — added in Stage 2
 		"IdentityExtension":      "Identity",
 		"CodebaseContext":        "Capabilities",
+		"LanguagePatterns":       "Capabilities", // moved from CanonicalDeployed
 		"OutputArtifactTemplate": "Capabilities",
 		"SeverityThresholds":     "Capabilities",
 		"SeverityDefinitions":    "Capabilities",
@@ -427,5 +431,73 @@ func TestVocabulary_NoStaleArtifactProvenanceInAnyTable(t *testing.T) {
 				t.Errorf("InjectionParent contains stale name %q", name)
 			}
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Vocabulary correction — LanguagePatterns re-catalogued, CustomConstraints deleted
+// ---------------------------------------------------------------------------
+
+func TestVocabulary_InjectionParent_ContainsLanguagePatternsWithCapabilitiesParent(t *testing.T) {
+	// Positive assertion, not just a re-pinned negative: LanguagePatterns must be
+	// present in the advisory InjectionParent catalogue with parent Capabilities.
+	// An absence-only assertion elsewhere would still pass if the name had been
+	// dropped entirely instead of re-catalogued.
+	got := docformat.InjectionParent
+	if got == nil {
+		t.Fatal("InjectionParent is nil")
+	}
+	parent, ok := got["LanguagePatterns"]
+	if !ok {
+		t.Fatal("InjectionParent must contain \"LanguagePatterns\" — it moved from the tool-managed " +
+			"CanonicalDeployed set to the advisory injection catalogue")
+	}
+	if parent != "Capabilities" {
+		t.Errorf("InjectionParent[\"LanguagePatterns\"]: want %q, got %q", "Capabilities", parent)
+	}
+}
+
+func TestVocabulary_CanonicalDeployed_LanguagePatternsAndCustomConstraints_AreAbsent(t *testing.T) {
+	// Neither removed name may remain in the tool-managed closed set.
+	staleNames := []string{"LanguagePatterns", "CustomConstraints"}
+	for _, name := range staleNames {
+		for _, n := range docformat.CanonicalDeployed {
+			if n == name {
+				t.Errorf(
+					"CanonicalDeployed must not contain %q — it is removed from the "+
+						"nine-name tool-managed vocabulary", name,
+				)
+			}
+		}
+	}
+}
+
+func TestVocabulary_DeployedParent_LanguagePatternsAndCustomConstraints_AreAbsent(t *testing.T) {
+	// Neither removed name may keep a required-parent entry.
+	staleNames := []string{"LanguagePatterns", "CustomConstraints"}
+	got := docformat.DeployedParent
+	if got == nil {
+		t.Fatal("DeployedParent is nil")
+	}
+	for _, name := range staleNames {
+		if _, ok := got[name]; ok {
+			t.Errorf(
+				"DeployedParent must not contain %q — it is removed from the nine-name "+
+					"tool-managed vocabulary", name,
+			)
+		}
+	}
+}
+
+func TestVocabulary_InjectionParent_CustomConstraints_IsAbsent(t *testing.T) {
+	// CustomConstraints is deleted outright, not re-catalogued as an injection name —
+	// unlike LanguagePatterns, it must not appear in InjectionParent either.
+	got := docformat.InjectionParent
+	if got == nil {
+		t.Fatal("InjectionParent is nil")
+	}
+	if _, ok := got["CustomConstraints"]; ok {
+		t.Error("InjectionParent must not contain \"CustomConstraints\" — it is deleted outright, " +
+			"not re-catalogued as an advisory injection name")
 	}
 }

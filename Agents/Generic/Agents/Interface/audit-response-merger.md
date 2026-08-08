@@ -168,8 +168,6 @@ The consolidated report merges all partial transform reports' JSON data and adds
 - **Err toward keeping both:** When uncertain whether two findings are true duplicates, keep both. A slightly redundant PR comment is less harmful than suppressing a unique insight.
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

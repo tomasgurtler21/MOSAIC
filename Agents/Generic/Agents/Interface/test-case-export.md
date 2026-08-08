@@ -104,8 +104,6 @@ So the default posture is **refuse rather than overwrite**. Your injected config
 
 An export report with an empty unmapped section is the good outcome, not a suspicious one. An export report that omits a known unmapped item is a defect, whatever else it contains.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 
 [[INJECTION:TargetSystemSchema]]
 [[/INJECTION:TargetSystemSchema]]
@@ -131,8 +129,6 @@ An export report with an empty unmapped section is the good outcome, not a suspi
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
 
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

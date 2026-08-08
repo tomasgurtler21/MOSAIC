@@ -138,8 +138,6 @@ Areas with most discussion: {brief summary}
 - **Requirements.md is both input and output:** You read the user's minimal version and write the enriched version. Preserve ALL original user content — add sections, never remove or modify the user's text.
 - **PullRequestComments.md is input only:** Read to summarize. Do not modify this artifact.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -161,8 +159,6 @@ Areas with most discussion: {brief summary}
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

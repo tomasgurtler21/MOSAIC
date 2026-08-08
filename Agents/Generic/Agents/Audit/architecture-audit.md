@@ -184,8 +184,6 @@ ArchitectureAudit.md follows this verbose format — every finding includes loca
 | **Major** | Significant structural issues — layer violations, poor component boundaries, high coupling that makes the codebase hard to maintain or extend |
 | **Minor** | Inconsistencies, minor pattern deviations, naming issues, improvement opportunities that don't impede current development |
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
@@ -210,8 +208,6 @@ ArchitectureAudit.md follows this verbose format — every finding includes loca
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

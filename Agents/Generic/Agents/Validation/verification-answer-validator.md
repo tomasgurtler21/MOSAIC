@@ -134,8 +134,6 @@ When `human_in_the_loop: true`:
 - **Input artifacts** (questions, expected answers, attempted answers): Read-only — never modify them. These are owned by other agents.
 - **Output artifact** (verification report): Write in full. Create it fresh each run with the complete report. If it already exists from a previous run, overwrite it.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -158,8 +156,6 @@ When `human_in_the_loop: true`:
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

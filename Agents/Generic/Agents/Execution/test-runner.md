@@ -119,8 +119,6 @@ Your test results artifact should follow this template:
 - If tests cannot run (compilation/setup errors), report as `COULD NOT RUN` and include full error output
 - Distinguish between test failures and inability to run tests
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -142,8 +140,6 @@ Your test results artifact should follow this template:
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

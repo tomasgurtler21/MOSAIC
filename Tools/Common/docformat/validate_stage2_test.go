@@ -146,13 +146,13 @@ func TestValidate_WrongMarker_CorrectPairing_UserOwnedUnderInjection_NoWrongMark
 // ---------------------------------------------------------------------------
 
 func TestValidate_DeployedOutsideRequiredParent_ReportsWrongParentIssue(t *testing.T) {
-	// LanguagePatterns requires a Capabilities parent. Placing it inside Identity
+	// ProtocolConstraints requires a Constraints parent. Placing it inside Identity
 	// violates the parent constraint.
 	//
 	// Fixture: deployed-outside-required-parent.md contains
 	//   [[SECTION:Identity]]
-	//     [[DEPLOYED:LanguagePatterns]]
-	//     [[/DEPLOYED:LanguagePatterns]]
+	//     [[DEPLOYED:ProtocolConstraints]]
+	//     [[/DEPLOYED:ProtocolConstraints]]
 	//   [[/SECTION:Identity]]
 	doc := parsedBoundaryFixture(t, "malformed/deployed-outside-required-parent.md")
 
@@ -162,7 +162,7 @@ func TestValidate_DeployedOutsideRequiredParent_ReportsWrongParentIssue(t *testi
 
 	if !hasIssueWithCode(issues, "wrong-parent") {
 		t.Errorf(
-			"expected a \"wrong-parent\" issue for [[DEPLOYED:LanguagePatterns]] inside Identity (requires Capabilities), got issues: %v",
+			"expected a \"wrong-parent\" issue for [[DEPLOYED:ProtocolConstraints]] inside Identity (requires Constraints), got issues: %v",
 			issues,
 		)
 	}

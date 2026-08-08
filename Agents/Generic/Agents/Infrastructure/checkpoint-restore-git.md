@@ -201,8 +201,6 @@ This is a hard refusal implemented by you, deliberately not a consequence of ign
 
 Nothing is rewound. Your invocation produces an ordinary Execution Log row like any other, the sequence counter advances and is never decremented, and no prior row is altered. `current_state` is not rewound to the checkpointed row's phase and stage — doing so would leave it disagreeing with the last log row, which the recovery procedure resolves by trusting the log, silently undoing the rewind on the next restart. The run's files move backward; its history does not.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -231,8 +229,6 @@ Nothing is rewound. Your invocation produces an ordinary Execution Log row like 
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

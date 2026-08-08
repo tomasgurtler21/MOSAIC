@@ -2,8 +2,8 @@
 name: test-agent
 ---
 
-[[SECTION:Capabilities]]
-Some capabilities text.
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
-[[/SECTION:Capabilities]]
+[[SECTION:Constraints]]
+Some constraints text.
+[[DEPLOYED:ProtocolConstraints]]
+[[/DEPLOYED:ProtocolConstraints]]
+[[/SECTION:Constraints]]

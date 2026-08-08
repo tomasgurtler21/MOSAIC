@@ -192,8 +192,6 @@ Answer each question below. Use any available knowledge base documentation as a 
 - **VerificationAttemptedAnswers.md:** Created after validation is complete. Contains only VALID questions grouped into batches. This is the final output that feeds the answering agent — the artifact format is self-describing so no special orchestrator task instructions are needed.
 - **Preserve existing valid pairs** when adding new ones — append, don't overwrite.
 
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
 [[INJECTION:CodebaseContext]]
 [[/INJECTION:CodebaseContext]]
 [[INJECTION:OutputArtifactTemplate]]
@@ -215,8 +213,6 @@ Answer each question below. Use any available knowledge base documentation as a 
 
 [[DEPLOYED:HarnessConstraints]]
 [[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---
