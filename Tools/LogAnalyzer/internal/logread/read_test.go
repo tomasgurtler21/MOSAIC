@@ -1112,6 +1112,485 @@ func TestReader_Read_VisitorError_PropagatedUnchanged(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// usage_record decoding — record identifier, model, usage
+// ---------------------------------------------------------------------------
+
+func TestReader_Read_UsageRecord_DecodesAsRecognisedEvent_NoFinding(t *testing.T) {
+	content := `{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"abc-123","run_id":"20260808T062735Z-770f","agent_instance_id":"contracts-designer#13","record_id":"msg_01ABCdef","record_index":7,"source":"agent_transcript","model":"claude-opus-4-6","service_tier":"standard","token_usage":{"input_tokens":100,"output_tokens":50,"cache_read_tokens":10,"cache_creation_tokens":5}}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, findings, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("well-formed usage_record must produce no finding, got: %v", findings)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != domain.EventUsageRecord {
+		t.Errorf("Type = %q, want %q", events[0].Type, domain.EventUsageRecord)
+	}
+	if events[0].UsageRecord == nil {
+		t.Fatal("usage_record event must have non-nil UsageRecord field block")
+	}
+}
+
+func TestReader_Read_UsageRecord_RecordIdentifierPopulated(t *testing.T) {
+	content := `{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"abc-123","run_id":"20260808T062735Z-770f","agent_instance_id":"contracts-designer#13","record_id":"msg_01ABCdef","record_index":7,"source":"agent_transcript","model":"claude-opus-4-6","token_usage":{"input_tokens":1}}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, _, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 1 || events[0].UsageRecord == nil {
+		t.Fatal("expected 1 usage_record event")
+	}
+	if events[0].UsageRecord.RecordID != "msg_01ABCdef" {
+		t.Errorf("RecordID = %q, want %q", events[0].UsageRecord.RecordID, "msg_01ABCdef")
+	}
+	if events[0].UsageRecord.AgentInstanceID != "contracts-designer#13" {
+		t.Errorf("AgentInstanceID = %q, want %q", events[0].UsageRecord.AgentInstanceID, "contracts-designer#13")
+	}
+}
+
+func TestReader_Read_UsageRecord_ModelPopulated(t *testing.T) {
+	content := `{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"orchestrator_transcript","model":"claude-opus-4-6"}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, _, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 1 || events[0].UsageRecord == nil {
+		t.Fatal("expected 1 usage_record event")
+	}
+	if events[0].UsageRecord.Model != "claude-opus-4-6" {
+		t.Errorf("Model = %q, want %q", events[0].UsageRecord.Model, "claude-opus-4-6")
+	}
+	if events[0].UsageRecord.Source != "orchestrator_transcript" {
+		t.Errorf("Source = %q, want %q", events[0].UsageRecord.Source, "orchestrator_transcript")
+	}
+}
+
+func TestReader_Read_UsageRecord_UsagePopulated(t *testing.T) {
+	content := `{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"agent_transcript","token_usage":{"input_tokens":100,"output_tokens":50,"cache_read_tokens":10,"cache_creation_tokens":5}}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, _, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 1 || events[0].UsageRecord == nil {
+		t.Fatal("expected 1 usage_record event")
+	}
+	fields := events[0].UsageRecord
+	if !fields.HasUsage {
+		t.Error("HasUsage must be true when token_usage key is present")
+	}
+	if v, ok := fields.Usage.Input.Value(); !ok || v != 100 {
+		t.Errorf("Usage.Input = (%d, %v), want (100, true)", v, ok)
+	}
+	if v, ok := fields.Usage.Output.Value(); !ok || v != 50 {
+		t.Errorf("Usage.Output = (%d, %v), want (50, true)", v, ok)
+	}
+	if v, ok := fields.Usage.CacheRead.Value(); !ok || v != 10 {
+		t.Errorf("Usage.CacheRead = (%d, %v), want (10, true)", v, ok)
+	}
+	if v, ok := fields.Usage.CacheCreation.Value(); !ok || v != 5 {
+		t.Errorf("Usage.CacheCreation = (%d, %v), want (5, true)", v, ok)
+	}
+}
+
+func TestReader_Read_UsageRecord_HasUsage_False_WhenTokenUsageAbsent(t *testing.T) {
+	content := `{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"agent_transcript"}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, _, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 1 || events[0].UsageRecord == nil {
+		t.Fatal("expected 1 usage_record event")
+	}
+	if events[0].UsageRecord.HasUsage {
+		t.Error("HasUsage must be false when token_usage key is absent entirely")
+	}
+	if !events[0].UsageRecord.Usage.IsEmpty() {
+		t.Error("Usage must be all-absent when token_usage key is absent")
+	}
+}
+
+func TestReader_Read_UsageRecord_RecordIndexZero_SurvivesAsPresent(t *testing.T) {
+	// record_index 0 must be distinguishable from record_index absent — 0 must
+	// survive, not be dropped as a zero value.
+	content := `{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"agent_transcript"}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, _, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 1 || events[0].UsageRecord == nil {
+		t.Fatal("expected 1 usage_record event")
+	}
+	if !events[0].UsageRecord.HasRecordIndex {
+		t.Error("HasRecordIndex must be true when record_index key is present, even when its value is 0")
+	}
+	if events[0].UsageRecord.RecordIndex != 0 {
+		t.Errorf("RecordIndex = %d, want 0", events[0].UsageRecord.RecordIndex)
+	}
+}
+
+func TestReader_Read_UsageRecord_RecordIndexAbsent_HasRecordIndexFalse(t *testing.T) {
+	content := `{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","source":"agent_transcript"}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, _, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 1 || events[0].UsageRecord == nil {
+		t.Fatal("expected 1 usage_record event")
+	}
+	if events[0].UsageRecord.HasRecordIndex {
+		t.Error("HasRecordIndex must be false when record_index key is absent")
+	}
+}
+
+func TestReader_Read_UsageRecord_OtherFieldBlocksAllNil(t *testing.T) {
+	content := `{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"agent_transcript"}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, _, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	ev := events[0]
+	if ev.InvocationStart != nil {
+		t.Error("InvocationStart must be nil on a usage_record event")
+	}
+	if ev.InvocationEnd != nil {
+		t.Error("InvocationEnd must be nil on a usage_record event")
+	}
+	if ev.Turn != nil {
+		t.Error("Turn must be nil on a usage_record event")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// usage_record — service tier presence/absence
+// ---------------------------------------------------------------------------
+
+func TestReader_Read_UsageRecord_ServiceTier_PresentPreserved(t *testing.T) {
+	content := `{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"agent_transcript","service_tier":"standard"}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, _, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 1 || events[0].UsageRecord == nil {
+		t.Fatal("expected 1 usage_record event")
+	}
+	if events[0].UsageRecord.ServiceTier != "standard" {
+		t.Errorf("ServiceTier = %q, want %q", events[0].UsageRecord.ServiceTier, "standard")
+	}
+}
+
+func TestReader_Read_UsageRecord_ServiceTier_AbsentIsEmptyString(t *testing.T) {
+	content := `{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"agent_transcript"}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, findings, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("absent service_tier must produce no finding, got: %v", findings)
+	}
+	if len(events) != 1 || events[0].UsageRecord == nil {
+		t.Fatal("expected 1 usage_record event")
+	}
+	if events[0].UsageRecord.ServiceTier != "" {
+		t.Errorf("ServiceTier = %q, want \"\" when absent", events[0].UsageRecord.ServiceTier)
+	}
+}
+
+func TestReader_Read_UsageRecord_ServiceTier_DistinguishesTwoRecords(t *testing.T) {
+	// One record with a service tier, one without — absence and presence must not
+	// bleed between events decoded from the same file.
+	content := strings.Join([]string{
+		`{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"agent_transcript","service_tier":"priority"}`,
+		`{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:36.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_2","record_index":1,"source":"agent_transcript"}`,
+	}, "\n")
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, _, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 2 || events[0].UsageRecord == nil || events[1].UsageRecord == nil {
+		t.Fatal("expected 2 usage_record events")
+	}
+	if events[0].UsageRecord.ServiceTier != "priority" {
+		t.Errorf("events[0].ServiceTier = %q, want %q", events[0].UsageRecord.ServiceTier, "priority")
+	}
+	if events[1].UsageRecord.ServiceTier != "" {
+		t.Errorf("events[1].ServiceTier = %q, want \"\" (this record carries no service_tier)", events[1].UsageRecord.ServiceTier)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Schema version set — both prior and new accepted, genuinely unrecognised
+// version still yields exactly one finding per file
+// ---------------------------------------------------------------------------
+
+func TestReader_Read_NewSchemaVersion_1_1_0_NoUnknownSchemaFinding(t *testing.T) {
+	content := `{"schema_version":"1.1.0","event":"run_start","timestamp":"2026-08-01T10:00:00.000Z","harness":"claude-code","session_id":"s1","run_id":"20260801T100000Z-ab01"}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, findings, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	for _, f := range findings {
+		if f.Kind == domain.FindingUnknownSchema {
+			t.Error("supported schema version 1.1.0 must not produce FindingUnknownSchema")
+		}
+	}
+}
+
+func TestReader_Read_PriorSchemaVersion_1_0_0_UsageRecordStillDecodes(t *testing.T) {
+	// A usage_record can legitimately appear even under the prior schema version
+	// during a mixed-schema transition; the reader must not gate decoding on the
+	// schema version.
+	content := `{"schema_version":"1.0.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"agent_transcript"}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, _, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 1 || events[0].Type != domain.EventUsageRecord {
+		t.Fatalf("expected 1 usage_record event, got %d events", len(events))
+	}
+}
+
+func TestReader_Read_MixedSchemaVersions_BothSupported_NoFindingAndNoHardFailure(t *testing.T) {
+	// A file whose lines mix the prior and the new schema version (as happens
+	// while a run straddles the adapter upgrade) must decode fully with no
+	// unknown-schema finding.
+	content := strings.Join([]string{
+		`{"schema_version":"1.0.0","event":"run_start","timestamp":"2026-08-01T10:00:00.000Z","harness":"claude-code","session_id":"s1","run_id":"20260801T100000Z-ab01"}`,
+		`{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-01T10:00:01.000Z","harness":"claude-code","session_id":"s1","run_id":"20260801T100000Z-ab01","record_id":"msg_1","record_index":0,"source":"agent_transcript"}`,
+	}, "\n")
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, findings, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 2 {
+		t.Errorf("expected 2 events, got %d", len(events))
+	}
+	if len(findings) != 0 {
+		t.Errorf("mixed but supported schema versions must produce no findings, got: %v", findings)
+	}
+}
+
+func TestReader_Read_UnrecognisedSchemaVersion_v3_StillOneFindingPerFile(t *testing.T) {
+	// A version genuinely outside the supported set (neither 1.0.0 nor 1.1.0)
+	// must still be caught — widening the supported set must not blind the
+	// reader to a future incompatible version.
+	lines := make([]string, 3)
+	for i := range lines {
+		lines[i] = `{"schema_version":"3.0.0","event":"run_start","timestamp":"2026-08-01T10:00:00.000Z","harness":"claude-code","session_id":"s1","run_id":"20260801T100000Z-ab01"}`
+	}
+	path := writeTempFile(t, strings.Join(lines, "\n"))
+
+	r := logread.NewReader()
+	events, findings, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 3 {
+		t.Errorf("events must still be returned for an unrecognised schema version, got %d", len(events))
+	}
+	var schemaFindings int
+	for _, f := range findings {
+		if f.Kind == domain.FindingUnknownSchema {
+			schemaFindings++
+		}
+	}
+	if schemaFindings != 1 {
+		t.Errorf("expected exactly 1 FindingUnknownSchema for an unrecognised version, got %d", schemaFindings)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Prior-schema decoding unaffected — flattened cache-creation field preserves
+// absent vs present-zero
+// ---------------------------------------------------------------------------
+
+func TestReader_Read_PriorSchema_CacheCreation_PresentZero_DistinctFromAbsent(t *testing.T) {
+	content := `{"schema_version":"1.0.0","event":"invocation_end","timestamp":"2026-08-01T10:00:00.000Z","harness":"claude-code","session_id":"s1","run_id":"20260801T100000Z-ab01","agent_instance_id":"a#1","token_usage":{"cache_creation_tokens":0}}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, _, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 1 || events[0].InvocationEnd == nil {
+		t.Fatal("expected 1 invocation_end event")
+	}
+	v, ok := events[0].InvocationEnd.Usage.CacheCreation.Value()
+	if !ok || v != 0 {
+		t.Errorf("CacheCreation = (%d, %v), want (0, true) — present zero, not absent", v, ok)
+	}
+}
+
+func TestReader_Read_PriorSchema_CacheCreation_Absent_WhenKeyMissing(t *testing.T) {
+	content := `{"schema_version":"1.0.0","event":"invocation_end","timestamp":"2026-08-01T10:00:00.000Z","harness":"claude-code","session_id":"s1","run_id":"20260801T100000Z-ab01","agent_instance_id":"a#1","token_usage":{"input_tokens":1}}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, _, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 1 || events[0].InvocationEnd == nil {
+		t.Fatal("expected 1 invocation_end event")
+	}
+	if _, ok := events[0].InvocationEnd.Usage.CacheCreation.Value(); ok {
+		t.Error("CacheCreation must be absent when cache_creation_tokens key is missing")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tolerance contract unchanged in the presence of usage_record — malformed
+// lines, truncated lines, blank lines, unknown event types and unknown
+// fields must all still be handled exactly as before
+// ---------------------------------------------------------------------------
+
+func TestReader_Read_MalformedLineAmongUsageRecords_SurroundingEventsReturned(t *testing.T) {
+	content := strings.Join([]string{
+		`{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"agent_transcript"}`,
+		`not json {{{`,
+		`{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:36.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_2","record_index":1,"source":"agent_transcript"}`,
+	}, "\n")
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, findings, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 2 {
+		t.Errorf("expected 2 usage_record events surrounding the malformed line, got %d", len(events))
+	}
+	var malformedCount int
+	for _, f := range findings {
+		if f.Kind == domain.FindingMalformedLine {
+			malformedCount++
+		}
+	}
+	if malformedCount != 1 {
+		t.Errorf("expected exactly 1 FindingMalformedLine, got %d", malformedCount)
+	}
+}
+
+func TestReader_Read_BlankLinesAmongUsageRecords_SkippedNoFinding(t *testing.T) {
+	content := strings.Join([]string{
+		`{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"agent_transcript"}`,
+		``,
+		`   `,
+		`{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:36.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_2","record_index":1,"source":"agent_transcript"}`,
+	}, "\n")
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, findings, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(events) != 2 {
+		t.Errorf("expected 2 usage_record events, got %d", len(events))
+	}
+	if len(findings) != 0 {
+		t.Errorf("blank lines must be skipped silently, got findings: %v", findings)
+	}
+}
+
+func TestReader_Read_UsageRecord_UnknownFields_Ignored_NoFinding(t *testing.T) {
+	content := `{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"agent_transcript","unknown_future_field":"x","nested_unknown":{"a":1}}`
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, findings, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("unknown JSON fields on a usage_record must produce no finding, got: %v", findings)
+	}
+	if len(events) != 1 || events[0].Type != domain.EventUsageRecord {
+		t.Fatal("expected 1 usage_record event")
+	}
+}
+
+func TestReader_Read_UnknownEventType_StillDecodesAlongsideUsageRecord(t *testing.T) {
+	// A future unrecognised event type must continue to decode as EventOther
+	// even in a file that also carries usage_record lines.
+	content := strings.Join([]string{
+		`{"schema_version":"1.1.0","event":"future_event_type_v9","timestamp":"2026-08-08T06:27:35.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f"}`,
+		`{"schema_version":"1.1.0","event":"usage_record","timestamp":"2026-08-08T06:27:36.412Z","harness":"claude-code","session_id":"s1","run_id":"20260808T062735Z-770f","record_id":"msg_1","record_index":0,"source":"agent_transcript"}`,
+	}, "\n")
+	path := writeTempFile(t, content)
+
+	r := logread.NewReader()
+	events, findings, err := r.ReadAll(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ReadAll error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("unrecognised event type must produce no finding, got: %v", findings)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+	if events[0].Type != domain.EventOther {
+		t.Errorf("events[0].Type = %q, want EventOther", events[0].Type)
+	}
+	if events[1].Type != domain.EventUsageRecord {
+		t.Errorf("events[1].Type = %q, want EventUsageRecord", events[1].Type)
+	}
+}
+
 func TestReader_Read_CancelledContext_PropagatesError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before starting

@@ -264,9 +264,69 @@ func TestEventType_Constants_WireValues(t *testing.T) {
 	}
 }
 
-func TestSchemaVersionSupported_Value(t *testing.T) {
-	if domain.SchemaVersionSupported != "1.0.0" {
-		t.Errorf("SchemaVersionSupported = %q, want %q", domain.SchemaVersionSupported, "1.0.0")
+// ---------------------------------------------------------------------------
+// EventUsageRecord constant (wire value)
+// ---------------------------------------------------------------------------
+
+func TestEventType_EventUsageRecord_WireValue(t *testing.T) {
+	if domain.EventUsageRecord != "usage_record" {
+		t.Errorf("EventUsageRecord = %q, want %q", domain.EventUsageRecord, "usage_record")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Schema version set — SchemaVersionCurrent, SupportedSchemaVersions,
+// IsSupportedSchemaVersion
+// ---------------------------------------------------------------------------
+
+func TestSchemaVersionCurrent_Value(t *testing.T) {
+	if domain.SchemaVersionCurrent != "1.1.0" {
+		t.Errorf("SchemaVersionCurrent = %q, want %q", domain.SchemaVersionCurrent, "1.1.0")
+	}
+}
+
+func TestSupportedSchemaVersions_ContainsBothVersions(t *testing.T) {
+	set := domain.SupportedSchemaVersions()
+	var has110, has100 bool
+	for _, v := range set {
+		if v == "1.1.0" {
+			has110 = true
+		}
+		if v == "1.0.0" {
+			has100 = true
+		}
+	}
+	if !has110 {
+		t.Error("SupportedSchemaVersions() must contain \"1.1.0\"")
+	}
+	if !has100 {
+		t.Error("SupportedSchemaVersions() must contain \"1.0.0\" (prior version stays supported)")
+	}
+}
+
+func TestSupportedSchemaVersions_NewestFirst(t *testing.T) {
+	set := domain.SupportedSchemaVersions()
+	if len(set) == 0 {
+		t.Fatal("SupportedSchemaVersions() must not be empty")
+	}
+	if set[0] != "1.1.0" {
+		t.Errorf("SupportedSchemaVersions()[0] = %q, want %q (newest first)", set[0], "1.1.0")
+	}
+}
+
+func TestIsSupportedSchemaVersion_PriorAndCurrent_True(t *testing.T) {
+	for _, v := range []string{"1.0.0", "1.1.0"} {
+		if !domain.IsSupportedSchemaVersion(v) {
+			t.Errorf("IsSupportedSchemaVersion(%q) = false, want true", v)
+		}
+	}
+}
+
+func TestIsSupportedSchemaVersion_UnrecognisedVersion_False(t *testing.T) {
+	for _, v := range []string{"2.0.0", "0.9.0", "", "1.1.0-beta"} {
+		if domain.IsSupportedSchemaVersion(v) {
+			t.Errorf("IsSupportedSchemaVersion(%q) = true, want false", v)
+		}
 	}
 }
 

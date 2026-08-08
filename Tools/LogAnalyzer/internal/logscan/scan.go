@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"mosaic-log-analyzer/internal/domain"
 )
@@ -147,6 +148,12 @@ func enumerateLogsRoot(src domain.Source) (domain.Inventory, []domain.Finding) {
 		name := e.Name()
 		dirPath := filepath.Join(src.Path, name)
 
+		if strings.HasPrefix(name, ".") {
+			// Dot-prefixed state directories (e.g. .session-runs/, .pending-dispatch/)
+			// are adapter state, not run folders. Skip entirely: no run entry, no finding.
+			continue
+		}
+
 		if name == domain.UnknownRunDirName {
 			runRef := domain.UnattributableRun()
 			entry, entryFindings := enumerateRunDir(runRef, dirPath)
@@ -227,6 +234,14 @@ func enumerateRunDir(run domain.RunRef, dir string) (domain.RunEntry, []domain.F
 				entry.OrchestratorFile = filepath.Join(dir, e.Name())
 			}
 			// Other plain files are silently ignored.
+			continue
+		}
+
+		if strings.HasPrefix(e.Name(), ".") {
+			// Dot-prefixed state directories (e.g. .agent-map/, .quarantine/) are
+			// adapter state, not agent-instance folders. Skip entirely: no finding.
+			// Agent instance ids are {Name}#{Number}-shaped and never begin with a
+			// dot, so no legitimate agent-instance folder is hidden by this rule.
 			continue
 		}
 

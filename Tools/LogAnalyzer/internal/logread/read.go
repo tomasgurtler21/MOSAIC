@@ -55,6 +55,10 @@ type wireEvent struct {
 	Model           string           `json:"model"`
 	Role            string           `json:"role"`
 	TokenUsage      *json.RawMessage `json:"token_usage"`
+	RecordID        string           `json:"record_id"`
+	RecordIndex     *int64           `json:"record_index"`
+	Source          string           `json:"source"`
+	ServiceTier     string           `json:"service_tier"`
 }
 
 // wireUsage is the JSON wire shape for the token_usage sub-object.
@@ -124,13 +128,13 @@ func (r *Reader) Read(ctx context.Context, path string, visit func(domain.Event)
 		}
 
 		// Emit a schema-version finding at most once per file.
-		if wire.SchemaVersion != domain.SchemaVersionSupported && !schemaFindingEmitted {
+		if !domain.IsSupportedSchemaVersion(wire.SchemaVersion) && !schemaFindingEmitted {
 			schemaFindingEmitted = true
 			findings = append(findings, domain.Finding{
 				Kind:     domain.FindingUnknownSchema,
 				Severity: domain.SeverityWarning,
 				Path:     path,
-				Detail:   "schema_version " + wire.SchemaVersion + " is not supported; expected " + domain.SchemaVersionSupported,
+				Detail:   "schema_version " + wire.SchemaVersion + " is not supported; supported versions: " + strings.Join(domain.SupportedSchemaVersions(), ", "),
 			})
 		}
 
@@ -222,6 +226,26 @@ func buildEvent(wire wireEvent) domain.Event {
 			}
 		}
 		ev.Turn = fields
+	case domain.EventUsageRecord:
+		ev.Type = domain.EventUsageRecord
+		fields := &domain.UsageRecordFields{
+			AgentInstanceID: domain.AgentInstanceID(wire.AgentInstanceID),
+			RecordID:        wire.RecordID,
+			Source:          wire.Source,
+			Model:           domain.ModelID(wire.Model),
+			ServiceTier:     wire.ServiceTier,
+		}
+		if wire.RecordIndex != nil {
+			fields.RecordIndex, fields.HasRecordIndex = *wire.RecordIndex, true
+		}
+		if wire.TokenUsage != nil {
+			fields.HasUsage = true
+			var wu wireUsage
+			if json.Unmarshal(*wire.TokenUsage, &wu) == nil {
+				fields.Usage = decodeUsage(wu)
+			}
+		}
+		ev.UsageRecord = fields
 	default:
 		// Unknown event type — decoded as EventOther with RawType preserved.
 		ev.Type = domain.EventOther

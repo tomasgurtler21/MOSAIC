@@ -80,6 +80,22 @@ func turnEvent(model domain.ModelID, usage domain.TokenUsage) domain.Event {
 	}
 }
 
+// usageRecordEvent constructs a usage_record event for a given agent identity
+// (empty on the orchestrator stream), record id, model and usage. HasUsage is
+// set to true when any category is present.
+func usageRecordEvent(id domain.AgentInstanceID, recordID string, model domain.ModelID, usage domain.TokenUsage) domain.Event {
+	return domain.Event{
+		Type: domain.EventUsageRecord,
+		UsageRecord: &domain.UsageRecordFields{
+			AgentInstanceID: id,
+			RecordID:        recordID,
+			Model:           model,
+			Usage:           usage,
+			HasUsage:        !usage.IsEmpty(),
+		},
+	}
+}
+
 // runEndEvent constructs a run_end event.
 func runEndEvent() domain.Event { return domain.Event{Type: domain.EventRunEnd} }
 
@@ -1281,5 +1297,354 @@ func TestAggregator_ResultDoesNotResetState(t *testing.T) {
 	if ok1 != ok2 || v1 != v2 {
 		t.Errorf("second Result() differs from first: first=(%d,%v), second=(%d,%v)",
 			v1, ok1, v2, ok2)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// usage_record — per-record summing and deduplication
+// ---------------------------------------------------------------------------
+
+func TestAggregate_UsageRecord_SumsIntoAgentInvocationTotal(t *testing.T) {
+	// Raw per-record usage events on an agent instance stream must sum into
+	// that instance's total.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, findings := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100), Output: domain.Tokens(20)}),
+		usageRecordEvent(agentID, "rec-2", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(50), Output: domain.Tokens(10)}),
+	))
+
+	if len(findings) > 0 {
+		t.Errorf("got %d unexpected findings: %v", len(findings), findings)
+	}
+
+	totals := requireOneAgent(t, requireOneRun(t, agg)).Totals()
+	assertTokenPresent(t, "Input", totals.Input, 150)
+	assertTokenPresent(t, "Output", totals.Output, 30)
+}
+
+func TestAggregate_UsageRecord_SumsIntoOrchestratorTurnTotal(t *testing.T) {
+	// Raw per-record usage events on the orchestrator stream must sum into the
+	// orchestrator's total, same as turn events do.
+	agg, findings := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref: orchStream(testRunRef),
+				Events: []domain.Event{
+					usageRecordEvent("", "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)}),
+					usageRecordEvent("", "rec-2", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(75)}),
+				},
+			},
+		},
+	})
+
+	if len(findings) > 0 {
+		t.Errorf("got %d unexpected findings: %v", len(findings), findings)
+	}
+
+	run := requireOneRun(t, agg)
+	assertTokenPresent(t, "Orchestrator Input", run.Orchestrator.Totals().Input, 275)
+}
+
+func TestAggregate_UsageRecord_DuplicateRecordID_CountedOnce(t *testing.T) {
+	// The adapter re-emits the same record on every hook firing that observes
+	// it. A repeated record id within one actor's stream must contribute only
+	// once to the total, and the re-emission must not itself raise a finding.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, findings := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}),
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}), // re-emission
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}), // re-emission
+	))
+
+	assertTokenPresent(t, "Input", requireOneAgent(t, requireOneRun(t, agg)).Totals().Input, 100)
+
+	if len(findings) > 0 {
+		t.Errorf("re-emission of an already-seen record id must not raise a finding; got: %v", findings)
+	}
+}
+
+func TestAggregate_UsageRecord_SameRecordID_DifferentAgentInstances_NotConflated(t *testing.T) {
+	// Deduplication is scoped per actor. The same record id used by two
+	// different agent instances must count once for each, not once overall.
+	agentA := domain.AgentInstanceID("AgentA#1")
+	agentB := domain.AgentInstanceID("AgentB#1")
+
+	agg, _ := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref:    agentStream(testRunRef, agentA),
+				Events: []domain.Event{usageRecordEvent(agentA, "shared-id", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)})},
+			},
+			{
+				Ref:    agentStream(testRunRef, agentB),
+				Events: []domain.Event{usageRecordEvent(agentB, "shared-id", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)})},
+			},
+		},
+	})
+
+	run := requireOneRun(t, agg)
+	if len(run.Agents) != 2 {
+		t.Fatalf("got %d agents, want 2", len(run.Agents))
+	}
+
+	for _, agent := range run.Agents {
+		switch agent.Actor.Instance {
+		case agentA:
+			assertTokenPresent(t, "AgentA Input", agent.Totals().Input, 100)
+		case agentB:
+			assertTokenPresent(t, "AgentB Input", agent.Totals().Input, 200)
+		}
+	}
+}
+
+func TestAggregate_UsageRecord_SameRecordID_OrchestratorAndAgent_NotConflated(t *testing.T) {
+	// Deduplication scope also separates the orchestrator stream from any
+	// agent instance stream: the same record id on both must count in both.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, _ := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref:    orchStream(testRunRef),
+				Events: []domain.Event{usageRecordEvent("", "shared-id", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(10)})},
+			},
+			{
+				Ref:    agentStream(testRunRef, agentID),
+				Events: []domain.Event{usageRecordEvent(agentID, "shared-id", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(20)})},
+			},
+		},
+	})
+
+	run := requireOneRun(t, agg)
+	assertTokenPresent(t, "Orchestrator Input", run.Orchestrator.Totals().Input, 10)
+	assertTokenPresent(t, "Agent Input", requireOneAgent(t, run).Totals().Input, 20)
+}
+
+func TestAggregate_UsageRecord_SameRecordID_DifferentRuns_NotConflated(t *testing.T) {
+	// Deduplication state must not leak across runs: the same record id in two
+	// different runs must count in both.
+	run1 := domain.NamedRun("20260101T000000Z-aaaa")
+	run2 := domain.NamedRun("20260101T000000Z-bbbb")
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, _ := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref:    agentStream(run1, agentID),
+				Events: []domain.Event{usageRecordEvent(agentID, "shared-id", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)})},
+			},
+			{
+				Ref:    agentStream(run2, agentID),
+				Events: []domain.Event{usageRecordEvent(agentID, "shared-id", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(300)})},
+			},
+		},
+	})
+
+	if len(agg.Runs) != 2 {
+		t.Fatalf("got %d runs, want 2", len(agg.Runs))
+	}
+
+	for _, run := range agg.Runs {
+		agent := requireOneAgent(t, run)
+		switch run.Run.ID {
+		case "20260101T000000Z-aaaa":
+			assertTokenPresent(t, "run1 Input", agent.Totals().Input, 100)
+		case "20260101T000000Z-bbbb":
+			assertTokenPresent(t, "run2 Input", agent.Totals().Input, 300)
+		}
+	}
+}
+
+func TestAggregate_UsageRecord_AgentStreamDoesNotContributeToOrchestratorTotal(t *testing.T) {
+	// Stream provenance alone determines attribution: a usage_record on an
+	// agent instance stream must never land in the orchestrator total, and
+	// vice versa.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, _ := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref:    orchStream(testRunRef),
+				Events: []domain.Event{usageRecordEvent("", "orch-rec", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(10)})},
+			},
+			{
+				Ref:    agentStream(testRunRef, agentID),
+				Events: []domain.Event{usageRecordEvent(agentID, "agent-rec", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(500)})},
+			},
+		},
+	})
+
+	run := requireOneRun(t, agg)
+	assertTokenPresent(t, "Orchestrator Input", run.Orchestrator.Totals().Input, 10)
+	assertTokenPresent(t, "Agent Input", requireOneAgent(t, run).Totals().Input, 500)
+}
+
+func TestAggregate_UsageRecord_SubagentTurnStillExcludedWhenUsageRecordsPresent(t *testing.T) {
+	// The pre-existing exclusion of subagent turn events from instance totals
+	// must survive unchanged even when the same stream also carries
+	// usage_record events.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	turnUsage := domain.TokenUsage{Input: domain.Tokens(999)}
+
+	agg, _ := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		turnEvent("claude-sonnet", turnUsage), // must NOT be counted
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}),
+	))
+
+	assertTokenPresent(t, "Input (turn excluded)", requireOneAgent(t, requireOneRun(t, agg)).Totals().Input, 100)
+}
+
+func TestAggregate_PriorSchemaOnlyRun_AggregatesWithoutRegression(t *testing.T) {
+	// A run whose events use only the prior schema (turn / invocation_end, no
+	// usage_record at all) must aggregate exactly as it did before this stage.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, findings := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref:    orchStream(testRunRef),
+				Events: []domain.Event{turnEvent("claude-sonnet", domain.TokenUsage{Input: domain.Tokens(50)})},
+			},
+			{
+				Ref: agentStream(testRunRef, agentID),
+				Events: []domain.Event{
+					turnEvent("claude-sonnet", domain.TokenUsage{Input: domain.Tokens(999)}), // excluded, as always
+					invEndEvent(agentID, "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}),
+				},
+			},
+		},
+	})
+
+	if len(findings) > 0 {
+		t.Errorf("got %d unexpected findings: %v", len(findings), findings)
+	}
+
+	run := requireOneRun(t, agg)
+	assertTokenPresent(t, "Orchestrator Input", run.Orchestrator.Totals().Input, 50)
+	assertTokenPresent(t, "Agent Input", requireOneAgent(t, run).Totals().Input, 100)
+}
+
+func TestAggregate_MixedSchemaAgent_UsesOnlyUsageRecordsNotLegacy(t *testing.T) {
+	// When an actor's stream carries at least one usage_record, its totals must
+	// come exclusively from usage_record events; the legacy sampled usage on
+	// its invocation_end is ignored, not summed alongside it.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, _ := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		invEndEvent(agentID, "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(9999)}), // legacy sampled — must be ignored
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}),
+		usageRecordEvent(agentID, "rec-2", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(50)}),
+	))
+
+	totals := requireOneAgent(t, requireOneRun(t, agg)).Totals()
+
+	if v, ok := totals.Input.Value(); !ok || v != 150 {
+		t.Errorf("agent Input = (%d, %v), want (150, true) — legacy invocation_end usage must be ignored once usage_record is present",
+			v, ok)
+	}
+}
+
+func TestAggregate_MixedSchemaOrchestrator_UsesOnlyUsageRecordsNotLegacy(t *testing.T) {
+	// Same coexistence rule on the orchestrator stream: sampled turn usage is
+	// ignored once a usage_record is present.
+	agg, _ := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref: orchStream(testRunRef),
+				Events: []domain.Event{
+					turnEvent("claude-sonnet", domain.TokenUsage{Input: domain.Tokens(9999)}), // legacy sampled — must be ignored
+					usageRecordEvent("", "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)}),
+				},
+			},
+		},
+	})
+
+	run := requireOneRun(t, agg)
+	if v, ok := run.Orchestrator.Totals().Input.Value(); !ok || v != 200 {
+		t.Errorf("orchestrator Input = (%d, %v), want (200, true) — legacy turn usage must be ignored once usage_record is present",
+			v, ok)
+	}
+}
+
+func TestAggregate_UsageRecord_AbsentCategorySurvivesSummingAndDedup(t *testing.T) {
+	// A category absent from every contributing usage_record must remain absent
+	// after summing and deduplication — it must never collapse to zero.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, _ := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}),
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}), // duplicate, discarded
+		usageRecordEvent(agentID, "rec-2", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(50)}),
+	))
+
+	totals := requireOneAgent(t, requireOneRun(t, agg)).Totals()
+	assertTokenPresent(t, "Input", totals.Input, 150)
+	assertTokenAbsent(t, "Output", totals.Output)
+	assertTokenAbsent(t, "CacheRead", totals.CacheRead)
+	assertTokenAbsent(t, "CacheCreation", totals.CacheCreation)
+}
+
+func TestAggregate_UsageRecord_PresentZeroDistinctFromAbsent(t *testing.T) {
+	// A present-zero category (the API reported the category and it was
+	// exactly zero) must remain distinguishable from a category that was
+	// never reported, after summing and deduplication.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, _ := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{
+			Input:     domain.Tokens(100),
+			CacheRead: domain.Tokens(0), // present zero, not absent
+		}),
+	))
+
+	totals := requireOneAgent(t, requireOneRun(t, agg)).Totals()
+	assertTokenPresent(t, "CacheRead (present zero)", totals.CacheRead, 0)
+	assertTokenAbsent(t, "CacheCreation (never reported)", totals.CacheCreation)
+}
+
+func TestAggregate_UsageRecord_EmptyRecordID_CountedAndProducesFinding(t *testing.T) {
+	// A usage_record with no derivable record id cannot be deduplicated. It
+	// must still be counted (not dropped) and must raise
+	// FindingUnidentifiedEvent so the gap is visible.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, findings := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		usageRecordEvent(agentID, "", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(75)}),
+	))
+
+	assertTokenPresent(t, "Input", requireOneAgent(t, requireOneRun(t, agg)).Totals().Input, 75)
+
+	if !hasFindingKind(findings, domain.FindingUnidentifiedEvent) {
+		t.Errorf("expected FindingUnidentifiedEvent for usage_record with empty record_id; got: %v", findings)
+	}
+}
+
+func TestAggregate_UsageRecord_NoUsableActorIdentity_ProducesFinding(t *testing.T) {
+	// A usage_record on an agent instance stream with neither an
+	// agent_instance_id nor a folder-derived InstanceHint cannot be attributed
+	// to any actor and must produce a finding rather than being silently
+	// dropped.
+	in := analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref: domain.StreamRef{
+					Run:          testRunRef,
+					Kind:         domain.StreamAgentInstance,
+					InstanceHint: "",
+				},
+				Events: []domain.Event{
+					usageRecordEvent("", "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(50)}),
+				},
+			},
+		},
+	}
+
+	_, findings := analysis.Aggregate(in)
+
+	if !hasFindingKind(findings, domain.FindingUnidentifiedEvent) {
+		t.Errorf("expected FindingUnidentifiedEvent for usage_record with no usable identity; got: %v", findings)
 	}
 }

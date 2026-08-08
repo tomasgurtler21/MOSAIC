@@ -923,6 +923,156 @@ func TestEnumerate_EmptyLogsRoot_KindIsLogsRoot_NotNotFound(t *testing.T) {
 	}
 }
 
+// ---- tests: dot-prefixed directory skip (logs root and run folder) ----
+
+func TestEnumerate_DotPrefixedDirectoryAtLogsRoot_NotUnrecognisedFolder(t *testing.T) {
+	// A dot-prefixed directory at the logs root (e.g. the adapter's
+	// .session-runs/ or .pending-dispatch/) must be skipped entirely: no run
+	// entry, and no FindingUnrecognisedFolder.
+	root := t.TempDir()
+	makeRunFolder(t, root, validRunID1)
+	if err := os.MkdirAll(filepath.Join(root, ".session-runs"), 0700); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	s := logscan.NewScanner()
+	src := s.Classify(root)
+
+	inv, findings := s.Enumerate(src)
+
+	if len(inv.Runs) != 1 {
+		t.Errorf("Inventory.Runs = %d, want 1 (dot-prefixed dir must not become a run)", len(inv.Runs))
+	}
+	for _, f := range findings {
+		if f.Kind == domain.FindingUnrecognisedFolder {
+			t.Errorf("dot-prefixed root directory must not produce FindingUnrecognisedFolder, got: %v", f)
+		}
+	}
+}
+
+func TestEnumerate_MultipleDotPrefixedDirectoriesAtLogsRoot_AllSkipped_NoFindings(t *testing.T) {
+	root := t.TempDir()
+	makeRunFolder(t, root, validRunID1)
+	for _, name := range []string{".session-runs", ".pending-dispatch"} {
+		if err := os.MkdirAll(filepath.Join(root, name), 0700); err != nil {
+			t.Fatalf("setup %s: %v", name, err)
+		}
+	}
+	s := logscan.NewScanner()
+	src := s.Classify(root)
+
+	inv, findings := s.Enumerate(src)
+
+	if len(inv.Runs) != 1 {
+		t.Errorf("Inventory.Runs = %d, want 1", len(inv.Runs))
+	}
+	if len(findings) != 0 {
+		t.Errorf("dot-prefixed root directories must produce no findings, got: %v", findings)
+	}
+}
+
+func TestEnumerate_DotPrefixedDirectoryOnly_LogsRootIsEmpty(t *testing.T) {
+	// A logs root containing only dot-prefixed state directories (no run
+	// folders, no unknown-run/) must be the explicit empty outcome, not an
+	// unrecognised-folder outcome.
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".pending-dispatch"), 0700); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	src := domain.Source{Kind: domain.SourceLogsRoot, Path: root}
+	s := logscan.NewScanner()
+
+	inv, findings := s.Enumerate(src)
+
+	if !inv.IsEmpty() {
+		t.Error("Inventory.IsEmpty() = false, want true when only dot-prefixed directories are present")
+	}
+	if len(findings) != 0 {
+		t.Errorf("dot-prefixed-only logs root must produce no findings, got: %v", findings)
+	}
+}
+
+func TestEnumerate_DotPrefixedDirectoryInsideRunFolder_NotMissingEventFile(t *testing.T) {
+	// A dot-prefixed directory inside a run folder (e.g. .agent-map/,
+	// .quarantine/) must not be treated as an agent-instance folder: no
+	// FindingMissingEventFile, and it must not appear in Agents.
+	root := t.TempDir()
+	runDir := makeRunFolder(t, root, validRunID1)
+	if err := os.MkdirAll(filepath.Join(runDir, ".agent-map"), 0700); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	s := logscan.NewScanner()
+	src := s.Classify(root)
+
+	inv, findings := s.Enumerate(src)
+
+	if len(inv.Runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(inv.Runs))
+	}
+	if len(inv.Runs[0].Agents) != 0 {
+		t.Errorf("Agents = %d, want 0 (dot-prefixed directory must not be treated as an agent-instance folder)", len(inv.Runs[0].Agents))
+	}
+	for _, f := range findings {
+		if f.Kind == domain.FindingMissingEventFile {
+			t.Errorf("dot-prefixed run-folder directory must not produce FindingMissingEventFile, got: %v", f)
+		}
+	}
+}
+
+func TestEnumerate_MultipleDotPrefixedDirectoriesInsideRunFolder_AllSkipped(t *testing.T) {
+	root := t.TempDir()
+	runDir := makeRunFolder(t, root, validRunID1)
+	for _, name := range []string{".agent-map", ".quarantine"} {
+		if err := os.MkdirAll(filepath.Join(runDir, name), 0700); err != nil {
+			t.Fatalf("setup %s: %v", name, err)
+		}
+	}
+	s := logscan.NewScanner()
+	src := s.Classify(root)
+
+	inv, findings := s.Enumerate(src)
+
+	if len(inv.Runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(inv.Runs))
+	}
+	if len(inv.Runs[0].Agents) != 0 {
+		t.Errorf("Agents = %d, want 0", len(inv.Runs[0].Agents))
+	}
+	if len(findings) != 0 {
+		t.Errorf("dot-prefixed run-folder directories must produce no findings, got: %v", findings)
+	}
+}
+
+func TestEnumerate_DotPrefixedDirectory_DoesNotHideLegitimateAgentFolder(t *testing.T) {
+	// A legitimate agent-instance folder alongside a dot-prefixed state
+	// directory must still be enumerated normally — the skip rule must not
+	// over-match. Agent instance ids are {Name}#{Number}-shaped and never
+	// begin with a dot, so this boundary is never actually ambiguous.
+	root := t.TempDir()
+	runDir := makeRunFolder(t, root, validRunID1)
+	if err := os.MkdirAll(filepath.Join(runDir, ".quarantine"), 0700); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	agentDir := makeAgentFolder(t, runDir, "TestWriter#22")
+	agentEventFile := makeAgentEventFile(t, agentDir)
+	s := logscan.NewScanner()
+	src := s.Classify(root)
+
+	inv, _ := s.Enumerate(src)
+
+	if len(inv.Runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(inv.Runs))
+	}
+	if len(inv.Runs[0].Agents) != 1 {
+		t.Fatalf("expected 1 legitimate agent folder alongside the dot-prefixed state dir, got %d", len(inv.Runs[0].Agents))
+	}
+	if inv.Runs[0].Agents[0].Dir != agentDir {
+		t.Errorf("Agents[0].Dir = %q, want %q", inv.Runs[0].Agents[0].Dir, agentDir)
+	}
+	if inv.Runs[0].Agents[0].EventFile != agentEventFile {
+		t.Errorf("Agents[0].EventFile = %q, want %q", inv.Runs[0].Agents[0].EventFile, agentEventFile)
+	}
+}
+
 func TestEnumerate_EmptyLogsRoot_ProducesNoFindings(t *testing.T) {
 	// A genuinely empty logs root (no entries at all) must produce zero
 	// findings — absence of runs is a described outcome, not a data-quality problem.
