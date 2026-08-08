@@ -32,6 +32,11 @@ import (
 //   - now: current timestamp, passed in for deterministic test output.
 //   - refreshedStages: optional refreshed stage set for Stage-* input
 //     resolution on non-EXECUTION rows (nil when not applicable).
+//   - stageSource: optional and at most one may be supplied. It describes
+//     where the stage table was looked for, and is used only to build the
+//     stop message when a staged row is reached with stages == nil. The
+//     zero value (or omission) yields the generic message. Passing more
+//     than one is a programming error and the first is used.
 //
 // Returns an EngineDecision: Dispatch, Complete, Deviation, or Stop.
 func Next(
@@ -43,11 +48,17 @@ func Next(
 	seq int,
 	now time.Time,
 	refreshedStages *domain.StageSet,
+	stageSource ...domain.StageSource,
 ) domain.EngineDecision {
+
+	var src domain.StageSource
+	if len(stageSource) > 0 {
+		src = stageSource[0]
+	}
 
 	// No prior invocations: initial dispatch.
 	if state.CurrentState.LastAgent == "" {
-		return initialDispatch(workflow, stages, agents, seq, now)
+		return initialDispatch(workflow, stages, agents, seq, now, src)
 	}
 
 	// Determine the response status and the response for deviation assembly.
@@ -115,7 +126,7 @@ func Next(
 	// SUCCESS: route based on row type.
 	if !currentRow.PhaseParsed.IsStaged {
 		return handleNonExecutionSuccess(workflow, stages, currentRowIdx, currentRow, state,
-			agents, seq, now, refreshedStages)
+			agents, seq, now, refreshedStages, src)
 	}
 	return handleExecutionSuccess(workflow, stages, currentRowIdx, state, agents, seq, now)
 }
@@ -123,18 +134,28 @@ func Next(
 // ResumePoint determines where to continue from a parsed artifact.
 // Pure function -- no I/O, no side effects.
 //
-// If the artifact has no execution log entries, returns the first row.
-// If the last logged invocation completed cleanly (its agent matches
-// current_state.last_agent), returns the row after it.
-// If a mismatch is detected between the execution log's last entry and
-// current_state, the last step was interrupted in-flight and must be
-// re-dispatched (ResumeInfo.RerunLast = true, FR-33).
+// Position is resolved from the last *workflow* entry in the execution log:
+// trailing infrastructure entries are skipped, in sequence order, using the
+// recognition rule (agent absent from workflow.Table, present in infra).
+// infra may be nil, meaning no infrastructure agents are declared.
+//
+// If the artifact has no execution log entries, or none that is a workflow
+// entry, returns the first row.
+// If the last *workflow* logged invocation completed cleanly (its agent
+// matches current_state.last_agent), returns the row after it. Trailing
+// infrastructure entries appearing after it are not an interruption.
+// If a mismatch is detected between the last workflow execution log entry
+// and current_state, the last workflow step was interrupted in-flight and
+// must be re-dispatched (ResumeInfo.RerunLast = true, FR-33).
+//
+// Returns *domain.PositionUnresolvedError when the position cannot be
+// determined.
 func ResumePoint(
 	workflow domain.AdmittedWorkflow,
 	stages *domain.StageSet,
 	state domain.ArtifactState,
+	infra domain.InfraAgentSet,
 ) (domain.ResumeInfo, error) {
-
 	if len(state.ExecutionLog) == 0 {
 		// Fresh start: resume from the first row.
 		return domain.ResumeInfo{
@@ -148,20 +169,38 @@ func ResumePoint(
 		}, nil
 	}
 
-	lastEntry := state.ExecutionLog[len(state.ExecutionLog)-1]
+	lastWorkflowEntry, found, findErr := lastWorkflowLogEntry(workflow, state.ExecutionLog, infra)
+	if findErr != nil {
+		return domain.ResumeInfo{}, fmt.Errorf("resume: %w", findErr)
+	}
+	if !found {
+		// The log holds no workflow entry at all (only infrastructure activity
+		// on record so far): resume from the first row, as if fresh.
+		return domain.ResumeInfo{
+			RowIndex:    0,
+			Phase:       firstRowPhase(workflow),
+			Stage:       "",
+			StageNumber: 0,
+			GroupIndex:  -1,
+			Seq:         0,
+			RerunLast:   false,
+		}, nil
+	}
 
-	// Interruption detection: the log's last entry doesn't match CurrentState.
-	interrupted := lastEntry.Agent != state.CurrentState.LastAgent
+	// Interruption detection: the last WORKFLOW entry doesn't match
+	// CurrentState. Trailing infrastructure entries appearing after it are
+	// not an interruption.
+	interrupted := lastWorkflowEntry.Agent != state.CurrentState.LastAgent
 
 	if interrupted {
-		// The last log entry was dispatched but not recorded in CurrentState.
-		// Re-run the interrupted row.
-		rowIdx, err := findRowForLogEntry(workflow, stages, lastEntry)
+		// The last workflow log entry was dispatched but not recorded in
+		// CurrentState. Re-run the interrupted row.
+		rowIdx, err := findRowForLogEntry(workflow, stages, lastWorkflowEntry)
 		if err != nil {
 			return domain.ResumeInfo{}, fmt.Errorf("resume: %w", err)
 		}
 		row := workflow.Table.Rows[rowIdx]
-		stageNum := parseStageNumber(lastEntry.Stage)
+		stageNum := parseStageNumber(lastWorkflowEntry.Stage)
 		groupIdx := -1
 		if row.PhaseParsed.IsStaged {
 			groupIdx = findGroupIndexInWorkflow(workflow, rowIdx)
@@ -169,7 +208,7 @@ func ResumePoint(
 		return domain.ResumeInfo{
 			RowIndex:    rowIdx,
 			Phase:       row.Phase,
-			Stage:       lastEntry.Stage,
+			Stage:       lastWorkflowEntry.Stage,
 			StageNumber: stageNum,
 			GroupIndex:  groupIdx,
 			Seq:         state.GlobalSequence,
@@ -177,8 +216,8 @@ func ResumePoint(
 		}, nil
 	}
 
-	// Clean completion: advance to the next row.
-	currentRowIdx, err := findRowForLogEntry(workflow, stages, lastEntry)
+	// Clean completion: advance to the next row after the last workflow step.
+	currentRowIdx, err := findRowForLogEntry(workflow, stages, lastWorkflowEntry)
 	if err != nil {
 		return domain.ResumeInfo{}, fmt.Errorf("resume: %w", err)
 	}
@@ -212,7 +251,7 @@ func ResumePoint(
 	}
 
 	// EXECUTION row: apply group/stage logic.
-	currentStageNum := parseStageNumber(lastEntry.Stage)
+	currentStageNum := parseStageNumber(lastWorkflowEntry.Stage)
 	adv, advErr := computeNextFromExecution(workflow, stages, currentRowIdx, currentStageNum)
 	if advErr != nil {
 		return domain.ResumeInfo{}, fmt.Errorf("resume: %w", advErr)
@@ -247,6 +286,69 @@ func ResumePoint(
 	}, nil
 }
 
+// lastWorkflowLogEntry returns the most recent execution log entry produced
+// by a workflow participant, skipping any trailing infrastructure entries
+// (recognised by derivation: absent from the routing table, present in infra).
+//
+// found is false when the log holds no workflow entry at all -- only
+// infrastructure activity is on record so far.
+//
+// Returns *domain.PositionUnresolvedError when a trailing entry is neither a
+// workflow participant nor a recognised infrastructure agent: the position
+// cannot be determined in that case. infra may be nil, meaning no
+// infrastructure agents are declared.
+func lastWorkflowLogEntry(
+	workflow domain.AdmittedWorkflow,
+	log []domain.ExecutionLogEntry,
+	infra domain.InfraAgentSet,
+) (entry domain.ExecutionLogEntry, found bool, err error) {
+	for i := len(log) - 1; i >= 0; i-- {
+		e := log[i]
+		agentName := extractAgentName(e.Agent)
+		if isWorkflowParticipant(workflow, agentName) {
+			return e, true, nil
+		}
+		if infra != nil && infra.IsInfrastructureAgent(e.Agent) {
+			continue // trailing infrastructure entry: keep looking
+		}
+		return domain.ExecutionLogEntry{}, false, &domain.PositionUnresolvedError{
+			AgentInstance: e.Agent,
+			Phase:         e.Phase,
+			Stage:         e.Stage,
+			Cause:         domain.CauseAgentNotInWorkflow,
+		}
+	}
+	return domain.ExecutionLogEntry{}, false, nil
+}
+
+// isWorkflowParticipant reports whether agentName names a routing table
+// participant for this workflow, in any row.
+func isWorkflowParticipant(workflow domain.AdmittedWorkflow, agentName string) bool {
+	for _, row := range workflow.Table.Rows {
+		if row.Agent == agentName {
+			return true
+		}
+	}
+	return false
+}
+
+// noStageSetReason builds the stop reason for a staged row reached with no
+// stage set available. base is the generic message for the call site
+// (distinct wording for initial dispatch vs. entering EXECUTION from a
+// prior row). When stageSource is the zero value ("not stated"), base is
+// returned unchanged. Otherwise the message names the path the stage table
+// was looked for, and distinguishes "was supposed to be seeded here and is
+// missing" from "this run never had one" via Seeded.
+func noStageSetReason(base string, stageSource domain.StageSource) string {
+	if stageSource == (domain.StageSource{}) {
+		return base
+	}
+	if stageSource.Seeded {
+		return fmt.Sprintf("%s: a stage table was seeded at %s but is missing", base, stageSource.Path)
+	}
+	return fmt.Sprintf("%s: no stage table was found at %s", base, stageSource.Path)
+}
+
 // ---- Routing helpers ----
 
 // initialDispatch returns the first dispatch when no prior invocations exist.
@@ -256,6 +358,7 @@ func initialDispatch(
 	agents map[string]domain.AgentReference,
 	seq int,
 	now time.Time,
+	stageSource domain.StageSource,
 ) domain.EngineDecision {
 	if workflow.PreExecutionEndRow > workflow.PreExecutionStartRow {
 		// Pre-execution rows exist: dispatch the first one.
@@ -280,7 +383,9 @@ func initialDispatch(
 
 	// Staged workflow with no pre-execution rows: dispatch first EXECUTION row of stage 1.
 	if stages == nil || len(stages.Entries) == 0 {
-		return domain.EngineDecision{Stop: &domain.StopDecision{Reason: "no stage set available for staged workflow"}}
+		return domain.EngineDecision{Stop: &domain.StopDecision{
+			Reason: noStageSetReason("no stage set available for staged workflow", stageSource),
+		}}
 	}
 	stage1 := stages.Entries[0]
 	ordGroups, ordErr := orderedGroupsForStage(workflow, stages, stage1.Number)
@@ -311,6 +416,7 @@ func handleNonExecutionSuccess(
 	seq int,
 	now time.Time,
 	refreshedStages *domain.StageSet,
+	stageSource domain.StageSource,
 ) domain.EngineDecision {
 
 	hint := currentRow.OnSuccess
@@ -349,7 +455,7 @@ func handleNonExecutionSuccess(
 	if targetInExecution && workflow.HasStagedPhase {
 		if stages == nil || len(stages.Entries) == 0 {
 			return domain.EngineDecision{Stop: &domain.StopDecision{
-				Reason: "entering EXECUTION phase but no stage set is available",
+				Reason: noStageSetReason("entering EXECUTION phase but no stage set is available", stageSource),
 			}}
 		}
 		stage1 := stages.Entries[0]
@@ -545,6 +651,16 @@ func buildDispatchStep(
 	agent := agents[row.Agent]
 	instanceID := fmt.Sprintf("%s#%d", row.Agent, seq+1)
 
+	// The recorded Phase/Stage are the canonical form the artifact stores:
+	// the bare phase name (never the routing table's qualified string) and
+	// the group-qualified stage value. row.Phase / stageStr, the qualified
+	// routing forms, remain available above for artifact-path resolution
+	// only and never reach the recorded fields.
+	recordedStage := ""
+	if isExecution {
+		recordedStage = domain.FormatStageValue(row.PhaseParsed.Group, stageNum)
+	}
+
 	return domain.DispatchStep{
 		RowIndex: rowIdx,
 		Agent:    agent,
@@ -555,8 +671,8 @@ func buildDispatchStep(
 			HumanInTheLoop:  effectiveHITL,
 		},
 		EffectiveHITL: effectiveHITL,
-		Phase:         row.Phase,
-		Stage:         stageStr,
+		Phase:         row.PhaseParsed.Name,
+		Stage:         recordedStage,
 	}, nil
 }
 
@@ -635,6 +751,21 @@ func findCurrentRowIndex(
 	agentName := extractAgentName(state.CurrentState.LastAgent)
 	phase := state.CurrentState.Phase
 
+	// An agent that is not a routing table participant at all is not an
+	// ambiguity to fall back on -- it is an unresolvable position, and the
+	// stop must name this as the cause (AC3.7). After the Apply fix,
+	// CurrentState.LastAgent always names a workflow participant in a
+	// correctly-recorded artifact, so reaching this branch means the
+	// recorded agent genuinely is not one.
+	if !isWorkflowParticipant(workflow, agentName) {
+		return -1, &domain.PositionUnresolvedError{
+			AgentInstance: state.CurrentState.LastAgent,
+			Phase:         phase,
+			Stage:         state.CurrentState.Stage,
+			Cause:         domain.CauseAgentNotInWorkflow,
+		}
+	}
+
 	// Non-EXECUTION row: find by agent name + phase (unique per phase in supported workflows).
 	if !isExecutionPhase(phase) {
 		for _, row := range workflow.Table.Rows {
@@ -668,7 +799,7 @@ func findCurrentRowIndex(
 	if stageNum == 0 {
 		return -1, nil
 	}
-	rowIdx, err := findExecutionRowBySeq(workflow, stages, stageNum, state.GlobalSequence)
+	rowIdx, err := findExecutionRowBySeq(workflow, stages, stageNum, state.GlobalSequence, matches)
 	if err != nil {
 		return -1, err // propagate, do not collapse to ambiguous -1
 	}
@@ -712,7 +843,7 @@ func findRowForLogEntry(
 	if stageNum == 0 {
 		return -1, fmt.Errorf("cannot parse stage number from %q", entry.Stage)
 	}
-	rowIdx, seqErr := findExecutionRowBySeq(workflow, stages, stageNum, entry.Seq)
+	rowIdx, seqErr := findExecutionRowBySeq(workflow, stages, stageNum, entry.Seq, matches)
 	if seqErr != nil {
 		return -1, seqErr // propagate approach error verbatim
 	}
@@ -723,10 +854,16 @@ func findRowForLogEntry(
 }
 
 // findExecutionRowBySeq maps a global sequence number inside a given stage
-// to a routing table row index, using the approach-ordered group structure.
+// to a routing table row index among the candidate rows in matches, using the
+// approach-ordered group structure.
 //
-// The computation assumes contiguous seq numbering (no gaps from deviations
-// within the same stage). Each stage contributes one seq per active row.
+// The naive computation (seq minus everything dispatched before this stage)
+// assumes one seq increment per active row. An interleaved infrastructure
+// invocation within the stage also consumes a seq number, which only ever
+// inflates this position, never deflates it. matches (the routing rows that
+// share the target agent) is therefore searched for the candidate with the
+// largest position not exceeding the computed position -- the correct
+// candidate whether or not an infrastructure step landed in between.
 //
 // Previous stages may have used different approaches (and therefore different
 // active row counts). The offset is computed by summing the actual row counts
@@ -740,6 +877,7 @@ func findExecutionRowBySeq(
 	stages *domain.StageSet,
 	stageNum domain.StageNumber,
 	seq int,
+	matches []int,
 ) (int, error) {
 	ordGroups, err := orderedGroupsForStage(workflow, stages, stageNum)
 	if err != nil {
@@ -775,15 +913,36 @@ func findExecutionRowBySeq(
 		return -1, nil
 	}
 
-	pos := posInStage
-	for _, g := range ordGroups {
-		size := g.EndRow - g.StartRow
-		if pos <= size {
-			return g.StartRow + (pos - 1), nil
-		}
-		pos -= size
+	matchSet := make(map[int]bool, len(matches))
+	for _, m := range matches {
+		matchSet[m] = true
 	}
-	return -1, nil
+
+	// Walk the ordered groups assigning each row its 1-indexed position, and
+	// track the candidate (from matches) with the largest position not
+	// exceeding posInStage. Fall back to the earliest candidate when
+	// posInStage falls before every candidate's true position.
+	bestRow, bestPos := -1, -1
+	firstRow, firstPos := -1, -1
+	pos := 0
+	for _, g := range ordGroups {
+		for r := g.StartRow; r < g.EndRow; r++ {
+			pos++
+			if !matchSet[r] {
+				continue
+			}
+			if firstRow < 0 || pos < firstPos {
+				firstRow, firstPos = r, pos
+			}
+			if pos <= posInStage && pos > bestPos {
+				bestRow, bestPos = r, pos
+			}
+		}
+	}
+	if bestRow >= 0 {
+		return bestRow, nil
+	}
+	return firstRow, nil
 }
 
 // findFirstRowForAgent returns the index of the first routing table row
@@ -906,22 +1065,23 @@ func extractAgentName(instanceID string) string {
 	return instanceID
 }
 
-// parseStageNumber extracts the integer stage number from a stage string like "Stage-1".
-// Returns 0 when the string is empty or cannot be parsed.
+// parseStageNumber extracts the integer stage number from a recorded stage
+// value, accepting both the target form ("Test.1", "1") and the legacy form
+// ("Stage-1") via domain.ParseStageValue. Returns 0 when the string is empty
+// or cannot be parsed.
 func parseStageNumber(stageStr string) domain.StageNumber {
-	if stageStr == "" {
+	_, n, ok := domain.ParseStageValue(stageStr)
+	if !ok {
 		return 0
 	}
-	var n int
-	if _, err := fmt.Sscanf(stageStr, "Stage-%d", &n); err != nil {
-		return 0
-	}
-	return domain.StageNumber(n)
+	return n
 }
 
-// isExecutionPhase returns true when the phase string represents a staged EXECUTION phase.
+// isExecutionPhase returns true when the phase value -- in either the target
+// bare form ("EXECUTION") or a legacy qualified form
+// ("EXECUTION.Test.[StageNumber]") -- represents a staged EXECUTION phase.
 func isExecutionPhase(phase string) bool {
-	return strings.HasPrefix(phase, "EXECUTION.")
+	return domain.RecordedPhaseName(phase) == "EXECUTION"
 }
 
 // firstRowPhase returns the phase of row 0, or "" if the table is empty.

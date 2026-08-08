@@ -137,7 +137,17 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 		// envelope-array parse has failed and its own recovery attempt has
 		// also failed; that is exactly the "parse failed" condition Runner's
 		// debug log distinguishes.
-		if errors.Is(err, commonharness.ErrMalformedJSON) {
+		//
+		// ErrProtocolNotExtractable (aliased here as ErrMalformedOutput) means
+		// the envelope was valid but no protocol response could be located
+		// within it. Both conditions mean "harness output could not be turned
+		// into a protocol response", so both log under the same event.
+		switch {
+		case errors.Is(err, commonharness.ErrMalformedJSON):
+			a.logger.Log(domain.EventHarnessParseFailed, string(resp.Stdout),
+				domain.F("agent", request.AgentInstanceID),
+			)
+		case errors.Is(err, commonharness.ErrProtocolNotExtractable):
 			a.logger.Log(domain.EventHarnessParseFailed, string(resp.Stdout),
 				domain.F("agent", request.AgentInstanceID),
 			)
@@ -157,10 +167,10 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 		return domain.ProtocolResponse{}, err
 	}
 
-	// A successful Spawn whose raw stdout does not itself parse as the
-	// envelope's JSON array means the shared package's defensive recovery
-	// path produced this result: log it as such.
-	if !isEnvelopeArray(resp.Stdout) {
+	// A successful Spawn whose raw stdout does not itself parse as a normal
+	// CLI envelope shape means the shared package's defensive recovery path
+	// produced this result: log it as such.
+	if !isNormalEnvelope(resp.Stdout) {
 		a.logger.Log(domain.EventHarnessParseRecovered,
 			"envelope array parse failed; direct protocol response recovered",
 			domain.F("agent", request.AgentInstanceID),
@@ -170,6 +180,9 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 	var protoResp domain.ProtocolResponse
 	if uErr := json.Unmarshal(resp.Protocol, &protoResp); uErr != nil {
 		wrapped := fmt.Errorf("%w: response decode failed", ErrMalformedOutput)
+		a.logger.Log(domain.EventHarnessParseFailed, string(resp.Protocol),
+			domain.F("agent", request.AgentInstanceID),
+		)
 		a.logger.Log(domain.EventHarnessInvokeError, wrapped.Error(),
 			domain.F("agent", request.AgentInstanceID),
 		)
@@ -183,13 +196,31 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 	return protoResp, nil
 }
 
-// isEnvelopeArray reports whether data unmarshals as a JSON array, the shape
-// of the CLI's normal --output-format json envelope. Used only to classify a
+// isNormalEnvelope reports whether data is shaped like one of the CLI's
+// normal --output-format json envelopes: either a top-level JSON array, or a
+// single result-bearing object (Claude Code's actual envelope shape:
+// {"type":"result", "result": "...", ...}). Used only to classify a
 // successful Spawn for the debug log — recognising the shape is not the same
 // as parsing it, which stays exactly once in mosaic-common/harness.
-func isEnvelopeArray(data []byte) bool {
-	var raw []json.RawMessage
-	return json.Unmarshal(data, &raw) == nil
+//
+// This must stay narrow: a bare protocol response object, or a protocol
+// response embedded in surrounding CLI noise, is a genuine recovery by the
+// shared package's defensive path and must not be classified as normal here.
+// Only an object carrying the envelope's own result-bearing fields
+// ("type":"result" with a "result" field) qualifies.
+func isNormalEnvelope(data []byte) bool {
+	var arr []json.RawMessage
+	if json.Unmarshal(data, &arr) == nil {
+		return true
+	}
+	var obj struct {
+		Type   string `json:"type"`
+		Result string `json:"result"`
+	}
+	if json.Unmarshal(data, &obj) != nil {
+		return false
+	}
+	return obj.Type == "result" && obj.Result != ""
 }
 
 // debugLoggerSink adapts domain.DebugLogger to commonharness.Sink, so the

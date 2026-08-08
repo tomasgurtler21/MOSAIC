@@ -15,6 +15,7 @@ import (
 	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/runscan"
+	"mosaic-run/internal/runselect"
 	"mosaic-run/internal/session"
 )
 
@@ -31,6 +32,13 @@ type RunIdentity struct {
 	RunID     string
 	RunFolder string
 	IsNewRun  bool
+
+	// Position is the resumed run's recorded position, already known to the
+	// caller (main.go reads the artifact once to check completion). When
+	// set, the announcement uses it directly instead of reading the
+	// artifact a second time. Nil for a new run, or when the caller has not
+	// already determined it.
+	Position *runselect.Position
 }
 
 // Run implements the mosaic-run CLI entry point.
@@ -180,12 +188,14 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 			// constructed in main.go before the session was created.
 			var resolvedRunID, resolvedRunFolder string
 			var resolvedIsNewRun bool
+			var resolvedPosition *runselect.Position
 
 			if identity != nil {
 				// Pre-resolved by caller: use directly, no scanning or minting.
 				resolvedRunID = identity.RunID
 				resolvedRunFolder = identity.RunFolder
 				resolvedIsNewRun = identity.IsNewRun
+				resolvedPosition = identity.Position
 			} else {
 				workDir, err := os.Getwd()
 				if err != nil {
@@ -218,11 +228,19 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 
 					// Check whether the run is completed. Parse errors are treated as
 					// resumable (the session layer will surface any real parse issues).
+					// A successful parse also yields the recorded position directly,
+					// so the announcement below need not read the artifact again.
 					if state, parseErr := artifact.Parse(data); parseErr == nil {
 						if strings.EqualFold(state.CurrentState.Phase, "COMPLETED") {
 							fmt.Fprintf(errOut, "error: run %s is completed and cannot be resumed\n", runIDFlag)
 							exitCode = ExitUsage
 							return nil
+						}
+						resolvedPosition = &runselect.Position{
+							Phase:       state.CurrentState.Phase,
+							Stage:       state.CurrentState.Stage,
+							LastAgent:   state.CurrentState.LastAgent,
+							LastUpdated: state.LastUpdated,
 						}
 					}
 
@@ -238,7 +256,10 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 					resolvedIsNewRun = true
 
 				} else {
-					// Neither flag: scan working directory for resumable candidates.
+					// Neither flag: the selection is never inferred from how many runs
+					// exist. Scan the working directory and ask runselect for the
+					// decision; a Question means the CLI refuses and names the
+					// available choices rather than guessing (AC2.2, AC2.6).
 					scanner := runscan.NewDirScanner()
 					scanResult, scanErr := scanner.Scan(workDir)
 					if scanErr != nil {
@@ -247,32 +268,28 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 						return nil
 					}
 
-					switch len(scanResult.Candidates) {
-					case 0:
-						// No resumable candidates: start a new run.
-						newRunID := domain.NewRunID(cliClock{}, domain.DefaultRandomSource())
-						resolvedRunID = newRunID
-						resolvedRunFolder = filepath.Join(workDir, domain.RunScopedFolder(newRunID))
-						resolvedIsNewRun = true
-
-					case 1:
-						// Exactly one candidate: auto-resume.
-						c := scanResult.Candidates[0]
-						resolvedRunID = c.RunID
-						resolvedRunFolder = c.FolderPath
-						resolvedIsNewRun = false
-
-					default:
-						// Multiple candidates: non-interactive mode cannot resolve ambiguity.
-						fmt.Fprintf(errOut, "error: multiple resumable runs found; use --run <run_id> to select one:\n")
-						for _, c := range scanResult.Candidates {
-							fmt.Fprintf(errOut, "  %s\n", c.RunID)
-						}
+					dec, resErr := runselect.Resolve(runselect.Request{Scan: scanResult, WorkDir: workDir}, cliMinter(workDir))
+					if resErr != nil {
+						fmt.Fprintf(errOut, "error: %v\n", resErr)
 						exitCode = ExitUsage
 						return nil
 					}
+					if dec.Question != nil {
+						fmt.Fprintf(errOut, "error: %s\n", formatSelectionRefusal(*dec.Question))
+						exitCode = ExitUsage
+						return nil
+					}
+
+					resolvedRunID = dec.Resolved.RunID
+					resolvedRunFolder = dec.Resolved.RunFolder
+					resolvedIsNewRun = dec.Resolved.IsNewRun
+					resolvedPosition = dec.Resolved.Position
 				}
 			}
+
+			// State the chosen run before any dispatch (AC2.7): which run, whether
+			// new or resumed, and for a resumed run its recorded position.
+			fmt.Fprintln(out, runselect.Announce(announceIdentity(resolvedRunID, resolvedRunFolder, resolvedIsNewRun, resolvedPosition)))
 
 			// Parse --infra-class into a class-to-agent map.
 			var infraClassSelections map[string]string
@@ -395,3 +412,69 @@ func outcomeToExitCode(outcome domain.RunOutcome) int {
 type cliClock struct{}
 
 func (cliClock) Now() time.Time { return time.Now().UTC() }
+
+// cliMinter returns a runselect.Minter that mints a new run_id rooted at workDir.
+func cliMinter(workDir string) runselect.Minter {
+	return func() (string, string) {
+		newRunID := domain.NewRunID(cliClock{}, domain.DefaultRandomSource())
+		return newRunID, filepath.Join(workDir, domain.RunScopedFolder(newRunID))
+	}
+}
+
+// formatSelectionRefusal renders the non-interactive refusal message for an
+// unsettled selection: every resumable run_id the caller may pass to --run,
+// every unresumable run with the reason it cannot be resumed (AC2.5), and
+// --new-run as the always-available way to start fresh (AC2.3, AC2.6).
+func formatSelectionRefusal(q runselect.Question) string {
+	var resumable []string
+	var unresumable []string
+	for _, c := range q.Choices {
+		switch c.Kind {
+		case runselect.ChoiceResume:
+			resumable = append(resumable, c.ID)
+		case runselect.ChoiceUnresumable:
+			unresumable = append(unresumable, fmt.Sprintf("%s (%s)", c.ID, c.Reason.Description()))
+		}
+	}
+	var sb strings.Builder
+	sb.WriteString("run selection is required; ")
+	if len(resumable) > 0 {
+		sb.WriteString("use --run <run_id> to resume one of: ")
+		sb.WriteString(strings.Join(resumable, ", "))
+		sb.WriteString(", or ")
+	}
+	sb.WriteString("use --new-run to start a new run")
+	if len(unresumable) > 0 {
+		sb.WriteString("; cannot be resumed: ")
+		sb.WriteString(strings.Join(unresumable, ", "))
+	}
+	return sb.String()
+}
+
+// announceIdentity builds the runselect.Identity used to render the
+// chosen-run announcement. When position is already known to the caller
+// (the artifact was already read to resolve identity), it is used directly.
+// Otherwise, for a resumed run, the artifact is read once here to recover
+// it; a read or parse failure simply leaves Position nil, which
+// runselect.Announce handles without panicking.
+func announceIdentity(runID, runFolder string, isNewRun bool, position *runselect.Position) runselect.Identity {
+	id := runselect.Identity{RunID: runID, RunFolder: runFolder, IsNewRun: isNewRun, Position: position}
+	if isNewRun || position != nil {
+		return id
+	}
+	data, err := os.ReadFile(filepath.Join(runFolder, "Orchestration.md"))
+	if err != nil {
+		return id
+	}
+	state, err := artifact.Parse(data)
+	if err != nil {
+		return id
+	}
+	id.Position = &runselect.Position{
+		Phase:       state.CurrentState.Phase,
+		Stage:       state.CurrentState.Stage,
+		LastAgent:   state.CurrentState.LastAgent,
+		LastUpdated: state.LastUpdated,
+	}
+	return id
+}

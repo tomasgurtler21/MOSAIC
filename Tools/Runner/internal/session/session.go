@@ -204,14 +204,24 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	// refusal; the engine enforces the stage set precondition at the point it
 	// is actually required (routing an EXECUTION row). A plan file that
 	// exists but cannot be parsed remains a refusal.
+	//
+	// Ordering: a resumed run's folder already exists, so the read happens
+	// here, in its original position. A new run's folder does not exist yet
+	// at this point -- seeded inputs (Plan.md among them) are not applied
+	// until Step 8 -- so on the new-run path the read is deferred until after
+	// Store.Create and seed.Apply have both run (Step 8a2 below). Reading it
+	// here on the new-run path would observe the run before its seeded
+	// inputs are in place, which is the defect this ordering fixes.
 	var stages *domain.StageSet
 	planPath := filepath.Join(config.RunFolder, "Plan.md")
-	if _, statErr := os.Stat(planPath); statErr == nil {
-		ss, stageErr := planstages.ReadStages(planPath, admitted.GroupsDeclared)
-		if stageErr != nil {
-			return s.refusal(stageErr.Error()), nil
+	if !config.IsNewRun {
+		if _, statErr := os.Stat(planPath); statErr == nil {
+			ss, stageErr := planstages.ReadStages(planPath, admitted.GroupsDeclared)
+			if stageErr != nil {
+				return s.refusal(stageErr.Error()), nil
+			}
+			stages = &ss
 		}
-		stages = &ss
 	}
 
 	// Step 6b: Enumerate declared infrastructure agents from the orchestrator file.
@@ -269,11 +279,31 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 			}
 			return s.refusal(applyErr.Error()), nil
 		}
+
+		// Step 8a2 (moved from Step 6 for the new-run path): the run folder
+		// exists and any seeded inputs have been applied, so this is the
+		// first point at which a read of the stage table observes the run as
+		// fully constituted. Absence is still normal. A plan file that exists
+		// but cannot be parsed is a refusal; the run folder created above is
+		// removed so a refused run leaves no trace, matching the seed-apply
+		// failure above.
+		if _, statErr := os.Stat(planPath); statErr == nil {
+			ss, stageErr := planstages.ReadStages(planPath, admitted.GroupsDeclared)
+			if stageErr != nil {
+				if rmErr := os.RemoveAll(config.RunFolder); rmErr != nil {
+					return s.refusal(fmt.Sprintf("%s; additionally, removing the run folder %s failed: %v",
+						stageErr.Error(), config.RunFolder, rmErr)), nil
+				}
+				return s.refusal(stageErr.Error()), nil
+			}
+			stages = &ss
+		}
+
 		seq = 0
 	} else {
 		// Resume: use the existing artifact (already validated above).
 		state = existingState
-		resume, resumeErr := engine.ResumePoint(admitted, stages, state)
+		resume, resumeErr := engine.ResumePoint(admitted, stages, state, domain.NewInfraAgentSet(declaredInfraAgents))
 		if resumeErr != nil {
 			return domain.RunOutcome{Status: domain.RunFailed, Message: resumeErr.Error()}, resumeErr
 		}
@@ -282,7 +312,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		// FR-33: if the last step was interrupted, rewind CurrentState so that
 		// engine.Next re-dispatches the interrupted row.
 		if resume.RerunLast {
-			state = rewindStateForRerun(state)
+			state = rewindStateForRerun(admitted.Table, domain.NewInfraAgentSet(declaredInfraAgents), state)
 		}
 	}
 
@@ -293,6 +323,17 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	declaredInfraAgents, err = validateAndApplyOverrides(state.InfrastructureOverrides, declaredInfraAgents)
 	if err != nil {
 		return s.refusal(err.Error()), nil
+	}
+
+	// stageSource describes where the stage table was looked for, so the
+	// engine's stop message can name the cause rather than the symptom when
+	// a staged row is reached with no stage set (I5.3). Seeded reflects
+	// whether the seed plan targets Plan.md; on a resumed run seedPlan is
+	// always the zero value (seeded inputs are ignored there), so Seeded is
+	// always false on that path.
+	stageSource := domain.StageSource{
+		Path:   planPath,
+		Seeded: seedPlan.HasDest("Plan.md"),
 	}
 
 	// =========================================================================
@@ -319,6 +360,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 			seq,
 			s.deps.Clock.Now(),
 			refreshedStages,
+			stageSource,
 		)
 		// Consume the refreshed stages once (they are only for one engine.Next call).
 		refreshedStages = nil
@@ -450,23 +492,18 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 			// rule). The named no-op and injected test hook are called once per
 			// workflow step dispatch cycle, matching the pre-existing contract.
 			if !completedStep.IsInfrastructure {
-				// Save the workflow step's CurrentState so the engine sees the
-				// correct last-workflow-agent after any infra dispatches complete.
-				// Infra rows update CurrentState (via Store.Apply), which would
-				// confuse engine.Next's row-lookup; restoring after evaluation
-				// keeps the engine's view consistent with the workflow routing table.
-				savedCurrentState := state.CurrentState
-
+				// Store.Apply no longer lets an infrastructure step's completion
+				// move current_state (it always names the last WORKFLOW step,
+				// on disk and in the returned state), so engine.Next's row-lookup
+				// stays correct across any infra dispatches triggered below
+				// without a save/restore here. That durable fix is now the sole
+				// owner of this behaviour.
 				halt, trigErr := s.evaluateTriggers(
 					ctx, &state, &seq, completedStep, prevWorkflowStep,
 					declaredInfraAgents, config,
 					buildActiveAgentsFilter(declaredInfraAgents, config.InfraClassSelections),
 					orchDir,
 				)
-
-				// Restore the workflow step's CurrentState so engine.Next can
-				// locate the correct row on its next call.
-				state.CurrentState = savedCurrentState
 
 				if trigErr != nil {
 					if ctx.Err() != nil {
@@ -697,21 +734,57 @@ func extractAgentIdentifier(instanceID string) string {
 // rewindStateForRerun adjusts the artifact CurrentState for a mid-invocation
 // interruption (FR-33): the last logged step was interrupted before Apply
 // completed, so the session must re-dispatch it. Rewinding CurrentState to
-// the second-to-last log entry (or empty) causes engine.Next to route to the
-// interrupted row again.
-func rewindStateForRerun(state domain.ArtifactState) domain.ArtifactState {
-	if len(state.ExecutionLog) <= 1 {
-		state.CurrentState = domain.CurrentState{}
+// the last WORKFLOW log entry before the interrupted one (or empty) causes
+// engine.Next to route to the interrupted row again.
+//
+// Trailing infrastructure entries between the interrupted step and the
+// workflow step that precedes it are skipped: current_state must reflect the
+// last completed WORKFLOW step, never an infrastructure invocation, so the
+// engine's row-lookup stays correct when infrastructure activity interleaves
+// with the interruption.
+//
+// An entry is recognised as infrastructure by the same two-condition
+// derivation used elsewhere: absent from the routing table and present in
+// infra. infra may be nil, meaning no infrastructure agents are declared.
+func rewindStateForRerun(table domain.RoutingTable, infra domain.InfraAgentSet, state domain.ArtifactState) domain.ArtifactState {
+	for i := len(state.ExecutionLog) - 2; i >= 0; i-- {
+		entry := state.ExecutionLog[i]
+		agentID := extractAgentIdentifier(entry.Agent)
+		if !isRoutingTableAgent(table, agentID) {
+			if infra != nil && infra.IsInfrastructureAgent(entry.Agent) {
+				continue // recognised infrastructure entry: keep looking
+			}
+			// Not a routing table participant and not recognised
+			// infrastructure either. Unreachable in practice -- ResumePoint
+			// would already have stopped on this entry with
+			// PositionUnresolvedError before this function is ever called --
+			// but applying the same two-condition recognition rule used
+			// elsewhere (rather than "absent from the routing table" alone)
+			// keeps this function from silently masking a defect if that
+			// call ordering ever changes.
+			continue
+		}
+		state.CurrentState = domain.CurrentState{
+			Phase:      entry.Phase,
+			Stage:      entry.Stage,
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  entry.Agent,
+		}
 		return state
 	}
-	prev := state.ExecutionLog[len(state.ExecutionLog)-2]
-	state.CurrentState = domain.CurrentState{
-		Phase:      prev.Phase,
-		Stage:      prev.Stage,
-		LastStatus: domain.StatusSUCCESS,
-		LastAgent:  prev.Agent,
-	}
+	state.CurrentState = domain.CurrentState{}
 	return state
+}
+
+// isRoutingTableAgent reports whether agentID names a participant in table,
+// in any row.
+func isRoutingTableAgent(table domain.RoutingTable, agentID string) bool {
+	for _, row := range table.Rows {
+		if row.Agent == agentID {
+			return true
+		}
+	}
+	return false
 }
 
 // refusal logs the refusal reason and constructs a RunOutcome with RunRefused

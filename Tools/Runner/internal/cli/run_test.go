@@ -94,6 +94,7 @@ func TestDefaultFlagValues(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "my-workflow",
 		"--task", "do the work",
+		"--new-run",
 	}, &spyStore{}, sess)
 
 	if code != cli.ExitSuccess {
@@ -172,6 +173,7 @@ func TestExitCodeMapping(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "t1",
+		"--new-run",
 	}
 
 	tests := []struct {
@@ -347,6 +349,7 @@ func TestSessionError(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "t1",
+		"--new-run",
 	}, sess)
 
 	if code != cli.ExitFailure {
@@ -863,11 +866,16 @@ func TestRunFlag_NonExistentRun_IsRejected(t *testing.T) {
 
 // ---- tests: default scan delegation (neither --run nor --new-run) ----
 
-func TestDefaultPath_ZeroCandidates_StartsNewRun(t *testing.T) {
-	// With no --run or --new-run and an empty working directory, the scanner
-	// finds zero candidates. The CLI must mint a new run and call session.Start
-	// with IsNewRun=true. Currently fails (RED): the implementation (I5.3) has
-	// not added the default scan path yet, so IsNewRun defaults to false.
+// TestDefaultPath_ZeroCandidates_Refuses verifies the removal of the
+// zero-candidate auto-start defect (AC2.6). With neither --run nor --new-run
+// and an empty working directory, the CLI must refuse rather than silently
+// minting a new run: the number of runs present never changes whether the
+// question is asked, and starting a new run must be stated as an explicit
+// choice (--new-run), not inferred from an empty workspace.
+//
+// Currently fails (RED): the CLI still auto-starts a new run for zero
+// candidates (the defect this stage removes).
+func TestDefaultPath_ZeroCandidates_Refuses(t *testing.T) {
 	rootDir := t.TempDir()
 	origDir, err := os.Getwd()
 	if err != nil {
@@ -878,30 +886,33 @@ func TestDefaultPath_ZeroCandidates_StartsNewRun(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
-	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
-	code, _, _ := runCLI(t, []string{
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
 		"run",
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
 	}, sess)
 
-	if code != cli.ExitSuccess {
-		t.Fatalf("exit code = %d, want ExitSuccess for zero-candidate default path", code)
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage (%d) when no run exists and no selection flag was given", code, cli.ExitUsage)
 	}
-	if !sess.called {
-		t.Fatal("session.Start was not called; CLI must start a new run when no candidates exist")
+	if !strings.Contains(errOut, "--new-run") {
+		t.Errorf("stderr %q does not mention --new-run as the way to start a new run", errOut)
 	}
-	if !sess.config.IsNewRun {
-		t.Error("IsNewRun = false, want true when no resumable candidates exist (new run minted)")
+	if sess.called {
+		t.Error("session.Start must not be called when selection is unresolved (zero candidates, no flags)")
 	}
 }
 
-func TestDefaultPath_OneCandidateWithNoFlag_AutoResumes(t *testing.T) {
-	// With no --run or --new-run and exactly one resumable candidate in the
-	// working directory, the CLI must auto-resume that candidate without user
-	// interaction. Currently fails (RED): I5.3 has not added the default scan
-	// path yet, so the CLI does not populate RunID from the scanned candidate.
+// TestDefaultPath_OneCandidateWithNoFlag_Refuses is the CLI-side expression
+// of the core defect this stage removes (AC2.2): a workspace with exactly one
+// resumable run must no longer be resumed silently. With neither --run nor
+// --new-run, the CLI must refuse and name the candidate so the caller can
+// pass --run explicitly, or --new-run to start fresh.
+//
+// Currently fails (RED): the CLI still auto-resumes the single candidate.
+func TestDefaultPath_OneCandidateWithNoFlag_Refuses(t *testing.T) {
 	rootDir := t.TempDir()
 	writeResumableRunArtifact(t, rootDir, cliRunID1)
 	origDir, err := os.Getwd()
@@ -913,25 +924,25 @@ func TestDefaultPath_OneCandidateWithNoFlag_AutoResumes(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
-	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
-	code, _, _ := runCLI(t, []string{
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
 		"run",
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
 	}, sess)
 
-	if code != cli.ExitSuccess {
-		t.Fatalf("exit code = %d, want ExitSuccess for single-candidate auto-resume", code)
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage (%d) when exactly one resumable run exists and no selection flag was given", code, cli.ExitUsage)
 	}
-	if !sess.called {
-		t.Fatal("session.Start was not called; CLI must auto-resume the single candidate")
+	if !strings.Contains(errOut, cliRunID1) {
+		t.Errorf("stderr %q does not name the single candidate %q", errOut, cliRunID1)
 	}
-	if sess.config.IsNewRun {
-		t.Error("IsNewRun = true, want false when auto-resuming the single candidate")
+	if !strings.Contains(errOut, "--new-run") {
+		t.Errorf("stderr %q does not mention --new-run as an available choice", errOut)
 	}
-	if sess.config.RunID != cliRunID1 {
-		t.Errorf("RunID = %q, want %q (the auto-resumed candidate's run_id)", sess.config.RunID, cliRunID1)
+	if sess.called {
+		t.Error("session.Start must not be called when a single candidate exists and no selection flag was given")
 	}
 }
 
@@ -975,6 +986,39 @@ func TestDefaultPath_MultipleCandidates_CLIRejectsWithRunIDList(t *testing.T) {
 	}
 }
 
+// TestDefaultPath_MultipleCandidates_RefusalMentionsNewRunOption verifies
+// AC2.3: whatever the workspace contains, starting a new run is an available
+// outcome, so the multi-candidate refusal must also mention --new-run, not
+// just the existing candidates.
+func TestDefaultPath_MultipleCandidates_RefusalMentionsNewRunOption(t *testing.T) {
+	rootDir := t.TempDir()
+	writeResumableRunArtifact(t, rootDir, cliRunID1)
+	writeResumableRunArtifact(t, rootDir, cliRunID2)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(rootDir); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+	}, sess)
+
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage (%d)", code, cli.ExitUsage)
+	}
+	if !strings.Contains(errOut, "--new-run") {
+		t.Errorf("stderr %q does not mention --new-run; starting a new run must remain an available choice", errOut)
+	}
+}
+
 // ============================================================
 // T5.3: COMPLETED marker persistence tests
 // ============================================================
@@ -1005,6 +1049,7 @@ func TestCOMPLETEDMarker_WrittenWhenRunCompleted(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--new-run",
 	}, spy, sess)
 
 	if code != cli.ExitSuccess {
@@ -1553,5 +1598,90 @@ func TestInputAndRunFlags_MutuallyExclusive_ErrorNamesRunFlag(t *testing.T) {
 
 	if !strings.Contains(errOut, "--run") {
 		t.Errorf("stderr %q does not name --run in the mutual-exclusion error", errOut)
+	}
+}
+
+// ============================================================
+// T2.3: chosen-run announcement tests
+// ============================================================
+//
+// AC2.7 requires that the tool states which run it is about to perform,
+// whether new or resumed, and for a resumed run its recorded position,
+// before any dispatch. These tests assert on stdout content, not exact
+// wording (per runselect.Announce's contract: content is fixed, phrasing is
+// not).
+//
+// Currently fail (RED): the CLI does not yet call runselect.Announce before
+// starting the session.
+
+// TestAnnouncement_NewRun_StatedBeforeDispatch verifies that starting a new
+// run via --new-run writes an announcement to stdout, before the session
+// outcome, naming the resolved run_id and stating that the run is new.
+func TestAnnouncement_NewRun_StatedBeforeDispatch(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	code, stdout, errOut := runCLIWithStore(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--new-run",
+	}, &spyStore{}, sess)
+
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want ExitSuccess; stderr: %q", code, errOut)
+	}
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.RunID == "" {
+		t.Fatal("sess.config.RunID is empty; cannot verify announcement without a resolved run_id")
+	}
+	if !strings.Contains(stdout, sess.config.RunID) {
+		t.Errorf("stdout %q does not contain the resolved run_id %q; the chosen run must be announced before dispatch", stdout, sess.config.RunID)
+	}
+	if !strings.Contains(strings.ToLower(stdout), "new") {
+		t.Errorf("stdout %q does not state that the run is new", stdout)
+	}
+}
+
+// TestAnnouncement_ResumedRun_ContainsPosition verifies that resuming a run
+// via --run writes an announcement to stdout naming the run_id, stating that
+// it is resumed, and reporting its recorded phase.
+func TestAnnouncement_ResumedRun_ContainsPosition(t *testing.T) {
+	rootDir := t.TempDir()
+	writeResumableRunArtifact(t, rootDir, testRunID)
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	if err := os.Chdir(rootDir); err != nil {
+		t.Fatalf("os.Chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	code, stdout, errOut := runCLIWithStore(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--run", testRunID,
+	}, &spyStore{}, sess)
+
+	if code != cli.ExitSuccess {
+		t.Fatalf("exit code = %d, want ExitSuccess; stderr: %q", code, errOut)
+	}
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if !strings.Contains(stdout, testRunID) {
+		t.Errorf("stdout %q does not contain the resumed run_id %q", stdout, testRunID)
+	}
+	if !strings.Contains(strings.ToLower(stdout), "resum") {
+		t.Errorf("stdout %q does not state that the run is resumed", stdout)
+	}
+	// writeResumableRunArtifact records current_state.phase: EXECUTION.
+	if !strings.Contains(stdout, "EXECUTION") {
+		t.Errorf("stdout %q does not contain the recorded phase %q", stdout, "EXECUTION")
 	}
 }

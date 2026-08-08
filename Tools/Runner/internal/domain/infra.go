@@ -1,5 +1,7 @@
 package domain
 
+import "strings"
+
 // DeclaredInfraTrigger represents one trigger in an infrastructure agent's
 // declaration (parsed from the deployed orchestrator file) or in an
 // infrastructure_overrides entry (parsed from Orchestration.md frontmatter).
@@ -30,6 +32,57 @@ type InfraDispatchResult struct {
 	Agent    DeclaredInfraAgent
 	Response ProtocolResponse
 	Step     CompletedStep
+}
+
+// InfraAgentSet reports whether an agent instance recorded in an artifact
+// belongs to an infrastructure agent declared for this run.
+//
+// The argument is an agent instance id in "{AgentName}#{Seq}" form, or a
+// bare agent name; implementations must accept both and compare on the
+// name part only.
+//
+// A nil InfraAgentSet is valid and means "no infrastructure agents are
+// declared for this run": callers must treat nil as always-false rather
+// than nil-checking at every site. NewInfraAgentSet returns a value that is
+// safe to call in this way, including for an empty or nil declared slice.
+type InfraAgentSet interface {
+	IsInfrastructureAgent(agentInstance string) bool
+}
+
+// infraAgentSet is the InfraAgentSet implementation built by NewInfraAgentSet.
+// Its zero value (including a nil *infraAgentSet) is usable: IsInfrastructureAgent
+// reports false for a nil receiver, so a caller need not nil-check the set itself.
+type infraAgentSet struct {
+	names map[string]struct{}
+}
+
+// NewInfraAgentSet builds an InfraAgentSet from the run's declared
+// infrastructure agents. An empty or nil slice yields a set that reports
+// false for every agent.
+func NewInfraAgentSet(declared []DeclaredInfraAgent) InfraAgentSet {
+	if len(declared) == 0 {
+		return (*infraAgentSet)(nil)
+	}
+	names := make(map[string]struct{}, len(declared))
+	for _, d := range declared {
+		names[d.Name] = struct{}{}
+	}
+	return &infraAgentSet{names: names}
+}
+
+// IsInfrastructureAgent implements InfraAgentSet. agentInstance may be a bare
+// agent name or an "{AgentName}#{Seq}" instance id; only the name part is
+// compared.
+func (s *infraAgentSet) IsInfrastructureAgent(agentInstance string) bool {
+	if s == nil {
+		return false
+	}
+	name := agentInstance
+	if i := strings.LastIndex(agentInstance, "#"); i >= 0 {
+		name = agentInstance[:i]
+	}
+	_, ok := s.names[name]
+	return ok
 }
 
 // NopDebugLogger is the named no-op DebugLogger. It is the default whenever no

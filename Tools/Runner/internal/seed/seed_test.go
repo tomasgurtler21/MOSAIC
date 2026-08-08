@@ -41,6 +41,18 @@ package seed_test
 //   Apply — copy failure:
 //   - When a copy fails (unreadable source), Apply returns a *domain.RefusalError
 //     whose Resource contains the failing source path.
+//
+//   BuildPlan — Requirements.md naming rule:
+//   - A single Requirement* match (any casing) becomes Dest "Requirements.md",
+//     whether contributed by a file source or the top level of a directory source.
+//   - The candidate pool spans all sources combined; a match from one source is
+//     found even when other sources contribute none.
+//   - Requirement* files nested beneath a directory source are excluded from the
+//     candidate pool: still copied under their relative paths, never renamed.
+//   - Zero or multiple matches refuse the whole (non-empty) seed set, including
+//     seed sets that contain no Requirement*-shaped name at all.
+//   - Refusal precedence: a candidate-less seed set that would also collide
+//     produces the zero-match refusal, not the collision refusal.
 
 import (
 	"errors"
@@ -143,7 +155,10 @@ func TestPlan_IsEmpty_NonEmptyPlan(t *testing.T) {
 // BuildPlan — single file source
 // ---------------------------------------------------------------------------
 
-func TestBuildPlan_SingleFile_DestIsBaseName(t *testing.T) {
+// TestBuildPlan_SingleFile_AlreadyNamedRequirements_NoOpRename pins the
+// no-op case of the naming rule: a sole source already named Requirements.md
+// is its own single match, so the rename changes nothing observable.
+func TestBuildPlan_SingleFile_AlreadyNamedRequirements_NoOpRename(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "Requirements.md")
 	writeFile(t, src, "# Requirements\n")
@@ -166,16 +181,31 @@ func TestBuildPlan_SingleFile_SourceRootEqualsSource(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "Plan.md")
 	writeFile(t, src, "# Plan\n")
+	// A Requirement* candidate must be present in the combined source set, or
+	// this otherwise-unrelated seed set is refused by the naming rule before
+	// this test's subject (SourceRoot) is ever reached.
+	reqSrc := filepath.Join(dir, "Requirements.md")
+	writeFile(t, reqSrc, "# Requirements\n")
 
-	plan, err := seed.BuildPlan([]string{src})
+	plan, err := seed.BuildPlan([]string{src, reqSrc})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(plan.Entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(plan.Entries))
+	if len(plan.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(plan.Entries))
 	}
 
-	entry := plan.Entries[0]
+	var entry seed.Entry
+	found := false
+	for _, e := range plan.Entries {
+		if e.Source == src {
+			entry = e
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no entry found for source %q", src)
+	}
 	if entry.SourceRoot != src {
 		t.Errorf("SourceRoot = %q, want %q", entry.SourceRoot, src)
 	}
@@ -188,18 +218,24 @@ func TestBuildPlan_SingleFile_DestUsesForwardSlash(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "Input.md")
 	writeFile(t, src, "content\n")
+	// A Requirement* candidate must be present, or this seed set is refused by
+	// the naming rule before the forward-slash assertion below runs.
+	reqSrc := filepath.Join(dir, "Requirements.md")
+	writeFile(t, reqSrc, "# Requirements\n")
 
-	plan, err := seed.BuildPlan([]string{src})
+	plan, err := seed.BuildPlan([]string{src, reqSrc})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(plan.Entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(plan.Entries))
+	if len(plan.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(plan.Entries))
 	}
 
-	// Dest must use forward slashes, not OS-native separators.
-	if strings.Contains(plan.Entries[0].Dest, "\\") {
-		t.Errorf("Dest %q must not contain backslashes; destinations must use forward slashes", plan.Entries[0].Dest)
+	// Dest must use forward slashes, not OS-native separators, on every entry.
+	for _, e := range plan.Entries {
+		if strings.Contains(e.Dest, "\\") {
+			t.Errorf("Dest %q must not contain backslashes; destinations must use forward slashes", e.Dest)
+		}
 	}
 }
 
@@ -211,18 +247,20 @@ func TestBuildPlan_DirectorySource_RecursiveDestMapping(t *testing.T) {
 	// Layout:
 	//   srcDir/
 	//     Plan.md
+	//     Requirements.md   (top-level candidate; keeps the naming rule satisfied)
 	//     Sub/
 	//       A.md
 	srcDir := t.TempDir()
 	writeFile(t, filepath.Join(srcDir, "Plan.md"), "# Plan\n")
+	writeFile(t, filepath.Join(srcDir, "Requirements.md"), "# Requirements\n")
 	writeFile(t, filepath.Join(srcDir, "Sub", "A.md"), "# A\n")
 
 	plan, err := seed.BuildPlan([]string{srcDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(plan.Entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(plan.Entries))
+	if len(plan.Entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(plan.Entries))
 	}
 
 	// Collect dest set for order-independent assertion.
@@ -240,24 +278,41 @@ func TestBuildPlan_DirectorySource_RecursiveDestMapping(t *testing.T) {
 
 func TestBuildPlan_DirectorySource_NestedStructurePreserved(t *testing.T) {
 	// Deep nesting: a/b/c.md → "a/b/c.md" relative to the directory root.
+	// A top-level Requirement.md candidate keeps the naming rule satisfied so
+	// this test's subject (nested path preservation) is reachable.
 	srcDir := t.TempDir()
 	writeFile(t, filepath.Join(srcDir, "a", "b", "c.md"), "deep\n")
+	writeFile(t, filepath.Join(srcDir, "Requirement.md"), "# req\n")
 
 	plan, err := seed.BuildPlan([]string{srcDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(plan.Entries) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(plan.Entries))
+	if len(plan.Entries) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(plan.Entries))
 	}
-	if plan.Entries[0].Dest != "a/b/c.md" {
-		t.Errorf("Dest = %q, want %q", plan.Entries[0].Dest, "a/b/c.md")
+
+	var deepEntry seed.Entry
+	found := false
+	for _, e := range plan.Entries {
+		if e.Dest == "a/b/c.md" {
+			deepEntry = e
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected an entry with Dest %q, entries: %+v", "a/b/c.md", plan.Entries)
+	}
+	if deepEntry.Dest != "a/b/c.md" {
+		t.Errorf("Dest = %q, want %q", deepEntry.Dest, "a/b/c.md")
 	}
 }
 
 func TestBuildPlan_DirectorySource_DestsUseForwardSlash(t *testing.T) {
 	srcDir := t.TempDir()
 	writeFile(t, filepath.Join(srcDir, "Sub", "file.md"), "content\n")
+	// Top-level candidate keeps the naming rule satisfied.
+	writeFile(t, filepath.Join(srcDir, "Requirement.md"), "# req\n")
 
 	plan, err := seed.BuildPlan([]string{srcDir})
 	if err != nil {
@@ -274,6 +329,8 @@ func TestBuildPlan_DirectorySource_SourceRootIsTheGivenDirectory(t *testing.T) {
 	srcDir := t.TempDir()
 	writeFile(t, filepath.Join(srcDir, "A.md"), "a\n")
 	writeFile(t, filepath.Join(srcDir, "B.md"), "b\n")
+	// Top-level candidate keeps the naming rule satisfied.
+	writeFile(t, filepath.Join(srcDir, "Requirement.md"), "# req\n")
 
 	plan, err := seed.BuildPlan([]string{srcDir})
 	if err != nil {
@@ -291,6 +348,8 @@ func TestBuildPlan_DirectorySource_NoEntryForDirectoriesThemselves(t *testing.T)
 	srcDir := t.TempDir()
 	writeFile(t, filepath.Join(srcDir, "Sub", "file.md"), "content\n")
 	// srcDir/Sub itself must not appear as an entry.
+	// Top-level candidate keeps the naming rule satisfied.
+	writeFile(t, filepath.Join(srcDir, "Requirement.md"), "# req\n")
 
 	plan, err := seed.BuildPlan([]string{srcDir})
 	if err != nil {
@@ -311,15 +370,19 @@ func TestBuildPlan_MultipleSources_OrderPreserved(t *testing.T) {
 	dir := t.TempDir()
 	src1 := filepath.Join(dir, "First.md")
 	src2 := filepath.Join(dir, "Second.md")
+	// A trailing Requirement* candidate keeps the naming rule satisfied without
+	// disturbing the order assertions on the first two entries below.
+	src3 := filepath.Join(dir, "Requirement.md")
 	writeFile(t, src1, "first\n")
 	writeFile(t, src2, "second\n")
+	writeFile(t, src3, "req\n")
 
-	plan, err := seed.BuildPlan([]string{src1, src2})
+	plan, err := seed.BuildPlan([]string{src1, src2, src3})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(plan.Entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(plan.Entries))
+	if len(plan.Entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(plan.Entries))
 	}
 	if plan.Entries[0].Dest != "First.md" {
 		t.Errorf("first entry Dest = %q, want \"First.md\"", plan.Entries[0].Dest)
@@ -333,10 +396,14 @@ func TestBuildPlan_MultipleSources_FileAndDirectory(t *testing.T) {
 	dir := t.TempDir()
 	srcFile := filepath.Join(dir, "Root.md")
 	srcDirPath := filepath.Join(dir, "srcdir")
+	// A separate candidate keeps the naming rule satisfied without renaming
+	// either Root.md or Inside.md, which this test's assertions depend on.
+	reqFile := filepath.Join(dir, "Requirement.md")
 	writeFile(t, srcFile, "root\n")
 	writeFile(t, filepath.Join(srcDirPath, "Inside.md"), "inside\n")
+	writeFile(t, reqFile, "req\n")
 
-	plan, err := seed.BuildPlan([]string{srcFile, srcDirPath})
+	plan, err := seed.BuildPlan([]string{srcFile, srcDirPath, reqFile})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -350,6 +417,220 @@ func TestBuildPlan_MultipleSources_FileAndDirectory(t *testing.T) {
 	}
 	if !dests["Inside.md"] {
 		t.Error("expected dest \"Inside.md\" from directory source")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// BuildPlan — Requirements.md naming rule
+// ---------------------------------------------------------------------------
+
+// TestBuildPlan_SingleFile_RequirementsMatch_VariousCasings pins case-
+// insensitive matching of the Requirement* pattern for a file source, and
+// that a match's Dest becomes exactly "Requirements.md".
+func TestBuildPlan_SingleFile_RequirementsMatch_VariousCasings(t *testing.T) {
+	names := []string{"Requirements.md", "requirement-draft.md", "REQUIREMENTS.MD"}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			src := filepath.Join(dir, name)
+			writeFile(t, src, "# req\n")
+
+			plan, err := seed.BuildPlan([]string{src})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(plan.Entries) != 1 {
+				t.Fatalf("expected 1 entry, got %d", len(plan.Entries))
+			}
+			if plan.Entries[0].Dest != "Requirements.md" {
+				t.Errorf("Dest = %q, want %q", plan.Entries[0].Dest, "Requirements.md")
+			}
+		})
+	}
+}
+
+// TestBuildPlan_DirectorySource_TopLevelRequirementsMatch_Renamed pins that a
+// single top-level Requirement* match inside a directory source is renamed to
+// Requirements.md, while unrelated entries keep their destinations.
+func TestBuildPlan_DirectorySource_TopLevelRequirementsMatch_Renamed(t *testing.T) {
+	srcDir := t.TempDir()
+	writeFile(t, filepath.Join(srcDir, "requirement-notes.md"), "# req\n")
+	writeFile(t, filepath.Join(srcDir, "Other.md"), "other\n")
+
+	plan, err := seed.BuildPlan([]string{srcDir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	dests := make(map[string]bool)
+	for _, e := range plan.Entries {
+		dests[e.Dest] = true
+	}
+	if !dests["Requirements.md"] {
+		t.Errorf("expected the top-level candidate renamed to Requirements.md, got dests %v", dests)
+	}
+	if dests["requirement-notes.md"] {
+		t.Error("the candidate's original destination should not remain in the plan")
+	}
+	if !dests["Other.md"] {
+		t.Error("expected the unrelated entry to keep its existing destination")
+	}
+}
+
+// TestBuildPlan_MultipleSources_CandidateFromFileSource_DirectoryContributesNone
+// pins that the candidate pool spans all sources combined: a match contributed
+// by a file source is renamed even when an accompanying directory source
+// contributes no candidate of its own. The file-source candidate is deliberately
+// NOT already named "Requirements.md" so the assertion can only pass once the
+// rename logic actually runs.
+func TestBuildPlan_MultipleSources_CandidateFromFileSource_DirectoryContributesNone(t *testing.T) {
+	dir := t.TempDir()
+	reqFile := filepath.Join(dir, "Requirement-file.md")
+	writeFile(t, reqFile, "# req\n")
+	srcDir := filepath.Join(dir, "srcdir")
+	writeFile(t, filepath.Join(srcDir, "Notes.md"), "notes\n")
+
+	plan, err := seed.BuildPlan([]string{reqFile, srcDir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	dests := make(map[string]bool)
+	for _, e := range plan.Entries {
+		dests[e.Dest] = true
+	}
+	if !dests["Requirements.md"] {
+		t.Error("expected the file-source candidate to resolve to Requirements.md")
+	}
+	if dests["Requirement-file.md"] {
+		t.Error("the candidate's original destination should not remain in the plan")
+	}
+	if !dests["Notes.md"] {
+		t.Error("expected the directory-source file to keep its existing destination")
+	}
+}
+
+// TestBuildPlan_SingleFile_SubstringMatch_NotPrefix_NotCandidate pins that the
+// Requirement* pattern is prefix-anchored, not a substring match: a name that
+// merely contains "requirement" without starting with it is not a candidate,
+// is not renamed, and — being the only source — leaves the seed set with zero
+// candidates, so BuildPlan refuses.
+func TestBuildPlan_SingleFile_SubstringMatch_NotPrefix_NotCandidate(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "MyRequirementsDraft.md")
+	writeFile(t, src, "draft\n")
+
+	plan, err := seed.BuildPlan([]string{src})
+	if err == nil {
+		t.Fatal("expected refusal: a substring (non-prefix) match must not count as a candidate")
+	}
+	assertZeroPlan(t, plan)
+	assertRefusalError(t, err, "Requirement")
+}
+
+// TestBuildPlan_DirectorySource_MultipleTopLevelRequirementsMatches_Refused
+// pins that more than one top-level Requirement* match contributed entirely by
+// a single directory source is refused, mirroring the file-source multiple-
+// match case.
+func TestBuildPlan_DirectorySource_MultipleTopLevelRequirementsMatches_Refused(t *testing.T) {
+	srcDir := t.TempDir()
+	writeFile(t, filepath.Join(srcDir, "Requirements.md"), "one\n")
+	writeFile(t, filepath.Join(srcDir, "requirement-draft.md"), "two\n")
+
+	plan, err := seed.BuildPlan([]string{srcDir})
+	if err == nil {
+		t.Fatal("expected refusal for multiple Requirement* matches from a single directory source, got nil error")
+	}
+	assertZeroPlan(t, plan)
+	assertRefusalError(t, err, "Requirement")
+}
+
+// TestBuildPlan_DirectorySource_NestedRequirementsFile_ExcludedFromCandidatePool
+// pins that a Requirement*-named file nested beneath a directory source is
+// excluded from the candidate pool: it is still copied under its relative
+// path, unrenamed, and does not count toward the match total.
+func TestBuildPlan_DirectorySource_NestedRequirementsFile_ExcludedFromCandidatePool(t *testing.T) {
+	srcDir := t.TempDir()
+	writeFile(t, filepath.Join(srcDir, "Requirement-top.md"), "top\n")
+	writeFile(t, filepath.Join(srcDir, "Sub", "Requirements.md"), "nested\n")
+
+	plan, err := seed.BuildPlan([]string{srcDir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	dests := make(map[string]bool)
+	for _, e := range plan.Entries {
+		dests[e.Dest] = true
+	}
+	if !dests["Requirements.md"] {
+		t.Errorf("expected the top-level candidate renamed to Requirements.md, got dests %v", dests)
+	}
+	if !dests["Sub/Requirements.md"] {
+		t.Error("expected the nested Requirements.md to be copied unrenamed under its relative path")
+	}
+}
+
+// TestBuildPlan_ZeroRequirementsMatches_Refused pins that a non-empty seed set
+// with no Requirement* candidate is refused, including sets that never
+// contained a Requirement*-shaped name (Required Behaviour 4).
+func TestBuildPlan_ZeroRequirementsMatches_Refused(t *testing.T) {
+	dir := t.TempDir()
+	src1 := filepath.Join(dir, "NotesA.md")
+	src2 := filepath.Join(dir, "NotesB.md")
+	writeFile(t, src1, "a\n")
+	writeFile(t, src2, "b\n")
+
+	plan, err := seed.BuildPlan([]string{src1, src2})
+	if err == nil {
+		t.Fatal("expected refusal for zero Requirement* matches, got nil error")
+	}
+	assertZeroPlan(t, plan)
+	assertRefusalError(t, err, "Requirement")
+}
+
+// TestBuildPlan_MultipleRequirementsMatches_Refused_NamesMatchedFiles pins
+// that more than one Requirement* match across the combined source set is
+// refused, and that the reason names the matched files.
+func TestBuildPlan_MultipleRequirementsMatches_Refused_NamesMatchedFiles(t *testing.T) {
+	dir := t.TempDir()
+	src1 := filepath.Join(dir, "Requirements.md")
+	src2 := filepath.Join(dir, "requirement-draft.md")
+	writeFile(t, src1, "one\n")
+	writeFile(t, src2, "two\n")
+
+	plan, err := seed.BuildPlan([]string{src1, src2})
+	if err == nil {
+		t.Fatal("expected refusal for multiple Requirement* matches, got nil error")
+	}
+	assertZeroPlan(t, plan)
+	assertRefusalError(t, err, src1, src2)
+}
+
+// TestBuildPlan_RefusalPrecedence_ZeroMatch_BeforeCollision pins Required
+// Behaviour 8's precedence: a seed set with no Requirement* candidate that
+// would also collide on destination produces the zero-match refusal, not the
+// collision refusal.
+func TestBuildPlan_RefusalPrecedence_ZeroMatch_BeforeCollision(t *testing.T) {
+	dir := t.TempDir()
+	src1 := filepath.Join(dir, "dir1", "Plan.md")
+	src2 := filepath.Join(dir, "dir2", "Plan.md")
+	writeFile(t, src1, "plan from dir1\n")
+	writeFile(t, src2, "plan from dir2\n")
+
+	plan, err := seed.BuildPlan([]string{src1, src2})
+	if err == nil {
+		t.Fatal("expected the zero-match refusal, got nil error")
+	}
+	assertZeroPlan(t, plan)
+
+	var re *domain.RefusalError
+	if !errors.As(err, &re) {
+		t.Fatalf("want *domain.RefusalError, got %T: %v", err, err)
+	}
+	msg := re.Error()
+	if strings.Contains(msg, "collision") {
+		t.Errorf("want the zero-match refusal to take precedence, but got a collision-shaped message: %q", msg)
 	}
 }
 
@@ -435,8 +716,12 @@ func TestBuildPlan_CrossSourceCollision_RefusedNamesBothSources(t *testing.T) {
 	src2 := filepath.Join(dir, "dir2", "Plan.md")
 	writeFile(t, src1, "plan from dir1\n")
 	writeFile(t, src2, "plan from dir2\n")
+	// A Requirement* candidate keeps the naming rule from masking the
+	// collision refusal this test targets (Required Behaviour 8).
+	reqSrc := filepath.Join(dir, "Requirement.md")
+	writeFile(t, reqSrc, "req\n")
 
-	plan, err := seed.BuildPlan([]string{src1, src2})
+	plan, err := seed.BuildPlan([]string{src1, src2, reqSrc})
 	if err == nil {
 		t.Fatal("expected an error for cross-source collision, got nil")
 	}
@@ -453,8 +738,12 @@ func TestBuildPlan_CrossSourceCollision_DirectoryAndFile(t *testing.T) {
 	writeFile(t, filepath.Join(srcDir, "Report.md"), "from dir\n")
 	srcFile := filepath.Join(dir, "Report.md")
 	writeFile(t, srcFile, "from file\n")
+	// A Requirement* candidate keeps the naming rule from masking the
+	// collision refusal this test targets (Required Behaviour 8).
+	reqSrc := filepath.Join(dir, "Requirement.md")
+	writeFile(t, reqSrc, "req\n")
 
-	plan, err := seed.BuildPlan([]string{srcDir, srcFile})
+	plan, err := seed.BuildPlan([]string{srcDir, srcFile, reqSrc})
 	if err == nil {
 		t.Fatal("expected cross-source collision error, got nil")
 	}
@@ -473,8 +762,12 @@ func TestBuildPlan_RunnerManagedDestination_Refused(t *testing.T) {
 	// reserved.
 	src := filepath.Join(dir, "Orchestration.md")
 	writeFile(t, src, "# fake orchestration\n")
+	// A Requirement* candidate keeps the naming rule from masking the
+	// reserved-destination refusal this test targets (Required Behaviour 8).
+	reqSrc := filepath.Join(dir, "Requirement.md")
+	writeFile(t, reqSrc, "req\n")
 
-	plan, err := seed.BuildPlan([]string{src})
+	plan, err := seed.BuildPlan([]string{src, reqSrc})
 	if err == nil {
 		t.Fatal("expected an error for runner-managed destination, got nil")
 	}
@@ -484,9 +777,12 @@ func TestBuildPlan_RunnerManagedDestination_Refused(t *testing.T) {
 
 func TestBuildPlan_RunnerManagedDestinationInSubdir_NotRefused(t *testing.T) {
 	// "Sub/Orchestration.md" is NOT reserved — only the exact root-level path is.
+	// A top-level Requirement.md candidate keeps the naming rule satisfied so
+	// this test's subject (nested reserved-name tolerance) is reachable.
 	dir := t.TempDir()
 	srcDir := filepath.Join(dir, "srcdir")
 	writeFile(t, filepath.Join(srcDir, "Sub", "Orchestration.md"), "nested\n")
+	writeFile(t, filepath.Join(srcDir, "Requirement.md"), "req\n")
 
 	plan, err := seed.BuildPlan([]string{srcDir})
 	if err != nil {

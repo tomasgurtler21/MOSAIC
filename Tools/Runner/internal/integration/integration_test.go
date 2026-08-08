@@ -469,6 +469,11 @@ func TestIntegration_VersionDrift_AllowOverride_Resumes(t *testing.T) {
 // set (its first, and here only, row is EXECUTION), where it stops cleanly
 // with a message naming the missing stage set, instead of panicking or
 // dispatching an agent it cannot route.
+//
+// This is the "never seeded" case of the Stage 5 diagnostic (AC5.5): no
+// SeedInputs were given at all, so the stop message must name what was
+// expected (Plan.md) and where it was looked for (the run folder path),
+// distinct from the "seeded but missing" case exercised elsewhere.
 func TestIntegration_StagedWorkflow_NoPlanMd_StopsCleanlyAtExecution(t *testing.T) {
 	dir := t.TempDir()
 	orchPath := copyFile(t, dir, "orchestrator.md",
@@ -476,6 +481,8 @@ func TestIntegration_StagedWorkflow_NoPlanMd_StopsCleanlyAtExecution(t *testing.
 	writeAgentFile(t, dir, "implementation-tdd")
 	writeAgentFile(t, dir, "implementation-review")
 	// Deliberately do NOT write Plan.md — absence must not refuse the run.
+	// SeedInputs is also deliberately unset: this run never had a stage table
+	// seeded into it at all.
 
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	sess := newSession(harness.NewFakeAdapter(), artifactPath, &scriptedResolver{})
@@ -499,6 +506,12 @@ func TestIntegration_StagedWorkflow_NoPlanMd_StopsCleanlyAtExecution(t *testing.
 	}
 	if !strings.Contains(got.Message, "stage set") {
 		t.Errorf("want stop message to name the missing stage set, got %q", got.Message)
+	}
+	// AC5.5: the message must name where the stage table was looked for, not
+	// just that one is missing.
+	wantPath := filepath.Join(dir, "Plan.md")
+	if !strings.Contains(got.Message, wantPath) {
+		t.Errorf("want stop message to name the path looked for (%q); got %q", wantPath, got.Message)
 	}
 }
 
@@ -1788,6 +1801,7 @@ func TestIntegration_Seeding_DirectorySource_FilesAtCorrectRelativePaths(t *test
 	// Source directory:
 	//   srcDir/
 	//     Top.md
+	//     Requirements.md   (top-level Requirement* candidate, so seeding is not refused)
 	//     Sub/
 	//       Nested.md
 	srcDir := filepath.Join(dir, "seed-src")
@@ -1797,6 +1811,11 @@ func TestIntegration_Seeding_DirectorySource_FilesAtCorrectRelativePaths(t *test
 	topContent := "# Top level\n"
 	if err := os.WriteFile(filepath.Join(srcDir, "Top.md"), []byte(topContent), 0600); err != nil {
 		t.Fatalf("write Top.md: %v", err)
+	}
+	// Requirement* candidate at the top level of the directory source, so the
+	// combined candidate pool has exactly one match and seeding is not refused.
+	if err := os.WriteFile(filepath.Join(srcDir, "Requirements.md"), []byte("# Requirements\n"), 0600); err != nil {
+		t.Fatalf("write Requirements.md: %v", err)
 	}
 	if err := os.MkdirAll(filepath.Join(srcDir, "Sub"), 0700); err != nil {
 		t.Fatalf("mkdir Sub: %v", err)
@@ -1892,6 +1911,14 @@ func TestIntegration_Seeding_MultipleSources_AllFilesPresent(t *testing.T) {
 		t.Fatalf("write DirInput.md: %v", err)
 	}
 
+	// Source 4: individual file. This is the sole Requirement* candidate across
+	// the combined source set, so seeding is not refused for lacking one.
+	content4 := "# Requirements\n"
+	src4 := filepath.Join(dir, "Requirements.md")
+	if err := os.WriteFile(src4, []byte(content4), 0600); err != nil {
+		t.Fatalf("write src4: %v", err)
+	}
+
 	runDir := filepath.Join(dir, "run")
 	artifactPath := filepath.Join(runDir, "Orchestration.md")
 
@@ -1923,7 +1950,7 @@ func TestIntegration_Seeding_MultipleSources_AllFilesPresent(t *testing.T) {
 		IsNewRun:             true,
 		OnDeviation:          domain.DeviationDelegate,
 		RunFolder:            runDir,
-		SeedInputs:           []string{src1, src2, srcDir},
+		SeedInputs:           []string{src1, src2, srcDir, src4},
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
@@ -1933,6 +1960,7 @@ func TestIntegration_Seeding_MultipleSources_AllFilesPresent(t *testing.T) {
 		{"src1", "Input1.md", content1},
 		{"src2", "Input2.md", content2},
 		{"srcDir/DirInput.md", "DirInput.md", content3},
+		{"src4", "Requirements.md", content4},
 	} {
 		gotContent, err := os.ReadFile(filepath.Join(runDir, tc.dest))
 		if err != nil {
@@ -2079,15 +2107,21 @@ func TestIntegration_Seeding_MidCopyFailure_RunFolderCompletelyRemoved(t *testin
 
 	// Source directory:
 	//   sources/
-	//     first.md       → dest "first.md"     (copies successfully)
+	//     first.md          → dest "first.md"          (copies successfully)
+	//     Requirements.md   → dest "Requirements.md"    (sole candidate, no-op rename; copies successfully)
 	//     sub/
-	//       second.md    → dest "sub/second.md" (fails — see sabotage below)
+	//       second.md       → dest "sub/second.md"      (fails — see sabotage below)
 	srcDir := filepath.Join(dir, "sources")
 	if err := os.MkdirAll(filepath.Join(srcDir, "sub"), 0700); err != nil {
 		t.Fatalf("mkdir sources/sub: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(srcDir, "first.md"), []byte("first\n"), 0600); err != nil {
 		t.Fatalf("write first.md: %v", err)
+	}
+	// Top-level Requirement* candidate, so the seed set has exactly one match
+	// and seeding is not refused before Apply is reached.
+	if err := os.WriteFile(filepath.Join(srcDir, "Requirements.md"), []byte("# Requirements\n"), 0600); err != nil {
+		t.Fatalf("write Requirements.md: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(srcDir, "sub", "second.md"), []byte("second\n"), 0600); err != nil {
 		t.Fatalf("write sub/second.md: %v", err)
@@ -2143,11 +2177,12 @@ func TestIntegration_Seeding_MidCopyFailure_RunFolderCompletelyRemoved(t *testin
 
 	// The refusal message must reference the seed component and name the
 	// specific entry that failed to copy. The failing entry is sub/second.md
-	// (Apply visits first.md before sub/second.md in lexical order; first.md
-	// copies successfully, then os.MkdirAll("runDir/sub") fails because the
-	// sabotage file occupies that path). Both the component tag and the
-	// failing source path must appear so the test distinguishes "named the
-	// right file" from "named some seed problem."
+	// (Apply visits the top-level files before descending into sub/; both
+	// Requirements.md and first.md copy successfully, then
+	// os.MkdirAll("runDir/sub") fails because the sabotage file occupies that
+	// path). Both the component tag and the failing source path must appear
+	// so the test distinguishes "named the right file" from "named some seed
+	// problem."
 	if !strings.Contains(msg, "seed") {
 		t.Errorf("want refusal message to reference the seed component; got %q", msg)
 	}
@@ -2158,6 +2193,433 @@ func TestIntegration_Seeding_MidCopyFailure_RunFolderCompletelyRemoved(t *testin
 	// No agents must have been dispatched: the failure occurred before the dispatch loop.
 	if len(f.Invocations()) != 0 {
 		t.Errorf("want no harness invocations on seed copy failure, got %d", len(f.Invocations()))
+	}
+}
+
+// ===== Seeding: invalid seed set leaves no run folder behind =====
+
+// TestIntegration_Seeding_InvalidSeedSet_NoRunFolderLeftBehind verifies that
+// when the seed set fails BuildPlan's validation (here: a source path that
+// does not exist), the run is refused and no run folder is created on disk
+// at all -- seed planning happens, and is refused, before Store.Create ever
+// runs. This is the ordering guarantee the Stage 5 reorder must preserve:
+// only seed.Apply moves to after Store.Create, never seed.BuildPlan.
+func TestIntegration_Seeding_InvalidSeedSet_NoRunFolderLeftBehind(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	nonExistent := filepath.Join(dir, "does-not-exist.md")
+
+	runDir := filepath.Join(dir, "run") // deliberately never created by this test
+	artifactPath := filepath.Join(runDir, "Orchestration.md")
+
+	f := harness.NewFakeAdapter()
+	// No responses queued: BuildPlan must refuse before any dispatch.
+
+	store := artifact.NewFileStore(artifactPath)
+	sess := session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Deviation: &scriptedResolver{},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		OnDeviation:          domain.DeviationDelegate,
+		RunFolder:            runDir,
+		SeedInputs:           []string{nonExistent},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+
+	msg := requireRefused(t, got, err)
+	if !strings.Contains(msg, "does-not-exist.md") {
+		t.Errorf("want refusal message to name the missing source path; got %q", msg)
+	}
+
+	// No run folder must exist at all -- not even Orchestration.md.
+	if _, statErr := os.Stat(runDir); !os.IsNotExist(statErr) {
+		t.Errorf("want no run folder created for an invalid seed set, but one exists at %s", runDir)
+	}
+
+	if len(f.Invocations()) != 0 {
+		t.Errorf("want no harness invocations for an invalid seed set, got %d", len(f.Invocations()))
+	}
+}
+
+// ===== Seeding: a seeded stage table dispatches on the first attempt =====
+
+// TestIntegration_Seeding_StagedWorkflow_SeededStageTable_DispatchesFirstAttempt
+// verifies the Stage 5 defect's absence directly: a staged workflow whose
+// stage table arrives via SeedInputs (never pre-populated on disk by the
+// test itself) dispatches successfully on a single Start call -- no stop, no
+// start-then-resume sequence, and the stage-driven dispatches actually
+// occur. This is the coverage gap the defect exploited: nothing previously
+// seeded a stage table into a brand-new staged run and then dispatched
+// against it in one call.
+//
+// Before the fix, the session reads the run folder's Plan.md (Step 6) before
+// the run folder is created and the seed plan is applied (Step 8), so the
+// stage set stays nil and the engine stops with no stage set available,
+// before any harness invocation.
+func TestIntegration_Seeding_StagedWorkflow_SeededStageTable_DispatchesFirstAttempt(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "staged-orch.md"))
+	writeAgentFile(t, dir, "implementation-tdd")
+	writeAgentFile(t, dir, "implementation-review")
+
+	// Seed sources: a Plan.md with a one-stage stage table, plus the mandatory
+	// Requirement* candidate so BuildPlan's naming rule is satisfied.
+	seedDir := filepath.Join(dir, "seed")
+	if err := os.MkdirAll(seedDir, 0700); err != nil {
+		t.Fatalf("mkdir seedDir: %v", err)
+	}
+	planContent := `# Plan
+
+## Stages
+
+| Stage | Name | Goal | Depends On | HITL |
+|-------|------|------|------------|:----:|
+| 1 | Stage One | The only stage | - | ❌ |
+`
+	planSrc := filepath.Join(seedDir, "Plan.md")
+	if err := os.WriteFile(planSrc, []byte(planContent), 0600); err != nil {
+		t.Fatalf("write seed Plan.md: %v", err)
+	}
+	reqSrc := filepath.Join(seedDir, "Requirements.md")
+	if err := os.WriteFile(reqSrc, []byte("# Requirements\n"), 0600); err != nil {
+		t.Fatalf("write seed Requirements.md: %v", err)
+	}
+
+	// runDir does not exist before Start is called: it is created by
+	// Store.Create as part of this one run-start sequence.
+	runDir := filepath.Join(dir, "run")
+	artifactPath := filepath.Join(runDir, "Orchestration.md")
+
+	f := harness.NewFakeAdapter()
+	f.Queue("implementation-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "implementation-tdd#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "implemented",
+	}})
+	f.Queue("implementation-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "implementation-review#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "reviewed",
+	}})
+
+	store := artifact.NewFileStore(artifactPath)
+	sess := session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Deviation: &scriptedResolver{},
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+	})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "staged",
+		Task:                 "task",
+		IsNewRun:             true,
+		OnDeviation:          domain.DeviationDelegate,
+		RunFolder:            runDir,
+		SeedInputs:           []string{planSrc, reqSrc},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+
+	// The single Start call must complete the run -- no stop, no resume needed.
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	invs := f.Invocations()
+	if len(invs) == 0 {
+		t.Fatal("want at least 1 harness invocation on the first Start call, got 0 (stage-driven dispatch never occurred)")
+	}
+	if invs[0].Agent.Identifier != "implementation-tdd" {
+		t.Errorf("want first dispatch to be implementation-tdd (stage 1), got %q", invs[0].Agent.Identifier)
+	}
+
+	// The seeded stage table itself must be present in the run folder,
+	// byte-identical to its source.
+	gotPlan, readErr := os.ReadFile(filepath.Join(runDir, "Plan.md"))
+	if readErr != nil {
+		t.Fatalf("read seeded Plan.md from run folder: %v", readErr)
+	}
+	if string(gotPlan) != planContent {
+		t.Errorf("seeded Plan.md content: got %q, want %q", string(gotPlan), planContent)
+	}
+}
+
+// ===== Position immune to infrastructure activity, end-to-end (T3.5) =====
+//
+// These use interval-agent-orch.md, which declares checkpoint-manager-git
+// (checkpoint class, INVOCATION_INTERVAL:1 -- fires after every workflow step)
+// alongside a two-row linear workflow (agent-a -> agent-b -> COMPLETE).
+
+// TestIntegration_InfrastructureAgent_MidWorkflow_RunsToCorrectEnd verifies
+// AC3.2-AC3.4: dispatching an infrastructure agent mid-workflow does not stop
+// the run, and the on-disk artifact's recorded position names the last
+// WORKFLOW step while every invocation -- workflow and infrastructure alike --
+// remains in the on-disk execution log, in sequence and attributable.
+func TestIntegration_InfrastructureAgent_MidWorkflow_RunsToCorrectEnd(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "interval-agent-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("checkpoint-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "checkpoint-manager-git#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "checkpoint taken",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("checkpoint-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "checkpoint-manager-git#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "checkpoint taken",
+	}})
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSession(f, artifactPath, &scriptedResolver{})
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		OnDeviation:          domain.DeviationDelegate,
+		Checkpoints:          true, // enable checkpoint class so its triggers are evaluated
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	store := artifact.NewFileStore(artifactPath)
+	final, err := store.Read(context.Background())
+	if err != nil {
+		t.Fatalf("Read final artifact: %v", err)
+	}
+
+	// AC3.2: the on-disk recorded position names the last WORKFLOW step, never
+	// the infrastructure agent that ran after it.
+	if final.CurrentState.LastAgent != "agent-b#3" {
+		t.Errorf("on-disk CurrentState.LastAgent: want %q (last workflow step), got %q",
+			"agent-b#3", final.CurrentState.LastAgent)
+	}
+
+	// AC3.3: both checkpoint invocations remain in the on-disk execution log,
+	// in sequence, alongside the workflow steps.
+	wantAgents := []string{"agent-a#1", "checkpoint-manager-git#2", "agent-b#3", "checkpoint-manager-git#4"}
+	if len(final.ExecutionLog) != len(wantAgents) {
+		t.Fatalf("on-disk ExecutionLog length: want %d, got %d", len(wantAgents), len(final.ExecutionLog))
+	}
+	for i, want := range wantAgents {
+		if final.ExecutionLog[i].Agent != want {
+			t.Errorf("on-disk ExecutionLog[%d].Agent: want %q, got %q", i, want, final.ExecutionLog[i].Agent)
+		}
+	}
+}
+
+// TestIntegration_InfrastructureAgent_ResumeAfterCleanStop_NotMisdiagnosedAsInterrupted
+// verifies AC3.5's first variant: a run resumed from an on-disk artifact whose
+// execution log ends with an infrastructure entry (recorded after a clean
+// workflow step completion) continues at the next workflow row, without
+// re-dispatching the already-completed workflow step and without the
+// infrastructure agent being treated as the interrupted step.
+func TestIntegration_InfrastructureAgent_ResumeAfterCleanStop_NotMisdiagnosedAsInterrupted(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "interval-agent-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	// On disk: agent-a completed, then checkpoint-manager-git fired cleanly
+	// afterward. Per the fix, current_state still names agent-a (the last
+	// WORKFLOW step) even though checkpoint-manager-git is the execution log's
+	// last entry -- this is a clean stop, not an interruption.
+	const artifactContent = `---
+type: orchestration-artifact
+workflow: linear
+workflow_version: "1.0"
+task: "test task"
+started: 2026-01-01T00:00:00Z
+last_updated: 2026-01-01T00:00:00Z
+global_sequence: 2
+checkpoints: disabled
+current_state:
+  phase: PLANNING
+  stage: null
+  last_status: SUCCESS
+  last_agent: "agent-a#1"
+  error_code: null
+---
+
+[[SECTION:ExecutionLog]]
+| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Checkpoint |
+| --- | ----- | ----- | ----- | ------ | --------- | ------- | ---------- |
+| 1 | agent-a#1 | PLANNING | - | SUCCESS | 2026-01-01T00:00:00Z | planning done | - |
+| 2 | checkpoint-manager-git#2 | PLANNING | - | SUCCESS | 2026-01-01T00:00:00Z | checkpoint taken | - |
+[[/SECTION:ExecutionLog]]
+
+[[SECTION:Artifacts]]
+| Artifact | Created In | Created By |
+| -------- | ---------- | ---------- |
+| plan.md | PLANNING | agent-a#1 |
+[[/SECTION:Artifacts]]
+
+[[SECTION:WorkflowNotes]]
+| Seq | Note |
+| --- | ---- |
+[[/SECTION:WorkflowNotes]]
+`
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	if err := os.WriteFile(artifactPath, []byte(artifactContent), 0600); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("checkpoint-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "checkpoint-manager-git#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "checkpoint taken",
+	}})
+
+	sess := newSession(f, artifactPath, &scriptedResolver{})
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             false,
+		OnDeviation:          domain.DeviationDelegate,
+		Checkpoints:          true, // enable checkpoint class so its triggers are evaluated
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	invs := f.Invocations()
+	if len(invs) == 0 || invs[0].Agent.Identifier != "agent-b" {
+		t.Fatalf("want first invocation to be agent-b (the row after the last workflow step), got %+v", invs)
+	}
+	for _, inv := range invs {
+		if inv.Agent.Identifier == "agent-a" {
+			t.Errorf("agent-a re-dispatched: resume misdiagnosed the trailing infrastructure entry as an interruption")
+		}
+	}
+}
+
+// TestIntegration_InfrastructureAgent_InterruptedAfterActivity_ResumesCorrectly
+// verifies AC3.5's second variant: a genuine mid-flight interruption occurring
+// after infrastructure activity is still detected and the interrupted workflow
+// row is re-dispatched, without the interleaved infrastructure entry being
+// mistaken for the interrupted step.
+func TestIntegration_InfrastructureAgent_InterruptedAfterActivity_ResumesCorrectly(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "interval-agent-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	// On disk: agent-a completed and is recorded in current_state.
+	// checkpoint-manager-git then fired (does not move current_state). agent-b
+	// was then dispatched and completed, but the runner was interrupted before
+	// current_state could be updated to reflect it.
+	const artifactContent = `---
+type: orchestration-artifact
+workflow: linear
+workflow_version: "1.0"
+task: "test task"
+started: 2026-01-01T00:00:00Z
+last_updated: 2026-01-01T00:00:00Z
+global_sequence: 3
+checkpoints: disabled
+current_state:
+  phase: PLANNING
+  stage: null
+  last_status: SUCCESS
+  last_agent: "agent-a#1"
+  error_code: null
+---
+
+[[SECTION:ExecutionLog]]
+| Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Checkpoint |
+| --- | ----- | ----- | ----- | ------ | --------- | ------- | ---------- |
+| 1 | agent-a#1 | PLANNING | - | SUCCESS | 2026-01-01T00:00:00Z | planning done | - |
+| 2 | checkpoint-manager-git#2 | PLANNING | - | SUCCESS | 2026-01-01T00:00:00Z | checkpoint taken | - |
+| 3 | agent-b#3 | PLANNING | - | SUCCESS | 2026-01-01T00:00:00Z | done | - |
+[[/SECTION:ExecutionLog]]
+
+[[SECTION:Artifacts]]
+| Artifact | Created In | Created By |
+| -------- | ---------- | ---------- |
+| plan.md | PLANNING | agent-a#1 |
+[[/SECTION:Artifacts]]
+
+[[SECTION:WorkflowNotes]]
+| Seq | Note |
+| --- | ---- |
+[[/SECTION:WorkflowNotes]]
+`
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	if err := os.WriteFile(artifactPath, []byte(artifactContent), 0600); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	f := harness.NewFakeAdapter()
+	// agent-b is re-dispatched (it was interrupted before current_state recorded
+	// it), then the run completes.
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "re-done after interruption",
+	}})
+	f.Queue("checkpoint-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "checkpoint-manager-git#5",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "checkpoint taken",
+	}})
+
+	sess := newSession(f, artifactPath, &scriptedResolver{})
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             false,
+		OnDeviation:          domain.DeviationDelegate,
+		Checkpoints:          true, // enable checkpoint class so its triggers are evaluated
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	invs := f.Invocations()
+	if len(invs) == 0 || invs[0].Agent.Identifier != "agent-b" {
+		t.Fatalf("want first invocation to re-run agent-b (interrupted row), got %+v", invs)
 	}
 }
 

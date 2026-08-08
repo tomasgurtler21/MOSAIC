@@ -31,9 +31,20 @@ package harness_test
 //     ErrMalformedJSON is returned, wrapping the raw output text.
 //   - The error message never contains a Go internal type name.
 //   - Large unrecoverable output is truncated with a visible indicator.
+//
+//   ParseClaudeCodeEnvelope — object-shaped envelope:
+//   - A single JSON object envelope (not an array) whose "result" field
+//     carries a well-formed protocol response returns that field's text.
+//   - A single JSON object envelope whose "result" field carries a
+//     ```json-fenced protocol response — mirroring the real Claude Code CLI
+//     payload shape — returns the fenced text verbatim, which then succeeds
+//     a subsequent ExtractProtocolJSON call.
+//   - A single JSON object envelope with no "result" field at all returns
+//     ErrProtocolNotExtractable.
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -245,6 +256,89 @@ func TestParseClaudeCodeEnvelope_LargeUnrecoverableOutput_TruncatedWithIndicator
 	}
 }
 
+// ---------------------------------------------------------------------------
+// ParseClaudeCodeEnvelope — object-shaped envelope
+// ---------------------------------------------------------------------------
+
+func TestParseClaudeCodeEnvelope_ObjectWithResultField_ReturnsResultText(t *testing.T) {
+	// The CLI's actual envelope shape for a single turn is a JSON object, not
+	// an array. This is the minimal case: a "result" field carrying a plain
+	// (unfenced) protocol response.
+	data := []byte(`{"type":"result","result":` + jsonQuote(validProtocolJSON) + `}`)
+
+	text, err := harness.ParseClaudeCodeEnvelope(data)
+
+	if err != nil {
+		t.Fatalf("want no error, got %v", err)
+	}
+	if text != validProtocolJSON {
+		t.Errorf("want text=%q, got %q", validProtocolJSON, text)
+	}
+}
+
+func TestParseClaudeCodeEnvelope_ObjectWithFencedResultField_ReturnsFencedTextVerbatim(t *testing.T) {
+	// Real Claude Code output wraps the protocol response inside a ```json
+	// fenced block within the "result" string. ParseClaudeCodeEnvelope must
+	// return that field's text verbatim rather than stripping the fence:
+	// extractability is ExtractProtocolJSON's job, exercised separately below.
+	fenced := "```json\n" + validProtocolJSON + "\n```"
+	data := []byte(`{"type":"result","result":` + jsonQuote(fenced) + `}`)
+
+	text, err := harness.ParseClaudeCodeEnvelope(data)
+
+	if err != nil {
+		t.Fatalf("want no error, got %v", err)
+	}
+	if text != fenced {
+		t.Errorf("want the fenced result text returned verbatim %q, got %q", fenced, text)
+	}
+
+	extracted, exErr := harness.ExtractProtocolJSON(text)
+	if exErr != nil {
+		t.Fatalf("want the fenced text to be extractable, got error: %v", exErr)
+	}
+	if !strings.Contains(string(extracted), `"agent_instance_id":"test-agent#1"`) {
+		t.Errorf("want the extracted object to carry the protocol payload, got %q", extracted)
+	}
+}
+
+func TestParseClaudeCodeEnvelope_RealisticObjectEnvelope_RecoversFencedBlockedResponse(t *testing.T) {
+	// Mirrors the actual failing payload from a Claude Code CLI invocation:
+	// a single JSON object with several sibling fields alongside "result",
+	// whose value is a fenced protocol response reporting BLOCKED.
+	blockedJSON := `{"agent_instance_id":"codebase-research#1","status_code":"BLOCKED","status_message":"missing input"}`
+	fenced := "```json\n" + blockedJSON + "\n```"
+	data := []byte(`{"is_error":false,"session_id":"abc123","subtype":"success","type":"result","result":` +
+		jsonQuote(fenced) + `,"duration_ms":15756}`)
+
+	text, err := harness.ParseClaudeCodeEnvelope(data)
+
+	if err != nil {
+		t.Fatalf("want no error, got %v", err)
+	}
+	if text != fenced {
+		t.Errorf("want the fenced result text returned verbatim %q, got %q", fenced, text)
+	}
+
+	extracted, exErr := harness.ExtractProtocolJSON(text)
+	if exErr != nil {
+		t.Fatalf("want the fenced BLOCKED response to be extractable, got error: %v", exErr)
+	}
+	if !strings.Contains(string(extracted), `"status_code":"BLOCKED"`) {
+		t.Errorf("want the extracted object to carry the BLOCKED status, got %q", extracted)
+	}
+}
+
+func TestParseClaudeCodeEnvelope_ObjectWithNoResultField_ReturnsErrProtocolNotExtractable(t *testing.T) {
+	data := []byte(`{"is_error":false,"session_id":"abc123","subtype":"success","type":"result","duration_ms":15756}`)
+
+	_, err := harness.ParseClaudeCodeEnvelope(data)
+
+	if !errors.Is(err, harness.ErrProtocolNotExtractable) {
+		t.Errorf("want ErrProtocolNotExtractable, got %v", err)
+	}
+}
+
 // jsonQuote returns s as a double-quoted, escaped JSON string literal, so
 // test fixtures can embed a JSON object as the value of another JSON field
 // without hand-escaping quotes.
@@ -257,8 +351,21 @@ func jsonQuote(s string) string {
 			b.WriteString(`\"`)
 		case '\\':
 			b.WriteString(`\\`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
 		default:
-			b.WriteRune(r)
+			if r < 0x20 {
+				// RFC 8259: control characters 0x00-0x1F must be escaped
+				// inside JSON strings. Any other control byte not already
+				// handled above uses the generic \u00XX escape.
+				fmt.Fprintf(&b, `\u%04x`, r)
+			} else {
+				b.WriteRune(r)
+			}
 		}
 	}
 	b.WriteByte('"')

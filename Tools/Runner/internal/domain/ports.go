@@ -62,11 +62,18 @@ type ArtifactStore interface {
 	// Returns an error if a file already exists at the location.
 	Create(ctx context.Context, info WorkflowInfo, task string, checkpoints bool, now time.Time, runID string) (ArtifactState, error)
 
-	// Apply records a completed step: updates current_state, appends an execution log
-	// entry, upserts artifact registry entries for each output artifact, bumps
-	// global_sequence and last_updated. The write is atomic (write-temp-then-rename).
-	// The step's output artifact paths are recorded exactly as provided.
-	// Workflow Notes are preserved unchanged.
+	// Apply records a completed step: appends an execution log entry, upserts
+	// artifact registry entries for each output artifact, and bumps
+	// global_sequence and last_updated. The write is atomic
+	// (write-temp-then-rename). The step's output artifact paths are recorded
+	// exactly as provided. Workflow Notes are preserved unchanged.
+	//
+	// current_state is updated only when step.IsInfrastructure is false.
+	// An infrastructure step leaves phase, stage, last_status, last_agent,
+	// and error_code exactly as they were, on disk as well as in the
+	// returned state, so the recorded workflow position continues to name
+	// the last workflow step. Everything else above applies to
+	// infrastructure steps unchanged: the invocation is fully recorded.
 	Apply(ctx context.Context, state ArtifactState, step CompletedStep) (ArtifactState, error)
 
 	// SetPhase updates only current_state.phase (and bumps last_updated and

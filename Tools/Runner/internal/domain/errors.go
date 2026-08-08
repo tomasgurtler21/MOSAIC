@@ -45,3 +45,54 @@ func (e *UnresolvableApproachError) Error() string {
 		e.Stage, e.Approach, e.WorkflowID, strings.Join(declared, ", "),
 	)
 }
+
+// PositionUnresolvedCause states why a position could not be resolved.
+type PositionUnresolvedCause int
+
+const (
+	// CauseAgentNotInWorkflow: the recorded agent is neither a routing table
+	// participant nor a declared infrastructure agent for this run.
+	CauseAgentNotInWorkflow PositionUnresolvedCause = iota
+
+	// CauseNoMatchingRow: the agent is in the routing table, but no row
+	// matches the recorded phase and stage.
+	CauseNoMatchingRow
+
+	// CauseAmbiguousRow: several rows match and the sequence-based
+	// disambiguation could not settle between them.
+	CauseAmbiguousRow
+)
+
+// PositionUnresolvedError is returned when the workflow position cannot be
+// determined from the artifact. Callers may inspect Cause; tests should
+// assert on Cause rather than on message substrings.
+type PositionUnresolvedError struct {
+	AgentInstance string // the recorded agent, "{AgentName}#{Seq}"
+	Phase         string // the recorded phase, as stored
+	Stage         string // the recorded stage, as stored
+	Cause         PositionUnresolvedCause
+}
+
+// Error states the cause, not merely the symptom. For CauseAgentNotInWorkflow
+// it says that the named agent is not a participant in this workflow.
+func (e *PositionUnresolvedError) Error() string {
+	switch e.Cause {
+	case CauseAgentNotInWorkflow:
+		return fmt.Sprintf(
+			"position unresolved: agent %q is not a participant in this workflow (phase %q, stage %q)",
+			e.AgentInstance, e.Phase, e.Stage,
+		)
+	case CauseNoMatchingRow:
+		return fmt.Sprintf(
+			"position unresolved: no routing row matches agent %q at phase %q, stage %q",
+			e.AgentInstance, e.Phase, e.Stage,
+		)
+	case CauseAmbiguousRow:
+		return fmt.Sprintf(
+			"position unresolved: multiple routing rows match agent %q at phase %q, stage %q, and sequence-based disambiguation could not settle between them",
+			e.AgentInstance, e.Phase, e.Stage,
+		)
+	default:
+		return fmt.Sprintf("position unresolved for agent %q at phase %q, stage %q", e.AgentInstance, e.Phase, e.Stage)
+	}
+}

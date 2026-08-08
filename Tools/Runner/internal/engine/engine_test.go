@@ -70,6 +70,16 @@ package engine_test
 //   - Mismatch between last log entry and CurrentState → RerunLast=true, RowIndex = last log row.
 //   - Resume from mid-stage position → GroupIndex and StageNumber derived correctly.
 //   - Resume with no interruption at end of pre-execution rows → RowIndex = first EXECUTION row.
+//
+//   Canonical phase and stage recording (AC4.2-AC4.5):
+//   - Grouped EXECUTION dispatch step records bare phase + group-qualified stage ("Test.1").
+//   - Ungrouped staged dispatch step records bare phase + plain stage number ("1").
+//   - Non-staged dispatch step records an empty stage.
+//   - Target-format recorded state (bare phase, group-qualified stage) resolves position,
+//     including disambiguating a repeated agent by group ("Test.1" vs "Implementation.1"),
+//     at both the Next and ResumePoint levels.
+//   - A legacy artifact (qualified phase, "Stage-N" stage) still resolves position, recovers
+//     the stage number, and remains resumable at both the Next and ResumePoint levels.
 
 import (
 	"errors"
@@ -421,9 +431,109 @@ func TestNext_FirstCall_StagedOnly_DispatchesFirstExecutionRow(t *testing.T) {
 	if agentName(step.Request.AgentInstanceID) != "implementation-tdd" {
 		t.Errorf("want agent implementation-tdd, got %s", step.Request.AgentInstanceID)
 	}
-	// Stage context must be Stage-1 for the first stage.
-	if step.Stage != "Stage-1" {
-		t.Errorf("want Stage=Stage-1, got %q", step.Stage)
+	// Stage context must be the plain stage number for the first stage
+	// (implementation-only declares no group).
+	if step.Stage != "1" {
+		t.Errorf("want Stage=1, got %q", step.Stage)
+	}
+}
+
+// ===== Stage-set-absent diagnostic (domain.StageSource) =====
+//
+// When a staged row is reached with stages == nil, Next's stop message must
+// name what was expected and where it was looked for, distinguishing "a
+// stage table was supposed to be seeded here and is missing" from "this run
+// never had one". stageSource is optional and variadic; omitting it (or
+// passing the zero value) must still yield a non-empty stop reason.
+
+// TestNext_NoStageSet_Omitted_StillProducesNonEmptyStopReason verifies that
+// calling Next without a stageSource argument at all (the pre-existing call
+// shape used everywhere else in this file) continues to produce a stop with
+// a non-empty reason for a staged workflow with no stage set.
+func TestNext_NoStageSet_Omitted_StillProducesNonEmptyStopReason(t *testing.T) {
+	aw := mustParseAndAdmit(t, implOnlyContent, "implementation-only", "3.1")
+	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
+
+	dec := engine.Next(aw, nil, emptyState(), nil, agents, 0, fixedNow, nil)
+
+	stop := requireStop(t, dec)
+	if stop.Reason == "" {
+		t.Error("want non-empty StopDecision.Reason when no stage set is available, got empty")
+	}
+}
+
+// TestNext_NoStageSet_InitialDispatch_NeverSeeded_NamesPathLookedFor verifies
+// that on the very first call (initial dispatch into a staged-only workflow),
+// a stageSource whose Seeded field is false still names the path that was
+// looked for in the stop reason.
+func TestNext_NoStageSet_InitialDispatch_NeverSeeded_NamesPathLookedFor(t *testing.T) {
+	aw := mustParseAndAdmit(t, implOnlyContent, "implementation-only", "3.1")
+	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
+	src := domain.StageSource{Path: "/runs/example/Plan.md", Seeded: false}
+
+	dec := engine.Next(aw, nil, emptyState(), nil, agents, 0, fixedNow, nil, src)
+
+	stop := requireStop(t, dec)
+	if !strings.Contains(stop.Reason, src.Path) {
+		t.Errorf("want StopDecision.Reason to name the looked-for path %q; got %q", src.Path, stop.Reason)
+	}
+}
+
+// TestNext_NoStageSet_InitialDispatch_SeededButMissing_NamesPathLookedFor
+// verifies that a stageSource whose Seeded field is true also names the path
+// that was looked for -- the seeded-but-missing case must still identify
+// where the table should have been.
+func TestNext_NoStageSet_InitialDispatch_SeededButMissing_NamesPathLookedFor(t *testing.T) {
+	aw := mustParseAndAdmit(t, implOnlyContent, "implementation-only", "3.1")
+	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
+	src := domain.StageSource{Path: "/runs/example/Plan.md", Seeded: true}
+
+	dec := engine.Next(aw, nil, emptyState(), nil, agents, 0, fixedNow, nil, src)
+
+	stop := requireStop(t, dec)
+	if !strings.Contains(stop.Reason, src.Path) {
+		t.Errorf("want StopDecision.Reason to name the looked-for path %q; got %q", src.Path, stop.Reason)
+	}
+}
+
+// TestNext_NoStageSet_InitialDispatch_SeededVsNeverSeeded_DistinctMessages
+// verifies that Seeded actually changes the rendered stop reason: the
+// seeded-but-missing case and the never-seeded case, for the same Path, must
+// be distinguishable from each other -- this is the entire point of carrying
+// the Seeded field rather than just Path.
+func TestNext_NoStageSet_InitialDispatch_SeededVsNeverSeeded_DistinctMessages(t *testing.T) {
+	aw := mustParseAndAdmit(t, implOnlyContent, "implementation-only", "3.1")
+	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
+	path := "/runs/example/Plan.md"
+
+	neverSeeded := requireStop(t, engine.Next(aw, nil, emptyState(), nil, agents, 0, fixedNow, nil,
+		domain.StageSource{Path: path, Seeded: false}))
+	seededMissing := requireStop(t, engine.Next(aw, nil, emptyState(), nil, agents, 0, fixedNow, nil,
+		domain.StageSource{Path: path, Seeded: true}))
+
+	if neverSeeded.Reason == seededMissing.Reason {
+		t.Errorf("want distinct stop reasons for Seeded=false vs Seeded=true (same Path); got identical reason %q for both",
+			neverSeeded.Reason)
+	}
+}
+
+// TestNext_NoStageSet_EnteringExecution_NeverSeeded_NamesPathLookedFor
+// verifies that the second call site where a staged row can be reached with
+// no stage set -- transitioning from a pre-EXECUTION row's SUCCESS into the
+// staged EXECUTION phase -- also renders the stageSource path into the stop
+// reason.
+func TestNext_NoStageSet_EnteringExecution_NeverSeeded_NamesPathLookedFor(t *testing.T) {
+	// quick-fix row 1: plan-review, OnSuccess="implementation-tdd" (an EXECUTION row).
+	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
+	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
+	state := stateAfter("PLANNING", "", "plan-review#2", domain.StatusSUCCESS, 2)
+	src := domain.StageSource{Path: "/runs/example/Plan.md", Seeded: false}
+
+	dec := engine.Next(aw, nil, state, successResponse("plan-review#2"), agents, 2, fixedNow, nil, src)
+
+	stop := requireStop(t, dec)
+	if !strings.Contains(stop.Reason, src.Path) {
+		t.Errorf("want StopDecision.Reason to name the looked-for path %q; got %q", src.Path, stop.Reason)
 	}
 }
 
@@ -767,8 +877,8 @@ func TestNext_Staged_TDD_AfterImplGroupLastStage_AdvancesToNextStage(t *testing.
 		t.Errorf("after Stage-1 last impl-group row, want test-writer-tdd in Stage-2, got %s",
 			step.Request.AgentInstanceID)
 	}
-	if step.Stage != "Stage-2" {
-		t.Errorf("want Stage=Stage-2, got %q", step.Stage)
+	if step.Stage != "Test.2" {
+		t.Errorf("want Stage=Test.2, got %q", step.Stage)
 	}
 }
 
@@ -850,8 +960,8 @@ func TestNext_Staged_OnSuccessIgnoredInsideExecution(t *testing.T) {
 		t.Errorf("On Success must be ignored inside EXECUTION: want tests-review-tdd (group-order next), got %s (suggests On Success was consulted)",
 			step.Request.AgentInstanceID)
 	}
-	if step.Stage != "Stage-1" {
-		t.Errorf("want Stage-1, got %q", step.Stage)
+	if step.Stage != "1" {
+		t.Errorf("want 1, got %q", step.Stage)
 	}
 }
 
@@ -1286,8 +1396,8 @@ func TestNext_Approach_TestsOnly_AfterTestGroup_AdvancesToNextStage(t *testing.T
 		t.Errorf("Tests-Only after last test-group row: want test-writer-tdd in Stage-2, got %s",
 			step.Request.AgentInstanceID)
 	}
-	if step.Stage != "Stage-2" {
-		t.Errorf("Tests-Only: want Stage-2, got %q", step.Stage)
+	if step.Stage != "Test.2" {
+		t.Errorf("Tests-Only: want Test.2, got %q", step.Stage)
 	}
 }
 
@@ -1415,11 +1525,13 @@ func TestNext_DispatchStep_PhaseAndStageSet(t *testing.T) {
 	dec := engine.Next(aw, stages, state, successResponse("plan-review#2"), agents, 2, fixedNow, nil)
 
 	step := requireDispatch(t, dec)
-	if step.Phase != "EXECUTION.[StageNumber]" {
-		t.Errorf("want Phase=EXECUTION.[StageNumber], got %q", step.Phase)
+	// The bare phase name and the plain stage number are recorded, not the
+	// routing table's qualified phase string or a "Stage-N" form.
+	if step.Phase != "EXECUTION" {
+		t.Errorf("want Phase=EXECUTION, got %q", step.Phase)
 	}
-	if step.Stage != "Stage-1" {
-		t.Errorf("want Stage=Stage-1, got %q", step.Stage)
+	if step.Stage != "1" {
+		t.Errorf("want Stage=1, got %q", step.Stage)
 	}
 }
 
@@ -1461,7 +1573,7 @@ func TestResumePoint_NoLogEntries_ReturnsFirstRow(t *testing.T) {
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
 	stages := singleStageSet("Implementation-Only")
 
-	info, err := engine.ResumePoint(aw, stages, emptyState())
+	info, err := engine.ResumePoint(aw, stages, emptyState(), nil)
 	if err != nil {
 		t.Fatalf("ResumePoint: unexpected error: %v", err)
 	}
@@ -1485,7 +1597,7 @@ func TestResumePoint_LastEntrySuccess_AdvancesToNextRow(t *testing.T) {
 	stages := singleStageSet("Implementation-Only")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
 
-	info, err := engine.ResumePoint(aw, stages, state)
+	info, err := engine.ResumePoint(aw, stages, state, nil)
 	if err != nil {
 		t.Fatalf("ResumePoint: unexpected error: %v", err)
 	}
@@ -1527,7 +1639,7 @@ func TestResumePoint_Interruption_RerunsLastRow(t *testing.T) {
 		},
 	}
 
-	info, err := engine.ResumePoint(aw, stages, state)
+	info, err := engine.ResumePoint(aw, stages, state, nil)
 	if err != nil {
 		t.Fatalf("ResumePoint: unexpected error: %v", err)
 	}
@@ -1549,7 +1661,7 @@ func TestResumePoint_StagedWorkflow_DerivesGroupAndStage(t *testing.T) {
 	stages := singleStageSet("TDD")
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "test-writer-tdd#8", domain.StatusSUCCESS, 8)
 
-	info, err := engine.ResumePoint(aw, stages, state)
+	info, err := engine.ResumePoint(aw, stages, state, nil)
 	if err != nil {
 		t.Fatalf("ResumePoint: unexpected error: %v", err)
 	}
@@ -1577,7 +1689,7 @@ func TestResumePoint_StagedWorkflow_NonExecutionRow_GroupIndexNegativeOne(t *tes
 	stages := singleStageSet("TDD")
 	state := stateAfter("RESEARCH", "", "codebase-research#1", domain.StatusSUCCESS, 1)
 
-	info, err := engine.ResumePoint(aw, stages, state)
+	info, err := engine.ResumePoint(aw, stages, state, nil)
 	if err != nil {
 		t.Fatalf("ResumePoint: unexpected error: %v", err)
 	}
@@ -1613,7 +1725,7 @@ func TestResumePoint_MidStageInterruption_DerivesCorrectRow(t *testing.T) {
 		},
 	}
 
-	info, err := engine.ResumePoint(aw, stages, state)
+	info, err := engine.ResumePoint(aw, stages, state, nil)
 	if err != nil {
 		t.Fatalf("ResumePoint: unexpected error: %v", err)
 	}
@@ -1954,8 +2066,8 @@ func TestNext_ThreeGroups_BetaFirst_FirstDispatchIsBeta(t *testing.T) {
 		t.Errorf("BetaFirst approach: want first dispatch to agent-beta (Beta group first in approach row), got %s",
 			step.Request.AgentInstanceID)
 	}
-	if step.Stage != "Stage-1" {
-		t.Errorf("want Stage-1, got %q", step.Stage)
+	if step.Stage != "Beta.1" {
+		t.Errorf("want Beta.1, got %q", step.Stage)
 	}
 }
 
@@ -2003,8 +2115,8 @@ func TestNext_ThreeGroups_GammaOnly_AfterGamma_NextStageStartsWithGamma(t *testi
 	dec := engine.Next(aw, stages, state, successResponse("agent-gamma#1"), agents, 1, fixedNow, nil)
 
 	step := requireDispatch(t, dec)
-	if step.Stage != "Stage-2" {
-		t.Errorf("GammaOnly: after stage 1 Gamma, want Stage-2, got %q", step.Stage)
+	if step.Stage != "Gamma.2" {
+		t.Errorf("GammaOnly: after stage 1 Gamma, want Gamma.2, got %q", step.Stage)
 	}
 	if agentName(step.Request.AgentInstanceID) != "agent-gamma" {
 		t.Errorf("GammaOnly stage 2: want agent-gamma (table-driven), got %s", step.Request.AgentInstanceID)
@@ -2038,8 +2150,8 @@ func TestNext_ThreeGroups_AlphaBeta_SkipsGamma(t *testing.T) {
 		t.Errorf("AlphaBeta: after agent-beta in stage 1, want agent-alpha in stage 2, got %s",
 			step.Request.AgentInstanceID)
 	}
-	if step.Stage != "Stage-2" {
-		t.Errorf("AlphaBeta: want Stage-2 after Alpha+Beta complete in stage 1, got %q", step.Stage)
+	if step.Stage != "Alpha.2" {
+		t.Errorf("AlphaBeta: want Alpha.2 after Alpha+Beta complete in stage 1, got %q", step.Stage)
 	}
 }
 
@@ -2108,8 +2220,8 @@ func TestNext_ThreeGroups_GroupInEveryApproachRow_RunsInEveryStage(t *testing.T)
 	dec := engine.Next(aw, stages, state, successResponse("agent-gamma#3"), agents, 3, fixedNow, nil)
 
 	step := requireDispatch(t, dec)
-	if step.Stage != "Stage-2" {
-		t.Errorf("after Gamma in stage 1, want Stage-2, got %q", step.Stage)
+	if step.Stage != "Beta.2" {
+		t.Errorf("after Gamma in stage 1, want Beta.2, got %q", step.Stage)
 	}
 	if agentName(step.Request.AgentInstanceID) != "agent-beta" {
 		t.Errorf("stage 2 BetaFirst: want agent-beta first (table-driven), got %s",
@@ -2275,7 +2387,7 @@ func TestResumePoint_UnresolvableApproach_ReturnsError(t *testing.T) {
 		},
 	}
 
-	_, err := engine.ResumePoint(aw, stages, state)
+	_, err := engine.ResumePoint(aw, stages, state, nil)
 
 	if err == nil {
 		t.Fatal("ResumePoint must return an error when approach is unresolvable during seq disambiguation")
@@ -2308,7 +2420,7 @@ func TestResumePoint_UnresolvableApproach_ErrorContainsApproachValue(t *testing.
 		},
 	}
 
-	_, err := engine.ResumePoint(aw, stages, state)
+	_, err := engine.ResumePoint(aw, stages, state, nil)
 	if err == nil {
 		t.Fatal("ResumePoint must return an error")
 	}
@@ -2455,6 +2567,471 @@ func TestNext_NoGroups_AllExecutionRowsDispatchedInOrder(t *testing.T) {
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "implementation-review" {
 		t.Errorf("no-groups: want implementation-review (second EXECUTION row), got %s",
+			step.Request.AgentInstanceID)
+	}
+}
+
+// ===== Position immune to infrastructure activity =====
+//
+// Coverage:
+//
+//   Resume after infrastructure activity (T3.2):
+//   - A run whose on-disk artifact ends with an infrastructure log entry resumes
+//     at the workflow row after the last WORKFLOW step, not the row after the
+//     infrastructure entry, and is not misdiagnosed as interrupted.
+//   - A genuine mid-flight interruption occurring after infrastructure activity
+//     is still detected and the interrupted workflow row is re-dispatched.
+//
+//   Sequence-based disambiguation with interleaved infrastructure invocations (T3.3):
+//   - A repeated agent (occupying more than one EXECUTION row) is still
+//     resolved to the correct row when an infrastructure step's own sequence
+//     bump has shifted the raw sequence arithmetic.
+//   - A single-agent-per-row workflow, where identification never depends on
+//     sequence arithmetic, continues to resolve correctly across an interleaved
+//     infrastructure invocation.
+//
+//   Unresolved-position diagnostic (T3.4):
+//   - When the recorded agent is neither a workflow participant nor a declared
+//     infrastructure agent, the stop names the agent and states that it is not
+//     a workflow participant.
+
+func declaredCheckpointInfraAgent() []domain.DeclaredInfraAgent {
+	return []domain.DeclaredInfraAgent{
+		{Name: "checkpoint-manager-git", Class: "checkpoint"},
+	}
+}
+
+// TestResumePoint_TrailingInfrastructureEntry_NotMisdiagnosedAsInterrupted verifies
+// that when the execution log ends with an infrastructure entry and current_state
+// correctly names the last WORKFLOW step (per the Apply fix), ResumePoint resumes
+// at the row after that workflow step rather than treating the trailing
+// infrastructure entry as an interruption.
+func TestResumePoint_TrailingInfrastructureEntry_NotMisdiagnosedAsInterrupted(t *testing.T) {
+	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
+	stages := singleStageSet("Implementation-Only")
+	infra := domain.NewInfraAgentSet(declaredCheckpointInfraAgent())
+
+	state := domain.ArtifactState{
+		GlobalSequence: 2,
+		CurrentState: domain.CurrentState{
+			Phase:      "PLANNING",
+			Stage:      "",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "planner-tdd-soft#1",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 1, Agent: "planner-tdd-soft#1", Phase: "PLANNING", Status: domain.StatusSUCCESS},
+			{Seq: 2, Agent: "checkpoint-manager-git#2", Phase: "PLANNING", Status: domain.StatusSUCCESS},
+		},
+	}
+
+	info, err := engine.ResumePoint(aw, stages, state, infra)
+	if err != nil {
+		t.Fatalf("ResumePoint: unexpected error: %v", err)
+	}
+	if info.RerunLast {
+		t.Error("want RerunLast=false (clean stop after infrastructure activity, not an interruption), got true")
+	}
+	if info.RowIndex != 1 {
+		t.Errorf("want RowIndex=1 (plan-review, the row after the last workflow step), got %d", info.RowIndex)
+	}
+}
+
+// TestResumePoint_InterruptionAfterInfrastructureActivity_RerunsWorkflowRow verifies
+// that a genuine mid-flight interruption occurring after infrastructure activity is
+// still detected: the workflow row that was dispatched but never recorded in
+// current_state is re-run, and the interleaved infrastructure entry does not
+// obscure the interruption.
+func TestResumePoint_InterruptionAfterInfrastructureActivity_RerunsWorkflowRow(t *testing.T) {
+	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
+	stages := singleStageSet("Implementation-Only")
+	infra := domain.NewInfraAgentSet(declaredCheckpointInfraAgent())
+
+	// planner-tdd-soft (row 0) completed and is recorded in current_state.
+	// checkpoint-manager-git then ran (does not move current_state). plan-review
+	// (row 1) was then dispatched and completed, but the runner was interrupted
+	// before current_state could be updated to reflect it.
+	state := domain.ArtifactState{
+		GlobalSequence: 3,
+		CurrentState: domain.CurrentState{
+			Phase:      "PLANNING",
+			Stage:      "",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "planner-tdd-soft#1",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 1, Agent: "planner-tdd-soft#1", Phase: "PLANNING", Status: domain.StatusSUCCESS},
+			{Seq: 2, Agent: "checkpoint-manager-git#2", Phase: "PLANNING", Status: domain.StatusSUCCESS},
+			{Seq: 3, Agent: "plan-review#3", Phase: "PLANNING", Status: domain.StatusSUCCESS},
+		},
+	}
+
+	info, err := engine.ResumePoint(aw, stages, state, infra)
+	if err != nil {
+		t.Fatalf("ResumePoint: unexpected error: %v", err)
+	}
+	if !info.RerunLast {
+		t.Error("want RerunLast=true (plan-review was dispatched but never recorded), got false")
+	}
+	if info.RowIndex != 1 {
+		t.Errorf("want RowIndex=1 (plan-review, the interrupted row), got %d", info.RowIndex)
+	}
+}
+
+// TestNext_Interleaved_Infrastructure_SequenceDisambiguation_RepeatedAgent verifies
+// AC3.6 for a workflow where one agent (build-review) occupies more than one
+// EXECUTION row: an infrastructure step's sequence bump, interleaved between
+// two workflow rows, must not throw off sequence-based row disambiguation.
+func TestNext_Interleaved_Infrastructure_SequenceDisambiguation_RepeatedAgent(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.1")
+	stages := singleStageSet("TDD")
+	agents := makeAgents("test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review")
+
+	// Stage-1, TDD approach, test group = [test-writer-tdd, build-review, tests-review-tdd].
+	// 7 pre-execution rows consume seq 1-7. test-writer-tdd completes at seq 8.
+	// checkpoint-manager-git then fires as an infrastructure step at seq 9 (not a
+	// routing row). build-review then completes at seq 10 -- one ahead of where it
+	// would land (seq 9) if only workflow rows consumed sequence numbers.
+	state := domain.ArtifactState{
+		GlobalSequence: 10,
+		CurrentState: domain.CurrentState{
+			Phase:      "EXECUTION.Test.[StageNumber]",
+			Stage:      "Stage-1",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "build-review#10",
+		},
+	}
+
+	dec := engine.Next(aw, stages, state, successResponse("build-review#10"), agents, 10, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	got := agentName(step.Request.AgentInstanceID)
+	if got != "tests-review-tdd" {
+		t.Errorf("want dispatch of tests-review-tdd (the row after build-review in the test group), got %q "+
+			"-- sequence-based disambiguation was thrown off by the infrastructure step's sequence bump", got)
+	}
+}
+
+// TestNext_Interleaved_Infrastructure_SequenceDisambiguation_SingleAgentPerRow verifies
+// AC3.6 for a workflow where every agent occupies exactly one row: identification is
+// by agent+phase, not sequence arithmetic, so an inflated global_sequence from an
+// interleaved infrastructure step must not affect resolution.
+func TestNext_Interleaved_Infrastructure_SequenceDisambiguation_SingleAgentPerRow(t *testing.T) {
+	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
+	stages := singleStageSet("Implementation-Only")
+	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
+
+	// planner-tdd-soft completes at seq 1. checkpoint-manager-git then fires as an
+	// infrastructure step at seq 2 (not a routing row). plan-review then completes
+	// at seq 3 -- one ahead of where it would land (seq 2) if only workflow rows
+	// consumed sequence numbers.
+	state := domain.ArtifactState{
+		GlobalSequence: 3,
+		CurrentState: domain.CurrentState{
+			Phase:      "PLANNING",
+			Stage:      "",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "plan-review#3",
+		},
+	}
+
+	dec := engine.Next(aw, stages, state, successResponse("plan-review#3"), agents, 3, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	got := agentName(step.Request.AgentInstanceID)
+	if got != "implementation-tdd" {
+		t.Errorf("want dispatch of implementation-tdd (On Success target of plan-review), got %q", got)
+	}
+}
+
+// TestNext_UnresolvedPosition_AgentNotInWorkflow_StopNamesCause verifies AC3.7:
+// when the recorded agent is not a workflow participant (and not recognisable as
+// an infrastructure entry either), the stop names the agent and states that it is
+// not a workflow participant, rather than a generic "could not determine" message.
+func TestNext_UnresolvedPosition_AgentNotInWorkflow_StopNamesCause(t *testing.T) {
+	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
+	stages := singleStageSet("Implementation-Only")
+	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
+
+	state := domain.ArtifactState{
+		GlobalSequence: 1,
+		CurrentState: domain.CurrentState{
+			Phase:      "PLANNING",
+			Stage:      "",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "mystery-agent#1",
+		},
+	}
+
+	dec := engine.Next(aw, stages, state, successResponse("mystery-agent#1"), agents, 1, fixedNow, nil)
+
+	stop := requireStop(t, dec)
+	if !strings.Contains(stop.Reason, "mystery-agent") {
+		t.Errorf("Stop reason must name the unresolvable agent, got %q", stop.Reason)
+	}
+	lower := strings.ToLower(stop.Reason)
+	if !strings.Contains(lower, "not a") || !strings.Contains(lower, "participant") {
+		t.Errorf("Stop reason must state that the agent is not a workflow participant (AC3.7), got %q", stop.Reason)
+	}
+}
+
+// ===== Canonical phase and stage recording =====
+//
+// The runner and the LLM orchestrator write the same Orchestration.md: the
+// bare phase name in the phase field, and the group-and-stage value in the
+// stage field ("Test.1" for a grouped EXECUTION row, "1" for an ungrouped
+// one, absent for a non-staged phase). The tests below cover what a
+// dispatch step records (AC4.2/AC4.3), that position resolution works
+// against that recorded form including disambiguation by group (AC4.4),
+// and that a legacy on-disk artifact (qualified phase, "Stage-N" stage)
+// remains resumable (AC4.5).
+
+// TestNext_StagedExecution_GroupedRow_RecordsBarePhaseAndGroupQualifiedStage
+// verifies that a dispatch into a grouped EXECUTION row (the common case)
+// records the bare phase name and the group-qualified stage value, not the
+// routing table's qualified phase string or a bare "Stage-N" form.
+func TestNext_StagedExecution_GroupedRow_RecordsBarePhaseAndGroupQualifiedStage(t *testing.T) {
+	// brownfield-tdd: after contracts-review (row 6), TDD approach dispatches
+	// test-writer-tdd (row 7, group "Test") for stage 1.
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review",
+		"test-runner",
+	)
+	state := stateAfter("DESIGN", "", "contracts-review#7", domain.StatusSUCCESS, 7)
+
+	dec := engine.Next(aw, stages, state, successResponse("contracts-review#7"), agents, 7, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	if step.Phase != "EXECUTION" {
+		t.Errorf("DispatchStep.Phase: want bare %q, got %q (the routing table's qualified string must not reach the recorded field)",
+			"EXECUTION", step.Phase)
+	}
+	if step.Stage != "Test.1" {
+		t.Errorf("DispatchStep.Stage: want group-qualified %q, got %q", "Test.1", step.Stage)
+	}
+}
+
+// TestNext_StagedExecution_UngroupedRow_RecordsBarePhaseAndPlainStageNumber
+// verifies that a dispatch into an ungrouped staged row records the bare
+// phase name and the plain stage number, with no group segment.
+func TestNext_StagedExecution_UngroupedRow_RecordsBarePhaseAndPlainStageNumber(t *testing.T) {
+	aw := mustParseAndAdmit(t, implOnlyContent, "implementation-only", "3.1")
+	stages := singleStageSet("Implementation-Only")
+	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
+
+	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	if step.Phase != "EXECUTION" {
+		t.Errorf("DispatchStep.Phase: want bare %q, got %q", "EXECUTION", step.Phase)
+	}
+	if step.Stage != "1" {
+		t.Errorf("DispatchStep.Stage: want plain stage number %q (no group declared), got %q", "1", step.Stage)
+	}
+}
+
+// TestNext_NonStagedRow_RecordsEmptyStage verifies that a dispatch into a
+// non-staged row records an empty stage value.
+func TestNext_NonStagedRow_RecordsEmptyStage(t *testing.T) {
+	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
+	stages := singleStageSet("Implementation-Only")
+	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
+	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
+
+	dec := engine.Next(aw, stages, state, successResponse("planner-tdd-soft#1"), agents, 1, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	if step.Phase != "PLANNING" {
+		t.Errorf("DispatchStep.Phase: want %q, got %q", "PLANNING", step.Phase)
+	}
+	if step.Stage != "" {
+		t.Errorf("DispatchStep.Stage: want empty (non-staged phase), got %q", step.Stage)
+	}
+}
+
+// TestNext_TargetFormatState_RepeatedAgent_Test_ResolvesToTestGroupRow verifies
+// that position resolution works against the target recorded format
+// (bare phase, group-qualified stage) for an agent that occupies more than
+// one EXECUTION row, and that the Test-group row is picked when the
+// recorded stage names the Test group.
+func TestNext_TargetFormatState_RepeatedAgent_Test_ResolvesToTestGroupRow(t *testing.T) {
+	// brownfield-tdd-build-verified: build-review appears at row 8 (Test
+	// group) and row 11 (Implementation group). Recorded state names the
+	// Test-group row (agent instance "build-review#9", stage "Test.1");
+	// the next dispatch must continue within the Test group
+	// (tests-review-tdd, row 9), not jump to the Implementation group.
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	state := stateAfter("EXECUTION", "Test.1", "build-review#9", domain.StatusSUCCESS, 9)
+
+	dec := engine.Next(aw, stages, state, successResponse("build-review#9"), agents, 9, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "tests-review-tdd" {
+		t.Errorf("recorded stage %q must resolve build-review to the Test-group row (row 8); want next dispatch tests-review-tdd, got %s",
+			"Test.1", step.Request.AgentInstanceID)
+	}
+}
+
+// TestNext_TargetFormatState_RepeatedAgent_Implementation_ResolvesToImplementationGroupRow
+// is the mirror of the above: the same repeated agent, but the recorded
+// stage names the Implementation group, and resolution must pick the
+// Implementation-group row instead -- proving the group segment is not
+// discarded during position resolution.
+func TestNext_TargetFormatState_RepeatedAgent_Implementation_ResolvesToImplementationGroupRow(t *testing.T) {
+	// build-review at row 11 (Implementation group); recorded stage
+	// "Implementation.1" must resolve there, continuing to
+	// implementation-review (row 12), not back into the Test group.
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	state := stateAfter("EXECUTION", "Implementation.1", "build-review#12", domain.StatusSUCCESS, 12)
+
+	dec := engine.Next(aw, stages, state, successResponse("build-review#12"), agents, 12, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "implementation-review" {
+		t.Errorf("recorded stage %q must resolve build-review to the Implementation-group row (row 11); want next dispatch implementation-review, got %s",
+			"Implementation.1", step.Request.AgentInstanceID)
+	}
+}
+
+// TestResumePoint_TargetFormatState_RepeatedAgent_Test_ResolvesNextRow is the
+// ResumePoint counterpart of the Next-level disambiguation tests above,
+// exercising findRowForLogEntry against a target-format execution log entry.
+func TestResumePoint_TargetFormatState_RepeatedAgent_Test_ResolvesNextRow(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+
+	state := domain.ArtifactState{
+		GlobalSequence: 9,
+		CurrentState: domain.CurrentState{
+			Phase:      "EXECUTION",
+			Stage:      "Test.1",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "build-review#9",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 9, Agent: "build-review#9", Phase: "EXECUTION", Stage: "Test.1", Status: domain.StatusSUCCESS},
+		},
+	}
+
+	info, err := engine.ResumePoint(aw, stages, state, nil)
+	if err != nil {
+		t.Fatalf("ResumePoint: unexpected error: %v", err)
+	}
+	if info.RowIndex != 9 {
+		t.Errorf("want RowIndex=9 (tests-review-tdd, next row in the Test group), got %d", info.RowIndex)
+	}
+	if info.RerunLast {
+		t.Error("want RerunLast=false (clean completion), got true")
+	}
+}
+
+// TestResumePoint_TargetFormatState_RepeatedAgent_Implementation_ResolvesNextRow
+// mirrors the above for the Implementation-group row of the same repeated agent.
+func TestResumePoint_TargetFormatState_RepeatedAgent_Implementation_ResolvesNextRow(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+
+	state := domain.ArtifactState{
+		GlobalSequence: 12,
+		CurrentState: domain.CurrentState{
+			Phase:      "EXECUTION",
+			Stage:      "Implementation.1",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "build-review#12",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 12, Agent: "build-review#12", Phase: "EXECUTION", Stage: "Implementation.1", Status: domain.StatusSUCCESS},
+		},
+	}
+
+	info, err := engine.ResumePoint(aw, stages, state, nil)
+	if err != nil {
+		t.Fatalf("ResumePoint: unexpected error: %v", err)
+	}
+	if info.RowIndex != 12 {
+		t.Errorf("want RowIndex=12 (implementation-review, next row in the Implementation group), got %d", info.RowIndex)
+	}
+	if info.RerunLast {
+		t.Error("want RerunLast=false (clean completion), got true")
+	}
+}
+
+// TestResumePoint_LegacyArtifact_QualifiedPhaseAndStageN_StillResolvesAndResumes
+// pins AC4.5: an artifact written by an earlier runner version, carrying the
+// qualified phase and the "Stage-N" stage form on disk, must still resolve
+// position correctly and be resumable after this stage's write-path change.
+// Reading such an artifact is unaffected by what the runner now writes.
+func TestResumePoint_LegacyArtifact_QualifiedPhaseAndStageN_StillResolvesAndResumes(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
+	stages := singleStageSet("TDD")
+
+	state := domain.ArtifactState{
+		GlobalSequence: 8,
+		CurrentState: domain.CurrentState{
+			Phase:      "EXECUTION.Test.[StageNumber]",
+			Stage:      "Stage-1",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "test-writer-tdd#8",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 8, Agent: "test-writer-tdd#8", Phase: "EXECUTION.Test.[StageNumber]", Stage: "Stage-1", Status: domain.StatusSUCCESS},
+		},
+	}
+
+	info, err := engine.ResumePoint(aw, stages, state, nil)
+	if err != nil {
+		t.Fatalf("ResumePoint: legacy artifact must still resolve, got error: %v", err)
+	}
+	if info.RowIndex != 8 {
+		t.Errorf("want RowIndex=8 (tests-review-tdd, next row after legacy test-writer-tdd entry), got %d", info.RowIndex)
+	}
+	if info.StageNumber != 1 {
+		t.Errorf("want StageNumber=1 recovered from legacy %q, got %d", "Stage-1", info.StageNumber)
+	}
+	if info.RerunLast {
+		t.Error("want RerunLast=false (clean completion), got true")
+	}
+}
+
+// TestNext_LegacyArtifact_QualifiedPhaseAndStageN_ResolvesAndDispatches is the
+// Next-level counterpart: a legacy-form CurrentState must still let Next
+// determine the current row and route the following dispatch, exactly as it
+// did before this stage's write-path change.
+func TestNext_LegacyArtifact_QualifiedPhaseAndStageN_ResolvesAndDispatches(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review",
+		"test-runner",
+	)
+	state := stateAfter("EXECUTION.Test.[StageNumber]", "Stage-1", "test-writer-tdd#8", domain.StatusSUCCESS, 8)
+
+	dec := engine.Next(aw, stages, state, successResponse("test-writer-tdd#8"), agents, 8, fixedNow, nil)
+
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "tests-review-tdd" {
+		t.Errorf("legacy artifact must still resolve position correctly: want next dispatch tests-review-tdd, got %s",
 			step.Request.AgentInstanceID)
 	}
 }

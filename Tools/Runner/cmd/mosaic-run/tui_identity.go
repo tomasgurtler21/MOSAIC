@@ -11,6 +11,7 @@ import (
 
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/runscan"
+	"mosaic-run/internal/runselect"
 	"mosaic-run/internal/tui"
 )
 
@@ -24,6 +25,13 @@ type tuiRunIdentity struct {
 	RunFolder  string
 	IsNewRun   bool
 	ScanResult *runscan.ScanResult
+
+	// Selection is the runselect.Question built via runselect.Resolve for
+	// the deferred shape -- the same decision the CLI refuses on. Non-nil
+	// exactly when ScanResult is non-nil. tui.Options.Selection is built
+	// from it directly, so the run-select screen is not a second copy of
+	// the question-building rules.
+	Selection *runselect.Question
 }
 
 // errTUIUsage marks argument-usage errors. The caller reports them on stderr
@@ -79,9 +87,10 @@ func resolveRunIdentityForTUI(args []string, workDir string) (tuiRunIdentity, er
 		if scanErr != nil {
 			return tuiRunIdentity{}, fmt.Errorf("scanning for runs: %w", scanErr)
 		}
-		switch len(result.Candidates) {
-		case 0:
-			// No candidates: mint a fresh run identity.
+		if len(result.Candidates) == 0 {
+			// No candidates: mint a fresh run identity. Zero candidates offers
+			// no real choice besides "start new" either way, so this is not the
+			// auto-resume defect the one-or-more-candidate case below removes.
 			newID := domain.NewRunID(&realClock{}, domain.DefaultRandomSource())
 			return tuiRunIdentity{
 				RunID:      newID,
@@ -89,23 +98,28 @@ func resolveRunIdentityForTUI(args []string, workDir string) (tuiRunIdentity, er
 				IsNewRun:   true,
 				ScanResult: nil,
 			}, nil
-		case 1:
-			// Single candidate: auto-resume.
-			return tuiRunIdentity{
-				RunID:      result.Candidates[0].RunID,
-				RunFolder:  result.Candidates[0].FolderPath,
-				IsNewRun:   false,
-				ScanResult: nil,
-			}, nil
-		default:
-			// Multiple candidates: defer to the run-select screen.
-			return tuiRunIdentity{
-				RunID:      "",
-				RunFolder:  "",
-				IsNewRun:   false,
-				ScanResult: &result,
-			}, nil
 		}
+		// One or more resumable candidates: defer to the run-select screen.
+		// The number of candidates never decides whether the screen is shown --
+		// a single candidate must not be auto-resumed, exactly like many.
+		//
+		// The deferred question is built via runselect.Resolve (neither flag
+		// set, so it always yields Decision.Question) rather than a local
+		// switch, so the TUI's run-select screen is built from the same
+		// decision the CLI refuses on. mint is never invoked here (Resolve
+		// only calls it for a resolved new-run outcome).
+		mint := newTUIRunIdentityMinter(workDir)
+		dec, resErr := runselect.Resolve(runselect.Request{Scan: result, WorkDir: workDir}, runselect.Minter(mint))
+		if resErr != nil {
+			return tuiRunIdentity{}, fmt.Errorf("%w: %v", errTUIUsage, resErr)
+		}
+		return tuiRunIdentity{
+			RunID:      "",
+			RunFolder:  "",
+			IsNewRun:   false,
+			ScanResult: &result,
+			Selection:  dec.Question,
+		}, nil
 	}
 }
 

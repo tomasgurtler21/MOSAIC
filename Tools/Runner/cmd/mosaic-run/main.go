@@ -27,6 +27,7 @@ import (
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/runscan"
+	"mosaic-run/internal/runselect"
 	"mosaic-run/internal/session"
 	"mosaic-run/internal/tui"
 	"mosaic-run/internal/tui/screens"
@@ -283,6 +284,7 @@ func runTUIMode(args []string) {
 	ctx := context.Background()
 	if err := tui.Run(ctx, initSess, tui.Options{
 		Interaction:      programRef,
+		Selection:        identity.Selection,
 		ScanResult:       identity.ScanResult,
 		ResolvedRunID:    identity.RunID,
 		IsNewRun:         identity.IsNewRun,
@@ -338,6 +340,7 @@ func resolveRunIdentityForCLI(args []string, workDirs ...string) (*cli.RunIdenti
 
 	var runID, runFolder string
 	var isNewRun bool
+	var position *runselect.Position
 
 	switch {
 	case runIDFlag != "":
@@ -360,10 +363,18 @@ func resolveRunIdentityForCLI(args []string, workDirs ...string) (*cli.RunIdenti
 		}
 		// Treat parse errors as resumable: the session layer will surface real
 		// format problems when it calls store.Read. Only reject when we can
-		// confirm the run is completed.
+		// confirm the run is completed. A successful parse also yields the
+		// recorded position directly, so cli.Run's announcement need not read
+		// the artifact a second time.
 		if state, parseErr := artifact.Parse(data); parseErr == nil {
 			if strings.EqualFold(state.CurrentState.Phase, "COMPLETED") {
 				return nil, nil, fmt.Errorf("run %s is completed and cannot be resumed", runIDFlag)
+			}
+			position = &runselect.Position{
+				Phase:       state.CurrentState.Phase,
+				Stage:       state.CurrentState.Stage,
+				LastAgent:   state.CurrentState.LastAgent,
+				LastUpdated: state.LastUpdated,
 			}
 		}
 		runID = runIDFlag
@@ -380,44 +391,37 @@ func resolveRunIdentityForCLI(args []string, workDirs ...string) (*cli.RunIdenti
 		isNewRun = true
 
 	default:
-		// Neither flag: scan the working directory for resumable candidates.
+		// Neither flag: the selection is never inferred from what the
+		// workspace happens to contain, whatever that is -- zero candidates
+		// included (Plan.md: "Minting a new run because none existed is
+		// exactly the inference this stage removes."). Scan the working
+		// directory and ask runselect for the decision; a non-nil identity
+		// returned to cli.Run would bypass cli.Run's own resolution step, so
+		// the refusal must happen here rather than being deferred (AC2.2,
+		// AC2.6, AC2.9).
 		scanner := runscan.NewDirScanner()
 		result, scanErr := scanner.Scan(workDir)
 		if scanErr != nil {
 			return nil, nil, fmt.Errorf("scanning for runs: %w", scanErr)
 		}
-		switch len(result.Candidates) {
-		case 0:
-			// No candidates: mint a new run_id for a fresh run.
-			newID := domain.NewRunID(&realClock{}, domain.DefaultRandomSource())
-			runID = newID
-			runFolder = filepath.Join(workDir, domain.RunScopedFolder(newID))
-			isNewRun = true
-		case 1:
-			// Exactly one candidate: auto-resume that run.
-			runID = result.Candidates[0].RunID
-			runFolder = result.Candidates[0].FolderPath
-			isNewRun = false
-		default:
-			// Multiple candidates: surface the ambiguity as an error.
-			// A non-nil identity returned to cli.Run would bypass cli.Run's own
-			// multi-candidate rejection check (non-nil identity skips all internal
-			// resolution). Reject here so the production path behaves identically
-			// to the nil-identity path that unit tests exercise.
-			var sb strings.Builder
-			sb.WriteString("multiple resumable runs found; use --run <run_id> to select one:")
-			for _, c := range result.Candidates {
-				sb.WriteString("\n  ")
-				sb.WriteString(c.RunID)
-			}
-			return nil, nil, fmt.Errorf("%s", sb.String())
+		dec, resErr := runselect.Resolve(runselect.Request{Scan: result, WorkDir: workDir}, mainMinter(workDir))
+		if resErr != nil {
+			return nil, nil, resErr
 		}
+		if dec.Question != nil {
+			return nil, nil, fmt.Errorf("%s", formatSelectionRefusal(*dec.Question))
+		}
+		runID = dec.Resolved.RunID
+		runFolder = dec.Resolved.RunFolder
+		isNewRun = dec.Resolved.IsNewRun
+		position = dec.Resolved.Position
 	}
 
 	identity := &cli.RunIdentity{
 		RunID:     runID,
 		RunFolder: runFolder,
 		IsNewRun:  isNewRun,
+		Position:  position,
 	}
 	// Return nil for the store. The caller constructs the authoritative store
 	// via newLoggedArtifactStore with the process logger, ensuring path anomalies
@@ -572,6 +576,48 @@ func buildTUIDelegate(h domain.HarnessAdapter, harnessStr, orchFile, runFolder s
 		ArtifactPath: artifactPath,
 		NextSeq:      func() int { orchSeq++; return orchSeq },
 	}
+}
+
+// mainMinter returns a runselect.Minter that mints a new run_id rooted at workDir.
+func mainMinter(workDir string) runselect.Minter {
+	return func() (string, string) {
+		newID := domain.NewRunID(&realClock{}, domain.DefaultRandomSource())
+		return newID, filepath.Join(workDir, domain.RunScopedFolder(newID))
+	}
+}
+
+// formatSelectionRefusal renders the non-interactive refusal message for an
+// unsettled selection: every resumable run_id the caller may pass to --run,
+// every unresumable run with the reason it cannot be resumed (AC2.5), and
+// --new-run as the always-available way to start fresh (AC2.3, AC2.6). This
+// mirrors internal/cli.formatSelectionRefusal; it is duplicated here rather
+// than exported across the package boundary because cli.Run and
+// resolveRunIdentityForCLI are independent resolution sites that share the
+// runselect decision but not their output plumbing.
+func formatSelectionRefusal(q runselect.Question) string {
+	var resumable []string
+	var unresumable []string
+	for _, c := range q.Choices {
+		switch c.Kind {
+		case runselect.ChoiceResume:
+			resumable = append(resumable, c.ID)
+		case runselect.ChoiceUnresumable:
+			unresumable = append(unresumable, fmt.Sprintf("%s (%s)", c.ID, c.Reason.Description()))
+		}
+	}
+	var sb strings.Builder
+	sb.WriteString("run selection is required; ")
+	if len(resumable) > 0 {
+		sb.WriteString("use --run <run_id> to resume one of: ")
+		sb.WriteString(strings.Join(resumable, ", "))
+		sb.WriteString(", or ")
+	}
+	sb.WriteString("use --new-run to start a new run")
+	if len(unresumable) > 0 {
+		sb.WriteString("; cannot be resumed: ")
+		sb.WriteString(strings.Join(unresumable, ", "))
+	}
+	return sb.String()
 }
 
 // realClock provides the current UTC time.

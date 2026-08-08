@@ -10,7 +10,7 @@ package artifact_test
 //   - CurrentState fields: phase, stage, last_status, last_agent, error_code.
 //   - ExecutionLog: row count, first row's Seq/Agent/Phase/Stage/Status/Timestamp/Summary.
 //   - Empty-value convention: "-" in Stage column → "" in ArtifactState (and vice versa).
-//   - Staged Stage value ("Stage-1") preserved as-is.
+//   - Staged Stage value ("1", the target ungrouped form) preserved as-is.
 //   - ArtifactRegistry: row count, first row's Artifact/CreatedIn/CreatedBy.
 //   - WorkflowNotes: count, first note's Seq and text preserved verbatim.
 //
@@ -102,6 +102,11 @@ package artifact_test
 //   - trigger_param populated correctly in DeclaredInfraTrigger.Param.
 //   - Multiple triggers for one agent: all triggers parsed.
 //   - Round-trip: agent name survives Parse → Render → re-Parse.
+//
+//   commits frontmatter field:
+//   - Render unconditionally emits "commits: disabled" regardless of state.
+//   - commits: is positioned after checkpoints: and before current_state:.
+//   - Parse accepts a frontmatter carrying a commits: line without refusing.
 
 import (
 	"bytes"
@@ -229,8 +234,10 @@ func TestParse_CanonicalFile_CurrentState_Phase(t *testing.T) {
 func TestParse_CanonicalFile_CurrentState_Stage(t *testing.T) {
 	state := mustReadCanonical(t)
 
-	if state.CurrentState.Stage != "Stage-1" {
-		t.Errorf("CurrentState.Stage: want %q, got %q", "Stage-1", state.CurrentState.Stage)
+	// canonical.md is an ungrouped staged row (quick-fix workflow, no group
+	// segment declared): the target recorded form is the plain stage number.
+	if state.CurrentState.Stage != "1" {
+		t.Errorf("CurrentState.Stage: want %q, got %q", "1", state.CurrentState.Stage)
 	}
 }
 
@@ -305,12 +312,13 @@ func TestParse_CanonicalFile_ExecutionLog_FirstRow_DashStage_ReturnsEmptyString(
 }
 
 func TestParse_CanonicalFile_ExecutionLog_SecondRow_StagedValue_Preserved(t *testing.T) {
-	// Row 1 has Stage="Stage-1" (EXECUTION phase, staged).
+	// Row 1 has Stage="1" (EXECUTION phase, staged, ungrouped -- the target
+	// recorded form for a row that declares no group).
 	// The value must be preserved as-is in ArtifactState.
 	state := mustReadCanonical(t)
 
-	if state.ExecutionLog[1].Stage != "Stage-1" {
-		t.Errorf("ExecutionLog[1].Stage: want %q, got %q", "Stage-1", state.ExecutionLog[1].Stage)
+	if state.ExecutionLog[1].Stage != "1" {
+		t.Errorf("ExecutionLog[1].Stage: want %q, got %q", "1", state.ExecutionLog[1].Stage)
 	}
 }
 
@@ -383,16 +391,17 @@ func TestParse_CanonicalFile_ArtifactRegistry_FirstEntry_CreatedBy(t *testing.T)
 }
 
 func TestParse_CanonicalFile_ArtifactRegistry_StagedEntry_CreatedIn(t *testing.T) {
-	// Entry for Stage-1/PlanProgress.md has CreatedIn="EXECUTION.Stage-1".
-	// This "Phase.Stage" notation is stored verbatim, not split.
+	// Entry for Stage-1/PlanProgress.md has CreatedIn="EXECUTION.1" -- the
+	// target form composed from the bare phase and the plain (ungrouped)
+	// stage number. This "Phase.Stage" notation is stored verbatim, not split.
 	state := mustReadCanonical(t)
 
 	var found bool
 	for _, e := range state.ArtifactRegistry {
 		if e.Artifact == "Stage-1/PlanProgress.md" {
 			found = true
-			if e.CreatedIn != "EXECUTION.Stage-1" {
-				t.Errorf("ArtifactRegistry[Stage-1/PlanProgress.md].CreatedIn: want %q, got %q", "EXECUTION.Stage-1", e.CreatedIn)
+			if e.CreatedIn != "EXECUTION.1" {
+				t.Errorf("ArtifactRegistry[Stage-1/PlanProgress.md].CreatedIn: want %q, got %q", "EXECUTION.1", e.CreatedIn)
 			}
 		}
 	}
@@ -1158,6 +1167,155 @@ func TestApply_WorkflowNotes_PreservedUnchanged(t *testing.T) {
 	}
 }
 
+// ---- Apply: infrastructure steps and recorded position (T3.1) ----
+//
+// An infrastructure step (CompletedStep.IsInfrastructure == true) must not move
+// the recorded workflow position: current_state continues to name the last
+// WORKFLOW step, on disk. Everything else Apply does -- execution log append,
+// sequence bump, last_updated bump, artifact registry upsert -- applies to an
+// infrastructure step exactly as it does to a workflow step.
+//
+// Assertions here go through store.Read after Apply, not just the in-memory
+// return value: an in-memory-only assertion would pass even with the on-disk
+// defect fully present, since fileStore.Apply builds newState in memory before
+// (incorrectly) letting it overwrite current_state on disk.
+
+func TestApply_Infrastructure_OnDisk_CurrentStateUnchanged(t *testing.T) {
+	store, state := mustCreateStore(t)
+	ctx := context.Background()
+
+	workflowStep := makeStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+	afterWorkflow, err := store.Apply(ctx, state, workflowStep)
+	if err != nil {
+		t.Fatalf("Apply (workflow step): %v", err)
+	}
+
+	infraStep := makeStep(2, "checkpoint-manager-git#2", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+	infraStep.IsInfrastructure = true
+	if _, err := store.Apply(ctx, afterWorkflow, infraStep); err != nil {
+		t.Fatalf("Apply (infrastructure step): %v", err)
+	}
+
+	onDisk, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after infrastructure step Apply: %v", err)
+	}
+	if onDisk.CurrentState.LastAgent != "planner#1" {
+		t.Errorf("on-disk CurrentState.LastAgent: want %q (unchanged by infrastructure step), got %q",
+			"planner#1", onDisk.CurrentState.LastAgent)
+	}
+	if onDisk.CurrentState.LastStatus != domain.StatusSUCCESS {
+		t.Errorf("on-disk CurrentState.LastStatus: want unchanged %q, got %q",
+			domain.StatusSUCCESS, onDisk.CurrentState.LastStatus)
+	}
+}
+
+func TestApply_Infrastructure_OnDisk_LogSequenceAndTimestampAdvance(t *testing.T) {
+	store, state := mustCreateStore(t)
+	ctx := context.Background()
+
+	ts1 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	workflowStep := makeStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, ts1, nil)
+	afterWorkflow, err := store.Apply(ctx, state, workflowStep)
+	if err != nil {
+		t.Fatalf("Apply (workflow step): %v", err)
+	}
+
+	ts2 := ts1.Add(time.Hour)
+	infraStep := makeStep(2, "checkpoint-manager-git#2", "PLANNING", "", domain.StatusSUCCESS, ts2, nil)
+	infraStep.IsInfrastructure = true
+	if _, err := store.Apply(ctx, afterWorkflow, infraStep); err != nil {
+		t.Fatalf("Apply (infrastructure step): %v", err)
+	}
+
+	onDisk, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after infrastructure step Apply: %v", err)
+	}
+
+	if len(onDisk.ExecutionLog) != 2 {
+		t.Fatalf("on-disk ExecutionLog length: want 2 (workflow step + infrastructure step), got %d",
+			len(onDisk.ExecutionLog))
+	}
+	last := onDisk.ExecutionLog[len(onDisk.ExecutionLog)-1]
+	if last.Agent != "checkpoint-manager-git#2" {
+		t.Errorf("on-disk ExecutionLog last entry Agent: want %q, got %q", "checkpoint-manager-git#2", last.Agent)
+	}
+	if onDisk.GlobalSequence != 2 {
+		t.Errorf("on-disk GlobalSequence: want 2 (advanced by the infrastructure step), got %d", onDisk.GlobalSequence)
+	}
+	if !onDisk.LastUpdated.Equal(ts2) {
+		t.Errorf("on-disk LastUpdated: want %v (advanced by the infrastructure step), got %v", ts2, onDisk.LastUpdated)
+	}
+}
+
+func TestApply_Infrastructure_OnDisk_ArtifactRegistryStillUpserted(t *testing.T) {
+	store, state := mustCreateStore(t)
+	ctx := context.Background()
+
+	infraStep := makeStep(1, "checkpoint-manager-git#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(),
+		[]string{"checkpoint.log"})
+	infraStep.IsInfrastructure = true
+	if _, err := store.Apply(ctx, state, infraStep); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	onDisk, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	var found bool
+	for _, e := range onDisk.ArtifactRegistry {
+		if e.Artifact == "checkpoint.log" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("on-disk ArtifactRegistry: entry for checkpoint.log not found after infrastructure step Apply " +
+			"(infrastructure invocations must remain fully recorded, AC3.3)")
+	}
+}
+
+func TestApply_Infrastructure_ThenWorkflowStep_CurrentStateNamesLatestWorkflowStep(t *testing.T) {
+	// planner#1 (workflow) -> checkpoint-manager-git#2 (infrastructure) ->
+	// plan-review#3 (workflow). The recorded position must end up naming
+	// plan-review, the latest WORKFLOW step, never the infrastructure step
+	// that ran between them.
+	store, state := mustCreateStore(t)
+	ctx := context.Background()
+
+	afterA, err := store.Apply(ctx, state,
+		makeStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil))
+	if err != nil {
+		t.Fatalf("Apply (planner): %v", err)
+	}
+
+	infraStep := makeStep(2, "checkpoint-manager-git#2", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+	infraStep.IsInfrastructure = true
+	afterInfra, err := store.Apply(ctx, afterA, infraStep)
+	if err != nil {
+		t.Fatalf("Apply (checkpoint-manager-git): %v", err)
+	}
+
+	if _, err := store.Apply(ctx, afterInfra,
+		makeStep(3, "plan-review#3", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)); err != nil {
+		t.Fatalf("Apply (plan-review): %v", err)
+	}
+
+	onDisk, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if onDisk.CurrentState.LastAgent != "plan-review#3" {
+		t.Errorf("on-disk CurrentState.LastAgent: want %q (latest workflow step), got %q",
+			"plan-review#3", onDisk.CurrentState.LastAgent)
+	}
+	if len(onDisk.ExecutionLog) != 3 {
+		t.Errorf("on-disk ExecutionLog length: want 3 (all three invocations recorded), got %d",
+			len(onDisk.ExecutionLog))
+	}
+}
+
 // ---- Round-trip ----
 
 func TestRoundTrip_CanonicalFile_IdenticalBytes(t *testing.T) {
@@ -1467,6 +1625,100 @@ func TestRoundTrip_WithRunID_PreservesRunID(t *testing.T) {
 
 	if state2.RunID != runID {
 		t.Errorf("RunID after round-trip: want %q, got %q", runID, state2.RunID)
+	}
+}
+
+// ---- Render / Parse: commits frontmatter field ----
+
+func TestRender_ContainsCommitsDisabled(t *testing.T) {
+	// Render must unconditionally emit "commits: disabled" in the frontmatter,
+	// regardless of the ArtifactState's field values. The field is a fixed
+	// literal, not derived from any state field.
+	state := domain.ArtifactState{
+		Type:     "orchestration-artifact",
+		Workflow: "test",
+	}
+
+	got, err := artifact.Render(state)
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+
+	if !strings.Contains(string(got), "commits: disabled") {
+		t.Errorf("Render: want frontmatter to contain %q, but it was absent.\nOutput:\n%s", "commits: disabled", got)
+	}
+}
+
+func TestRender_CommitsPosition_AfterCheckpointsBeforeCurrentState(t *testing.T) {
+	// commits: disabled must appear immediately after the checkpoints: line
+	// and before the current_state: block, so the two related toggles read
+	// together.
+	state := domain.ArtifactState{
+		Type:        "orchestration-artifact",
+		Workflow:    "test",
+		Checkpoints: true,
+	}
+
+	got, err := artifact.Render(state)
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+
+	output := string(got)
+	checkpointsIdx := strings.Index(output, "checkpoints:")
+	commitsIdx := strings.Index(output, "commits:")
+	currentStateIdx := strings.Index(output, "current_state:")
+
+	if checkpointsIdx < 0 {
+		t.Fatal("rendered output is missing the checkpoints: field")
+	}
+	if commitsIdx < 0 {
+		t.Fatal("rendered output is missing the commits: field")
+	}
+	if currentStateIdx < 0 {
+		t.Fatal("rendered output is missing the current_state: field")
+	}
+	if !(checkpointsIdx < commitsIdx && commitsIdx < currentStateIdx) {
+		t.Errorf("commits is not positioned after checkpoints: and before current_state:. checkpoints@%d, commits@%d, current_state@%d",
+			checkpointsIdx, commitsIdx, currentStateIdx)
+	}
+}
+
+func TestParse_FrontmatterWithCommitsLine_DoesNotRefuse(t *testing.T) {
+	// Parse must accept an artifact whose frontmatter carries a commits: line
+	// without refusing the file. The value is not stored anywhere; only
+	// tolerance is required.
+	data := []byte("---\n" +
+		"type: orchestration-artifact\n" +
+		"workflow: test\n" +
+		"workflow_version: \"1.0\"\n" +
+		"task: \"test\"\n" +
+		"started: 2026-01-01T00:00:00Z\n" +
+		"last_updated: 2026-01-01T00:00:00Z\n" +
+		"global_sequence: 0\n" +
+		"checkpoints: disabled\n" +
+		"commits: disabled\n" +
+		"current_state:\n" +
+		"  phase: null\n" +
+		"  stage: null\n" +
+		"  last_status: null\n" +
+		"  last_agent: null\n" +
+		"  error_code: null\n" +
+		"---\n" +
+		"\n" +
+		"[[SECTION:ExecutionLog]]\n" +
+		"[[/SECTION:ExecutionLog]]\n" +
+		"\n" +
+		"[[SECTION:Artifacts]]\n" +
+		"[[/SECTION:Artifacts]]\n" +
+		"\n" +
+		"[[SECTION:WorkflowNotes]]\n" +
+		"[[/SECTION:WorkflowNotes]]\n")
+
+	_, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: want no error for a frontmatter carrying commits:, got: %v", err)
 	}
 }
 

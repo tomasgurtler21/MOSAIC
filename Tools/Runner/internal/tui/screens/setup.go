@@ -11,7 +11,7 @@ import (
 
 	"mosaic-common/tui/widgets"
 	"mosaic-run/internal/domain"
-	"mosaic-run/internal/runscan"
+	"mosaic-run/internal/runselect"
 )
 
 // OrchestratorFileScreen prompts the user to enter the path to the orchestrator agent file.
@@ -140,8 +140,8 @@ func NewWorkflowSelectScreen(workflows []domain.WorkflowRegion, width, height in
 	items := make([]widgets.ListItem, len(workflows))
 	for i, wf := range workflows {
 		items[i] = widgets.ListItem{
-			ID:    string(wf.Info.ID),
-			Label: string(wf.Info.ID),
+			ID:     string(wf.Info.ID),
+			Label:  string(wf.Info.ID),
 			Detail: fmt.Sprintf("version: %s", wf.Info.Version),
 		}
 	}
@@ -209,28 +209,47 @@ func (s *WorkflowSelectScreen) Resize(width, height int) {
 
 // NewRunSentinelID is the list-item ID used for the synthetic "Start new run"
 // entry. It is deliberately not a valid run_id (contains no timestamp or hex
-// suffix) so it can never collide with a real RunCandidate's RunID.
-const NewRunSentinelID = "__new_run__"
+// suffix) so it can never collide with a real run_id. Equal to
+// runselect.NewRunChoiceID.
+const NewRunSentinelID = runselect.NewRunChoiceID
 
 // RunSelectScreen lets the user select a resumable run or start a new one.
 //
 // Navigation contract:
-//   - Enter on a candidate -> Done() == true, SelectedCandidate() returns the chosen RunCandidate.
+//   - Enter on a selectable choice -> Done() == true, SelectedChoiceID() returns its ID.
 //   - Enter on the "Start new run" item -> Done() == true, IsNewRun() == true.
 //   - Esc -> Back() == true.
 type RunSelectScreen struct {
-	list       *widgets.List
-	candidates []runscan.RunCandidate
-	width      int
-	height     int
-	styles     Styles
+	list    *widgets.List
+	choices []runselect.Choice
+	width   int
+	height  int
+	styles  Styles
 }
 
-// NewRunSelectScreen creates the run selection screen.
-// candidates must be non-empty (caller should skip this screen when len == 0 or 1).
-// A synthetic "Start new run" item is prepended to the list with ID = NewRunSentinelID.
-func NewRunSelectScreen(candidates []runscan.RunCandidate, width, height int, styles Styles) *RunSelectScreen {
-	items := make([]widgets.ListItem, 0, len(candidates)+1)
+// NewRunSelectScreen creates the run selection screen from a selection
+// question.
+//
+// The list is: the "Start a new run" item first, then every selectable
+// choice in question order, then every non-selectable choice, each rendered
+// with the reason it cannot be resumed. Non-selectable items are skipped by
+// cursor movement and cannot be activated.
+//
+// question.Choices may contain zero selectable entries; the screen is still
+// valid and shows only "Start a new run" plus any unresumable entries.
+func NewRunSelectScreen(question runselect.Question, width, height int, styles Styles) *RunSelectScreen {
+	var selectable []runselect.Choice
+	var unresumable []runselect.Choice
+	for _, c := range question.Choices {
+		switch c.Kind {
+		case runselect.ChoiceResume:
+			selectable = append(selectable, c)
+		case runselect.ChoiceUnresumable:
+			unresumable = append(unresumable, c)
+		}
+	}
+
+	items := make([]widgets.ListItem, 0, len(selectable)+1)
 
 	// Prepend the "Start new run" entry.
 	items = append(items, widgets.ListItem{
@@ -238,32 +257,39 @@ func NewRunSelectScreen(candidates []runscan.RunCandidate, width, height int, st
 		Label: "Start a new run",
 	})
 
-	// Append each resumable candidate.
-	for _, c := range candidates {
-		label := c.RunID
+	// Append each resumable choice.
+	for _, c := range selectable {
+		label := c.Run.RunID
 		detail := ""
-		if c.Workflow != "" {
-			detail += c.Workflow
+		if c.Run.Workflow != "" {
+			detail += c.Run.Workflow
 		}
-		if c.Task != "" {
+		if c.Run.Task != "" {
 			if detail != "" {
 				detail += " — "
 			}
-			detail += c.Task
+			detail += c.Run.Task
 		}
-		if !c.LastUpdated.IsZero() {
+		if !c.Run.LastUpdated.IsZero() {
 			if detail != "" {
 				detail += "  "
 			}
-			detail += c.LastUpdated.Format("2006-01-02 15:04:05 UTC")
-		}
-		if c.ParseError != nil {
-			detail = "(unreadable: " + c.ParseError.Error() + ")"
+			detail += c.Run.LastUpdated.Format("2006-01-02 15:04:05 UTC")
 		}
 		items = append(items, widgets.ListItem{
-			ID:     c.RunID,
+			ID:     c.ID,
 			Label:  label,
 			Detail: detail,
+		})
+	}
+
+	// Append each unresumable choice, disabled, with its reason shown.
+	for _, c := range unresumable {
+		items = append(items, widgets.ListItem{
+			ID:             c.ID,
+			Label:          c.Run.RunID,
+			Disabled:       true,
+			DisabledReason: c.Reason.Description(),
 		})
 	}
 
@@ -280,11 +306,11 @@ func NewRunSelectScreen(candidates []runscan.RunCandidate, width, height int, st
 	list := widgets.NewList(items, contentH, width, listStyles)
 
 	return &RunSelectScreen{
-		list:       list,
-		candidates: candidates,
-		width:      width,
-		height:     height,
-		styles:     styles,
+		list:    list,
+		choices: question.Choices,
+		width:   width,
+		height:  height,
+		styles:  styles,
 	}
 }
 
@@ -310,24 +336,9 @@ func (s *RunSelectScreen) Done() bool { return s.list.Done() }
 // Back reports whether the user pressed Esc.
 func (s *RunSelectScreen) Back() bool { return s.list.Back() }
 
-// SelectedID returns the ID of the selected list item. Only valid when Done() is true.
-func (s *RunSelectScreen) SelectedID() string { return s.list.SelectedID() }
-
-// SelectedCandidate returns the selected RunCandidate.
-// Only valid when Done() == true and IsNewRun() == false.
-// Returns nil when IsNewRun() is true.
-func (s *RunSelectScreen) SelectedCandidate() *runscan.RunCandidate {
-	if s.IsNewRun() {
-		return nil
-	}
-	id := s.list.SelectedID()
-	for i := range s.candidates {
-		if s.candidates[i].RunID == id {
-			return &s.candidates[i]
-		}
-	}
-	return nil
-}
+// SelectedChoiceID returns the ID of the activated choice. Valid only when
+// Done() is true. Equals NewRunSentinelID when the user chose a new run.
+func (s *RunSelectScreen) SelectedChoiceID() string { return s.list.SelectedID() }
 
 // IsNewRun reports whether the user chose the "Start new run" option.
 // Only valid when Done() == true.
@@ -459,9 +470,9 @@ type ConfigSelection struct {
 type configStep int
 
 const (
-	configStepDeviation     configStep = iota
-	configStepHarness                  // harness adapter selection
-	configStepHarnessTimeout           // timeout entry (only when claude-code is selected)
+	configStepDeviation      configStep = iota
+	configStepHarness                   // harness adapter selection
+	configStepHarnessTimeout            // timeout entry (only when claude-code is selected)
 	configStepVersionDrift
 	configStepCheckpoints
 	configStepInfraClass // agent-per-class selection (only when multiple same-class gated agents)

@@ -162,11 +162,16 @@ func (m *memStore) Create(_ context.Context, info domain.WorkflowInfo, task stri
 func (m *memStore) Apply(_ context.Context, state domain.ArtifactState, step domain.CompletedStep) (domain.ArtifactState, error) {
 	m.Applied = append(m.Applied, step)
 	state.GlobalSequence = step.Seq
-	state.CurrentState = domain.CurrentState{
-		Phase:      step.Phase,
-		Stage:      step.Stage,
-		LastStatus: step.Status,
-		LastAgent:  step.AgentInstance,
+	// current_state is updated only for workflow steps, matching the real
+	// fileStore's contract (ContractsDesign.md, domain.ArtifactStore.Apply):
+	// an infrastructure step must not move the recorded workflow position.
+	if !step.IsInfrastructure {
+		state.CurrentState = domain.CurrentState{
+			Phase:      step.Phase,
+			Stage:      step.Stage,
+			LastStatus: step.Status,
+			LastAgent:  step.AgentInstance,
+		}
 	}
 	state.ExecutionLog = append(state.ExecutionLog, domain.ExecutionLogEntry{
 		Seq:    step.Seq,
@@ -4391,13 +4396,20 @@ func TestSession_Start_SeedInputs_RunnerManagedDestination_RefusesBeforeStoreCre
 	ses, _, store, orchPath := newLinearSession(t)
 
 	// A source named "Orchestration.md" maps to the runner-managed destination.
-	src := filepath.Join(t.TempDir(), "Orchestration.md")
+	seedDir := t.TempDir()
+	src := filepath.Join(seedDir, "Orchestration.md")
 	if err := os.WriteFile(src, []byte("# should be rejected\n"), 0600); err != nil {
+		t.Fatalf("write seed source: %v", err)
+	}
+	// A Requirement* candidate keeps the seed-naming rule from masking the
+	// runner-managed-destination refusal this test targets.
+	reqSrc := filepath.Join(seedDir, "Requirement.md")
+	if err := os.WriteFile(reqSrc, []byte("# req\n"), 0600); err != nil {
 		t.Fatalf("write seed source: %v", err)
 	}
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.SeedInputs = []string{src}
+	cfg.SeedInputs = []string{src, reqSrc}
 
 	got, err := ses.Start(context.Background(), cfg)
 
@@ -4434,9 +4446,15 @@ func TestSession_Start_SeedInputs_CrossSourceCollision_RefusesBeforeStoreCreate(
 			t.Fatalf("write %s: %v", p, wErr)
 		}
 	}
+	// A Requirement* candidate keeps the seed-naming rule from masking the
+	// cross-source collision refusal this test targets.
+	reqSrc := filepath.Join(d, "Requirement.md")
+	if wErr := os.WriteFile(reqSrc, []byte("req\n"), 0600); wErr != nil {
+		t.Fatalf("write %s: %v", reqSrc, wErr)
+	}
 
 	cfg := baseLinearConfig(orchPath)
-	cfg.SeedInputs = []string{src1, src2}
+	cfg.SeedInputs = []string{src1, src2, reqSrc}
 
 	got, err := ses.Start(context.Background(), cfg)
 

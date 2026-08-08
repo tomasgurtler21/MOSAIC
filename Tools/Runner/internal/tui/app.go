@@ -18,12 +18,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	tuicommon "mosaic-common/tui"
 	"mosaic-common/interaction"
+	tuicommon "mosaic-common/tui"
+	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/deviation"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/orchfile"
 	"mosaic-run/internal/runscan"
+	"mosaic-run/internal/runselect"
 	"mosaic-run/internal/session"
 	"mosaic-run/internal/tui/screens"
 	"mosaic-run/internal/workflow"
@@ -67,9 +69,23 @@ type Options struct {
 	// Theme sets the colour scheme. DefaultTheme() is used when zero.
 	Theme tuicommon.Theme
 
+	// Selection carries the unanswered selection question built by
+	// runselect.Resolve when run identity was not settled before launch.
+	// When non-nil, it is used directly to build the run-select screen and
+	// takes precedence over ScanResult -- the production entry point
+	// (cmd/mosaic-run) always supplies it, so the screen is built from the
+	// same runselect decision the CLI refuses on, not a second copy of the
+	// question-building rules.
+	Selection *runselect.Question
+
 	// ScanResult carries the run folder scan results. When Candidates has
 	// more than one entry, the RunSelectScreen is shown before setup.
 	// When nil or empty, the screen is skipped and a new run is assumed.
+	//
+	// Retained alongside Selection for callers (and this package's own
+	// tests) that construct Options directly from a scan without going
+	// through runselect.Resolve first. When Selection is nil, ScanResult is
+	// adapted locally via candidatesToQuestion.
 	ScanResult *runscan.ScanResult
 
 	// ResolvedRunID is set when --run or --new-run resolved identity before
@@ -179,6 +195,13 @@ type rootModel struct {
 	// Run selection screen (shown when multiple resumable candidates exist).
 	runSelectScreen *screens.RunSelectScreen
 
+	// runSelectQuestion is the runselect.Question the run-select screen was
+	// built from. A chosen Choice.ID is resolved back to a full Identity via
+	// runselect.Answer, the same function the CLI's non-interactive path
+	// would use to interpret an explicit --run value -- the screen never
+	// holds a second copy of the selection rules.
+	runSelectQuestion *runselect.Question
+
 	// Entry screens (concrete types so back-navigation preserves state).
 	fileScreen      *screens.OrchestratorFileScreen
 	workflowScreen  *screens.WorkflowSelectScreen
@@ -193,7 +216,7 @@ type rootModel struct {
 	progressScreen *screens.ProgressScreen
 
 	// Deviation screen (constructed when a deviation occurs).
-	deviationScreen *screens.DeviationScreen
+	deviationScreen  *screens.DeviationScreen
 	pendingDeviation *deviationRequestMsg
 
 	// Artifact inspection screen.
@@ -201,10 +224,10 @@ type rootModel struct {
 	prevScreen     screenID // screen to return to after artifact inspection
 
 	// Generic question overlays from the Interaction port.
-	activeQuestion  *questionMsg
-	selectOverlay   *inlineSelectOne
-	textOverlay     *inlineText
-	confirmOverlay  *inlineConfirm
+	activeQuestion *questionMsg
+	selectOverlay  *inlineSelectOne
+	textOverlay    *inlineText
+	confirmOverlay *inlineConfirm
 
 	// Done screen.
 	doneScreen *screens.DoneScreen
@@ -241,10 +264,10 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	style := stylesFromTheme(opts.Theme)
 	ctx, cancel := context.WithCancel(ctx)
 
-	fileScreen      := screens.NewOrchestratorFileScreen(w, h, style)
-	taskScreen      := screens.NewTaskScreen(w, h, style)
+	fileScreen := screens.NewOrchestratorFileScreen(w, h, style)
+	taskScreen := screens.NewTaskScreen(w, h, style)
 	seedInputScreen := screens.NewSeedInputScreen(w, h, style)
-	configScreen    := screens.NewConfigScreen(w, h, style)
+	configScreen := screens.NewConfigScreen(w, h, style)
 
 	interact := opts.Interaction
 	if interact == nil {
@@ -257,29 +280,46 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	preRunID := opts.ResolvedRunID
 	preIsNewRun := opts.IsNewRun
 
-	if opts.ResolvedRunID == "" && !opts.IsNewRun && opts.ScanResult != nil && len(opts.ScanResult.Candidates) > 1 {
-		// Multiple resumable candidates with no pre-resolved run: show the selection screen.
-		runSelectScreen = screens.NewRunSelectScreen(opts.ScanResult.Candidates, w, h, style)
+	var runSelectQuestion *runselect.Question
+	haveCandidates := opts.Selection != nil || (opts.ScanResult != nil && len(opts.ScanResult.Candidates) >= 1)
+	if opts.ResolvedRunID == "" && !opts.IsNewRun && haveCandidates {
+		// Any resumable candidate with no pre-resolved run: show the selection
+		// screen. The number of candidates never decides whether the screen is
+		// shown -- only an explicit pre-resolved identity does.
+		//
+		// opts.Selection, when supplied, is the runselect.Question the
+		// production entry point built via runselect.Resolve -- the single
+		// decision shared with the CLI. opts.ScanResult is adapted locally
+		// only for callers that construct Options directly from a scan.
+		var q runselect.Question
+		if opts.Selection != nil {
+			q = *opts.Selection
+		} else {
+			q = candidatesToQuestion(*opts.ScanResult)
+		}
+		runSelectQuestion = &q
+		runSelectScreen = screens.NewRunSelectScreen(q, w, h, style)
 		initialScreen = screenRunSelect
 	}
-	// Zero or one candidate (or pre-resolved): skip run select, go straight to setup.
+	// Zero candidates (or pre-resolved): skip run select, go straight to setup.
 
 	m := &rootModel{
-		ctx:             ctx,
-		ctxCancel:       cancel,
-		theme:           opts.Theme,
-		screen:          initialScreen,
-		width:           w,
-		height:          h,
-		sess:            sess,
-		sessionFactory:  opts.SessionFactory,
-		mintRunIdentity: opts.MintRunIdentity,
-		interact:        interact,
-		runSelectScreen: runSelectScreen,
-		fileScreen:      fileScreen,
-		taskScreen:      taskScreen,
-		seedInputScreen: seedInputScreen,
-		configScreen:    configScreen,
+		ctx:               ctx,
+		ctxCancel:         cancel,
+		theme:             opts.Theme,
+		screen:            initialScreen,
+		width:             w,
+		height:            h,
+		sess:              sess,
+		sessionFactory:    opts.SessionFactory,
+		mintRunIdentity:   opts.MintRunIdentity,
+		interact:          interact,
+		runSelectScreen:   runSelectScreen,
+		runSelectQuestion: runSelectQuestion,
+		fileScreen:        fileScreen,
+		taskScreen:        taskScreen,
+		seedInputScreen:   seedInputScreen,
+		configScreen:      configScreen,
 	}
 
 	// Pre-populate run identity when already resolved (--run / --new-run / single candidate).
@@ -292,6 +332,38 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	}
 
 	return m
+}
+
+// candidatesToQuestion adapts a scan result into the runselect.Question shape
+// screens.RunSelectScreen takes: the always-present new-run choice, then
+// every resumable candidate as a selectable ChoiceResume, then every
+// unresumable run as a non-selectable ChoiceUnresumable carrying its reason.
+// It is a data-shape adapter only, not a selection decision.
+func candidatesToQuestion(scan runscan.ScanResult) runselect.Question {
+	choices := make([]runselect.Choice, 0, len(scan.Candidates)+len(scan.Unresumable)+1)
+	choices = append(choices, runselect.Choice{
+		ID:         runselect.NewRunChoiceID,
+		Kind:       runselect.ChoiceNewRun,
+		Selectable: true,
+	})
+	for _, c := range scan.Candidates {
+		choices = append(choices, runselect.Choice{
+			ID:         c.RunID,
+			Kind:       runselect.ChoiceResume,
+			Run:        c.RunInfo,
+			Selectable: true,
+		})
+	}
+	for _, u := range scan.Unresumable {
+		choices = append(choices, runselect.Choice{
+			ID:         u.RunID,
+			Kind:       runselect.ChoiceUnresumable,
+			Run:        u.RunInfo,
+			Selectable: false,
+			Reason:     u.Reason,
+		})
+	}
+	return runselect.Question{Choices: choices}
 }
 
 // stylesFromTheme converts a tuicommon.Theme to screens.Styles.
@@ -456,16 +528,26 @@ func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selections.runID = ""
 				m.selections.runFolder = ""
 			}
-		} else {
-			c := m.runSelectScreen.SelectedCandidate()
-			if c != nil {
-				m.selections.runID = c.RunID
-				m.selections.runFolder = c.FolderPath
+		} else if m.runSelectQuestion != nil {
+			choiceID := m.runSelectScreen.SelectedChoiceID()
+			// Resolve the chosen ID back to a full Identity via the same
+			// runselect.Answer function the CLI would use for an explicit
+			// --run value -- the screen never holds a second copy of the
+			// selection rules. mint is only reachable for NewRunChoiceID,
+			// already handled above, so a nil-safe fallback is passed here.
+			mint := m.mintRunIdentity
+			if mint == nil {
+				mint = func() (string, string) { return "", "" }
+			}
+			id, err := runselect.Answer(*m.runSelectQuestion, choiceID, runselect.Minter(mint))
+			if err == nil {
+				m.selections.runID = id.RunID
+				m.selections.runFolder = id.RunFolder
 				m.selections.isNewRun = false
 				// Reconstruct the session with the correct run-scoped store if a factory is available.
 				// Harness config is not yet known (config screen has not run); defaults to fake adapter.
 				if m.sessionFactory != nil {
-					m.sess = m.sessionFactory(c.FolderPath, false, "", screens.ConfigSelection{})
+					m.sess = m.sessionFactory(id.RunFolder, false, "", screens.ConfigSelection{})
 				}
 			}
 		}
@@ -614,13 +696,48 @@ func (m *rootModel) updateSetupConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sess = m.sessionFactory(m.selections.runFolder, m.selections.isNewRun, m.selections.orchestratorFile, m.selections.config)
 		}
 
-		// Transition to progress screen and start the session.
+		// Transition to progress screen and start the session. The chosen run
+		// is stated as the initial status line before dispatch (AC2.7),
+		// mirroring the CLI's stdout announcement -- the same runselect.Announce
+		// renderer, so the wording is the single source for both frontends.
 		style := stylesFromTheme(m.theme)
 		m.progressScreen = screens.NewProgressScreen(m.width, m.height, style)
+		m.progressScreen.SetStatus(runselect.Announce(m.announceIdentity()), false)
 		m.screen = screenProgress
 		return m, tea.Batch(m.progressScreen.Init(), m.startSession())
 	}
 	return m, nil
+}
+
+// announceIdentity builds the runselect.Identity used to render the
+// chosen-run announcement (AC2.7) from the currently selected run. For a
+// resumed run it attempts to read the recorded position from the run's
+// artifact; a read or parse failure simply leaves Position nil, which
+// runselect.Announce handles without panicking.
+func (m *rootModel) announceIdentity() runselect.Identity {
+	id := runselect.Identity{
+		RunID:     m.selections.runID,
+		RunFolder: m.selections.runFolder,
+		IsNewRun:  m.selections.isNewRun,
+	}
+	if id.IsNewRun || id.RunFolder == "" {
+		return id
+	}
+	data, err := os.ReadFile(filepath.Join(id.RunFolder, "Orchestration.md"))
+	if err != nil {
+		return id
+	}
+	state, err := artifact.Parse(data)
+	if err != nil {
+		return id
+	}
+	id.Position = &runselect.Position{
+		Phase:       state.CurrentState.Phase,
+		Stage:       state.CurrentState.Stage,
+		LastAgent:   state.CurrentState.LastAgent,
+		LastUpdated: state.LastUpdated,
+	}
+	return id
 }
 
 // ---------------------------------------------------------------------------

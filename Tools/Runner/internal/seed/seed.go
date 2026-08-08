@@ -5,6 +5,13 @@
 // validation and writes nothing, so a caller can reject an invalid seed set
 // before creating the target folder. Apply performs every write and revalidates
 // nothing. Neither function knows anything about runs, sessions, or the CLI.
+//
+// BuildPlan also enforces a naming rule: exactly one source across the whole
+// seed set must be a "Requirement*" candidate (case-insensitive, matched
+// against file sources and the top-level files of directory sources), and
+// that entry's destination is renamed to Requirements.md. A seed set with
+// zero or more than one candidate is refused; see BuildPlan for the precedence
+// of this refusal relative to the others.
 package seed
 
 import (
@@ -13,8 +20,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+
 	"mosaic-run/internal/domain"
 )
+
+// requirementsDestName is the literal destination name that the single
+// Requirement* candidate in a seed set is renamed to. Kept as a single named
+// constant so a future caller-supplied override is a narrow change.
+const requirementsDestName = "Requirements.md"
 
 // Entry is one planned file copy.
 type Entry struct {
@@ -49,6 +63,17 @@ func (p Plan) IsEmpty() bool {
 	return len(p.Entries) == 0
 }
 
+// HasDest reports whether the plan writes the given destination name,
+// compared against Entry.Dest exactly as the plan holds it.
+func (p Plan) HasDest(dest string) bool {
+	for _, e := range p.Entries {
+		if e.Dest == dest {
+			return true
+		}
+	}
+	return false
+}
+
 // reservedDestinations is the internal, authoritative set of runner-managed
 // destination paths. Extend this slice to grow the reserved set.
 var reservedDestinations = []string{"Orchestration.md"}
@@ -74,21 +99,34 @@ func ReservedDestinations() []string {
 //
 // Each source names either a file or a directory:
 //   - A file source yields one entry whose destination is the source's base name
-//     at the plan root.
+//     at the plan root, unless it is the sole Requirement* candidate, in which
+//     case its destination becomes Requirements.md (see below).
 //   - A directory source yields one entry per regular file beneath it, with
 //     destinations preserving the path relative to the named directory. A
 //     directory source contributes no entry for the directories themselves.
 //
 // Sources are processed in the order given, and Plan.Entries preserves that order.
-// A nil or empty sources slice yields an empty plan and a nil error.
+// A nil or empty sources slice yields an empty plan and a nil error; this is the
+// sole case in which the Requirement* naming rule does not apply.
+//
+// After entries are accumulated, exactly one entry across the whole seed set
+// must be a "Requirement*" candidate: a case-insensitive prefix match on the
+// base name, considered only for file sources and the top-level files of
+// directory sources (nested directory files are never candidates, though they
+// are still copied unrenamed). The single candidate's destination is renamed
+// to Requirements.md; every other entry keeps its destination unchanged. Zero
+// or more than one candidate refuses the whole seed set.
 //
 // BuildPlan returns a *domain.RefusalError with Component "seed" when any of the
-// following hold; see "Refusal error shapes" for Resource/Reason contracts:
-//   - a source path does not exist on disk
-//   - a source path is itself a symlink
-//   - a symlink is encountered anywhere beneath a directory source
-//   - two entries resolve to the same destination
-//   - an entry's destination is a runner-managed path (see ReservedDestinations)
+// following hold; see "Refusal error shapes" for Resource/Reason contracts. They
+// are checked in this order, which determines which refusal a caller sees when
+// more than one would apply:
+//  1. a source path does not exist on disk
+//  2. a source path is itself a symlink
+//  3. a symlink is encountered anywhere beneath a directory source
+//  4. zero or more than one Requirement* candidate is found across the seed set
+//  5. two entries resolve to the same destination
+//  6. an entry's destination is a runner-managed path (see ReservedDestinations)
 //
 // Symlink detection uses os.Lstat and fs.DirEntry.Type()&fs.ModeSymlink. It must
 // never use os.Stat, which follows links and would let a symlink through.
@@ -178,6 +216,50 @@ func BuildPlan(sources []string) (Plan, error) {
 				Dest:       dest,
 				SourceRoot: src,
 			})
+		}
+	}
+
+	// Requirements.md naming rule: exactly one entry across all sources
+	// combined must be a "Requirement*" candidate (case-insensitive, prefix
+	// match on the base name), considering only file sources and the
+	// top-level files of directory sources. Nested directory files are
+	// excluded from the candidate pool, though they are still copied. This
+	// runs after Phase 1 accumulation and before Phase 2 validation, so
+	// Phase 2 sees the renamed destination (Required Behaviour 7/8).
+	var candidateIdxs []int
+	for i, e := range entries {
+		// A candidate's Dest has no "/" (it sits at the root of the plan
+		// output): true for every file source, and for a directory source
+		// only when the file is at the directory's top level.
+		if strings.Contains(e.Dest, "/") {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(e.Dest), "requirement") {
+			candidateIdxs = append(candidateIdxs, i)
+		}
+	}
+
+	switch len(candidateIdxs) {
+	case 1:
+		entries[candidateIdxs[0]].Dest = requirementsDestName
+	case 0:
+		return Plan{}, &domain.RefusalError{
+			Component: "seed",
+			Resource:  "",
+			Reason:    "no Requirement* candidate was found among the seeded sources; exactly one source must have a name starting with \"Requirement\" (case-insensitive) so it can be copied to Requirements.md",
+		}
+	default:
+		matched := make([]string, 0, len(candidateIdxs))
+		for _, idx := range candidateIdxs {
+			matched = append(matched, entries[idx].Source)
+		}
+		return Plan{}, &domain.RefusalError{
+			Component: "seed",
+			Resource:  strings.Join(matched, ", "),
+			Reason: fmt.Sprintf(
+				"multiple Requirement* candidates were found among the seeded sources: %s; exactly one is required so it can be copied to Requirements.md",
+				strings.Join(matched, ", "),
+			),
 		}
 	}
 

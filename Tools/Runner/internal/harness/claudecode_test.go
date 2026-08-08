@@ -59,6 +59,20 @@ package harness_test
 //   - Bare JSON object missing required protocol fields returns ErrMalformedJSON
 //     and the error contains the raw CLI output.
 //   - Large unrecoverable output is truncated with a visible "[truncated" indicator.
+//
+//   Debug log raw-content gap-fill:
+//   - An extractable protocol response that fails to decode into
+//     domain.ProtocolResponse logs the raw content to the debug log.
+//   - A valid envelope with no extractable protocol response logs the raw
+//     content to the debug log.
+//   - Raw content reaches the debug log untruncated for payloads exceeding
+//     the shared package's 2000-byte error-string cap.
+//   - The pre-existing non-JSON-output logging behaviour is unchanged: the
+//     event is logged exactly once, with no duplicated raw payload.
+//   - A successful invocation returning a realistic object-shaped CLI
+//     envelope logs no parse-recovered event.
+//   - Bare and embedded protocol responses still log a parse-recovered event
+//     after the envelope-shape classification is widened.
 
 import (
 	"context"
@@ -154,6 +168,49 @@ func runHelperProcess() {
 		// Write output well beyond the 2000-character readability cap, none
 		// of it JSON. Exercises the truncation-with-indicator behaviour.
 		os.Stdout.WriteString(strings.Repeat("x", 3000)) //nolint:errcheck
+
+	case "protocol-decode-fail":
+		// Write a bare JSON object that IS extractable as a Communication
+		// Protocol candidate (agent_instance_id and status_code are present
+		// as strings, so it passes the shared package's recognition check)
+		// but fails to decode into domain.ProtocolResponse: error_code is a
+		// number where the target field is string-typed. Exercises the
+		// ErrMalformedOutput path inside the adapter itself.
+		os.Stdout.WriteString(`{"agent_instance_id":"test-agent#1","status_code":"SUCCESS","status_message":"ok","error_code":12345}`) //nolint:errcheck
+
+	case "bad-envelope-large":
+		// Write a valid JSON array with no "result"-type entry, the same
+		// shape as "bad-envelope", but padded well beyond the shared
+		// package's 2000-byte error-string cap. Exercises untruncated
+		// raw-content capture on the ErrProtocolNotExtractable path.
+		os.Stdout.WriteString(`[{"type":"assistant","message":"` + strings.Repeat("x", 3000) + `"}]`) //nolint:errcheck
+
+	case "object-envelope":
+		// Write a realistic single-object CLI envelope (the shape Claude
+		// Code actually emits for an ordinary turn): a "type":"result"
+		// object carrying a "result" field with the protocol response text,
+		// surrounded by other CLI-emitted fields. A successful invocation
+		// against this must be classified as a normal envelope, not a
+		// recovery.
+		type objectEnvelope struct {
+			IsError    bool   `json:"is_error"`
+			SessionID  string `json:"session_id"`
+			Subtype    string `json:"subtype"`
+			Type       string `json:"type"`
+			Result     string `json:"result"`
+			DurationMs int    `json:"duration_ms"`
+		}
+		protocolResp := `{"agent_instance_id":"test-agent#1","status_code":"SUCCESS","status_message":"ok"}`
+		envelope := objectEnvelope{
+			IsError:    false,
+			SessionID:  "session-abc123",
+			Subtype:    "success",
+			Type:       "result",
+			Result:     protocolResp,
+			DurationMs: 15756,
+		}
+		data, _ := json.Marshal(envelope)
+		os.Stdout.Write(data) //nolint:errcheck
 
 	case "hang":
 		// Block indefinitely so the test can exercise timeout and context
@@ -993,6 +1050,32 @@ func (r *recordingLogger) allEvents() []string {
 	return names
 }
 
+// messageFor returns the message of the first recorded entry with the given
+// event name. Returns ("", false) when no such entry was recorded.
+func (r *recordingLogger) messageFor(event string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.entries {
+		if e.Event == event {
+			return e.Message, true
+		}
+	}
+	return "", false
+}
+
+// countEvent returns how many entries were recorded for the given event name.
+func (r *recordingLogger) countEvent(event string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, e := range r.entries {
+		if e.Event == event {
+			n++
+		}
+	}
+	return n
+}
+
 // ---------------------------------------------------------------------------
 // T5.1 — adapter logs invocation start, raw stdout, raw stderr, and outcome
 // ---------------------------------------------------------------------------
@@ -1203,5 +1286,140 @@ func TestClaudeCodeAdapter_BasicConstructor_UnchangedBehaviourAfterLoggerAdded(t
 	}
 	if resp.StatusCode != domain.StatusSUCCESS {
 		t.Errorf("want SUCCESS with basic constructor, got %q", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Debug log raw-content gap-fill
+// ---------------------------------------------------------------------------
+
+// TestClaudeCodeAdapterWithLogger_ProtocolDecodeFailure_LogsRawContent
+// verifies that when the CLI output IS extractable as a Communication
+// Protocol candidate but fails to decode into domain.ProtocolResponse, the
+// adapter logs the raw content to the debug log rather than leaving only the
+// short wrapped error message.
+func TestClaudeCodeAdapterWithLogger_ProtocolDecodeFailure_LogsRawContent(t *testing.T) {
+	setHelperEnv(t, "protocol-decode-fail")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if !errors.Is(err, harness.ErrMalformedOutput) {
+		t.Fatalf("want ErrMalformedOutput, got %v", err)
+	}
+
+	msg, ok := logger.messageFor(domain.EventHarnessParseFailed)
+	if !ok {
+		t.Fatalf("want %s logged when the extracted protocol response fails to decode, got events: %v",
+			domain.EventHarnessParseFailed, logger.allEvents())
+	}
+	if !strings.Contains(msg, `"error_code":12345`) {
+		t.Errorf("want logged message to contain the raw undecodable content, got %q", msg)
+	}
+}
+
+// TestClaudeCodeAdapterWithLogger_ProtocolNotExtractable_LogsRawContent
+// verifies that when the CLI produces a valid envelope with no extractable
+// Communication Protocol response, the adapter logs the raw content to the
+// debug log. Before this behaviour exists, only a short wrapped error is
+// logged under EventHarnessInvokeError and no raw content reaches the log.
+func TestClaudeCodeAdapterWithLogger_ProtocolNotExtractable_LogsRawContent(t *testing.T) {
+	setHelperEnv(t, "bad-envelope")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if !errors.Is(err, harness.ErrMalformedOutput) {
+		t.Fatalf("want ErrMalformedOutput, got %v", err)
+	}
+
+	msg, ok := logger.messageFor(domain.EventHarnessParseFailed)
+	if !ok {
+		t.Fatalf("want %s logged when no protocol response is extractable, got events: %v",
+			domain.EventHarnessParseFailed, logger.allEvents())
+	}
+	if !strings.Contains(msg, `"type":"assistant","message":"hello there"`) {
+		t.Errorf("want logged message to contain the raw CLI output, got %q", msg)
+	}
+}
+
+// TestClaudeCodeAdapterWithLogger_ProtocolNotExtractable_LargePayloadUntruncated
+// verifies that raw content reaching the debug log for the
+// ErrProtocolNotExtractable path is not bounded by the shared package's
+// 2000-byte error-string cap: a payload well beyond that cap must reach the
+// log in full.
+func TestClaudeCodeAdapterWithLogger_ProtocolNotExtractable_LargePayloadUntruncated(t *testing.T) {
+	setHelperEnv(t, "bad-envelope-large")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if !errors.Is(err, harness.ErrMalformedOutput) {
+		t.Fatalf("want ErrMalformedOutput, got %v", err)
+	}
+
+	msg, ok := logger.messageFor(domain.EventHarnessParseFailed)
+	if !ok {
+		t.Fatalf("want %s logged for the large unrecoverable payload, got events: %v",
+			domain.EventHarnessParseFailed, logger.allEvents())
+	}
+	if strings.Contains(msg, "[truncated") {
+		t.Errorf("want no truncation indicator in the debug-log message, got %q", msg)
+	}
+	if !strings.Contains(msg, strings.Repeat("x", 3000)) {
+		t.Errorf("want the full 3000-byte payload present in the debug-log message untruncated")
+	}
+}
+
+// TestClaudeCodeAdapterWithLogger_MalformedJSON_NoDuplicateRawContentLog is a
+// regression guard: the already-covered ErrMalformedJSON path must keep
+// logging EventHarnessParseFailed exactly once per invocation. Gap-filling
+// the two other unrecoverable paths must not introduce a second, duplicated
+// raw-content log entry on this pre-existing path.
+func TestClaudeCodeAdapterWithLogger_MalformedJSON_NoDuplicateRawContentLog(t *testing.T) {
+	setHelperEnv(t, "bad-json")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if !errors.Is(err, harness.ErrMalformedJSON) {
+		t.Fatalf("want ErrMalformedJSON, got %v", err)
+	}
+
+	if got := logger.countEvent(domain.EventHarnessParseFailed); got != 1 {
+		t.Errorf("want exactly one %s entry, got %d: %v",
+			domain.EventHarnessParseFailed, got, logger.allEvents())
+	}
+}
+
+// TestClaudeCodeAdapterWithLogger_ObjectShapedEnvelope_NoParseRecoveredLogged
+// verifies that a successful invocation returning a realistic object-shaped
+// CLI envelope (the shape Claude Code actually emits: a single "type":"result"
+// object, not a JSON array) is classified as a normal envelope, not a
+// recovery: no EventHarnessParseRecovered entry is logged, and the response
+// is still parsed correctly.
+func TestClaudeCodeAdapterWithLogger_ObjectShapedEnvelope_NoParseRecoveredLogged(t *testing.T) {
+	setHelperEnv(t, "object-envelope")
+	logger := &recordingLogger{}
+	adapter := harness.NewClaudeCodeAdapterWithLogger(helperExe(t), 5*time.Second, logger)
+
+	resp, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
+
+	if err != nil {
+		t.Fatalf("want no error for a successful object-shaped envelope, got %v", err)
+	}
+	if resp.StatusCode != domain.StatusSUCCESS {
+		t.Errorf("want StatusCode=SUCCESS, got %q", resp.StatusCode)
+	}
+	if resp.AgentInstanceID != "test-agent#1" {
+		t.Errorf("want AgentInstanceID=test-agent#1, got %q", resp.AgentInstanceID)
+	}
+	if logger.eventLogged(domain.EventHarnessParseRecovered) {
+		t.Errorf("want no %s for a genuine object-shaped envelope, got events: %v",
+			domain.EventHarnessParseRecovered, logger.allEvents())
 	}
 }

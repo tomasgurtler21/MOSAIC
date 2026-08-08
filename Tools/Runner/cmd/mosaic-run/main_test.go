@@ -481,8 +481,10 @@ func TestResolveRunIdentityForCLI_InputWithRun_RefusesMutuallyExclusive(t *testi
 }
 
 // TestResolveRunIdentityForCLI_InputAloneWithoutRun_DoesNotRefuse verifies
-// that --input by itself (no --run) does not trigger the mutual-exclusion check.
-// The scanner runs on an empty temp dir, finds zero candidates, and mints a new run.
+// that --input by itself (no --run) does not trigger the --input/--run
+// mutual-exclusion check. --new-run is passed explicitly so the assertion
+// exercises only that mutual-exclusion check, not the separate zero-candidate
+// selection refusal AC2.6 requires when neither --run nor --new-run is given.
 func TestResolveRunIdentityForCLI_InputAloneWithoutRun_DoesNotRefuse(t *testing.T) {
 	rootDir := t.TempDir()
 	origDir, err := os.Getwd()
@@ -500,6 +502,7 @@ func TestResolveRunIdentityForCLI_InputAloneWithoutRun_DoesNotRefuse(t *testing.
 		"--workflow", "w1",
 		"--task", "do work",
 		"--input", "/some/seed.md",
+		"--new-run",
 		// no --run flag
 	}
 
@@ -511,7 +514,7 @@ func TestResolveRunIdentityForCLI_InputAloneWithoutRun_DoesNotRefuse(t *testing.
 		t.Fatal("resolveRunIdentityForCLI returned nil identity; want a new-run identity")
 	}
 	if !identity.IsNewRun {
-		t.Error("IsNewRun = false, want true when --input is given without --run (scanner mints new run)")
+		t.Error("IsNewRun = false, want true when --input is given without --run (--new-run mints a new run)")
 	}
 }
 
@@ -740,10 +743,16 @@ func TestResolveRunIdentityForTUI_MultipleCandidate_DefersToRunSelectScreen(t *t
 	}
 }
 
-// TestResolveRunIdentityForTUI_SingleCandidate_AutoResumes verifies that when
-// the scan finds exactly one candidate, resolveRunIdentityForTUI resolves to
-// that candidate's identity without minting.
-func TestResolveRunIdentityForTUI_SingleCandidate_AutoResumes(t *testing.T) {
+// TestResolveRunIdentityForTUI_SingleCandidate_DefersToRunSelectScreen is the
+// TUI entry-point expression of the core defect this stage removes (AC2.2):
+// exactly one resumable run must no longer be auto-resumed before the TUI
+// even launches. resolveRunIdentityForTUI must defer to the run-select
+// screen exactly as it already does for the multi-candidate case, returning
+// empty identity fields and a non-nil ScanResult.
+//
+// Currently fails (RED): resolveRunIdentityForTUI still auto-resumes the
+// single candidate (the `case 1` branch this stage removes).
+func TestResolveRunIdentityForTUI_SingleCandidate_DefersToRunSelectScreen(t *testing.T) {
 	workDir := t.TempDir()
 	const runID = "20260727T170000Z-a3f9"
 	folder := filepath.Join(workDir, domain.RunScopedFolder(runID))
@@ -755,17 +764,20 @@ func TestResolveRunIdentityForTUI_SingleCandidate_AutoResumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveRunIdentityForTUI(single candidate) error = %v, want nil", err)
 	}
-	if identity.RunID != runID {
-		t.Errorf("RunID = %q, want %q", identity.RunID, runID)
+	if identity.RunID != "" {
+		t.Errorf("RunID = %q, want empty string; a single candidate must defer to the run-select screen, not auto-resume", identity.RunID)
 	}
-	if identity.RunFolder != folder {
-		t.Errorf("RunFolder = %q, want %q", identity.RunFolder, folder)
+	if identity.RunFolder != "" {
+		t.Errorf("RunFolder = %q, want empty string for single-candidate deferral", identity.RunFolder)
 	}
 	if identity.IsNewRun {
-		t.Error("IsNewRun = true, want false for single-candidate auto-resume")
+		t.Error("IsNewRun = true, want false for single-candidate deferral")
 	}
-	if identity.ScanResult != nil {
-		t.Errorf("ScanResult = %v, want nil for single-candidate auto-resume", identity.ScanResult)
+	if identity.ScanResult == nil {
+		t.Fatal("ScanResult = nil, want non-nil scan result for single-candidate deferral")
+	}
+	if len(identity.ScanResult.Candidates) != 1 || identity.ScanResult.Candidates[0].RunID != runID {
+		t.Errorf("ScanResult.Candidates = %+v, want exactly one candidate with RunID %q", identity.ScanResult.Candidates, runID)
 	}
 }
 

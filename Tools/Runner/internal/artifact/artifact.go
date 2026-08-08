@@ -238,6 +238,7 @@ func Render(state domain.ArtifactState) ([]byte, error) {
 	} else {
 		buf.WriteString("checkpoints: disabled\n")
 	}
+	buf.WriteString("commits: disabled\n")
 	if len(state.InfrastructureOverrides) > 0 {
 		buf.WriteString("infrastructure_overrides:\n")
 		for _, ov := range state.InfrastructureOverrides {
@@ -399,12 +400,21 @@ func (f *fileStore) Apply(ctx context.Context, state domain.ArtifactState, step 
 	newState.GlobalSequence = state.GlobalSequence + 1
 	newState.LastUpdated = step.Timestamp
 
-	newState.CurrentState = domain.CurrentState{
-		Phase:      step.Phase,
-		Stage:      step.Stage,
-		LastStatus: step.Status,
-		LastAgent:  step.AgentInstance,
-		ErrorCode:  step.ErrorCode,
+	// current_state is updated only for workflow steps. An infrastructure
+	// step leaves phase, stage, last_status, last_agent, and error_code
+	// exactly as they were, on disk as well as in the returned state, so the
+	// recorded workflow position continues to name the last workflow step.
+	// The invocation is still fully recorded above and below: the execution
+	// log entry, sequence bump, and artifact registry upsert all apply to an
+	// infrastructure step unchanged.
+	if !step.IsInfrastructure {
+		newState.CurrentState = domain.CurrentState{
+			Phase:      step.Phase,
+			Stage:      step.Stage,
+			LastStatus: step.Status,
+			LastAgent:  step.AgentInstance,
+			ErrorCode:  step.ErrorCode,
+		}
 	}
 
 	// Upsert artifact registry entries.
