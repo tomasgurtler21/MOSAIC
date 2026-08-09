@@ -290,8 +290,8 @@ The one thing an executor does differently is *why* it dispatched them and *what
 An infrastructure agent invocation produces one ordinary Execution Log row, appended after it completes, with the phase and stage current at the time it ran:
 
 ```markdown
-| 14 | Implementation#14 | EXECUTION | GREEN | SUCCESS | 2026-01-29T12:45:00Z | Implemented updateProfile endpoint | Stage-2/Plan.md, Contracts.md | - |
-| 15 | checkpoint-manager-git#15 | EXECUTION | GREEN | SUCCESS | 2026-01-29T12:46:00Z | Committed checkpoint for GREEN stage | - | 4f1a08d |
+| 14 | Implementation#14 | EXECUTION | Implementation.2 | SUCCESS | 2026-01-29T12:45:00Z | Implemented updateProfile endpoint | Stage-2/Plan.md, Contracts.md | - |
+| 15 | checkpoint-manager-git#15 | EXECUTION | Implementation.2 | SUCCESS | 2026-01-29T12:46:00Z | Committed checkpoint for stage 2 | - | 4f1a08d |
 ```
 
 No new column marks a row as infrastructure. The agent name already identifies it, and a consumer that needs to distinguish them matches against the declaration region (§3.1) it already reads. A column here would encode information the row already carries.

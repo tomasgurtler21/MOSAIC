@@ -15,7 +15,7 @@ This document explains the execution-group mechanism available to workflow autho
 - [Omission, ordering, and repetition](#omission-ordering-and-repetition)
 - [Contiguity constraint](#contiguity-constraint)
 - [Validation and refusal reference](#validation-and-refusal-reference)
-- [`current_state.phase` convention](#current_statephase-convention)
+- [How groups are recorded in `Orchestration.md`](#how-groups-are-recorded-in-orchestrationmd)
 - [Worked examples](#worked-examples)
 
 ---
@@ -216,19 +216,20 @@ R1 is not a pre-invocation refusal. It is a typed routing-decision failure (`Unr
 
 ---
 
-## `current_state.phase` convention
+## How groups are recorded in `Orchestration.md`
 
-The orchestrator's `current_state.phase` field holds the **base phase name** for staged rows: always `EXECUTION`, never the group sub-qualifier, never the full row string.
+The phase notation described above is *routing-table* notation: it identifies a row of the workflow. It is never written into a run's `Orchestration.md`. That artifact records the run's position using its own vocabulary, defined normatively in `Development/Designs/OrchestrationArtifactFormat.md` §4.1. The part that matters to a workflow author is this:
 
-| Value | Correct use |
-|-------|-------------|
-| `EXECUTION` | `current_state.phase` for any grouped or bare staged row |
-| `EXECUTION.Test` | Wrong — do not store the group sub-qualifier here |
-| `EXECUTION.Test.[StageNumber]` | Wrong — do not store the full row string here |
+| Field | Value |
+|-------|-------|
+| `Phase` (log column) and `current_state.phase` | Always the bare phase name `EXECUTION` — never `EXECUTION.Test`, never `EXECUTION.Test.[StageNumber]` |
+| `Stage` (log column) and `current_state.stage` | `{Group}.{StageNumber}` for a grouped row (e.g. `Test.1`), a bare `{StageNumber}` for an ungrouped row (e.g. `4`) |
 
-**Why this matters:** Per-stage HITL resolution and the `EXECUTION` branch of crash recovery both compare `current_state.phase` against the bare string `"EXECUTION"`. Storing a qualified form like `EXECUTION.Test` means the comparison never matches, so HITL stops firing and crash recovery silently misroutes — both without any error message.
+So a group token you define here is what appears, verbatim and case-sensitively, in the `Stage` column of every run that executes the rows carrying it — and in the `Created In` column of every artifact those rows produce (`EXECUTION.Test.1`). Group names are therefore visible to anyone reading a run artifact, which is worth weighing when you choose them.
 
-**Contrast with the execution log:** The runner's own execution-log `Phase` column stores the full row string (for example `EXECUTION.Test.[StageNumber]`). This is correct and intentional. The two values serve different consumers and are never compared to each other. Only the orchestrator's `current_state.phase` must use the bare name.
+**Why the bare phase name matters:** per-stage HITL resolution and the `EXECUTION` branch of crash recovery both compare the recorded phase against the literal string `"EXECUTION"`. A qualified form like `EXECUTION.Test` never matches, so HITL stops firing and recovery silently misroutes — neither produces an error message.
+
+Both executors write these values identically, which is what lets a run started by an LLM orchestrator be resumed by the script runner and the reverse.
 
 ---
 

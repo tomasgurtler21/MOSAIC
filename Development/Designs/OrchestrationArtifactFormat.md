@@ -1,9 +1,9 @@
 # Orchestration Artifact Format
 
 > **Status:** Approved
-> **Version:** 2.0
+> **Version:** 2.1
 > **Created:** 2026-07-28
-> **Last Updated:** 2026-08-01
+> **Last Updated:** 2026-08-09
 > **Scope:** The schema of `Orchestration.md` — the blackboard artifact an orchestrator (human-driven LLM or a future deterministic script) reads and writes to track execution state for one workflow run. Defines its sections, their mutability rules, and the format each section uses.
 
 ---
@@ -60,12 +60,14 @@ commits: enabled
 commit_branch: mosaic/run/20260129T090000Z-a3f9
 current_state:
   phase: EXECUTION
-  stage: GREEN
+  stage: 2
   last_status: SUCCESS
   last_agent: "Implementation#14"
   error_code: null
 ---
 ```
+
+(`quick-fix` declares no execution groups, so its stage value is a bare number. A grouped workflow would read `stage: Implementation.2` here — see §4.1.)
 
 | Field | Mutability | Description |
 |---|---|---|
@@ -81,13 +83,39 @@ current_state:
 | `commits` | Set once | `enabled` or `disabled`. Fixed for the life of the run. Controls whether `commit`-class infrastructure agents fire on trigger. Default `disabled`. |
 | `commit_branch` | Set once | The branch name the `commit`-class agent commits to, recorded once at run start. Present when `commits: enabled`; absent or `null` when `disabled`. Enables branch-mismatch detection if `HEAD` moves mid-run. The value is whatever the run-start setup dispatch returned (`CommitAgent.md` §4.9) — the orchestrator records it rather than deriving it, and inspects the repository at no point. The run's variant is decidable from this field alone: MOSAIC-owned exactly when the value is `mosaic/run/{run_id}`, which is why no separate variant field exists to disagree with it. |
 | `infrastructure_overrides` | Set once | Optional block; absent in the common case. When present, each key is an infrastructure agent name whose `triggers` list is replaced by the specified list for the duration of the run. Set once at run start and never modified during the run. An agent name not present in the infrastructure agent declaration region is a start-up error. Shape: `{agent-name}: { triggers: [ { trigger: <trigger>, trigger_param: <param-or-null> } ] }`. |
-| `current_state.phase` | Updated in place | One of the standard workflow phases (`PLANNING`, `DESIGN`, `EXECUTION`, etc.). `COMPLETED` is the terminal value written after the session finishes successfully — once set to `COMPLETED`, the run is no longer resumable. |
-| `current_state.stage` | Updated in place | Stage name when `phase` is `EXECUTION` and the workflow has stages; `null` otherwise. |
+| `current_state.phase` | Updated in place | One of the standard workflow phases (`PLANNING`, `DESIGN`, `EXECUTION`, etc.), always as the bare phase name — see §4.1. `COMPLETED` is the terminal value written after the session finishes successfully — once set to `COMPLETED`, the run is no longer resumable. |
+| `current_state.stage` | Updated in place | Stage value when `phase` is `EXECUTION` and the workflow has stages; `null` otherwise. Format defined in §4.1. |
 | `current_state.last_status` | Updated in place | The status code returned by the most recently completed subagent; `null` before any subagent has run. |
 | `current_state.last_agent` | Updated in place | `{AgentName}#{Number}` of the most recently completed subagent; `null` before any subagent has run. |
 | `current_state.error_code` | Updated in place | Populated only when `last_status` is `BLOCKED`; `null` otherwise. |
 
 `current_state` is the one nested block whose fields are all mutable in place — grouping it makes explicit that this is the single piece of frontmatter a resuming orchestrator overwrites wholesale on every step, versus the surrounding fields which are set once at creation (aside from `last_updated` and `global_sequence`, which update alongside it).
+
+### 4.1 Phase and stage value vocabulary
+
+Two facts locate a run in its workflow: its phase and, inside `EXECUTION`, its stage. Both appear twice in this artifact — in `current_state` (§4) and in the Execution Log's `Phase`/`Stage` columns (§5) — and `Created In` (§6) is composed from them. **All four use the vocabulary defined here.** They are written identically by every executor, so a run started by an LLM orchestrator and resumed by a script (or the reverse) reads the same values.
+
+**Phase is always the bare phase name.** `EXECUTION` — never `EXECUTION.[StageNumber]`, never `EXECUTION.Test.[StageNumber]`. Those qualified strings are *routing-table* notation identifying a workflow row; they are a property of the workflow definition, not of the run's position, and they never appear in this artifact in any field. A qualified value here breaks two things silently: per-stage HITL resolution and the `EXECUTION` branch of recovery (§9) both compare the phase against the literal string `EXECUTION`, and neither reports a mismatch.
+
+**Stage carries the group.** The stage value is the one and only place a workflow's execution group surfaces in this artifact:
+
+| Situation | `Stage` (log) / `stage` (frontmatter) | `Created In` |
+|---|---|---|
+| Phase is not `EXECUTION` | `-` / `null` | `RESEARCH`, `PLANNING`, … (phase alone) |
+| `EXECUTION`, workflow declares no groups, stage 4 | `4` | `EXECUTION.4` |
+| `EXECUTION`, group `Test`, stage 1 | `Test.1` | `EXECUTION.Test.1` |
+| `EXECUTION`, group `Implementation`, stage 3 | `Implementation.3` | `EXECUTION.Implementation.3` |
+
+Rules:
+
+- `{StageNumber}` is the 1-based index of the stage in the plan artifact's stage table. Never `0`, never negative — a non-positive number means "not staged", which is written as `-`/`null`, not as a numeric stage.
+- `{Group}` is copied verbatim from the group segment of the routing row's `Phase` cell. It is case-sensitive and contains no `.` and no whitespace. A workflow that declares no groups produces a bare number; there is no placeholder group token and no `-` filler in the group position.
+- The separator is a single `.`. A parser splits on the **last** `.` so the numeric part is unambiguous.
+- **Legacy read tolerance:** earlier orchestrator versions wrote `Stage-{N}` (e.g. `Stage-1`). A consumer must accept that form on read as ungrouped stage `N`. Nothing writes it.
+
+**The stage value is not a folder name.** Per-stage artifacts live under `Stage-{StageNumber}/` (e.g. `Stage-1/Plan.md`), keyed on the stage number alone. Group never appears in a path — the `Test` and `Implementation` groups of stage 1 write into the same `Stage-1/` folder. The two conventions are independent and neither is derived from the other.
+
+Group vocabulary itself — how a workflow declares groups, how the plan artifact's `Approach` column selects a group order, and what a runner refuses — is a workflow-definition concern and is specified in `Workflows/ExecutionGroups.md`. This artifact only records the group the executing row belonged to.
 
 ## 5. Execution Log (Tier 2, append-only)
 
@@ -106,8 +134,8 @@ One row per completed subagent invocation, appended after that invocation comple
 |---|---|
 | `Seq` | Matches `global_sequence` at the time this row was written; also the numeric suffix in `Agent`. |
 | `Agent` | `{AgentName}#{Seq}`. |
-| `Phase` | Phase during the invocation. |
-| `Stage` | Stage if `Phase` is `EXECUTION` and the workflow has stages; `-` otherwise. |
+| `Phase` | Phase during the invocation, as the bare phase name (§4.1). |
+| `Stage` | Stage value if `Phase` is `EXECUTION` and the workflow has stages; `-` otherwise. Carries the execution group when the workflow declares one — format in §4.1. |
 | `Status` | The subagent's returned status code. |
 | `Timestamp` | ISO-8601, invocation completion time. |
 | `Summary` | The subagent's own `status_message` from its protocol response, copied across — not text the orchestrator composes itself. This keeps `Summary` inside the "mechanical" category (§2) despite reading like free text: it's copied content, not authored content. Bounded and single-line by construction — a `|` or a literal newline inside this field is invalid and must be stripped or escaped by whatever writes the row. Truncation, when `status_message` exceeds 100 characters, takes the **first 50 and last 50 characters**, joined by ` … ` — not a naive first-100 cut. This isn't cosmetic: a verbose `status_message` (which shouldn't happen per protocol, but does) tends to front-load process narration and put the actual outcome in its closing sentence, so a head-only truncation systematically discards the part most worth keeping. Head+tail keeps both the opening context and the conclusion, at the same total character budget. |
@@ -124,7 +152,7 @@ One row per completed subagent invocation, appended after that invocation comple
 
 **Retention needs no in-file marking, and this schema doesn't set a retention policy.** Because `Checkpoint` values are never edited after being written, "which checkpoints are still live" isn't state the file has to track — it can be computed by whoever needs it, by walking the Execution Log backward and treating the most recent non-empty `Checkpoint` values as the live rollback targets, however many that consumer chooses to keep. Older checkpointed rows remain exactly as written (nothing is ever deleted or marked `[EXPIRED]`) — they simply aren't picked as targets once retired by that read-time rule. This avoids the alternative (marking old entries as expired in place), which would have made one column in an otherwise strictly-append-only section mutable after the fact. How many checkpoints to retain, and by what rule, is a policy question for whatever manages checkpoint creation — not a parameter this document defines.
 
-The current `Orchestration.template.md` in this workspace labels the `Agent` column `Subgent` — a pre-existing typo, not an intentional naming choice. Fixing it is implementation work for whoever builds against this schema, not a decision this document needs to make, but it's noted here so it isn't ported forward by accident.
+The column is `Agent`. A now-removed `Orchestration.template.md` labelled it `Subgent` — a typo, never an intentional naming choice — and artifacts produced from that template still exist. Consumers may treat a `Subgent` header as a legacy alias for `Agent` on read; nothing writes it.
 
 ## 6. Artifacts (Tier 2, keyed registry)
 
@@ -134,7 +162,7 @@ The current `Orchestration.template.md` in this workspace labels the `Agent` col
 |----------|------------|------------|
 | Research.md | RESEARCH | Research#1 |
 | Plan.md | PLANNING | Planner#3 |
-| Stage-1/PlanProgress.md | EXECUTION.Stage-1 | Implementation#10 |
+| Stage-1/PlanProgress.md | EXECUTION.Implementation.1 | Implementation#10 |
 [[/SECTION:Artifacts]]
 ```
 
@@ -145,7 +173,7 @@ Unlike the Execution Log, this section is **not** a history — it's a lookup ta
 | Column | Description |
 |---|---|
 | `Artifact` | Path, exactly as it appeared in the subagent's declared output artifacts. The key for this table. |
-| `Created In` | `Phase` or `Phase.Stage`, taken from `current_state` at the moment this row is last written. Reflects the most recent write, not the original creation. |
+| `Created In` | `Phase` when the invocation had no stage, `Phase.Stage` when it did — both components taken verbatim from `current_state` at the moment this row is last written, joined by a single `.` (§4.1). Reflects the most recent write, not the original creation. |
 | `Created By` | `{AgentName}#{Seq}` of the invocation that most recently produced or reworked it — the same value as that invocation's `Agent` column in the Execution Log, letting the two tables be cross-referenced directly. The single exception is the reserved literal `user`, for artifacts adopted at run init (§11) that no invocation produced; such rows carry `Created In: INIT` and are the one case where a row has no corresponding Execution Log entry. A consumer cross-referencing this column must tolerate that. Once a subagent reworks such a path, the row is overwritten in place like any other and `user` is replaced by the producing invocation. |
 
 **No `Type` column, and no validity-window notation for scope.** A column classifying the artifact (Research / Plan / Review / …) was considered but left out: that classification is already fully recoverable from the artifact's own filename — reserved-keyword naming conventions already used across this workspace (a `Plan`-named file is a routing artifact, a kebab-case `{agent-name}.md` file is a review output, and so on) make a separate stored classification pure duplication of what the name already encodes. A richer scope notation (marking an artifact as valid across a phase range, or across a specific span of stages) was also considered and left out — expressing that requires judgment about how long an artifact stays relevant, which isn't something a script can determine mechanically at write time. Where that distinction matters (e.g. `Iteration1_Review.md` vs. `Iteration2_Review.md`), it's already visible in the filename itself, not something this table needs to additionally encode.
@@ -214,7 +242,7 @@ commits: enabled
 commit_branch: mosaic/run/20260129T080000Z-b2c4
 current_state:
   phase: EXECUTION
-  stage: GREEN
+  stage: Implementation.2
   last_status: SUCCESS
   last_agent: "Implementation#16"
   error_code: null
@@ -228,10 +256,10 @@ current_state:
 | 3 | Designer#3 | DESIGN | - | SUCCESS | 2026-01-29T09:15:00Z | Designed ProfileService interface | Research.md | - |
 | 4 | checkpoint-manager-git#4 | DESIGN | - | SUCCESS | 2026-01-29T09:16:00Z | Committed checkpoint of working tree (3 files). [checkpoint:4f1a08d] | - | 4f1a08d |
 | ... | ... | ... | ... | ... | ... | ... | ... | ... |
-| 13 | TestRunner#13 | EXECUTION | REVIEW | SUCCESS | 2026-01-29T10:50:00Z | All tests pass (3/3) | Plan.md, Stage-1/PlanProgress.md | - |
-| 14 | checkpoint-manager-git#14 | EXECUTION | REVIEW | SUCCESS | 2026-01-29T10:51:00Z | Committed checkpoint of working tree (7 files). [checkpoint:7c2e9f1] | - | 7c2e9f1 |
-| 15 | TestCreator#15 | EXECUTION | RED | SUCCESS | 2026-01-29T11:15:00Z | Created tests for updateProfile endpoint | Plan.md | - |
-| 16 | Implementation#16 | EXECUTION | GREEN | SUCCESS | 2026-01-29T12:45:00Z | Implemented updateProfile endpoint | Plan.md, Design.md | - |
+| 13 | ImplementationReview#13 | EXECUTION | Implementation.1 | SUCCESS | 2026-01-29T10:50:00Z | All tests pass (3/3) | Plan.md, Stage-1/PlanProgress.md | - |
+| 14 | checkpoint-manager-git#14 | EXECUTION | Implementation.1 | SUCCESS | 2026-01-29T10:51:00Z | Committed checkpoint of working tree (7 files). [checkpoint:7c2e9f1] | - | 7c2e9f1 |
+| 15 | TestCreator#15 | EXECUTION | Test.2 | SUCCESS | 2026-01-29T11:15:00Z | Created tests for updateProfile endpoint | Plan.md | - |
+| 16 | Implementation#16 | EXECUTION | Implementation.2 | SUCCESS | 2026-01-29T12:45:00Z | Implemented updateProfile endpoint | Plan.md, Design.md | - |
 [[/SECTION:ExecutionLog]]
 
 [[SECTION:Artifacts]]
@@ -241,7 +269,7 @@ current_state:
 | Research.md | RESEARCH | Research#1 |
 | Plan.md | PLANNING | Planner#2 |
 | Design.md | DESIGN | Designer#3 |
-| ProfileService.ts | EXECUTION.GREEN | Implementation#16 |
+| ProfileService.ts | EXECUTION.Implementation.2 | Implementation#16 |
 [[/SECTION:Artifacts]]
 
 [[SECTION:WorkflowNotes]]

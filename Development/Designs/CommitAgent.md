@@ -295,8 +295,8 @@ A successful setup response ends `status_message` with it, containing the branch
 An ordinary row, like any infrastructure agent invocation:
 
 ```markdown
-| 15 | Implementation#15 | EXECUTION | GREEN | SUCCESS | ... | Implemented updateProfile endpoint | Stage-2/Plan.md | - |
-| 16 | commit-manager-git#16 | EXECUTION | GREEN | SUCCESS | ... | Committed stage 2 work to feature/profiles (12 files). [commit:9c2e41b] | Stage-2/Plan.md, Stage-2/PlanProgress.md | - |
+| 15 | Implementation#15 | EXECUTION | Implementation.2 | SUCCESS | ... | Implemented updateProfile endpoint | Stage-2/Plan.md | - |
+| 16 | commit-manager-git#16 | EXECUTION | Implementation.2 | SUCCESS | ... | Committed stage 2 work to feature/profiles (12 files). [commit:9c2e41b] | Stage-2/Plan.md, Stage-2/PlanProgress.md | - |
 ```
 
 `Seq` is consumed as for any agent, the `Checkpoint` column stays empty (§4.8), and `Inputs` records the artifacts the message was derived from — which, unusually for this system, is a genuine audit trail of *why the commit says what it says*.

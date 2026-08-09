@@ -329,8 +329,8 @@ This is a hard exclusion implemented in the agent, deliberately not a consequenc
 An ordinary invocation row. Nothing is rewound.
 
 ```markdown
-| 21 | test-runner#21 | EXECUTION | GREEN | COMPLETED_NEEDS_ACTION | ... | 6 tests failing | Stage-2/Plan.md | - |
-| 22 | checkpoint-restore-git#22 | EXECUTION | GREEN | SUCCESS | ... | Restored working tree to 4f1a08d (Seq 15) | - | - |
+| 21 | test-runner#21 | EXECUTION | Implementation.2 | COMPLETED_NEEDS_ACTION | ... | 6 tests failing | Stage-2/Plan.md | - |
+| 22 | checkpoint-restore-git#22 | EXECUTION | Implementation.2 | SUCCESS | ... | Restored working tree to 4f1a08d (Seq 15) | - | - |
 ```
 
 `global_sequence` advances as for any invocation and is never decremented. No prior row is altered. `current_state` is not rewound to the checkpointed row's phase and stage: doing so would leave `current_state` disagreeing with the last Execution Log row, and the schema's recovery procedure resolves that disagreement by trusting the log — silently undoing the rewind on the next restart. The run's files move backward; its history does not.

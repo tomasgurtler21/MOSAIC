@@ -58,7 +58,7 @@ func DefaultTheme() Theme {
 			RoleSuccess:  lipgloss.NewStyle().Foreground(lipgloss.Color("10")),
 			RoleWarning:  lipgloss.NewStyle().Foreground(lipgloss.Color("11")),
 			RoleError:    lipgloss.NewStyle().Foreground(lipgloss.Color("9")),
-			RoleHelp:     lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
+			RoleHelp:     lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("14")),
 			RoleBorder:   lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
 		},
 	}
