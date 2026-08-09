@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "test_id": "full-surface",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "Agent", "agent": "researcher", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "researcher#1",
+        "run_id": "smoke-run",
+        "status_code": "SUCCESS",
+        "status_message": "Research complete."
+      },
+      "side_effects": {
+        "create_files": [
+          { "path": "Research.md", "content": "# Research\n" }
+        ]
+      }
+    }
+  ]
+}

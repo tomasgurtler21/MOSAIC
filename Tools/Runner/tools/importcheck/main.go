@@ -56,6 +56,22 @@ const modulePrefix = "mosaic-run/"
 // adapter package that should not be imported by production code in internal/.
 const harnessPackage = modulePrefix + "internal/harness"
 
+// harnessSelectionConsumers lists the files (relative to internal/) explicitly
+// permitted to import internal/harness despite the general isolation rule.
+// These import only the package's Selection composition surface (Selections,
+// Accepts, CLISelections, FlagValues, FlagValueList, FakeHarnessID) — never a
+// concrete adapter type — to drive the --harness flag's usage/validation and
+// the TUI configuration screen's harness step from Runner's one accepted set
+// (mosaic-common/harness's CLI catalog plus the tool-local "fake" test
+// double). The concrete adapter types remain reachable only through
+// domain.HarnessAdapter; this exception is narrowly scoped to these two files
+// rather than to the whole package, so the general rule still catches any
+// other file that starts constructing adapters directly.
+var harnessSelectionConsumers = map[string]bool{
+	"cli/run.go":           true,
+	"tui/screens/setup.go": true,
+}
+
 // rule describes one import-boundary constraint for a single package directory.
 type rule struct {
 	// dir is the directory path relative to the module root.
@@ -84,8 +100,8 @@ type rule struct {
 // Adding a violation means the architecture has drifted; fix the code, not this list.
 var rules = []rule{
 	{
-		dir:  "internal/domain",
-		desc: "domain is the base layer: must not import any package from this module",
+		dir:                    "internal/domain",
+		desc:                   "domain is the base layer: must not import any package from this module",
 		forbidAllModuleImports: true,
 	},
 	{
@@ -306,6 +322,10 @@ func checkHarnessIsolation(moduleRoot string) (violations []string, errs []strin
 		imports, err := parseImports(fset, path)
 		if err != nil {
 			return nil // parse errors are reported by per-package rules
+		}
+
+		if harnessSelectionConsumers[relSlash] {
+			return nil
 		}
 
 		for _, imp := range imports {

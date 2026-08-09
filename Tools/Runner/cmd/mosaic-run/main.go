@@ -20,6 +20,8 @@ import (
 
 	"github.com/mattn/go-isatty"
 
+	commonharness "mosaic-common/harness"
+
 	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/cli"
 	"mosaic-run/internal/debuglog"
@@ -518,15 +520,19 @@ func newLoggedArtifactStore(path string, logger domain.DebugLogger) domain.Artif
 
 // buildAdapter constructs the HarnessAdapter specified by harnessStr.
 //
-// When harnessStr is "claude-code", a ClaudeCodeAdapter is created with
-// claudePathStr as the executable path and timeout as the invocation limit.
-// A zero or negative timeout is treated as the default (30 minutes).
+// When harnessStr is "claude-code" or "opencode", the corresponding CLI
+// adapter is created with claudePathStr as the executable path and timeout
+// as the invocation limit. A zero or negative timeout is treated as the
+// default (30 minutes). claudePathStr is named for the Claude Code CLI
+// historically, but it names whichever harness CLI harnessStr selected: the
+// opencode case reuses the same parameter, defaulting to the published
+// "opencode" command name when empty.
 // For any other value (including "fake" and unknown strings), FakeAdapter is
 // returned. Unknown values are not rejected here; cli.Run validates the
 // --harness flag and surfaces usage errors for unknown values (AC3.8).
 //
 // An optional logger may be passed as the last argument. When provided, the
-// ClaudeCodeAdapter is constructed with the logger so that invocation I/O is
+// CLI adapter is constructed with the logger so that invocation I/O is
 // captured in the debug log. When omitted, the adapter uses a no-op logger.
 // The fake adapter ignores the logger in all cases.
 func buildAdapter(harnessStr, claudePathStr string, timeout time.Duration, loggers ...domain.DebugLogger) domain.HarnessAdapter {
@@ -540,20 +546,32 @@ func buildAdapter(harnessStr, claudePathStr string, timeout time.Duration, logge
 			timeout = 30 * time.Minute
 		}
 		return harness.NewClaudeCodeAdapterWithLogger(claudePathStr, timeout, logger)
+	case commonharness.HarnessIDOpenCode:
+		exe := claudePathStr
+		if exe == "" {
+			exe = "opencode"
+		}
+		if timeout <= 0 {
+			timeout = 30 * time.Minute
+		}
+		return harness.NewOpenCodeAdapterWithLogger(exe, timeout, logger)
 	default: // "fake" or unknown
 		return harness.NewFakeAdapter()
 	}
 }
 
 // buildTUIDelegate constructs the OrchestratorDelegate for TUI deviation
-// resolution. Returns a non-nil delegate only when harnessStr is "claude-code"
-// and orchFile is non-empty; otherwise returns nil (falling back to stop mode).
+// resolution. Returns a non-nil delegate only when harnessStr names a
+// CLI-backed harness (per the shared catalog) and orchFile is non-empty;
+// otherwise returns nil (falling back to stop mode). This admits every
+// CLI-backed harness, not just Claude Code, and excludes both the tool-local
+// "fake" harness and unrecognised values.
 //
 // The same harness instance h must be the one used for both session dispatch
 // and orchestrator invocation, ensuring deviation resolution uses the same
 // adapter as the primary session.
 func buildTUIDelegate(h domain.HarnessAdapter, harnessStr, orchFile, runFolder string) *deviation.OrchestratorDelegate {
-	if harnessStr != "claude-code" || orchFile == "" {
+	if !commonharness.IsCLIHarness(harnessStr) || orchFile == "" {
 		return nil
 	}
 	orchDir := orchFileDir(orchFile)

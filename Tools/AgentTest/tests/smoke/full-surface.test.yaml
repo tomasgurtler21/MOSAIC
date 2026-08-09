@@ -1,0 +1,50 @@
+schema_version: 1
+id: full-surface
+description: >
+  Exercises the assertion classes the one-dispatch smoke test does not:
+  seeded orchestration state (final_state, execution_log), protocol
+  violations, stub side effects (artifact_created / artifact_not_created)
+  and task-message inspection.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: mini-orchestrator
+  definition: .claude/agents/mini-orchestrator.md
+  opening_message: |
+    Research the topic "widgets".
+  invocation_kind: orchestrator
+  model: default
+  allowed_tools: [Task, Agent]
+
+stub_registry: full-surface.stubs.json
+timeout: 5m
+turn_limit: 10
+
+seed_files:
+  - path: .claude/agents/mini-orchestrator.md
+    ref: mini-orchestrator.md
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: orchestration-seed.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: Agent, agent: researcher }
+  final_state:
+    phase: COMPLETED
+    last_status: SUCCESS
+  execution_log:
+    agent_ids: ["researcher#1"]
+    all_status: SUCCESS
+  protocol_violations: 0
+  artifact_created:
+    - Research.md
+  artifact_not_created:
+    - Design.md
+  task_messages:
+    - at: 1
+      identity: { tool: Agent, agent: researcher }
+      task_description_contains: ["widgets"]

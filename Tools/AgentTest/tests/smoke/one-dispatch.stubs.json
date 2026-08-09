@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "test_id": "one-dispatch",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "Agent", "agent": "researcher", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "researcher#1",
+        "run_id": "one-dispatch-run",
+        "status_code": "SUCCESS",
+        "status_message": "Research on widgets complete."
+      }
+    }
+  ]
+}

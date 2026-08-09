@@ -1,0 +1,17 @@
+schema_version: 1
+id: smoke
+description: >
+  Real-harness smoke suite. Unlike examples/ (which runs on the scripted
+  `fake` harness and is exercised by the Go e2e tests), this suite drives an
+  actual agent CLI and therefore costs money and requires a working harness
+  environment. It exists to prove the claude-code path end to end before any
+  MOSAIC-semantic tests are authored on top of it.
+defaults:
+  harness: claude-code
+  timeout: 5m
+  turn_limit: 10
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: one-dispatch.test.yaml
+  - path: full-surface.test.yaml

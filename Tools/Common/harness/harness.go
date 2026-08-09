@@ -41,6 +41,17 @@ type SpawnRequest struct {
 	Env          []string // appended to the inherited environment
 	ExtraArgs    []string
 	Timeout      time.Duration
+
+	// SystemPrompt is additional system-prompt content, already resolved to
+	// text by the caller. It exists because a harness may offer no CLI flag
+	// for appending to the system prompt: an argument builder that needed
+	// such content would otherwise have to read a file, and argument
+	// builders in this package are pure. Resolving it — reading a file,
+	// synthesizing an <env> block — belongs to the caller.
+	//
+	// The Claude Code builder ignores this field: it has
+	// --append-system-prompt-file and needs no substitute.
+	SystemPrompt string
 }
 
 // Response is the structured result of a spawn.

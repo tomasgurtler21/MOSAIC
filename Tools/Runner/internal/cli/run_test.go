@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	commonharness "mosaic-common/harness"
 	"mosaic-common/interaction"
 	"mosaic-run/internal/cli"
 	"mosaic-run/internal/domain"
@@ -1201,6 +1202,93 @@ func TestHarnessFlag_UnknownRejectsWithUsageError(t *testing.T) {
 	}
 	if sess.called {
 		t.Error("session.Start should not be called for invalid --harness value")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.4: catalog-driven flag surfaces
+//
+// These tests verify that --harness's usage string, its validation and its
+// usage-error message are all derived from Runner's one accepted set
+// (Selections/Accepts/FlagValues/FlagValueList in internal/harness), so a
+// shared-catalog addition reaches all three without a restated literal.
+// ---------------------------------------------------------------------------
+
+// TestHarnessFlag_OpenCodeAccepted verifies that --harness opencode is
+// accepted and the session is started normally, mirroring
+// TestHarnessFlag_ClaudeCodeAccepted for the new catalog entry.
+func TestHarnessFlag_OpenCodeAccepted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	args := append(baseHarnessArgs(), "--harness", "opencode")
+	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+	if code != cli.ExitSuccess {
+		t.Errorf("exit code = %d, want ExitSuccess (%d); stderr: %q", code, cli.ExitSuccess, errOut)
+	}
+	if !sess.called {
+		t.Error("session.Start was not called for --harness opencode")
+	}
+}
+
+// TestHarnessFlag_EveryCatalogEntryAccepted verifies that every harness the
+// shared catalog declares passes --harness validation, so a future catalog
+// addition is accepted here without an edit to this test or to run.go.
+func TestHarnessFlag_EveryCatalogEntryAccepted(t *testing.T) {
+	for _, entry := range commonharness.CLIHarnesses() {
+		sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+		args := append(baseHarnessArgs(), "--harness", entry.ID)
+		code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+		if code != cli.ExitSuccess {
+			t.Errorf("--harness %s: exit code = %d, want ExitSuccess (%d); stderr: %q", entry.ID, code, cli.ExitSuccess, errOut)
+		}
+		if !sess.called {
+			t.Errorf("--harness %s: session.Start was not called", entry.ID)
+		}
+	}
+}
+
+// TestHarnessFlag_UnknownStillRejectsWithUsageError_AfterOpenCodeAdded
+// re-verifies AC3.8's negative half now that a second catalog entry exists:
+// an unrecognised value must still be refused.
+func TestHarnessFlag_UnknownStillRejectsWithUsageError_AfterOpenCodeAdded(t *testing.T) {
+	sess := &scriptedSession{}
+	args := append(baseHarnessArgs(), "--harness", "still-not-a-harness")
+	code, _, errOut := runCLI(t, args, sess)
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage (%d) for unknown --harness value", code, cli.ExitUsage)
+	}
+	if sess.called {
+		t.Error("session.Start should not be called for invalid --harness value")
+	}
+	_ = errOut
+}
+
+// TestHarnessFlag_UsageErrorMessageListsEveryAcceptedValue verifies that an
+// unknown --harness value's usage-error message names every accepted value,
+// including the new "opencode" catalog entry — not just the two that
+// predate it (AC4.5).
+func TestHarnessFlag_UsageErrorMessageListsEveryAcceptedValue(t *testing.T) {
+	sess := &scriptedSession{}
+	args := append(baseHarnessArgs(), "--harness", "still-not-a-harness")
+	_, _, errOut := runCLI(t, args, sess)
+
+	for _, want := range []string{"fake", "claude-code", "opencode"} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("usage-error message %q does not mention accepted value %q", errOut, want)
+		}
+	}
+}
+
+// TestHarnessFlag_HelpUsageListsEveryAcceptedValue verifies that the flag's
+// own usage string (shown by --help) names every accepted value, so a
+// catalog addition reaches the usage text without a restated literal.
+func TestHarnessFlag_HelpUsageListsEveryAcceptedValue(t *testing.T) {
+	sess := &scriptedSession{}
+	_, _, errOut := runCLI(t, []string{"run", "--help"}, sess)
+
+	for _, want := range []string{"fake", "claude-code", "opencode"} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("--help usage text %q does not mention accepted value %q", errOut, want)
+		}
 	}
 }
 

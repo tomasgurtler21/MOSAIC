@@ -43,8 +43,9 @@ import (
 
 	"github.com/mattn/go-isatty"
 
+	commonharness "mosaic-common/harness"
+
 	"mosaic-agent-test/internal/cli"
-	"mosaic-agent-test/internal/harness/claudecode"
 	"mosaic-agent-test/internal/tui"
 )
 
@@ -110,7 +111,12 @@ func resolveWiringConfig(args []string) WiringConfig {
 	selfDir := filepath.Dir(selfPath)
 
 	return WiringConfig{
-		HarnessID:       scanFlag(args, "--harness", claudecode.HarnessID),
+		// The default names the shared CLI-harness catalog's Claude Code
+		// identity, not an adapter package's own constant, so the resolved
+		// default cannot silently diverge from the catalog. The resolved
+		// value is unchanged: commonharness.HarnessIDClaudeCode and
+		// claudecode.HarnessID are the same string.
+		HarnessID:       scanFlag(args, "--harness", commonharness.HarnessIDClaudeCode),
 		FixtureRoot:     scanFlag(args, "--fixtures", "fixtures"),
 		WorkspaceRoot:   scanFlag(args, "--workspace-root", filepath.Join(os.TempDir(), "mosaic-agent-test-workspaces")),
 		SelfPath:        selfPath,

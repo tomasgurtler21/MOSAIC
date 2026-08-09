@@ -1,0 +1,16 @@
+schema_version: "1"
+id: fixture-logger
+version: 0.1.0
+description: Minimal fixture bundle for opencode adapter provisioning tests.
+
+variants:
+  opencode:
+    supported: true
+    files:
+      - source: hook_a.ts
+        target: hook_a.ts
+      - source: hook_b.ts
+        target: lib/renamed_hook_b.ts
+      - source: ../shared.ts
+        target: shared.ts
+    registration: []

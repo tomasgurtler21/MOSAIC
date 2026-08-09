@@ -125,7 +125,7 @@ func BuildArgs(req SpawnRequest) ([]string, error) {
 	var args []string
 	switch req.Agent.Kind {
 	case InvocationOrchestrator:
-		promptContent = buildEnvBlock() + "\n" + promptContent
+		promptContent = EnvBlock("") + "\n" + promptContent
 		args = []string{
 			"--agent", req.Agent.Identifier,
 			"-p", promptContent,
@@ -147,13 +147,27 @@ func BuildArgs(req SpawnRequest) ([]string, error) {
 	return args, nil
 }
 
-// buildEnvBlock synthesizes the <env> block prepended to orchestrator
-// prompts, compensating for --agent mode fully replacing the CLI's default
-// system prompt.
-func buildEnvBlock() string {
-	cwd, _ := os.Getwd()
+// EnvBlock synthesizes the <env> preamble a harness's default system prompt
+// would normally supply, for the case where selecting a named agent replaces
+// that default prompt entirely.
+//
+// workingDir names the directory the block should report. An empty
+// workingDir resolves the current process's working directory, which is the
+// behaviour the Claude Code orchestrator path has always had; a caller that
+// knows the subject will run somewhere else (a sandbox, for instance) passes
+// that directory explicitly rather than letting the block describe the wrong
+// place.
+//
+// This function is deliberately NOT called from any argument builder: it
+// reads the clock and may read the process working directory, and builders
+// in this package are pure.
+func EnvBlock(workingDir string) string {
+	dir := workingDir
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
 	date := time.Now().Format("2006-01-02")
-	return fmt.Sprintf("<env>\nWorking directory: %s\nPlatform: %s\nCurrent date: %s\n</env>", cwd, runtime.GOOS, date)
+	return fmt.Sprintf("<env>\nWorking directory: %s\nPlatform: %s\nCurrent date: %s\n</env>", dir, runtime.GOOS, date)
 }
 
 // Run executes an already-built plan: a resolved command plus arguments plus

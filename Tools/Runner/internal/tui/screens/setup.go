@@ -11,6 +11,7 @@ import (
 
 	"mosaic-common/tui/widgets"
 	"mosaic-run/internal/domain"
+	"mosaic-run/internal/harness"
 	"mosaic-run/internal/runselect"
 )
 
@@ -450,10 +451,11 @@ type ConfigSelection struct {
 	AllowVersionDrift bool
 	Checkpoints       bool
 
-	// Harness names the harness adapter. The TUI only ever produces
-	// "claude-code". The CLI --harness flag additionally accepts "fake", and an
-	// unrecognised or zero value maps to the fake adapter for test and
-	// backward-compatibility paths.
+	// Harness names the harness adapter. The TUI produces any CLI-backed
+	// harness identity from harness.CLISelections() (the selection the user's
+	// cursor rested on). The CLI --harness flag additionally accepts the
+	// tool-local "fake" test double, and an unrecognised or zero value maps
+	// to the fake adapter for test and backward-compatibility paths.
 	Harness string
 
 	Timeout time.Duration // invocation timeout
@@ -472,7 +474,7 @@ type configStep int
 const (
 	configStepDeviation      configStep = iota
 	configStepHarness                   // harness adapter selection
-	configStepHarnessTimeout            // timeout entry (only when claude-code is selected)
+	configStepHarnessTimeout            // timeout entry (shown for any CLI-backed harness)
 	configStepVersionDrift
 	configStepCheckpoints
 	configStepInfraClass // agent-per-class selection (only when multiple same-class gated agents)
@@ -492,7 +494,8 @@ type infraClassEntry struct {
 //   - After all prompts are answered -> Done() == true, Selection() returns the choices.
 //   - Esc on first prompt -> Back() == true.
 //   - Esc on subsequent prompts -> goes back to the previous prompt.
-//   - The harness timeout step is only shown when "Claude Code CLI" is selected.
+//   - The harness timeout step is shown for any CLI-backed harness selection,
+//     since every CLI harness spawns a timed subprocess.
 //   - The infra-class step is only shown for gated classes with multiple declared agents.
 type ConfigScreen struct {
 	step           configStep
@@ -592,6 +595,10 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 			if s.cursor < 1 {
 				s.cursor++
 			}
+		case configStepHarness:
+			if max := len(harness.CLISelections()) - 1; s.cursor < max {
+				s.cursor++
+			}
 		case configStepInfraClass:
 			if s.infraClassIdx < len(s.infraClassQueue) {
 				max := len(s.infraClassQueue[s.infraClassIdx].agents) - 1
@@ -626,7 +633,10 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		s.step = configStepHarness
 		s.cursor = 0
 	case configStepHarness:
-		s.sel.Harness = "claude-code"
+		sels := harness.CLISelections()
+		if s.cursor >= 0 && s.cursor < len(sels) {
+			s.sel.Harness = sels[s.cursor].ID
+		}
 		s.step = configStepHarnessTimeout
 		s.timeoutInput.Reset()
 		s.cursor = 0
@@ -714,7 +724,9 @@ func (s *ConfigScreen) View() string {
 		body.WriteString(s.renderOption(1, "Stop the run"))
 	case configStepHarness:
 		body.WriteString(s.styles.Body.Width(s.width).Render("Harness adapter:") + "\n")
-		body.WriteString(s.renderOption(0, "Claude Code CLI"))
+		for i, sel := range harness.CLISelections() {
+			body.WriteString(s.renderOption(i, sel.Label))
+		}
 	case configStepHarnessTimeout:
 		body.WriteString(s.timeoutInput.View())
 	case configStepVersionDrift:

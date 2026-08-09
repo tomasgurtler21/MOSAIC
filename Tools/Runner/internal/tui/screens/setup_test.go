@@ -17,9 +17,12 @@ package screens
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"mosaic-run/internal/harness"
 )
 
 // ---------------------------------------------------------------------------
@@ -392,5 +395,144 @@ func TestOrchestratorPath_NormalisationEquivalence_OneSidedTrailingQuote(t *test
 	got := s.FilePath()
 	if got != rawInput {
 		t.Errorf("FilePath() = %q, want %q; unmatched trailing quote must be left intact by FilePath()", got, rawInput)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ConfigScreen — harness step (T4.5)
+//
+// These tests exercise ConfigScreen's harness configuration step, which
+// currently renders exactly one hard-coded option ("Claude Code CLI") and
+// assigns the literal "claude-code" regardless of cursor position
+// (ConfigSelection.Harness's own doc comment states as much). They are RED
+// until the step is reworked (I4.6) to enumerate harness.CLISelections() and
+// assign the identity the cursor actually rests on.
+//
+// Tests are in package screens (not screens_test) so they can inspect
+// ConfigScreen's unexported step/cursor fields directly, the same access
+// pattern validateOrchestratorFile testing above relies on.
+// ---------------------------------------------------------------------------
+
+// pressKey sends a single key press to the screen's Update method.
+func pressKey(s *ConfigScreen, keyType tea.KeyType) tea.Cmd {
+	return s.Update(tea.KeyMsg{Type: keyType})
+}
+
+// newConfigScreenAtHarnessStep creates a ConfigScreen and advances it past
+// the deviation step (accepting the default, cursor 0) so the harness step
+// is current.
+func newConfigScreenAtHarnessStep() *ConfigScreen {
+	s := NewConfigScreen(80, 24, Styles{})
+	pressKey(s, tea.KeyEnter) // deviation step -> harness step
+	return s
+}
+
+// TestConfigScreen_HarnessStep_OffersOneOptionPerAcceptedHarness verifies
+// that the rendered view lists exactly one option per
+// harness.CLISelections() entry, using each entry's Label — not a single
+// hard-coded "Claude Code CLI" line.
+func TestConfigScreen_HarnessStep_OffersOneOptionPerAcceptedHarness(t *testing.T) {
+	s := newConfigScreenAtHarnessStep()
+	view := s.View()
+
+	sels := harness.CLISelections()
+	if len(sels) < 2 {
+		t.Fatalf("test fixture assumption violated: want at least 2 CLI-backed selections to distinguish from the old single-option render, got %d", len(sels))
+	}
+	for _, sel := range sels {
+		if !strings.Contains(view, sel.Label) {
+			t.Errorf("harness step view does not contain label %q for accepted harness %q; view:\n%s", sel.Label, sel.ID, view)
+		}
+	}
+}
+
+// TestConfigScreen_HarnessStep_SelectionAssignsCursorIdentity verifies that
+// pressing Enter on the harness step assigns the identity the cursor
+// actually rests on (harness.CLISelections()[cursor].ID), not a fixed
+// literal. It moves the cursor down once, so unless there are at least 2
+// CLI-backed selections, cursor movement would be clamped and this test
+// would not distinguish the fixed-literal bug from a correct implementation.
+func TestConfigScreen_HarnessStep_SelectionAssignsCursorIdentity(t *testing.T) {
+	sels := harness.CLISelections()
+	if len(sels) < 2 {
+		t.Fatalf("test fixture assumption violated: want at least 2 CLI-backed selections, got %d", len(sels))
+	}
+
+	s := newConfigScreenAtHarnessStep()
+	pressKey(s, tea.KeyDown) // move cursor to the second entry
+	pressKey(s, tea.KeyEnter)
+
+	want := sels[1].ID
+	if s.sel.Harness != want {
+		t.Errorf("sel.Harness = %q, want %q (the identity the cursor rested on, not a fixed literal)", s.sel.Harness, want)
+	}
+}
+
+// TestConfigScreen_HarnessStep_FirstOptionSelection verifies the cursor-0
+// case explicitly: selecting without moving the cursor assigns
+// CLISelections()[0].ID.
+func TestConfigScreen_HarnessStep_FirstOptionSelection(t *testing.T) {
+	sels := harness.CLISelections()
+	if len(sels) == 0 {
+		t.Fatalf("test fixture assumption violated: want at least 1 CLI-backed selection, got 0")
+	}
+
+	s := newConfigScreenAtHarnessStep()
+	pressKey(s, tea.KeyEnter)
+
+	want := sels[0].ID
+	if s.sel.Harness != want {
+		t.Errorf("sel.Harness = %q, want %q", s.sel.Harness, want)
+	}
+}
+
+// TestConfigScreen_HarnessStep_CursorBoundsMatchAcceptedSetLength verifies
+// that cursor movement is bounded by the number of accepted CLI-backed
+// harnesses rather than a hard-coded single option: pressing down
+// (len(sels)-1) times should reach the last entry, and one more press must
+// not move the cursor further.
+func TestConfigScreen_HarnessStep_CursorBoundsMatchAcceptedSetLength(t *testing.T) {
+	sels := harness.CLISelections()
+	if len(sels) < 2 {
+		t.Fatalf("test fixture assumption violated: want at least 2 CLI-backed selections, got %d", len(sels))
+	}
+
+	s := newConfigScreenAtHarnessStep()
+	for i := 0; i < len(sels)+2; i++ { // deliberately over-press
+		pressKey(s, tea.KeyDown)
+	}
+	pressKey(s, tea.KeyEnter)
+
+	want := sels[len(sels)-1].ID
+	if s.sel.Harness != want {
+		t.Errorf("sel.Harness = %q after over-pressing down, want %q (cursor must clamp at the last accepted entry)", s.sel.Harness, want)
+	}
+}
+
+// TestConfigScreen_HarnessStep_EscReturnsToDeviationStep verifies that
+// pressing Esc on the harness step navigates back to the deviation step,
+// preserving the existing back-navigation contract.
+func TestConfigScreen_HarnessStep_EscReturnsToDeviationStep(t *testing.T) {
+	s := newConfigScreenAtHarnessStep()
+	pressKey(s, tea.KeyEsc)
+
+	if s.step != configStepDeviation {
+		t.Errorf("step = %v after Esc on harness step, want configStepDeviation", s.step)
+	}
+	if s.Back() {
+		t.Error("Back() = true; Esc on the harness step (not the first step) must not set the screen's Back flag")
+	}
+}
+
+// TestConfigScreen_HarnessStep_EnterAdvancesToTimeoutStep verifies that
+// pressing Enter on the harness step still advances to the harness-timeout
+// step, preserving navigation behaviour once the step enumerates multiple
+// options.
+func TestConfigScreen_HarnessStep_EnterAdvancesToTimeoutStep(t *testing.T) {
+	s := newConfigScreenAtHarnessStep()
+	pressKey(s, tea.KeyEnter)
+
+	if s.step != configStepHarnessTimeout {
+		t.Errorf("step = %v after Enter on harness step, want configStepHarnessTimeout", s.step)
 	}
 }

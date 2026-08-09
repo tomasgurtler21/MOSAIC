@@ -24,6 +24,7 @@ import (
 	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/fixtures"
 	"mosaic-agent-test/internal/harness/claudecode"
+	"mosaic-agent-test/internal/harness/opencode"
 	"mosaic-agent-test/internal/launch"
 	"mosaic-agent-test/internal/preflight"
 	"mosaic-agent-test/internal/report"
@@ -120,6 +121,7 @@ func selectFrontend(args []string, isTerminal TerminalCheck) Frontend {
 // adapter.
 type adapterOptions struct {
 	ClaudeCode claudecode.Options
+	OpenCode   opencode.Options
 }
 
 // ErrUnknownHarness reports a harness identity that resolves to no adapter.
@@ -127,13 +129,15 @@ type adapterOptions struct {
 // default harness.
 var ErrUnknownHarness = errors.New("mosaic-agent-test: unknown harness")
 
-// newAdapter resolves a harness selection to its adapter. Only the Claude
-// Code adapter exists in this module today; a future adapter is added here
-// as it lands, not guessed at ahead of it.
+// newAdapter resolves a harness selection to its adapter. Case labels come
+// from the shared CLI-harness catalog's own identity constants, so this
+// switch and that catalog cannot drift apart silently.
 func newAdapter(id string, opts adapterOptions) (domain.HarnessAdapter, error) {
 	switch id {
-	case claudecode.HarnessID:
+	case commonharness.HarnessIDClaudeCode:
 		return claudecode.New(opts.ClaudeCode), nil
+	case commonharness.HarnessIDOpenCode:
+		return opencode.New(opts.OpenCode), nil
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownHarness, id)
 	}
@@ -147,8 +151,10 @@ func newAdapter(id string, opts adapterOptions) (domain.HarnessAdapter, error) {
 // default decoder.
 func decoderFor(id string) (launch.Decoder, error) {
 	switch id {
-	case claudecode.HarnessID:
+	case commonharness.HarnessIDClaudeCode:
 		return claudecode.DecodeEnvelope, nil
+	case commonharness.HarnessIDOpenCode:
+		return opencode.DecodeEnvelope, nil
 	default:
 		return nil, fmt.Errorf("%w: %q", ErrUnknownHarness, id)
 	}

@@ -14,6 +14,7 @@ import (
 
 	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/domain"
+	"mosaic-run/internal/harness"
 	"mosaic-run/internal/runscan"
 	"mosaic-run/internal/runselect"
 	"mosaic-run/internal/session"
@@ -89,7 +90,7 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 		checkpoints       string
 		runIDFlag         string // --run: resume a specific run by run_id
 		isNewRunFlag      bool   // --new-run: force creation of a new run
-		harnessFlag       string // --harness: adapter selection (fake|claude-code)
+		harnessFlag       string // --harness: adapter selection, from harness.Selections()
 		timeoutFlag       string // --timeout: invocation timeout duration string
 		claudePathFlag    string // --claude-path: Claude Code CLI executable path
 		infraClassFlag    string   // --infra-class: comma-separated class=agent mappings
@@ -161,12 +162,11 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				return nil
 			}
 
-			// Validate --harness.
-			switch harnessFlag {
-			case "fake", "claude-code":
-				// valid
-			default:
-				fmt.Fprintf(errOut, "error: invalid --harness value %q; valid values: fake, claude-code\n", harnessFlag)
+			// Validate --harness against Runner's one accepted set (the
+			// tool-local test double plus every catalog-declared CLI harness),
+			// so a catalog addition is accepted here without an edit.
+			if !harness.Accepts(harnessFlag) {
+				fmt.Fprintf(errOut, "error: invalid --harness value %q; valid values: %s\n", harnessFlag, harness.FlagValueList())
 				exitCode = ExitUsage
 				return nil
 			}
@@ -371,7 +371,7 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 	runCmd.Flags().StringVar(&checkpoints, "checkpoints", "disabled", "Checkpoint support (disabled|enabled)")
 	runCmd.Flags().StringVar(&runIDFlag, "run", "", "Resume a specific run by run_id")
 	runCmd.Flags().BoolVar(&isNewRunFlag, "new-run", false, "Force creation of a new run")
-	runCmd.Flags().StringVar(&harnessFlag, "harness", "fake", "Harness adapter to use (fake|claude-code)")
+	runCmd.Flags().StringVar(&harnessFlag, "harness", harness.FakeHarnessID, fmt.Sprintf("Harness adapter to use (%s)", harness.FlagValues()))
 	runCmd.Flags().StringVar(&timeoutFlag, "timeout", "30m", "Invocation timeout for the harness adapter (e.g. 30m, 1h)")
 	runCmd.Flags().StringVar(&claudePathFlag, "claude-path", "claude", "Path to the Claude Code CLI binary")
 	runCmd.Flags().StringVar(&infraClassFlag, "infra-class", "", "Comma-separated class=agent mappings for non-interactive agent-per-class selection (e.g. checkpoint=checkpoint-manager-git,commit=commit-manager-git)")

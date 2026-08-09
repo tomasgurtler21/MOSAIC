@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	commonharness "mosaic-common/harness"
+
 	"mosaic-run/internal/deviation"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
@@ -265,6 +267,56 @@ func TestBuildAdapter_ClaudeCode_CustomPathAndTimeout(t *testing.T) {
 	}
 }
 
+// TestBuildAdapter_OpenCode_ReturnsOpenCodeAdapter verifies that passing
+// "opencode" as harnessStr constructs a *harness.OpenCodeAdapter. This is the
+// primary AC4.3 assertion: the new catalog entry resolves to its own
+// adapter, mirroring TestBuildAdapter_ClaudeCode_ReturnsClaudeCodeAdapter.
+func TestBuildAdapter_OpenCode_ReturnsOpenCodeAdapter(t *testing.T) {
+	h := buildAdapter("opencode", "/custom/opencode", 45*time.Minute)
+	if _, ok := h.(*harness.OpenCodeAdapter); !ok {
+		t.Errorf("buildAdapter(opencode) returned %T, want *harness.OpenCodeAdapter", h)
+	}
+}
+
+// TestBuildAdapter_OpenCode_ZeroTimeoutDefaultsTo30Min verifies that a zero
+// timeout for "opencode" is treated as the 30-minute default, mirroring the
+// claude-code case.
+func TestBuildAdapter_OpenCode_ZeroTimeoutDefaultsTo30Min(t *testing.T) {
+	h := buildAdapter("opencode", "opencode", 0)
+	if _, ok := h.(*harness.OpenCodeAdapter); !ok {
+		t.Errorf("buildAdapter(opencode, timeout=0) returned %T, want *harness.OpenCodeAdapter", h)
+	}
+}
+
+// TestBuildAdapter_Unknown_StillReturnsFakeAdapter_AfterOpenCodeAdded
+// re-verifies AC4.3's negative half now that a second catalog case exists:
+// an unrecognised value must still fall back to FakeAdapter, and adding the
+// "opencode" case must not have widened the default arm's match.
+func TestBuildAdapter_Unknown_StillReturnsFakeAdapter_AfterOpenCodeAdded(t *testing.T) {
+	h := buildAdapter("still-unknown-harness", "", 0)
+	if _, ok := h.(*harness.FakeAdapter); !ok {
+		t.Errorf("buildAdapter(still-unknown-harness) returned %T, want *harness.FakeAdapter", h)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestBuildAdapter_CatalogCoverage (T4.6, AC4.7)
+//
+// A future catalog addition with no buildAdapter case must fail this test
+// rather than silently falling back to the fake adapter. It iterates every
+// entry commonharness.CLIHarnesses() declares and asserts buildAdapter
+// resolves it to something other than *harness.FakeAdapter.
+// ---------------------------------------------------------------------------
+
+func TestBuildAdapter_CatalogCoverage_EveryEntryResolvesToARealAdapter(t *testing.T) {
+	for _, entry := range commonharness.CLIHarnesses() {
+		h := buildAdapter(entry.ID, "some-path", 5*time.Minute)
+		if _, isFake := h.(*harness.FakeAdapter); isFake {
+			t.Errorf("buildAdapter(%q) returned *harness.FakeAdapter; every catalog entry must resolve to a real adapter, or this composition root has silently missed a case", entry.ID)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // buildTUIDelegate
 //
@@ -335,6 +387,56 @@ func TestBuildTUIDelegate_ClaudeCodeWithoutOrchFile_ReturnsNil(t *testing.T) {
 	delegate := buildTUIDelegate(h, "claude-code", "", "/run/folder")
 	if delegate != nil {
 		t.Errorf("buildTUIDelegate(claude-code, no orchFile) returned non-nil %T, want nil", delegate)
+	}
+}
+
+// TestBuildTUIDelegate_OpenCodeWithOrchFile_ReturnsOrchestratorDelegate
+// verifies that selecting "opencode" with a known orchestrator file also
+// produces a non-nil OrchestratorDelegate (AC4.4): the generalized condition
+// admits every CLI-backed harness, not just "claude-code".
+func TestBuildTUIDelegate_OpenCodeWithOrchFile_ReturnsOrchestratorDelegate(t *testing.T) {
+	h := harness.NewFakeAdapter()
+	delegate := buildTUIDelegate(h, "opencode", "/orch/dir/orch.md", "/run/folder")
+	if delegate == nil {
+		t.Fatal("buildTUIDelegate(opencode) returned nil, want *deviation.OrchestratorDelegate")
+	}
+	if delegate.Harness != h {
+		t.Error("delegate.Harness is not the expected harness instance")
+	}
+}
+
+// TestBuildTUIDelegate_OpenCodeWithoutOrchFile_ReturnsNil verifies that,
+// mirroring the claude-code case, an unknown orchestrator file still yields
+// nil for "opencode".
+func TestBuildTUIDelegate_OpenCodeWithoutOrchFile_ReturnsNil(t *testing.T) {
+	h := harness.NewFakeAdapter()
+	delegate := buildTUIDelegate(h, "opencode", "", "/run/folder")
+	if delegate != nil {
+		t.Errorf("buildTUIDelegate(opencode, no orchFile) returned non-nil %T, want nil", delegate)
+	}
+}
+
+// TestBuildTUIDelegate_Fake_StillReturnsNil_AfterOpenCodeAdmitted re-verifies
+// the negative half of AC4.4 now that a second CLI-backed harness is
+// admitted: the tool-local test double must still be excluded by the
+// generalized condition.
+func TestBuildTUIDelegate_Fake_StillReturnsNil_AfterOpenCodeAdmitted(t *testing.T) {
+	h := harness.NewFakeAdapter()
+	delegate := buildTUIDelegate(h, "fake", "/orch/dir/orch.md", "/run/folder")
+	if delegate != nil {
+		t.Errorf("buildTUIDelegate(fake) returned non-nil %T, want nil", delegate)
+	}
+}
+
+// TestBuildTUIDelegate_UnrecognisedHarness_ReturnsNil verifies that an
+// unrecognised harness value is excluded by the generalized
+// IsCLIHarness-based condition, mirroring the unknown-value fallback
+// elsewhere in composition.
+func TestBuildTUIDelegate_UnrecognisedHarness_ReturnsNil(t *testing.T) {
+	h := harness.NewFakeAdapter()
+	delegate := buildTUIDelegate(h, "not-a-real-harness", "/orch/dir/orch.md", "/run/folder")
+	if delegate != nil {
+		t.Errorf("buildTUIDelegate(not-a-real-harness) returned non-nil %T, want nil", delegate)
 	}
 }
 

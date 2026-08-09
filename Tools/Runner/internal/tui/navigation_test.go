@@ -18,6 +18,7 @@ import (
 	"mosaic-common/interaction"
 	tuicommon "mosaic-common/tui"
 	"mosaic-run/internal/domain"
+	"mosaic-run/internal/harness"
 	"mosaic-run/internal/runscan"
 	"mosaic-run/internal/runselect"
 	"mosaic-run/internal/session"
@@ -1254,21 +1255,29 @@ func TestConfigScreen_HarnessStep_ContainsRealHarnessOption(t *testing.T) {
 	}
 }
 
-// TestConfigScreen_HarnessStep_CursorPinnedAtZero verifies that pressing Down on
-// the harness step does not move the cursor, because there is only one option.
-func TestConfigScreen_HarnessStep_CursorPinnedAtZero(t *testing.T) {
+// TestConfigScreen_HarnessStep_CursorMovesBetweenAcceptedHarnesses verifies that
+// pressing Down on the harness step moves the cursor between the accepted
+// harnesses. The step now renders one option per accepted harness (AC4.6)
+// rather than a single pinned option, so with more than one accepted harness
+// the cursor — and the rendered view — must change.
+func TestConfigScreen_HarnessStep_CursorMovesBetweenAcceptedHarnesses(t *testing.T) {
+	sels := harness.CLISelections()
+	if len(sels) < 2 {
+		t.Fatalf("test fixture assumption violated: want at least 2 CLI-backed harnesses to observe cursor movement, got %d", len(sels))
+	}
+
 	style := stylesFromTheme(tuicommon.DefaultTheme())
 	s := screens.NewConfigScreen(80, 24, style)
 
 	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation → harness step
 
 	viewBefore := s.View()
-	s.Update(tea.KeyMsg{Type: tea.KeyDown}) // attempt to advance cursor
+	s.Update(tea.KeyMsg{Type: tea.KeyDown}) // move cursor to the next accepted harness
 	viewAfter := s.View()
 
-	if viewBefore != viewAfter {
-		t.Errorf("pressing Down on the harness step changed the view; cursor must be pinned at 0 "+
-			"(only one option exists):\nbefore:\n%s\nafter:\n%s", viewBefore, viewAfter)
+	if viewBefore == viewAfter {
+		t.Errorf("pressing Down on the harness step did not change the view; cursor must move between "+
+			"the %d accepted harnesses:\n%s", len(sels), viewBefore)
 	}
 }
 

@@ -97,6 +97,27 @@ func runHelperProcess() {
 		n, _ := os.Stdin.Read(buf)
 		os.Stdout.Write(buf[:n]) //nolint:errcheck
 
+	case "opencode-success":
+		// Produce a valid `opencode run --format json` event stream: one text
+		// event carrying the protocol response, terminated by a step_finish
+		// whose reason is "stop" (success). Exit 0.
+		protocolResp := `{"agent_instance_id":"test-agent#1","status_code":"SUCCESS","status_message":"ok"}`
+		os.Stdout.WriteString(`{"type":"step_start"}` + "\n")                                             //nolint:errcheck
+		os.Stdout.WriteString(`{"type":"text","part":{"type":"text","text":` + jsonQuote(protocolResp) + `}}` + "\n") //nolint:errcheck
+		os.Stdout.WriteString(`{"type":"step_finish","part":{"reason":"stop"}}` + "\n")                    //nolint:errcheck
+
+	case "opencode-stream-error":
+		// Simulate the zero-exit trap: the process exits 0 but the event
+		// stream itself reports failure via an "error" event. Nothing here
+		// resembles a non-zero exit — the whole point is that the exit code
+		// carries no information for this harness.
+		os.Stdout.WriteString(`{"type":"error","error":{"name":"SomeError","data":{"message":"simulated failure"}}}` + "\n") //nolint:errcheck
+
+	case "opencode-incomplete":
+		// Emit a recognised event but never a terminal one (no step_finish,
+		// no error). Exit 0. The stream's outcome cannot be established.
+		os.Stdout.WriteString(`{"type":"step_start"}` + "\n") //nolint:errcheck
+
 	case "hang":
 		// Block indefinitely so the test can exercise timeout and context
 		// cancellation. time.Sleep avoids the goroutine-deadlock panic that

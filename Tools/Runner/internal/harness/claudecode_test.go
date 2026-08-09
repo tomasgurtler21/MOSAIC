@@ -212,6 +212,24 @@ func runHelperProcess() {
 		data, _ := json.Marshal(envelope)
 		os.Stdout.Write(data) //nolint:errcheck
 
+	case "opencode-success":
+		// Produce a valid `opencode run --format json` event stream: one text
+		// event carrying the protocol response, terminated by a step_finish
+		// whose reason is "stop" (success). Exit 0.
+		protocolResp := `{"agent_instance_id":"test-agent#1","status_code":"SUCCESS","status_message":"ok"}`
+		os.Stdout.WriteString(`{"type":"step_start"}` + "\n")                                                         //nolint:errcheck
+		os.Stdout.WriteString(`{"type":"text","part":{"type":"text","text":` + opencodeJSONQuote(protocolResp) + `}}` + "\n") //nolint:errcheck
+		os.Stdout.WriteString(`{"type":"step_finish","part":{"reason":"stop"}}` + "\n")                               //nolint:errcheck
+
+	case "opencode-stream-error":
+		// Simulate the zero-exit trap: the process exits 0 but the event
+		// stream itself reports failure via an "error" event.
+		os.Stdout.WriteString(`{"type":"error","error":{"name":"SomeError","data":{"message":"simulated failure"}}}` + "\n") //nolint:errcheck
+
+	case "opencode-incomplete":
+		// Emit a recognised event but never a terminal one. Exit 0.
+		os.Stdout.WriteString(`{"type":"step_start"}` + "\n") //nolint:errcheck
+
 	case "hang":
 		// Block indefinitely so the test can exercise timeout and context
 		// cancellation. time.Sleep avoids the goroutine-deadlock panic that
@@ -229,6 +247,14 @@ func runHelperProcess() {
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
+
+// opencodeJSONQuote renders s as a JSON string literal (quotes and escaping
+// included), so an OpenCode helper case can embed arbitrary text inside a
+// hand-written event-stream line without hand-escaping it.
+func opencodeJSONQuote(s string) string {
+	data, _ := json.Marshal(s)
+	return string(data)
+}
 
 // helperExe returns the path to this test binary, which acts as the fake
 // "claude" executable when GO_WANT_HELPER_PROCESS=1 is set.
