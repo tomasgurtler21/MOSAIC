@@ -183,6 +183,9 @@ func (s *service) askHooks(ctx context.Context) []string {
 // modelResolution is the outcome of resolveModels: the per-agent model map ready for
 // plan.Input.Models, the tier-to-model mappings used this run, and accumulated state
 // that can be threaded into a subsequent resolveModels invocation.
+//
+// The value is meaningful only when resolveModels' accompanying error is nil. On error the
+// returned modelResolution is always the zero value.
 type modelResolution struct {
 	models         map[string]domain.ModelSelection
 	tierModelsUsed map[domain.Tier]string
@@ -215,6 +218,14 @@ type modelResolution struct {
 // tierSkipOverride and agentSkipOverride, when true, pre-set the skip-all latches for
 // QTierModel and QAgentModel respectively. This lets a caller suppress interactive model
 // questions without setting SkipAll in the request.
+//
+// Error contract: resolveModels returns a non-nil error, and the zero value of
+// modelResolution, under exactly three conditions — UserConfig.Load fails (propagated
+// unwrapped); a QTierModel or QAgentModel question answers domain.Cancelled (wrapped as
+// ErrModelSelectionCancelled, matchable with errors.Is); or Interaction.SelectOne returns a
+// transport error (wrapped with question context). On any of these the function returns
+// immediately and asks no further question. The returned modelResolution is meaningful only
+// when the error is nil; callers must not read it otherwise.
 func (s *service) resolveModels(
 	ctx context.Context,
 	tierModels map[domain.Tier]string,
@@ -226,8 +237,11 @@ func (s *service) resolveModels(
 	extraOptions []domain.Option,
 	tierSkipOverride bool,
 	agentSkipOverride bool,
-) modelResolution {
-	cfg, _ := s.deps.UserConfig.Load()
+) (modelResolution, error) {
+	cfg, err := s.deps.UserConfig.Load()
+	if err != nil {
+		return modelResolution{}, err
+	}
 	tierModelsUsed := make(map[domain.Tier]string)
 	for k, v := range cfg.TierModels[harnessID] {
 		tierModelsUsed[k] = v
@@ -295,7 +309,7 @@ func (s *service) resolveModels(
 		}
 		ans, err := s.deps.Interaction.SelectOne(ctx, q)
 		if err != nil {
-			continue
+			return modelResolution{}, fmt.Errorf("select model for tier %s: %w", ti.Tier, err)
 		}
 		switch ans.Status {
 		case domain.SkippedAll:
@@ -309,6 +323,8 @@ func (s *service) resolveModels(
 			if modelID != "" {
 				tierModelsUsed[ti.Tier] = modelID
 			}
+		case domain.Cancelled:
+			return modelResolution{}, fmt.Errorf("select model for tier %s: %w", ti.Tier, ErrModelSelectionCancelled)
 		}
 	}
 
@@ -343,22 +359,25 @@ func (s *service) resolveModels(
 				Options: options,
 			}
 			ans, err := s.deps.Interaction.SelectOne(ctx, q)
-			if err == nil {
-				switch ans.Status {
-				case domain.SkippedAll:
-					agentSkippedAll = true
-				case domain.Answered:
-					modelID := ans.OptionID
-					origin := domain.OriginHarnessList
-					if ans.Custom != "" {
-						modelID = ans.Custom
-						origin = domain.OriginCustom
-						appendCustomID(modelID)
-					}
-					if modelID != "" {
-						models[agent.Key] = domain.ModelSelection{ModelID: modelID, Origin: origin}
-					}
+			if err != nil {
+				return modelResolution{}, fmt.Errorf("select model for agent %s: %w", agent.Key, err)
+			}
+			switch ans.Status {
+			case domain.SkippedAll:
+				agentSkippedAll = true
+			case domain.Answered:
+				modelID := ans.OptionID
+				origin := domain.OriginHarnessList
+				if ans.Custom != "" {
+					modelID = ans.Custom
+					origin = domain.OriginCustom
+					appendCustomID(modelID)
 				}
+				if modelID != "" {
+					models[agent.Key] = domain.ModelSelection{ModelID: modelID, Origin: origin}
+				}
+			case domain.Cancelled:
+				return modelResolution{}, fmt.Errorf("select model for agent %s: %w", agent.Key, ErrModelSelectionCancelled)
 			}
 		}
 		// GapNoModel gaps for unresolved agents are emitted solely by plan.Build, which
@@ -373,7 +392,7 @@ func (s *service) resolveModels(
 		accumulatedOptions: accumulatedOptions,
 		tierSkippedAll:     tierSkippedAll,
 		agentSkippedAll:    agentSkippedAll,
-	}
+	}, nil
 }
 
 // buildModelOptions converts a harness's declared model list into ChoiceQuestion options.
@@ -435,6 +454,19 @@ func (s *service) persistTierModels(harnessID string, tierModelsUsed map[domain.
 	}
 	cfg.TierModels[harnessID] = merged
 	return s.deps.UserConfig.Save(cfg)
+}
+
+// notifyPersistFailure surfaces a failed convenience-persist (tier models or custom model
+// IDs) to the user via a warning Notice, without aborting the run: the deployment itself has
+// already succeeded by the time either persist runs, and losing a remembered tier mapping is
+// not a reason to report a successful deployment as a failure.
+func (s *service) notifyPersistFailure(ctx context.Context, err error) {
+	s.deps.Interaction.Notify(ctx, domain.Notice{
+		Level: domain.NoticeWarning,
+		Title: "Settings were not saved",
+		Message: fmt.Sprintf("%s could not be updated: %v. Your deployment succeeded; "+
+			"your model selections were not remembered for next time.", s.deps.UserConfig.Path(), err),
+	})
 }
 
 // ---------------------------------------------------------------------------

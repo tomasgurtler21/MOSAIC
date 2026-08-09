@@ -11,6 +11,7 @@ then use the references below for deeper topics.
 | Document | What it covers |
 |----------|----------------|
 | [README](../README.md) | Installation, the two flows (deploy and update), config file reference, runtime layout, troubleshooting |
+| [Configuration Reference](configuration.md) | Every key in `tool-config.yaml` and `user-config.yaml`; the `tool_destinations` tool-mapping layer; precedence, validation rules, worked examples |
 | [CLI Reference](cli.md) | Every subcommand, flag, exit code, and the selections file format; machine-readable JSON output |
 
 ---
@@ -35,10 +36,11 @@ then use the references below for deeper topics.
 
 ## Document map
 
-The five documents form an outward-pointing reference tree:
+The six documents form an outward-pointing reference tree:
 
 ```
 README.md                  ← start here (users)
+├── docs/configuration.md  ← every config key, tool mappings
 ├── docs/cli.md            ← CLI flags and exit codes
 ├── docs/harness-contributor-guide.md
 │   ├── docs/descriptor-schema.md   ← descriptor YAML reference
@@ -58,8 +60,12 @@ The following table shows where each major concept is documented.
 | Runtime directory layout | [README — Runtime layout](../README.md#runtime-layout) |
 | Deploy flow | [README — Deploy](../README.md#deploy--create-a-new-workspace) |
 | Update flow and conflict resolution | [README — Update](../README.md#update--bring-a-workspace-up-to-date) |
-| tool-config.yaml fields | [README — Config file reference](../README.md#config-file-reference) |
-| user-config.yaml fields | [README — Config file reference](../README.md#config-file-reference) |
+| tool-config.yaml fields | [Configuration Reference — tool-config.yaml](configuration.md#tool-configyaml) |
+| user-config.yaml fields | [Configuration Reference — user-config.yaml](configuration.md#user-configyaml) |
+| Mapping a generic tool to a harness tool | [Configuration Reference — tool_destinations](configuration.md#tool_destinations) |
+| Silencing the repeated "custom tool" prompt | [Configuration Reference — Why you want it](configuration.md#why-you-want-it) |
+| Tool-mapping precedence (user / project / descriptor) | [Configuration Reference — Precedence](configuration.md#precedence) |
+| Overriding a built-in harness at runtime | [Configuration Reference — What is NOT configurable here](configuration.md#what-is-not-configurable-here) |
 | CLI subcommands and flags | [CLI Reference](cli.md) |
 | Selections file format | [CLI Reference — Selections file](cli.md#selections-file-format) |
 | Exit codes | [CLI Reference — Exit codes](cli.md#exit-codes) |

@@ -1,28 +1,51 @@
 # mosaic-deploy user configuration
 #
-# This file stores per-user state for the MOSAIC deployment tool.
-# It records tier-to-model mappings from previous runs so you are not asked
-# to choose models repeatedly for agents in the same tier.
+# This file stores per-user state and per-user overrides for the MOSAIC
+# deployment tool. Most of it is written automatically by the tool so you are
+# not asked the same questions on every run; all of it can also be hand-edited.
 #
 # IMPORTANT: Do NOT commit this file to the repository. It contains personal
-# preferences and harness-specific model selections that differ between users
-# and machines. Add MosaicDeploy/config/user-config.yaml to your .gitignore
+# preferences and harness-specific selections that differ between users and
+# machines. Add MosaicDeploy/config/user-config.yaml to your .gitignore
 # (the MOSAIC root .gitignore already excludes the MosaicDeploy/ tree).
 #
 # Location after install: MosaicDeploy/config/user-config.yaml (at MOSAIC root)
 # Source template:        Tools/Deployment/config/user-config.yaml
+#
+# Every key this file supports is listed below. A key you omit is simply empty;
+# an unknown key is ignored. Full reference with worked examples:
+# Tools/Deployment/docs/configuration.md
+#
+# Keys in this file:
+#   schema_version     (string)
+#   tier_models        (map: harness-id -> tier-name -> model-id)
+#   custom_model_ids   (map: harness-id -> list of model-id strings)
+#   tool_destinations  (map: harness-id -> list of tool mappings)
+#
+# NOTE: when the tool records a new selection, it edits this file in place —
+# only the four keys above are updated, and your own comments and formatting
+# elsewhere in the file are preserved.
 
 schema_version: "1"
 
-# tier_models records the user's tier-to-model selections per harness.
+# ---------------------------------------------------------------------------
+# tier_models
+# ---------------------------------------------------------------------------
+# Records your tier-to-model selections per harness, so agents in an
+# already-answered tier do not re-prompt.
 # Structure: harness-id -> tier-name -> model-id
 #
-# This is written automatically by the tool when you confirm a model selection
-# during deployment. You can also edit it directly.
+# Written automatically when you confirm a model selection during deployment.
+# You can also edit it directly.
+#
+# Only TIER-level mappings persist. Per-agent model overrides are deliberately
+# NOT stored: a tier mapping expresses a standing preference for a class of
+# agents, whereas a per-agent choice is a one-time override that should not
+# silently apply to future runs.
 #
 # Tier keys are stored verbatim and are never validated against the tiers
-# currently in source. A tier that has since been renamed does not cause an
-# error on load.
+# currently present in source. A tier that has since been renamed or removed
+# does not cause an error on load; it is simply never matched.
 #
 # Example (after a deployment run):
 #   tier_models:
@@ -33,3 +56,85 @@ schema_version: "1"
 #       HIGH: gpt-4o
 #       LOW: gpt-4o-mini
 tier_models: {}
+
+# ---------------------------------------------------------------------------
+# custom_model_ids
+# ---------------------------------------------------------------------------
+# Remembers model IDs you typed by hand in previous runs, per harness. They are
+# offered as selectable OPTIONS in future tier-model and agent-model questions —
+# they are not pre-answers and never select themselves.
+#
+# The list is append-only across runs and deduplicated by exact string match.
+# Delete an entry here to stop it being offered.
+#
+# Example:
+#   custom_model_ids:
+#     claude-code:
+#       - claude-sonnet-4-5-20250929
+#     opencode:
+#       - openrouter/qwen/qwen3-coder
+custom_model_ids: {}
+
+# ---------------------------------------------------------------------------
+# tool_destinations
+# ---------------------------------------------------------------------------
+# Your personal generic-tool -> harness-tool mappings. Identical syntax and
+# semantics to the `tool_destinations` key in tool-config.yaml; entries here
+# take precedence over the project-level ones.
+#
+# WHY YOU WANT THIS: during deployment, any generic tool an agent declares that
+# the target harness has no mapping for triggers a "custom tool" prompt asking
+# you to type a harness-side name. Those answers are NOT remembered between
+# runs, so you get asked again on every deploy and every update. Declaring the
+# mapping here answers the question permanently. It also answers the mirror-
+# image prompt during `promote` (harness tool -> which generic tool?), because
+# both directions read this same table.
+#
+# Put a mapping HERE when it reflects your own machine or your own MCP server
+# setup. Put it in tool-config.yaml when the whole team should get it.
+#
+# PRECEDENCE, per generic tool, highest first:
+#   user-config.yaml  >  tool-config.yaml  >  harness descriptor
+# Precedence applies to a generic tool as a WHOLE UNIT: a declaration here
+# replaces the entire destination set below it. Destinations are never merged
+# across layers.
+#
+# ---- Mapping fields ----
+#   generic       (required) generic tool name; unique within one harness list.
+#   destinations  (required) ordered list of output targets. An EMPTY list
+#                 (`destinations: []`) means "unsupported on this harness":
+#                 emits nothing and silences the prompt.
+#
+# ---- Destination fields ----
+#   to         (required) `main` (the harness's own tools key) or `field`
+#              (a separate frontmatter key of your choice).
+#   field      (required when to: field / forbidden when to: main)
+#   format     (only when to: field) list-block (default) | list-flow | scalar
+#   separator  (only when format: scalar) defaults to ", "
+#   names      (required, non-empty) harness-side tool or MCP server names.
+#
+# Built-in harness ids: claude-code, opencode, ghcp-cli, vscode-ghcp
+# Generic tools all built-ins already map: file_read, file_write, file_edit,
+# file_search, content_search, terminal, subagent, user_interaction, skill
+#
+# ---- Example ----
+#   tool_destinations:
+#     claude-code:
+#       - generic: user_interaction
+#         destinations:
+#           - to: main
+#             names: ["mcp__user-feedback__ask_user_questions"]
+#       - generic: knowledge_base
+#         destinations:
+#           - to: main
+#             names: ["Read"]
+#           - to: field
+#             field: mcpServers
+#             format: list-block
+#             names: ["mosaic-kb"]
+#
+# A malformed entry is a fatal startup error naming the exact path, e.g.
+#   tool_destinations.claude-code[0].destinations[1].field
+#
+# Uncomment and edit to use. The key may be omitted entirely.
+#tool_destinations: {}

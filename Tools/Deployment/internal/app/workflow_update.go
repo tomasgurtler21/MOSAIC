@@ -180,7 +180,8 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 	var skippedTools map[string]bool
 	if len(newAgents) > 0 {
 		orderedNewAgents := s.orderedAgentsForModelResolution(workflowIDs, newAgents)
-		newAgentModelRes = s.resolveModels(
+		var err error
+		newAgentModelRes, err = s.resolveModels(
 			ctx, nil, nil, req.SkipAll,
 			harnessID, module, orderedNewAgents,
 			nil, false, false,
@@ -188,6 +189,9 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 			// Update passes true for tierSkipOverride to suppress tier questions; this
 			// flow deliberately does not, because the requirement is full deploy-new parity.
 		)
+		if err != nil {
+			return domain.RunSummary{}, err
+		}
 		customTools, skippedTools = s.resolveCustomTools(ctx, nil, req.SkipAll, module, newAgents)
 	}
 
@@ -205,7 +209,10 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 	}
 
 	toolCfg, _ := s.deps.ToolConfig.Load()
-	userCfg, _ := s.deps.UserConfig.Load()
+	userCfg, err := s.deps.UserConfig.Load()
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
 	toolMappingsVersion := config.HashToolDestinations(toolCfg.ToolDestinations, userCfg.ToolDestinations)
 
 	planInput := plan.Input{
@@ -353,12 +360,16 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 	// Persist tier models and custom model IDs collected during this run (from model
 	// questions asked for newly-required agents), matching deploy-new's persistence step.
 	if len(newAgents) > 0 {
-		_ = s.persistTierModels(harnessID, newAgentModelRes.tierModelsUsed)
+		if err := s.persistTierModels(harnessID, newAgentModelRes.tierModelsUsed); err != nil {
+			s.notifyPersistFailure(ctx, err)
+		}
 		customIDs := make([]string, 0, len(newAgentModelRes.accumulatedOptions))
 		for _, opt := range newAgentModelRes.accumulatedOptions {
 			customIDs = append(customIDs, opt.ID)
 		}
-		_ = s.persistCustomModelIDs(harnessID, customIDs)
+		if err := s.persistCustomModelIDs(harnessID, customIDs); err != nil {
+			s.notifyPersistFailure(ctx, err)
+		}
 	}
 
 	return s.buildSummary(domain.ModeWorkflowsOnly, harnessRef, workspace, result), nil

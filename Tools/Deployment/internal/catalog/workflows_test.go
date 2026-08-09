@@ -19,53 +19,167 @@ package catalog_test
 // T7.7:
 //   - WorkflowSection extracts the [[SECTION:Workflow:{id}]] block including its
 //     boundary tags, byte-identically from the source file.
+//
+// Classification record (every loadRealCatalog-based assertion in this file):
+//   - Content-coupled, rewritten to a structural invariant: the known-workflow-ID
+//     allowlist (was TestWorkflows_KnownIDs_AllPresent) and both known-category
+//     allowlists (was TestWorkflowCategories_AllSixKnownCategoriesPresent and
+//     TestWorkflowCategories_AllKnownCategoriesPresent, near-duplicates of each other) are
+//     replaced by TestWorkflowCategories_EveryOnDiskCategoryYieldsAtLeastOneWorkflow, which
+//     walks the real Workflows/ directory tree and asserts every category folder with an
+//     eligible file produces a matching WorkflowCategories() entry, without naming any
+//     workflow or category. Individual-workflow-loss detection within an existing category
+//     is deliberately traded away by this move — recorded here, not discovered later.
+//   - Content-coupled, removed (guaranteed structurally by the loader): the Build-has-5
+//     count (was TestWorkflowCategories_Build_FiveWorkflows). WorkflowCategories() can
+//     never contain an empty category — categories are only appended when at least one
+//     workflow was found for them — so an exact-count assertion added detection power only
+//     over content, not over behaviour.
+//   - Content-coupled, generalised to a structural invariant: the quick-fix-in-Build
+//     spot-check (was TestWorkflowCategories_QuickFix_InBuildCategory) is replaced by
+//     TestWorkflowCategories_EveryWorkflowAppearsInItsCategory, which asserts the same
+//     membership property for every workflow instead of one named one.
+//   - Content-coupled, moved onto a synthetic fixture: the quick-fix field and
+//     referenced-agent spot-checks (was TestWorkflow_QuickFix_Fields and
+//     TestWorkflow_QuickFix_ReferencedAgents) now build their own workflow file and index
+//     row via writeWorkflowIndex/writeWorkflowFile instead of reading quick-fix from the
+//     real repository. All original assertions are preserved.
+//   - Behaviour-under-test, moved onto a synthetic fixture: the byte-identical section
+//     extraction tests (were TestWorkflowSection_QuickFix_*) exist to prove
+//     WorkflowSection's extraction logic, not to confirm quick-fix's presence or content.
+//     They now build their own workflow file with a section block via
+//     makeWorkflowWithSectionFixture. All original assertions are preserved, plus one new
+//     assertion that outer maintainer prose is excluded from the extracted section.
+//   - The underscore-prefix exclusion test (TestWorkflows_UnderscorePrefixed_Excluded) is a
+//     loader rule, not content coupling, and needed no change.
+//   - Everything else (non-empty-field checks, lookup-by-key, index/disk-orphan detection,
+//     and the two orphan/missing-section fixture-backed tests) asserts a property that
+//     holds over whatever the catalog returns, or already used a synthetic/testdata
+//     fixture, and needed no change.
 
 import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"mosaic-deploy/internal/catalog"
 )
+
+// ---------------------------------------------------------------------------
+// Synthetic workflow fixture helpers
+// ---------------------------------------------------------------------------
+
+// writeWorkflowIndex writes a minimal Workflows/Index.md table listing the given rows.
+// Each row is {id, category, version, name, description, hint, file}.
+func writeWorkflowIndex(t *testing.T, root string, rows [][7]string) {
+	t.Helper()
+	var sb strings.Builder
+	sb.WriteString("# Workflows Index\n\n")
+	sb.WriteString("| ID | Category | Version | Name | Description | Hint | File |\n")
+	sb.WriteString("|----|----------|---------|------|--------------|------|------|\n")
+	for _, r := range rows {
+		sb.WriteString("| " + r[0] + " | " + r[1] + " | " + r[2] + " | " + r[3] + " | " + r[4] + " | " + r[5] + " | `" + r[6] + "` |\n")
+	}
+	mustWriteFile(t, root, filepath.Join("Workflows", "Index.md"), []byte(sb.String()))
+}
+
+// writeWorkflowFile writes a minimal workflow markdown file with frontmatter at
+// <root>/Workflows/<category>/<fileName>.
+func writeWorkflowFile(t *testing.T, root, category, fileName, id string, referencedAgents []string) {
+	t.Helper()
+	mustMkdir(t, root, "Workflows", category)
+	fm := "---\nid: " + id + "\nversion: \"1.0.0\"\nname: Sample Workflow\ndescription: Sample workflow for tests.\nhint: A quick hint.\n"
+	if len(referencedAgents) > 0 {
+		fm += "referenced_agents:\n"
+		for _, a := range referencedAgents {
+			fm += "  - " + a + "\n"
+		}
+	}
+	fm += "---\nContent.\n"
+	mustWriteFile(t, root, filepath.Join("Workflows", category, fileName), []byte(fm))
+}
+
+// makeWorkflowWithSectionFixture builds a synthetic MOSAIC root containing one workflow,
+// "sample-workflow", whose source file carries maintainer prose before and after its
+// [[SECTION:Workflow:sample-workflow]] block, and loads the catalog from it. It returns
+// the loaded catalog and the raw source bytes, for byte-identity comparison.
+func makeWorkflowWithSectionFixture(t *testing.T) (catalog.Catalog, []byte) {
+	t.Helper()
+	root := makeTempMosaicRoot(t)
+	writeWorkflowIndex(t, root, [][7]string{
+		{"sample-workflow", "SampleCategory", "1.0.0", "Sample Workflow", "Sample workflow.", "Hint.", "SampleCategory/sample-workflow.md"},
+	})
+	content := []byte("---\nid: sample-workflow\nversion: \"1.0.0\"\nname: Sample Workflow\ndescription: Sample.\nhint: Hint.\n---\n\n" +
+		"OUTER_MAINTAINER_TEXT: prose that must never appear in the extracted section.\n\n" +
+		"[[SECTION:Workflow:sample-workflow]]\nThis is the workflow body.\n[[/SECTION:Workflow:sample-workflow]]\n\n" +
+		"Trailing prose.\n")
+	mustMkdir(t, root, "Workflows", "SampleCategory")
+	mustWriteFile(t, root, filepath.Join("Workflows", "SampleCategory", "sample-workflow.md"), content)
+
+	cat, err := catalog.Load(root)
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+	return cat, content
+}
 
 // ---------------------------------------------------------------------------
 // T7.6 — Enumeration
 // ---------------------------------------------------------------------------
 
-// TestWorkflows_KnownIDs_AllPresent verifies that a named set of workflow IDs are all
-// returned by Workflows(). This protects that the catalog discovers the known workflow
-// documents and does not silently lose categories or individual workflows. Underscore-prefixed
-// utility files must remain excluded — they are covered separately by
-// TestWorkflows_UnderscorePrefixed_Excluded.
-// Adding a new workflow does not break this test; only removing a named ID will.
-func TestWorkflows_KnownIDs_AllPresent(t *testing.T) {
-	// Workflows spanning all six categories, including the MosaicTest conformance fixtures.
-	knownWorkflowIDs := []string{
-		// Build
-		"quick-fix",
-		"greenfield-tdd",
-		"brownfield-tdd",
-		// Audit
-		"brownfield-pr-audit",
-		// Research
-		"brownfield-research-only",
-		// Design
-		"brownfield-design",
-		// DataPreprocessing
-		"kb-generation",
-		// MosaicTest
-		"smoke-single",
-		"staged-preplaced-plan",
-		"payload-stress",
-	}
+// TestWorkflowCategories_EveryOnDiskCategoryYieldsAtLeastOneWorkflow verifies that every
+// subdirectory of the real repository's Workflows/ folder that contains at least one
+// eligible (non-underscore-prefixed) .md file produces a matching category in
+// WorkflowCategories(), and that WorkflowCategories() names no category absent from disk.
+// This is a structural invariant: it detects a whole category silently disappearing from
+// the catalog without naming any specific workflow or category, so it survives content
+// moves like relocating a whole category out of the scanned tree.
+func TestWorkflowCategories_EveryOnDiskCategoryYieldsAtLeastOneWorkflow(t *testing.T) {
 	cat := loadRealCatalog(t)
-	workflows := cat.Workflows()
-	ids := make(map[string]bool, len(workflows))
-	for _, w := range workflows {
-		ids[w.ID] = true
+	wfRoot := filepath.Join(cat.Root(), "Workflows")
+
+	entries, err := os.ReadDir(wfRoot)
+	if err != nil {
+		t.Fatalf("os.ReadDir(%q): %v", wfRoot, err)
 	}
-	for _, id := range knownWorkflowIDs {
-		if !ids[id] {
-			t.Errorf("Workflows() is missing known workflow %q; catalog may have lost a category or workflow file", id)
+	onDiskCategories := make(map[string]bool)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		catDir := filepath.Join(wfRoot, e.Name())
+		fileEntries, err := os.ReadDir(catDir)
+		if err != nil {
+			continue
+		}
+		for _, fe := range fileEntries {
+			name := fe.Name()
+			if fe.IsDir() || strings.HasPrefix(name, "_") || !strings.HasSuffix(name, ".md") {
+				continue
+			}
+			onDiskCategories[e.Name()] = true
+			break
+		}
+	}
+	if len(onDiskCategories) == 0 {
+		t.Fatal("no eligible workflow files found on disk under Workflows/; cannot verify the invariant")
+	}
+
+	categoriesInCatalog := make(map[string]bool)
+	for _, c := range cat.WorkflowCategories() {
+		categoriesInCatalog[c.Name] = true
+	}
+
+	for category := range onDiskCategories {
+		if !categoriesInCatalog[category] {
+			t.Errorf("workflow category directory %q has eligible files on disk but WorkflowCategories() has no matching entry", category)
+		}
+	}
+	for category := range categoriesInCatalog {
+		if !onDiskCategories[category] {
+			t.Errorf("WorkflowCategories() contains category %q with no matching on-disk directory under %q", category, wfRoot)
 		}
 	}
 }
@@ -161,61 +275,79 @@ func TestWorkflows_AllHaveAbsoluteSourcePath(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T7.6 — Known workflow: quick-fix
+// T7.6 — Workflow field and referenced-agent parsing (synthetic fixture)
 // ---------------------------------------------------------------------------
 
-// TestWorkflow_QuickFix_Fields verifies specific field values for the well-known
-// quick-fix workflow, which is a stable representative workflow file.
-func TestWorkflow_QuickFix_Fields(t *testing.T) {
-	cat := loadRealCatalog(t)
+// TestWorkflow_Fields_PopulatedFromFrontmatterAndIndex verifies that a workflow's fields
+// are populated from its own frontmatter and index row on a synthetic fixture, rather
+// than reading a specific workflow out of the real repository.
+func TestWorkflow_Fields_PopulatedFromFrontmatterAndIndex(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeWorkflowIndex(t, root, [][7]string{
+		{"sample-workflow", "SampleCategory", "1.0.0", "Sample Workflow", "Sample workflow.", "Hint.", "SampleCategory/sample-workflow.md"},
+	})
+	writeWorkflowFile(t, root, "SampleCategory", "sample-workflow.md", "sample-workflow", nil)
 
-	w, ok := cat.Workflow("quick-fix")
-	if !ok {
-		t.Fatal("Workflow(\"quick-fix\"): returned not-found; expected this workflow to be present")
+	cat, err := catalog.Load(root)
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
 	}
 
-	if w.ID != "quick-fix" {
-		t.Errorf("quick-fix ID = %q, want %q", w.ID, "quick-fix")
+	w, ok := cat.Workflow("sample-workflow")
+	if !ok {
+		t.Fatal("Workflow(\"sample-workflow\"): returned not-found; expected this workflow to be present")
+	}
+
+	if w.ID != "sample-workflow" {
+		t.Errorf("ID = %q, want %q", w.ID, "sample-workflow")
 	}
 	if w.Name == "" {
-		t.Error("quick-fix Name is empty")
+		t.Error("Name is empty")
 	}
-	if w.Category != "Build" {
-		t.Errorf("quick-fix Category = %q, want %q", w.Category, "Build")
+	if w.Category != "SampleCategory" {
+		t.Errorf("Category = %q, want %q", w.Category, "SampleCategory")
 	}
 	if w.Description == "" {
-		t.Error("quick-fix Description is empty")
+		t.Error("Description is empty")
 	}
 	if w.Hint == "" {
-		t.Error("quick-fix Hint is empty")
+		t.Error("Hint is empty")
 	}
 	if w.Version == "" {
-		t.Error("quick-fix Version is empty")
+		t.Error("Version is empty")
 	}
 }
 
-// TestWorkflow_QuickFix_ReferencedAgents verifies that the quick-fix workflow's
-// ReferencedAgents list contains the expected agent slugs.
-func TestWorkflow_QuickFix_ReferencedAgents(t *testing.T) {
-	cat := loadRealCatalog(t)
-	w, ok := cat.Workflow("quick-fix")
+// TestWorkflow_ReferencedAgents_PopulatedFromFrontmatter verifies that a workflow's
+// ReferencedAgents list is populated from its referenced_agents frontmatter, on a
+// synthetic fixture rather than a specific real workflow.
+func TestWorkflow_ReferencedAgents_PopulatedFromFrontmatter(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeWorkflowIndex(t, root, [][7]string{
+		{"sample-workflow", "SampleCategory", "1.0.0", "Sample Workflow", "Sample workflow.", "Hint.", "SampleCategory/sample-workflow.md"},
+	})
+	wantAgents := []string{"agent-one", "agent-two", "agent-three"}
+	writeWorkflowFile(t, root, "SampleCategory", "sample-workflow.md", "sample-workflow", wantAgents)
+
+	cat, err := catalog.Load(root)
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+	w, ok := cat.Workflow("sample-workflow")
 	if !ok {
-		t.Fatal("Workflow(\"quick-fix\"): not found")
+		t.Fatal("Workflow(\"sample-workflow\"): not found")
 	}
 
 	if len(w.ReferencedAgents) == 0 {
-		t.Fatal("quick-fix ReferencedAgents is empty; expected at least one agent slug")
+		t.Fatal("ReferencedAgents is empty; expected at least one agent slug")
 	}
-
-	// Verify the known referenced agents are present.
-	wantAgents := []string{"planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner"}
 	referenced := make(map[string]bool, len(w.ReferencedAgents))
 	for _, slug := range w.ReferencedAgents {
 		referenced[slug] = true
 	}
 	for _, want := range wantAgents {
 		if !referenced[want] {
-			t.Errorf("quick-fix ReferencedAgents missing expected agent %q (got: %v)", want, w.ReferencedAgents)
+			t.Errorf("ReferencedAgents missing expected agent %q (got: %v)", want, w.ReferencedAgents)
 		}
 	}
 }
@@ -223,66 +355,6 @@ func TestWorkflow_QuickFix_ReferencedAgents(t *testing.T) {
 // ---------------------------------------------------------------------------
 // T7.6 — WorkflowCategories
 // ---------------------------------------------------------------------------
-
-// TestWorkflowCategories_AllSixKnownCategoriesPresent verifies that all six known workflow
-// category names appear in the result of WorkflowCategories(). This protects that the
-// catalog surfaces every category a workflow declares. Adding a new category does not break
-// this test; only removing a named category will.
-func TestWorkflowCategories_AllSixKnownCategoriesPresent(t *testing.T) {
-	knownCategories := []string{
-		"Build", "Audit", "Research", "Design", "DataPreprocessing", "MosaicTest",
-	}
-	cat := loadRealCatalog(t)
-	cats := cat.WorkflowCategories()
-
-	catNames := make(map[string]bool, len(cats))
-	for _, c := range cats {
-		catNames[c.Name] = true
-	}
-	for _, name := range knownCategories {
-		if !catNames[name] {
-			t.Errorf("WorkflowCategories() is missing known category %q", name)
-		}
-	}
-}
-
-// TestWorkflowCategories_AllKnownCategoriesPresent verifies that all six known
-// category names appear in the result.
-func TestWorkflowCategories_AllKnownCategoriesPresent(t *testing.T) {
-	knownCategories := []string{"Build", "Audit", "Research", "Design", "DataPreprocessing", "MosaicTest"}
-	cat := loadRealCatalog(t)
-	cats := cat.WorkflowCategories()
-
-	catNames := make(map[string]bool, len(cats))
-	for _, c := range cats {
-		catNames[c.Name] = true
-	}
-	for _, name := range knownCategories {
-		if !catNames[name] {
-			t.Errorf("WorkflowCategories() missing expected category %q", name)
-		}
-	}
-}
-
-// TestWorkflowCategories_Build_FiveWorkflows verifies that the Build category contains
-// exactly 5 workflows.
-func TestWorkflowCategories_Build_FiveWorkflows(t *testing.T) {
-	const wantCount = 5
-	cat := loadRealCatalog(t)
-	for _, c := range cat.WorkflowCategories() {
-		if c.Name == "Build" {
-			if len(c.Workflows) != wantCount {
-				var ids []string
-				for _, w := range c.Workflows {
-					ids = append(ids, w.ID)
-				}
-				t.Errorf("Build category has %d workflows, want %d (got: %v)", len(c.Workflows), wantCount, ids)
-			}
-			return
-		}
-	}
-	t.Error("Build category not found in WorkflowCategories()")
-}
 
 // TestWorkflowCategories_TotalMatchesWorkflowsCount verifies that the total number of
 // workflows across all categories equals the count returned by Workflows().
@@ -298,22 +370,26 @@ func TestWorkflowCategories_TotalMatchesWorkflowsCount(t *testing.T) {
 	}
 }
 
-// TestWorkflowCategories_QuickFix_InBuildCategory verifies that quick-fix appears in
-// the Build category's Workflows list.
-func TestWorkflowCategories_QuickFix_InBuildCategory(t *testing.T) {
+// TestWorkflowCategories_EveryWorkflowAppearsInItsCategory verifies that every workflow
+// returned by Workflows() appears in the Workflows list of its own Category within
+// WorkflowCategories(). This asserts the category-membership property for every workflow
+// rather than spot-checking one named workflow against one named category.
+func TestWorkflowCategories_EveryWorkflowAppearsInItsCategory(t *testing.T) {
 	cat := loadRealCatalog(t)
+	idsByCategory := make(map[string]map[string]bool)
 	for _, c := range cat.WorkflowCategories() {
-		if c.Name == "Build" {
-			for _, w := range c.Workflows {
-				if w.ID == "quick-fix" {
-					return // found
-				}
-			}
-			t.Error("quick-fix not found in Build category Workflows")
-			return
+		ids := make(map[string]bool, len(c.Workflows))
+		for _, w := range c.Workflows {
+			ids[w.ID] = true
+		}
+		idsByCategory[c.Name] = ids
+	}
+	for _, w := range cat.Workflows() {
+		if !idsByCategory[w.Category][w.ID] {
+			t.Errorf("workflow %q (Category %q) does not appear in WorkflowCategories()[%q].Workflows",
+				w.ID, w.Category, w.Category)
 		}
 	}
-	t.Error("Build category not found in WorkflowCategories()")
 }
 
 // ---------------------------------------------------------------------------
@@ -419,104 +495,108 @@ func TestIssues_RealRepo_NoIndexOrFileOrphans(t *testing.T) {
 // T7.7 — Byte-identical workflow section extraction
 // ---------------------------------------------------------------------------
 
-// TestWorkflowSection_QuickFix_ByteIdentical verifies that WorkflowSection("quick-fix")
-// returns the [[SECTION:Workflow:quick-fix]] block byte-identically to what is stored in
-// the quick-fix.md source file. No normalisation of any kind is allowed.
-func TestWorkflowSection_QuickFix_ByteIdentical(t *testing.T) {
-	cat := loadRealCatalog(t)
+// TestWorkflowSection_ByteIdentical verifies that WorkflowSection returns the
+// [[SECTION:Workflow:{id}]] block byte-identically to what is stored in the source file.
+// No normalisation of any kind is allowed.
+func TestWorkflowSection_ByteIdentical(t *testing.T) {
+	cat, raw := makeWorkflowWithSectionFixture(t)
 
-	section, err := cat.WorkflowSection("quick-fix")
+	section, err := cat.WorkflowSection("sample-workflow")
 	if err != nil {
-		t.Fatalf("WorkflowSection(\"quick-fix\"): %v", err)
+		t.Fatalf("WorkflowSection(\"sample-workflow\"): %v", err)
 	}
 	if len(section) == 0 {
-		t.Fatal("WorkflowSection(\"quick-fix\"): returned empty bytes")
-	}
-
-	// Read the raw source file and extract the same block for comparison.
-	w, ok := cat.Workflow("quick-fix")
-	if !ok {
-		t.Fatal("Workflow(\"quick-fix\"): not found")
-	}
-	raw, err := os.ReadFile(w.SourcePath)
-	if err != nil {
-		t.Fatalf("read quick-fix source: %v", err)
+		t.Fatal("WorkflowSection(\"sample-workflow\"): returned empty bytes")
 	}
 
 	// The returned bytes must be a contiguous sub-slice of the raw source file,
 	// starting with the opening boundary tag and ending with the closing boundary tag.
 	if !bytes.Contains(raw, section) {
-		t.Error("WorkflowSection(\"quick-fix\") returned bytes that are not a byte-identical " +
+		t.Error("WorkflowSection(\"sample-workflow\") returned bytes that are not a byte-identical " +
 			"contiguous substring of the raw source file")
 	}
 }
 
-// TestWorkflowSection_QuickFix_IncludesOpeningBoundary verifies that the extracted section
-// includes the [[SECTION:Workflow:quick-fix]] opening boundary tag.
-func TestWorkflowSection_QuickFix_IncludesOpeningBoundary(t *testing.T) {
-	cat := loadRealCatalog(t)
-	section, err := cat.WorkflowSection("quick-fix")
+// TestWorkflowSection_ExcludesOuterProse verifies that the extracted section does not
+// contain maintainer prose that sits outside the section's boundary tags in the source
+// file.
+func TestWorkflowSection_ExcludesOuterProse(t *testing.T) {
+	cat, _ := makeWorkflowWithSectionFixture(t)
+	section, err := cat.WorkflowSection("sample-workflow")
 	if err != nil {
-		t.Fatalf("WorkflowSection(\"quick-fix\"): %v", err)
+		t.Fatalf("WorkflowSection(\"sample-workflow\"): %v", err)
+	}
+	if bytes.Contains(section, []byte("OUTER_MAINTAINER_TEXT")) {
+		t.Error("WorkflowSection returned bytes containing outer maintainer prose; expected only the bounded section")
+	}
+}
+
+// TestWorkflowSection_IncludesOpeningBoundary verifies that the extracted section
+// includes the [[SECTION:Workflow:{id}]] opening boundary tag.
+func TestWorkflowSection_IncludesOpeningBoundary(t *testing.T) {
+	cat, _ := makeWorkflowWithSectionFixture(t)
+	section, err := cat.WorkflowSection("sample-workflow")
+	if err != nil {
+		t.Fatalf("WorkflowSection(\"sample-workflow\"): %v", err)
 	}
 
-	openTag := []byte("[[SECTION:Workflow:quick-fix]]")
+	openTag := []byte("[[SECTION:Workflow:sample-workflow]]")
 	if !bytes.Contains(section, openTag) {
-		t.Errorf("WorkflowSection(\"quick-fix\") does not contain the opening boundary tag %q", openTag)
+		t.Errorf("WorkflowSection does not contain the opening boundary tag %q", openTag)
 	}
 }
 
-// TestWorkflowSection_QuickFix_IncludesClosingBoundary verifies that the extracted section
-// includes the [[/SECTION:Workflow:quick-fix]] closing boundary tag.
-func TestWorkflowSection_QuickFix_IncludesClosingBoundary(t *testing.T) {
-	cat := loadRealCatalog(t)
-	section, err := cat.WorkflowSection("quick-fix")
+// TestWorkflowSection_IncludesClosingBoundary verifies that the extracted section
+// includes the [[/SECTION:Workflow:{id}]] closing boundary tag.
+func TestWorkflowSection_IncludesClosingBoundary(t *testing.T) {
+	cat, _ := makeWorkflowWithSectionFixture(t)
+	section, err := cat.WorkflowSection("sample-workflow")
 	if err != nil {
-		t.Fatalf("WorkflowSection(\"quick-fix\"): %v", err)
+		t.Fatalf("WorkflowSection(\"sample-workflow\"): %v", err)
 	}
 
-	closeTag := []byte("[[/SECTION:Workflow:quick-fix]]")
+	closeTag := []byte("[[/SECTION:Workflow:sample-workflow]]")
 	if !bytes.Contains(section, closeTag) {
-		t.Errorf("WorkflowSection(\"quick-fix\") does not contain the closing boundary tag %q", closeTag)
+		t.Errorf("WorkflowSection does not contain the closing boundary tag %q", closeTag)
 	}
 }
 
-// TestWorkflowSection_QuickFix_StartsWithOpeningBoundary verifies that the first line
-// of the extracted section IS the opening boundary tag. No content must appear before it.
-func TestWorkflowSection_QuickFix_StartsWithOpeningBoundary(t *testing.T) {
-	cat := loadRealCatalog(t)
-	section, err := cat.WorkflowSection("quick-fix")
+// TestWorkflowSection_StartsWithOpeningBoundary verifies that the first bytes of the
+// extracted section ARE the opening boundary tag. No content must appear before it.
+func TestWorkflowSection_StartsWithOpeningBoundary(t *testing.T) {
+	cat, _ := makeWorkflowWithSectionFixture(t)
+	section, err := cat.WorkflowSection("sample-workflow")
 	if err != nil {
-		t.Fatalf("WorkflowSection(\"quick-fix\"): %v", err)
+		t.Fatalf("WorkflowSection(\"sample-workflow\"): %v", err)
 	}
 
-	openTag := "[[SECTION:Workflow:quick-fix]]"
+	openTag := "[[SECTION:Workflow:sample-workflow]]"
 	if !bytes.HasPrefix(section, []byte(openTag)) {
 		first := string(section)
 		if len(first) > 60 {
 			first = first[:60] + "..."
 		}
-		t.Errorf("WorkflowSection(\"quick-fix\") does not start with the opening boundary tag;\n  got prefix: %q", first)
+		t.Errorf("WorkflowSection does not start with the opening boundary tag;\n  got prefix: %q", first)
 	}
 }
 
-// TestWorkflowSection_QuickFix_EndsWithClosingBoundary verifies that the extracted section
-// ends with the closing boundary tag (optionally followed by a single newline).
-func TestWorkflowSection_QuickFix_EndsWithClosingBoundary(t *testing.T) {
-	cat := loadRealCatalog(t)
-	section, err := cat.WorkflowSection("quick-fix")
+// TestWorkflowSection_EndsWithClosingBoundary verifies that the extracted section ends
+// with the closing boundary tag (optionally followed by a single newline).
+func TestWorkflowSection_EndsWithClosingBoundary(t *testing.T) {
+	cat, _ := makeWorkflowWithSectionFixture(t)
+	section, err := cat.WorkflowSection("sample-workflow")
 	if err != nil {
-		t.Fatalf("WorkflowSection(\"quick-fix\"): %v", err)
+		t.Fatalf("WorkflowSection(\"sample-workflow\"): %v", err)
 	}
 
-	closeTag := "[[/SECTION:Workflow:quick-fix]]"
+	closeTag := "[[/SECTION:Workflow:sample-workflow]]"
 	trimmed := bytes.TrimRight(section, "\n")
 	if !bytes.HasSuffix(trimmed, []byte(closeTag)) {
 		last := string(section)
 		if len(last) > 80 {
 			last = "..." + last[len(last)-80:]
 		}
-		t.Errorf("WorkflowSection(\"quick-fix\") does not end with the closing boundary tag;\n  got suffix: %q", last)
+		t.Errorf("WorkflowSection does not end with the closing boundary tag;\n  got suffix: %q", last)
 	}
 }
 

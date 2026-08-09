@@ -448,7 +448,7 @@ commits: enabled
 commit_branch: mosaic/run/20260129T090000Z-a3f9
 current_state:
   phase: EXECUTION
-  stage: GREEN
+  stage: 2
   last_status: SUCCESS
   last_agent: "Implementation#14"
   error_code: null
@@ -467,11 +467,28 @@ current_state:
 | `checkpoints` | Set once | `enabled` or `disabled`, fixed for the life of the run |
 | `commits` | Set once | `enabled` or `disabled`, fixed for the life of the run. Default `disabled`. Gates whether commit-class infrastructure agents fire |
 | `commit_branch` | Set once | The branch the commit-class agent commits to, copied from what the run-start setup dispatch returned. Present when `commits: enabled`; absent or `null` otherwise. Recording it is what makes a mid-run branch change detectable — an agent that read the current branch each time it fired would follow the user wherever they went |
-| `current_state.phase` | Every write | `INIT`\|`RESEARCH`\|`ARCHITECTURE`\|`PLANNING`\|`DESIGN`\|`EXECUTION`\|`REVIEW`\|`COMPLETION`, or `COMPLETED` once the run finishes successfully (terminal — a `COMPLETED` run is not resumable) |
-| `current_state.stage` | Every write | Stage name when `phase` is `EXECUTION` and the workflow has stages; `null` otherwise |
+| `current_state.phase` | Every write | `INIT`\|`RESEARCH`\|`ARCHITECTURE`\|`PLANNING`\|`DESIGN`\|`EXECUTION`\|`REVIEW`\|`COMPLETION`, or `COMPLETED` once the run finishes successfully (terminal — a `COMPLETED` run is not resumable). Always the bare name — see Phase and Stage Values below |
+| `current_state.stage` | Every write | Stage value when `phase` is `EXECUTION` and the workflow has stages; `null` otherwise. See Phase and Stage Values below |
 | `current_state.last_status` | Every write | Status code from the most recently completed subagent; `null` before any has run |
 | `current_state.last_agent` | Every write | `{AgentName}#{Seq}` of that subagent; `null` before any has run |
 | `current_state.error_code` | Every write | Set only when `last_status` is `BLOCKED`; `null` otherwise |
+
+**Phase and stage values.** Phase and stage appear in four places — `current_state.phase`, `current_state.stage`, the Execution Log's `Phase` and `Stage` columns, and the Artifacts registry's `Created In`. Write them identically in all four.
+
+`Phase` is **always the bare phase name**: `EXECUTION`, never `EXECUTION.[StageNumber]` and never `EXECUTION.Test.[StageNumber]`. Those qualified forms are routing-table notation identifying a workflow row — they say which row you dispatched, not where the run is. A qualified value here breaks per-stage HITL and EXECUTION-phase recovery silently, because both compare against the literal string `EXECUTION` and neither reports a mismatch.
+
+`Stage` is where the execution group goes — it is the only field in this artifact that records one:
+
+| Situation | `Stage` / `stage` | `Created In` |
+|---|---|---|
+| Phase is not `EXECUTION` | `-` in the log, `null` in frontmatter | phase alone, e.g. `PLANNING` |
+| `EXECUTION`, workflow declares no groups, stage 4 | `4` | `EXECUTION.4` |
+| `EXECUTION`, row `EXECUTION.Test.[StageNumber]`, stage 1 | `Test.1` | `EXECUTION.Test.1` |
+| `EXECUTION`, row `EXECUTION.Implementation.[StageNumber]`, stage 3 | `Implementation.3` | `EXECUTION.Implementation.3` |
+
+Take `{Group}` verbatim from the group segment of the dispatched row's `Phase` cell — it is case-sensitive. Take `{StageNumber}` as the 1-based index of the stage in the Plan artifact's stage table. Join with a single `.`. A workflow whose EXECUTION rows are all bare (`EXECUTION.[StageNumber]`) produces a plain number, with no group and no filler in its place.
+
+The stage value is **not** a folder name. Per-stage artifacts live under `Stage-{StageNumber}/` keyed on the number alone — the `Test` and `Implementation` groups of stage 1 both write into `Stage-1/`. Never put a group into a path, and never write `Stage-1` into the `Stage` column. An older orchestrator did write that form; when resuming such a run, read it as ungrouped stage 1 and write the current form from then on.
 
 **2. EXECUTION LOG** (Append-only — NEVER modify a written row)
 ```markdown
@@ -489,8 +506,8 @@ One row per **completed** invocation, appended after it completes — never befo
 |---|---|
 | `Seq` | `global_sequence` at write time; also the suffix in `Agent` |
 | `Agent` | `{AgentName}#{Seq}` |
-| `Phase` | Phase during the invocation |
-| `Stage` | Stage if `Phase` is `EXECUTION` and the workflow has stages; `-` otherwise |
+| `Phase` | Phase during the invocation, bare name only (see Phase and stage values above) |
+| `Stage` | Stage value if `Phase` is `EXECUTION` and the workflow has stages; `-` otherwise. Carries the group when the row declares one |
 | `Status` | The subagent's returned status code |
 | `Timestamp` | ISO-8601 completion time |
 | `Summary` | The subagent's own `status_message`, **copied across** — never text you compose yourself |
@@ -512,7 +529,7 @@ A non-empty `Checkpoint` always means real, restorable content exists. Never wri
 |----------|------------|------------|
 | Requirements.md | INIT | user |
 | Research.md | RESEARCH | Research#1 |
-| Stage-1/PlanProgress.md | EXECUTION.Stage-1 | Implementation#10 |
+| Stage-1/PlanProgress.md | EXECUTION.Implementation.1 | Implementation#10 |
 [[/SECTION:Artifacts]]
 ```
 

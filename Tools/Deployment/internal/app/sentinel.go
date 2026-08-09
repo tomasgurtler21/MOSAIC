@@ -17,6 +17,13 @@ var ErrPlanNotConfirmed = errors.New("deployment plan was not confirmed")
 // rather than a deployment summary.
 var ErrRunReverted = errors.New("deployment run failed and the workspace was restored")
 
+// ErrModelSelectionCancelled is returned when the user cancels a tier-model or agent-model
+// question — Esc in the TUI, which arrives as domain.Cancelled. It aborts the whole run:
+// no config is persisted and no plan is executed. It is a distinguishable sentinel so a
+// frontend can tell a deliberate user abort from a genuine failure and render accordingly,
+// exactly as it already does for ErrPlanNotConfirmed.
+var ErrModelSelectionCancelled = errors.New("model selection was cancelled")
+
 // RevertedRunError is returned by a flow whose execution ran in atomic mode, failed, and was
 // reversed. It carries the original cause so the user sees why the run failed, and the paths
 // the reversal could not restore so the user can recover them from backups if any exist.

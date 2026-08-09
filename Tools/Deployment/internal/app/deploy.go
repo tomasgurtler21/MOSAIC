@@ -106,7 +106,10 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	}
 
 	orderedAgents := s.orderedAgentsForModelResolution(workflowIDs, probeSet.Agents)
-	modelRes := s.resolveModels(ctx, req.TierModels, req.AgentModels, req.SkipAll, harnessID, module, orderedAgents, nil, false, false)
+	modelRes, err := s.resolveModels(ctx, req.TierModels, req.AgentModels, req.SkipAll, harnessID, module, orderedAgents, nil, false, false)
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
 
 	// Resolve infrastructure agent structs from the catalog for model resolution and content generation.
 	infraAgents := make([]domain.Agent, 0, len(infraAgentIDs))
@@ -122,7 +125,8 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	// and skip-all state from the first call so they are not re-asked for the infra batch.
 	var infraModelRes modelResolution
 	if len(infraAgents) > 0 {
-		infraModelRes = s.resolveModels(
+		var err error
+		infraModelRes, err = s.resolveModels(
 			ctx,
 			modelRes.tierModelsUsed, // already-resolved tiers are not re-asked
 			req.AgentModels,
@@ -134,6 +138,9 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 			modelRes.tierSkippedAll,     // carry tier skip-all state from the regular batch
 			modelRes.agentSkippedAll,    // carry agent skip-all state from the regular batch
 		)
+		if err != nil {
+			return domain.RunSummary{}, err
+		}
 		// Merge infra-agent model selections into the combined models map.
 		for k, v := range infraModelRes.models {
 			modelRes.models[k] = v
@@ -174,7 +181,10 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	// Compute the tool-mappings version hash from the loaded config stores so the planner
 	// can detect staleness when the user modifies their tool-destination configuration.
 	toolCfg, _ := s.deps.ToolConfig.Load()
-	userCfg, _ := s.deps.UserConfig.Load()
+	userCfg, err := s.deps.UserConfig.Load()
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
 	toolMappingsVersion := config.HashToolDestinations(toolCfg.ToolDestinations, userCfg.ToolDestinations)
 
 	planInput := plan.Input{
@@ -268,7 +278,9 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		return domain.RunSummary{}, err
 	}
 
-	_ = s.persistTierModels(harnessID, modelRes.tierModelsUsed)
+	if err := s.persistTierModels(harnessID, modelRes.tierModelsUsed); err != nil {
+		s.notifyPersistFailure(ctx, err)
+	}
 
 	// Merge accumulated custom model options from both resolveModels calls before persisting.
 	allAccumulatedOptions := append(modelRes.accumulatedOptions, infraModelRes.accumulatedOptions...)
@@ -276,7 +288,9 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	for _, opt := range allAccumulatedOptions {
 		customIDs = append(customIDs, opt.ID)
 	}
-	_ = s.persistCustomModelIDs(harnessID, customIDs)
+	if err := s.persistCustomModelIDs(harnessID, customIDs); err != nil {
+		s.notifyPersistFailure(ctx, err)
+	}
 
 	return s.buildSummary(domain.ModeDeployNew, harnessRef, workspace, result), nil
 }

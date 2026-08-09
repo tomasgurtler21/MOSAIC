@@ -167,6 +167,10 @@ func applyFrontmatter(
 	if c := applyVersionStamp(fm, "injections_version", desc.InjectionsVersion); c != nil {
 		changes = append(changes, *c)
 	}
+	// tool_mappings_version is a content hash of the effective tool_destinations
+	// mappings for this harness (combined project + user config). It lets `update`
+	// detect stale tool mappings without re-diffing tool lists. See "The
+	// tool_mappings_version stamp" in Tools/Deployment/docs/configuration.md.
 	if c := applyVersionStamp(fm, "tool_mappings_version", req.ToolMappingsVersion); c != nil {
 		changes = append(changes, *c)
 	}

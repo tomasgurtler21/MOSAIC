@@ -13,10 +13,53 @@ package catalog_test
 //   - No validation against a fixed list: any tier string present in source is returned.
 //   - Each TierInfo carries the rationale text from the first agent that declared this tier.
 //   - Each TierInfo carries the sorted list of agent keys that declared this tier.
+//
+// Classification record: TestTiers_MixedCaseTier_PresentVerbatim and
+// TestTiers_MixedCaseTier_NotCaseFolded (previously TestTiers_KnownTiers_PresentVerbatim
+// and TestTiers_HighTier_NotLowercased, which named the five real tier strings) exist to
+// prove the loader does not lowercase, trim, or otherwise normalise tier strings — that is
+// behaviour-under-test (Plan.md's classification table), not format vocabulary:
+// Agents/Generic/SourceFilesFormat.md documents recommended_tier as "an open string...
+// never validated against a fixed enum", and introduces
+// "LOW"/"MEDIUM"/"HIGH"/"LOW-MEDIUM"/"MEDIUM-HIGH" only as "examples in the current
+// source", not a closed set. Both tests were moved onto a synthetic fixture built via
+// writeAgentWithTier, using a deliberately mixed-case tier value ("MiXeD-Case") so the
+// no-normalisation property is proven without depending on which tier strings the live
+// repository happens to use today. TestTiers_AllAgentTiersDeclared_InTiersList and
+// TestTiers_Count_MatchesDistinctTierValuesInSource below independently cover the same
+// terrain against the real repository without naming tier strings, for defence in depth.
+// TestTiers_HighTier_HasRationale and TestTiers_MediumTier_HasRationale similarly name
+// "HIGH" and "MEDIUM" against loadRealCatalog only to pick a representative entry to check
+// for non-empty Rationale; TestTiers_AllHaveRationale above already asserts the same
+// property over every tier, so these two are disclosed as redundant, low-risk content
+// coupling rather than rewritten (see review follow-up).
 
 import (
+	"path/filepath"
 	"testing"
+
+	"mosaic-deploy/internal/catalog"
 )
+
+// writeAgentWithTier writes a minimal subagent file declaring the given recommended_tier
+// and tier_rationale at <root>/Agents/Generic/Agents/<category>/<name>.md. Used to prove
+// tier-string handling (verbatim, no normalisation) without depending on which tier
+// strings the live repository happens to use.
+func writeAgentWithTier(t *testing.T, root, category, name, tier, rationale string) {
+	t.Helper()
+	mustMkdir(t, root, "Agents", "Generic", "Agents", category)
+	fm := "---\n"
+	fm += "id: \"1\"\n"
+	fm += "version: \"1.0.0\"\n"
+	fm += "name: " + name + "\n"
+	fm += "description: Synthetic agent for tier-parsing tests.\n"
+	fm += "role: subagent\n"
+	fm += "recommended_tier: " + tier + "\n"
+	fm += "tier_rationale: " + rationale + "\n"
+	fm += "---\nContent.\n"
+	relPath := filepath.Join("Agents", "Generic", "Agents", category, name+".md")
+	mustWriteFile(t, root, relPath, []byte(fm))
+}
 
 // ---------------------------------------------------------------------------
 // Basic invariants
@@ -82,46 +125,63 @@ func TestTiers_NoDuplicateTierStrings(t *testing.T) {
 // No normalisation
 // ---------------------------------------------------------------------------
 
-// TestTiers_KnownTiers_PresentVerbatim verifies that the well-known tier strings from
-// the repository are present exactly as written in agent frontmatter — not lowercased,
-// trimmed, or otherwise normalised.
-func TestTiers_KnownTiers_PresentVerbatim(t *testing.T) {
-	// These tier strings are exactly as written in the repository agent files.
-	// If the implementation normalises (e.g. lowercases) them, this test will fail.
-	knownTiers := []string{"LOW", "MEDIUM", "HIGH", "LOW-MEDIUM", "MEDIUM-HIGH"}
+// TestTiers_MixedCaseTier_PresentVerbatim verifies that a tier string is returned exactly
+// as written in agent frontmatter — not lowercased, trimmed, or otherwise normalised —
+// using a synthetic mixed-case value that no real tier vocabulary would produce, so the
+// property holds independent of which tier strings the live repository happens to use.
+func TestTiers_MixedCaseTier_PresentVerbatim(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeAgentWithTier(t, root, "Infrastructure", "sample-tier-agent", "MiXeD-Case", "Synthetic rationale.")
 
-	cat := loadRealCatalog(t)
-	tierMap := make(map[string]bool)
-	for _, ti := range cat.Tiers() {
-		tierMap[string(ti.Tier)] = true
+	cat, err := catalog.Load(root)
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
 	}
 
-	for _, want := range knownTiers {
-		if !tierMap[want] {
-			t.Errorf("Tiers() does not contain expected tier %q (check that tier strings are returned verbatim without normalisation)", want)
+	found := false
+	for _, ti := range cat.Tiers() {
+		if string(ti.Tier) == "MiXeD-Case" {
+			found = true
 		}
+	}
+	if !found {
+		t.Error("Tiers() does not contain \"MiXeD-Case\" verbatim (check that tier strings are returned without normalisation)")
 	}
 }
 
-// TestTiers_HighTier_NotLowercased verifies specifically that "HIGH" appears and "high"
-// does NOT appear, confirming no case-folding occurs.
-func TestTiers_HighTier_NotLowercased(t *testing.T) {
-	cat := loadRealCatalog(t)
-	foundUppercase := false
+// TestTiers_MixedCaseTier_NotCaseFolded verifies specifically that a mixed-case tier
+// string appears in its original casing and does NOT also appear fully lowercased or
+// fully uppercased, confirming no case-folding occurs.
+func TestTiers_MixedCaseTier_NotCaseFolded(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeAgentWithTier(t, root, "Infrastructure", "sample-tier-agent", "MiXeD-Case", "Synthetic rationale.")
+
+	cat, err := catalog.Load(root)
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	foundOriginal := false
 	foundLowercase := false
+	foundUppercase := false
 	for _, ti := range cat.Tiers() {
-		if string(ti.Tier) == "HIGH" {
+		switch string(ti.Tier) {
+		case "MiXeD-Case":
+			foundOriginal = true
+		case "mixed-case":
+			foundLowercase = true
+		case "MIXED-CASE":
 			foundUppercase = true
 		}
-		if string(ti.Tier) == "high" {
-			foundLowercase = true
-		}
 	}
-	if !foundUppercase {
-		t.Error("Tiers() does not contain \"HIGH\"; expected it verbatim from agent frontmatter")
+	if !foundOriginal {
+		t.Error("Tiers() does not contain \"MiXeD-Case\"; expected it verbatim from agent frontmatter")
 	}
 	if foundLowercase {
-		t.Error("Tiers() contains lowercased \"high\"; tier strings must not be normalised")
+		t.Error("Tiers() contains lowercased \"mixed-case\"; tier strings must not be normalised")
+	}
+	if foundUppercase {
+		t.Error("Tiers() contains uppercased \"MIXED-CASE\"; tier strings must not be normalised")
 	}
 }
 

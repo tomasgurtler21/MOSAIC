@@ -8,49 +8,77 @@ package catalog_test
 //   - pr-scope-filtering: CONTEXT-ZONE.md
 //
 // The catalog must:
-//   - Enumerate all 4 skills
+//   - Enumerate every skill folder present on disk
 //   - Expose the version, key, name, and description from SKILL.md frontmatter
 //   - Include every file in the skill folder in the Files list, relative to SourceDir
 //   - Set EntryFile to "SKILL.md"
+//
+// Classification record: the exact skill count (was TestSkills_Count_Matches4) and the
+// four-known-skill-keys allowlist (was TestSkills_AllFourKnownSkillsPresent) were
+// content-coupled and are replaced by TestSkills_MatchOnDiskSkillFolders, a structural
+// invariant comparing Skills() against a direct directory listing of
+// Agents/Generic/Skills/. It detects a skill folder silently failing to load, or Skills()
+// returning an entry with no backing folder, without naming any skill.
+//
+// The two exact companion-file counts (were TestSkill_LeanTDD_FilesCount and
+// TestSkill_PrScopeFiltering_FilesCount) were content-coupled and are replaced by
+// TestSkill_FilesCount_MatchesFolderContents on a synthetic fixture, preserving the same
+// detection power (extra or missing files in a folder are still caught).
+//
+// Beyond this stage's explicit item list, but within AC7.2's scope: the two companion-file
+// spot-checks and the single-file-skills check also named specific real skill keys
+// (lean-tdd, pr-scope-filtering, efficient-file-reading, git-read-commands). They are
+// replaced by TestSkill_Files_IncludesCompanionFilesByName and
+// TestSkill_SkillWithoutCompanionFiles_HasExactlyOneFile on synthetic fixtures, preserving
+// the same assertions.
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"mosaic-deploy/internal/catalog"
 )
 
 // ---------------------------------------------------------------------------
 // Enumeration
 // ---------------------------------------------------------------------------
 
-// TestSkills_Count_Matches4 verifies that the catalog returns exactly 4 skills,
-// matching the known count in the repository.
-func TestSkills_Count_Matches4(t *testing.T) {
-	const wantCount = 4
+// TestSkills_MatchOnDiskSkillFolders verifies that Skills() returns exactly one entry
+// per subdirectory of the real repository's Agents/Generic/Skills/ folder — no fewer
+// (a folder failed to load) and no more (a phantom entry with no backing folder).
+func TestSkills_MatchOnDiskSkillFolders(t *testing.T) {
 	cat := loadRealCatalog(t)
-	skills := cat.Skills()
-	if len(skills) != wantCount {
-		var keys []string
-		for _, s := range skills {
-			keys = append(keys, s.Key)
-		}
-		t.Errorf("Skills() returned %d skills, want %d (got: %v)", len(skills), wantCount, keys)
-	}
-}
+	skillsDir := filepath.Join(cat.Root(), "Agents", "Generic", "Skills")
 
-// TestSkills_AllFourKnownSkillsPresent verifies that the four known skill folder names
-// are all present in the catalog.
-func TestSkills_AllFourKnownSkillsPresent(t *testing.T) {
-	knownKeys := []string{
-		"efficient-file-reading",
-		"git-read-commands",
-		"lean-tdd",
-		"pr-scope-filtering",
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		t.Fatalf("os.ReadDir(%q): %v", skillsDir, err)
 	}
-	cat := loadRealCatalog(t)
-	for _, key := range knownKeys {
-		if _, ok := cat.Skill(key); !ok {
-			t.Errorf("Skill(%q): returned not-found; expected this skill to be present", key)
+	onDisk := make(map[string]bool)
+	for _, e := range entries {
+		if e.IsDir() {
+			onDisk[e.Name()] = true
+		}
+	}
+	if len(onDisk) == 0 {
+		t.Fatal("no skill folders found on disk under Agents/Generic/Skills/; cannot verify the invariant")
+	}
+
+	skills := cat.Skills()
+	inCatalog := make(map[string]bool, len(skills))
+	for _, s := range skills {
+		inCatalog[s.Key] = true
+	}
+
+	for key := range onDisk {
+		if !inCatalog[key] {
+			t.Errorf("skill folder %q exists on disk but Skills() has no matching entry", key)
+		}
+	}
+	for key := range inCatalog {
+		if !onDisk[key] {
+			t.Errorf("Skills() contains key %q with no matching on-disk folder under %q", key, skillsDir)
 		}
 	}
 }
@@ -180,93 +208,79 @@ func TestSkills_Files_AllExistOnDisk(t *testing.T) {
 // Companion files
 // ---------------------------------------------------------------------------
 
-// TestSkill_LeanTDD_HasCompanionFile verifies that the lean-tdd skill includes
-// EXAMPLES-CSHARP.md in its Files list. This file is a companion to SKILL.md and
-// must be catalogued as part of the skill.
-func TestSkill_LeanTDD_HasCompanionFile(t *testing.T) {
-	cat := loadRealCatalog(t)
-	s, ok := cat.Skill("lean-tdd")
+// TestSkill_Files_IncludesCompanionFilesByName verifies, on a synthetic skill folder,
+// that a companion file placed alongside SKILL.md appears in the Files list by its exact
+// name. This proves the same behaviour the two real-skill spot-checks proved (a companion
+// file is catalogued, not just counted) without naming a specific real skill.
+func TestSkill_Files_IncludesCompanionFilesByName(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeSkillFolder(t, root, "sample-skill")
+	mustWriteFile(t, root, filepath.Join("Agents", "Generic", "Skills", "sample-skill", "COMPANION.md"), []byte("# Companion\n"))
+
+	cat, err := catalog.Load(root)
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+	s, ok := cat.Skill("sample-skill")
 	if !ok {
-		t.Fatal("Skill(\"lean-tdd\"): not found")
+		t.Fatal("Skill(\"sample-skill\"): not found")
 	}
 
-	const companionFile = "EXAMPLES-CSHARP.md"
 	found := false
 	for _, f := range s.Files {
-		if f == companionFile {
+		if f == "COMPANION.md" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("lean-tdd skill does not include companion file %q in Files: %v", companionFile, s.Files)
+		t.Errorf("sample-skill does not include companion file %q in Files: %v", "COMPANION.md", s.Files)
 	}
 }
 
-// TestSkill_PrScopeFiltering_HasCompanionFile verifies that the pr-scope-filtering skill
-// includes CONTEXT-ZONE.md in its Files list.
-func TestSkill_PrScopeFiltering_HasCompanionFile(t *testing.T) {
-	cat := loadRealCatalog(t)
-	s, ok := cat.Skill("pr-scope-filtering")
-	if !ok {
-		t.Fatal("Skill(\"pr-scope-filtering\"): not found")
-	}
+// TestSkill_FilesCount_MatchesFolderContents verifies, on a synthetic skill folder with
+// two companion files besides SKILL.md, that the Files list has exactly as many entries
+// as files placed on disk. This is the same detection power as asserting a literal count
+// on a real skill (extra or missing files are caught), without coupling to which real
+// skill happens to have companion files today.
+func TestSkill_FilesCount_MatchesFolderContents(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeSkillFolder(t, root, "sample-skill")
+	mustWriteFile(t, root, filepath.Join("Agents", "Generic", "Skills", "sample-skill", "COMPANION-ONE.md"), []byte("# Companion One\n"))
+	mustWriteFile(t, root, filepath.Join("Agents", "Generic", "Skills", "sample-skill", "COMPANION-TWO.md"), []byte("# Companion Two\n"))
 
-	const companionFile = "CONTEXT-ZONE.md"
-	found := false
-	for _, f := range s.Files {
-		if f == companionFile {
-			found = true
-			break
-		}
+	cat, err := catalog.Load(root)
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
 	}
-	if !found {
-		t.Errorf("pr-scope-filtering skill does not include companion file %q in Files: %v", companionFile, s.Files)
-	}
-}
-
-// TestSkill_LeanTDD_FilesCount verifies that lean-tdd has exactly 2 files (SKILL.md +
-// EXAMPLES-CSHARP.md). If extra files are added to the folder, this test will catch them.
-func TestSkill_LeanTDD_FilesCount(t *testing.T) {
-	const wantCount = 2
-	cat := loadRealCatalog(t)
-	s, ok := cat.Skill("lean-tdd")
+	s, ok := cat.Skill("sample-skill")
 	if !ok {
-		t.Fatal("Skill(\"lean-tdd\"): not found")
+		t.Fatal("Skill(\"sample-skill\"): not found")
 	}
+	const wantCount = 3 // SKILL.md + two companions
 	if len(s.Files) != wantCount {
-		t.Errorf("lean-tdd Files count = %d, want %d: %v", len(s.Files), wantCount, s.Files)
+		t.Errorf("sample-skill Files count = %d, want %d: %v", len(s.Files), wantCount, s.Files)
 	}
 }
 
-// TestSkill_PrScopeFiltering_FilesCount verifies that pr-scope-filtering has exactly 2 files
-// (SKILL.md + CONTEXT-ZONE.md).
-func TestSkill_PrScopeFiltering_FilesCount(t *testing.T) {
-	const wantCount = 2
-	cat := loadRealCatalog(t)
-	s, ok := cat.Skill("pr-scope-filtering")
+// TestSkill_SkillWithoutCompanionFiles_HasExactlyOneFile verifies, on a synthetic skill
+// folder containing only SKILL.md, that Files has exactly one entry. This proves the same
+// behaviour the two named-real-skill checks proved (a skill with no companion files is
+// not padded with phantom entries) without naming a specific real skill.
+func TestSkill_SkillWithoutCompanionFiles_HasExactlyOneFile(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeSkillFolder(t, root, "sample-skill")
+
+	cat, err := catalog.Load(root)
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+	s, ok := cat.Skill("sample-skill")
 	if !ok {
-		t.Fatal("Skill(\"pr-scope-filtering\"): not found")
+		t.Fatal("Skill(\"sample-skill\"): not found")
 	}
-	if len(s.Files) != wantCount {
-		t.Errorf("pr-scope-filtering Files count = %d, want %d: %v", len(s.Files), wantCount, s.Files)
-	}
-}
-
-// TestSkill_SkillsWithoutCompanionFiles_HaveExactlyOneFile verifies that skills without
-// companion files (efficient-file-reading, git-read-commands) have exactly 1 file (SKILL.md).
-func TestSkill_SkillsWithoutCompanionFiles_HaveExactlyOneFile(t *testing.T) {
-	singleFileSkills := []string{"efficient-file-reading", "git-read-commands"}
-	cat := loadRealCatalog(t)
-	for _, key := range singleFileSkills {
-		s, ok := cat.Skill(key)
-		if !ok {
-			t.Errorf("Skill(%q): not found", key)
-			continue
-		}
-		if len(s.Files) != 1 {
-			t.Errorf("skill %q should have 1 file (SKILL.md only), got %d: %v", key, len(s.Files), s.Files)
-		}
+	if len(s.Files) != 1 {
+		t.Errorf("sample-skill should have 1 file (SKILL.md only), got %d: %v", len(s.Files), s.Files)
 	}
 }
 

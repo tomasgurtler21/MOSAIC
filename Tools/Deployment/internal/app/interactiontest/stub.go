@@ -120,6 +120,16 @@ func (b *Builder) AnswerCancelledText(id domain.QuestionID, subject string) *Bui
 	return b
 }
 
+// AnswerCancelledChoice scripts a Cancelled response for a SelectOne or SelectMany call
+// matching id and subject — the answer the TUI produces when the user presses Esc. Unlike
+// AnswerCancelledText, which the service treats as a skip, a cancelled choice answer at a
+// model question aborts the run.
+func (b *Builder) AnswerCancelledChoice(id domain.QuestionID, subject string) *Builder {
+	b.s.choices[scriptKey{id, subject}] = domain.ChoiceAnswer{Status: domain.Cancelled}
+	b.s.multiChoices[scriptKey{id, subject}] = domain.MultiChoiceAnswer{Status: domain.Cancelled}
+	return b
+}
+
 // AnswerConfirm scripts the answer returned when Confirm is called with the given id and subject.
 func (b *Builder) AnswerConfirm(id domain.QuestionID, subject string, confirm bool) *Builder {
 	b.s.confirms[scriptKey{id, subject}] = domain.ConfirmAnswer{
@@ -169,6 +179,7 @@ type Stub struct {
 	mu          sync.Mutex
 	script      script
 	calls       []Call
+	notices     []domain.Notice
 	reviewIndex int
 }
 
@@ -193,6 +204,17 @@ func (s *Stub) QuestionOrder() []domain.QuestionID {
 		ids = append(ids, c.ID)
 	}
 	return ids
+}
+
+// Notices returns every Notice passed to Notify, in call order, so a test can assert that a
+// warning was surfaced to the user and inspect its level and message. The returned slice is a
+// snapshot; modifications to it do not affect the Stub.
+func (s *Stub) Notices() []domain.Notice {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]domain.Notice, len(s.notices))
+	copy(out, s.notices)
+	return out
 }
 
 // WasAsked reports whether a question with the given id and subject was called at least once.
@@ -262,9 +284,13 @@ func (s *Stub) Confirm(ctx context.Context, q domain.Question) (domain.ConfirmAn
 	return domain.ConfirmAnswer{Status: domain.Answered, Confirm: true}, nil
 }
 
-// Notify implements domain.Interaction. It records the call and returns without blocking.
+// Notify implements domain.Interaction. It records the call, and the Notice value itself
+// (retrievable via Notices), and returns without blocking.
 func (s *Stub) Notify(ctx context.Context, n domain.Notice) {
 	s.record(Call{Kind: "notify"})
+	s.mu.Lock()
+	s.notices = append(s.notices, n)
+	s.mu.Unlock()
 }
 
 // Progress implements domain.Interaction. It records the call and returns without blocking.

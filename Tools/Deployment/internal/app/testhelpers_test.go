@@ -244,11 +244,42 @@ type spyUserConfig struct {
 	cfg   config.UserConfig
 	saved []config.UserConfig
 	path  string
+
+	// loadErr, when non-nil, is returned by Load instead of (cfg, nil). Used to inject an
+	// unreadable-config failure (a raw parse error or a config.MappingDeclError) without
+	// touching the filesystem.
+	loadErr error
+
+	// failLoadFrom, when non-zero, restricts loadErr to Load calls numbered failLoadFrom or
+	// later (1-indexed by call order): earlier calls succeed normally. This lets a test
+	// simulate a config store whose first read (e.g. resolveModels' own Load) succeeds while
+	// a later read (e.g. a hash-site Load) fails, so a call site's own error check can be
+	// exercised in isolation from a check made earlier in the same run. Zero means loadErr
+	// (when set) applies to every call.
+	failLoadFrom int
+
+	// loadCalls counts every Load invocation, in order, so a test can assert how many times
+	// Load was called or which call number a given interaction corresponds to.
+	loadCalls int
+
+	// saveErr, when non-nil, is returned by Save instead of nil, after still recording the
+	// call in saved (Save's contract is "attempt the write and report the error", not
+	// "silently drop the attempt").
+	saveErr error
 }
 
-func (s *spyUserConfig) Load() (config.UserConfig, error) { return s.cfg, nil }
+func (s *spyUserConfig) Load() (config.UserConfig, error) {
+	s.loadCalls++
+	if s.loadErr != nil && (s.failLoadFrom == 0 || s.loadCalls >= s.failLoadFrom) {
+		return config.UserConfig{}, s.loadErr
+	}
+	return s.cfg, nil
+}
 func (s *spyUserConfig) Save(cfg config.UserConfig) error {
 	s.saved = append(s.saved, cfg)
+	if s.saveErr != nil {
+		return s.saveErr
+	}
 	s.cfg = cfg
 	return nil
 }

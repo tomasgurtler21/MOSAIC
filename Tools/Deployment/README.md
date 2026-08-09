@@ -320,7 +320,9 @@ The generated generic file:
   - Deployment and transform stamps are **dropped**: `transform_version`,
     `injections_version`, `bundle_version`, `protocol_version`,
     `tool_mappings_version`, `model`. These are per-deployment artifacts that
-    have no place in a generic source.
+    have no place in a generic source. See "The `tool_mappings_version` stamp"
+    in `docs/configuration.md` for what that particular field is and where it
+    comes from.
 
 The source (harness-only) file is **never modified or deleted**.
 
@@ -399,6 +401,7 @@ all team members share the same settings.
 | `utility_agent_allow_list` | list of strings | `[]` | Keys of utility agents that may be selected during deployment. An empty list means no utility agents are offered. |
 | `allow_external_modules` | bool | `false` | Whether external harness modules in `MosaicDeploy/harnesses/` may be used. Must be `true` for the external harness module tier to work. |
 | `log_retention_runs` | int | `0` | Maximum history log entries to keep. `0` means keep all. |
+| `tool_destinations` | map | `{}` | Generic-tool → harness-tool mappings, keyed by harness id. Declaring a tool here permanently answers the "custom tool" prompt for it. See [docs/configuration.md](docs/configuration.md#tool_destinations). |
 
 **Example:**
 
@@ -409,7 +412,17 @@ utility_agent_allow_list:
   - documentation-writer
 allow_external_modules: false
 log_retention_runs: 50
+tool_destinations:
+  claude-code:
+    - generic: knowledge_base
+      destinations:
+        - to: main
+          names: ["mcp__mosaic-kb__search"]
 ```
+
+> **Note on defaults:** when this file is absent entirely, all six shipped
+> utility agents are enabled by default. Once the file exists, its values are
+> authoritative — `utility_agent_allow_list: []` really does mean "none".
 
 ### user-config.yaml
 
@@ -422,6 +435,8 @@ already excludes the entire `MosaicDeploy/` tree.
 |-------|------|---------|-------------|
 | `schema_version` | string | `"1"` | Config schema version. Do not change. |
 | `tier_models` | map | `{}` | Recorded tier-to-model mappings. Structure: `harness-id -> tier-name -> model-id`. Written automatically during deployment. |
+| `custom_model_ids` | map | `{}` | Model IDs you typed by hand, per harness. Offered as selectable options (never pre-answers) in later runs. Append-only, deduplicated. |
+| `tool_destinations` | map | `{}` | Personal generic-tool → harness-tool mappings. Same syntax as the `tool-config.yaml` key; takes precedence over it. See [docs/configuration.md](docs/configuration.md#tool_destinations). |
 
 **Example (after a deployment run):**
 
@@ -434,7 +449,23 @@ tier_models:
   opencode:
     HIGH: gpt-4o
     LOW: gpt-4o-mini
+custom_model_ids:
+  claude-code:
+    - claude-sonnet-4-5-20250929
+tool_destinations:
+  claude-code:
+    - generic: user_interaction
+      destinations:
+        - to: main
+          names: ["mcp__user-feedback__ask_user_questions"]
 ```
+
+> **The tool rewrites this file** when it records a selection. All keys survive,
+> but YAML comments you add do not. Keep notes elsewhere.
+
+For the full key-by-key reference — including `tool_destinations` syntax,
+precedence, validation rules, and worked examples — see
+[docs/configuration.md](docs/configuration.md).
 
 ---
 
@@ -447,8 +478,8 @@ MOSAIC/
   mosaic-deploy[.exe]           # the installed binary
   MosaicDeploy/
     config/
-      tool-config.yaml          # project-level config (utility allow-list, external opt-in)
-      user-config.yaml          # per-user config (tier-to-model mappings)
+      tool-config.yaml          # project-level config (utility allow-list, external opt-in, tool mappings)
+      user-config.yaml          # per-user config (tier-to-model mappings, custom models, tool mappings)
     harnesses/                  # optional runtime harness modules (drop-in executables)
     logs/
       latest.log                # full log of the most recent run

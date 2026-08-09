@@ -186,11 +186,15 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		newAgents = append(newAgents, agent)
 	}
 	if len(newAgents) > 0 {
-		newAgentModelRes = s.resolveModels(
+		var err error
+		newAgentModelRes, err = s.resolveModels(
 			ctx, req.TierModels, req.AgentModels, req.SkipAll,
 			harnessID, module, newAgents,
 			nil, true, false,
 		)
+		if err != nil {
+			return domain.RunSummary{}, err
+		}
 	}
 
 	// Merge deployed model selections with newly resolved models for new agents.
@@ -208,7 +212,10 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	// Compute the tool-mappings version hash from the loaded config stores so the planner
 	// can detect staleness when the user modifies their tool-destination configuration.
 	toolCfg, _ := s.deps.ToolConfig.Load()
-	userCfg, _ := s.deps.UserConfig.Load()
+	userCfg, err := s.deps.UserConfig.Load()
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
 	toolMappingsVersion := config.HashToolDestinations(toolCfg.ToolDestinations, userCfg.ToolDestinations)
 
 	planInput := plan.Input{
@@ -397,7 +404,9 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	for _, opt := range newAgentModelRes.accumulatedOptions {
 		customIDs = append(customIDs, opt.ID)
 	}
-	_ = s.persistCustomModelIDs(harnessID, customIDs)
+	if err := s.persistCustomModelIDs(harnessID, customIDs); err != nil {
+		s.notifyPersistFailure(ctx, err)
+	}
 
 	return s.buildSummary(domain.ModeUpdate, harnessRef, workspace, result), nil
 }
