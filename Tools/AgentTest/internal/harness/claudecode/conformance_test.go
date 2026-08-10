@@ -24,8 +24,14 @@ import (
 	"mosaic-agent-test/internal/harness/contract"
 )
 
-var conformanceWorkerID = domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "Worker"}
+var conformanceWorkerID = domain.CollaboratorIdentity{ToolName: domain.DispatchToolName, AgentIdentity: "Worker"}
 
+// conformanceNativePre synthesises a native payload the way the real harness
+// actually sends one. The identity it receives carries the normalized,
+// harness-neutral vocabulary (see contract.Config.NativePre's doc comment);
+// the wire tool_name field, in contrast, always carries this harness's own
+// native dispatch-tool name, exactly as a live invocation would, regardless
+// of what identity vocabulary the caller supplied.
 func conformanceNativePre(id domain.CollaboratorIdentity, msg domain.TaskMessage, token string) []byte {
 	input := claudecode.TaskToolInput{
 		SubagentType: id.AgentIdentity,
@@ -40,12 +46,15 @@ func conformanceNativePre(id domain.CollaboratorIdentity, msg domain.TaskMessage
 	toolInput, _ := json.Marshal(input)
 	b, _ := json.Marshal(claudecode.PreToolUsePayload{
 		HookEventName: "PreToolUse",
-		ToolName:      id.ToolName,
+		ToolName:      claudecode.NativeDispatchToolName,
 		ToolInput:     toolInput,
 	})
 	return b
 }
 
+// conformanceNativePost is conformanceNativePre's post-invocation
+// counterpart: the wire tool_name field always carries this harness's own
+// native dispatch-tool name, for the same reason.
 func conformanceNativePost(id domain.CollaboratorIdentity, token string, observed string) []byte {
 	// The post-invocation payload echoes the tool's (already rewritten)
 	// input, which is where the harness preserves the planted token through
@@ -55,9 +64,22 @@ func conformanceNativePost(id domain.CollaboratorIdentity, token string, observe
 	toolInput, _ := json.Marshal(input)
 	b, _ := json.Marshal(claudecode.PostToolUsePayload{
 		HookEventName: "PostToolUse",
-		ToolName:      id.ToolName,
+		ToolName:      claudecode.NativeDispatchToolName,
 		ToolInput:     toolInput,
 		ToolResponse:  json.RawMessage(`"` + observed + `"`),
+	})
+	return b
+}
+
+// conformanceNativeCompletion synthesises this harness's own SubagentStop
+// completion-signal payload, carrying observed as the collaborator's real
+// reply. AgentTranscriptPath is deliberately empty: this check exercises
+// ObservedResponse recovery, not correlation-token recovery, which is
+// already covered by testCorrelation via NativePre/NativePost.
+func conformanceNativeCompletion(observed string) []byte {
+	b, _ := json.Marshal(claudecode.CompletionPayload{
+		HookEventName:        "SubagentStop",
+		LastAssistantMessage: observed,
 	})
 	return b
 }
@@ -97,9 +119,10 @@ func newConformanceConfig() contract.Config {
 		New: func(t *testing.T, dir string) domain.HarnessAdapter {
 			return claudecode.New(claudecode.Options{})
 		},
-		NativePre:  conformanceNativePre,
-		NativePost: conformanceNativePost,
-		Observe:    conformanceObserve,
+		NativePre:        conformanceNativePre,
+		NativePost:       conformanceNativePost,
+		NativeCompletion: conformanceNativeCompletion,
+		Observe:          conformanceObserve,
 		Subject: domain.SubjectUnderTest{
 			Identity:       "orchestrator",
 			DefinitionPath: "agents/orchestrator.md",

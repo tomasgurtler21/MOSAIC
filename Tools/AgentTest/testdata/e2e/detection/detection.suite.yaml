@@ -10,7 +10,6 @@ description: >
   wrong — so every reachable assertion class is shown both passing and
   failing, with the failing assertion named in the result.
 defaults:
-  harness: fake
   timeout: 30s
   turn_limit: 5
   repetitions: 1

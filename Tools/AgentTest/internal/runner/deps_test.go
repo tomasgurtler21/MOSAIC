@@ -59,6 +59,11 @@ type harness struct {
 	Rec      *callRecorder
 
 	FixtureRoot string
+	// WorkspaceRoot is the directory the harness's own workspace.Manager is
+	// rooted at, exposed so a test can construct a second, independent
+	// Manager instance against the same directory — the shape a later
+	// process rerunning the same suite actually takes.
+	WorkspaceRoot string
 }
 
 // newHarness assembles a runner.Deps rooted at fresh temp directories, with
@@ -104,13 +109,14 @@ func newHarness(t *testing.T) *harness {
 			Clock:      clock,
 			Progress:   sink,
 		},
-		Adapter:     adapter,
-		Launcher:    launcher,
-		Cost:        costProvider,
-		Sink:        sink,
-		Clock:       clock,
-		Rec:         rec,
-		FixtureRoot: fixtureRoot,
+		Adapter:       adapter,
+		Launcher:      launcher,
+		Cost:          costProvider,
+		Sink:          sink,
+		Clock:         clock,
+		Rec:           rec,
+		FixtureRoot:   fixtureRoot,
+		WorkspaceRoot: workspaceRoot,
 	}
 }
 
@@ -133,5 +139,9 @@ func newRequest(testID string) runner.Request {
 			Registry: domain.StubRegistry{TestID: testID},
 		},
 		Settings: domain.RunSettings{},
+		// RetainNever pins the default policy explicitly, so a test built
+		// from this helper is never left depending on RetentionPolicy's
+		// zero value ("") meaning the same thing.
+		Retention: domain.RetainNever,
 	}
 }

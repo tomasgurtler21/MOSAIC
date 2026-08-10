@@ -22,12 +22,12 @@ import (
 )
 
 func TestEchoFidelity_CollaboratorReplyMismatchesStub_FailsUnconditionally(t *testing.T) {
-	greeter := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "greeter"}
+	greeter := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "greeter"}
 
 	script := fakeOptionsFor(
 		domain.HarnessCapabilities{SupportsDirectSubstitution: false},
 		[]subjectStep{
-			invoke("Task", "greeter"),
+			invoke("dispatch", "greeter"),
 			finish(`{"agent_instance_id":"standin-subject#1","status_code":"SUCCESS","status_message":"Done."}`),
 		},
 	)

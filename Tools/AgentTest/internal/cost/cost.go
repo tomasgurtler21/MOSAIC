@@ -87,12 +87,25 @@ func (p *provider) Cost(ctx context.Context, q domain.CostQuery) (domain.CostRep
 	args := []string{"total", "--run", q.RunID, "--path", q.LogRoot, "--format", "json"}
 	stdout, exitCode, invokeErr := invoke(runCtx, p.opts.ExecutablePath, args)
 	if invokeErr != nil {
-		return Map(exitCode, RunTotal{}, false, invokeErr), nil
+		return Map(MapInput{
+			ExecutablePath: p.opts.ExecutablePath,
+			RunID:          q.RunID,
+			LogRoot:        q.LogRoot,
+			ExitCode:       exitCode,
+			InvokeErr:      invokeErr,
+		}), nil
 	}
 
 	var total RunTotal
 	if parseErr := json.Unmarshal(stdout, &total); parseErr != nil {
-		return Map(exitCode, RunTotal{}, false, parseErr), nil
+		return Map(MapInput{
+			ExecutablePath: p.opts.ExecutablePath,
+			RunID:          q.RunID,
+			LogRoot:        q.LogRoot,
+			ExitCode:       exitCode,
+			StdoutLen:      len(stdout),
+			ParseErr:       parseErr,
+		}), nil
 	}
 
 	unknownBucketPresent := false
@@ -100,7 +113,14 @@ func (p *provider) Cost(ctx context.Context, q domain.CostQuery) (domain.CostRep
 		unknownBucketPresent = statDir(filepath.Join(q.LogRoot, UnknownRunBucket))
 	}
 
-	return Map(exitCode, total, unknownBucketPresent, nil), nil
+	return Map(MapInput{
+		ExecutablePath:       p.opts.ExecutablePath,
+		RunID:                q.RunID,
+		LogRoot:              q.LogRoot,
+		ExitCode:             exitCode,
+		Total:                total,
+		UnknownBucketPresent: unknownBucketPresent,
+	}), nil
 }
 
 // RunTotal mirrors the log-analysis tool's stable per-run total wire shape.
@@ -132,21 +152,69 @@ type MoneyValue struct {
 	Amount *string `json:"amount,omitempty"`
 }
 
+// MapInput is everything known at the call site when the delegate's outcome
+// is mapped to a report. Every field the diagnostic names is here by
+// construction, which is what stops the exit code and the queried path from
+// being dropped. See ContractsDesign.md's "cost mapping surface".
+type MapInput struct {
+	// ExecutablePath is the delegate that was invoked.
+	ExecutablePath string
+	// RunID and LogRoot are what was queried.
+	RunID   string
+	LogRoot string
+
+	// ExitCode is the delegate's exit code; meaningful only when InvokeErr is nil.
+	ExitCode int
+	// StdoutLen is how many bytes the delegate produced, so "exited non-zero
+	// and said nothing" is distinguishable from "said something unparseable"
+	// without carrying the payload itself into the mapping.
+	StdoutLen int
+
+	Total                RunTotal
+	UnknownBucketPresent bool
+
+	// InvokeErr is non-nil only when the delegate could not be invoked or run
+	// to completion at all — never for a delegate that ran and exited non-zero.
+	InvokeErr error
+	// ParseErr is non-nil when the delegate's stdout could not be decoded.
+	ParseErr error
+}
+
 // Map is the pure mapping from the delegated tool's outcome to a cost
-// report.
-func Map(exitCode int, total RunTotal, unknownBucketPresent bool, invokeErr error) domain.CostReport {
-	if invokeErr != nil {
+// report. See ContractsDesign.md's "cost mapping surface" for the full
+// mapping contract.
+func Map(in MapInput) domain.CostReport {
+	if in.InvokeErr != nil {
 		return domain.CostReport{
 			Attribution: domain.AttributionUnavailable,
-			Detail:      fmt.Sprintf("cost: delegating to the log-analysis tool failed: %v", invokeErr),
+			Detail:      fmt.Sprintf("cost: could not be invoked: the log-analysis tool %q failed to run: %v", in.ExecutablePath, in.InvokeErr),
 		}
 	}
 
-	switch exitCode {
+	if in.ParseErr != nil {
+		if in.ExitCode == exitSuccess {
+			return domain.CostReport{
+				Attribution: domain.AttributionUnavailable,
+				Detail: fmt.Sprintf(
+					"cost: the log-analysis tool %q ran successfully but produced output that could not be decoded (%d bytes of stdout)",
+					in.ExecutablePath, in.StdoutLen,
+				),
+			}
+		}
+		return domain.CostReport{
+			Attribution: domain.AttributionUnavailable,
+			Detail: fmt.Sprintf(
+				"cost: the log-analysis tool %q exited with code %d and produced output that could not be decoded, querying run %q under log root %q",
+				in.ExecutablePath, in.ExitCode, in.RunID, in.LogRoot,
+			),
+		}
+	}
+
+	switch in.ExitCode {
 	case exitSuccess:
-		return mapSuccess(total)
+		return mapSuccess(in.Total)
 	case exitNoData:
-		if unknownBucketPresent {
+		if in.UnknownBucketPresent {
 			return domain.CostReport{
 				Attribution: domain.AttributionUnknownBucket,
 				Detail:      "cost: no data for this run, but the fallback bucket is present — a cost exists but could not be attributed",
@@ -171,7 +239,7 @@ func Map(exitCode int, total RunTotal, unknownBucketPresent bool, invokeErr erro
 	default:
 		return domain.CostReport{
 			Attribution: domain.AttributionUnavailable,
-			Detail:      fmt.Sprintf("cost: the log-analysis tool reported an unrecognised exit code %d", exitCode),
+			Detail:      fmt.Sprintf("cost: the log-analysis tool reported an unrecognised exit code %d", in.ExitCode),
 		}
 	}
 }

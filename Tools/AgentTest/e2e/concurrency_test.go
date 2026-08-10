@@ -37,16 +37,16 @@ import (
 )
 
 func TestConcurrency_OverlappingInvocations_ReconstructsPeakBothWays(t *testing.T) {
-	researcher := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "researcher"}
-	libResearcher := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "library-researcher"}
+	researcher := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "researcher"}
+	libResearcher := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "library-researcher"}
 
 	script := fakeOptionsFor(
 		domain.HarnessCapabilities{SupportsDirectSubstitution: false},
 		[]subjectStep{
 			// No Result turn between these two Invoke turns: the stand-in
 			// treats them as one concurrency batch (see standin_test.go).
-			invoke("Task", "researcher"),
-			invoke("Task", "library-researcher"),
+			invoke("dispatch", "researcher"),
+			invoke("dispatch", "library-researcher"),
 			finish(`{"agent_instance_id":"standin-subject#1","run_id":"concurrency-run","status_code":"SUCCESS","status_message":"Done."}`),
 		},
 	)

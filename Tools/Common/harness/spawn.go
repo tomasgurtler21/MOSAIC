@@ -75,7 +75,7 @@ func (s *claudeCodeSpawner) Spawn(ctx context.Context, req SpawnRequest) (Respon
 		Sink:       s.cfg.sink,
 	})
 	if err != nil {
-		return Response{}, err
+		return resp, err
 	}
 
 	text, err := ParseClaudeCodeEnvelope(resp.Stdout)
@@ -236,18 +236,30 @@ func Run(ctx context.Context, cmd Command, args []string, o RunOptions) (Respons
 	if waitErr != nil {
 		var exitErr *exec.ExitError
 		var wrapped error
+		exitCode := -1
 		if errors.As(waitErr, &exitErr) {
+			exitCode = exitErr.ExitCode()
 			stderrContent := strings.TrimSpace(stderr.String())
 			if stderrContent != "" {
-				wrapped = fmt.Errorf("%w: exit status %d: %s", ErrNonZeroExit, exitErr.ExitCode(), stderrContent)
+				wrapped = fmt.Errorf("%w: exit status %d: %s", ErrNonZeroExit, exitCode, stderrContent)
 			} else {
-				wrapped = fmt.Errorf("%w: exit status %d", ErrNonZeroExit, exitErr.ExitCode())
+				wrapped = fmt.Errorf("%w: exit status %d", ErrNonZeroExit, exitCode)
 			}
 		} else {
 			wrapped = fmt.Errorf("%w: %v", ErrNonZeroExit, waitErr)
 		}
 		logEvent(o.Sink, "spawn.error", wrapped.Error(), nil)
-		return Response{}, wrapped
+		// The exit code and captured stderr are carried through even on
+		// failure: a caller decoding a non-zero exit (an authentication or
+		// environment failure, for instance) needs both to diagnose it
+		// without reproducing outside the tool. Only Start failing (handled
+		// above) leaves the response genuinely empty.
+		return Response{
+			ExitCode: exitCode,
+			Stdout:   stdout.Bytes(),
+			Stderr:   stderr.String(),
+			Duration: duration,
+		}, wrapped
 	}
 
 	return Response{

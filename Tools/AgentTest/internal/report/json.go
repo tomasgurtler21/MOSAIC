@@ -55,6 +55,24 @@ type wireRunReport struct {
 	DurationMS      int64           `json:"duration_ms"`
 	Cost            wireCost        `json:"cost"`
 	NegativeApplied bool            `json:"negative_applied"`
+
+	// RetainedSandboxPath is the sandbox left on disk for diagnosis, empty
+	// when none was retained.
+	RetainedSandboxPath string `json:"retained_sandbox_path,omitempty"`
+
+	// Subject carries the subject's own failure output on a non-zero exit.
+	// nil when the subject exited zero, so a run that succeeded never
+	// mentions stderr at all.
+	Subject *wireSubjectFailure `json:"subject,omitempty"`
+}
+
+// wireSubjectFailure is what a subject that exited non-zero told us.
+type wireSubjectFailure struct {
+	ExitCode int `json:"exit_code"`
+	// Stderr and RawOutput are truncated for display by the renderings,
+	// never dropped by the model.
+	Stderr    string `json:"stderr,omitempty"`
+	RawOutput string `json:"raw_output,omitempty"`
 }
 
 type wireRunKey struct {
@@ -142,19 +160,30 @@ func toWireAggregate(a domain.AggregateResult) wireAggregate {
 }
 
 func toWireRunReport(r RunReport) wireRunReport {
+	var subject *wireSubjectFailure
+	if r.Subject.ExitCode != 0 {
+		subject = &wireSubjectFailure{
+			ExitCode:  r.Subject.ExitCode,
+			Stderr:    r.Subject.Stderr,
+			RawOutput: r.Subject.RawOutput,
+		}
+	}
+
 	return wireRunReport{
 		Run: wireRunKey{
 			RunID:     r.Key.RunID,
 			TestID:    r.Key.TestID,
 			RunNumber: r.Key.RunNumber,
 		},
-		Verdict:         string(r.Verdict),
-		Reasons:         reasonStrings(r.Reasons),
-		Assertions:      assertionWires(r.Assertions),
-		Conditions:      conditionWires(r.Conditions),
-		DurationMS:      r.Duration.Milliseconds(),
-		Cost:            toWireCost(r.Cost),
-		NegativeApplied: r.NegativeApplied,
+		Verdict:             string(r.Verdict),
+		Reasons:             reasonStrings(r.Reasons),
+		Assertions:          assertionWires(r.Assertions),
+		Conditions:          conditionWires(r.Conditions),
+		DurationMS:          r.Duration.Milliseconds(),
+		Cost:                toWireCost(r.Cost),
+		NegativeApplied:     r.NegativeApplied,
+		RetainedSandboxPath: r.RetainedSandboxPath,
+		Subject:             subject,
 	}
 }
 

@@ -66,6 +66,12 @@ func Capabilities() domain.HarnessCapabilities {
 		CorrelationField:           "args.prompt",
 		RegistrationModel:          domain.RegistrationDirectoryDrop,
 		BridgeKind:                 domain.BridgeInProcess,
+		// This adapter performs no normalization (see
+		// ContractsDesign.md's dispatch-tool vocabulary contract): its
+		// TranslateCall propagates the native name verbatim, so the one
+		// name it can actually produce is its own un-normalized native
+		// name, not domain.DispatchToolName.
+		ProducibleToolNames: []string{InterceptedToolName},
 	}
 }
 

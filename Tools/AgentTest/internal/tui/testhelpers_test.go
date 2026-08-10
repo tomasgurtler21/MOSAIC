@@ -153,10 +153,11 @@ type fakeSuiteRunner struct {
 	block   bool
 	release chan struct{}
 
-	called     bool
-	gotCtx     context.Context
-	cancelled  bool
-	cancelDone chan struct{}
+	called       bool
+	gotCtx       context.Context
+	gotRetention domain.RetentionPolicy
+	cancelled    bool
+	cancelDone   chan struct{}
 }
 
 var _ SuiteRunner = (*fakeSuiteRunner)(nil)
@@ -214,10 +215,11 @@ func (f *fakeSuiteRunner) wasCancelled(t *testing.T) bool {
 	}
 }
 
-func (f *fakeSuiteRunner) Run(ctx context.Context, p preflight.Plan, sink domain.ProgressSink) (report.Result, error) {
+func (f *fakeSuiteRunner) Run(ctx context.Context, p preflight.Plan, sink domain.ProgressSink, retention domain.RetentionPolicy) (report.Result, error) {
 	f.mu.Lock()
 	f.called = true
 	f.gotCtx = ctx
+	f.gotRetention = retention
 	f.mu.Unlock()
 
 	for _, ev := range f.events {

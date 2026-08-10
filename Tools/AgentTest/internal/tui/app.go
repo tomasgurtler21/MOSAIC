@@ -14,6 +14,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	commonharness "mosaic-common/harness"
 	tuicommon "mosaic-common/tui"
 
 	"mosaic-agent-test/internal/authoring"
@@ -27,11 +28,16 @@ import (
 // interchangeably in the equivalence test.
 type PreflightFunc func(preflight.Input) (preflight.Plan, authoring.Report)
 
-// SuiteRunner is the same interface the CLI drives the suite through. The
-// TUI constructs no scheduling, no verdicts and no infrastructure of its
-// own; it only calls Run and folds what Progress emits.
+// SuiteRunner is the interface the TUI drives the suite through. Unlike
+// cli.SuiteRunner (which the CLI's factory rebuilds per invocation, already
+// carrying its resolved retention), the TUI wires one long-lived Suite for
+// the whole process, so retention cannot be baked in at construction: the
+// suite-select screen's toggle can change it on every run. Run therefore
+// takes the live retention policy as a call-time argument — the value
+// startSelectedSuite passes is Model.retention at the moment the run starts,
+// not whatever Options.Suite was built with.
 type SuiteRunner interface {
-	Run(ctx context.Context, p preflight.Plan, sink domain.ProgressSink) (report.Result, error)
+	Run(ctx context.Context, p preflight.Plan, sink domain.ProgressSink, retention domain.RetentionPolicy) (report.Result, error)
 }
 
 // Options is the pre-wired dependency set the composition root hands in.
@@ -40,18 +46,36 @@ type Options struct {
 	Suite     SuiteRunner
 	// Suites are the discovered suite paths offered for selection on the
 	// suite-select screen.
-	Suites  []string
+	Suites []string
+
+	// Harness is the initially selected harness identity, from the CLI flag
+	// or its default. The harness-select screen may change it.
 	Harness string
+
+	// Harnesses is the selectable catalog, supplied by the composition root
+	// from the same mosaic-common/harness source the CLI uses. The TUI
+	// restates no harness identity of its own.
+	Harnesses []commonharness.CLIHarness
+
+	// Retention is the initial retention policy; the suite-select screen's
+	// toggle affordance may change it. Both frontends resolve to the same
+	// domain.RetentionPolicy value reaching the same runner field.
+	Retention domain.RetentionPolicy
 }
 
-// Screen names one of the four screens this frontend presents.
+// Screen names one of the screens this frontend presents.
 type Screen string
 
 const (
-	ScreenSuiteSelect Screen = "suite_select"
-	ScreenProgress    Screen = "progress"
-	ScreenResults     Screen = "results"
-	ScreenDetail      Screen = "detail"
+	// ScreenHarnessSelect offers the harness-selection affordance —
+	// Stage 5's TUI equivalent of the CLI's --harness flag — following the
+	// same cursor-and-select pattern as ScreenSuiteSelect, sourced from
+	// Options.Harnesses.
+	ScreenHarnessSelect Screen = "harness_select"
+	ScreenSuiteSelect   Screen = "suite_select"
+	ScreenProgress      Screen = "progress"
+	ScreenResults       Screen = "results"
+	ScreenDetail        Screen = "detail"
 )
 
 // ProgressMsg carries one folded progress event into the Bubble Tea message
@@ -91,9 +115,19 @@ type Model struct {
 	// never dereferences a nil sink.
 	sinkBox *sinkBox
 
+	// Harness-select screen state (Stage 5). selectedHarness starts as
+	// Options.Harness (the CLI-flag-or-default initial selection) and is
+	// updated once a harness-select entry is chosen.
+	harnessCursor   int
+	selectedHarness string
+
 	// Suite-select screen state.
 	suiteCursor int
 	running     bool
+
+	// retention starts as Options.Retention and is updated by the
+	// suite-select screen's toggle affordance (Stage 7).
+	retention domain.RetentionPolicy
 
 	// Folded progress state (AC16.2, AC16.8): every field here is set only
 	// by Fold, from an event or the terminal result model, and nothing in
@@ -122,15 +156,21 @@ var _ tea.Model = Model{}
 // NewModel constructs the initial Model on the suite-select screen. The
 // suite has not started; Suites lists what a user may pick from.
 func NewModel(o Options) Model {
-	return Model{
-		opts:    o,
-		theme:   tuicommon.DefaultTheme(),
-		screen:  ScreenSuiteSelect,
-		width:   tuicommon.DefaultWidth,
-		height:  tuicommon.DefaultHeight,
-		ctx:     context.Background(),
-		sinkBox: newSinkBox(),
+	m := Model{
+		opts:            o,
+		theme:           tuicommon.DefaultTheme(),
+		screen:          ScreenSuiteSelect,
+		width:           tuicommon.DefaultWidth,
+		height:          tuicommon.DefaultHeight,
+		ctx:             context.Background(),
+		sinkBox:         newSinkBox(),
+		selectedHarness: o.Harness,
+		retention:       o.Retention,
 	}
+	if len(o.Harnesses) > 0 {
+		m.screen = ScreenHarnessSelect
+	}
+	return m
 }
 
 // Init is called once when the Bubble Tea program starts. Nothing needs to
@@ -193,6 +233,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.screen {
+	case ScreenHarnessSelect:
+		return m.updateHarnessSelect(msg)
 	case ScreenSuiteSelect:
 		return m.updateSuiteSelect(msg)
 	case ScreenResults:
@@ -206,8 +248,39 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// updateSuiteSelect handles suite-cursor movement and starting the chosen
-// suite.
+// updateHarnessSelect handles harness-cursor movement and recording the
+// chosen harness, following the same cursor-and-select pattern as
+// updateSuiteSelect. Selecting moves to the suite-select screen — the
+// harness-select screen is always the entry point when a catalog is
+// offered, so this is the only transition into suite selection on that
+// path.
+func (m Model) updateHarnessSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Down):
+		if m.harnessCursor < len(m.opts.Harnesses)-1 {
+			m.harnessCursor++
+		}
+		return m, nil
+
+	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Up):
+		if m.harnessCursor > 0 {
+			m.harnessCursor--
+		}
+		return m, nil
+
+	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Select):
+		if len(m.opts.Harnesses) == 0 || m.harnessCursor >= len(m.opts.Harnesses) {
+			return m, nil
+		}
+		m.selectedHarness = m.opts.Harnesses[m.harnessCursor].ID
+		m.screen = ScreenSuiteSelect
+		return m, nil
+	}
+	return m, nil
+}
+
+// updateSuiteSelect handles suite-cursor movement, the retention toggle
+// (Stage 7) and starting the chosen suite.
 func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Down):
@@ -222,10 +295,31 @@ func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Space):
+		m.retention = nextRetention(m.retention)
+		return m, nil
+
 	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Select):
 		return m.startSelectedSuite()
 	}
 	return m, nil
+}
+
+// nextRetention advances p one step around the cycle the suite-select
+// screen's Space binding walks: RetainNever -> RetainOnFailure ->
+// RetainAlways -> RetainNever, wrapping. Ascending retention, so repeated
+// presses walk from least to most retained before wrapping. A zero
+// RetentionPolicy (the unset value) is treated as RetainNever, so the first
+// press from an unset Options.Retention still advances predictably.
+func nextRetention(p domain.RetentionPolicy) domain.RetentionPolicy {
+	switch p {
+	case domain.RetainOnFailure:
+		return domain.RetainAlways
+	case domain.RetainAlways:
+		return domain.RetainNever
+	default:
+		return domain.RetainOnFailure
+	}
 }
 
 // startSelectedSuite pre-flights the cursor's suite and, when it validates,
@@ -245,7 +339,7 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 	if m.opts.Preflight != nil {
 		resolved, rpt := m.opts.Preflight(preflight.Input{
 			SuitePath: suitePath,
-			HarnessID: m.opts.Harness,
+			HarnessID: m.selectedHarness,
 		})
 		if rpt.HasErrors() {
 			m.statusMsg = "pre-flight failed for " + suitePath
@@ -269,6 +363,10 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 
 	runner := m.opts.Suite
 	sink := m.sinkBox.get()
+	// The live toggle value, not Options.Retention: this is what makes the
+	// suite-select screen's affordance actually reach the run it starts,
+	// rather than only the on-screen label and Model.Retention().
+	retention := m.retention
 
 	// The suite starts now, on its own goroutine, rather than when the
 	// returned tea.Cmd is eventually invoked: quitting must be able to
@@ -288,7 +386,7 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 			done <- SuiteFinishedMsg{}
 			return
 		}
-		result, err := runner.Run(ctx, plan, sink)
+		result, err := runner.Run(ctx, plan, sink, retention)
 		done <- SuiteFinishedMsg{Result: result, Err: err}
 	}()
 	<-started
@@ -384,6 +482,8 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // than wrapping into noise.
 func (m Model) View() string {
 	switch m.screen {
+	case ScreenHarnessSelect:
+		return m.viewHarnessSelect()
 	case ScreenSuiteSelect:
 		return m.viewSuiteSelect()
 	case ScreenProgress:
@@ -442,6 +542,19 @@ func (m Model) Fold(ev domain.ProgressEvent) Model {
 // Screen reports the currently active screen.
 func (m Model) Screen() Screen {
 	return m.screen
+}
+
+// SelectedHarness reports the harness identity currently selected —
+// Options.Harness until the harness-select screen changes it.
+func (m Model) SelectedHarness() string {
+	return m.selectedHarness
+}
+
+// Retention reports the sandbox retention policy currently selected —
+// Options.Retention until the suite-select screen's toggle affordance
+// changes it (Stage 7).
+func (m Model) Retention() domain.RetentionPolicy {
+	return m.retention
 }
 
 // TotalTests reports the suite's declared total, learned from

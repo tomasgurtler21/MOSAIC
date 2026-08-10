@@ -19,7 +19,23 @@ var (
 	// the failure mode the capability-honesty test exists to prevent, so
 	// the adapter fails loudly instead.
 	ErrSubstitutionUnsupported = errors.New("claudecode: this harness cannot substitute a result directly")
+	// ErrUnrecognisedDispatchToolName is returned when a native payload
+	// reports a dispatch-tool name this adapter does not know how to
+	// normalize. Passing an unrecognised name through verbatim is exactly
+	// how a vendor's next rename would become another invisible defect, so
+	// it is surfaced as a handleable error instead.
+	ErrUnrecognisedDispatchToolName = errors.New("claudecode: unrecognised native dispatch-tool name")
 )
+
+// normalizeDispatchToolName maps this harness's native dispatch-tool name to
+// the normalized, harness-neutral vocabulary authored tests use. An
+// unrecognised native name is rejected rather than passed through silently.
+func normalizeDispatchToolName(native string) (string, error) {
+	if native == NativeDispatchToolName {
+		return domain.DispatchToolName, nil
+	}
+	return "", fmt.Errorf("%w: %q", ErrUnrecognisedDispatchToolName, native)
+}
 
 // TranslateCall implements domain.HarnessAdapter. An unrecognised event, a
 // payload missing the fields identity is derived from, and a payload that
@@ -31,6 +47,8 @@ func (a *Adapter) TranslateCall(phase domain.InterceptionPhase, native []byte) (
 		return a.translatePre(native)
 	case domain.PhasePost:
 		return a.translatePost(native)
+	case domain.PhaseCompletion:
+		return a.translateCompletion(native)
 	default:
 		return domain.InterceptedCall{}, fmt.Errorf("%w: interception phase %q", ErrPayloadUnrecognised, phase)
 	}
@@ -48,6 +66,11 @@ func (a *Adapter) translatePre(native []byte) (domain.InterceptedCall, error) {
 		return domain.InterceptedCall{}, fmt.Errorf("%w: tool_name is empty", ErrIdentityUndetermined)
 	}
 
+	normalizedToolName, err := normalizeDispatchToolName(payload.ToolName)
+	if err != nil {
+		return domain.InterceptedCall{}, err
+	}
+
 	input, err := decodeTaskToolInput(payload.ToolInput)
 	if err != nil {
 		return domain.InterceptedCall{}, err
@@ -57,7 +80,7 @@ func (a *Adapter) translatePre(native []byte) (domain.InterceptedCall, error) {
 
 	return domain.InterceptedCall{
 		Phase:            domain.PhasePre,
-		Identity:         domain.CollaboratorIdentity{ToolName: payload.ToolName, AgentIdentity: input.SubagentType},
+		Identity:         domain.CollaboratorIdentity{ToolName: normalizedToolName, AgentIdentity: input.SubagentType},
 		Message:          parseTaskMessage(input.Prompt),
 		CorrelationToken: token,
 		RawPayload:       json.RawMessage(native),
@@ -77,6 +100,11 @@ func (a *Adapter) translatePost(native []byte) (domain.InterceptedCall, error) {
 		return domain.InterceptedCall{}, fmt.Errorf("%w: tool_name is empty", ErrIdentityUndetermined)
 	}
 
+	normalizedToolName, err := normalizeDispatchToolName(payload.ToolName)
+	if err != nil {
+		return domain.InterceptedCall{}, err
+	}
+
 	input, err := decodeTaskToolInput(payload.ToolInput)
 	if err != nil {
 		return domain.InterceptedCall{}, err
@@ -86,13 +114,71 @@ func (a *Adapter) translatePost(native []byte) (domain.InterceptedCall, error) {
 
 	return domain.InterceptedCall{
 		Phase:            domain.PhasePost,
-		Identity:         domain.CollaboratorIdentity{ToolName: payload.ToolName, AgentIdentity: input.SubagentType},
+		Identity:         domain.CollaboratorIdentity{ToolName: normalizedToolName, AgentIdentity: input.SubagentType},
 		Message:          parseTaskMessage(input.Prompt),
 		CorrelationToken: token,
 		RawPayload:       json.RawMessage(native),
 		Capabilities:     a.Capabilities(),
 		ObservedResponse: extractText(payload.ToolResponse),
 	}, nil
+}
+
+// translateCompletion translates the harness's SubagentStop completion
+// signal into a call carrying the recovered collaborator reply and, when
+// recoverable, the correlation token planted at the pre-invocation point.
+//
+// An absent AgentTranscriptPath or a transcript carrying no planted token
+// are both legitimate outcomes for an un-stubbed or partially-stubbed
+// dispatch (AC12.7): CorrelationToken comes back empty, never an error.
+// Only a malformed payload or a wrong hook_event_name is an error, mirroring
+// translatePre/translatePost's own validation.
+func (a *Adapter) translateCompletion(native []byte) (domain.InterceptedCall, error) {
+	var payload CompletionPayload
+	if err := json.Unmarshal(native, &payload); err != nil {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: %v", ErrPayloadMalformed, err)
+	}
+	if payload.HookEventName != "SubagentStop" {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: hook_event_name %q", ErrPayloadUnrecognised, payload.HookEventName)
+	}
+
+	return domain.InterceptedCall{
+		Phase:            domain.PhaseCompletion,
+		CorrelationToken: a.recoverCompletionToken(payload.AgentTranscriptPath),
+		RawPayload:       json.RawMessage(native),
+		Capabilities:     a.Capabilities(),
+		ObservedResponse: payload.LastAssistantMessage,
+	}, nil
+}
+
+// recoverCompletionToken reads the collaborator's own transcript file
+// (through a.opts.TranscriptReader, or the real file reader when nil) and
+// scans its entries for the correlation token planted at the pre-invocation
+// point, using the same marker PlantToken/RecoverToken use. An empty
+// transcriptPath, an unreadable transcript, or a transcript carrying no
+// planted token all resolve to an empty token — none of them is an error
+// here, since none of them is anything but a legitimate un-stubbed or
+// partially-stubbed dispatch.
+func (a *Adapter) recoverCompletionToken(transcriptPath string) string {
+	if transcriptPath == "" {
+		return ""
+	}
+
+	reader := a.opts.TranscriptReader
+	if reader == nil {
+		reader = readTranscriptFile
+	}
+
+	entries, err := reader(transcriptPath)
+	if err != nil {
+		return ""
+	}
+
+	for _, entry := range entries {
+		if token, ok := RecoverToken(TaskToolInput{Prompt: entry}); ok {
+			return token
+		}
+	}
+	return ""
 }
 
 // decodeTaskToolInput decodes tool_input into TaskToolInput. An absent
@@ -145,8 +231,12 @@ func extractText(raw json.RawMessage) string {
 // (PhasePost), the reply always passes through and never denies, regardless
 // of what outcome the caller supplies.
 func (a *Adapter) TranslateOutcome(outcome domain.InterceptionOutcome, call domain.InterceptedCall) ([]byte, error) {
-	if call.Phase == domain.PhasePost {
-		return NeutralReply(domain.PhasePost), nil
+	if call.Phase == domain.PhasePost || call.Phase == domain.PhaseCompletion {
+		// The real call has already run by either of these phases, so the
+		// reply always passes through and never denies, regardless of what
+		// outcome the caller supplies (e.g. intercept.Decide misrouting the
+		// call through its pre-invocation decision path).
+		return NeutralReply(call.Phase), nil
 	}
 
 	switch outcome.Kind {

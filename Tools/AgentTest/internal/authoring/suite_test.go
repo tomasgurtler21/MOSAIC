@@ -18,7 +18,6 @@ schema_version: 1
 id: orchestrator-routing
 description: Routing behaviour of the standard orchestrator
 defaults:
-  harness: claude-code
   timeout: 15m
   turn_limit: 60
   repetitions: 1

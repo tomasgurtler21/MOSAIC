@@ -49,5 +49,12 @@ func evaluateConditions(ev domain.RunEvidence) []domain.RunCondition {
 		})
 	}
 
+	if !ev.LogsProduced {
+		out = append(out, domain.RunCondition{
+			Kind:   domain.ConditionNoLogsProduced,
+			Detail: fmt.Sprintf("no logs found under %s", ev.LogRoot),
+		})
+	}
+
 	return out
 }

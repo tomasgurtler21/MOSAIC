@@ -6,7 +6,6 @@ description: >
   created, and the run passes end to end through the tool's real
   non-interactive entry point.
 defaults:
-  harness: fake
   timeout: 30s
   turn_limit: 5
   repetitions: 1

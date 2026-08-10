@@ -42,6 +42,22 @@ func passResultWithCost(n int, usd float64) domain.TestResult {
 	return r
 }
 
+// infrastructureResult is a TestResult as suite.runRepetition now builds it
+// for a runner error: FAIL, ReasonInfrastructure, and a condition carrying
+// the underlying error detail. Unlike stateIntegrityResult, this is never
+// retried — NeedsRetry only recognises ReasonStateIntegrity — so a single
+// occurrence, not a recurrence, is what Aggregate must act on.
+func infrastructureResult(n int) domain.TestResult {
+	return domain.TestResult{
+		Key:     domain.RunKey{RunID: "run-1", TestID: "example", RunNumber: n},
+		Verdict: domain.VerdictFail,
+		Reasons: []domain.FailureReason{domain.ReasonInfrastructure},
+		Conditions: []domain.RunCondition{
+			{Kind: domain.ConditionRunNotStarted, Detail: "spawn-plan failed: exec: \"claude\": executable file not found in $PATH"},
+		},
+	}
+}
+
 func TestAggregate_PassRateMet_YieldsPassVerdict(t *testing.T) {
 	results := []domain.TestResult{passResult(1), passResult(2), failResult(3)}
 	policy := domain.RepetitionPolicy{Repetitions: 3, PassRate: 0.6}
@@ -168,6 +184,45 @@ func TestAggregate_StateIntegrityRecursAfterRetry_IsInfrastructureFailure(t *tes
 	}
 	if !hasReason(got.Reasons, domain.ReasonInfrastructure) {
 		t.Errorf("Reasons = %+v, want ReasonInfrastructure — this is a tool fault, not a subject regression", got.Reasons)
+	}
+}
+
+// TestAggregate_SingleInfrastructureReasonResult_SetsInfrastructureFailure
+// covers AC1.5: an infrastructure-reason result — the shape suite.runRepetition
+// now builds for a runner error — must set InfrastructureFailure on a single
+// occurrence, unlike the two-occurrence rule that applies to a recurring
+// state-integrity fault.
+func TestAggregate_SingleInfrastructureReasonResult_SetsInfrastructureFailure(t *testing.T) {
+	results := []domain.TestResult{infrastructureResult(1)}
+	policy := domain.RepetitionPolicy{Repetitions: 1, PassRate: 1.0}
+
+	got := evaluate.Aggregate(results, policy)
+
+	if !got.InfrastructureFailure {
+		t.Error("InfrastructureFailure = false, want true — a single infrastructure-reason result must be enough, it is never retried like a state-integrity fault")
+	}
+	if got.Verdict != domain.VerdictFail {
+		t.Errorf("Verdict = %q, want FAIL", got.Verdict)
+	}
+	if !hasReason(got.Reasons, domain.ReasonInfrastructure) {
+		t.Errorf("Reasons = %+v, want ReasonInfrastructure", got.Reasons)
+	}
+}
+
+// TestAggregate_InfrastructureReasonAmongOtherwisePassingRuns_StillFlagsInfrastructureFailure
+// confirms an infrastructure fault on one repetition is never masked by other
+// repetitions of the same test passing cleanly.
+func TestAggregate_InfrastructureReasonAmongOtherwisePassingRuns_StillFlagsInfrastructureFailure(t *testing.T) {
+	results := []domain.TestResult{passResult(1), infrastructureResult(2), passResult(3)}
+	policy := domain.RepetitionPolicy{Repetitions: 3, PassRate: 1.0}
+
+	got := evaluate.Aggregate(results, policy)
+
+	if !got.InfrastructureFailure {
+		t.Error("InfrastructureFailure = false, want true — an infrastructure fault on one repetition must not be masked by the others passing")
+	}
+	if got.Verdict != domain.VerdictFail {
+		t.Errorf("Verdict = %q, want FAIL — an infrastructure fault must never read as an overall pass", got.Verdict)
 	}
 }
 

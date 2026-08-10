@@ -1,8 +1,9 @@
 package claudecode_test
 
-// Tests for the environment pre-flight check (part of T10.3, and the method
-// AC10.6 and AC10.7 name explicitly as the surface the driver calls before
-// the first spawn).
+// Tests for the environment pre-flight check, now reached through
+// domain.HarnessAdapter.CheckEnvironment (Stage 3's port method) rather than
+// a claudecode-local method: this adapter's existing check moves behind the
+// port without losing any check it already performs (AC3.4).
 //
 // CheckEnvironment integrates interpreter resolution, bundle readability,
 // binary-path resolution and outside-scope inspection into one report. A
@@ -11,10 +12,12 @@ package claudecode_test
 // Detail naming what was tried and what to do.
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/harness/claudecode"
 )
 
@@ -29,14 +32,17 @@ func TestCheckEnvironment_UnresolvableInterpreterFails(t *testing.T) {
 
 	adapter := claudecode.New(claudecode.Options{Interpreter: bogus})
 
-	report := adapter.CheckEnvironment(testContext())
+	report, err := adapter.CheckEnvironment(testContext())
+	if err != nil {
+		t.Fatalf("CheckEnvironment: %v", err)
+	}
 	if report.OK() {
 		t.Fatalf("CheckEnvironment: OK() = true, want false for an unresolvable interpreter")
 	}
 
 	var found bool
 	for _, p := range report.Problems {
-		if p.Kind != claudecode.ProblemInterpreterUnresolved {
+		if p.Kind != domain.ProblemInterpreterUnresolved {
 			continue
 		}
 		found = true
@@ -64,14 +70,17 @@ func TestCheckEnvironment_UnreadableBundleFails(t *testing.T) {
 		LoggerBundleDir: missing,
 	})
 
-	report := adapter.CheckEnvironment(testContext())
+	report, err := adapter.CheckEnvironment(testContext())
+	if err != nil {
+		t.Fatalf("CheckEnvironment: %v", err)
+	}
 	if report.OK() {
 		t.Fatalf("CheckEnvironment: OK() = true, want false for an unreadable bundle directory")
 	}
 
 	var found bool
 	for _, p := range report.Problems {
-		if p.Kind != claudecode.ProblemBundleUnreadable {
+		if p.Kind != domain.ProblemBundleUnreadable {
 			continue
 		}
 		found = true
@@ -81,6 +90,86 @@ func TestCheckEnvironment_UnreadableBundleFails(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("CheckEnvironment: Problems = %+v, want a ProblemBundleUnreadable entry", report.Problems)
+	}
+}
+
+// TestCheckEnvironment_MissingBundle_DetailNamesExpectedLayout asserts that
+// an absent logger-bundle directory produces a Detail naming the expected
+// bundle layout — the manifest file and the per-variant directory shape —
+// rather than the bare file-not-found text hookbundle.Load's own error
+// carries today. AC6.2 requires this for both an absent bundle and a
+// misshapen one; this covers the absent case.
+func TestCheckEnvironment_MissingBundle_DetailNamesExpectedLayout(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist", "bundle")
+
+	adapter := claudecode.New(claudecode.Options{
+		Interpreter:     "py",
+		LoggerBundleDir: missing,
+	})
+
+	report, err := adapter.CheckEnvironment(testContext())
+	if err != nil {
+		t.Fatalf("CheckEnvironment: %v", err)
+	}
+
+	var found bool
+	for _, p := range report.Problems {
+		if p.Kind != domain.ProblemBundleUnreadable && p.Kind != domain.ProblemBundleMisshapen {
+			continue
+		}
+		found = true
+		if !strings.Contains(p.Detail, "hook.yaml") {
+			t.Errorf("CheckEnvironment: bundle problem Detail %q does not name the manifest file (%q); AC6.2 requires the expected layout, not a bare file-not-found", p.Detail, "hook.yaml")
+		}
+		if !strings.Contains(p.Detail, missing) {
+			t.Errorf("CheckEnvironment: bundle problem Detail %q does not name the searched path %q", p.Detail, missing)
+		}
+		if !strings.Contains(p.Detail, "--logger-bundle") {
+			t.Errorf("CheckEnvironment: bundle problem Detail %q does not name the --logger-bundle override", p.Detail)
+		}
+	}
+	if !found {
+		t.Errorf("CheckEnvironment: Problems = %+v, want a bundle problem for a missing directory", report.Problems)
+	}
+}
+
+// TestCheckEnvironment_MisshapenBundle_IsDistinctFromUnreadableAndNamesLayout
+// asserts that a bundle directory that exists but whose manifest cannot be
+// parsed is classified ProblemBundleMisshapen — distinct from an absent or
+// otherwise unreadable directory — and that its Detail names the expected
+// layout the same way the absent case does.
+func TestCheckEnvironment_MisshapenBundle_IsDistinctFromUnreadableAndNamesLayout(t *testing.T) {
+	dir := t.TempDir()
+	malformed := "not: [valid, yaml: structure"
+	if err := os.WriteFile(filepath.Join(dir, "hook.yaml"), []byte(malformed), 0o644); err != nil {
+		t.Fatalf("writing malformed hook.yaml: %v", err)
+	}
+
+	adapter := claudecode.New(claudecode.Options{
+		Interpreter:     "py",
+		LoggerBundleDir: dir,
+	})
+
+	report, err := adapter.CheckEnvironment(testContext())
+	if err != nil {
+		t.Fatalf("CheckEnvironment: %v", err)
+	}
+
+	var found bool
+	for _, p := range report.Problems {
+		if p.Kind != domain.ProblemBundleMisshapen {
+			continue
+		}
+		found = true
+		if !strings.Contains(p.Detail, "hook.yaml") {
+			t.Errorf("CheckEnvironment: misshapen-bundle Detail %q does not name the manifest file", p.Detail)
+		}
+		if !strings.Contains(p.Detail, dir) {
+			t.Errorf("CheckEnvironment: misshapen-bundle Detail %q does not name the searched path %q", p.Detail, dir)
+		}
+	}
+	if !found {
+		t.Errorf("CheckEnvironment: Problems = %+v, want a ProblemBundleMisshapen entry for a bundle directory whose manifest cannot be parsed — distinct from ProblemBundleUnreadable, which names an absent or unreadable directory", report.Problems)
 	}
 }
 
@@ -101,14 +190,17 @@ func TestCheckEnvironment_CompetingOutsideScopeRewriterFails(t *testing.T) {
 		ScopeProbe:  probe,
 	})
 
-	report := adapter.CheckEnvironment(testContext())
+	report, err := adapter.CheckEnvironment(testContext())
+	if err != nil {
+		t.Fatalf("CheckEnvironment: %v", err)
+	}
 	if report.OK() {
 		t.Fatalf("CheckEnvironment: OK() = true, want false when an outside scope has a competing input-rewriting hook")
 	}
 
 	var found bool
 	for _, p := range report.Problems {
-		if p.Kind != claudecode.ProblemCompetingRewriter {
+		if p.Kind != domain.ProblemCompetingRewriter {
 			continue
 		}
 		found = true
@@ -139,8 +231,21 @@ func TestCheckEnvironment_HealthyConfigurationIsOK(t *testing.T) {
 		ScopeProbe:      probe,
 	})
 
-	report := adapter.CheckEnvironment(testContext())
+	report, err := adapter.CheckEnvironment(testContext())
+	if err != nil {
+		t.Fatalf("CheckEnvironment: %v", err)
+	}
 	if !report.OK() {
 		t.Errorf("CheckEnvironment: OK() = false, want true for a resolvable interpreter, a readable bundle and no competing outside-scope hooks; problems=%+v", report.Problems)
+	}
+
+	// claudecode always runs an interpreter, so a healthy check must resolve
+	// and report it — an adapter that ran no interpreter would leave both
+	// zero-valued, per InterpreterApplicable's honesty obligation.
+	if !report.InterpreterApplicable {
+		t.Errorf("CheckEnvironment: InterpreterApplicable = false, want true — claudecode always runs an interpreter")
+	}
+	if report.InterpreterCmd != "py" {
+		t.Errorf("CheckEnvironment: InterpreterCmd = %q, want %q", report.InterpreterCmd, "py")
 	}
 }

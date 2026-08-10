@@ -8,6 +8,7 @@ checkout-rejects-invalid-cart: FAIL [assertion_failure]
 checkout-times-out: TIMEOUT [timeout]
 checkout-state-integrity-fault: FAIL [state_integrity] (infrastructure failure)
 checkout-cost-unattributed: PASS [cost_unattributed]
+  ! cost_unattributed: log root missing
 
 Totals: FAIL=2 PASS=2 TIMEOUT=1
 Infrastructure failures: 1

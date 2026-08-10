@@ -112,6 +112,17 @@ type standinScript struct {
 	// field's whole job is to make the sandbox look, at the moment the
 	// subject starts, exactly like one a crashed prior holder left behind.
 	SeedDeadLock bool `json:"seed_dead_lock,omitempty"`
+	// SeedDeadLockOnce seeds the dead lock on the first spawn only. A marker
+	// file is written beside the script path (scriptEnvVar) after the first
+	// seed; subsequent spawns that find the marker skip seeding. This lets
+	// the retry run clean and demonstrate that a recovered repetition reports
+	// one excluded attempt, one counted attempt and aggregate PASS.
+	//
+	// The marker persists across spawns because the script path lives in a
+	// per-test temp directory that survives for the duration of the Go test,
+	// while each spawn gets a fresh sandbox — the same script path is shared
+	// across attempts even as sandboxes are isolated.
+	SeedDeadLockOnce bool `json:"seed_dead_lock_once,omitempty"`
 	// ProbeFiles, when non-empty, are paths (relative to the sandbox's
 	// subject directory) runStandin checks for existence right after a
 	// batch's pre-invocation interception phase returns — before the
@@ -253,6 +264,26 @@ func runStandin() int {
 			fmt.Fprintln(os.Stderr, "fake-subject: seeding dead lock:", err)
 			return printFallbackResult()
 		}
+	}
+
+	if sc.SeedDeadLockOnce {
+		markerPath := os.Getenv(scriptEnvVar) + ".seed_once_done"
+		if _, statErr := os.Stat(markerPath); os.IsNotExist(statErr) {
+			// First spawn: seed the dead lock and create the marker so
+			// subsequent spawns (the retry) skip seeding and run clean.
+			if err := seedDeadLock(controlDir); err != nil {
+				fmt.Fprintln(os.Stderr, "fake-subject: seeding dead lock (once):", err)
+				return printFallbackResult()
+			}
+			if err := os.WriteFile(markerPath, []byte("done"), 0o644); err != nil {
+				// Marker creation failed; log it but continue — the lock is
+				// already seeded for this spawn, so skipping the marker only
+				// risks seeding twice on the retry rather than corrupting
+				// this attempt's result.
+				fmt.Fprintln(os.Stderr, "fake-subject: writing seed-once marker:", err)
+			}
+		}
+		// Subsequent spawns: marker exists, skip seeding.
 	}
 
 	turns, err := readSubjectTurns()

@@ -17,20 +17,20 @@ import (
 )
 
 func TestExamples_DocumentationGradeSamples_PassPreflightAndRunGreen(t *testing.T) {
-	requirementsRefinement := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "requirements-refinement"}
-	researcher := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "researcher"}
-	libResearcher := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "library-researcher"}
-	planner := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "planner"}
+	requirementsRefinement := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "requirements-refinement"}
+	researcher := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "researcher"}
+	libResearcher := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "library-researcher"}
+	planner := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "planner"}
 
 	script := fakeOptionsFor(
 		domain.HarnessCapabilities{SupportsDirectSubstitution: false},
 		[]subjectStep{
-			invoke("Task", "requirements-refinement"),
+			invoke("dispatch", "requirements-refinement"),
 			// No Result turn between these two Invoke turns: one concurrency
 			// batch, matching the declared research-fanout parallel group.
-			invoke("Task", "researcher"),
-			invoke("Task", "library-researcher"),
-			invoke("Task", "planner"),
+			invoke("dispatch", "researcher"),
+			invoke("dispatch", "library-researcher"),
+			invoke("dispatch", "planner"),
 			finish(`{"agent_instance_id":"orchestrator#5","run_id":"full-workflow-run","status_code":"SUCCESS","status_message":"Workflow complete."}`),
 		},
 	)

@@ -4,15 +4,13 @@ description: >
   Documentation-grade sample suite (T18.11): one full-workflow
   orchestrator-layer test and one single-decision subagent-layer test,
   written the way a test author would write them and readable as the
-  format's own documentation. Unlike testdata/examples' reference fixtures
-  (which declare harness: claude-code and exist only to be parsed by
-  pre-flight's own package tests), this suite declares harness: fake and is
-  actually exercised end to end by this stage's own test suite — see
-  Tools/AgentTest/e2e/examples_test.go — so an example that stops matching
-  the implementation breaks the build rather than misleading its next
-  reader.
+  format's own documentation. A suite is harness-agnostic: it declares no
+  harness of its own, and runs against whichever harness the invocation
+  selects. This suite is actually exercised end to end by this stage's own
+  test suite — see Tools/AgentTest/e2e/examples_test.go — so an example that
+  stops matching the implementation breaks the build rather than misleading
+  its next reader.
 defaults:
-  harness: fake
   timeout: 15m
   turn_limit: 60
   repetitions: 1

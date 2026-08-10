@@ -4,10 +4,11 @@ description: >
   Documentation-grade example of a full-workflow orchestrator-layer test: it
   exercises every declared concept a test definition carries — a
   parallel-invocation group, an exact invocation-sequence assertion, a
-  seeded final orchestration state and execution log, a clean protocol
-  (zero violations), created and never-created artifacts, a reconstructed
-  concurrency minimum, and a task-message check — against one fixed,
-  deterministic scripted run.
+  seeded final orchestration state and execution log, created and
+  never-created artifacts, a reconstructed concurrency minimum, and a
+  task-message check — against one fixed, deterministic scripted run. Note
+  that layer: orchestrator suppresses protocol-message validation, so this
+  test declares no protocol_violations assertion.
 
 layer: orchestrator
 negative: false
@@ -32,26 +33,25 @@ seed_files:
 parallel_groups:
   - name: research-fanout
     members:
-      - { tool: Task, agent: researcher }
-      - { tool: Task, agent: library-researcher }
+      - { tool: dispatch, agent: researcher }
+      - { tool: dispatch, agent: library-researcher }
 
 assertions:
   invocation_sequence:
     exact: true
     steps:
-      - { tool: Task, agent: requirements-refinement }
+      - { tool: dispatch, agent: requirements-refinement }
       - group: research-fanout
         members:
-          - { tool: Task, agent: researcher }
-          - { tool: Task, agent: library-researcher }
-      - { tool: Task, agent: planner }
+          - { tool: dispatch, agent: researcher }
+          - { tool: dispatch, agent: library-researcher }
+      - { tool: dispatch, agent: planner }
   final_state:
     phase: COMPLETED
     last_status: SUCCESS
   execution_log:
     agent_ids: ["requirements-refinement#1", "researcher#2", "library-researcher#3", "planner#4"]
     all_status: SUCCESS
-  protocol_violations: 0
   artifact_created:
     - Requirements.md
     - Research.md
@@ -61,5 +61,5 @@ assertions:
     research-fanout: 2
   task_messages:
     - at: 4
-      identity: { tool: Task, agent: planner }
+      identity: { tool: dispatch, agent: planner }
       task_description_contains: ["plan"]

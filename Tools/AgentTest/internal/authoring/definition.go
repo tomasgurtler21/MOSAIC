@@ -25,6 +25,12 @@ var definitionKnownFields = map[string]bool{
 	"seed_files":             true,
 	"parallel_groups":        true,
 	"assertions":             true,
+
+	// "harness" is a known top-level key only in the sense that its presence
+	// is recognised and rejected with a specific "removed-key-harness"
+	// diagnostic (see ParseTestDefinition), rather than falling through to
+	// the generic "unknown-field" check below.
+	"harness": true,
 }
 
 type wireSubject struct {
@@ -195,6 +201,7 @@ func ParseTestDefinition(src Source) (domain.TestDefinition, Report) {
 		return domain.TestDefinition{}, report
 	}
 	checkUnknownTopLevelFields(src, root, definitionKnownFields, &report)
+	reportRemovedHarnessKeyIfPresent(src, root, "harness", &report)
 
 	var wire wireDefinition
 	if err := goyaml.Unmarshal(src.Data, &wire); err != nil {

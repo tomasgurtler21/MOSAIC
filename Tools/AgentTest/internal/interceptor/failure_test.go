@@ -242,6 +242,9 @@ func (p panickingAdapter) TranslateCall(phase domain.InterceptionPhase, native [
 func (p panickingAdapter) TranslateOutcome(outcome domain.InterceptionOutcome, call domain.InterceptedCall) ([]byte, error) {
 	return p.inner.TranslateOutcome(outcome, call)
 }
+func (p panickingAdapter) CheckEnvironment(ctx context.Context) (domain.EnvironmentReport, error) {
+	return p.inner.CheckEnvironment(ctx)
+}
 
 func TestRun_FailureContainment_UnexpectedPanic(t *testing.T) {
 	h := newHarness(t, baseState(), domain.StubRegistry{OnUnmatched: domain.UnmatchedHalt}, domain.HarnessCapabilities{SupportsDirectSubstitution: true}, nil)

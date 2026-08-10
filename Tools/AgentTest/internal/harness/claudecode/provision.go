@@ -2,7 +2,9 @@ package claudecode
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,7 +47,26 @@ type Options struct {
 	// NewToken generates a correlation token. nil selects the default
 	// generator, whose opacity is a tested property.
 	NewToken func() string
+
+	// TranscriptReader reads a collaborator's own transcript file (named by
+	// the completion signal's agent_transcript_path) and returns its entries
+	// as raw text, one string per entry, in file order. It exists so
+	// recovering the correlation token planted at the pre-invocation point
+	// (which the completion signal does not carry directly) does not perform
+	// direct file I/O in a code path a test cannot substitute. nil selects
+	// the real reader.
+	TranscriptReader TranscriptReader
+
+	// Credentials supplies the harness credential material Provision seeds
+	// into the relocated config home. nil selects the real
+	// user-home-based source. A test substitutes this seam so no test run
+	// ever reads or copies the developer's real credentials.
+	Credentials CredentialSource
 }
+
+// TranscriptReader reads a collaborator transcript file and returns its
+// entries' raw text in file order. See Options.TranscriptReader.
+type TranscriptReader func(path string) ([]string, error)
 
 // Adapter implements domain.HarnessAdapter for the Claude Code harness.
 type Adapter struct {
@@ -74,10 +95,15 @@ func (a *Adapter) ID() string {
 //	    response. Every stubbed call therefore travels the prompt-rewrite
 //	    path.
 //	SupportsPostInterception:   true
-//	    A post-invocation point exists and observes the real result, which
-//	    is what makes in-flight echo-fidelity comparison possible. It cannot
-//	    overwrite a built-in tool's recorded result, which is why it is only
-//	    ever an observation point here.
+//	    A post-invocation point exists, but it fires when the collaborator is
+//	    launched, not when it finishes: it carries the harness's async-launch
+//	    acknowledgement, never the collaborator's real reply. It remains an
+//	    observation point (it never denies), but echo fidelity cannot be
+//	    evaluated against what it observes.
+//	SupportsReplyRecovery:      true
+//	    The collaborator's real reply is recovered from the harness's own
+//	    completion signal (its SubagentStop hook) instead, which is what
+//	    makes echo-fidelity comparison possible on this harness.
 //	CorrelationField:           "tool_input.prompt"
 //	RegistrationModel:          domain.RegistrationSharedFile
 //	BridgeKind:                 domain.BridgeSpawned
@@ -85,9 +111,11 @@ func Capabilities() domain.HarnessCapabilities {
 	return domain.HarnessCapabilities{
 		SupportsDirectSubstitution: false,
 		SupportsPostInterception:   true,
+		SupportsReplyRecovery:      true,
 		CorrelationField:           "tool_input.prompt",
 		RegistrationModel:          domain.RegistrationSharedFile,
 		BridgeKind:                 domain.BridgeSpawned,
+		ProducibleToolNames:        []string{domain.DispatchToolName},
 	}
 }
 
@@ -125,70 +153,40 @@ func (a *Adapter) InspectScopes(ctx context.Context) ([]domain.ScopeFinding, err
 	return findings, nil
 }
 
-// EnvironmentProblemKind names one class of pre-flight environment failure.
-type EnvironmentProblemKind string
-
-const (
-	ProblemInterpreterUnresolved EnvironmentProblemKind = "interpreter_unresolved"
-	ProblemBundleUnreadable      EnvironmentProblemKind = "bundle_unreadable"
-	ProblemBinaryPathUnresolved  EnvironmentProblemKind = "binary_path_unresolved"
-	ProblemCompetingRewriter     EnvironmentProblemKind = "competing_rewriter"
-)
-
-// EnvironmentProblem is one pre-flight failure.
-type EnvironmentProblem struct {
-	Kind   EnvironmentProblemKind
-	Detail string // names what was tried and what to do about it
-}
-
-// EnvironmentReport is the outcome of CheckEnvironment.
-type EnvironmentReport struct {
-	Interpreter Interpreter
-	Scopes      []domain.ScopeFinding
-	BinaryPath  string
-	Problems    []EnvironmentProblem
-}
-
-// OK reports whether the environment is usable: no problem was found.
-func (r EnvironmentReport) OK() bool {
-	return len(r.Problems) == 0
-}
-
-// CheckEnvironment validates everything that must hold before the first
-// subject is spawned: an interpreter the logger bundle can actually run, a
-// readable bundle, a resolvable binary path for the bridge, and
-// configuration scopes free of competing input rewriters.
+// CheckEnvironment implements domain.HarnessAdapter. It validates everything
+// that must hold before the first subject is spawned: an interpreter the
+// logger bundle can actually run, a readable bundle, a resolvable binary
+// path for the bridge, and configuration scopes free of competing input
+// rewriters. It loses no check the pre-port CheckEnvironment performed.
 //
-// It is called by the driver during pre-flight, not during provisioning,
-// because a wrong interpreter yields a run with no logs and therefore no
-// cost — a silent failure that must surface before an agent's cost is
-// incurred.
-func (a *Adapter) CheckEnvironment(ctx context.Context) EnvironmentReport {
-	var report EnvironmentReport
+// It is called during pre-flight, not during provisioning, because a wrong
+// interpreter yields a run with no logs and therefore no cost — a silent
+// failure that must surface before an agent's cost is incurred.
+func (a *Adapter) CheckEnvironment(ctx context.Context) (domain.EnvironmentReport, error) {
+	var report domain.EnvironmentReport
+	report.InterpreterApplicable = true
 
 	interp, err := ResolveInterpreter(ctx, a.opts.Interpreter)
-	report.Interpreter = interp
+	report.InterpreterCmd = interp.Command
+	report.InterpreterTried = interp.Tried
 	if err != nil {
-		report.Problems = append(report.Problems, EnvironmentProblem{
-			Kind:   ProblemInterpreterUnresolved,
+		report.Problems = append(report.Problems, domain.EnvironmentProblem{
+			Kind:   domain.ProblemInterpreterUnresolved,
 			Detail: err.Error(),
 		})
 	}
 
 	if a.opts.LoggerBundleDir != "" {
 		if _, err := hookbundle.Load(a.opts.LoggerBundleDir); err != nil {
-			report.Problems = append(report.Problems, EnvironmentProblem{
-				Kind:   ProblemBundleUnreadable,
-				Detail: fmt.Sprintf("logger bundle at %q: %v", a.opts.LoggerBundleDir, err),
-			})
+			report.Problems = append(report.Problems, bundleProblem(a.opts.LoggerBundleDir, err))
 		}
 	}
 
 	binPath, err := a.resolveSelfPath()
 	report.BinaryPath = binPath
 	if err != nil {
-		report.Problems = append(report.Problems, EnvironmentProblem{
-			Kind:   ProblemBinaryPathUnresolved,
+		report.Problems = append(report.Problems, domain.EnvironmentProblem{
+			Kind:   domain.ProblemBinaryPathUnresolved,
 			Detail: err.Error(),
 		})
 	}
@@ -198,15 +196,48 @@ func (a *Adapter) CheckEnvironment(ctx context.Context) EnvironmentReport {
 	if err == nil {
 		for _, f := range findings {
 			if f.RewritesInput && !f.Neutralized {
-				report.Problems = append(report.Problems, EnvironmentProblem{
-					Kind:   ProblemCompetingRewriter,
+				report.Problems = append(report.Problems, domain.EnvironmentProblem{
+					Kind:   domain.ProblemCompetingRewriter,
 					Detail: f.Detail,
 				})
 			}
 		}
 	}
 
-	return report
+	return report, nil
+}
+
+// expectedBundleLayout names the logger-bundle directory shape
+// hookbundle.Load requires, verbatim as ContractsDesign.md's configuration
+// resolution contract states it. bundleProblem's Detail always includes
+// this: a bundle problem must name what is expected, not only that
+// something failed.
+const expectedBundleLayout = `logger-bundle/
+  hook.yaml                 <- the bundle manifest
+  claude-code/               <- one directory per harness variant
+    mosaic_logger.py
+    mosaic_logger_core.py
+    ...`
+
+// bundleProblem classifies a hookbundle.Load failure into the neutral
+// vocabulary and names the expected layout, the path that was searched, and
+// the --logger-bundle override that would change it — never a bare
+// file-not-found (AC6.2). A manifest that exists but cannot be parsed is
+// ProblemBundleMisshapen, distinct from an absent or otherwise unreadable
+// directory (ProblemBundleUnreadable): the two call for different fixes.
+func bundleProblem(bundleDir string, loadErr error) domain.EnvironmentProblem {
+	kind := domain.ProblemBundleUnreadable
+	if errors.Is(loadErr, hookbundle.ErrMalformedManifest) {
+		kind = domain.ProblemBundleMisshapen
+	}
+
+	return domain.EnvironmentProblem{
+		Kind: kind,
+		Detail: fmt.Sprintf(
+			"logger bundle at %s could not be loaded: %v\nexpected layout (override with --logger-bundle or the MOSAIC_AGENT_TEST_LOGGER_BUNDLE environment variable):\n%s",
+			bundleDir, loadErr, expectedBundleLayout,
+		),
+	}
 }
 
 // resolveSelfPath resolves the absolute path of the running binary, through
@@ -249,9 +280,14 @@ func (a *Adapter) Provision(ctx context.Context, req domain.ProvisionRequest) (d
 	if err != nil {
 		return prov, fmt.Errorf("claudecode: building post-invocation bridge: %w", err)
 	}
+	completionBridge, err := BuildBridge(req, domain.PhaseCompletion)
+	if err != nil {
+		return prov, fmt.Errorf("claudecode: building completion bridge: %w", err)
+	}
 
-	allContribs := make([]Contribution, 0, len(bundleContribs)+1)
+	allContribs := make([]Contribution, 0, len(bundleContribs)+2)
 	allContribs = append(allContribs, InterceptorEntries(preBridge, postBridge))
+	allContribs = append(allContribs, CompletionEntry(completionBridge))
 	allContribs = append(allContribs, bundleContribs...)
 
 	if req.InterpreterCmd != "" {
@@ -286,11 +322,58 @@ func (a *Adapter) Provision(ctx context.Context, req domain.ProvisionRequest) (d
 		}
 	}
 
+	if err := a.seedCredentials(&prov, req); err != nil {
+		return prov, err
+	}
+
 	if findings, err := a.InspectScopes(ctx); err == nil {
 		prov.ScopeFindings = findings
 	}
 
 	return prov, nil
+}
+
+// seedCredentials seeds the harness's credential file(s) into the same
+// relocated config-home directory SpawnPlan points ConfigHomeEnvVar at
+// (ConfigHomeRelDir), so relocating the user scope to neutralize its
+// competing-rewriter risk does not also break the subject's ability to
+// authenticate. Every seeded path is recorded both in prov.Files (so
+// Deprovision removes it) and prov.Sensitive (so a retained sandbox never
+// keeps it — see runner.Teardown's scrub path).
+//
+// The credential source is Options.Credentials when set, and the real
+// user-home-based source otherwise. A source reporting no credentials (the
+// harness is not logged in) is not an error here: the resulting
+// authentication failure is diagnosed later from the subject's exit code and
+// stderr, not pre-empted during provisioning.
+func (a *Adapter) seedCredentials(prov *domain.Provisioning, req domain.ProvisionRequest) error {
+	src := a.opts.Credentials
+	if src == nil {
+		src = realCredentialSource{}
+	}
+
+	files, err := src.Credentials()
+	if err != nil {
+		return fmt.Errorf("claudecode: reading harness credentials: %w", err)
+	}
+
+	configHomeDir := filepath.Join(req.Sandbox.ControlDir, ConfigHomeRelDir)
+	for _, f := range files {
+		destPath, err := safeJoin(configHomeDir, f.RelPath)
+		if err != nil {
+			return fmt.Errorf("claudecode: seeded credential file %q: %w", f.RelPath, err)
+		}
+
+		mode := f.Mode
+		if mode == 0 {
+			mode = 0o600
+		}
+		if err := writeTrackedMode(prov, destPath, f.Content, mode); err != nil {
+			return err
+		}
+		prov.Sensitive = append(prov.Sensitive, destPath)
+	}
+	return nil
 }
 
 // provisionLoggerBundle resolves the bundle's variant for this harness
@@ -394,10 +477,17 @@ func safeJoin(baseDir, rel string) (string, error) {
 // the ones it creates), writes data to path, and records path — so the
 // returned ledger describes precisely what Deprovision must remove.
 func writeTracked(prov *domain.Provisioning, path string, data []byte) error {
+	return writeTrackedMode(prov, path, data, 0o644)
+}
+
+// writeTrackedMode is writeTracked with an explicit file mode — the seam
+// credential seeding uses so a credential file lands with a stricter mode
+// than the composed configuration's 0o644 default.
+func writeTrackedMode(prov *domain.Provisioning, path string, data []byte, mode fs.FileMode) error {
 	if err := ensureDirsFor(prov, filepath.Dir(path)); err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, mode); err != nil {
 		return fmt.Errorf("claudecode: writing %q: %w", path, err)
 	}
 	prov.Files = append(prov.Files, path)

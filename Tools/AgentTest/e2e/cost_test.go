@@ -33,7 +33,7 @@ func (p fixedCostProvider) Cost(ctx context.Context, q domain.CostQuery) (domain
 
 func costCheckScript() []subjectStep {
 	return []subjectStep{
-		invoke("Task", "effecter"),
+		invoke("dispatch", "effecter"),
 		finish(`{"agent_instance_id":"standin-subject#1","run_id":"cost-run","status_code":"SUCCESS","status_message":"Done."}`),
 	}
 }

@@ -7,6 +7,8 @@ package suite
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -36,10 +38,31 @@ type Options struct {
 	// samples make a burst of load part of what is being measured.
 	MaxConcurrentTests int
 
-	// RunID authors the run identity for one attempt. Injected so
-	// evidence, log locations and golden reports are reproducible in
-	// tests.
-	RunID func(testID string, runNumber int) string
+	// RunID authors the run identity for one attempt. The third
+	// argument is the zero-based attempt index within the repetition:
+	// 0 for the original attempt, 1 for the state-integrity retry.
+	// Injected so evidence, log locations and golden reports are
+	// reproducible in tests; each call for the same (testID,
+	// runNumber) pair must produce a different id for a different
+	// attempt, so the retry can get its own sandbox.
+	//
+	// Contract: whatever this returns MUST satisfy domain.ValidRunID,
+	// because the logger bundle silently buckets anything else under
+	// "unknown-run" and cost attribution then fails for a reason no
+	// message names.
+	RunID func(testID string, runNumber, attempt int) string
+
+	// Retention is the run-level sandbox retention policy, decided by the
+	// frontend. The concrete TestRunner this Suite is bound to (see
+	// internal/runner and the composition root's wiring) is the one that
+	// actually carries it into each attempt's runner.Request.Retention: the
+	// TestRunner interface's own signature stays (ctx, key, t), so a
+	// TestRunner implementation binds Retention at construction alongside
+	// its other per-invocation configuration, the same way it already binds
+	// SelfPath and LoggerBundleDir. Recorded here so the value the suite was
+	// configured with and the value reaching the runner are the same one,
+	// checkable field-for-field rather than trusted by comment.
+	Retention domain.RetentionPolicy
 }
 
 // Suite runs a validated plan and renders the single result model both
@@ -161,14 +184,20 @@ func (s *Suite) runTest(ctx context.Context, rt preflight.ResolvedTest, sink dom
 		final, attempts := s.runRepetition(ctx, rt, rep, sink, clock)
 		allResults = append(allResults, attempts...)
 		runReports = append(runReports, report.RunReport{
-			Key:             final.Key,
-			Verdict:         final.Verdict,
-			Reasons:         final.Reasons,
-			Assertions:      final.Assertions,
-			Conditions:      final.Conditions,
-			Duration:        final.Duration,
-			Cost:            final.Cost,
-			NegativeApplied: final.NegativeApplied,
+			Key:                 final.Key,
+			Verdict:             final.Verdict,
+			Reasons:             final.Reasons,
+			Assertions:          final.Assertions,
+			Conditions:          final.Conditions,
+			Duration:            final.Duration,
+			Cost:                final.Cost,
+			NegativeApplied:     final.NegativeApplied,
+			RetainedSandboxPath: final.RetainedSandboxPath,
+			Subject: report.SubjectFailure{
+				ExitCode:  final.SubjectResult.ExitCode,
+				Stderr:    final.SubjectResult.Stderr,
+				RawOutput: final.SubjectResult.RawOutput,
+			},
 		})
 
 		emitSafe(sink, domain.ProgressEvent{
@@ -208,9 +237,30 @@ func (s *Suite) runRepetition(ctx context.Context, rt preflight.ResolvedTest, re
 	var final domain.TestResult
 
 	for attempt := 0; attempt <= StateIntegrityRetries; attempt++ {
-		key := domain.RunKey{RunID: s.runID(rt.Definition.ID, rep), TestID: rt.Definition.ID, RunNumber: rep}
+		key := domain.RunKey{RunID: s.runID(rt.Definition.ID, rep, attempt), TestID: rt.Definition.ID, RunNumber: rep}
 
-		ev, _ := s.opts.Runner.Run(ctx, key, rt)
+		ev, err := s.opts.Runner.Run(ctx, key, rt)
+		if err != nil {
+			// Nothing ran: no evidence exists to evaluate, so none is
+			// evaluated. The runner's error is the only evidence there is,
+			// and it must never be discarded in favor of a zero-valued
+			// evidence set reading as a pass. This ends the retry loop for
+			// this attempt — retrying against the same unstarted-run fault
+			// would not help, unlike the state-integrity retry rule, which
+			// only fires when a run actually happened.
+			result := domain.TestResult{
+				Key:     key,
+				Verdict: domain.VerdictFail,
+				Reasons: []domain.FailureReason{domain.ReasonInfrastructure},
+				Conditions: []domain.RunCondition{{
+					Kind:   domain.ConditionRunNotStarted,
+					Detail: err.Error(),
+				}},
+			}
+			attempts = append(attempts, result)
+			final = result
+			break
+		}
 		ev.Key = key
 
 		for _, rec := range ev.Records {
@@ -238,11 +288,24 @@ func (s *Suite) runRepetition(ctx context.Context, rt preflight.ResolvedTest, re
 	return final, attempts
 }
 
-func (s *Suite) runID(testID string, runNumber int) string {
+func (s *Suite) runID(testID string, runNumber, attempt int) string {
 	if s.opts.RunID != nil {
-		return s.opts.RunID(testID, runNumber)
+		return s.opts.RunID(testID, runNumber, attempt)
 	}
-	return fmt.Sprintf("%s-%d", testID, runNumber)
+	return defaultRunID(s.opts.Clock, testID, runNumber, attempt)
+}
+
+// defaultRunID is the package's own run-identity generator, used whenever
+// Options.RunID is left nil. It produces an id in the shape
+// domain.FormatRunID renders: the instant comes from clock, so the id is
+// deterministic under an injected clock, and the four-hex-digit suffix is
+// derived from (testID, runNumber, attempt) so two different tests, two
+// repetitions of the same test, or two attempts of the same repetition —
+// even under a clock that has not advanced between them — never collide.
+func defaultRunID(clock domain.Clock, testID string, runNumber, attempt int) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s-%d-%d", testID, runNumber, attempt)))
+	suffix := hex.EncodeToString(sum[:2])
+	return domain.FormatRunID(clock.Now(), suffix)
 }
 
 // failedAssertionNames names the classes of assertions that failed, for the

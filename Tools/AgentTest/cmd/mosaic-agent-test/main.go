@@ -116,15 +116,42 @@ func resolveWiringConfig(args []string) WiringConfig {
 		// default cannot silently diverge from the catalog. The resolved
 		// value is unchanged: commonharness.HarnessIDClaudeCode and
 		// claudecode.HarnessID are the same string.
-		HarnessID:       scanFlag(args, "--harness", commonharness.HarnessIDClaudeCode),
-		FixtureRoot:     scanFlag(args, "--fixtures", "fixtures"),
-		WorkspaceRoot:   scanFlag(args, "--workspace-root", filepath.Join(os.TempDir(), "mosaic-agent-test-workspaces")),
-		SelfPath:        selfPath,
-		LoggerBundleDir: filepath.Join(selfDir, "logger-bundle"),
-		CostToolPath:    filepath.Join(selfDir, "mosaic-log-analyzer"+exeSuffix()),
-		CostTimeout:     30 * time.Second,
-		Diag:            os.Stderr, // never stdout: stdout carries the machine-readable report in --format json
+		HarnessID:     scanFlag(args, "--harness", commonharness.HarnessIDClaudeCode),
+		FixtureRoot:   scanFlag(args, "--fixtures", "fixtures"),
+		WorkspaceRoot: scanFlag(args, "--workspace-root", filepath.Join(os.TempDir(), "mosaic-agent-test-workspaces")),
+		SelfPath:      selfPath,
+
+		// Resolution order, highest precedence first: the CLI flag, then
+		// the environment variable, then the binary-relative default — see
+		// ContractsDesign.md's configuration resolution contract. The
+		// default is retained, not replaced, so a correctly staged dist/
+		// keeps working with no flag and no variable.
+		LoggerBundleDir: resolveConfiguredPath(
+			args, "--logger-bundle", "MOSAIC_AGENT_TEST_LOGGER_BUNDLE",
+			filepath.Join(selfDir, "logger-bundle"),
+		),
+		CostToolPath: resolveConfiguredPath(
+			args, "--cost-tool", "MOSAIC_AGENT_TEST_COST_TOOL",
+			filepath.Join(selfDir, "mosaic-log-analyzer"+exeSuffix()),
+		),
+
+		CostTimeout: 30 * time.Second,
+		Diag:        os.Stderr, // never stdout: stdout carries the machine-readable report in --format json
 	}
+}
+
+// resolveConfiguredPath resolves one configurable path through the
+// three-tier precedence every override in this binary follows: a CLI flag
+// (scanFlag, matching both frontends' own accepted forms), then the named
+// environment variable, then def — never replaced, only overridden.
+func resolveConfiguredPath(args []string, flagName, envName, def string) string {
+	if v := scanFlag(args, flagName, ""); v != "" {
+		return v
+	}
+	if v := os.Getenv(envName); v != "" {
+		return v
+	}
+	return def
 }
 
 // wiringFailureExitCode maps a buildDeps failure onto the CLI's own exit

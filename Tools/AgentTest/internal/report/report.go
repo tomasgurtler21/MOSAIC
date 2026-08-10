@@ -54,6 +54,25 @@ type RunReport struct {
 	Duration        time.Duration
 	Cost            domain.CostReport
 	NegativeApplied bool
+
+	// RetainedSandboxPath is the sandbox left on disk for diagnosis, empty
+	// when none was retained. Printed by both renderings: a retention
+	// feature whose path a user has to guess is not a feature.
+	RetainedSandboxPath string
+
+	// Subject carries the subject's own failure output on a non-zero exit.
+	// Zero-valued when the subject exited zero.
+	Subject SubjectFailure
+}
+
+// SubjectFailure is what a subject that exited non-zero told us. Zero-valued
+// when the subject exited zero.
+type SubjectFailure struct {
+	ExitCode int
+	// Stderr and RawOutput are truncated for display by the renderings,
+	// never dropped by the model.
+	Stderr    string
+	RawOutput string
 }
 
 // Build assembles the model from what the suite produced. Pure, so both
@@ -117,6 +136,9 @@ const (
 	ClassStateIntegrity   OutcomeClass = "state_integrity"
 	ClassCostUnattributed OutcomeClass = "cost_unattributed"
 	ClassEchoMismatch     OutcomeClass = "echo_mismatch"
+
+	// ClassSubjectFailure is a subject that exited non-zero.
+	ClassSubjectFailure OutcomeClass = "subject_failure"
 )
 
 // Classify reports every class a run exhibits, in a stable order. A run can
@@ -140,6 +162,9 @@ func Classify(r RunReport) []OutcomeClass {
 		if c.Kind == domain.ConditionCostUnattributed {
 			out = append(out, ClassCostUnattributed)
 		}
+	}
+	if r.Subject.ExitCode != 0 {
+		out = append(out, ClassSubjectFailure)
 	}
 	if len(out) == 0 && r.Verdict == domain.VerdictPass {
 		out = append(out, ClassPass)

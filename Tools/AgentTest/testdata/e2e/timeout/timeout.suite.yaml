@@ -5,7 +5,6 @@ description: >
   elapses before the scripted subject ever reaches a Result turn must earn
   the timeout verdict rather than being reported as an ordinary failure.
 defaults:
-  harness: fake
   timeout: 200ms
   turn_limit: 5
   repetitions: 1

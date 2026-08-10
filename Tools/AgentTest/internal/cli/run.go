@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	commonharness "mosaic-common/harness"
+
 	"mosaic-agent-test/internal/authoring"
 	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/preflight"
@@ -26,6 +28,21 @@ var valueFlags = map[string]bool{
 	"workspace-root": true,
 	"timeout":        true,
 	"repetitions":    true,
+
+	// logger-bundle and cost-tool are recognised-and-ignored here, the same
+	// way tui is: both are pre-scanned by the composition root ahead of
+	// this parser (see cmd/mosaic-agent-test's resolveWiringConfig), so
+	// this package owes them nothing beyond not rejecting them as unknown.
+	"logger-bundle": true,
+	"cost-tool":     true,
+}
+
+// boolFlags are the flags this package's command surface accepts that take
+// no value, other than --tui (handled separately above) and --help/-h
+// (handled ahead of parseInvocation).
+var boolFlags = map[string]bool{
+	"keep-sandbox":            true,
+	"keep-sandbox-on-failure": true,
 }
 
 // parsedInvocation is the result of tokenising the command line: the
@@ -35,6 +52,7 @@ type parsedInvocation struct {
 	command    string
 	suitePath  string
 	flags      map[string]string
+	boolFlags  map[string]bool
 	tuiPresent bool
 }
 
@@ -50,6 +68,23 @@ func (e usageError) Error() string { return e.msg }
 // Execute in cli.go so the file layout matches the plan: command tree, flag
 // parsing and the run/validate paths live here.
 func execute(ctx context.Context, args []string, o Options) int {
+	if helpRequested(args) {
+		if err := Usage(o.Stdout, o); err != nil {
+			fmt.Fprintf(o.Stderr, "error: %v\n", err)
+			return ExitFailure
+		}
+		return ExitSuccess
+	}
+
+	if len(args) == 0 {
+		// A bare invocation shows the full usage surface, not only the
+		// terse "no command given" message: an invocation naming no
+		// command is still a usage error (ExitUsage), but the response to
+		// it must be the same surface --help produces.
+		_ = Usage(o.Stderr, o)
+		return ExitUsage
+	}
+
 	inv, err := parseInvocation(args)
 	if err != nil {
 		fmt.Fprintf(o.Stderr, "error: %v\n", err)
@@ -67,13 +102,26 @@ func execute(ctx context.Context, args []string, o Options) int {
 	}
 }
 
+// helpRequested reports whether args carries an explicit help request
+// (--help or -h) anywhere. Checked ahead of parseInvocation so a help
+// request is honoured regardless of position, without teaching the
+// command/flag parser its own help vocabulary.
+func helpRequested(args []string) bool {
+	for _, a := range args {
+		if a == "--help" || a == "-h" {
+			return true
+		}
+	}
+	return false
+}
+
 // parseInvocation tokenises the raw command line into a command name, a
 // positional suite path and a set of flag values, accepting both
 // space-separated ("--flag value") and equals-separated ("--flag=value")
 // forms equivalently. An unrecognised flag or a value-flag stated without a
 // value is a usageError.
 func parseInvocation(args []string) (parsedInvocation, error) {
-	inv := parsedInvocation{flags: map[string]string{}}
+	inv := parsedInvocation{flags: map[string]string{}, boolFlags: map[string]bool{}}
 
 	if len(args) == 0 {
 		return inv, usageError{"no command given; want \"run\" or \"validate\""}
@@ -101,6 +149,11 @@ func parseInvocation(args []string) (parsedInvocation, error) {
 
 		if name == "tui" {
 			inv.tuiPresent = true
+			continue
+		}
+
+		if boolFlags[name] {
+			inv.boolFlags[name] = true
 			continue
 		}
 
@@ -161,7 +214,24 @@ func resolveInput(inv parsedInvocation, o Options) (preflight.Input, error) {
 		in.Overrides.Repetitions = &n
 	}
 
+	if len(o.Harnesses) > 0 && !harnessRecognised(in.HarnessID, o.Harnesses) {
+		return in, usageError{fmt.Sprintf("unrecognised --harness value %q", in.HarnessID)}
+	}
+
 	return in, nil
+}
+
+// harnessRecognised reports whether id names an entry in catalog. Validation
+// only runs when a catalog was actually supplied: Options.Harnesses is
+// empty in every context that has not been wired to a catalog, and an empty
+// catalog must never reject every value.
+func harnessRecognised(id string, catalog []commonharness.CLIHarness) bool {
+	for _, h := range catalog {
+		if h.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveFormat validates the --format flag against the documented
@@ -177,6 +247,21 @@ func resolveFormat(inv parsedInvocation) (string, error) {
 	default:
 		return "", usageError{fmt.Sprintf("invalid --format value %q; want \"text\" or \"json\"", format)}
 	}
+}
+
+// resolveRetention resolves --keep-sandbox and --keep-sandbox-on-failure into
+// the sandbox retention policy: domain.RetainNever when neither is present,
+// domain.RetainOnFailure for --keep-sandbox-on-failure alone, and
+// domain.RetainAlways for --keep-sandbox alone or both together (the
+// stronger policy wins; specifying both is not an error).
+func resolveRetention(inv parsedInvocation) domain.RetentionPolicy {
+	if inv.boolFlags["keep-sandbox"] {
+		return domain.RetainAlways
+	}
+	if inv.boolFlags["keep-sandbox-on-failure"] {
+		return domain.RetainOnFailure
+	}
+	return domain.RetainNever
 }
 
 // resolveWorkspaceRoot resolves --workspace-root against Options.WorkspaceRoot
@@ -210,7 +295,10 @@ func runCommand(ctx context.Context, inv parsedInvocation, o Options) int {
 		return ExitPreflight
 	}
 
-	cfg := RunConfig{WorkspaceRoot: resolveWorkspaceRoot(inv, o)}
+	cfg := RunConfig{
+		WorkspaceRoot: resolveWorkspaceRoot(inv, o),
+		Retention:     resolveRetention(inv),
+	}
 	runner, err := o.Suite(cfg)
 	if err != nil {
 		fmt.Fprintf(o.Stderr, "error: could not build the suite runner: %v\n", err)

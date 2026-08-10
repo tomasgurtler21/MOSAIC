@@ -7,6 +7,7 @@ import (
 	"time"
 
 	goyaml "github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
 
 	"mosaic-agent-test/internal/domain"
 )
@@ -23,8 +24,12 @@ var suiteKnownFields = map[string]bool{
 // carry, shared by suite defaults, suite entry overrides and a test
 // definition's own settings. Pointer fields mirror domain.RunSettings: a nil
 // field is "not stated at this level", not "stated as zero".
+//
+// harness: is deliberately absent. A suite is harness-agnostic and carries
+// no harness identity of its own — the harness is always selected
+// externally, by the invocation. A document still declaring it is rejected
+// (see reportRemovedHarnessKeyIfPresent), never silently ignored.
 type WireSettings struct {
-	Harness              string   `yaml:"harness" json:"harness"`
 	Timeout              *string  `yaml:"timeout" json:"timeout"`
 	TurnLimit            *int     `yaml:"turn_limit" json:"turn_limit"`
 	Repetitions          *int     `yaml:"repetitions" json:"repetitions"`
@@ -36,7 +41,6 @@ type WireSettings struct {
 // translation is Timeout, whose wire form is a duration string.
 func (w WireSettings) toDomain(src Source, pointer string, report *Report) domain.RunSettings {
 	settings := domain.RunSettings{
-		HarnessID:            w.Harness,
 		TurnLimit:            w.TurnLimit,
 		Repetitions:          w.Repetitions,
 		PassRate:             w.PassRate,
@@ -82,6 +86,12 @@ func ParseSuite(src Source) (domain.TestSuite, Report) {
 		return domain.TestSuite{}, report
 	}
 	checkUnknownTopLevelFields(src, root, suiteKnownFields, &report)
+	reportRemovedHarnessKeyIfPresent(src, mappingChild(root, "defaults"), "defaults.harness", &report)
+	if testsNode, ok := mappingChild(root, "tests").(*ast.SequenceNode); ok {
+		for i, item := range testsNode.Values {
+			reportRemovedHarnessKeyIfPresent(src, item, sequencePointer("tests", i, "harness"), &report)
+		}
+	}
 
 	var wire wireSuite
 	if err := goyaml.Unmarshal(src.Data, &wire); err != nil {

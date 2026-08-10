@@ -1,0 +1,28 @@
+schema_version: 1
+id: lock-compromised-once
+description: >
+  The scripted subject dispatches one collaborator. The sandbox's run-state
+  lock is compromised before the first interception runs, causing a
+  state-integrity fault that is excluded and retried. The retry runs clean:
+  no dead lock is seeded for the second spawn, so the subject completes
+  normally and its assertions hold. Demonstrates recovery: one excluded
+  attempt, one counted attempt, aggregate PASS.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  definition: subject.txt
+  opening_message: |
+    Greet the one collaborator.
+  invocation_kind: subagent
+  model: default
+  allowed_tools: [Task]
+
+stub_registry: lock-compromised-once.stubs.json
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  artifact_created:
+    - greeting.txt

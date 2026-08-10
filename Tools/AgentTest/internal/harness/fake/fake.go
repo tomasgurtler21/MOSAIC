@@ -134,6 +134,15 @@ func (a *Adapter) InspectScopes(ctx context.Context) ([]domain.ScopeFinding, err
 	return nil, nil
 }
 
+// CheckEnvironment implements domain.HarnessAdapter. It is trivially
+// successful: the scripted adapter exists so a whole-pipeline run can be
+// driven with no LLM and no special case, and a pre-flight refusal from the
+// scripted adapter itself would defeat that purpose. It runs no interpreter,
+// so InterpreterApplicable stays false.
+func (a *Adapter) CheckEnvironment(ctx context.Context) (domain.EnvironmentReport, error) {
+	return domain.EnvironmentReport{}, nil
+}
+
 // fakeMarkerName is the file Provision writes into the sandbox's control
 // directory to record that this adapter is installed. Deprovision removes
 // exactly this file and any directory it created to hold it.

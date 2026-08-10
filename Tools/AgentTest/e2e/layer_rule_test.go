@@ -31,12 +31,12 @@ import (
 )
 
 func TestLayerRule_ProtocolValidation_SuppressedForOrchestratorAppliedElsewhere(t *testing.T) {
-	helper := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "helper"}
+	helper := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "helper"}
 
 	script := fakeOptionsFor(
 		domain.HarnessCapabilities{SupportsDirectSubstitution: false},
 		[]subjectStep{
-			invoke("Task", "helper"),
+			invoke("dispatch", "helper"),
 			finish(`{"agent_instance_id":"standin-subject#1","run_id":"layer-run","status_code":"SUCCESS","status_message":"Done."}`),
 		},
 	)

@@ -24,7 +24,9 @@ func CheckCapabilityHonesty(t *testing.T, cfg Config) error {
 	adapter := cfg.New(t, t.TempDir())
 	caps := adapter.Capabilities()
 
-	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "Worker"}
+	// Normalized vocabulary: NativePre encodes it into the harness's own
+	// wire shape, per Config.NativePre's doc comment.
+	id := domain.CollaboratorIdentity{ToolName: domain.DispatchToolName, AgentIdentity: "Worker"}
 	msg := domain.TaskMessage{
 		AgentInstanceID: "Worker#1",
 		TaskDescription: "do the work",
@@ -74,6 +76,48 @@ func CheckCapabilityHonesty(t *testing.T, cfg Config) error {
 	}
 	if observed.CorrelationToken != token {
 		return fmt.Errorf("capability honesty: observed CorrelationToken = %q, want %q", observed.CorrelationToken, token)
+	}
+
+	if err := checkReplyRecoveryHonesty(t, cfg, caps); err != nil {
+		return err
+	}
+	return nil
+}
+
+// checkReplyRecoveryHonesty holds SupportsReplyRecovery to the same standard
+// CheckCapabilityHonesty already holds SupportsDirectSubstitution to: a
+// declared capability must be demonstrated, not merely asserted. Driving
+// only a synthetic PhasePre/PhasePost round trip — as the rest of this check
+// does — cannot demonstrate it, because reply recovery is specifically about
+// what happens at a phase neither of those payloads exercises. A synthetic
+// payload alone must not be able to satisfy this declaration.
+func checkReplyRecoveryHonesty(t *testing.T, cfg Config, caps domain.HarnessCapabilities) error {
+	t.Helper()
+
+	if !caps.SupportsReplyRecovery {
+		return nil
+	}
+	if cfg.NativeCompletion == nil {
+		return fmt.Errorf(
+			"capability honesty: adapter declares SupportsReplyRecovery=true but Config.NativeCompletion is nil — " +
+				"the suite has no seam to drive a real completion payload through TranslateCall(domain.PhaseCompletion, ...), " +
+				"so this declaration is currently unverifiable rather than honoured",
+		)
+	}
+
+	adapter := cfg.New(t, t.TempDir())
+	const wantReply = "the collaborator's real completion reply, recovered from the completion signal"
+
+	native := cfg.NativeCompletion(wantReply)
+	call, err := adapter.TranslateCall(domain.PhaseCompletion, native)
+	if err != nil {
+		return fmt.Errorf("capability honesty: TranslateCall(PhaseCompletion): %v", err)
+	}
+	if call.ObservedResponse != wantReply {
+		return fmt.Errorf(
+			"capability honesty: adapter declares SupportsReplyRecovery=true but TranslateCall(PhaseCompletion) returned ObservedResponse=%q, want the recovered reply %q — a declared capability must match what the adapter actually observes",
+			call.ObservedResponse, wantReply,
+		)
 	}
 	return nil
 }

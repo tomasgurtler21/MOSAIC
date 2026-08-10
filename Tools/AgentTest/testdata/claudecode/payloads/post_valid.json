@@ -1,7 +1,7 @@
 {
   "hook_event_name": "PostToolUse",
   "session_id": "sess-post-1",
-  "tool_name": "Task",
+  "tool_name": "Agent",
   "tool_input": {
     "subagent_type": "Worker",
     "prompt": "please respond with the scripted stub content \u0007c0ffee00deadbeef"

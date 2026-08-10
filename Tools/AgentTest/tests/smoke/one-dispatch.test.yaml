@@ -32,4 +32,4 @@ assertions:
   invocation_sequence:
     exact: true
     steps:
-      - { tool: Agent, agent: researcher }
+      - { tool: dispatch, agent: researcher }

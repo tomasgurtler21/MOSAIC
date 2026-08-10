@@ -11,7 +11,6 @@ description: >
   what actually happened — proving suppression is real and not a
   coincidence of the facts.
 defaults:
-  harness: fake
   timeout: 30s
   turn_limit: 5
   repetitions: 1

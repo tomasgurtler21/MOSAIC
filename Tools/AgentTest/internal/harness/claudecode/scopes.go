@@ -26,6 +26,18 @@ var ErrScopeAbsent = errors.New("claudecode: configuration scope absent")
 // this adapter when its matcher would select this tool.
 const InterceptedToolName = "Task"
 
+// RegistrationToolName is the name this harness accepts when a hook matcher
+// is registered. It is NOT what the harness reports at the interception
+// point. It is kept as its own named concept, distinct from
+// NativeDispatchToolName below, because conflating the two is exactly the
+// defect that broke interception once already.
+const RegistrationToolName = InterceptedToolName
+
+// NativeDispatchToolName is what this harness reports in an interception
+// payload. Conflating it with RegistrationToolName is the defect this
+// separation exists to prevent.
+const NativeDispatchToolName = "Agent"
+
 // Scopes enumerates the configuration scopes this harness merges, lowest
 // precedence first. The sandbox scope is included so the enumeration is a
 // complete description rather than a list of exceptions.
@@ -38,9 +50,9 @@ func Scopes(s domain.Sandbox) []domain.ConfigScope {
 			Isolatable: false,
 		},
 		{
-			Name:       "user",
-			Path:       userScopeSettingsPath(),
-			InSandbox:  false,
+			Name:      "user",
+			Path:      userScopeSettingsPath(),
+			InSandbox: false,
 			// The harness honours ConfigHomeEnvVar to relocate its user-scope
 			// configuration entirely, which is what makes this scope isolatable.
 			Isolatable: true,
@@ -143,7 +155,13 @@ func inspectOneScope(probe ScopeProbe, scope domain.ConfigScope) domain.ScopeFin
 			return domain.ScopeFinding{
 				Scope:       scope,
 				Neutralized: scope.Isolatable,
-				Detail:      fmt.Sprintf("%s configuration scope not found; treated as absent, not inspected", scope.Name),
+				// The absent settings document carries no credentials to lose:
+				// Provision seeds this harness's credential file(s) into the
+				// relocated config home regardless of whether a settings
+				// document exists there, so isolating this scope never costs
+				// the subject its ability to authenticate.
+				PreservesSubjectFunction: true,
+				Detail:                   fmt.Sprintf("%s configuration scope not found; treated as absent, not inspected", scope.Name),
 			}
 		}
 		return domain.ScopeFinding{
@@ -168,9 +186,10 @@ func inspectOneScope(probe ScopeProbe, scope domain.ConfigScope) domain.ScopeFin
 		detail = fmt.Sprintf("%s configuration scope registers a hook that rewrites the intercepted call's input", scope.Name)
 	}
 	return domain.ScopeFinding{
-		Scope:         scope,
-		RewritesInput: finding.RewritesInput,
-		Neutralized:   neutralized,
-		Detail:        detail,
+		Scope:                    scope,
+		RewritesInput:            finding.RewritesInput,
+		Neutralized:              neutralized,
+		PreservesSubjectFunction: true,
+		Detail:                   detail,
 	}
 }

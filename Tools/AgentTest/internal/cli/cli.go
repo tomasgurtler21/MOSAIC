@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 
+	commonharness "mosaic-common/harness"
+
 	"mosaic-agent-test/internal/authoring"
 	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/preflight"
@@ -35,6 +37,13 @@ type RunConfig struct {
 	// created. Always non-empty: it is the --workspace-root value when
 	// the flag is present and Options.WorkspaceRoot otherwise.
 	WorkspaceRoot string
+
+	// Retention is the sandbox retention policy resolved from --keep-sandbox
+	// and --keep-sandbox-on-failure: domain.RetainNever when neither is
+	// present, domain.RetainOnFailure for --keep-sandbox-on-failure alone,
+	// and domain.RetainAlways for --keep-sandbox alone or both together (the
+	// stronger policy wins; specifying both is not an error).
+	Retention domain.RetentionPolicy
 }
 
 // SuiteFactory binds an invocation's resolved configuration to a fully
@@ -71,6 +80,13 @@ type Options struct {
 	WorkspaceRoot  string
 	FixtureRoot    string
 	DefaultHarness string
+
+	// Harnesses is the selectable harness catalog, supplied by the
+	// composition root from mosaic-common/harness. --harness is validated
+	// against it: a value naming no catalog entry is a usage error, never a
+	// silent default. The CLI restates no harness identity of its own, so
+	// flag validation cannot drift from the catalog.
+	Harnesses []commonharness.CLIHarness
 }
 
 // Execute runs the command line and returns the process exit code. It
@@ -84,13 +100,18 @@ type Options struct {
 // `validate <suite>` pre-flights only and neither creates a sandbox nor
 // spawns an agent. Both accept, in space-separated and equals-separated
 // forms: --tests (comma-separated subset), --harness, --format (text|json),
-// --fixtures, --workspace-root, --timeout, --repetitions. --tui is
-// recognised and ignored — it is consumed by the composition root. An
+// --fixtures, --workspace-root, --timeout, --repetitions, --logger-bundle
+// and --cost-tool (both pre-scanned and consumed by the composition root;
+// this package only recognises them so it does not reject them as
+// unknown). --tui is recognised and ignored — it too is consumed by the
+// composition root. --help/-h and a bare invocation (no arguments) both
+// write the usage surface (see help.go) rather than only an error. An
 // unknown flag or a flag missing its value is a usage error (ExitUsage).
 //
 // See run.go for the implementation: flag parsing, pre-flight dispatch, the
 // deferred suite-factory call, progress streaming and output-format
-// selection.
+// selection. See help.go for the usage surface itself: Commands, Flags,
+// ValueConsumingFlags and Usage.
 func Execute(ctx context.Context, args []string, o Options) int {
 	return execute(ctx, args, o)
 }

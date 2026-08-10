@@ -204,6 +204,39 @@ func TestInterceptorEntries_RewritesInputAndMatchesInterceptedTool(t *testing.T)
 	}
 }
 
+// TestCompletionEntry_SubagentStopIsAsyncAndObservational asserts
+// CompletionEntry registers the harness's own completion signal — the
+// SubagentStop hook — as an asynchronous, non-input-rewriting entry,
+// matching PhaseCompletion's observation-only contract: this phase never
+// substitutes, rewrites or halts.
+func TestCompletionEntry_SubagentStopIsAsyncAndObservational(t *testing.T) {
+	sb := newSandbox(t, t.TempDir())
+	req := baseProvisionRequest(sb)
+
+	completion, err := claudecode.BuildBridge(req, domain.PhaseCompletion)
+	if err != nil {
+		t.Fatalf("BuildBridge(PhaseCompletion): %v", err)
+	}
+
+	contrib := claudecode.CompletionEntry(completion)
+
+	if contrib.RewritesInput {
+		t.Errorf("CompletionEntry: RewritesInput = true, want false (observation only)")
+	}
+
+	matchers, ok := contrib.Settings.Hooks["SubagentStop"]
+	if !ok || len(matchers) == 0 || len(matchers[0].Hooks) == 0 {
+		t.Fatalf("CompletionEntry: no SubagentStop hook entry in %+v", contrib.Settings.Hooks)
+	}
+	entry := matchers[0].Hooks[0]
+	if entry.Async == nil || !*entry.Async {
+		t.Errorf("CompletionEntry: SubagentStop entry Async = %v, want an asynchronous (true) entry", entry.Async)
+	}
+	if entry.Command != completion.Executable {
+		t.Errorf("CompletionEntry: Command = %q, want the completion bridge's Executable %q", entry.Command, completion.Executable)
+	}
+}
+
 // containsAdjacent reports whether flag immediately precedes value anywhere
 // in args.
 func containsAdjacent(args []string, flag, value string) bool {

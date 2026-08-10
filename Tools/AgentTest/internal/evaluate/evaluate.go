@@ -44,8 +44,16 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 	stateIntegrity := hasRunEvent(ev.Records, domain.RunEventLockReclaimed)
 	timedOut := ev.SubjectResult.Disposition == domain.DispositionTimedOut
 
+	// A definition that declared one or more assertion classes but whose
+	// evaluation produced zero evaluated results must never read as a pass,
+	// whatever caused the zero — including after negative-test inversion,
+	// which cannot turn an empty set into a passing one. A definition that
+	// genuinely declared nothing is unaffected: this guard only fires when
+	// something was declared.
+	vacuousAssertions := assertionsDeclared(ev.Definition.Assertions) && len(assertions) == 0
+
 	var reasons []domain.FailureReason
-	if assertionFailed {
+	if assertionFailed || vacuousAssertions {
 		reasons = append(reasons, domain.ReasonAssertion)
 	}
 	if echoFailed {
@@ -67,14 +75,16 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 	}
 
 	return domain.TestResult{
-		Key:             ev.Key,
-		Verdict:         verdict,
-		Reasons:         reasons,
-		Assertions:      assertions,
-		Conditions:      conditions,
-		NegativeApplied: negative,
-		Cost:            ev.Cost,
-		Duration:        ev.Duration,
+		Key:                 ev.Key,
+		Verdict:             verdict,
+		Reasons:             reasons,
+		Assertions:          assertions,
+		Conditions:          conditions,
+		NegativeApplied:     negative,
+		Cost:                ev.Cost,
+		Duration:            ev.Duration,
+		RetainedSandboxPath: ev.RetainedSandboxPath,
+		SubjectResult:       ev.SubjectResult,
 	}
 }
 

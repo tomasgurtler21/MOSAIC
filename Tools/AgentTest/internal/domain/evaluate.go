@@ -43,6 +43,23 @@ type RunEvidence struct {
 
 	Cost     CostReport
 	Duration time.Duration
+
+	// LogRoot is the log location this run's cost was queried from, carried
+	// here so a no-logs condition's detail can name the path that was
+	// searched without evaluate importing anything path- or I/O-related.
+	LogRoot string
+
+	// LogsProduced reports whether LogRoot contained any log records at all.
+	// False raises ConditionNoLogsProduced. Only meaningful when the run
+	// actually started: RunEvidence is never built on the path where it did
+	// not (see ConditionRunNotStarted).
+	LogsProduced bool
+
+	// RetainedSandboxPath is the sandbox left on disk for diagnosis by this
+	// attempt's teardown, empty when none was retained. Carried here so the
+	// report a user reads can print an openable path — a retention feature
+	// whose path has to be guessed is not a feature.
+	RetainedSandboxPath string
 }
 
 // TestResult is the outcome of evaluating one run's evidence: a verdict with
@@ -63,6 +80,18 @@ type TestResult struct {
 	NegativeApplied bool
 	Cost            CostReport
 	Duration        time.Duration
+
+	// RetainedSandboxPath is carried through from RunEvidence unchanged, so
+	// the report a user reads can print the path a retained sandbox was left
+	// at, empty when none was retained.
+	RetainedSandboxPath string
+
+	// SubjectResult carries the subject's exit code, stderr and raw output
+	// from RunEvidence so the report can surface a diagnosable authentication
+	// or environment failure without the user having to reproduce outside the
+	// tool. Zero-valued when the subject exited zero; the report only renders
+	// it when ExitCode != 0.
+	SubjectResult SubjectResult
 }
 
 // AssertionOutcome is the per-assertion result of evaluating one class.
@@ -99,11 +128,39 @@ type RunCondition struct {
 type RunConditionKind string
 
 const (
-	ConditionCostUnattributed       RunConditionKind = "cost_unattributed"
-	ConditionUnterminatedInterval   RunConditionKind = "unterminated_interval"
-	ConditionExtractionDegraded     RunConditionKind = "extraction_degraded"
-	ConditionUnmatchedInvocation    RunConditionKind = "unmatched_invocation"
+	ConditionCostUnattributed        RunConditionKind = "cost_unattributed"
+	ConditionUnterminatedInterval    RunConditionKind = "unterminated_interval"
+	ConditionExtractionDegraded      RunConditionKind = "extraction_degraded"
+	ConditionUnmatchedInvocation     RunConditionKind = "unmatched_invocation"
 	ConditionOrchestrationUnreadable RunConditionKind = "orchestration_unreadable"
+
+	// ConditionRunNotStarted carries the detail of a fault that stopped an
+	// attempt before it began: a setup, provisioning or spawn-plan failure, or
+	// a recovered panic. Nothing ran, so there is no evidence of any kind.
+	//
+	// It duplicates no reason kind. The verdict's reason stays
+	// ReasonInfrastructure — already documented as "the tool itself could not
+	// complete the run" and already consumed by aggregation. The reason
+	// answers why the verdict is FAIL; this answers what happened, which is
+	// what a condition is for. No existing kind describes it honestly: the
+	// other kinds all describe a property of a run that did happen.
+	//
+	// Detail is the runner error's text, prefixed with the phase that failed,
+	// and never the empty string.
+	ConditionRunNotStarted RunConditionKind = "run_not_started"
+
+	// ConditionNoLogsProduced reports that a run that DID start finished
+	// having produced no logs at all, so cost could not be attributed for a
+	// reason that is about the run rather than about the delegate.
+	//
+	// The distinction from ConditionRunNotStarted is load-bearing and must
+	// stay legible in Detail as well as in Kind: this one means "started,
+	// produced nothing", that one means "never started". Detail names the
+	// log root that was queried and found empty. The two are mutually
+	// exclusive by construction: ConditionRunNotStarted is raised only where
+	// runner.Run returned an error, which is precisely the path on which no
+	// evidence — and therefore no log root to inspect — exists.
+	ConditionNoLogsProduced RunConditionKind = "no_logs_produced"
 )
 
 // RepetitionPolicy is a test's declared repetition count and required pass

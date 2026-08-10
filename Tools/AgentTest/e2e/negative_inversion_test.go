@@ -45,7 +45,7 @@ func TestNegativeInversion_UnderlyingAssertionFails_OverallPasses(t *testing.T) 
 		Script: fakeOptionsFor(
 			subjectGreetsOneCollaborator(),
 			[]subjectStep{
-				invoke("Task", "greeter"),
+				invoke("dispatch", "greeter"),
 				finish(`{"agent_instance_id":"standin-subject#1","status_code":"SUCCESS","status_message":"Done."}`),
 			},
 		),
@@ -67,7 +67,7 @@ func TestNegativeInversion_UnderlyingAssertionPasses_OverallFails(t *testing.T) 
 		Script: fakeOptionsFor(
 			subjectGreetsOneCollaborator(),
 			[]subjectStep{
-				invoke("Task", "greeter"),
+				invoke("dispatch", "greeter"),
 				finish(`{"agent_instance_id":"standin-subject#1","status_code":"SUCCESS","status_message":"Done."}`),
 			},
 		),

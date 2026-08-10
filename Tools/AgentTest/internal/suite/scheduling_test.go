@@ -2,6 +2,8 @@ package suite_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"mosaic-agent-test/internal/domain"
@@ -14,7 +16,7 @@ func newSuite(runner *scriptedRunner, clock *fakeClock, progress domain.Progress
 		Runner:   runner,
 		Progress: progress,
 		Clock:    clock,
-		RunID:    func(testID string, runNumber int) string { return "run-" + testID },
+		RunID:    func(testID string, runNumber, attempt int) string { return "run-" + testID },
 	})
 }
 
@@ -230,4 +232,117 @@ func TestSuiteRun_ReturnsCompletedResultsOnCancellation(t *testing.T) {
 	if result.Tests[0].TestID != "test-a" {
 		t.Errorf("result.Tests[0].TestID = %q, want %q: the completed test's own report must be returned, not a placeholder", result.Tests[0].TestID, "test-a")
 	}
+}
+
+// TestSuiteRun_RunnerError_YieldsInfrastructureFailWithConditionCarryingErrorDetail
+// asserts a runner error is never discarded: it must translate into a FAIL
+// result carrying the infrastructure reason and a condition holding the
+// error text, rather than being silently evaluated as zero-valued (and
+// therefore passing) evidence (AC1.1).
+func TestSuiteRun_RunnerError_YieldsInfrastructureFailWithConditionCarryingErrorDetail(t *testing.T) {
+	// Arrange
+	wantErrText := "spawn-plan failed: exec: \"claude\": executable file not found in $PATH"
+	runner := newScriptedRunner()
+	runner.scriptFor("test-a", scriptedOutcome{err: errors.New(wantErrText)})
+	s := newSuite(runner, newFakeClock(), &recordingSink{})
+	plan := buildPlan(resolvedTest("test-a", 1, 1.0))
+
+	// Act
+	result, err := runSuite(t, s, context.Background(), plan)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Suite.Run returned an error: %v", err)
+	}
+	if len(result.Tests) != 1 || len(result.Tests[0].Runs) != 1 {
+		t.Fatalf("got %+v, want exactly one test with exactly one run", result.Tests)
+	}
+	run := result.Tests[0].Runs[0]
+
+	if run.Verdict != domain.VerdictFail {
+		t.Errorf("run Verdict = %q, want FAIL — a runner error must never evaluate as a pass", run.Verdict)
+	}
+	if !hasFailureReason(run.Reasons, domain.ReasonInfrastructure) {
+		t.Errorf("run Reasons = %+v, want ReasonInfrastructure", run.Reasons)
+	}
+	cond, ok := findConditionKind(run.Conditions, domain.ConditionRunNotStarted)
+	if !ok {
+		t.Fatalf("run Conditions = %+v, want a ConditionRunNotStarted entry", run.Conditions)
+	}
+	if !strings.Contains(cond.Detail, wantErrText) {
+		t.Errorf("condition Detail = %q, want it to contain the runner error text %q", cond.Detail, wantErrText)
+	}
+}
+
+// TestSuiteRun_RunnerError_StopsRetryLoopForThatAttempt asserts a runner
+// error ends the repetition's retry loop rather than retrying against the
+// same fault — distinct from the state-integrity retry rule, which only
+// fires on ReasonStateIntegrity (AC1.2).
+func TestSuiteRun_RunnerError_StopsRetryLoopForThatAttempt(t *testing.T) {
+	// Arrange
+	runner := newScriptedRunner()
+	runner.scriptFor("test-a",
+		scriptedOutcome{err: errors.New("provisioning failed: workspace root is not writable")},
+		scriptedOutcome{evidence: passingEvidence()},
+	)
+	s := newSuite(runner, newFakeClock(), &recordingSink{})
+	plan := buildPlan(resolvedTest("test-a", 1, 1.0))
+
+	// Act
+	_, err := runSuite(t, s, context.Background(), plan)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Suite.Run returned an error: %v", err)
+	}
+	calls := runner.callsFor("test-a")
+	if len(calls) != 1 {
+		t.Fatalf("test-a was run %d times, want exactly 1 — a runner error must end the retry loop for that attempt, not consume the next scripted outcome", len(calls))
+	}
+}
+
+// TestSuiteRun_RunnerError_AggregateReportsInfrastructureFailure confirms
+// the runner-error path reaches the same aggregate and report-level
+// infrastructure accounting a repeated state-integrity fault does (AC1.5).
+func TestSuiteRun_RunnerError_AggregateReportsInfrastructureFailure(t *testing.T) {
+	// Arrange
+	runner := newScriptedRunner()
+	runner.scriptFor("test-a", scriptedOutcome{err: errors.New("setup failed: panic recovered: nil pointer dereference")})
+	s := newSuite(runner, newFakeClock(), &recordingSink{})
+	plan := buildPlan(resolvedTest("test-a", 1, 1.0))
+
+	// Act
+	result, err := runSuite(t, s, context.Background(), plan)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Suite.Run returned an error: %v", err)
+	}
+	if len(result.Tests) != 1 {
+		t.Fatalf("got %d test reports, want 1", len(result.Tests))
+	}
+	if !result.Tests[0].Aggregate.InfrastructureFailure {
+		t.Error("Aggregate.InfrastructureFailure = false, want true — a runner error is an infrastructure fault")
+	}
+	if result.InfrastructureFailures != 1 {
+		t.Errorf("Result.InfrastructureFailures = %d, want 1", result.InfrastructureFailures)
+	}
+}
+
+func hasFailureReason(reasons []domain.FailureReason, want domain.FailureReason) bool {
+	for _, r := range reasons {
+		if r == want {
+			return true
+		}
+	}
+	return false
+}
+
+func findConditionKind(conditions []domain.RunCondition, want domain.RunConditionKind) (domain.RunCondition, bool) {
+	for _, c := range conditions {
+		if c.Kind == want {
+			return c, true
+		}
+	}
+	return domain.RunCondition{}, false
 }

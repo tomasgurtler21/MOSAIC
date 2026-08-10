@@ -47,6 +47,50 @@ func TestAppendThenRead_RoundTripsEveryRecordKind(t *testing.T) {
 	}
 }
 
+// TestAppendThenRead_PreservesTaskMessageRawAndExtractionQuality is the
+// round-trip test whose absence let TaskMessage.Raw and .Extraction cross
+// the interceptor-process-to-runner-process boundary as always-zero values:
+// every other unit test builds a TaskMessage in memory and never crosses a
+// file, so a field tagged json:"-" never showed up as a failure anywhere
+// else.
+func TestAppendThenRead_PreservesTaskMessageRawAndExtractionQuality(t *testing.T) {
+	// Arrange: a start record carrying a TaskMessage with non-zero Raw and
+	// Extraction, the shape the interceptor process actually writes.
+	path := filepath.Join(t.TempDir(), "invocations.jsonl")
+	log := invlog.NewLog(path)
+	msg := domain.TaskMessage{
+		AgentInstanceID: "researcher#1",
+		TaskDescription: "Research the topic.",
+		Raw:             `{"agent_instance_id":"researcher#1","task_description":"Research the topic."}`,
+		Extraction:      domain.ExtractionDegraded,
+	}
+	start := domain.LogRecord{Kind: domain.RecordStart, TestID: "t", RunNumber: 1, Seq: 1, Message: &msg}
+
+	// Act
+	if err := log.Append(start); err != nil {
+		t.Fatalf("Append returned unexpected error: %v", err)
+	}
+	records, _, err := log.Read()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Read returned unexpected error: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record, got %d: %+v", len(records), records)
+	}
+	got := records[0].Message
+	if got == nil {
+		t.Fatal("expected a non-nil Message on the read-back record")
+	}
+	if got.Raw != msg.Raw {
+		t.Errorf("Raw = %q after an append-and-read cycle, want %q — Raw must survive the interceptor/runner process boundary", got.Raw, msg.Raw)
+	}
+	if got.Extraction != domain.ExtractionDegraded {
+		t.Errorf("Extraction = %q after an append-and-read cycle, want %q — extraction quality must survive the interceptor/runner process boundary", got.Extraction, domain.ExtractionDegraded)
+	}
+}
+
 func TestAppend_ConcurrentWritersProduceNoInterleavedOrTruncatedRecords(t *testing.T) {
 	// Arrange
 	path := filepath.Join(t.TempDir(), "invocations.jsonl")

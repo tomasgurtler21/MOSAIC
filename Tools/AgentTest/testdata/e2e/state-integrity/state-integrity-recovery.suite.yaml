@@ -1,0 +1,15 @@
+schema_version: 1
+id: state-integrity-recovery-e2e
+description: >
+  End-to-end retry-recovery scenario: the run-state lock is compromised only
+  on the first spawn. The first attempt faults on state integrity and is
+  excluded from the pass-rate denominator; the retry runs clean because the
+  dead lock is not re-seeded. The aggregate verdict must be PASS with exactly
+  one excluded and one counted attempt, and no infrastructure failure.
+defaults:
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: lock-compromised-once.test.yaml

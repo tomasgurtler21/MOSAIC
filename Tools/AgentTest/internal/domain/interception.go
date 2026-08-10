@@ -12,6 +12,16 @@ type InterceptionPhase string
 const (
 	PhasePre  InterceptionPhase = "pre"
 	PhasePost InterceptionPhase = "post"
+
+	// PhaseCompletion is the harness's own completion signal for a dispatched
+	// collaborator — the event at which the real reply exists, on a harness
+	// whose post-invocation point fires at launch.
+	//
+	// A call translated at this phase carries ObservedResponse (the recovered
+	// reply) and CorrelationToken, and nothing else is required of it.
+	// Observation only: an outcome for this phase is never a substitution, a
+	// rewrite or a halt.
+	PhaseCompletion InterceptionPhase = "completion"
 )
 
 // InterceptedCall is the normalized inbound model every harness adapter
@@ -20,11 +30,14 @@ type InterceptedCall struct {
 	Phase            InterceptionPhase
 	Identity         CollaboratorIdentity
 	Message          TaskMessage
-	CorrelationToken string          // opaque, innocuous; survives pre to post
+	CorrelationToken string          // opaque, innocuous; survives pre to post/completion
 	RawPayload       json.RawMessage // the adapter's native payload, for diagnostics
 	Capabilities     HarnessCapabilities
 	// ObservedResponse is what the collaborator actually produced.
-	// Populated on PhasePost only; the input to echo-fidelity comparison.
+	// Populated on PhasePost and PhaseCompletion; the input to echo-fidelity
+	// comparison. On PhaseCompletion, an empty CorrelationToken is a
+	// legitimate outcome for an un-stubbed or partially-stubbed dispatch, not
+	// an error: there is nothing pending to compare it against.
 	ObservedResponse string
 }
 
@@ -85,8 +98,29 @@ type HarnessCapabilities struct {
 	// correlation token in. Declared so the conformance suite can verify it.
 	CorrelationField string
 
+	// SupportsReplyRecovery declares that this adapter can observe the
+	// collaborator's real reply through a later completion event, rather than
+	// only whatever its post-invocation point happens to carry.
+	//
+	// It exists because SupportsPostInterception was true in letter and false
+	// in spirit on a harness whose post point fires at launch and carries an
+	// async acknowledgement. Echo fidelity is evaluated against the recovered
+	// reply when this is true, and against the post point's observed response
+	// when it is false. Echo fidelity itself stays unconditional either way.
+	SupportsReplyRecovery bool
+
 	RegistrationModel RegistrationModel
 	BridgeKind        BridgeKind
+
+	// ProducibleToolNames lists every normalized dispatch-tool name this
+	// harness can actually produce at its interception point. Preflight
+	// rejects a declared identity absent from this list, so an unproducible
+	// identity fails before a run instead of silently going unmatched during
+	// one.
+	//
+	// Returned as a fresh slice per call; the value is otherwise constant for
+	// the adapter's lifetime, as the whole type is.
+	ProducibleToolNames []string
 }
 
 // RegistrationModel is how a harness's interception configuration is
@@ -127,8 +161,41 @@ type ScopeFinding struct {
 	Scope         ConfigScope
 	RewritesInput bool // registers a hook that rewrites the intercepted call's input
 	Neutralized   bool // the adapter isolated the scope rather than merely inspecting it
-	Detail        string
+
+	// PreservesSubjectFunction declares that the subject can still run after
+	// whatever this adapter did to the scope.
+	//
+	// Neutralized answers "was the configuration isolated". This answers
+	// "and does the subject still work". They are different questions: an
+	// adapter that relocates a scope holding both configuration and
+	// credentials answers the first yes and the second no unless it seeds
+	// the credentials back.
+	//
+	// An adapter that neither isolates nor breaks anything reports true: it
+	// preserved function by not interfering.
+	//
+	// Conformance obligation: Neutralized && !PreservesSubjectFunction fails
+	// the neutralization check. Isolating a scope at the cost of the
+	// subject's ability to run is a failure, not a pass.
+	PreservesSubjectFunction bool
+
+	// FunctionDetail explains a false PreservesSubjectFunction, naming what
+	// the isolation cost the subject.
+	FunctionDetail string
+
+	Detail string
 }
+
+// InterceptorSubcommand is the argv token that routes this binary to its
+// interceptor frontend. It is owned here, in the one layer every package may
+// import, because two packages must agree on it and neither may import the
+// other: the composition root routes on it, and the runner puts it in
+// ProvisionRequest.InterceptorArgs so the registered hook actually reaches
+// the interceptor rather than falling through to the CLI frontend.
+//
+// It must never appear in help output: the subject under test may read this
+// binary's usage text.
+const InterceptorSubcommand = "intercept"
 
 // ProvisionRequest is what an adapter needs to populate a sandbox.
 type ProvisionRequest struct {
@@ -156,6 +223,15 @@ type Provisioning struct {
 	Files         []string // absolute paths, in creation order
 	Dirs          []string // directories the adapter created, in creation order
 	ScopeFindings []ScopeFinding
+
+	// Sensitive lists absolute paths, a subset of Files, holding material that
+	// must never be left on disk when a sandbox is retained — harness
+	// credentials above all.
+	//
+	// Declaring it here rather than deleting it in the adapter is what lets a
+	// harness-neutral retention path scrub without knowing what a credential
+	// is called on any particular harness.
+	Sensitive []string
 }
 
 // SpawnPlan is a declarative description of how to start the subject. The

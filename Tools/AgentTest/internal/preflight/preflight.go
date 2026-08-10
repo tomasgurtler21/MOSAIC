@@ -22,6 +22,17 @@ type Input struct {
 	HarnessID string
 	// Overrides applied on top of suite defaults, from CLI flags.
 	Overrides Overrides
+
+	// Capabilities are the selected adapter's declared capabilities, supplied
+	// by the composition root. Preflight decides on these values alone; no
+	// harness name reaches a decision here.
+	Capabilities domain.HarnessCapabilities
+
+	// Environment is the selected adapter's environment report, supplied by
+	// the composition root. A report carrying problems becomes preflight
+	// errors, so an unusable environment is refused before any subject is
+	// spawned and any cost is incurred.
+	Environment domain.EnvironmentReport
 }
 
 // Overrides are CLI-flag-sourced values applied on top of a suite's
@@ -152,7 +163,9 @@ func Validate(in Input) (Plan, authoring.Report) {
 		}
 
 		if haveRegistry {
-			checkCollaboratorsKnown(&report, defPath, def, registryIdentities(registry))
+			ids := registryIdentities(registry)
+			checkCollaboratorsKnown(&report, defPath, def, ids)
+			checkDispatchToolsProducible(&report, regPath, ids, in.Capabilities)
 		}
 
 		if resolver != nil {
@@ -163,6 +176,7 @@ func Validate(in Input) (Plan, authoring.Report) {
 		}
 
 		checkParallelGroups(&report, defPath, def)
+		checkSuppressedAssertions(&report, defPath, def)
 
 		effective := mergeSettings(mergeSettings(suite.Defaults, entry.Settings), def.Settings)
 		effective = applyOverrides(effective, in.Overrides)
@@ -177,7 +191,23 @@ func Validate(in Input) (Plan, authoring.Report) {
 
 	plan.Tests = filterByTestIDs(plan.Tests, in.Overrides.TestIDs)
 
+	addEnvironmentDiagnostics(&report, in.Environment)
+
 	return plan, report
+}
+
+// addEnvironmentDiagnostics reports "environment-unusable" for every
+// domain.EnvironmentProblem the selected adapter's environment check found,
+// preserving each problem's own Detail text verbatim, so an unusable
+// environment is refused before a run rather than discovered mid-run.
+func addEnvironmentDiagnostics(report *authoring.Report, env domain.EnvironmentReport) {
+	for _, p := range env.Problems {
+		report.Add(authoring.Diagnostic{
+			Severity: authoring.SeverityError,
+			Code:     "environment-unusable",
+			Message:  fmt.Sprintf("environment check failed (%s): %s", p.Kind, p.Detail),
+		})
+	}
 }
 
 // filterByTestIDs restricts tests to those whose Definition.ID is named in
@@ -228,6 +258,46 @@ func sequenceIdentities(seq *domain.SequenceAssertion) map[domain.CollaboratorId
 		}
 	}
 	return set
+}
+
+// checkDispatchToolsProducible reports "unproducible-dispatch-tool" for
+// every declared collaborator identity whose tool name is absent from the
+// selected harness's Capabilities.ProducibleToolNames — the identity's
+// dispatch tool would go unmatched at run time, so it is rejected before a
+// run instead. Preflight decides on Capabilities alone; no harness name
+// enters this decision.
+func checkDispatchToolsProducible(report *authoring.Report, regPath string, ids map[domain.CollaboratorIdentity]bool, caps domain.HarnessCapabilities) {
+	if len(caps.ProducibleToolNames) == 0 {
+		// No producible set was supplied: the caller has not wired the
+		// harness-capability route for this check. Every real adapter
+		// declares at least one producible name, so this only happens when
+		// Capabilities was left at its zero value, and skipping is the
+		// honest choice — an empty set is "not supplied", not "this
+		// harness can dispatch nothing".
+		return
+	}
+
+	producible := make(map[string]bool, len(caps.ProducibleToolNames))
+	for _, name := range caps.ProducibleToolNames {
+		producible[name] = true
+	}
+
+	reported := make(map[string]bool, len(ids))
+	for id := range ids {
+		if producible[id.ToolName] || reported[id.ToolName] {
+			continue
+		}
+		reported[id.ToolName] = true
+		report.Add(authoring.Diagnostic{
+			Severity: authoring.SeverityError,
+			Code:     "unproducible-dispatch-tool",
+			Path:     regPath,
+			Message: fmt.Sprintf(
+				"declared dispatch-tool identity %q is not producible by the selected harness (producible: %v)",
+				id.ToolName, caps.ProducibleToolNames,
+			),
+		})
+	}
 }
 
 // checkCollaboratorsKnown reports "unknown-collaborator" for every
@@ -337,14 +407,68 @@ func checkParallelGroups(report *authoring.Report, defPath string, def domain.Te
 	}
 }
 
+// checkSuppressedAssertions reports "suppressed-assertion" (a warning, not an
+// error) for every assertion class def declares that def.Layer suppresses
+// entirely — the source of truth is domain.LayerSuppresses, so this check and
+// internal/evaluate's behaviour can never drift apart. A warning, rather than
+// an error, keeps the shipped layer-rule fixtures — which declare suppression
+// deliberately, to exercise it — validating cleanly.
+func checkSuppressedAssertions(report *authoring.Report, defPath string, def domain.TestDefinition) {
+	for _, class := range declaredAssertionClasses(def.Assertions) {
+		if !domain.LayerSuppresses(def.Layer, class) {
+			continue
+		}
+		report.Add(authoring.Diagnostic{
+			Severity: authoring.SeverityWarning,
+			Code:     "suppressed-assertion",
+			Path:     defPath,
+			Message:  fmt.Sprintf("declared assertion class %q is suppressed: %s", class, domain.SuppressionReason(def.Layer, class)),
+		})
+	}
+}
+
+// declaredAssertionClasses reports every assertion class a declares, using
+// the nil-means-not-declared convention domain.Assertions documents.
+func declaredAssertionClasses(a domain.Assertions) []domain.AssertionClass {
+	var out []domain.AssertionClass
+	if a.InvocationSequence != nil {
+		out = append(out, domain.ClassInvocationSequence)
+	}
+	if a.ExecutionLogAgentIDs != nil {
+		out = append(out, domain.ClassExecutionLogAgentIDs)
+	}
+	if a.ExecutionLogAllStatus != nil {
+		out = append(out, domain.ClassExecutionLogAllStatus)
+	}
+	if a.FinalPhase != nil {
+		out = append(out, domain.ClassFinalPhase)
+	}
+	if a.FinalStatus != nil {
+		out = append(out, domain.ClassFinalStatus)
+	}
+	if a.ProtocolViolations != nil {
+		out = append(out, domain.ClassProtocolViolations)
+	}
+	if a.ArtifactCreated != nil {
+		out = append(out, domain.ClassArtifactCreated)
+	}
+	if a.ArtifactNotCreated != nil {
+		out = append(out, domain.ClassArtifactNotCreated)
+	}
+	if a.MinConcurrency != nil {
+		out = append(out, domain.ClassMinConcurrency)
+	}
+	if len(a.TaskMessages) > 0 {
+		out = append(out, domain.ClassTaskMessage)
+	}
+	return out
+}
+
 // mergeSettings applies override on top of base: only override's non-nil /
 // non-empty fields take effect, so a level that states nothing leaves the
 // level beneath it untouched.
 func mergeSettings(base, override domain.RunSettings) domain.RunSettings {
 	result := base
-	if override.HarnessID != "" {
-		result.HarnessID = override.HarnessID
-	}
 	if override.Timeout != nil {
 		result.Timeout = override.Timeout
 	}

@@ -4,7 +4,7 @@
   "on_unmatched": "halt",
   "stubs": [
     {
-      "match": { "tool": "Task", "agent": "greeter", "invocation": 1 },
+      "match": { "tool": "dispatch", "agent": "greeter", "invocation": 1 },
       "response": {
         "agent_instance_id": "greeter#1",
         "status_code": "SUCCESS",

@@ -23,8 +23,8 @@ turn_limit: 5
 parallel_groups:
   - name: fanout
     members:
-      - { tool: Task, agent: researcher }
-      - { tool: Task, agent: library-researcher }
+      - { tool: dispatch, agent: researcher }
+      - { tool: dispatch, agent: library-researcher }
 
 assertions:
   min_concurrency:

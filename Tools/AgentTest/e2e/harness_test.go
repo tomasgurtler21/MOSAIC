@@ -39,6 +39,19 @@ import (
 	"mosaic-agent-test/internal/workspace"
 )
 
+// frozenClock is a domain.Clock that always returns the same instant,
+// making time-dependent behaviour deterministic regardless of when the
+// test runs. A scenario that injects a frozenClock causes defaultRunID
+// to produce the same id for both attempts of one repetition (before
+// I14.1 folds the attempt index into the suffix), so state-integrity
+// tests reliably fail in the RED phase rather than depending on whether
+// the two attempts straddle a real wall-clock second boundary.
+type frozenClock struct{ t time.Time }
+
+func (c frozenClock) Now() time.Time { return c.t }
+
+var _ domain.Clock = frozenClock{}
+
 // Scenario is one authored end-to-end case.
 //
 // Script is the scripted adapter's own configuration — Capabilities and
@@ -57,11 +70,27 @@ type Scenario struct {
 	Script            fake.Options
 	InvocationDetails map[string][]sidecarDetail
 
-	// SleepBeforeExit and SeedDeadLock, when set, are forwarded verbatim into
-	// the stand-in's own sidecar — see standin_test.go's standinScript for
-	// what each one makes the stand-in do before processing any turn.
-	SleepBeforeExit string
-	SeedDeadLock    bool
+	// SleepBeforeExit, SeedDeadLock and SeedDeadLockOnce, when set, are
+	// forwarded verbatim into the stand-in's own sidecar — see
+	// standin_test.go's standinScript for what each one makes the
+	// stand-in do before processing any turn.
+	SleepBeforeExit  string
+	SeedDeadLock     bool
+	// SeedDeadLockOnce seeds the dead lock only on the first spawn: a
+	// marker file written beside the script path prevents subsequent
+	// spawns from seeding again, so attempt two can run clean and
+	// demonstrate recovery.
+	SeedDeadLockOnce bool
+
+	// Clock, when set, replaces standinClock{} as the domain.Clock passed
+	// to both workspace.NewManager and suite.New. A frozenClock makes
+	// suite.defaultRunID (which calls clock.Now() and is used when
+	// Options.RunID is nil) produce the same id on both attempts of one
+	// repetition — because the timestamp component does not advance — so a
+	// state-integrity scenario's RED-phase failure is guaranteed by
+	// construction rather than by the odds of two OS-scheduled goroutines
+	// both happening to fall within the same wall-clock second.
+	Clock domain.Clock
 
 	// ProbeFiles, when non-empty, are paths (relative to the sandbox's
 	// subject directory) the stand-in checks for existence immediately after
@@ -149,7 +178,13 @@ type wireAggregateDoc struct {
 	InfrastructureFailure bool   `json:"infrastructure_failure"`
 }
 
+type wireRunKeyDoc struct {
+	RunID  string `json:"run_id"`
+	TestID string `json:"test_id"`
+}
+
 type wireRunReportDoc struct {
+	Run        wireRunKeyDoc      `json:"run"`
 	Verdict    string             `json:"verdict"`
 	Reasons    []string           `json:"reasons"`
 	Assertions []wireAssertionDoc `json:"assertions"`
@@ -226,7 +261,10 @@ func RunScenario(t *testing.T, sc Scenario) Outcome {
 		t.Fatalf("RunScenario: constructing fixture resolver: %v", err)
 	}
 	effects := sideeffects.NewApplier(resolver)
-	clock := standinClock{}
+	var clock domain.Clock = standinClock{}
+	if sc.Clock != nil {
+		clock = sc.Clock
+	}
 	var cost domain.CostProvider = zeroCostProvider{}
 	if sc.Cost != nil {
 		cost = sc.Cost
@@ -417,6 +455,7 @@ func writeScriptSidecar(t *testing.T, sc Scenario) string {
 		InvocationDetails:    sc.InvocationDetails,
 		SleepBeforeExit:      sc.SleepBeforeExit,
 		SeedDeadLock:         sc.SeedDeadLock,
+		SeedDeadLockOnce:     sc.SeedDeadLockOnce,
 		ProbeFiles:           sc.ProbeFiles,
 		SkipInvokeOnRuns:     sc.SkipInvokeOnRuns,
 		SkipInvokeForTestIDs: sc.SkipInvokeForTestIDs,

@@ -278,5 +278,37 @@ func infrastructureFaultResult(suiteID string) report.Result {
 	})
 }
 
+// infrastructureFaultResultFromRunnerError is a report.Result whose single
+// test ended by a runner error — a single infrastructure-reason result, never
+// requiring a recurrence the way a state-integrity fault does. It exercises
+// the same exit-code path infrastructureFaultResult does, from the other
+// stage-1 guard.
+func infrastructureFaultResultFromRunnerError(suiteID string) report.Result {
+	return report.Build(suiteID, time.Time{}, time.Time{}, []report.TestReport{
+		{
+			TestID: "unspawnable-subject",
+			Layer:  domain.LayerOrchestrator,
+			Aggregate: domain.AggregateResult{
+				TestID:                "unspawnable-subject",
+				Verdict:               domain.VerdictFail,
+				Reasons:               []domain.FailureReason{domain.ReasonInfrastructure},
+				Counted:               1,
+				Passed:                0,
+				InfrastructureFailure: true,
+			},
+			Runs: []report.RunReport{
+				{
+					Key:     domain.RunKey{RunID: "unspawnable-subject-1", TestID: "unspawnable-subject", RunNumber: 1},
+					Verdict: domain.VerdictFail,
+					Reasons: []domain.FailureReason{domain.ReasonInfrastructure},
+					Conditions: []domain.RunCondition{
+						{Kind: domain.ConditionRunNotStarted, Detail: "spawn-plan failed: exec: \"claude\": executable file not found in $PATH"},
+					},
+				},
+			},
+		},
+	})
+}
+
 func durationPtr(d time.Duration) *time.Duration { return &d }
 func intPtr(i int) *int                          { return &i }

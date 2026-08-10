@@ -58,14 +58,14 @@ import (
 // detectionScript is the fixed subject/collaborator sequence every detection
 // test in this scenario observes identically.
 func detectionScript() fake.Options {
-	greeter := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "greeter"}
-	helper := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "helper"}
+	greeter := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "greeter"}
+	helper := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "helper"}
 
 	opts := fakeOptionsFor(
 		domain.HarnessCapabilities{SupportsDirectSubstitution: false},
 		[]subjectStep{
-			invoke("Task", "greeter"),
-			invoke("Task", "helper"),
+			invoke("dispatch", "greeter"),
+			invoke("dispatch", "helper"),
 			finish(`{"agent_instance_id":"standin-subject#1","run_id":"detect-run","status_code":"SUCCESS","status_message":"Done."}`),
 		},
 	)
@@ -91,8 +91,8 @@ func detectionScript() fake.Options {
 // detection tests need: only the greeter's first invocation carries a
 // distinguishing phrase.
 func detectionDetails() map[string][]sidecarDetail {
-	greeter := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "greeter"}
-	helper := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "helper"}
+	greeter := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "greeter"}
+	helper := domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "helper"}
 	return map[string][]sidecarDetail{
 		greeter.Key(): {{AgentInstanceID: "greeter#1", TaskDescription: "Greet the collaborator politely."}},
 		helper.Key():  {{AgentInstanceID: "helper#2", TaskDescription: "Assist without creating files."}},

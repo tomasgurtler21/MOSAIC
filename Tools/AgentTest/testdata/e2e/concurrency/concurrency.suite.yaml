@@ -11,7 +11,6 @@ description: >
   the first-generation defect this test exists to demonstrate absent,
   where the assertion always reported zero and could never pass.
 defaults:
-  harness: fake
   timeout: 30s
   turn_limit: 5
   repetitions: 1

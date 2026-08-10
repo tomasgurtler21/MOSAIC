@@ -28,7 +28,6 @@ type SuiteEntry struct {
 // resolved in that precedence order. Pointer fields distinguish "not stated"
 // from "stated as the zero value".
 type RunSettings struct {
-	HarnessID            string
 	Timeout              *time.Duration
 	TurnLimit            *int
 	Repetitions          *int

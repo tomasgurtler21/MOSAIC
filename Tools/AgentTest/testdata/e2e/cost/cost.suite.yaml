@@ -6,7 +6,6 @@ description: >
   cost) is what varies between a well-formed and an unattributable cost
   report; this test definition is identical for both.
 defaults:
-  harness: fake
   timeout: 30s
   turn_limit: 5
   repetitions: 1

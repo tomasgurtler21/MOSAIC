@@ -16,6 +16,7 @@ package opencode_test
 // only check the declaration itself is the one the design specifies.
 
 import (
+	"reflect"
 	"testing"
 
 	commonharness "mosaic-common/harness"
@@ -53,6 +54,18 @@ func TestCapabilities_PostInterceptionSupported(t *testing.T) {
 	caps := opencode.Capabilities()
 	if !caps.SupportsPostInterception {
 		t.Errorf("Capabilities: SupportsPostInterception = false, want true — a post-invocation hook exists and observes the real result")
+	}
+}
+
+// TestCapabilities_ReplyRecoveryUnsupported asserts opencode receives no
+// echo-fidelity-recovery change (AC12.9): unlike claudecode, it has no
+// completion-signal-driven reply recovery, so this stays false as an
+// explicit regression guard rather than holding only by the field's
+// zero-value default.
+func TestCapabilities_ReplyRecoveryUnsupported(t *testing.T) {
+	caps := opencode.Capabilities()
+	if caps.SupportsReplyRecovery {
+		t.Errorf("Capabilities: SupportsReplyRecovery = true, want false — opencode receives no echo-fidelity-recovery change in this stage")
 	}
 }
 
@@ -95,7 +108,7 @@ func TestCapabilities_BridgeKindIsInProcess(t *testing.T) {
 func TestCapabilities_IsConstantAcrossCalls(t *testing.T) {
 	first := opencode.Capabilities()
 	second := opencode.Capabilities()
-	if first != second {
+	if !reflect.DeepEqual(first, second) {
 		t.Errorf("Capabilities: first call = %+v, second call = %+v; the declared value must be constant", first, second)
 	}
 }
@@ -105,7 +118,7 @@ func TestCapabilities_IsConstantAcrossCalls(t *testing.T) {
 // values can be asserted without constructing an adapter.
 func TestCapabilities_PackageFunctionAndMethodAgree(t *testing.T) {
 	a := opencode.New(opencode.Options{})
-	if a.Capabilities() != opencode.Capabilities() {
+	if !reflect.DeepEqual(a.Capabilities(), opencode.Capabilities()) {
 		t.Errorf("Capabilities: method = %+v, package function = %+v; they must agree", a.Capabilities(), opencode.Capabilities())
 	}
 }

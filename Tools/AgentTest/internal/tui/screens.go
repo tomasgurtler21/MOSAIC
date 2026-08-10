@@ -46,8 +46,47 @@ func (m Model) renderScreen(title, subtitle, body string, help []tuicommon.HelpE
 }
 
 // ---------------------------------------------------------------------------
+// Harness selection
+// ---------------------------------------------------------------------------
+
+// viewHarnessSelect renders the harness-selection affordance — the TUI's
+// equivalent of the CLI's --harness flag — following the same
+// cursor-and-select layout as viewSuiteSelect.
+func (m Model) viewHarnessSelect() string {
+	width := m.contentWidth()
+
+	var b strings.Builder
+	if len(m.opts.Harnesses) == 0 {
+		b.WriteString(tuicommon.Truncate("no harness catalog offered", width))
+	}
+	for i, h := range m.opts.Harnesses {
+		prefix := "  "
+		if i == m.harnessCursor {
+			prefix = "> "
+		}
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(tuicommon.Truncate(prefix+h.Label, width))
+	}
+
+	return m.renderScreen("Select a Harness", "", b.String(), tuicommon.EntryScreenHelp())
+}
+
+// ---------------------------------------------------------------------------
 // Suite selection
 // ---------------------------------------------------------------------------
+
+// suiteSelectHelp is EntryScreenHelp with the Space/toggle entry inserted,
+// so the retention affordance (Stage 7) is discoverable the same way every
+// other key binding on this screen is.
+func suiteSelectHelp() []tuicommon.HelpEntry {
+	entry := tuicommon.HelpEntry{
+		Key:  tuicommon.GlobalKeys.Space.Help().Key,
+		Desc: tuicommon.GlobalKeys.Space.Help().Desc,
+	}
+	return append([]tuicommon.HelpEntry{entry}, tuicommon.EntryScreenHelp()...)
+}
 
 func (m Model) viewSuiteSelect() string {
 	width := m.contentWidth()
@@ -66,8 +105,10 @@ func (m Model) viewSuiteSelect() string {
 		}
 		b.WriteString(tuicommon.Truncate(prefix+s, width))
 	}
+	b.WriteString("\n")
+	b.WriteString(tuicommon.Truncate(fmt.Sprintf("Retain sandbox: %s", m.retention), width))
 
-	return m.renderScreen("Select a Suite", "", b.String(), tuicommon.EntryScreenHelp())
+	return m.renderScreen("Select a Suite", "", b.String(), suiteSelectHelp())
 }
 
 // ---------------------------------------------------------------------------

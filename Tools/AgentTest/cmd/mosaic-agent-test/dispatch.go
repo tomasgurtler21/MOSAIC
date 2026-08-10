@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -35,11 +36,15 @@ import (
 	"mosaic-agent-test/internal/workspace"
 )
 
-// InterceptorSubcommand is the interceptor route's only recognised
-// argument. Deliberately absent from any help surface: the subject under
-// test may see this binary's usage output, and the transparency obligation
-// reaches there too.
-const InterceptorSubcommand = "intercept"
+// InterceptorSubcommand is this package's name for domain.InterceptorSubcommand
+// — the argv token that routes this binary to its interceptor frontend. It is
+// an alias, not a restatement: internal/domain owns the literal (it is the one
+// layer both the composition root and internal/runner may import), and this
+// binary's own files reference it under this short name rather than the
+// qualified one throughout. Deliberately absent from any help surface: the
+// subject under test may see this binary's usage output, and the
+// transparency obligation reaches there too.
+const InterceptorSubcommand = domain.InterceptorSubcommand
 
 // Frontend names the three things this binary can be.
 type Frontend string
@@ -55,18 +60,20 @@ const (
 type TerminalCheck func() (stdinIsTerminal, stdoutIsTerminal bool)
 
 // valueConsumingFlags is the named set positional detection consults so a
-// flag's value token is never mistaken for a subcommand. It names every
-// space-separated-value flag the CLI frontend's command surface accepts
-// (see ContractsDesign.md, cli's command-surface table). "--tui" is
-// deliberately absent: it is boolean and consumes no following value.
-var valueConsumingFlags = map[string]bool{
-	"--tests":          true,
-	"--harness":        true,
-	"--format":         true,
-	"--fixtures":       true,
-	"--workspace-root": true,
-	"--timeout":        true,
-	"--repetitions":    true,
+// flag's value token is never mistaken for a subcommand. It is derived from
+// cli.ValueConsumingFlags() — the CLI package's own shared flag
+// specification — rather than restating the list a second time, so a flag
+// added there is recognised here without a second edit. "--tui" is
+// deliberately absent from that source: it is boolean and consumes no
+// following value.
+var valueConsumingFlags = valueConsumingFlagSet()
+
+func valueConsumingFlagSet() map[string]bool {
+	out := make(map[string]bool)
+	for _, name := range cli.ValueConsumingFlags() {
+		out[name] = true
+	}
+	return out
 }
 
 // selectFrontend implements the dispatch rules: the interceptor route first
@@ -81,7 +88,7 @@ var valueConsumingFlags = map[string]bool{
 // could launch a user interface into the pipe the harness is reading its
 // reply from.
 func selectFrontend(args []string, isTerminal TerminalCheck) Frontend {
-	if len(args) > 0 && args[0] == InterceptorSubcommand {
+	if len(args) > 0 && args[0] == domain.InterceptorSubcommand {
 		return FrontendInterceptor
 	}
 
@@ -205,6 +212,12 @@ type Deps struct {
 	SelfPath        string
 	LoggerBundleDir string
 
+	// InterpreterCmd is the interpreter the selected adapter's
+	// CheckEnvironment resolved during preflight, carried into runner.Deps
+	// verbatim so the next stage can put it into the provision request.
+	// Empty is legal: it means the selected adapter runs no interpreter.
+	InterpreterCmd string
+
 	// The resolved defaults a frontend may surface or override.
 	HarnessID     string
 	FixtureRoot   string
@@ -230,7 +243,15 @@ func (s writerSink) Log(ev commonharness.Event) {
 // An unrecognised HarnessID surfaces here as ErrUnknownHarness, so the usage
 // error is decided before any frontend starts.
 func buildDeps(cfg WiringConfig) (Deps, error) {
-	adapter, err := newAdapter(cfg.HarnessID, adapterOptions{})
+	// LoggerBundleDir is threaded into the claudecode adapter's own Options
+	// so its CheckEnvironment below actually validates the bundle this
+	// invocation resolved (flag, environment variable or the
+	// binary-relative default) rather than always seeing an empty,
+	// unchecked directory. opencode declares no bundle option: it runs no
+	// interpreter and has nothing to validate here.
+	adapter, err := newAdapter(cfg.HarnessID, adapterOptions{
+		ClaudeCode: claudecode.Options{LoggerBundleDir: cfg.LoggerBundleDir},
+	})
 	if err != nil {
 		return Deps{}, err
 	}
@@ -253,6 +274,26 @@ func buildDeps(cfg WiringConfig) (Deps, error) {
 		Timeout:        cfg.CostTimeout,
 	})
 
+	// The environment check runs once, here, before either frontend does
+	// anything: its report's Problems become preflight errors (see
+	// environmentBakedPreflight below), and its resolved interpreter is
+	// carried into the wired dependency set both frontends run against —
+	// never re-resolved by a frontend or by the runner.
+	envReport, err := adapter.CheckEnvironment(context.Background())
+	if err != nil {
+		return Deps{}, fmt.Errorf("buildDeps: checking environment for harness %q: %w", cfg.HarnessID, err)
+	}
+
+	// The cost tool's availability is checked here, harness-neutrally,
+	// rather than left to surface only once a run tries and fails to
+	// attribute cost: an absent tool is folded into the same
+	// EnvironmentReport every harness's bundle/interpreter problems already
+	// travel through, so it reaches preflight through the one existing seam
+	// (environmentBakedPreflight) rather than a second one.
+	if problem, absent := costToolProblem(cfg.CostToolPath); absent {
+		envReport.Problems = append(envReport.Problems, problem)
+	}
+
 	return Deps{
 		Adapter:   adapter,
 		Decoder:   decoder,
@@ -261,15 +302,48 @@ func buildDeps(cfg WiringConfig) (Deps, error) {
 		Effects:   effects,
 		Cost:      costProvider,
 		Clock:     systemClock{},
-		Preflight: preflight.Validate,
+		Preflight: environmentBakedPreflight(envReport),
 
 		SelfPath:        cfg.SelfPath,
 		LoggerBundleDir: cfg.LoggerBundleDir,
+		InterpreterCmd:  envReport.InterpreterCmd,
 
 		HarnessID:     cfg.HarnessID,
 		FixtureRoot:   cfg.FixtureRoot,
 		WorkspaceRoot: cfg.WorkspaceRoot,
 	}, nil
+}
+
+// costToolProblem reports whether path names a cost-analysis tool this
+// process cannot find, and if so the EnvironmentProblem naming the path
+// searched and the override that would change it — never a bare
+// file-not-found, per AC6.2. A stat error other than "does not exist"
+// (permission denied, for example) is treated the same way: either way the
+// tool is not usable from here.
+func costToolProblem(path string) (domain.EnvironmentProblem, bool) {
+	if _, err := os.Stat(path); err != nil {
+		return domain.EnvironmentProblem{
+			Kind: domain.ProblemCostToolUnavailable,
+			Detail: fmt.Sprintf(
+				"cost-analysis tool not found at %s (override with --cost-tool or the MOSAIC_AGENT_TEST_COST_TOOL environment variable): %v",
+				path, err,
+			),
+		}, true
+	}
+	return domain.EnvironmentProblem{}, false
+}
+
+// environmentBakedPreflight returns a preflight.Validate that always
+// validates with env as the environment report, so both frontends turn a
+// failing environment check into a preflight error without either one
+// having to know the selected adapter's environment report itself. Neither
+// frontend constructs an EnvironmentReport of its own: this is the one
+// place it is resolved and baked in.
+func environmentBakedPreflight(env domain.EnvironmentReport) func(preflight.Input) (preflight.Plan, authoring.Report) {
+	return func(in preflight.Input) (preflight.Plan, authoring.Report) {
+		in.Environment = env
+		return preflight.Validate(in)
+	}
 }
 
 // composedSuiteRunner adapts a Deps and a workspace.Manager, both bound at
@@ -278,27 +352,65 @@ func buildDeps(cfg WiringConfig) (Deps, error) {
 // run needs is assembled — deferred to Run, where the run's own progress
 // sink is finally known.
 type composedSuiteRunner struct {
-	deps Deps
-	ws   workspace.Manager
+	deps      Deps
+	ws        workspace.Manager
+	retention domain.RetentionPolicy
 }
 
 func (r composedSuiteRunner) Run(ctx context.Context, p preflight.Plan, sink domain.ProgressSink) (report.Result, error) {
 	rd := r.deps.RunnerDeps(r.ws, sink)
 	s := suite.New(suite.Options{
-		Runner:   testRunnerAdapter{deps: rd},
-		Progress: sink,
-		Clock:    r.deps.Clock,
+		Runner:    testRunnerAdapter{deps: rd, retention: r.retention},
+		Progress:  sink,
+		Clock:     r.deps.Clock,
+		Retention: r.retention,
 	})
 	return s.Run(ctx, p)
 }
 
 // testRunnerAdapter adapts runner.Run — a free function over runner.Deps —
 // into suite.TestRunner, the interface the suite's scheduling drives one
-// attempt through.
-type testRunnerAdapter struct{ deps runner.Deps }
+// attempt through. retention is bound once, at construction, the same way
+// runner.Deps' own SelfPath and LoggerBundleDir are: suite.TestRunner's
+// signature carries no room for a per-invocation value, so the one
+// resolved retention policy for this run travels here instead.
+type testRunnerAdapter struct {
+	deps      runner.Deps
+	retention domain.RetentionPolicy
+}
 
 func (a testRunnerAdapter) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest) (domain.RunEvidence, error) {
-	return runner.Run(ctx, a.deps, runner.Request{Key: key, Test: t, Settings: t.Settings})
+	return runner.Run(ctx, a.deps, runner.Request{Key: key, Test: t, Settings: t.Settings, Retention: a.retention})
+}
+
+// tuiSuiteRunner adapts a Deps and a workspace.Manager, both bound at
+// construction, into tui.SuiteRunner. Unlike composedSuiteRunner (whose
+// retention is fixed at construction, matching cli.SuiteRunner's
+// per-invocation RunConfig), tui.SuiteRunner's Run carries retention as a
+// call-time argument: the TUI wires one long-lived Suite for the whole
+// process, but the suite-select screen's toggle can change the policy on
+// every run, so the value has to travel with the call rather than with
+// construction. Run simply forwards to a composedSuiteRunner built fresh with
+// the call's retention, so the two frontends still funnel through the exact
+// same suite-construction logic.
+type tuiSuiteRunner struct {
+	deps Deps
+	ws   workspace.Manager
+}
+
+func (r tuiSuiteRunner) Run(ctx context.Context, p preflight.Plan, sink domain.ProgressSink, retention domain.RetentionPolicy) (report.Result, error) {
+	return composedSuiteRunner{deps: r.deps, ws: r.ws, retention: retention}.Run(ctx, p, sink)
+}
+
+// newTUISuiteRunner mirrors newSuiteRunner's workspace-root resolution and
+// error behaviour, but returns a tui.SuiteRunner whose retention is supplied
+// per Run call instead of being fixed at construction — see tuiSuiteRunner's
+// doc comment for why the TUI needs this and the CLI does not.
+func newTUISuiteRunner(d Deps) (tui.SuiteRunner, error) {
+	if d.WorkspaceRoot == "" {
+		return nil, fmt.Errorf("newTUISuiteRunner: workspace root is required")
+	}
+	return tuiSuiteRunner{deps: d, ws: workspace.NewManager(d.WorkspaceRoot, d.Clock)}, nil
 }
 
 // newSuiteRunner binds a Deps to one invocation's resolved configuration and
@@ -315,7 +427,7 @@ func newSuiteRunner(d Deps, rc cli.RunConfig) (cli.SuiteRunner, error) {
 		return nil, fmt.Errorf("newSuiteRunner: workspace root is required")
 	}
 	ws := workspace.NewManager(rc.WorkspaceRoot, d.Clock)
-	return composedSuiteRunner{deps: d, ws: ws}, nil
+	return composedSuiteRunner{deps: d, ws: ws, retention: rc.Retention}, nil
 }
 
 // RunnerDeps is the per-attempt collaborator set a Deps yields once the
@@ -336,6 +448,7 @@ func (d Deps) RunnerDeps(ws workspace.Manager, progress domain.ProgressSink) run
 
 		SelfPath:        d.SelfPath,
 		LoggerBundleDir: d.LoggerBundleDir,
+		InterpreterCmd:  d.InterpreterCmd,
 	}
 }
 
@@ -363,11 +476,26 @@ func cliOptions(d Deps, stdout, stderr io.Writer) cli.Options {
 		WorkspaceRoot:  d.WorkspaceRoot,
 		FixtureRoot:    d.FixtureRoot,
 		DefaultHarness: d.HarnessID,
+
+		// Sourced from the shared catalog, never restated: the same set
+		// newAdapter/decoderFor switch on, so the CLI's flag validation
+		// cannot drift from what the composition root can actually wire.
+		Harnesses: commonharness.CLIHarnesses(),
 	}
 }
 
 func tuiOptions(d Deps, suites []string) (tui.Options, error) {
-	runnerForDefault, err := newSuiteRunner(d, cli.RunConfig{WorkspaceRoot: d.WorkspaceRoot})
+	// The TUI's retention affordance is the in-screen toggle (Options.Retention,
+	// changed by Model's Space binding), not a flag: it starts at
+	// domain.RetainNever, the zero value, exactly as an unset --keep-sandbox
+	// pair resolves the CLI's RunConfig.Retention to domain.RetainNever.
+	//
+	// Suite is wired through newTUISuiteRunner, not newSuiteRunner: the TUI's
+	// Options.Suite is bound once for the process's lifetime, so it cannot
+	// carry a retention value fixed at construction the way the CLI's
+	// per-invocation factory does — Run receives the live Model.retention on
+	// every call instead (see tuiSuiteRunner's doc comment).
+	runnerForDefault, err := newTUISuiteRunner(d)
 	if err != nil {
 		return tui.Options{}, err
 	}
@@ -377,5 +505,11 @@ func tuiOptions(d Deps, suites []string) (tui.Options, error) {
 		Suite:     runnerForDefault,
 		Suites:    suites,
 		Harness:   d.HarnessID,
+		Retention: domain.RetainNever,
+
+		// Same catalog source as cliOptions: both frontends offer the
+		// identical selectable set, so neither can drift from the other or
+		// from what the composition root can actually wire.
+		Harnesses: commonharness.CLIHarnesses(),
 	}, nil
 }

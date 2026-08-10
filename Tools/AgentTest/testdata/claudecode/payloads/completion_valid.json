@@ -1,0 +1,7 @@
+{
+  "hook_event_name": "SubagentStop",
+  "session_id": "sess-completion-1",
+  "agent_id": "agent-xyz",
+  "agent_transcript_path": "/sandbox/transcripts/agent-xyz.jsonl",
+  "last_assistant_message": "{\"status_code\":\"SUCCESS\"}"
+}

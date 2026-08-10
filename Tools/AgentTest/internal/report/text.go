@@ -62,14 +62,38 @@ func writeTestLine(w io.Writer, t TestReport) error {
 	}
 	for _, run := range t.Runs {
 		for _, a := range run.Assertions {
-			if a.Outcome != domain.AssertionFail {
-				continue
+			switch a.Outcome {
+			case domain.AssertionFail:
+				detail := ""
+				if a.Detail != "" {
+					detail = fmt.Sprintf(" (%s)", a.Detail)
+				}
+				if _, err := fmt.Fprintf(w, "  - %s: expected %q, got %q%s\n", a.Class, a.Expected, a.Actual, detail); err != nil {
+					return err
+				}
+			case domain.AssertionNotEvaluated:
+				if _, err := fmt.Fprintf(w, "  ~ %s: not_evaluated (%s)\n", a.Class, a.Detail); err != nil {
+					return err
+				}
 			}
-			detail := ""
-			if a.Detail != "" {
-				detail = fmt.Sprintf(" (%s)", a.Detail)
+		}
+		for _, c := range run.Conditions {
+			if _, err := fmt.Fprintf(w, "  ! %s: %s\n", c.Kind, c.Detail); err != nil {
+				return err
 			}
-			if _, err := fmt.Fprintf(w, "  - %s: expected %q, got %q%s\n", a.Class, a.Expected, a.Actual, detail); err != nil {
+		}
+		if run.RetainedSandboxPath != "" {
+			if _, err := fmt.Fprintf(w, "  retained sandbox: %s\n", run.RetainedSandboxPath); err != nil {
+				return err
+			}
+		}
+		if run.Subject.ExitCode != 0 {
+			stderr := run.Subject.Stderr
+			const maxStderrDisplay = 500
+			if len(stderr) > maxStderrDisplay {
+				stderr = stderr[:maxStderrDisplay] + "..."
+			}
+			if _, err := fmt.Fprintf(w, "  subject exited %d: %s\n", run.Subject.ExitCode, stderr); err != nil {
 				return err
 			}
 		}

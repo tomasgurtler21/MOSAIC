@@ -46,9 +46,9 @@ func nativePost(id domain.CollaboratorIdentity, token string) []byte {
 	return b
 }
 
-var workerID = domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "Worker"}
+var workerID = domain.CollaboratorIdentity{ToolName: domain.DispatchToolName, AgentIdentity: "Worker"}
 var workerMsg = domain.TaskMessage{AgentInstanceID: "Worker#1", TaskDescription: "do the work"}
-var researcherID = domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "Researcher"}
+var researcherID = domain.CollaboratorIdentity{ToolName: domain.DispatchToolName, AgentIdentity: "Researcher"}
 
 // fakeSandbox builds a minimal domain.Sandbox rooted at dir, for tests that
 // need to provision the fake adapter directly rather than through

@@ -48,6 +48,16 @@ type Deps struct {
 	// provision request; the runner does not interpret either.
 	SelfPath        string
 	LoggerBundleDir string
+
+	// InterpreterCmd is the interpreter resolved by the adapter's
+	// CheckEnvironment during preflight and carried here by the composition
+	// root. The runner does not interpret it; it populates
+	// ProvisionRequest.InterpreterCmd verbatim.
+	//
+	// Empty is legal and means "this adapter runs no interpreter". It is
+	// never a default, a fallback or a literal: no interpreter name appears
+	// anywhere in this package.
+	InterpreterCmd string
 }
 
 // Request is what one attempt of one test needs to run.
@@ -55,6 +65,11 @@ type Request struct {
 	Key      domain.RunKey
 	Test     preflight.ResolvedTest
 	Settings domain.RunSettings
+
+	// Retention is the run-level sandbox retention policy, decided by the
+	// frontend and passed in. The runner never reads it from the
+	// environment.
+	Retention domain.RetentionPolicy
 }
 
 // Run executes one attempt end to end and tears down on every exit path,
@@ -75,7 +90,7 @@ func Run(ctx context.Context, d Deps, req Request) (evidence domain.RunEvidence,
 	defer func() {
 		if r := recover(); r != nil {
 			if sandboxKnown {
-				_ = Teardown(d, ledger)
+				_, _ = Teardown(d, ledger, AttemptOutcome{Policy: req.Retention, Failed: true})
 			}
 			evidence = domain.RunEvidence{}
 			runErr = fmt.Errorf("runner: recovered panic: %v", r)
@@ -89,14 +104,16 @@ func Run(ctx context.Context, d Deps, req Request) (evidence domain.RunEvidence,
 	}
 	if setupErr != nil {
 		if sandboxKnown {
-			_ = Teardown(d, ledger)
+			_, _ = Teardown(d, ledger, AttemptOutcome{Policy: req.Retention, Failed: true})
 		}
 		return domain.RunEvidence{}, setupErr
 	}
 
-	plan, planErr := d.Adapter.SpawnPlan(ctx, req.Test.Definition.Subject, ledger.Provisioning)
+	subject := subjectWithRunIDPrelude(req.Test.Definition.Subject, req.Key.RunID)
+
+	plan, planErr := d.Adapter.SpawnPlan(ctx, subject, ledger.Provisioning)
 	if planErr != nil {
-		_ = Teardown(d, ledger)
+		_, _ = Teardown(d, ledger, AttemptOutcome{Policy: req.Retention, Failed: true})
 		return domain.RunEvidence{}, fmt.Errorf("runner: obtaining spawn plan: %w", planErr)
 	}
 
@@ -112,10 +129,13 @@ func Run(ctx context.Context, d Deps, req Request) (evidence domain.RunEvidence,
 		}
 	}
 
-	_ = Teardown(d, ledger)
+	retention, _ := Teardown(d, ledger, AttemptOutcome{Policy: req.Retention, Failed: launchErr != nil})
 
 	dur := d.Clock.Now().Sub(start)
 	evidence = BuildEvidence(req, snap, costReport, dur)
+	if retention.Retained {
+		evidence.RetainedSandboxPath = retention.Path
+	}
 
 	if launchErr != nil {
 		return evidence, launchErr
@@ -182,9 +202,14 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 	// 6. Drive the adapter's provisioning.
 	provReq := domain.ProvisionRequest{
 		Sandbox:         sb,
-		Subject:         req.Test.Definition.Subject,
+		Subject:         subjectWithRunIDPrelude(req.Test.Definition.Subject, req.Key.RunID),
 		LoggerBundleDir: d.LoggerBundleDir,
 		InterceptorPath: d.SelfPath,
+		InterceptorArgs: []string{domain.InterceptorSubcommand},
+		InterpreterCmd:  d.InterpreterCmd,
+		// Collaborators: deliberately unset — stub-collaborator generation
+		// is deferred (see ContractsDesign.md's "Contracts Deliberately Not
+		// Defined").
 	}
 	provisioning, err := d.Adapter.Provision(ctx, provReq)
 	if err != nil {
@@ -195,6 +220,17 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 	_ = SaveSetupLedger(sb.SetupLedgerPath(), ledger)
 
 	return sb, ledger, nil
+}
+
+// subjectWithRunIDPrelude returns a copy of subject whose opening message
+// has domain.RunIDPrelude(runID) prepended, so the logger bundle's
+// extraction recovers the run id from the prompt the same way real MOSAIC
+// orchestration runs carry it. subject itself, and therefore the caller's
+// Request, is never mutated.
+func subjectWithRunIDPrelude(subject domain.SubjectUnderTest, runID string) domain.SubjectUnderTest {
+	out := subject
+	out.OpeningMessage = domain.RunIDPrelude(runID) + subject.OpeningMessage
+	return out
 }
 
 // runIDPlaceholder is expanded in a seed file's declared path, so a seeded
@@ -299,13 +335,56 @@ func LoadSetupLedger(path string) (SetupLedger, error) {
 	return l, nil
 }
 
-// Teardown removes precisely the ledger's contents. A path absent from the
-// ledger is never touched.
+// RetentionOutcome tells Run's caller what happened to the sandbox, so the
+// report can name a path a user can actually open.
+type RetentionOutcome struct {
+	Retained bool
+	// Path is the retained sandbox root; empty when Retained is false.
+	Path string
+	// Scrubbed lists the sensitive paths removed before retention, so a test
+	// asserts on the scrub rather than on its absence.
+	Scrubbed []string
+}
+
+// AttemptOutcome is what the caller knows and Teardown cannot observe: which
+// policy this attempt runs under, and whether the attempt failed. It is a
+// parameter rather than a field on SetupLedger, because SetupLedger is
+// persisted to disk at the end of setup, before any outcome exists — a
+// Retention or AttemptFailed field on it would be written to disk
+// permanently stale, inside precisely the retained sandbox a diagnosis
+// reads. Run supplies AttemptOutcome{Policy: req.Retention, Failed: ...} at
+// each of its four Teardown call sites.
+type AttemptOutcome struct {
+	// Policy is req.Retention, carried unchanged from the frontend. Teardown
+	// never reads a policy from the environment or from disk.
+	Policy domain.RetentionPolicy
+
+	// Failed is true exactly when the attempt failed or never started: the
+	// panic-recovery exit, the setup-failure exit, the spawn-plan-failure
+	// exit, and a normal exit whose supervision returned an error. It is
+	// false only on a normal exit that produced evidence without error.
+	Failed bool
+}
+
+// Teardown honours o.Policy on every exit path, including panic recovery:
 //
-// The adapter's own Deprovision step is driven first and its error, if any,
-// is surfaced rather than swallowed — but it never stops the sandbox this
-// run created from being removed too, because teardown always happens.
-func Teardown(d Deps, l SetupLedger) error {
+//	RetainNever     → Deprovision, then delete the sandbox root. Today's behaviour.
+//	RetainAlways    → Skip Deprovision, scrub Provisioning.Sensitive, keep the root.
+//	RetainOnFailure → Behaves as RetainAlways when o.Failed; as RetainNever otherwise.
+//
+// Deprovision is skipped whenever the sandbox is retained: deprovisioning
+// removes the provisioned configuration, which is precisely the artifact a
+// diagnosis needs. Scrubbing is unconditional whenever a sandbox is left on
+// disk: a retained sandbox never contains live harness credential material.
+func Teardown(d Deps, l SetupLedger, o AttemptOutcome) (RetentionOutcome, error) {
+	if shouldRetain(o) {
+		scrubbed, scrubErr := scrubSensitive(l.Provisioning.Sensitive)
+		if scrubErr != nil {
+			return RetentionOutcome{}, fmt.Errorf("runner: teardown: scrubbing retained sandbox: %w", scrubErr)
+		}
+		return RetentionOutcome{Retained: true, Path: l.SandboxRoot, Scrubbed: scrubbed}, nil
+	}
+
 	var deprovisionErr error
 	if d.Adapter != nil {
 		deprovisionErr = d.Adapter.Deprovision(context.Background(), l.Provisioning)
@@ -318,14 +397,45 @@ func Teardown(d Deps, l SetupLedger) error {
 
 	switch {
 	case deprovisionErr != nil && teardownErr != nil:
-		return fmt.Errorf("runner: teardown: deprovision failed: %v; sandbox removal failed: %v", deprovisionErr, teardownErr)
+		return RetentionOutcome{}, fmt.Errorf("runner: teardown: deprovision failed: %v; sandbox removal failed: %v", deprovisionErr, teardownErr)
 	case deprovisionErr != nil:
-		return fmt.Errorf("runner: teardown: deprovision failed: %w", deprovisionErr)
+		return RetentionOutcome{}, fmt.Errorf("runner: teardown: deprovision failed: %w", deprovisionErr)
 	case teardownErr != nil:
-		return fmt.Errorf("runner: teardown: %w", teardownErr)
+		return RetentionOutcome{}, fmt.Errorf("runner: teardown: %w", teardownErr)
 	default:
-		return nil
+		return RetentionOutcome{}, nil
 	}
+}
+
+// shouldRetain resolves o into a retain/remove decision: RetainAlways always
+// retains, RetainOnFailure retains exactly when the attempt failed, and
+// RetainNever (and any unrecognised policy) never retains.
+func shouldRetain(o AttemptOutcome) bool {
+	switch o.Policy {
+	case domain.RetainAlways:
+		return true
+	case domain.RetainOnFailure:
+		return o.Failed
+	default:
+		return false
+	}
+}
+
+// scrubSensitive removes every path in paths, so a retained sandbox never
+// contains live harness credential material, and returns the paths it
+// actually removed (skipping empty entries) for the caller to report.
+func scrubSensitive(paths []string) ([]string, error) {
+	var scrubbed []string
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if err := os.RemoveAll(p); err != nil {
+			return scrubbed, fmt.Errorf("removing %q: %w", p, err)
+		}
+		scrubbed = append(scrubbed, p)
+	}
+	return scrubbed, nil
 }
 
 // SentinelPollInterval is how often the supervisor checks for the
@@ -457,6 +567,10 @@ type Snapshot struct {
 	LogReport            invlog.ReadReport
 	SubjectResult        domain.SubjectResult
 	LogRoot              string // captured so cost can be read after teardown
+
+	// LogsProduced reports whether LogRoot held any log records, populated
+	// from the actual log tree by TakeSnapshot via logRootHasFiles.
+	LogsProduced bool
 }
 
 // TakeSnapshot captures everything the verdict engine will need, before
@@ -466,6 +580,7 @@ func TakeSnapshot(d Deps, s domain.Sandbox, res domain.SubjectResult) Snapshot {
 		Files:         listSubjectFiles(s.SubjectDir),
 		SubjectResult: res,
 		LogRoot:       s.LogRoot(),
+		LogsProduced:  logRootHasFiles(s.LogRoot()),
 	}
 
 	records, report, err := invlog.NewLog(s.InvocationLogPath()).Read()
@@ -489,6 +604,25 @@ func TakeSnapshot(d Deps, s domain.Sandbox, res domain.SubjectResult) Snapshot {
 // convention seed files and real MOSAIC runs both use.
 func orchestrationDocPath(s domain.Sandbox) string {
 	return filepath.Join(s.SubjectDir, "Orchestration-"+s.Key.RunID, "Orchestration.md")
+}
+
+// logRootHasFiles reports whether root contains at least one file, so a run
+// that started but produced no logs at all is distinguishable from one that
+// did. A missing root counts as no files, not an error: a run whose subject
+// never wrote anything under OrchestrationLogs never creates the directory.
+func logRootHasFiles(root string) bool {
+	found := false
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if found {
+			return filepath.SkipAll
+		}
+		if err != nil || d == nil || d.IsDir() {
+			return nil
+		}
+		found = true
+		return nil
+	})
+	return found
 }
 
 // listSubjectFiles returns every file beneath subjectDir, relative to it,
@@ -536,6 +670,9 @@ func BuildEvidence(req Request, snap Snapshot, cost domain.CostReport, dur time.
 
 		Cost:     cost,
 		Duration: dur,
+
+		LogRoot:      snap.LogRoot,
+		LogsProduced: snap.LogsProduced,
 	}
 }
 

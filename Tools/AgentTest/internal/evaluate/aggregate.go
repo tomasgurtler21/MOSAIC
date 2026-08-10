@@ -16,6 +16,7 @@ func Aggregate(results []domain.TestResult, policy domain.RepetitionPolicy) doma
 	}
 
 	stateIntegrityCount := 0
+	infrastructureReason := false
 	for _, r := range results {
 		if out.TestID == "" {
 			out.TestID = r.Key.TestID
@@ -30,13 +31,21 @@ func Aggregate(results []domain.TestResult, policy domain.RepetitionPolicy) doma
 		if r.Verdict == domain.VerdictPass {
 			out.Passed++
 		}
+		if hasReason(r.Reasons, domain.ReasonInfrastructure) {
+			infrastructureReason = true
+		}
 	}
 
 	if out.Counted > 0 {
 		out.PassRate = float64(out.Passed) / float64(out.Counted)
 	}
 
-	out.InfrastructureFailure = stateIntegrityCount >= 2
+	// A recurring state-integrity fault (caught above via the exclusion
+	// count) and a runner error carrying ReasonInfrastructure directly are
+	// two different routes to the same conclusion: the tool, not the
+	// subject, failed. The latter needs no two-occurrence threshold — it was
+	// never retried in the first place, unlike a state-integrity fault.
+	out.InfrastructureFailure = stateIntegrityCount >= 2 || infrastructureReason
 
 	switch {
 	case out.InfrastructureFailure:
@@ -51,4 +60,14 @@ func Aggregate(results []domain.TestResult, policy domain.RepetitionPolicy) doma
 	}
 
 	return out
+}
+
+// hasReason reports whether reasons contains want.
+func hasReason(reasons []domain.FailureReason, want domain.FailureReason) bool {
+	for _, r := range reasons {
+		if r == want {
+			return true
+		}
+	}
+	return false
 }

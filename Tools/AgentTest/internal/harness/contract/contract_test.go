@@ -32,10 +32,10 @@ type wireCall struct {
 
 // wireReply is the loyalAdapter's native outcome-reply shape.
 type wireReply struct {
-	Kind  string          `json:"kind"`
-	Body  json.RawMessage `json:"body,omitempty"`
-	Prompt string         `json:"prompt,omitempty"`
-	Token string          `json:"token"`
+	Kind   string          `json:"kind"`
+	Body   json.RawMessage `json:"body,omitempty"`
+	Prompt string          `json:"prompt,omitempty"`
+	Token  string          `json:"token"`
 }
 
 // loyalAdapter is a small, fully-working domain.HarnessAdapter double used
@@ -86,8 +86,9 @@ func (a *loyalAdapter) ConfigScopes() []domain.ConfigScope {
 func (a *loyalAdapter) InspectScopes(ctx context.Context) ([]domain.ScopeFinding, error) {
 	findings := []domain.ScopeFinding{
 		{
-			Scope:       domain.ConfigScope{Name: "user", InSandbox: false, Isolatable: true},
-			Neutralized: true,
+			Scope:                    domain.ConfigScope{Name: "user", InSandbox: false, Isolatable: true},
+			Neutralized:              true,
+			PreservesSubjectFunction: true,
 		},
 	}
 	if a.rewritingScope {
@@ -164,6 +165,14 @@ func (a *loyalAdapter) TranslateCall(phase domain.InterceptionPhase, native []by
 		Capabilities:     a.caps,
 		ObservedResponse: w.Observed,
 	}, nil
+}
+
+// CheckEnvironment implements domain.HarnessAdapter. The loyal double runs
+// no interpreter and reports so honestly (InterpreterApplicable false, an
+// empty InterpreterCmd), and finds no problem: it exists to prove the whole
+// suite passes a truthful implementation end to end.
+func (a *loyalAdapter) CheckEnvironment(ctx context.Context) (domain.EnvironmentReport, error) {
+	return domain.EnvironmentReport{}, nil
 }
 
 func (a *loyalAdapter) TranslateOutcome(outcome domain.InterceptionOutcome, call domain.InterceptedCall) ([]byte, error) {
@@ -386,5 +395,79 @@ func TestRun_DishonestUnderclaimingCapabilityDouble_FailsCapabilityHonestyCheck(
 	}
 	if err := contract.CheckTranslationRoundTrip(t, cfg); err == nil {
 		t.Error("expected the translation-round-trip check to fail against a double that under-claims its capability (declares no direct substitution but actually achieves it), but it reported no error")
+	}
+}
+
+// brokenFunctionAdapter declares a scope neutralized while reporting that
+// the isolation broke the subject's ability to run — the exact failure mode
+// AC8.4 exists to catch: an adapter that isolates a scope at the cost of
+// the subject's ability to run must fail the neutralization check, not
+// pass it.
+type brokenFunctionAdapter struct {
+	loyalAdapter
+}
+
+func (a *brokenFunctionAdapter) InspectScopes(ctx context.Context) ([]domain.ScopeFinding, error) {
+	return []domain.ScopeFinding{
+		{
+			Scope:                    domain.ConfigScope{Name: "user", InSandbox: false, Isolatable: true},
+			Neutralized:              true,
+			PreservesSubjectFunction: false,
+			FunctionDetail:           "relocating the user scope moved authentication material out of reach; the subject can no longer log in",
+		},
+	}, nil
+}
+
+// TestRun_AdapterThatBreaksSubjectWhileClaimingNeutralization_FailsTheNeutralizationCheck
+// pins AC8.4: an adapter that reports Neutralized=true for a scope while
+// reporting PreservesSubjectFunction=false must fail the conformance
+// suite's neutralization check.
+func TestRun_AdapterThatBreaksSubjectWhileClaimingNeutralization_FailsTheNeutralizationCheck(t *testing.T) {
+	caps := domain.HarnessCapabilities{
+		SupportsDirectSubstitution: true,
+		SupportsPostInterception:   true,
+		CorrelationField:           "token",
+	}
+	cfg := contract.Config{
+		Name: "broken-function",
+		New: func(t *testing.T, dir string) domain.HarnessAdapter {
+			return &brokenFunctionAdapter{loyalAdapter{caps: caps}}
+		},
+		NativePre:  loyalNativePre,
+		NativePost: loyalNativePost,
+		Observe:    loyalObserve,
+		Subject:    loyalSubject(),
+	}
+
+	// Direct call, no t.Run subtest, for the same reason the dishonest
+	// capability doubles above call the check* function directly: a failing
+	// verdict here must not mark this test's own *testing.T failed as an
+	// unwanted side effect.
+	if err := contract.CheckPreservesSubjectFunction(t, cfg); err == nil {
+		t.Error("expected the neutralization check to fail against a double that reports Neutralized=true while PreservesSubjectFunction=false, but it reported no error")
+	}
+}
+
+// TestRun_AdapterThatOnlyInspectsCleanly_PreservesSubjectFunctionByDefault
+// pins the companion positive case ContractsDesign.md states explicitly: an
+// adapter that neither isolates nor breaks anything reports
+// PreservesSubjectFunction=true by not interfering, so the neutralization
+// check does not fire for a scope it never neutralized in the first place.
+func TestRun_AdapterThatOnlyInspectsCleanly_PreservesSubjectFunctionByDefault(t *testing.T) {
+	cfg := contract.Config{
+		Name: "loyal-rewrite",
+		New: newLoyalAdapter(domain.HarnessCapabilities{
+			SupportsDirectSubstitution: false,
+			SupportsPostInterception:   true,
+			CorrelationField:           "token",
+		}),
+		NativePre:  loyalNativePre,
+		NativePost: loyalNativePost,
+		Observe:    loyalObserve,
+		Subject:    loyalSubject(),
+	}
+
+	if err := contract.CheckPreservesSubjectFunction(t, cfg); err != nil {
+		t.Errorf("neutralization check failed against a loyal double that honestly declares PreservesSubjectFunction=true for its neutralized scope: %v", err)
 	}
 }

@@ -22,5 +22,5 @@ assertions:
   invocation_sequence:
     exact: true
     steps:
-      - { tool: Task, agent: greeter }
-      - { tool: Task, agent: helper }
+      - { tool: dispatch, agent: greeter }
+      - { tool: dispatch, agent: helper }

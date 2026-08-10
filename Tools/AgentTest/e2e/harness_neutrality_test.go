@@ -56,7 +56,7 @@ func TestHarnessNeutrality_FullPipeline_RunsThroughScriptedAdapterWithNoEngineCh
 		Script: fakeOptionsFor(
 			domain.HarnessCapabilities{SupportsDirectSubstitution: true},
 			[]subjectStep{
-				invoke("Task", "greeter"),
+				invoke("dispatch", "greeter"),
 				finish(`{"agent_instance_id":"standin-subject#1","status_code":"SUCCESS","status_message":"Done."}`),
 			},
 		),

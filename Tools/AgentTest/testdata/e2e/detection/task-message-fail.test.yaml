@@ -21,5 +21,5 @@ turn_limit: 5
 assertions:
   task_messages:
     - at: 1
-      identity: { tool: Task, agent: greeter }
+      identity: { tool: dispatch, agent: greeter }
       task_description_contains: ["this phrase never appears"]

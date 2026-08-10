@@ -82,3 +82,37 @@ func InterceptorEntries(pre, post Bridge) Contribution {
 		},
 	}
 }
+
+// CompletionEntry generates this adapter's registration contribution for the
+// harness's own completion signal — the SubagentStop hook, the source of the
+// collaborator's real reply once the collaborator has actually finished
+// (unlike PostToolUse, which fires at launch). It is registered separately
+// from InterceptorEntries, and matches on every SubagentStop event rather
+// than on InterceptedToolName: SubagentStop is not a tool-use hook and
+// carries no tool matcher to filter on.
+//
+// The entry is asynchronous and purely observational, exactly like the
+// post-invocation entry: this phase never rewrites anything and never
+// halts the subject, per PhaseCompletion's doc comment in
+// domain/interception.go ("Observation only: an outcome for this phase is
+// never a substitution, a rewrite or a halt"). It therefore does not
+// contribute to the single-rewriter composition invariant Compose enforces.
+func CompletionEntry(completion Bridge) Contribution {
+	completionAsync := true
+
+	return Contribution{
+		Source:        "interceptor",
+		RewritesInput: false,
+		Settings: Settings{
+			Hooks: map[string][]Matcher{
+				"SubagentStop": {
+					{
+						Hooks: []Entry{
+							{Type: "command", Command: completion.Executable, Args: completion.Args, Async: &completionAsync},
+						},
+					},
+				},
+			},
+		},
+	}
+}

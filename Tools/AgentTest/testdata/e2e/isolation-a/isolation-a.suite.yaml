@@ -7,7 +7,6 @@ description: >
   together these two independent RunScenario invocations demonstrate that
   one run's sandbox, log and state never carry the other's artifacts.
 defaults:
-  harness: fake
   timeout: 30s
   turn_limit: 5
   repetitions: 1

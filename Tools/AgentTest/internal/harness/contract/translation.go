@@ -25,7 +25,9 @@ func CheckTranslationRoundTrip(t *testing.T, cfg Config) error {
 	adapter := cfg.New(t, t.TempDir())
 	caps := adapter.Capabilities()
 
-	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "Worker"}
+	// Normalized vocabulary: NativePre encodes it into the harness's own
+	// wire shape, per Config.NativePre's doc comment.
+	id := domain.CollaboratorIdentity{ToolName: domain.DispatchToolName, AgentIdentity: "Worker"}
 	msg := domain.TaskMessage{
 		AgentInstanceID: "Worker#1",
 		TaskDescription: "do the work",

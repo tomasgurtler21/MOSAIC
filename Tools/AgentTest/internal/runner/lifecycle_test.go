@@ -163,7 +163,7 @@ func TestTeardown_RemovesExactlyWhatTheLedgerRecords(t *testing.T) {
 		SandboxRoot: sandboxRoot,
 	}
 
-	if err := runner.Teardown(h.Deps, ledger); err != nil {
+	if _, err := runner.Teardown(h.Deps, ledger, runner.AttemptOutcome{Policy: domain.RetainNever}); err != nil {
 		t.Fatalf("Teardown returned unexpected error: %v", err)
 	}
 
@@ -187,7 +187,7 @@ func TestTeardown_NeverRemovesAFileTheRunDidNotCreate(t *testing.T) {
 	sandboxRoot := t.TempDir()
 	ledger := runner.SetupLedger{SandboxRoot: sandboxRoot}
 
-	if err := runner.Teardown(h.Deps, ledger); err != nil {
+	if _, err := runner.Teardown(h.Deps, ledger, runner.AttemptOutcome{Policy: domain.RetainNever}); err != nil {
 		t.Fatalf("Teardown returned unexpected error: %v", err)
 	}
 
@@ -217,7 +217,7 @@ func TestTeardown_DeprovisionFails_StillRemovesTheSandboxButSurfacesTheError(t *
 	// run created from being removed either — the same "teardown always
 	// happens" guarantee the panic and provision-failure cases above cover,
 	// extended to the adapter's own half of teardown.
-	err := runner.Teardown(h.Deps, ledger)
+	_, err := runner.Teardown(h.Deps, ledger, runner.AttemptOutcome{Policy: domain.RetainNever})
 	if err == nil {
 		t.Error("Teardown returned no error despite Deprovision failing, want the failure surfaced rather than swallowed")
 	}
@@ -254,5 +254,398 @@ func TestSetupLedger_SaveThenLoad_RoundTripsItsContents(t *testing.T) {
 	}
 	if len(loaded.ControlFiles) != 2 {
 		t.Errorf("loaded.ControlFiles = %v, want 2 entries", loaded.ControlFiles)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Sandbox retention (Stage 7): the three policies honoured on every exit
+// path a run's Teardown can be reached from, and the credential-scrub
+// obligation a retained sandbox carries.
+//
+// Teardown takes the retention policy and the attempt's failure state as an
+// explicit AttemptOutcome parameter, not as fields on SetupLedger: the
+// ledger is persisted to disk at the end of setup, before any outcome
+// exists, so a Retention or AttemptFailed field on it would be written
+// permanently stale inside the very sandbox a diagnosis reads. Run supplies
+// AttemptOutcome{Policy: req.Retention, Failed: ...} at each of its four
+// Teardown call sites.
+// ---------------------------------------------------------------------------
+
+func TestRun_RetainAlways_KeepsTheSandboxOnDisk_AfterNormalCompletion(t *testing.T) {
+	h := newHarness(t)
+	req := newRequest("retain-always-normal")
+	req.Retention = domain.RetainAlways
+
+	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	if _, err := h.Deps.Workspaces.Locate(req.Key); err != nil {
+		t.Errorf("Locate after Run = %v, want the sandbox still found — RetainAlways must keep it", err)
+	}
+	for _, name := range h.Rec.all() {
+		if name == "adapter.Deprovision" {
+			t.Error("adapter.Deprovision was called despite RetainAlways; retention must skip deprovision, which would remove the artifacts a diagnosis needs")
+		}
+	}
+}
+
+func TestRun_RetainAlways_KeepsTheSandboxOnDisk_OnSpawnPlanFailure(t *testing.T) {
+	h := newHarness(t)
+	h.Adapter.planErr = errors.New("spawn plan could not be built")
+	req := newRequest("retain-always-spawn-fail")
+	req.Retention = domain.RetainAlways
+
+	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+		t.Fatal("Run returned no error for a spawn-plan failure")
+	}
+
+	if _, err := h.Deps.Workspaces.Locate(req.Key); err != nil {
+		t.Errorf("Locate after a spawn-plan failure = %v, want the sandbox retained under RetainAlways", err)
+	}
+}
+
+func TestRun_RetainAlways_KeepsTheSandboxOnDisk_OnProvisionFailure(t *testing.T) {
+	h := newHarness(t)
+	h.Adapter.provisionErr = errors.New("provisioning failed")
+	req := newRequest("retain-always-provision-fail")
+	req.Retention = domain.RetainAlways
+
+	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+		t.Fatal("Run returned no error for a provisioning failure")
+	}
+
+	if _, err := h.Deps.Workspaces.Locate(req.Key); err != nil {
+		t.Errorf("Locate after a provisioning failure = %v, want the sandbox retained under RetainAlways", err)
+	}
+}
+
+func TestRun_RetainAlways_KeepsTheSandboxOnDisk_OnPanicRecovery(t *testing.T) {
+	h := newHarness(t)
+	h.Launcher.launchFn = func(ctx context.Context, plan domain.SpawnPlan) (domain.SubjectResult, error) {
+		panic("simulated failure inside execution")
+	}
+	req := newRequest("retain-always-panic")
+	req.Retention = domain.RetainAlways
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("Run let a panic escape rather than recovering and tearing down: %v", r)
+			}
+		}()
+		if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+			t.Error("Run returned no error for a panicking execution")
+		}
+	}()
+
+	if _, err := h.Deps.Workspaces.Locate(req.Key); err != nil {
+		t.Errorf("Locate after a recovered panic = %v, want the sandbox retained under RetainAlways", err)
+	}
+}
+
+func TestRun_RetainOnFailure_TearsDownTheSandbox_WhenTheAttemptSucceeds(t *testing.T) {
+	h := newHarness(t)
+	req := newRequest("retain-on-failure-success")
+	req.Retention = domain.RetainOnFailure
+
+	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	if _, err := h.Deps.Workspaces.Locate(req.Key); !errors.Is(err, workspace.ErrSandboxNotFound) {
+		t.Errorf("Locate after a successful RetainOnFailure run = %v, want %v — a successful attempt must not be retained", err, workspace.ErrSandboxNotFound)
+	}
+}
+
+func TestRun_RetainOnFailure_RetainsTheSandbox_WhenTheAttemptFails(t *testing.T) {
+	h := newHarness(t)
+	h.Adapter.planErr = errors.New("spawn plan could not be built")
+	req := newRequest("retain-on-failure-spawn-fail")
+	req.Retention = domain.RetainOnFailure
+
+	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+		t.Fatal("Run returned no error for a spawn-plan failure")
+	}
+
+	if _, err := h.Deps.Workspaces.Locate(req.Key); err != nil {
+		t.Errorf("Locate after a failed RetainOnFailure run = %v, want the sandbox retained", err)
+	}
+}
+
+// TestRun_RetainOnFailure_RetainsTheSandbox_OnProvisionFailure exercises the
+// Teardown call site reached after a provisioning failure — a distinct exit
+// path from the spawn-plan-failure one already covered above, and one no
+// compiler-checked structural guard pins to the correct AttemptOutcome.Failed
+// value (see ContractsDesign.md's "no structural guard over the call sites"
+// note).
+func TestRun_RetainOnFailure_RetainsTheSandbox_OnProvisionFailure(t *testing.T) {
+	h := newHarness(t)
+	h.Adapter.provisionErr = errors.New("provisioning failed")
+	req := newRequest("retain-on-failure-provision-fail")
+	req.Retention = domain.RetainOnFailure
+
+	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+		t.Fatal("Run returned no error for a provisioning failure")
+	}
+
+	if _, err := h.Deps.Workspaces.Locate(req.Key); err != nil {
+		t.Errorf("Locate after a provisioning failure = %v, want the sandbox retained under RetainOnFailure", err)
+	}
+}
+
+// TestRun_RetainOnFailure_RetainsTheSandbox_OnSeedFileResolutionFailure
+// exercises the Teardown call site reached after a seed-file resolution
+// failure — the third of the four distinct exit paths Run's Teardown is
+// called from.
+func TestRun_RetainOnFailure_RetainsTheSandbox_OnSeedFileResolutionFailure(t *testing.T) {
+	h := newHarness(t)
+	req := newRequest("retain-on-failure-seed-resolution-error")
+	req.Retention = domain.RetainOnFailure
+	req.Test.Definition.SeedFiles = []domain.SeedFile{
+		{Path: "notes/plan.md", Ref: "does-not-exist.json"},
+	}
+
+	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+		t.Fatal("Run returned no error for a seed-file resolution failure")
+	}
+
+	if _, err := h.Deps.Workspaces.Locate(req.Key); err != nil {
+		t.Errorf("Locate after a seed-file resolution failure = %v, want the sandbox retained under RetainOnFailure", err)
+	}
+}
+
+// TestRun_RetainOnFailure_RetainsTheSandbox_OnPanicRecovery exercises the
+// Teardown call site reached after a recovered panic — the fourth and final
+// distinct exit path, completing RetainOnFailure's coverage of the same
+// four-exit-path matrix RetainAlways already has above.
+func TestRun_RetainOnFailure_RetainsTheSandbox_OnPanicRecovery(t *testing.T) {
+	h := newHarness(t)
+	h.Launcher.launchFn = func(ctx context.Context, plan domain.SpawnPlan) (domain.SubjectResult, error) {
+		panic("simulated failure inside execution")
+	}
+	req := newRequest("retain-on-failure-panic")
+	req.Retention = domain.RetainOnFailure
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("Run let a panic escape rather than recovering and tearing down: %v", r)
+			}
+		}()
+		if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+			t.Error("Run returned no error for a panicking execution")
+		}
+	}()
+
+	if _, err := h.Deps.Workspaces.Locate(req.Key); err != nil {
+		t.Errorf("Locate after a recovered panic = %v, want the sandbox retained under RetainOnFailure", err)
+	}
+}
+
+// TestRun_RetainAlways_EvidenceCarriesTheRetainedSandboxPath is Stage 7's
+// bridge to AC7.3: the report can only print a path Run actually returns.
+func TestRun_RetainAlways_EvidenceCarriesTheRetainedSandboxPath(t *testing.T) {
+	h := newHarness(t)
+	req := newRequest("retain-always-evidence-path")
+	req.Retention = domain.RetainAlways
+
+	evidence, err := runner.Run(context.Background(), h.Deps, req)
+	if err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	sb, locateErr := h.Deps.Workspaces.Locate(req.Key)
+	if locateErr != nil {
+		t.Fatalf("sandbox was not retained (Locate returned %v); the path assertion below is meaningless without it", locateErr)
+	}
+
+	if evidence.RetainedSandboxPath != sb.Root {
+		t.Errorf("evidence.RetainedSandboxPath = %q, want %q — a retention feature whose path the report cannot show is not a feature", evidence.RetainedSandboxPath, sb.Root)
+	}
+}
+
+// TestTeardown_RetainAlways_SkipsDeprovisionAndKeepsTheSandbox is the
+// Teardown-direct counterpart to the Run-level tests above: it isolates the
+// policy decision from the rest of the lifecycle.
+func TestTeardown_RetainAlways_SkipsDeprovisionAndKeepsTheSandbox(t *testing.T) {
+	h := newHarness(t)
+	sandboxRoot := t.TempDir()
+	subjectDir := filepath.Join(sandboxRoot, "subject")
+	if err := os.MkdirAll(subjectDir, 0o755); err != nil {
+		t.Fatalf("failed to create subject dir: %v", err)
+	}
+
+	ledger := runner.SetupLedger{SandboxRoot: sandboxRoot}
+
+	outcome, err := runner.Teardown(h.Deps, ledger, runner.AttemptOutcome{Policy: domain.RetainAlways})
+	if err != nil {
+		t.Fatalf("Teardown returned unexpected error: %v", err)
+	}
+
+	if !outcome.Retained {
+		t.Error("RetentionOutcome.Retained = false, want true under RetainAlways")
+	}
+	if outcome.Path != sandboxRoot {
+		t.Errorf("RetentionOutcome.Path = %q, want %q", outcome.Path, sandboxRoot)
+	}
+	if _, statErr := os.Stat(sandboxRoot); statErr != nil {
+		t.Errorf("sandbox root is gone after Teardown under RetainAlways: %v", statErr)
+	}
+	for _, name := range h.Rec.all() {
+		if name == "adapter.Deprovision" {
+			t.Error("adapter.Deprovision was called under RetainAlways, want it skipped")
+		}
+	}
+}
+
+// TestTeardown_RetainAlways_ScrubsSensitivePathsBeforeRetaining covers the
+// forward obligation Stage 8 depends on: whatever Provisioning.Sensitive
+// names is gone before a retained sandbox is left on disk, and everything
+// else in the sandbox survives untouched.
+func TestTeardown_RetainAlways_ScrubsSensitivePathsBeforeRetaining(t *testing.T) {
+	h := newHarness(t)
+	sandboxRoot := t.TempDir()
+	subjectDir := filepath.Join(sandboxRoot, "subject")
+	credDir := filepath.Join(subjectDir, ".config")
+	if err := os.MkdirAll(credDir, 0o755); err != nil {
+		t.Fatalf("failed to create credential dir: %v", err)
+	}
+	credFile := filepath.Join(credDir, "credentials.json")
+	if err := os.WriteFile(credFile, []byte(`{"token":"secret"}`), 0o600); err != nil {
+		t.Fatalf("failed to write credential file: %v", err)
+	}
+	harmlessFile := filepath.Join(subjectDir, "notes.md")
+	if err := os.WriteFile(harmlessFile, []byte("notes"), 0o644); err != nil {
+		t.Fatalf("failed to write harmless file: %v", err)
+	}
+
+	ledger := runner.SetupLedger{
+		SandboxRoot: sandboxRoot,
+		Provisioning: domain.Provisioning{
+			Sensitive: []string{credFile},
+		},
+	}
+
+	outcome, err := runner.Teardown(h.Deps, ledger, runner.AttemptOutcome{Policy: domain.RetainAlways})
+	if err != nil {
+		t.Fatalf("Teardown returned unexpected error: %v", err)
+	}
+
+	if _, statErr := os.Stat(credFile); !os.IsNotExist(statErr) {
+		t.Errorf("credential file still exists after a retained Teardown (err=%v), want it scrubbed", statErr)
+	}
+	if _, statErr := os.Stat(harmlessFile); statErr != nil {
+		t.Errorf("a non-sensitive file was removed by the scrub step: %v", statErr)
+	}
+
+	found := false
+	for _, p := range outcome.Scrubbed {
+		if p == credFile {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("RetentionOutcome.Scrubbed = %v, want it to list %q", outcome.Scrubbed, credFile)
+	}
+}
+
+func TestTeardown_RetainOnFailure_AttemptFailed_RetainsTheSandbox(t *testing.T) {
+	h := newHarness(t)
+	sandboxRoot := t.TempDir()
+	if err := os.MkdirAll(sandboxRoot, 0o755); err != nil {
+		t.Fatalf("failed to create sandbox root: %v", err)
+	}
+
+	ledger := runner.SetupLedger{SandboxRoot: sandboxRoot}
+
+	outcome, err := runner.Teardown(h.Deps, ledger, runner.AttemptOutcome{Policy: domain.RetainOnFailure, Failed: true})
+	if err != nil {
+		t.Fatalf("Teardown returned unexpected error: %v", err)
+	}
+	if !outcome.Retained {
+		t.Error("RetentionOutcome.Retained = false, want true — RetainOnFailure must behave as RetainAlways when the attempt failed")
+	}
+	if _, statErr := os.Stat(sandboxRoot); statErr != nil {
+		t.Errorf("sandbox root is gone after a failed RetainOnFailure attempt: %v", statErr)
+	}
+	for _, name := range h.Rec.all() {
+		if name == "adapter.Deprovision" {
+			t.Error("adapter.Deprovision was called under a failed RetainOnFailure attempt, want it skipped — RetainOnFailure behaves as RetainAlways when the attempt failed")
+		}
+	}
+}
+
+// TestTeardown_RetainOnFailure_AttemptFailed_ScrubsSensitivePathsBeforeRetaining
+// mirrors TestTeardown_RetainAlways_ScrubsSensitivePathsBeforeRetaining for
+// the other way a sandbox can be retained: RetainOnFailure behaving as
+// RetainAlways once the attempt has failed. The scrub obligation
+// ("unconditional whenever a sandbox is left on disk") applies here just as
+// much as under RetainAlways.
+func TestTeardown_RetainOnFailure_AttemptFailed_ScrubsSensitivePathsBeforeRetaining(t *testing.T) {
+	h := newHarness(t)
+	sandboxRoot := t.TempDir()
+	subjectDir := filepath.Join(sandboxRoot, "subject")
+	credDir := filepath.Join(subjectDir, ".config")
+	if err := os.MkdirAll(credDir, 0o755); err != nil {
+		t.Fatalf("failed to create credential dir: %v", err)
+	}
+	credFile := filepath.Join(credDir, "credentials.json")
+	if err := os.WriteFile(credFile, []byte(`{"token":"secret"}`), 0o600); err != nil {
+		t.Fatalf("failed to write credential file: %v", err)
+	}
+	harmlessFile := filepath.Join(subjectDir, "notes.md")
+	if err := os.WriteFile(harmlessFile, []byte("notes"), 0o644); err != nil {
+		t.Fatalf("failed to write harmless file: %v", err)
+	}
+
+	ledger := runner.SetupLedger{
+		SandboxRoot: sandboxRoot,
+		Provisioning: domain.Provisioning{
+			Sensitive: []string{credFile},
+		},
+	}
+
+	outcome, err := runner.Teardown(h.Deps, ledger, runner.AttemptOutcome{Policy: domain.RetainOnFailure, Failed: true})
+	if err != nil {
+		t.Fatalf("Teardown returned unexpected error: %v", err)
+	}
+
+	if _, statErr := os.Stat(credFile); !os.IsNotExist(statErr) {
+		t.Errorf("credential file still exists after a failed RetainOnFailure Teardown (err=%v), want it scrubbed", statErr)
+	}
+	if _, statErr := os.Stat(harmlessFile); statErr != nil {
+		t.Errorf("a non-sensitive file was removed by the scrub step: %v", statErr)
+	}
+
+	found := false
+	for _, p := range outcome.Scrubbed {
+		if p == credFile {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("RetentionOutcome.Scrubbed = %v, want it to list %q", outcome.Scrubbed, credFile)
+	}
+}
+
+func TestTeardown_RetainOnFailure_AttemptSucceeded_RemovesTheSandbox(t *testing.T) {
+	h := newHarness(t)
+	sandboxRoot := t.TempDir()
+	if err := os.MkdirAll(sandboxRoot, 0o755); err != nil {
+		t.Fatalf("failed to create sandbox root: %v", err)
+	}
+
+	ledger := runner.SetupLedger{SandboxRoot: sandboxRoot}
+
+	outcome, err := runner.Teardown(h.Deps, ledger, runner.AttemptOutcome{Policy: domain.RetainOnFailure, Failed: false})
+	if err != nil {
+		t.Fatalf("Teardown returned unexpected error: %v", err)
+	}
+	if outcome.Retained {
+		t.Error("RetentionOutcome.Retained = true, want false — RetainOnFailure must behave as RetainNever when the attempt succeeded")
+	}
+	if _, statErr := os.Stat(sandboxRoot); !os.IsNotExist(statErr) {
+		t.Errorf("sandbox root still exists after a successful RetainOnFailure attempt (err=%v), want it removed", statErr)
 	}
 }

@@ -61,6 +61,27 @@ type HarnessAdapter interface {
 	// interception point expects. call is the call the outcome answers, so
 	// the adapter can echo native identifiers the harness requires.
 	TranslateOutcome(outcome InterceptionOutcome, call InterceptedCall) ([]byte, error)
+
+	// CheckEnvironment validates everything that must hold before the first
+	// subject is spawned, and yields the values the neutral layers need from
+	// the adapter — most importantly the resolved interpreter command.
+	//
+	// It performs no provisioning and spawns no subject. It is called during
+	// preflight, before any cost is incurred.
+	//
+	// The returned report is always usable, even when problems were found:
+	// Problems is the authority on whether the environment is usable, and
+	// the error return is reserved for a fault that prevented the check
+	// from being performed at all (never for a problem the check exists to
+	// find).
+	//
+	// Honesty obligation, enforced by the conformance suite: an adapter MUST
+	// NOT report a problem-free environment while having failed to resolve
+	// something it needs, and MUST NOT report a resolved value it does not
+	// actually use. An adapter that runs no interpreter leaves
+	// EnvironmentReport.Interpreter zero-valued and says so in
+	// InterpreterApplicable.
+	CheckEnvironment(ctx context.Context) (EnvironmentReport, error)
 }
 
 // SubjectLauncher executes a SpawnPlan and reports what the subject did.

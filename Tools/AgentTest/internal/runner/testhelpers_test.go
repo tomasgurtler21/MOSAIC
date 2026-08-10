@@ -85,6 +85,11 @@ type stubAdapter struct {
 	// lastProvisionReq captures the most recent Provision call, so a test can
 	// read back the sandbox setup actually created.
 	lastProvisionReq domain.ProvisionRequest
+
+	// lastSpawnPlanSubject captures the subject SpawnPlan was actually
+	// handed, so a test can assert on run-id prompt injection without
+	// inspecting internal runner state.
+	lastSpawnPlanSubject domain.SubjectUnderTest
 }
 
 var _ domain.HarnessAdapter = (*stubAdapter)(nil)
@@ -119,6 +124,7 @@ func (a *stubAdapter) Deprovision(ctx context.Context, p domain.Provisioning) er
 
 func (a *stubAdapter) SpawnPlan(ctx context.Context, subject domain.SubjectUnderTest, p domain.Provisioning) (domain.SpawnPlan, error) {
 	a.rec.record("adapter.SpawnPlan")
+	a.lastSpawnPlanSubject = subject
 	if a.planErr != nil {
 		return domain.SpawnPlan{}, a.planErr
 	}
@@ -131,6 +137,13 @@ func (a *stubAdapter) TranslateCall(phase domain.InterceptionPhase, native []byt
 
 func (a *stubAdapter) TranslateOutcome(outcome domain.InterceptionOutcome, call domain.InterceptedCall) ([]byte, error) {
 	return nil, errNotUsedByRunnerTests
+}
+
+// CheckEnvironment implements domain.HarnessAdapter. Not exercised by the
+// runner's own tests, which drive setup/spawn directly rather than through a
+// pre-flight check.
+func (a *stubAdapter) CheckEnvironment(ctx context.Context) (domain.EnvironmentReport, error) {
+	return domain.EnvironmentReport{}, nil
 }
 
 // stubLauncher is a minimal domain.SubjectLauncher double. It performs no

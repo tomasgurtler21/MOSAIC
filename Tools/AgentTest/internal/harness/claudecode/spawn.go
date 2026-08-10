@@ -52,7 +52,7 @@ func (a *Adapter) SpawnPlan(ctx context.Context, subject domain.SubjectUnderTest
 	// entirely inside the sandbox's control directory, which is what lets
 	// the adapter report that scope as neutralized rather than merely
 	// inspected (see scopes.go).
-	configHome := filepath.Join(p.Sandbox.ControlDir, "claude-home")
+	configHome := filepath.Join(p.Sandbox.ControlDir, ConfigHomeRelDir)
 
 	return domain.SpawnPlan{
 		Executable:        ClaudeCLIExecutable,

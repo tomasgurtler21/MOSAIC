@@ -72,6 +72,51 @@ func sequencePointer(list string, i int, field string) string {
 	return fmt.Sprintf("%s[%d].%s", list, i, field)
 }
 
+// removedHarnessKeyMessage is the diagnostic text every "removed-key-harness"
+// occurrence uses, naming both the removal and where a harness is actually
+// selected instead.
+const removedHarnessKeyMessage = "harness: is no longer part of the suite/test schema; " +
+	"the harness is selected by the invocation (the --harness flag or the TUI's " +
+	"harness-select screen), never declared in an authored file"
+
+// mappingChild returns the value of root's top-level key, or nil when root
+// is nil or declares no such key.
+func mappingChild(root *ast.MappingNode, key string) ast.Node {
+	if root == nil {
+		return nil
+	}
+	for _, v := range root.Values {
+		if v.Key.String() == key {
+			return v.Value
+		}
+	}
+	return nil
+}
+
+// reportRemovedHarnessKeyIfPresent reports a "removed-key-harness" diagnostic
+// for node's own "harness" key, if node is a mapping that declares one. node
+// is nil-safe: a section that was never authored (e.g. no "defaults:") has
+// nothing to check.
+func reportRemovedHarnessKeyIfPresent(src Source, node ast.Node, pointer string, report *Report) {
+	m, ok := node.(*ast.MappingNode)
+	if !ok {
+		return
+	}
+	for _, v := range m.Values {
+		if v.Key.String() != "harness" {
+			continue
+		}
+		report.Add(Diagnostic{
+			Severity: SeverityError,
+			Code:     "removed-key-harness",
+			Path:     src.Path,
+			Line:     v.Key.GetToken().Position.Line,
+			Pointer:  pointer,
+			Message:  removedHarnessKeyMessage,
+		})
+	}
+}
+
 // missingRequiredField builds the standard "missing-required-field"
 // diagnostic every authored format reports the same way.
 func missingRequiredField(src Source, field string) Diagnostic {

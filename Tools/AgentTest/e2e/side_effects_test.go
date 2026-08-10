@@ -70,7 +70,7 @@ func TestSideEffects_DeclaredFileExists_BeforeResponseDelivered(t *testing.T) {
 		Script: fakeOptionsFor(
 			effectTimingScript(),
 			[]subjectStep{
-				invoke("Task", "effecter"),
+				invoke("dispatch", "effecter"),
 				finish(`{"agent_instance_id":"standin-subject#1","run_id":"side-effects-run","status_code":"SUCCESS","status_message":"Done."}`),
 			},
 		),
@@ -103,7 +103,7 @@ func TestSideEffects_WorkspaceRemoved_AndUntouchedFilesSurvive(t *testing.T) {
 		Script: fakeOptionsFor(
 			effectTimingScript(),
 			[]subjectStep{
-				invoke("Task", "effecter"),
+				invoke("dispatch", "effecter"),
 				finish(`{"agent_instance_id":"standin-subject#1","run_id":"side-effects-run","status_code":"SUCCESS","status_message":"Done."}`),
 			},
 		),
@@ -148,7 +148,7 @@ func TestSideEffects_IndependentRuns_DoNotObserveEachOthersState(t *testing.T) {
 		Script: fakeOptionsFor(
 			domain.HarnessCapabilities{SupportsDirectSubstitution: true},
 			[]subjectStep{
-				invoke("Task", "worker-a"),
+				invoke("dispatch", "worker-a"),
 				finish(`{"agent_instance_id":"standin-subject#1","run_id":"isolation-a-run","status_code":"SUCCESS","status_message":"Done."}`),
 			},
 		),
@@ -159,7 +159,7 @@ func TestSideEffects_IndependentRuns_DoNotObserveEachOthersState(t *testing.T) {
 		Script: fakeOptionsFor(
 			domain.HarnessCapabilities{SupportsDirectSubstitution: true},
 			[]subjectStep{
-				invoke("Task", "worker-b"),
+				invoke("dispatch", "worker-b"),
 				finish(`{"agent_instance_id":"standin-subject#1","run_id":"isolation-b-run","status_code":"SUCCESS","status_message":"Done."}`),
 			},
 		),

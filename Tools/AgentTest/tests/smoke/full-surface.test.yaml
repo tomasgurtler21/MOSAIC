@@ -32,7 +32,7 @@ assertions:
   invocation_sequence:
     exact: true
     steps:
-      - { tool: Agent, agent: researcher }
+      - { tool: dispatch, agent: researcher }
   final_state:
     phase: COMPLETED
     last_status: SUCCESS
@@ -46,5 +46,5 @@ assertions:
     - Design.md
   task_messages:
     - at: 1
-      identity: { tool: Agent, agent: researcher }
+      identity: { tool: dispatch, agent: researcher }
       task_description_contains: ["widgets"]

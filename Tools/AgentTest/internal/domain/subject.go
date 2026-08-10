@@ -29,6 +29,17 @@ type SubjectUnderTest struct {
 	AllowedTools   []string
 }
 
+// DispatchToolName is the normalized, harness-neutral name of the tool that
+// dispatches a collaborator. Authored tests, stub registries and fixtures use
+// this name and no other.
+//
+// Adapters translate their harness's native name to it: a vendor renaming a
+// tool must not break a test suite, because a suite that breaks on a rename
+// is measuring the wrong thing.
+//
+// It is deliberately not any harness's own term.
+const DispatchToolName = "dispatch"
+
 // CollaboratorIdentity is a composite, not an agent type.
 //
 // In the current mode the intercepted thing is an agent dispatch, so ToolName
@@ -96,8 +107,11 @@ type TaskMessage struct {
 	IncludeResultSummary bool     `json:"include_result_summary"`
 	HumanInTheLoop       bool     `json:"human_in_the_loop"`
 
-	Raw        string            `json:"-"` // verbatim text the message was extracted from
-	Extraction ExtractionQuality `json:"-"`
+	// Raw and Extraction cross the interceptor-process-to-runner-process
+	// boundary through invocations.jsonl. They were tagged json:"-", so both
+	// arrived zero-valued and the degraded-extraction condition was dead code.
+	Raw        string            `json:"raw,omitempty"`
+	Extraction ExtractionQuality `json:"extraction,omitempty"`
 }
 
 // ExtractionQuality records how confidently a TaskMessage was recovered from
@@ -119,7 +133,14 @@ type SubjectResult struct {
 	RawOutput       string
 	Disposition     RunDisposition
 	ExitCode        int
-	Duration        time.Duration
+
+	// Stderr is the subject's standard error, carried through from the
+	// launcher's response. An authentication failure is diagnosable from
+	// this alone; without it a non-zero exit is indistinguishable from a
+	// subject regression.
+	Stderr string
+
+	Duration time.Duration
 }
 
 // RunDisposition is how the subject's run ended.

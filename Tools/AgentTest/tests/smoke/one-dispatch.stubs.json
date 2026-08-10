@@ -4,7 +4,7 @@
   "on_unmatched": "halt",
   "stubs": [
     {
-      "match": { "tool": "Agent", "agent": "researcher", "invocation": 1 },
+      "match": { "tool": "dispatch", "agent": "researcher", "invocation": 1 },
       "response": {
         "agent_instance_id": "researcher#1",
         "run_id": "one-dispatch-run",

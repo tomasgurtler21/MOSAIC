@@ -92,6 +92,10 @@ func testConfigScopeInspection(t *testing.T, cfg Config) {
 			t.Errorf("InspectScopes: scope %q registers a hook that rewrites the intercepted call's input and was not neutralized, but Detail is empty; the operator needs an explanation of the un-neutralized rewriting hook", s.Name)
 		}
 	}
+
+	if err := CheckPreservesSubjectFunction(t, cfg); err != nil {
+		t.Error(err)
+	}
 }
 
 // testProvisionRefusesCompetingRewriteHooks asserts that Provision fails
@@ -168,7 +172,11 @@ func testTranslateBasics(t *testing.T, cfg Config) {
 	adapter := cfg.New(t, t.TempDir())
 	caps := adapter.Capabilities()
 
-	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "Worker"}
+	// The identity fed to NativePre is the normalized, harness-neutral
+	// vocabulary authored tests use — never a harness's own native name.
+	// NativePre is responsible for encoding it into whatever wire shape
+	// its harness actually speaks (see Config.NativePre's doc comment).
+	id := domain.CollaboratorIdentity{ToolName: domain.DispatchToolName, AgentIdentity: "Worker"}
 	msg := domain.TaskMessage{
 		AgentInstanceID: "Worker#1",
 		TaskDescription: "do the work",

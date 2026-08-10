@@ -18,10 +18,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/harness/claudecode"
+	"mosaic-agent-test/internal/stubmatch"
 )
 
 func payloadFixture(t *testing.T, name string) []byte {
@@ -45,6 +47,13 @@ func newTestAdapter() *claudecode.Adapter {
 // Inbound: TranslateCall
 // ---------------------------------------------------------------------------
 
+// TestTranslateCall_PreSubagentDispatch_ProducesCompositeIdentity fixes the
+// defect this stage exists to remediate: the fixture's native payload
+// reports the harness's own dispatch-tool name (claudecode.NativeDispatchToolName,
+// "Agent" — what the real harness actually sends), and the identity
+// TranslateCall produces must carry the normalized, harness-neutral name
+// (domain.DispatchToolName, "dispatch") that authored tests use — never the
+// native name verbatim.
 func TestTranslateCall_PreSubagentDispatch_ProducesCompositeIdentity(t *testing.T) {
 	a := newTestAdapter()
 
@@ -53,12 +62,106 @@ func TestTranslateCall_PreSubagentDispatch_ProducesCompositeIdentity(t *testing.
 		t.Fatalf("TranslateCall: %v", err)
 	}
 
-	want := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "Worker"}
+	want := domain.CollaboratorIdentity{ToolName: domain.DispatchToolName, AgentIdentity: "Worker"}
 	if call.Identity != want {
-		t.Errorf("TranslateCall: Identity = %+v, want %+v", call.Identity, want)
+		t.Errorf("TranslateCall: Identity = %+v, want %+v (the normalized identity, not the harness's native tool name)", call.Identity, want)
 	}
 	if call.Phase != domain.PhasePre {
 		t.Errorf("TranslateCall: Phase = %q, want %q", call.Phase, domain.PhasePre)
+	}
+}
+
+// TestTranslateCall_Post_NormalizesNativeToolNameToDispatch is the same
+// normalization obligation on the post-invocation translation path: a native
+// payload reporting the harness's own dispatch-tool name must still yield
+// the normalized neutral identity.
+func TestTranslateCall_Post_NormalizesNativeToolNameToDispatch(t *testing.T) {
+	a := newTestAdapter()
+
+	call, err := a.TranslateCall(domain.PhasePost, payloadFixture(t, "post_valid.json"))
+	if err != nil {
+		t.Fatalf("TranslateCall: %v", err)
+	}
+
+	want := domain.CollaboratorIdentity{ToolName: domain.DispatchToolName, AgentIdentity: "Worker"}
+	if call.Identity != want {
+		t.Errorf("TranslateCall(post): Identity = %+v, want %+v (the normalized identity, not the harness's native tool name)", call.Identity, want)
+	}
+}
+
+// TestTranslateCall_Pre_UnrecognisedNativeDispatchToolName_IsHandleableError
+// pins the failure mode named in ContractsDesign.md's normalization
+// contract: an unrecognised native dispatch-tool name must be returned as a
+// translation error, never passed through silently. Silent pass-through is
+// how a vendor's next rename would become another invisible defect.
+func TestTranslateCall_Pre_UnrecognisedNativeDispatchToolName_IsHandleableError(t *testing.T) {
+	a := newTestAdapter()
+
+	call, err := a.TranslateCall(domain.PhasePre, payloadFixture(t, "pre_unknown_dispatch_tool.json"))
+	if err == nil {
+		t.Errorf("TranslateCall: expected an error for an unrecognised native dispatch-tool name, got call=%+v", call)
+	}
+}
+
+// TestTranslateCall_Post_UnrecognisedNativeDispatchToolName_IsHandleableError
+// is the same obligation on the post-invocation path.
+func TestTranslateCall_Post_UnrecognisedNativeDispatchToolName_IsHandleableError(t *testing.T) {
+	a := newTestAdapter()
+
+	call, err := a.TranslateCall(domain.PhasePost, payloadFixture(t, "post_unknown_dispatch_tool.json"))
+	if err == nil {
+		t.Errorf("TranslateCall(post): expected an error for an unrecognised native dispatch-tool name, got call=%+v", call)
+	}
+}
+
+// TestRegistrationToolName_DiffersFromNativeDispatchToolName pins the
+// separation ContractsDesign.md requires: the name this harness accepts for
+// hook-matcher registration and the name it reports at its interception
+// point are two different concepts. Conflating them (making them the same
+// constant, or the same value) is exactly the defect that broke interception
+// once already.
+func TestRegistrationToolName_DiffersFromNativeDispatchToolName(t *testing.T) {
+	if claudecode.RegistrationToolName == claudecode.NativeDispatchToolName {
+		t.Errorf("RegistrationToolName (%q) must differ from NativeDispatchToolName (%q); conflating registration with the reported name is the defect this separation prevents",
+			claudecode.RegistrationToolName, claudecode.NativeDispatchToolName)
+	}
+}
+
+// TestNormalizedIdentity_MatchesStubRegistryWrittenInNormalizedVocabulary is
+// the end-to-end proof this stage exists to deliver (T11.2): a stub
+// registry authored entirely in the normalized vocabulary
+// (domain.DispatchToolName) must match the identity TranslateCall derives
+// from a real native payload — the exact path that was broken when the
+// harness's native "Agent" name reached a registry keyed on "Task" and
+// went unmatched. The same domain.CollaboratorIdentity equality this proves
+// for stub matching is what invocation-sequence assertions are matched by
+// too (see internal/preflight's sequenceIdentities and
+// checkCollaboratorsKnown), so this one proof covers both consumers.
+func TestNormalizedIdentity_MatchesStubRegistryWrittenInNormalizedVocabulary(t *testing.T) {
+	a := newTestAdapter()
+
+	call, err := a.TranslateCall(domain.PhasePre, payloadFixture(t, "pre_valid_subagent.json"))
+	if err != nil {
+		t.Fatalf("TranslateCall: %v", err)
+	}
+
+	registry := domain.StubRegistry{
+		OnUnmatched: domain.UnmatchedHalt,
+		Stubs: []domain.Stub{
+			{
+				Match: domain.StubMatch{
+					Identity:   domain.CollaboratorIdentity{ToolName: domain.DispatchToolName, AgentIdentity: "Worker"},
+					Invocation: 1,
+				},
+				Response: json.RawMessage(`{"status_code":"SUCCESS"}`),
+			},
+		},
+	}
+
+	result := stubmatch.Match(registry, call.Identity, 1)
+	if !result.Matched {
+		t.Errorf("stubmatch.Match: Matched = false, want true — a stub registry authored in the normalized vocabulary (%q) must match the identity derived from a real native payload (%+v)",
+			domain.DispatchToolName, call.Identity)
 	}
 }
 
@@ -100,7 +203,7 @@ func TestTranslateCall_CarriesCapabilityFlags(t *testing.T) {
 		t.Fatalf("TranslateCall: %v", err)
 	}
 
-	if call.Capabilities != a.Capabilities() {
+	if !reflect.DeepEqual(call.Capabilities, a.Capabilities()) {
 		t.Errorf("TranslateCall: Capabilities = %+v, want the adapter's own declared capabilities %+v", call.Capabilities, a.Capabilities())
 	}
 }

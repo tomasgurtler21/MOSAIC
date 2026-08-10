@@ -31,7 +31,9 @@ func testCorrelation(t *testing.T, cfg Config) {
 		}
 	}
 
-	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "Worker"}
+	// Normalized vocabulary: NativePre/NativePost encode it into the
+	// harness's own wire shape, per Config.NativePre's doc comment.
+	id := domain.CollaboratorIdentity{ToolName: domain.DispatchToolName, AgentIdentity: "Worker"}
 	msg := domain.TaskMessage{
 		AgentInstanceID: "Worker#1",
 		TaskDescription: "do the work",

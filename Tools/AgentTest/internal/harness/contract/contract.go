@@ -35,6 +35,22 @@ type Config struct {
 	NativePre  func(id domain.CollaboratorIdentity, msg domain.TaskMessage, token string) []byte
 	NativePost func(id domain.CollaboratorIdentity, token string, observed string) []byte
 
+	// NativeCompletion synthesises a native completion-signal payload (see
+	// domain.PhaseCompletion) carrying observed as what the collaborator
+	// actually said. It exists so the capability-honesty check can drive a
+	// real completion payload through TranslateCall(PhaseCompletion, ...)
+	// rather than accepting the declaration on faith: an adapter whose
+	// post-invocation point fires at launch could otherwise declare
+	// SupportsReplyRecovery honestly in letter while the suite never
+	// actually exercised the recovery path, exactly the gap that made
+	// SupportsPostInterception's own declaration true in letter and false in
+	// spirit before this mechanism existed.
+	//
+	// Nil for an adapter that declares SupportsReplyRecovery: false — it
+	// makes no reply-recovery claim for this check to hold honest, so the
+	// check is skipped for it rather than failing on an absent seam.
+	NativeCompletion func(observed string) []byte
+
 	// Observe interprets what the adapter emitted back to its harness and
 	// reports the effect actually achieved. This is what makes the
 	// capability-honesty test possible: the suite compares the observed
@@ -89,6 +105,8 @@ type ObservedEffect struct {
 //   - a malformed or unrecognised native payload is a handleable error,
 //     never a panic
 //   - deprovision removes every file provision installed
+//   - the environment check answers for every adapter and is honest about
+//     what it actually resolves (CheckEnvironment)
 func Run(t *testing.T, cfg Config) {
 	t.Helper()
 
@@ -103,6 +121,7 @@ func Run(t *testing.T, cfg Config) {
 	t.Run("TranslationRoundTrip", func(t *testing.T) { testTranslationRoundTrip(t, cfg) })
 	t.Run("MalformedNativePayload", func(t *testing.T) { testMalformedNativePayload(t, cfg) })
 	t.Run("Teardown", func(t *testing.T) { testTeardown(t, cfg) })
+	t.Run("EnvironmentCheck", func(t *testing.T) { testEnvironmentCheck(t, cfg) })
 }
 
 // newSandbox builds a domain.Sandbox rooted at dir, creating the subject and

@@ -24,7 +24,7 @@ func TestHappyPath_SubstitutedInvocation_PassesEndToEnd(t *testing.T) {
 		Script: fakeOptionsFor(
 			domain.HarnessCapabilities{SupportsDirectSubstitution: true},
 			[]subjectStep{
-				invoke("Task", "greeter"),
+				invoke("dispatch", "greeter"),
 				finish(`{"agent_instance_id":"standin-subject#1","status_code":"SUCCESS","status_message":"Done."}`),
 			},
 		),

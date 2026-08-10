@@ -9,7 +9,6 @@ description: >
   excluded from the test's pass-rate aggregation rather than counted as a
   subject regression.
 defaults:
-  harness: fake
   timeout: 30s
   turn_limit: 5
   repetitions: 1

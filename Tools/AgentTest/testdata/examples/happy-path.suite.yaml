@@ -5,7 +5,6 @@ description: >
   definition, stub registry — doubling as this format's documentation and as
   pre-flight's happy-path fixture.
 defaults:
-  harness: claude-code
   timeout: 15m
   turn_limit: 60
   repetitions: 1

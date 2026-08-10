@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"mosaic-agent-test/internal/domain"
@@ -108,7 +109,7 @@ func TestTranslateCall_CarriesCapabilityFlags(t *testing.T) {
 		t.Fatalf("TranslateCall: %v", err)
 	}
 
-	if call.Capabilities != a.Capabilities() {
+	if !reflect.DeepEqual(call.Capabilities, a.Capabilities()) {
 		t.Errorf("TranslateCall: Capabilities = %+v, want the adapter's own declared capabilities %+v", call.Capabilities, a.Capabilities())
 	}
 }

@@ -73,6 +73,27 @@ func TestExitCode_Failure_InfrastructureFault(t *testing.T) {
 	}
 }
 
+// TestExitCode_Failure_InfrastructureFault_FromRunnerError: the suite ran to
+// completion but a test ended by a runner error rather than any assertion —
+// a single infrastructure-reason occurrence, not a recurrence. This must
+// read as ExitFailure, the same as the repeated-state-integrity path,
+// closing the loop from suite.runRepetition's fix through evaluate.Aggregate
+// to the exit code (AC1.5).
+func TestExitCode_Failure_InfrastructureFault_FromRunnerError(t *testing.T) {
+	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	runner := &fakeSuiteRunner{result: infrastructureFaultResultFromRunnerError("orchestrator-routing")}
+	opts := baseOptions(stdout, stderr, scriptedPreflight(preflight.Plan{}, cleanReport(), nil), runner)
+
+	got := cli.Execute(context.Background(), []string{"run", "suite.yaml"}, opts)
+
+	if got != cli.ExitFailure {
+		t.Errorf("exit code = %d, want ExitFailure (%d)", got, cli.ExitFailure)
+	}
+	if got == cli.ExitTestsFailed {
+		t.Error("a runner-error infrastructure fault must not be reported as ExitTestsFailed")
+	}
+}
+
 // TestExitCode_Failure_SuiteFactoryError: the suite factory could not build
 // a runner for the resolved RunConfig — an unusable workspace root, most of
 // all. The invocation itself was well formed, so this is ExitFailure, never

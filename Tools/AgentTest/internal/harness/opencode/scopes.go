@@ -186,7 +186,12 @@ func inspectOneScope(probe ScopeProbe, scope domain.ConfigScope) domain.ScopeFin
 			return domain.ScopeFinding{
 				Scope:       scope,
 				Neutralized: scope.Isolatable,
-				Detail:      fmt.Sprintf("%s configuration scope not found; treated as absent, not inspected", scope.Name),
+				// This adapter never relocates or otherwise interferes with a
+				// scope: it neither isolates nor breaks anything, so it
+				// reports true unconditionally, per ContractsDesign.md's
+				// domain.ScopeFinding contract.
+				PreservesSubjectFunction: true,
+				Detail:                   fmt.Sprintf("%s configuration scope not found; treated as absent, not inspected", scope.Name),
 			}
 		}
 		return domain.ScopeFinding{
@@ -214,7 +219,12 @@ func inspectOneScope(probe ScopeProbe, scope domain.ConfigScope) domain.ScopeFin
 		Scope:         scope,
 		RewritesInput: finding.RewritesInput,
 		Neutralized:   neutralized,
-		Detail:        detail,
+		// This adapter never relocates or otherwise interferes with a scope:
+		// it neither isolates nor breaks anything, so it reports true
+		// unconditionally, per ContractsDesign.md's domain.ScopeFinding
+		// contract.
+		PreservesSubjectFunction: true,
+		Detail:                   detail,
 	}
 }
 

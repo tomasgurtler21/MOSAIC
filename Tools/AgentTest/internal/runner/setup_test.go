@@ -123,6 +123,69 @@ func TestRun_SetupInitializesRunStateWithTheDeclaredLimits(t *testing.T) {
 	}
 }
 
+// TestRun_SetupProvisionRequestCarriesTheInterceptorSubcommand asserts that
+// the request runner.setup builds carries the shared interceptor subcommand
+// in InterceptorArgs, sourced from domain.InterceptorSubcommand rather than a
+// private literal or an unset field. Left unset, the registered hook the
+// adapter builds from this request falls through to the CLI frontend instead
+// of reaching the interceptor.
+func TestRun_SetupProvisionRequestCarriesTheInterceptorSubcommand(t *testing.T) {
+	h := newHarness(t)
+	req := newRequest("provision-interceptor-subcommand")
+
+	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	got := h.Adapter.lastProvisionReq.InterceptorArgs
+	if len(got) == 0 || got[0] != domain.InterceptorSubcommand {
+		t.Errorf("ProvisionRequest.InterceptorArgs = %v, want it to begin with domain.InterceptorSubcommand %q", got, domain.InterceptorSubcommand)
+	}
+}
+
+// TestRun_SetupProvisionRequestCarriesTheResolvedInterpreter asserts that
+// the request runner.setup builds carries Deps.InterpreterCmd verbatim in
+// InterpreterCmd — the interpreter the composition root already resolved
+// during preflight and carried into Deps — rather than leaving the field
+// unset regardless of what Deps holds.
+func TestRun_SetupProvisionRequestCarriesTheResolvedInterpreter(t *testing.T) {
+	h := newHarness(t)
+	h.Deps.InterpreterCmd = "py"
+	req := newRequest("provision-interpreter-cmd")
+
+	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	got := h.Adapter.lastProvisionReq.InterpreterCmd
+	if got != h.Deps.InterpreterCmd {
+		t.Errorf("ProvisionRequest.InterpreterCmd = %q, want Deps.InterpreterCmd %q carried verbatim", got, h.Deps.InterpreterCmd)
+	}
+}
+
+// TestRun_SetupProvisionRequestLeavesInterpreterCmdEmptyWhenUnresolved
+// asserts that when Deps.InterpreterCmd is left at its zero value — the
+// documented legal case for an adapter that runs no interpreter — the built
+// ProvisionRequest.InterpreterCmd stays empty rather than being defaulted or
+// hardcoded to some literal (e.g. a fallback interpreter name) inside setup.
+// This is the "never hardcoded" half of the interpreter-carrying contract;
+// TestRun_SetupProvisionRequestCarriesTheResolvedInterpreter above only
+// covers the "carried when present" half.
+func TestRun_SetupProvisionRequestLeavesInterpreterCmdEmptyWhenUnresolved(t *testing.T) {
+	h := newHarness(t)
+	// h.Deps.InterpreterCmd left unset (zero value) deliberately.
+	req := newRequest("provision-interpreter-cmd-unset")
+
+	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	got := h.Adapter.lastProvisionReq.InterpreterCmd
+	if got != "" {
+		t.Errorf("ProvisionRequest.InterpreterCmd = %q, want empty string carried verbatim from an unset Deps.InterpreterCmd (never hardcoded)", got)
+	}
+}
+
 func TestRun_RunIdentityIsAuthoredBeforeTheSubjectIsSpawned(t *testing.T) {
 	h := newHarness(t)
 	req := newRequest("setup-run-identity")

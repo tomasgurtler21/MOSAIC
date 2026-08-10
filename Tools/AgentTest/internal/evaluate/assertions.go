@@ -60,6 +60,25 @@ func evaluateAssertions(ev domain.RunEvidence) []domain.AssertionResult {
 	return out
 }
 
+// assertionsDeclared reports whether a is not its zero value — i.e. whether
+// the test definition declared at least one assertion class, however that
+// declaration was spelled. A pointer field's nilness and a slice or map
+// field's nilness both distinguish "not declared" from "declared", per
+// domain.Assertions' own documented distinction between nil ("not
+// evaluated") and an empty non-nil value ("assert the empty set").
+func assertionsDeclared(a domain.Assertions) bool {
+	return a.InvocationSequence != nil ||
+		a.ExecutionLogAgentIDs != nil ||
+		a.ExecutionLogAllStatus != nil ||
+		a.FinalPhase != nil ||
+		a.FinalStatus != nil ||
+		a.ProtocolViolations != nil ||
+		a.ArtifactCreated != nil ||
+		a.ArtifactNotCreated != nil ||
+		a.MinConcurrency != nil ||
+		a.TaskMessages != nil
+}
+
 func evaluateEquals(class domain.AssertionClass, observed, want string) domain.AssertionResult {
 	ar := domain.AssertionResult{Class: class, Expected: want, Actual: observed}
 	if observed == want {
@@ -105,11 +124,11 @@ func evaluateExecutionLogAllStatus(rows []domain.ExecutionLogRow, want string) d
 }
 
 func evaluateProtocolViolations(ev domain.RunEvidence, layer domain.TestLayer, want int) domain.AssertionResult {
-	if layer == domain.LayerOrchestrator {
+	if domain.LayerSuppresses(layer, domain.ClassProtocolViolations) {
 		return domain.AssertionResult{
 			Class:   domain.ClassProtocolViolations,
 			Outcome: domain.AssertionNotEvaluated,
-			Detail:  "layer: orchestrator suppresses protocol-message validation",
+			Detail:  domain.SuppressionReason(layer, domain.ClassProtocolViolations),
 		}
 	}
 

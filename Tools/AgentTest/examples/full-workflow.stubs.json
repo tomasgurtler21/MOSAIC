@@ -4,7 +4,7 @@
   "on_unmatched": "halt",
   "stubs": [
     {
-      "match": { "tool": "Task", "agent": "requirements-refinement", "invocation": 1 },
+      "match": { "tool": "dispatch", "agent": "requirements-refinement", "invocation": 1 },
       "response": {
         "agent_instance_id": "requirements-refinement#1",
         "run_id": "full-workflow-run",
@@ -18,7 +18,7 @@
       }
     },
     {
-      "match": { "tool": "Task", "agent": "researcher", "invocation": 1 },
+      "match": { "tool": "dispatch", "agent": "researcher", "invocation": 1 },
       "response": {
         "agent_instance_id": "researcher#2",
         "run_id": "full-workflow-run",
@@ -32,7 +32,7 @@
       }
     },
     {
-      "match": { "tool": "Task", "agent": "library-researcher", "invocation": 1 },
+      "match": { "tool": "dispatch", "agent": "library-researcher", "invocation": 1 },
       "response": {
         "agent_instance_id": "library-researcher#3",
         "run_id": "full-workflow-run",
@@ -41,7 +41,7 @@
       }
     },
     {
-      "match": { "tool": "Task", "agent": "planner", "invocation": 1 },
+      "match": { "tool": "dispatch", "agent": "planner", "invocation": 1 },
       "response": {
         "agent_instance_id": "planner#4",
         "run_id": "full-workflow-run",

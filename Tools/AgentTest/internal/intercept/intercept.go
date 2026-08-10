@@ -38,7 +38,7 @@ type Decision struct {
 	SideEffects []domain.FileEffect
 }
 
-// Decide handles both interception phases, selected by Input.Call.Phase.
+// Decide handles all three interception phases, selected by Input.Call.Phase.
 //
 // Pre-invocation:
 //   - a stubbed call yields OutcomeSubstitute when
@@ -50,14 +50,17 @@ type Decision struct {
 //   - any call once the early-exit threshold has been reached yields
 //     OutcomeHalt with HaltEarlyExit.
 //
-// Post-invocation:
+// Post-invocation and completion:
 //   - the pending stub is recovered by correlation token, echo fidelity is
 //     compared, an end record is produced, and the outcome is always
-//     OutcomePassthrough. The post phase never halts or denies: it fires
-//     after the collaborator has already run, so refusing it can only
-//     damage the subject's run.
+//     OutcomePassthrough. Neither phase ever halts or denies: both fire
+//     after the collaborator has already run, so refusing either can only
+//     damage the subject's run. PhaseCompletion is handled identically to
+//     PhasePost: it is the event that carries a real reply on a harness
+//     whose post-invocation point fires at launch (see
+//     domain.PhaseCompletion's doc comment).
 func Decide(in Input) (Decision, error) {
-	if in.Call.Phase == domain.PhasePost {
+	if in.Call.Phase == domain.PhasePost || in.Call.Phase == domain.PhaseCompletion {
 		return decidePost(in), nil
 	}
 	return decidePre(in), nil

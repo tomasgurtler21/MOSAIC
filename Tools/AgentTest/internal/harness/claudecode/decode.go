@@ -57,6 +57,8 @@ func DecodeEnvelope(res harness.Response, err error) (domain.SubjectResult, erro
 		return domain.SubjectResult{
 			Disposition: domain.DispositionTurnLimit,
 			RawOutput:   string(res.Stdout),
+			ExitCode:    res.ExitCode,
+			Stderr:      res.Stderr,
 			Duration:    res.Duration,
 		}, nil
 	}
@@ -66,6 +68,8 @@ func DecodeEnvelope(res harness.Response, err error) (domain.SubjectResult, erro
 		return domain.SubjectResult{
 			Disposition: domain.DispositionSpawnFailed,
 			RawOutput:   string(res.Stdout),
+			ExitCode:    res.ExitCode,
+			Stderr:      res.Stderr,
 			Duration:    res.Duration,
 		}, nil
 	}
@@ -79,6 +83,8 @@ func DecodeEnvelope(res harness.Response, err error) (domain.SubjectResult, erro
 		Disposition:     domain.DispositionCompleted,
 		ProtocolMessage: protocolMessage,
 		RawOutput:       string(res.Stdout),
+		ExitCode:        res.ExitCode,
+		Stderr:          res.Stderr,
 		Duration:        res.Duration,
 	}, nil
 }
@@ -98,9 +104,17 @@ func decodeFailure(res harness.Response, err error) domain.SubjectResult {
 		// error this function was not written to expect — degrades to the
 		// same safe disposition: the run cannot be trusted as completed,
 		// but it is not the supervisor-observed early exit either.
+		//
+		// ExitCode and Stderr are carried through unconditionally: this is
+		// exactly the arm a non-zero subject exit ("Not logged in") hits,
+		// and an authentication or environment failure must be diagnosable
+		// from the decoded result alone, without reproducing outside the
+		// tool.
 		return domain.SubjectResult{
 			Disposition: domain.DispositionSpawnFailed,
 			RawOutput:   string(res.Stdout),
+			ExitCode:    res.ExitCode,
+			Stderr:      res.Stderr,
 			Duration:    res.Duration,
 		}
 	}

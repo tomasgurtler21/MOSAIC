@@ -30,7 +30,7 @@ func TestRepetition_MixedOutcomesAcrossRepetitions_AggregateAgainstDeclaredPassR
 		Script: fakeOptionsFor(
 			domain.HarnessCapabilities{SupportsDirectSubstitution: true},
 			[]subjectStep{
-				invoke("Task", "effecter"),
+				invoke("dispatch", "effecter"),
 				finish(`{"agent_instance_id":"standin-subject#1","run_id":"repetition-run","status_code":"SUCCESS","status_message":"Done."}`),
 			},
 		),

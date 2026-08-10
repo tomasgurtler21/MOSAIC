@@ -24,6 +24,6 @@ assertions:
   invocation_sequence:
     exact: true
     steps:
-      - { tool: Task, agent: greeter }
+      - { tool: dispatch, agent: greeter }
   artifact_created:
     - greeting.txt

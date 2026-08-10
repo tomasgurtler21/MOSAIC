@@ -14,6 +14,7 @@ package claudecode_test
 // there and only declaration correctness is asserted here.
 
 import (
+	"reflect"
 	"testing"
 
 	"mosaic-agent-test/internal/domain"
@@ -31,6 +32,18 @@ func TestCapabilities_PostInterceptionSupported(t *testing.T) {
 	caps := claudecode.Capabilities()
 	if !caps.SupportsPostInterception {
 		t.Errorf("Capabilities: SupportsPostInterception = false, want true — a post-invocation point exists and observes the real result")
+	}
+}
+
+// TestCapabilities_ReplyRecoverySupported pins Stage 12's fix (AC12.1,
+// AC12.6): this harness's post-invocation point fires at launch, so echo
+// fidelity can only be evaluated against a reply recovered from a later
+// completion event. Declaring SupportsReplyRecovery is what makes that
+// recovery path truthful instead of merely present.
+func TestCapabilities_ReplyRecoverySupported(t *testing.T) {
+	caps := claudecode.Capabilities()
+	if !caps.SupportsReplyRecovery {
+		t.Errorf("Capabilities: SupportsReplyRecovery = false, want true — this harness's post-invocation point cannot be used for echo fidelity, only the recovered completion reply can")
 	}
 }
 
@@ -57,7 +70,19 @@ func TestCapabilities_RegistrationAndBridgeKind(t *testing.T) {
 // so the declared values can be asserted without constructing an adapter.
 func TestCapabilities_PackageFunctionAndMethodAgree(t *testing.T) {
 	a := claudecode.New(claudecode.Options{})
-	if a.Capabilities() != claudecode.Capabilities() {
+	if !reflect.DeepEqual(a.Capabilities(), claudecode.Capabilities()) {
 		t.Errorf("Capabilities: method = %+v, package function = %+v; they must agree", a.Capabilities(), claudecode.Capabilities())
+	}
+}
+
+// TestCapabilities_ProducibleToolNames_IsExactlyDispatch pins the per-adapter
+// obligation in ContractsDesign.md's HarnessAdapter table: this adapter
+// normalizes its one native dispatch name, so the normalized name is the
+// only entry it can honestly declare as producible.
+func TestCapabilities_ProducibleToolNames_IsExactlyDispatch(t *testing.T) {
+	caps := claudecode.Capabilities()
+	want := []string{domain.DispatchToolName}
+	if !reflect.DeepEqual(caps.ProducibleToolNames, want) {
+		t.Errorf("Capabilities: ProducibleToolNames = %v, want %v", caps.ProducibleToolNames, want)
 	}
 }

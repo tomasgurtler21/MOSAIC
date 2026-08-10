@@ -29,6 +29,22 @@ type PostToolUsePayload struct {
 	ToolResponse  json.RawMessage `json:"tool_response"`
 }
 
+// CompletionPayload is this harness's completion signal (its SubagentStop
+// hook), fired when a dispatched collaborator finishes. It carries the
+// collaborator's real reply directly (LastAssistantMessage), which is what
+// makes reply recovery possible on a harness whose post-invocation point
+// fires at launch rather than at completion. The correlation token planted
+// at the pre-invocation point does not travel on this payload: it is
+// recovered from the transcript file AgentTranscriptPath names (see
+// translateCompletion).
+type CompletionPayload struct {
+	HookEventName        string `json:"hook_event_name"`
+	SessionID            string `json:"session_id"`
+	AgentID              string `json:"agent_id"`
+	AgentTranscriptPath  string `json:"agent_transcript_path"`
+	LastAssistantMessage string `json:"last_assistant_message"`
+}
+
 // TaskToolInput is the dispatch tool's input. SubagentType is where the
 // composite collaborator identity's agent half comes from; it is empty for a
 // plain tool call, which is exactly the future mode the composite identity

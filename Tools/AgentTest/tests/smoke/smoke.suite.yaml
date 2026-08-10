@@ -7,7 +7,6 @@ description: >
   environment. It exists to prove the claude-code path end to end before any
   MOSAIC-semantic tests are authored on top of it.
 defaults:
-  harness: claude-code
   timeout: 5m
   turn_limit: 10
   repetitions: 1

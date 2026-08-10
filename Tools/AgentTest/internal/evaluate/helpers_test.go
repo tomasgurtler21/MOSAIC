@@ -118,6 +118,8 @@ func baseEvidence() domain.RunEvidence {
 		PeakConcurrency:           map[string]int{},
 		Cost:                      domain.CostReport{TotalUSD: 0.05, Attribution: domain.AttributionAttributed},
 		Duration:                  5 * time.Second,
+		LogRoot:                   "/sandbox/subject/OrchestrationLogs/20260807T120000Z-aaaa",
+		LogsProduced:              true,
 	}
 }
 
@@ -161,4 +163,20 @@ func hasConditionKind(conditions []domain.RunCondition, want domain.RunCondition
 		}
 	}
 	return false
+}
+
+// findCondition returns the first RunCondition of kind in conditions, so a
+// test can assert on its Detail without depending on slice order.
+func findCondition(t interface {
+	Helper()
+	Fatalf(string, ...any)
+}, conditions []domain.RunCondition, kind domain.RunConditionKind) domain.RunCondition {
+	t.Helper()
+	for _, c := range conditions {
+		if c.Kind == kind {
+			return c
+		}
+	}
+	t.Fatalf("no RunCondition found for kind %q in %+v", kind, conditions)
+	return domain.RunCondition{}
 }

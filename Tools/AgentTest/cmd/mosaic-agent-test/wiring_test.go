@@ -106,6 +106,7 @@ func testDeps(t *testing.T) Deps {
 
 		SelfPath:        "C:/bin/mosaic-agent-test.exe",
 		LoggerBundleDir: "C:/bundles/logger",
+		InterpreterCmd:  "py",
 
 		HarnessID:     "claude-code",
 		FixtureRoot:   "C:/fixtures",
@@ -332,6 +333,9 @@ func TestDeps_RunnerDeps_ProjectsEveryCollaboratorFieldUnchanged(t *testing.T) {
 	if got.LoggerBundleDir != d.LoggerBundleDir {
 		t.Errorf("RunnerDeps(ws, progress).LoggerBundleDir = %q, want d.LoggerBundleDir %q", got.LoggerBundleDir, d.LoggerBundleDir)
 	}
+	if got.InterpreterCmd != d.InterpreterCmd {
+		t.Errorf("RunnerDeps(ws, progress).InterpreterCmd = %q, want d.InterpreterCmd %q (AC3.6: the resolved interpreter must reach the wired dependency set both frontends run against)", got.InterpreterCmd, d.InterpreterCmd)
+	}
 	if got.Workspaces != ws {
 		t.Error("RunnerDeps(ws, progress).Workspaces is not the ws argument passed in")
 	}
@@ -363,7 +367,8 @@ func TestDeps_RunnerDeps_IsIndependentOfWhichWorkspaceAndProgressAreGiven(t *tes
 	if got1.Adapter != got2.Adapter || got1.Launcher != got2.Launcher ||
 		got1.Fixtures != got2.Fixtures || got1.Effects != got2.Effects ||
 		got1.Cost != got2.Cost || got1.Clock != got2.Clock ||
-		got1.SelfPath != got2.SelfPath || got1.LoggerBundleDir != got2.LoggerBundleDir {
+		got1.SelfPath != got2.SelfPath || got1.LoggerBundleDir != got2.LoggerBundleDir ||
+		got1.InterpreterCmd != got2.InterpreterCmd {
 		t.Errorf("d.RunnerDeps varied its collaborator fields across two calls on the same d:\nfirst:  %+v\nsecond: %+v", got1, got2)
 	}
 }
