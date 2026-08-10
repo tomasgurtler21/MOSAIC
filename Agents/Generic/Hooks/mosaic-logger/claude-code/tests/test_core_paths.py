@@ -452,3 +452,95 @@ class TestLogPathsSessionBinding(unittest.TestCase):
         self.assertNotIn('"', str(entry))
         self.assertNotIn('<', str(entry))
         self.assertNotIn('>', str(entry))
+
+
+class TestLogPathsUsageState(unittest.TestCase):
+    """LogPaths.usage_state_dir and usage_state_entry encode the per-run,
+    per-stream usage-emission state location as pure path construction.
+    Both methods create no directories and perform no I/O."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name)
+        self.paths = core.build_paths(self.root)
+        self.run_id = "20260101T170000Z-us01"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_usage_state_dirname_constant_exists(self):
+        """The module-level USAGE_STATE_DIRNAME constant must be present so
+        callers can reference it without hard-coding the directory name."""
+        self.assertTrue(hasattr(core, "USAGE_STATE_DIRNAME"))
+        self.assertIsInstance(core.USAGE_STATE_DIRNAME, str)
+
+    def test_usage_state_dir_is_dot_prefixed_child_of_run_root(self):
+        """Dot-prefix ensures the analyzer's directory scan skips the sidecar,
+        consistent with .agent-map, .quarantine and other sidecars."""
+        result = self.paths.usage_state_dir(self.run_id)
+        self.assertEqual(self.paths.run_root(self.run_id), result.parent)
+        self.assertTrue(result.name.startswith("."))
+
+    def test_usage_state_dir_name_matches_constant(self):
+        result = self.paths.usage_state_dir(self.run_id)
+        self.assertEqual(core.USAGE_STATE_DIRNAME, result.name)
+
+    def test_usage_state_dir_is_under_run_root(self):
+        result = self.paths.usage_state_dir(self.run_id)
+        self.assertTrue(str(result).startswith(str(self.paths.run_root(self.run_id))))
+
+    def test_usage_state_dir_is_run_scoped(self):
+        """Different run_ids produce different state directories, so state
+        never survives into a fresh run."""
+        dir_a = self.paths.usage_state_dir("20260101T170000Z-run1")
+        dir_b = self.paths.usage_state_dir("20260101T170000Z-run2")
+        self.assertNotEqual(dir_a, dir_b)
+
+    def test_usage_state_entry_is_under_usage_state_dir(self):
+        entry = self.paths.usage_state_entry(self.run_id, "abc1234567890123")
+        state_dir = self.paths.usage_state_dir(self.run_id)
+        self.assertEqual(state_dir, entry.parent)
+
+    def test_usage_state_entry_has_json_suffix(self):
+        entry = self.paths.usage_state_entry(self.run_id, "abc1234567890123")
+        self.assertEqual(".json", entry.suffix)
+
+    def test_usage_state_entry_differs_for_different_stream_keys(self):
+        """Each destination stream has its own isolated state file."""
+        entry_a = self.paths.usage_state_entry(self.run_id, "aaaa0000aaaa0000")
+        entry_b = self.paths.usage_state_entry(self.run_id, "bbbb1111bbbb1111")
+        self.assertNotEqual(entry_a, entry_b)
+
+    def test_usage_state_entry_differs_for_different_run_ids(self):
+        entry_a = self.paths.usage_state_entry("20260101T170000Z-r1", "same-key")
+        entry_b = self.paths.usage_state_entry("20260101T170000Z-r2", "same-key")
+        self.assertNotEqual(entry_a, entry_b)
+
+    def test_usage_state_entry_sanitizes_stream_key_with_reserved_chars(self):
+        """stream_key typically comes from a 16-char hex digest, but the method
+        must remain total and safe for any string input."""
+        entry = self.paths.usage_state_entry(self.run_id, 'key"with<reserved>')
+        self.assertNotIn('"', str(entry))
+        self.assertNotIn('<', str(entry))
+        self.assertNotIn('>', str(entry))
+
+    def test_equal_stream_keys_always_resolve_to_same_entry(self):
+        e1 = self.paths.usage_state_entry(self.run_id, "fixed-key")
+        e2 = self.paths.usage_state_entry(self.run_id, "fixed-key")
+        self.assertEqual(e1, e2)
+
+    def test_usage_state_dir_creates_no_directories(self):
+        new_tmp = tempfile.TemporaryDirectory()
+        new_root = pathlib.Path(new_tmp.name) / "workspace"
+        new_paths = core.build_paths(new_root)
+        new_paths.usage_state_dir("some-run")
+        self.assertFalse(new_root.exists())
+        new_tmp.cleanup()
+
+    def test_usage_state_entry_creates_no_directories(self):
+        new_tmp = tempfile.TemporaryDirectory()
+        new_root = pathlib.Path(new_tmp.name) / "workspace"
+        new_paths = core.build_paths(new_root)
+        new_paths.usage_state_entry("some-run", "some-key")
+        self.assertFalse(new_root.exists())
+        new_tmp.cleanup()

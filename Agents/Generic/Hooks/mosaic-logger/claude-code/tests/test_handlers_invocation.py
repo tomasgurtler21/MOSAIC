@@ -823,9 +823,10 @@ class TestSubagentStopUsageEmission(unittest.TestCase):
         self.assertEqual({"msg_both_orch"}, orch_usage_ids)
         self.assertEqual(set(), invocation_usage_ids & orch_usage_ids)
 
-    def test_repeated_stop_firings_re_emit_without_error(self):
-        """T5.4: two SubagentStop firings against the same transcripts are
-        tolerated -- no exception, and the record is re-emitted."""
+    def test_repeated_stop_firings_do_not_error_or_duplicate(self):
+        """Two SubagentStop firings against the same transcripts are tolerated:
+        no exception is raised and the usage record is emitted exactly once,
+        not re-emitted on the second identical firing."""
         agent_transcript_path = _write_transcript_file(self.tmp.name, [
             {"type": "assistant", "message": {
                 "id": "msg_repeat", "model": "claude-opus-4-5",
@@ -841,7 +842,7 @@ class TestSubagentStopUsageEmission(unittest.TestCase):
                        agent_transcript_path=agent_transcript_path)
         events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "Reviewer#35"))
         usage_events = [e for e in events if e["event"] == "usage_record"]
-        self.assertEqual(2, len(usage_events))
+        self.assertEqual(1, len(usage_events))
 
 
 # ---------------------------------------------------------------------------
@@ -2467,6 +2468,163 @@ class TestSubagentStopRegressionMappedPathUnaffected(unittest.TestCase):
                              last_assistant_message="Mapped and normal.")
         invocation.handle_subagent_stop(ctx)
         self.assertTrue(self.paths.invocation_output(_RUN_ID, "Reviewer#23").exists())
+
+
+# ---------------------------------------------------------------------------
+# Subagent-stop capture path: regression guards for the tool-firing fix
+# ---------------------------------------------------------------------------
+
+class TestSubagentStopCapturePathUnaffected(unittest.TestCase):
+    """The subagent-stop path is the sole authoritative source of a subagent's
+    own usage records. Its behavior must remain unchanged regardless of any
+    change to how tool-path emission is handled.
+
+    The key invariant: handle_subagent_stop reads ctx.field("agent_transcript_path")
+    — the subagent's own file — not ctx.transcript_path (the orchestrator's
+    transcript). This is what makes stop-path attribution correct and distinct
+    from the orchestrator stream."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+        self.paths = core.build_paths(self.tmp_path)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _setup_mapping(self, agent_id, agent_instance_id, agent_type=None):
+        _register_mapping(self.tmp.name, _RUN_ID, agent_id, agent_instance_id, agent_type)
+
+    def _run_stop(self, agent_id, **kwargs):
+        ctx = _make_stop_ctx(self.tmp.name, agent_id=agent_id, **kwargs)
+        invocation.handle_subagent_stop(ctx)
+        return ctx
+
+    def test_subagent_usage_reaches_invocation_stream_from_own_transcript(self):
+        """A subagent's usage records must land on its invocation stream, read
+        from agent_transcript_path — the subagent's own file, not ctx.transcript_path."""
+        own_transcript = _write_transcript_file(
+            str(self.tmp_path / "own"),
+            [{"type": "assistant", "message": {
+                "id": "msg_own", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 15},
+            }}],
+        )
+        self._setup_mapping("aid-stop-u1", "StopAgent#1", "StopAgent")
+        self._run_stop("aid-stop-u1", agent_type="StopAgent",
+                       last_assistant_message='{"status_code": "SUCCESS"}',
+                       agent_transcript_path=own_transcript)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "StopAgent#1"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events),
+                         "Subagent's own usage records must reach the invocation stream at stop")
+        self.assertEqual("msg_own", usage_events[0].get("record_id"))
+
+    def test_orchestrator_transcript_records_reach_orchestrator_stream_at_stop(self):
+        """At SubagentStop the orchestrator transcript (ctx.transcript_path) must still
+        produce usage_records on the orchestrator stream, separately from the subagent's."""
+        orch_transcript = _write_transcript_file(
+            str(self.tmp_path / "orch"),
+            [{"type": "assistant", "message": {
+                "id": "msg_orch", "model": "claude-opus-4-5",
+                "usage": {"output_tokens": 25},
+            }}],
+        )
+        self._setup_mapping("aid-stop-u2", "StopAgent#2", "StopAgent")
+        self._run_stop("aid-stop-u2", agent_type="StopAgent",
+                       last_assistant_message='{"status_code": "SUCCESS"}',
+                       transcript_path=orch_transcript)
+        orc_path = self.paths.orchestrator_events(_RUN_ID)
+        self.assertTrue(orc_path.exists(),
+                        "Orchestrator-stream usage_record must be emitted at SubagentStop")
+        events = _read_jsonl(orc_path)
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events))
+        self.assertEqual("msg_orch", usage_events[0].get("record_id"))
+
+    def test_subagent_own_records_not_drawn_from_orchestrator_transcript(self):
+        """Records from ctx.transcript_path (orchestrator) must NOT appear on the
+        invocation stream. Only agent_transcript_path records reach the subagent's stream."""
+        own_transcript = _write_transcript_file(
+            str(self.tmp_path / "own2"),
+            [{"type": "assistant", "message": {
+                "id": "msg_subagent_only", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 20},
+            }}],
+        )
+        orch_transcript = _write_transcript_file(
+            str(self.tmp_path / "orch2"),
+            [{"type": "assistant", "message": {
+                "id": "msg_orchestrator_only", "model": "claude-opus-4-5",
+                "usage": {"output_tokens": 30},
+            }}],
+        )
+        self._setup_mapping("aid-stop-u3", "StopAgent#3", "StopAgent")
+        self._run_stop("aid-stop-u3", agent_type="StopAgent",
+                       last_assistant_message='{"status_code": "SUCCESS"}',
+                       agent_transcript_path=own_transcript,
+                       transcript_path=orch_transcript)
+        inv_events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "StopAgent#3"))
+        inv_record_ids = {e["record_id"] for e in inv_events if e["event"] == "usage_record"}
+        self.assertIn("msg_subagent_only", inv_record_ids,
+                      "Subagent's own record must reach the invocation stream")
+        self.assertNotIn("msg_orchestrator_only", inv_record_ids,
+                         "Orchestrator-transcript record must not reach the invocation stream")
+
+    def test_quarantine_stop_usage_records_still_reach_quarantine_stream(self):
+        """An unmapped SubagentStop (quarantine path) still delivers the subagent's
+        usage records to the quarantine event stream, not to any ordinary invocation dir."""
+        quarantine_transcript = _write_transcript_file(
+            str(self.tmp_path / "quarantine"),
+            [{"type": "assistant", "message": {
+                "id": "msg_quarantine", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 5},
+            }}],
+        )
+        # No mapping registered — triggers the quarantine path
+        self._run_stop("aid-stop-q1",
+                       last_assistant_message="Genuine but unmapped.",
+                       agent_transcript_path=quarantine_transcript)
+        events = _read_jsonl(self.paths.quarantine_events(_RUN_ID, "aid-stop-q1"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events),
+                         "Quarantine-path usage records must still reach the quarantine stream")
+
+    def test_stop_handler_degrades_gracefully_on_missing_agent_transcript(self):
+        """When agent_transcript_path is absent or unreadable, no usage_record is written
+        to the invocation stream and the handler completes without raising."""
+        self._setup_mapping("aid-stop-u4", "StopAgent#4", "StopAgent")
+        try:
+            self._run_stop("aid-stop-u4", agent_type="StopAgent",
+                           last_assistant_message='{"status_code": "SUCCESS"}',
+                           agent_transcript_path="/nonexistent/transcript.jsonl")
+        except Exception as exc:
+            self.fail(f"handle_subagent_stop raised on missing agent transcript: {exc}")
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "StopAgent#4"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events),
+                         "No usage_record must be written when agent_transcript_path is unreadable")
+
+    def test_stop_handler_invocation_end_still_written_alongside_usage_records(self):
+        """invocation_end must appear on the invocation stream regardless of whether
+        agent_transcript_path is provided. Usage emission is independent of event emission."""
+        own_transcript = _write_transcript_file(
+            str(self.tmp_path / "own3"),
+            [{"type": "assistant", "message": {
+                "id": "msg_check", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 8},
+            }}],
+        )
+        self._setup_mapping("aid-stop-u5", "StopAgent#5", "StopAgent")
+        self._run_stop("aid-stop-u5", agent_type="StopAgent",
+                       last_assistant_message='{"status_code": "SUCCESS"}',
+                       agent_transcript_path=own_transcript)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "StopAgent#5"))
+        event_types = [e["event"] for e in events]
+        self.assertIn("invocation_end", event_types,
+                      "invocation_end must be written alongside usage records at stop")
+        self.assertIn("usage_record", event_types,
+                      "usage_record must be written from agent_transcript_path at stop")
 
 
 if __name__ == "__main__":

@@ -1270,18 +1270,31 @@ class TestToolFiringUsageEmission(unittest.TestCase):
         self.assertIn("tool_call_start", [e["event"] for e in events])
 
     def test_usage_record_routes_with_the_tool_event_for_subagent_scope(self):
-        """A subagent-scoped tool firing's usage_record lands on that
-        invocation's stream, matching resolve_destination -- never the
-        orchestrator stream."""
+        """A subagent-scoped tool firing must NOT emit a usage_record to any stream.
+        Tool events are still emitted and still routed to the invocation stream,
+        but usage emission is suppressed entirely when ctx.agent_id is set.
+        The subagent-stop path is the sole source of a subagent's own usage records."""
         os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
         _register_mapping(self.tmp.name, _RUN_ID, "aid-usage-6", "ToolAgent#6")
         ctx = _pre_tool_ctx(self.tmp.name, agent_id="aid-usage-6",
                             tool_name="Read", tool_use_id="tu-usage-6",
                             transcript_path=self._transcript())
         tools.handle_pre_tool_use(ctx)
-        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "ToolAgent#6"))
-        usage_events = [e for e in events if e["event"] == "usage_record"]
-        self.assertEqual(1, len(usage_events))
+        # No usage_record must appear on the invocation stream
+        invocation_events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "ToolAgent#6"))
+        usage_events = [e for e in invocation_events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events),
+                         "Subagent-scoped tool firing must not write usage_record to the invocation stream")
+        # No usage_record must appear on the orchestrator stream either
+        orc_path = self.paths.orchestrator_events(_RUN_ID)
+        orc_events = _read_jsonl(orc_path) if orc_path.exists() else []
+        orc_usage = [e for e in orc_events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(orc_usage),
+                         "Subagent-scoped tool firing must not write usage_record to the orchestrator stream")
+        # The tool event itself must still be written to the invocation stream
+        tool_events = [e for e in invocation_events if e["event"] == "tool_call_start"]
+        self.assertEqual(1, len(tool_events),
+                         "Tool event must still be emitted to the invocation stream in subagent scope")
 
     def test_no_usage_record_when_transcript_path_absent(self):
         os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
@@ -1290,6 +1303,267 @@ class TestToolFiringUsageEmission(unittest.TestCase):
         events = _read_jsonl(self.paths.orchestrator_events(_RUN_ID))
         usage_events = [e for e in events if e["event"] == "usage_record"]
         self.assertEqual(0, len(usage_events))
+
+
+# ---------------------------------------------------------------------------
+# Tool-firing usage suppression in subagent scope
+# ---------------------------------------------------------------------------
+
+class TestSubagentToolFiringUsageSuppression(unittest.TestCase):
+    """When ctx.agent_id is set (subagent scope), no usage_record is written
+    to any stream by any of the three tool handlers, regardless of capture mode.
+
+    Tool events themselves are unaffected: they are still emitted and still
+    route to the invocation stream exactly as before. Orchestrator-scoped
+    firings (no ctx.agent_id) continue to emit usage records, unchanged."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.paths = core.build_paths(pathlib.Path(self.tmp.name))
+        self._orig_capture = os.environ.get("MOSAIC_LOGGER_USAGE_CAPTURE")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        if self._orig_capture is None:
+            os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        else:
+            os.environ["MOSAIC_LOGGER_USAGE_CAPTURE"] = self._orig_capture
+
+    def _transcript(self, subdir=None):
+        """Write a single-record transcript and return its path."""
+        dir_path = pathlib.Path(self.tmp.name)
+        if subdir:
+            dir_path = dir_path / subdir
+        return _write_tool_transcript(str(dir_path), [
+            {"type": "assistant", "message": {
+                "id": "msg_supp", "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 10},
+            }},
+        ])
+
+    def _register(self, agent_id, agent_instance_id):
+        _register_mapping(self.tmp.name, _RUN_ID, agent_id, agent_instance_id)
+
+    # --- Subagent scope: no usage_record to invocation stream ---
+
+    def test_pre_tool_use_subagent_scope_emits_no_usage_record_to_invocation_stream(self):
+        """PreToolUse with agent_id must write no usage_record to the invocation stream."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        self._register("aid-sup-1", "SubAgent#101")
+        ctx = _pre_tool_ctx(self.tmp.name, agent_id="aid-sup-1",
+                            tool_name="Read", tool_use_id="tu-sup-1",
+                            transcript_path=self._transcript("s1"))
+        tools.handle_pre_tool_use(ctx)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#101"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events),
+                         "PreToolUse in subagent scope must not write usage_record to the invocation stream")
+
+    def test_post_tool_use_subagent_scope_emits_no_usage_record_to_invocation_stream(self):
+        """PostToolUse with agent_id must write no usage_record to the invocation stream."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        self._register("aid-sup-2", "SubAgent#102")
+        ctx = _post_tool_ctx(self.tmp.name, agent_id="aid-sup-2",
+                             tool_name="Write", tool_use_id="tu-sup-2",
+                             tool_output="ok", transcript_path=self._transcript("s2"))
+        tools.handle_post_tool_use(ctx)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#102"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events),
+                         "PostToolUse in subagent scope must not write usage_record to the invocation stream")
+
+    def test_post_tool_use_failure_subagent_scope_emits_no_usage_record_to_invocation_stream(self):
+        """PostToolUseFailure with agent_id must write no usage_record to the invocation stream."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        self._register("aid-sup-3", "SubAgent#103")
+        ctx = _failure_ctx(self.tmp.name, agent_id="aid-sup-3",
+                           tool_name="Bash", tool_use_id="tu-sup-3",
+                           tool_output="Error: exit 1", transcript_path=self._transcript("s3"))
+        tools.handle_post_tool_use_failure(ctx)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#103"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events),
+                         "PostToolUseFailure in subagent scope must not write usage_record to the invocation stream")
+
+    # --- Subagent scope: no usage_record to orchestrator stream either ---
+
+    def test_pre_tool_use_subagent_scope_emits_no_usage_record_to_orchestrator_stream(self):
+        """PreToolUse with agent_id must not leak a usage_record to the orchestrator stream."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        self._register("aid-sup-4", "SubAgent#104")
+        ctx = _pre_tool_ctx(self.tmp.name, agent_id="aid-sup-4",
+                            tool_name="Read", tool_use_id="tu-sup-4",
+                            transcript_path=self._transcript("s4"))
+        tools.handle_pre_tool_use(ctx)
+        orc_path = self.paths.orchestrator_events(_RUN_ID)
+        orc_events = _read_jsonl(orc_path) if orc_path.exists() else []
+        usage_events = [e for e in orc_events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events),
+                         "PreToolUse in subagent scope must not leak usage_record to the orchestrator stream")
+
+    def test_post_tool_use_subagent_scope_emits_no_usage_record_to_orchestrator_stream(self):
+        """PostToolUse with agent_id must not leak a usage_record to the orchestrator stream."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        self._register("aid-sup-5", "SubAgent#105")
+        ctx = _post_tool_ctx(self.tmp.name, agent_id="aid-sup-5",
+                             tool_name="Write", tool_use_id="tu-sup-5",
+                             tool_output="ok", transcript_path=self._transcript("s5"))
+        tools.handle_post_tool_use(ctx)
+        orc_path = self.paths.orchestrator_events(_RUN_ID)
+        orc_events = _read_jsonl(orc_path) if orc_path.exists() else []
+        usage_events = [e for e in orc_events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events),
+                         "PostToolUse in subagent scope must not leak usage_record to the orchestrator stream")
+
+    def test_post_tool_use_failure_subagent_scope_emits_no_usage_record_to_orchestrator_stream(self):
+        """PostToolUseFailure with agent_id must not leak a usage_record to the orchestrator stream."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        self._register("aid-sup-6", "SubAgent#106")
+        ctx = _failure_ctx(self.tmp.name, agent_id="aid-sup-6",
+                           tool_name="Bash", tool_use_id="tu-sup-6",
+                           tool_output="Error: exit 1", transcript_path=self._transcript("s6"))
+        tools.handle_post_tool_use_failure(ctx)
+        orc_path = self.paths.orchestrator_events(_RUN_ID)
+        orc_events = _read_jsonl(orc_path) if orc_path.exists() else []
+        usage_events = [e for e in orc_events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events),
+                         "PostToolUseFailure in subagent scope must not leak usage_record to the orchestrator stream")
+
+    # --- Subagent scope: tool event itself still emitted ---
+
+    def test_pre_tool_use_subagent_scope_tool_event_still_emitted(self):
+        """Suppressing usage_record must not suppress the tool_call_start event.
+        The tool event must still be written to the invocation stream."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        self._register("aid-sup-7", "SubAgent#107")
+        ctx = _pre_tool_ctx(self.tmp.name, agent_id="aid-sup-7",
+                            tool_name="Read", tool_use_id="tu-sup-7",
+                            transcript_path=self._transcript("s7"))
+        tools.handle_pre_tool_use(ctx)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#107"))
+        tool_events = [e for e in events if e["event"] == "tool_call_start"]
+        self.assertEqual(1, len(tool_events),
+                         "tool_call_start must still be emitted to the invocation stream when usage is suppressed")
+
+    def test_post_tool_use_subagent_scope_tool_event_still_emitted(self):
+        """Suppressing usage_record must not suppress the tool_call_end event.
+        The tool event must still be written to the invocation stream."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        self._register("aid-sup-8", "SubAgent#108")
+        ctx = _post_tool_ctx(self.tmp.name, agent_id="aid-sup-8",
+                             tool_name="Write", tool_use_id="tu-sup-8",
+                             tool_output="ok", transcript_path=self._transcript("s8"))
+        tools.handle_post_tool_use(ctx)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#108"))
+        tool_events = [e for e in events if e["event"] == "tool_call_end"]
+        self.assertEqual(1, len(tool_events),
+                         "tool_call_end must still be emitted to the invocation stream when usage is suppressed")
+
+    def test_post_tool_use_failure_subagent_scope_tool_event_still_emitted(self):
+        """Suppressing usage_record must not suppress the tool_call_end (error) event.
+        The tool event must still be written to the invocation stream."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        self._register("aid-sup-9", "SubAgent#109")
+        ctx = _failure_ctx(self.tmp.name, agent_id="aid-sup-9",
+                           tool_name="Bash", tool_use_id="tu-sup-9",
+                           tool_output="Error: exit 1", transcript_path=self._transcript("s9"))
+        tools.handle_post_tool_use_failure(ctx)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#109"))
+        tool_events = [e for e in events if e["event"] == "tool_call_end"]
+        self.assertEqual(1, len(tool_events),
+                         "tool_call_end (error) must still be emitted to the invocation stream when usage is suppressed")
+
+    # --- Orchestrator scope: usage_record emission unchanged (regression guards) ---
+
+    def test_orchestrator_pre_tool_use_still_emits_usage_record(self):
+        """Suppression applies only in subagent scope. Orchestrator-scoped
+        PreToolUse must still emit a usage_record to the orchestrator stream."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        ctx = _pre_tool_ctx(self.tmp.name, tool_name="Read", tool_use_id="tu-sup-orc-1",
+                            transcript_path=self._transcript("o1"))
+        tools.handle_pre_tool_use(ctx)
+        events = _read_jsonl(self.paths.orchestrator_events(_RUN_ID))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events),
+                         "Orchestrator-scoped PreToolUse must still emit usage_record")
+
+    def test_orchestrator_post_tool_use_still_emits_usage_record(self):
+        """Orchestrator-scoped PostToolUse must still emit a usage_record."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        ctx = _post_tool_ctx(self.tmp.name, tool_name="Read", tool_use_id="tu-sup-orc-2",
+                             tool_output="x", transcript_path=self._transcript("o2"))
+        tools.handle_post_tool_use(ctx)
+        events = _read_jsonl(self.paths.orchestrator_events(_RUN_ID))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events),
+                         "Orchestrator-scoped PostToolUse must still emit usage_record")
+
+    def test_orchestrator_post_tool_use_failure_still_emits_usage_record(self):
+        """Orchestrator-scoped PostToolUseFailure must still emit a usage_record."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        ctx = _failure_ctx(self.tmp.name, tool_name="Bash", tool_use_id="tu-sup-orc-3",
+                           tool_output="Error: exit 1", transcript_path=self._transcript("o3"))
+        tools.handle_post_tool_use_failure(ctx)
+        events = _read_jsonl(self.paths.orchestrator_events(_RUN_ID))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(1, len(usage_events),
+                         "Orchestrator-scoped PostToolUseFailure must still emit usage_record")
+
+    # --- boundaries gate: unchanged for orchestrator scope (regression guards) ---
+
+    def test_boundaries_gate_suppresses_orchestrator_scope_emission(self):
+        """MOSAIC_LOGGER_USAGE_CAPTURE=boundaries continues to suppress usage
+        emission for orchestrator-scoped firings, unaffected by the subagent fix."""
+        os.environ["MOSAIC_LOGGER_USAGE_CAPTURE"] = "boundaries"
+        ctx = _pre_tool_ctx(self.tmp.name, tool_name="Read", tool_use_id="tu-sup-gate-1",
+                            transcript_path=self._transcript("g1"))
+        tools.handle_pre_tool_use(ctx)
+        orc_path = self.paths.orchestrator_events(_RUN_ID)
+        events = _read_jsonl(orc_path) if orc_path.exists() else []
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events),
+                         "boundaries gate must still suppress usage_record for orchestrator-scoped firings")
+
+    def test_subagent_scope_suppression_independent_of_boundaries_gate(self):
+        """Subagent suppression applies regardless of MOSAIC_LOGGER_USAGE_CAPTURE.
+        Setting boundaries while in subagent scope must also produce no usage_record."""
+        os.environ["MOSAIC_LOGGER_USAGE_CAPTURE"] = "boundaries"
+        self._register("aid-sup-gate-2", "SubAgent#110")
+        ctx = _pre_tool_ctx(self.tmp.name, agent_id="aid-sup-gate-2",
+                            tool_name="Read", tool_use_id="tu-sup-gate-2",
+                            transcript_path=self._transcript("g2"))
+        tools.handle_pre_tool_use(ctx)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#110"))
+        usage_events = [e for e in events if e["event"] == "usage_record"]
+        self.assertEqual(0, len(usage_events),
+                         "Subagent-scope suppression must apply even when boundaries gate is active")
+
+    def test_subagent_tool_event_not_suppressed_when_boundaries_gate_active(self):
+        """With MOSAIC_LOGGER_USAGE_CAPTURE=boundaries, the tool event is still
+        emitted in subagent scope. Only usage emission is affected by the gate."""
+        os.environ["MOSAIC_LOGGER_USAGE_CAPTURE"] = "boundaries"
+        self._register("aid-sup-gate-3", "SubAgent#111")
+        ctx = _pre_tool_ctx(self.tmp.name, agent_id="aid-sup-gate-3",
+                            tool_name="Read", tool_use_id="tu-sup-gate-3",
+                            transcript_path=self._transcript("g3"))
+        tools.handle_pre_tool_use(ctx)
+        events = _read_jsonl(self.paths.invocation_events(_RUN_ID, "SubAgent#111"))
+        tool_events = [e for e in events if e["event"] == "tool_call_start"]
+        self.assertEqual(1, len(tool_events),
+                         "tool_call_start must still be emitted in subagent scope with boundaries gate active")
+
+    def test_subagent_scope_never_raises_regardless_of_transcript_content(self):
+        """handle_pre_tool_use must not raise even in subagent scope with a
+        transcript that contains unusual data. Suppression is silent."""
+        os.environ.pop("MOSAIC_LOGGER_USAGE_CAPTURE", None)
+        self._register("aid-sup-nr-1", "SubAgent#112")
+        ctx = _pre_tool_ctx(self.tmp.name, agent_id="aid-sup-nr-1",
+                            tool_name="Read", tool_use_id="tu-sup-nr-1",
+                            transcript_path=self._transcript("nr1"))
+        try:
+            tools.handle_pre_tool_use(ctx)
+        except Exception as exc:
+            self.fail(f"handle_pre_tool_use raised in subagent scope: {exc}")
 
 
 if __name__ == "__main__":

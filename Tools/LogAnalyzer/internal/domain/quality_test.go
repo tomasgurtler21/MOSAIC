@@ -244,3 +244,74 @@ func TestQualitySummary_Incomplete_UnreadableFileFindings_True(t *testing.T) {
 		t.Error("QualitySummary with unreadable-file findings must be incomplete")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// FindingCrossStreamRecord — severity and non-data-loss classification
+// ---------------------------------------------------------------------------
+
+func TestQualitySummary_CrossStreamRecordFinding_NotIncomplete(t *testing.T) {
+	// FindingCrossStreamRecord signals suspect data, not lost data. No events
+	// were irrecoverably lost — the duplicate was dropped rather than
+	// double-counted. A QualitySummary whose only findings are of this kind
+	// must not be incomplete, so it does not falsely indicate partial data.
+	findings := []domain.Finding{
+		{
+			Kind:     domain.FindingCrossStreamRecord,
+			Severity: domain.SeverityWarning,
+			Path:     "agent/events.jsonl",
+			Run:      domain.NamedRun("20260802T074635Z-480e"),
+		},
+	}
+	q := domain.NewQualitySummary(findings)
+	if q.Incomplete() {
+		t.Error("QualitySummary with only cross-stream-record findings must not be incomplete")
+	}
+}
+
+func TestQualitySummary_CrossStreamRecordFinding_IsNotClean(t *testing.T) {
+	// A cross-stream finding is still a finding: the summary is not clean.
+	findings := []domain.Finding{
+		{
+			Kind:     domain.FindingCrossStreamRecord,
+			Severity: domain.SeverityWarning,
+			Path:     "agent/events.jsonl",
+			Run:      domain.NamedRun("20260802T074635Z-480e"),
+		},
+	}
+	q := domain.NewQualitySummary(findings)
+	if q.IsClean() {
+		t.Error("QualitySummary with cross-stream-record findings must not be clean")
+	}
+}
+
+func TestQualitySummary_CrossStreamRecordFinding_CountedInRollup(t *testing.T) {
+	// FindingCrossStreamRecord participates in the Counts rollup like every
+	// other kind, with no special casing. Two findings of this kind must appear
+	// as count 2.
+	findings := []domain.Finding{
+		{Kind: domain.FindingCrossStreamRecord, Severity: domain.SeverityWarning,
+			Path: "agent1/events.jsonl", Run: domain.NamedRun("20260802T074635Z-480e")},
+		{Kind: domain.FindingCrossStreamRecord, Severity: domain.SeverityWarning,
+			Path: "agent2/events.jsonl", Run: domain.NamedRun("20260802T074635Z-480e")},
+	}
+	q := domain.NewQualitySummary(findings)
+	if got := q.Counts[domain.FindingCrossStreamRecord]; got != 2 {
+		t.Errorf("Counts[FindingCrossStreamRecord] = %d, want 2", got)
+	}
+}
+
+func TestQualitySummary_CrossStreamRecordFinding_MixedWithDataLossStillIncomplete(t *testing.T) {
+	// When a cross-stream finding is mixed with a data-loss finding, the summary
+	// remains incomplete (the data-loss finding drives that). The cross-stream
+	// finding does not flip Incomplete back to false.
+	findings := []domain.Finding{
+		{Kind: domain.FindingCrossStreamRecord, Severity: domain.SeverityWarning,
+			Path: "agent/events.jsonl", Run: domain.NamedRun("20260802T074635Z-480e")},
+		{Kind: domain.FindingMalformedLine, Severity: domain.SeverityWarning,
+			Path: "orch/events.jsonl", Line: 3, Run: domain.NamedRun("20260802T074635Z-480e")},
+	}
+	q := domain.NewQualitySummary(findings)
+	if !q.Incomplete() {
+		t.Error("QualitySummary with a malformed-line finding must be incomplete even when a cross-stream finding is also present")
+	}
+}

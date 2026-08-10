@@ -3,7 +3,12 @@
 Handles: PreToolUse, PostToolUse, PostToolUseFailure. Routes tool events to
 the orchestrator stream or the owning subagent's stream based on agent_id.
 
-High-frequency path: performs no transcript reads and no directory scanning.
+High-frequency path: performs no transcript reads and no directory scanning
+for tool events. When tool_capture_enabled() allows it and the firing is in
+orchestrator scope (no ctx.agent_id), a transcript read is deliberately
+performed to emit usage_record events. Subagent-scoped firings suppress
+usage emission entirely; the subagent-stop handler is the sole source of a
+subagent's own usage records, reading the subagent's own transcript at stop.
 """
 
 import mosaic_logger_core as core
@@ -23,9 +28,13 @@ def resolve_destination(ctx: "core.HookContext"):
 
 
 def _resolve_usage_scope(ctx: "core.HookContext"):
-    """Return (agent_instance_id, source) matching resolve_destination's own
-    routing decision, so a tool firing's usage_record lands on exactly the
-    same stream as the tool event it accompanies."""
+    """Return (agent_instance_id, source) for orchestrator-scoped firings,
+    matching resolve_destination's routing decision.
+
+    Only called for orchestrator-scoped firings (ctx.agent_id unset).
+    Subagent-scoped firings are suppressed before this function is reached;
+    _emit_tool_usage_records returns early when ctx.agent_id is set, so
+    this function never runs in subagent scope."""
     if not ctx.agent_id:
         return None, "orchestrator_transcript"
     run_id = core.effective_run_id(ctx)
@@ -36,9 +45,20 @@ def _resolve_usage_scope(ctx: "core.HookContext"):
 
 
 def _emit_tool_usage_records(ctx: "core.HookContext") -> None:
-    """Emit usage_record events from ctx.transcript_path when
-    tool_capture_enabled() allows it, routed to the same destination as the
-    tool event itself. Never suppresses the surrounding tool event."""
+    """Emit usage_record events from ctx.transcript_path when in orchestrator
+    scope and tool_capture_enabled() allows it. Never suppresses the
+    surrounding tool event.
+
+    When ctx.agent_id is set (subagent scope), returns immediately without
+    emitting any usage records to any stream. The subagent-stop handler in
+    mosaic_logger_handlers_invocation.py is the sole source of a subagent's
+    own usage records; it reads the subagent's own transcript at stop time.
+
+    When ctx.agent_id is unset (orchestrator scope) and tool_capture_enabled()
+    allows it, reads ctx.transcript_path and emits one usage_record per
+    assistant record to the orchestrator stream, unchanged from prior behaviour."""
+    if ctx.agent_id:
+        return
     if not usage.tool_capture_enabled():
         return
     agent_instance_id, source = _resolve_usage_scope(ctx)

@@ -28,6 +28,7 @@ QUARANTINE_DIRNAME = ".quarantine"
 RESERVED_FILENAME_CHARS = '<>:"/\\|?*'
 DEBUG_ENV_VAR = "MOSAIC_LOGGER_DEBUG"
 WORKSPACE_ENV_VAR = "CLAUDE_PROJECT_DIR"
+USAGE_STATE_DIRNAME = ".usage-state"
 
 # ---------------------------------------------------------------------------
 # Timestamp helpers (module-internal; used by core and callers)
@@ -317,6 +318,24 @@ class LogPaths:
 
     def quarantine_raw(self, run_id: str, agent_id: str) -> pathlib.Path:
         return self.quarantine_invocation_dir(run_id, agent_id) / "04_session.raw"
+
+    def usage_state_dir(self, run_id: str) -> pathlib.Path:
+        """<root>/<run_id>/.usage-state/
+
+        Run-scoped, so state never survives into a fresh run. Dot-prefixed
+        so the analyzer's directory scan skips it, following .agent-map,
+        .quarantine and the other sidecar directories.
+        """
+        return self.run_root(run_id) / USAGE_STATE_DIRNAME
+
+    def usage_state_entry(self, run_id: str, stream_key: str) -> pathlib.Path:
+        """<...>/.usage-state/<sanitize_component(stream_key)>.json
+
+        One file per destination stream. The orchestrator stream, each
+        invocation stream and each quarantine destination address distinct
+        files, so they never share or contend on state.
+        """
+        return self.usage_state_dir(run_id) / f"{sanitize_component(stream_key)}.json"
 
 
 def build_paths(workspace_root: pathlib.Path) -> LogPaths:

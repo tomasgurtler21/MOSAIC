@@ -2,7 +2,7 @@
 
 > **Status:** Draft for review
 > **Created:** 2026-07-27
-> **Last Updated:** 2026-07-27
+> **Last Updated:** 2026-08-10
 > **Scope:** The canonical log event schema, the on-disk artifact layout, run identity, and the merge utility's contract. 
 
 ---
@@ -46,8 +46,9 @@ The machine-readable format is JSONL: one JSON object per event per line, append
 | `tool_call_end` | A tool call completes (successfully or with an error). |
 | `notification` | The harness asked for human input: a permission prompt, an idle notification, or similar. |
 | `compaction` | A context-window compaction or equivalent context-management event occurred. |
+| `usage_record` | One API call's token usage as an independently attributable, deduplicable unit. |
 
-No other event types exist in schema version 1. A human prompt to the orchestrator is modeled as a `turn` event with `role: "user"`, not a distinct event type — a human prompt is simply a conversation turn.
+These twelve event types are the complete set in schema version 1. A human prompt to the orchestrator is modeled as a `turn` event with `role: "user"`, not a distinct event type — a human prompt is simply a conversation turn.
 
 `tool_call` is deliberately two events, not one. A single post-hoc event would assume tool calls are synchronous and non-overlapping, which isn't true — parallel and background tool execution is a real case this schema has to survive (it's the same reason the invocation JSONL is scoped per-invocation rather than shared: concurrent execution is common, not an edge case). Splitting into start/end mirrors `invocation_start`/`invocation_end` and matches how harnesses natively hook this (paired before/after events), rather than forcing the adapter to buffer a call's state until it resolves.
 
@@ -184,6 +185,22 @@ Harnesses vary in whether a human-input prompt is observable as one event or two
 | `trigger` | enum: `"auto"` \| `"manual"` | Optional | What caused the compaction. |
 | `tokens_before` | number | Optional | Context size prior to compaction. |
 | `tokens_after` | number | Optional | Context size after compaction. |
+
+**`usage_record`**
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `record_id` | string | Required | Deduplication key, stable per API call. Used to correlate re-observations of the same record across firings. |
+| `record_index` | integer | Required | 0-based ordinal among assistant records in file order. Diagnostic and ordering aid only; carries no attribution or totalling weight. |
+| `source` | string | Required | `"orchestrator_transcript"` or `"agent_transcript"`. Forensic provenance only; stream placement is authoritative for attribution. |
+| `agent_instance_id` | string | Optional | Present on invocation streams only; omitted on the orchestrator stream. |
+| `model` | string | Optional | The model of this record, when resolvable. |
+| `service_tier` | string | Optional | Descriptive detail only; drives no pricing decision. |
+| `token_usage` | object | Optional | Present when at least one sub-field is resolvable. Sub-fields `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens`, each independently optional and present only when its source value is a genuine number, including 0. |
+
+**Supersede rule (normative).** A producer may observe the same `record_id` more than once as its values settle. When the same `record_id` appears more than once within a stream, the later observation is authoritative and supersedes all earlier ones. A consumer totals the final observed value for each `record_id`, never the first.
+
+**Single-stream invariant (normative).** A given `record_id` belongs to exactly one stream within a run, so a record contributes to exactly one actor's total. The same `record_id` appearing on two different streams is a producer-side contract violation. A consumer surfaces this as a data-quality issue rather than silently attributing the record to both actors.
 
 ### 3.5 Derived fields (not in the wire schema)
 

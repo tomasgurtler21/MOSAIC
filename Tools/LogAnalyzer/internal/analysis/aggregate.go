@@ -14,6 +14,14 @@ type runState struct {
 	agents       map[domain.AgentInstanceID]*actorState
 	// provisional starts true; set false when run_end or session_end is seen.
 	provisional bool
+	// recordOwners maps record_id to the actor that first presented it within
+	// this run. Consulted before per-actor supersede to enforce the
+	// single-stream invariant: a record_id may only count toward one stream.
+	recordOwners map[string]domain.ActorRef
+	// crossStreamReported is the set of record_ids for which exactly one
+	// FindingCrossStreamRecord has already been raised. Subsequent foreign
+	// observations of the same record_id produce no additional finding.
+	crossStreamReported map[string]bool
 }
 
 // actorState holds mutable state for one actor within a run.
@@ -21,7 +29,7 @@ type actorState struct {
 	actor       domain.ActorRef
 	invocations []domain.InvocationUsage // legacy: turn / invocation_end sampled usage
 	records     []domain.InvocationUsage // per-record usage, file order preserved
-	seenRecords map[string]bool          // dedup keys, scoped to this actor in this run
+	recordIndex map[string]int           // record_id → index into records; last-wins supersede
 }
 
 // effective returns the invocation records that count toward this actor's
@@ -50,12 +58,25 @@ func (s *actorState) effective() []domain.InvocationUsage {
 //     in Aggregate.Unattributable, never in Aggregate.Runs.
 //   - A usage_record event is attributed by STREAM PROVENANCE alone: on the
 //     orchestrator stream it contributes to the orchestrator total, on an agent
-//     instance stream to that instance's total. The adapter guarantees each
-//     record is written to exactly one stream, so no record can contribute twice.
+//     instance stream to that instance's total.
+//   - Single-stream invariant (now verified, not trusted): a given record_id may
+//     belong to exactly one stream per run. When a record_id is first observed
+//     its owning actor is recorded in the run-scoped registry. Re-observation
+//     on the SAME stream is ordinary deduplication (last-wins supersede) and
+//     raises no finding. Observation from a DIFFERENT stream is a producer-side
+//     contract violation: exactly one FindingCrossStreamRecord warning is raised
+//     per duplicated record, and the duplicate is not added to the later actor's
+//     total. First in feed order retains the record.
 //   - Where an actor has at least one usage_record, its totals come from those
 //     records ONLY and the sampled token_usage on its turn / invocation_end
 //     events is ignored. Where it has none, the legacy rules above apply
 //     unchanged. The two sources are never summed together.
+//   - When the same record_id appears more than once on one actor's stream, the
+//     LAST (most recent) observation supersedes all earlier ones. The record's
+//     ordinal position among that actor's records is preserved and the record
+//     count does not increase on re-observation. Re-observation is the expected
+//     case and raises no finding. Records with an empty record_id cannot be
+//     deduplicated and are each counted once, raising FindingUnidentifiedEvent.
 type Aggregator struct {
 	runs           map[string]*runState // keyed by run ID for named runs
 	unattributable *runState            // nil until first unattributable event
@@ -208,23 +229,35 @@ func (a *Aggregator) handleAgentUsageRecord(rs *runState, ref domain.StreamRef, 
 	a.handleUsageRecord(rs, ref, ev, as)
 }
 
-// handleUsageRecord deduplicates a usage_record event on the record id, scoped
-// to the given actorState, and appends it to that actor's per-record total.
-// A record whose id is already present is discarded silently — the expected
-// re-emission case, not an anomaly. A record with an empty record id cannot be
-// deduplicated; it is counted once and raises FindingUnidentifiedEvent so the
-// gap is visible.
+// handleUsageRecord applies two rules in order for each usage_record event:
 //
-// Residual risk: a record whose id changes between firings because compaction
-// rewrote the transcript (the position-plus-hash fallback derivation) is
-// counted twice. This is the accepted residual risk noted in the design.
+//  1. Single-stream check (run-scoped): for a non-empty record_id, consult
+//     the run's ownership registry. If the record is absent, register this
+//     actor as owner and proceed to rule 2. If the record is already owned by
+//     this same actor, it is ordinary re-observation — proceed to rule 2. If
+//     the record is owned by a different actor, raise exactly one
+//     FindingCrossStreamRecord (the first time only) and return without
+//     contributing the record to this actor's total.
+//
+//  2. Supersede (per-actor): for a non-empty record_id already held by this
+//     actor, replace the stored entry in place (last observation wins),
+//     preserving file order and record count. For a record_id not yet held,
+//     append in file order. For an empty record_id, append and raise
+//     FindingUnidentifiedEvent.
 func (a *Aggregator) handleUsageRecord(rs *runState, ref domain.StreamRef, ev domain.Event, as *actorState) {
 	rec := ev.UsageRecord
 	if rec == nil {
 		return
 	}
 
+	entry := domain.InvocationUsage{
+		Model:   rec.Model,
+		Harness: ev.Harness,
+		Usage:   rec.Usage,
+	}
+
 	if rec.RecordID == "" {
+		// Empty record_id: cannot enter either registry or supersede map.
 		a.findings = append(a.findings, domain.Finding{
 			Kind:     domain.FindingUnidentifiedEvent,
 			Severity: domain.SeverityWarning,
@@ -232,21 +265,56 @@ func (a *Aggregator) handleUsageRecord(rs *runState, ref domain.StreamRef, ev do
 			Actor:    as.actor,
 			Detail:   "usage_record with no record_id",
 		})
-	} else {
-		if as.seenRecords == nil {
-			as.seenRecords = make(map[string]bool)
-		}
-		if as.seenRecords[rec.RecordID] {
-			return
-		}
-		as.seenRecords[rec.RecordID] = true
+		as.records = append(as.records, entry)
+		return
 	}
 
-	as.records = append(as.records, domain.InvocationUsage{
-		Model:   rec.Model,
-		Harness: ev.Harness,
-		Usage:   rec.Usage,
-	})
+	// Rule 1: single-stream invariant check.
+	if owner, owned := rs.recordOwners[rec.RecordID]; owned {
+		if !sameActorIdentity(owner, as.actor) {
+			// Cross-stream violation: raise at most one finding per record.
+			if !rs.crossStreamReported[rec.RecordID] {
+				rs.crossStreamReported[rec.RecordID] = true
+				a.findings = append(a.findings, domain.Finding{
+					Kind:     domain.FindingCrossStreamRecord,
+					Severity: domain.SeverityWarning,
+					Path:     ref.Path,
+					Line:     0,
+					Run:      ref.Run,
+					Actor:    as.actor,
+					Detail: "usage_record " + rec.RecordID +
+						" already attributed to " + owner.Label() +
+						"; duplicate on " + as.actor.Label() + " ignored",
+				})
+			}
+			return
+		}
+		// Same actor: fall through to per-actor supersede.
+	} else {
+		// First time this record_id is seen in this run: register ownership.
+		rs.recordOwners[rec.RecordID] = as.actor
+	}
+
+	// Rule 2: per-actor supersede.
+	if as.recordIndex == nil {
+		as.recordIndex = make(map[string]int)
+	}
+	if idx, seen := as.recordIndex[rec.RecordID]; seen {
+		// Last observation wins: replace in place, preserving file order and count.
+		as.records[idx] = entry
+		return
+	}
+
+	// First observation for this actor: append and record its position.
+	as.recordIndex[rec.RecordID] = len(as.records)
+	as.records = append(as.records, entry)
+}
+
+// sameActorIdentity reports whether two ActorRefs identify the same stream
+// owner. It compares only Kind and Instance, deliberately ignoring Type (the
+// agent_type hint from invocation_start) which is not part of stream identity.
+func sameActorIdentity(a, b domain.ActorRef) bool {
+	return a.Kind == b.Kind && a.Instance == b.Instance
 }
 
 // handleInvocationStart processes an invocation_start event.
@@ -347,9 +415,11 @@ func (a *Aggregator) getOrCreateRunState(run domain.RunRef) *runState {
 // newRunState constructs a fresh runState, initialized as provisional.
 func newRunState(run domain.RunRef) *runState {
 	rs := &runState{
-		run:         run,
-		agents:      make(map[domain.AgentInstanceID]*actorState),
-		provisional: true,
+		run:                 run,
+		agents:              make(map[domain.AgentInstanceID]*actorState),
+		provisional:         true,
+		recordOwners:        make(map[string]domain.ActorRef),
+		crossStreamReported: make(map[string]bool),
 	}
 	rs.orchestrator = actorState{actor: domain.Orchestrator()}
 	return rs

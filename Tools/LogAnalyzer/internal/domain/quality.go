@@ -17,6 +17,12 @@ const (
 	FindingUnrecognisedFolder  FindingKind = "unrecognised_folder"
 	FindingMissingEventFile    FindingKind = "missing_event_file"
 	FindingInvalidPricingEntry FindingKind = "invalid_pricing_entry"
+
+	// FindingCrossStreamRecord reports a usage_record whose record_id was
+	// observed on more than one stream within a single run, violating the
+	// format's single-stream invariant. The data is suspect, not partial:
+	// this kind is deliberately NOT a member of dataLossKinds.
+	FindingCrossStreamRecord FindingKind = "cross_stream_record"
 )
 
 // FindingSeverity lets a frontend decide prominence without parsing kinds.

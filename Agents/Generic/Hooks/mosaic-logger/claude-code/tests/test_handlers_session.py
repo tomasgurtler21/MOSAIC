@@ -809,8 +809,10 @@ class TestHandleStopUsageEmission(unittest.TestCase):
         self.assertEqual("Here is my response.", turn_events[0]["content"])
         self.assertEqual("claude-opus-4-5", turn_events[0]["model"])
 
-    def test_repeated_stop_firings_do_not_error_and_re_emit(self):
-        """T5.4: two Stop firings against the same transcript are tolerated."""
+    def test_repeated_stop_firings_do_not_error_or_duplicate(self):
+        """Two Stop firings against the same transcript are tolerated: no
+        exception is raised and the usage record is emitted exactly once, not
+        duplicated on the second identical firing."""
         transcript_path = self.tmp_path / "transcript.jsonl"
         _write_transcript(transcript_path, [
             {"type": "assistant", "message": {
@@ -827,7 +829,7 @@ class TestHandleStopUsageEmission(unittest.TestCase):
         ctx = _make_ctx(payload, self.tmp_path)
         session_handlers.handle_stop(ctx)
         session_handlers.handle_stop(ctx)
-        self.assertEqual(2, len(self._usage_events(ctx)))
+        self.assertEqual(1, len(self._usage_events(ctx)))
 
 
 # ---------------------------------------------------------------------------

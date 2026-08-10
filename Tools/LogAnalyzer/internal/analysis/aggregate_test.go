@@ -8,6 +8,7 @@ package analysis_test
 // No filesystem, network, clock or randomness is involved anywhere in these tests.
 
 import (
+	"strings"
 	"testing"
 
 	"mosaic-log-analyzer/internal/analysis"
@@ -1365,13 +1366,16 @@ func TestAggregate_UsageRecord_DuplicateRecordID_CountedOnce(t *testing.T) {
 	}
 }
 
-func TestAggregate_UsageRecord_SameRecordID_DifferentAgentInstances_NotConflated(t *testing.T) {
-	// Deduplication is scoped per actor. The same record id used by two
-	// different agent instances must count once for each, not once overall.
+func TestAggregate_UsageRecord_SameRecordID_DifferentAgentInstances_CrossStreamViolation(t *testing.T) {
+	// A record_id that appears on two different agent-instance streams within the
+	// same run violates the single-stream invariant. The first stream in feed
+	// order retains the record and keeps its total; the later stream's actor total
+	// is not inflated by the duplicate. Exactly one FindingCrossStreamRecord
+	// warning is raised, naming the later stream's actor.
 	agentA := domain.AgentInstanceID("AgentA#1")
 	agentB := domain.AgentInstanceID("AgentB#1")
 
-	agg, _ := analysis.Aggregate(analysis.Input{
+	agg, findings := analysis.Aggregate(analysis.Input{
 		Streams: []analysis.Stream{
 			{
 				Ref:    agentStream(testRunRef, agentA),
@@ -1384,27 +1388,65 @@ func TestAggregate_UsageRecord_SameRecordID_DifferentAgentInstances_NotConflated
 		},
 	})
 
-	run := requireOneRun(t, agg)
-	if len(run.Agents) != 2 {
-		t.Fatalf("got %d agents, want 2", len(run.Agents))
+	// Exactly one cross-stream violation finding must be raised.
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want exactly 1; findings: %v", len(findings), findings)
+	}
+	f := findings[0]
+	if f.Kind != domain.FindingCrossStreamRecord {
+		t.Errorf("finding kind = %q, want FindingCrossStreamRecord", f.Kind)
+	}
+	if f.Severity != domain.SeverityWarning {
+		t.Errorf("finding severity = %d, want SeverityWarning", f.Severity)
+	}
+	// Finding must name the later stream's actor (AgentB, the one whose total was protected).
+	if f.Actor.Kind != domain.ActorAgentInstance || f.Actor.Instance != agentB {
+		t.Errorf("finding actor = %+v, want agent instance %q", f.Actor, agentB)
+	}
+	// Finding run must match the run where the violation occurred.
+	if f.Run != testRunRef {
+		t.Errorf("finding run = %+v, want %+v", f.Run, testRunRef)
+	}
+	// Finding detail must name the duplicated record and both actors.
+	if !strings.Contains(f.Detail, "shared-id") {
+		t.Errorf("finding detail %q does not mention record id %q", f.Detail, "shared-id")
+	}
+	if !strings.Contains(f.Detail, string(agentA)) {
+		t.Errorf("finding detail %q does not mention first-stream actor %q", f.Detail, agentA)
+	}
+	if !strings.Contains(f.Detail, string(agentB)) {
+		t.Errorf("finding detail %q does not mention second-stream actor %q", f.Detail, agentB)
 	}
 
+	// AgentA (first stream) retains its record; its total must be 100.
+	run := requireOneRun(t, agg)
+	var foundAgentA bool
 	for _, agent := range run.Agents {
-		switch agent.Actor.Instance {
-		case agentA:
+		if agent.Actor.Instance == agentA {
+			foundAgentA = true
 			assertTokenPresent(t, "AgentA Input", agent.Totals().Input, 100)
-		case agentB:
-			assertTokenPresent(t, "AgentB Input", agent.Totals().Input, 200)
 		}
+		if agent.Actor.Instance == agentB {
+			// AgentB's duplicate was dropped; its total must not include the 200-token record.
+			if v, ok := agent.Totals().Input.Value(); ok && v != 0 {
+				t.Errorf("AgentB Input = %d, want absent or 0 (duplicate must not inflate total)", v)
+			}
+		}
+	}
+	if !foundAgentA {
+		t.Error("AgentA not found in run agents; first stream must retain its record")
 	}
 }
 
-func TestAggregate_UsageRecord_SameRecordID_OrchestratorAndAgent_NotConflated(t *testing.T) {
-	// Deduplication scope also separates the orchestrator stream from any
-	// agent instance stream: the same record id on both must count in both.
+func TestAggregate_UsageRecord_SameRecordID_OrchestratorAndAgent_CrossStreamViolation(t *testing.T) {
+	// A record_id that appears on the orchestrator stream and on an agent-instance
+	// stream within the same run violates the single-stream invariant. The
+	// orchestrator stream (first in feed order) retains the record; the agent
+	// stream's total is not inflated. Exactly one FindingCrossStreamRecord warning
+	// is raised, naming the later stream's actor.
 	agentID := domain.AgentInstanceID("Agent#1")
 
-	agg, _ := analysis.Aggregate(analysis.Input{
+	agg, findings := analysis.Aggregate(analysis.Input{
 		Streams: []analysis.Stream{
 			{
 				Ref:    orchStream(testRunRef),
@@ -1417,9 +1459,48 @@ func TestAggregate_UsageRecord_SameRecordID_OrchestratorAndAgent_NotConflated(t 
 		},
 	})
 
+	// Exactly one cross-stream violation finding must be raised.
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want exactly 1; findings: %v", len(findings), findings)
+	}
+	f := findings[0]
+	if f.Kind != domain.FindingCrossStreamRecord {
+		t.Errorf("finding kind = %q, want FindingCrossStreamRecord", f.Kind)
+	}
+	if f.Severity != domain.SeverityWarning {
+		t.Errorf("finding severity = %d, want SeverityWarning", f.Severity)
+	}
+	// Finding must name the later stream's actor (the agent, whose total was protected).
+	if f.Actor.Kind != domain.ActorAgentInstance || f.Actor.Instance != agentID {
+		t.Errorf("finding actor = %+v, want agent instance %q", f.Actor, agentID)
+	}
+	// Finding run must match the run where the violation occurred.
+	if f.Run != testRunRef {
+		t.Errorf("finding run = %+v, want %+v", f.Run, testRunRef)
+	}
+	// Finding detail must name the duplicated record and both actors.
+	if !strings.Contains(f.Detail, "shared-id") {
+		t.Errorf("finding detail %q does not mention record id %q", f.Detail, "shared-id")
+	}
+	if !strings.Contains(f.Detail, "orchestrator") {
+		t.Errorf("finding detail %q does not mention first-stream actor (orchestrator)", f.Detail)
+	}
+	if !strings.Contains(f.Detail, string(agentID)) {
+		t.Errorf("finding detail %q does not mention second-stream actor %q", f.Detail, agentID)
+	}
+
+	// Orchestrator (first stream) retains its record; total must be 10.
 	run := requireOneRun(t, agg)
 	assertTokenPresent(t, "Orchestrator Input", run.Orchestrator.Totals().Input, 10)
-	assertTokenPresent(t, "Agent Input", requireOneAgent(t, run).Totals().Input, 20)
+
+	// Agent's total must not be inflated by the duplicate.
+	for _, agent := range run.Agents {
+		if agent.Actor.Instance == agentID {
+			if v, ok := agent.Totals().Input.Value(); ok && v != 0 {
+				t.Errorf("Agent Input = %d, want absent or 0 (duplicate must not inflate total)", v)
+			}
+		}
+	}
 }
 
 func TestAggregate_UsageRecord_SameRecordID_DifferentRuns_NotConflated(t *testing.T) {
@@ -1646,5 +1727,375 @@ func TestAggregate_UsageRecord_NoUsableActorIdentity_ProducesFinding(t *testing.
 
 	if !hasFindingKind(findings, domain.FindingUnidentifiedEvent) {
 		t.Errorf("expected FindingUnidentifiedEvent for usage_record with no usable identity; got: %v", findings)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// usage_record — last-wins supersede behaviour (TDD RED phase)
+// ---------------------------------------------------------------------------
+
+func TestAggregate_UsageRecord_SupersedeTakesLastObservation(t *testing.T) {
+	// When the same record_id is observed twice with different token_usage, the
+	// actor's total must reflect the second (later) observation's values, not the
+	// first. A first-wins implementation would give Input=100; this test fails
+	// against any implementation that does not apply last-wins supersede.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, findings := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100), Output: domain.Tokens(10)}),
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200), Output: domain.Tokens(20)}),
+	))
+
+	if len(findings) > 0 {
+		t.Errorf("re-observation must not raise a finding; got: %v", findings)
+	}
+
+	totals := requireOneAgent(t, requireOneRun(t, agg)).Totals()
+	assertTokenPresent(t, "Input", totals.Input, 200)
+	assertTokenPresent(t, "Output", totals.Output, 20)
+}
+
+func TestAggregate_UsageRecord_ThreeObservationsSettleOnLast(t *testing.T) {
+	// Three successive observations of the same record_id must settle on the
+	// third (last) set of values. A first-wins implementation keeps the first
+	// (Input=100); this test fails unless all intermediate values are discarded
+	// in favour of the final one.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, findings := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}),
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)}),
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(300)}),
+	))
+
+	if len(findings) > 0 {
+		t.Errorf("repeated re-observation must not raise findings; got: %v", findings)
+	}
+
+	totals := requireOneAgent(t, requireOneRun(t, agg)).Totals()
+	assertTokenPresent(t, "Input", totals.Input, 300)
+}
+
+func TestAggregate_UsageRecord_SupersedeDoesNotInflateRecordCount(t *testing.T) {
+	// Re-observing a record_id must replace the stored entry in place, leaving
+	// the actor's Invocations slice length unchanged. With two distinct records
+	// where one is re-observed, the slice length must remain 2 and the total
+	// must reflect the final values (last-wins). A first-wins implementation
+	// gives Input=150; this test also fails there because the total assertion
+	// expects 250 (the last-observed value for rec-1 plus rec-2).
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, _ := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}),
+		usageRecordEvent(agentID, "rec-2", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(50)}),
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)}), // supersedes rec-1
+	))
+
+	agent := requireOneAgent(t, requireOneRun(t, agg))
+
+	if got := len(agent.Invocations); got != 2 {
+		t.Errorf("Invocations length = %d, want 2 — re-observation must replace the entry, not append a new one", got)
+	}
+
+	// 200 (last rec-1) + 50 (rec-2) = 250.
+	assertTokenPresent(t, "Input", agent.Totals().Input, 250)
+}
+
+func TestAggregate_UsageRecord_SupersedePreservesFileOrder(t *testing.T) {
+	// Re-observing an earlier record must update its values in place and leave
+	// its ordinal position among the actor's Invocations unchanged. After
+	// emitting rec-a then rec-b then re-observing rec-a, position 0 must carry
+	// rec-a's final-observed values (Input=30) and position 1 must carry rec-b
+	// (Input=20). A first-wins implementation leaves position 0 at Input=10,
+	// failing the assertion.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, _ := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		usageRecordEvent(agentID, "rec-a", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(10)}),
+		usageRecordEvent(agentID, "rec-b", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(20)}),
+		usageRecordEvent(agentID, "rec-a", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(30)}), // supersedes rec-a
+	))
+
+	agent := requireOneAgent(t, requireOneRun(t, agg))
+
+	if got := len(agent.Invocations); got != 2 {
+		t.Fatalf("Invocations length = %d, want 2", got)
+	}
+
+	// Position 0 must carry rec-a's final values, not its initial values.
+	assertTokenPresent(t, "position-0 Input (rec-a final)", agent.Invocations[0].Usage.Input, 30)
+	// Position 1 carries rec-b, unchanged by the re-observation of rec-a.
+	assertTokenPresent(t, "position-1 Input (rec-b)", agent.Invocations[1].Usage.Input, 20)
+}
+
+func TestAggregate_UsageRecord_SupersedeScopedPerActor(t *testing.T) {
+	// The supersede mechanism is per-actor. A re-observation of a record_id on
+	// one actor's stream must update only that actor's stored entry; a second
+	// actor's records are unaffected. Each actor uses a distinct record_id here
+	// so no cross-stream invariant violation is produced — the test isolates
+	// supersede scoping from the separate cross-stream detection logic. A
+	// first-wins implementation leaves AgentA at Input=100 instead of 300,
+	// failing here.
+	agentA := domain.AgentInstanceID("AgentA#1")
+	agentB := domain.AgentInstanceID("AgentB#1")
+
+	agg, findings := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref: agentStream(testRunRef, agentA),
+				Events: []domain.Event{
+					usageRecordEvent(agentA, "rec-a1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}),
+					usageRecordEvent(agentA, "rec-a1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(300)}), // supersedes
+				},
+			},
+			{
+				Ref: agentStream(testRunRef, agentB),
+				Events: []domain.Event{
+					usageRecordEvent(agentB, "rec-b1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)}),
+				},
+			},
+		},
+	})
+
+	if len(findings) > 0 {
+		t.Errorf("got %d unexpected findings: %v", len(findings), findings)
+	}
+
+	run := requireOneRun(t, agg)
+	if len(run.Agents) != 2 {
+		t.Fatalf("got %d agents, want 2", len(run.Agents))
+	}
+	for _, agent := range run.Agents {
+		switch agent.Actor.Instance {
+		case agentA:
+			assertTokenPresent(t, "AgentA Input", agent.Totals().Input, 300)
+		case agentB:
+			assertTokenPresent(t, "AgentB Input", agent.Totals().Input, 200)
+		}
+	}
+}
+
+func TestAggregate_UsageRecord_SupersedeOnOrchestratorStream(t *testing.T) {
+	// Last-wins supersede must apply on the orchestrator stream as well as agent
+	// streams. A first-wins implementation returns Input=100; this test fails
+	// there.
+	agg, findings := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref: orchStream(testRunRef),
+				Events: []domain.Event{
+					usageRecordEvent("", "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}),
+					usageRecordEvent("", "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(400)}), // supersedes
+				},
+			},
+		},
+	})
+
+	if len(findings) > 0 {
+		t.Errorf("re-observation on orchestrator stream must not raise a finding; got: %v", findings)
+	}
+
+	run := requireOneRun(t, agg)
+	assertTokenPresent(t, "Orchestrator Input", run.Orchestrator.Totals().Input, 400)
+}
+
+func TestAggregate_UsageRecord_EmptyRecordIDUnaffectedBySupersede(t *testing.T) {
+	// Empty record_ids cannot enter the supersede mechanism. Each empty-id event
+	// is counted once and raises FindingUnidentifiedEvent, exactly as before.
+	// Two empty-id events on the same stream both contribute their values to the
+	// total (no deduplication is possible without a key).
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, findings := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		usageRecordEvent(agentID, "", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}),
+		usageRecordEvent(agentID, "", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)}),
+	))
+
+	// Each empty-id event must produce exactly one FindingUnidentifiedEvent.
+	var unidentifiedCount int
+	for _, f := range findings {
+		if f.Kind == domain.FindingUnidentifiedEvent {
+			unidentifiedCount++
+		}
+	}
+	if unidentifiedCount != 2 {
+		t.Errorf("got %d FindingUnidentifiedEvent findings, want 2 (one per empty-id event)", unidentifiedCount)
+	}
+
+	// Both events contribute their values to the total.
+	totals := requireOneAgent(t, requireOneRun(t, agg)).Totals()
+	assertTokenPresent(t, "Input", totals.Input, 300)
+}
+
+func TestAggregate_UsageRecord_SupersedeMixedWithLegacyStillIgnoresLegacy(t *testing.T) {
+	// When an actor carries usage_record events that include re-observations,
+	// legacy invocation_end usage must still be ignored. The per-actor precedence
+	// rule is unchanged by the supersede fix. A first-wins implementation gives
+	// Input=100 (wrong value, right precedence); this test fails because it
+	// expects 200 from the last-observed usage_record.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, _ := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		invEndEvent(agentID, "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(9999)}), // legacy — must be ignored
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}),
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)}), // supersedes
+	))
+
+	totals := requireOneAgent(t, requireOneRun(t, agg)).Totals()
+	assertTokenPresent(t, "Input", totals.Input, 200)
+}
+
+// ---------------------------------------------------------------------------
+// usage_record — cross-stream duplicate detection (TDD RED phase)
+// ---------------------------------------------------------------------------
+
+func TestAggregate_UsageRecord_CrossStreamDuplicate_MultipleObservationsFromForeignStream_ExactlyOneFinding(t *testing.T) {
+	// When the same record_id is observed multiple times from a foreign stream,
+	// exactly one FindingCrossStreamRecord must be raised — one per duplicated
+	// record, never one per duplicate observation. Raising a finding on every
+	// copy would flood findings under a real producer bug.
+	agentA := domain.AgentInstanceID("AgentA#1")
+	agentB := domain.AgentInstanceID("AgentB#1")
+
+	_, findings := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref:    agentStream(testRunRef, agentA),
+				Events: []domain.Event{usageRecordEvent(agentA, "rec-x", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)})},
+			},
+			{
+				Ref: agentStream(testRunRef, agentB),
+				Events: []domain.Event{
+					usageRecordEvent(agentB, "rec-x", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)}), // first foreign copy
+					usageRecordEvent(agentB, "rec-x", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)}), // second foreign copy
+					usageRecordEvent(agentB, "rec-x", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)}), // third foreign copy
+				},
+			},
+		},
+	})
+
+	var crossStreamCount int
+	for _, f := range findings {
+		if f.Kind == domain.FindingCrossStreamRecord {
+			crossStreamCount++
+		}
+	}
+	if crossStreamCount != 1 {
+		t.Errorf("got %d FindingCrossStreamRecord findings for one duplicated record, want exactly 1", crossStreamCount)
+	}
+}
+
+func TestAggregate_UsageRecord_CrossStreamDuplicate_AgentFirstThenOrchestrator_AgentRetains(t *testing.T) {
+	// Feed order determines which stream owns a record. When the agent stream
+	// is processed before the orchestrator stream and both present the same
+	// record_id, the agent retains the record. Exactly one FindingCrossStreamRecord
+	// is raised, naming the orchestrator as the later stream's actor.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	agg, findings := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref:    agentStream(testRunRef, agentID),
+				Events: []domain.Event{usageRecordEvent(agentID, "shared-id", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(50)})},
+			},
+			{
+				Ref:    orchStream(testRunRef),
+				Events: []domain.Event{usageRecordEvent("", "shared-id", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(99)})},
+			},
+		},
+	})
+
+	// Exactly one cross-stream finding naming the orchestrator as the later actor.
+	if len(findings) != 1 {
+		t.Fatalf("got %d findings, want exactly 1; findings: %v", len(findings), findings)
+	}
+	f := findings[0]
+	if f.Kind != domain.FindingCrossStreamRecord {
+		t.Errorf("finding kind = %q, want FindingCrossStreamRecord", f.Kind)
+	}
+	if f.Actor.Kind != domain.ActorOrchestrator {
+		t.Errorf("finding actor kind = %d, want ActorOrchestrator (later stream)", f.Actor.Kind)
+	}
+
+	// Agent (first stream) retains the record; total must be 50.
+	run := requireOneRun(t, agg)
+	assertTokenPresent(t, "Agent Input", requireOneAgent(t, run).Totals().Input, 50)
+
+	// Orchestrator's duplicate was dropped; its total must not include the 99-token record.
+	if v, ok := run.Orchestrator.Totals().Input.Value(); ok && v != 0 {
+		t.Errorf("Orchestrator Input = %d, want absent or 0 (duplicate must not inflate total)", v)
+	}
+}
+
+func TestAggregate_UsageRecord_CrossStreamDuplicate_SameStreamReobservationNotViolation(t *testing.T) {
+	// Re-observation of the same record_id on the same stream is ordinary supersede
+	// behaviour and must not be treated as a cross-stream violation. No
+	// FindingCrossStreamRecord must be raised.
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	_, findings := analysis.Aggregate(oneAgentStream(testRunRef, agentID,
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)}),
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)}), // re-observation, same stream
+		usageRecordEvent(agentID, "rec-1", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(300)}), // re-observation, same stream
+	))
+
+	for _, f := range findings {
+		if f.Kind == domain.FindingCrossStreamRecord {
+			t.Errorf("same-stream re-observation must not raise FindingCrossStreamRecord; got: %v", f)
+		}
+	}
+}
+
+func TestAggregate_UsageRecord_CrossStreamDuplicate_TwoDifferentRecordsEachOnce_NoViolation(t *testing.T) {
+	// Two different record_ids, each appearing on exactly one stream, must
+	// produce no cross-stream finding even when both streams are present.
+	agentA := domain.AgentInstanceID("AgentA#1")
+	agentB := domain.AgentInstanceID("AgentB#1")
+
+	_, findings := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref:    agentStream(testRunRef, agentA),
+				Events: []domain.Event{usageRecordEvent(agentA, "rec-a", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)})},
+			},
+			{
+				Ref:    agentStream(testRunRef, agentB),
+				Events: []domain.Event{usageRecordEvent(agentB, "rec-b", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)})},
+			},
+		},
+	})
+
+	for _, f := range findings {
+		if f.Kind == domain.FindingCrossStreamRecord {
+			t.Errorf("distinct record_ids on separate streams must not raise FindingCrossStreamRecord; got: %v", f)
+		}
+	}
+}
+
+func TestAggregate_UsageRecord_CrossStreamDuplicate_RunScopedRegistry_DifferentRunsNoViolation(t *testing.T) {
+	// The run-scoped registry must not bleed across runs. The same record_id in
+	// two different runs is not a violation and must raise no FindingCrossStreamRecord.
+	// This test confirms the cross-stream registry is per-run, not global.
+	run1 := domain.NamedRun("20260101T000000Z-cccc")
+	run2 := domain.NamedRun("20260101T000000Z-dddd")
+	agentID := domain.AgentInstanceID("Agent#1")
+
+	_, findings := analysis.Aggregate(analysis.Input{
+		Streams: []analysis.Stream{
+			{
+				Ref:    agentStream(run1, agentID),
+				Events: []domain.Event{usageRecordEvent(agentID, "cross-run-id", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(100)})},
+			},
+			{
+				Ref:    agentStream(run2, agentID),
+				Events: []domain.Event{usageRecordEvent(agentID, "cross-run-id", "claude-sonnet", domain.TokenUsage{Input: domain.Tokens(200)})},
+			},
+		},
+	})
+
+	for _, f := range findings {
+		if f.Kind == domain.FindingCrossStreamRecord {
+			t.Errorf("same record_id in two different runs must not raise FindingCrossStreamRecord; got: %v", f)
+		}
 	}
 }
