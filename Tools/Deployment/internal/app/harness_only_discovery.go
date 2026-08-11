@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/catalog"
 	"mosaic-deploy/internal/domain"
 )
@@ -79,15 +80,23 @@ func eligibleHarnessOnly(src []byte) EligibilityVerdict {
 		}
 	}
 
-	// Signal one: non-empty transform_version scalar in frontmatter.
-	tvVal, ok := fm.Get("transform_version")
-	if !ok || tvVal.Kind != domain.KindScalar || tvVal.Scalar == "" {
+	// Signal one: non-empty transform_version scalar in frontmatter. Both the prefixed
+	// (mosaic_-prefixed) and legacy (unprefixed) names are accepted via agentfields.ReadOrder,
+	// with the prefixed name preferred when both are present.
+	tvField, _ := agentfields.ByDeployedName("transform_version")
+	var transformVersion string
+	for _, key := range agentfields.ReadOrder(tvField) {
+		if v, ok := fm.Get(key); ok && v.Kind == domain.KindScalar && v.Scalar != "" {
+			transformVersion = v.Scalar
+			break
+		}
+	}
+	if transformVersion == "" {
 		return EligibilityVerdict{
 			Eligible: false,
 			Reason:   "frontmatter does not carry a non-empty transform_version scalar",
 		}
 	}
-	transformVersion := tvVal.Scalar
 
 	// Signal two: body carries at least one canonical section AND no blocking issues.
 
@@ -131,8 +140,14 @@ func eligibleHarnessOnly(src []byte) EligibilityVerdict {
 	if v, ok := fm.Get("version"); ok && v.Kind == domain.KindScalar {
 		meta.Version = v.Scalar
 	}
-	if v, ok := fm.Get("id"); ok && v.Kind == domain.KindScalar {
-		meta.NumericID = v.Scalar
+	// Read the numeric ID from the deployed file, accepting both the prefixed (mosaic_-prefixed)
+	// and legacy (unprefixed) forms via agentfields.ReadOrder.
+	idField, _ := agentfields.ByGeneric("id")
+	for _, key := range agentfields.ReadOrder(idField) {
+		if v, ok := fm.Get(key); ok && v.Kind == domain.KindScalar {
+			meta.NumericID = v.Scalar
+			break
+		}
 	}
 
 	// Parse role; default to RoleSubagent when absent or unrecognised.

@@ -1,8 +1,5 @@
 ---
-id: 17
 version: 3.1.0
-transform_version: 1.0.0
-injections_version: 1.0.0
 description: Executes tests and reports results - providing clear pass/fail outcomes and failure diagnostics for the workflow
 model: github-copilot/claude-sonnet-4-6
 tools:
@@ -13,6 +10,9 @@ tools:
   - execute
   - ask_user
 role: subagent
+mosaic_transform_version: 1.0.0
+mosaic_injections_version: 1.0.0
+mosaic_id: 17
 ---
 
 [[SECTION:Identity]]

@@ -476,6 +476,148 @@ func TestWorkflowsCmd_DoesNotCallPromote(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Stripped-field and diverted-tool rendering (AC2.3)
+// ---------------------------------------------------------------------------
+
+// TestPromoteCmd_HumanOutput_IncludesDivertedTools verifies that diverted tools recovered
+// from harness-specific frontmatter fields appear in the human-readable promote output.
+// A promote result with DivertedTools must list them, because the operator needs to know
+// which tools were recovered from a non-standard field rather than the main tools key.
+func TestPromoteCmd_HumanOutput_IncludesDivertedTools(t *testing.T) {
+	// Arrange
+	filePath := "/path/to/agent.md"
+	svc := &spyService{
+		promoteResp: app.PromoteResult{
+			SourcePath:      filePath,
+			DestinationPath: "/mosaicroot/Agents/Generic/Agents/Test/agent.md",
+			Key:             "agent",
+			NumericID:       "15",
+			DivertedTools:   []string{"Bash", "Read"},
+		},
+	}
+	outBuf := &bytes.Buffer{}
+
+	// Act
+	cli.Run(context.Background(),
+		[]string{"promote", "--file", filePath, "--harness", "stub-harness"},
+		svc, outBuf, &bytes.Buffer{})
+
+	// Assert
+	out := outBuf.String()
+	if !strings.Contains(out, "Bash") {
+		t.Errorf("human output %q does not contain diverted tool %q; diverted tools must appear in the promote summary", out, "Bash")
+	}
+	if !strings.Contains(out, "Read") {
+		t.Errorf("human output %q does not contain diverted tool %q; diverted tools must appear in the promote summary", out, "Read")
+	}
+}
+
+// TestPromoteCmd_HumanOutput_IncludesStrippedFields verifies that stripped frontmatter
+// fields appear in the human-readable promote output. A promote result with StrippedFields
+// must list each field's key and reason so the operator can review what was removed.
+func TestPromoteCmd_HumanOutput_IncludesStrippedFields(t *testing.T) {
+	// Arrange
+	filePath := "/path/to/agent.md"
+	svc := &spyService{
+		promoteResp: app.PromoteResult{
+			SourcePath:      filePath,
+			DestinationPath: "/mosaicroot/Agents/Generic/Agents/Test/agent.md",
+			Key:             "agent",
+			NumericID:       "16",
+			StrippedFields: []app.StrippedField{
+				{Key: "customField", Values: []string{"val1", "val2"}, Reason: app.StripReasonUnknownField},
+				{Key: "mcpServers", Values: []string{"unmapped-server"}, Reason: app.StripReasonUnmappedDivertedValue},
+			},
+		},
+	}
+	outBuf := &bytes.Buffer{}
+
+	// Act
+	cli.Run(context.Background(),
+		[]string{"promote", "--file", filePath, "--harness", "stub-harness"},
+		svc, outBuf, &bytes.Buffer{})
+
+	// Assert
+	out := outBuf.String()
+	if !strings.Contains(out, "customField") {
+		t.Errorf("human output %q does not contain stripped field key %q; stripped fields must appear in the promote summary", out, "customField")
+	}
+	if !strings.Contains(out, "mcpServers") {
+		t.Errorf("human output %q does not contain stripped field key %q; stripped fields must appear in the promote summary", out, "mcpServers")
+	}
+	if !strings.Contains(out, string(app.StripReasonUnknownField)) {
+		t.Errorf("human output %q does not contain strip reason %q; stripped field reasons must appear in the promote summary", out, app.StripReasonUnknownField)
+	}
+	if !strings.Contains(out, string(app.StripReasonUnmappedDivertedValue)) {
+		t.Errorf("human output %q does not contain strip reason %q; stripped field reasons must appear in the promote summary", out, app.StripReasonUnmappedDivertedValue)
+	}
+}
+
+// TestPromoteCmd_HumanOutput_NoDivertedTools_OmitsDivertedSection verifies that when
+// DivertedTools is empty, no diverted-tools line appears in the output. Absent diverted
+// tools must not produce a visible but empty section.
+func TestPromoteCmd_HumanOutput_NoDivertedTools_OmitsDivertedSection(t *testing.T) {
+	// Arrange
+	filePath := "/path/to/agent.md"
+	svc := &spyService{
+		promoteResp: app.PromoteResult{
+			SourcePath:      filePath,
+			DestinationPath: "/dest/agent.md",
+			Key:             "agent",
+			NumericID:       "17",
+			DivertedTools:   nil, // no diverted tools
+		},
+	}
+	outBuf := &bytes.Buffer{}
+
+	// Act
+	cli.Run(context.Background(),
+		[]string{"promote", "--file", filePath, "--harness", "stub-harness"},
+		svc, outBuf, &bytes.Buffer{})
+
+	// Assert
+	out := outBuf.String()
+	if strings.Contains(strings.ToLower(out), "diverted") {
+		t.Errorf("human output %q contains 'diverted' but no diverted tools were present; empty section must be omitted", out)
+	}
+}
+
+// TestPromoteCmd_DryRunHumanOutput_IncludesStrippedFields verifies that stripped fields
+// also appear in the dry-run human output. A dry-run promote computes everything but writes
+// no file; the stripped-field report must still be shown.
+func TestPromoteCmd_DryRunHumanOutput_IncludesStrippedFields(t *testing.T) {
+	// Arrange
+	filePath := "/path/to/agent.md"
+	svc := &spyService{
+		promoteResp: app.PromoteResult{
+			SourcePath:      filePath,
+			DestinationPath: "/dest/agent.md",
+			Key:             "agent",
+			NumericID:       "18",
+			DryRun:          true,
+			StrippedFields: []app.StrippedField{
+				{Key: "unknownKey", Values: []string{"someValue"}, Reason: app.StripReasonUnknownField},
+			},
+		},
+	}
+	outBuf := &bytes.Buffer{}
+
+	// Act
+	cli.Run(context.Background(),
+		[]string{"promote", "--file", filePath, "--dry-run", "--harness", "stub-harness"},
+		svc, outBuf, &bytes.Buffer{})
+
+	// Assert
+	out := outBuf.String()
+	if !strings.Contains(strings.ToLower(out), "dry run") {
+		t.Errorf("output %q does not contain 'dry run' marker; dry-run output must signal no file was written", out)
+	}
+	if !strings.Contains(out, "unknownKey") {
+		t.Errorf("dry-run output %q does not contain stripped field key %q; stripped fields must appear even in dry-run output", out, "unknownKey")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Harness flag on promote subcommand (T1.1)
 // ---------------------------------------------------------------------------
 

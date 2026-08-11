@@ -53,6 +53,34 @@ var modeItems = []widgets.ListItem{
 			"Use this to turn a one-off harness-specific agent into a reusable generic\n" +
 			"agent that can be deployed to any harness.",
 	},
+	{
+		ID:          string(domain.ModeTransformHarness),
+		Label:       "Transform harness",
+		Description: "Convert one or more deployed agent files from one harness to another.",
+		Detail: "Reads an agent file (or a folder of agent files) that was deployed for\n" +
+			"a source harness and rewrites each one for a target harness.\n\n" +
+			"Input can be a single agent file or a directory. Directory enumeration is\n" +
+			"non-recursive — only files directly under the given folder are processed;\n" +
+			"subdirectories are skipped.\n\n" +
+			"Only files whose name ends with the source harness's extension are included.\n" +
+			"Files that belong to a different harness are skipped with a per-file note.\n\n" +
+			"Use this to migrate agents between harnesses without losing tool mappings\n" +
+			"or injected content.",
+	},
+	{
+		ID:          string(domain.ModeUtilityInfraOnly),
+		Label:       "Deploy utility/infrastructure only",
+		Description: "Deploy only Utility and Infrastructure agents, skipping workflows and hooks.",
+		Detail: "Asks only the Utility and Infrastructure agent selection questions.\n" +
+			"Workflow selection, hook configuration, and orchestrator rewriting are\n" +
+			"never performed in this mode.\n\n" +
+			"The run deploys the selected Utility and Infrastructure agents and the\n" +
+			"skills they require — nothing else.\n\n" +
+			"Infrastructure-agent model resolution works exactly as in the full deploy,\n" +
+			"including the skip path and the resulting gap behaviour.\n\n" +
+			"Use this when you want to add or update utility and infrastructure agents\n" +
+			"without touching the orchestrator or workflow configuration.",
+	},
 }
 
 // ModeScreen presents the available run modes: deploy-new, update-existing,

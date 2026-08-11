@@ -25,12 +25,22 @@ package app
 //   Harness-specific keys: derived from the identified harness's descriptor keys
 //   (ModelKey, ToolsKey) and its FrontmatterPlan.Set key names, passed in by the
 //   service layer via PromoteInput.DropKeys (see promoteHarnessDropKeys).
+//
+// AD-12 override (promote direction, three fields only):
+//   recommended_tier, tier_rationale, and required_skills are always written in the
+//   promote (harness → generic) direction, even when their PromoteInput values are
+//   empty or nil. An empty PromoteInput value produces an empty form in the output:
+//   recommended_tier: "", tier_rationale: "", required_skills: []. This is a
+//   deliberate, scoped override of AD-12 — the general "omit when empty" rule — for
+//   exactly these three fields in the promote direction only. All other fields and the
+//   deploy (generic → harness) direction continue to follow AD-12.
 
 import (
 	"errors"
 	"fmt"
 
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
 )
@@ -47,15 +57,19 @@ var ErrPromoteNumericIDRequired = errors.New("promote requires a numeric agent i
 // generic source from a deployed harness-only agent. Each is either a stamp the
 // deployment pipeline writes at deploy time or a harness-specific artifact; carrying any
 // of them into a generic source would make the file lie about its provenance.
-var promoteDroppedFrontmatterKeys = map[string]bool{
-	"transform_version":               true,
-	"injections_version":              true,
-	"orchestrator_injections_version": true,
-	"bundle_version":                  true,
-	"protocol_version":                true,
-	"tool_mappings_version":           true,
-	"model":                           true,
-}
+//
+// The set covers both the prefixed (mosaic_-prefixed) and legacy (unprefixed) name forms
+// of every MOSAIC-only deployed stamp, derived from the agentfields registry. This ensures
+// that both already-migrated files (carrying prefixed names) and legacy files (carrying
+// unprefixed names) have all MOSAIC stamps stripped during promote. The "id" entry is
+// excluded from the drop set because promote restores it as the generic "id" key.
+var promoteDroppedFrontmatterKeys = func() map[string]bool {
+	m := make(map[string]bool)
+	for _, k := range agentfields.PromoteDropKeys() {
+		m[k] = true
+	}
+	return m
+}()
 
 // PromoteInput carries everything buildGenericAgent needs. The frontmatter decisions the
 // core cannot make alone — the numeric id in particular, which requires knowledge of the
@@ -88,17 +102,21 @@ type PromoteInput struct {
 	Tools []string
 
 	// RecommendedTier is the generic-only field recovered from the user during promote.
-	// An empty string means the field was not supplied and must be omitted from the output
-	// entirely — never written blank (AD-12).
+	// An empty string means the field was not supplied and is written as an empty scalar
+	// (recommended_tier: "") rather than omitted. This is a deliberate, scoped override of
+	// AD-12 for the promote direction and this field only: a promoted generic agent always
+	// carries the key, so the gap is visible to whoever completes it.
 	RecommendedTier string
 
 	// TierRationale is the generic-only field recovered from the user during promote.
-	// An empty string means the field was not supplied; it is omitted from the output.
+	// An empty string means the field was not supplied and is written as an empty scalar
+	// (tier_rationale: ""), not omitted. Scoped AD-12 override, as for RecommendedTier.
 	TierRationale string
 
 	// RequiredSkills is the generic-only field recovered from the user during promote,
 	// entered as a comma-separated list and split by the service layer. A nil or empty
-	// slice means the field was not supplied and is omitted from the output.
+	// slice means the field was not supplied and is written as an empty flow list
+	// (required_skills: []), not omitted. Scoped AD-12 override, as for RecommendedTier.
 	RequiredSkills []string
 }
 
@@ -121,11 +139,19 @@ type promoteSourceFacts struct {
 	// harness's own tools key, in document order, deduplicated first-seen. Empty when the
 	// file carries no tools key or the harness declares none.
 	HarnessTools []string
+	// DivertedTools are the harness-side tool entries extracted from diverted
+	// frontmatter fields (DestField destinations), in first-seen extraction order,
+	// deduplicated first-seen across all diverted fields. Empty when the descriptor
+	// declares no DestField destinations or none are present in the source.
+	//
+	// Added in Stage 2 to support diverted-field recovery during promote.
+	DivertedTools []string
 }
 
 // inspectPromoteSource reads the facts service.Promote needs from a deployed agent's
-// frontmatter before it can ask its questions: which keys the file already carries, and
-// which harness-side tool entries it declares under the harness's own tools key.
+// frontmatter before it can ask its questions: which keys the file already carries, which
+// harness-side tool entries it declares under the harness's own tools key, and which
+// harness-side tool entries it declares in diverted frontmatter fields (DestField destinations).
 //
 // Pure: it parses src and returns; it performs no I/O and asks nothing. A source that
 // fails to parse returns an error wrapping ErrPromoteNotTransformed.
@@ -152,9 +178,30 @@ func inspectPromoteSource(src []byte, d *domain.HarnessDescriptor) (promoteSourc
 	}
 	harnessTools := descriptor.ExtractToolEntries(d, toolsValue)
 
+	// Extract harness-side tool entries from every diverted frontmatter field (DestField
+	// destinations declared in the descriptor). Entries are collected in field-declaration
+	// order and deduplicated first-seen across all diverted fields combined.
+	divertedFields := descriptor.DivertedToolFields(d)
+	var divertedTools []string
+	seenDiverted := make(map[string]bool)
+	for _, df := range divertedFields {
+		var fieldValue domain.FieldValue
+		if v, ok := fm.Get(df.Key); ok {
+			fieldValue = v
+		}
+		entries := descriptor.ExtractDivertedToolEntries(df, fieldValue)
+		for _, e := range entries {
+			if !seenDiverted[e] {
+				seenDiverted[e] = true
+				divertedTools = append(divertedTools, e)
+			}
+		}
+	}
+
 	return promoteSourceFacts{
-		Keys:         keys,
-		HarnessTools: harnessTools,
+		Keys:          keys,
+		HarnessTools:  harnessTools,
+		DivertedTools: divertedTools,
 	}, nil
 }
 
@@ -242,6 +289,16 @@ func buildGenericAgent(in PromoteInput) ([]byte, error) {
 	// Set (or overwrite) the four generated keys. Set updates an existing entry in-place
 	// and marks it dirty (so it re-serialises from the new value rather than rawBytes);
 	// absent keys are appended. Reorder below moves all four to the front.
+	//
+	// For the id field: the deployed source may carry either the prefixed form (mosaic_id,
+	// from a migrated file) or the legacy form (id). Both are removed before setting the
+	// generic "id" so that exactly one form appears in the output. The promoteDroppedFrontmatterKeys
+	// set excludes the id entry (promote restores it rather than dropping it), so the removal
+	// must be done explicitly here. agentfields.ReadOrder supplies both names via the registry.
+	idField, _ := agentfields.ByGeneric("id")
+	for _, key := range agentfields.ReadOrder(idField) {
+		fm.Remove(key)
+	}
 	fm.Set("id", domain.ScalarValue(in.NumericID, domain.QuotePlain))
 	fm.Set("version", domain.ScalarValue(version, domain.QuotePlain))
 	fm.Set("name", domain.ScalarValue(name, domain.QuotePlain))
@@ -263,23 +320,32 @@ func buildGenericAgent(in PromoteInput) ([]byte, error) {
 		}
 	}
 
-	// Apply recovered generic-only fields per AD-12: a non-empty value is written, an
-	// empty value is omitted entirely (never written blank). Keys already carried from the
-	// source are overwritten in place; absent keys are appended after the reorder step
-	// so they follow the carried keys in the fixed order tools, recommended_tier,
-	// tier_rationale, required_skills (AD-13).
-	if in.RecommendedTier != "" {
-		fm.Set("recommended_tier", domain.ScalarValue(in.RecommendedTier, domain.QuotePlain))
+	// Apply recovered generic-only fields. For exactly these three fields in the promote
+	// direction, AD-12 is overridden: when the source does not already carry the key, an
+	// empty or nil PromoteInput value is written with an empty form (recommended_tier: "",
+	// tier_rationale: "", required_skills: []) rather than omitted. This makes the gap
+	// visible to whoever completes the promoted file.
+	//
+	// When the source already carries the key (value in the cloned frontmatter), its value
+	// is preserved — the service layer does not re-ask for a key the source already supplies,
+	// so PromoteInput will be empty for that field. Setting it to empty would destroy the
+	// carried value, which is the wrong outcome.
+	//
+	// In both paths the key is always present after this block. Absent keys are appended
+	// after the reorder step so they follow the carried keys in the fixed order tools,
+	// recommended_tier, tier_rationale, required_skills (AD-13).
+	if _, sourceHas := fm.Get("recommended_tier"); !sourceHas || in.RecommendedTier != "" {
+		fm.Set("recommended_tier", domain.ScalarValue(in.RecommendedTier, domain.QuoteDouble))
 	}
-	if in.TierRationale != "" {
-		fm.Set("tier_rationale", domain.ScalarValue(in.TierRationale, domain.QuotePlain))
+	if _, sourceHas := fm.Get("tier_rationale"); !sourceHas || in.TierRationale != "" {
+		fm.Set("tier_rationale", domain.ScalarValue(in.TierRationale, domain.QuoteDouble))
 	}
-	if len(in.RequiredSkills) > 0 {
-		items := make([]domain.FieldValue, len(in.RequiredSkills))
+	if _, sourceHas := fm.Get("required_skills"); !sourceHas || len(in.RequiredSkills) > 0 {
+		skillItems := make([]domain.FieldValue, len(in.RequiredSkills))
 		for i, s := range in.RequiredSkills {
-			items[i] = domain.ScalarValue(s, domain.QuotePlain)
+			skillItems[i] = domain.ScalarValue(s, domain.QuotePlain)
 		}
-		fm.Set("required_skills", domain.ListValue(items, domain.ListFlow))
+		fm.Set("required_skills", domain.ListValue(skillItems, domain.ListFlow))
 	}
 
 	// Reorder: generated keys first (in policy order), then every other surviving key in

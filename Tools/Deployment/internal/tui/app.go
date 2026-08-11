@@ -111,9 +111,12 @@ type rootModel struct {
 	summaryScreen *screens.SummaryScreen
 
 	// Post-promote summary screen (shown on screenDone after a successful promote run).
-	// Exactly one of summaryScreen and promoteScreen is non-nil in screenDone, decided by
-	// which completion message arrived. The other is nil.
+	// Exactly one of summaryScreen, promoteScreen, and transformScreen is non-nil in
+	// screenDone, decided by which completion message arrived. The others are nil.
 	promoteScreen *screens.PromoteSummaryScreen
+
+	// Post-transform summary screen (shown on screenDone after a successful transform run).
+	transformScreen *screens.TransformSummaryScreen
 
 	// Status / error shown during screenRunning.
 	statusMsg string
@@ -217,6 +220,9 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.promoteScreen != nil {
 			m.promoteScreen.Resize(m.width, m.height)
 		}
+		if m.transformScreen != nil {
+			m.transformScreen.Resize(m.width, m.height)
+		}
 		return m, nil
 	}
 
@@ -236,6 +242,12 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenDone
 		style := stylesFromTheme(m.theme)
 		m.promoteScreen = screens.NewPromoteSummaryScreen(doneMsg.result, m.width, m.height, style)
+		return m, nil
+	}
+	if doneMsg, ok := msg.(transformDoneMsg); ok {
+		m.screen = screenDone
+		style := stylesFromTheme(m.theme)
+		m.transformScreen = screens.NewTransformSummaryScreen(doneMsg.result, m.width, m.height, style)
 		return m, nil
 	}
 	if errMsg, ok := msg.(runErrorMsg); ok {
@@ -270,6 +282,13 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screenDone:
 		if m.promoteScreen != nil {
 			done := m.promoteScreen.Update(msg)
+			if done {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+		if m.transformScreen != nil {
+			done := m.transformScreen.Update(msg)
 			if done {
 				return m, tea.Quit
 			}
@@ -356,9 +375,12 @@ func (m *rootModel) updateMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modeScreen.Reset()
 		// Set the path kind on every mode→path transition so that back-navigation
 		// followed by a different mode selection always applies the correct kind.
-		if m.selections.mode == domain.ModePromote {
+		switch m.selections.mode {
+		case domain.ModePromote:
 			m.wsScreen.SetPathKind(screens.PathKindFile)
-		} else {
+		case domain.ModeTransformHarness:
+			m.wsScreen.SetPathKind(screens.PathKindFileOrDirectory)
+		default:
 			m.wsScreen.SetPathKind(screens.PathKindDirectory)
 		}
 		m.screen = screenWorkspace
@@ -380,9 +402,12 @@ func (m *rootModel) updateWorkspace(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.selections.workspacePath = m.wsScreen.WorkspacePath()
 		m.wsScreen.Reset()
 		m.screen = screenRunning
-		if m.selections.mode == domain.ModePromote {
+		switch m.selections.mode {
+		case domain.ModePromote:
 			m.statusMsg = "Running promote…"
-		} else {
+		case domain.ModeTransformHarness:
+			m.statusMsg = "Running transform…"
+		default:
 			m.statusMsg = "Running deployment…"
 		}
 		return m, m.startService()
@@ -636,7 +661,7 @@ func (m *rootModel) handleQuestionMsg(qMsg questionMsg) (tea.Model, tea.Cmd) {
 		m.activeQuestion = &qMsg
 		// Route model-selection questions to the dedicated overlay.
 		switch qMsg.choiceQ.ID {
-		case domain.QTierModel, domain.QAgentModel:
+		case domain.QTierModel, domain.QAgentModel, domain.QTransformTargetModel:
 			m.modelOverlay = screens.NewModelSelectScreen(qMsg.choiceQ, m.width, m.height, style)
 		case domain.QLocalModification:
 			m.conflictOverlay = screens.NewConflictScreen(qMsg.choiceQ, m.width, m.height, style)
@@ -742,6 +767,32 @@ func (m *rootModel) startService() tea.Cmd {
 			}
 			return promoteDoneMsg{result: result}
 
+		case domain.ModeTransformHarness:
+			// TargetHarnessID is left empty so QTransformTargetHarness is asked interactively.
+			// SourceHarnessID comes from the harness screen selection.
+			// Path is the file or folder path collected by the file-or-directory path screen.
+			result, err := svc.TransformHarness(ctx, app.TransformHarnessRequest{
+				SourceHarnessID: sel.harnessID,
+				Path:            sel.workspacePath,
+			})
+			if err != nil {
+				return runErrorMsg{err: err}
+			}
+			return transformDoneMsg{result: result}
+
+		case domain.ModeUtilityInfraOnly:
+			// UtilityAgentIDs and InfrastructureAgentIDs are left nil so the flow asks
+			// QUtilityAgents and QInfrastructureAgents interactively through the Interaction port.
+			// WorkspacePath comes from the workspace screen selection.
+			summary, err := svc.DeployUtilityInfrastructure(ctx, app.UtilityInfraRequest{
+				HarnessID:     sel.harnessID,
+				WorkspacePath: sel.workspacePath,
+			})
+			if err != nil {
+				return runErrorMsg{err: err}
+			}
+			return runDoneMsg{summary: summary}
+
 		default:
 			return runErrorMsg{err: fmt.Errorf("unknown mode: %q", sel.mode)}
 		}
@@ -757,6 +808,13 @@ type runDoneMsg struct {
 // It is the promote-mode counterpart of runDoneMsg, which remains RunSummary-only.
 type promoteDoneMsg struct {
 	result app.PromoteResult
+}
+
+// transformDoneMsg signals that Service.TransformHarness completed. The result is
+// carried for any future summary rendering; the TUI currently transitions to screenDone
+// using the generic key-to-quit path.
+type transformDoneMsg struct {
+	result app.TransformHarnessResult
 }
 
 // runErrorMsg signals that the service call returned an error.
@@ -827,6 +885,9 @@ func (m *rootModel) viewRunning() string {
 func (m *rootModel) viewDone() string {
 	if m.promoteScreen != nil {
 		return m.promoteScreen.View()
+	}
+	if m.transformScreen != nil {
+		return m.transformScreen.View()
 	}
 	if m.summaryScreen != nil {
 		return m.summaryScreen.View()

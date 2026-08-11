@@ -47,6 +47,13 @@ func (s *stubNavService) Promote(_ context.Context, _ app.PromoteRequest) (app.P
 func (s *stubNavService) UpdateWorkflows(_ context.Context, _ app.WorkflowUpdateRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{}, nil
 }
+func (s *stubNavService) TransformHarness(_ context.Context, _ app.TransformHarnessRequest) (app.TransformHarnessResult, error) {
+	return app.TransformHarnessResult{}, nil
+}
+
+func (s *stubNavService) DeployUtilityInfrastructure(_ context.Context, _ app.UtilityInfraRequest) (domain.RunSummary, error) {
+	return domain.RunSummary{}, nil
+}
 
 // ---------------------------------------------------------------------------
 // Helpers

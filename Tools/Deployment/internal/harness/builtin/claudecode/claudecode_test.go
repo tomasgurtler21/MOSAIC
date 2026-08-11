@@ -541,7 +541,7 @@ func TestContract_ClaudeCode(t *testing.T) {
 				Expected: domain.FrontmatterPlan{
 					Set:      nil,
 					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
-					KeyOrder: []string{"id", "version", "transform_version", "injections_version", "name", "description", "model", "tools"},
+					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools"},
 				},
 			},
 		},

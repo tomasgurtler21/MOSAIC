@@ -29,6 +29,7 @@ import (
 	"mosaic-deploy/internal/harness/registry"
 	"mosaic-deploy/internal/logging"
 	"mosaic-deploy/internal/manifest"
+	"mosaic-deploy/internal/pathinput"
 	"mosaic-deploy/internal/plan"
 	"mosaic-deploy/internal/todo"
 	"mosaic-deploy/internal/tui"
@@ -185,10 +186,10 @@ func scanGlobalFlags(args []string) (mosaicRoot string, allowExternal bool) {
 		arg := args[i]
 		switch {
 		case arg == "--mosaic-root" && i+1 < len(args):
-			mosaicRoot = args[i+1]
+			mosaicRoot = pathinput.Unquote(strings.TrimSpace(args[i+1]))
 			i++
 		case strings.HasPrefix(arg, "--mosaic-root="):
-			mosaicRoot = strings.TrimPrefix(arg, "--mosaic-root=")
+			mosaicRoot = pathinput.Unquote(strings.TrimSpace(strings.TrimPrefix(arg, "--mosaic-root=")))
 		case arg == "--allow-external":
 			allowExternal = true
 		}

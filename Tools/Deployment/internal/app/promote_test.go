@@ -2175,36 +2175,6 @@ func TestBuildGenericAgent_RecommendedTier_NonEmpty_WrittenAsScalar(t *testing.T
 	}
 }
 
-// TestBuildGenericAgent_RecommendedTier_Empty_AbsentFromOutput verifies that when
-// PromoteInput.RecommendedTier is empty, the recommended_tier key is completely absent from
-// the generated output — never written as an empty scalar (AD-12, AC5.5).
-func TestBuildGenericAgent_RecommendedTier_Empty_AbsentFromOutput(t *testing.T) {
-	src := sourceWithoutRecoverableFields()
-
-	out, err := buildGenericAgent(PromoteInput{
-		Source:          src,
-		NumericID:       "9",
-		Key:             "field-recovery-agent",
-		Role:            domain.RoleSubagent,
-		Version:         "1.0.0",
-		RecommendedTier: "", // deliberately empty — must produce no key
-	})
-	if err != nil {
-		t.Fatalf("buildGenericAgent failed: %v", err)
-	}
-
-	doc, parseErr := docformat.Parse(out)
-	if parseErr != nil {
-		t.Fatalf("generated output failed to parse: %v", parseErr)
-	}
-	// Guard: verify the output is non-empty before checking absence.
-	if _, present := doc.Frontmatter().Get("id"); !present {
-		t.Fatal("generated frontmatter is missing `id`; output may be empty — this guard prevents vacuous pass")
-	}
-	if _, present := doc.Frontmatter().Get("recommended_tier"); present {
-		t.Error("recommended_tier is present in output; an empty RecommendedTier must produce no key (AD-12)")
-	}
-}
 
 // TestBuildGenericAgent_TierRationale_NonEmpty_WrittenAsScalar verifies that when
 // PromoteInput.TierRationale is a non-empty string, the generated frontmatter carries
@@ -2234,96 +2204,6 @@ func TestBuildGenericAgent_TierRationale_NonEmpty_WrittenAsScalar(t *testing.T) 
 	}
 }
 
-// TestBuildGenericAgent_TierRationale_Empty_AbsentFromOutput verifies that when
-// PromoteInput.TierRationale is empty, the tier_rationale key is completely absent from
-// the generated output — never written as an empty scalar (AD-12, AC5.5).
-func TestBuildGenericAgent_TierRationale_Empty_AbsentFromOutput(t *testing.T) {
-	src := sourceWithoutRecoverableFields()
-
-	out, err := buildGenericAgent(PromoteInput{
-		Source:        src,
-		NumericID:     "9",
-		Key:           "field-recovery-agent",
-		Role:          domain.RoleSubagent,
-		Version:       "1.0.0",
-		TierRationale: "", // deliberately empty — must produce no key
-	})
-	if err != nil {
-		t.Fatalf("buildGenericAgent failed: %v", err)
-	}
-
-	doc, parseErr := docformat.Parse(out)
-	if parseErr != nil {
-		t.Fatalf("generated output failed to parse: %v", parseErr)
-	}
-	if _, present := doc.Frontmatter().Get("id"); !present {
-		t.Fatal("generated frontmatter is missing `id`; output may be empty — guard prevents vacuous pass")
-	}
-	if _, present := doc.Frontmatter().Get("tier_rationale"); present {
-		t.Error("tier_rationale is present in output; an empty TierRationale must produce no key (AD-12)")
-	}
-}
-
-// TestBuildGenericAgent_RequiredSkills_Nil_AbsentFromOutput verifies that when
-// PromoteInput.RequiredSkills is nil, the required_skills key is absent from the generated
-// output. Nil means "not supplied"; the field must be omitted entirely (AD-12, AC5.5).
-func TestBuildGenericAgent_RequiredSkills_Nil_AbsentFromOutput(t *testing.T) {
-	src := sourceWithoutRecoverableFields()
-
-	out, err := buildGenericAgent(PromoteInput{
-		Source:         src,
-		NumericID:      "9",
-		Key:            "field-recovery-agent",
-		Role:           domain.RoleSubagent,
-		Version:        "1.0.0",
-		RequiredSkills: nil, // nil — must produce no key
-	})
-	if err != nil {
-		t.Fatalf("buildGenericAgent failed: %v", err)
-	}
-
-	doc, parseErr := docformat.Parse(out)
-	if parseErr != nil {
-		t.Fatalf("generated output failed to parse: %v", parseErr)
-	}
-	if _, present := doc.Frontmatter().Get("id"); !present {
-		t.Fatal("generated frontmatter is missing `id`; output may be empty — guard prevents vacuous pass")
-	}
-	if _, present := doc.Frontmatter().Get("required_skills"); present {
-		t.Error("required_skills is present with nil RequiredSkills; a nil slice must produce no key (AD-12)")
-	}
-}
-
-// TestBuildGenericAgent_RequiredSkills_EmptySlice_AbsentFromOutput verifies that when
-// PromoteInput.RequiredSkills is a non-nil but empty slice, the required_skills key is also
-// absent from the generated output. An empty answered list is treated the same as a nil
-// (not-supplied) list — the field is omitted entirely (AD-12).
-func TestBuildGenericAgent_RequiredSkills_EmptySlice_AbsentFromOutput(t *testing.T) {
-	src := sourceWithoutRecoverableFields()
-
-	out, err := buildGenericAgent(PromoteInput{
-		Source:         src,
-		NumericID:      "9",
-		Key:            "field-recovery-agent",
-		Role:           domain.RoleSubagent,
-		Version:        "1.0.0",
-		RequiredSkills: []string{}, // non-nil empty — must also produce no key
-	})
-	if err != nil {
-		t.Fatalf("buildGenericAgent failed: %v", err)
-	}
-
-	doc, parseErr := docformat.Parse(out)
-	if parseErr != nil {
-		t.Fatalf("generated output failed to parse: %v", parseErr)
-	}
-	if _, present := doc.Frontmatter().Get("id"); !present {
-		t.Fatal("generated frontmatter is missing `id`; output may be empty — guard prevents vacuous pass")
-	}
-	if _, present := doc.Frontmatter().Get("required_skills"); present {
-		t.Error("required_skills is present with empty RequiredSkills; an empty slice must produce no key (AD-12)")
-	}
-}
 
 // TestBuildGenericAgent_RequiredSkills_SingleEntry_WrittenAsFlowStyleList verifies that
 // a RequiredSkills slice with one entry is written to the generated frontmatter as a
@@ -2466,6 +2346,334 @@ func TestBuildGenericAgent_RecoveredFields_AppendedAfterCarriedKeysInFixedOrder(
 	}
 	if skillsPos <= ratPos {
 		t.Errorf("required_skills (pos %d) must appear after tier_rationale (pos %d) — fixed order violated. Full order: %v", skillsPos, ratPos, keys)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stage 3: Always-present deployment metadata (scoped AD-12 override for the
+// promote direction)
+//
+// Stage 3 overrides AD-12 for exactly three fields in the promote direction:
+// recommended_tier, tier_rationale, and required_skills. When these fields are
+// empty or nil (not supplied), the generated generic agent must carry the key
+// with an empty value — never omitted. This is a deliberate, scoped change
+// that makes the gap visible to whoever completes the promoted file later.
+//
+// The tests below specify the NEW contract and are TDD RED: they fail with the
+// current implementation (which omits the three fields when empty/nil). They
+// will pass after the generation core is updated in I3.1.
+//
+// Verified new behaviours:
+//   - Empty RecommendedTier   → recommended_tier: ""  present in output
+//   - Empty TierRationale     → tier_rationale: ""    present in output
+//   - Nil RequiredSkills      → required_skills: []   present as empty flow list
+//   - Empty RequiredSkills    → required_skills: []   present as empty flow list
+//   - All three present together in AD-13 order even when all are empty/nil
+// ---------------------------------------------------------------------------
+
+// TestBuildGenericAgent_EmptyRecommendedTier_WrittenAsEmptyScalar verifies that when
+// PromoteInput.RecommendedTier is empty, the generated output carries recommended_tier
+// with an empty scalar value — never omitted. This is the scoped AD-12 override that
+// makes the gap visible in the promoted file.
+func TestBuildGenericAgent_EmptyRecommendedTier_WrittenAsEmptyScalar(t *testing.T) {
+	src := sourceWithoutRecoverableFields()
+
+	out, err := buildGenericAgent(PromoteInput{
+		Source:          src,
+		NumericID:       "9",
+		Key:             "field-recovery-agent",
+		Role:            domain.RoleSubagent,
+		Version:         "1.0.0",
+		RecommendedTier: "", // empty — must write as empty scalar, not omit
+	})
+	if err != nil {
+		t.Fatalf("buildGenericAgent failed: %v", err)
+	}
+
+	doc, parseErr := docformat.Parse(out)
+	if parseErr != nil {
+		t.Fatalf("generated output failed to parse: %v", parseErr)
+	}
+	// Guard: ensure output is non-empty before checking the specific key.
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("generated frontmatter is missing `id`; output may be empty — guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("recommended_tier")
+	if !present {
+		t.Error("recommended_tier is absent from output; an empty RecommendedTier must still write the key with an empty value (scoped AD-12 override)")
+		return
+	}
+	if v.Kind != domain.KindScalar {
+		t.Errorf("recommended_tier has kind %v, want KindScalar", v.Kind)
+	}
+	if v.Scalar != "" {
+		t.Errorf("recommended_tier = %q, want empty string; an empty RecommendedTier must produce an empty scalar value", v.Scalar)
+	}
+}
+
+// TestBuildGenericAgent_EmptyTierRationale_WrittenAsEmptyScalar verifies that when
+// PromoteInput.TierRationale is empty, the generated output carries tier_rationale with
+// an empty scalar value — never omitted. Scoped AD-12 override.
+func TestBuildGenericAgent_EmptyTierRationale_WrittenAsEmptyScalar(t *testing.T) {
+	src := sourceWithoutRecoverableFields()
+
+	out, err := buildGenericAgent(PromoteInput{
+		Source:        src,
+		NumericID:     "9",
+		Key:           "field-recovery-agent",
+		Role:          domain.RoleSubagent,
+		Version:       "1.0.0",
+		TierRationale: "", // empty — must write as empty scalar, not omit
+	})
+	if err != nil {
+		t.Fatalf("buildGenericAgent failed: %v", err)
+	}
+
+	doc, parseErr := docformat.Parse(out)
+	if parseErr != nil {
+		t.Fatalf("generated output failed to parse: %v", parseErr)
+	}
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("generated frontmatter is missing `id`; output may be empty — guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("tier_rationale")
+	if !present {
+		t.Error("tier_rationale is absent from output; an empty TierRationale must still write the key with an empty value (scoped AD-12 override)")
+		return
+	}
+	if v.Kind != domain.KindScalar {
+		t.Errorf("tier_rationale has kind %v, want KindScalar", v.Kind)
+	}
+	if v.Scalar != "" {
+		t.Errorf("tier_rationale = %q, want empty string; an empty TierRationale must produce an empty scalar value", v.Scalar)
+	}
+}
+
+// TestBuildGenericAgent_NilRequiredSkills_WrittenAsEmptyFlowList verifies that when
+// PromoteInput.RequiredSkills is nil, the generated output carries required_skills as
+// an empty flow list — never omitted. Scoped AD-12 override.
+func TestBuildGenericAgent_NilRequiredSkills_WrittenAsEmptyFlowList(t *testing.T) {
+	src := sourceWithoutRecoverableFields()
+
+	out, err := buildGenericAgent(PromoteInput{
+		Source:         src,
+		NumericID:      "9",
+		Key:            "field-recovery-agent",
+		Role:           domain.RoleSubagent,
+		Version:        "1.0.0",
+		RequiredSkills: nil, // nil — must write as empty flow list, not omit
+	})
+	if err != nil {
+		t.Fatalf("buildGenericAgent failed: %v", err)
+	}
+
+	doc, parseErr := docformat.Parse(out)
+	if parseErr != nil {
+		t.Fatalf("generated output failed to parse: %v", parseErr)
+	}
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("generated frontmatter is missing `id`; output may be empty — guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("required_skills")
+	if !present {
+		t.Error("required_skills is absent from output; a nil RequiredSkills must still write the key as an empty flow list (scoped AD-12 override)")
+		return
+	}
+	if v.Kind != domain.KindList {
+		t.Errorf("required_skills has kind %v, want KindList (empty flow list)", v.Kind)
+	}
+	if len(v.Items) != 0 {
+		t.Errorf("required_skills has %d item(s); want 0 items for nil RequiredSkills: %v", len(v.Items), v.Items)
+	}
+}
+
+// TestBuildGenericAgent_EmptySliceRequiredSkills_WrittenAsEmptyFlowList verifies that
+// when PromoteInput.RequiredSkills is a non-nil but empty slice, the generated output
+// carries required_skills as an empty flow list — never omitted. Both nil and empty slice
+// produce the same output under the scoped AD-12 override.
+func TestBuildGenericAgent_EmptySliceRequiredSkills_WrittenAsEmptyFlowList(t *testing.T) {
+	src := sourceWithoutRecoverableFields()
+
+	out, err := buildGenericAgent(PromoteInput{
+		Source:         src,
+		NumericID:      "9",
+		Key:            "field-recovery-agent",
+		Role:           domain.RoleSubagent,
+		Version:        "1.0.0",
+		RequiredSkills: []string{}, // non-nil empty — must write as empty flow list, not omit
+	})
+	if err != nil {
+		t.Fatalf("buildGenericAgent failed: %v", err)
+	}
+
+	doc, parseErr := docformat.Parse(out)
+	if parseErr != nil {
+		t.Fatalf("generated output failed to parse: %v", parseErr)
+	}
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("generated frontmatter is missing `id`; output may be empty — guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("required_skills")
+	if !present {
+		t.Error("required_skills is absent from output; an empty (non-nil) RequiredSkills must still write the key as an empty flow list (scoped AD-12 override)")
+		return
+	}
+	if v.Kind != domain.KindList {
+		t.Errorf("required_skills has kind %v, want KindList (empty flow list)", v.Kind)
+	}
+	if len(v.Items) != 0 {
+		t.Errorf("required_skills has %d item(s); want 0 items for an empty RequiredSkills slice: %v", len(v.Items), v.Items)
+	}
+}
+
+// TestBuildGenericAgent_AllThreeMetadataFields_PresentWithEmptyValuesWhenNoneSupplied
+// verifies that when all three deployment-metadata fields are empty or nil, all three keys
+// appear in the generated output with empty values. The scoped AD-12 override applies to
+// all three fields simultaneously; no field may be silently dropped.
+func TestBuildGenericAgent_AllThreeMetadataFields_PresentWithEmptyValuesWhenNoneSupplied(t *testing.T) {
+	src := sourceWithoutRecoverableFields()
+
+	out, err := buildGenericAgent(PromoteInput{
+		Source:          src,
+		NumericID:       "9",
+		Key:             "field-recovery-agent",
+		Role:            domain.RoleSubagent,
+		Version:         "1.0.0",
+		RecommendedTier: "", // empty
+		TierRationale:   "", // empty
+		RequiredSkills:  nil, // nil
+	})
+	if err != nil {
+		t.Fatalf("buildGenericAgent failed: %v", err)
+	}
+
+	doc, parseErr := docformat.Parse(out)
+	if parseErr != nil {
+		t.Fatalf("generated output failed to parse: %v", parseErr)
+	}
+	// Guard: ensure output is non-empty.
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("generated frontmatter is missing `id`; output may be empty — guard prevents vacuous pass")
+	}
+	fm := doc.Frontmatter()
+	if _, present := fm.Get("recommended_tier"); !present {
+		t.Error("recommended_tier is absent; all three deployment-metadata fields must be present even when none were supplied")
+	}
+	if _, present := fm.Get("tier_rationale"); !present {
+		t.Error("tier_rationale is absent; all three deployment-metadata fields must be present even when none were supplied")
+	}
+	if _, present := fm.Get("required_skills"); !present {
+		t.Error("required_skills is absent; all three deployment-metadata fields must be present even when none were supplied")
+	}
+}
+
+// TestBuildGenericAgent_EmptyMetadataFields_AppearInAD13OrderAfterCarriedKeys verifies
+// that when all three deployment-metadata fields are absent from PromoteInput (empty/nil),
+// they are still written in the documented AD-13 order — recommended_tier, tier_rationale,
+// required_skills — appearing after all carried keys (e.g., description).
+func TestBuildGenericAgent_EmptyMetadataFields_AppearInAD13OrderAfterCarriedKeys(t *testing.T) {
+	// Source carries description (a carried key) but none of the three metadata fields.
+	// All three are empty/nil in the input so they are newly appended in the output.
+	src := sourceWithoutRecoverableFields()
+
+	out, err := buildGenericAgent(PromoteInput{
+		Source:          src,
+		NumericID:       "9",
+		Key:             "field-recovery-agent",
+		Role:            domain.RoleSubagent,
+		Version:         "1.0.0",
+		RecommendedTier: "", // empty
+		TierRationale:   "", // empty
+		RequiredSkills:  nil, // nil
+	})
+	if err != nil {
+		t.Fatalf("buildGenericAgent failed: %v", err)
+	}
+
+	doc, parseErr := docformat.Parse(out)
+	if parseErr != nil {
+		t.Fatalf("generated output failed to parse: %v", parseErr)
+	}
+	keys := doc.Frontmatter().Keys()
+
+	pos := func(target string) int {
+		for i, k := range keys {
+			if k == target {
+				return i
+			}
+		}
+		return -1
+	}
+
+	descPos := pos("description")
+	tierPos := pos("recommended_tier")
+	ratPos := pos("tier_rationale")
+	skillsPos := pos("required_skills")
+
+	for _, p := range []struct {
+		name string
+		idx  int
+	}{
+		{"description", descPos},
+		{"recommended_tier", tierPos},
+		{"tier_rationale", ratPos},
+		{"required_skills", skillsPos},
+	} {
+		if p.idx == -1 {
+			t.Errorf("key %q is absent from output; all four keys must be present", p.name)
+		}
+	}
+	if t.Failed() {
+		t.Logf("full key order: %v", keys)
+		return
+	}
+
+	// The three metadata fields must follow the carried description key (AD-13).
+	if tierPos <= descPos {
+		t.Errorf("recommended_tier (pos %d) must appear after description (pos %d); metadata fields must be appended after carried keys. Full order: %v", tierPos, descPos, keys)
+	}
+	if ratPos <= descPos {
+		t.Errorf("tier_rationale (pos %d) must appear after description (pos %d). Full order: %v", ratPos, descPos, keys)
+	}
+	if skillsPos <= descPos {
+		t.Errorf("required_skills (pos %d) must appear after description (pos %d). Full order: %v", skillsPos, descPos, keys)
+	}
+	// Within the metadata block the fixed AD-13 order must hold.
+	if ratPos <= tierPos {
+		t.Errorf("tier_rationale (pos %d) must appear after recommended_tier (pos %d) — fixed AD-13 order violated. Full order: %v", ratPos, tierPos, keys)
+	}
+	if skillsPos <= ratPos {
+		t.Errorf("required_skills (pos %d) must appear after tier_rationale (pos %d) — fixed AD-13 order violated. Full order: %v", skillsPos, ratPos, keys)
+	}
+}
+
+// TestBuildGenericAgent_EmptyScalarFields_ProduceLiteralDoubleQuotes verifies that when
+// RecommendedTier and TierRationale are empty strings the generated output bytes contain
+// the literal text `recommended_tier: ""` and `tier_rationale: ""` — not the bare
+// `recommended_tier: ` form that a plain (unquoted) empty scalar would produce. This
+// byte-level check catches serialization regressions that a re-parse check would miss,
+// because parsing `key: ` and `key: ""` both yield an empty scalar value.
+func TestBuildGenericAgent_EmptyScalarFields_ProduceLiteralDoubleQuotes(t *testing.T) {
+	src := sourceWithoutRecoverableFields()
+
+	out, err := buildGenericAgent(PromoteInput{
+		Source:          src,
+		NumericID:       "9",
+		Key:             "field-recovery-agent",
+		Role:            domain.RoleSubagent,
+		Version:         "1.0.0",
+		RecommendedTier: "",
+		TierRationale:   "",
+	})
+	if err != nil {
+		t.Fatalf("buildGenericAgent failed: %v", err)
+	}
+
+	if !bytes.Contains(out, []byte(`recommended_tier: ""`)) {
+		t.Errorf("output bytes do not contain literal `recommended_tier: \"\"`: got:\n%s", out)
+	}
+	if !bytes.Contains(out, []byte(`tier_rationale: ""`)) {
+		t.Errorf("output bytes do not contain literal `tier_rationale: \"\"`: got:\n%s", out)
 	}
 }
 

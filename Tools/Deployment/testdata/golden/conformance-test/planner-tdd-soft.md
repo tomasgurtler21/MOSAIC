@@ -1,8 +1,5 @@
 ---
-id: 6
 version: 7.1.0
-transform_version: 1.0.0
-injections_version: 1.0.0
 description: Creates implementation plans with per-stage context isolation (Plan.md routing artifact + Stage-{N}/Plan.md + Stage-{N}/PlanProgress.md) following TDD principles when feasible - breaking down requirements into test-first stages with unique IDs, clear sequencing, and immutable tracking
 model: github-copilot/claude-sonnet-4-6
 tools:
@@ -13,6 +10,9 @@ tools:
   - execute
   - ask_user
 role: subagent
+mosaic_transform_version: 1.0.0
+mosaic_injections_version: 1.0.0
+mosaic_id: 6
 ---
 
 [[SECTION:Identity]]

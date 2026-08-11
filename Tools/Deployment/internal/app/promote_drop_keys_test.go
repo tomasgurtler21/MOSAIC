@@ -42,6 +42,7 @@ import (
 
 	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/harness/descriptor"
 )
 
 // ---------------------------------------------------------------------------
@@ -616,6 +617,82 @@ func TestPromoteHarnessDropKeys_EmptyDescriptor_ReturnsEmptySetNoError(t *testin
 		if k != "" {
 			t.Errorf("drop set contains unexpected key %q for an empty descriptor; expected an empty set", k)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests for buildPromoteHarnessDropSet (shared drop-set and classifier derivation)
+// ---------------------------------------------------------------------------
+
+// TestBuildPromoteHarnessDropSet_DropKeysMatchPromoteHarnessDropKeys verifies that
+// buildPromoteHarnessDropSet's DropKeys field equals the result of promoteHarnessDropKeys for
+// the same inputs. This pins the delegation contract: the two functions must agree because
+// promoteHarnessDropKeys delegates to buildPromoteHarnessDropSet.
+func TestBuildPromoteHarnessDropSet_DropKeysMatchPromoteHarnessDropKeys(t *testing.T) {
+	modules := []*configuredFrontmatterModule{
+		openCodeShapedModule(),
+		differentlyShapedModule(),
+	}
+
+	for _, mod := range modules {
+		t.Run(mod.desc.ID, func(t *testing.T) {
+			wantKeys, wantErr := promoteHarnessDropKeys(mod, domain.ArtifactAgent, "test-agent")
+			// Reset agentKeys so the second call records its own invocations independently.
+			mod.agentKeys = nil
+
+			gotSet, gotErr := buildPromoteHarnessDropSet(mod, domain.ArtifactAgent, "test-agent")
+
+			if wantErr != gotErr {
+				t.Errorf("error mismatch: promoteHarnessDropKeys returned %v, buildPromoteHarnessDropSet returned %v", wantErr, gotErr)
+			}
+			for k := range wantKeys {
+				if !gotSet.DropKeys[k] {
+					t.Errorf("buildPromoteHarnessDropSet.DropKeys missing key %q that promoteHarnessDropKeys includes", k)
+				}
+			}
+			for k := range gotSet.DropKeys {
+				if !wantKeys[k] {
+					t.Errorf("buildPromoteHarnessDropSet.DropKeys has extra key %q not in promoteHarnessDropKeys result", k)
+				}
+			}
+		})
+	}
+}
+
+// TestBuildPromoteHarnessDropSet_ClassifierIsNonZero verifies that buildPromoteHarnessDropSet
+// returns a usable FieldClassifier alongside the drop keys. The classifier is tested by
+// asserting it correctly classifies the harness's own declared keys as ClassHarness and
+// an invented key as ClassUnknown.
+func TestBuildPromoteHarnessDropSet_ClassifierIsNonZero(t *testing.T) {
+	mod := openCodeShapedModule() // ModelKey="model", ToolsKey="permission", plan adds "mode"
+
+	set, err := buildPromoteHarnessDropSet(mod, domain.ArtifactAgent, "test-agent")
+	if err != nil {
+		t.Fatalf("buildPromoteHarnessDropSet returned unexpected error: %v", err)
+	}
+
+	// The classifier must recognise the harness's own non-MOSAIC keys as ClassHarness.
+	// "permission" is the ToolsKey (non-MOSAIC), so it must be ClassHarness or ClassDivertedTool.
+	if cls := set.Classifier.Classify("permission"); cls != descriptor.ClassHarness {
+		t.Errorf("Classifier.Classify(%q) = %q, want ClassHarness; the classifier must be built from the harness descriptor", "permission", cls)
+	}
+
+	// An arbitrary unknown key must be ClassUnknown.
+	if cls := set.Classifier.Classify("invented_key_xyz"); cls != descriptor.ClassUnknown {
+		t.Errorf("Classifier.Classify(%q) = %q, want ClassUnknown; unknown keys must classify as unknown", "invented_key_xyz", cls)
+	}
+}
+
+// TestBuildPromoteHarnessDropSet_FrontmatterCalledOnce verifies that buildPromoteHarnessDropSet
+// calls module.Frontmatter exactly once, not twice. A single call ensures both the drop-set
+// and the classifier are derived from the same plan, with no risk of divergence.
+func TestBuildPromoteHarnessDropSet_FrontmatterCalledOnce(t *testing.T) {
+	mod := openCodeShapedModule()
+
+	_, _ = buildPromoteHarnessDropSet(mod, domain.ArtifactAgent, "test-agent")
+
+	if len(mod.agentKeys) != 1 {
+		t.Errorf("module.Frontmatter called %d time(s); want exactly 1 call — both drop-set and classifier must share a single plan", len(mod.agentKeys))
 	}
 }
 

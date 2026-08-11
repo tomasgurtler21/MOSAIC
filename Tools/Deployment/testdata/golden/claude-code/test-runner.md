@@ -1,8 +1,8 @@
 ---
-id: 17
+mosaic_id: 17
 version: 3.1.0
-transform_version: 3.0.0
-injections_version: 1.1.0
+mosaic_transform_version: 3.0.0
+mosaic_injections_version: 1.1.0
 name: test-runner
 description: Executes tests and reports results - providing clear pass/fail outcomes and failure diagnostics for the workflow
 model: claude-sonnet-4-6

@@ -87,6 +87,16 @@ const (
 	// required_skills. Text question taking a comma-separated list; Subject is the source
 	// file path.
 	QPromoteRequiredSkills QuestionID = "promote-required-skills"
+
+	// QTransformTargetHarness asks which harness to transform the input agents into.
+	// Answer: one harness id from ListHarnesses, excluding the selected source harness.
+	QTransformTargetHarness QuestionID = "transform-target-harness"
+
+	// QTransformTargetModel asks which target-harness model to write into the transformed
+	// agents. Skippable: a skipped or empty answer leaves the model field empty in every
+	// output file. Answer: one model id from the target descriptor's ModelCatalog, or a
+	// free-text id when the harness declares none.
+	QTransformTargetModel QuestionID = "transform-target-model"
 )
 
 // PlanReviewer is the deployment-specific interface for plan review. The shared Interaction

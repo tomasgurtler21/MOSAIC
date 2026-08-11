@@ -1507,7 +1507,7 @@ func TestContractTest_ExternalAdapter_PassesSharedContractSuite(t *testing.T) {
 						{Key: "mode", Value: domain.ScalarValue("subagent", domain.QuotePlain)},
 					},
 					Remove:   []string{"name", "recommended_tier", "tier_rationale", "required_skills", "tools"},
-					KeyOrder: []string{"id", "version", "transform_version", "injections_version", "description", "mode", "model", "permission"},
+					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "description", "mode", "model", "permission"},
 				},
 			},
 			{
@@ -1531,7 +1531,7 @@ func TestContractTest_ExternalAdapter_PassesSharedContractSuite(t *testing.T) {
 						{Key: "mode", Value: domain.ScalarValue("primary", domain.QuotePlain)},
 					},
 					Remove:   []string{"name", "recommended_tier", "tier_rationale", "required_skills", "tools"},
-					KeyOrder: []string{"id", "version", "transform_version", "injections_version", "description", "mode", "model", "permission"},
+					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "description", "mode", "model", "permission"},
 				},
 			},
 		},

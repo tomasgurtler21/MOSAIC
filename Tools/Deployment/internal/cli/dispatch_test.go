@@ -196,3 +196,11 @@ func (s *countingService) UpdateWorkflows(ctx context.Context, req app.WorkflowU
 func (s *countingService) Promote(ctx context.Context, req app.PromoteRequest) (app.PromoteResult, error) {
 	return app.PromoteResult{}, nil
 }
+
+func (s *countingService) TransformHarness(ctx context.Context, req app.TransformHarnessRequest) (app.TransformHarnessResult, error) {
+	return app.TransformHarnessResult{}, nil
+}
+
+func (s *countingService) DeployUtilityInfrastructure(ctx context.Context, req app.UtilityInfraRequest) (domain.RunSummary, error) {
+	return domain.RunSummary{Outcome: domain.OutcomeSuccess}, nil
+}

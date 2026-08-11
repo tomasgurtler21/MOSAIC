@@ -38,11 +38,15 @@ type stubFlowService struct {
 	deploy          domain.RunSummary
 	update          domain.RunSummary
 	workflows       domain.RunSummary
+	utilityInfra    domain.RunSummary
 	promote         app.PromoteResult
+	transform       app.TransformHarnessResult
 	deployErr       error
 	updateErr       error
 	workflowsErr    error
+	utilityInfraErr error
 	promoteErr      error
+	transformErr    error
 }
 
 func (s *stubFlowService) ListHarnesses() []domain.HarnessRef { return s.harnesses }
@@ -57,6 +61,13 @@ func (s *stubFlowService) UpdateWorkflows(_ context.Context, _ app.WorkflowUpdat
 }
 func (s *stubFlowService) Promote(_ context.Context, _ app.PromoteRequest) (app.PromoteResult, error) {
 	return s.promote, s.promoteErr
+}
+func (s *stubFlowService) TransformHarness(_ context.Context, _ app.TransformHarnessRequest) (app.TransformHarnessResult, error) {
+	return s.transform, s.transformErr
+}
+
+func (s *stubFlowService) DeployUtilityInfrastructure(_ context.Context, _ app.UtilityInfraRequest) (domain.RunSummary, error) {
+	return s.utilityInfra, s.utilityInfraErr
 }
 
 // ---------------------------------------------------------------------------
@@ -586,6 +597,180 @@ func TestWorkflowsOnlyMode_PathScreen_AcceptsWorkspaceDirectory(t *testing.T) {
 			"workflows-only must keep directory-kind validation after the promote path-kind fix", m.screen)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Utility/Infrastructure-only keyboard flow
+// ---------------------------------------------------------------------------
+
+// TestFullKeyboardFlow_UtilityInfraOnly_StartService_CallsDeployUtilityInfrastructure
+// verifies that when ModeUtilityInfraOnly is selected from the mode screen and the workspace
+// is confirmed, startService dispatches to svc.DeployUtilityInfrastructure rather than
+// DeployNew, Update, or any other method.
+//
+// Navigation assumes ModeUtilityInfraOnly is the sixth mode item (after deploy-new, update,
+// workflows-only, promote, and transform-harness), reached by pressing Down five times.
+// The test will fail RED if the mode is not yet in the list (I7.3 not implemented) — the
+// selection will land on the wrong mode and both the mode assertion and the dispatch
+// assertion will catch the missing entry.
+//
+// The DeployNew stub is wired to return an error: if startService incorrectly dispatches
+// to DeployNew, the flow reaches screenDone with a non-empty errMsg, failing the assertion
+// that confirms the correct method was called.
+func TestFullKeyboardFlow_UtilityInfraOnly_StartService_CallsDeployUtilityInfrastructure(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := newFlowSvc(workspace)
+	// Make DeployNew fail so a wrong dispatch is detectable via m.errMsg.
+	svc.deployErr = errors.New("DeployNew must not be called for ModeUtilityInfraOnly; " +
+		"startService must dispatch to DeployUtilityInfrastructure instead")
+	svc.utilityInfra = domain.RunSummary{
+		Mode:           domain.ModeUtilityInfraOnly,
+		WorkspacePath:  workspace,
+		DeploymentRoot: workspace + "/.ai",
+		Outcome:        domain.OutcomeSuccess,
+	}
+	m := newFlowModel(svc, workspace)
+
+	// Step 1: Harness screen.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.screen != screenMode {
+		t.Fatalf("screen = %v after harness Enter; want screenMode", m.screen)
+	}
+
+	// Step 2: Mode screen — Down five times reaches the sixth item (utility-infra-only); Enter confirms.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // deploy-new → update
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // update → workflows-only
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // workflows-only → promote
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // promote → transform-harness
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // transform-harness → utility-infra-only
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if m.screen != screenWorkspace {
+		t.Fatalf("screen = %v after five Down+Enter on mode; want screenWorkspace — "+
+			"ModeUtilityInfraOnly must be present as the sixth mode item and must advance "+
+			"directly to the workspace screen (not a workflow-selection or other intermediate screen)",
+			m.screen)
+	}
+	if m.selections.mode != domain.ModeUtilityInfraOnly {
+		t.Fatalf("selections.mode = %q; want ModeUtilityInfraOnly — "+
+			"mode screen may be missing the ModeUtilityInfraOnly entry (I7.3 not yet implemented)",
+			m.selections.mode)
+	}
+
+	// Step 3: Workspace screen — Enter confirms.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.screen != screenRunning {
+		t.Fatalf("screen = %v after workspace Enter; want screenRunning", m.screen)
+	}
+
+	// Step 4: Execute the service command; the stub returns a successful RunSummary.
+	msg := runCmd(cmd)
+	if msg == nil {
+		t.Fatal("startService returned nil message; want runDoneMsg or runErrorMsg")
+	}
+	_, _ = m.Update(msg)
+
+	// Assert: flow reached summary screen — DeployUtilityInfrastructure was dispatched correctly.
+	if m.screen != screenDone {
+		t.Fatalf("screen = %v after utility-infra run; want screenDone", m.screen)
+	}
+	// Assert: no error — a non-empty errMsg means DeployNew was called instead (it returns an error).
+	if m.errMsg != "" {
+		t.Errorf("flow completed with error %q; want clean completion — "+
+			"DeployUtilityInfrastructure must be dispatched for ModeUtilityInfraOnly, not DeployNew "+
+			"or any other service method; check the ModeUtilityInfraOnly case in startService",
+			m.errMsg)
+	}
+}
+
+// TestModeScreen_HasSixItems verifies that the mode screen presents six mode entries so
+// that the utility/infrastructure-only mode is discoverable through the TUI.
+func TestModeScreen_HasSixItems(t *testing.T) {
+	// Arrange — navigate to the mode screen.
+	workspace := t.TempDir()
+	m := newFlowModel(newFlowSvc(workspace), workspace)
+
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // advance to mode screen
+	if m.screen != screenMode {
+		t.Fatalf("precondition: screen = %v, want screenMode", m.screen)
+	}
+
+	// Move the cursor to the sixth item (Down five times) and verify none of the first
+	// five presses commit the selection (i.e., the list has a sixth item rather than
+	// stopping at the fifth).
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // deploy-new → update
+	if m.screen != screenMode {
+		t.Fatal("Down from first mode item left screenMode; expected second item")
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // update → workflows-only
+	if m.screen != screenMode {
+		t.Fatal("Down from second mode item left screenMode; expected third item")
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // workflows-only → promote
+	if m.screen != screenMode {
+		t.Fatal("Down from third mode item left screenMode; expected fourth item")
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // promote → transform-harness
+	if m.screen != screenMode {
+		t.Fatal("Down from fourth mode item left screenMode; expected fifth item")
+	}
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // transform-harness → utility-infra-only
+	if m.screen != screenMode {
+		t.Fatal("Down from fifth mode item left screenMode; expected sixth item")
+	}
+
+	// Confirm the sixth item and verify the mode is set to ModeUtilityInfraOnly.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.selections.mode != domain.ModeUtilityInfraOnly {
+		t.Errorf("selections.mode = %q after selecting sixth mode item; want ModeUtilityInfraOnly — "+
+			"mode screen may be missing the ModeUtilityInfraOnly entry (I7.3 not yet implemented)",
+			m.selections.mode)
+	}
+}
+
+// TestUtilityInfraOnlyMode_PathScreen_AcceptsWorkspaceDirectory verifies that entering an
+// existing writable workspace directory in utility-infra-only mode advances to screenRunning.
+// This is the workspace-screen regression guard ensuring the path-kind fix applied to promote
+// mode does not affect the utility-infra-only mode.
+func TestUtilityInfraOnlyMode_PathScreen_AcceptsWorkspaceDirectory(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	svc := newFlowSvc(workspace)
+	svc.utilityInfra = domain.RunSummary{
+		Mode:           domain.ModeUtilityInfraOnly,
+		WorkspacePath:  workspace,
+		DeploymentRoot: workspace + "/.ai",
+		Outcome:        domain.OutcomeSuccess,
+	}
+	m := newFlowModel(svc, workspace)
+
+	// Navigate to utility-infra-only workspace screen.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → transform-harness
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → utility-infra-only
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select utility-infra-only → workspace
+
+	if m.screen != screenWorkspace {
+		t.Fatalf("precondition: screen = %v, want screenWorkspace — "+
+			"ModeUtilityInfraOnly must advance to the workspace screen after mode selection",
+			m.screen)
+	}
+
+	// Act: Enter on the workspace directory.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Assert: directory accepted and flow advances to running.
+	if m.screen != screenRunning {
+		t.Errorf("screen = %v after Enter on directory in utility-infra-only mode; want screenRunning; "+
+			"utility-infra-only must use directory-kind path validation for the workspace screen",
+			m.screen)
+	}
+}
+
+// ---------------------------------------------------------------------------
 
 // TestDeployMode_PathScreen_View_ContainsDirectoryWording verifies that the path screen in
 // deploy-new mode shows directory-oriented wording. This is a regression test guarding against

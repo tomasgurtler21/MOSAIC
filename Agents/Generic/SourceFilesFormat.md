@@ -39,8 +39,31 @@ does not apply to them.
 | `model` | string | Model placeholder (`{model-identifier}`) or a concrete model id in a deployed file. |
 | `tools` | flow-list or placeholder | Generic tool vocabulary (`{tool-permissions}` for the orchestrator). |
 
-A deployed agent file additionally carries `bundle_version`, written by the
-deployment tool. It is not a source field.
+A deployed agent file additionally carries MOSAIC bookkeeping fields written by
+the deployment tool. These are not source fields and are not present in generic
+source files under `Agents/Generic/`.
+
+All MOSAIC-only bookkeeping fields in deployed files carry a `mosaic_` prefix,
+so a reader can distinguish MOSAIC bookkeeping from fields the harness runtime
+actually consumes. The fields and their generic-source counterparts are defined
+in `Tools/Deployment/internal/agentfields` — that package is the single source
+of truth for the pairing.
+
+| Deployed field | Generic source field | Written by |
+|----------------|---------------------|------------|
+| `mosaic_id` | `id` | deploy transform (rename of source `id`) |
+| `mosaic_bundle_version` | — | deploy transform |
+| `mosaic_transform_version` | — | harness descriptor |
+| `mosaic_injections_version` | — | harness descriptor |
+| `mosaic_tool_mappings_version` | — | harness descriptor |
+| `mosaic_orchestrator_injections_version` | — | harness module (orchestrator only) |
+
+**Legacy names:** Deployed files produced before the `mosaic_` prefix was
+introduced carry the same fields without the prefix (e.g. `bundle_version`,
+`transform_version`). Every read site accepts both forms, preferring the
+prefixed name when both are present. A file carrying only legacy names is not
+spuriously stale; on the next update its fields are migrated to the prefixed
+names with values preserved, and a repeat run reports it unchanged.
 
 > **Not yet read by the tool.** `role` is specified but role is still inferred
 > from the file's path in `domain.AgentRole`, whose enum reads

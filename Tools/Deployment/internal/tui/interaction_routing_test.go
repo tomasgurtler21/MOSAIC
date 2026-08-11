@@ -35,6 +35,13 @@ func (s *stubRoutingService) Promote(_ context.Context, _ app.PromoteRequest) (a
 func (s *stubRoutingService) UpdateWorkflows(_ context.Context, _ app.WorkflowUpdateRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{}, nil
 }
+func (s *stubRoutingService) TransformHarness(_ context.Context, _ app.TransformHarnessRequest) (app.TransformHarnessResult, error) {
+	return app.TransformHarnessResult{}, nil
+}
+
+func (s *stubRoutingService) DeployUtilityInfrastructure(_ context.Context, _ app.UtilityInfraRequest) (domain.RunSummary, error) {
+	return domain.RunSummary{}, nil
+}
 
 // newRoutingModel returns a rootModel in screenRunning state (simulating mid-flow) with a
 // nil service, since routing tests only exercise the question overlay system.
@@ -579,6 +586,118 @@ func TestInteractionRouting_ModelOverlay_IsNonNilAfterQTierModel(t *testing.T) {
 	view := m.modelOverlay.View()
 	if view == "" {
 		t.Error("ModelSelectScreen.View() returned empty string after creation")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// QPromoteCustomTool routing (T4.3)
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// QTransformTargetHarness routing (I6.3/I6.4)
+// ---------------------------------------------------------------------------
+
+// TestInteractionRouting_QTransformTargetHarness_ShowsSelectionOverlay verifies that when the
+// app layer sends a QTransformTargetHarness question, the root model switches to screenQuestion
+// and activates a selection overlay. Before I6.3/I6.4 wire this question ID to a specific
+// overlay, the message is unhandled and this test fails correctly.
+func TestInteractionRouting_QTransformTargetHarness_ShowsSelectionOverlay(t *testing.T) {
+	m := newRoutingModel()
+	qMsg := buildSelectOneMsg(domain.QTransformTargetHarness, []domain.Option{
+		{ID: "opencode", Label: "OpenCode"},
+		{ID: "cursor", Label: "Cursor"},
+	})
+
+	m.Update(qMsg)
+
+	if m.screen != screenQuestion {
+		t.Errorf("screen = %v after QTransformTargetHarness; want screenQuestion; "+
+			"I6.3/I6.4 must wire QTransformTargetHarness to an overlay so the user can select a target harness", m.screen)
+	}
+	// QTransformTargetHarness is a harness-selection choice and should route to the generic
+	// select overlay (the same mechanism used by other SelectOne harness-type questions).
+	if m.selectOverlay == nil {
+		t.Error("selectOverlay is nil after QTransformTargetHarness; want a selection overlay; " +
+			"I6.3/I6.4 must handle QTransformTargetHarness and route it to a selection overlay")
+	}
+	if m.modelOverlay != nil {
+		t.Error("modelOverlay is non-nil after QTransformTargetHarness; harness selection must not use the model overlay")
+	}
+}
+
+// TestInteractionRouting_QTransformTargetHarness_ViewContainsHarnessOptions verifies that the
+// overlay shown for QTransformTargetHarness includes the harness option labels in its View().
+func TestInteractionRouting_QTransformTargetHarness_ViewContainsHarnessOptions(t *testing.T) {
+	m := newRoutingModel()
+	qMsg := buildSelectOneMsg(domain.QTransformTargetHarness, []domain.Option{
+		{ID: "opencode", Label: "OpenCode"},
+		{ID: "cursor", Label: "Cursor"},
+	})
+
+	m.Update(qMsg)
+
+	if m.screen != screenQuestion {
+		t.Fatalf("precondition: screen = %v after QTransformTargetHarness; want screenQuestion; "+
+			"I6.3/I6.4 must wire the overlay before this view test is meaningful", m.screen)
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "OpenCode") {
+		t.Errorf("View() after QTransformTargetHarness does not contain 'OpenCode':\n%s\n"+
+			"the target-harness overlay must display the harness options to the user", view)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// QTransformTargetModel routing (I6.3/I6.4)
+// ---------------------------------------------------------------------------
+
+// TestInteractionRouting_QTransformTargetModel_ShowsModelSelectScreen verifies that when the
+// app layer sends a QTransformTargetModel question, the root model switches to screenQuestion
+// and activates the ModelSelectScreen overlay. This mirrors QTierModel and QAgentModel routing.
+// Before I6.3/I6.4 wire this question ID, the message is unhandled and this test fails.
+func TestInteractionRouting_QTransformTargetModel_ShowsModelSelectScreen(t *testing.T) {
+	m := newRoutingModel()
+	qMsg := buildSelectOneMsg(domain.QTransformTargetModel, []domain.Option{
+		{ID: "gpt-4o", Label: "GPT-4o"},
+		{ID: "claude-3-sonnet", Label: "Claude 3 Sonnet"},
+	})
+
+	m.Update(qMsg)
+
+	if m.screen != screenQuestion {
+		t.Errorf("screen = %v after QTransformTargetModel; want screenQuestion; "+
+			"I6.3/I6.4 must wire QTransformTargetModel to the ModelSelectScreen overlay", m.screen)
+	}
+	if m.modelOverlay == nil {
+		t.Error("modelOverlay is nil after QTransformTargetModel; want a ModelSelectScreen; " +
+			"QTransformTargetModel is a model-selection question and must reuse the ModelSelectScreen " +
+			"overlay exactly as QTierModel and QAgentModel do")
+	}
+	if m.selectOverlay != nil {
+		t.Error("selectOverlay is non-nil after QTransformTargetModel; must use modelOverlay instead")
+	}
+}
+
+// TestInteractionRouting_QTransformTargetModel_ViewContainsModelOptions verifies that the
+// ModelSelectScreen overlay for QTransformTargetModel displays the provided model options.
+func TestInteractionRouting_QTransformTargetModel_ViewContainsModelOptions(t *testing.T) {
+	m := newRoutingModel()
+	qMsg := buildSelectOneMsg(domain.QTransformTargetModel, []domain.Option{
+		{ID: "gpt-4o", Label: "GPT-4o"},
+	})
+
+	m.Update(qMsg)
+
+	if m.screen != screenQuestion {
+		t.Fatalf("precondition: screen = %v after QTransformTargetModel; want screenQuestion; "+
+			"I6.3/I6.4 must wire the ModelSelectScreen overlay first", m.screen)
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "GPT-4o") {
+		t.Errorf("View() after QTransformTargetModel does not contain 'GPT-4o':\n%s\n"+
+			"the model overlay must display the available target-model options", view)
 	}
 }
 

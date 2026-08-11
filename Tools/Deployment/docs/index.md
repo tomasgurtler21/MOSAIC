@@ -60,6 +60,7 @@ The following table shows where each major concept is documented.
 | Runtime directory layout | [README — Runtime layout](../README.md#runtime-layout) |
 | Deploy flow | [README — Deploy](../README.md#deploy--create-a-new-workspace) |
 | Update flow and conflict resolution | [README — Update](../README.md#update--bring-a-workspace-up-to-date) |
+| Utility/infrastructure-only deploy | [README — Utility/infrastructure only](../README.md#utilityinfrastructure-only--deploy-a-subset-without-workflows) |
 | tool-config.yaml fields | [Configuration Reference — tool-config.yaml](configuration.md#tool-configyaml) |
 | user-config.yaml fields | [Configuration Reference — user-config.yaml](configuration.md#user-configyaml) |
 | Mapping a generic tool to a harness tool | [Configuration Reference — tool_destinations](configuration.md#tool_destinations) |

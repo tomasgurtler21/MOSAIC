@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/pathinput"
 	"mosaic-deploy/internal/transform"
 )
 
@@ -48,17 +49,6 @@ func (s *service) askHarness(ctx context.Context) (string, error) {
 	return id, nil
 }
 
-// stripMatchedOuterQuotes removes a single surrounding pair of double-quote characters when
-// both the first and last characters are double quotes. It strips exactly one outer pair; an
-// unmatched quote or multiple nested pairs are left unchanged. The input must already have
-// surrounding whitespace removed.
-func stripMatchedOuterQuotes(s string) string {
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
-
 // askWorkspace prompts for the target workspace path.
 func (s *service) askWorkspace(ctx context.Context) (string, error) {
 	q := domain.TextQuestion{
@@ -71,7 +61,7 @@ func (s *service) askWorkspace(ctx context.Context) (string, error) {
 	if ans.Status != domain.Answered {
 		return "", errors.New("no workspace path was provided")
 	}
-	text := stripMatchedOuterQuotes(strings.TrimSpace(ans.Text))
+	text := pathinput.Unquote(strings.TrimSpace(ans.Text))
 	if text == "" {
 		return "", errors.New("no workspace path was provided")
 	}

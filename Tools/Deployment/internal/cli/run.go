@@ -10,6 +10,7 @@ import (
 
 	"mosaic-deploy/internal/app"
 	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/pathinput"
 )
 
 // Exit code contract (AC19.4):
@@ -89,7 +90,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 
 			req := app.DeployRequest{
 				HarnessID:       deployHarness,
-				WorkspacePath:   deployWorkspace,
+				WorkspacePath:   pathinput.Unquote(strings.TrimSpace(deployWorkspace)),
 				Scope:           domain.ScopeProject,
 				DryRun:          deployDryRun,
 				AutoConfirmPlan: deployAutoConfirm,
@@ -103,7 +104,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 
 			// Apply selections file when provided.
 			if deploySelections != "" {
-				sf, code, err := parseSelectionsFile(deploySelections)
+				sf, code, err := parseSelectionsFile(pathinput.Unquote(strings.TrimSpace(deploySelections)))
 				if err != nil {
 					fmt.Fprintf(errOut, "error: %v\n", err)
 					exitCode = code
@@ -165,7 +166,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 
 			req := app.UpdateRequest{
 				HarnessID:       updateHarness,
-				WorkspacePath:   updateWorkspace,
+				WorkspacePath:   pathinput.Unquote(strings.TrimSpace(updateWorkspace)),
 				ConflictDefault: conflictDefault,
 				DryRun:          updateDryRun,
 				AutoConfirmPlan: updateAutoConfirm,
@@ -219,7 +220,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 
 			req := app.WorkflowUpdateRequest{
 				HarnessID:       workflowsHarness,
-				WorkspacePath:   workflowsWorkspace,
+				WorkspacePath:   pathinput.Unquote(strings.TrimSpace(workflowsWorkspace)),
 				DryRun:          workflowsDryRun,
 				AutoConfirmPlan: workflowsAutoConfirm,
 			}
@@ -260,12 +261,12 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 	// promote subcommand
 	// ------------------------------------------------------------------
 	var (
-		promoteFile     string
-		promoteHarness  string
-		promoteCategory string
+		promoteFile      string
+		promoteHarness   string
+		promoteCategory  string
 		promoteOverwrite bool
-		promoteDryRun   bool
-		promoteOutput   string
+		promoteDryRun    bool
+		promoteOutput    string
 	)
 
 	promoteCmd := &cobra.Command{
@@ -285,7 +286,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 			}
 
 			req := app.PromoteRequest{
-				FilePath:  promoteFile,
+				FilePath:  pathinput.Unquote(strings.TrimSpace(promoteFile)),
 				HarnessID: promoteHarness,
 				Category:  promoteCategory,
 				Overwrite: promoteOverwrite,
@@ -305,7 +306,162 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 	promoteCmd.Flags().BoolVar(&promoteDryRun, "dry-run", false, "Validate and compute without writing any file")
 	promoteCmd.Flags().StringVar(&promoteOutput, "output", "", "Output format (json)")
 
-	root.AddCommand(deployCmd, updateCmd, workflowsCmd, promoteCmd)
+	// ------------------------------------------------------------------
+	// transform subcommand
+	// ------------------------------------------------------------------
+	var (
+		transformHarness       string
+		transformTargetHarness string
+		transformPath          string
+		transformTargetModel   string
+		transformOverwrite     bool
+		transformDryRun        bool
+		transformOutput        string
+	)
+
+	transformCmd := &cobra.Command{
+		Use:   "transform",
+		Short: "Convert deployed agent files from one harness to another",
+		Long: `Transform one or more deployed agent files from a source harness to a target harness.
+
+Input may be a single agent file or a directory of agent files. Directory enumeration is
+non-recursive — only files directly under the given directory are processed; subdirectories
+are not descended into.`,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if transformHarness == "" {
+				fmt.Fprintf(errOut, "error: --harness is required for the transform subcommand\n")
+				exitCode = ExitUsage
+				return nil
+			}
+			if transformTargetHarness == "" {
+				fmt.Fprintf(errOut, "error: --target-harness is required for the transform subcommand\n")
+				exitCode = ExitUsage
+				return nil
+			}
+			if transformPath == "" {
+				fmt.Fprintf(errOut, "error: --path is required for the transform subcommand\n")
+				exitCode = ExitUsage
+				return nil
+			}
+
+			req := app.TransformHarnessRequest{
+				SourceHarnessID: transformHarness,
+				TargetHarnessID: transformTargetHarness,
+				Path:            pathinput.Unquote(strings.TrimSpace(transformPath)),
+				TargetModel:     transformTargetModel,
+				Overwrite:       transformOverwrite,
+				DryRun:          transformDryRun,
+			}
+
+			result, svcErr := svc.TransformHarness(ctx, req)
+			exitCode = renderTransformOutput(out, errOut, transformOutput, result, svcErr)
+			return nil
+		},
+	}
+
+	transformCmd.Flags().StringVar(&transformHarness, "harness", "", "Source harness ID (required)")
+	transformCmd.Flags().StringVar(&transformTargetHarness, "target-harness", "", "Target harness ID (required)")
+	transformCmd.Flags().StringVar(&transformPath, "path", "", "Agent file or folder of agent files (required); non-recursive for directories")
+	transformCmd.Flags().StringVar(&transformTargetModel, "target-model", "", "Target harness model identifier; absent means model field is left empty")
+	transformCmd.Flags().BoolVar(&transformOverwrite, "overwrite", false, "Overwrite an existing destination file")
+	transformCmd.Flags().BoolVar(&transformDryRun, "dry-run", false, "Compute outcomes without writing any file")
+	transformCmd.Flags().StringVar(&transformOutput, "output", "", "Output format (json)")
+
+	// ------------------------------------------------------------------
+	// utility-infra subcommand
+	// ------------------------------------------------------------------
+	var (
+		utilityInfraHarness         string
+		utilityInfraWorkspace       string
+		utilityInfraUtility         string
+		utilityInfraInfrastructure  string
+		utilityInfraConflict        string
+		utilityInfraOutput          string
+		utilityInfraDryRun          bool
+		utilityInfraAutoConfirm     bool
+		utilityInfraUtilitySet      bool
+		utilityInfraInfraSet        bool
+	)
+
+	utilityInfraCmd := &cobra.Command{
+		Use:   "utility-infra",
+		Short: "Deploy only Utility and Infrastructure agents",
+		Long: `Deploy only Utility and Infrastructure agents and the skills they require.
+
+Asks only the Utility and Infrastructure agent selection questions. Workflow
+selection, hook configuration, and orchestrator rewriting are never performed.
+
+Directory enumeration is non-recursive when a folder path is supplied.`,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			utilityInfraUtilitySet = cmd.Flags().Changed("utility")
+			utilityInfraInfraSet = cmd.Flags().Changed("infrastructure")
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if utilityInfraWorkspace == "" {
+				fmt.Fprintf(errOut, "error: --workspace is required for the utility-infra subcommand\n")
+				exitCode = ExitUsage
+				return nil
+			}
+			if utilityInfraHarness == "" {
+				fmt.Fprintf(errOut, "error: --harness is required for the utility-infra subcommand\n")
+				exitCode = ExitUsage
+				return nil
+			}
+
+			req := app.UtilityInfraRequest{
+				HarnessID:       utilityInfraHarness,
+				WorkspacePath:   pathinput.Unquote(strings.TrimSpace(utilityInfraWorkspace)),
+				Scope:           domain.ScopeProject,
+				DryRun:          utilityInfraDryRun,
+				AutoConfirmPlan: utilityInfraAutoConfirm,
+			}
+
+			// Apply --conflict when explicitly provided.
+			if utilityInfraConflict != "" {
+				switch strings.ToLower(utilityInfraConflict) {
+				case "skip":
+					req.ConflictDefault = domain.DecisionSkip
+				case "overwrite":
+					req.ConflictDefault = domain.DecisionOverwrite
+				case "backup":
+					req.ConflictDefault = domain.DecisionBackupThenOverwrite
+				default:
+					fmt.Fprintf(errOut, "invalid --conflict value %q; valid values: skip, overwrite, backup\n", utilityInfraConflict)
+					exitCode = ExitUsage
+					return nil
+				}
+			}
+
+			// Nil means "ask interactively" (CD-6 nil/empty convention).
+			// An explicitly provided flag (even empty string) produces a non-nil slice.
+			if utilityInfraUtilitySet {
+				req.UtilityAgentIDs = splitTrimmedParts(utilityInfraUtility)
+			}
+			if utilityInfraInfraSet {
+				req.InfrastructureAgentIDs = splitTrimmedParts(utilityInfraInfrastructure)
+			}
+
+			summary, svcErr := svc.DeployUtilityInfrastructure(ctx, req)
+			exitCode = renderUtilityInfraOutput(out, errOut, utilityInfraOutput, utilityInfraDryRun, summary, svcErr)
+			return nil
+		},
+	}
+
+	utilityInfraCmd.Flags().StringVar(&utilityInfraHarness, "harness", "", "Harness ID (required)")
+	utilityInfraCmd.Flags().StringVar(&utilityInfraWorkspace, "workspace", "", "Workspace directory (required)")
+	utilityInfraCmd.Flags().StringVar(&utilityInfraUtility, "utility", "", "Comma-separated utility agent ids (absent = ask; empty string = none)")
+	utilityInfraCmd.Flags().StringVar(&utilityInfraInfrastructure, "infrastructure", "", "Comma-separated infrastructure agent ids (absent = ask; empty string = none)")
+	utilityInfraCmd.Flags().StringVar(&utilityInfraConflict, "conflict", "", "Default decision for locally-modified files (skip|overwrite|backup)")
+	utilityInfraCmd.Flags().StringVar(&utilityInfraOutput, "output", "", "Output format (json)")
+	utilityInfraCmd.Flags().BoolVar(&utilityInfraDryRun, "dry-run", false, "Compute and report without writing any file")
+	utilityInfraCmd.Flags().BoolVar(&utilityInfraAutoConfirm, "auto-confirm", false, "Auto-confirm the deployment plan without prompting")
+
+	root.AddCommand(deployCmd, updateCmd, workflowsCmd, promoteCmd, transformCmd, utilityInfraCmd)
 	root.SetArgs(args)
 
 	if err := root.Execute(); err != nil {

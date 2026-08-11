@@ -5,6 +5,9 @@ name: codebase-research-new
 role: subagent
 description: Analyzes codebase, explores existing patterns, and documents findings to build foundational understanding for downstream agents
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction, skill]
+recommended_tier: ""
+tier_rationale: ""
+required_skills: []
 ---
 
 [[SECTION:Identity]]

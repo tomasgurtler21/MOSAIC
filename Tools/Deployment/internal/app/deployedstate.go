@@ -11,6 +11,7 @@ import (
 	"regexp"
 
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/manifest"
 	"mosaic-deploy/internal/plan"
@@ -44,27 +45,19 @@ func probeDeployedArtifact(workspace, targetPath, modelKey string) domain.Deploy
 	}
 
 	// Parse frontmatter for version stamps and model ID. Failure leaves scalar fields empty (graceful degradation).
+	// Each MOSAIC-only stamp is read via agentfields.ReadOrder, which tries the prefixed name first
+	// and falls back to the legacy name. This accepts both already-migrated and legacy-named files.
 	if doc, parseErr := docformat.Parse(data); parseErr == nil {
 		fm := doc.Frontmatter()
 		if fm.Present() {
 			if v, ok := fm.Get("version"); ok && v.Kind == domain.KindScalar {
 				state.Version = v.Scalar
 			}
-			if v, ok := fm.Get("transform_version"); ok && v.Kind == domain.KindScalar {
-				state.TransformVersion = v.Scalar
-			}
-			if v, ok := fm.Get("injections_version"); ok && v.Kind == domain.KindScalar {
-				state.InjectionsVersion = v.Scalar
-			}
-			if v, ok := fm.Get("orchestrator_injections_version"); ok && v.Kind == domain.KindScalar {
-				state.OrchestratorInjectionsVersion = v.Scalar
-			}
-			if v, ok := fm.Get("tool_mappings_version"); ok && v.Kind == domain.KindScalar {
-				state.ToolMappingsVersion = v.Scalar
-			}
-			if v, ok := fm.Get("bundle_version"); ok && v.Kind == domain.KindScalar {
-				state.BundleVersion = v.Scalar
-			}
+			state.TransformVersion = readDeployedStamp(fm, "transform_version")
+			state.InjectionsVersion = readDeployedStamp(fm, "injections_version")
+			state.OrchestratorInjectionsVersion = readDeployedStamp(fm, "orchestrator_injections_version")
+			state.ToolMappingsVersion = readDeployedStamp(fm, "tool_mappings_version")
+			state.BundleVersion = readDeployedStamp(fm, "bundle_version")
 			if modelKey != "" {
 				if v, ok := fm.Get(modelKey); ok && v.Kind == domain.KindScalar {
 					state.ModelID = v.Scalar
@@ -82,6 +75,24 @@ func probeDeployedArtifact(workspace, targetPath, modelKey string) domain.Deploy
 	state.ProtocolVersion = extractDeployedProtocolVersion(data)
 
 	return state
+}
+
+// readDeployedStamp reads one MOSAIC-only stamp field from a deployed file's frontmatter,
+// accepting both the prefixed (mosaic_-prefixed) and legacy (unprefixed) name forms.
+// The prefixed name is tried first; if absent, the legacy name is tried. Returns an empty
+// string when neither form is present or the value is not a scalar. The legacy name is
+// used as the lookup key into the agentfields registry.
+func readDeployedStamp(fm *docformat.Frontmatter, legacyKey string) string {
+	f, ok := agentfields.ByDeployedName(legacyKey)
+	if !ok {
+		return ""
+	}
+	for _, key := range agentfields.ReadOrder(f) {
+		if v, ok := fm.Get(key); ok && v.Kind == domain.KindScalar {
+			return v.Scalar
+		}
+	}
+	return ""
 }
 
 // probeDeployedState probes every path in paths, passing modelKey to each per-artifact probe.

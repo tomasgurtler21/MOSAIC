@@ -191,3 +191,63 @@ func TestAskWorkspace_DoubleNestedQuotes_OnlyOuterPairStripped(t *testing.T) {
 			summary.WorkspacePath, want)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Additional edge cases — inputs that must be returned unchanged
+// ---------------------------------------------------------------------------
+
+// TestAskWorkspace_SingleDoubleQuoteChar_PathIsPreserved verifies that a workspace answer
+// consisting of a single double-quote character is returned unchanged. A single character
+// cannot form a matched outer pair (len < 2), so nothing is stripped.
+func TestAskWorkspace_SingleDoubleQuoteChar_PathIsPreserved(t *testing.T) {
+	// Arrange — the workspace answer is a lone double-quote character.
+	req, _, deps := runDeployWithWorkspaceAnswer(t, `"`)
+	svc := app.New(deps)
+
+	// Act — the run will fail because '"' is not a real directory; that is expected.
+	summary, _ := svc.DeployNew(context.Background(), req)
+
+	// Assert — the single quote must not be stripped.
+	if summary.WorkspacePath != `"` {
+		t.Errorf(`WorkspacePath = %q; want %q (a single double-quote has no matching pair and must not be stripped)`,
+			summary.WorkspacePath, `"`)
+	}
+}
+
+// TestAskWorkspace_SingleQuotedPath_IsNotStripped verifies that a workspace answer
+// enclosed in single quotes is returned unchanged. Only double-quote pairs are stripped;
+// single quotes are not treated as path delimiters.
+func TestAskWorkspace_SingleQuotedPath_IsNotStripped(t *testing.T) {
+	// Arrange — single-quoted path.
+	rawInput := `'/path/to/workspace'`
+	req, _, deps := runDeployWithWorkspaceAnswer(t, rawInput)
+	svc := app.New(deps)
+
+	// Act
+	summary, _ := svc.DeployNew(context.Background(), req)
+
+	// Assert — single quotes must not be stripped; the path is returned as-is.
+	if summary.WorkspacePath != rawInput {
+		t.Errorf("WorkspacePath = %q; want %q (single quotes must not be stripped)",
+			summary.WorkspacePath, rawInput)
+	}
+}
+
+// TestAskWorkspace_InteriorDoubleQuotes_PathIsPreserved verifies that a workspace answer
+// with double-quote characters in the interior of the string is returned unchanged. The
+// stripping rule applies only to the outermost pair of quotes, not to interior occurrences.
+func TestAskWorkspace_InteriorDoubleQuotes_PathIsPreserved(t *testing.T) {
+	// Arrange — path with interior quotes, no surrounding pair.
+	rawInput := `/path/"interior"/dir`
+	req, _, deps := runDeployWithWorkspaceAnswer(t, rawInput)
+	svc := app.New(deps)
+
+	// Act
+	summary, _ := svc.DeployNew(context.Background(), req)
+
+	// Assert — interior quotes must not be touched.
+	if summary.WorkspacePath != rawInput {
+		t.Errorf("WorkspacePath = %q; want %q (interior double quotes must not be stripped)",
+			summary.WorkspacePath, rawInput)
+	}
+}

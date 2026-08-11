@@ -19,12 +19,12 @@ package transform_test
 //       Apply to return an error wrapping ErrSourceDeployedRegionNotEmpty.
 //     - No partial output is returned on this error.
 //
-//   T6.6 — bundle_version stamp in deployed frontmatter; orchestrator receives no bundle:
+//   T6.6 — mosaic_bundle_version stamp in deployed frontmatter; orchestrator receives no bundle:
 //     - A subagent transformed with a populated bundle carries the bundle's version in the
-//       deployed file's frontmatter under the key `bundle_version`.
+//       deployed file's frontmatter under the key `mosaic_bundle_version`.
 //     - The stamp value equals BundleContent.Version verbatim.
 //     - An orchestrator-role source with no bundle regions, transformed with a bundle whose
-//       blocks all apply to subagent, produces no error and no bundle_version stamp.
+//       blocks all apply to subagent, produces no error and no mosaic_bundle_version stamp.
 //
 //   Ordering:
 //     - [[INJECTION:]] regions are resolved AFTER all [[DEPLOYED:]] bundle regions are filled,
@@ -180,7 +180,7 @@ Partial bundle test agent.
 
 // sourceOrchestratorNoBundleRegions is a minimal orchestrator source with no bundle-sourced
 // [[DEPLOYED:]] regions. Used to verify that an orchestrator-role file produces no error and
-// no bundle_version stamp.
+// no mosaic_bundle_version stamp.
 const sourceOrchestratorNoBundleRegions = `---
 version: 1.0.0
 name: orchestrator
@@ -564,12 +564,14 @@ func TestBundle_SourceFileWithPopulatedDeployedRegion_NoPartialOutput(t *testing
 }
 
 // ---------------------------------------------------------------------------
-// T6.6 — bundle_version stamp and orchestrator exemption
+// T6.6 — mosaic_bundle_version stamp and orchestrator exemption
 // ---------------------------------------------------------------------------
 
 // TestBundle_SubagentOutput_CarriesBundleVersionStamp verifies that the deployed output
-// frontmatter for a subagent carries a `bundle_version` key whose value equals
+// frontmatter for a subagent carries a `mosaic_bundle_version` key whose value equals
 // BundleContent.Version verbatim. The stamp enables staleness detection on subsequent runs.
+//
+// This test FAILS until I4.2 updates the bundle stamp write path to use the prefixed key name.
 func TestBundle_SubagentOutput_CarriesBundleVersionStamp(t *testing.T) {
 	const bundleVersion = "1.0.0"
 	bundle := fixtureBundle(bundleVersion)
@@ -596,13 +598,13 @@ func TestBundle_SubagentOutput_CarriesBundleVersionStamp(t *testing.T) {
 		t.Fatalf("parse output: %v", parseErr)
 	}
 
-	stampVal, ok := doc.Frontmatter().Get("bundle_version")
+	stampVal, ok := doc.Frontmatter().Get("mosaic_bundle_version")
 	if !ok {
-		t.Fatal("deployed output frontmatter does not contain `bundle_version`; " +
-			"the bundle version must be stamped into every deployed subagent")
+		t.Fatal("deployed output frontmatter does not contain `mosaic_bundle_version`; " +
+			"the bundle version must be stamped under the prefixed key into every deployed subagent")
 	}
 	if stampVal.Scalar != bundleVersion {
-		t.Errorf("frontmatter `bundle_version` = %q, want %q (BundleContent.Version verbatim)",
+		t.Errorf("frontmatter `mosaic_bundle_version` = %q, want %q (BundleContent.Version verbatim)",
 			stampVal.Scalar, bundleVersion)
 	}
 }
@@ -610,6 +612,8 @@ func TestBundle_SubagentOutput_CarriesBundleVersionStamp(t *testing.T) {
 // TestBundle_SubagentOutput_StampValueMatchesBundleVersion verifies that when multiple
 // bundle versions are used across runs, the stamp value reflects the specific version
 // supplied in the request — not a hardcoded default.
+//
+// This test FAILS until I4.2 updates the bundle stamp write path to use the prefixed key name.
 func TestBundle_SubagentOutput_StampValueMatchesBundleVersion(t *testing.T) {
 	cases := []string{"1.0.0", "1.1.0", "2.0.0", "0.1.0-alpha"}
 	for _, version := range cases {
@@ -637,12 +641,13 @@ func TestBundle_SubagentOutput_StampValueMatchesBundleVersion(t *testing.T) {
 				t.Fatalf("parse output: %v", parseErr)
 			}
 
-			stampVal, ok := doc.Frontmatter().Get("bundle_version")
+			stampVal, ok := doc.Frontmatter().Get("mosaic_bundle_version")
 			if !ok {
-				t.Fatal("deployed output frontmatter does not contain `bundle_version`")
+				t.Fatal("deployed output frontmatter does not contain `mosaic_bundle_version`; " +
+					"the bundle stamp must use the prefixed field name")
 			}
 			if stampVal.Scalar != version {
-				t.Errorf("`bundle_version` = %q, want %q", stampVal.Scalar, version)
+				t.Errorf("`mosaic_bundle_version` = %q, want %q", stampVal.Scalar, version)
 			}
 		})
 	}
@@ -678,7 +683,7 @@ func TestBundle_OrchestratorRoleWithNoBundleRegions_ReturnsNoError(t *testing.T)
 }
 
 // TestBundle_OrchestratorRoleWithNoBundleRegions_NoVersionStamp verifies that the deployed
-// output for an orchestrator with no bundle regions does NOT carry a `bundle_version`
+// output for an orchestrator with no bundle regions does NOT carry a `mosaic_bundle_version`
 // frontmatter stamp. The stamp is written only when the agent's role receives bundle blocks;
 // an orchestrator that receives none must remain untouched.
 func TestBundle_OrchestratorRoleWithNoBundleRegions_NoVersionStamp(t *testing.T) {
@@ -705,8 +710,8 @@ func TestBundle_OrchestratorRoleWithNoBundleRegions_NoVersionStamp(t *testing.T)
 		t.Fatalf("parse output: %v", parseErr)
 	}
 
-	if _, ok := doc.Frontmatter().Get("bundle_version"); ok {
-		t.Error("deployed orchestrator output carries `bundle_version` stamp; " +
+	if _, ok := doc.Frontmatter().Get("mosaic_bundle_version"); ok {
+		t.Error("deployed orchestrator output carries `mosaic_bundle_version` stamp; " +
 			"an orchestrator-role file that receives no bundle blocks must not receive the stamp")
 	}
 }

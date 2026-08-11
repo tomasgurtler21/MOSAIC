@@ -5,6 +5,8 @@ package screens
 // RunSummary-only.
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"mosaic-deploy/internal/app"
@@ -47,23 +49,33 @@ func (s *PromoteSummaryScreen) Done() bool { return s.done }
 
 // View renders the screen. It always shows the source path, the destination path, the agent
 // key, the assigned numeric id, and the category, and states explicitly that nothing was
-// written when the result is a dry run.
+// written when the result is a dry run. Diverted tools recovered from harness frontmatter
+// fields and any stripped fields are shown after the primary summary.
 func (s *PromoteSummaryScreen) View() string {
+	var sb strings.Builder
 	if s.result.DryRun {
-		return s.styles.Success.Width(s.width).Render(
-			"Promote (dry run)\nSource: " + s.result.SourcePath +
-				"\nDestination: " + s.result.DestinationPath + " (not written)" +
-				"\nKey: " + s.result.Key +
-				"\nID: " + s.result.NumericID,
-		)
-	}
-	return s.styles.Success.Width(s.width).Render(
-		"Promote complete\nSource: " + s.result.SourcePath +
+		sb.WriteString("Promote (dry run)\nSource: " + s.result.SourcePath +
+			"\nDestination: " + s.result.DestinationPath + " (not written)" +
+			"\nKey: " + s.result.Key +
+			"\nID: " + s.result.NumericID)
+	} else {
+		sb.WriteString("Promote complete\nSource: " + s.result.SourcePath +
 			"\nDestination: " + s.result.DestinationPath +
 			"\nKey: " + s.result.Key +
 			"\nID: " + s.result.NumericID +
-			"\nCategory: " + s.result.Category,
-	)
+			"\nCategory: " + s.result.Category)
+	}
+	if len(s.result.DivertedTools) > 0 {
+		sb.WriteString("\nDiverted tools recovered: " + strings.Join(s.result.DivertedTools, ", "))
+	}
+	for _, sf := range s.result.StrippedFields {
+		if len(sf.Values) > 0 {
+			sb.WriteString("\nStripped field: " + sf.Key + " (" + string(sf.Reason) + "): " + strings.Join(sf.Values, ", "))
+		} else {
+			sb.WriteString("\nStripped field: " + sf.Key + " (" + string(sf.Reason) + ")")
+		}
+	}
+	return s.styles.Success.Width(s.width).Render(sb.String())
 }
 
 // Resize adjusts the screen to new terminal dimensions.

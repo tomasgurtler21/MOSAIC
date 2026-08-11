@@ -1,11 +1,11 @@
 ---
 version: 7.3.1
-transform_version: 1.0.0
-injections_version: 1.0.0
 description: Central coordinator that manages multi-agent workflow execution, routing tasks to subagents and maintaining execution state
 model: github-copilot/claude-sonnet-4-6
 tools: [read, write, edit, search, execute, ask_user]
 role: orchestrator
+mosaic_transform_version: 1.0.0
+mosaic_injections_version: 1.0.0
 ---
 
 [[SECTION:Identity]]

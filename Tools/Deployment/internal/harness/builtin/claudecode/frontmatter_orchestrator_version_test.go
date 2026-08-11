@@ -1,32 +1,33 @@
 package claudecode_test
 
 // frontmatter_orchestrator_version_test.go: Tests for conditional stamping of
-// orchestrator_injections_version in the Frontmatter method (Stage 5, AC5.2, AC5.3).
+// mosaic_orchestrator_injections_version in the Frontmatter method.
 //
-// The orchestrator_injections_version field must be stamped into the deployed orchestrator
-// agent frontmatter (AC5.2) but must be absent from subagent deployed frontmatter (AC5.3).
+// The mosaic_orchestrator_injections_version field must be stamped into the deployed
+// orchestrator agent frontmatter but must be absent from subagent deployed frontmatter.
 // The harness module's Frontmatter() method is responsible for this conditional inclusion:
 // when AgentKey == "orchestrator" and Versions.OrchestratorInjectionsVersion is non-empty,
 // the returned FrontmatterPlan.Set must include a field with key
-// "orchestrator_injections_version". For all other AgentKey values, the field must not
-// appear in Set.
+// "mosaic_orchestrator_injections_version". For all other AgentKey values, the field must
+// not appear in Set.
 //
-// Additionally, the descriptor's key_order must position "orchestrator_injections_version"
-// immediately after "injections_version", so that the deployed orchestrator file has the
+// Additionally, the descriptor's key_order must position "mosaic_orchestrator_injections_version"
+// immediately after "mosaic_injections_version", so that the deployed orchestrator file has the
 // field in the correct position relative to the adjacent version fields.
 //
 // RED STATE:
-//   TestFrontmatter_OrchestratorAgent_StampsOrchestratorInjectionsVersion:
-//     FAILS until I5.3 updates Frontmatter() to conditionally stamp
-//     orchestrator_injections_version based on AgentKey.
+//   TestFrontmatter_OrchestratorAgent_StampsMosaicOrchestratorInjectionsVersion:
+//     FAILS until I4.3 updates Frontmatter() to stamp "mosaic_orchestrator_injections_version"
+//     (the prefixed name) instead of the legacy "orchestrator_injections_version".
 //
-//   TestFrontmatter_SubagentAgent_DoesNotStampOrchestratorInjectionsVersion:
-//     PASSES in RED phase (the field is not yet stamped for any agent key). Serves as a
-//     regression guard: after I5.3 is implemented, this test catches any implementation
-//     that stamps the field for all agent keys instead of orchestrator-only.
+//   TestFrontmatter_SubagentAgent_DoesNotStampMosaicOrchestratorInjectionsVersion:
+//     PASSES in RED phase (the field is not stamped for any agent key yet). Serves as a
+//     regression guard: after I4.3, this test catches an implementation that stamps the
+//     field for all agent keys instead of orchestrator-only.
 //
-//   TestDescriptor_KeyOrder_ContainsOrchestratorInjectionsVersionAfterInjectionsVersion:
-//     FAILS until I5.4 updates the claude-code descriptor's key_order list.
+//   TestDescriptor_KeyOrder_ContainsMosaicOrchestratorInjectionsVersionAfterMosaicInjectionsVersion:
+//     FAILS until I4.4 updates the claude-code descriptor's key_order entries to the prefixed
+//     names (mosaic_injections_version, mosaic_orchestrator_injections_version).
 
 import (
 	"testing"
@@ -34,16 +35,15 @@ import (
 	"mosaic-deploy/internal/domain"
 )
 
-// TestFrontmatter_OrchestratorAgent_StampsOrchestratorInjectionsVersion verifies that
+// TestFrontmatter_OrchestratorAgent_StampsMosaicOrchestratorInjectionsVersion verifies that
 // calling Frontmatter with AgentKey="orchestrator" and a non-empty
 // OrchestratorInjectionsVersion in Versions produces a FrontmatterPlan whose Set slice
-// contains a field with key "orchestrator_injections_version" carrying the provided
-// version value. This is the stamping path required by AC5.2: the deployed orchestrator
-// file must carry the orchestrator_injections_version frontmatter field.
+// contains a field with key "mosaic_orchestrator_injections_version" carrying the provided
+// version value. The deployed orchestrator file must carry the prefixed field name.
 //
 // The test uses a minimal FrontmatterRequest (no Source fields, empty model) to isolate
 // the version-stamping behavior from the other frontmatter shaping logic.
-func TestFrontmatter_OrchestratorAgent_StampsOrchestratorInjectionsVersion(t *testing.T) {
+func TestFrontmatter_OrchestratorAgent_StampsMosaicOrchestratorInjectionsVersion(t *testing.T) {
 	mod := newModule(t)
 
 	const wantVersion = "1.0"
@@ -63,35 +63,36 @@ func TestFrontmatter_OrchestratorAgent_StampsOrchestratorInjectionsVersion(t *te
 		t.Fatalf("Frontmatter(orchestrator): %v", err)
 	}
 
-	// Scan Set for the orchestrator_injections_version field.
+	// Scan Set for the mosaic_orchestrator_injections_version field.
 	var found *domain.FrontmatterField
 	for i := range plan.Set {
-		if plan.Set[i].Key == "orchestrator_injections_version" {
+		if plan.Set[i].Key == "mosaic_orchestrator_injections_version" {
 			f := plan.Set[i]
 			found = &f
 			break
 		}
 	}
 	if found == nil {
-		t.Fatalf("Frontmatter(orchestrator) Set does not contain key \"orchestrator_injections_version\"; "+
-			"the field must be stamped when AgentKey==\"orchestrator\" and OrchestratorInjectionsVersion is non-empty. "+
+		t.Fatalf("Frontmatter(orchestrator) Set does not contain key \"mosaic_orchestrator_injections_version\"; "+
+			"the field must be stamped under the prefixed name when AgentKey==\"orchestrator\" and "+
+			"OrchestratorInjectionsVersion is non-empty. "+
 			"Set keys: %v", setKeys(plan.Set))
 	}
 	if found.Value.Scalar != wantVersion {
-		t.Errorf("Set[\"orchestrator_injections_version\"].Value.Scalar = %q; want %q",
+		t.Errorf("Set[\"mosaic_orchestrator_injections_version\"].Value.Scalar = %q; want %q",
 			found.Value.Scalar, wantVersion)
 	}
 }
 
-// TestFrontmatter_SubagentAgent_DoesNotStampOrchestratorInjectionsVersion verifies that
+// TestFrontmatter_SubagentAgent_DoesNotStampMosaicOrchestratorInjectionsVersion verifies that
 // calling Frontmatter with a non-orchestrator AgentKey does not produce
-// "orchestrator_injections_version" in the returned FrontmatterPlan.Set. This satisfies
-// AC5.3: subagent deployed files must not carry the orchestrator_injections_version field.
+// "mosaic_orchestrator_injections_version" in the returned FrontmatterPlan.Set. Subagent
+// deployed files must not carry the orchestrator_injections_version field under any name.
 //
 // The source VersionStamps intentionally carries an empty OrchestratorInjectionsVersion
 // (as the harness module produces for subagents), mirroring the real call-site behavior.
 // This test passes in RED phase and serves as a regression guard after implementation.
-func TestFrontmatter_SubagentAgent_DoesNotStampOrchestratorInjectionsVersion(t *testing.T) {
+func TestFrontmatter_SubagentAgent_DoesNotStampMosaicOrchestratorInjectionsVersion(t *testing.T) {
 	mod := newModule(t)
 
 	req := domain.FrontmatterRequest{
@@ -110,27 +111,31 @@ func TestFrontmatter_SubagentAgent_DoesNotStampOrchestratorInjectionsVersion(t *
 		t.Fatalf("Frontmatter(test-writer subagent): %v", err)
 	}
 
-	// Verify the field is absent from Set.
+	// Verify neither the prefixed nor the legacy form appears in Set.
 	for _, f := range plan.Set {
-		if f.Key == "orchestrator_injections_version" {
+		if f.Key == "mosaic_orchestrator_injections_version" {
 			t.Errorf("Frontmatter(subagent \"test-writer\") Set contains key "+
+				"\"mosaic_orchestrator_injections_version\" = %q; this field must not appear in "+
+				"subagent frontmatter",
+				f.Value.Scalar)
+		}
+		if f.Key == "orchestrator_injections_version" {
+			t.Errorf("Frontmatter(subagent \"test-writer\") Set contains legacy key "+
 				"\"orchestrator_injections_version\" = %q; this field must not appear in "+
-				"subagent frontmatter (AC5.3: subagent deployed files do not carry the field)",
+				"subagent frontmatter under any name",
 				f.Value.Scalar)
 		}
 	}
 }
 
-// TestDescriptor_KeyOrder_ContainsOrchestratorInjectionsVersionAfterInjectionsVersion
+// TestDescriptor_KeyOrder_ContainsMosaicOrchestratorInjectionsVersionAfterMosaicInjectionsVersion
 // verifies that the claude-code descriptor's key_order list includes
-// "orchestrator_injections_version" in the position immediately after "injections_version".
-// The descriptor's key_order controls the position of each field in the deployed agent
-// file's frontmatter; incorrect positioning would put the new field out of the expected
-// location relative to its sibling version fields.
+// "mosaic_orchestrator_injections_version" in the position immediately after
+// "mosaic_injections_version". Both entries must use the prefixed names after Stage 4.
 //
-// RED: FAILS until I5.4 adds "orchestrator_injections_version" to the claude-code
-// descriptor's key_order list.
-func TestDescriptor_KeyOrder_ContainsOrchestratorInjectionsVersionAfterInjectionsVersion(t *testing.T) {
+// RED: FAILS until I4.4 updates the claude-code descriptor's key_order entries to the
+// prefixed names "mosaic_injections_version" and "mosaic_orchestrator_injections_version".
+func TestDescriptor_KeyOrder_ContainsMosaicOrchestratorInjectionsVersionAfterMosaicInjectionsVersion(t *testing.T) {
 	mod := newModule(t)
 	desc := mod.Descriptor()
 
@@ -139,25 +144,25 @@ func TestDescriptor_KeyOrder_ContainsOrchestratorInjectionsVersionAfterInjection
 	injectionsIdx := -1
 	orchIdx := -1
 	for i, key := range keyOrder {
-		if key == "injections_version" {
+		if key == "mosaic_injections_version" {
 			injectionsIdx = i
 		}
-		if key == "orchestrator_injections_version" {
+		if key == "mosaic_orchestrator_injections_version" {
 			orchIdx = i
 		}
 	}
 
 	if orchIdx == -1 {
-		t.Fatalf("descriptor key_order does not contain \"orchestrator_injections_version\"; "+
+		t.Fatalf("descriptor key_order does not contain \"mosaic_orchestrator_injections_version\"; "+
 			"current key_order: %v", keyOrder)
 	}
 	if injectionsIdx == -1 {
-		t.Fatalf("descriptor key_order does not contain \"injections_version\" (unexpected); "+
+		t.Fatalf("descriptor key_order does not contain \"mosaic_injections_version\" (unexpected); "+
 			"current key_order: %v", keyOrder)
 	}
 	if orchIdx != injectionsIdx+1 {
-		t.Errorf("\"orchestrator_injections_version\" is at key_order[%d], want key_order[%d] "+
-			"(immediately after \"injections_version\" at index %d); "+
+		t.Errorf("\"mosaic_orchestrator_injections_version\" is at key_order[%d], want key_order[%d] "+
+			"(immediately after \"mosaic_injections_version\" at index %d); "+
 			"current key_order: %v",
 			orchIdx, injectionsIdx+1, injectionsIdx, keyOrder)
 	}

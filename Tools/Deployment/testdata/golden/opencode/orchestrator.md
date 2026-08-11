@@ -1,8 +1,8 @@
 ---
 version: 7.3.1
-transform_version: 3.0.0
-injections_version: 1.3.1
-orchestrator_injections_version: 1.0.0
+mosaic_transform_version: 3.0.0
+mosaic_injections_version: 1.3.1
+mosaic_orchestrator_injections_version: 1.0.0
 description: Central coordinator that manages multi-agent workflow execution, routing tasks to subagents and maintaining execution state
 mode: primary
 model: github-copilot/claude-sonnet-4-6

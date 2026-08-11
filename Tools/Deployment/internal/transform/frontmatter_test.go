@@ -236,8 +236,10 @@ func TestFrontmatter_KeyOrder_OutputMatchesDescriptorOrder(t *testing.T) {
 }
 
 // TestFrontmatter_UntouchedFieldsPreservedVerbatim asserts that fields not in the Add,
-// Drop, or special-cased (model, tools, version stamps) sets are carried through
-// byte-identical. The fixture descriptor preserves: id, version, description, required_skills.
+// Drop, or special-cased (model, tools, version stamps, id rename) sets are carried through
+// byte-identical. The fixture descriptor preserves: version, description, required_skills.
+// Note: the generic "id" field is renamed to "mosaic_id" in the deployed output (Step 4c),
+// so it is verified under its deployed name here.
 func TestFrontmatter_UntouchedFieldsPreservedVerbatim(t *testing.T) {
 	doc := applyFrontmatterSource(t)
 	fm := doc.Frontmatter()
@@ -248,7 +250,7 @@ func TestFrontmatter_UntouchedFieldsPreservedVerbatim(t *testing.T) {
 		scalar   string // non-empty for KindScalar
 	}
 	checks := []check{
-		{key: "id", wantKind: domain.KindScalar, scalar: "42"},
+		{key: "mosaic_id", wantKind: domain.KindScalar, scalar: "42"},
 		{key: "description", wantKind: domain.KindScalar, scalar: "Agent for frontmatter tests"},
 		{key: "required_skills", wantKind: domain.KindList},
 	}
@@ -293,12 +295,12 @@ func TestVersionStamp_TransformVersionFromModule(t *testing.T) {
 		t.Fatalf("Parse output: %v", err)
 	}
 
-	v, ok := doc.Frontmatter().Get("transform_version")
+	v, ok := doc.Frontmatter().Get("mosaic_transform_version")
 	if !ok {
-		t.Fatal("transform_version absent from output frontmatter")
+		t.Fatal("mosaic_transform_version absent from output frontmatter")
 	}
 	if v.Scalar != desc.TransformVersion {
-		t.Errorf("transform_version: want %q (from module descriptor), got %q",
+		t.Errorf("mosaic_transform_version: want %q (from module descriptor), got %q",
 			desc.TransformVersion, v.Scalar)
 	}
 }
@@ -326,12 +328,12 @@ func TestVersionStamp_InjectionsVersionFromModule(t *testing.T) {
 		t.Fatalf("Parse output: %v", err)
 	}
 
-	v, ok := doc.Frontmatter().Get("injections_version")
+	v, ok := doc.Frontmatter().Get("mosaic_injections_version")
 	if !ok {
-		t.Fatal("injections_version absent from output frontmatter")
+		t.Fatal("mosaic_injections_version absent from output frontmatter")
 	}
 	if v.Scalar != desc.InjectionsVersion {
-		t.Errorf("injections_version: want %q (from module descriptor), got %q",
+		t.Errorf("mosaic_injections_version: want %q (from module descriptor), got %q",
 			desc.InjectionsVersion, v.Scalar)
 	}
 }
@@ -360,7 +362,7 @@ func TestVersionStamp_AllThreeVersionFieldsPresent(t *testing.T) {
 	doc := applyFrontmatterSource(t)
 	fm := doc.Frontmatter()
 
-	requiredVersionKeys := []string{"version", "transform_version", "injections_version"}
+	requiredVersionKeys := []string{"version", "mosaic_transform_version", "mosaic_injections_version"}
 	for _, key := range requiredVersionKeys {
 		if _, ok := fm.Get(key); !ok {
 			t.Errorf("version field %q absent from output frontmatter", key)

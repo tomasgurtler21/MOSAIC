@@ -1,12 +1,15 @@
 # mosaic-deploy
 
 `mosaic-deploy` transforms and installs MOSAIC generic agent definitions into a
-target AI harness workspace. It handles two operations:
+target AI harness workspace. It handles several operations:
 
 - **Deploy** — create a new workspace from scratch by selecting agents, skills,
   workflows, and model assignments, then writing every file in one pass.
 - **Update** — bring an existing workspace up to date with the latest agent
   versions, preserving locally-modified files as you choose.
+- **Utility/infrastructure only** — deploy only Utility and Infrastructure
+  agents and their required skills, without touching workflows, hooks, or
+  orchestrator configuration.
 
 The tool reads from the MOSAIC source tree (generic agents, skills, hook bundles,
 workflow definitions) and writes harness-specific files to a workspace you own.
@@ -18,9 +21,10 @@ It never modifies MOSAIC sources.
 
 - [Installation](#installation)
 - [First run](#first-run)
-- [The two flows](#the-two-flows)
+- [The main flows](#the-main-flows)
   - [Deploy — create a new workspace](#deploy--create-a-new-workspace)
   - [Update — bring a workspace up to date](#update--bring-a-workspace-up-to-date)
+  - [Utility/infrastructure only — deploy a subset without workflows](#utilityinfrastructure-only--deploy-a-subset-without-workflows)
 - [Harness-only agents](#harness-only-agents)
   - [How Update detects harness-only agents](#how-update-detects-harness-only-agents)
   - [Refresh-scope prompt](#refresh-scope-prompt)
@@ -98,6 +102,9 @@ From the MOSAIC root, with the binary installed:
 
 # CLI — update an existing workspace
 ./mosaic-deploy update --harness claude-code --workspace /path/to/my-project --auto-confirm
+
+# CLI — deploy only utility and infrastructure agents
+./mosaic-deploy utility-infra --harness claude-code --workspace /path/to/my-project --auto-confirm
 ```
 
 On Windows, use `.\mosaic-deploy.exe` instead of `./mosaic-deploy`.
@@ -109,7 +116,7 @@ so repeated runs are faster.
 
 ---
 
-## The two flows
+## The main flows
 
 ### Deploy — create a new workspace
 
@@ -180,6 +187,39 @@ The update flow updates an existing workspace to the latest agent versions. It:
   --conflict backup \
   --auto-confirm
 ```
+
+### Utility/infrastructure only — deploy a subset without workflows
+
+The utility-infra flow deploys only Utility and Infrastructure agents and the skills they require. It never asks about workflows, hooks, or the orchestrator. Use it when you want to add or refresh these agent groups in a workspace that already has its orchestrator and workflows configured.
+
+The flow:
+
+1. Asks you to select utility agents (or pre-answer with `--utility`)
+2. Asks you to select infrastructure agents (or pre-answer with `--infrastructure`)
+3. Resolves models for infrastructure agents using the same two-batch logic as the full deploy, including the skip/gap path
+4. Shows a plan for review
+5. Writes only the selected agents and the skills they require
+
+Workflow-driven agents, the orchestrator, and hook bundles are not touched.
+
+**CLI example:**
+
+```sh
+# Ask interactively which agents to deploy.
+./mosaic-deploy utility-infra \
+  --harness claude-code \
+  --workspace /path/to/my-project
+
+# Non-interactive: pre-answer both selections.
+./mosaic-deploy utility-infra \
+  --harness claude-code \
+  --workspace /path/to/my-project \
+  --utility "code-reviewer,test-runner" \
+  --infrastructure "docker-manager" \
+  --auto-confirm
+```
+
+Pass `--dry-run` to see the plan without writing any files. See the [CLI Reference](docs/cli.md#utility-infra-subcommand) for the full flag list and nil/empty pre-answer convention.
 
 ---
 

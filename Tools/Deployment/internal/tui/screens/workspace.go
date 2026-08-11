@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"mosaic-deploy/internal/pathinput"
 	"mosaic-deploy/internal/tui/widgets"
 )
 
@@ -21,6 +22,15 @@ const (
 	PathKindDirectory PathKind = iota
 	// PathKindFile accepts an existing, readable regular file.
 	PathKindFile
+	// PathKindFileOrDirectory accepts either an existing readable regular file or an
+	// existing readable directory. Used by the harness-transform mode, whose input may be
+	// a single agent file or a folder of them.
+	//
+	// Screen wording: label "Agent file or folder path:", placeholder
+	// "/path/to/agent.md or /path/to/folder". Validation: non-empty after quote stripping;
+	// the path exists; it is a readable regular file or a readable directory. Writability
+	// is not required — this mode's output goes to the target harness's own resolved path.
+	PathKindFileOrDirectory
 )
 
 // WorkspaceScreen prompts the user for a workspace directory path and validates it before
@@ -97,6 +107,10 @@ func (s *WorkspaceScreen) SetPathKind(kind PathKind) {
 		label = "Agent file path:"
 		placeholder = "/path/to/agent.md"
 		validateFn = validateFilePath
+	case PathKindFileOrDirectory:
+		label = "Agent file or folder path:"
+		placeholder = "/path/to/agent.md or /path/to/folder"
+		validateFn = validateFileOrDirPath
 	default: // PathKindDirectory
 		label = "Workspace directory path:"
 		placeholder = "/path/to/workspace"
@@ -109,20 +123,9 @@ func (s *WorkspaceScreen) SetPathKind(kind PathKind) {
 	s.input = input
 }
 
-// stripMatchedOuterQuotes removes a single surrounding pair of double-quote characters when
-// both the first and last characters are double quotes. It strips exactly one outer pair; an
-// unmatched quote or multiple nested pairs are left unchanged. The input must already have
-// surrounding whitespace removed.
-func stripMatchedOuterQuotes(s string) string {
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s[1 : len(s)-1]
-	}
-	return s
-}
-
 // validateWorkspacePath runs the three-step validation on the path the user typed.
 func validateWorkspacePath(path string) error {
-	path = stripMatchedOuterQuotes(strings.TrimSpace(path))
+	path = pathinput.Unquote(strings.TrimSpace(path))
 	if path == "" {
 		return errors.New("path cannot be empty")
 	}
@@ -157,7 +160,7 @@ func validateWorkspacePath(path string) error {
 
 // validateFilePath runs the three-step validation on the file path the user typed.
 func validateFilePath(path string) error {
-	path = stripMatchedOuterQuotes(strings.TrimSpace(path))
+	path = pathinput.Unquote(strings.TrimSpace(path))
 	if path == "" {
 		return errors.New("path cannot be empty")
 	}
@@ -188,6 +191,47 @@ func validateFilePath(path string) error {
 	return nil
 }
 
+// validateFileOrDirPath runs validation for PathKindFileOrDirectory: the path must be
+// non-empty, exist on disk, and be either a readable regular file or a readable directory.
+// Writability is not required — the transform mode writes to the target harness's own path.
+func validateFileOrDirPath(path string) error {
+	path = pathinput.Unquote(strings.TrimSpace(path))
+	if path == "" {
+		return errors.New("path cannot be empty")
+	}
+
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return errors.New("path is not valid: " + err.Error())
+	}
+
+	info, err := os.Stat(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return errors.New("path does not exist: " + abs)
+		}
+		return errors.New("cannot access path: " + err.Error())
+	}
+
+	if info.IsDir() {
+		// Directory: probe readability by opening it.
+		f, openErr := os.Open(abs)
+		if openErr != nil {
+			return errors.New("directory is not readable: " + abs)
+		}
+		f.Close()
+		return nil
+	}
+
+	// Regular file: probe readability by opening for reading.
+	f, openErr := os.Open(abs)
+	if openErr != nil {
+		return errors.New("file is not readable: " + abs)
+	}
+	f.Close()
+	return nil
+}
+
 // Update processes a key message and delegates to the text input widget.
 func (s *WorkspaceScreen) Update(msg tea.Msg) tea.Cmd {
 	cmd := s.input.Update(msg)
@@ -207,6 +251,11 @@ func (s *WorkspaceScreen) View() string {
 		subtitle = "Enter the path to the harness-only agent file to promote."
 		guidanceText = "The path must be an existing, readable regular file.\n" +
 			"This is typically a .md file describing the agent.\n"
+	case PathKindFileOrDirectory:
+		title = "Agent File or Folder Path"
+		subtitle = "Enter the path to an agent file or a folder of agent files."
+		guidanceText = "The path must be an existing, readable file or directory.\n" +
+			"For a folder, only files directly under it are processed (non-recursive).\n"
 	default: // PathKindDirectory
 		title = "Workspace Path"
 		subtitle = "Enter the directory where agents will be deployed."
@@ -232,7 +281,7 @@ func (s *WorkspaceScreen) Back() bool { return s.input.Back() }
 
 // WorkspacePath returns the validated workspace path. Only valid when Done() is true.
 func (s *WorkspaceScreen) WorkspacePath() string {
-	p := stripMatchedOuterQuotes(strings.TrimSpace(s.input.Value()))
+	p := pathinput.Unquote(strings.TrimSpace(s.input.Value()))
 	abs, err := filepath.Abs(p)
 	if err != nil {
 		return p

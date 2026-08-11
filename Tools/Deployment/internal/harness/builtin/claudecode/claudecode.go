@@ -33,6 +33,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
 	"mosaic-deploy/internal/harness/injectionfile"
@@ -179,15 +180,16 @@ func (m *module) Frontmatter(req domain.FrontmatterRequest) (domain.FrontmatterP
 	}
 
 	keyOrder := m.desc.Frontmatter.KeyOrder
+	orchField, _ := agentfields.ByDeployedName("orchestrator_injections_version")
 	if req.AgentKey == "orchestrator" && req.Versions.OrchestratorInjectionsVersion != "" {
 		set = append(set, domain.FrontmatterField{
-			Key:   "orchestrator_injections_version",
+			Key:   orchField.Deployed,
 			Value: domain.ScalarValue(req.Versions.OrchestratorInjectionsVersion, domain.QuotePlain),
 		})
 	} else {
-		// For non-orchestrator agents, strip orchestrator_injections_version from the key
-		// order so the field is not positioned (and thus not emitted) in subagent output.
-		keyOrder = filterKeyOrder(keyOrder, "orchestrator_injections_version")
+		// For non-orchestrator agents, strip the orchestrator injections version field from the
+		// key order so it is not positioned (and thus not emitted) in subagent output.
+		keyOrder = filterKeyOrder(keyOrder, orchField.Deployed)
 	}
 
 	return domain.FrontmatterPlan{

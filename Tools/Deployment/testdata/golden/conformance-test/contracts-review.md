@@ -1,8 +1,5 @@
 ---
-id: 12
 version: 4.1.0
-transform_version: 1.0.0
-injections_version: 1.0.0
 description: Reviews technical design quality - ensuring interfaces, contracts, and data structures are complete, consistent, testable, and aligned with codebase patterns
 model: github-copilot/claude-sonnet-4-6
 tools:
@@ -12,6 +9,9 @@ tools:
   - search
   - ask_user
 role: subagent
+mosaic_transform_version: 1.0.0
+mosaic_injections_version: 1.0.0
+mosaic_id: 12
 ---
 
 [[SECTION:Identity]]

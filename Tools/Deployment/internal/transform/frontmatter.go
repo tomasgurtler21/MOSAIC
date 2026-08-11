@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
 )
 
@@ -160,35 +161,56 @@ func applyFrontmatter(
 		}
 	}
 
-	// Step 4: Stamp transform_version, injections_version, and tool_mappings_version.
-	if c := applyVersionStamp(fm, "transform_version", desc.TransformVersion); c != nil {
+	// Step 4: Stamp version fields under their mosaic_-prefixed deployed names, derived from
+	// the agentfields registry. No literal prefixed key names appear here; all names come from
+	// agentfields.ByDeployedName (which looks up by the legacy name) and uses field.Deployed.
+	tvField, _ := agentfields.ByDeployedName("transform_version")
+	if c := applyVersionStamp(fm, tvField.Deployed, desc.TransformVersion); c != nil {
 		changes = append(changes, *c)
 	}
-	if c := applyVersionStamp(fm, "injections_version", desc.InjectionsVersion); c != nil {
+	ivField, _ := agentfields.ByDeployedName("injections_version")
+	if c := applyVersionStamp(fm, ivField.Deployed, desc.InjectionsVersion); c != nil {
 		changes = append(changes, *c)
 	}
 	// tool_mappings_version is a content hash of the effective tool_destinations
 	// mappings for this harness (combined project + user config). It lets `update`
 	// detect stale tool mappings without re-diffing tool lists. See "The
 	// tool_mappings_version stamp" in Tools/Deployment/docs/configuration.md.
-	if c := applyVersionStamp(fm, "tool_mappings_version", req.ToolMappingsVersion); c != nil {
+	tmvField, _ := agentfields.ByDeployedName("tool_mappings_version")
+	if c := applyVersionStamp(fm, tmvField.Deployed, req.ToolMappingsVersion); c != nil {
 		changes = append(changes, *c)
 	}
 
 	// Step 4b: Stamp bundle_version for roles that receive bundle blocks. The stamp enables
 	// staleness detection on subsequent runs. Written only when AppliesToRole is true, so the
 	// orchestrator (which today receives no bundle blocks) is never stamped.
+	bvField, _ := agentfields.ByDeployedName("bundle_version")
 	if req.Bundle.AppliesToRole(req.Role) && req.Bundle.Version != "" {
 		before := ""
-		if v, ok := fm.Get("bundle_version"); ok {
+		if v, ok := fm.Get(bvField.Deployed); ok {
 			before = renderValue(v)
 		}
-		fm.Set("bundle_version", domain.ScalarValue(req.Bundle.Version, domain.QuotePlain))
+		fm.Set(bvField.Deployed, domain.ScalarValue(req.Bundle.Version, domain.QuotePlain))
 		changes = append(changes, FieldChange{
-			Key:    "bundle_version",
+			Key:    bvField.Deployed,
 			Before: before,
 			After:  req.Bundle.Version,
 			Reason: "bundle version stamp",
+		})
+	}
+
+	// Step 4c: Rename the generic "id" field to its mosaic_-prefixed deployed name. The
+	// generic source carries "id"; deployed files must carry the prefixed form. The
+	// agentfields registry supplies both names; no prefixed literal appears here.
+	idField, _ := agentfields.ByGeneric("id")
+	if v, ok := fm.Get(idField.Legacy); ok {
+		fm.Remove(idField.Legacy)
+		fm.Set(idField.Deployed, v)
+		changes = append(changes, FieldChange{
+			Key:    idField.Deployed,
+			Before: "",
+			After:  renderValue(v),
+			Reason: "id field rename to deployed form",
 		})
 	}
 

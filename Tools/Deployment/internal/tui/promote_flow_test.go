@@ -625,6 +625,13 @@ func (s *capturingPromoteService) Promote(ctx context.Context, req app.PromoteRe
 	s.lastPromoteReq = &req
 	return s.inner.Promote(ctx, req)
 }
+func (s *capturingPromoteService) TransformHarness(ctx context.Context, req app.TransformHarnessRequest) (app.TransformHarnessResult, error) {
+	return s.inner.TransformHarness(ctx, req)
+}
+
+func (s *capturingPromoteService) DeployUtilityInfrastructure(ctx context.Context, req app.UtilityInfraRequest) (domain.RunSummary, error) {
+	return s.inner.DeployUtilityInfrastructure(ctx, req)
+}
 
 // TestPromoteMode_SuppliesSelectedHarnessIDInRequest verifies that when the TUI executes a
 // promote run, the PromoteRequest carries the harness id that was selected on the harness

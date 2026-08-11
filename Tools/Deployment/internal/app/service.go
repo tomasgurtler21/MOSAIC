@@ -80,6 +80,33 @@ type Service interface {
 	// Hook artifacts remain entirely out of scope and registrations are always cleared.
 	UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest) (domain.RunSummary, error)
 
+	// TransformHarness converts one or more already-deployed agents from a source harness
+	// into a target harness's deployed form.
+	//
+	// req.Path may name a single agent file or a directory. A directory is enumerated
+	// non-recursively; only regular files with the source harness's agent extension are
+	// considered, and every other entry is reported as a skip rather than an error.
+	//
+	// Per-file independence is the contract: a mismatched, non-agent, or failing file is
+	// recorded in the result and the batch continues. A non-nil error is reserved for
+	// failures that make the whole run meaningless — an unresolvable harness id, an
+	// unreadable input path, or user cancellation of a question.
+	//
+	// No destination file is overwritten unless req.Overwrite is true; without it, an
+	// existing destination yields a per-file outcome with StatusFailed and
+	// ErrTransformDestinationExists as its reason.
+	TransformHarness(ctx context.Context, req TransformHarnessRequest) (TransformHarnessResult, error)
+
+	// DeployUtilityInfrastructure deploys only Utility and Infrastructure agents plus the
+	// artifacts they require (their skills). It asks exactly the QUtilityAgents and
+	// QInfrastructureAgents questions and the model questions those agents imply. It never
+	// asks QWorkflows or QHooks, never plans a workflow-driven agent, and never rewrites
+	// the deployed orchestrator.
+	//
+	// Infrastructure-agent model resolution behaves exactly as in DeployNew, including the
+	// skip path and the resulting GapNoModel entries.
+	DeployUtilityInfrastructure(ctx context.Context, req UtilityInfraRequest) (domain.RunSummary, error)
+
 	// Promote generates a generic agent source file from a single already boundary-tagged
 	// harness-only agent file, so that a one-off harness-specific agent becomes reusable
 	// across harnesses through the normal Deploy/Update flow.
@@ -210,6 +237,14 @@ type PromoteResult struct {
 	// RecoveredFields names the generic-only frontmatter fields the user supplied during
 	// this run, in ask order. Fields left absent are not listed.
 	RecoveredFields []string `json:"recoveredFields,omitempty"`
+	// StrippedFields lists frontmatter fields removed from the generated generic agent
+	// because they could not be recovered — unmappable diverted tool values and fields
+	// unknown to MOSAIC. Empty when nothing was stripped.
+	StrippedFields []StrippedField `json:"strippedFields,omitempty"`
+	// DivertedTools lists the harness-side tool entries recovered from diverted
+	// frontmatter fields (as opposed to the harness's main tools key), in extraction
+	// order. Reported separately from Tools so the user can see the recovery happened.
+	DivertedTools []string `json:"divertedTools,omitempty"`
 }
 
 // New constructs a Service with the supplied dependency set.

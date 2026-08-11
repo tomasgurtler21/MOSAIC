@@ -14,43 +14,72 @@ import (
 	"strconv"
 	"strings"
 
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/catalog"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
 )
 
-// promoteHarnessDropKeys derives the harness-specific frontmatter keys to drop from a
-// promoted generic file, using only the identified harness's own contract:
+// promoteHarnessDropSet is the unified result of the harness drop-key derivation and
+// field classification. Produced by a single module.Frontmatter call so both products
+// share the same plan.
+type promoteHarnessDropSet struct {
+	// DropKeys is the harness-specific frontmatter key drop set for PromoteInput.DropKeys.
+	DropKeys map[string]bool
+	// Classifier is the field classifier for the same harness, ready for unknown-field
+	// detection and diverted-field recovery in the same Promote call.
+	Classifier descriptor.FieldClassifier
+}
+
+// buildPromoteHarnessDropSet derives the harness-specific frontmatter drop set and the
+// field classifier from a resolved harness module. Both products derive from a single
+// module.Frontmatter call, so the classifier used for unknown-field detection and
+// diverted-field recovery later in the Promote call is guaranteed to be built from the
+// same plan that shaped the drop set.
 //
-//   - Descriptor().Frontmatter.ModelKey — the key the harness writes the model to
-//   - Descriptor().Frontmatter.ToolsKey — the key the harness writes its tools to
-//   - the Key of every entry in the harness's own FrontmatterPlan.Set
+// The drop set includes:
+//   - Descriptor().Frontmatter.ModelKey and ToolsKey — always included, even when those
+//     names happen to be MOSAIC generic vocabulary words (e.g. ModelKey="model").
+//   - Every key from FrontmatterPlan.Set. FrontmatterSpec.Drop and FrontmatterPlan.Remove
+//     name generic fields the harness removes at deploy time, which promote is trying to
+//     restore, not remove again (AD-3). Only plan.Set keys enter the drop set.
 //
-// Only key names are taken from the plan; values are never read. FrontmatterSpec.Drop and
-// FrontmatterPlan.Remove are deliberately excluded: they name generic fields the harness
-// removes at deploy time, which is what promote is trying to restore, not remove again.
-// Empty key names are ignored. Keys in promoteProtectedGenericKeys are excluded.
-//
-// The plan is requested for the promoted agent's own kind and key so a harness that shapes
-// its plan per artifact contributes the keys it would actually have added to this file.
-// A module whose Frontmatter call fails contributes only its descriptor keys, and the error
-// is returned so the caller can decide; it never panics or silently drops the whole set.
+// Keys in promoteProtectedGenericKeys are excluded (AD-4). On Frontmatter failure the
+// classifier is built from descriptor keys alone; the error is returned so the caller
+// can decide whether to proceed or abort.
 //
 // Pure with respect to the filesystem: it calls only module.Descriptor() and
 // module.Frontmatter(...), both of which the HarnessModule contract requires to be
 // deterministic and side-effect free.
-func promoteHarnessDropKeys(
+func buildPromoteHarnessDropSet(
 	module domain.HarnessModule,
 	kind domain.ArtifactKind,
 	agentKey string,
-) (map[string]bool, error) {
-	result := make(map[string]bool)
-
+) (promoteHarnessDropSet, error) {
 	desc := module.Descriptor()
 
-	// Collect the descriptor-level keys: the key the harness writes the model to and the
-	// key it writes its tool entries to. Empty strings and collisions with the protected
-	// generic keys are silently ignored (AD-4).
+	// Request the frontmatter plan for this specific agent kind and key. The plan is used
+	// both to populate the field classifier and to derive the plan-Set key contribution to
+	// the drop set.
+	plan, err := module.Frontmatter(domain.FrontmatterRequest{
+		Kind:     kind,
+		AgentKey: agentKey,
+	})
+
+	// Build the field classifier. On plan failure, use a zero plan so the classifier still
+	// contributes descriptor-declared keys. The error is returned alongside the partial set.
+	var clfPlan domain.FrontmatterPlan
+	if err == nil {
+		clfPlan = plan
+	}
+	clf := descriptor.NewFieldClassifier(desc, clfPlan)
+
+	result := make(map[string]bool)
+
+	// Descriptor-level keys: the key the harness writes the model to and the key it writes
+	// its tool entries to. Included even when they match a MOSAIC vocabulary name (e.g.
+	// ModelKey="model"), because the harness explicitly uses them and promote must remove
+	// them. AD-4 protected keys remain excluded.
 	if k := desc.Frontmatter.ModelKey; k != "" && !promoteProtectedGenericKeys[k] {
 		result[k] = true
 	}
@@ -58,28 +87,35 @@ func promoteHarnessDropKeys(
 		result[k] = true
 	}
 
-	// Request the frontmatter plan for this specific agent kind and key. Only the key names
-	// from FrontmatterPlan.Set are taken; values are never read. FrontmatterSpec.Drop and
-	// FrontmatterPlan.Remove are deliberately excluded: they name generic fields the harness
-	// removes at deploy time, which is exactly what promote is trying to restore (AD-3).
-	plan, err := module.Frontmatter(domain.FrontmatterRequest{
-		Kind:     kind,
-		AgentKey: agentKey,
-	})
-	if err != nil {
-		// Return whatever descriptor-level keys we already have alongside the error, so the
-		// caller can decide whether to proceed or abort. We never panic or silently discard.
-		return result, err
-	}
-
-	for _, field := range plan.Set {
+	// Plan.Set keys: the harness adds these to the deployed file; promote must remove them.
+	// Plan.Remove and Spec.Drop name generic fields the harness removes at deploy time —
+	// exactly what promote is trying to restore, not remove again (AD-3). Empty key names
+	// and collisions with protected generic keys are silently ignored.
+	for _, field := range clfPlan.Set {
 		if field.Key == "" || promoteProtectedGenericKeys[field.Key] {
 			continue
 		}
 		result[field.Key] = true
 	}
 
-	return result, nil
+	return promoteHarnessDropSet{DropKeys: result, Classifier: clf}, err
+}
+
+// promoteHarnessDropKeys derives the harness-specific frontmatter keys to drop from a
+// promoted generic file. It is a thin wrapper over buildPromoteHarnessDropSet for callers
+// that only need the drop-key map and not the field classifier.
+//
+// The plan is requested for the promoted agent's own kind and key so a harness that shapes
+// its plan per artifact contributes the keys it would actually have added to this file.
+// A module whose Frontmatter call fails contributes only its descriptor keys, and the error
+// is returned so the caller can decide; it never panics or silently drops the whole set.
+func promoteHarnessDropKeys(
+	module domain.HarnessModule,
+	kind domain.ArtifactKind,
+	agentKey string,
+) (map[string]bool, error) {
+	set, err := buildPromoteHarnessDropSet(module, kind, agentKey)
+	return set.DropKeys, err
 }
 
 // promoteRecoveredFields carries the generic-only frontmatter values recovered from the user
@@ -192,8 +228,9 @@ func (s *service) resolvePromoteTools(
 // A field the source already carries is not asked about — a harness that does not drop it
 // carried it through, and re-asking would be noise. Each remaining field is asked at most
 // once per run. A field the user does not supply (skipped, cancelled, unresolvable, or
-// answered with empty text) is returned as its zero value, which the generation core omits
-// from the output rather than writing blank.
+// answered with empty text) is returned as its zero value, which the generation core writes
+// with its empty form (recommended_tier: "", tier_rationale: "", required_skills: []) rather
+// than omitting it — a deliberate, scoped override of AD-12 for the promote direction.
 func (s *service) resolvePromoteGenericFields(
 	ctx context.Context,
 	facts promoteSourceFacts,
@@ -433,18 +470,109 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 	// reaches the harness's FrontmatterPlan through key (AD-15), not through kind.
 	kind := domain.ArtifactAgent
 
-	// Derive the harness-specific frontmatter drop-set from the resolved module's own
-	// contract (descriptor keys and plan-added key names). A plan failure is fatal:
-	// proceeding without the full drop-set would leak the harness's own added fields into
-	// the generic file — the exact defect this flow was designed to fix.
-	dropKeys, dropErr := promoteHarnessDropKeys(module, kind, key)
+	// Derive the harness-specific frontmatter drop-set and the field classifier from the
+	// resolved module's own contract. Both products share a single module.Frontmatter call
+	// so the two derivations are guaranteed to agree. A plan failure is fatal: proceeding
+	// without the full drop-set would leak the harness's own added fields into the generic
+	// file — the exact defect this flow was designed to fix.
+	harnessDropSet, dropErr := buildPromoteHarnessDropSet(module, kind, key)
 	if dropErr != nil {
 		return PromoteResult{}, fmt.Errorf("deriving harness frontmatter drop-set: %w", dropErr)
+	}
+	dropKeys := harnessDropSet.DropKeys
+	clf := harnessDropSet.Classifier
+
+	// Always add every diverted tool-destination field key to the drop set. These fields are
+	// harness artifacts whose content is recovered into the generic tools list; the key itself
+	// must never appear in the generic output (AC2.2, AC2.7).
+	for _, df := range descriptor.DivertedToolFields(module.Descriptor()) {
+		if !promoteProtectedGenericKeys[df.Key] {
+			dropKeys[df.Key] = true
+		}
+	}
+
+	// Parse the source frontmatter to classify each key and handle unknown fields (FR-3) and
+	// diverted fields (FR-2). We parse the source once here; buildGenericAgent parses it again,
+	// but promote is never a batch operation so this is acceptable.
+	var strippedFields []StrippedField
+	var divertedResolvedGenericNames []string // generic names recovered from diverted fields
+
+	srcDoc, srcParseErr := docformat.Parse(src)
+	if srcParseErr == nil {
+		srcFm := srcDoc.Frontmatter()
+
+		// Unknown-field detection (FR-3): classify every source key; keys that are ClassUnknown
+		// are added to the drop set and reported as stripped.
+		for _, k := range srcFm.Keys() {
+			if clf.Classify(k) == descriptor.ClassUnknown {
+				if !promoteProtectedGenericKeys[k] {
+					dropKeys[k] = true
+				}
+				val, _ := srcFm.Get(k)
+				rendered := descriptor.RenderFieldValues(val)
+				strippedFields = append(strippedFields, StrippedField{
+					Key:    k,
+					Values: rendered,
+					Reason: StripReasonUnknownField,
+				})
+			}
+		}
+
+		// Diverted-field recovery (FR-2, AC2.2, AC2.7): for each declared DestField destination,
+		// extract its entries from the source, reverse-map them, and either recover them into the
+		// generic tools list or report them as stripped — never prompt for diverted values.
+		seenDivertedGeneric := make(map[string]bool)
+		addDivertedGeneric := func(name string) {
+			if !seenDivertedGeneric[name] {
+				seenDivertedGeneric[name] = true
+				divertedResolvedGenericNames = append(divertedResolvedGenericNames, name)
+			}
+		}
+
+		for _, df := range descriptor.DivertedToolFields(module.Descriptor()) {
+			var fieldValue domain.FieldValue
+			if v, ok := srcFm.Get(df.Key); ok {
+				fieldValue = v
+			}
+			entries := descriptor.ExtractDivertedToolEntries(df, fieldValue)
+
+			var unmapped []string
+			for _, entry := range entries {
+				if genericName, ok := descriptor.ReverseMapTool(module.Descriptor(), entry); ok {
+					addDivertedGeneric(genericName)
+				} else {
+					unmapped = append(unmapped, entry)
+				}
+			}
+
+			// Report unmapped diverted values as stripped, per field (AC2.3, AC2.7).
+			// The field key is always dropped (handled above), regardless of how many values mapped.
+			if len(unmapped) > 0 {
+				strippedFields = append(strippedFields, StrippedField{
+					Key:    df.Key,
+					Values: unmapped,
+					Reason: StripReasonUnmappedDivertedValue,
+				})
+			}
+		}
 	}
 
 	// Reverse-map the harness tool entries to the authoritative generic tools list.
 	// resolvePromoteTools returns a non-nil slice (AD-7) so it is always authoritative.
 	resolvedTools, verbatimTools := s.resolvePromoteTools(ctx, module, facts.HarnessTools, req.FilePath)
+
+	// Append diverted-field recoveries to the generic tools list, deduplicating first-seen
+	// against entries already resolved from the main tools key.
+	seenMain := make(map[string]bool, len(resolvedTools))
+	for _, t := range resolvedTools {
+		seenMain[t] = true
+	}
+	for _, t := range divertedResolvedGenericNames {
+		if !seenMain[t] {
+			seenMain[t] = true
+			resolvedTools = append(resolvedTools, t)
+		}
+	}
 
 	// Recover the generic-only fields the harness dropped at deploy time.
 	recovered := s.resolvePromoteGenericFields(ctx, facts, req.FilePath)
@@ -486,6 +614,8 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 			Tools:           resolvedTools,
 			VerbatimTools:   verbatimTools,
 			RecoveredFields: recovered.Supplied,
+			StrippedFields:  strippedFields,
+			DivertedTools:   facts.DivertedTools,
 		}, nil
 	}
 
@@ -507,6 +637,8 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 		Tools:           resolvedTools,
 		VerbatimTools:   verbatimTools,
 		RecoveredFields: recovered.Supplied,
+		StrippedFields:  strippedFields,
+		DivertedTools:   facts.DivertedTools,
 	}, nil
 }
 

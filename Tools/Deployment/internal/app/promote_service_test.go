@@ -2727,121 +2727,6 @@ func TestPromote_RequiredSkillsSupplied_AppearsInRecoveredFields(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// T5.2: Skipped/unanswered values are absent from promoted file (AD-12, AC5.5)
-// ---------------------------------------------------------------------------
-
-// TestPromote_RecommendedTierSkipped_AbsentFromPromotedFile verifies that when the user
-// skips QPromoteRecommendedTier, the promoted file does not contain a recommended_tier key
-// — it must be absent entirely, never written as empty (AD-12, AC5.5).
-func TestPromote_RecommendedTierSkipped_AbsentFromPromotedFile(t *testing.T) {
-	// Arrange — source has no recommended_tier; stub answers with SkippedOne (default).
-	src := eligibleAgentWithoutRecoverableFields()
-	srcPath := writeSourceFile(t, src)
-	mosaicRoot := t.TempDir()
-	stub := interactiontest.NewBuilder().Build() // all questions → SkippedOne
-	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
-	svc := app.New(deps)
-
-	// Act
-	result, err := svc.Promote(context.Background(), app.PromoteRequest{
-		FilePath:  srcPath,
-		Category:  "TestCategory",
-		HarnessID: "stub-harness",
-	})
-	if err != nil {
-		t.Fatalf("Promote: %v", err)
-	}
-
-	// Assert — recommended_tier must be absent.
-	b, readErr := os.ReadFile(result.DestinationPath)
-	if readErr != nil {
-		t.Fatalf("read promoted file: %v", readErr)
-	}
-	doc, parseErr := docformat.Parse(b)
-	if parseErr != nil {
-		t.Fatalf("parse promoted file: %v", parseErr)
-	}
-	// Guard: ensure the file was actually written.
-	if _, ok := doc.Frontmatter().Get("id"); !ok {
-		t.Fatal("promoted file has no `id` key — the file may be empty; this guard prevents a vacuous pass")
-	}
-	if _, present := doc.Frontmatter().Get("recommended_tier"); present {
-		t.Error("recommended_tier is present in promoted file after a skipped answer; a skipped answer must produce no key (AD-12, AC5.5)")
-	}
-}
-
-// TestPromote_TierRationaleSkipped_AbsentFromPromotedFile verifies that when the user
-// skips QPromoteTierRationale, the promoted file does not contain a tier_rationale key
-// (AD-12, AC5.5).
-func TestPromote_TierRationaleSkipped_AbsentFromPromotedFile(t *testing.T) {
-	src := eligibleAgentWithoutRecoverableFields()
-	srcPath := writeSourceFile(t, src)
-	mosaicRoot := t.TempDir()
-	stub := interactiontest.NewBuilder().Build()
-	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
-	svc := app.New(deps)
-
-	result, err := svc.Promote(context.Background(), app.PromoteRequest{
-		FilePath:  srcPath,
-		Category:  "TestCategory",
-		HarnessID: "stub-harness",
-	})
-	if err != nil {
-		t.Fatalf("Promote: %v", err)
-	}
-
-	b, readErr := os.ReadFile(result.DestinationPath)
-	if readErr != nil {
-		t.Fatalf("read promoted file: %v", readErr)
-	}
-	doc, parseErr := docformat.Parse(b)
-	if parseErr != nil {
-		t.Fatalf("parse promoted file: %v", parseErr)
-	}
-	if _, ok := doc.Frontmatter().Get("id"); !ok {
-		t.Fatal("promoted file has no `id` key — guard prevents vacuous pass")
-	}
-	if _, present := doc.Frontmatter().Get("tier_rationale"); present {
-		t.Error("tier_rationale is present in promoted file after a skipped answer; must be absent (AD-12, AC5.5)")
-	}
-}
-
-// TestPromote_RequiredSkillsSkipped_AbsentFromPromotedFile verifies that when the user
-// skips QPromoteRequiredSkills, the promoted file does not contain a required_skills key
-// (AD-12, AC5.5).
-func TestPromote_RequiredSkillsSkipped_AbsentFromPromotedFile(t *testing.T) {
-	src := eligibleAgentWithoutRecoverableFields()
-	srcPath := writeSourceFile(t, src)
-	mosaicRoot := t.TempDir()
-	stub := interactiontest.NewBuilder().Build()
-	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
-	svc := app.New(deps)
-
-	result, err := svc.Promote(context.Background(), app.PromoteRequest{
-		FilePath:  srcPath,
-		Category:  "TestCategory",
-		HarnessID: "stub-harness",
-	})
-	if err != nil {
-		t.Fatalf("Promote: %v", err)
-	}
-
-	b, readErr := os.ReadFile(result.DestinationPath)
-	if readErr != nil {
-		t.Fatalf("read promoted file: %v", readErr)
-	}
-	doc, parseErr := docformat.Parse(b)
-	if parseErr != nil {
-		t.Fatalf("parse promoted file: %v", parseErr)
-	}
-	if _, ok := doc.Frontmatter().Get("id"); !ok {
-		t.Fatal("promoted file has no `id` key — guard prevents vacuous pass")
-	}
-	if _, present := doc.Frontmatter().Get("required_skills"); present {
-		t.Error("required_skills is present in promoted file after a skipped answer; must be absent (AD-12, AC5.5)")
-	}
-}
 
 // ---------------------------------------------------------------------------
 // T5.2: Non-interactive path completes without error (AC5.6)
@@ -2951,44 +2836,6 @@ func TestPromote_RequiredSkills_EmptyCommaEntries_Discarded(t *testing.T) {
 	}
 }
 
-// TestPromote_RequiredSkills_OnlyCommas_AbsentFromPromotedFile verifies that when the user
-// enters only commas or whitespace (producing no non-empty entries after splitting and
-// trimming), the required_skills key is omitted entirely from the promoted file (AD-11,
-// AD-12). An answer of pure separators is equivalent to a skipped answer.
-func TestPromote_RequiredSkills_OnlyCommas_AbsentFromPromotedFile(t *testing.T) {
-	src := eligibleAgentWithoutRecoverableFields()
-	srcPath := writeSourceFile(t, src)
-	mosaicRoot := t.TempDir()
-	stub := interactiontest.NewBuilder().
-		AnswerText(domain.QPromoteRequiredSkills, srcPath, " , , ").
-		Build()
-	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
-	svc := app.New(deps)
-
-	result, err := svc.Promote(context.Background(), app.PromoteRequest{
-		FilePath:  srcPath,
-		Category:  "TestCategory",
-		HarnessID: "stub-harness",
-	})
-	if err != nil {
-		t.Fatalf("Promote: %v", err)
-	}
-
-	b, readErr := os.ReadFile(result.DestinationPath)
-	if readErr != nil {
-		t.Fatalf("read promoted file: %v", readErr)
-	}
-	doc, parseErr := docformat.Parse(b)
-	if parseErr != nil {
-		t.Fatalf("parse promoted file: %v", parseErr)
-	}
-	if _, ok := doc.Frontmatter().Get("id"); !ok {
-		t.Fatal("promoted file has no `id` key — guard prevents vacuous pass")
-	}
-	if _, present := doc.Frontmatter().Get("required_skills"); present {
-		t.Error("required_skills is present after an all-commas answer; an answer with no non-empty entries must produce no key (AD-11, AD-12)")
-	}
-}
 
 // TestPromote_EachRecoverableField_AskedAtMostOnce verifies that each recoverable-field
 // question is asked at most once per promote invocation, even if the source lacks all three
@@ -3570,5 +3417,588 @@ func TestPromote_RealOpenCodeFixture_Parity_BodyAndFrontmatter(t *testing.T) {
 		if strings.TrimSpace(between) != "" {
 			t.Errorf("[[DEPLOYED:%s]] region is not empty: content = %q", tag, between)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stage 3: Always-present deployment metadata — service-layer tests
+//
+// After Stage 3 the promote service must always write recommended_tier,
+// tier_rationale, and required_skills to the promoted file — even when the
+// corresponding question is skipped, cancelled, or not answered. Unanswered
+// questions produce empty values; values the source already carries are
+// preserved unchanged.
+//
+// The "skipped → empty present" tests below are TDD RED: they fail with the
+// current implementation because the service+core combination today omits the
+// three fields when no answer is supplied. They will pass after I3.1.
+//
+// The "source carries → retained" tests are regression guards that document
+// already-correct behaviour and verify it is not broken by the Stage 3 changes.
+// ---------------------------------------------------------------------------
+
+// TestPromote_RecommendedTierSkipped_PresentAsEmptyScalarInWrittenFile verifies that
+// when the user skips QPromoteRecommendedTier, the promoted file carries
+// recommended_tier with an empty scalar value — never absent. Scoped AD-12 override.
+func TestPromote_RecommendedTierSkipped_PresentAsEmptyScalarInWrittenFile(t *testing.T) {
+	src := eligibleAgentWithoutRecoverableFields()
+	srcPath := writeSourceFile(t, src)
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().Build() // all questions → SkippedOne
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	b, readErr := os.ReadFile(result.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("read promoted file: %v", readErr)
+	}
+	doc, parseErr := docformat.Parse(b)
+	if parseErr != nil {
+		t.Fatalf("parse promoted file: %v", parseErr)
+	}
+	// Guard: ensure the file was actually written.
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("promoted file has no `id` key — the file may be empty; guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("recommended_tier")
+	if !present {
+		t.Error("recommended_tier is absent from promoted file after a skipped answer; the key must be present with an empty value (scoped AD-12 override)")
+		return
+	}
+	if v.Kind != domain.KindScalar {
+		t.Errorf("recommended_tier has kind %v, want KindScalar (empty scalar)", v.Kind)
+	}
+	if v.Scalar != "" {
+		t.Errorf("recommended_tier = %q, want empty string; a skipped answer must produce an empty scalar", v.Scalar)
+	}
+}
+
+// TestPromote_TierRationaleSkipped_PresentAsEmptyScalarInWrittenFile verifies that when
+// the user skips QPromoteTierRationale, the promoted file carries tier_rationale with an
+// empty scalar value — never absent. Scoped AD-12 override.
+func TestPromote_TierRationaleSkipped_PresentAsEmptyScalarInWrittenFile(t *testing.T) {
+	src := eligibleAgentWithoutRecoverableFields()
+	srcPath := writeSourceFile(t, src)
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().Build()
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	b, readErr := os.ReadFile(result.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("read promoted file: %v", readErr)
+	}
+	doc, parseErr := docformat.Parse(b)
+	if parseErr != nil {
+		t.Fatalf("parse promoted file: %v", parseErr)
+	}
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("promoted file has no `id` key — guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("tier_rationale")
+	if !present {
+		t.Error("tier_rationale is absent from promoted file after a skipped answer; the key must be present with an empty value (scoped AD-12 override)")
+		return
+	}
+	if v.Kind != domain.KindScalar {
+		t.Errorf("tier_rationale has kind %v, want KindScalar (empty scalar)", v.Kind)
+	}
+	if v.Scalar != "" {
+		t.Errorf("tier_rationale = %q, want empty string; a skipped answer must produce an empty scalar", v.Scalar)
+	}
+}
+
+// TestPromote_RequiredSkillsSkipped_PresentAsEmptyListInWrittenFile verifies that when
+// the user skips QPromoteRequiredSkills, the promoted file carries required_skills as an
+// empty flow list — never absent. Scoped AD-12 override.
+func TestPromote_RequiredSkillsSkipped_PresentAsEmptyListInWrittenFile(t *testing.T) {
+	src := eligibleAgentWithoutRecoverableFields()
+	srcPath := writeSourceFile(t, src)
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().Build()
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	b, readErr := os.ReadFile(result.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("read promoted file: %v", readErr)
+	}
+	doc, parseErr := docformat.Parse(b)
+	if parseErr != nil {
+		t.Fatalf("parse promoted file: %v", parseErr)
+	}
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("promoted file has no `id` key — guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("required_skills")
+	if !present {
+		t.Error("required_skills is absent from promoted file after a skipped answer; the key must be present as an empty flow list (scoped AD-12 override)")
+		return
+	}
+	if v.Kind != domain.KindList {
+		t.Errorf("required_skills has kind %v, want KindList (empty flow list)", v.Kind)
+	}
+	if len(v.Items) != 0 {
+		t.Errorf("required_skills has %d item(s) after a skipped answer; want an empty list: %v", len(v.Items), v.Items)
+	}
+}
+
+// TestPromote_AllMetadataFieldsSkipped_AllPresentWithEmptyValues verifies that when all
+// three promote questions are skipped (the default non-interactive behaviour), the promoted
+// file carries all three deployment-metadata fields with empty values. The scoped AD-12
+// override must apply to all three fields simultaneously.
+func TestPromote_AllMetadataFieldsSkipped_AllPresentWithEmptyValues(t *testing.T) {
+	src := eligibleAgentWithoutRecoverableFields()
+	srcPath := writeSourceFile(t, src)
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().Build() // all questions → SkippedOne
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	b, readErr := os.ReadFile(result.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("read promoted file: %v", readErr)
+	}
+	doc, parseErr := docformat.Parse(b)
+	if parseErr != nil {
+		t.Fatalf("parse promoted file: %v", parseErr)
+	}
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("promoted file has no `id` key — guard prevents vacuous pass")
+	}
+	fm := doc.Frontmatter()
+	if _, present := fm.Get("recommended_tier"); !present {
+		t.Error("recommended_tier is absent; all three deployment-metadata fields must be present even when all questions were skipped")
+	}
+	if _, present := fm.Get("tier_rationale"); !present {
+		t.Error("tier_rationale is absent; all three deployment-metadata fields must be present even when all questions were skipped")
+	}
+	if _, present := fm.Get("required_skills"); !present {
+		t.Error("required_skills is absent; all three deployment-metadata fields must be present even when all questions were skipped")
+	}
+}
+
+// TestPromote_TierRationaleCancelled_PresentAsEmptyScalarInWrittenFile verifies that when
+// QPromoteTierRationale is explicitly cancelled, the promoted file still carries
+// tier_rationale with an empty scalar value. Cancelled is a non-answered outcome and must
+// behave identically to skipped under the scoped AD-12 override.
+func TestPromote_TierRationaleCancelled_PresentAsEmptyScalarInWrittenFile(t *testing.T) {
+	src := eligibleAgentWithoutRecoverableFields()
+	srcPath := writeSourceFile(t, src)
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().
+		AnswerCancelledText(domain.QPromoteTierRationale, srcPath).
+		Build()
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	b, readErr := os.ReadFile(result.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("read promoted file: %v", readErr)
+	}
+	doc, parseErr := docformat.Parse(b)
+	if parseErr != nil {
+		t.Fatalf("parse promoted file: %v", parseErr)
+	}
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("promoted file has no `id` key — guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("tier_rationale")
+	if !present {
+		t.Error("tier_rationale is absent from promoted file after a cancelled answer; a cancelled answer must produce an empty scalar, not omit the key")
+		return
+	}
+	if v.Scalar != "" {
+		t.Errorf("tier_rationale = %q, want empty string; a cancelled answer must produce an empty scalar value", v.Scalar)
+	}
+}
+
+// TestPromote_RequiredSkillsCancelled_PresentAsEmptyListInWrittenFile verifies that when
+// QPromoteRequiredSkills is explicitly cancelled, the promoted file still carries
+// required_skills as an empty flow list. Cancelled behaves identically to skipped.
+func TestPromote_RequiredSkillsCancelled_PresentAsEmptyListInWrittenFile(t *testing.T) {
+	src := eligibleAgentWithoutRecoverableFields()
+	srcPath := writeSourceFile(t, src)
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().
+		AnswerCancelledText(domain.QPromoteRequiredSkills, srcPath).
+		Build()
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	b, readErr := os.ReadFile(result.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("read promoted file: %v", readErr)
+	}
+	doc, parseErr := docformat.Parse(b)
+	if parseErr != nil {
+		t.Fatalf("parse promoted file: %v", parseErr)
+	}
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("promoted file has no `id` key — guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("required_skills")
+	if !present {
+		t.Error("required_skills is absent from promoted file after a cancelled answer; a cancelled answer must produce an empty list, not omit the key")
+		return
+	}
+	if v.Kind != domain.KindList {
+		t.Errorf("required_skills has kind %v, want KindList (empty flow list)", v.Kind)
+	}
+	if len(v.Items) != 0 {
+		t.Errorf("required_skills has %d item(s) after a cancelled answer; want an empty list: %v", len(v.Items), v.Items)
+	}
+}
+
+// TestPromote_RecommendedTierCancelled_PresentAsEmptyScalarInWrittenFile verifies that when
+// QPromoteRecommendedTier is explicitly cancelled, the promoted file still carries
+// recommended_tier with an empty scalar value. Cancelled is a non-answered outcome and must
+// behave identically to skipped under the scoped AD-12 override.
+func TestPromote_RecommendedTierCancelled_PresentAsEmptyScalarInWrittenFile(t *testing.T) {
+	src := eligibleAgentWithoutRecoverableFields()
+	srcPath := writeSourceFile(t, src)
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().
+		AnswerCancelledText(domain.QPromoteRecommendedTier, srcPath).
+		Build()
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	b, readErr := os.ReadFile(result.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("read promoted file: %v", readErr)
+	}
+	doc, parseErr := docformat.Parse(b)
+	if parseErr != nil {
+		t.Fatalf("parse promoted file: %v", parseErr)
+	}
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("promoted file has no `id` key — guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("recommended_tier")
+	if !present {
+		t.Error("recommended_tier is absent from promoted file after a cancelled answer; a cancelled answer must produce an empty scalar, not omit the key")
+		return
+	}
+	if v.Kind != domain.KindScalar {
+		t.Errorf("recommended_tier has kind %v, want KindScalar (empty scalar)", v.Kind)
+	}
+	if v.Scalar != "" {
+		t.Errorf("recommended_tier = %q, want empty string; a cancelled answer must produce an empty scalar value", v.Scalar)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stage 3: Empty-text answers produce present fields with empty values
+//
+// These tests verify that when a user explicitly answers a question with an
+// empty string (as distinct from skipping or cancelling), the three
+// deployment-metadata fields are still written with empty values in the
+// promoted file. The scoped AD-12 override applies to empty-text answers
+// just as it does to skipped and cancelled answers.
+//
+// These are TDD RED: they fail with the current implementation and will pass
+// after I3.1.
+// ---------------------------------------------------------------------------
+
+// TestPromote_RecommendedTierAnsweredEmpty_PresentAsEmptyScalarInWrittenFile verifies that
+// when the user answers QPromoteRecommendedTier with an empty string, the promoted file
+// carries recommended_tier with an empty scalar value — never absent. The design treats
+// an empty-text answer as equivalent to skipped or cancelled for this field.
+func TestPromote_RecommendedTierAnsweredEmpty_PresentAsEmptyScalarInWrittenFile(t *testing.T) {
+	src := eligibleAgentWithoutRecoverableFields()
+	srcPath := writeSourceFile(t, src)
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().
+		AnswerText(domain.QPromoteRecommendedTier, srcPath, "").
+		Build()
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	b, readErr := os.ReadFile(result.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("read promoted file: %v", readErr)
+	}
+	doc, parseErr := docformat.Parse(b)
+	if parseErr != nil {
+		t.Fatalf("parse promoted file: %v", parseErr)
+	}
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("promoted file has no `id` key — guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("recommended_tier")
+	if !present {
+		t.Error("recommended_tier is absent from promoted file after an empty-text answer; the key must be present with an empty value (scoped AD-12 override)")
+		return
+	}
+	if v.Kind != domain.KindScalar {
+		t.Errorf("recommended_tier has kind %v, want KindScalar (empty scalar)", v.Kind)
+	}
+	if v.Scalar != "" {
+		t.Errorf("recommended_tier = %q, want empty string; an empty-text answer must produce an empty scalar", v.Scalar)
+	}
+}
+
+// TestPromote_TierRationaleAnsweredEmpty_PresentAsEmptyScalarInWrittenFile verifies that
+// when the user answers QPromoteTierRationale with an empty string, the promoted file
+// carries tier_rationale with an empty scalar value — never absent.
+func TestPromote_TierRationaleAnsweredEmpty_PresentAsEmptyScalarInWrittenFile(t *testing.T) {
+	src := eligibleAgentWithoutRecoverableFields()
+	srcPath := writeSourceFile(t, src)
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().
+		AnswerText(domain.QPromoteTierRationale, srcPath, "").
+		Build()
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	b, readErr := os.ReadFile(result.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("read promoted file: %v", readErr)
+	}
+	doc, parseErr := docformat.Parse(b)
+	if parseErr != nil {
+		t.Fatalf("parse promoted file: %v", parseErr)
+	}
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("promoted file has no `id` key — guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("tier_rationale")
+	if !present {
+		t.Error("tier_rationale is absent from promoted file after an empty-text answer; the key must be present with an empty value (scoped AD-12 override)")
+		return
+	}
+	if v.Kind != domain.KindScalar {
+		t.Errorf("tier_rationale has kind %v, want KindScalar (empty scalar)", v.Kind)
+	}
+	if v.Scalar != "" {
+		t.Errorf("tier_rationale = %q, want empty string; an empty-text answer must produce an empty scalar", v.Scalar)
+	}
+}
+
+// TestPromote_RequiredSkillsAnsweredEmpty_PresentAsEmptyListInWrittenFile verifies that
+// when the user answers QPromoteRequiredSkills with an empty string (yielding no non-empty
+// entries after splitting), the promoted file carries required_skills as an empty flow list
+// — never absent. An empty-text answer is equivalent to skipped or cancelled.
+func TestPromote_RequiredSkillsAnsweredEmpty_PresentAsEmptyListInWrittenFile(t *testing.T) {
+	src := eligibleAgentWithoutRecoverableFields()
+	srcPath := writeSourceFile(t, src)
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().
+		AnswerText(domain.QPromoteRequiredSkills, srcPath, "").
+		Build()
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	b, readErr := os.ReadFile(result.DestinationPath)
+	if readErr != nil {
+		t.Fatalf("read promoted file: %v", readErr)
+	}
+	doc, parseErr := docformat.Parse(b)
+	if parseErr != nil {
+		t.Fatalf("parse promoted file: %v", parseErr)
+	}
+	if _, ok := doc.Frontmatter().Get("id"); !ok {
+		t.Fatal("promoted file has no `id` key — guard prevents vacuous pass")
+	}
+	v, present := doc.Frontmatter().Get("required_skills")
+	if !present {
+		t.Error("required_skills is absent from promoted file after an empty-text answer; the key must be present as an empty flow list (scoped AD-12 override)")
+		return
+	}
+	if v.Kind != domain.KindList {
+		t.Errorf("required_skills has kind %v, want KindList (empty flow list)", v.Kind)
+	}
+	if len(v.Items) != 0 {
+		t.Errorf("required_skills has %d item(s) after an empty-text answer; want an empty list: %v", len(v.Items), v.Items)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stage 3: Source-carried metadata field values are retained
+//
+// These regression guards verify that when the source already carries one of
+// the three deployment-metadata fields, its value is preserved in the promoted
+// file. This behaviour was already correct before Stage 3; the tests ensure it
+// is not broken by the AD-12 override change.
+// ---------------------------------------------------------------------------
+
+// TestPromote_SourceCarriesRecommendedTier_ValueRetainedInWrittenFile verifies that when
+// the source already carries recommended_tier, the promoted file contains the source's
+// original value — not an empty string. The "don't re-ask for a field the source already
+// carries" rule means the source value passes through unchanged.
+func TestPromote_SourceCarriesRecommendedTier_ValueRetainedInWrittenFile(t *testing.T) {
+	// eligibleHarnessOnlyAgentBytes carries recommended_tier: MEDIUM.
+	srcPath := writeSourceFile(t, eligibleHarnessOnlyAgentBytes())
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().Build()
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	gotTier, present := parseFrontmatterFieldSvc(t, result.DestinationPath, "recommended_tier")
+	if !present {
+		t.Fatal("recommended_tier is absent from promoted file; a source-carried value must be preserved in the output")
+	}
+	if gotTier != "MEDIUM" {
+		t.Errorf("recommended_tier = %q, want %q; the source's carried value must be preserved unchanged", gotTier, "MEDIUM")
+	}
+}
+
+// TestPromote_SourceCarriesTierRationale_ValueRetainedInWrittenFile verifies that when
+// the source already carries tier_rationale, the promoted file contains the source's
+// original value unchanged.
+func TestPromote_SourceCarriesTierRationale_ValueRetainedInWrittenFile(t *testing.T) {
+	// eligibleHarnessOnlyAgentBytes carries tier_rationale: "moderate capability needed for this task".
+	srcPath := writeSourceFile(t, eligibleHarnessOnlyAgentBytes())
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().Build()
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	gotRationale, present := parseFrontmatterFieldSvc(t, result.DestinationPath, "tier_rationale")
+	if !present {
+		t.Fatal("tier_rationale is absent from promoted file; a source-carried value must be preserved in the output")
+	}
+	const wantRationale = "moderate capability needed for this task"
+	if gotRationale != wantRationale {
+		t.Errorf("tier_rationale = %q, want %q; the source's carried value must be preserved unchanged", gotRationale, wantRationale)
+	}
+}
+
+// TestPromote_SourceCarriesRequiredSkills_ValueRetainedInWrittenFile verifies that when
+// the source already carries required_skills, the promoted file contains the source's
+// list value unchanged.
+func TestPromote_SourceCarriesRequiredSkills_ValueRetainedInWrittenFile(t *testing.T) {
+	// eligibleHarnessOnlyAgentBytes carries required_skills: [lean-tdd].
+	srcPath := writeSourceFile(t, eligibleHarnessOnlyAgentBytes())
+	mosaicRoot := t.TempDir()
+	stub := interactiontest.NewBuilder().Build()
+	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
+	svc := app.New(deps)
+
+	result, err := svc.Promote(context.Background(), app.PromoteRequest{
+		FilePath:  srcPath,
+		Category:  "TestCategory",
+		HarnessID: "stub-harness",
+	})
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	gotSkills := parseFrontmatterListSvc(t, result.DestinationPath, "required_skills")
+	if gotSkills == nil {
+		t.Fatal("required_skills is absent from promoted file; a source-carried list must be preserved in the output")
+	}
+	wantSkills := []string{"lean-tdd"}
+	if !reflect.DeepEqual(gotSkills, wantSkills) {
+		t.Errorf("required_skills = %v, want %v; the source's carried list must be preserved unchanged", gotSkills, wantSkills)
 	}
 }

@@ -89,15 +89,139 @@ func renderPromoteJSON(out io.Writer, result app.PromoteResult) {
 	_ = enc.Encode(result)
 }
 
+// renderTransformOutput writes the transform result and returns the appropriate exit code.
+// When format is "json", a TransformHarnessResult JSON document is written to out; otherwise
+// a human-readable summary is written to out. When svcErr is non-nil the error is written
+// to errOut and ExitFailure is returned.
+func renderTransformOutput(out, errOut io.Writer, format string, result app.TransformHarnessResult, svcErr error) int {
+	if svcErr != nil {
+		fmt.Fprintf(errOut, "error: %v\n", svcErr)
+		return ExitFailure
+	}
+	if strings.EqualFold(format, "json") {
+		enc := json.NewEncoder(out)
+		_ = enc.Encode(result)
+	} else {
+		renderTransformHuman(out, result)
+	}
+	return ExitSuccess
+}
+
+// renderTransformHuman writes a human-readable summary of the transform run to out.
+func renderTransformHuman(out io.Writer, result app.TransformHarnessResult) {
+	dryPrefix := ""
+	if result.DryRun {
+		dryPrefix = "dry run: "
+	}
+	fmt.Fprintf(out, "%stransform complete\nsource: %s → %s\ninput: %s\n",
+		dryPrefix, result.SourceHarnessID, result.TargetHarnessID, result.InputPath)
+	fmt.Fprintf(out, "transformed: %d  skipped-mismatch: %d  skipped-not-agent: %d  failed: %d\n",
+		result.Transformed, result.SkippedMismatch, result.SkippedNotAgent, result.Failed)
+	for _, f := range result.Files {
+		switch f.Status {
+		case app.StatusTransformed:
+			if result.DryRun {
+				fmt.Fprintf(out, "  [dry-run] %s → %s\n", f.SourcePath, f.DestinationPath)
+			} else {
+				fmt.Fprintf(out, "  transformed: %s → %s\n", f.SourcePath, f.DestinationPath)
+			}
+			if f.Warning != "" {
+				fmt.Fprintf(out, "    warning: %s\n", f.Warning)
+			}
+			if len(f.Tools) > 0 {
+				fmt.Fprintf(out, "    tools: %s\n", strings.Join(f.Tools, ", "))
+			}
+			if len(f.CarriedVerbatimTools) > 0 {
+				fmt.Fprintf(out, "    carried verbatim tools: %s\n", strings.Join(f.CarriedVerbatimTools, ", "))
+			}
+			for _, sf := range f.StrippedFields {
+				if len(sf.Values) > 0 {
+					fmt.Fprintf(out, "    stripped field: %s (%s): %s\n", sf.Key, string(sf.Reason), strings.Join(sf.Values, ", "))
+				} else {
+					fmt.Fprintf(out, "    stripped field: %s (%s)\n", sf.Key, string(sf.Reason))
+				}
+			}
+		case app.StatusSkippedMismatch:
+			fmt.Fprintf(out, "  skipped (mismatch): %s — %s\n", f.SourcePath, f.Reason)
+		case app.StatusSkippedNotAgent:
+			fmt.Fprintf(out, "  skipped (not agent): %s — %s\n", f.SourcePath, f.Reason)
+		case app.StatusFailed:
+			fmt.Fprintf(out, "  failed: %s — %s\n", f.SourcePath, f.Reason)
+		}
+	}
+}
+
+// renderUtilityInfraOutput writes the utility-infra run summary and returns the exit code.
+// When format is "json", a domain.RunSummary JSON document is written to out. Otherwise a
+// human-readable summary is written. A dry-run run includes a "dry run" indicator in the
+// human-readable output. When svcErr is non-nil the error is written to errOut and
+// ExitFailure is returned.
+func renderUtilityInfraOutput(out, errOut io.Writer, format string, dryRun bool, summary domain.RunSummary, svcErr error) int {
+	if svcErr != nil {
+		fmt.Fprintf(errOut, "error: %v\n", svcErr)
+		return ExitFailure
+	}
+	if strings.EqualFold(format, "json") {
+		renderJSON(out, summary)
+	} else {
+		renderUtilityInfraHuman(out, dryRun, summary)
+	}
+	return outcomeExitCode(summary.Outcome)
+}
+
+// renderUtilityInfraHuman writes a human-readable summary of a utility-infra run.
+// It mirrors renderHuman but adds a "dry run" prefix when the run was a dry-run.
+func renderUtilityInfraHuman(out io.Writer, dryRun bool, summary domain.RunSummary) {
+	prefix := ""
+	if dryRun {
+		prefix = "dry run: "
+	}
+	switch summary.Outcome {
+	case domain.OutcomeSuccess:
+		fmt.Fprintf(out, "%sdeployment complete\nworkspace: %s\n", prefix, summary.WorkspacePath)
+	case domain.OutcomeCompletedWithGaps:
+		fmt.Fprintf(out, "%scompleted with skips: some items were skipped and recorded in the TODO list\nworkspace: %s\n", prefix, summary.WorkspacePath)
+	case domain.OutcomeFailed:
+		fmt.Fprintf(out, "%sdeployment encountered errors\nworkspace: %s\n", prefix, summary.WorkspacePath)
+	default:
+		fmt.Fprintf(out, "%soutcome: %s\nworkspace: %s\n", prefix, string(summary.Outcome), summary.WorkspacePath)
+	}
+}
+
+// splitTrimmedParts splits a comma-separated string into trimmed, non-empty parts.
+// An empty input string yields a non-nil empty slice, preserving the CD-6 nil/empty semantics:
+// the caller passes a non-nil empty slice to mean "none, do not ask".
+func splitTrimmedParts(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
 // renderPromoteHuman writes a human-readable summary of the promote to out. The output
 // always names the destination path and the assigned numeric id, and states explicitly that
-// nothing was written when result.DryRun is true.
+// nothing was written when result.DryRun is true. Diverted tools recovered from harness
+// frontmatter fields and any stripped fields are reported after the primary summary.
 func renderPromoteHuman(out io.Writer, result app.PromoteResult) {
 	if result.DryRun {
 		fmt.Fprintf(out, "dry run: promote validated\nsource: %s\ndestination: %s (not written)\nkey: %s\nid: %s\n",
 			result.SourcePath, result.DestinationPath, result.Key, result.NumericID)
-		return
+	} else {
+		fmt.Fprintf(out, "promoted: %s\ndestination: %s\nkey: %s\nid: %s\n",
+			result.SourcePath, result.DestinationPath, result.Key, result.NumericID)
 	}
-	fmt.Fprintf(out, "promoted: %s\ndestination: %s\nkey: %s\nid: %s\n",
-		result.SourcePath, result.DestinationPath, result.Key, result.NumericID)
+	if len(result.DivertedTools) > 0 {
+		fmt.Fprintf(out, "diverted tools recovered: %s\n", strings.Join(result.DivertedTools, ", "))
+	}
+	for _, sf := range result.StrippedFields {
+		if len(sf.Values) > 0 {
+			fmt.Fprintf(out, "stripped field: %s (%s): %s\n", sf.Key, string(sf.Reason), strings.Join(sf.Values, ", "))
+		} else {
+			fmt.Fprintf(out, "stripped field: %s (%s)\n", sf.Key, string(sf.Reason))
+		}
+	}
 }

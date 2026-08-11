@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
 )
 
@@ -96,13 +97,20 @@ func buildDeployedAgentIndex(workspace, agentsDir string) DeployedAgentIndex {
 			continue
 		}
 
-		v, ok := fm.Get("id")
-		if !ok || v.Kind != domain.KindScalar || v.Scalar == "" {
-			// No `id` field or empty value — skip silently.
+		// Read the numeric ID from the deployed file, accepting both the prefixed (mosaic_-prefixed)
+		// and legacy (unprefixed) forms via agentfields.ReadOrder. The prefixed name is tried first.
+		idField, _ := agentfields.ByGeneric("id")
+		var numericID string
+		for _, key := range agentfields.ReadOrder(idField) {
+			if v, ok := fm.Get(key); ok && v.Kind == domain.KindScalar && v.Scalar != "" {
+				numericID = v.Scalar
+				break
+			}
+		}
+		if numericID == "" {
+			// No id field or empty value — skip silently.
 			continue
 		}
-
-		numericID := v.Scalar
 		targetPath := filepath.Join(agentsDir, name)
 		idx[numericID] = append(idx[numericID], DeployedAgentEntry{
 			NumericID:  numericID,

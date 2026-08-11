@@ -838,7 +838,7 @@ func TestContract_GHCP(t *testing.T) {
 						{Key: "user-invocable", Value: domain.ScalarValue("false", domain.QuotePlain)},
 					},
 					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
-					KeyOrder: []string{"id", "version", "transform_version", "injections_version", "name", "description", "model", "tools", "user-invocable"},
+					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "user-invocable"},
 				},
 			},
 		},

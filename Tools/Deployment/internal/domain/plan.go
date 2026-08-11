@@ -10,6 +10,13 @@ const (
 	// ModePromote generates a generic agent source file from a harness-only agent.
 	// It is never triggered by an Update run; it is always an explicit, opt-in command.
 	ModePromote RunMode = "promote"
+	// ModeTransformHarness converts already-deployed agents from one harness's form to
+	// another's, preserving injection content. Never triggered by an Update run.
+	ModeTransformHarness RunMode = "transform-harness"
+
+	// ModeUtilityInfraOnly deploys only Utility and Infrastructure agents, asking no
+	// workflow or hook questions.
+	ModeUtilityInfraOnly RunMode = "utility-infra-only"
 )
 
 // PlanAction is the intended deployment action for one artifact.

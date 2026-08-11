@@ -16,9 +16,9 @@ package builtin_test
 //   - No stale embedded-only model ID survives in any harness.
 //
 //   Key order preservation (three harnesses):
-//   - orchestrator_injections_version remains in FrontmatterSpec.KeyOrder for every
-//     affected embedded descriptor after migration. The embedded copies carry it; the
-//     public copies do not. A wholesale file copy during migration would drop it.
+//   - mosaic_orchestrator_injections_version is present in FrontmatterSpec.KeyOrder for every
+//     affected embedded descriptor after Stage 4 migration. The field must survive both the
+//     model list migration (Stage 1) and the mosaic_ prefix rename (Stage 4).
 //
 //   Claude Code non-model changes:
 //   - The "subagent" mapping resolves to ["Task", "TaskStop"] (both names, in order).
@@ -247,14 +247,17 @@ func TestDescriptorConsolidation_ModelIDs(t *testing.T) {
 // T1.2 — orchestrator_injections_version preservation
 // ─────────────────────────────────────────────────────────────────
 
-// TestDescriptorConsolidation_OrchestratorInjectionsVersionInKeyOrder verifies that
-// orchestrator_injections_version is present in each affected embedded descriptor's
-// frontmatter key_order.
+// TestDescriptorConsolidation_MosaicOrchestratorInjectionsVersionInKeyOrder verifies that
+// "mosaic_orchestrator_injections_version" is present in each affected embedded descriptor's
+// frontmatter key_order after the Stage 4 mosaic_ prefix migration.
 //
-// All three embedded descriptors already carry this entry; the public copies do not.
-// A wholesale copy of a public file into the embedded slot would silently drop it.
-// These tests pass in the RED phase and continue passing after a correct migration.
-func TestDescriptorConsolidation_OrchestratorInjectionsVersionInKeyOrder(t *testing.T) {
+// The embedded descriptors are the authoritative copies. Both the model list migration
+// (Stage 1) and the prefix rename (Stage 4/I4.4) update the key_order entries. This test
+// guards that the renamed entry survives both migrations.
+//
+// RED: FAILS until I4.4 renames the key_order entry from "orchestrator_injections_version"
+// to "mosaic_orchestrator_injections_version" in all three embedded descriptor YAML files.
+func TestDescriptorConsolidation_MosaicOrchestratorInjectionsVersionInKeyOrder(t *testing.T) {
 	cases := []struct {
 		harness string
 		dir     string
@@ -269,9 +272,9 @@ func TestDescriptorConsolidation_OrchestratorInjectionsVersionInKeyOrder(t *test
 		tc := tc
 		t.Run(tc.harness, func(t *testing.T) {
 			d := loadEmbeddedDescriptor(t, tc.dir, tc.file)
-			if !containsStr(d.Frontmatter.KeyOrder, "orchestrator_injections_version") {
-				t.Errorf("%s: Frontmatter.KeyOrder does not contain \"orchestrator_injections_version\"; "+
-					"this entry must survive the model list migration\n  KeyOrder: %v",
+			if !containsStr(d.Frontmatter.KeyOrder, "mosaic_orchestrator_injections_version") {
+				t.Errorf("%s: Frontmatter.KeyOrder does not contain \"mosaic_orchestrator_injections_version\"; "+
+					"the prefixed name must be present after Stage 4 descriptor update\n  KeyOrder: %v",
 					tc.harness, d.Frontmatter.KeyOrder)
 			}
 		})

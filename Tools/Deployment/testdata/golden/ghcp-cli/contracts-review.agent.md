@@ -1,8 +1,8 @@
 ---
-id: 12
+mosaic_id: 12
 version: 4.1.0
-transform_version: 3.0.0
-injections_version: 1.2.0
+mosaic_transform_version: 3.0.0
+mosaic_injections_version: 1.2.0
 name: contracts-review
 description: Reviews technical design quality - ensuring interfaces, contracts, and data structures are complete, consistent, testable, and aligned with codebase patterns
 model: claude-sonnet-4-6

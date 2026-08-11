@@ -67,9 +67,11 @@ to make anything happen on disk.
      manifest itself is unusable). This is a conservative bias: "found on disk but can't
      confirm we wrote it" is always treated as a conflict, never silently overwritten.
    - **Update** — hash matches the manifest record, but one or more version fields (`version`,
-     `transform_version`, `injections_version`, compared independently) differ between the
-     deployed file and the current source/harness values, or the deployed file carries no
-     readable version stamps at all. See Staleness Model below.
+     `mosaic_transform_version`, `mosaic_injections_version`, compared independently) differ
+     between the deployed file and the current source/harness values, or the deployed file
+     carries no readable version stamps at all. Legacy unprefixed names are accepted as
+     fallback at every read site; a file carrying only legacy names is not spuriously stale and
+     is migrated to the prefixed form on the next update. See Staleness Model below.
    - **Unchanged** — hash matches and all version fields agree with source.
 4. Gaps are also surfaced during planning, before any transform runs: an agent with no
    resolved model produces `GapNoModel`; a generic tool the harness cannot map produces
@@ -83,8 +85,14 @@ to make anything happen on disk.
 Staleness is evaluated per-field, never as a single "is this stale" boolean:
 
 - **Agents** compare three independent fields — `version` (the source file's own version),
-  `transform_version`, and `injections_version` (both sourced from the harness descriptor,
-  so a harness update alone can mark every agent stale even if no source file changed).
+  `mosaic_transform_version`, and `mosaic_injections_version` (both sourced from the harness
+  descriptor, so a harness update alone can mark every agent stale even if no source file
+  changed). The deployed field names carry the `mosaic_` prefix; each read site accepts the
+  legacy unprefixed names (`transform_version`, `injections_version`) as fallback so that
+  files produced before the prefix migration are not spuriously stale. The prefixed name wins
+  when both forms are present. The complete pairing of deployed names to legacy aliases is
+  defined in `Tools/Deployment/internal/agentfields` — no read or write site scatters literal
+  prefixed strings; all derive from that registry.
 - **Skills** and **hook bundles** compare a single `version` field each.
 
 Each mismatching field produces a `VersionDelta` (field name, deployed value, source value);
@@ -189,7 +197,7 @@ recorded is a real, detectable local modification, not noise to be smoothed over
 | Concept | Meaning |
 |---------|---------|
 | Plan item action | One of Create / Update / Unchanged / Conflict — the single classification a plan item carries into execution. |
-| Version delta | An independent per-field staleness signal (`version`, `transform_version`, `injections_version` for agents; a single `version` for skills/hooks). |
+| Version delta | An independent per-field staleness signal (`version`, `mosaic_transform_version`, `mosaic_injections_version` for agents; a single `version` for skills/hooks). Deployed field names carry the `mosaic_` prefix; legacy unprefixed names are accepted as fallback (prefixed wins when both present). |
 | Injection class | Harness / Project / Workflow — determines whether region content is always refreshed, preserved-then-refreshed, or fully reassembled. |
 | Gap | A structured "this needed a human decision or couldn't be automated" signal, produced at any of the plan/transform/deploy stages and funneled into `todo`. |
 | Fallback tier | Workspace / MOSAIC-root / OS-temp — the three-tier writability chain resolved exactly once per run. |

@@ -112,10 +112,10 @@ frontmatter:
     - "recommended_tier"
     - "tier_rationale"
   key_order:
-    - "id"
+    - "mosaic_id"
     - "version"
-    - "transform_version"
-    - "injections_version"
+    - "mosaic_transform_version"
+    - "mosaic_injections_version"
     - "description"
     - "mode"
     - "model"
