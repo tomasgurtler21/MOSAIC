@@ -26,7 +26,7 @@ negative: false
 
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
   opening_message: |
     Build the thing described in Requirements.md.
   invocation_kind: orchestrator
@@ -64,8 +64,8 @@ func TestParseTestDefinition_WellFormed_PopulatesCoreFields(t *testing.T) {
 	if def.Subject.Identity != "orchestrator" {
 		t.Errorf("Subject.Identity = %q, want %q", def.Subject.Identity, "orchestrator")
 	}
-	if def.Subject.DefinitionPath != ".claude/agents/orchestrator.md" {
-		t.Errorf("Subject.DefinitionPath = %q, want %q", def.Subject.DefinitionPath, ".claude/agents/orchestrator.md")
+	if def.Subject.CatalogAgentKey != "orchestrator" {
+		t.Errorf("Subject.CatalogAgentKey = %q, want %q", def.Subject.CatalogAgentKey, "orchestrator")
 	}
 	if def.StubRegistryPath != "stubs/happy-path.stubs.json" {
 		t.Errorf("StubRegistryPath = %q, want %q", def.StubRegistryPath, "stubs/happy-path.stubs.json")
@@ -81,7 +81,7 @@ id: d
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: stubs/d.stubs.json
 not_a_real_field: true
 `),
@@ -105,7 +105,7 @@ schema_version: 1
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: stubs/d.stubs.json
 `),
 	}
@@ -130,7 +130,7 @@ layer: subagent
 negative: true
 subject:
   identity: researcher
-  definition: .claude/agents/researcher.md
+  agent: researcher
 stub_registry: stubs/d.stubs.json
 `),
 	}
@@ -156,7 +156,7 @@ id: d
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: stubs/d.stubs.json
 repetitions: 3
 pass_rate: 0.67
@@ -184,7 +184,7 @@ id: d
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: stubs/d.stubs.json
 timeout: 15m
 turn_limit: 60
@@ -212,7 +212,7 @@ id: d
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: stubs/d.stubs.json
 parallel_groups:
   - name: research-fanout
@@ -258,7 +258,7 @@ id: d
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: stubs/d.stubs.json
 seed_files:
   - path: Orchestration-{run_id}/Orchestration.md
@@ -297,7 +297,7 @@ id: d
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: stubs/d.stubs.json
 assertions:
 %s
@@ -472,7 +472,7 @@ id: d
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: stubs/d.stubs.json
 assertions:
   artifact_created: []

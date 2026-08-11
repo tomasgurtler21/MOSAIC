@@ -107,7 +107,7 @@ layer: orchestrator
 harness: claude-code
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: stubs/d.stubs.json
 `),
 	}
@@ -133,7 +133,7 @@ id: d
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: stubs/d.stubs.json
 `),
 	}

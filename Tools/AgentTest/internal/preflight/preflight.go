@@ -4,11 +4,14 @@
 package preflight
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"mosaic-agent-test/internal/agentdeploy"
 	"mosaic-agent-test/internal/authoring"
 	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/fixtures"
@@ -33,6 +36,23 @@ type Input struct {
 	// errors, so an unusable environment is refused before any subject is
 	// spawned and any cost is incurred.
 	Environment domain.EnvironmentReport
+
+	// Deploy renders declarations in dry-run mode to validate them against
+	// the real catalogue, so a subject naming an agent that does not exist,
+	// or a workflow id that does not exist, is refused before any sandbox is
+	// created and any cost is incurred. Supplied by the composition root.
+	//
+	// A nil Deploy skips exactly the checks that need it and no others,
+	// following the same "not supplied means not checked" convention as a
+	// zero-valued Capabilities.
+	Deploy domain.AgentDeployer
+
+	// DeployScratchRoot is the workspace root the dry-run renders are pointed
+	// at. Nothing is written there — DryRun suppresses both the write and the
+	// parent-directory creation — so it need not exist; it exists as a field
+	// rather than a constant so a test can assert the value the port received.
+	// Supplied by the composition root alongside Deploy.
+	DeployScratchRoot string
 }
 
 // Overrides are CLI-flag-sourced values applied on top of a suite's
@@ -177,6 +197,10 @@ func Validate(in Input) (Plan, authoring.Report) {
 
 		checkParallelGroups(&report, defPath, def)
 		checkSuppressedAssertions(&report, defPath, def)
+		checkDeploymentDeclarations(&report, defPath, defDir, def, in)
+		if haveRegistry {
+			checkUndeclaredStubAgents(&report, defPath, def, registry)
+		}
 
 		effective := mergeSettings(mergeSettings(suite.Defaults, entry.Settings), def.Settings)
 		effective = applyOverrides(effective, in.Overrides)
@@ -526,5 +550,191 @@ func rangeDiagnostic(path, field, reason string) authoring.Diagnostic {
 		Path:     path,
 		Pointer:  field,
 		Message:  fmt.Sprintf("%s %s", field, reason),
+	}
+}
+
+// checkDeploymentDeclarations validates the subject's agent declaration and
+// each stub agent's source path against the real catalogue, reporting every
+// error found rather than stopping at the first.
+//
+// Field-inspection checks (missing-subject-agent, missing-stub-definition)
+// run unconditionally. Render-based checks run only when in.Deploy is non-nil,
+// following the same "not supplied means not checked" convention as
+// zero-valued Capabilities.
+func checkDeploymentDeclarations(report *authoring.Report, defPath, defDir string, def domain.TestDefinition, in Input) {
+	// missing-subject-agent: field inspection, no render needed.
+	if def.Subject.CatalogAgentKey == "" {
+		report.Add(authoring.Diagnostic{
+			Severity: authoring.SeverityError,
+			Code:     "missing-subject-agent",
+			Path:     defPath,
+			Pointer:  "subject.agent",
+			Message:  "subject declares no catalogue agent key; use subject.agent to name the agent to render",
+		})
+	} else if in.Deploy != nil {
+		// Dry-run the subject to validate the catalogue agent and workflow ids.
+		checkSubjectRender(report, defPath, def, in)
+	}
+
+	// Stub agent checks: os.Stat for file existence, then dry-run render if
+	// the file exists and Deploy is non-nil.
+	for si, sa := range def.StubAgents {
+		resolvedPath := filepath.Join(defDir, filepath.FromSlash(sa.SourcePath))
+		if _, err := os.Stat(resolvedPath); err != nil {
+			report.Add(authoring.Diagnostic{
+				Severity: authoring.SeverityError,
+				Code:     "missing-stub-definition",
+				Path:     defPath,
+				Pointer:  fmt.Sprintf("stub_agents[%d].source", si),
+				Message:  fmt.Sprintf("stub definition source file %q not found", sa.SourcePath),
+			})
+			continue
+		}
+		if in.Deploy == nil {
+			continue
+		}
+		_, renderErr := in.Deploy.Render(context.Background(), domain.RenderAgentRequest{
+			SourcePath:    resolvedPath,
+			HarnessID:     in.HarnessID,
+			WorkspaceRoot: in.DeployScratchRoot,
+			DryRun:        true,
+		})
+		if renderErr != nil {
+			if isToolFailure(renderErr) {
+				addDeployToolProblem(report, renderErr)
+				return
+			}
+			report.Add(authoring.Diagnostic{
+				Severity: authoring.SeverityError,
+				Code:     "unrenderable-stub-definition",
+				Path:     defPath,
+				Pointer:  fmt.Sprintf("stub_agents[%d].source", si),
+				Message:  fmt.Sprintf("stub definition %q failed dry-run render: %v", sa.SourcePath, renderErr),
+			})
+		}
+	}
+}
+
+// checkSubjectRender performs a dry-run render of the subject declaration and
+// maps the deployment tool's reason code to a preflight diagnostic. It reports
+// at most one subject diagnostic per test: a single dry-run render can only
+// reveal the first failure in the tool's validation order, and that is the
+// honest maximum it can report.
+func checkSubjectRender(report *authoring.Report, defPath string, def domain.TestDefinition, in Input) {
+	_, err := in.Deploy.Render(context.Background(), domain.RenderAgentRequest{
+		CatalogAgentKey: def.Subject.CatalogAgentKey,
+		HarnessID:       in.HarnessID,
+		WorkspaceRoot:   in.DeployScratchRoot,
+		Workflows:       def.Subject.Workflows,
+		DryRun:          true,
+	})
+	if err == nil {
+		return
+	}
+
+	if isToolFailure(err) {
+		addDeployToolProblem(report, err)
+		return
+	}
+
+	var re *agentdeploy.RenderError
+	if errors.As(err, &re) {
+		switch re.Reason {
+		case "agent-not-in-catalog":
+			report.Add(authoring.Diagnostic{
+				Severity: authoring.SeverityError,
+				Code:     "unknown-subject-agent",
+				Path:     defPath,
+				Pointer:  "subject.agent",
+				Message: fmt.Sprintf("catalogue agent %q not found: %s",
+					def.Subject.CatalogAgentKey, re.ToolMessage),
+			})
+			return
+		case "unknown-workflow":
+			report.Add(authoring.Diagnostic{
+				Severity: authoring.SeverityError,
+				Code:     "unknown-workflow",
+				Path:     defPath,
+				Pointer:  "subject.workflows",
+				Message: fmt.Sprintf("workflow %q is not in the catalogue: %s",
+					re.Detail, re.ToolMessage),
+			})
+			return
+		}
+		// Any other reason code — including future codes not modelled here —
+		// is treated as unrenderable-subject-declaration. This is the
+		// forward-compatibility rule: an unrecognised reason degrades to a less
+		// specific diagnostic rather than to a wrong one.
+		report.Add(authoring.Diagnostic{
+			Severity: authoring.SeverityError,
+			Code:     "unrenderable-subject-declaration",
+			Path:     defPath,
+			Pointer:  "subject",
+			Message:  fmt.Sprintf("subject declaration failed dry-run render: %s", re.ToolMessage),
+		})
+		return
+	}
+
+	// Non-RenderError: something unexpected (e.g. ErrUnparseableOutput). Treat
+	// as unrenderable-subject-declaration since it is not a tool-availability
+	// failure.
+	report.Add(authoring.Diagnostic{
+		Severity: authoring.SeverityError,
+		Code:     "unrenderable-subject-declaration",
+		Path:     defPath,
+		Pointer:  "subject",
+		Message:  fmt.Sprintf("subject declaration failed dry-run render: %v", err),
+	})
+}
+
+// isToolFailure reports whether err represents a deployment-tool availability
+// problem (the tool could not be invoked or timed out) rather than a
+// declaration problem. These must be reported through the environment-problem
+// channel rather than as declaration diagnostics.
+func isToolFailure(err error) bool {
+	return errors.Is(err, agentdeploy.ErrToolUnavailable) || errors.Is(err, agentdeploy.ErrTimedOut)
+}
+
+// addDeployToolProblem reports a tool-availability failure as an
+// environment-unusable diagnostic so it is not mistaken for a declaration error.
+func addDeployToolProblem(report *authoring.Report, err error) {
+	report.Add(authoring.Diagnostic{
+		Severity: authoring.SeverityError,
+		Code:     "environment-unusable",
+		Message:  fmt.Sprintf("deployment tool unavailable: %v", err),
+	})
+}
+
+// checkUndeclaredStubAgents reports "undeclared-stub-agent" for every
+// collaborator identity present in the stub registry that has no corresponding
+// stub_agents entry. A dispatch to a collaborator with no deployed definition
+// file is a hard-to-diagnose run-time failure for a declaration error that is
+// fully knowable before the run.
+func checkUndeclaredStubAgents(report *authoring.Report, defPath string, def domain.TestDefinition, registry domain.StubRegistry) {
+	// Build a set of declared stub identities.
+	declared := make(map[domain.CollaboratorIdentity]bool, len(def.StubAgents))
+	for _, sa := range def.StubAgents {
+		declared[sa.Identity] = true
+	}
+
+	// Report any registry collaborator identity that has no declared stub agent.
+	reported := make(map[domain.CollaboratorIdentity]bool)
+	for si, stub := range registry.Stubs {
+		id := stub.Match.Identity
+		if declared[id] || reported[id] {
+			continue
+		}
+		reported[id] = true
+		report.Add(authoring.Diagnostic{
+			Severity: authoring.SeverityError,
+			Code:     "undeclared-stub-agent",
+			Path:     defPath,
+			Pointer:  fmt.Sprintf("stubs[%d].match", si),
+			Message: fmt.Sprintf(
+				"collaborator %+v is in the stub registry but has no stub_agents definition; "+
+					"add a stub_agents entry with its source file so the deployment tool can render it",
+				id,
+			),
+		})
 	}
 }

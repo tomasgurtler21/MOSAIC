@@ -9,7 +9,7 @@ negative: false
 
 subject:
   identity: standin-subject
-  definition: subject.txt
+  agent: standin-subject
   opening_message: |
     Ask the effecter to do its one thing, then finish.
   invocation_kind: subagent
@@ -17,6 +17,11 @@ subject:
   allowed_tools: [Task]
 
 stub_registry: effect-timing.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: effecter
+    source: ../stub-agent-placeholder.md
 timeout: 30s
 turn_limit: 5
 

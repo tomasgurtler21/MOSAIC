@@ -43,6 +43,10 @@ func (s *stubRoutingService) DeployUtilityInfrastructure(_ context.Context, _ ap
 	return domain.RunSummary{}, nil
 }
 
+func (s *stubRoutingService) RenderAgent(_ context.Context, _ app.RenderAgentRequest) (app.RenderAgentResult, error) {
+	return app.RenderAgentResult{}, nil
+}
+
 // newRoutingModel returns a rootModel in screenRunning state (simulating mid-flow) with a
 // nil service, since routing tests only exercise the question overlay system.
 func newRoutingModel() *rootModel {

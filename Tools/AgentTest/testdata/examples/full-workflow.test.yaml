@@ -10,7 +10,7 @@ negative: false
 
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
   opening_message: |
     Build the thing described in Requirements.md.
   invocation_kind: orchestrator
@@ -18,6 +18,23 @@ subject:
   allowed_tools: [Task, Read, Write, Edit]
 
 stub_registry: full-workflow.stubs.json
+stub_agents:
+  - identity:
+      tool: Task
+      agent: requirements-refinement
+    source: ../../agents/requirements-refinement.md
+  - identity:
+      tool: Task
+      agent: researcher
+    source: ../../agents/researcher.md
+  - identity:
+      tool: Task
+      agent: library-researcher
+    source: ../../agents/library-researcher.md
+  - identity:
+      tool: Task
+      agent: planner
+    source: ../../agents/planner.md
 timeout: 15m
 turn_limit: 60
 

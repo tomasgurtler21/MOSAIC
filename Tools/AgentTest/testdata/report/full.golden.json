@@ -28,7 +28,8 @@
           "conditions": [],
           "duration_ms": 2000,
           "cost": { "total_usd": 0.05, "attribution": "attributed", "detail": "" },
-          "negative_applied": false
+          "negative_applied": false,
+          "subject_version": "unknown"
         }
       ]
     },
@@ -65,7 +66,8 @@
           "conditions": [],
           "duration_ms": 1500,
           "cost": { "total_usd": 0.02, "attribution": "attributed", "detail": "" },
-          "negative_applied": false
+          "negative_applied": false,
+          "subject_version": "unknown"
         }
       ]
     },
@@ -93,7 +95,8 @@
           "conditions": [],
           "duration_ms": 30000,
           "cost": { "total_usd": 0.10, "attribution": "attributed", "detail": "" },
-          "negative_applied": false
+          "negative_applied": false,
+          "subject_version": "unknown"
         }
       ]
     },
@@ -121,7 +124,8 @@
           "conditions": [],
           "duration_ms": 5000,
           "cost": { "total_usd": 0.03, "attribution": "attributed", "detail": "" },
-          "negative_applied": false
+          "negative_applied": false,
+          "subject_version": "unknown"
         }
       ]
     },
@@ -151,7 +155,8 @@
           ],
           "duration_ms": 1000,
           "cost": { "total_usd": 0, "attribution": "unavailable", "detail": "log root missing" },
-          "negative_applied": false
+          "negative_applied": false,
+          "subject_version": "unknown"
         }
       ]
     }

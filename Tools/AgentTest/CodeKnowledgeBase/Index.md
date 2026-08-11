@@ -9,9 +9,9 @@
 | **Domain** | Core types and ports (interfaces) shared by every other area: `HarnessAdapter`, `Store`, `Manager`, `Clock`, run/test/verdict models. Defines the vocabulary the rest of the module speaks, and every port a concrete implementation must satisfy. | Imported by everything; imports nothing else in the module. |
 | **Authoring & Preflight** | Parses and schema-validates the three authored file formats (test suite, test definition, stub registry), resolves `$ref` fixture references, and composes both into one deterministic pre-flight validation report / runnable plan. | Feeds both frontends (CLI, TUI) and the suite runner; Preflight composes Authoring + Fixtures. |
 | **Interception Pipeline** | The heart of the tool: a pure decision core (given an intercepted collaborator call and the current run state, decide what happens) wrapped in a short-lived imperative-shell process the harness invokes once per intercepted call. Includes stub matching, crash-safe lock-guarded run state, the append-only invocation log, and side-effect materialisation. | Invoked out-of-process by the harness during a subject's turn; writes state the Runner later reads as evidence. |
-| **Harness Adapters** | Everything harness-specific: capability declarations, sandbox provisioning (hooks, bridge, stub definitions, logger bundle), spawn planning, native-payload translation, and scope inspection. A reusable conformance suite is the executable specification every adapter (including a scripted no-LLM fake) must pass unchanged. | Consumed only through the `domain.HarnessAdapter` port; concrete adapter packages may be imported only from within the harness area and the composition root. |
+| **Harness Adapters** | Everything harness-specific: capability declarations, sandbox provisioning (hooks, bridge, logger bundle), spawn planning, native-payload translation, and scope inspection. A reusable conformance suite is the executable specification every adapter (including a scripted no-LLM fake) must pass unchanged. Agent definition files (subject and stub collaborators) are written into the sandbox by the `domain.AgentDeployer` port before `Provision` is called; the adapter itself never writes them. | Consumed only through the `domain.HarnessAdapter` port; concrete adapter packages may be imported only from within the harness area and the composition root. |
 | **Subject Launch** | Harness-neutral process execution of a `SpawnPlan` — starts the subject process and decodes the finished invocation into a result, without knowing which harness produced the plan. | Sits between the Runner and process control (`mosaic-common/harness`); receives its envelope-decoding function from whichever adapter the composition root selected. |
-| **Execution & Orchestration** | Owns one test attempt's full lifecycle (sandbox setup → supervised execution → evidence snapshot → teardown) and one suite's scheduling across tests, repetitions and the state-integrity retry/exclude rule. Also owns per-run sandbox lifecycle and reconstructs true peak concurrency from the invocation log. | Runner composes Workspace, Adapter, Launcher, Fixtures, Effects, Cost and reads Runstate/Invlog/Orchstate as evidence sources; Suite composes Runner + Evaluate + Report. |
+| **Execution & Orchestration** | Owns one test attempt's full lifecycle (sandbox setup → supervised execution → evidence snapshot → teardown) and one suite's scheduling across tests, repetitions and the state-integrity retry/exclude rule. Also owns per-run sandbox lifecycle and reconstructs true peak concurrency from the invocation log. | Runner composes Workspace, Adapter, Launcher, Fixtures, Effects, Cost, Deploy and reads Runstate/Invlog/Orchstate as evidence sources; Suite composes Runner + Evaluate + Report. |
 | **Evaluation & Reporting** | Turns one run's gathered evidence into a verdict with per-assertion detail (pure function), parses MOSAIC orchestration documents into evidence, validates Communication Protocol messages, defines the single result model both renderings consume, and reports per-run agent cost by delegating to an external log-analysis tool. | Evaluate is pure and consumes evidence assembled by Runner from Orchstate/Protocolcheck/Concurrency/Cost; Report is the only model either frontend renders. |
 | **Frontends** | The two user-facing surfaces: a non-interactive CLI (flag/positional parsing, exit codes, text/JSON rendering) and an interactive TUI (bubbletea-based, folds the same progress-event stream the CLI renders as lines into a navigable model). Both drive the same `SuiteRunner`/`PreflightFunc` abstractions. | Consume Preflight + Suite (via the composition root's wiring) and Report; never import each other except through two named shared exceptions. |
 | **Composition Root** | The single place that decides which of the binary's three modes (interceptor route, TUI, CLI) an invocation resolves to, and the only place that constructs concrete adapters, stores or providers. Also implements the interceptor route's own process wiring. | Depends on every other area to assemble one `Deps` value; no other package constructs infrastructure. |
@@ -19,7 +19,8 @@
 
 ## System-Wide Patterns
 
-- **Layered import boundaries, mechanically enforced.** Every package is classified into exactly one layer: `domain` (no internal imports) → pure cores (`stubmatch`, `intercept`, `evaluate`, `concurrency`, `protocolcheck` — import only domain and each other, no I/O, no ambient clock reads) → adapters/stores (`workspace`, `runstate`, `invlog`, `harness/*`, `launch`, `orchstate`, `cost`, `report`, `sideeffects`, `authoring`, `fixtures`, `preflight` — import only domain and pure cores, with `preflight` alone allowed to also import `authoring`/`fixtures`) → use cases (`interceptor`, `runner`, `suite` — may also import adapters, never `cli`/`tui`) → frontends (`cli`, `tui` — never import each other, except both may import `report`, `preflight`, `authoring`). A package the classification table doesn't recognise is itself treated as a violation.
+- **Layered import boundaries, mechanically enforced.** Every package is classified into exactly one layer: `domain` (no internal imports) → pure cores (`stubmatch`, `intercept`, `evaluate`, `concurrency`, `protocolcheck` — import only domain and each other, no I/O, no ambient clock reads) → adapters/stores (`workspace`, `runstate`, `invlog`, `harness/*`, `launch`, `orchstate`, `cost`, `agentdeploy`, `report`, `sideeffects`, `authoring`, `fixtures`, `preflight` — import only domain and pure cores, with `preflight` alone allowed to also import `authoring`/`fixtures`) → use cases (`interceptor`, `runner`, `suite` — may also import adapters, never `cli`/`tui`) → frontends (`cli`, `tui` — never import each other, except both may import `report`, `preflight`, `authoring`). A package the classification table doesn't recognise is itself treated as a violation.
+- **External tool dependency: `mosaic-deploy`.** The composition root stages `mosaic-deploy` beside the binary and wires a `domain.AgentDeployer` port (implemented in `internal/agentdeploy`) that invokes it as a subprocess. This module never imports `mosaic-deploy` directly — doing so would pull the deployment tool's concrete harness knowledge across the harness isolation boundary. The port communicates via JSON on stdout, using the deploy tool's `render` subcommand with `--output json`. Generic-form stub collaborator definitions live in `Tools/AgentTest/agents/`, one file per agent key, never in the product catalogue.
 - **Harness isolation.** No package outside `internal/harness/` may import a concrete harness adapter package directly. The one narrow exception is the composition root (`cmd/mosaic-agent-test`), which alone may construct a concrete adapter.
 - **Purity discipline.** Pure-core packages take time as an explicit parameter (never `time.Now()`) and perform no I/O, so decisions are reproducible and testable without a sandbox, a clock or a process.
 - **Ports over concretions.** Nearly every cross-area collaboration point is an interface defined in `domain` (or a narrow package-local interface such as `suite.TestRunner`), with exactly one production implementation wired once, in the composition root.
@@ -29,12 +30,43 @@
 ## Key Invariants
 
 - `domain` imports nothing else in this module; every other layer's boundary is defined relative to it.
-- A sandbox may only be freshly created, never adopted from an existing/non-empty directory — this is what makes teardown a plain deletion rather than a restore protocol.
+- A sandbox may only be freshly created, never adopted from an existing/non-empty directory — this is what makes teardown a plain deletion rather than a restore protocol. Agent definition rendering through `domain.AgentDeployer` happens before `Provision` is called; rendered paths are appended to the provisioning ledger before each render completes so teardown removes exactly what was written even on a partial setup failure.
 - Run state mutations always go through a lock-guarded read-modify-write with atomic (write-temp-then-rename) commit; there is no unguarded write path, and the mutating closure itself must perform no I/O.
 - The invocation log is append-only JSONL; concurrent appends from independent short-lived processes must not interleave or truncate records, and a trailing partial record from a crash is tolerated, never treated as an error.
 - `report.Result` is the single model both the text and JSON renderings, and both frontends, traverse — no consumer computes its own counts, totals or outcome classes.
 - A harness adapter's declared `Capabilities()` must be truthful: the conformance suite drives a stubbed invocation and rejects an adapter whose observed effect contradicts what it declared.
 - Peak concurrency is reconstructed by replaying invocation-log start/end records as half-open intervals, never trusted from a counter maintained live at interception time.
+
+## Test Authoring: Subject and Stub Declaration
+
+Test definitions authored in `.test.yaml` files declare the subject with `subject.agent` (not `subject.definition`):
+
+```yaml
+subject:
+  identity: orchestrator
+  agent: orchestrator         # catalogue agent key — REQUIRED, replaces the old `definition` field
+  workflows: [tdd-soft]       # optional; absent = unspecified, [] = explicitly none
+  opening_message: "..."
+  invocation_kind: orchestrator
+  model: "..."
+  allowed_tools: [...]
+```
+
+The sandbox-relative definition path is produced by rendering during setup and is never authored. The old `subject.definition` key is removed; a test definition that still carries it receives an error diagnostic pointing to `subject.agent` as the replacement.
+
+Stub collaborators that need a rendered harness-specific agent file are declared with `stub_agents`:
+
+```yaml
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: researcher
+    source: ../agents/researcher.md    # relative to this test definition file
+```
+
+The source path points to a generic-form definition in `Tools/AgentTest/agents/`. The `stub_agents` key is distinct from the stub registry (`.stubs.json`): the registry declares what a collaborator *replies*; `stub_agents` declares the *definition file* that makes the dispatch a legal one. Both are needed for a collaborator that is both declared in the registry and dispatched to.
+
+See `Tools/AgentTest/agents/README.md` for the file naming convention, required frontmatter fields, and ID assignment for files in that directory.
 
 ## Known Complexity
 

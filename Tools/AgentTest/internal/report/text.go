@@ -97,6 +97,9 @@ func writeTestLine(w io.Writer, t TestReport) error {
 				return err
 			}
 		}
+		if _, err := fmt.Fprintf(w, "  subject version: %s\n", subjectVersionOrUnknown(run.SubjectVersion)); err != nil {
+			return err
+		}
 	}
 	return nil
 }

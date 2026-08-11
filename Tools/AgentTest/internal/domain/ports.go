@@ -32,9 +32,9 @@ type HarnessAdapter interface {
 	InspectScopes(ctx context.Context) ([]ScopeFinding, error)
 
 	// Provision installs everything this harness needs inside the sandbox:
-	// the interception configuration, the bridge, the stub collaborator
-	// definitions, and the MOSAIC logger bundle. It writes only under
-	// req.Sandbox and returns a ledger of exactly what it created.
+	// the interception configuration, the bridge, and the MOSAIC logger
+	// bundle. It writes only under req.Sandbox and returns a ledger of
+	// exactly what it created.
 	//
 	// Provision MUST fail rather than proceed when more than one entry in
 	// the composed configuration would rewrite the intercepted call's input.
@@ -118,4 +118,80 @@ type CostProvider interface {
 // run. Implementations must be safe for concurrent use.
 type ProgressSink interface {
 	Emit(ev ProgressEvent)
+}
+
+// AgentDeployer renders one generic-form MOSAIC agent definition into one
+// harness's form at a destination inside a sandbox. Implemented in
+// internal/agentdeploy by invoking the compiled deployment tool; this module
+// never imports that tool (see the harness isolation boundary), and never
+// itself knows where a harness expects an agent file to live.
+//
+// Render reports the destination path the tool actually wrote and the source
+// agent's version. Callers MUST use the reported path rather than
+// reconstructing one: reconstructing it would reintroduce the harness-layout
+// knowledge this port exists to keep out.
+//
+// Render never hangs: every implementation bounds the delegate's runtime and
+// maps a timeout to an error like any other failure. It returns an error for
+// every outcome in which nothing usable was produced, and a nil error only
+// when the definition was written (or, under DryRun, fully validated).
+//
+// Render writes no hook file and no settings file. The harness adapter remains
+// the sole author of the sandbox's composed configuration.
+type AgentDeployer interface {
+	Render(ctx context.Context, req RenderAgentRequest) (RenderAgentResult, error)
+}
+
+// RenderAgentRequest asks for one generic-form agent definition to be rendered
+// into a sandbox. It is harness-neutral in everything but HarnessID, which is
+// passed through from the selected adapter's own ID and never interpreted by
+// the caller.
+type RenderAgentRequest struct {
+	// CatalogAgentKey names an agent in the product's real generic catalogue —
+	// how the subject under test is sourced, so a run exercises the real,
+	// current agent. Mutually exclusive with SourcePath; exactly one required.
+	CatalogAgentKey string
+	// SourcePath is a generic-form definition file in this module's own
+	// workspace — how a stub collaborator is sourced, so test-only definitions
+	// never enter the product catalogue. Mutually exclusive with CatalogAgentKey.
+	SourcePath string
+
+	// HarnessID is the harness to render for, taken from the selected adapter's ID.
+	HarnessID string
+	// WorkspaceRoot is where the rendered file is placed — the sandbox's subject
+	// directory. The destination beneath it is resolved by the delegate, never
+	// by this module.
+	WorkspaceRoot string
+
+	// Model is the model identifier the rendered agent declares. Empty leaves it
+	// unset.
+	Model string
+	// Workflows pins the workflow set an orchestrator subject is rendered with.
+	// nil means "not specified"; non-nil empty means "explicitly none". An
+	// orchestrator rendered with a different workflow set is a materially
+	// different agent, which is why a test can pin it rather than inherit a
+	// default.
+	Workflows []string
+
+	// DryRun validates everything and writes nothing. Used by preflight to
+	// refuse a bad declaration before a sandbox exists.
+	DryRun bool
+}
+
+// RenderAgentResult is what the delegate reported it did. Every field is
+// reported data, never something this module reconstructed.
+type RenderAgentResult struct {
+	// DestinationPath is the absolute path the delegate wrote. The subject's
+	// sandbox-relative definition path is derived from this and from nothing
+	// else.
+	DestinationPath string
+	// CreatedDirectories are directories the delegate created, outermost first,
+	// so a teardown ledger can record exactly what appeared.
+	CreatedDirectories []string
+	// SourceVersion is the source agent's declared version. Empty means the
+	// source declared none — a legal state that must be reported as unknown,
+	// never as a blank that reads like a real value.
+	SourceVersion string
+	// AgentKey is the slug the definition was rendered under.
+	AgentKey string
 }

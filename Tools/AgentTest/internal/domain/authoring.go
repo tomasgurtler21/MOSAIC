@@ -50,11 +50,16 @@ type TestDefinition struct {
 
 	Subject          SubjectUnderTest
 	StubRegistryPath string
-	Settings         RunSettings
-	SeedFiles        []SeedFile
-	ParallelGroups   []ParallelGroup
-	Assertions       Assertions
-	SourcePath       string
+	// StubAgents are the generic-form stub collaborator definitions to be
+	// rendered into the sandbox, in declaration order. Each entry declares
+	// which collaborator it stands in for and where its generic-form source
+	// file lives, relative to this definition file.
+	StubAgents     []StubAgent
+	Settings       RunSettings
+	SeedFiles      []SeedFile
+	ParallelGroups []ParallelGroup
+	Assertions     Assertions
+	SourcePath     string
 }
 
 // SeedFile pre-populates the subject directory, for a test that starts

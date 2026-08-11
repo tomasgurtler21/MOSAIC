@@ -633,6 +633,10 @@ func (s *capturingPromoteService) DeployUtilityInfrastructure(ctx context.Contex
 	return s.inner.DeployUtilityInfrastructure(ctx, req)
 }
 
+func (s *capturingPromoteService) RenderAgent(ctx context.Context, req app.RenderAgentRequest) (app.RenderAgentResult, error) {
+	return s.inner.RenderAgent(ctx, req)
+}
+
 // TestPromoteMode_SuppliesSelectedHarnessIDInRequest verifies that when the TUI executes a
 // promote run, the PromoteRequest carries the harness id that was selected on the harness
 // screen. The TUI must not present any additional harness question during the promote flow;

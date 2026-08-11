@@ -10,7 +10,7 @@ negative: false
 
 subject:
   identity: standin-subject
-  definition: subject.txt
+  agent: standin-subject
   opening_message: |
     Dispatch the researcher and the library researcher together, then finish.
   invocation_kind: subagent
@@ -18,6 +18,15 @@ subject:
   allowed_tools: [Task]
 
 stub_registry: min-concurrency-pass.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: researcher
+    source: ../stub-agent-placeholder.md
+  - identity:
+      tool: dispatch
+      agent: library-researcher
+    source: ../stub-agent-placeholder.md
 timeout: 30s
 turn_limit: 5
 

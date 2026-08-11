@@ -28,7 +28,8 @@
           "conditions": [],
           "duration_ms": 500,
           "cost": { "total_usd": 0, "attribution": "attributed", "detail": "" },
-          "negative_applied": false
+          "negative_applied": false,
+          "subject_version": "unknown"
         },
         {
           "run": { "run_id": "run-001", "test_id": "always-loses-its-lock", "run_number": 2 },
@@ -38,7 +39,8 @@
           "conditions": [],
           "duration_ms": 500,
           "cost": { "total_usd": 0, "attribution": "attributed", "detail": "" },
-          "negative_applied": false
+          "negative_applied": false,
+          "subject_version": "unknown"
         }
       ]
     }

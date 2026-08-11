@@ -134,9 +134,28 @@ func resolveWiringConfig(args []string) WiringConfig {
 			args, "--cost-tool", "MOSAIC_AGENT_TEST_COST_TOOL",
 			filepath.Join(selfDir, "mosaic-log-analyzer"+exeSuffix()),
 		),
+		// DeployToolPath defaults to the binary-relative mosaic-deploy[.exe],
+		// so a correctly staged distribution resolves it with no flag and no
+		// environment variable, exactly as CostToolPath does for the cost tool.
+		DeployToolPath: resolveConfiguredPath(
+			args, "--deploy-tool", "MOSAIC_AGENT_TEST_DEPLOY_TOOL",
+			filepath.Join(selfDir, "mosaic-deploy"+exeSuffix()),
+		),
+		// MosaicRoot defaults to empty, meaning "do not override" — the deploy
+		// tool resolves its own root. A correctly staged distribution therefore
+		// needs no flag and no environment variable for this field.
+		MosaicRoot: resolveConfiguredPath(
+			args, "--mosaic-root", "MOSAIC_AGENT_TEST_MOSAIC_ROOT",
+			"",
+		),
+		// DeployScratchRoot is a per-process path under os.TempDir(). Nothing
+		// is written there (dry-run suppresses the write and directory
+		// creation), so it is never created and never cleaned up.
+		DeployScratchRoot: filepath.Join(os.TempDir(), fmt.Sprintf("mosaic-agent-test-deploy-scratch-%d", os.Getpid())),
 
-		CostTimeout: 30 * time.Second,
-		Diag:        os.Stderr, // never stdout: stdout carries the machine-readable report in --format json
+		CostTimeout:   30 * time.Second,
+		DeployTimeout: 60 * time.Second,
+		Diag:          os.Stderr, // never stdout: stdout carries the machine-readable report in --format json
 	}
 }
 

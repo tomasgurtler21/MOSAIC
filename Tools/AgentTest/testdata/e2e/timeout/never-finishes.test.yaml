@@ -11,7 +11,7 @@ negative: false
 
 subject:
   identity: standin-subject
-  definition: subject.txt
+  agent: standin-subject
   opening_message: |
     Do something that never finishes.
   invocation_kind: subagent

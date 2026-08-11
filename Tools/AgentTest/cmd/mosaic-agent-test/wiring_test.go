@@ -84,6 +84,12 @@ type fakeProgressSink struct{}
 
 func (fakeProgressSink) Emit(ev domain.ProgressEvent) {}
 
+type fakeDeployer struct{}
+
+func (fakeDeployer) Render(_ context.Context, req domain.RenderAgentRequest) (domain.RenderAgentResult, error) {
+	return domain.RenderAgentResult{}, errors.New("fakeDeployer: not exercised by this test")
+}
+
 type discardWriter struct{}
 
 func (*discardWriter) Write(p []byte) (int, error) { return len(p), nil }
@@ -103,6 +109,7 @@ func testDeps(t *testing.T) Deps {
 		Cost:      fakeCostProvider{},
 		Clock:     fakeClock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
 		Preflight: preflight.Validate,
+		Deploy:    fakeDeployer{},
 
 		SelfPath:        "C:/bin/mosaic-agent-test.exe",
 		LoggerBundleDir: "C:/bundles/logger",
@@ -336,6 +343,9 @@ func TestDeps_RunnerDeps_ProjectsEveryCollaboratorFieldUnchanged(t *testing.T) {
 	if got.InterpreterCmd != d.InterpreterCmd {
 		t.Errorf("RunnerDeps(ws, progress).InterpreterCmd = %q, want d.InterpreterCmd %q (AC3.6: the resolved interpreter must reach the wired dependency set both frontends run against)", got.InterpreterCmd, d.InterpreterCmd)
 	}
+	if got.Deploy != d.Deploy {
+		t.Error("RunnerDeps(ws, progress).Deploy is not d.Deploy (a regression dropping Deploy: d.Deploy from RunnerDeps means the runner renders with a different deployer than preflight validated against)")
+	}
 	if got.Workspaces != ws {
 		t.Error("RunnerDeps(ws, progress).Workspaces is not the ws argument passed in")
 	}
@@ -367,6 +377,7 @@ func TestDeps_RunnerDeps_IsIndependentOfWhichWorkspaceAndProgressAreGiven(t *tes
 	if got1.Adapter != got2.Adapter || got1.Launcher != got2.Launcher ||
 		got1.Fixtures != got2.Fixtures || got1.Effects != got2.Effects ||
 		got1.Cost != got2.Cost || got1.Clock != got2.Clock ||
+		got1.Deploy != got2.Deploy ||
 		got1.SelfPath != got2.SelfPath || got1.LoggerBundleDir != got2.LoggerBundleDir ||
 		got1.InterpreterCmd != got2.InterpreterCmd {
 		t.Errorf("d.RunnerDeps varied its collaborator fields across two calls on the same d:\nfirst:  %+v\nsecond: %+v", got1, got2)

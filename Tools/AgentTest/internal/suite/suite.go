@@ -193,6 +193,7 @@ func (s *Suite) runTest(ctx context.Context, rt preflight.ResolvedTest, sink dom
 			Cost:                final.Cost,
 			NegativeApplied:     final.NegativeApplied,
 			RetainedSandboxPath: final.RetainedSandboxPath,
+			SubjectVersion:      final.SubjectVersion,
 			Subject: report.SubjectFailure{
 				ExitCode:  final.SubjectResult.ExitCode,
 				Stderr:    final.SubjectResult.Stderr,

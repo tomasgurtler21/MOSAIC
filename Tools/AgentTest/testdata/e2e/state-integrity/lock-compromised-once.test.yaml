@@ -12,7 +12,7 @@ negative: false
 
 subject:
   identity: standin-subject
-  definition: subject.txt
+  agent: standin-subject
   opening_message: |
     Greet the one collaborator.
   invocation_kind: subagent
@@ -20,6 +20,11 @@ subject:
   allowed_tools: [Task]
 
 stub_registry: lock-compromised-once.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: greeter
+    source: ../stub-agent-placeholder.md
 timeout: 30s
 turn_limit: 5
 

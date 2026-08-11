@@ -7,7 +7,7 @@ negative: false
 
 subject:
   identity: standin-subject
-  definition: subject.txt
+  agent: standin-subject
   opening_message: |
     Ask worker-a to do its one thing, then finish.
   invocation_kind: subagent
@@ -15,6 +15,11 @@ subject:
   allowed_tools: [Task]
 
 stub_registry: isolation-a-test.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: worker-a
+    source: ../stub-agent-placeholder.md
 timeout: 30s
 turn_limit: 5
 

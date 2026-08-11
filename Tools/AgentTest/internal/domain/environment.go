@@ -5,12 +5,13 @@ package domain
 type EnvironmentProblemKind string
 
 const (
-	ProblemInterpreterUnresolved EnvironmentProblemKind = "interpreter_unresolved"
-	ProblemBundleUnreadable      EnvironmentProblemKind = "bundle_unreadable"
-	ProblemBundleMisshapen       EnvironmentProblemKind = "bundle_misshapen"
-	ProblemCostToolUnavailable   EnvironmentProblemKind = "cost_tool_unavailable"
-	ProblemBinaryPathUnresolved  EnvironmentProblemKind = "binary_path_unresolved"
-	ProblemCompetingRewriter     EnvironmentProblemKind = "competing_rewriter"
+	ProblemInterpreterUnresolved  EnvironmentProblemKind = "interpreter_unresolved"
+	ProblemBundleUnreadable       EnvironmentProblemKind = "bundle_unreadable"
+	ProblemBundleMisshapen        EnvironmentProblemKind = "bundle_misshapen"
+	ProblemCostToolUnavailable    EnvironmentProblemKind = "cost_tool_unavailable"
+	ProblemDeployToolUnavailable  EnvironmentProblemKind = "deploy_tool_unavailable"
+	ProblemBinaryPathUnresolved   EnvironmentProblemKind = "binary_path_unresolved"
+	ProblemCompetingRewriter      EnvironmentProblemKind = "competing_rewriter"
 )
 
 // EnvironmentProblem is one reason the environment is unusable.

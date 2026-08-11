@@ -19,6 +19,7 @@ import (
 
 	commonharness "mosaic-common/harness"
 
+	"mosaic-agent-test/internal/agentdeploy"
 	"mosaic-agent-test/internal/authoring"
 	"mosaic-agent-test/internal/cli"
 	"mosaic-agent-test/internal/cost"
@@ -186,7 +187,28 @@ type WiringConfig struct {
 	LoggerBundleDir string
 	CostToolPath    string
 	CostTimeout     time.Duration
-	Diag            io.Writer
+	// DeployToolPath is the path to the mosaic-deploy binary. The default is
+	// the binary-relative mosaic-deploy[.exe], matching how CostToolPath
+	// defaults to the binary-relative mosaic-log-analyzer. An absent tool is
+	// reported as an EnvironmentProblem naming this path and the override that
+	// would change it — never a bare file-not-found.
+	DeployToolPath string
+	// MosaicRoot overrides the deployment tool's own root resolution. Empty
+	// means "do not override" — the flag is simply not passed and the deploy
+	// tool resolves its own root. A correctly staged distribution therefore
+	// works with no flag and no environment variable, matching how the
+	// binary-relative default for DeployToolPath needs no configuration.
+	MosaicRoot string
+	// DeployTimeout bounds every render invocation. The composition root sets
+	// this once; the port enforces it with context.WithTimeout on every call.
+	DeployTimeout time.Duration
+	// DeployScratchRoot is the workspace root preflight dry-run renders are
+	// pointed at. Nothing is written there — DryRun suppresses the write and
+	// the parent-directory creation — so it need not exist. A per-process
+	// path under os.TempDir() is the default; it is configurable only so a
+	// test can pin it.
+	DeployScratchRoot string
+	Diag              io.Writer
 }
 
 // Deps is the single wired dependency set this binary builds, once, for
@@ -206,6 +228,10 @@ type Deps struct {
 	Cost      domain.CostProvider
 	Clock     domain.Clock
 	Preflight func(preflight.Input) (preflight.Plan, authoring.Report)
+	// Deploy renders the subject and each declared stub collaborator into the
+	// sandbox before the adapter's Provision is called. Both frontends receive
+	// the same value via RunnerDeps, matching every other collaborator on Deps.
+	Deploy domain.AgentDeployer
 
 	// Pass-through values the runner hands to the adapter without
 	// interpreting, carried here so neither frontend has to know them.
@@ -294,6 +320,24 @@ func buildDeps(cfg WiringConfig) (Deps, error) {
 		envReport.Problems = append(envReport.Problems, problem)
 	}
 
+	// The deployment tool is checked here for the same reason: an absent tool
+	// should surface as a preflight diagnostic before any sandbox is created or
+	// any cost is incurred, never discovered only when the first render fails
+	// at setup time.
+	if problem, absent := deployToolProblem(cfg.DeployToolPath); absent {
+		envReport.Problems = append(envReport.Problems, problem)
+	}
+
+	// Construct the deployment port once, here. Both Deps.Deploy (for the
+	// runner) and Deps.Preflight (for dry-run declaration validation) close
+	// over the same value, so preflight and the runner can never validate
+	// against one deployer and render with another.
+	deployProvider := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: cfg.DeployToolPath,
+		MosaicRoot:     cfg.MosaicRoot,
+		Timeout:        cfg.DeployTimeout,
+	})
+
 	return Deps{
 		Adapter:   adapter,
 		Decoder:   decoder,
@@ -302,7 +346,8 @@ func buildDeps(cfg WiringConfig) (Deps, error) {
 		Effects:   effects,
 		Cost:      costProvider,
 		Clock:     systemClock{},
-		Preflight: environmentBakedPreflight(envReport),
+		Preflight: environmentBakedPreflight(envReport, deployProvider, cfg.DeployScratchRoot),
+		Deploy:    deployProvider,
 
 		SelfPath:        cfg.SelfPath,
 		LoggerBundleDir: cfg.LoggerBundleDir,
@@ -333,15 +378,39 @@ func costToolProblem(path string) (domain.EnvironmentProblem, bool) {
 	return domain.EnvironmentProblem{}, false
 }
 
+// deployToolProblem reports whether path names a deployment tool this process
+// cannot find, and if so the EnvironmentProblem naming the path searched and
+// the override that would change it — never a bare file-not-found, mirroring
+// costToolProblem exactly. A stat error of any kind (not found, permission
+// denied) is treated the same way: either way the tool is not usable from here.
+func deployToolProblem(path string) (domain.EnvironmentProblem, bool) {
+	if _, err := os.Stat(path); err != nil {
+		return domain.EnvironmentProblem{
+			Kind: domain.ProblemDeployToolUnavailable,
+			Detail: fmt.Sprintf(
+				"deployment tool not found at %s (override with --deploy-tool or the MOSAIC_AGENT_TEST_DEPLOY_TOOL environment variable): %v",
+				path, err,
+			),
+		}, true
+	}
+	return domain.EnvironmentProblem{}, false
+}
+
 // environmentBakedPreflight returns a preflight.Validate that always
-// validates with env as the environment report, so both frontends turn a
-// failing environment check into a preflight error without either one
-// having to know the selected adapter's environment report itself. Neither
-// frontend constructs an EnvironmentReport of its own: this is the one
-// place it is resolved and baked in.
-func environmentBakedPreflight(env domain.EnvironmentReport) func(preflight.Input) (preflight.Plan, authoring.Report) {
+// validates with env as the environment report and dep as the deployer, so
+// both frontends validate declarations against the real catalogue without
+// either one constructing a deployment port. This is the one place either
+// value is baked in; a frontend that set them would be a second source of
+// truth for the same dependency.
+func environmentBakedPreflight(
+	env domain.EnvironmentReport,
+	dep domain.AgentDeployer,
+	scratchRoot string,
+) func(preflight.Input) (preflight.Plan, authoring.Report) {
 	return func(in preflight.Input) (preflight.Plan, authoring.Report) {
 		in.Environment = env
+		in.Deploy = dep
+		in.DeployScratchRoot = scratchRoot
 		return preflight.Validate(in)
 	}
 }
@@ -445,6 +514,7 @@ func (d Deps) RunnerDeps(ws workspace.Manager, progress domain.ProgressSink) run
 		Cost:       d.Cost,
 		Clock:      d.Clock,
 		Progress:   progress,
+		Deploy:     d.Deploy,
 
 		SelfPath:        d.SelfPath,
 		LoggerBundleDir: d.LoggerBundleDir,

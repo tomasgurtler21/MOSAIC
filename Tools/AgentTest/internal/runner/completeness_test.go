@@ -40,12 +40,13 @@ func TestProvisionRequestCompletenessGuard(t *testing.T) {
 	}
 
 	// excludedFields are deliberately unset by the runner and deliberately
-	// excluded from the completeness obligation. Collaborators is out of
-	// scope per Plan.md: "Collaborators is explicitly out of scope ...
-	// exclude Collaborators from the completeness check."
-	excludedFields := map[string]bool{
-		"Collaborators": true,
-	}
+	// excluded from the completeness obligation. There are currently no fields
+	// in this category: ProvisionRequest.Collaborators was removed when the
+	// adapter's collaborator-writing loop was retired in favour of the deploy
+	// port, so there is nothing to exclude here. The map is kept in place so
+	// the guard's three-category structure stays visible if a future field
+	// warrants exclusion.
+	excludedFields := map[string]bool{}
 
 	// outOfScopeFields are fields the runner already populates from data the
 	// caller supplies directly (the sandbox, the subject, the logger bundle
@@ -96,12 +97,5 @@ func TestProvisionRequestCompletenessGuard(t *testing.T) {
 	// published placeholder interpreter and the logger hooks never run.
 	if got.InterpreterCmd != h.Deps.InterpreterCmd {
 		t.Errorf("ProvisionRequest.InterpreterCmd = %q, want Deps.InterpreterCmd %q carried verbatim", got.InterpreterCmd, h.Deps.InterpreterCmd)
-	}
-
-	// Excluded field: Collaborators. Asserted unset here, not because this
-	// guard requires it, but so the exclusion itself stays visible and
-	// intentional rather than merely implied by omission.
-	if got.Collaborators != nil {
-		t.Errorf("ProvisionRequest.Collaborators = %v, want nil (stub-collaborator generation is deferred and explicitly excluded from this guard)", got.Collaborators)
 	}
 }

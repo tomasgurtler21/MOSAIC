@@ -117,6 +117,36 @@ func reportRemovedHarnessKeyIfPresent(src Source, node ast.Node, pointer string,
 	}
 }
 
+// reportRemovedSubjectDefinitionKeyIfPresent reports a
+// "removed-key-subject-definition" diagnostic when the subject mapping in root
+// contains a "definition" key. The sandbox-relative definition path is now
+// produced by the deployment port at render time and must never be authored.
+func reportRemovedSubjectDefinitionKeyIfPresent(src Source, root *ast.MappingNode, report *Report) {
+	subjectNode := mappingChild(root, "subject")
+	if subjectNode == nil {
+		return
+	}
+	subjectMapping, ok := subjectNode.(*ast.MappingNode)
+	if !ok {
+		return
+	}
+	for _, v := range subjectMapping.Values {
+		if v.Key.String() != "definition" {
+			continue
+		}
+		report.Add(Diagnostic{
+			Severity: SeverityError,
+			Code:     "removed-key-subject-definition",
+			Path:     src.Path,
+			Line:     v.Key.GetToken().Position.Line,
+			Pointer:  "subject.definition",
+			Message: "subject.definition is removed; use subject.agent to name the catalogue agent " +
+				"key instead; the sandbox-relative definition path is now produced by rendering " +
+				"from the deployment port's own result and must not be authored",
+		})
+	}
+}
+
 // missingRequiredField builds the standard "missing-required-field"
 // diagnostic every authored format reports the same way.
 func missingRequiredField(src Source, field string) Diagnostic {

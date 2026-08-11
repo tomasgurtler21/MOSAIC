@@ -250,10 +250,9 @@ func (a *Adapter) resolveSelfPath() (string, error) {
 }
 
 // Provision implements domain.HarnessAdapter. It installs the composed
-// hook configuration, the logger bundle, and the stub collaborator
-// definitions into req.Sandbox, and refuses when the composed configuration
-// would contain more than one entry that rewrites the intercepted call's
-// input.
+// hook configuration and the logger bundle into req.Sandbox, and refuses
+// when the composed configuration would contain more than one entry that
+// rewrites the intercepted call's input.
 //
 // On any failure Provision still returns the ledger of what it created
 // before the failure, so a caller can tear down exactly that partial state
@@ -310,16 +309,6 @@ func (a *Adapter) Provision(ctx context.Context, req domain.ProvisionRequest) (d
 	settingsPath := filepath.Join(req.Sandbox.SubjectDir, SettingsRelPath)
 	if err := writeTracked(&prov, settingsPath, marshaled); err != nil {
 		return prov, err
-	}
-
-	for _, c := range req.Collaborators {
-		destPath, err := safeJoin(req.Sandbox.SubjectDir, c.TargetPath)
-		if err != nil {
-			return prov, fmt.Errorf("claudecode: stub collaborator definition %q: %w", c.TargetPath, err)
-		}
-		if err := writeTracked(&prov, destPath, c.Definition); err != nil {
-			return prov, err
-		}
 	}
 
 	if err := a.seedCredentials(&prov, req); err != nil {

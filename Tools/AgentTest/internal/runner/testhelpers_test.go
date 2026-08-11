@@ -5,13 +5,14 @@ package runner_test
 // The workspace manager, fixture resolver and side-effect applier are the
 // real implementations from earlier stages — there is nothing harness- or
 // process-shaped about them, so stubbing them would only hide bugs. Only the
-// two spawning-related ports (domain.HarnessAdapter, domain.SubjectLauncher)
-// and the cost port are stubbed here, exactly as T13.2 and T13.6 call for:
-// the whole lifecycle is driven through a stub adapter and a stub launcher
-// so no real process and no real harness is ever needed.
+// two spawning-related ports (domain.HarnessAdapter, domain.SubjectLauncher),
+// the cost port, and the deployment port are stubbed here: the whole lifecycle
+// is driven through stub doubles so no real process and no real harness is
+// ever needed.
 
 import (
 	"context"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -90,6 +91,11 @@ type stubAdapter struct {
 	// handed, so a test can assert on run-id prompt injection without
 	// inspecting internal runner state.
 	lastSpawnPlanSubject domain.SubjectUnderTest
+
+	// lastDeprovisionedProv captures the Provisioning Deprovision was most
+	// recently called with, so a test can assert on the full merged ledger
+	// (rendered paths plus adapter-installed paths) after a run.
+	lastDeprovisionedProv domain.Provisioning
 }
 
 var _ domain.HarnessAdapter = (*stubAdapter)(nil)
@@ -119,6 +125,7 @@ func (a *stubAdapter) Provision(ctx context.Context, req domain.ProvisionRequest
 
 func (a *stubAdapter) Deprovision(ctx context.Context, p domain.Provisioning) error {
 	a.rec.record("adapter.Deprovision")
+	a.lastDeprovisionedProv = p
 	return a.deprovisionErr
 }
 
@@ -219,4 +226,47 @@ type errNotUsedByRunnerTestsError struct{}
 
 func (errNotUsedByRunnerTestsError) Error() string {
 	return "runner tests: this stub method is not exercised by the runner, which never calls TranslateCall/TranslateOutcome directly"
+}
+
+// stubDeployer is a minimal domain.AgentDeployer double. It records every
+// Render call and returns a configured result. When renderFn is nil, a default
+// result with a plausible DestinationPath under WorkspaceRoot is returned so
+// tests that do not care about specific paths still get a compilable, usable
+// result once the implementation starts calling the port.
+type stubDeployer struct {
+	mu    sync.Mutex
+	calls []domain.RenderAgentRequest
+
+	// renderFn, when set, is called for every Render invocation; its return
+	// value replaces the default. Tests that need to control the reported path
+	// or inject failures set this field.
+	renderFn func(req domain.RenderAgentRequest) (domain.RenderAgentResult, error)
+}
+
+var _ domain.AgentDeployer = (*stubDeployer)(nil)
+
+func (d *stubDeployer) Render(ctx context.Context, req domain.RenderAgentRequest) (domain.RenderAgentResult, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.calls = append(d.calls, req)
+	if d.renderFn != nil {
+		return d.renderFn(req)
+	}
+	// Default: a plausible destination path rooted in the workspace, so tests
+	// that do not need to inspect exact paths still get a non-empty result.
+	key := req.CatalogAgentKey
+	if key == "" {
+		key = "stub"
+	}
+	return domain.RenderAgentResult{
+		DestinationPath: filepath.Join(req.WorkspaceRoot, key+".md"),
+		AgentKey:        key,
+	}, nil
+}
+
+// allCalls returns all recorded Render invocations in order.
+func (d *stubDeployer) allCalls() []domain.RenderAgentRequest {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]domain.RenderAgentRequest(nil), d.calls...)
 }

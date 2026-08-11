@@ -104,11 +104,14 @@ func (a *loyalAdapter) InspectScopes(ctx context.Context) ([]domain.ScopeFinding
 
 // Provision writes the loyal adapter's marker file, but first honours the
 // port's MUST-fail obligation: it refuses when the composed configuration
-// (here, more than one stub collaborator entry) would contain more than one
-// entry that rewrites the intercepted call's input.
+// would contain more than one entry that rewrites the intercepted call's
+// input. For this test double the condition is encoded as more than one
+// element in InterceptorArgs — the seam loyalCompetingRewriteRequest triggers
+// by passing two args instead of one. Each real adapter uses its own
+// registration-model-specific check instead.
 func (a *loyalAdapter) Provision(ctx context.Context, req domain.ProvisionRequest) (domain.Provisioning, error) {
-	if len(req.Collaborators) > 1 {
-		return domain.Provisioning{}, fmt.Errorf("loyal: %d entries in the composed configuration would rewrite the intercepted call's input; refusing rather than proceeding", len(req.Collaborators))
+	if len(req.InterceptorArgs) > 1 {
+		return domain.Provisioning{}, fmt.Errorf("loyal: %d entries in the composed configuration would rewrite the intercepted call's input; refusing rather than proceeding", len(req.InterceptorArgs))
 	}
 
 	markerDir := filepath.Join(req.Sandbox.SubjectDir, "loyal-adapter")
@@ -215,21 +218,19 @@ func loyalObserve(t *testing.T, native []byte) contract.ObservedEffect {
 	}
 }
 
-// loyalCompetingRewriteRequest builds a ProvisionRequest with more than one
-// stub collaborator entry, which loyalAdapter.Provision recognises as a
-// composed configuration containing competing input-rewrite hooks and
-// refuses. This is the loyal double's Config-level seam for
-// contract.Config.CompetingRewriteRequest.
+// loyalCompetingRewriteRequest builds a ProvisionRequest that loyalAdapter
+// recognises as having competing input-rewrite hooks and refuses. The loyal
+// double's trigger for this condition is more than one element in
+// InterceptorArgs — two args stand in for two competing configurations in the
+// loyal double's registration model. See loyalAdapter.Provision.
 func loyalCompetingRewriteRequest(sb domain.Sandbox, subject domain.SubjectUnderTest) domain.ProvisionRequest {
 	return domain.ProvisionRequest{
-		Sandbox: sb,
-		Subject: subject,
-		Collaborators: []domain.StubCollaborator{
-			{Identity: domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "First"}},
-			{Identity: domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "Second"}},
-		},
+		Sandbox:         sb,
+		Subject:         subject,
 		InterceptorPath: "interceptor",
-		InterceptorArgs: []string{"intercept"},
+		// Two args: the loyal adapter interprets this as two contributions
+		// that would rewrite the intercepted call's input and refuses.
+		InterceptorArgs: []string{"intercept", "competing-rewriter"},
 	}
 }
 

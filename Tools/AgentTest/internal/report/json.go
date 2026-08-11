@@ -64,6 +64,12 @@ type wireRunReport struct {
 	// nil when the subject exited zero, so a run that succeeded never
 	// mentions stderr at all.
 	Subject *wireSubjectFailure `json:"subject,omitempty"`
+
+	// SubjectVersion is the version of the subject definition this run
+	// exercised, so a result can be attributed to a specific version of the
+	// agent under test. Always present; the literal "unknown" when the
+	// subject's source declared no version.
+	SubjectVersion string `json:"subject_version"`
 }
 
 // wireSubjectFailure is what a subject that exited non-zero told us.
@@ -184,7 +190,18 @@ func toWireRunReport(r RunReport) wireRunReport {
 		NegativeApplied:     r.NegativeApplied,
 		RetainedSandboxPath: r.RetainedSandboxPath,
 		Subject:             subject,
+		SubjectVersion:      subjectVersionOrUnknown(r.SubjectVersion),
 	}
+}
+
+// subjectVersionOrUnknown maps an empty version string to "unknown", so the
+// wire format always carries a legible value rather than a blank that reads
+// like a real version.
+func subjectVersionOrUnknown(v string) string {
+	if v == "" {
+		return "unknown"
+	}
+	return v
 }
 
 func toWireCost(c domain.CostReport) wireCost {

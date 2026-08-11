@@ -70,6 +70,10 @@ func (s *stubFlowService) DeployUtilityInfrastructure(_ context.Context, _ app.U
 	return s.utilityInfra, s.utilityInfraErr
 }
 
+func (s *stubFlowService) RenderAgent(_ context.Context, _ app.RenderAgentRequest) (app.RenderAgentResult, error) {
+	return app.RenderAgentResult{}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------

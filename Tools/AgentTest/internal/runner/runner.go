@@ -58,6 +58,12 @@ type Deps struct {
 	// never a default, a fallback or a literal: no interpreter name appears
 	// anywhere in this package.
 	InterpreterCmd string
+
+	// Deploy renders the subject and each declared stub collaborator into the
+	// sandbox. It is a port like every other field here: the runner spawns
+	// nothing itself and names no harness, and it passes the harness id
+	// through from the adapter without interpreting it.
+	Deploy domain.AgentDeployer
 }
 
 // Request is what one attempt of one test needs to run.
@@ -120,6 +126,10 @@ func Run(ctx context.Context, d Deps, req Request) (evidence domain.RunEvidence,
 	res, launchErr := superviseExecution(ctx, d, sb, plan, req.Settings)
 
 	snap := TakeSnapshot(d, sb, res)
+	// Carry the subject version captured at render time into the snapshot, so
+	// BuildEvidence can place it in RunEvidence. TakeSnapshot has no access to
+	// the ledger, so the copy happens here where both are in scope.
+	snap.SubjectVersion = ledger.SubjectVersion
 
 	costReport, costErr := d.Cost.Cost(ctx, domain.CostQuery{LogRoot: snap.LogRoot, RunID: req.Key.RunID})
 	if costErr != nil {
@@ -156,8 +166,63 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 	}
 	ledger.SandboxRoot = sb.Root
 
-	// 2. The run identity is already authored into sb.Key (== req.Key) by
-	// workspace.Create, so the log location is known before anything spawns.
+	// 2. Render the subject and each declared stub collaborator into the
+	// sandbox through the deployment port. The subject is rendered first so
+	// its DefinitionPath is known before the adapter builds a spawn plan.
+	// Each result is appended to the ledger before the next render begins,
+	// so a partial failure still leaves the ledger describing what exists
+	// and teardown can remove exactly that.
+	if d.Deploy != nil && req.Test.Definition.Subject.CatalogAgentKey != "" {
+		result, renderErr := d.Deploy.Render(ctx, domain.RenderAgentRequest{
+			CatalogAgentKey: req.Test.Definition.Subject.CatalogAgentKey,
+			HarnessID:       d.Adapter.ID(),
+			WorkspaceRoot:   sb.SubjectDir,
+			Model:           req.Test.Definition.Subject.Model,
+			Workflows:       req.Test.Definition.Subject.Workflows,
+		})
+		if renderErr != nil {
+			return sb, ledger, fmt.Errorf("runner: rendering subject %q: %w",
+				req.Test.Definition.Subject.CatalogAgentKey, renderErr)
+		}
+		// Record before using so teardown sees the path even if a later step fails.
+		ledger.Provisioning.Files = append(ledger.Provisioning.Files, result.DestinationPath)
+		ledger.Provisioning.Dirs = append(ledger.Provisioning.Dirs, result.CreatedDirectories...)
+
+		// Capture the subject's source version at render time: the rendered
+		// file in the sandbox is gone by report time, so this is the only
+		// moment the value is available without risk of disagreement.
+		ledger.SubjectVersion = result.SourceVersion
+
+		// Resolve the subject's spawn-time definition path from the reported
+		// destination. It is never authored and never reconstructed from harness
+		// layout knowledge. A DestinationPath outside the sandbox is a port
+		// contract violation; fail diagnosably rather than proceeding with an
+		// empty definition path.
+		rel, relErr := filepath.Rel(sb.SubjectDir, result.DestinationPath)
+		if relErr != nil {
+			return sb, ledger, fmt.Errorf("runner: subject destination %q is not relative to sandbox %q: %w",
+				result.DestinationPath, sb.SubjectDir, relErr)
+		}
+		req.Test.Definition.Subject.DefinitionPath = rel
+	}
+
+	for _, stub := range req.Test.Definition.StubAgents {
+		if d.Deploy == nil {
+			break
+		}
+		result, renderErr := d.Deploy.Render(ctx, domain.RenderAgentRequest{
+			SourcePath:    stub.SourcePath,
+			HarnessID:     d.Adapter.ID(),
+			WorkspaceRoot: sb.SubjectDir,
+		})
+		if renderErr != nil {
+			return sb, ledger, fmt.Errorf("runner: rendering stub %q: %w",
+				stub.Identity.AgentIdentity, renderErr)
+		}
+		// Record before moving to the next stub.
+		ledger.Provisioning.Files = append(ledger.Provisioning.Files, result.DestinationPath)
+		ledger.Provisioning.Dirs = append(ledger.Provisioning.Dirs, result.CreatedDirectories...)
+	}
 
 	// 3. Seed declared files, resolving $ref through the fixture resolver,
 	// with {run_id} expanded in the declared path.
@@ -207,15 +272,20 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 		InterceptorPath: d.SelfPath,
 		InterceptorArgs: []string{domain.InterceptorSubcommand},
 		InterpreterCmd:  d.InterpreterCmd,
-		// Collaborators: deliberately unset — stub-collaborator generation
-		// is deferred (see ContractsDesign.md's "Contracts Deliberately Not
-		// Defined").
 	}
 	provisioning, err := d.Adapter.Provision(ctx, provReq)
 	if err != nil {
 		return sb, ledger, fmt.Errorf("runner: provisioning: %w", err)
 	}
-	ledger.Provisioning = provisioning
+	// Merge the adapter's Provisioning into the ledger rather than replacing
+	// it, so rendered paths recorded before Provision are preserved. Files
+	// the deploy tool wrote are invisible to the adapter; if they were not
+	// recorded before this merge they would be lost and survive Deprovision.
+	ledger.Provisioning.Files = append(ledger.Provisioning.Files, provisioning.Files...)
+	ledger.Provisioning.Dirs = append(ledger.Provisioning.Dirs, provisioning.Dirs...)
+	ledger.Provisioning.Sandbox = provisioning.Sandbox
+	ledger.Provisioning.ScopeFindings = provisioning.ScopeFindings
+	ledger.Provisioning.Sensitive = provisioning.Sensitive
 
 	_ = SaveSetupLedger(sb.SetupLedgerPath(), ledger)
 
@@ -305,6 +375,12 @@ type SetupLedger struct {
 	SeededFiles  []string // relative to the subject dir, in creation order
 	ControlFiles []string // relative to the control dir, in creation order
 	Effects      domain.EffectLedger
+
+	// SubjectVersion is the subject's declared source version, captured from
+	// the deployment port's result at render time. Carried here so Run can
+	// copy it into the Snapshot and ultimately into BuildEvidence without
+	// threading it through as an additional return value.
+	SubjectVersion string
 }
 
 // SaveSetupLedger persists l at path.
@@ -571,6 +647,12 @@ type Snapshot struct {
 	// LogsProduced reports whether LogRoot held any log records, populated
 	// from the actual log tree by TakeSnapshot via logRootHasFiles.
 	LogsProduced bool
+
+	// SubjectVersion is the subject's declared source version, captured from
+	// the deployment port's result during setup and copied here from the
+	// SetupLedger so BuildEvidence can carry it into RunEvidence without
+	// re-deriving it. Empty when the source declared no version.
+	SubjectVersion string
 }
 
 // TakeSnapshot captures everything the verdict engine will need, before
@@ -673,6 +755,8 @@ func BuildEvidence(req Request, snap Snapshot, cost domain.CostReport, dur time.
 
 		LogRoot:      snap.LogRoot,
 		LogsProduced: snap.LogsProduced,
+
+		SubjectVersion: snap.SubjectVersion,
 	}
 }
 

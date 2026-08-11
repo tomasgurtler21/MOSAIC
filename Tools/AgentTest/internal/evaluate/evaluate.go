@@ -85,6 +85,7 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 		Duration:            ev.Duration,
 		RetainedSandboxPath: ev.RetainedSandboxPath,
 		SubjectResult:       ev.SubjectResult,
+		SubjectVersion:      ev.SubjectVersion,
 	}
 }
 

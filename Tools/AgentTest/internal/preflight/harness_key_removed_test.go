@@ -37,6 +37,7 @@ tests:
 `,
 		"happy-path.test.yaml":  validDefinition,
 		"happy-path.stubs.json": validRegistry,
+		"agents/researcher.md":  "# stub researcher placeholder",
 	})
 
 	_, report := preflight.Validate(preflight.Input{
@@ -97,6 +98,7 @@ func TestValidate_NoHarnessKeyDeclared_ValidatesCleanly_RegardlessOfInputHarness
 		"s.suite.yaml":          validSuite,
 		"happy-path.test.yaml":  validDefinition,
 		"happy-path.stubs.json": validRegistry,
+		"agents/researcher.md":  "# stub researcher placeholder",
 	})
 
 	for _, id := range []string{"claude-code", "opencode", "fake", "anything-at-all"} {

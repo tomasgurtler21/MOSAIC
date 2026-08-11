@@ -10,6 +10,15 @@ package opencode_test
 // provisioning will write (unit-testable independently of the filesystem),
 // and Provision's foreign-plugin scan refuses a plugins directory that
 // already holds someone else's plugin (testable by planting a file).
+//
+// Note: the collaborator-writing tests that previously appeared here
+// (TestProvision_DeploysStubCollaboratorDefinitions,
+// TestProvision_RefusesCollaboratorTargetEscapingSandbox,
+// TestProvision_PartialFailureStillRecordsWhatWasCreated) have been removed
+// together with the mechanism they tested. Stub collaborator definitions are
+// now placed by the deployment port (domain.AgentDeployer) before the adapter
+// runs, not by the adapter's Provision loop. The new placement contract is
+// exercised in internal/runner/render_test.go.
 
 import (
 	"os"
@@ -20,14 +29,6 @@ import (
 	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/harness/opencode"
 )
-
-func stubCollaborator(agentType, fileName, content string) domain.StubCollaborator {
-	return domain.StubCollaborator{
-		Identity:   domain.CollaboratorIdentity{ToolName: "task", AgentIdentity: agentType},
-		Definition: []byte(content),
-		TargetPath: filepath.ToSlash(filepath.Join(opencode.AgentsRelDir, fileName)),
-	}
-}
 
 func minimalProvisionRequest(sb domain.Sandbox) domain.ProvisionRequest {
 	return domain.ProvisionRequest{
@@ -167,118 +168,6 @@ func TestProvision_NeverWritesOutsideTheSandbox(t *testing.T) {
 		if !strings.HasPrefix(f, sb.SubjectDir) && !strings.HasPrefix(f, sb.ControlDir) {
 			t.Errorf("Provisioning.Files contains %q, outside both SubjectDir %q and ControlDir %q", f, sb.SubjectDir, sb.ControlDir)
 		}
-	}
-}
-
-// TestProvision_DeploysStubCollaboratorDefinitions asserts that every
-// collaborator the request declares is written into the sandbox at its
-// declared target path, and recorded in the returned ledger.
-func TestProvision_DeploysStubCollaboratorDefinitions(t *testing.T) {
-	dir := t.TempDir()
-	sb := newSandbox(t, dir)
-	adapter := opencode.New(opencode.Options{})
-
-	collaborators := []domain.StubCollaborator{
-		stubCollaborator("worker", "worker.md", "# Worker stub\n"),
-		stubCollaborator("reviewer", "reviewer.md", "# Reviewer stub\n"),
-	}
-
-	req := minimalProvisionRequest(sb)
-	req.Collaborators = collaborators
-	prov, err := adapter.Provision(testContext(), req)
-	if err != nil {
-		t.Fatalf("Provision: %v", err)
-	}
-
-	for _, c := range collaborators {
-		full := filepath.Join(sb.SubjectDir, filepath.FromSlash(c.TargetPath))
-		data, err := os.ReadFile(full)
-		if err != nil {
-			t.Errorf("Provision: stub collaborator definition %q not written: %v", c.TargetPath, err)
-			continue
-		}
-		if string(data) != string(c.Definition) {
-			t.Errorf("Provision: stub collaborator definition %q content = %q, want %q", c.TargetPath, data, c.Definition)
-		}
-
-		found := false
-		for _, f := range prov.Files {
-			if f == full {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("Provisioning.Files does not record collaborator definition %q; got %v", full, prov.Files)
-		}
-	}
-}
-
-// TestProvision_RefusesCollaboratorTargetEscapingSandbox asserts that a
-// stub collaborator whose target path escapes the sandbox subject directory
-// is refused, never written — the tool must never write outside the
-// sandbox on any path.
-func TestProvision_RefusesCollaboratorTargetEscapingSandbox(t *testing.T) {
-	dir := t.TempDir()
-	sb := newSandbox(t, dir)
-	adapter := opencode.New(opencode.Options{})
-
-	escaping := domain.StubCollaborator{
-		Identity:   domain.CollaboratorIdentity{ToolName: "task", AgentIdentity: "escaper"},
-		Definition: []byte("# should never be written"),
-		TargetPath: "../../outside-the-sandbox.md",
-	}
-
-	req := minimalProvisionRequest(sb)
-	req.Collaborators = []domain.StubCollaborator{escaping}
-	_, err := adapter.Provision(testContext(), req)
-	if err == nil {
-		t.Fatalf("Provision: want an error for a stub collaborator target path escaping the sandbox, got nil")
-	}
-
-	escapedPath := filepath.Join(dir, "outside-the-sandbox.md")
-	if _, statErr := os.Stat(escapedPath); statErr == nil {
-		t.Errorf("Provision: wrote %q outside the sandbox despite refusing the request", escapedPath)
-	}
-}
-
-// TestProvision_PartialFailureStillRecordsWhatWasCreated asserts that when
-// a later provisioning step fails, whatever was created before the failure
-// is still present in the returned ledger, so a caller can tear it down.
-func TestProvision_PartialFailureStillRecordsWhatWasCreated(t *testing.T) {
-	dir := t.TempDir()
-	sb := newSandbox(t, dir)
-	adapter := opencode.New(opencode.Options{})
-
-	goodCollaborator := stubCollaborator("worker", "worker.md", "# Worker stub\n")
-	escaping := domain.StubCollaborator{
-		Identity:   domain.CollaboratorIdentity{ToolName: "task", AgentIdentity: "escaper"},
-		Definition: []byte("# should never be written"),
-		TargetPath: "../../outside-the-sandbox.md",
-	}
-
-	req := minimalProvisionRequest(sb)
-	req.Collaborators = []domain.StubCollaborator{goodCollaborator, escaping}
-	prov, err := adapter.Provision(testContext(), req)
-	if err == nil {
-		t.Fatalf("Provision: want an error for the escaping collaborator, got success")
-	}
-
-	// The plugin, written before the collaborators, must still be recorded.
-	pluginPath := filepath.Join(sb.SubjectDir, opencode.PluginsRelDir, opencode.PluginFileName)
-	found := false
-	for _, f := range prov.Files {
-		if f == pluginPath {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("Provision: partial failure did not record the plugin created before the failure (%q); ledger=%v", pluginPath, prov.Files)
-	}
-
-	if err := adapter.Deprovision(testContext(), prov); err != nil {
-		t.Errorf("Deprovision: tearing down a partial ledger returned an error: %v", err)
 	}
 }
 
@@ -449,9 +338,7 @@ func TestDeprovision_RemovesExactlyWhatWasRecorded(t *testing.T) {
 	sb := newSandbox(t, dir)
 	adapter := opencode.New(opencode.Options{})
 
-	req := minimalProvisionRequest(sb)
-	req.Collaborators = []domain.StubCollaborator{stubCollaborator("worker", "worker.md", "# Worker stub\n")}
-	prov, err := adapter.Provision(testContext(), req)
+	prov, err := adapter.Provision(testContext(), minimalProvisionRequest(sb))
 	if err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
@@ -506,8 +393,10 @@ func TestDeprovision_RemovesChildrenBeforeParentDirectories(t *testing.T) {
 	sb := newSandbox(t, dir)
 	adapter := opencode.New(opencode.Options{})
 
+	// Use a logger bundle to populate the plugins directory with nested files,
+	// which causes Provision to record both files and their parent directories.
 	req := minimalProvisionRequest(sb)
-	req.Collaborators = []domain.StubCollaborator{stubCollaborator("worker", "worker.md", "# Worker stub\n")}
+	req.LoggerBundleDir = fixtureBundleDir(t, "fixture-bundle")
 	prov, err := adapter.Provision(testContext(), req)
 	if err != nil {
 		t.Fatalf("Provision: %v", err)

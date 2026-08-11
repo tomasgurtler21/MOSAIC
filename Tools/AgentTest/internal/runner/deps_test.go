@@ -57,6 +57,7 @@ type harness struct {
 	Sink     *recordingSink
 	Clock    *fakeClock
 	Rec      *callRecorder
+	Deployer *stubDeployer // the deployment port double, wired as Deps.Deploy
 
 	FixtureRoot string
 	// WorkspaceRoot is the directory the harness's own workspace.Manager is
@@ -97,6 +98,7 @@ func newHarness(t *testing.T) *harness {
 	launcher := &stubLauncher{rec: rec}
 	costProvider := &stubCostProvider{rec: rec, report: domain.CostReport{Attribution: domain.AttributionAttributed}}
 	sink := &recordingSink{}
+	deployer := &stubDeployer{}
 
 	return &harness{
 		Deps: runner.Deps{
@@ -108,6 +110,7 @@ func newHarness(t *testing.T) *harness {
 			Cost:       costProvider,
 			Clock:      clock,
 			Progress:   sink,
+			Deploy:     deployer,
 		},
 		Adapter:       adapter,
 		Launcher:      launcher,
@@ -115,6 +118,7 @@ func newHarness(t *testing.T) *harness {
 		Sink:          sink,
 		Clock:         clock,
 		Rec:           rec,
+		Deployer:      deployer,
 		FixtureRoot:   fixtureRoot,
 		WorkspaceRoot: workspaceRoot,
 	}

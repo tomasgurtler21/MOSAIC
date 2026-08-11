@@ -17,6 +17,7 @@ var definitionKnownFields = map[string]bool{
 	"negative":               true,
 	"subject":                true,
 	"stub_registry":          true,
+	"stub_agents":            true,
 	"timeout":                true,
 	"turn_limit":             true,
 	"repetitions":            true,
@@ -35,11 +36,17 @@ var definitionKnownFields = map[string]bool{
 
 type wireSubject struct {
 	Identity       string   `yaml:"identity"`
-	Definition     string   `yaml:"definition"`
+	Agent          string   `yaml:"agent"`
+	Workflows      []string `yaml:"workflows"`
 	OpeningMessage string   `yaml:"opening_message"`
 	InvocationKind string   `yaml:"invocation_kind"`
 	Model          string   `yaml:"model"`
 	AllowedTools   []string `yaml:"allowed_tools"`
+}
+
+type wireStubAgent struct {
+	Identity wireCollaboratorIdentity `yaml:"identity"`
+	Source   string                   `yaml:"source"`
 }
 
 type wireSeedFile struct {
@@ -180,8 +187,9 @@ type wireDefinition struct {
 	Layer         string `yaml:"layer"`
 	Negative      bool   `yaml:"negative"`
 
-	Subject      wireSubject `yaml:"subject"`
-	StubRegistry string      `yaml:"stub_registry"`
+	Subject      wireSubject    `yaml:"subject"`
+	StubRegistry string         `yaml:"stub_registry"`
+	StubAgents   []wireStubAgent `yaml:"stub_agents"`
 
 	WireSettings `yaml:",inline"`
 
@@ -202,6 +210,7 @@ func ParseTestDefinition(src Source) (domain.TestDefinition, Report) {
 	}
 	checkUnknownTopLevelFields(src, root, definitionKnownFields, &report)
 	reportRemovedHarnessKeyIfPresent(src, root, "harness", &report)
+	reportRemovedSubjectDefinitionKeyIfPresent(src, root, &report)
 
 	var wire wireDefinition
 	if err := goyaml.Unmarshal(src.Data, &wire); err != nil {
@@ -225,12 +234,13 @@ func ParseTestDefinition(src Source) (domain.TestDefinition, Report) {
 		Layer:         domain.TestLayer(wire.Layer),
 		Negative:      wire.Negative,
 		Subject: domain.SubjectUnderTest{
-			Identity:       wire.Subject.Identity,
-			DefinitionPath: wire.Subject.Definition,
-			OpeningMessage: wire.Subject.OpeningMessage,
-			InvocationKind: wire.Subject.InvocationKind,
-			Model:          wire.Subject.Model,
-			AllowedTools:   wire.Subject.AllowedTools,
+			Identity:        wire.Subject.Identity,
+			CatalogAgentKey: wire.Subject.Agent,
+			Workflows:       wire.Subject.Workflows,
+			OpeningMessage:  wire.Subject.OpeningMessage,
+			InvocationKind:  wire.Subject.InvocationKind,
+			Model:           wire.Subject.Model,
+			AllowedTools:    wire.Subject.AllowedTools,
 		},
 		StubRegistryPath: wire.StubRegistry,
 		Settings:         wire.WireSettings.toDomain(src, "timeout", &report),
@@ -242,6 +252,13 @@ func ParseTestDefinition(src Source) (domain.TestDefinition, Report) {
 			Path:    sf.Path,
 			Content: sf.Content,
 			Ref:     sf.Ref,
+		})
+	}
+
+	for _, sa := range wire.StubAgents {
+		def.StubAgents = append(def.StubAgents, domain.StubAgent{
+			Identity:   sa.Identity.toDomain(),
+			SourcePath: sa.Source,
 		})
 	}
 

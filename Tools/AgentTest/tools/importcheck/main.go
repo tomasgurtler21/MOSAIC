@@ -109,6 +109,7 @@ var adapterPackages = map[string]bool{
 	"internal/launch":             true,
 	"internal/orchstate":          true,
 	"internal/cost":               true,
+	"internal/agentdeploy":        true,
 	"internal/report":             true,
 	"internal/sideeffects":        true,
 	"internal/authoring":          true,
@@ -140,8 +141,9 @@ var frontendPackages = map[string]bool{
 // that composition is its contract, named in the Integration Points table.
 var adapterImportExceptions = map[string]map[string]bool{
 	"internal/preflight": {
-		"internal/authoring": true,
-		"internal/fixtures":  true,
+		"internal/authoring":  true,
+		"internal/fixtures":   true,
+		"internal/agentdeploy": true, // preflight uses agentdeploy for dry-run declaration validation
 	},
 	"internal/sideeffects": {
 		"internal/fixtures": true,

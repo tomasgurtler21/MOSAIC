@@ -140,13 +140,13 @@ func TestResolveWiringConfig_CostToolPath_DefaultsToBinaryRelativePath(t *testin
 // ---------------------------------------------------------------------------
 
 // TestValueConsumingFlags_IncludesTheNewPathOverrides asserts the
-// composition root's positional detection recognises both new flags as
-// value-consuming, so a space-separated value never gets mistaken for a
+// composition root's positional detection recognises all value-consuming path
+// override flags, so a space-separated value never gets mistaken for a
 // positional subcommand (see selectFrontend's own flag-aware handling).
 func TestValueConsumingFlags_IncludesTheNewPathOverrides(t *testing.T) {
-	for _, name := range []string{"--logger-bundle", "--cost-tool"} {
+	for _, name := range []string{"--logger-bundle", "--cost-tool", "--deploy-tool", "--mosaic-root"} {
 		if !valueConsumingFlags[name] {
-			t.Errorf("valueConsumingFlags[%q] = false, want true (AC6.6: every new value-consuming flag must be recognised by positional detection)", name)
+			t.Errorf("valueConsumingFlags[%q] = false, want true (every value-consuming flag must be recognised by positional detection)", name)
 		}
 	}
 }
@@ -170,5 +170,135 @@ func TestSelectFrontend_CostToolFlagValue_NotMistakenForPositional(t *testing.T)
 	got := selectFrontend([]string{"--cost-tool", "C:/bin/mosaic-log-analyzer.exe"}, alwaysTerminal)
 	if got != FrontendTUI {
 		t.Errorf(`selectFrontend([--cost-tool C:/bin/mosaic-log-analyzer.exe], alwaysTerminal) = %q, want %q (the flag's value must not be mistaken for a positional command)`, got, FrontendTUI)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// DeployToolPath precedence
+// ---------------------------------------------------------------------------
+
+// TestResolveWiringConfig_DeployToolPath_FlagWinsOverEverything mirrors the
+// LoggerBundleDir and CostToolPath precedence tests for --deploy-tool.
+func TestResolveWiringConfig_DeployToolPath_FlagWinsOverEverything(t *testing.T) {
+	t.Setenv("MOSAIC_AGENT_TEST_DEPLOY_TOOL", "C:/from-env/mosaic-deploy.exe")
+
+	cases := map[string][]string{
+		"space":  {"run", "suite.yaml", "--deploy-tool", "C:/from-flag/mosaic-deploy.exe"},
+		"equals": {"run", "suite.yaml", "--deploy-tool=C:/from-flag/mosaic-deploy.exe"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := resolveWiringConfig(args)
+			if cfg.DeployToolPath != "C:/from-flag/mosaic-deploy.exe" {
+				t.Errorf("resolveWiringConfig(%v).DeployToolPath = %q, want the flag value %q (a flag must win over the environment variable)", args, cfg.DeployToolPath, "C:/from-flag/mosaic-deploy.exe")
+			}
+		})
+	}
+}
+
+// TestResolveWiringConfig_DeployToolPath_EnvWinsOverDefault asserts the
+// MOSAIC_AGENT_TEST_DEPLOY_TOOL variable, absent a flag, wins over the
+// binary-relative default.
+func TestResolveWiringConfig_DeployToolPath_EnvWinsOverDefault(t *testing.T) {
+	t.Setenv("MOSAIC_AGENT_TEST_DEPLOY_TOOL", "C:/from-env/mosaic-deploy.exe")
+
+	cfg := resolveWiringConfig([]string{"run", "suite.yaml"})
+
+	if cfg.DeployToolPath != "C:/from-env/mosaic-deploy.exe" {
+		t.Errorf("resolveWiringConfig(...).DeployToolPath = %q, want the environment value %q (the variable must win over the default when no flag is given)", cfg.DeployToolPath, "C:/from-env/mosaic-deploy.exe")
+	}
+}
+
+// TestResolveWiringConfig_DeployToolPath_DefaultsToBinaryRelativePath asserts
+// that with neither a flag nor the environment variable set, the default
+// remains relative to the running binary's own directory — the property that
+// keeps a correctly staged distribution working with no configuration at all.
+// The binary-relative default includes the platform executable suffix
+// (empty on Linux/macOS, ".exe" on Windows), matching CostToolPath's pattern.
+func TestResolveWiringConfig_DeployToolPath_DefaultsToBinaryRelativePath(t *testing.T) {
+	t.Setenv("MOSAIC_AGENT_TEST_DEPLOY_TOOL", "")
+
+	cfg := resolveWiringConfig([]string{"run", "suite.yaml"})
+
+	want := filepath.Join(expectedSelfDir(t), "mosaic-deploy"+expectedExeSuffix())
+	if cfg.DeployToolPath != want {
+		t.Errorf("resolveWiringConfig(...).DeployToolPath = %q, want the binary-relative default %q", cfg.DeployToolPath, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// MosaicRoot precedence
+// ---------------------------------------------------------------------------
+
+// TestResolveWiringConfig_MosaicRoot_FlagWinsOverEverything mirrors the
+// DeployToolPath flag-wins tests for --mosaic-root.
+func TestResolveWiringConfig_MosaicRoot_FlagWinsOverEverything(t *testing.T) {
+	t.Setenv("MOSAIC_AGENT_TEST_MOSAIC_ROOT", "C:/from-env/mosaic-root")
+
+	cases := map[string][]string{
+		"space":  {"run", "suite.yaml", "--mosaic-root", "C:/from-flag/mosaic-root"},
+		"equals": {"run", "suite.yaml", "--mosaic-root=C:/from-flag/mosaic-root"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := resolveWiringConfig(args)
+			if cfg.MosaicRoot != "C:/from-flag/mosaic-root" {
+				t.Errorf("resolveWiringConfig(%v).MosaicRoot = %q, want the flag value %q (a flag must win over the environment variable)", args, cfg.MosaicRoot, "C:/from-flag/mosaic-root")
+			}
+		})
+	}
+}
+
+// TestResolveWiringConfig_MosaicRoot_EnvWinsOverDefault asserts the
+// MOSAIC_AGENT_TEST_MOSAIC_ROOT variable, absent a flag, wins over the
+// default empty string.
+func TestResolveWiringConfig_MosaicRoot_EnvWinsOverDefault(t *testing.T) {
+	t.Setenv("MOSAIC_AGENT_TEST_MOSAIC_ROOT", "C:/from-env/mosaic-root")
+
+	cfg := resolveWiringConfig([]string{"run", "suite.yaml"})
+
+	if cfg.MosaicRoot != "C:/from-env/mosaic-root" {
+		t.Errorf("resolveWiringConfig(...).MosaicRoot = %q, want the environment value %q (the variable must win over the default when no flag is given)", cfg.MosaicRoot, "C:/from-env/mosaic-root")
+	}
+}
+
+// TestResolveWiringConfig_MosaicRoot_DefaultsToEmpty asserts that with neither
+// a flag nor the environment variable set, MosaicRoot defaults to the empty
+// string. An empty MosaicRoot means "do not override" — the --mosaic-root flag
+// is simply not passed to the deployment tool, which then resolves its own
+// MOSAIC root. A correctly staged distribution therefore works with no flag and
+// no environment variable.
+func TestResolveWiringConfig_MosaicRoot_DefaultsToEmpty(t *testing.T) {
+	t.Setenv("MOSAIC_AGENT_TEST_MOSAIC_ROOT", "")
+
+	cfg := resolveWiringConfig([]string{"run", "suite.yaml"})
+
+	if cfg.MosaicRoot != "" {
+		t.Errorf("resolveWiringConfig(...).MosaicRoot = %q, want empty string (empty means the deploy tool resolves its own root; a correctly staged distribution needs no flag and no variable)", cfg.MosaicRoot)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Positional-detection coverage for --deploy-tool and --mosaic-root
+// ---------------------------------------------------------------------------
+
+// TestSelectFrontend_DeployToolFlagValue_NotMistakenForPositional mirrors the
+// existing --logger-bundle and --cost-tool tests for --deploy-tool: a bare
+// invocation carrying only "--deploy-tool <path>" must fall through to the
+// terminal check rather than routing to the CLI frontend because the flag's
+// value was mistaken for a positional command.
+func TestSelectFrontend_DeployToolFlagValue_NotMistakenForPositional(t *testing.T) {
+	got := selectFrontend([]string{"--deploy-tool", "C:/bin/mosaic-deploy.exe"}, alwaysTerminal)
+	if got != FrontendTUI {
+		t.Errorf(`selectFrontend([--deploy-tool C:/bin/mosaic-deploy.exe], alwaysTerminal) = %q, want %q (the flag's value must not be mistaken for a positional command)`, got, FrontendTUI)
+	}
+}
+
+// TestSelectFrontend_MosaicRootFlagValue_NotMistakenForPositional mirrors the
+// above for --mosaic-root.
+func TestSelectFrontend_MosaicRootFlagValue_NotMistakenForPositional(t *testing.T) {
+	got := selectFrontend([]string{"--mosaic-root", "C:/mosaic"}, alwaysTerminal)
+	if got != FrontendTUI {
+		t.Errorf(`selectFrontend([--mosaic-root C:/mosaic], alwaysTerminal) = %q, want %q (the flag's value must not be mistaken for a positional command)`, got, FrontendTUI)
 	}
 }

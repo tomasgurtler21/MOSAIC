@@ -30,8 +30,13 @@ id: happy-path
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: happy-path.stubs.json
+stub_agents:
+  - identity:
+      tool: Task
+      agent: researcher
+    source: agents/researcher.md
 assertions:
   protocol_violations: 0
 `
@@ -42,8 +47,13 @@ id: happy-path
 layer: subagent
 subject:
   identity: researcher
-  definition: .claude/agents/researcher.md
+  agent: researcher
 stub_registry: happy-path.stubs.json
+stub_agents:
+  - identity:
+      tool: Task
+      agent: researcher
+    source: agents/researcher.md
 assertions:
   protocol_violations: 0
 `
@@ -54,8 +64,13 @@ id: happy-path
 layer: integration
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: happy-path.stubs.json
+stub_agents:
+  - identity:
+      tool: Task
+      agent: researcher
+    source: agents/researcher.md
 assertions:
   protocol_violations: 0
 `
@@ -71,6 +86,7 @@ func TestValidate_LayerSuppressedAssertion_ReportsWarning(t *testing.T) {
 		"s.suite.yaml":          validSuite,
 		"happy-path.test.yaml":  orchestratorLayerProtocolViolationsDefinition,
 		"happy-path.stubs.json": validRegistry,
+		"agents/researcher.md":  "# stub researcher placeholder",
 	})
 
 	_, report := preflight.Validate(preflight.Input{
@@ -109,6 +125,7 @@ func TestValidate_LayerSuppressedAssertion_IsWarningNotError(t *testing.T) {
 		"s.suite.yaml":          validSuite,
 		"happy-path.test.yaml":  orchestratorLayerProtocolViolationsDefinition,
 		"happy-path.stubs.json": validRegistry,
+		"agents/researcher.md":  "# stub researcher placeholder",
 	})
 
 	_, report := preflight.Validate(preflight.Input{
@@ -141,6 +158,7 @@ func TestValidate_UnsuppressedAssertion_ValidatesCleanly(t *testing.T) {
 				"s.suite.yaml":          validSuite,
 				"happy-path.test.yaml":  tc.definition,
 				"happy-path.stubs.json": validRegistry,
+				"agents/researcher.md":  "# stub researcher placeholder",
 			})
 
 			_, report := preflight.Validate(preflight.Input{
@@ -168,6 +186,7 @@ func TestValidate_HappyPath_NoSuppressedAssertionDiagnostic(t *testing.T) {
 		"s.suite.yaml":          validSuite,
 		"happy-path.test.yaml":  validDefinition,
 		"happy-path.stubs.json": validRegistry,
+		"agents/researcher.md":  "# stub researcher placeholder",
 	})
 
 	_, report := preflight.Validate(preflight.Input{

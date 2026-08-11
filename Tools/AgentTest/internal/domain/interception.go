@@ -201,19 +201,26 @@ const InterceptorSubcommand = "intercept"
 type ProvisionRequest struct {
 	Sandbox         Sandbox
 	Subject         SubjectUnderTest
-	Collaborators   []StubCollaborator // definitions standing in for real collaborators
-	LoggerBundleDir string             // the MOSAIC logger bundle to deploy, read as data
-	InterpreterCmd  string             // resolved and validated before provisioning
-	InterceptorPath string             // absolute path of the running binary
-	InterceptorArgs []string           // subcommand plus --workspace / --harness
+	LoggerBundleDir string   // the MOSAIC logger bundle to deploy, read as data
+	InterpreterCmd  string   // resolved and validated before provisioning
+	InterceptorPath string   // absolute path of the running binary
+	InterceptorArgs []string // subcommand plus --workspace / --harness
 }
 
-// StubCollaborator is one collaborator definition an adapter writes into the
-// sandbox in place of the real one.
-type StubCollaborator struct {
-	Identity   CollaboratorIdentity
-	Definition []byte // the definition file content to write
-	TargetPath string // relative to the sandbox subject dir
+// StubAgent is one declared stub collaborator's generic-form definition:
+// which collaborator it stands in for, and where its definition lives in this
+// module's workspace. It carries a path rather than bytes because the
+// definition is rendered by the deployment tool from source, not written
+// verbatim by an adapter.
+//
+// A stub's behaviour — what it replies when intercepted — is declared
+// separately, in the stub registry. These are two different things and must
+// not be conflated.
+type StubAgent struct {
+	Identity CollaboratorIdentity
+	// SourcePath is the generic-form definition file path, resolved relative
+	// to the test definition file that declared it.
+	SourcePath string
 }
 
 // Provisioning is the ledger of what an adapter installed. Deprovision

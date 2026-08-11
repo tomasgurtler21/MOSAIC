@@ -54,8 +54,13 @@ id: happy-path
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: happy-path.stubs.json
+stub_agents:
+  - identity:
+      tool: Task
+      agent: researcher
+    source: agents/researcher.md
 assertions:
   final_state:
     phase: COMPLETED
@@ -77,6 +82,7 @@ func TestValidate_HappyPath_NoErrors(t *testing.T) {
 		"s.suite.yaml":          validSuite,
 		"happy-path.test.yaml":  validDefinition,
 		"happy-path.stubs.json": validRegistry,
+		"agents/researcher.md":  "# stub researcher placeholder",
 	})
 
 	_, report := preflight.Validate(preflight.Input{
@@ -167,7 +173,7 @@ id: happy-path
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: does-not-exist.stubs.json
 `,
 	})
@@ -195,7 +201,7 @@ id: happy-path
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: happy-path.stubs.json
 assertions:
   task_messages:
@@ -228,7 +234,7 @@ id: happy-path
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: happy-path.stubs.json
 seed_files:
   - path: Orchestration-{run_id}/Orchestration.md
@@ -260,7 +266,7 @@ id: happy-path
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: happy-path.stubs.json
 parallel_groups:
   - name: research-fanout
@@ -306,6 +312,7 @@ func TestValidate_RegistryTestIDMismatchesDefinitionID_ReportsError(t *testing.T
       "response": { "status_code": "SUCCESS" } }
   ]
 }`,
+		"agents/researcher.md": "# stub researcher placeholder",
 	})
 
 	_, report := preflight.Validate(preflight.Input{
@@ -338,7 +345,7 @@ id: happy-path
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: happy-path.stubs.json
 repetitions: -1
 `,
@@ -351,7 +358,7 @@ id: happy-path
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: happy-path.stubs.json
 pass_rate: 1.5
 `,
@@ -364,7 +371,7 @@ id: happy-path
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: happy-path.stubs.json
 timeout: -15m
 `,
@@ -377,7 +384,7 @@ id: happy-path
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: happy-path.stubs.json
 turn_limit: -1
 `,
@@ -436,7 +443,7 @@ id: happy-path
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: does-not-exist.stubs.json
 seed_files:
   - path: Orchestration-{run_id}/Orchestration.md
@@ -533,7 +540,7 @@ id: happy-path
 layer: orchestrator
 subject:
   identity: orchestrator
-  definition: .claude/agents/orchestrator.md
+  agent: orchestrator
 stub_registry: happy-path.stubs.json
 seed_files:
   - path: Orchestration-{run_id}/First.md
@@ -593,6 +600,7 @@ func TestValidate_PerformsNoProcessSpawningOrWorkspaceCreation(t *testing.T) {
 		"s.suite.yaml":          validSuite,
 		"happy-path.test.yaml":  validDefinition,
 		"happy-path.stubs.json": validRegistry,
+		"agents/researcher.md":  "# stub researcher placeholder",
 	})
 
 	before := snapshot(t, filepath.Dir(root))

@@ -10,7 +10,7 @@ negative: false
 
 subject:
   identity: standin-subject
-  definition: subject.txt
+  agent: standin-subject
   opening_message: |
     Dispatch the helper, then finish.
   invocation_kind: subagent
@@ -18,6 +18,11 @@ subject:
   allowed_tools: [Task]
 
 stub_registry: subagent-layer.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: helper
+    source: ../stub-agent-placeholder.md
 timeout: 30s
 turn_limit: 5
 

@@ -12,7 +12,7 @@ negative: false
 
 subject:
   identity: planner
-  definition: .claude/agents/planner.md
+  agent: planner
   opening_message: |
     Continue the workflow using the seeded orchestration state.
   invocation_kind: subagent

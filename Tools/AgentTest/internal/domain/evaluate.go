@@ -60,6 +60,17 @@ type RunEvidence struct {
 	// report a user reads can print an openable path — a retention feature
 	// whose path has to be guessed is not a feature.
 	RetainedSandboxPath string
+
+	// SubjectVersion is the declared version of the subject's source
+	// definition, captured at render time from the deployment port's own
+	// result. It is carried here because the report cannot obtain it
+	// elsewhere: the rendered file in the sandbox is gone by report time, and
+	// re-deriving it later could disagree with what was actually deployed.
+	//
+	// Empty means the source declared no version — a legal state the
+	// renderings show as unknown, never as a blank that reads like a real
+	// value.
+	SubjectVersion string
 }
 
 // TestResult is the outcome of evaluating one run's evidence: a verdict with
@@ -92,6 +103,13 @@ type TestResult struct {
 	// tool. Zero-valued when the subject exited zero; the report only renders
 	// it when ExitCode != 0.
 	SubjectResult SubjectResult
+
+	// SubjectVersion is carried through from RunEvidence unchanged, exactly
+	// as RetainedSandboxPath is, so the report can attribute a result to a
+	// specific version of the agent under test. Empty means the source
+	// declared no version; the renderings show it as unknown rather than
+	// blank.
+	SubjectVersion string
 }
 
 // AssertionOutcome is the per-assertion result of evaluating one class.

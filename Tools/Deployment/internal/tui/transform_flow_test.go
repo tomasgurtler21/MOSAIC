@@ -381,6 +381,10 @@ func (s *capturingTransformService) DeployUtilityInfrastructure(ctx context.Cont
 	return s.inner.DeployUtilityInfrastructure(ctx, req)
 }
 
+func (s *capturingTransformService) RenderAgent(ctx context.Context, req app.RenderAgentRequest) (app.RenderAgentResult, error) {
+	return s.inner.RenderAgent(ctx, req)
+}
+
 // TestTransformMode_SuppliesSelectedHarnessIDInRequest verifies that when the TUI executes
 // a transform run, the TransformHarnessRequest carries the harness id selected on the
 // harness screen as SourceHarnessID. The TUI must not present any additional harness

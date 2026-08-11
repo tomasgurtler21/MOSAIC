@@ -115,6 +115,7 @@ func Run(t *testing.T, cfg Config) {
 	t.Run("ConfigScopeInspection", func(t *testing.T) { testConfigScopeInspection(t, cfg) })
 	t.Run("ProvisionDeprovision", func(t *testing.T) { testProvisionDeprovision(t, cfg) })
 	t.Run("ProvisionRefusesCompetingRewriteHooks", func(t *testing.T) { testProvisionRefusesCompetingRewriteHooks(t, cfg) })
+	t.Run("ProvisionCoexistsWithPrerenderedFiles", func(t *testing.T) { testProvisionCoexistsWithPrerenderedFiles(t, cfg) })
 	t.Run("TranslateBasics", func(t *testing.T) { testTranslateBasics(t, cfg) })
 	t.Run("CapabilityHonesty", func(t *testing.T) { testCapabilityHonesty(t, cfg) })
 	t.Run("Correlation", func(t *testing.T) { testCorrelation(t, cfg) })
@@ -150,7 +151,6 @@ func buildProvisionRequest(sb domain.Sandbox, subject domain.SubjectUnderTest) d
 	return domain.ProvisionRequest{
 		Sandbox:         sb,
 		Subject:         subject,
-		Collaborators:   nil,
 		LoggerBundleDir: "",
 		InterpreterCmd:  "",
 		InterceptorPath: "interceptor",

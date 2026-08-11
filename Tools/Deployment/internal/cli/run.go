@@ -461,7 +461,113 @@ Directory enumeration is non-recursive when a folder path is supplied.`,
 	utilityInfraCmd.Flags().BoolVar(&utilityInfraDryRun, "dry-run", false, "Compute and report without writing any file")
 	utilityInfraCmd.Flags().BoolVar(&utilityInfraAutoConfirm, "auto-confirm", false, "Auto-confirm the deployment plan without prompting")
 
-	root.AddCommand(deployCmd, updateCmd, workflowsCmd, promoteCmd, transformCmd, utilityInfraCmd)
+	// ------------------------------------------------------------------
+	// render subcommand
+	// ------------------------------------------------------------------
+	var (
+		renderHarness      string
+		renderSource       string
+		renderSourceAgent  string
+		renderDest         string
+		renderWorkspace    string
+		renderModel        string
+		renderWorkflowsStr string
+		renderWorkflowsSet bool
+		renderOverwrite    bool
+		renderDryRun       bool
+		renderOutput       string
+	)
+
+	renderCmd := &cobra.Command{
+		Use:   "render",
+		Short: "Render one generic-form MOSAIC agent into a target harness's deployed form",
+		Long: `Render exactly one generic-form MOSAIC agent definition into one target harness's
+deployed form at a caller-chosen destination.
+
+The source may be a file at any path (--source) or a named catalogue agent (--source-agent).
+Exactly one of these must be supplied.
+
+The destination may be an exact path (--dest) or a workspace root (--workspace) from which
+the harness descriptor resolves the agent's path. Exactly one of these must be supplied.
+
+This subcommand is fully non-interactive: it never consults the user regardless of which
+flags are present or absent. A programmatic caller can drive it without risk of hanging on
+a prompt.`,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			// Record whether --workflows was explicitly set, so the nil/non-nil distinction
+			// is preserved in the request: an absent flag yields nil ("not specified"),
+			// an explicitly provided flag (even with an empty value) yields a non-nil slice.
+			renderWorkflowsSet = cmd.Flags().Changed("workflows")
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Validate required flags and mutual-exclusion constraints before calling the
+			// service. Usage errors write to errOut and, when --output json is set, also
+			// emit a RenderFailure envelope to out so a programmatic caller sees the same
+			// JSON shape on every non-zero exit.
+			if renderHarness == "" {
+				exitCode = renderRenderAgentUsageError(out, errOut, renderOutput,
+					"--harness is required for the render subcommand", "harness-required")
+				return nil
+			}
+			if renderSource == "" && renderSourceAgent == "" {
+				exitCode = renderRenderAgentUsageError(out, errOut, renderOutput,
+					"--source or --source-agent is required for the render subcommand", "source-required")
+				return nil
+			}
+			if renderSource != "" && renderSourceAgent != "" {
+				exitCode = renderRenderAgentUsageError(out, errOut, renderOutput,
+					"--source and --source-agent are mutually exclusive for the render subcommand", "source-ambiguous")
+				return nil
+			}
+			if renderDest == "" && renderWorkspace == "" {
+				exitCode = renderRenderAgentUsageError(out, errOut, renderOutput,
+					"--dest or --workspace is required for the render subcommand", "destination-required")
+				return nil
+			}
+			if renderDest != "" && renderWorkspace != "" {
+				exitCode = renderRenderAgentUsageError(out, errOut, renderOutput,
+					"--dest and --workspace are mutually exclusive for the render subcommand", "destination-ambiguous")
+				return nil
+			}
+
+			req := app.RenderAgentRequest{
+				SourcePath:      pathinput.Unquote(strings.TrimSpace(renderSource)),
+				SourceAgentKey:  renderSourceAgent,
+				TargetHarnessID: renderHarness,
+				DestinationPath: pathinput.Unquote(strings.TrimSpace(renderDest)),
+				WorkspaceRoot:   pathinput.Unquote(strings.TrimSpace(renderWorkspace)),
+				TargetModel:     renderModel,
+				Overwrite:       renderOverwrite,
+				DryRun:          renderDryRun,
+			}
+
+			// Workflow flag: nil when absent ("not specified"), non-nil when explicitly
+			// provided ("explicitly none" for an empty value, or the named ids).
+			if renderWorkflowsSet {
+				req.Workflows = splitTrimmedParts(renderWorkflowsStr)
+			}
+
+			result, svcErr := svc.RenderAgent(ctx, req)
+			exitCode = renderRenderAgentOutput(out, errOut, renderOutput, result, svcErr)
+			return nil
+		},
+	}
+
+	renderCmd.Flags().StringVar(&renderHarness, "harness", "", "Target harness ID (required)")
+	renderCmd.Flags().StringVar(&renderSource, "source", "", "Generic-form agent file at any path (one of --source, --source-agent; quote-stripped)")
+	renderCmd.Flags().StringVar(&renderSourceAgent, "source-agent", "", "Catalogue agent key, e.g. orchestrator (one of --source, --source-agent)")
+	renderCmd.Flags().StringVar(&renderDest, "dest", "", "Exact destination file path (one of --dest, --workspace; quote-stripped)")
+	renderCmd.Flags().StringVar(&renderWorkspace, "workspace", "", "Workspace root; harness resolves the destination path under it (one of --dest, --workspace; quote-stripped)")
+	renderCmd.Flags().StringVar(&renderModel, "model", "", "Target model identifier; absent leaves the output's model field empty, no question is asked")
+	renderCmd.Flags().StringVar(&renderWorkflowsStr, "workflows", "", "Comma-separated workflow ids; absent = not specified (nil), empty string = explicitly none")
+	renderCmd.Flags().BoolVar(&renderOverwrite, "overwrite", false, "Permit replacing an existing destination file")
+	renderCmd.Flags().BoolVar(&renderDryRun, "dry-run", false, "Compute and validate everything; write nothing")
+	renderCmd.Flags().StringVar(&renderOutput, "output", "", "Output format (json)")
+
+	root.AddCommand(deployCmd, updateCmd, workflowsCmd, promoteCmd, transformCmd, utilityInfraCmd, renderCmd)
 	root.SetArgs(args)
 
 	if err := root.Execute(); err != nil {

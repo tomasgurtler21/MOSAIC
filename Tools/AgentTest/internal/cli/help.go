@@ -47,6 +47,8 @@ var flagSpecs = []FlagSpec{
 	{Name: "--tui", Summary: "Launch the interactive frontend", ConsumesValue: false},
 	{Name: "--logger-bundle", Placeholder: "<dir>", Summary: "Logger bundle directory override", ConsumesValue: true},
 	{Name: "--cost-tool", Placeholder: "<path>", Summary: "Log-analysis tool path override", ConsumesValue: true},
+	{Name: "--deploy-tool", Placeholder: "<path>", Summary: "Deployment tool path override", ConsumesValue: true},
+	{Name: "--mosaic-root", Placeholder: "<dir>", Summary: "MOSAIC repository root override for the deployment tool", ConsumesValue: true},
 	{Name: "--keep-sandbox", Summary: "Retain every sandbox for diagnosis", ConsumesValue: false},
 	{Name: "--keep-sandbox-on-failure", Summary: "Retain a sandbox when the attempt failed", ConsumesValue: false},
 	{Name: "--help", Summary: "Show this usage surface and exit (-h)", ConsumesValue: false},

@@ -3,6 +3,8 @@ Started: 2026-08-07T12:00:00Z
 Finished: 2026-08-07T12:05:00Z
 
 always-loses-its-lock: FAIL [state_integrity] (infrastructure failure)
+  subject version: unknown
+  subject version: unknown
 
 Totals: FAIL=1
 Infrastructure failures: 1

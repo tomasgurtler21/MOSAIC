@@ -16,14 +16,16 @@ vars:
   LDFLAGS: -s -w
   DIST_DIR: ./dist
 
-  # Source material for the staged runtime dependencies (AC6.5): the logger
-  # bundle's source lives at the repo root, and the cost tool's build output
-  # is another tool's dist/. Both are staged into this tool's own dist/ so a
-  # freshly built binary resolves its binary-relative defaults (see
+  # Source material for the staged runtime dependencies: the logger bundle's
+  # source lives at the repo root, the cost tool's build output is another
+  # tool's dist/, and the deploy tool's build output is the Deployment tool's
+  # dist/. All three are staged into this tool's own dist/ so a freshly built
+  # binary resolves its binary-relative defaults (see
   # cmd/mosaic-agent-test's resolveWiringConfig) with no flag or environment
   # variable set.
   HOOKS_SRC_DIR: ../../.claude/hooks
   LOGANALYZER_DIST_DIR: ../LogAnalyzer/dist
+  DEPLOYMENT_DIST_DIR: ../Deployment/dist
 
 tasks:
 
@@ -101,24 +103,40 @@ tasks:
     generates:
       - "{{.DIST_DIR}}/mosaic-log-analyzer"
 
+  stage:deploy-tool:windows:
+    desc: "Stage the Windows deployment tool into dist/mosaic-deploy.exe"
+    cmds:
+      - cp {{.DEPLOYMENT_DIST_DIR}}/mosaic-deploy.exe {{.DIST_DIR}}/mosaic-deploy.exe
+    generates:
+      - "{{.DIST_DIR}}/mosaic-deploy.exe"
+
+  stage:deploy-tool:linux:
+    desc: "Stage the Linux deployment tool into dist/mosaic-deploy"
+    cmds:
+      - cp {{.DEPLOYMENT_DIST_DIR}}/mosaic-deploy-linux-amd64 {{.DIST_DIR}}/mosaic-deploy
+    generates:
+      - "{{.DIST_DIR}}/mosaic-deploy"
+
   # ---------------------------------------------------------------------------
   # Full dist/: cross-compile plus staging, so the resulting binary works out
   # of the box with no --logger-bundle, --cost-tool or environment override.
   # ---------------------------------------------------------------------------
 
   dist:windows:
-    desc: "Build the Windows binary and stage the logger bundle and cost tool beside it"
+    desc: "Build the Windows binary and stage the logger bundle, cost tool, and deploy tool beside it"
     deps: [build:windows]
     cmds:
       - task: stage:bundle
       - task: stage:cost-tool:windows
+      - task: stage:deploy-tool:windows
 
   dist:linux:
-    desc: "Build the Linux binary and stage the logger bundle and cost tool beside it"
+    desc: "Build the Linux binary and stage the logger bundle, cost tool, and deploy tool beside it"
     deps: [build:linux]
     cmds:
       - task: stage:bundle
       - task: stage:cost-tool:linux
+      - task: stage:deploy-tool:linux
 
   dist:all:
     desc: "Build and stage for every supported platform (Windows and Linux amd64)"

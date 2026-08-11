@@ -9,6 +9,56 @@ import (
 	"mosaic-agent-test/internal/domain"
 )
 
+// testProvisionCoexistsWithPrerenderedFiles asserts that Provision succeeds
+// when the sandbox's subject directory already contains files — as it does
+// when the deployment port has rendered agent definitions there before the
+// adapter's Provision is called — and that Deprovision does not remove those
+// pre-existing files. The adapter must write and track only its own files.
+//
+// This is the provisioning contract the runner relies on: render port writes
+// first, adapter provisions second, and the ledger after merging must contain
+// both populations; Deprovision must remove exactly what the adapter recorded.
+func testProvisionCoexistsWithPrerenderedFiles(t *testing.T, cfg Config) {
+	t.Helper()
+
+	dir := t.TempDir()
+	adapter := cfg.New(t, dir)
+	sb := newSandbox(t, dir)
+
+	// Place a pre-rendered agent definition as if the deploy port had written
+	// it before the adapter's Provision runs. The adapter must neither fail
+	// because the file exists nor remove it during Deprovision.
+	prerenderedDir := filepath.Join(sb.SubjectDir, ".mosaic-agents")
+	if err := os.MkdirAll(prerenderedDir, 0o755); err != nil {
+		t.Fatalf("testProvisionCoexistsWithPrerenderedFiles: create pre-rendered dir: %v", err)
+	}
+	prerenderedFile := filepath.Join(prerenderedDir, "orchestrator.md")
+	if err := os.WriteFile(prerenderedFile, []byte("# pre-rendered agent"), 0o644); err != nil {
+		t.Fatalf("testProvisionCoexistsWithPrerenderedFiles: write pre-rendered file: %v", err)
+	}
+
+	prov, err := adapter.Provision(testContext(), buildProvisionRequest(sb, cfg.Subject))
+	if err != nil {
+		t.Fatalf("Provision: failed when subject dir already contains pre-rendered files: %v\n"+
+			"want: Provision succeeds regardless of pre-existing files placed by the deploy port", err)
+	}
+	t.Cleanup(func() {
+		_ = adapter.Deprovision(testContext(), prov)
+	})
+
+	if err := adapter.Deprovision(testContext(), prov); err != nil {
+		t.Fatalf("Deprovision: %v", err)
+	}
+
+	// The pre-rendered file must survive Deprovision. Deprovision removes
+	// exactly what Provisioning records; a file the adapter never placed must
+	// never appear in its ledger.
+	if _, err := os.Stat(prerenderedFile); err != nil {
+		t.Errorf("Deprovision removed pre-rendered file %q which was not in the adapter's ledger; "+
+			"Deprovision must remove exactly what Provisioning records, never files placed by other components", prerenderedFile)
+	}
+}
+
 // testSpawnPlan asserts that SpawnPlan describes how to start the subject
 // without performing any process control itself. The adapter performs no
 // process control, so the assertion is on the plan's contents plus the

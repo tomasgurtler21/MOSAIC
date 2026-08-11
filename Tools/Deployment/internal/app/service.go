@@ -107,6 +107,33 @@ type Service interface {
 	// skip path and the resulting GapNoModel entries.
 	DeployUtilityInfrastructure(ctx context.Context, req UtilityInfraRequest) (domain.RunSummary, error)
 
+	// RenderAgent renders exactly one generic-form MOSAIC agent into one target harness's
+	// deployed form at a caller-chosen destination.
+	//
+	// Source: exactly one of req.SourcePath (a generic-form file at any path, read directly)
+	// or req.SourceAgentKey (an agent resolved from the Agents/Generic/ catalogue). Neither
+	// is ErrRenderSourceRequired; both is ErrRenderSourceAmbiguous.
+	//
+	// Destination: exactly one of req.DestinationPath (honoured verbatim) or req.WorkspaceRoot
+	// (the target harness descriptor's own project-scope path for this agent key, joined onto
+	// that root). Neither is ErrRenderDestinationRequired; both is ErrRenderDestinationAmbiguous.
+	//
+	// The agent's key is derived from the source file's base name without extension. Role and
+	// version come from the source file's own frontmatter. An absent role defaults to
+	// domain.RoleSubagent; an unrecognised role is ErrRenderInvalidRole. An absent version
+	// yields an empty SourceVersion in the result.
+	//
+	// Workflows: req.Workflows is nil for "not specified" and non-nil empty for "explicitly
+	// none". A non-nil non-empty set for a non-orchestrator is ErrRenderWorkflowsNotApplicable.
+	// An id not in the catalogue is ErrRenderUnknownWorkflow.
+	//
+	// RenderAgent is all-or-nothing: nil error means the file was written (or computed under
+	// DryRun); non-nil error means nothing was written. It never consults domain.Interaction.
+	//
+	// An existing destination is never silently replaced: without req.Overwrite it is
+	// ErrRenderDestinationExists. The overwrite check runs under DryRun too.
+	RenderAgent(ctx context.Context, req RenderAgentRequest) (RenderAgentResult, error)
+
 	// Promote generates a generic agent source file from a single already boundary-tagged
 	// harness-only agent file, so that a one-off harness-specific agent becomes reusable
 	// across harnesses through the normal Deploy/Update flow.

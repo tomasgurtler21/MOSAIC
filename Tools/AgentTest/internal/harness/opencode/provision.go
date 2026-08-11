@@ -86,10 +86,9 @@ func ComposePlugins(contribs ...PluginContribution) ([]PluginFile, error) {
 }
 
 // Provision implements domain.HarnessAdapter. It generates and installs the
-// interception plugin, deploys the logger bundle's OpenCode variant and the
-// stub collaborator definitions, all under req.Sandbox only, and refuses
-// when more than one plugin able to rewrite the intercepted call's input
-// would be present.
+// interception plugin and deploys the logger bundle's OpenCode variant, all
+// under req.Sandbox only, and refuses when more than one plugin able to
+// rewrite the intercepted call's input would be present.
 //
 // On any failure Provision still returns the ledger of what it created
 // before the failure, so a caller can tear down exactly that partial state
@@ -148,16 +147,6 @@ func (a *Adapter) Provision(ctx context.Context, req domain.ProvisionRequest) (d
 			return prov, fmt.Errorf("opencode: plugin file target %q: %w", f.Target, err)
 		}
 		if err := writeTracked(&prov, destPath, f.Content); err != nil {
-			return prov, err
-		}
-	}
-
-	for _, c := range req.Collaborators {
-		destPath, err := safeJoin(req.Sandbox.SubjectDir, c.TargetPath)
-		if err != nil {
-			return prov, fmt.Errorf("opencode: stub collaborator definition %q: %w", c.TargetPath, err)
-		}
-		if err := writeTracked(&prov, destPath, c.Definition); err != nil {
 			return prov, err
 		}
 	}

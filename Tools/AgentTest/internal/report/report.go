@@ -63,6 +63,12 @@ type RunReport struct {
 	// Subject carries the subject's own failure output on a non-zero exit.
 	// Zero-valued when the subject exited zero.
 	Subject SubjectFailure
+
+	// SubjectVersion is the version of the subject definition this run
+	// exercised, carried from RunEvidence through TestResult. Empty means the
+	// source declared no version; both renderings show it as unknown rather
+	// than blank, so a reader never mistakes an absent version for a real one.
+	SubjectVersion string
 }
 
 // SubjectFailure is what a subject that exited non-zero told us. Zero-valued

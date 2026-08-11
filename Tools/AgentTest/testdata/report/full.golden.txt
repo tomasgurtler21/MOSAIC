@@ -3,12 +3,17 @@ Started: 2026-08-07T12:00:00Z
 Finished: 2026-08-07T12:05:00Z
 
 checkout-happy-path: PASS
+  subject version: unknown
 checkout-rejects-invalid-cart: FAIL [assertion_failure]
   - final_state.last_status: expected "REJECTED", got "COMPLETED" (final status did not match)
+  subject version: unknown
 checkout-times-out: TIMEOUT [timeout]
+  subject version: unknown
 checkout-state-integrity-fault: FAIL [state_integrity] (infrastructure failure)
+  subject version: unknown
 checkout-cost-unattributed: PASS [cost_unattributed]
   ! cost_unattributed: log root missing
+  subject version: unknown
 
 Totals: FAIL=2 PASS=2 TIMEOUT=1
 Infrastructure failures: 1

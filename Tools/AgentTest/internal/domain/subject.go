@@ -21,8 +21,28 @@ import (
 
 // SubjectUnderTest is the thing being exercised.
 type SubjectUnderTest struct {
-	Identity       string // agent identifier, e.g. "orchestrator"
-	DefinitionPath string // path to the definition file, relative to the sandbox subject dir
+	Identity string // agent identifier, e.g. "orchestrator"
+
+	// CatalogAgentKey names the agent in the product's real generic catalogue
+	// that this subject is rendered from. Authored in the test definition;
+	// harness-neutral by construction, because nothing about a catalogue key
+	// names a harness. Resolved from the declaration's subject.agent field
+	// during authoring-layer parsing.
+	CatalogAgentKey string
+
+	// Workflows pins the workflow set the subject is rendered with, for an
+	// orchestrator subject. nil means "not specified"; non-nil empty means
+	// "explicitly none". An orchestrator rendered with a different workflow set
+	// is a materially different agent, which is why a test can pin it rather
+	// than inherit a default.
+	Workflows []string
+
+	// DefinitionPath is the definition file's path relative to the sandbox
+	// subject dir. Its meaning is unchanged, but its source is not: it is
+	// resolved during setup from what the deployment port reported it wrote,
+	// and is never authored in a test definition. Do not author this field.
+	DefinitionPath string
+
 	OpeningMessage string // the first message the subject receives
 	InvocationKind string // maps to mosaic-common/harness InvocationKind
 	Model          string
