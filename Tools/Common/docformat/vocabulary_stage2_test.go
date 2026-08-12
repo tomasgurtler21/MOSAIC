@@ -25,9 +25,9 @@ package docformat_test
 //   - ArtifactProvenance is absent from DeployedParent.
 //   - New bundle names map to their required parent sections.
 //
-// Coverage (InjectionParent — advisory, ArtifactProvenanceExtension removed, ProtocolExtension
-// and LanguagePatterns added):
-//   - InjectionParent contains ProtocolExtension mapped to "" (top level).
+// Coverage (InjectionParent — advisory, ArtifactProvenanceExtension and ProtocolExtension
+// removed, LanguagePatterns added):
+//   - ProtocolExtension is absent from InjectionParent (removed in Stage 2; use [[CUSTOM:ProtocolExtension]]).
 //   - ArtifactProvenanceExtension is absent from InjectionParent.
 //   - Tool-managed names are absent from InjectionParent.
 //
@@ -345,19 +345,18 @@ func TestInjectionParent_Stage2_IsNotNil(t *testing.T) {
 	}
 }
 
-func TestInjectionParent_Stage2_ContainsProtocolExtension(t *testing.T) {
-	// ProtocolExtension is re-added to InjectionParent (as an advisory top-level entry)
-	// in Stage 2. It was removed from CanonicalInjections in a prior stage; in Stage 2
-	// it appears in the advisory InjectionParent table as the first new entry.
+func TestInjectionParent_Stage2_ProtocolExtension_IsAbsent(t *testing.T) {
+	// ProtocolExtension is removed from InjectionParent in Stage 2. Projects needing to
+	// extend the protocol use [[CUSTOM:ProtocolExtension]] instead — MOSAIC defines
+	// [[INJECTION:]] slots; projects invent [[CUSTOM:]] ones. The name remains legal as
+	// an open injection name and is never flagged, but it no longer carries an advisory parent.
 	got := docformat.InjectionParent
 	if got == nil {
 		t.Fatal("InjectionParent is nil")
 	}
-	parent, ok := got["ProtocolExtension"]
-	if !ok {
-		t.Error("InjectionParent must contain \"ProtocolExtension\" after Stage 2 — it is added as a top-level advisory entry")
-	} else if parent != "" {
-		t.Errorf("InjectionParent[\"ProtocolExtension\"]: want %q (top-level sentinel), got %q", "", parent)
+	if _, ok := got["ProtocolExtension"]; ok {
+		t.Error("InjectionParent must not contain \"ProtocolExtension\" — " +
+			"it is removed from the advisory map in Stage 2; projects use [[CUSTOM:ProtocolExtension]] instead")
 	}
 }
 
@@ -376,10 +375,10 @@ func TestInjectionParent_Stage2_ArtifactProvenanceExtension_IsAbsent(t *testing.
 
 func TestInjectionParent_Stage2_FullAdvisoryMap(t *testing.T) {
 	// InjectionParent is now advisory only (no enforcement of an allowlist).
-	// The nine entries are usual parents used for advisory reporting. LanguagePatterns
-	// is included here after moving out of the tool-managed CanonicalDeployed set.
+	// The eight entries are the usual parents used for advisory reporting.
+	// ProtocolExtension is removed in Stage 2 — projects use [[CUSTOM:ProtocolExtension]].
+	// LanguagePatterns is included here after moving out of the tool-managed CanonicalDeployed set.
 	wantMap := map[string]string{
-		"ProtocolExtension":      "", // top level — new entry in Stage 2
 		"IdentityExtension":      "Identity",
 		"CodebaseContext":        "Capabilities",
 		"LanguagePatterns":       "Capabilities", // moved from CanonicalDeployed
@@ -400,6 +399,10 @@ func TestInjectionParent_Stage2_FullAdvisoryMap(t *testing.T) {
 		} else if gotParent != wantParent {
 			t.Errorf("InjectionParent[%q]: want %q, got %q", name, wantParent, gotParent)
 		}
+	}
+	// ProtocolExtension must be absent from the advisory map after Stage 2.
+	if _, ok := got["ProtocolExtension"]; ok {
+		t.Error("InjectionParent must not contain \"ProtocolExtension\" — removed in Stage 2; use [[CUSTOM:ProtocolExtension]]")
 	}
 }
 

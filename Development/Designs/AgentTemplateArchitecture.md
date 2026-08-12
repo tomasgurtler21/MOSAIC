@@ -1,7 +1,7 @@
 ---
 id: agent-template-architecture
 type: specification
-version: "1.5"
+version: "1.6"
 name: "Agent Template Architecture"
 description: "The structure of a MOSAIC agent file: frontmatter schema, the four region kinds and their ownership, canonical document order, the per-role region matrix, and what each section must contain."
 author: MOSAIC
@@ -115,7 +115,7 @@ A file's top-level boundaries appear in this order. Every entry is a `[[SECTION:
 | 6 | `OutputFormat` | section | subagent |
 | 7 | `ExecutionPhilosophy` | section | subagent, orchestrator |
 
-Seven slots. There is no separate provenance slot: the artifact provenance stamp is part of the orchestration contract and ships inside slot 2. §15 records the transitional state, since the files have not been migrated yet.
+Seven slots. There is no separate provenance slot: the artifact provenance stamp is part of the orchestration contract and ships inside slot 2. §16 records the transitional state, since the files have not been migrated yet.
 
 **The rule is "not out of order", not "exactly these seven".** A file's top-level boundaries must form a *subsequence* of the list above. Concretely:
 
@@ -211,9 +211,11 @@ Two groups. Identity fields describe the agent; deployment fields tell the deplo
 | `role` | enum | Yes | identity | `subagent` or `orchestrator` (§3.2). |
 | `model` | string | Yes | deployment | `{model-identifier}` in source; a concrete model id in a deployed file. |
 | `tools` | flow list or placeholder | Yes | deployment | Generic tool vocabulary, mapped to harness-specific names at deploy time. `{tool-permissions}` where the deployment supplies the whole list. |
-| `recommended_tier` | string | Yes | deployment | The capability tier this agent wants. Open string — no fixed vocabulary. Presented to the user during model selection and used as the key for tier-to-model mapping. Values in current source: `LOW`, `LOW-MEDIUM`, `MEDIUM`, `MEDIUM-HIGH`, `HIGH`. |
-| `tier_rationale` | string | Yes | deployment | Why that tier. Shown to the user alongside it, so a person choosing a model has the reasoning and not just the label. |
-| `required_skills` | flow list | Yes | deployment | Skill keys this agent's instructions explicitly tell it to load. `[]` when it loads none. Values are folder names under `Agents/Generic/Skills/`. Never inferred from context — a skill appears here only because a Process step names it. |
+| `recommended_tier` | string | Source only | deployment | The capability tier this agent wants. Open string — no fixed vocabulary. Presented to the user during model selection and used as the key for tier-to-model mapping. Values in current source: `LOW`, `LOW-MEDIUM`, `MEDIUM`, `MEDIUM-HIGH`, `HIGH`. |
+| `tier_rationale` | string | Source only | deployment | Why that tier. Shown to the user alongside it, so a person choosing a model has the reasoning and not just the label. |
+| `required_skills` | flow list | Source only | deployment | Skill keys this agent's instructions explicitly tell it to load. `[]` when it loads none. Values are folder names under `Agents/Generic/Skills/`. Never inferred from context — a skill appears here only because a Process step names it. |
+
+**"Source only"** means the field is required in source files under `Agents/Generic/` and is consumed by the deployment tool during transformation (for model selection, skill shipping, etc.), but is stripped from deployed output by every harness descriptor's `drop` list. It does not appear in deployed agent files. The three source-only fields — `recommended_tier`, `tier_rationale`, `required_skills` — serve the deployment pipeline, not the agent at runtime.
 
 A deployed file additionally carries `bundle_version`, written by the tool. It is not a source field; see `DeployedSectionsBundle.md` §3.2.
 
@@ -227,7 +229,7 @@ Key order in source is `id`, `version`, `name`, `description`, `role`, then the 
 
 There is a second reason, smaller but sharper: a role in frontmatter is checkable against the file's own regions. A file declaring `role: subagent` with no `OutputFormat` section is detectably wrong (§9). With role inferred from path, the same file is merely unusual.
 
-**On the vocabulary.** The deployment tool's internal role enum currently reads `worker` / `orchestrator` / `utility`, while every design document says `subagent`. The frontmatter field uses `subagent`, because that is the word the contract and this document both use, and because `worker` names nothing else in the system. Reconciling the code enum is recorded in §15.
+**On the vocabulary.** The deployment tool's internal role enum currently reads `worker` / `orchestrator` / `utility`, while every design document says `subagent`. The frontmatter field uses `subagent`, because that is the word the contract and this document both use, and because `worker` names nothing else in the system. Reconciling the code enum is recorded in §16.
 
 `utility` is not a value here. Utility agents carry no boundary tags, are never deployed into a run, and are outside this schema entirely (§1.1).
 
@@ -239,7 +241,7 @@ A flat integer, assigned when an agent is first created, and thereafter immutabl
 
 The orchestrator carries no `id`: there is one of it, it is referenced by role rather than by number, and a sequence number for a set of one informs nobody.
 
-The honest position is that no current consumer has been found for this field — matching is done by `name` everywhere the tooling was inspected. It is retained rather than retired because retiring it is a change to forty-two files and a round-trip contract for no functional gain, and because a stable identifier that survives a rename is cheap to keep and expensive to reintroduce. §14 records the question rather than closing it.
+The honest position is that no current consumer has been found for this field — matching is done by `name` everywhere the tooling was inspected. It is retained rather than retired because retiring it is a change to forty-two files and a round-trip contract for no functional gain, and because a stable identifier that survives a rename is cheap to keep and expensive to reintroduce. §15 records the question rather than closing it.
 
 ### 3.4 Version Bump Rules
 
@@ -314,7 +316,7 @@ The order is not arbitrary: the closing procedure continues the Process list and
 
 Top-level `[[DEPLOYED:CommunicationProtocol]]`, slot 2. Empty in source. Content is the role-matched block from `CommunicationProtocol.md`, which is the whole orchestration contract: message shape, status and error vocabularies, the HITL gate, and the artifact provenance stamp.
 
-Nothing is authored here, and no injection sits inside it — the region is regenerated wholesale, so anything nested would be destroyed on the next deploy (§2.1). A project needing to extend the protocol uses `[[INJECTION:ProtocolExtension]]` as a top-level sibling of this region; §6.2.1 covers what belongs there and what does not.
+Nothing is authored here, and no injection sits inside it — the region is regenerated wholesale, so anything nested would be destroyed on the next deploy (§2.1). A project needing to extend the protocol uses `[[CUSTOM:ProtocolExtension]]` as a top-level sibling of this region; §6.2.1 covers what belongs there and what does not.
 
 ### 4.3 Capabilities
 
@@ -483,17 +485,24 @@ Most are carried by MOSAIC's own sources, declared empty so a project can see th
 | `SeverityDefinitions` | `Capabilities` | What each severity means in this project (validation agents) |
 | `ErrorHandlingExtension` | `ErrorHandling` | Project-specific recovery guidance |
 | `ContextLimits` | `ExecutionPhilosophy` | Context window thresholds and guidance |
-| `ProtocolExtension` | body top level | Deployment-specific protocol mechanics (§6.2.1) |
 
 "Usual parent" is where the region belongs when the agent is otherwise conventional, and where MOSAIC's own agents put it. Placing one elsewhere is an author's call, not a validation failure. The single hard rule about placement is §6.5's: never inside a `[[DEPLOYED:]]` region.
 
-#### 6.2.1 `ProtocolExtension`
+#### 6.2.2 Stability Obligations
 
-Permitted, and a sibling of `[[DEPLOYED:CommunicationProtocol]]` at body top level — never inside it, since the contract region is regenerated wholesale and would take the extension with it.
+Two development disciplines protect deployed agents from avoidable rework when this catalogue changes:
 
-It exists because a deployment can have real business extending the protocol without altering it. A project whose subagents run behind network endpoints while the orchestrator runs locally needs to say *how a message is delivered*; nothing in the contract covers transport, and that project's alternative to an extension region is forking the contract, which is strictly worse for everyone.
+**Declare injection points upfront.** An agent's source injection set should be declared in the agent's first version. Adding a new `[[INJECTION:]]` to a source file that is already deployed into projects creates a name-collision risk: if any project has a `[[CUSTOM:]]` with the same name, the deploy tool aborts until the project renames their custom region. Injection points are rare enough that getting the set right once is feasible; adding them later is never free.
 
-**The guidance, which is guidance and not a check:** extend the mechanics — transport, delivery, environment-specific handling. Do not restate or redefine what the contract already fixes: message shape, the status and error vocabularies, the HITL gate, the provenance stamp. An extension contradicting the contract leaves the agent with two answers and no basis to choose between them, and it will choose the nearer one (principle 7). That is a real hazard, and it is the project's to own — the same as any other injection.
+**Rename through the rename table, never by hand.** Renaming a source injection without adding a corresponding entry to the rename table (§10.1) strands every project's content under the old name — it appears as an orphan in `TODO.md` while the new name deploys empty. The rename table exists to make this automatic. Omitting the entry is a development error, not a design gap, and the orphaned content must be rescued manually from `TODO.md` for every affected deployed agent. The table entry is part of the rename, not an afterthought.
+
+#### 6.2.1 Protocol Extension
+
+`ProtocolExtension` is not a catalogued injection name. A project needing to extend the protocol uses `[[CUSTOM:ProtocolExtension]]` as a top-level sibling of `[[DEPLOYED:CommunicationProtocol]]` — never inside it, since the contract region is regenerated wholesale and would take the extension with it. Because `[[CUSTOM:]]` regions are project-invented, no source declaration is needed; the project adds the region directly to their deployed files.
+
+The use case is unchanged: a deployment can have real business extending the protocol without altering it. A project whose subagents run behind network endpoints while the orchestrator runs locally needs to say *how a message is delivered*; nothing in the contract covers transport, and that project's alternative is forking the contract, which is strictly worse for everyone.
+
+**The guidance, which is guidance and not a check:** extend the mechanics — transport, delivery, environment-specific handling. Do not restate or redefine what the contract already fixes: message shape, the status and error vocabularies, the HITL gate, the provenance stamp. An extension contradicting the contract leaves the agent with two answers and no basis to choose between them, and it will choose the nearer one (principle 7). That is a real hazard, and it is the project's to own — the same as any other custom region.
 
 **`ArtifactProvenanceExtension`** is retired rather than forbidden. The stamp it extended has folded into the orchestration contract, so the region no longer has a counterpart to extend; a project needing extra artifact frontmatter uses `OutputArtifactTemplate`, which governs artifact content rather than the contract. A file still carrying the region is stale, not invalid, and its content is preserved like any other injection.
 
@@ -723,9 +732,9 @@ Changes this document makes to them:
 - The deployed-name classifier's `default:` branch stops resolving to the harness class. `HarnessConstraints` becomes an explicit case, and an unclassified name is an error (§2.5.1).
 - `DeployedParent` gains the five new names with the parents in §2.5.
 - `CanonicalOrder` becomes seven slots, of which slot 2 is deployed, and is consumed as a subsequence rather than an equality check (§2.3).
-- `InjectionParent` **stops being an allowlist.** Injection names are open (§6.2): an unlisted name is preserved like any other. What remains is a table of usual parents for the suggested names, consulted for advice-level reporting only. `ArtifactProvenanceExtension` leaves it, `ProtocolExtension` enters it with an empty parent (top level).
+- `InjectionParent` **stops being an allowlist.** Injection names are open (§6.2): an unlisted name is preserved like any other. What remains is a table of usual parents for the suggested names, consulted for advice-level reporting only. `ArtifactProvenanceExtension` leaves it; `ProtocolExtension` is absent — projects use `[[CUSTOM:ProtocolExtension]]` instead of `[[INJECTION:ProtocolExtension]]`, following the rule that MOSAIC defines `[[INJECTION:]]` slots and projects invent `[[CUSTOM:]]` ones.
 
-`SourceFilesFormat.md` should be reduced to a pointer at this document plus the skill and hook-bundle conventions it uniquely covers, rather than restating the agent format alongside it (§15).
+`SourceFilesFormat.md` should be reduced to a pointer at this document plus the skill and hook-bundle conventions it uniquely covers, rather than restating the agent format alongside it (§16).
 
 ---
 
@@ -766,10 +775,32 @@ Changes this document makes to them:
 
 ---
 
-## 13. Changelog
+## 13. Change Propagation
+
+A change to this schema is never local. The table below lists what must be checked or updated when each category of change is made. Omitting a downstream update leaves the system in disagreement about what is valid — and the disagreement is silent until a deployment fails or a validator flags it.
+
+| Change | Must update |
+|--------|------------|
+| Canonical section order (§2.3) | `SourceFilesFormat.md`, `vocabulary.go` (`CanonicalOrder`), `boundary_constants.py`, all source agent files, test fixtures. Deployed agents with `[[CUSTOM:]]` regions may require repositioning after parking (§6.4). |
+| Injection name added (§6.2) | Source agent files carrying the injection, `SourceFilesFormat.md` injection catalogue. Adding to an already-deployed agent risks a Shape B collision if a project uses the same name as `[[CUSTOM:]]` — see §6.2.2. |
+| Injection name renamed (§6.2) | Rename table entry (§6.2.2, §10.1), source agent files, `SourceFilesFormat.md` injection catalogue. Without the table entry, project content is stranded. |
+| Injection name removed (§6.2) | Source agent files. Project content is orphaned to `TODO.md` on the first update — §6.2.2 states the discipline that makes removal rare. |
+| Deployed region name added or removed (§2.5) | `vocabulary.go` (`CanonicalDeployed`, `DeployedParent`), `boundary_constants.py`, classifier, role matrix (§2.4), `SourceFilesFormat.md`. If bundle-sourced, the bundle gains a block and `DeployedSectionsBundle.md` is updated. |
+| Bundle block content changed | `bundle_version` bump, specifying document changelog, all deployed agents (redeploy). If the changed region has nested user regions, the deploy tool should emit a TODO advising the project to review their content against the new text. |
+| Communication Protocol content changed | Protocol version bump in `CommunicationProtocol.md`. Projects with `[[CUSTOM:ProtocolExtension]]` must review their content against the new protocol. |
+| Frontmatter field added or renamed (§3) | `SourceFilesFormat.md`, harness descriptor `frontmatter_plan` (filter/add/remove lists), `agentfields` registry, all source agent files. |
+| Validator rule severity changed (§9) | `validate.go`. A promotion from warning to error may cause previously passing project agents to fail — this is intentional and motivated. |
+| Generic tool name changed in source `tools` list | Harness module tool mappings (internal). Projects with custom `tool_destinations` must update their configuration. |
+| Role matrix changed (§2.4) | Bundle block `applies_to` fields, classifier, validator, source agent files for the affected role. |
+| Skill folder renamed (`Agents/Generic/Skills/`) | Source agent `required_skills` fields, agent body text referencing the skill path. |
+
+---
+
+## 14. Changelog
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.6 | 2026-08-12 | **`ProtocolExtension` removed from the injection catalogue.** The name is no longer an entry in `InjectionParent`; projects needing to extend the protocol use `[[CUSTOM:ProtocolExtension]]` instead of `[[INJECTION:ProtocolExtension]]`. The name remains legal as an open injection name and is preserved byte-identically if used, but carries no advisory parent. This applies the `[[INJECTION:]]` vs `[[CUSTOM:]]` provenance rule consistently: MOSAIC defines `[[INJECTION:]]` slots in source; projects invent `[[CUSTOM:]]` regions in deployed files. §4.2, §6.2, and §6.2.1 updated; §10.1 and §13 reconciled; `vocabulary.go` and `SourceFilesFormat.md` updated. Prior discussion (the v1.1 removal and v1.2 reinstatement) is preserved in §15. |
 | 1.5 | 2026-08-11 | **`[[CUSTOM:]]` marker introduced; source-driven invariant stated; nesting inside `[[DEPLOYED:]]` permitted.** New fourth region kind `[[CUSTOM:Name]]` for project-invented regions that exist only in deployed files, distinct from `[[INJECTION:]]` which is declared in source. On schema reorder, source injections follow the source automatically; custom regions are parked at end of file with a TODO. Principle 10 added to §1.3 stating the source-driven structure invariant that makes reordering safe. `LanguagePatterns` removed from the injection catalogue — it is not declared in any source file and is a `[[CUSTOM:]]` if a project wants it. Rule 13 reversed: `[[INJECTION:]]` and `[[CUSTOM:]]` may now nest inside `[[DEPLOYED:]]` regions — the tool preserves them on regeneration. This gives project extensions an anchor inside deployed content that survives schema reorder. §6 restructured: §6.1 distinguishes the two kinds, §6.2 is the injection catalogue, §6.4 specifies custom region behavior on reorder, §6.5 is rules. Analysis in `SchemaEvolution-Problems.md`. |
 | 1.4 | 2026-08-08 | **`LanguagePatterns` and `CustomConstraints` removed from the deployed vocabulary.** Both were listed in §2.5 with the content source *"Deployment configuration"* — a category this document named and never specified, and that no tool ever implemented. Lacking a generator, both fell through the classifier's permissive `default:` branch to the harness class, which meant every harness had to declare them empty solely to satisfy §2.4's content-source check; the rationale text in those files records an author noting the classification was wrong and complying anyway. `CanonicalDeployed` drops from eleven names to nine and the phantom source disappears, leaving the three §2.5 actually describes. `LanguagePatterns` becomes a catalogued injection name (§6.1), deliberately not declared in MOSAIC's own sources. `CustomConstraints` is deleted outright — it had no definition, no specification, and served as an escape hatch for content that belonged in `HarnessConstraints`. New §2.5.1 makes the underlying rule explicit: a deployed name must name an implemented generator, and an unclassified name is an error rather than a default. Role matrix, tier table, §4.3, §4.4 and §10.1 follow. |
 | 1.3 | 2026-08-05 | **`OutputFormat` corrected to two varying fields.** v1.0 reduced the section to `status_message` on the premise that nothing else in the response envelope varied between agents. A survey of the forty-two sources disproves it: `error_code` varies too — most agents return `E101`, but `test-runner` returns `E501`, `pull-request-comment-interface` `E502`, `requirements-refinement` `E503`, and `audit-to-pull-request` `E401`. The contract region supplies the code vocabulary and can never supply an agent's choice from it, so §4.6's table gains an `error_code` column and permits multiple `BLOCKED` rows. Migration step 7 amended accordingly — as written it would have discarded every one of those choices in its least verifiable step. Rule 17r extended to review the code choice alongside the message. The envelope deletion itself is unchanged and rule 17 is untouched: the widened table contains no JSON fence. |
@@ -779,7 +810,7 @@ Changes this document makes to them:
 
 ---
 
-## 14. Open Ideas / Dead Ends
+## 15. Open Ideas / Dead Ends
 
 **Under consideration**
 
@@ -790,7 +821,7 @@ Changes this document makes to them:
 
 - **A required structure for `Capabilities`.** It is the one section with no specified shape (§4.3), which is right for expertise that genuinely varies. Considered requiring `### Core Capabilities` as a minimum; decided against. The template already shows it, every agent follows it, and promoting a convention to a rule buys nothing. If content validation lands it would be a warning at most, alongside rule 15.
 - **A closed vocabulary of injection names.** Held until v1.2. Its stated purpose was to stop a user's content being orphaned on update — but preservation matches names between the deployed file and the source file, so a name the author wrote into their own source is preserved with or without a list. The list bought nothing and cost an author the ability to name a region after their own project's concept (§6.2). Superseded in v1.5 by a different solution: project-invented regions use `[[CUSTOM:]]` instead of `[[INJECTION:]]`, making the distinction visible in the file. Deployed names are the opposite case and stay closed: there the tool must find *content* for the name.
-- **Banning `ProtocolExtension`.** Held until v1.2 on the argument that a project able to append to a contract is able to contradict it. True, and insufficient. A deployment whose subagents sit behind network endpoints has to state how a message is delivered, which the contract does not cover; denying it a region does not prevent the change, it forces a fork of the contract instead. Contradicting the contract remains a real hazard and is now stated as guidance the project owns (§6.2.1).
+- **`ProtocolExtension` as a catalogued injection.** Added to the catalogue in v1.2: a deployment with real transport needs should not be forced to fork the contract. Removed again in v1.6: injections are declared in MOSAIC source files; protocol extension is a project invention that belongs in `[[CUSTOM:ProtocolExtension]]`. The change does not forbid the use case — it routes it correctly. Projects that already use `[[INJECTION:ProtocolExtension]]` find their content preserved as an open, uncatalogued injection name; new ones use `[[CUSTOM:]]`. The v1.1 removal for a different reason (the stamp folded into the contract and `ArtifactProvenanceExtension` died by the same argument) and the v1.2 reinstatement are both recorded in the changelog; this is the third entry in that sequence.
 - **One uniform strictness for every tree.** Would mean either blocking legitimate project agents or letting MOSAIC's own sources off the rules they exist to demonstrate. The strict/lenient split (§9.2) is what lets the recipe be enforced on the recipe without being enforced on its readers.
 - **Requiring every injection in a file to be filled.** Empty is the normal state of a source file and of a fresh deployment (principle 3), and where a section offers alternative child injections the rule would demand contradictory content (§6.5).
 - **A `function` or `category` frontmatter field.** The folder already states it, and a second copy is undetectably wrong when the two disagree (§3.5).
@@ -806,7 +837,7 @@ Changes this document makes to them:
 
 ---
 
-## 15. Open Items
+## 16. Open Items
 
 - **Most of §9 is unimplemented, and the implemented part is now wrong in three places.** `docformat/validate.go` checks boundary structure only — no frontmatter conformance, no section content, no bundle comparison. On top of that backlog, three live checks no longer match this document: `unknown-injection` must go entirely (§6.2), `out-of-order-section` must become a subsequence test rather than rejecting unknown top-level names (§2.3), and injection parent placement must drop from error to advice (rule 9b). The three subtractions are the fastest way to stop the validator flagging legitimate work.
 - **Severity and mode are specified but the validator has one of each.** Everything it reports is an error, and it behaves identically on MOSAIC's tree and a user's. §9.1's two axes and §9.2's strict/lenient split both need building, along with routing warnings into `TODO.md` and the deployment summary rather than only to a console.

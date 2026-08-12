@@ -241,17 +241,28 @@ HARNESS_ONLY_FRONTMATTER_KEYS: frozenset[str] = frozenset({
     "mode", "permission", "model", "transform_version",
 })
 
+# Keys that only a generic source file may carry. Consumed by the deployment
+# pipeline and stripped from deployed output, per AgentTemplateArchitecture.md
+# §3.1 "Source only". These keys are never written to harness-path output.
+GENERIC_ONLY_FRONTMATTER_KEYS: frozenset[str] = frozenset({
+    "required_skills", "recommended_tier", "tier_rationale",
+})
+
 # Keys legal on any agent file (generic or harness) regardless of path.
 # Equivalent to KNOWN_FRONTMATTER_KEYS minus HARNESS_ONLY_FRONTMATTER_KEYS
-# minus BUNDLE_FRONTMATTER_KEYS.
+# minus GENERIC_ONLY_FRONTMATTER_KEYS minus BUNDLE_FRONTMATTER_KEYS.
 AGENT_COMMON_FRONTMATTER_KEYS: frozenset[str] = (
-    KNOWN_FRONTMATTER_KEYS - HARNESS_ONLY_FRONTMATTER_KEYS - BUNDLE_FRONTMATTER_KEYS
+    KNOWN_FRONTMATTER_KEYS
+    - HARNESS_ONLY_FRONTMATTER_KEYS
+    - GENERIC_ONLY_FRONTMATTER_KEYS
+    - BUNDLE_FRONTMATTER_KEYS
 )
 
 # Per-kind allowlist consulted by the validator.
 # Contract: KNOWN_FRONTMATTER_KEYS == set().union(*FRONTMATTER_KEYS_BY_KIND.values())
+# The generic entry re-adds the generic-only keys; the harness entry does not.
 FRONTMATTER_KEYS_BY_KIND: dict[DocumentKind, frozenset[str]] = {
-    DocumentKind.AGENT_GENERIC: AGENT_COMMON_FRONTMATTER_KEYS,
+    DocumentKind.AGENT_GENERIC: AGENT_COMMON_FRONTMATTER_KEYS | GENERIC_ONLY_FRONTMATTER_KEYS,
     DocumentKind.AGENT_HARNESS: AGENT_COMMON_FRONTMATTER_KEYS | HARNESS_ONLY_FRONTMATTER_KEYS,
     DocumentKind.BUNDLE: BUNDLE_FRONTMATTER_KEYS | frozenset({
         "id", "name", "description", "bundle_version",

@@ -64,10 +64,11 @@ func init() {
 	// mirroring boundary_constants.py. This is an advisory table only: injection names
 	// are open, and an unlisted name is preserved like any other and is never flagged.
 	// An entry whose value is "" means the injection usually appears at body top level.
-	// ArtifactProvenanceExtension and CustomConstraints are removed; ProtocolExtension
-	// and LanguagePatterns are added — LanguagePatterns moved here from CanonicalDeployed.
+	// ArtifactProvenanceExtension, CustomConstraints, and ProtocolExtension are removed;
+	// LanguagePatterns is added — moved here from CanonicalDeployed.
+	// Projects needing to extend the protocol use [[CUSTOM:ProtocolExtension]] instead:
+	// MOSAIC defines [[INJECTION:]] slots; projects invent [[CUSTOM:]] ones.
 	InjectionParent = map[string]string{
-		"ProtocolExtension":      "", // top level
 		"IdentityExtension":      "Identity",
 		"CodebaseContext":        "Capabilities",
 		"LanguagePatterns":       "Capabilities", // moved from CanonicalDeployed

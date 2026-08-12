@@ -214,15 +214,19 @@ def build_output_frontmatter(
          lines. When kind is AGENT_HARNESS, they are preserved.
       5. 'id' is replaced with generic_id when generic_id is not None. When it
          is None, any existing 'id' is preserved verbatim.
-      6. Each of derived.name / derived.role / derived.required_skills is
-         written when absent from source; an existing value is left untouched.
-      7. 'recommended_tier' and 'tier_rationale' are handled independently.
-         For each key: when absent (or present-but-empty) it is written with
-         the appropriate placeholder and one NC_TIER_PLACEHOLDER NonConformance
-         is returned with detail set to that key's name; when present with a
-         non-empty value it is not touched and raises nothing.
+      6a. derived.name is written when absent from source on both paths.
+      6b. derived.role is written when absent from source on both paths.
+      6c. derived.required_skills is written when absent from source only on
+          the AGENT_GENERIC path; it is never appended on the AGENT_HARNESS path.
+      7. 'recommended_tier' and 'tier_rationale' are handled independently,
+         but only on the AGENT_GENERIC path. On AGENT_GENERIC: when absent (or
+         present-but-empty) each key is written with the appropriate placeholder
+         and one NC_TIER_PLACEHOLDER NonConformance is returned with detail set
+         to that key's name; when present with a non-empty value it is not
+         touched and raises nothing. On AGENT_HARNESS: these keys are never
+         appended and no NC_TIER_PLACEHOLDER is raised.
       8. Appended keys are emitted in DERIVED_KEY_ORDER after the last source
-         key.
+         key, restricted to the keys that are still appended for the given kind.
 
     Scalar emission format: 'key: value', unquoted, except a value containing
     a space, ':' or '#', which is double-quoted. required_skills is emitted as
@@ -315,15 +319,22 @@ def build_output_frontmatter(
             output_lines.append(f"id: {generic_id}\n")
             continue
 
-        # Rule 7: tier keys — replace present-but-empty with placeholder.
+        # Rule 7: tier keys — replace present-but-empty with placeholder,
+        # but only on the generic path. On the harness path, pass through verbatim.
         if key == "recommended_tier" and not value:
-            output_lines.append(f"recommended_tier: {TIER_PLACEHOLDER}\n")
-            tier_nc_needed.add("recommended_tier")
+            if kind is DocumentKind.AGENT_GENERIC:
+                output_lines.append(f"recommended_tier: {TIER_PLACEHOLDER}\n")
+                tier_nc_needed.add("recommended_tier")
+            else:
+                output_lines.append(line)
             continue
 
         if key == "tier_rationale" and not value:
-            output_lines.append(f"tier_rationale: {_format_scalar(TIER_RATIONALE_PLACEHOLDER)}\n")
-            tier_nc_needed.add("tier_rationale")
+            if kind is DocumentKind.AGENT_GENERIC:
+                output_lines.append(f"tier_rationale: {_format_scalar(TIER_RATIONALE_PLACEHOLDER)}\n")
+                tier_nc_needed.add("tier_rationale")
+            else:
+                output_lines.append(line)
             continue
 
         # Keep verbatim.
@@ -333,7 +344,9 @@ def build_output_frontmatter(
     if not version_written:
         output_lines.append(f"version: {version_after}\n")
 
-    # Rules 6, 7, 8: append absent derived/tier keys in DERIVED_KEY_ORDER.
+    # Rules 6, 7, 8: append absent derived/tier keys in DERIVED_KEY_ORDER,
+    # restricted to the keys appropriate for the given kind.
+    is_generic = kind is DocumentKind.AGENT_GENERIC
     for key in DERIVED_KEY_ORDER:
         if key in present_keys:
             continue  # already in source (handled verbatim or modified above)
@@ -343,15 +356,21 @@ def build_output_frontmatter(
         elif key == "role":
             output_lines.append(f"role: {_format_scalar(derived.role)}\n")
         elif key == "required_skills":
-            output_lines.append(
-                f"required_skills: {_format_skills(derived.required_skills)}\n"
-            )
+            # Rule 6c: only append on the generic path.
+            if is_generic:
+                output_lines.append(
+                    f"required_skills: {_format_skills(derived.required_skills)}\n"
+                )
         elif key == "recommended_tier":
-            output_lines.append(f"recommended_tier: {TIER_PLACEHOLDER}\n")
-            tier_nc_needed.add("recommended_tier")
+            # Rule 7: only append placeholder on the generic path.
+            if is_generic:
+                output_lines.append(f"recommended_tier: {TIER_PLACEHOLDER}\n")
+                tier_nc_needed.add("recommended_tier")
         elif key == "tier_rationale":
-            output_lines.append(f"tier_rationale: {_format_scalar(TIER_RATIONALE_PLACEHOLDER)}\n")
-            tier_nc_needed.add("tier_rationale")
+            # Rule 7: only append placeholder on the generic path.
+            if is_generic:
+                output_lines.append(f"tier_rationale: {_format_scalar(TIER_RATIONALE_PLACEHOLDER)}\n")
+                tier_nc_needed.add("tier_rationale")
 
     # Emit NC_TIER_PLACEHOLDER findings in DERIVED_KEY_ORDER.
     ncs: list[NonConformance] = []

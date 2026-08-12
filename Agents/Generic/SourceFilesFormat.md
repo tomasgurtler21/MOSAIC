@@ -261,7 +261,6 @@ injection is ever required to be filled.
 | Name | Usual parent |
 |------|--------------|
 | `IdentityExtension` | `Identity` |
-| `ProtocolExtension` | Body top level (sibling of `CommunicationProtocol`) |
 | `CodebaseContext` | `Capabilities` |
 | `OutputArtifactTemplate` | `Capabilities` |
 | `SeverityThresholds` | `Capabilities` |
@@ -272,6 +271,11 @@ injection is ever required to be filled.
 `ArtifactProvenanceExtension` is retired: the stamp it extended folded into the
 orchestration contract. A file still carrying it is stale, not invalid, and its
 content is preserved.
+
+`ProtocolExtension` is not a catalogued injection name. Projects needing to
+extend the protocol use `[[CUSTOM:ProtocolExtension]]` as a top-level sibling
+of the deployed contract region — `[[CUSTOM:]]` regions are project-invented
+and need no source declaration. See `AgentTemplateArchitecture.md` §6.2.1.
 
 ### Project-invented names — declare with `[[CUSTOM:]]`
 

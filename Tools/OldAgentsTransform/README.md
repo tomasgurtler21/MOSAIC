@@ -86,23 +86,49 @@ py Tools/OldAgentsTransform/boundary_transformer.py <input.md>
 
 # Non-destructive: write elsewhere instead of overwriting in place
 py Tools/OldAgentsTransform/boundary_transformer.py <input.md> --output <out.md>
+
+# Force-overwrite an existing --output without confirmation (scripted / batch use)
+py Tools/OldAgentsTransform/boundary_transformer.py <input.md> --output <out.md> --force
 ```
 
 Without `--output` the file is **overwritten in place**. Commit or back up first.
 
+**Overwrite guard:** When `--output` names an existing file, the CLI warns and asks for
+confirmation before overwriting. If the session is non-interactive (stdin is not a tty, e.g.
+from CI, a script, or captured by a test harness), the default is to **decline** rather than
+block. Pass `--force` to overwrite unconditionally without a prompt — intended for scripted
+and unattended use.
+
+| Scenario | Behaviour | Exit code |
+|----------|-----------|-----------|
+| `--output` not given | File overwritten in place, no prompt | 0 |
+| `--output` given, file does not exist | File written, no prompt | 0 |
+| `--output` given, file exists, `--force` | File overwritten, no prompt | 0 |
+| `--output` given, file exists, interactive, user answers `y`/`yes` | File overwritten | 0 |
+| `--output` given, file exists, non-interactive (no `--force`) | Declined, file unchanged | **2** |
+| `--output` given, file exists, interactive, user declines or presses Enter | Declined, file unchanged | **2** |
+
+Exit code 2 (declined overwrite) is distinct from exit code 1 (transform error) so a script can
+tell a refused overwrite apart from a failed transform.
+
 A file is treated as a harness file when its frontmatter contains
 `transform_version`. For those:
 
-- **With `--generic-ref`:** the tool diffs against the generic counterpart to
-  locate project-specific injection content and produces a full-quality result.
-- **Without `--generic-ref`:** the tool automatically runs a *degraded-quality*
-  transform — no flag is needed to enable this. No error is returned; a warning
-  is printed to stderr identifying the file as degraded. See
+- **With `--generic-ref`:** the explicitly supplied path is used as the generic
+  counterpart. Takes precedence over auto-lookup.
+- **Without `--generic-ref`, stem matches:** the single-file CLI automatically
+  locates the generic counterpart by filename stem (e.g. `contracts-designer.md`
+  → `Agents/Generic/Agents/Planning/contracts-designer.md`) and produces a
+  full-quality result. No flag is required — passing `--generic-ref` is
+  optional.
+- **Without `--generic-ref`, no stem match:** the tool automatically runs a
+  *degraded-quality* transform. No error is returned; a warning is printed to
+  stderr identifying the file as degraded. See
   [Harness-only agents](#harness-only-agents-no-generic-counterpart) below for
   what quality is sacrificed.
 - **Orchestrator exception:** a harness file named `orchestrator.md` or
   `orchestrator.agent.md` (matched case-insensitively by filename) still
-  hard-fails without `--generic-ref`, and nothing is written.
+  hard-fails when no generic counterpart is found, and nothing is written.
 
 **Utility and non-agent files are skipped, regardless of harness status.** Before
 frontmatter is even read, the file's base name is checked against a fixed
@@ -168,7 +194,7 @@ listing per-file findings for gaps the tool can detect but not fix:
 | `NC-7B` | The output carries zero `[[INJECTION:...]]` regions — a project cannot customise the agent |
 | `NC-7C` | A heading naming a specific harness (e.g. "Claude Code", "GHCP CLI") sits inside an agent-authored section, rather than under `HarnessConstraints` |
 | `NC-D1F` | A superseded bullet was found in drifted wording and left in place |
-| `NC-TIER` | `recommended_tier` or `tier_rationale` was absent and was written as a placeholder that needs manual completion |
+| `NC-TIER` | `recommended_tier` or `tier_rationale` was absent and was written as a placeholder that needs manual completion. Only raised on the **generic path** — these fields are not written on the harness path, so no finding is raised there even when they are absent. |
 
 Findings are recorded on `TransformResult.non_conformances` for a single
 transform, accumulated across a batch, and rendered by
@@ -287,10 +313,14 @@ always hard-fail; they are never routed through the degraded path.
 4. `boundary_validator.py --batch` again — a clean run is the acceptance gate.
 5. Diff the result: expect boundary tag lines, inserted `[[DEPLOYED:...]]`
    conduct regions (with the prose bullets they supersede removed), derived or
-   reconciled frontmatter keys (`name`, `role`, `required_skills`, tier
-   placeholders, `id`), and a minor version bump. These are deliberate,
-   correct changes, not regressions — a diff that shows only these categories
-   is the expected outcome, not one where nothing but tags and version changed.
+   reconciled frontmatter keys (`name`, `role`, `id`), and a minor version
+   bump. For **generic source files** only, also expect `required_skills`,
+   `recommended_tier`, and `tier_rationale` (with `TODO` placeholders) when
+   those fields were absent. Harness files receive `name` and `role` but never
+   `required_skills`, `recommended_tier`, or `tier_rationale`. These are
+   deliberate, correct changes, not regressions — a diff that shows only these
+   categories is the expected outcome, not one where nothing but tags and
+   version changed.
 
 ---
 
@@ -313,10 +343,13 @@ were the old `[INJECTION: name]` markers and the `## Communication Protocol`
 block, and the only additions were blank lines and a `---` separator. That is
 no longer the whole story: the tool now also inserts `[[DEPLOYED:...]]` conduct
 regions and deletes the prose bullets they supersede, derives missing
-frontmatter keys (`name`, `role`, `required_skills`, tier placeholders), and
-reconciles `id` against the generic reference. A body diff against current
-output will show these deliberate additions and deletions in addition to
-boundary tags.
+frontmatter keys (`name`, `role`), and reconciles `id` against the generic
+reference. On the **generic path only**, it also appends `required_skills` and
+tier-placeholder values for `recommended_tier` and `tier_rationale` when those
+fields are absent. On the **harness path** these three fields are never appended
+— no tier-placeholder non-conformance is raised there either. A body diff
+against current output will show these deliberate additions and deletions in
+addition to boundary tags.
 
 ### Communication Protocol regions are rewritten, not preserved
 

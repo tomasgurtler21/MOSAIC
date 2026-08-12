@@ -250,10 +250,10 @@ func TestValidate_UnbalancedOpenTag_IssueLineIsNonZero(t *testing.T) {
 // --- InjectionParent advisory map ---
 
 func TestInjectionParent_MapsEachAdvisoryInjectionToItsParent(t *testing.T) {
-	// Stage 2: ArtifactProvenanceExtension is removed from InjectionParent;
-	// ProtocolExtension is added at top level. The map is now advisory only.
+	// Stage 2: ArtifactProvenanceExtension and ProtocolExtension are removed from
+	// InjectionParent. ProtocolExtension is removed from the advisory map — projects use
+	// [[CUSTOM:ProtocolExtension]] instead. The map is now advisory only.
 	wantMap := map[string]string{
-		"ProtocolExtension":      "", // top level — added in Stage 2
 		"IdentityExtension":      "Identity",
 		"CodebaseContext":        "Capabilities",
 		"OutputArtifactTemplate": "Capabilities",
@@ -274,6 +274,11 @@ func TestInjectionParent_MapsEachAdvisoryInjectionToItsParent(t *testing.T) {
 		} else if gotParent != wantParent {
 			t.Errorf("InjectionParent[%q]: want %q, got %q", inj, wantParent, gotParent)
 		}
+	}
+	// ProtocolExtension must be absent from the advisory map after Stage 2.
+	if _, ok := got["ProtocolExtension"]; ok {
+		t.Error("InjectionParent must not contain \"ProtocolExtension\" — " +
+			"removed in Stage 2; projects use [[CUSTOM:ProtocolExtension]] instead")
 	}
 }
 

@@ -19,8 +19,7 @@ TOOLS_DIR = pathlib.Path(__file__).parent
 sys.path.insert(0, str(TOOLS_DIR))
 from boundary_transformer import SkipReason, is_orchestrator_file, transform_file
 from non_conformance import NonConformance, render_report
-
-REPO_ROOT = TOOLS_DIR.parent
+from generic_lookup import REPO_ROOT, build_generic_map, file_base
 
 
 @dataclasses.dataclass
@@ -35,26 +34,6 @@ class BatchSummary:
     def ok(self) -> bool:
         """True when the batch produced no errors."""
         return self.errors == 0
-
-
-# Build a mapping: base_name -> Path of the generic file
-def build_generic_map() -> dict[str, pathlib.Path]:
-    """Return a dict mapping base filename (no extension) to its generic Path."""
-    generic_agents_root = REPO_ROOT / "Agents" / "Generic" / "Agents"
-    generic_orch = REPO_ROOT / "Agents" / "Generic" / "Orchestrator" / "orchestrator.md"
-
-    mapping: dict[str, pathlib.Path] = {}
-    for p in generic_agents_root.rglob("*.md"):
-        if p.name == "README.md":
-            continue
-        base = p.stem  # e.g. "implementation-tdd"
-        mapping[base] = p
-
-    # Orchestrator
-    if generic_orch.exists():
-        mapping["orchestrator"] = generic_orch
-
-    return mapping
 
 
 def get_harness_files(harness_dir: pathlib.Path) -> list[pathlib.Path]:
@@ -76,14 +55,6 @@ def get_harness_files(harness_dir: pathlib.Path) -> list[pathlib.Path]:
             break
 
     return files
-
-
-def file_base(path: pathlib.Path) -> str:
-    """Return the base stem for a file (handles double extension like .agent.md)."""
-    name = path.name
-    if name.endswith(".agent.md"):
-        return name[: -len(".agent.md")]
-    return path.stem
 
 
 def run_batch(harness_dirs: list[pathlib.Path], generic_map: dict[str, pathlib.Path],

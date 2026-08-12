@@ -359,14 +359,15 @@ func TestVocabulary_DeployedParent_ExactNineEntryMap(t *testing.T) {
 	}
 }
 
-func TestVocabulary_InjectionParent_ExactNineEntryAdvisoryMap(t *testing.T) {
-	// Authoritative 9-entry advisory map. InjectionParent is no longer an allowlist;
+func TestVocabulary_InjectionParent_ExactEightEntryAdvisoryMap(t *testing.T) {
+	// Authoritative 8-entry advisory map. InjectionParent is no longer an allowlist;
 	// an absent name is preserved, never flagged. The values are the drift signal.
-	// LanguagePatterns is a new entry: it moved from the tool-managed CanonicalDeployed
+	// ProtocolExtension is removed in Stage 2: projects use [[CUSTOM:ProtocolExtension]]
+	// instead — MOSAIC defines [[INJECTION:]] slots; projects invent [[CUSTOM:]] ones.
+	// LanguagePatterns is present: it moved from the tool-managed CanonicalDeployed
 	// set to this advisory catalogue, keeping its Capabilities parent.
 	// Any deviation is a drift from boundary_constants.py (where "" in Go is None in Python).
 	want := map[string]string{
-		"ProtocolExtension":      "", // top level — added in Stage 2
 		"IdentityExtension":      "Identity",
 		"CodebaseContext":        "Capabilities",
 		"LanguagePatterns":       "Capabilities", // moved from CanonicalDeployed

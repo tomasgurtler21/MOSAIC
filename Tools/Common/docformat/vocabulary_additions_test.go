@@ -6,7 +6,8 @@ package docformat_test
 //   - CanonicalOrder shrinks from 8 to 7 slots (ArtifactProvenance removed).
 //   - CanonicalDeployed grows from 7 to 11 names; ArtifactProvenance removed.
 //   - CanonicalInjections is removed entirely; no reference to it is valid.
-//   - InjectionParent loses ArtifactProvenanceExtension and gains ProtocolExtension.
+//   - InjectionParent loses ArtifactProvenanceExtension and ProtocolExtension; ProtocolExtension
+//     is removed from the advisory map — projects use [[CUSTOM:ProtocolExtension]] instead.
 //
 // Tests that verified the pre-Stage-2 state (8-slot order, 7 deployed, 8 injections,
 // ArtifactProvenance in CanonicalDeployed/CanonicalOrder) are removed because the

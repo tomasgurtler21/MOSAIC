@@ -15,8 +15,10 @@ import enum
 import pathlib
 import re
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Optional
+
+from generic_lookup import find_generic_ref as _find_generic_ref
 
 from boundary_constants import (
     BoundaryKind,
@@ -73,6 +75,18 @@ WARN_ALREADY_TRANSFORMED: str = (
 ERR_HARNESS_NO_GENERIC_REF: str = (
     "Harness file detected (transform_version in frontmatter) but --generic-ref not provided"
 )
+
+# Overwrite-guard messages. All use a {path} str.format placeholder.
+WARN_OUTPUT_EXISTS: str = (
+    "Output file already exists and will be overwritten: {path}"
+)
+PROMPT_OVERWRITE: str = "Overwrite {path}? [y/N] "
+MSG_OVERWRITE_DECLINED: str = "Aborted: {path} was not overwritten"
+
+# CLI exit codes.
+EXIT_OK: int = 0
+EXIT_ERROR: int = 1              # existing behavior, now named
+EXIT_OVERWRITE_DECLINED: int = 2 # declined overwrite (distinct from transform error)
 
 # Matches a top-level YAML frontmatter key at the start of a line (no leading
 # whitespace). Indented lines belong to a multi-line value (list items or nested
@@ -345,6 +359,28 @@ def transform_file(
     if is_harness and generic_ref_path is None:
         version_before_raw = frontmatter.get("version", "")
 
+        # Idempotency guard: skip files that already carry canonical boundary
+        # tags.  This only applies when no generic reference is provided; when
+        # a caller supplies a ref (e.g. batch_transform on the normal path, or
+        # an operator's explicit --generic-ref), the guard does not fire so the
+        # full-quality transform proceeds as requested.
+        if has_canonical_boundary_tags("".join(lines[frontmatter_end:])):
+            warn = WARN_ALREADY_TRANSFORMED.format(path=input_path)
+            print(warn, file=sys.stderr)
+            return TransformResult(
+                success=True,
+                errors=[],
+                sections_added=[],
+                injections_added=[],
+                deployed_added=[],
+                version_before=version_before_raw,
+                version_after=version_before_raw,
+                degraded=False,
+                skipped=True,
+                skip_reason=SkipReason.ALREADY_TRANSFORMED,
+                warnings=[warn],
+            )
+
         # 1. Orchestrator check: preserve the existing hard-error for orchestrators.
         if is_orchestrator_file(input_path):
             return TransformResult(
@@ -363,30 +399,10 @@ def transform_file(
                 warnings=[],
             )
 
-        # 2. Idempotency guard: if the file already carries valid canonical
-        #    boundary tags, skip it rather than re-running the transform.
-        body_lines = lines[frontmatter_end:]
-        body_str = "".join(body_lines)
-        if has_canonical_boundary_tags(body_str):
-            warn = WARN_ALREADY_TRANSFORMED.format(path=input_path)
-            print(warn, file=sys.stderr)
-            return TransformResult(
-                success=True,
-                errors=[],
-                sections_added=[],
-                injections_added=[],
-                deployed_added=[],
-                version_before=version_before_raw,
-                version_after=version_before_raw,
-                degraded=False,
-                skipped=True,
-                skip_reason=SkipReason.ALREADY_TRANSFORMED,
-                warnings=[warn],
-            )
-
-        # 3. Degraded transform: apply the generic-body logic with non-strict
+        # 2. Degraded transform: apply the generic-body logic with non-strict
         #    identity classification. When version is absent, default_version()
         #    supplies a substitute so the transform can proceed.
+        body_lines = lines[frontmatter_end:]
         version_before = resolve_version(frontmatter)
         version_after = _bump_version(version_before)
         transform_version_after = _bump_version(frontmatter["transform_version"])
@@ -1808,6 +1824,129 @@ def _merge_section(harness_section: list[str], generic_section: list[str]) -> tu
     return out, injections
 
 
+def resolve_cli_generic_ref(
+    input_path: pathlib.Path,
+    explicit_ref: pathlib.Path | None,
+) -> pathlib.Path | None:
+    """Return the generic reference the CLI should pass to transform_file().
+
+    Precedence:
+      1. ``explicit_ref`` when not None — returned unchanged, no lookup performed.
+      2. Auto-lookup via _find_generic_ref(input_path), but only when
+         ``input_path`` is a harness file (frontmatter carries
+         ``transform_version``). Returns the match, or None when there is none.
+      3. None in every other case — including any unreadable or unparseable
+         input, which is left for transform_file() to report.
+
+    Returns None for a generic-file input, so generic transforms are unaffected.
+    Never raises; a lookup failure degrades to None.
+    """
+    if explicit_ref is not None:
+        return explicit_ref
+
+    try:
+        content = input_path.read_text(encoding="utf-8")
+        lines = content.splitlines(keepends=True)
+        fm_result = _parse_frontmatter(lines, require_version=False)
+        if not fm_result["success"]:
+            return None
+        if "transform_version" not in fm_result["frontmatter"]:
+            return None
+        # Orchestrator files require an explicit --generic-ref; auto-lookup does
+        # not apply to them so the existing hard-fail is preserved.
+        if is_orchestrator_file(input_path):
+            return None
+        # Non-orchestrator harness file — attempt stem-based auto-lookup.
+        return _find_generic_ref(input_path)
+    except Exception:
+        return None
+
+
+def confirm_overwrite(
+    output_path: pathlib.Path,
+    *,
+    force: bool = False,
+    prompt_fn: Callable[[str], str] = input,
+    interactive: bool | None = None,
+) -> bool:
+    """Return True when the CLI may write to `output_path`.
+
+    - True immediately when `force` is True, or when `output_path` does not
+      exist. No prompt, no output.
+    - Otherwise emits WARN_OUTPUT_EXISTS to stderr, then:
+        * when the session is non-interactive, returns False without prompting;
+        * when interactive, calls `prompt_fn(PROMPT_OVERWRITE)` and returns True
+          only for an affirmative answer ('y' or 'yes', case-insensitive, after
+          stripping). Every other answer, EOF, or interrupt returns False.
+    - `interactive` defaults to None, meaning "detect" (sys.stdin exists and
+      sys.stdin.isatty()). Passing an explicit bool overrides detection.
+    """
+    # Fast path: bypass everything when force is set or output is new.
+    if force or not output_path.exists():
+        return True
+
+    # The output exists and no force flag: warn on stderr regardless of
+    # interactivity, then decide whether to prompt.
+    print(WARN_OUTPUT_EXISTS.format(path=output_path), file=sys.stderr)
+
+    # Resolve interactivity when the caller did not override it.
+    if interactive is None:
+        try:
+            interactive = bool(sys.stdin and sys.stdin.isatty())
+        except Exception:
+            interactive = False
+
+    if not interactive:
+        return False
+
+    # Interactive path: prompt and return True only for an affirmative answer.
+    try:
+        answer = prompt_fn(PROMPT_OVERWRITE.format(path=output_path))
+        return answer.strip().lower() in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+
+def _cli_would_skip(
+    input_path: pathlib.Path,
+    generic_ref: pathlib.Path | None,
+) -> bool:
+    """Return True when a transform of `input_path` would result in a skip.
+
+    A skip is any of UTILITY_AGENT, NON_AGENT, or ALREADY_TRANSFORMED. The
+    overwrite guard is only relevant for normal (writing) transforms, so the
+    guard's caller uses this to avoid prompting on skip paths.
+
+    Never raises: classification failures are left for transform_file() to
+    diagnose and report.
+    """
+    try:
+        _file_class = _fc.classify_file(input_path)
+        if _fc.is_skippable(_file_class):
+            return True
+    except Exception:
+        return False
+
+    # ALREADY_TRANSFORMED applies when no generic ref is provided and the
+    # harness body already carries canonical boundary tags.  Orchestrator files
+    # are NOT excluded here: transform_file() checks canonical tags first (before
+    # any orchestrator guard), so an already-transformed orchestrator file takes
+    # the silent ALREADY_TRANSFORMED skip path there too.
+    if generic_ref is None:
+        try:
+            content = input_path.read_text(encoding="utf-8")
+            lines = content.splitlines(keepends=True)
+            fm = _parse_frontmatter(lines, require_version=False)
+            if fm["success"] and "transform_version" in fm["frontmatter"]:
+                body = lines[fm["end_line"]:]
+                if has_canonical_boundary_tags("".join(body)):
+                    return True
+        except Exception:
+            pass
+
+    return False
+
+
 def _main() -> int:
     """CLI entry point. Returns exit code."""
     parser = argparse.ArgumentParser(
@@ -1817,15 +1956,47 @@ def _main() -> int:
     parser.add_argument("--output", type=pathlib.Path, default=None,
                         help="Write result to this path instead of overwriting in-place")
     parser.add_argument("--generic-ref", type=pathlib.Path, default=None,
-                        help="Path to the generic counterpart file (required for harness files)")
+                        help="Path to the generic counterpart file; when omitted, auto-lookup "
+                             "by filename stem is used for harness files")
+    parser.add_argument("--force", action="store_true", default=False,
+                        help="Overwrite an existing --output file without warning or prompting. "
+                             "Intended for scripted and unattended use.")
     args = parser.parse_args()
 
-    result = transform_file(args.input, args.output, args.generic_ref)
+    generic_ref = resolve_cli_generic_ref(args.input, args.generic_ref)
+
+    # CLI-level idempotency: when auto-lookup resolved a generic ref (the
+    # operator did not supply --generic-ref explicitly), honour the
+    # already-transformed skip at this layer so that transform_file()'s frozen
+    # contract is unchanged.  An explicit --generic-ref intentionally bypasses
+    # this check, letting the operator force a full re-transform.
+    if args.generic_ref is None and generic_ref is not None:
+        try:
+            _content = args.input.read_text(encoding="utf-8")
+            _lines = _content.splitlines(keepends=True)
+            _fm = _parse_frontmatter(_lines, require_version=False)
+            if _fm["success"]:
+                _body = _lines[_fm["end_line"]:]
+                if has_canonical_boundary_tags("".join(_body)):
+                    warn = WARN_ALREADY_TRANSFORMED.format(path=args.input)
+                    print(warn, file=sys.stderr)
+                    return EXIT_OK
+        except Exception:
+            pass
+
+    # Overwrite guard: applies only when an explicit --output is given and the
+    # transform would write output (i.e. not a skip path).
+    if args.output is not None and not _cli_would_skip(args.input, generic_ref):
+        if not confirm_overwrite(args.output, force=args.force):
+            print(MSG_OVERWRITE_DECLINED.format(path=args.output), file=sys.stderr)
+            return EXIT_OVERWRITE_DECLINED
+
+    result = transform_file(args.input, args.output, generic_ref)
     if not result.success:
         for err in result.errors:
             print(f"{args.input}:{err.line_number}: {err.message}", file=sys.stderr)
-        return 1
-    return 0
+        return EXIT_ERROR
+    return EXIT_OK
 
 
 if __name__ == "__main__":

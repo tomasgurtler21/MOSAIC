@@ -89,6 +89,8 @@ Semver, with tiers describing **what redeploying would change for an agent**:
 
 This is what catches a partial deploy, an interrupted run, or an agent added by hand from an older source. It is checkable across a deployment folder without reading a single region body, and it is the cheapest integrity check the system has.
 
+**Why this is a non-issue in practice.** The deployment tool updates all agents in a folder together — a single `deploy` or `update` command processes every agent in the deployment. Whole-folder updates satisfy the invariant mechanically: every agent receives the same bundle version in the same run, so there is no window in which versions disagree. A future change to per-agent updates would need to preserve this property, either by stamping the same version or by checking the folder-wide invariant after the single-agent write.
+
 ### 3.2 Where the stamp goes
 
 `bundle_version` is written into the **deployed file's frontmatter**. Not into region bodies.

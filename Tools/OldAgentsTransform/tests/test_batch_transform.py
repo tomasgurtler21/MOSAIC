@@ -1469,3 +1469,167 @@ class TestBatchNonConformanceReport:
             f"Expected at least 3 non-conformances from 3 no-injection files; "
             f"got {summary.non_conformances}"
         )
+
+
+# ===========================================================================
+# Stage 1 — Repo-root fix and shared-lookup compatibility
+# ===========================================================================
+#
+# These tests verify two things:
+#   1. bt.REPO_ROOT resolves to the actual mosaic repo root (not Tools/).
+#      The current batch_transform.py has REPO_ROOT = TOOLS_DIR.parent, which
+#      resolves to <repo>/Tools/ — one parent short. These tests fail in RED
+#      until I1.2 rewires batch_transform to import REPO_ROOT from generic_lookup.
+#   2. bt.build_generic_map, bt.file_base, and bt.BATCH_DIRS remain accessible
+#      and correct after the extraction to generic_lookup.
+#
+# RED state: tests that depend on REPO_ROOT or build_generic_map content fail
+# because the current REPO_ROOT is wrong. Tests for file_base pass already
+# (the function is correct today); they serve as non-regression anchors to
+# confirm that re-exporting from generic_lookup does not break existing callers.
+# ===========================================================================
+
+
+class TestBatchTransformRepoRootAndLookupCompat:
+    """bt.REPO_ROOT, bt.build_generic_map, and bt.file_base must remain correct after extraction.
+
+    RED: REPO_ROOT and build_generic_map tests fail until I1.1 + I1.2 are implemented.
+    PASS (already): file_base tests — serve as non-regression anchors.
+    """
+
+    def test_repo_root_generic_agents_tree_exists(self):
+        """bt.REPO_ROOT must point to the real mosaic repo root.
+
+        Fails in RED: current REPO_ROOT resolves to <repo>/Tools/, which does not
+        contain Agents/Generic/Agents. GREEN after I1.2 rewires to generic_lookup.
+        """
+        assert (bt.REPO_ROOT / "Agents" / "Generic" / "Agents").is_dir(), (
+            f"bt.REPO_ROOT ({bt.REPO_ROOT!r}) does not contain 'Agents/Generic/Agents'; "
+            "REPO_ROOT is one parent hop short of the true repo root"
+        )
+
+    def test_repo_root_is_not_tools_dir(self):
+        """bt.REPO_ROOT must not be the Tools/ directory.
+
+        Fails in RED: the current value ends at <repo>/Tools/.
+        """
+        assert bt.REPO_ROOT.name != "Tools", (
+            f"bt.REPO_ROOT resolved to {bt.REPO_ROOT!r}; "
+            "correct value is the repo root, not the Tools/ directory"
+        )
+
+    def test_build_generic_map_is_callable(self):
+        """bt.build_generic_map must be a callable after the extraction."""
+        assert callable(bt.build_generic_map), (
+            "bt.build_generic_map must remain callable after extraction to generic_lookup"
+        )
+
+    def test_build_generic_map_returns_nonempty_dict(self):
+        """bt.build_generic_map() must return a non-empty dict with the corrected REPO_ROOT.
+
+        Fails in RED: current REPO_ROOT is wrong so the glob finds nothing and the
+        map is empty (or the function is not yet wired to generic_lookup).
+        """
+        result = bt.build_generic_map()
+        assert isinstance(result, dict), (
+            f"bt.build_generic_map() must return a dict; got {type(result).__name__!r}"
+        )
+        assert len(result) > 0, (
+            "bt.build_generic_map() must return a non-empty mapping; "
+            "if empty, REPO_ROOT may still point to Tools/ instead of the repo root"
+        )
+
+    def test_build_generic_map_contains_contracts_designer(self):
+        """bt.build_generic_map() must contain 'contracts-designer' after the root fix.
+
+        Fails in RED: the current glob finds no files because REPO_ROOT is wrong.
+        """
+        result = bt.build_generic_map()
+        assert "contracts-designer" in result, (
+            "'contracts-designer' must be in bt.build_generic_map(); "
+            f"current map size: {len(result)}, REPO_ROOT: {bt.REPO_ROOT!r}"
+        )
+
+    def test_file_base_is_callable(self):
+        """bt.file_base must be callable — confirms the name is accessible post-extraction."""
+        assert callable(bt.file_base), (
+            "bt.file_base must remain callable after extraction to generic_lookup"
+        )
+
+    def test_file_base_double_extension(self):
+        """bt.file_base correctly strips the .agent.md double extension."""
+        result = bt.file_base(pathlib.Path("contracts-designer.agent.md"))
+        assert result == "contracts-designer", (
+            f"bt.file_base('contracts-designer.agent.md') must return 'contracts-designer'; "
+            f"got {result!r}"
+        )
+
+    def test_file_base_single_extension(self):
+        """bt.file_base correctly strips a plain .md extension."""
+        result = bt.file_base(pathlib.Path("orchestrator.md"))
+        assert result == "orchestrator", (
+            f"bt.file_base('orchestrator.md') must return 'orchestrator'; got {result!r}"
+        )
+
+    def test_file_base_hyphenated_agent_md(self):
+        """bt.file_base preserves hyphens when stripping .agent.md."""
+        result = bt.file_base(pathlib.Path("planner-tdd-soft.agent.md"))
+        assert result == "planner-tdd-soft", (
+            f"bt.file_base('planner-tdd-soft.agent.md') must return 'planner-tdd-soft'; "
+            f"got {result!r}"
+        )
+
+
+class TestBatchDirsResolveToExistingDirectories:
+    """Every directory in BATCH_DIRS must resolve to an existing directory.
+
+    Fails in RED: REPO_ROOT currently resolves to <repo>/Tools/, so every BATCH_DIRS
+    entry expands to a non-existent path under Tools/Agents/. After I1.2 (REPO_ROOT
+    imported from generic_lookup with the correct 3-parent-hop resolution), each entry
+    expands to a directory that exists under <repo>/Agents/.
+    """
+
+    def test_batch_dirs_b_all_exist(self):
+        """All directories in BATCH_DIRS['B'] must exist under the real Agents/ tree."""
+        for d in bt.BATCH_DIRS["B"]:
+            assert d.is_dir(), (
+                f"BATCH_DIRS['B'] entry {d!r} does not exist; "
+                "REPO_ROOT may still be resolving to Tools/ instead of the repo root"
+            )
+
+    def test_batch_dirs_c_all_exist(self):
+        """All directories in BATCH_DIRS['C'] must exist under the real Agents/ tree."""
+        for d in bt.BATCH_DIRS["C"]:
+            assert d.is_dir(), (
+                f"BATCH_DIRS['C'] entry {d!r} does not exist; "
+                "REPO_ROOT may still be resolving to Tools/ instead of the repo root"
+            )
+
+    def test_batch_dirs_d_all_exist(self):
+        """All directories in BATCH_DIRS['D'] must exist under the real Agents/ tree."""
+        for d in bt.BATCH_DIRS["D"]:
+            assert d.is_dir(), (
+                f"BATCH_DIRS['D'] entry {d!r} does not exist; "
+                "REPO_ROOT may still be resolving to Tools/ instead of the repo root"
+            )
+
+    def test_batch_dirs_e_all_exist(self):
+        """All directories in BATCH_DIRS['E'] must exist under the real Agents/ tree."""
+        for d in bt.BATCH_DIRS["E"]:
+            assert d.is_dir(), (
+                f"BATCH_DIRS['E'] entry {d!r} does not exist; "
+                "REPO_ROOT may still be resolving to Tools/ instead of the repo root"
+            )
+
+    def test_all_batch_dirs_entries_exist(self):
+        """Every entry across all BATCH_DIRS batches must resolve to an existing directory."""
+        failed = []
+        for batch_key, dirs in bt.BATCH_DIRS.items():
+            for d in dirs:
+                if not d.is_dir():
+                    failed.append((batch_key, str(d)))
+        assert not failed, (
+            f"The following BATCH_DIRS entries do not exist: {failed!r}. "
+            f"REPO_ROOT is {bt.REPO_ROOT!r}. "
+            "After the fix, all entries must resolve under <repo>/Agents/."
+        )

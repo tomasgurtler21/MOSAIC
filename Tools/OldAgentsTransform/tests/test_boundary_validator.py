@@ -2198,3 +2198,178 @@ class TestCustomKindValidatorErrorDetection:
         assert "E006" in codes, (
             "Two [[CUSTOM:]] regions with the same name must raise E006 (duplicate boundary name)"
         )
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: Generic-only key validator allowlist
+# ---------------------------------------------------------------------------
+#
+# After Stage 4 narrows the AGENT_HARNESS allowlist in boundary_constants.py,
+# the validator must flag required_skills, recommended_tier, and tier_rationale
+# as unexpected (E009) on a harness-kind document, while accepting them on a
+# generic-kind document.
+#
+# Tests are in TDD RED phase: they fail until Stage 4 (I4.1) removes the three
+# fields from FRONTMATTER_KEYS_BY_KIND[AGENT_HARNESS].
+
+
+class TestGenericOnlyKeyValidatorAllowlist:
+    """validate_file flags generic-only keys on harness documents (E009) and
+    accepts them on generic documents."""
+
+    # --- Harness file carrying required_skills → E009 ---
+
+    def test_harness_file_with_required_skills_raises_e009(self) -> None:
+        """A harness file carrying required_skills must produce an E009 error after Stage 4."""
+        # Arrange
+        # s4_validator_harness_generic_only_key.md is a harness file (transform_version present)
+        # carrying required_skills: [lean-tdd] in its frontmatter.
+        fixture = _fixture("s4_validator_harness_generic_only_key.md")
+
+        # Act
+        errors = validate_file(fixture)
+
+        # Assert
+        e009_errors = [e for e in errors if e.error_code == "E009"]
+        required_skills_e009 = [e for e in e009_errors if "required_skills" in e.message]
+        assert required_skills_e009 != [], (
+            "A harness-kind file carrying 'required_skills' must produce E009 after Stage 4 "
+            "narrows the AGENT_HARNESS allowlist; no such error was found. "
+            f"All errors: {errors}"
+        )
+
+    # --- Harness file: all three generic-only keys → E009 for each ---
+
+    def test_harness_file_with_all_three_generic_only_keys_raises_e009_for_each(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A harness file carrying all three generic-only keys must raise E009 for each."""
+        # Arrange
+        content = (
+            "---\n"
+            "id: 200\n"
+            "version: 2.0.0\n"
+            "transform_version: 2.0.0\n"
+            "name: harness-all-generic-only\n"
+            "description: Harness file carrying all three generic-only keys.\n"
+            "required_skills: [lean-tdd]\n"
+            "recommended_tier: MEDIUM\n"
+            "tier_rationale: A reason\n"
+            "---\n\n"
+            "[[SECTION:Identity]]\n"
+            "# HarnessAllGenericOnly Agent\n"
+            "Content here.\n"
+            "[[/SECTION:Identity]]\n"
+        )
+        agent_file = tmp_path / "harness-all-generic-only.md"
+        agent_file.write_text(content, encoding="utf-8")
+
+        # Act
+        errors = validate_file(agent_file)
+
+        # Assert
+        e009_errors = [e for e in errors if e.error_code == "E009"]
+        flagged_keys = {
+            key for key in ("required_skills", "recommended_tier", "tier_rationale")
+            if any(key in e.message for e in e009_errors)
+        }
+        assert flagged_keys == {"required_skills", "recommended_tier", "tier_rationale"}, (
+            "A harness file carrying all three generic-only keys must produce E009 for each; "
+            f"only these keys were flagged: {flagged_keys}. All errors: {errors}"
+        )
+
+    # --- Generic file carrying the three keys → no E009 ---
+
+    def test_generic_file_with_required_skills_raises_no_e009(self) -> None:
+        """A generic file carrying required_skills must produce no E009 after Stage 4."""
+        # Arrange
+        # s4_validator_generic_generic_only_key.md is a generic file (no transform_version)
+        # carrying required_skills, recommended_tier, and tier_rationale.
+        fixture = _fixture("s4_validator_generic_generic_only_key.md")
+
+        # Act
+        errors = validate_file(fixture)
+
+        # Assert
+        e009_errors = [e for e in errors if e.error_code == "E009"]
+        generic_only_e009 = [
+            e for e in e009_errors
+            if any(k in e.message for k in ("required_skills", "recommended_tier", "tier_rationale"))
+        ]
+        assert generic_only_e009 == [], (
+            "A generic-kind file carrying required_skills, recommended_tier, and tier_rationale "
+            "must produce no E009; these are valid generic-only keys. "
+            f"Unexpected errors: {generic_only_e009}"
+        )
+
+    def test_generic_file_with_all_three_generic_only_keys_raises_no_e009(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A generic file carrying all three generic-only keys must not raise E009 for any."""
+        # Arrange
+        content = (
+            "---\n"
+            "id: 201\n"
+            "version: 1.0.0\n"
+            "name: generic-all-generic-only\n"
+            "description: Generic file carrying all three generic-only keys.\n"
+            "required_skills: [lean-tdd]\n"
+            "recommended_tier: LOW\n"
+            "tier_rationale: Low-stakes test fixture\n"
+            "---\n\n"
+            "[[SECTION:Identity]]\n"
+            "# GenericAllGenericOnly Agent\n"
+            "Content here.\n"
+            "[[/SECTION:Identity]]\n"
+        )
+        agent_file = tmp_path / "generic-all-generic-only.md"
+        agent_file.write_text(content, encoding="utf-8")
+
+        # Act
+        errors = validate_file(agent_file)
+
+        # Assert
+        e009_errors = [e for e in errors if e.error_code == "E009"]
+        generic_only_e009 = [
+            e for e in e009_errors
+            if any(k in e.message for k in ("required_skills", "recommended_tier", "tier_rationale"))
+        ]
+        assert generic_only_e009 == [], (
+            "A generic-kind file carrying all three generic-only keys must produce no E009; "
+            f"unexpected errors: {generic_only_e009}"
+        )
+
+    # --- Existing allowlist still works for genuinely unknown keys ---
+
+    def test_genuinely_unknown_key_still_flagged_e009_on_harness_after_stage4(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Narrowing the harness allowlist must not disable E009 for genuinely unknown keys."""
+        # Arrange
+        content = (
+            "---\n"
+            "id: 202\n"
+            "version: 2.0.0\n"
+            "transform_version: 2.0.0\n"
+            "name: harness-unknown-key\n"
+            "description: Harness file with a genuinely unknown key.\n"
+            "totally_unknown_key_xyz: some_value\n"
+            "---\n\n"
+            "[[SECTION:Identity]]\n"
+            "# HarnessUnknownKey Agent\n"
+            "Content here.\n"
+            "[[/SECTION:Identity]]\n"
+        )
+        agent_file = tmp_path / "harness-unknown-key.md"
+        agent_file.write_text(content, encoding="utf-8")
+
+        # Act
+        errors = validate_file(agent_file)
+
+        # Assert
+        codes = [e.error_code for e in errors]
+        assert "E009" in codes, (
+            "A genuinely unknown frontmatter key must still produce E009 on a harness file "
+            "after Stage 4 narrows the allowlist; the narrowing must not disable E009 generally. "
+            f"Got codes: {codes}"
+        )

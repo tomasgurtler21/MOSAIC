@@ -13,6 +13,9 @@ TestUtilityAgentTransformFileSkip, TestNonAgentTransformFileSkip,
 TestSkipReasonDistinguishesFromAlreadyTransformed, TestNormalTransformSkipReasonIsNone)
 will fail until SkipReason is added to boundary_transformer.py and transform_file skips
 utility-agent and non-agent files before reading their content.
+The overwrite-guard test classes (TestOverwriteGuardConstants, TestConfirmOverwrite,
+TestCLIOverwriteGuard, TestCLIOverwriteUntouchedCases) will fail until confirm_overwrite(),
+the new constants, and the --force flag are added to boundary_transformer.py.
 """
 from __future__ import annotations
 
@@ -6478,47 +6481,6 @@ class TestDegradedPathStage6:
         result, _ = _transform_to_tmp(s6_harness_degraded_no_tier_input, tmp_path)
         assert result.degraded is True
 
-    def test_degraded_path_inserts_recommended_tier_placeholder(
-        self, s6_harness_degraded_no_tier_input, tmp_path
-    ) -> None:
-        """recommended_tier must be written with a placeholder on the degraded write-out path."""
-        result, output_path = _transform_to_tmp(s6_harness_degraded_no_tier_input, tmp_path)
-        assert result.success is True
-        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
-        assert any(l.startswith("recommended_tier:") for l in fm_lines), (
-            "recommended_tier must be inserted on the degraded path when absent"
-        )
-
-    def test_degraded_path_inserts_tier_rationale_placeholder(
-        self, s6_harness_degraded_no_tier_input, tmp_path
-    ) -> None:
-        """tier_rationale must be written with a placeholder on the degraded write-out path."""
-        result, output_path = _transform_to_tmp(s6_harness_degraded_no_tier_input, tmp_path)
-        assert result.success is True
-        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
-        assert any(l.startswith("tier_rationale:") for l in fm_lines), (
-            "tier_rationale must be inserted on the degraded path when absent"
-        )
-
-    def test_degraded_path_tier_placeholder_value_is_todo(
-        self, s6_harness_degraded_no_tier_input, tmp_path
-    ) -> None:
-        """The placeholder value TIER_PLACEHOLDER must appear in degraded output."""
-        result, output_path = _transform_to_tmp(s6_harness_degraded_no_tier_input, tmp_path)
-        assert result.success is True
-        assert TIER_PLACEHOLDER in _read(output_path)
-
-    def test_degraded_path_records_nc_tier_placeholder_on_result(
-        self, s6_harness_degraded_no_tier_input, tmp_path
-    ) -> None:
-        """Two NC_TIER_PLACEHOLDER findings must be recorded on result.non_conformances."""
-        result, _ = _transform_to_tmp(s6_harness_degraded_no_tier_input, tmp_path)
-        tier_ncs = [nc for nc in result.non_conformances if nc.code == NC_TIER_PLACEHOLDER]
-        assert len(tier_ncs) == 2, (
-            f"Expected 2 NC_TIER_PLACEHOLDER on degraded-path result but got "
-            f"{len(tier_ncs)}: {result.non_conformances}"
-        )
-
     def test_degraded_path_preserves_mode_key(
         self, s6_harness_degraded_no_tier_input, tmp_path
     ) -> None:
@@ -7507,17 +7469,6 @@ class TestErrorHandlingAndExecutionPhilosophyHarnessPath:
         fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
         assert any(l.startswith("role:") for l in fm_lines), (
             "'role' must be derived and written on the degraded write-out path"
-        )
-
-    def test_degraded_path_writes_required_skills(
-        self, s6_harness_degraded_no_tier_input, tmp_path
-    ) -> None:
-        """'required_skills' must be written to output frontmatter on the degraded path when absent."""
-        result, output_path = _transform_to_tmp(s6_harness_degraded_no_tier_input, tmp_path)
-        assert result.success is True
-        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
-        assert any(l.startswith("required_skills:") for l in fm_lines), (
-            "'required_skills' must be derived and written on the degraded write-out path"
         )
 
 
@@ -9708,6 +9659,777 @@ class TestHarnessProseDection:
 
 
 # ---------------------------------------------------------------------------
+# Overwrite guard — constants (T3.1)
+# ---------------------------------------------------------------------------
+
+class TestOverwriteGuardConstants:
+    """New constants introduced by the overwrite guard must be defined in boundary_transformer.
+
+    These tests verify the existence and value of the module-level constants and the
+    new exit code.  All tests fail in RED because the symbols do not exist until the
+    overwrite guard is implemented.
+    """
+
+    def test_warn_output_exists_constant_exists(self):
+        """WARN_OUTPUT_EXISTS must be importable from boundary_transformer."""
+        import boundary_transformer as bt
+        assert hasattr(bt, "WARN_OUTPUT_EXISTS"), (
+            "boundary_transformer must define WARN_OUTPUT_EXISTS"
+        )
+
+    def test_warn_output_exists_has_path_placeholder(self):
+        """WARN_OUTPUT_EXISTS must contain a {path} str.format placeholder."""
+        from boundary_transformer import WARN_OUTPUT_EXISTS
+        assert "{path}" in WARN_OUTPUT_EXISTS, (
+            "WARN_OUTPUT_EXISTS must contain a {path} placeholder so callers can "
+            "substitute the actual output path"
+        )
+
+    def test_prompt_overwrite_constant_exists(self):
+        """PROMPT_OVERWRITE must be importable from boundary_transformer."""
+        import boundary_transformer as bt
+        assert hasattr(bt, "PROMPT_OVERWRITE"), (
+            "boundary_transformer must define PROMPT_OVERWRITE"
+        )
+
+    def test_prompt_overwrite_has_path_placeholder(self):
+        """PROMPT_OVERWRITE must contain a {path} str.format placeholder."""
+        from boundary_transformer import PROMPT_OVERWRITE
+        assert "{path}" in PROMPT_OVERWRITE, (
+            "PROMPT_OVERWRITE must contain a {path} placeholder so the prompt names "
+            "the specific file being overwritten"
+        )
+
+    def test_msg_overwrite_declined_constant_exists(self):
+        """MSG_OVERWRITE_DECLINED must be importable from boundary_transformer."""
+        import boundary_transformer as bt
+        assert hasattr(bt, "MSG_OVERWRITE_DECLINED"), (
+            "boundary_transformer must define MSG_OVERWRITE_DECLINED"
+        )
+
+    def test_msg_overwrite_declined_has_path_placeholder(self):
+        """MSG_OVERWRITE_DECLINED must contain a {path} str.format placeholder."""
+        from boundary_transformer import MSG_OVERWRITE_DECLINED
+        assert "{path}" in MSG_OVERWRITE_DECLINED, (
+            "MSG_OVERWRITE_DECLINED must contain a {path} placeholder so the message "
+            "names the file that was not overwritten"
+        )
+
+    def test_exit_overwrite_declined_constant_exists(self):
+        """EXIT_OVERWRITE_DECLINED must be importable from boundary_transformer."""
+        import boundary_transformer as bt
+        assert hasattr(bt, "EXIT_OVERWRITE_DECLINED"), (
+            "boundary_transformer must define EXIT_OVERWRITE_DECLINED"
+        )
+
+    def test_exit_overwrite_declined_value_is_2(self):
+        """EXIT_OVERWRITE_DECLINED must equal 2."""
+        from boundary_transformer import EXIT_OVERWRITE_DECLINED
+        assert EXIT_OVERWRITE_DECLINED == 2, (
+            f"EXIT_OVERWRITE_DECLINED must be 2; got {EXIT_OVERWRITE_DECLINED!r}"
+        )
+
+    def test_exit_overwrite_declined_distinct_from_exit_error(self):
+        """EXIT_OVERWRITE_DECLINED must differ from EXIT_ERROR so scripts can distinguish them."""
+        from boundary_transformer import EXIT_OVERWRITE_DECLINED
+        import boundary_transformer as bt
+        exit_error = getattr(bt, "EXIT_ERROR", 1)
+        assert EXIT_OVERWRITE_DECLINED != exit_error, (
+            "EXIT_OVERWRITE_DECLINED and EXIT_ERROR must be different values so a script "
+            "can tell a refused overwrite apart from a failed transform"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Overwrite guard — confirm_overwrite() unit tests (T3.1)
+# ---------------------------------------------------------------------------
+
+class TestConfirmOverwrite:
+    """Unit tests for confirm_overwrite() using its injectable prompt_fn and interactive seams.
+
+    All tests bypass sys.stdin entirely; no test patches global state.
+    The five core scenarios: force=True, non-existent path, non-interactive, affirmative
+    answer, and negative / exception answers are each tested with a direct call.
+    """
+
+    def test_force_true_with_existing_file_returns_true(self, tmp_path):
+        """force=True must return True immediately regardless of whether the output file exists."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        result = confirm_overwrite(
+            existing,
+            force=True,
+            prompt_fn=lambda s: "n",
+            interactive=True,
+        )
+        assert result is True, (
+            "confirm_overwrite must return True when force=True, even if the file exists"
+        )
+
+    def test_force_true_does_not_call_prompt_fn(self, tmp_path):
+        """force=True must not invoke prompt_fn even when the output file exists."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        prompt_calls = []
+        confirm_overwrite(
+            existing,
+            force=True,
+            prompt_fn=lambda s: prompt_calls.append(s) or "n",
+            interactive=True,
+        )
+        assert prompt_calls == [], (
+            "confirm_overwrite must not call prompt_fn when force=True"
+        )
+
+    def test_nonexistent_output_returns_true(self, tmp_path):
+        """When output_path does not exist, confirm_overwrite must return True without prompting."""
+        from boundary_transformer import confirm_overwrite
+        nonexistent = tmp_path / "brand_new_output.md"
+        assert not nonexistent.exists(), "Precondition: output must not exist"
+        prompt_calls = []
+        result = confirm_overwrite(
+            nonexistent,
+            force=False,
+            prompt_fn=lambda s: prompt_calls.append(s) or "n",
+            interactive=True,
+        )
+        assert result is True, (
+            "confirm_overwrite must return True when output_path does not exist"
+        )
+        assert prompt_calls == [], (
+            "confirm_overwrite must not call prompt_fn when output_path does not exist"
+        )
+
+    def test_existing_output_noninteractive_returns_false(self, tmp_path):
+        """interactive=False with an existing output must return False without blocking."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        result = confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=lambda s: "y",
+            interactive=False,
+        )
+        assert result is False, (
+            "confirm_overwrite must return False when interactive=False and output exists; "
+            "the non-interactive path must decline without prompting"
+        )
+
+    def test_existing_output_noninteractive_does_not_call_prompt_fn(self, tmp_path):
+        """interactive=False must not invoke prompt_fn (safe default — never block stdin)."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        prompt_calls = []
+        confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=lambda s: prompt_calls.append(s) or "y",
+            interactive=False,
+        )
+        assert prompt_calls == [], (
+            "confirm_overwrite must not call prompt_fn when interactive=False"
+        )
+
+    def test_affirmative_y_returns_true(self, tmp_path):
+        """An interactive answer of 'y' must return True."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        result = confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=lambda s: "y",
+            interactive=True,
+        )
+        assert result is True, (
+            "confirm_overwrite must return True for answer 'y'"
+        )
+
+    def test_affirmative_yes_returns_true(self, tmp_path):
+        """An interactive answer of 'yes' must return True."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        result = confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=lambda s: "yes",
+            interactive=True,
+        )
+        assert result is True, (
+            "confirm_overwrite must return True for answer 'yes'"
+        )
+
+    def test_affirmative_uppercase_Y_returns_true(self, tmp_path):
+        """Affirmative matching is case-insensitive: 'Y' must return True."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        result = confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=lambda s: "Y",
+            interactive=True,
+        )
+        assert result is True, (
+            "confirm_overwrite must return True for answer 'Y' (case-insensitive match)"
+        )
+
+    def test_affirmative_with_surrounding_whitespace_returns_true(self, tmp_path):
+        """Answers are stripped before comparison: '  yes  ' must return True."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        result = confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=lambda s: "  yes  ",
+            interactive=True,
+        )
+        assert result is True, (
+            "confirm_overwrite must strip whitespace before comparing the answer"
+        )
+
+    def test_negative_n_returns_false(self, tmp_path):
+        """An interactive answer of 'n' must return False."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        result = confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=lambda s: "n",
+            interactive=True,
+        )
+        assert result is False, (
+            "confirm_overwrite must return False for answer 'n'"
+        )
+
+    def test_empty_answer_returns_false(self, tmp_path):
+        """Pressing Enter with no input (empty string) must return False."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        result = confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=lambda s: "",
+            interactive=True,
+        )
+        assert result is False, (
+            "confirm_overwrite must return False for an empty answer (default is No)"
+        )
+
+    def test_ambiguous_answer_returns_false(self, tmp_path):
+        """Any answer other than 'y' or 'yes' must return False."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        result = confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=lambda s: "maybe",
+            interactive=True,
+        )
+        assert result is False, (
+            "confirm_overwrite must return False for any answer that is not 'y' or 'yes'"
+        )
+
+    def test_eof_error_returns_false_and_does_not_propagate(self, tmp_path):
+        """An EOFError raised by prompt_fn must be caught and treated as a decline (False)."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        def raise_eof(s: str) -> str:
+            raise EOFError
+        result = confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=raise_eof,
+            interactive=True,
+        )
+        assert result is False, (
+            "confirm_overwrite must return False (not propagate) when prompt_fn raises EOFError"
+        )
+
+    def test_keyboard_interrupt_returns_false_and_does_not_propagate(self, tmp_path):
+        """A KeyboardInterrupt raised by prompt_fn must be caught and treated as a decline (False)."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        def raise_interrupt(s: str) -> str:
+            raise KeyboardInterrupt
+        result = confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=raise_interrupt,
+            interactive=True,
+        )
+        assert result is False, (
+            "confirm_overwrite must return False (not propagate) when prompt_fn raises KeyboardInterrupt"
+        )
+
+    def test_existing_output_emits_warn_output_exists_to_stderr(self, tmp_path, capsys):
+        """When output exists and the interactive path runs, WARN_OUTPUT_EXISTS must go to stderr."""
+        from boundary_transformer import confirm_overwrite, WARN_OUTPUT_EXISTS
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=lambda s: "n",
+            interactive=True,
+        )
+        captured = capsys.readouterr()
+        assert WARN_OUTPUT_EXISTS.format(path=existing) in captured.err, (
+            "confirm_overwrite must emit WARN_OUTPUT_EXISTS to stderr when the output "
+            "file exists and a decision is being made"
+        )
+
+    def test_existing_output_noninteractive_emits_warn_output_exists_to_stderr(
+        self, tmp_path, capsys
+    ):
+        """Even in non-interactive mode, WARN_OUTPUT_EXISTS must be emitted to stderr when output exists."""
+        from boundary_transformer import confirm_overwrite, WARN_OUTPUT_EXISTS
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        confirm_overwrite(
+            existing,
+            force=False,
+            prompt_fn=lambda s: "n",
+            interactive=False,
+        )
+        captured = capsys.readouterr()
+        assert WARN_OUTPUT_EXISTS.format(path=existing) in captured.err, (
+            "confirm_overwrite must emit WARN_OUTPUT_EXISTS to stderr even in "
+            "non-interactive mode when the output file exists"
+        )
+
+    def test_force_true_does_not_emit_warn_output_exists(self, tmp_path, capsys):
+        """force=True must produce no stderr output even when the output file exists."""
+        from boundary_transformer import confirm_overwrite
+        existing = tmp_path / "out.md"
+        existing.write_text("pre-existing\n", encoding="utf-8")
+        confirm_overwrite(
+            existing,
+            force=True,
+            prompt_fn=lambda s: "n",
+            interactive=True,
+        )
+        captured = capsys.readouterr()
+        # The warning text is stable per design: any partial match is sufficient.
+        assert "Output file already exists" not in captured.err, (
+            "confirm_overwrite must not emit WARN_OUTPUT_EXISTS when force=True"
+        )
+
+    def test_nonexistent_output_does_not_emit_warn_output_exists(self, tmp_path, capsys):
+        """No WARN_OUTPUT_EXISTS must be emitted when output_path does not exist."""
+        from boundary_transformer import confirm_overwrite
+        nonexistent = tmp_path / "brand_new_output.md"
+        confirm_overwrite(
+            nonexistent,
+            force=False,
+            prompt_fn=lambda s: "n",
+            interactive=True,
+        )
+        captured = capsys.readouterr()
+        assert "Output file already exists" not in captured.err, (
+            "confirm_overwrite must not emit WARN_OUTPUT_EXISTS when output_path does not exist"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Overwrite guard — CLI integration tests (T3.1)
+# ---------------------------------------------------------------------------
+
+class TestCLIOverwriteGuard:
+    """CLI subprocess tests for the --output overwrite guard.
+
+    All subprocess invocations use capture_output=True, which makes stdin a
+    non-tty pipe; confirm_overwrite() detects this as non-interactive and
+    returns False (decline) without prompting.  The accepting path is covered
+    at the unit level by TestConfirmOverwrite and at the CLI level by the
+    --force flag tests below.
+    """
+
+    def test_existing_output_exits_with_overwrite_declined_code(
+        self, generic_standard_input, tmp_path
+    ):
+        """When --output names an existing file and --force is absent, CLI must exit EXIT_OVERWRITE_DECLINED."""
+        from boundary_transformer import EXIT_OVERWRITE_DECLINED
+        output_path = tmp_path / "out.md"
+        output_path.write_text("pre-existing\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(generic_standard_input), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == EXIT_OVERWRITE_DECLINED, (
+            f"CLI must exit {EXIT_OVERWRITE_DECLINED} when --output exists and --force "
+            f"is absent; got returncode={proc.returncode}, stderr={proc.stderr!r}"
+        )
+
+    def test_existing_output_emits_warn_output_exists_on_stderr(
+        self, generic_standard_input, tmp_path
+    ):
+        """When --output names an existing file, WARN_OUTPUT_EXISTS must appear on stderr."""
+        output_path = tmp_path / "out.md"
+        output_path.write_text("pre-existing\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(generic_standard_input), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        # Use the stable prefix from the design-specified message text.
+        assert "Output file already exists" in proc.stderr, (
+            f"WARN_OUTPUT_EXISTS must appear on stderr when --output exists; "
+            f"got stderr={proc.stderr!r}"
+        )
+
+    def test_existing_output_declined_leaves_file_byte_identical(
+        self, generic_standard_input, tmp_path
+    ):
+        """When overwrite is declined (non-interactive), the existing --output file must be untouched."""
+        output_path = tmp_path / "out.md"
+        original_content = "# Pre-existing output\n"
+        output_path.write_text(original_content, encoding="utf-8")
+        subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(generic_standard_input), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert output_path.read_text(encoding="utf-8") == original_content, (
+            "Declining overwrite must leave the existing --output file byte-identical"
+        )
+
+    def test_existing_output_declined_emits_msg_overwrite_declined_on_stderr(
+        self, generic_standard_input, tmp_path
+    ):
+        """When overwrite is declined, MSG_OVERWRITE_DECLINED must appear on stderr."""
+        output_path = tmp_path / "out.md"
+        output_path.write_text("pre-existing\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(generic_standard_input), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        # Use the stable prefix from the design-specified message text.
+        assert "Aborted" in proc.stderr, (
+            f"MSG_OVERWRITE_DECLINED must appear on stderr when overwrite is declined; "
+            f"got stderr={proc.stderr!r}"
+        )
+
+    def test_force_flag_exits_zero_with_existing_output(
+        self, generic_standard_input, tmp_path
+    ):
+        """--force must bypass the guard and exit 0 even when --output already exists."""
+        output_path = tmp_path / "out.md"
+        output_path.write_text("pre-existing\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(generic_standard_input), "--output", str(output_path), "--force"],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, (
+            f"--force must exit 0 when --output exists; "
+            f"got returncode={proc.returncode}, stderr={proc.stderr!r}"
+        )
+
+    def test_force_flag_overwrites_existing_output_with_transformed_content(
+        self, generic_standard_input, tmp_path
+    ):
+        """--force must overwrite the existing --output file with the transform result."""
+        output_path = tmp_path / "out.md"
+        original_content = "pre-existing\n"
+        output_path.write_text(original_content, encoding="utf-8")
+        subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(generic_standard_input), "--output", str(output_path), "--force"],
+            capture_output=True, text=True,
+        )
+        assert output_path.read_text(encoding="utf-8") != original_content, (
+            "--force must overwrite the existing output file with the transformed content"
+        )
+
+    def test_force_flag_does_not_emit_warn_output_exists(
+        self, generic_standard_input, tmp_path
+    ):
+        """--force must produce no WARN_OUTPUT_EXISTS on stderr even when --output exists."""
+        output_path = tmp_path / "out.md"
+        output_path.write_text("pre-existing\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(generic_standard_input), "--output", str(output_path), "--force"],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, (
+            f"--force must exit 0 when --output exists; "
+            f"got returncode={proc.returncode}, stderr={proc.stderr!r}"
+        )
+        assert "Output file already exists" not in proc.stderr, (
+            "--force must not emit WARN_OUTPUT_EXISTS"
+        )
+
+    def test_nonexistent_output_exits_zero_and_writes_file(
+        self, generic_standard_input, tmp_path
+    ):
+        """A non-existent --output path must be written directly with no guard and exit 0."""
+        output_path = tmp_path / "brand_new_out.md"
+        assert not output_path.exists(), "Precondition: output must not exist before the run"
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(generic_standard_input), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, (
+            f"CLI must exit 0 when --output does not yet exist; "
+            f"got returncode={proc.returncode}, stderr={proc.stderr!r}"
+        )
+        assert output_path.exists(), (
+            "CLI must create the output file when --output path does not exist"
+        )
+
+    def test_nonexistent_output_does_not_emit_warn_output_exists(
+        self, generic_standard_input, tmp_path
+    ):
+        """No WARN_OUTPUT_EXISTS must appear on stderr when --output does not exist."""
+        output_path = tmp_path / "brand_new_out.md"
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(generic_standard_input), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert "Output file already exists" not in proc.stderr, (
+            "WARN_OUTPUT_EXISTS must not be emitted when --output does not exist"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Overwrite guard — untouched cases (T3.2)
+# ---------------------------------------------------------------------------
+
+class TestCLIOverwriteUntouchedCases:
+    """CLI paths that must bypass the overwrite guard entirely.
+
+    The guard applies only when args.output is not None AND the input would take
+    a normal (non-skipped) transform.  In-place transforms and all three skip paths
+    (utility-agent, non-agent, already-transformed) must never prompt, never return
+    EXIT_OVERWRITE_DECLINED, and must leave any existing --output file exactly as found.
+    A non-interactive invocation with no usable stdin must exit promptly.
+    """
+
+    def test_inplace_transform_exits_zero_with_no_output_flag(
+        self, generic_standard_input, tmp_path
+    ):
+        """Without --output, CLI must overwrite input in-place and exit 0 with no overwrite warning."""
+        import shutil
+        work_copy = tmp_path / "work.md"
+        shutil.copy(generic_standard_input, work_copy)
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI), str(work_copy)],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, (
+            f"In-place transform must exit 0; "
+            f"got returncode={proc.returncode}, stderr={proc.stderr!r}"
+        )
+
+    def test_inplace_transform_emits_no_overwrite_warning(
+        self, generic_standard_input, tmp_path
+    ):
+        """Without --output, WARN_OUTPUT_EXISTS must never appear on stderr."""
+        import shutil
+        work_copy = tmp_path / "work.md"
+        shutil.copy(generic_standard_input, work_copy)
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI), str(work_copy)],
+            capture_output=True, text=True,
+        )
+        assert "Output file already exists" not in proc.stderr, (
+            "In-place transform must not emit WARN_OUTPUT_EXISTS; "
+            "the overwrite guard only applies to an explicit --output"
+        )
+
+    def test_utility_agent_skip_with_existing_output_exits_zero(self, tmp_path):
+        """A utility-agent skip with an existing --output must exit 0 without triggering the guard."""
+        input_path = tmp_path / "transformation.md"
+        input_path.write_text(_SKIP_FIXTURE_CONTENT, encoding="utf-8")
+        output_path = tmp_path / "out.md"
+        output_path.write_text("# Pre-existing output\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(input_path), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, (
+            f"Utility-agent skip must exit 0 even when --output exists; "
+            f"got returncode={proc.returncode}, stderr={proc.stderr!r}"
+        )
+
+    def test_utility_agent_skip_with_existing_output_emits_no_overwrite_warning(
+        self, tmp_path
+    ):
+        """A utility-agent skip must not emit WARN_OUTPUT_EXISTS even when --output exists."""
+        input_path = tmp_path / "transformation.md"
+        input_path.write_text(_SKIP_FIXTURE_CONTENT, encoding="utf-8")
+        output_path = tmp_path / "out.md"
+        output_path.write_text("# Pre-existing output\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(input_path), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert "Output file already exists" not in proc.stderr, (
+            "Utility-agent skip path must not emit WARN_OUTPUT_EXISTS"
+        )
+
+    def test_utility_agent_skip_with_existing_output_leaves_file_unchanged(
+        self, tmp_path
+    ):
+        """A utility-agent skip must leave the existing --output file byte-identical."""
+        input_path = tmp_path / "transformation.md"
+        input_path.write_text(_SKIP_FIXTURE_CONTENT, encoding="utf-8")
+        output_path = tmp_path / "out.md"
+        existing_content = "# Pre-existing output\n"
+        output_path.write_text(existing_content, encoding="utf-8")
+        subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(input_path), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert output_path.read_text(encoding="utf-8") == existing_content, (
+            "Utility-agent skip must not modify an existing --output file"
+        )
+
+    def test_non_agent_skip_with_existing_output_exits_zero(self, tmp_path):
+        """A non-agent skip with an existing --output must exit 0 without triggering the guard."""
+        input_path = tmp_path / "Cheap orchestrator.md"
+        input_path.write_text(_SKIP_FIXTURE_CONTENT, encoding="utf-8")
+        output_path = tmp_path / "out.md"
+        output_path.write_text("# Pre-existing output\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(input_path), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, (
+            f"Non-agent skip must exit 0 even when --output exists; "
+            f"got returncode={proc.returncode}, stderr={proc.stderr!r}"
+        )
+
+    def test_non_agent_skip_with_existing_output_emits_no_overwrite_warning(
+        self, tmp_path
+    ):
+        """A non-agent skip must not emit WARN_OUTPUT_EXISTS even when --output exists."""
+        input_path = tmp_path / "Cheap orchestrator.md"
+        input_path.write_text(_SKIP_FIXTURE_CONTENT, encoding="utf-8")
+        output_path = tmp_path / "out.md"
+        output_path.write_text("# Pre-existing output\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(input_path), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert "Output file already exists" not in proc.stderr, (
+            "Non-agent skip path must not emit WARN_OUTPUT_EXISTS"
+        )
+
+    def test_non_agent_skip_with_existing_output_leaves_file_unchanged(self, tmp_path):
+        """A non-agent skip must leave the existing --output file byte-identical."""
+        input_path = tmp_path / "Cheap orchestrator.md"
+        input_path.write_text(_SKIP_FIXTURE_CONTENT, encoding="utf-8")
+        output_path = tmp_path / "out.md"
+        existing_content = "# Pre-existing output\n"
+        output_path.write_text(existing_content, encoding="utf-8")
+        subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(input_path), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert output_path.read_text(encoding="utf-8") == existing_content, (
+            "Non-agent skip must not modify an existing --output file"
+        )
+
+    def test_already_transformed_skip_with_existing_output_exits_zero(
+        self, fixtures_dir, tmp_path
+    ):
+        """An already-transformed skip with an existing --output must exit 0 without triggering the guard."""
+        input_path = fixtures_dir / "harness_only_transformed_input.md"
+        output_path = tmp_path / "out.md"
+        output_path.write_text("# Pre-existing output\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(input_path), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert proc.returncode == 0, (
+            f"Already-transformed skip must exit 0 even when --output exists; "
+            f"got returncode={proc.returncode}, stderr={proc.stderr!r}"
+        )
+
+    def test_already_transformed_skip_with_existing_output_emits_no_overwrite_warning(
+        self, fixtures_dir, tmp_path
+    ):
+        """An already-transformed skip must not emit WARN_OUTPUT_EXISTS even when --output exists."""
+        input_path = fixtures_dir / "harness_only_transformed_input.md"
+        output_path = tmp_path / "out.md"
+        output_path.write_text("# Pre-existing output\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(input_path), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert "Output file already exists" not in proc.stderr, (
+            "Already-transformed skip path must not emit WARN_OUTPUT_EXISTS"
+        )
+
+    def test_already_transformed_skip_with_existing_output_leaves_file_unchanged(
+        self, fixtures_dir, tmp_path
+    ):
+        """An already-transformed skip must leave the existing --output file byte-identical."""
+        input_path = fixtures_dir / "harness_only_transformed_input.md"
+        output_path = tmp_path / "out.md"
+        existing_content = "# Pre-existing output\n"
+        output_path.write_text(existing_content, encoding="utf-8")
+        subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(input_path), "--output", str(output_path)],
+            capture_output=True, text=True,
+        )
+        assert output_path.read_text(encoding="utf-8") == existing_content, (
+            "Already-transformed skip must not modify an existing --output file"
+        )
+
+    def test_noninteractive_invocation_with_devnull_stdin_does_not_hang(
+        self, generic_standard_input, tmp_path
+    ):
+        """Running with stdin=DEVNULL (no readable stdin) must exit promptly without blocking.
+
+        This directly verifies that the non-interactive detection path does not attempt
+        to read from stdin when it is unavailable, and that batch_transform.py's call
+        path (which never supplies an output path) is structurally unreachable from
+        the guard — but this CLI test confirms the guard handles absent stdin gracefully.
+        """
+        from boundary_transformer import EXIT_OVERWRITE_DECLINED
+        output_path = tmp_path / "out.md"
+        output_path.write_text("pre-existing\n", encoding="utf-8")
+        proc = subprocess.run(
+            [sys.executable, str(_TRANSFORMER_CLI),
+             str(generic_standard_input), "--output", str(output_path)],
+            stdin=subprocess.DEVNULL,
+            capture_output=True, text=True,
+            timeout=10,
+        )
+        assert proc.returncode == EXIT_OVERWRITE_DECLINED, (
+            f"Non-interactive CLI (stdin=DEVNULL) must exit {EXIT_OVERWRITE_DECLINED} "
+            f"without hanging; got returncode={proc.returncode}, stderr={proc.stderr!r}"
+        )
+
+# ---------------------------------------------------------------------------
 # T8.4 — render_report output and earlier-stage records
 # ---------------------------------------------------------------------------
 
@@ -10249,3 +10971,519 @@ class TestEmptyCustomConstraintsStillDropped:
             "the drop rule must not generalise beyond CustomConstraints"
         )
         assert "[[/INJECTION:ErrorHandlingExtension]]" in out
+
+
+# ===========================================================================
+# Stage 4: Frontmatter field scoping
+# ===========================================================================
+#
+# Tests for T4.1 (build_output_frontmatter kind-dependent emission) and T4.4
+# (end-to-end transform tests for both harness paths).
+#
+# All tests in these classes are in TDD RED phase: they compile and run but
+# fail until Stage 4 narrows Rules 6-8 of build_output_frontmatter() so that
+# required_skills, recommended_tier, and tier_rationale are only appended on
+# the generic path, and adds GENERIC_ONLY_FRONTMATTER_KEYS to boundary_constants.
+#
+# ---------------------------------------------------------------------------
+# T4.1: build_output_frontmatter — harness kind does not append the three fields
+# ---------------------------------------------------------------------------
+
+
+class TestFrontmatterScopingHarnessUnit:
+    """build_output_frontmatter with kind=AGENT_HARNESS must not append required_skills,
+    recommended_tier, or tier_rationale when those keys are absent from the source.
+    It must not raise NC_TIER_PLACEHOLDER for either tier key. name and role remain
+    appended on the harness path (they are common fields).
+
+    These tests are in TDD RED phase: they fail until Stage 4 makes Rules 6c and 7
+    kind-dependent in frontmatter_build.py.
+    """
+
+    _MINIMAL_HARNESS_LINES: list = [
+        "id: 20\n",
+        "version: 2.0.0\n",
+        "transform_version: 2.0.0\n",
+        "description: A harness agent with no derived keys in source\n",
+    ]
+
+    @property
+    def _derived(self) -> DerivedFrontmatter:
+        return DerivedFrontmatter(
+            name="my-harness-agent",
+            role="subagent",
+            required_skills=["lean-tdd"],
+        )
+
+    def _build_harness(self, raw_lines=None, *, derived=None):
+        return build_output_frontmatter(
+            raw_lines if raw_lines is not None else self._MINIMAL_HARNESS_LINES,
+            kind=DocumentKind.AGENT_HARNESS,
+            derived=derived if derived is not None else self._derived,
+            version_after="2.1.0",
+            transform_version_after="2.1.0",
+            generic_id=None,
+        )
+
+    # --- required_skills must NOT appear on the harness path ---
+
+    def test_harness_does_not_append_required_skills_when_absent(self) -> None:
+        """Rule 6c on harness path: required_skills must not be appended when absent."""
+        # Arrange / Act
+        output_lines, _ = self._build_harness()
+
+        # Assert
+        combined = "".join(output_lines)
+        assert "required_skills" not in combined, (
+            "required_skills must NOT be written to harness-path output when absent from source; "
+            f"got combined output:\n{combined}"
+        )
+
+    def test_harness_does_not_append_required_skills_with_non_empty_derived(self) -> None:
+        """required_skills must not be written even when derived.required_skills is non-empty."""
+        # Arrange
+        derived = DerivedFrontmatter(
+            name="my-harness-agent",
+            role="subagent",
+            required_skills=["lean-tdd", "efficient-file-reading"],
+        )
+
+        # Act
+        output_lines, _ = self._build_harness(derived=derived)
+
+        # Assert
+        combined = "".join(output_lines)
+        assert "required_skills" not in combined, (
+            "required_skills must NOT appear in harness-path output regardless of the "
+            "derived.required_skills value; the key is generic-only"
+        )
+
+    # --- recommended_tier must NOT appear on the harness path ---
+
+    def test_harness_does_not_append_recommended_tier_when_absent(self) -> None:
+        """Rule 7 on harness path: recommended_tier must not be appended when absent."""
+        # Arrange / Act
+        output_lines, _ = self._build_harness()
+
+        # Assert
+        combined = "".join(output_lines)
+        assert "recommended_tier" not in combined, (
+            "recommended_tier must NOT be written to harness-path output when absent from source; "
+            f"got combined output:\n{combined}"
+        )
+
+    # --- tier_rationale must NOT appear on the harness path ---
+
+    def test_harness_does_not_append_tier_rationale_when_absent(self) -> None:
+        """Rule 7 on harness path: tier_rationale must not be appended when absent."""
+        # Arrange / Act
+        output_lines, _ = self._build_harness()
+
+        # Assert
+        combined = "".join(output_lines)
+        assert "tier_rationale" not in combined, (
+            "tier_rationale must NOT be written to harness-path output when absent from source; "
+            f"got combined output:\n{combined}"
+        )
+
+    # --- NC_TIER_PLACEHOLDER must NOT be raised on the harness path ---
+
+    def test_harness_raises_no_nc_tier_placeholder_when_both_tier_keys_absent(self) -> None:
+        """No NC_TIER_PLACEHOLDER is raised on the harness path regardless of tier key absence."""
+        # Arrange / Act
+        _, ncs = self._build_harness()
+
+        # Assert
+        tier_ncs = [nc for nc in ncs if nc.code == NC_TIER_PLACEHOLDER]
+        assert tier_ncs == [], (
+            f"NC_TIER_PLACEHOLDER must NOT be raised on the harness path; got: {tier_ncs}"
+        )
+
+    def test_harness_raises_no_nc_tier_placeholder_when_recommended_tier_absent(self) -> None:
+        """NC_TIER_PLACEHOLDER for recommended_tier must not fire on harness path."""
+        # Arrange
+        lines = self._MINIMAL_HARNESS_LINES + ["tier_rationale: Some reason\n"]
+
+        # Act
+        _, ncs = self._build_harness(raw_lines=lines)
+
+        # Assert
+        tier_ncs = [nc for nc in ncs if nc.code == NC_TIER_PLACEHOLDER]
+        assert tier_ncs == [], (
+            "NC_TIER_PLACEHOLDER must NOT be raised for absent recommended_tier on harness path; "
+            f"got: {tier_ncs}"
+        )
+
+    def test_harness_raises_no_nc_tier_placeholder_when_tier_rationale_absent(self) -> None:
+        """NC_TIER_PLACEHOLDER for tier_rationale must not fire on harness path."""
+        # Arrange
+        lines = self._MINIMAL_HARNESS_LINES + ["recommended_tier: MEDIUM\n"]
+
+        # Act
+        _, ncs = self._build_harness(raw_lines=lines)
+
+        # Assert
+        tier_ncs = [nc for nc in ncs if nc.code == NC_TIER_PLACEHOLDER]
+        assert tier_ncs == [], (
+            "NC_TIER_PLACEHOLDER must NOT be raised for absent tier_rationale on harness path; "
+            f"got: {tier_ncs}"
+        )
+
+    # --- name and role ARE still written on the harness path ---
+
+    def test_harness_still_appends_name_when_absent(self) -> None:
+        """Rule 6a on harness path: name must still be appended when absent (unchanged)."""
+        # Arrange / Act
+        output_lines, _ = self._build_harness()
+
+        # Assert
+        combined = "".join(output_lines)
+        assert "name: my-harness-agent" in combined, (
+            "name must still be written to harness-path output when absent from source"
+        )
+
+    def test_harness_still_appends_role_when_absent(self) -> None:
+        """Rule 6b on harness path: role must still be appended when absent (unchanged)."""
+        # Arrange / Act
+        output_lines, _ = self._build_harness()
+
+        # Assert
+        combined = "".join(output_lines)
+        assert "role: subagent" in combined, (
+            "role must still be written to harness-path output when absent from source"
+        )
+
+    # --- generic path unchanged: tier and required_skills still written ---
+
+    def test_generic_still_appends_required_skills_when_absent(self) -> None:
+        """Regression guard: generic path must still append required_skills when absent."""
+        # Arrange / Act
+        output_lines, _ = build_output_frontmatter(
+            self._MINIMAL_HARNESS_LINES,
+            kind=DocumentKind.AGENT_GENERIC,
+            derived=self._derived,
+            version_after="2.1.0",
+            transform_version_after=None,
+            generic_id=None,
+        )
+
+        # Assert
+        combined = "".join(output_lines)
+        assert "required_skills" in combined, (
+            "required_skills must still be written on the generic path (unchanged)"
+        )
+
+    def test_generic_still_appends_recommended_tier_when_absent(self) -> None:
+        """Regression guard: generic path must still append recommended_tier when absent."""
+        # Arrange / Act
+        output_lines, _ = build_output_frontmatter(
+            self._MINIMAL_HARNESS_LINES,
+            kind=DocumentKind.AGENT_GENERIC,
+            derived=self._derived,
+            version_after="2.1.0",
+            transform_version_after=None,
+            generic_id=None,
+        )
+
+        # Assert
+        combined = "".join(output_lines)
+        assert "recommended_tier" in combined, (
+            "recommended_tier must still be written on the generic path (unchanged)"
+        )
+
+    def test_generic_still_raises_nc_tier_placeholder_when_tier_absent(self) -> None:
+        """Regression guard: generic path must still raise NC_TIER_PLACEHOLDER when absent."""
+        # Arrange / Act
+        _, ncs = build_output_frontmatter(
+            self._MINIMAL_HARNESS_LINES,
+            kind=DocumentKind.AGENT_GENERIC,
+            derived=self._derived,
+            version_after="2.1.0",
+            transform_version_after=None,
+            generic_id=None,
+        )
+
+        # Assert
+        tier_ncs = [nc for nc in ncs if nc.code == NC_TIER_PLACEHOLDER]
+        assert len(tier_ncs) == 2, (
+            "NC_TIER_PLACEHOLDER must still be raised twice on the generic path when both "
+            f"tier keys are absent; got: {tier_ncs}"
+        )
+
+    # --- pre-existing values on harness source pass through unchanged ---
+
+    def test_harness_pre_existing_required_skills_passes_through(self) -> None:
+        """A harness source already carrying required_skills is not stripped (Rule 1 verbatim)."""
+        # Arrange
+        lines = self._MINIMAL_HARNESS_LINES + ["required_skills: [some-skill]\n"]
+
+        # Act
+        output_lines, _ = self._build_harness(raw_lines=lines)
+
+        # Assert
+        combined = "".join(output_lines)
+        assert "required_skills: [some-skill]" in combined, (
+            "A pre-existing required_skills value on a harness source must flow through verbatim "
+            "(Rule 1 passthrough); Stage 4 adds no stripping logic for this case"
+        )
+
+    def test_harness_pre_existing_recommended_tier_passes_through(self) -> None:
+        """A harness source carrying recommended_tier is not stripped (Rule 1 verbatim)."""
+        # Arrange
+        lines = self._MINIMAL_HARNESS_LINES + ["recommended_tier: HIGH\n"]
+
+        # Act
+        output_lines, _ = self._build_harness(raw_lines=lines)
+
+        # Assert
+        combined = "".join(output_lines)
+        assert "recommended_tier: HIGH" in combined, (
+            "A pre-existing recommended_tier value on a harness source must pass through "
+            "verbatim (Rule 1); the stage adds no stripping, placeholder-detection, or "
+            "keep-vs-strip branching for this case"
+        )
+
+    def test_harness_pre_existing_recommended_tier_raises_no_nc(self) -> None:
+        """A pre-existing recommended_tier on a harness source must not raise NC_TIER_PLACEHOLDER."""
+        # Arrange
+        lines = self._MINIMAL_HARNESS_LINES + [
+            "recommended_tier: HIGH\n",
+            "tier_rationale: Orchestrates many agents\n",
+        ]
+
+        # Act
+        _, ncs = self._build_harness(raw_lines=lines)
+
+        # Assert
+        tier_ncs = [nc for nc in ncs if nc.code == NC_TIER_PLACEHOLDER]
+        assert tier_ncs == [], (
+            "NC_TIER_PLACEHOLDER must not be raised for a pre-existing tier value on a "
+            f"harness source; got: {tier_ncs}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T4.4: End-to-end transform tests — both harness paths omit the three fields
+# ---------------------------------------------------------------------------
+
+
+class TestFrontmatterScopingE2E:
+    """transform_file on a harness input must not write required_skills, recommended_tier,
+    or tier_rationale to the output frontmatter, on both the full-quality and degraded paths,
+    and must not record NC_TIER_PLACEHOLDER findings.
+
+    These tests are in TDD RED phase: they fail until Stage 4 makes build_output_frontmatter()
+    kind-dependent and the harness transform paths no longer append the three generic-only fields.
+
+    Full-quality path: harness_codebase_agnostic_input transformed with generic_standard_input
+    as the generic reference.
+    Degraded path: s6_harness_degraded_no_tier_input transformed without a generic reference.
+    Generic regression guard: s6_generic_no_tier_input — all three fields must still be written.
+    """
+
+    # --- Full-quality harness path (with generic ref) ---
+
+    def test_full_quality_harness_no_required_skills_in_output(
+        self, harness_codebase_agnostic_input, generic_standard_input, tmp_path
+    ) -> None:
+        """required_skills must not appear in harness output frontmatter (full-quality path)."""
+        # Arrange / Act
+        result, output_path = _transform_to_tmp(
+            harness_codebase_agnostic_input, tmp_path,
+            generic_ref_path=generic_standard_input,
+        )
+        assert result.success is True
+        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
+
+        # Assert
+        assert not any(l.startswith("required_skills:") for l in fm_lines), (
+            "required_skills must NOT appear in harness output frontmatter on the full-quality path"
+        )
+
+    def test_full_quality_harness_no_recommended_tier_in_output(
+        self, harness_codebase_agnostic_input, generic_standard_input, tmp_path
+    ) -> None:
+        """recommended_tier must not appear in harness output frontmatter (full-quality path)."""
+        # Arrange / Act
+        result, output_path = _transform_to_tmp(
+            harness_codebase_agnostic_input, tmp_path,
+            generic_ref_path=generic_standard_input,
+        )
+        assert result.success is True
+        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
+
+        # Assert
+        assert not any(l.startswith("recommended_tier:") for l in fm_lines), (
+            "recommended_tier must NOT appear in harness output frontmatter on the full-quality path"
+        )
+
+    def test_full_quality_harness_no_tier_rationale_in_output(
+        self, harness_codebase_agnostic_input, generic_standard_input, tmp_path
+    ) -> None:
+        """tier_rationale must not appear in harness output frontmatter (full-quality path)."""
+        # Arrange / Act
+        result, output_path = _transform_to_tmp(
+            harness_codebase_agnostic_input, tmp_path,
+            generic_ref_path=generic_standard_input,
+        )
+        assert result.success is True
+        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
+
+        # Assert
+        assert not any(l.startswith("tier_rationale:") for l in fm_lines), (
+            "tier_rationale must NOT appear in harness output frontmatter on the full-quality path"
+        )
+
+    def test_full_quality_harness_no_nc_tier_placeholder_on_result(
+        self, harness_codebase_agnostic_input, generic_standard_input, tmp_path
+    ) -> None:
+        """result.non_conformances must contain no NC_TIER_PLACEHOLDER on the full-quality path."""
+        # Arrange / Act
+        result, _ = _transform_to_tmp(
+            harness_codebase_agnostic_input, tmp_path,
+            generic_ref_path=generic_standard_input,
+        )
+
+        # Assert
+        tier_ncs = [nc for nc in result.non_conformances if nc.code == NC_TIER_PLACEHOLDER]
+        assert tier_ncs == [], (
+            "NC_TIER_PLACEHOLDER must NOT be raised for a harness file on the full-quality path; "
+            f"the absence of these fields is correct behavior. Got: {tier_ncs}"
+        )
+
+    def test_full_quality_harness_still_has_role_in_output(
+        self, harness_codebase_agnostic_input, generic_standard_input, tmp_path
+    ) -> None:
+        """role must still appear in harness output frontmatter (it is a common field)."""
+        # Arrange / Act
+        result, output_path = _transform_to_tmp(
+            harness_codebase_agnostic_input, tmp_path,
+            generic_ref_path=generic_standard_input,
+        )
+        assert result.success is True
+        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
+
+        # Assert
+        assert any(l.startswith("role:") for l in fm_lines), (
+            "role must still be written to harness output frontmatter (it is a common field, "
+            "not a generic-only field)"
+        )
+
+    # --- Degraded harness path (no generic ref) ---
+
+    def test_degraded_harness_no_required_skills_in_output(
+        self, s6_harness_degraded_no_tier_input, tmp_path
+    ) -> None:
+        """required_skills must not appear in harness output frontmatter (degraded path)."""
+        # Arrange / Act
+        result, output_path = _transform_to_tmp(s6_harness_degraded_no_tier_input, tmp_path)
+        assert result.success is True
+        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
+
+        # Assert
+        assert not any(l.startswith("required_skills:") for l in fm_lines), (
+            "required_skills must NOT appear in harness output frontmatter on the degraded path"
+        )
+
+    def test_degraded_harness_no_recommended_tier_in_output(
+        self, s6_harness_degraded_no_tier_input, tmp_path
+    ) -> None:
+        """recommended_tier must not appear in harness output frontmatter (degraded path)."""
+        # Arrange / Act
+        result, output_path = _transform_to_tmp(s6_harness_degraded_no_tier_input, tmp_path)
+        assert result.success is True
+        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
+
+        # Assert
+        assert not any(l.startswith("recommended_tier:") for l in fm_lines), (
+            "recommended_tier must NOT appear in harness output frontmatter on the degraded path"
+        )
+
+    def test_degraded_harness_no_tier_rationale_in_output(
+        self, s6_harness_degraded_no_tier_input, tmp_path
+    ) -> None:
+        """tier_rationale must not appear in harness output frontmatter (degraded path)."""
+        # Arrange / Act
+        result, output_path = _transform_to_tmp(s6_harness_degraded_no_tier_input, tmp_path)
+        assert result.success is True
+        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
+
+        # Assert
+        assert not any(l.startswith("tier_rationale:") for l in fm_lines), (
+            "tier_rationale must NOT appear in harness output frontmatter on the degraded path"
+        )
+
+    def test_degraded_harness_no_nc_tier_placeholder_on_result(
+        self, s6_harness_degraded_no_tier_input, tmp_path
+    ) -> None:
+        """result.non_conformances must contain no NC_TIER_PLACEHOLDER on the degraded path."""
+        # Arrange / Act
+        result, _ = _transform_to_tmp(s6_harness_degraded_no_tier_input, tmp_path)
+
+        # Assert
+        tier_ncs = [nc for nc in result.non_conformances if nc.code == NC_TIER_PLACEHOLDER]
+        assert tier_ncs == [], (
+            "NC_TIER_PLACEHOLDER must NOT be raised for a harness file on the degraded path; "
+            f"the absence of these fields is correct behavior. Got: {tier_ncs}"
+        )
+
+    def test_degraded_harness_still_has_role_in_output(
+        self, s6_harness_degraded_no_tier_input, tmp_path
+    ) -> None:
+        """role must still be written to harness output frontmatter on the degraded path."""
+        # Arrange / Act
+        result, output_path = _transform_to_tmp(s6_harness_degraded_no_tier_input, tmp_path)
+        assert result.success is True
+        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
+
+        # Assert
+        assert any(l.startswith("role:") for l in fm_lines), (
+            "role must still be written to harness output frontmatter on the degraded path "
+            "(it is a common field, not a generic-only field)"
+        )
+
+    # --- Generic path regression guard: all three fields still written ---
+
+    def test_generic_required_skills_still_written_on_generic_path(
+        self, s6_generic_no_tier_input, tmp_path
+    ) -> None:
+        """Regression guard: generic transform must still append required_skills when absent."""
+        # Arrange / Act
+        result, output_path = _transform_to_tmp(s6_generic_no_tier_input, tmp_path)
+        assert result.success is True
+        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
+
+        # Assert
+        assert any(l.startswith("required_skills:") for l in fm_lines), (
+            "required_skills must still be written on the generic path after Stage 4; "
+            "Stage 4 must not affect generic-path behavior"
+        )
+
+    def test_generic_recommended_tier_still_written_on_generic_path(
+        self, s6_generic_no_tier_input, tmp_path
+    ) -> None:
+        """Regression guard: generic transform must still append recommended_tier when absent."""
+        # Arrange / Act
+        result, output_path = _transform_to_tmp(s6_generic_no_tier_input, tmp_path)
+        assert result.success is True
+        fm_lines = _s6_extract_frontmatter_lines(_read(output_path))
+
+        # Assert
+        assert any(l.startswith("recommended_tier:") for l in fm_lines), (
+            "recommended_tier must still be written on the generic path after Stage 4"
+        )
+
+    def test_generic_nc_tier_placeholder_still_raised_on_generic_path(
+        self, s6_generic_no_tier_input, tmp_path
+    ) -> None:
+        """Regression guard: generic transform must still raise NC_TIER_PLACEHOLDER when absent."""
+        # Arrange / Act
+        result, _ = _transform_to_tmp(s6_generic_no_tier_input, tmp_path)
+        assert result.success is True
+
+        # Assert
+        tier_ncs = [nc for nc in result.non_conformances if nc.code == NC_TIER_PLACEHOLDER]
+        assert len(tier_ncs) == 2, (
+            "NC_TIER_PLACEHOLDER must still be raised twice on the generic path after Stage 4; "
+            f"got: {tier_ncs}"
+        )

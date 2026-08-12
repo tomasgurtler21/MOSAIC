@@ -1162,3 +1162,187 @@ class TestTagHelperCustomKind:
         assert m.group("kind") == "CUSTOM"
         assert m.group("close") == "/"
         assert m.group("name") == "CustomConstraints"
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: GENERIC_ONLY_FRONTMATTER_KEYS and narrowed FRONTMATTER_KEYS_BY_KIND
+# ---------------------------------------------------------------------------
+#
+# Stage 4 adds GENERIC_ONLY_FRONTMATTER_KEYS to boundary_constants.py and
+# narrows the AGENT_HARNESS allowlist so it excludes required_skills,
+# recommended_tier, and tier_rationale (which are now generic-only).
+#
+# Tests in this class are in TDD RED phase: they fail until Stage 4 (I4.1)
+# adds the GENERIC_ONLY_FRONTMATTER_KEYS set and updates the derivation of
+# AGENT_COMMON_FRONTMATTER_KEYS and FRONTMATTER_KEYS_BY_KIND accordingly.
+
+
+class TestGenericOnlyFrontmatterKeys:
+    """GENERIC_ONLY_FRONTMATTER_KEYS must exist, contain the three deployment-pipeline-only
+    fields, and properly drive the per-kind allowlist split."""
+
+    _GENERIC_ONLY_FIELDS: tuple[str, ...] = (
+        "required_skills",
+        "recommended_tier",
+        "tier_rationale",
+    )
+
+    # --- GENERIC_ONLY_FRONTMATTER_KEYS existence and type ---
+
+    def test_generic_only_frontmatter_keys_exists(self) -> None:
+        """GENERIC_ONLY_FRONTMATTER_KEYS must be exported from boundary_constants."""
+        assert hasattr(boundary_constants, "GENERIC_ONLY_FRONTMATTER_KEYS"), (
+            "boundary_constants must export GENERIC_ONLY_FRONTMATTER_KEYS after Stage 4. "
+            "The attribute is absent — Stage 4 (I4.1) has not been implemented yet."
+        )
+
+    def test_generic_only_frontmatter_keys_is_a_frozenset(self) -> None:
+        """GENERIC_ONLY_FRONTMATTER_KEYS must be a frozenset (immutable shared constant)."""
+        keys = boundary_constants.GENERIC_ONLY_FRONTMATTER_KEYS
+        assert isinstance(keys, frozenset), (
+            f"GENERIC_ONLY_FRONTMATTER_KEYS must be a frozenset, got {type(keys).__name__}"
+        )
+
+    # --- GENERIC_ONLY_FRONTMATTER_KEYS membership ---
+
+    def test_required_skills_is_in_generic_only_keys(self) -> None:
+        """required_skills must be a member of GENERIC_ONLY_FRONTMATTER_KEYS."""
+        assert "required_skills" in boundary_constants.GENERIC_ONLY_FRONTMATTER_KEYS, (
+            "'required_skills' must be in GENERIC_ONLY_FRONTMATTER_KEYS after Stage 4; "
+            "it is a deployment-pipeline-only field stripped from deployed output."
+        )
+
+    def test_recommended_tier_is_in_generic_only_keys(self) -> None:
+        """recommended_tier must be a member of GENERIC_ONLY_FRONTMATTER_KEYS."""
+        assert "recommended_tier" in boundary_constants.GENERIC_ONLY_FRONTMATTER_KEYS, (
+            "'recommended_tier' must be in GENERIC_ONLY_FRONTMATTER_KEYS after Stage 4."
+        )
+
+    def test_tier_rationale_is_in_generic_only_keys(self) -> None:
+        """tier_rationale must be a member of GENERIC_ONLY_FRONTMATTER_KEYS."""
+        assert "tier_rationale" in boundary_constants.GENERIC_ONLY_FRONTMATTER_KEYS, (
+            "'tier_rationale' must be in GENERIC_ONLY_FRONTMATTER_KEYS after Stage 4."
+        )
+
+    def test_generic_only_keys_contains_exactly_three_members(self) -> None:
+        """GENERIC_ONLY_FRONTMATTER_KEYS must have exactly three members."""
+        keys = boundary_constants.GENERIC_ONLY_FRONTMATTER_KEYS
+        assert len(keys) == 3, (
+            f"GENERIC_ONLY_FRONTMATTER_KEYS must have exactly 3 members "
+            f"(required_skills, recommended_tier, tier_rationale), got {len(keys)}: {keys}"
+        )
+
+    # --- Disjointness invariant ---
+
+    def test_generic_only_and_harness_only_are_disjoint(self) -> None:
+        """GENERIC_ONLY_FRONTMATTER_KEYS and HARNESS_ONLY_FRONTMATTER_KEYS must be disjoint."""
+        from boundary_constants import HARNESS_ONLY_FRONTMATTER_KEYS
+        overlap = boundary_constants.GENERIC_ONLY_FRONTMATTER_KEYS & HARNESS_ONLY_FRONTMATTER_KEYS
+        assert overlap == frozenset(), (
+            f"GENERIC_ONLY_FRONTMATTER_KEYS and HARNESS_ONLY_FRONTMATTER_KEYS must be disjoint; "
+            f"overlap: {overlap}"
+        )
+
+    # --- AGENT_HARNESS allowlist exclusion ---
+
+    def test_required_skills_not_in_agent_harness_allowlist(self) -> None:
+        """required_skills must NOT be in the AGENT_HARNESS per-kind allowlist."""
+        from boundary_constants import FRONTMATTER_KEYS_BY_KIND
+        from document_kind import DocumentKind
+        harness_keys = FRONTMATTER_KEYS_BY_KIND[DocumentKind.AGENT_HARNESS]
+        assert "required_skills" not in harness_keys, (
+            "'required_skills' must NOT be in FRONTMATTER_KEYS_BY_KIND[AGENT_HARNESS] after "
+            "Stage 4; it is a generic-only key and must not appear in the harness allowlist."
+        )
+
+    def test_recommended_tier_not_in_agent_harness_allowlist(self) -> None:
+        """recommended_tier must NOT be in the AGENT_HARNESS per-kind allowlist."""
+        from boundary_constants import FRONTMATTER_KEYS_BY_KIND
+        from document_kind import DocumentKind
+        harness_keys = FRONTMATTER_KEYS_BY_KIND[DocumentKind.AGENT_HARNESS]
+        assert "recommended_tier" not in harness_keys, (
+            "'recommended_tier' must NOT be in FRONTMATTER_KEYS_BY_KIND[AGENT_HARNESS] after Stage 4."
+        )
+
+    def test_tier_rationale_not_in_agent_harness_allowlist(self) -> None:
+        """tier_rationale must NOT be in the AGENT_HARNESS per-kind allowlist."""
+        from boundary_constants import FRONTMATTER_KEYS_BY_KIND
+        from document_kind import DocumentKind
+        harness_keys = FRONTMATTER_KEYS_BY_KIND[DocumentKind.AGENT_HARNESS]
+        assert "tier_rationale" not in harness_keys, (
+            "'tier_rationale' must NOT be in FRONTMATTER_KEYS_BY_KIND[AGENT_HARNESS] after Stage 4."
+        )
+
+    # --- AGENT_GENERIC allowlist inclusion ---
+
+    def test_required_skills_in_agent_generic_allowlist(self) -> None:
+        """required_skills must be in the AGENT_GENERIC per-kind allowlist."""
+        from boundary_constants import FRONTMATTER_KEYS_BY_KIND
+        from document_kind import DocumentKind
+        generic_keys = FRONTMATTER_KEYS_BY_KIND[DocumentKind.AGENT_GENERIC]
+        assert "required_skills" in generic_keys, (
+            "'required_skills' must be in FRONTMATTER_KEYS_BY_KIND[AGENT_GENERIC] after Stage 4."
+        )
+
+    def test_recommended_tier_in_agent_generic_allowlist(self) -> None:
+        """recommended_tier must be in the AGENT_GENERIC per-kind allowlist."""
+        from boundary_constants import FRONTMATTER_KEYS_BY_KIND
+        from document_kind import DocumentKind
+        generic_keys = FRONTMATTER_KEYS_BY_KIND[DocumentKind.AGENT_GENERIC]
+        assert "recommended_tier" in generic_keys, (
+            "'recommended_tier' must be in FRONTMATTER_KEYS_BY_KIND[AGENT_GENERIC] after Stage 4."
+        )
+
+    def test_tier_rationale_in_agent_generic_allowlist(self) -> None:
+        """tier_rationale must be in the AGENT_GENERIC per-kind allowlist."""
+        from boundary_constants import FRONTMATTER_KEYS_BY_KIND
+        from document_kind import DocumentKind
+        generic_keys = FRONTMATTER_KEYS_BY_KIND[DocumentKind.AGENT_GENERIC]
+        assert "tier_rationale" in generic_keys, (
+            "'tier_rationale' must be in FRONTMATTER_KEYS_BY_KIND[AGENT_GENERIC] after Stage 4."
+        )
+
+    # --- Union invariant ---
+
+    def test_known_frontmatter_keys_equals_union_of_per_kind_sets(self) -> None:
+        """KNOWN_FRONTMATTER_KEYS must equal the union of all FRONTMATTER_KEYS_BY_KIND values.
+
+        This invariant must hold after Stage 4 narrows the harness allowlist and adds
+        GENERIC_ONLY_FRONTMATTER_KEYS. The generic entry re-adds the generic-only keys,
+        so the union remains equal to KNOWN_FRONTMATTER_KEYS.
+        """
+        from boundary_constants import FRONTMATTER_KEYS_BY_KIND
+        union = set().union(*FRONTMATTER_KEYS_BY_KIND.values())
+        assert union == set(KNOWN_FRONTMATTER_KEYS), (
+            "KNOWN_FRONTMATTER_KEYS must equal the union of all FRONTMATTER_KEYS_BY_KIND values. "
+            f"Missing from union: {set(KNOWN_FRONTMATTER_KEYS) - union}. "
+            f"Extra in union: {union - set(KNOWN_FRONTMATTER_KEYS)}."
+        )
+
+    # --- AGENT_COMMON_FRONTMATTER_KEYS still contains role ---
+
+    def test_role_still_in_agent_common_frontmatter_keys(self) -> None:
+        """AGENT_COMMON_FRONTMATTER_KEYS must still contain role after Stage 4.
+
+        role is a common field present on both generic and harness paths. Removing
+        generic-only keys from AGENT_COMMON must not accidentally remove role.
+        """
+        from boundary_constants import AGENT_COMMON_FRONTMATTER_KEYS
+        assert "role" in AGENT_COMMON_FRONTMATTER_KEYS, (
+            "'role' must still be in AGENT_COMMON_FRONTMATTER_KEYS after Stage 4 narrows it; "
+            "role is a common field, not a generic-only field."
+        )
+
+    # --- Generic-only keys excluded from AGENT_COMMON ---
+
+    def test_required_skills_not_in_agent_common_frontmatter_keys(self) -> None:
+        """required_skills must NOT be in AGENT_COMMON_FRONTMATTER_KEYS after Stage 4.
+
+        Stage 4 removes required_skills from AGENT_COMMON by subtracting GENERIC_ONLY_FRONTMATTER_KEYS.
+        It is then re-added to the AGENT_GENERIC entry only.
+        """
+        from boundary_constants import AGENT_COMMON_FRONTMATTER_KEYS
+        assert "required_skills" not in AGENT_COMMON_FRONTMATTER_KEYS, (
+            "'required_skills' must NOT be in AGENT_COMMON_FRONTMATTER_KEYS after Stage 4; "
+            "it is a generic-only key and must not be common to both kinds."
+        )

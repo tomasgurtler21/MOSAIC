@@ -8,9 +8,6 @@ description: A generic agent with all common injections for testing the boundary
 model: claude-opus-4
 tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 role: subagent
-required_skills: []
-recommended_tier: TODO
-tier_rationale: "TODO: state why this tier"
 ---
 
 [[SECTION:Identity]]
