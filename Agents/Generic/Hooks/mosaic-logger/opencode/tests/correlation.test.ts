@@ -21,7 +21,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import * as nodePath from "node:path";
 import * as nodeOs from "node:os";
 
-import { SessionCorrelationStore, type SessionRecord } from "../lib/correlation";
+import { SessionCorrelationStore, type SessionRecord, type PendingToolCall } from "../lib/correlation";
 import { LogPaths } from "../lib/core";
 
 // ---------------------------------------------------------------------------
@@ -699,5 +699,412 @@ describe("SessionCorrelationStore — end-to-end parent chain scenario", () => {
 
     // Other fields still preserved after the update
     expect(store.get("session-sub")!.parentId).toBe("session-orch");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pending dispatch queue (per-parent FIFO) — Stage 3
+//
+// These tests specify the new pushPendingDispatch / claimPendingDispatch /
+// pendingDispatchCount / clearPendingDispatches methods that do not yet exist
+// on SessionCorrelationStore. All tests in this section are RED until the
+// implementation adds the dispatch-queue capability to the store.
+// ---------------------------------------------------------------------------
+
+describe("SessionCorrelationStore — pending dispatch queue", () => {
+  let store: SessionCorrelationStore;
+
+  beforeEach(() => {
+    store = makeStore();
+  });
+
+  it("returns undefined when no dispatch has been pushed for a parent", () => {
+    expect(store.claimPendingDispatch("parent-a")).toBeUndefined();
+  });
+
+  it("returns the pushed dispatch and consumes it", () => {
+    store.pushPendingDispatch("parent-a", {
+      callId: "call-123",
+      parentSessionId: "parent-a",
+      agentInstanceId: "TestAgent#1",
+      runId: "20260101T000000Z-aaaa",
+      prompt: "do some work",
+      dispatchedAt: TS,
+    });
+    const claimed = store.claimPendingDispatch("parent-a");
+    expect(claimed).toBeDefined();
+    expect(claimed!.agentInstanceId).toBe("TestAgent#1");
+    expect(claimed!.runId).toBe("20260101T000000Z-aaaa");
+  });
+
+  it("second claim after consuming returns undefined", () => {
+    store.pushPendingDispatch("parent-a", {
+      callId: "call-abc",
+      parentSessionId: "parent-a",
+      dispatchedAt: TS,
+    });
+    store.claimPendingDispatch("parent-a"); // consume
+    expect(store.claimPendingDispatch("parent-a")).toBeUndefined();
+  });
+
+  it("returns dispatches in FIFO order when multiple are queued", () => {
+    store.pushPendingDispatch("parent-a", {
+      callId: "call-first",
+      parentSessionId: "parent-a",
+      agentInstanceId: "Agent#1",
+      dispatchedAt: TS,
+    });
+    store.pushPendingDispatch("parent-a", {
+      callId: "call-second",
+      parentSessionId: "parent-a",
+      agentInstanceId: "Agent#2",
+      dispatchedAt: TS,
+    });
+    store.pushPendingDispatch("parent-a", {
+      callId: "call-third",
+      parentSessionId: "parent-a",
+      agentInstanceId: "Agent#3",
+      dispatchedAt: TS,
+    });
+
+    expect(store.claimPendingDispatch("parent-a")!.agentInstanceId).toBe("Agent#1");
+    expect(store.claimPendingDispatch("parent-a")!.agentInstanceId).toBe("Agent#2");
+    expect(store.claimPendingDispatch("parent-a")!.agentInstanceId).toBe("Agent#3");
+    expect(store.claimPendingDispatch("parent-a")).toBeUndefined();
+  });
+
+  it("pendingDispatchCount returns 0 for a parent with no pending dispatches", () => {
+    expect(store.pendingDispatchCount("parent-a")).toBe(0);
+  });
+
+  it("pendingDispatchCount returns the correct count as dispatches are pushed", () => {
+    store.pushPendingDispatch("parent-a", { callId: "c1", parentSessionId: "parent-a", dispatchedAt: TS });
+    expect(store.pendingDispatchCount("parent-a")).toBe(1);
+    store.pushPendingDispatch("parent-a", { callId: "c2", parentSessionId: "parent-a", dispatchedAt: TS });
+    expect(store.pendingDispatchCount("parent-a")).toBe(2);
+  });
+
+  it("pendingDispatchCount decrements after a claim", () => {
+    store.pushPendingDispatch("parent-a", { callId: "c1", parentSessionId: "parent-a", dispatchedAt: TS });
+    store.pushPendingDispatch("parent-a", { callId: "c2", parentSessionId: "parent-a", dispatchedAt: TS });
+    store.claimPendingDispatch("parent-a");
+    expect(store.pendingDispatchCount("parent-a")).toBe(1);
+  });
+
+  it("clearPendingDispatches removes all pending entries for a parent", () => {
+    store.pushPendingDispatch("parent-a", { callId: "c1", parentSessionId: "parent-a", dispatchedAt: TS });
+    store.pushPendingDispatch("parent-a", { callId: "c2", parentSessionId: "parent-a", dispatchedAt: TS });
+    store.clearPendingDispatches("parent-a");
+    expect(store.pendingDispatchCount("parent-a")).toBe(0);
+    expect(store.claimPendingDispatch("parent-a")).toBeUndefined();
+  });
+
+  it("clearPendingDispatches on a parent with no entries does not throw", () => {
+    expect(() => store.clearPendingDispatches("parent-never-used")).not.toThrow();
+  });
+
+  it("queues for different parents are independent", () => {
+    store.pushPendingDispatch("parent-a", {
+      callId: "call-a",
+      parentSessionId: "parent-a",
+      agentInstanceId: "Agent#1",
+      dispatchedAt: TS,
+    });
+    store.pushPendingDispatch("parent-b", {
+      callId: "call-b",
+      parentSessionId: "parent-b",
+      agentInstanceId: "Agent#2",
+      dispatchedAt: TS,
+    });
+
+    expect(store.claimPendingDispatch("parent-a")!.agentInstanceId).toBe("Agent#1");
+    expect(store.claimPendingDispatch("parent-b")!.agentInstanceId).toBe("Agent#2");
+    expect(store.claimPendingDispatch("parent-a")).toBeUndefined();
+    expect(store.claimPendingDispatch("parent-b")).toBeUndefined();
+  });
+
+  it("clearing one parent does not affect another parent's queue", () => {
+    store.pushPendingDispatch("parent-a", { callId: "ca1", parentSessionId: "parent-a", dispatchedAt: TS });
+    store.pushPendingDispatch("parent-b", { callId: "cb1", parentSessionId: "parent-b", agentInstanceId: "Agent#9", dispatchedAt: TS });
+    store.clearPendingDispatches("parent-a");
+    expect(store.claimPendingDispatch("parent-b")!.agentInstanceId).toBe("Agent#9");
+  });
+
+  it("preserves all dispatch fields through push and claim", () => {
+    const dispatch = {
+      callId: "call-xyz",
+      parentSessionId: "parent-a",
+      agentInstanceId: "Planner#3",
+      agentType: "Planner",
+      runId: "20260808T120000Z-abcd",
+      prompt: '{"agent_instance_id":"Planner#3","run_id":"20260808T120000Z-abcd"}',
+      dispatchedAt: "2026-08-08T12:00:00.000Z",
+    };
+    store.pushPendingDispatch("parent-a", dispatch);
+    const claimed = store.claimPendingDispatch("parent-a");
+    expect(claimed).toEqual(dispatch);
+  });
+
+  it("handles a dispatch without agentInstanceId or runId (unresolved identity)", () => {
+    store.pushPendingDispatch("parent-a", {
+      callId: "call-no-id",
+      parentSessionId: "parent-a",
+      dispatchedAt: TS,
+      // no agentInstanceId, no runId — identity could not be extracted from the prompt
+    });
+    const claimed = store.claimPendingDispatch("parent-a");
+    expect(claimed).toBeDefined();
+    expect(claimed!.agentInstanceId).toBeUndefined();
+    expect(claimed!.runId).toBeUndefined();
+  });
+
+  it("concurrent dispatches under one parent are attributed in dispatch order (FIFO)", () => {
+    // Simulates an orchestrator that fires three subagents before any session.created
+    // arrives. The three pending entries must be claimed in the exact order they were
+    // pushed, regardless of how much time passes between push and claim.
+    const parents = ["parent-root"];
+    const agents = ["Writer#1", "Reviewer#2", "Analyst#3"];
+    for (let i = 0; i < agents.length; i++) {
+      store.pushPendingDispatch(parents[0], {
+        callId: `call-${i}`,
+        parentSessionId: parents[0],
+        agentInstanceId: agents[i],
+        dispatchedAt: TS,
+      });
+    }
+    for (const expectedAgent of agents) {
+      expect(store.claimPendingDispatch(parents[0])!.agentInstanceId).toBe(expectedAgent);
+    }
+    expect(store.claimPendingDispatch(parents[0])).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// adoptRunId — run-id propagation to orchestrator chain head — Stage 3
+//
+// These tests specify the new adoptRunId method that does not yet exist on
+// SessionCorrelationStore. All tests in this section are RED until the
+// implementation adds adoptRunId.
+// ---------------------------------------------------------------------------
+
+describe("SessionCorrelationStore — adoptRunId", () => {
+  let store: SessionCorrelationStore;
+
+  beforeEach(() => {
+    store = makeStore();
+  });
+
+  it("sets the run id on the orchestrator session at the head of the chain", () => {
+    store.register("orch", makeRecord({ sessionId: "orch" }));
+    store.register("sub", makeRecord({ sessionId: "sub", parentId: "orch" }));
+
+    store.adoptRunId("sub", RUN_ID);
+
+    expect(store.get("orch")!.runId).toBe(RUN_ID);
+  });
+
+  it("is a no-op when the chain head already carries a run id", () => {
+    const originalRunId = "20260101T000000Z-orig";
+    store.register("orch", makeRecord({ sessionId: "orch", runId: originalRunId }));
+    store.register("sub", makeRecord({ sessionId: "sub", parentId: "orch" }));
+
+    store.adoptRunId("sub", "20260808T000000Z-new1");
+
+    // Original run id must be preserved
+    expect(store.get("orch")!.runId).toBe(originalRunId);
+  });
+
+  it("sets run id directly when the session is the chain head (orchestrator itself)", () => {
+    store.register("orch", makeRecord({ sessionId: "orch" }));
+
+    store.adoptRunId("orch", RUN_ID);
+
+    expect(store.get("orch")!.runId).toBe(RUN_ID);
+  });
+
+  it("is a no-op for an unknown session and does not throw", () => {
+    expect(() => store.adoptRunId("not-registered", RUN_ID)).not.toThrow();
+  });
+
+  it("propagates run id through a two-hop chain to the root", () => {
+    store.register("root", makeRecord({ sessionId: "root" }));
+    store.register("mid", makeRecord({ sessionId: "mid", parentId: "root" }));
+    store.register("leaf", makeRecord({ sessionId: "leaf", parentId: "mid" }));
+
+    store.adoptRunId("leaf", RUN_ID);
+
+    expect(store.get("root")!.runId).toBe(RUN_ID);
+    // Intermediate sessions are not the target of adoption
+    expect(store.get("mid")!.runId).toBeUndefined();
+    expect(store.get("leaf")!.runId).toBeUndefined();
+  });
+
+  it("after adoptRunId, getRunId resolves correctly for all sessions in the chain", () => {
+    store.register("root", makeRecord({ sessionId: "root" }));
+    store.register("sub", makeRecord({ sessionId: "sub", parentId: "root" }));
+
+    store.adoptRunId("sub", RUN_ID);
+
+    // Both sessions now resolve the same run id through the chain
+    expect(store.getRunId("root")).toBe(RUN_ID);
+    expect(store.getRunId("sub")).toBe(RUN_ID);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PendingToolCall registry (call-id-keyed)
+//
+// These tests specify the new registerToolCall / closeToolCall / peekToolCall /
+// openDispatchCallFor methods that do not yet exist on SessionCorrelationStore.
+// All tests in this section are RED until the implementation adds the
+// call-id-keyed tool call registry to the store.
+// ---------------------------------------------------------------------------
+
+describe("SessionCorrelationStore — PendingToolCall registry", () => {
+  let store: SessionCorrelationStore;
+
+  beforeEach(() => {
+    store = makeStore();
+  });
+
+  function makePendingToolCall(overrides: Partial<PendingToolCall> = {}): PendingToolCall {
+    return {
+      callId: "call-default-1",
+      sessionId: "sess-default",
+      toolName: "bash",
+      isDispatch: false,
+      startedAt: TS,
+      ...overrides,
+    };
+  }
+
+  it("registerToolCall stores an in-flight tool call, retrievable via peekToolCall", () => {
+    const entry = makePendingToolCall({ callId: "call-reg-1" });
+    store.registerToolCall(entry);
+    const peeked = store.peekToolCall("call-reg-1");
+    expect(peeked).toBeDefined();
+    expect(peeked!.callId).toBe("call-reg-1");
+  });
+
+  it("peekToolCall does not consume the entry — a second peek returns the same entry", () => {
+    store.registerToolCall(makePendingToolCall({ callId: "call-peek-1" }));
+    const first = store.peekToolCall("call-peek-1");
+    const second = store.peekToolCall("call-peek-1");
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect(second!.callId).toBe("call-peek-1");
+  });
+
+  it("closeToolCall returns the entry on the first call", () => {
+    store.registerToolCall(makePendingToolCall({ callId: "call-close-1" }));
+    const result = store.closeToolCall("call-close-1");
+    expect(result).toBeDefined();
+    expect(result!.callId).toBe("call-close-1");
+  });
+
+  it("closeToolCall returns undefined on the second call, making closure idempotent", () => {
+    store.registerToolCall(makePendingToolCall({ callId: "call-idem-1" }));
+    store.closeToolCall("call-idem-1");
+    const second = store.closeToolCall("call-idem-1");
+    expect(second).toBeUndefined();
+  });
+
+  it("peekToolCall returns undefined after the call has been closed", () => {
+    store.registerToolCall(makePendingToolCall({ callId: "call-peek-after-close" }));
+    store.closeToolCall("call-peek-after-close");
+    expect(store.peekToolCall("call-peek-after-close")).toBeUndefined();
+  });
+
+  it("closeToolCall returns undefined for a call id that was never registered", () => {
+    expect(store.closeToolCall("call-never-registered")).toBeUndefined();
+  });
+
+  it("peekToolCall returns undefined for a call id that was never registered", () => {
+    expect(store.peekToolCall("call-never-registered")).toBeUndefined();
+  });
+
+  it("different call ids are tracked independently — closing one does not affect the other", () => {
+    store.registerToolCall(makePendingToolCall({ callId: "call-indep-A" }));
+    store.registerToolCall(makePendingToolCall({ callId: "call-indep-B" }));
+    store.closeToolCall("call-indep-A");
+    expect(store.peekToolCall("call-indep-B")).toBeDefined();
+    expect(store.closeToolCall("call-indep-B")).toBeDefined();
+    expect(store.peekToolCall("call-indep-A")).toBeUndefined();
+  });
+
+  it("preserves all PendingToolCall fields through registration and retrieval", () => {
+    const entry: PendingToolCall = {
+      callId: "call-fields-1",
+      sessionId: "sess-preserve",
+      toolName: "task",
+      isDispatch: true,
+      startedAt: "2026-08-11T12:00:00.000Z",
+    };
+    store.registerToolCall(entry);
+    const peeked = store.peekToolCall("call-fields-1");
+    expect(peeked).toEqual(entry);
+  });
+
+  it("closing and re-registering the same call id makes the new entry retrievable", () => {
+    store.registerToolCall(makePendingToolCall({ callId: "call-re-reg", toolName: "bash" }));
+    store.closeToolCall("call-re-reg");
+    // Re-register the same call id (edge case: re-use after close)
+    store.registerToolCall(makePendingToolCall({ callId: "call-re-reg", toolName: "edit" }));
+    const peeked = store.peekToolCall("call-re-reg");
+    expect(peeked).toBeDefined();
+    expect(peeked!.toolName).toBe("edit");
+  });
+
+  it("openDispatchCallFor returns the dispatch tool call linked to a child session", () => {
+    store.register(
+      "child-sess-dispatch",
+      makeRecord({ sessionId: "child-sess-dispatch", dispatchCallId: "call-dispatch-open" }),
+    );
+    store.registerToolCall(
+      makePendingToolCall({ callId: "call-dispatch-open", toolName: "task", isDispatch: true }),
+    );
+    const result = store.openDispatchCallFor("child-sess-dispatch");
+    expect(result).toBeDefined();
+    expect(result!.callId).toBe("call-dispatch-open");
+    expect(result!.isDispatch).toBe(true);
+  });
+
+  it("openDispatchCallFor returns undefined when the child session has no dispatch call id", () => {
+    store.register(
+      "child-no-dispatch",
+      makeRecord({ sessionId: "child-no-dispatch" }),
+    );
+    expect(store.openDispatchCallFor("child-no-dispatch")).toBeUndefined();
+  });
+
+  it("openDispatchCallFor returns undefined once the dispatch call has been closed", () => {
+    store.register(
+      "child-closed-dispatch",
+      makeRecord({ sessionId: "child-closed-dispatch", dispatchCallId: "call-closed-dispatch" }),
+    );
+    store.registerToolCall(
+      makePendingToolCall({ callId: "call-closed-dispatch", toolName: "task", isDispatch: true }),
+    );
+    store.closeToolCall("call-closed-dispatch");
+    expect(store.openDispatchCallFor("child-closed-dispatch")).toBeUndefined();
+  });
+
+  it("openDispatchCallFor returns undefined for an unknown child session", () => {
+    expect(store.openDispatchCallFor("unknown-child-session")).toBeUndefined();
+  });
+
+  it("parallel task calls from one session each have independent entries in the registry", () => {
+    // An orchestrator can dispatch multiple subagents before any completes.
+    store.registerToolCall(
+      makePendingToolCall({ callId: "par-dispatch-1", toolName: "task", isDispatch: true }),
+    );
+    store.registerToolCall(
+      makePendingToolCall({ callId: "par-dispatch-2", toolName: "task", isDispatch: true }),
+    );
+    // Close the first dispatch.
+    store.closeToolCall("par-dispatch-1");
+    // The second must still be open.
+    expect(store.peekToolCall("par-dispatch-2")).toBeDefined();
+    expect(store.closeToolCall("par-dispatch-2")).toBeDefined();
   });
 });

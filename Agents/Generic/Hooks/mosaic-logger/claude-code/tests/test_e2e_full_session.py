@@ -436,17 +436,22 @@ class TestFullSessionLayout(unittest.TestCase):
         events_file = self.paths.orchestrator_events(self.run_id)
         self.assertGreater(events_file.stat().st_size, 0)
 
-    # Orchestrator raw transcript export
+    # Orchestrator raw transcript export.
+    # The handler passes the orchestrator session ID so that inside the
+    # degradation bucket the transcript is scoped per-session. For a real
+    # run folder the session ID has no effect on the filename.
     def test_orchestrator_raw_export_exists(self):
-        self.assertTrue(self.paths.orchestrator_raw(self.run_id).exists())
+        self.assertTrue(
+            self.paths.orchestrator_raw(self.run_id, _SESSION_ID).exists()
+        )
 
     def test_orchestrator_raw_sidecar_exists(self):
-        raw = self.paths.orchestrator_raw(self.run_id)
+        raw = self.paths.orchestrator_raw(self.run_id, _SESSION_ID)
         sidecar = raw.with_suffix("").with_suffix(".meta.json")
         self.assertTrue(sidecar.exists())
 
     def test_orchestrator_sidecar_is_valid_json(self):
-        raw = self.paths.orchestrator_raw(self.run_id)
+        raw = self.paths.orchestrator_raw(self.run_id, _SESSION_ID)
         sidecar = raw.with_suffix("").with_suffix(".meta.json")
         data = json.loads(sidecar.read_text("utf-8"))
         self.assertIn("harness", data)

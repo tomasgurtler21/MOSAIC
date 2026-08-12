@@ -177,7 +177,7 @@ def handle_subagent_start(ctx: "core.HookContext") -> None:
         # Step 10: refresh 00_orchestrator_session.raw (best-effort).
         export.export_transcript(
             ctx.transcript_path,
-            ctx.paths.orchestrator_raw(run_id),
+            ctx.paths.orchestrator_raw(run_id, ctx.session_id),
             "transcript_path",
         )
 
@@ -261,7 +261,7 @@ def handle_subagent_stop(ctx: "core.HookContext") -> None:
         # Step 8: refresh 00_orchestrator_session.raw.
         export.export_transcript(
             ctx.transcript_path,
-            ctx.paths.orchestrator_raw(run_id),
+            ctx.paths.orchestrator_raw(run_id, ctx.session_id),
             "transcript_path",
         )
 

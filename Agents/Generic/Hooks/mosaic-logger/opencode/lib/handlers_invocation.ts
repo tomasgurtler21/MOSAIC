@@ -13,7 +13,7 @@
  */
 
 import { currentTimestamp, effectiveRunId, debugLog } from "./core.js";
-import { extractInstanceId, extractRunId, extractStatusCode } from "./runstate.js";
+import { extractInstanceId, extractRunId, extractStatusCode, fallbackInstanceId } from "./runstate.js";
 import { renderInput, renderOutput, writeArtifact } from "./artifacts.js";
 import { exportSession, exportOrchestratorTranscript } from "./export.js";
 import type { HandlerDependencies } from "./handlers_session.js";
@@ -23,36 +23,43 @@ import type { HandlerDependencies } from "./handlers_session.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Extract plain text from an OpenCode message's content field.
- * Handles both string content and the array-of-parts format.
+ * Concatenate the text of every `type: "text"` part in the given parts array,
+ * joining multiple text parts with "\n". Returns undefined if none are found.
+ *
+ * Accepts `unknown` and returns `undefined` for anything that is not a usable
+ * array — including null, non-arrays, empty arrays, and arrays whose entries
+ * carry no text-typed part with a non-empty string. Never throws.
  */
-function extractTextFromContent(content: unknown): string | undefined {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return undefined;
+export function extractTextFromParts(parts: unknown): string | undefined {
+  if (!Array.isArray(parts)) return undefined;
 
-  const parts: string[] = [];
-  for (const part of content) {
-    if (typeof part === "string") {
-      parts.push(part);
-    } else if (typeof part === "object" && part !== null) {
-      const p = part as Record<string, unknown>;
-      if (typeof p.text === "string") parts.push(p.text);
+  const texts: string[] = [];
+  for (const part of parts) {
+    if (typeof part !== "object" || part === null) continue;
+    const p = part as Record<string, unknown>;
+    if (p["type"] === "text" && typeof p["text"] === "string" && p["text"].length > 0) {
+      texts.push(p["text"]);
     }
   }
-  return parts.length > 0 ? parts.join("") : undefined;
+  return texts.length > 0 ? texts.join("\n") : undefined;
 }
 
 /**
  * Extract text from the first user message in a messages array.
- * The first user message is the dispatch prompt sent by the orchestrator.
+ * Role is read from entry.info.role (the real OpenCode shape); text is assembled
+ * from text-typed parts via extractTextFromParts.
+ * Returns undefined for any malformed or non-matching input. Never throws.
  */
-function extractFirstUserText(messages: unknown): string | undefined {
+export function extractFirstUserText(messages: unknown): string | undefined {
   if (!Array.isArray(messages)) return undefined;
   for (const msg of messages) {
     if (typeof msg !== "object" || msg === null) continue;
     const m = msg as Record<string, unknown>;
-    if (m.role === "user") {
-      return extractTextFromContent(m.content);
+    const info = m["info"];
+    if (typeof info !== "object" || info === null) continue;
+    const infoObj = info as Record<string, unknown>;
+    if (infoObj["role"] === "user") {
+      return extractTextFromParts(m["parts"]);
     }
   }
   return undefined;
@@ -60,16 +67,21 @@ function extractFirstUserText(messages: unknown): string | undefined {
 
 /**
  * Extract text from the last assistant message in a messages array.
- * The last assistant message is the subagent's final response.
+ * Role is read from entry.info.role (the real OpenCode shape); text is assembled
+ * from text-typed parts via extractTextFromParts.
+ * Returns undefined for any malformed or non-matching input. Never throws.
  */
-function extractLastAssistantText(messages: unknown): string | undefined {
+export function extractLastAssistantText(messages: unknown): string | undefined {
   if (!Array.isArray(messages)) return undefined;
   let lastText: string | undefined;
   for (const msg of messages) {
     if (typeof msg !== "object" || msg === null) continue;
     const m = msg as Record<string, unknown>;
-    if (m.role === "assistant") {
-      const text = extractTextFromContent(m.content);
+    const info = m["info"];
+    if (typeof info !== "object" || info === null) continue;
+    const infoObj = info as Record<string, unknown>;
+    if (infoObj["role"] === "assistant") {
+      const text = extractTextFromParts(m["parts"]);
       if (text !== undefined) lastText = text;
     }
   }
@@ -102,57 +114,85 @@ export function createInvocationHandlers(deps: HandlerDependencies): {
 } {
   const { store, paths, sdkClient, buildEvent, appendEvent } = deps;
 
-  async function handleInvocationStart(sessionId: string, _parentId: string): Promise<void> {
+  async function handleInvocationStart(sessionId: string, parentId: string): Promise<void> {
     // Session is already registered in the correlation store by session handler.
     const ts = currentTimestamp();
 
-    // Fetch subagent's messages to extract identity from the dispatch prompt.
-    let messages: unknown;
-    try {
-      messages = await sdkClient.session.messages({ path: { id: sessionId } });
-    } catch (err) {
-      debugLog(`handleInvocationStart: SDK messages() failed for ${sessionId}`, err);
-      // Continue — identity will be unknown for this invocation
+    // Resolution order for identity:
+    //   1. Pending dispatch — identity captured at task tool dispatch time (primary)
+    //   2. session.messages() extraction — secondary fallback only when no dispatch queued
+    const pendingDispatch = store.claimPendingDispatch(parentId);
+
+    let promptText: string | undefined;
+    let agentInstanceId: string | undefined;
+    let agentType: string | undefined;
+    let extractedRunId: string | undefined;
+    // Track whether the secondary (session.messages) path was taken so that
+    // orchestrator transcript refresh (which itself calls session.messages) is
+    // only done in that path, keeping the primary dispatch path SDK-call-free.
+    let usedSecondaryPath = false;
+
+    if (pendingDispatch) {
+      // Primary path: dispatch payload intercepted at tool.execute.before time.
+      // No SDK call needed — identity is already in memory.
+      agentInstanceId = pendingDispatch.agentInstanceId;
+      agentType = pendingDispatch.agentType;
+      extractedRunId = pendingDispatch.runId;
+      promptText = pendingDispatch.prompt;
+    } else {
+      // Secondary path: fetch the session's messages and extract identity from the
+      // user-role prompt text. Used when the dispatch payload was unavailable or
+      // the pending queue for this parent is empty.
+      usedSecondaryPath = true;
+      let messages: unknown;
+      try {
+        messages = await sdkClient.session.messages({ path: { id: sessionId } });
+      } catch (err) {
+        debugLog(`handleInvocationStart: SDK messages() failed for ${sessionId}`, err);
+        // Continue — identity will be resolved from whatever we have
+      }
+      promptText = extractFirstUserText(messages);
+      agentInstanceId = extractInstanceId(promptText);
+      extractedRunId = extractRunId(promptText);
+      // Derive agent type from the instance id when no separate agentType field
+      if (agentInstanceId?.includes("#")) {
+        agentType = agentInstanceId.split("#")[0];
+      }
     }
 
-    const promptText = extractFirstUserText(messages);
-    const agentInstanceId = extractInstanceId(promptText) ?? `unmapped_${sessionId}`;
-
-    // Guard: skip unmapped invocations (agent_instance_id could not be extracted).
-    // Mirrors the Python adapter's symmetric guard that skips both start and end
-    // when ctx.agent_id is absent, ensuring event-pair symmetry in the log.
-    if (agentInstanceId.startsWith("unmapped_")) {
-      debugLog(`handleInvocationStart: skipping unmapped session ${sessionId} (no agent_instance_id in prompt)`);
-      return;
+    // Apply fallback naming when identity remains unresolved. Per MosaicLogFormat.md
+    // §3.2, invocation_start is mandatory and must be emitted even when identity is
+    // unknown — a degraded event under unknown-run beats a missing one.
+    if (!agentInstanceId) {
+      agentInstanceId = fallbackInstanceId();
     }
 
-    const agentType = agentInstanceId.includes("#")
-      ? agentInstanceId.split("#")[0]
-      : undefined;
-    const extractedRunId = extractRunId(promptText);
-
-    // Store extracted identity in the correlation store
+    // Store resolved identity in the correlation store and mark that invocation_start
+    // was emitted so handleInvocationEnd can stay symmetric.
+    // When a pending dispatch was claimed, record its callId on this session so that
+    // openDispatchCallFor(sessionId) can find the open tool call and close it
+    // synthetically when handleInvocationEnd fires.
     store.register(sessionId, {
       agentInstanceId,
       agentType,
       prompt: promptText,
       runId: extractedRunId,
+      invocationStarted: true,
+      ...(pendingDispatch ? { dispatchCallId: pendingDispatch.callId } : {}),
     });
 
-    // If we extracted a run_id, also update the orchestrator session record so that
-    // store.getRunId() resolves correctly for all sessions in the chain.
+    // Propagate the resolved run id to the orchestrator session at the chain head
+    // so every session in the chain resolves the same run folder.
     if (extractedRunId) {
-      const orchestratorId = store.resolveOrchestratorSession(sessionId);
-      if (orchestratorId && orchestratorId !== sessionId) {
-        store.register(orchestratorId, { runId: extractedRunId });
-      }
+      store.adoptRunId(sessionId, extractedRunId);
     }
 
     const runId = store.getRunId(sessionId);
     const effectiveRun = effectiveRunId(runId);
     const sink = paths.invocationEvents(effectiveRun, agentInstanceId);
 
-    // Emit invocation_start
+    // Emit invocation_start unconditionally — degraded events land in unknown-run,
+    // which is the spec's intended outcome for unresolvable identity.
     await appendEvent(
       sink,
       buildEvent(
@@ -179,10 +219,14 @@ export function createInvocationHandlers(deps: HandlerDependencies): {
       }),
     );
 
-    // Refresh orchestrator transcript (best-effort)
-    const orchestratorId = store.resolveOrchestratorSession(sessionId);
-    if (orchestratorId) {
-      await exportOrchestratorTranscript(sdkClient, orchestratorId, paths, effectiveRun);
+    // Refresh orchestrator transcript only when the secondary (session.messages) path
+    // was taken, because exportOrchestratorTranscript internally calls session.messages()
+    // and the primary dispatch path must remain SDK-call-free after identity is captured.
+    if (usedSecondaryPath) {
+      const orchestratorId = store.resolveOrchestratorSession(sessionId);
+      if (orchestratorId) {
+        await exportOrchestratorTranscript(sdkClient, orchestratorId, paths, effectiveRun, orchestratorId);
+      }
     }
   }
 
@@ -192,14 +236,17 @@ export function createInvocationHandlers(deps: HandlerDependencies): {
     const record = store.get(sessionId);
     if (!record) return;
 
-    // Guard: skip if no agent_instance_id was extracted.
-    // handleInvocationStart returns early (without emitting invocation_start) when
-    // extraction fails, so no matching invocation_start exists for this session.
-    // This check is a symmetric defensive guard ensuring invocation_end is never
-    // emitted without a preceding invocation_start.
     const agentInstanceId = record.agentInstanceId;
-    if (!agentInstanceId || agentInstanceId.startsWith("unmapped_")) {
-      debugLog(`handleInvocationEnd: skipping unmapped session ${sessionId} (no agent_instance_id extracted at start)`);
+
+    // Guard: emit invocation_end only when invocation_start was previously emitted
+    // (tracked by the invocationStarted flag set in handleInvocationStart). For
+    // sessions that carry a known agentInstanceId from direct registration (a legacy
+    // path used by tests that bypass handleInvocationStart), allow emission when
+    // agentInstanceId is set to a non-fallback value — this preserves the previous
+    // behaviour for those sessions without requiring a mandatory handleInvocationStart
+    // call in every test that exercises handleInvocationEnd.
+    if (!record.invocationStarted && (!agentInstanceId || agentInstanceId.startsWith("unmapped_"))) {
+      debugLog(`handleInvocationEnd: skipping session ${sessionId} — no invocation_start was emitted`);
       return;
     }
 
@@ -269,10 +316,20 @@ export function createInvocationHandlers(deps: HandlerDependencies): {
     try {
       const orchestratorId = store.resolveOrchestratorSession(sessionId);
       if (orchestratorId) {
-        await exportOrchestratorTranscript(sdkClient, orchestratorId, paths, effectiveRun);
+        await exportOrchestratorTranscript(sdkClient, orchestratorId, paths, effectiveRun, orchestratorId);
       }
     } catch (err) {
       debugLog(`handleInvocationEnd: exportOrchestratorTranscript failed for ${sessionId}`, err);
+    }
+
+    // Stage 5: synthesize closure for the task dispatch that spawned this subagent.
+    // Idempotent — if the real after-hook already fired, closeToolCall returns
+    // undefined and no second event is emitted. If the after-hook never fires (the
+    // confirmed OpenCode bug scenario), this is the only path that closes the call.
+    try {
+      await deps.closeDispatchCall?.(sessionId);
+    } catch (err) {
+      debugLog(`handleInvocationEnd: closeDispatchCall failed for ${sessionId}`, err);
     }
   }
 

@@ -22,6 +22,7 @@ import {
   buildSidecar,
 } from "../lib/export";
 import { LogPaths } from "../lib/core";
+import { userMessageEntry, assistantMessageEntry } from "./fixtures/opencode_api";
 
 // ---------------------------------------------------------------------------
 // Test helpers and stub SDK client
@@ -71,18 +72,15 @@ function makeSdkClient(options: {
   };
 }
 
-/** Sample message list as the SDK would return from client.session.messages(). */
+/**
+ * Sample message list as the SDK would return from client.session.messages().
+ * Built via fixture builders so the real { info, parts } shape is used throughout
+ * this file — satisfying the suite-wide constraint that no test constructs a
+ * message as { role, content }.
+ */
 const SAMPLE_MESSAGES = [
-  {
-    id: "msg-001",
-    role: "user",
-    content: [{ type: "text", text: "Do the task." }],
-  },
-  {
-    id: "msg-002",
-    role: "assistant",
-    content: [{ type: "text", text: '{"status_code": "SUCCESS"}' }],
-  },
+  userMessageEntry("Do the task.", { id: "msg-001" }),
+  assistantMessageEntry('{"status_code": "SUCCESS"}', { id: "msg-002" }),
 ];
 
 // ---------------------------------------------------------------------------
@@ -586,5 +584,93 @@ describe("exportOrchestratorTranscript", () => {
     expect(result.ok).toBe(true);
     const rawContent = JSON.parse(nodeFs.readFileSync(result.rawPath!, "utf-8"));
     expect(rawContent).toEqual([{ id: "different-session-msg" }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// exportOrchestratorTranscript — bucket scoping wiring (integration)
+// ---------------------------------------------------------------------------
+// These tests verify that the session id is forwarded through
+// exportOrchestratorTranscript to LogPaths.orchestratorRaw, so the degradation
+// bucket gets session-scoped filenames on disk. This is the level of coverage
+// that was missing from Stage 8: the LogPaths unit was correct, but the call
+// site that connects session ids to filenames was untested end-to-end.
+
+describe("exportOrchestratorTranscript — bucket scoping wiring", () => {
+  let tempDir: string;
+  let paths: LogPaths;
+
+  beforeEach(() => {
+    tempDir = nodeFs.mkdtempSync(
+      nodePath.join(nodeOs.tmpdir(), "mosaic-scope-wiring-test-"),
+    );
+    paths = new LogPaths(tempDir);
+  });
+
+  afterEach(() => {
+    nodeFs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("writes a session-scoped file to the bucket when sessionId is provided", async () => {
+    const client = makeSdkClient({ messagesResult: SAMPLE_MESSAGES });
+    const sessId = "orch-sess-integration-A";
+
+    const result = await exportOrchestratorTranscript(
+      client,
+      sessId,
+      paths,
+      "unknown-run",
+      sessId,
+    );
+
+    expect(result.ok).toBe(true);
+    const expectedPath = paths.orchestratorRaw("unknown-run", sessId);
+    expect(nodeFs.existsSync(expectedPath)).toBe(true);
+    expect(nodePath.basename(expectedPath)).toContain(sessId);
+  });
+
+  it("two calls with different session ids each land a distinct file on disk", async () => {
+    const client = makeSdkClient({ messagesResult: SAMPLE_MESSAGES });
+    const sessA = "orch-sess-bucket-A";
+    const sessB = "orch-sess-bucket-B";
+
+    await exportOrchestratorTranscript(client, sessA, paths, "unknown-run", sessA);
+    await exportOrchestratorTranscript(client, sessB, paths, "unknown-run", sessB);
+
+    const pathA = paths.orchestratorRaw("unknown-run", sessA);
+    const pathB = paths.orchestratorRaw("unknown-run", sessB);
+    expect(pathA).not.toBe(pathB);
+    expect(nodeFs.existsSync(pathA)).toBe(true);
+    expect(nodeFs.existsSync(pathB)).toBe(true);
+  });
+
+  it("session B's write does not overwrite session A's file", async () => {
+    const clientA = makeSdkClient({ messagesResult: [{ sessionLabel: "A" }] });
+    const clientB = makeSdkClient({ messagesResult: [{ sessionLabel: "B" }] });
+    const sessA = "orch-sess-nooverwrite-A";
+    const sessB = "orch-sess-nooverwrite-B";
+
+    await exportOrchestratorTranscript(clientA, sessA, paths, "unknown-run", sessA);
+    await exportOrchestratorTranscript(clientB, sessB, paths, "unknown-run", sessB);
+
+    const pathA = paths.orchestratorRaw("unknown-run", sessA);
+    const contentsA = JSON.parse(nodeFs.readFileSync(pathA, "utf-8"));
+    expect(contentsA).toEqual([{ sessionLabel: "A" }]);
+  });
+
+  it("falls back to the unscoped path when no sessionId is provided", async () => {
+    const client = makeSdkClient({ messagesResult: SAMPLE_MESSAGES });
+
+    const result = await exportOrchestratorTranscript(
+      client,
+      SESSION_ID,
+      paths,
+      "unknown-run",
+    );
+
+    expect(result.ok).toBe(true);
+    const expectedPath = paths.orchestratorRaw("unknown-run");
+    expect(nodeFs.existsSync(expectedPath)).toBe(true);
+    expect(nodePath.basename(expectedPath)).toBe("00_orchestrator_session.raw");
   });
 });

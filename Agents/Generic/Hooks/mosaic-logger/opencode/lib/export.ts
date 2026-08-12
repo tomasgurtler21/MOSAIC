@@ -155,6 +155,11 @@ export async function exportSession(
  * that targets 00_orchestrator_session.raw. Called on subagent lifecycle
  * events to keep the orchestrator transcript current.
  *
+ * When `sessionId` is provided and `runId` is the degradation bucket, the
+ * target path is scoped so concurrent sessions in the bucket cannot overwrite
+ * each other. For real run folders the `sessionId` has no effect and the
+ * existing fixed filename is used.
+ *
  * Never throws.
  */
 export async function exportOrchestratorTranscript(
@@ -162,7 +167,8 @@ export async function exportOrchestratorTranscript(
   orchestratorSessionId: string,
   paths: LogPaths,
   runId: string,
+  sessionId?: string,
 ): Promise<ExportResult> {
-  const targetPath = paths.orchestratorRaw(runId);
+  const targetPath = paths.orchestratorRaw(runId, sessionId);
   return exportSession(sdkClient, orchestratorSessionId, targetPath);
 }

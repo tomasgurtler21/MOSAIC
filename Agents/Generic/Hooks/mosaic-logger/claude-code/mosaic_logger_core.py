@@ -243,7 +243,10 @@ class LogPaths:
     def orchestrator_events(self, run_id: str) -> pathlib.Path:
         return self.run_root(run_id) / "00_orchestrator_events.jsonl"
 
-    def orchestrator_raw(self, run_id: str) -> pathlib.Path:
+    def orchestrator_raw(self, run_id: str, session_id: "str | None" = None) -> pathlib.Path:
+        if run_id == "unknown-run" and session_id:
+            scope = transcript_scope_segment(HARNESS, session_id)
+            return self.run_root(run_id) / f"00_orchestrator_session__{scope}.raw"
         return self.run_root(run_id) / "00_orchestrator_session.raw"
 
     def invocation_dir(self, run_id: str, agent_instance_id: str) -> pathlib.Path:
@@ -366,6 +369,20 @@ def sanitize_component(name: str) -> str:
             result.append(ch)
     sanitized = "".join(result).rstrip(". ")
     return sanitized if sanitized else "_"
+
+
+def transcript_scope_segment(harness: str, session_id: str) -> str:
+    """Build the scope segment used to name the degradation-bucket transcript.
+
+    Result: sanitize(harness)__sanitize(session_id) with all dots additionally
+    replaced by underscores, so sidecar derivation via with_suffix() remains
+    correct even when the session identifier contains dots.
+
+    Identical contract in all four adapters.
+    """
+    sanitized_harness = sanitize_component(harness).replace(".", "_")
+    sanitized_session = sanitize_component(session_id).replace(".", "_")
+    return f"{sanitized_harness}__{sanitized_session}"
 
 
 # ---------------------------------------------------------------------------

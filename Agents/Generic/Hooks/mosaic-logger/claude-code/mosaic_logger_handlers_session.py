@@ -134,7 +134,7 @@ def handle_stop(ctx: "core.HookContext") -> None:
     # Refresh the orchestrator raw transcript export (best-effort).
     export.export_transcript(
         ctx.transcript_path,
-        ctx.paths.orchestrator_raw(run_id),
+        ctx.paths.orchestrator_raw(run_id, ctx.session_id),
         "transcript_path",
     )
 

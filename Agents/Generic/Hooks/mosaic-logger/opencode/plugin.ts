@@ -24,22 +24,24 @@ import {
   safeHandler,
   readAdapterVersion,
 } from "./lib/core.js";
-import { SessionCorrelationStore } from "./lib/correlation.js";
+import { SessionCorrelationStore, FileClosedSessionRegistry } from "./lib/correlation.js";
 import { fallbackCallId } from "./lib/runstate.js";
 import {
   createSessionHandlers,
-  extractSessionId,
-  extractParentId,
   type HandlerDependencies,
   type OpenCodeEvent,
-  type StopInput,
+  type PermissionAskInput,
+  type SessionCompactingInput,
   type ToolBeforeInput,
   type ToolBeforeOutput,
   type ToolAfterInput,
+  type ToolAfterOutput,
   type SdkClient,
 } from "./lib/handlers_session.js";
 import { createInvocationHandlers } from "./lib/handlers_invocation.js";
 import { createToolHandlers } from "./lib/handlers_tools.js";
+import { createNotificationHandlers } from "./lib/handlers_notifications.js";
+import { createMessageHandlers } from "./lib/handlers_messages.js";
 
 // ---------------------------------------------------------------------------
 // Plugin factory
@@ -62,6 +64,7 @@ export const MosaicLogger = async (ctx: {
     const workspaceRoot = ctx.directory;
     const paths = new LogPaths(workspaceRoot);
     const store = new SessionCorrelationStore();
+    const closedSessions = new FileClosedSessionRegistry(paths);
     const sdkClient = ctx.client;
 
     // Set up debug logging via the SDK client
@@ -97,36 +100,53 @@ export const MosaicLogger = async (ctx: {
       buildEvent,
       appendEvent,
       fallbackCallId,
+      closedSessions,
     };
 
     // Create all handler sets
     const sessionHandlers = createSessionHandlers(handlerDeps);
     const invHandlers = createInvocationHandlers(handlerDeps);
     const toolHandlers = createToolHandlers(handlerDeps);
+    const notificationHandlers = createNotificationHandlers(handlerDeps);
+    const msgHandlers = createMessageHandlers(handlerDeps);
+
+    // Late-bind invocation callbacks into the shared deps object.
+    // The session handler reads invocationCallbacks via the deps reference (not a
+    // destructured copy), so this assignment is visible inside session handler closures
+    // for the session.created (subagent) and session.idle (subagent) paths.
+    handlerDeps.invocationCallbacks = {
+      handleInvocationStart: invHandlers.handleInvocationStart,
+      handleInvocationEnd: invHandlers.handleInvocationEnd,
+    };
+
+    // Late-bind closeDispatchCall into the shared deps object.
+    // handleInvocationEnd reads it via the deps reference so this assignment
+    // is visible inside the invocation handler closure even though toolHandlers
+    // is constructed after createInvocationHandlers returns.
+    handlerDeps.closeDispatchCall = toolHandlers.closeDispatchCall;
 
     // --- Return hook registration map ---
     return {
       /**
        * Generic event bus hook. Receives all session.* and other bus events.
-       * Routes to session handler, then to invocation handler for subagent creations.
+       *
+       * Routing:
+       *   - message.updated → msgHandlers.handleMessageEvent (turn + usage_record emission)
+       *   - all other event types → sessionHandlers.handleEvent (session lifecycle)
+       *
+       * The session handler internally routes subagent session.created events to
+       * invocationCallbacks.handleInvocationStart and subagent session.idle events
+       * to invocationCallbacks.handleInvocationEnd via the late-bound callbacks.
        */
       event: safeHandler(
         "event",
         async (input: { event: OpenCodeEvent }) => {
           const event = input.event;
           if (!event) return;
-
-          // Let session handler process the event first (registers sessions,
-          // emits orchestrator lifecycle events)
-          await sessionHandlers.handleEvent(event);
-
-          // For subagent session creation, also start the invocation
-          if (event.type === "session.created") {
-            const sessionId = extractSessionId(event);
-            const parentId = extractParentId(event);
-            if (sessionId && parentId) {
-              await invHandlers.handleInvocationStart(sessionId, parentId);
-            }
+          if (event.type === "message.updated") {
+            await msgHandlers.handleMessageEvent(event);
+          } else {
+            await sessionHandlers.handleEvent(event);
           }
         },
       ),
@@ -143,30 +163,36 @@ export const MosaicLogger = async (ctx: {
 
       /**
        * Tool execution end hook. Maps to tool_call_end.
+       * The after-hook's second argument carries the tool output payload; forwarding
+       * it to handleToolAfter allows deriveToolOutcome to determine the real outcome
+       * rather than defaulting to the hardcoded success fallback.
        */
       "tool.execute.after": safeHandler(
         "tool.execute.after",
-        async (input: ToolAfterInput) => {
-          await toolHandlers.handleToolAfter(input);
+        async (input: ToolAfterInput, output: ToolAfterOutput) => {
+          await toolHandlers.handleToolAfter(input, output);
         },
       ),
 
       /**
-       * Agent loop stopped hook. Routes to session end or invocation end
-       * based on whether the session is a subagent or orchestrator session.
+       * Permission prompt hook. Emits a notification event to the appropriate stream.
+       * Observe-only — never alters the permission decision.
        */
-      stop: safeHandler(
-        "stop",
-        async (input: StopInput) => {
-          if (!input?.sessionID) return;
+      "permission.ask": safeHandler(
+        "permission.ask",
+        async (input: PermissionAskInput, output?: unknown) => {
+          await notificationHandlers.handlePermissionAsk(input, output);
+        },
+      ),
 
-          if (store.isSubagentSession(input.sessionID)) {
-            // Subagent finished — emit invocation_end + write artifacts + exports
-            await invHandlers.handleInvocationEnd(input.sessionID);
-          } else {
-            // Orchestrator session ended — emit session_end + run_end
-            await sessionHandlers.handleStop(input);
-          }
+      /**
+       * Session compaction hook (experimental). Emits a compaction event.
+       * Observe-only — never alters compaction behaviour.
+       */
+      "experimental.session.compacting": safeHandler(
+        "experimental.session.compacting",
+        async (input: SessionCompactingInput, output?: unknown) => {
+          await notificationHandlers.handleSessionCompacting(input, output);
         },
       ),
     };

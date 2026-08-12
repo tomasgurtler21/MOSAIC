@@ -1,11 +1,13 @@
 schema_version: "1"
 id: mosaic-logger
-version: 1.2.0
+version: 1.3.0
 description: >-
   Captures hook events across four harnesses — Claude Code (12 events), GHCP
-  CLI (14 events), VS Code Chat Extension (8 events), and OpenCode (4 hooks) —
-  for full MOSAIC orchestration log capture: session lifecycle, user turns,
-  assistant turns, tool calls, subagent invocations, and compaction events.
+  CLI (14 events), VS Code Chat Extension (8 events), and OpenCode (5 hooks:
+  event, tool.execute.before, tool.execute.after, permission.ask,
+  experimental.session.compacting) — for full MOSAIC orchestration log capture:
+  session lifecycle, user turns, assistant turns, tool calls, subagent
+  invocations, usage records, notifications, and compaction events.
   Produces structured JSONL event streams, per-invocation markdown artifacts,
   and byte-identical transcript exports under OrchestrationLogs/.
 
@@ -239,6 +241,10 @@ variants:
         target: lib/handlers_invocation.ts
       - source: lib/handlers_tools.ts
         target: lib/handlers_tools.ts
+      - source: lib/handlers_messages.ts
+        target: lib/handlers_messages.ts
+      - source: lib/handlers_notifications.ts
+        target: lib/handlers_notifications.ts
       - source: ../hook.yaml
         target: hook.yaml
     registration: []

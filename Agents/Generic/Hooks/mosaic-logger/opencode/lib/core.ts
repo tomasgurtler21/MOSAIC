@@ -10,6 +10,7 @@
  */
 
 import * as nodePath from "node:path";
+import * as nodeFs from "node:fs";
 import * as nodeFsPromises from "node:fs/promises";
 
 // ---------------------------------------------------------------------------
@@ -187,6 +188,24 @@ export function sanitizeComponent(name: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Transcript scope segment
+// ---------------------------------------------------------------------------
+
+/**
+ * The one filename scope segment, defined once here and mirrored verbatim in the
+ * three Python adapters. Exported for cross-adapter consistency testing.
+ *
+ * Result: sanitize(harness)__sanitize(sessionId) with all dots additionally
+ * replaced by underscores, so sidecar derivation via suffix replacement remains
+ * correct even when the session identifier contains dots.
+ */
+export function transcriptScopeSegment(harness: string, sessionId: string): string {
+  const sanitizedHarness = sanitizeComponent(harness).replace(/\./g, "_");
+  const sanitizedSession = sanitizeComponent(sessionId).replace(/\./g, "_");
+  return `${sanitizedHarness}__${sanitizedSession}`;
+}
+
+// ---------------------------------------------------------------------------
 // Path layout
 // ---------------------------------------------------------------------------
 
@@ -213,13 +232,25 @@ export class LogPaths {
     return nodePath.join(this.runRoot(runId), "00_orchestrator_events.jsonl");
   }
 
-  /** {root}/{runId}/00_orchestrator_session.raw */
-  orchestratorRaw(runId: string): string {
+  /**
+   * {root}/{runId}/00_orchestrator_session.raw for a real run.
+   * Inside the degradation bucket, the name is scoped so two sessions or two
+   * harnesses cannot target the same file.
+   */
+  orchestratorRaw(runId: string, sessionId?: string): string {
+    if (runId === "unknown-run" && sessionId && sessionId !== "") {
+      const scope = transcriptScopeSegment(HARNESS, sessionId);
+      return nodePath.join(this.runRoot(runId), `00_orchestrator_session__${scope}.raw`);
+    }
     return nodePath.join(this.runRoot(runId), "00_orchestrator_session.raw");
   }
 
-  /** {root}/{runId}/00_orchestrator_session.meta.json */
-  orchestratorRawMeta(runId: string): string {
+  /** Sidecar adjacent to the transcript above, same scoping rules. */
+  orchestratorRawMeta(runId: string, sessionId?: string): string {
+    if (runId === "unknown-run" && sessionId && sessionId !== "") {
+      const scope = transcriptScopeSegment(HARNESS, sessionId);
+      return nodePath.join(this.runRoot(runId), `00_orchestrator_session__${scope}.meta.json`);
+    }
     return nodePath.join(this.runRoot(runId), "00_orchestrator_session.meta.json");
   }
 
@@ -312,6 +343,39 @@ export async function atomicReplaceText(
   text: string,
 ): Promise<boolean> {
   return atomicReplace(filePath, Buffer.from(text, "utf-8"));
+}
+
+/**
+ * Synchronous variant of atomicReplace for use on low-frequency paths where
+ * briefly blocking the event loop is acceptable (e.g. session-close marker writes).
+ * Write data to a temp file in the target's directory, then rename over target.
+ * Returns true on success, false on any failure (including rename collision on
+ * Windows — callers must check whether the target already exists to distinguish
+ * concurrent-write races from genuine failures). Never throws.
+ * The target directory must already exist; this function does not create directories.
+ */
+export function atomicReplaceSync(filePath: string, data: Uint8Array | Buffer): boolean {
+  const dir = nodePath.dirname(filePath);
+  const tmpName = nodePath.join(
+    dir,
+    `.tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+  );
+  try {
+    nodeFs.writeFileSync(tmpName, data);
+    try {
+      nodeFs.renameSync(tmpName, filePath);
+      return true;
+    } catch {
+      try {
+        nodeFs.unlinkSync(tmpName);
+      } catch {
+        // Ignore cleanup errors
+      }
+      return false;
+    }
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -14,12 +14,77 @@
 import { currentTimestamp, effectiveRunId } from "./core.js";
 import { extractRunId } from "./runstate.js";
 import type { LogPaths } from "./core.js";
-import type { SessionCorrelationStore } from "./correlation.js";
+import type { SessionCorrelationStore, ClosedSessionRegistry } from "./correlation.js";
 
 // ---------------------------------------------------------------------------
 // Shared OpenCode hook-input types
 // (Exported so plugin.ts and other handler modules can use them)
 // ---------------------------------------------------------------------------
+
+// --- SDK message shapes (client.session.messages) ---
+
+/** Role discriminator on a message info object. */
+export type MessageRole = "user" | "assistant";
+
+/** Token counters on an assistant message. All fields unverified against a live install. */
+export interface MessageTokens {
+  input?: number;
+  output?: number;
+  reasoning?: number;
+  cache?: { read?: number; write?: number };
+  [key: string]: unknown;
+}
+
+/**
+ * The `info` half of a message entry. Assistant-only fields are optional.
+ * All fields declared here are shape hints for readers and tests; field-name drift
+ * must degrade to absent data, never to a crash.
+ */
+export interface MessageInfo {
+  id?: string;
+  role?: MessageRole | string;
+  sessionID?: string;
+  parentID?: string;
+  cost?: number;
+  modelID?: string;
+  providerID?: string;
+  mode?: string;
+  tokens?: MessageTokens;
+  time?: { created?: number; completed?: number; [key: string]: unknown };
+  [key: string]: unknown;
+}
+
+/**
+ * One entry of a message part. `type` discriminates a 10-member union
+ * (text | reasoning | file | tool | step-start | step-finish | snapshot | patch | agent | retry).
+ * Only `text` parts carry a `text` field. There is no `content` field at any level.
+ */
+export interface MessagePart {
+  id?: string;
+  messageID?: string;
+  sessionID?: string;
+  type?: string;
+  text?: string;
+  name?: string;   // AgentPart
+  source?: unknown; // AgentPart
+  [key: string]: unknown;
+}
+
+/** One element of the array returned by client.session.messages(). */
+export interface MessageEntry {
+  info?: MessageInfo;
+  parts?: MessagePart[];
+  [key: string]: unknown;
+}
+
+// --- Bus event shapes (the `event` hook) ---
+
+/** Session object carried under properties.info for created/updated/deleted. */
+export interface SessionInfo {
+  id?: string;
+  parentID?: string;
+  [key: string]: unknown;
+}
 
 /** Generic OpenCode bus event. Access all fields defensively. */
 export interface OpenCodeEvent {
@@ -28,16 +93,11 @@ export interface OpenCodeEvent {
   [key: string]: unknown;
 }
 
-/** Input to the stop hook. */
-export interface StopInput {
-  sessionID: string;
-  [key: string]: unknown;
-}
-
 /** Input to tool.execute.before. */
 export interface ToolBeforeInput {
   tool: string;
   sessionID: string;
+  callID?: string;
   [key: string]: unknown;
 }
 
@@ -51,7 +111,28 @@ export interface ToolBeforeOutput {
 export interface ToolAfterInput {
   tool: string;
   sessionID: string;
+  callID?: string;
   args?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/** The after-hook's second parameter. Shape unconfirmed beyond "an object". */
+export interface ToolAfterOutput {
+  [key: string]: unknown;
+}
+
+/** permission.ask payload. Shape unconfirmed; every field optional by contract. */
+export interface PermissionAskInput {
+  sessionID?: string;
+  type?: string;
+  title?: string;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+/** experimental.session.compacting payload. Experimental hook; shape unconfirmed. */
+export interface SessionCompactingInput {
+  sessionID?: string;
   [key: string]: unknown;
 }
 
@@ -75,6 +156,26 @@ export interface SdkClient {
       };
     }): Promise<void>;
   };
+}
+
+// ---------------------------------------------------------------------------
+// InvocationCallbacks
+// ---------------------------------------------------------------------------
+
+/**
+ * Late-bound invocation entry points supplied by the plugin factory.
+ *
+ * Injected into the session handler so a `session.created` or `session.idle`
+ * event for a subagent can drive invocation start/end without the session
+ * handler importing the invocation module directly (which would create an
+ * import cycle). Wired by the plugin factory after both handler sets are
+ * constructed.
+ */
+export interface InvocationCallbacks {
+  /** Handle a subagent session creation — emits invocation_start. */
+  handleInvocationStart: (sessionId: string, parentId: string) => Promise<void>;
+  /** Handle a subagent session going idle — emits invocation_end + artifacts. */
+  handleInvocationEnd: (sessionId: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +206,38 @@ export interface HandlerDependencies {
   appendEvent: (filePath: string, event: Record<string, unknown>) => Promise<void>;
   /** Generate a fallback tool call_id. */
   fallbackCallId: (toolName?: string) => string;
+
+  /**
+   * NEW — durable closed-session record. Consulted on every session close to
+   * prevent a second session_end/run_end pair after a process restart.
+   * Optional for backward compatibility with tests that do not supply it;
+   * when absent the handler falls back to in-memory-only deduplication.
+   */
+  closedSessions?: ClosedSessionRegistry;
+
+  /**
+   * NEW — invocation lifecycle callbacks, injected by the plugin factory after
+   * both handler sets are constructed (late binding via object mutation). The
+   * session handler accesses this via the `deps` reference, not a destructured
+   * copy, so the factory can assign it after `createSessionHandlers` returns.
+   *
+   * Optional: handler modules must treat this as possibly absent (for test
+   * isolation) and no-op when it is undefined.
+   */
+  invocationCallbacks?: InvocationCallbacks;
+
+  /**
+   * Close an open `task` dispatch call from a signal other than the after-hook.
+   * Injected by the plugin factory after `createToolHandlers` returns (late binding
+   * via object mutation, same pattern as invocationCallbacks). Called by
+   * `handleInvocationEnd` so that a subagent's end event synthesizes the closing
+   * `tool_call_end` for the dispatching `task` call when the real after-hook was
+   * never delivered.
+   *
+   * Optional: invocation handlers must treat this as possibly absent (for test
+   * isolation) and no-op when it is undefined.
+   */
+  closeDispatchCall?: (childSessionId: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -195,25 +328,33 @@ export function createSessionHandlers(deps: HandlerDependencies): {
    * Handle a generic event bus event. Dispatches to session.created,
    * session.deleted, session.idle based on event.type.
    * For subagent sessions (parentID present on session.created), registers
-   * in the correlation store but defers invocation events to the invocation
-   * handler (wired by plugin.ts).
+   * in the correlation store and calls invocationCallbacks.handleInvocationStart.
+   * For session.idle on subagent sessions, calls invocationCallbacks.handleInvocationEnd.
    */
   handleEvent: (event: OpenCodeEvent) => Promise<void>;
-
-  /**
-   * Handle the stop hook for an orchestrator (top-level) session.
-   * Emits session_end + run_end. Subagent session ends are routed to the
-   * invocation handler by plugin.ts before this is called.
-   */
-  handleStop: (input: StopInput) => Promise<void>;
 } {
   const { store, paths, sdkClient, adapterVersion, buildEvent, appendEvent } = deps;
 
   /** Emit session_end + run_end for a top-level session. Idempotent. */
   async function emitSessionEnd(sessionId: string, reason?: string): Promise<void> {
+    // Step 1: in-memory short-circuit (synchronous — guards concurrent same-process calls).
     if (store.isEnded(sessionId)) return;
+
+    // Step 2: claim the close synchronously so a second concurrent call that
+    // hasn't reached its first await yet will see isEnded = true and bail out.
+    // This is the critical ordering: markEnded runs before any await so it is
+    // always atomic with respect to the in-memory check above.
     store.markEnded(sessionId);
 
+    // Step 3: durable check — if a previous process already closed this session,
+    // the marker file will exist and we suppress the duplicate close pair.
+    const registry = deps.closedSessions;
+    if (registry) {
+      const alreadyClosed = await registry.isClosed(sessionId);
+      if (alreadyClosed) return;
+    }
+
+    // Step 4: emit the close pair.
     const ts = currentTimestamp();
     const runId = store.getRunId(sessionId);
     const effectiveRun = effectiveRunId(runId);
@@ -228,6 +369,13 @@ export function createSessionHandlers(deps: HandlerDependencies): {
       sink,
       buildEvent("run_end", { sessionId, runId, timestamp: ts }, {}),
     );
+
+    // Step 5: persist the durable marker so a future process restart won't
+    // emit a second close pair. Never throws; write failure only means
+    // durability is lost, not that the close itself is blocked.
+    if (registry) {
+      await registry.markClosed(sessionId);
+    }
   }
 
   /**
@@ -291,10 +439,15 @@ export function createSessionHandlers(deps: HandlerDependencies): {
           const record = parentId !== undefined ? { parentId } : {};
           store.register(sessionId, record);
 
-          // For top-level (orchestrator) sessions: emit session_start + run_start
-          // For subagent sessions: invocation handler takes over (wired in plugin.ts)
           if (!parentId) {
+            // Top-level (orchestrator) session: emit session_start + run_start
             await handleOrchestratorSessionCreated(sessionId);
+          } else {
+            // Subagent session: drive invocation start via the late-bound callbacks.
+            // deps.invocationCallbacks is set by the plugin factory after all handler
+            // sets are constructed; the session handler reads it via the deps reference
+            // (not a destructured copy) so the late assignment is visible here.
+            await deps.invocationCallbacks?.handleInvocationStart(sessionId, parentId);
           }
         }
         break;
@@ -318,9 +471,32 @@ export function createSessionHandlers(deps: HandlerDependencies): {
         break;
       }
 
-      case "session.deleted":
       case "session.idle": {
-        // Only emit end events for orchestrator sessions; subagent ends handled elsewhere
+        // session.idle fires when a session's agent loop goes quiet — this is the
+        // replacement signal for the nonexistent stop hook.
+        // Route by session kind: subagents go to invocation-end handling; top-level
+        // sessions (and unknown sessions that default to non-subagent) go to session end.
+        if (sessionId) {
+          if (store.isSubagentSession(sessionId)) {
+            // Subagent: drive invocation end via callbacks. Guard with isEnded so
+            // repeated idle events for the same session are no-ops after the first.
+            if (!store.isEnded(sessionId)) {
+              await deps.invocationCallbacks?.handleInvocationEnd(sessionId);
+            }
+          } else {
+            // Top-level (or unknown) session: emit session_end + run_end
+            await emitSessionEnd(sessionId, type);
+          }
+        }
+        break;
+      }
+
+      case "session.deleted": {
+        // session.deleted is a different lifecycle moment (record removed, not idle).
+        // Route to session end for top-level sessions only — it is retained as a
+        // second closing signal in case idle never fires for the top-level session.
+        // Subagent session.deleted must NOT trigger invocation-end handling: that
+        // path belongs exclusively to session.idle.
         if (sessionId && !store.isSubagentSession(sessionId)) {
           await emitSessionEnd(sessionId, type);
         }
@@ -333,19 +509,5 @@ export function createSessionHandlers(deps: HandlerDependencies): {
     }
   }
 
-  async function handleStop(input: StopInput): Promise<void> {
-    const sessionId = input?.sessionID;
-    if (!sessionId) return;
-
-    // Defensive guard: plugin.ts already routes subagent stop events to
-    // handleInvocationEnd before calling this function. This check protects
-    // against future mis-wiring where handleStop might be called directly for
-    // a subagent session. Under the current plugin.ts routing contract, this
-    // branch is never taken in production.
-    if (store.isSubagentSession(sessionId)) return;
-
-    await emitSessionEnd(sessionId);
-  }
-
-  return { handleEvent, handleStop };
+  return { handleEvent };
 }
