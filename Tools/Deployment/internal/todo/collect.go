@@ -30,16 +30,19 @@ var categoryIndex = func() map[domain.TodoCategory]int {
 // gapToCategory is the single canonical mapping from GapKind to TodoCategory. Every gap kind
 // in domain.gaps.go appears here exactly once; the mapping is not duplicated anywhere.
 var gapToCategory = map[domain.GapKind]domain.TodoCategory{
-	domain.GapNoModel:             domain.TodoModels,
-	domain.GapUnmappedTool:        domain.TodoToolMappings,
-	domain.GapEmptyInjection:      domain.TodoInjections,
-	domain.GapRemovedInjection:    domain.TodoInjections,
-	domain.GapParkedCustomRegion:  domain.TodoInjections,
-	domain.GapSkippedFile:         domain.TodoSkippedFiles,
-	domain.GapHookRegistration:    domain.TodoRegistration,
-	domain.GapManualStep:          domain.TodoManual,
-	domain.GapFallbackLocation:    domain.TodoEnvironment,
-	domain.GapUnsupportedArtifact: domain.TodoEnvironment,
+	domain.GapNoModel:                  domain.TodoModels,
+	domain.GapUnmappedTool:             domain.TodoToolMappings,
+	domain.GapEmptyInjection:           domain.TodoInjections,
+	domain.GapRemovedInjection:         domain.TodoInjections,
+	domain.GapParkedCustomRegion:       domain.TodoInjections,
+	domain.GapCustomRegionFallthrough:      domain.TodoInjections,
+	domain.GapInjectionReparented:          domain.TodoInjections,
+	domain.GapDeployedRegionContentChanged: domain.TodoInjections,
+	domain.GapSkippedFile:                  domain.TodoSkippedFiles,
+	domain.GapHookRegistration:         domain.TodoRegistration,
+	domain.GapManualStep:               domain.TodoManual,
+	domain.GapFallbackLocation:         domain.TodoEnvironment,
+	domain.GapUnsupportedArtifact:      domain.TodoEnvironment,
 }
 
 // collector is the concrete Collector implementation.

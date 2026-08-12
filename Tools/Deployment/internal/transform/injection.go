@@ -1,6 +1,7 @@
 package transform
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 
@@ -187,6 +188,38 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 			outcomes = append(outcomes, outcome)
 		}
 
+		// Content-change detection: compare the freshly generated canonical content of this
+		// deployed region against its previously deployed canonical content. A gap is emitted
+		// when the canonical content changed AND nested user regions are present, so the user
+		// knows to review their nested content against the updated canonical text.
+		//
+		// This runs between step 2 (generator) and step 3 (reemitNestedUserRegions): at this
+		// point the node holds only the freshly generated canonical content with no nested user
+		// regions re-emitted yet, making the comparison symmetric via CanonicalContent.
+		//
+		// Conditions for gap emission:
+		//   - depDoc != nil: an update run; no previous content exists on a create run.
+		//   - len(capture) > 0: nested user regions are present and will survive.
+		//   - CanonicalContent differs between old (deployed) and new (generated) sides.
+		if len(capture) > 0 && depDoc != nil {
+			newCanonical := CanonicalContent(node)
+			if depRegion, ok := depDoc.Body().Deployed(name); ok {
+				oldCanonical := CanonicalContent(depRegion)
+				if !bytes.Equal(newCanonical, oldCanonical) {
+					nestedNames := make([]string, 0, len(capture))
+					for _, rec := range capture {
+						nestedNames = append(nestedNames, rec.Name)
+					}
+					sort.Strings(nestedNames)
+					gaps = append(gaps, domain.Gap{
+						Kind:    domain.GapDeployedRegionContentChanged,
+						Subject: name,
+						Detail:  DeployedRegionContentChangedDetail(name, nestedNames, req.Timestamp),
+					})
+				}
+			}
+		}
+
 		// Re-emit nested user-owned regions inside the parent after the generator ran.
 		// This is step 3 of the mandatory capture-regenerate-reemit sequence.
 		// When capture is empty, reemitNestedUserRegions is a no-op and does not touch the
@@ -200,6 +233,30 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 				reemittedNames[out.Name] = true
 			}
 			outcomes = append(outcomes, nestedOutcomes...)
+		}
+	}
+
+	// Injection re-parenting detection (AD-E, AD-F): walk all source [[INJECTION:]] nodes at
+	// any depth — including those nested inside [[DEPLOYED:]] regions, which are skipped by
+	// the main source-region loop above. This is a read-only inspection and does not affect
+	// placement or content. Runs only on update runs (depDoc != nil).
+	if depDoc != nil {
+		deployedInjParents := buildDeployedInjectionParents(depDoc, renames)
+		for _, node := range body.Injections() {
+			name := node.Name()
+			deployedParent, inDeployed := deployedInjParents[name]
+			if !inDeployed {
+				// Injection is new in the source — no previous parent to compare (AD-F).
+				continue
+			}
+			sourceParent := anchorParentName(node)
+			if sourceParent != deployedParent {
+				gaps = append(gaps, domain.Gap{
+					Kind:    domain.GapInjectionReparented,
+					Subject: name,
+					Detail:  InjectionReparentedDetail(name, deployedParent, sourceParent, req.Timestamp),
+				})
+			}
 		}
 	}
 
@@ -272,13 +329,30 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 		//
 		//   anchored OR no reorder → place at anchored position (normal path)
 		//   !anchored AND reorder  → collect for parking (one gap for the whole set)
+		//
+		// Fallthrough detection runs on the placement path: when a region's ParentName is
+		// non-empty but cannot be resolved in the output body (neither as a section nor as a
+		// deployed region), the region falls through to body-level placement. One gap is
+		// emitted per transform listing all fallthrough names in sorted order. This is
+		// independent of the reorder flag and disjoint from the parking path.
 		sort.Strings(customNames)
 		var toPark []customRegionRecord
+		var fallthroughNames []string
 		for _, name := range customNames {
 			entry := deployedContent[name]
 			rec := customRecordByName[name]
 			anchored := rec.ParentName != "" && sourceAnchors[rec.ParentName]
 			if anchored || !reorder {
+				// Detect fallthrough before calling placeCustomRegion: if the ParentName is
+				// non-empty but resolves to neither a section nor a deployed region in the
+				// output body, the region will fall through to body-level placement.
+				if rec.ParentName != "" {
+					_, sectionOK := body.SectionDeep(rec.ParentName)
+					_, deployedOK := body.Deployed(rec.ParentName)
+					if !sectionOK && !deployedOK {
+						fallthroughNames = append(fallthroughNames, name)
+					}
+				}
 				// Anchored or no reorder: place the custom region at its resolved position.
 				if _, placeErr := placeCustomRegion(body, rec, entry.Content); placeErr != nil {
 					return nil, nil, nil, nil, placeErr
@@ -295,6 +369,17 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 				// Content is already present on the record from collectDeployedCustomRegions.
 				toPark = append(toPark, rec)
 			}
+		}
+
+		// Emit one fallthrough gap when one or more custom regions could not be anchored to
+		// their recorded parent in the output document and were placed at body level. Names
+		// are already in sorted order because customNames was sorted before the loop.
+		if len(fallthroughNames) > 0 {
+			gaps = append(gaps, domain.Gap{
+				Kind:    domain.GapCustomRegionFallthrough,
+				Subject: req.Key,
+				Detail:  FallthroughCustomRegionsDetail(fallthroughNames, req.Timestamp),
+			})
 		}
 
 		// Park all unanchored custom regions at end of body and emit a single parking gap
@@ -653,6 +738,58 @@ func reemitNestedUserRegions(parent *docformat.Node, captured []nestedRegionReco
 		})
 	}
 	return outcomes, nil
+}
+
+// anchorParentName returns the anchor parent name for a node: the name of its nearest
+// enclosing [[SECTION:]] or [[DEPLOYED:]] ancestor, or the empty string when the node sits
+// at document top level (Parent == nil). This is the canonical identity used for
+// re-parenting comparison.
+func anchorParentName(node *docformat.Node) string {
+	if node.Parent() == nil {
+		return ""
+	}
+	return node.Parent().Name()
+}
+
+// buildDeployedInjectionParents returns a map from resolved injection name to anchor parent
+// name for every [[INJECTION:]] node in the deployed document. Rename resolution is applied
+// so the map is keyed on post-rename names, matching the keys in the deployedContent map.
+//
+// Returns nil when depDoc is nil (create run).
+func buildDeployedInjectionParents(depDoc *docformat.Document, renames []RenameEntry) map[string]string {
+	if depDoc == nil {
+		return nil
+	}
+
+	injections := depDoc.Body().Injections()
+
+	// Build the raw map: original deployed name → anchor parent name.
+	rawParents := make(map[string]string, len(injections))
+	for _, node := range injections {
+		rawParents[node.Name()] = anchorParentName(node)
+	}
+
+	// Apply rename resolution identical to buildDeployedRegionMap: old names become new names
+	// when the new name is absent, so the result keys match what applyProjectRegion sees.
+	result := make(map[string]string, len(rawParents))
+	for name, parent := range rawParents {
+		result[name] = parent
+	}
+	for _, r := range renames {
+		if _, oldPresent := rawParents[r.Old]; !oldPresent {
+			continue
+		}
+		// Old name was found in the deployed file. Remove it from the result.
+		delete(result, r.Old)
+		if _, newPresent := rawParents[r.New]; !newPresent {
+			// New name absent: migrate the old name's parent to the new name.
+			result[r.New] = rawParents[r.Old]
+		}
+		// When the new name is also present, the new-name entry wins and the old entry is
+		// already removed. No override needed — mirrors the buildDeployedRegionMap policy.
+	}
+
+	return result
 }
 
 // buildDeployedRegionMap parses the deployed file and returns a map from user-owned region

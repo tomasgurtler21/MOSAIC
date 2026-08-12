@@ -19,6 +19,26 @@ const (
 	// The content is in the deployed file, not lost; the user must move it to the
 	// correct section. One gap is produced per transform, listing all parked names.
 	GapParkedCustomRegion GapKind = "parked-custom-region"
+
+	// GapCustomRegionFallthrough reports [[CUSTOM:]] regions whose recorded parent could not
+	// be resolved in the output document — typically because the source removed the parent
+	// section — and which were therefore placed at body level. The content is in the deployed
+	// file, not lost; the user must move it to the correct section. One gap is produced per
+	// transform, listing all fallthrough names in sorted order. Distinct from
+	// GapParkedCustomRegion, which covers the schema-reorder case.
+	GapCustomRegionFallthrough GapKind = "custom-region-fallthrough"
+
+	// GapInjectionReparented reports a source [[INJECTION:]] region that existed in the
+	// previously deployed file and now sits under a different parent. Advisory only: content
+	// is preserved verbatim at the new location and the transform is unaffected. One gap is
+	// produced per re-parented injection.
+	GapInjectionReparented GapKind = "injection-reparented"
+
+	// GapDeployedRegionContentChanged reports a [[DEPLOYED:]] region whose canonical content
+	// changed relative to the previously deployed file and which contains nested user-owned
+	// regions, whose content survived regeneration untouched and may now contradict or
+	// duplicate the updated canonical text. One gap is produced per affected region.
+	GapDeployedRegionContentChanged GapKind = "deployed-region-content-changed"
 )
 
 // Gap is produced by transform, plan, and deploy when a decision could not be made automatically.

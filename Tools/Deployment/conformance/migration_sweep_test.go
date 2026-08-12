@@ -19,11 +19,9 @@ package conformance_test
 //       Capabilities) — it was never a tool-managed name and belongs here, not above.
 //
 //   (3) No [[INJECTION:ProtocolExtension]] in any file.
-//       Note: the original doc-comment reason ("ProtocolExtension is removed from the
-//       vocabulary") is stale — ProtocolExtension was re-added to the advisory InjectionParent
-//       map in Stage 2. The assertion remains a valid safeguard: no current agent file should
-//       declare [[INJECTION:ProtocolExtension]] until a later stage explicitly migrates one.
-//       The test is not retired here.
+//       ProtocolExtension was briefly catalogued in the advisory InjectionParent map, then
+//       removed again in Stage 2: projects should use [[CUSTOM:ProtocolExtension]] instead
+//       of [[INJECTION:ProtocolExtension]]. No current agent file should declare the injection.
 //
 //   (4) No leftover hardcoded protocol section.
 //       The old [[SECTION:CommunicationProtocol]] marker is replaced by
@@ -218,11 +216,10 @@ func TestMigrationSweep_NoDeprecatedNameUnderDeployed(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestMigrationSweep_NoProtocolExtension verifies that no Agents/Generic/ file declares
-// [[INJECTION:ProtocolExtension]]. The original reason ("ProtocolExtension is removed from
-// the vocabulary; its presence in any file is an error") is stale as of Stage 2 —
-// ProtocolExtension was re-added to the advisory InjectionParent map. The assertion is
-// retained as a safety net: no current agent file should declare this injection, and the
-// test will fail if one does before a later stage explicitly authorises it.
+// [[INJECTION:ProtocolExtension]]. ProtocolExtension is removed from the advisory
+// InjectionParent map in Stage 2; projects use [[CUSTOM:ProtocolExtension]] instead.
+// The assertion is retained as a safety net: no current agent file should declare this
+// injection.
 func TestMigrationSweep_NoProtocolExtension(t *testing.T) {
 	paths := genericAgentPaths(t)
 	for _, p := range paths {

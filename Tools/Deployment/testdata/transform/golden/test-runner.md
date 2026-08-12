@@ -150,6 +150,8 @@ Your test results artifact should follow this template:
 - Do NOT suppress error output - it's needed for diagnostics
 
 [[DEPLOYED:HarnessConstraints]]
+Fixture harness constraint: always use the approved tool list.
+Do not invoke tools not declared in the agent's tools field.
 [[/DEPLOYED:HarnessConstraints]]
 
 [[/SECTION:Constraints]]

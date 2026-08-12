@@ -156,14 +156,11 @@ No character may be altered, added, or removed.
 		t.Fatalf("Apply: %v", err) // RED: fails here with ErrNotImplemented
 	}
 
-	_, srcBody, err := docformat.SplitFrontmatter(src)
-	if err != nil {
-		t.Fatalf("SplitFrontmatter (source): %v", err)
-	}
-	_, outBody, err := docformat.SplitFrontmatter(result.Output)
-	if err != nil {
-		t.Fatalf("SplitFrontmatter (output): %v", err)
-	}
+	// Compare body structure with [[DEPLOYED:]] content cleared in both operands.
+	// Deployed region content is legitimately different before and after transform;
+	// the structural bytes surrounding those regions must remain identical.
+	srcBody := bodyWithDeployedContentCleared(t, src, "synthetic-agent (source)")
+	outBody := bodyWithDeployedContentCleared(t, result.Output, "synthetic-agent (output)")
 
 	if !bytes.Equal(srcBody, outBody) {
 		t.Errorf("body bytes differ\ngot  %d bytes, want %d bytes\n"+

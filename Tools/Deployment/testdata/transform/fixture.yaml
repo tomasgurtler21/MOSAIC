@@ -121,6 +121,12 @@ frontmatter:
     - "model"
     - "tools"
 
+injections:
+  - name: "HarnessConstraints"
+    content: |
+      Fixture harness constraint: always use the approved tool list.
+      Do not invoke tools not declared in the agent's tools field.
+
 hooks:
   supported: false
   variant_key: ""

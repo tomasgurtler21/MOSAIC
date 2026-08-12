@@ -34,11 +34,34 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 	// Ask for target harness when not pre-answered (CD-6 pre-answer convention).
 	targetHarnessID := req.TargetHarnessID
 	if targetHarnessID == "" {
+		// Build one option per registry harness, mirroring askHarness in resolve.go.
+		// The source harness is included but disabled so the overlay is never empty even
+		// on a single-harness registry; source-role reason takes precedence over the
+		// harness's own unusable reason when both apply.
+		opts := make([]domain.Option, 0, len(s.deps.Registry.List()))
+		for _, h := range s.deps.Registry.List() {
+			var disabled bool
+			var disabledReason string
+			if h.ID == req.SourceHarnessID {
+				disabled = true
+				disabledReason = "already the transform source"
+			} else if !h.Usable {
+				disabled = true
+				disabledReason = h.UnusableReason
+			}
+			opts = append(opts, domain.Option{
+				ID:             h.ID,
+				Label:          h.DisplayName,
+				Disabled:       disabled,
+				DisabledReason: disabledReason,
+			})
+		}
 		ans, askErr := s.deps.Interaction.SelectOne(ctx, domain.ChoiceQuestion{
 			Question: domain.Question{
 				ID:    domain.QTransformTargetHarness,
 				Title: "Select target harness",
 			},
+			Options: opts,
 		})
 		if askErr != nil {
 			return TransformHarnessResult{}, fmt.Errorf("target harness question failed: %w", askErr)
