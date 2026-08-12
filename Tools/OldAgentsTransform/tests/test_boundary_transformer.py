@@ -2476,27 +2476,32 @@ class TestLegacyCustomConstraintsDropRule:
         assert result.success is True, f"Transform must succeed; errors={result.errors}"
         return _read(output_path)
 
-    def test_populated_custom_constraints_preserved_as_injection(
+    def test_populated_custom_constraints_preserved_as_custom_region(
         self, tmp_path: pathlib.Path
     ) -> None:
         """A custom_constraints region with content must survive as
-        [[INJECTION:CustomConstraints]], content preserved verbatim (AC2.5)."""
+        [[CUSTOM:CustomConstraints]], content preserved verbatim."""
         out = self._transformed_content(
             tmp_path,
             "Some constraint.\n\n"
             "[INJECTION: custom_constraints]\n"
             "Never touch production credentials.\n",
         )
-        assert "[[INJECTION:CustomConstraints]]" in out, (
+        assert "[[CUSTOM:CustomConstraints]]" in out, (
             "A populated legacy custom_constraints marker must be preserved as "
-            "[[INJECTION:CustomConstraints]]"
+            "[[CUSTOM:CustomConstraints]] — project-invented content uses the "
+            "CUSTOM kind, not INJECTION"
         )
         assert "Never touch production credentials." in out, (
             "The populated region's content must be preserved verbatim"
         )
+        assert "[[INJECTION:CustomConstraints]]" not in out, (
+            "[[INJECTION:CustomConstraints]] must NOT appear in the output — "
+            "the populated path now emits [[CUSTOM:CustomConstraints]]"
+        )
         assert "[[DEPLOYED:CustomConstraints]]" not in out, (
-            "CustomConstraints must never be emitted as a [[DEPLOYED:]] region -- "
-            "it is no longer tool-managed"
+            "CustomConstraints must never be emitted as a [[DEPLOYED:]] region — "
+            "it is not tool-managed"
         )
 
     def test_empty_custom_constraints_dropped_entirely(
@@ -9907,3 +9912,340 @@ class TestNonConformanceRenderReport:
             f"Expected NC_DRIFTED_BULLET for file with probe-only PC-bullet-5 wording; "
             f"got codes: {nc_codes!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Populated custom_constraints emits [[CUSTOM:CustomConstraints]] — both paths
+# ---------------------------------------------------------------------------
+
+
+class TestPopulatedCustomConstraintsEmitsCustomRegion:
+    """A populated legacy [INJECTION: custom_constraints] marker must be emitted as
+    [[CUSTOM:CustomConstraints]] on both the generic and harness transform paths.
+
+    Tests fail in RED: the transformer currently emits [[INJECTION:CustomConstraints]]
+    for the populated case. After the implementation change, the kind switches to CUSTOM.
+    """
+
+    _AGENT_BODY_PREFIX = (
+        "# TestAgent Agent\n\nYou are the agent.\n\n---\n\n"
+        "## Capabilities\n\nSome capability prose.\n\n---\n\n"
+        "## Constraints\n\n"
+    )
+    _AGENT_BODY_SUFFIX = (
+        "\n\n---\n\n"
+        "## Error Handling\n\nHandle errors.\n\n---\n\n"
+        "## Output Format\n\nJSON.\n\n---\n\n"
+        "## Execution Philosophy\n\nExecute.\n"
+    )
+
+    def _generic_content(self, constraints_body: str) -> str:
+        return (
+            "---\n"
+            "id: test-cc3\n"
+            "version: 1.0.0\n"
+            "name: test-agent\n"
+            "description: Agent exercising the populated custom_constraints marker.\n"
+            "---\n\n"
+            + self._AGENT_BODY_PREFIX
+            + constraints_body
+            + self._AGENT_BODY_SUFFIX
+        )
+
+    def _generic_transformed(self, tmp_path: pathlib.Path, constraints_body: str) -> str:
+        content = self._generic_content(constraints_body)
+        input_path = tmp_path / "cc3-generic-input.md"
+        input_path.write_text(content, encoding="utf-8")
+        output_path = tmp_path / "cc3-generic-output.md"
+        result = transform_file(input_path, output_path)
+        assert result.success is True, f"Generic transform must succeed; errors={result.errors}"
+        return _read(output_path)
+
+    def _harness_transformed(
+        self, tmp_path: pathlib.Path, harness_constraints_body: str, generic_constraints_body: str
+    ) -> str:
+        """Run the harness transform path.
+
+        harness_constraints_body: Constraints section content in the harness file
+            (has content where the marker was, not the marker itself).
+        generic_constraints_body: Constraints section content in the generic ref
+            (still has the [INJECTION: custom_constraints] marker).
+        """
+        harness_content = (
+            "---\n"
+            "id: test-cc3h\n"
+            "version: 1.0.0\n"
+            "transform_version: 1.0.0\n"
+            "name: test-agent\n"
+            "description: Harness agent with populated custom_constraints.\n"
+            "model: claude-opus-4\n"
+            "---\n\n"
+            + self._AGENT_BODY_PREFIX
+            + harness_constraints_body
+            + self._AGENT_BODY_SUFFIX
+        )
+        generic_content = self._generic_content(generic_constraints_body)
+        harness_path = tmp_path / "cc3-harness-input.md"
+        generic_path = tmp_path / "cc3-generic-ref.md"
+        harness_path.write_text(harness_content, encoding="utf-8")
+        generic_path.write_text(generic_content, encoding="utf-8")
+        output_path = tmp_path / "cc3-harness-output.md"
+        result = transform_file(harness_path, output_path, generic_path)
+        assert result.success is True, f"Harness transform must succeed; errors={result.errors}"
+        return _read(output_path)
+
+    def test_generic_path_emits_custom_open_tag(self, tmp_path: pathlib.Path) -> None:
+        """Generic path: populated custom_constraints must produce [[CUSTOM:CustomConstraints]]."""
+        out = self._generic_transformed(
+            tmp_path,
+            "Some constraint.\n\n"
+            "[INJECTION: custom_constraints]\n"
+            "Never touch production credentials.\n",
+        )
+        assert "[[CUSTOM:CustomConstraints]]" in out, (
+            "Populated custom_constraints on the generic path must emit "
+            "[[CUSTOM:CustomConstraints]] — project-invented content uses the CUSTOM kind"
+        )
+
+    def test_generic_path_emits_custom_close_tag(self, tmp_path: pathlib.Path) -> None:
+        """Generic path: the custom region must have a matching close tag."""
+        out = self._generic_transformed(
+            tmp_path,
+            "Some constraint.\n\n"
+            "[INJECTION: custom_constraints]\n"
+            "Never touch production credentials.\n",
+        )
+        assert "[[/CUSTOM:CustomConstraints]]" in out, (
+            "The [[/CUSTOM:CustomConstraints]] close tag must be present in the output"
+        )
+
+    def test_generic_path_does_not_emit_injection_region(self, tmp_path: pathlib.Path) -> None:
+        """Generic path: [[INJECTION:CustomConstraints]] must NOT appear in the output."""
+        out = self._generic_transformed(
+            tmp_path,
+            "Some constraint.\n\n"
+            "[INJECTION: custom_constraints]\n"
+            "Never touch production credentials.\n",
+        )
+        assert "[[INJECTION:CustomConstraints]]" not in out, (
+            "[[INJECTION:CustomConstraints]] must not appear in the output; "
+            "the populated marker is now emitted as [[CUSTOM:CustomConstraints]]"
+        )
+
+    def test_generic_path_preserves_fill_content(self, tmp_path: pathlib.Path) -> None:
+        """Generic path: the fill content must be preserved inside the custom region."""
+        out = self._generic_transformed(
+            tmp_path,
+            "Some constraint.\n\n"
+            "[INJECTION: custom_constraints]\n"
+            "Never touch production credentials.\n",
+        )
+        assert "Never touch production credentials." in out, (
+            "Fill content inside the populated custom_constraints must be preserved verbatim"
+        )
+
+    def test_harness_path_emits_custom_open_tag(self, tmp_path: pathlib.Path) -> None:
+        """Harness path: populated custom_constraints (fill replaces marker) must produce
+        [[CUSTOM:CustomConstraints]] in the output."""
+        out = self._harness_transformed(
+            tmp_path,
+            # Harness: marker replaced with fill content
+            harness_constraints_body=(
+                "Some constraint.\n\n"
+                "Never touch production credentials.\n"
+            ),
+            # Generic ref: still has the marker
+            generic_constraints_body=(
+                "Some constraint.\n\n"
+                "[INJECTION: custom_constraints]\n"
+            ),
+        )
+        assert "[[CUSTOM:CustomConstraints]]" in out, (
+            "Populated custom_constraints on the harness path must emit "
+            "[[CUSTOM:CustomConstraints]], not [[INJECTION:CustomConstraints]]"
+        )
+
+    def test_harness_path_does_not_emit_injection_region(self, tmp_path: pathlib.Path) -> None:
+        """Harness path: [[INJECTION:CustomConstraints]] must NOT appear in the output."""
+        out = self._harness_transformed(
+            tmp_path,
+            harness_constraints_body=(
+                "Some constraint.\n\n"
+                "Never touch production credentials.\n"
+            ),
+            generic_constraints_body=(
+                "Some constraint.\n\n"
+                "[INJECTION: custom_constraints]\n"
+            ),
+        )
+        assert "[[INJECTION:CustomConstraints]]" not in out, (
+            "[[INJECTION:CustomConstraints]] must not appear in the harness-path output; "
+            "the populated marker is now emitted as [[CUSTOM:CustomConstraints]]"
+        )
+
+    def test_harness_path_preserves_fill_content(self, tmp_path: pathlib.Path) -> None:
+        """Harness path: the fill content must be preserved inside the custom region."""
+        out = self._harness_transformed(
+            tmp_path,
+            harness_constraints_body=(
+                "Some constraint.\n\n"
+                "Never touch production credentials.\n"
+            ),
+            generic_constraints_body=(
+                "Some constraint.\n\n"
+                "[INJECTION: custom_constraints]\n"
+            ),
+        )
+        assert "Never touch production credentials." in out, (
+            "Fill content inside the populated custom_constraints must be preserved verbatim "
+            "on the harness path"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Empty custom_constraints still dropped after populated-path kind change
+# ---------------------------------------------------------------------------
+
+
+class TestEmptyCustomConstraintsStillDropped:
+    """An empty legacy custom_constraints marker must still be dropped entirely
+    after the populated path changes to emit [[CUSTOM:CustomConstraints]].
+
+    The drop-when-empty rule and the surrounding blank-line collapse are unchanged.
+    These tests pin that behavior so it cannot regress when the populated path is modified.
+    """
+
+    def _make_content(self, constraints_body: str) -> str:
+        return (
+            "---\n"
+            "id: test-cc4\n"
+            "version: 1.0.0\n"
+            "name: test-agent\n"
+            "description: Agent exercising the empty custom_constraints drop rule.\n"
+            "---\n\n"
+            "# TestAgent Agent\n\nYou are the agent.\n\n---\n\n"
+            "## Capabilities\n\nSome capability prose.\n\n---\n\n"
+            "## Constraints\n\n" + constraints_body + "\n\n---\n\n"
+            "## Error Handling\n\nHandle errors.\n\n---\n\n"
+            "## Output Format\n\nJSON.\n\n---\n\n"
+            "## Execution Philosophy\n\nExecute.\n"
+        )
+
+    def _transformed(self, tmp_path: pathlib.Path, constraints_body: str) -> str:
+        content = self._make_content(constraints_body)
+        input_path = tmp_path / "cc4-input.md"
+        input_path.write_text(content, encoding="utf-8")
+        output_path = tmp_path / "cc4-output.md"
+        result = transform_file(input_path, output_path)
+        assert result.success is True, f"Transform must succeed; errors={result.errors}"
+        return _read(output_path)
+
+    def test_empty_marker_produces_no_custom_open_tag(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """An empty custom_constraints marker must not produce [[CUSTOM:CustomConstraints]]."""
+        out = self._transformed(
+            tmp_path,
+            "Some constraint.\n\n[INJECTION: custom_constraints]\n",
+        )
+        assert "[[CUSTOM:CustomConstraints]]" not in out, (
+            "An empty legacy custom_constraints marker must not produce "
+            "[[CUSTOM:CustomConstraints]] — the drop rule is unchanged"
+        )
+
+    def test_empty_marker_produces_no_injection_open_tag(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """An empty custom_constraints marker must not produce [[INJECTION:CustomConstraints]]
+        either — the marker is dropped entirely, no region is emitted."""
+        out = self._transformed(
+            tmp_path,
+            "Some constraint.\n\n[INJECTION: custom_constraints]\n",
+        )
+        assert "[[INJECTION:CustomConstraints]]" not in out, (
+            "An empty legacy custom_constraints marker must not produce "
+            "[[INJECTION:CustomConstraints]] — the drop rule is unchanged"
+        )
+
+    def test_empty_marker_leaves_no_custom_constraints_text(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """No text containing 'CustomConstraints' must appear in the output when the
+        marker is empty — neither as a tag name nor as prose."""
+        out = self._transformed(
+            tmp_path,
+            "Some constraint.\n\n[INJECTION: custom_constraints]\n",
+        )
+        assert "CustomConstraints" not in out, (
+            "Dropping an empty legacy custom_constraints marker must leave no trace of "
+            "'CustomConstraints' in the output"
+        )
+
+    def test_harness_path_empty_marker_still_dropped(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """On the harness path, an empty custom_constraints marker (still present in both
+        harness and generic) must still be dropped entirely after the kind change."""
+        harness_content = (
+            "---\n"
+            "id: test-cc4h\n"
+            "version: 1.0.0\n"
+            "transform_version: 1.0.0\n"
+            "name: test-agent\n"
+            "description: Harness with empty custom_constraints.\n"
+            "model: claude-opus-4\n"
+            "---\n\n"
+            "# TestAgent Agent\n\nYou are the agent.\n\n---\n\n"
+            "## Capabilities\n\nSome capability prose.\n\n---\n\n"
+            "## Constraints\n\nSome constraint.\n[INJECTION: custom_constraints]\n---\n\n"
+            "## Error Handling\n\nHandle errors.\n\n---\n\n"
+            "## Output Format\n\nJSON.\n\n---\n\n"
+            "## Execution Philosophy\n\nExecute.\n"
+        )
+        generic_content = (
+            "---\n"
+            "id: test-cc4h\n"
+            "version: 1.0.0\n"
+            "name: test-agent\n"
+            "description: Generic ref for harness empty drop test.\n"
+            "---\n\n"
+            "# TestAgent Agent\n\nYou are the agent.\n\n---\n\n"
+            "## Capabilities\n\nSome capability prose.\n\n---\n\n"
+            "## Constraints\n\nSome constraint.\n[INJECTION: custom_constraints]\n---\n\n"
+            "## Error Handling\n\nHandle errors.\n\n---\n\n"
+            "## Output Format\n\nJSON.\n\n---\n\n"
+            "## Execution Philosophy\n\nExecute.\n"
+        )
+        harness_path = tmp_path / "cc4h-harness.md"
+        generic_path = tmp_path / "cc4h-generic.md"
+        harness_path.write_text(harness_content, encoding="utf-8")
+        generic_path.write_text(generic_content, encoding="utf-8")
+        output_path = tmp_path / "cc4h-output.md"
+        result = transform_file(harness_path, output_path, generic_path)
+        assert result.success is True, f"Transform must succeed; errors={result.errors}"
+        out = _read(output_path)
+        assert "CustomConstraints" not in out, (
+            "An empty custom_constraints marker must still be dropped on the harness path "
+            "after the kind change — neither [[CUSTOM:CustomConstraints]] nor "
+            "[[INJECTION:CustomConstraints]] should appear"
+        )
+
+    def test_empty_marker_drop_does_not_affect_neighbouring_injection(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """The drop rule is name-scoped: a neighbouring empty injection of a different
+        name must still be emitted — the drop must not generalise beyond CustomConstraints."""
+        out = self._transformed(
+            tmp_path,
+            "Some constraint.\n\n"
+            "[INJECTION: custom_constraints]\n"
+            "[INJECTION: error_handling_extension]\n",
+        )
+        assert "CustomConstraints" not in out, (
+            "The empty custom_constraints region must still be dropped"
+        )
+        assert "[[INJECTION:ErrorHandlingExtension]]" in out, (
+            "A neighbouring empty injection of a different name must still be emitted; "
+            "the drop rule must not generalise beyond CustomConstraints"
+        )
+        assert "[[/INJECTION:ErrorHandlingExtension]]" in out

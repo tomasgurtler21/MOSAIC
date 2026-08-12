@@ -1,9 +1,9 @@
 ---
 id: agent-template-architecture
 type: specification
-version: "1.4"
+version: "1.5"
 name: "Agent Template Architecture"
-description: "The structure of a MOSAIC agent file: frontmatter schema, the three region kinds and their ownership, canonical document order, the per-role region matrix, and what each section must contain."
+description: "The structure of a MOSAIC agent file: frontmatter schema, the four region kinds and their ownership, canonical document order, the per-role region matrix, and what each section must contain."
 author: MOSAIC
 status: Draft
 ---
@@ -16,7 +16,7 @@ An agent file is a system prompt with a schema. This document is that schema: wh
 
 **Covered here:**
 
-- The three region kinds and what each one's marker promises (§2.1)
+- The four region kinds and what each one's marker promises (§2.1)
 - Canonical document order and the per-role region matrix (§2.3, §2.4)
 - Every tool-managed region name and where its content comes from (§2.5)
 - Frontmatter fields, their meaning, and their bump rules (§3)
@@ -47,7 +47,7 @@ That arrangement produced exactly the outcome it was always going to. Forty-two 
 
 Three things are different in the format specified here, and together they are why this document specifies a schema rather than supplying a template.
 
-**Ownership is declared in the file.** A region's marker says who writes it: `[[SECTION:]]` is MOSAIC-authored and carried verbatim, `[[DEPLOYED:]]` is written by the tool and regenerated every deploy, `[[INJECTION:]]` is the project's and preserved byte-identically. A reader knows which regions are theirs without consulting anything.
+**Ownership is declared in the file.** A region's marker says who writes it: `[[SECTION:]]` is MOSAIC-authored and carried verbatim, `[[DEPLOYED:]]` is written by the tool and regenerated every deploy, `[[INJECTION:]]` is declared by MOSAIC and filled by the project, `[[CUSTOM:]]` is invented by the project entirely. A reader knows which regions are theirs without consulting anything.
 
 **Content has moved out of the template into contracts.** The orchestration protocol left in v1.9, and the provenance stamp folded into it. It is now one file deploying into one named region. The template's job is no longer to hold that text but to place the slot it goes into.
 
@@ -58,7 +58,7 @@ Three things are different in the format specified here, and together they are w
 | # | Principle | What it buys |
 |---|---|---|
 | 1 | **Text repeated across agents is deployed, never copied** | Forty-two copies of a sentence drift; one source cannot. Every fragment identical across agents is either single-sourced or deleted. |
-| 2 | **The marker states the owner** | `[[SECTION:]]`, `[[DEPLOYED:]]`, `[[INJECTION:]]` answer "may I edit this?" from the file itself. No lookup into code or docs. |
+| 2 | **The marker states the owner** | `[[SECTION:]]`, `[[DEPLOYED:]]`, `[[INJECTION:]]`, `[[CUSTOM:]]` answer "may I edit this?" from the file itself. No lookup into code or docs. |
 | 3 | **A source file is a valid document on its own** | Empty deployed regions and empty injections are the normal state of a source file, not a degraded one. Nothing is required to be filled for the file to be well-formed. |
 | 4 | **One fact, one authority** | The contract states message shape and the stamp; this document states structure. Where they touch, they reference rather than restate — a second copy is always the one that goes stale. |
 | 5 | **Structure is mechanically checkable** | Every rule here that can be a validator rule is written to be one (§9). A convention no tool can check is a convention that erodes. |
@@ -66,6 +66,7 @@ Three things are different in the format specified here, and together they are w
 | 7 | **The nearest instruction wins in practice** | A model follows the specific, role-adjacent instruction over the general one three sections up. So the nearby instruction must be correct, not merely present — this is why the HITL defect mattered far more than its count suggested. |
 | 8 | **A check that flags legitimate work gets switched off** | Principle 5's counterweight. A validator that errors on an unusual but working agent teaches its user to ignore it, and an ignored validator enforces nothing. Severity is therefore part of every rule: a rule errors only when violating it breaks the tool, breaks interop, or destroys the user's own content. Everything else warns or advises (§9). |
 | 9 | **Not every rule is a tool's to enforce** | A specification states more than a regex can check, and that is not a defect. Each rule names its enforcement mechanism — tool, review, or guidance — so that advice is never mistaken for a broken check, and so that authors are not pushed into writing only what a validator can read (§9). |
+| 10 | **Structure comes from the source; the deployed file contributes content, never shape** | On update, the output structure is entirely the source file's — section order, nesting, which regions exist and where. The deployed file is read only for a flat map of injection/custom names to content bytes; no positional information is kept. This is what makes schema reordering safe: there is no second opinion about structure to reconcile against. |
 
 ---
 
@@ -73,19 +74,22 @@ Three things are different in the format specified here, and together they are w
 
 An agent file has two parts: a YAML frontmatter block (§3) and a body composed of boundary-delimited regions.
 
-### 2.1 The Three Region Kinds
+### 2.1 The Four Region Kinds
 
 | Marker | Written by | On deploy | On update |
 |--------|-----------|-----------|-----------|
 | `[[SECTION:Name]]` … `[[/SECTION:Name]]` | MOSAIC source authors | Carried from source byte-identically | Carried from source byte-identically |
 | `[[DEPLOYED:Name]]` … `[[/DEPLOYED:Name]]` | The deployment tool | Body generated from a canonical source | Regenerated wholesale; prior content discarded |
-| `[[INJECTION:Name]]` … `[[/INJECTION:Name]]` | Project authors | Left empty, listed in `TODO.md` | Preserved byte-identically |
+| `[[INJECTION:Name]]` … `[[/INJECTION:Name]]` | MOSAIC source authors | Left empty, listed in `TODO.md` | Preserved byte-identically |
+| `[[CUSTOM:Name]]` … `[[/CUSTOM:Name]]` | Project authors | N/A — never in source | Preserved byte-identically |
 
-Three consequences follow and are worth stating outright:
+**`[[INJECTION:]]` vs `[[CUSTOM:]]`:** Both are project-owned content preserved byte-identically on update. The difference is provenance. An `[[INJECTION:]]` region is **declared in the source file** by MOSAIC — the source defines where it sits, and on schema reorder the content follows the source's new position automatically (principle 10). A `[[CUSTOM:]]` region is **invented by the project** and exists only in the deployed file — it has no source anchor, so on schema reorder the tool parks it at end of file and emits a TODO for the user to reposition it (§6.4).
+
+Four consequences follow and are worth stating outright:
 
 **Never author content inside a `[[DEPLOYED:]]` region.** It is discarded on the next update without warning. In a source file these regions are always empty; the deployed file is the only place they have content.
 
-**A user-owned injection is never nested inside a `[[DEPLOYED:]]` region.** The parent is regenerated wholesale, which would destroy the child. Where an injection accompanies a deployed region, it is a *sibling* at the same level.
+**A user-owned region (`[[INJECTION:]]` or `[[CUSTOM:]]`) may be nested inside a `[[DEPLOYED:]]` region.** The tool preserves nested user-owned regions when regenerating the deployed parent — it writes the new canonical text around them. This is the natural placement for project extensions of deployed content (e.g. custom error handling inside `ErrorHandlingCommon`), and it gives the extension an anchor that survives schema reorder.
 
 **Region replacement precedes injection resolution.** Reversed, the tool would resolve an injection and then overwrite the region beside it, discarding content it had just placed.
 
@@ -94,7 +98,7 @@ Three consequences follow and are worth stating outright:
 - A tag line matches when the trimmed line is exactly `[[` + marker body + `]]`. Nothing else on the line.
 - Each boundary name appears at most once per file.
 - `[[SECTION:]]` regions appear at body top level, except for the orchestrator's template blocks (§5.4).
-- `[[DEPLOYED:]]` and `[[INJECTION:]]` regions appear either nested inside a section or at body top level, according to the parent named in §2.5 and §6.1. An empty required parent (`""`) means top level.
+- `[[DEPLOYED:]]`, `[[INJECTION:]]`, and `[[CUSTOM:]]` regions appear either nested inside a section or at body top level. `[[DEPLOYED:]]` parents are named in §2.5, `[[INJECTION:]]` parents in §6.2. `[[CUSTOM:]]` regions have no source-declared parent — their position is the project author's choice. An empty required parent (`""`) means top level.
 - A compound name of the form `[[SECTION:Prefix:id]]` marks an enumerable item — workflows, infrastructure agent declarations, and the canonical blocks in the bundle all use this form, so a tool can enumerate by prefix without knowing the members ahead of time.
 
 ### 2.3 Canonical Document Order
@@ -188,7 +192,7 @@ The rest followed mechanically. §2.4 required present deployed regions to have 
 Two consequences are binding:
 
 - **An unrecognised or unclassified deployed name is an error, never a fallback.** A classifier that assigns a default class to a name nobody classified deliberately will assign the wrong one silently, and the closed-set check will then propagate it into every harness and every agent. There is no safe default here; the safe behaviour is to refuse.
-- **A name with nothing to fill it is not a deployed name.** If content is authored per project, it is an injection (§6.1). If it is authored per agent, it is body text. Neither is a `[[DEPLOYED:]]` region, and giving one a region that no generator fills produces a permanently empty block that every agent carries and no tool can populate.
+- **A name with nothing to fill it is not a deployed name.** If content is authored per project, it is an injection or custom region (§6.1). If it is authored per agent, it is body text. Neither is a `[[DEPLOYED:]]` region, and giving one a region that no generator fills produces a permanently empty block that every agent carries and no tool can populate.
 
 ---
 
@@ -310,7 +314,7 @@ The order is not arbitrary: the closing procedure continues the Process list and
 
 Top-level `[[DEPLOYED:CommunicationProtocol]]`, slot 2. Empty in source. Content is the role-matched block from `CommunicationProtocol.md`, which is the whole orchestration contract: message shape, status and error vocabularies, the HITL gate, and the artifact provenance stamp.
 
-Nothing is authored here, and no injection sits inside it — the region is regenerated wholesale, so anything nested would be destroyed on the next deploy (§2.1). A project needing to extend the protocol uses `[[INJECTION:ProtocolExtension]]` as a top-level sibling of this region; §6.1.1 covers what belongs there and what does not.
+Nothing is authored here, and no injection sits inside it — the region is regenerated wholesale, so anything nested would be destroyed on the next deploy (§2.1). A project needing to extend the protocol uses `[[INJECTION:ProtocolExtension]]` as a top-level sibling of this region; §6.2.1 covers what belongs there and what does not.
 
 ### 4.3 Capabilities
 
@@ -339,7 +343,7 @@ Capabilities is the least constrained section by design. It is where an agent's 
 
 **Deployed:** none. The section carries no tool-managed region.
 
-**Injections:** `[[INJECTION:CodebaseContext]]`, `[[INJECTION:OutputArtifactTemplate]]`, and for validation agents `[[INJECTION:SeverityThresholds]]` and `[[INJECTION:SeverityDefinitions]]` (§6.2). `[[INJECTION:LanguagePatterns]]` is available to a project with language-specific patterns to state, and is not carried by MOSAIC's own sources (§6.1).
+**Injections:** `[[INJECTION:CodebaseContext]]`, `[[INJECTION:OutputArtifactTemplate]]`, and for validation agents `[[INJECTION:SeverityThresholds]]` and `[[INJECTION:SeverityDefinitions]]` (§6.3). `[[CUSTOM:LanguagePatterns]]` is available to a project with language-specific patterns to state — it is a `[[CUSTOM:]]` region, not declared in any source file (§6.1).
 
 **Tool access is not described here.** It is the `tools` frontmatter field. A prose list of tools in the body is a second statement that goes stale the first time the field changes.
 
@@ -449,33 +453,41 @@ The orchestrator's `Capabilities` contains nested `[[SECTION:]]` regions — `Ex
 
 ---
 
-## 6. Injection Points
+## 6. Injection and Custom Points
 
-### 6.1 The Injection Name Set Is Open
+### 6.1 Two Kinds of Project-Owned Region
 
-**Every `[[INJECTION:]]` region is preserved, whatever it is called.** There is no allowlist of injection names, and an unrecognised name is not an error, a warning, or a reason to orphan content into `TODO.md`.
+Both `[[INJECTION:]]` and `[[CUSTOM:]]` hold project-authored content preserved byte-identically on update. They differ in provenance and in how the tool handles them on schema changes:
 
-Preservation does not need a list. On update the tool matches injection names between the deployed file and the source file; a name the author put in their source is a name that will be there next time. A closed vocabulary would add nothing to that and would cost an author the ability to name a region after their own project's concept. `[[DEPLOYED:]]` names are the opposite case and stay closed (§2.5) — those the tool must find *content* for, and a name it does not recognise has no source.
+| | `[[INJECTION:]]` | `[[CUSTOM:]]` |
+|---|---|---|
+| **Declared in** | MOSAIC source files | Deployed files only (project-invented) |
+| **Position on update** | Follows the source — if the source moves it, content moves with it | No source anchor — position is wherever the project put it |
+| **On schema reorder** | Automatically repositioned per the new source (principle 10) | Parked at end of file with a TODO to reposition (§6.4) |
+| **Name set** | Catalogued below; most declared empty in source | Fully open — any name the project invents |
 
-**The catalogue below is a suggestion, not a constraint.** These are the names that mean the same thing across projects and that MOSAIC ships `TODO.md` guidance for. An author with a use for one should prefer it over inventing a synonym; an author with a genuine need for something else should invent it.
+**The practical rule:** if MOSAIC defines the slot, it is `[[INJECTION:]]`. If the project invents the slot, it is `[[CUSTOM:]]`.
 
-Most are also carried by MOSAIC's own sources, declared empty so a project can see the slot exists. `LanguagePatterns` is the exception and is deliberately **not** declared anywhere in `Agents/Generic/`: a language pattern is meaningful only once a project has a language, so pre-declaring it in every agent would ship an empty region and a `TODO.md` line to fifty-odd files on the chance that one project fills them. A project that wants it adds the region to its own sources like any other name it invents. Being catalogued costs nothing; being declared costs every agent.
+### 6.2 Source Injection Catalogue
+
+The names below are the `[[INJECTION:]]` regions MOSAIC declares in source files. They are preserved by name-matching between deployed and source on update — a name the author put in the source is a name that will be there next time.
+
+Most are carried by MOSAIC's own sources, declared empty so a project can see the slot exists. `LanguagePatterns` is the exception and is deliberately **not** declared anywhere in `Agents/Generic/`: a language pattern is meaningful only once a project has a language, so pre-declaring it in every agent would ship an empty region and a `TODO.md` line to fifty-odd files on the chance that one project fills them. A project that wants it uses `[[CUSTOM:LanguagePatterns]]` in their deployed file.
 
 | Name | Usual parent | Purpose |
 |------|--------------|---------|
 | `IdentityExtension` | `Identity` | Project or domain expertise added to the agent's identity |
 | `CodebaseContext` | `Capabilities` | Knowledge of the project's codebase |
-| `LanguagePatterns` | `Capabilities` | Language-specific coding patterns the project expects this agent to follow |
 | `OutputArtifactTemplate` | `Capabilities` | The project's expected structure for this agent's output artifact |
 | `SeverityThresholds` | `Capabilities` | Which issue severities require rework (validation agents) |
 | `SeverityDefinitions` | `Capabilities` | What each severity means in this project (validation agents) |
 | `ErrorHandlingExtension` | `ErrorHandling` | Project-specific recovery guidance |
 | `ContextLimits` | `ExecutionPhilosophy` | Context window thresholds and guidance |
-| `ProtocolExtension` | body top level | Deployment-specific protocol mechanics (§6.1.1) |
+| `ProtocolExtension` | body top level | Deployment-specific protocol mechanics (§6.2.1) |
 
-"Usual parent" is where the region belongs when the agent is otherwise conventional, and where MOSAIC's own agents put it. Placing one elsewhere is an author's call, not a validation failure. The single hard rule about placement is §6.3's: never inside a `[[DEPLOYED:]]` region.
+"Usual parent" is where the region belongs when the agent is otherwise conventional, and where MOSAIC's own agents put it. Placing one elsewhere is an author's call, not a validation failure. The single hard rule about placement is §6.5's: never inside a `[[DEPLOYED:]]` region.
 
-#### 6.1.1 `ProtocolExtension`
+#### 6.2.1 `ProtocolExtension`
 
 Permitted, and a sibling of `[[DEPLOYED:CommunicationProtocol]]` at body top level — never inside it, since the contract region is regenerated wholesale and would take the extension with it.
 
@@ -485,7 +497,7 @@ It exists because a deployment can have real business extending the protocol wit
 
 **`ArtifactProvenanceExtension`** is retired rather than forbidden. The stamp it extended has folded into the orchestration contract, so the region no longer has a counterpart to extend; a project needing extra artifact frontmatter uses `OutputArtifactTemplate`, which governs artifact content rather than the contract. A file still carrying the region is stale, not invalid, and its content is preserved like any other injection.
 
-### 6.2 Severity Injections
+### 6.3 Severity Injections
 
 Validation agents carry two additional injections. `SeverityThresholds` is followed in source by a default table stating which severities require rework, which a project overrides:
 
@@ -498,11 +510,25 @@ Validation agents carry two additional injections. `SeverityThresholds` is follo
 
 The status rule follows from it: any issue at a severity marked as requiring rework means `COMPLETED_NEEDS_ACTION`; otherwise `SUCCESS` with the issues recorded in the report. `SeverityDefinitions` optionally states what each level means in the project's terms.
 
-### 6.3 Rules
+### 6.4 Custom Regions and Schema Reorder
+
+`[[CUSTOM:]]` regions exist only in deployed files. The project author writes them directly; the source has no knowledge of them.
+
+**On normal update (no structural change):** `[[CUSTOM:]]` regions are preserved byte-identically in their current position, exactly like `[[INJECTION:]]` regions. The tool reads them into the name->content map and writes them back where they were.
+
+**On schema reorder** (section order in deployed file differs from section order in source):
+
+1. `[[CUSTOM:]]` regions nested inside a source section or deployed region that still exists **stay anchored to that parent** and move with it — same behavior as a source injection.
+2. `[[CUSTOM:]]` regions whose parent context disappeared or is no longer identifiable are **parked at the end of the deployed file**, after all sections.
+3. The tool emits a **TODO** entry: "Schema reorder detected. These custom regions were preserved at end of file — move them to the correct section."
+
+The tool does not need to distinguish "parked" from "always at end of file". On the reorder update, it parks and notifies. On every subsequent update, end-of-file custom regions are just regions — name->content in, name->content out. The tool is stateless about parking.
+
+### 6.5 Rules
 
 One is enforced. The rest are guidance, and marked as such.
 
-**Enforced — never nest an injection inside a `[[DEPLOYED:]]` region.** The parent is regenerated wholesale on every deploy and would take the child's content with it, silently. This is the only injection rule that errors, and it errors because violating it destroys the user's own work rather than because it offends the schema (rule 13).
+**Nesting inside `[[DEPLOYED:]]` is permitted.** `[[INJECTION:]]` and `[[CUSTOM:]]` regions may be nested inside a `[[DEPLOYED:]]` region. The tool preserves them when regenerating the deployed parent — it writes the new canonical content and keeps nested user-owned regions intact. This replaces the former rule 13 ban, which existed because the tool previously destroyed nested content on regeneration.
 
 **Guidance:**
 
@@ -510,7 +536,7 @@ One is enforced. The rest are guidance, and marked as such.
 - **A template must work with every injection empty.** That is the state of every source file and of every fresh deployment; an agent that only makes sense once a project has filled something in is broken by default.
 - **Injections extend; they do not contradict.** An injection redefining a rule stated in a deployed region leaves the agent two answers with no basis to choose, and it will follow the nearer one (principle 7). The tag itself does not convey this, so the `TODO.md` text for each injection should.
 
-**No injection is ever required to be filled.** Empty is the normal state, not a degraded one (principle 3), and unfilled regions belong in the `TODO.md` checklist rather than in a validator's output. This matters most where a parent section offers several alternative child injections: filling all of them is not the goal, and a rule demanding it would be demanding contradictory content. Which of them a project uses is the project's decision and nobody else's.
+**No injection or custom region is ever required to be filled.** Empty is the normal state, not a degraded one (principle 3), and unfilled regions belong in the `TODO.md` checklist rather than in a validator's output. This matters most where a parent section offers several alternative child injections: filling all of them is not the goal, and a rule demanding it would be demanding contradictory content. Which of them a project uses is the project's decision and nobody else's.
 
 ---
 
@@ -615,14 +641,14 @@ All errors, and none of them can flag a creative agent: each is a field the tool
 | 8b | The five conduct regions present for `role: subagent` (§2.4.1) | Warning | Tool | No |
 | 8c | No region present that the role forbids (§2.4) | Warning | Tool | No |
 | 9a | Every `[[DEPLOYED:]]` region sits under the parent named in §2.5 | Error | Tool | Yes |
-| 9b | Every `[[INJECTION:]]` region sits under its usual parent (§6.1) | Advice | Tool | Yes — should be downgraded |
+| 9b | Every `[[INJECTION:]]` region sits under its usual parent (§6.2) | Advice | Tool | Yes — should be downgraded |
 | 10 | No boundary name appears twice in one file | Error | Tool | Yes |
 | 11 | Every opened boundary is closed, with matching name | Error | Tool | Yes |
 | 12 | In a source file, every `[[DEPLOYED:]]` region is empty | Error | Tool | No |
-| 13 | No `[[INJECTION:]]` region nested inside a `[[DEPLOYED:]]` region | Error | Tool | Yes |
+| 13 | `[[INJECTION:]]` and `[[CUSTOM:]]` regions nested inside `[[DEPLOYED:]]` are preserved on regeneration | — | Tool | No — tool currently destroys them |
 | 14 | Every `[[DEPLOYED:]]` name is one the tool has a source for (§2.5) | Error | Tool | Yes |
 
-Rule 14 replaces the former "`ProtocolExtension` does not appear". Injection names are open and unlisted names are preserved, not orphaned (§6.1); deployed names stay closed, because an unrecognised one leaves the tool with a slot and no content.
+Rule 14 replaces the former "`ProtocolExtension` does not appear". Injection names are open and unlisted names are preserved, not orphaned (§6.2); deployed names stay closed, because an unrecognised one leaves the tool with a slot and no content.
 
 Rule 9b is the clearest case of a check to relax: it currently errors on an injection placed somewhere unusual, which harms nobody and destroys nothing.
 
@@ -697,7 +723,7 @@ Changes this document makes to them:
 - The deployed-name classifier's `default:` branch stops resolving to the harness class. `HarnessConstraints` becomes an explicit case, and an unclassified name is an error (§2.5.1).
 - `DeployedParent` gains the five new names with the parents in §2.5.
 - `CanonicalOrder` becomes seven slots, of which slot 2 is deployed, and is consumed as a subsequence rather than an equality check (§2.3).
-- `InjectionParent` **stops being an allowlist.** Injection names are open (§6.1): an unlisted name is preserved like any other. What remains is a table of usual parents for the suggested names, consulted for advice-level reporting only. `ArtifactProvenanceExtension` leaves it, `ProtocolExtension` enters it with an empty parent (top level).
+- `InjectionParent` **stops being an allowlist.** Injection names are open (§6.2): an unlisted name is preserved like any other. What remains is a table of usual parents for the suggested names, consulted for advice-level reporting only. `ArtifactProvenanceExtension` leaves it, `ProtocolExtension` enters it with an empty parent (top level).
 
 `SourceFilesFormat.md` should be reduced to a pointer at this document plus the skill and hook-bundle conventions it uniquely covers, rather than restating the agent format alongside it (§15).
 
@@ -727,7 +753,8 @@ Changes this document makes to them:
 | **Region** | A named span of a file bounded by a matched pair of markers. |
 | **Section** | A `[[SECTION:]]` region — MOSAIC-authored, carried verbatim. |
 | **Deployed region** | A `[[DEPLOYED:]]` region — written by the tool, regenerated on every deploy. |
-| **Injection** | An `[[INJECTION:]]` region — project-authored, preserved byte-identically. |
+| **Injection** | An `[[INJECTION:]]` region — declared in source, project-filled, preserved byte-identically. Follows source position on reorder. |
+| **Custom region** | A `[[CUSTOM:]]` region — project-invented, exists only in deployed files, preserved byte-identically. Parked at end of file on schema reorder. |
 | **Canonical block** | Deployed text maintained in one place and copied into every agent carrying the matching region. |
 | **Bundle** | `Agents/Generic/DeployedSections.md` — the file holding every canonical block. A payload, not a specification. |
 | **Bundle version** | The bundle's semver, stamped into every deployed file's frontmatter. Governed by `DeployedSectionsBundle.md`. |
@@ -743,6 +770,7 @@ Changes this document makes to them:
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.5 | 2026-08-11 | **`[[CUSTOM:]]` marker introduced; source-driven invariant stated; nesting inside `[[DEPLOYED:]]` permitted.** New fourth region kind `[[CUSTOM:Name]]` for project-invented regions that exist only in deployed files, distinct from `[[INJECTION:]]` which is declared in source. On schema reorder, source injections follow the source automatically; custom regions are parked at end of file with a TODO. Principle 10 added to §1.3 stating the source-driven structure invariant that makes reordering safe. `LanguagePatterns` removed from the injection catalogue — it is not declared in any source file and is a `[[CUSTOM:]]` if a project wants it. Rule 13 reversed: `[[INJECTION:]]` and `[[CUSTOM:]]` may now nest inside `[[DEPLOYED:]]` regions — the tool preserves them on regeneration. This gives project extensions an anchor inside deployed content that survives schema reorder. §6 restructured: §6.1 distinguishes the two kinds, §6.2 is the injection catalogue, §6.4 specifies custom region behavior on reorder, §6.5 is rules. Analysis in `SchemaEvolution-Problems.md`. |
 | 1.4 | 2026-08-08 | **`LanguagePatterns` and `CustomConstraints` removed from the deployed vocabulary.** Both were listed in §2.5 with the content source *"Deployment configuration"* — a category this document named and never specified, and that no tool ever implemented. Lacking a generator, both fell through the classifier's permissive `default:` branch to the harness class, which meant every harness had to declare them empty solely to satisfy §2.4's content-source check; the rationale text in those files records an author noting the classification was wrong and complying anyway. `CanonicalDeployed` drops from eleven names to nine and the phantom source disappears, leaving the three §2.5 actually describes. `LanguagePatterns` becomes a catalogued injection name (§6.1), deliberately not declared in MOSAIC's own sources. `CustomConstraints` is deleted outright — it had no definition, no specification, and served as an escape hatch for content that belonged in `HarnessConstraints`. New §2.5.1 makes the underlying rule explicit: a deployed name must name an implemented generator, and an unclassified name is an error rather than a default. Role matrix, tier table, §4.3, §4.4 and §10.1 follow. |
 | 1.3 | 2026-08-05 | **`OutputFormat` corrected to two varying fields.** v1.0 reduced the section to `status_message` on the premise that nothing else in the response envelope varied between agents. A survey of the forty-two sources disproves it: `error_code` varies too — most agents return `E101`, but `test-runner` returns `E501`, `pull-request-comment-interface` `E502`, `requirements-refinement` `E503`, and `audit-to-pull-request` `E401`. The contract region supplies the code vocabulary and can never supply an agent's choice from it, so §4.6's table gains an `error_code` column and permits multiple `BLOCKED` rows. Migration step 7 amended accordingly — as written it would have discarded every one of those choices in its least verifiable step. Rule 17r extended to review the code choice alongside the message. The envelope deletion itself is unchanged and rule 17 is untouched: the widened table contains no JSON fence. |
 | 1.0 | 2026-08-05 | **Initial specification.** Established the agent file schema: frontmatter fields including a declared `role`, the three region kinds and their ownership semantics, canonical document order, a per-role region matrix, and a section-by-section content specification. Settled the canonical-fragment question: five fragments become `[[DEPLOYED:]]` regions, one is deleted. Rewrote `OutputFormat` as a `status_message` table with no JSON envelope. Corrected three live defects structurally. |
@@ -761,10 +789,10 @@ Changes this document makes to them:
 **Rejected**
 
 - **A required structure for `Capabilities`.** It is the one section with no specified shape (§4.3), which is right for expertise that genuinely varies. Considered requiring `### Core Capabilities` as a minimum; decided against. The template already shows it, every agent follows it, and promoting a convention to a rule buys nothing. If content validation lands it would be a warning at most, alongside rule 15.
-- **A closed vocabulary of injection names.** Held until v1.2. Its stated purpose was to stop a user's content being orphaned on update — but preservation matches names between the deployed file and the source file, so a name the author wrote into their own source is preserved with or without a list. The list bought nothing and cost an author the ability to name a region after their own project's concept (§6.1). Deployed names are the opposite case and stay closed: there the tool must find *content* for the name.
-- **Banning `ProtocolExtension`.** Held until v1.2 on the argument that a project able to append to a contract is able to contradict it. True, and insufficient. A deployment whose subagents sit behind network endpoints has to state how a message is delivered, which the contract does not cover; denying it a region does not prevent the change, it forces a fork of the contract instead. Contradicting the contract remains a real hazard and is now stated as guidance the project owns (§6.1.1).
+- **A closed vocabulary of injection names.** Held until v1.2. Its stated purpose was to stop a user's content being orphaned on update — but preservation matches names between the deployed file and the source file, so a name the author wrote into their own source is preserved with or without a list. The list bought nothing and cost an author the ability to name a region after their own project's concept (§6.2). Superseded in v1.5 by a different solution: project-invented regions use `[[CUSTOM:]]` instead of `[[INJECTION:]]`, making the distinction visible in the file. Deployed names are the opposite case and stay closed: there the tool must find *content* for the name.
+- **Banning `ProtocolExtension`.** Held until v1.2 on the argument that a project able to append to a contract is able to contradict it. True, and insufficient. A deployment whose subagents sit behind network endpoints has to state how a message is delivered, which the contract does not cover; denying it a region does not prevent the change, it forces a fork of the contract instead. Contradicting the contract remains a real hazard and is now stated as guidance the project owns (§6.2.1).
 - **One uniform strictness for every tree.** Would mean either blocking legitimate project agents or letting MOSAIC's own sources off the rules they exist to demonstrate. The strict/lenient split (§9.2) is what lets the recipe be enforced on the recipe without being enforced on its readers.
-- **Requiring every injection in a file to be filled.** Empty is the normal state of a source file and of a fresh deployment (principle 3), and where a section offers alternative child injections the rule would demand contradictory content (§6.3).
+- **Requiring every injection in a file to be filled.** Empty is the normal state of a source file and of a fresh deployment (principle 3), and where a section offers alternative child injections the rule would demand contradictory content (§6.5).
 - **A `function` or `category` frontmatter field.** The folder already states it, and a second copy is undetectably wrong when the two disagree (§3.5).
 - **`agent_class` in agent frontmatter.** Would create a second declaration of a fact the orchestrator's declaration region owns and the executor actually reads (§3.5).
 - **Single-sourcing everything repeated, or deleting every contract echo.** Both pure options were rejected in favour of a per-fragment split. Reasoning in `Development/Analysis/AgentBodyDrift.md` §4.
@@ -773,14 +801,14 @@ Changes this document makes to them:
 - **Reducing §4.6 to `status_message` alone.** Held until v1.3, on the premise that it was the only field varying between agents. It was not: `error_code` varies too, and the contract region can only supply the five-code vocabulary, never this agent's choice from it (§4.6). The premise also reached into migration step 7, where acting on it would have destroyed the choices rather than merely omitted them.
 - **A `[[DEPLOYED:]]` region for the Process list itself.** Every Process list is agent-specific; only its closing steps were shared. Deploying the whole list would have meant no list at all.
 - **"Deployment configuration" as a content source.** Held until v1.4 as the source for `LanguagePatterns` and `CustomConstraints`. It described no mechanism, had no specification behind it, and was never implemented — the `Specified in` column carried an em-dash for both rows, which is this document admitting in its own table that nobody had written the thing down. A source that exists only as a phrase in a table is worse than an acknowledged gap: the closed-set rule forced every harness to satisfy it with empty declarations, so the fiction propagated into four harness files and every deployed agent. §2.5.1 now requires a named, implemented generator.
-- **A per-agent `LanguagePatterns` region in MOSAIC's own sources.** Considered when reclassifying it as an injection in v1.4, on the precedent of `CodebaseContext`, which is declared empty in thirty-seven sources. Rejected: `CodebaseContext` describes a codebase every project has, while language patterns are meaningful only to a project that has settled on a language and wants its agents constrained by it. Declaring it everywhere would ship fifty-odd empty regions and `TODO.md` lines to make one project's case marginally easier. It stays catalogued and undeclared (§6.1).
+- **A per-agent `LanguagePatterns` region in MOSAIC's own sources.** Considered when reclassifying it as an injection in v1.4, on the precedent of `CodebaseContext`, which is declared empty in thirty-seven sources. Rejected: `CodebaseContext` describes a codebase every project has, while language patterns are meaningful only to a project that has settled on a language and wants its agents constrained by it. Declaring it everywhere would ship fifty-odd empty regions and `TODO.md` lines to make one project's case marginally easier. As of v1.5, `LanguagePatterns` is a `[[CUSTOM:]]` region if a project wants it.
 - **A separate `ArtifactProvenance` canonical slot.** Held slot 3 in v1.0. Removed: the stamp is verified by the orchestrator, which makes it hard interop rather than an audit convenience, and a contract with two version numbers in two regions is a contract that can disagree with itself.
 
 ---
 
 ## 15. Open Items
 
-- **Most of §9 is unimplemented, and the implemented part is now wrong in three places.** `docformat/validate.go` checks boundary structure only — no frontmatter conformance, no section content, no bundle comparison. On top of that backlog, three live checks no longer match this document: `unknown-injection` must go entirely (§6.1), `out-of-order-section` must become a subsequence test rather than rejecting unknown top-level names (§2.3), and injection parent placement must drop from error to advice (rule 9b). The three subtractions are the fastest way to stop the validator flagging legitimate work.
+- **Most of §9 is unimplemented, and the implemented part is now wrong in three places.** `docformat/validate.go` checks boundary structure only — no frontmatter conformance, no section content, no bundle comparison. On top of that backlog, three live checks no longer match this document: `unknown-injection` must go entirely (§6.2), `out-of-order-section` must become a subsequence test rather than rejecting unknown top-level names (§2.3), and injection parent placement must drop from error to advice (rule 9b). The three subtractions are the fastest way to stop the validator flagging legitimate work.
 - **Severity and mode are specified but the validator has one of each.** Everything it reports is an error, and it behaves identically on MOSAIC's tree and a user's. §9.1's two axes and §9.2's strict/lenient split both need building, along with routing warnings into `TODO.md` and the deployment summary rather than only to a console.
 - **No review-mechanism rules run.** Rules 15r–18r are specified with `Review` as their mechanism and nothing performs them. The intended vehicle is a validation subagent given them as a checklist; that agent does not exist.
 - **The provenance merge is specified but not executed.** The design layer is done — `CommunicationProtocol.md` v1.10 owns the stamp, and `ArtifactProvenance.md` is a tombstone. What remains is mechanical: forty-two agent files still carry `[[DEPLOYED:ArtifactProvenance]]` and `[[INJECTION:ArtifactProvenanceExtension]]`, and the three vocabulary copies plus the `Tools/Common/testdata/boundary/` fixtures still encode eight-slot ordering. Until that lands, deployed agents do not match §2.3.

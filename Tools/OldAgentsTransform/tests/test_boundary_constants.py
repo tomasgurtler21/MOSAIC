@@ -930,3 +930,235 @@ class TestKnownFrontmatterKeysBundleKeys:
                 f"Bundle key {key!r} is in BUNDLE_FRONTMATTER_KEYS but not in "
                 "KNOWN_FRONTMATTER_KEYS; the union property is violated"
             )
+
+
+# ---------------------------------------------------------------------------
+# BoundaryKind.CUSTOM enum member — vocabulary extension
+# ---------------------------------------------------------------------------
+
+
+class TestBoundaryKindCustomMember:
+    """BoundaryKind must carry a CUSTOM member with string value 'CUSTOM'."""
+
+    def test_custom_member_exists(self) -> None:
+        assert hasattr(BoundaryKind, "CUSTOM"), (
+            "BoundaryKind must have a CUSTOM member — it is not present yet"
+        )
+
+    def test_custom_member_value_is_string_CUSTOM(self) -> None:
+        assert BoundaryKind.CUSTOM.value == "CUSTOM", (
+            "BoundaryKind.CUSTOM.value must be the string 'CUSTOM'"
+        )
+
+    def test_four_members_total(self) -> None:
+        """BoundaryKind must have exactly four members after CUSTOM is added."""
+        assert len(BoundaryKind) == 4, (
+            f"Expected 4 BoundaryKind members (SECTION, INJECTION, DEPLOYED, CUSTOM), "
+            f"got {len(BoundaryKind)}: {list(BoundaryKind)}"
+        )
+
+    def test_existing_three_members_still_present(self) -> None:
+        """SECTION, INJECTION, and DEPLOYED must still exist with their current values."""
+        assert BoundaryKind.SECTION.value == "SECTION"
+        assert BoundaryKind.INJECTION.value == "INJECTION"
+        assert BoundaryKind.DEPLOYED.value == "DEPLOYED"
+
+    def test_custom_is_distinct_from_injection(self) -> None:
+        assert BoundaryKind.CUSTOM != BoundaryKind.INJECTION, (
+            "BoundaryKind.CUSTOM must be a separate member from BoundaryKind.INJECTION"
+        )
+
+    def test_custom_is_distinct_from_deployed(self) -> None:
+        assert BoundaryKind.CUSTOM != BoundaryKind.DEPLOYED, (
+            "BoundaryKind.CUSTOM must be a separate member from BoundaryKind.DEPLOYED"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TAG_PATTERN — CUSTOM kind acceptance
+# ---------------------------------------------------------------------------
+
+
+class TestTagPatternCustomKindAcceptance:
+    """TAG_PATTERN must match CUSTOM open and close tags, including compound and
+    hyphenated names, once the CUSTOM alternative is added to the kind group."""
+
+    def test_simple_custom_open_tag_matches(self) -> None:
+        m = TAG_PATTERN.match("[[CUSTOM:CustomConstraints]]")
+        assert m is not None, (
+            "TAG_PATTERN must match a simple CUSTOM open tag like "
+            "'[[CUSTOM:CustomConstraints]]'"
+        )
+
+    def test_simple_custom_close_tag_matches(self) -> None:
+        m = TAG_PATTERN.match("[[/CUSTOM:CustomConstraints]]")
+        assert m is not None, (
+            "TAG_PATTERN must match a simple CUSTOM close tag like "
+            "'[[/CUSTOM:CustomConstraints]]'"
+        )
+
+    def test_custom_tag_kind_group_is_CUSTOM(self) -> None:
+        m = TAG_PATTERN.match("[[CUSTOM:CustomConstraints]]")
+        assert m is not None, "Must match before checking groups"
+        assert m.group("kind") == "CUSTOM", (
+            "The 'kind' capture group must yield 'CUSTOM' for a custom open tag"
+        )
+
+    def test_custom_tag_name_group_yields_name(self) -> None:
+        m = TAG_PATTERN.match("[[CUSTOM:CustomConstraints]]")
+        assert m is not None, "Must match before checking groups"
+        assert m.group("name") == "CustomConstraints"
+
+    def test_custom_open_tag_close_group_is_empty(self) -> None:
+        m = TAG_PATTERN.match("[[CUSTOM:CustomConstraints]]")
+        assert m is not None, "Must match before checking groups"
+        assert m.group("close") == "", (
+            "Close group must be empty string for an open tag"
+        )
+
+    def test_custom_close_tag_close_group_is_slash(self) -> None:
+        m = TAG_PATTERN.match("[[/CUSTOM:CustomConstraints]]")
+        assert m is not None, "Must match before checking groups"
+        assert m.group("close") == "/", (
+            "Close group must be '/' for a close tag"
+        )
+
+    def test_compound_custom_name_with_colon_matches(self) -> None:
+        m = TAG_PATTERN.match("[[CUSTOM:Project:my-feature]]")
+        assert m is not None, (
+            "TAG_PATTERN must match a compound CUSTOM name like "
+            "'[[CUSTOM:Project:my-feature]]'"
+        )
+
+    def test_compound_custom_name_yields_full_name_group(self) -> None:
+        m = TAG_PATTERN.match("[[CUSTOM:Project:my-feature]]")
+        assert m is not None, "Must match before checking groups"
+        assert m.group("name") == "Project:my-feature", (
+            "The 'name' capture group must yield the full compound string "
+            "including the internal colon"
+        )
+
+    def test_hyphenated_custom_name_matches(self) -> None:
+        m = TAG_PATTERN.match("[[CUSTOM:My-component]]")
+        assert m is not None, (
+            "TAG_PATTERN must match a CUSTOM tag whose name contains a hyphen"
+        )
+
+    def test_compound_custom_close_tag_matches(self) -> None:
+        m = TAG_PATTERN.match("[[/CUSTOM:Project:my-feature]]")
+        assert m is not None, (
+            "TAG_PATTERN must match a compound CUSTOM close tag"
+        )
+
+    def test_compound_custom_close_tag_kind_group(self) -> None:
+        m = TAG_PATTERN.match("[[/CUSTOM:Project:my-feature]]")
+        assert m is not None, "Must match before checking groups"
+        assert m.group("kind") == "CUSTOM"
+
+    def test_existing_kinds_still_match_after_custom_added(self) -> None:
+        """Adding CUSTOM to the alternation must not break existing kind acceptance."""
+        assert TAG_PATTERN.match("[[SECTION:Identity]]") is not None
+        assert TAG_PATTERN.match("[[INJECTION:IdentityExtension]]") is not None
+        assert TAG_PATTERN.match("[[DEPLOYED:CommunicationProtocol]]") is not None
+
+
+class TestTagPatternCustomKindRejection:
+    """TAG_PATTERN must still reject malformed CUSTOM tags after the CUSTOM
+    alternative is added to the kind group."""
+
+    def test_custom_empty_name_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[CUSTOM:]]") is None, (
+            "An empty CUSTOM name must not match TAG_PATTERN"
+        )
+
+    def test_custom_name_starting_with_digit_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[CUSTOM:1invalid]]") is None, (
+            "A CUSTOM name starting with a digit must not match TAG_PATTERN"
+        )
+
+    def test_custom_name_starting_with_hyphen_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[CUSTOM:-bad]]") is None, (
+            "A CUSTOM name starting with a hyphen must not match TAG_PATTERN"
+        )
+
+    def test_custom_trailing_colon_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[CUSTOM:trailing:]]") is None, (
+            "A CUSTOM name with a trailing colon (empty segment after it) "
+            "must not match TAG_PATTERN"
+        )
+
+    def test_custom_qualifier_starting_with_digit_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[CUSTOM:Valid:1bad]]") is None, (
+            "A compound CUSTOM qualifier starting with a digit must not match TAG_PATTERN"
+        )
+
+    def test_custom_qualifier_starting_with_hyphen_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[CUSTOM:Valid:-bad]]") is None, (
+            "A compound CUSTOM qualifier starting with a hyphen must not match TAG_PATTERN"
+        )
+
+    def test_existing_malformed_rejections_still_hold(self) -> None:
+        """Adding CUSTOM must not break existing rejection rules for other kinds."""
+        assert TAG_PATTERN.match("[[SECTION:]]") is None
+        assert TAG_PATTERN.match("[[INJECTION:1bad]]") is None
+        assert TAG_PATTERN.match("[[DEPLOYED:-bad]]") is None
+        assert TAG_PATTERN.match("[[SECTION:trailing:]]") is None
+
+
+# ---------------------------------------------------------------------------
+# Tag helpers — CUSTOM kind
+# ---------------------------------------------------------------------------
+
+
+class TestTagHelperCustomKind:
+    """open_tag and close_tag must render [[CUSTOM:Name]] / [[/CUSTOM:Name]] tags
+    once BoundaryKind.CUSTOM exists — they are already generic over BoundaryKind
+    and need no code change beyond the enum gaining the member."""
+
+    def test_open_tag_custom_simple_name(self) -> None:
+        result = boundary_constants.open_tag(BoundaryKind.CUSTOM, "CustomConstraints")
+        assert result == "[[CUSTOM:CustomConstraints]]", (
+            f"open_tag(BoundaryKind.CUSTOM, 'CustomConstraints') must return "
+            f"'[[CUSTOM:CustomConstraints]]', got {result!r}"
+        )
+
+    def test_close_tag_custom_simple_name(self) -> None:
+        result = boundary_constants.close_tag(BoundaryKind.CUSTOM, "CustomConstraints")
+        assert result == "[[/CUSTOM:CustomConstraints]]", (
+            f"close_tag(BoundaryKind.CUSTOM, 'CustomConstraints') must return "
+            f"'[[/CUSTOM:CustomConstraints]]', got {result!r}"
+        )
+
+    def test_open_tag_custom_compound_name(self) -> None:
+        result = boundary_constants.open_tag(BoundaryKind.CUSTOM, "Project:my-feature")
+        assert result == "[[CUSTOM:Project:my-feature]]"
+
+    def test_close_tag_custom_compound_name(self) -> None:
+        result = boundary_constants.close_tag(BoundaryKind.CUSTOM, "Project:my-feature")
+        assert result == "[[/CUSTOM:Project:my-feature]]"
+
+    def test_open_tag_custom_result_matches_tag_pattern(self) -> None:
+        """open_tag(CUSTOM, ...) output must round-trip through TAG_PATTERN once
+        CUSTOM is added to the kind alternation."""
+        result = boundary_constants.open_tag(BoundaryKind.CUSTOM, "CustomConstraints")
+        m = TAG_PATTERN.match(result)
+        assert m is not None, (
+            "The result of open_tag(BoundaryKind.CUSTOM, 'CustomConstraints') must "
+            "match TAG_PATTERN once CUSTOM is in the alternation"
+        )
+        assert m.group("kind") == "CUSTOM"
+        assert m.group("close") == ""
+        assert m.group("name") == "CustomConstraints"
+
+    def test_close_tag_custom_result_matches_tag_pattern(self) -> None:
+        """close_tag(CUSTOM, ...) output must round-trip through TAG_PATTERN once
+        CUSTOM is added to the kind alternation."""
+        result = boundary_constants.close_tag(BoundaryKind.CUSTOM, "CustomConstraints")
+        m = TAG_PATTERN.match(result)
+        assert m is not None, (
+            "The result of close_tag(BoundaryKind.CUSTOM, 'CustomConstraints') must "
+            "match TAG_PATTERN once CUSTOM is in the alternation"
+        )
+        assert m.group("kind") == "CUSTOM"
+        assert m.group("close") == "/"
+        assert m.group("name") == "CustomConstraints"

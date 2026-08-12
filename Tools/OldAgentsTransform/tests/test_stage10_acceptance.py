@@ -502,8 +502,8 @@ class TestOrderingConstraints:
                 if "[[DEPLOYED:ProtocolConstraints]]" in lines else None
             hc_idx = lines.index("[[DEPLOYED:HarnessConstraints]]") \
                 if "[[DEPLOYED:HarnessConstraints]]" in lines else None
-            cc_idx = lines.index("[[INJECTION:CustomConstraints]]") \
-                if "[[INJECTION:CustomConstraints]]" in lines else None
+            cc_idx = lines.index("[[CUSTOM:CustomConstraints]]") \
+                if "[[CUSTOM:CustomConstraints]]" in lines else None
 
             if pc_idx is not None and hc_idx is not None:
                 checked_any = True

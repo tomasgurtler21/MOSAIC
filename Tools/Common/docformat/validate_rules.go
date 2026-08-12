@@ -1,6 +1,7 @@
 package docformat
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -34,10 +35,17 @@ func validateDocumentRules(d *Document, opts ValidateOptions) []Issue {
 		issues = append(issues, checkConductRegions(body, opts.Role)...)
 	}
 
-	// Rule 12: In a source file, every [[DEPLOYED:]] region must be empty.
-	// Skipped when Kind is DocumentUnknown or DocumentDeployed.
+	// Rule 12: In a source file, every [[DEPLOYED:]] region must be empty (or hold only
+	// empty nested user-owned markers). Skipped when Kind is DocumentUnknown or DocumentDeployed.
 	if opts.Kind == DocumentSource {
 		issues = append(issues, checkSourceDeployedRegions(body)...)
+	}
+
+	// Custom-region-in-source: a [[CUSTOM:]] region in a source document is an error.
+	// Custom regions are project-owned content that exists only in deployed files.
+	// Skipped when Kind is DocumentUnknown or DocumentDeployed.
+	if opts.Kind == DocumentSource {
+		issues = append(issues, checkCustomRegionInSource(body)...)
 	}
 
 	// Rule 15: Identity section must have the required shape.
@@ -230,12 +238,58 @@ func checkConductRegions(body *Body, role string) []Issue {
 // Rule 12: Source deployed regions must be empty
 // ---------------------------------------------------------------------------
 
+// SourceDeployedRegionIsEmpty reports whether a [[DEPLOYED:]] region satisfies the
+// source-file emptiness requirement.
+//
+// A region is empty when its content, after removing every nested [[INJECTION:]] or
+// [[CUSTOM:]] node that is itself whitespace-only (removing the node's tags along with
+// its content), is whitespace-only.
+//
+// A nested user-owned region carrying non-whitespace content makes the parent non-empty.
+// Any other non-whitespace content makes the parent non-empty.
+func SourceDeployedRegionIsEmpty(n *Node) bool {
+	for _, item := range n.items {
+		switch v := item.(type) {
+		case *Node:
+			// An empty (whitespace-only) user-owned nested region does not count as content
+			// and is skipped. Any other node kind, or a non-empty user-owned region, makes
+			// the parent non-empty.
+			if (v.kind == NodeInjection || v.kind == NodeCustom) && v.IsEmpty() {
+				continue
+			}
+			return false
+		case *textSpan:
+			if len(bytes.TrimSpace(v.raw)) > 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// checkCustomRegionInSource reports a "custom-region-in-source" error for every
+// [[CUSTOM:]] region found in a source document. Custom regions are project-owned
+// content that exists only in deployed files.
+func checkCustomRegionInSource(body *Body) []Issue {
+	var issues []Issue
+	for _, node := range body.CustomRegions() {
+		issues = append(issues, Issue{
+			Severity: SeverityError,
+			Code:     "custom-region-in-source",
+			Message:  fmt.Sprintf("source file declares [[CUSTOM:%s]]; custom regions exist only in deployed files", node.Name()),
+			Node:     node.Name(),
+		})
+	}
+	return issues
+}
+
 // checkSourceDeployedRegions reports a "populated-source-region" error for every
-// [[DEPLOYED:]] region in a source file that contains non-whitespace content.
+// [[DEPLOYED:]] region in a source file that contains non-whitespace content beyond
+// empty nested user-owned markers.
 func checkSourceDeployedRegions(body *Body) []Issue {
 	var issues []Issue
 	for _, node := range body.DeployedRegions() {
-		if !node.IsEmpty() {
+		if !SourceDeployedRegionIsEmpty(node) {
 			issues = append(issues, Issue{
 				Severity: SeverityError,
 				Code:     "populated-source-region",

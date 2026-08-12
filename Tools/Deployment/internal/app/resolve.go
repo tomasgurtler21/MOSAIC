@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/pathinput"
@@ -747,9 +748,15 @@ func (s *service) buildContent(
 			Role:                 agent.Role,
 			Protocol:             protocol,
 			Bundle:               bundle,
+			Timestamp:            s.now().UTC().Format(time.RFC3339),
 		})
 		if err != nil {
 			return nil, err
+		}
+		// Forward any gaps produced by the transform (e.g. parking events) to the
+		// todo collector so they appear in the TODO report for the user to act on.
+		for _, g := range res.Report.Gaps {
+			s.deps.Todo.AddGap(g)
 		}
 		return res.Output, nil
 	}

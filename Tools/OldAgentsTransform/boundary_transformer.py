@@ -835,18 +835,20 @@ def _transform_generic_body(lines: list[str], strict_identity: bool = True) -> d
                     marker_kind = injection_match["kind"]
 
                     # Deliberate, name-scoped rule: the legacy custom_constraints
-                    # marker is preserved as [[INJECTION:CustomConstraints]] only
+                    # marker is preserved as [[CUSTOM:CustomConstraints]] only
                     # when content immediately follows it; an empty marker is
                     # dropped entirely (no open or close tag emitted). Every other
                     # old marker keeps the unconditional empty-pair behaviour below.
+                    # CustomConstraints is project-invented content, so it uses the
+                    # CUSTOM kind rather than INJECTION.
                     if injection_name == "CustomConstraints":
                         content_lines, next_j = _collect_custom_constraints_content(
                             lines, j + 1, section_end
                         )
                         if content_lines:
-                            result_lines.append(f"{open_tag(marker_kind, injection_name)}\n")
+                            result_lines.append(f"{open_tag(BoundaryKind.CUSTOM, injection_name)}\n")
                             result_lines.extend(content_lines)
-                            result_lines.append(f"{close_tag(marker_kind, injection_name)}\n")
+                            result_lines.append(f"{close_tag(BoundaryKind.CUSTOM, injection_name)}\n")
                             injections_added.append(injection_name)
                         j = next_j
                         continue
@@ -1758,6 +1760,11 @@ def _merge_section(harness_section: list[str], generic_section: list[str]) -> tu
                     _append_line(c)
                 if out and not out[-1].strip():
                     collapse_next_blank = True
+            elif name == "CustomConstraints":
+                # Populated CustomConstraints: project-invented content uses the
+                # CUSTOM kind rather than INJECTION.
+                _emit_injection(name, content, out, kind=BoundaryKind.CUSTOM)
+                injections.append(name)
             else:
                 _emit_injection(name, content, out, kind=marker_kind)
                 injections.append(name)

@@ -22,9 +22,15 @@ type bodyItem interface {
 	// visitDeployed calls fn on every NodeDeployed reachable from this item, in
 	// document order. It is a no-op for text spans.
 	visitDeployed(fn func(*Node))
-	// visitRegions calls fn on every NodeInjection or NodeDeployed reachable from this
-	// item, in document order. It is a no-op for text spans.
+	// visitCustom calls fn on every NodeCustom reachable from this item, in
+	// document order. It is a no-op for text spans.
+	visitCustom(fn func(*Node))
+	// visitRegions calls fn on every NodeInjection, NodeDeployed, or NodeCustom
+	// reachable from this item, in document order. It is a no-op for text spans.
 	visitRegions(fn func(*Node))
+	// visitUserRegions calls fn on every NodeInjection or NodeCustom reachable from
+	// this item, in document order. It is a no-op for text spans.
+	visitUserRegions(fn func(*Node))
 }
 
 // textSpan holds a contiguous run of body bytes that contains no recognised boundary tags.
@@ -32,11 +38,13 @@ type textSpan struct {
 	raw []byte
 }
 
-func (s *textSpan) bodyBytes() []byte              { return s.raw }
-func (s *textSpan) visitInjections(_ func(*Node)) {}
-func (s *textSpan) visitSections(_ func(*Node))   {}
-func (s *textSpan) visitDeployed(_ func(*Node))   {}
-func (s *textSpan) visitRegions(_ func(*Node))    {}
+func (s *textSpan) bodyBytes() []byte               { return s.raw }
+func (s *textSpan) visitInjections(_ func(*Node))  {}
+func (s *textSpan) visitSections(_ func(*Node))    {}
+func (s *textSpan) visitDeployed(_ func(*Node))    {}
+func (s *textSpan) visitCustom(_ func(*Node))      {}
+func (s *textSpan) visitRegions(_ func(*Node))     {}
+func (s *textSpan) visitUserRegions(_ func(*Node)) {}
 
 // ---------------------------------------------------------------------------
 // Node — bodyItem implementation
@@ -83,14 +91,35 @@ func (n *Node) visitDeployed(fn func(*Node)) {
 	}
 }
 
-// visitRegions calls fn on this node (if it is an injection or deployed region) then
-// recurses into items.
+// visitCustom calls fn on this node (if it is a custom region) then recurses into items.
+func (n *Node) visitCustom(fn func(*Node)) {
+	if n.kind == NodeCustom {
+		fn(n)
+	}
+	for _, item := range n.items {
+		item.visitCustom(fn)
+	}
+}
+
+// visitRegions calls fn on this node (if it is an injection, deployed, or custom region)
+// then recurses into items.
 func (n *Node) visitRegions(fn func(*Node)) {
-	if n.kind == NodeInjection || n.kind == NodeDeployed {
+	if n.kind == NodeInjection || n.kind == NodeDeployed || n.kind == NodeCustom {
 		fn(n)
 	}
 	for _, item := range n.items {
 		item.visitRegions(fn)
+	}
+}
+
+// visitUserRegions calls fn on this node (if it is an injection or custom region) then
+// recurses into items.
+func (n *Node) visitUserRegions(fn func(*Node)) {
+	if n.kind == NodeInjection || n.kind == NodeCustom {
+		fn(n)
+	}
+	for _, item := range n.items {
+		item.visitUserRegions(fn)
 	}
 }
 
@@ -157,6 +186,20 @@ func parseBoundaryTag(line []byte) (kind NodeKind, isClose bool, name string, ma
 			return "", false, "", false
 		}
 		return NodeDeployed, true, n, true
+
+	case strings.HasPrefix(inner, "CUSTOM:"):
+		n := inner[7:]
+		if n == "" {
+			return "", false, "", false
+		}
+		return NodeCustom, false, n, true
+
+	case strings.HasPrefix(inner, "/CUSTOM:"):
+		n := inner[8:]
+		if n == "" {
+			return "", false, "", false
+		}
+		return NodeCustom, true, n, true
 	}
 
 	return "", false, "", false
@@ -244,12 +287,25 @@ func parseBodyItems(raw []byte) []bodyItem {
 // Body methods
 // ---------------------------------------------------------------------------
 
+// setBodyOnItems sets the body pointer on every Node reachable from items, recursively.
+// This is called after parseBodyItems so that every node knows which body it belongs to,
+// enabling AppendRegion to check for document-wide name uniqueness.
+func setBodyOnItems(items []bodyItem, b *Body) {
+	for _, item := range items {
+		if n, ok := item.(*Node); ok {
+			n.body = b
+			setBodyOnItems(n.items, b)
+		}
+	}
+}
+
 // ensureParsed triggers parsing of the raw body bytes on the first call.
 func (b *Body) ensureParsed() {
 	if b.parsed {
 		return
 	}
 	b.items = parseBodyItems(b.raw)
+	setBodyOnItems(b.items, b)
 	b.parsed = true
 }
 
@@ -352,6 +408,19 @@ func (b *Body) Sections() []*Node {
 	return sections
 }
 
+// TopLevelNodes returns all direct child nodes of the body in document order,
+// regardless of kind. Text spans between nodes are not included.
+func (b *Body) TopLevelNodes() []*Node {
+	b.ensureParsed()
+	var nodes []*Node
+	for _, item := range b.items {
+		if n, ok := item.(*Node); ok {
+			nodes = append(nodes, n)
+		}
+	}
+	return nodes
+}
+
 // SectionsDeep returns all section nodes at any nesting depth, in document order.
 // Analogous to the existing Injections() method which already enumerates depth-first.
 func (b *Body) SectionsDeep() []*Node {
@@ -419,8 +488,8 @@ func (b *Body) DeployedRegions() []*Node {
 	return deployed
 }
 
-// Regions returns every injection and deployed region at any nesting depth, interleaved
-// in document order.
+// Regions returns every injection, deployed, and custom region at any nesting depth,
+// interleaved in document order.
 func (b *Body) Regions() []*Node {
 	b.ensureParsed()
 	var regions []*Node
@@ -430,6 +499,61 @@ func (b *Body) Regions() []*Node {
 		})
 	}
 	return regions
+}
+
+// CustomRegions returns every [[CUSTOM:]] region at any nesting depth, in document order.
+func (b *Body) CustomRegions() []*Node {
+	b.ensureParsed()
+	var customs []*Node
+	for _, item := range b.items {
+		item.visitCustom(func(n *Node) {
+			customs = append(customs, n)
+		})
+	}
+	return customs
+}
+
+// Custom returns the first [[CUSTOM:]] region with the given name at any nesting depth.
+// The name is matched case-sensitively.
+func (b *Body) Custom(name string) (*Node, bool) {
+	b.ensureParsed()
+	for _, item := range b.items {
+		if n, ok := item.(*Node); ok {
+			if result := findCustom(n, name); result != nil {
+				return result, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// findCustom performs a depth-first search for a custom region named name within the
+// subtree rooted at n.
+func findCustom(n *Node, name string) *Node {
+	if n.kind == NodeCustom && n.name == name {
+		return n
+	}
+	for _, item := range n.items {
+		if child, ok := item.(*Node); ok {
+			if result := findCustom(child, name); result != nil {
+				return result
+			}
+		}
+	}
+	return nil
+}
+
+// UserRegions returns every [[INJECTION:]] and [[CUSTOM:]] region at any nesting depth,
+// interleaved in document order.
+func (b *Body) UserRegions() []*Node {
+	b.ensureParsed()
+	var userRegions []*Node
+	for _, item := range b.items {
+		item.visitUserRegions(func(n *Node) {
+			userRegions = append(userRegions, n)
+		})
+	}
+	return userRegions
 }
 
 // ---------------------------------------------------------------------------
@@ -476,6 +600,11 @@ func (n *Node) SetContent(b []byte) error {
 		if child, ok := item.(*Node); ok {
 			child.parent = n
 		}
+	}
+	// Propagate the body pointer so any new nested nodes can participate in
+	// document-wide name checks (e.g. AppendRegion's duplicate detection).
+	if n.body != nil {
+		setBodyOnItems(newItems, n.body)
 	}
 	n.items = newItems
 	return nil

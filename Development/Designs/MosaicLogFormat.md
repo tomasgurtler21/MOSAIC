@@ -258,17 +258,22 @@ OrchestrationLogs/
 │       └── 04_session.meta.json              # sidecar for the above
 ├── {run_id}/...                              # sibling runs, never colliding
 └── unknown-run/                              # degradation bucket: events whose run_id could not be extracted (§4.2)
+    ├── 00_orchestrator_session__{harness}__{session_id}.raw       # session-scoped transcript (§4.4 exception)
+    ├── 00_orchestrator_session__{harness}__{session_id}.meta.json # adjacent sidecar
+    ├── 00_orchestrator_events.jsonl                               # append-only; unchanged name
     └── {agent_instance_id}/                  # same internal structure as a real run folder
         └── ...
 ```
 
 `{agent_instance_id}` folder names are sanitized for filesystem safety (`<>:"/\|?*` replaced with underscores). Numbering (`00_`, `01_`, …) exists purely for human browsability when sorted in a file explorer and carries no machine meaning. `unknown-run/` follows the same internal structure as a real run folder — per-invocation `{agent_instance_id}/` subdirectories with the same file set — so tooling that processes `{run_id}/` directories can process `unknown-run/` with the same code path.
 
+**Transcript naming inside the bucket (§4.4 exception).** In real run folders, the orchestrator transcript is always `00_orchestrator_session.raw`. Inside `unknown-run/` the name includes a scope segment — `{harness}` and `{session_id}`, each sanitized and with dots replaced by underscores, joined by `__` — so two unrelated sessions or harnesses writing into the shared bucket never target the same file. The scope segment is formed as `sanitize(harness)__sanitize(session_id)` with all dots additionally replaced by underscores (to keep sidecar derivation via suffix replacement correct regardless of dots in the session identifier). When no session id is available the name falls back to the unscoped `00_orchestrator_session.raw`. This exception applies only to the transcript and its sidecar; `00_orchestrator_events.jsonl` keeps its fixed name because it is append-only and no data is lost by interleaving.
+
 ### 4.4 Orchestrator-level transcript and events
 
 Two run-root files carry the orchestrator's own record, distinct in purpose:
 
-- **`00_orchestrator_session.raw`** (+ `.meta.json` sidecar) is the raw transcript export — the verification path, per §4.5's raw-export policy. It's refreshed on subagent lifecycle events so it stays current, which is the one deliberate exception to "no file written by more than one in-flight invocation": concurrent hook processes from parallel subagent spawns may refresh it near-simultaneously. Writes are an **atomic replace**: write to a temp file, then rename over the target. Under contention this can only lose a refresh, which the next subagent event restores, and can never leave a torn or half-written file.
+- **`00_orchestrator_session.raw`** (+ `.meta.json` sidecar) is the raw transcript export — the verification path, per §4.5's raw-export policy. It's refreshed on subagent lifecycle events so it stays current, which is the one deliberate exception to "no file written by more than one in-flight invocation": concurrent hook processes from parallel subagent spawns may refresh it near-simultaneously. Writes are an **atomic replace**: write to a temp file, then rename over the target. Under contention this can only lose a refresh, which the next subagent event restores, and can never leave a torn or half-written file. **Inside `unknown-run/` this file's name is session-scoped** (see §4.3) so two unrelated sessions can never overwrite each other's transcript. In a real run folder the name is always the fixed `00_orchestrator_session.raw`.
 - **`00_orchestrator_events.jsonl`** is the canonical, typed event stream for everything scoped to the orchestrator rather than to any one invocation: `run_start`/`run_end`, `session_start`/`session_end`, and the orchestrator's own `turn`/`tool_call_start`/`tool_call_end`/`notification`/`compaction` events (§3.5, §4.1). Unlike the transcript above, this file is append-only, matching the discipline of the per-invocation `03_events.jsonl` files — there's no equivalent overwrite risk here since the orchestrator is the file's sole writer.
 
 ### 4.5 Human-readable and verification artifacts

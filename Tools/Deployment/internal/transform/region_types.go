@@ -36,14 +36,28 @@ const (
 	// RegionBundleFilled means a bundle-sourced region was filled with its role-matched
 	// block content, verbatim.
 	RegionBundleFilled RegionAction = "filled-from-bundle"
+
+	// RegionCustomPreserved means a [[CUSTOM:]] region found in the deployed file was
+	// carried into the output at its anchored position. The content is byte-identical to
+	// the deployed file; no content is regenerated or reformatted.
+	RegionCustomPreserved RegionAction = "preserved-custom"
+
+	// RegionParked means a [[CUSTOM:]] region could not be anchored in the output after
+	// a schema reorder and was appended at the end of the file with content intact. The
+	// user must move it to the correct section.
+	RegionParked RegionAction = "parked-at-end-of-file"
+
+	// RegionMigrated means content stored in the deployed file under a renamed injection's
+	// old name was carried into the region under its new name.
+	RegionMigrated RegionAction = "migrated-from-renamed"
 )
 
 // RegionOutcome records what happened to one managed region in the document body.
-// It covers both [[INJECTION:]] (user-owned) and [[DEPLOYED:]] (tool-managed) regions,
-// with the Marker field distinguishing them.
+// It covers [[INJECTION:]] (user-owned), [[DEPLOYED:]] (tool-managed), and [[CUSTOM:]]
+// (project-invented, deployed-file only) regions, with the Marker field distinguishing them.
 type RegionOutcome struct {
 	Name   string
-	Marker docformat.NodeKind // NodeInjection (user-owned) or NodeDeployed (tool-managed)
+	Marker docformat.NodeKind // NodeInjection (user-owned), NodeDeployed (tool-managed), or NodeCustom (project-invented)
 	Class  domain.InjectionClass
 	Action RegionAction
 	Bytes  int // byte length of the content placed in the region
@@ -74,6 +88,15 @@ var ErrBundleBlockMissingForRole = errors.New("no bundle block for region and ro
 // source file. Source regions are empty by definition; content there is either a hand-edit
 // about to be discarded or a deployed file mistakenly committed as source.
 var ErrSourceDeployedRegionNotEmpty = errors.New("source file carries a populated deployed region")
+
+// ErrRegionNameCollision reports a name that is claimed by two user-owned regions at once:
+// either the same name appears twice as [[CUSTOM:]] in the deployed file, or the same name
+// appears as [[CUSTOM:]] in the deployed file and [[INJECTION:]] in the source. Preserving
+// both would break the unique-name-per-file invariant; preserving one would silently lose
+// the other's content. The transform never guesses which copy to keep.
+//
+// The error message names the colliding name and where each occurrence lives.
+var ErrRegionNameCollision = errors.New("region name claimed by two user-owned regions")
 
 // ProtocolVersionComment renders the version marker line written as the first line of the
 // deployed protocol region: "<!-- protocol-version: 1.9 -->\n".

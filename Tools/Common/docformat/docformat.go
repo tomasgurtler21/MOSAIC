@@ -339,7 +339,14 @@ const (
 	NodeSection   NodeKind = "section"
 	NodeInjection NodeKind = "injection"
 	NodeDeployed  NodeKind = "deployed" // tool-managed region
+	NodeCustom    NodeKind = "custom"   // project-invented, deployed-file only
 )
+
+// UserOwned reports whether a node kind carries content the project owns and the tool
+// must never discard: NodeInjection and NodeCustom.
+func (k NodeKind) UserOwned() bool {
+	return k == NodeInjection || k == NodeCustom
+}
 
 // Node is a section or injection block in the document body. The content between the
 // boundary tags is stored as a list of child items (text spans and nested nodes) so that
@@ -351,6 +358,7 @@ type Node struct {
 	items    []bodyItem // content items between the open and close tags
 	closeTag []byte     // raw bytes of the closing tag line; empty when the tag is unclosed
 	parent   *Node      // nil when the node is at the top level of the body
+	body     *Body      // the body that owns this node; set by ensureParsed and AppendRegion
 }
 
 // ---------------------------------------------------------------------------

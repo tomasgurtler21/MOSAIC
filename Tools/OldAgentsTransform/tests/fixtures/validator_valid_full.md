@@ -56,9 +56,9 @@ Codebase context content injected here.
 - Stay within scope
 - Do not modify fixtures
 
-[[INJECTION:CustomConstraints]]
+[[CUSTOM:CustomConstraints]]
 Custom constraint content injected here.
-[[/INJECTION:CustomConstraints]]
+[[/CUSTOM:CustomConstraints]]
 
 [[/SECTION:Constraints]]
 ---

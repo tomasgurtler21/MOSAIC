@@ -69,6 +69,14 @@ func ExpectedMarker(name string) (kind NodeKind, known bool) {
 //   - Any name under NodeInjection that is not tool-managed returns InjectionProject and a
 //     nil error. Unknown injection names are preserved, never rejected.
 func ClassifyRegion(kind NodeKind, name string) (mosaic.InjectionClass, error) {
+	// NodeCustom: always project class for every name. The custom name set is fully open;
+	// a name that also appears in CanonicalDeployed is still project class, because a custom
+	// region can never be tool-managed. This branch must be evaluated before isCanonicalDeployed
+	// so that a canonical deployed name under [[CUSTOM:]] never triggers ErrMarkerMismatch.
+	if kind == NodeCustom {
+		return mosaic.InjectionProject, nil
+	}
+
 	isDeployed := isCanonicalDeployed(name)
 
 	if kind == NodeDeployed {

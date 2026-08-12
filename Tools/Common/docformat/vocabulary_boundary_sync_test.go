@@ -501,3 +501,165 @@ func TestVocabulary_InjectionParent_CustomConstraints_IsAbsent(t *testing.T) {
 			"not re-catalogued as an advisory injection name")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// T9.2 — Custom-marker parity assertions (Go side of the cross-implementation table)
+//
+// Both the Go implementation (mosaic-common/docformat) and the Python implementation
+// (Tools/OldAgentsTransform/boundary_constants.py) must satisfy the same four-marker
+// parity table. This section pins the Go side; dedicated Python tests pin the Python side.
+// Neither implementation's coverage stands in for the other's.
+// ---------------------------------------------------------------------------
+
+func TestParity_FourNodeKinds_AllDistinct(t *testing.T) {
+	// The marker vocabulary has exactly four distinct kinds: SECTION, INJECTION,
+	// DEPLOYED, CUSTOM. Any two of the four must be unequal.
+	// This matches the Python requirement that BoundaryKind has exactly four members.
+	kinds := []docformat.NodeKind{
+		docformat.NodeSection,
+		docformat.NodeInjection,
+		docformat.NodeDeployed,
+		docformat.NodeCustom,
+	}
+	for i := 0; i < len(kinds); i++ {
+		for j := i + 1; j < len(kinds); j++ {
+			if kinds[i] == kinds[j] {
+				t.Errorf("NodeKind values are not distinct: kinds[%d]=%q == kinds[%d]=%q",
+					i, kinds[i], j, kinds[j])
+			}
+		}
+	}
+}
+
+func TestParity_NodeCustom_StringValue_IsCustomLowercase(t *testing.T) {
+	// Go NodeCustom uses the string "custom". Python BoundaryKind.CUSTOM uses "CUSTOM".
+	// The case difference is intentional (Go uses lowercase, Python uses uppercase enum values).
+	// This test pins the Go value so both can be verified independently.
+	if string(docformat.NodeCustom) != "custom" {
+		t.Errorf("NodeCustom string value: want %q, got %q", "custom", string(docformat.NodeCustom))
+	}
+}
+
+func TestParity_UserOwned_MatchesPythonProjectOwnerKinds(t *testing.T) {
+	// The parity table says "content owner = project" for NodeInjection and NodeCustom,
+	// and "content owner = tool" or "structure" for NodeDeployed and NodeSection.
+	// Go's UserOwned() predicate must reflect this exactly.
+	wantTrue := []docformat.NodeKind{docformat.NodeInjection, docformat.NodeCustom}
+	for _, k := range wantTrue {
+		if !k.UserOwned() {
+			t.Errorf("NodeKind(%q).UserOwned() must return true — parity table: content owner = project", k)
+		}
+	}
+
+	wantFalse := []docformat.NodeKind{docformat.NodeDeployed, docformat.NodeSection}
+	for _, k := range wantFalse {
+		if k.UserOwned() {
+			t.Errorf("NodeKind(%q).UserOwned() must return false — parity table: content owner is not project", k)
+		}
+	}
+}
+
+func TestParity_CustomNameSet_IsOpen_NoErrorForAnyName(t *testing.T) {
+	// Parity table: CUSTOM name set = open; unknown name is NOT an error.
+	// This matches Python BoundaryKind.CUSTOM where the validator's canonical-name check
+	// (E004-class) is not applied and any name is accepted.
+	openNames := []string{
+		"ProjectNotes",
+		"CustomConstraints",
+		"ArbitraryProjectFeature",
+		"Workflow:quick-fix",
+		"any-hyphenated-name",
+		// Even names in CanonicalDeployed must not error under NodeCustom:
+		"CommunicationProtocol",
+		"HarnessConstraints",
+		"AuthorityHierarchy",
+	}
+	for _, name := range openNames {
+		_, err := docformat.ClassifyRegion(docformat.NodeCustom, name)
+		if err != nil {
+			t.Errorf("ClassifyRegion(NodeCustom, %q): must not return an error — "+
+				"parity table: CUSTOM name set is open, unknown names are never errors, got: %v",
+				name, err)
+		}
+	}
+}
+
+func TestParity_CustomClassification_AlwaysProject(t *testing.T) {
+	// Parity table: CUSTOM classification = project, always.
+	// A custom region is project-invented content; MOSAIC never claims tool ownership of it.
+	// This is the Go-side assertion; the Python side has no equivalent classify call but the
+	// same concept applies through the validator's canonical-name check being skipped for CUSTOM.
+	names := []string{
+		"ProjectNotes",
+		"CustomConstraints",
+		"CommunicationProtocol", // canonical deployed name — still project under CUSTOM
+		"HarnessConstraints",
+	}
+	for _, name := range names {
+		class, err := docformat.ClassifyRegion(docformat.NodeCustom, name)
+		if err != nil {
+			t.Errorf("ClassifyRegion(NodeCustom, %q): unexpected error: %v", name, err)
+			continue
+		}
+		if class != domain.InjectionProject {
+			t.Errorf("ClassifyRegion(NodeCustom, %q): want InjectionProject, got %q — "+
+				"parity table: CUSTOM classification is always project", name, class)
+		}
+	}
+}
+
+func TestParity_InjectionDeployedNameSetRules_Unchanged(t *testing.T) {
+	// Cross-check: INJECTION name set remains open (no error for unknown names) and
+	// DEPLOYED name set remains closed (error for unknown names). These were the rules
+	// before CUSTOM was added; adding CUSTOM must not alter them.
+	_, injErr := docformat.ClassifyRegion(docformat.NodeInjection, "CompletelyUnknownInjectionName")
+	if injErr != nil {
+		t.Errorf("ClassifyRegion(NodeInjection, unknownName): must not error — injection name set is open, got: %v", injErr)
+	}
+
+	_, depErr := docformat.ClassifyRegion(docformat.NodeDeployed, "CompletelyUnknownDeployedName")
+	if depErr == nil {
+		t.Error("ClassifyRegion(NodeDeployed, unknownName): must return an error — deployed name set is closed")
+	}
+}
+
+func TestParity_ValidateRejectsCustomRegionInSourceFile(t *testing.T) {
+	// Parity table: legal in a source file = NO for CUSTOM.
+	// The validator must emit a "custom-region-in-source" error for [[CUSTOM:]] in a source document.
+	// This is the Go-side parity assertion; the Python validator does not distinguish source/deployed
+	// documents in the same way, but the property is verified at the Go docformat layer.
+	//
+	// Fixture: validate_custom_test.go exercises this in depth; this test pins the rule for
+	// the parity table rather than repeating the full validate_custom_test.go coverage.
+	const srcDoc = `---
+id: 999
+version: 1.0.0
+name: parity-source-custom-test
+description: Parity test — custom in source must be rejected
+model: {model-identifier}
+tools: []
+recommended_tier: LOW
+tier_rationale: parity
+required_skills: []
+---
+
+[[SECTION:Identity]]
+# Parity Agent
+
+[[CUSTOM:ProjectNotes]]
+Custom content in a source file — must be rejected.
+[[/CUSTOM:ProjectNotes]]
+[[/SECTION:Identity]]
+`
+	doc, err := docformat.Parse([]byte(srcDoc))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	issues := docformat.Validate(doc, docformat.ValidateOptions{Kind: docformat.DocumentSource})
+
+	if !hasIssueWithCode(issues, "custom-region-in-source") {
+		t.Errorf("Validate(DocumentSource) with [[CUSTOM:]] did not emit 'custom-region-in-source'; "+
+			"parity table: CUSTOM is not legal in source files. Issues: %v", issues)
+	}
+}

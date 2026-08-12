@@ -13,6 +13,12 @@ const (
 	GapManualStep          GapKind = "manual-step"
 	GapFallbackLocation    GapKind = "fallback-location"
 	GapUnsupportedArtifact GapKind = "unsupported-artifact" // e.g. hooks requested for a harness with none
+
+	// GapParkedCustomRegion reports [[CUSTOM:]] regions relocated to the end of the
+	// deployed file because a schema reorder left them without a surviving anchor.
+	// The content is in the deployed file, not lost; the user must move it to the
+	// correct section. One gap is produced per transform, listing all parked names.
+	GapParkedCustomRegion GapKind = "parked-custom-region"
 )
 
 // Gap is produced by transform, plan, and deploy when a decision could not be made automatically.

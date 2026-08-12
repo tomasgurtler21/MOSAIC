@@ -15,6 +15,7 @@ class BoundaryKind(Enum):
     SECTION = "SECTION"
     INJECTION = "INJECTION"
     DEPLOYED = "DEPLOYED"
+    CUSTOM = "CUSTOM"
 
 
 # Six canonical section names in document order.
@@ -184,7 +185,7 @@ MARKER_TO_INJECTION_NAME: dict[str, str] = {
 # a letter; digits and hyphens are allowed after the first character of a segment.
 # A trailing colon or a segment starting with a digit or hyphen does not match.
 TAG_PATTERN: re.Pattern[str] = re.compile(
-    r"^\[\[(?P<close>/?)(?P<kind>SECTION|INJECTION|DEPLOYED):"
+    r"^\[\[(?P<close>/?)(?P<kind>SECTION|INJECTION|DEPLOYED|CUSTOM):"
     r"(?P<name>[A-Za-z][A-Za-z0-9-]*(?::[A-Za-z][A-Za-z0-9-]*)*)\]\]$"
 )
 

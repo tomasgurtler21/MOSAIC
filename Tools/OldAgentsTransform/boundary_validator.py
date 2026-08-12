@@ -224,6 +224,7 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
     section_stack: list[tuple[str, int]] = []
     injection_stack: list[tuple[str, int]] = []
     deployed_stack: list[tuple[str, int]] = []
+    custom_stack: list[tuple[str, int]] = []
     # All boundary names seen so far (for E006 duplicate detection).
     seen_names: set[str] = set()
     # Index into CANONICAL_ORDER of the last canonical slot seen (for E007).
@@ -264,7 +265,11 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
             # Bundle documents skip these checks — their compound SECTION names are
             # intentional and do not require the agent canonical vocabulary.
             expected = EXPECTED_MARKER.get(name)
-            if not is_bundle and expected is not None and expected != kind:
+            if kind == BoundaryKind.CUSTOM:
+                # Custom names are open: any name is valid and project-owned.
+                # No canonical-name check, no required-parent check, no order check.
+                is_canonical = True
+            elif not is_bundle and expected is not None and expected != kind:
                 # Canonical name declared under the wrong marker.
                 errors.append(ValidationError(
                     file_path=file_path,
@@ -292,7 +297,7 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                 is_canonical = True
             else:  # DEPLOYED
                 is_canonical = name in CANONICAL_DEPLOYED
-                if not is_canonical and not is_bundle:
+                if not is_bundle and not is_canonical:
                     # Unknown DEPLOYED name — no generator exists for it.
                     errors.append(ValidationError(
                         file_path=file_path,
@@ -314,7 +319,12 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                 else:
                     seen_names.add(name)
 
-                if kind == BoundaryKind.SECTION:
+                if kind == BoundaryKind.CUSTOM:
+                    # Custom names are open: no canonical-name check, no order check,
+                    # no required-parent check. Track the stack for balance errors only.
+                    custom_stack.append((name, line_num))
+
+                elif kind == BoundaryKind.SECTION:
                     # Check canonical document order (E007) — only for canonical names,
                     # and skipped for bundle documents which use compound names.
                     if is_canonical and not is_bundle:
@@ -427,7 +437,29 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
 
             else:
                 # --- Closing tag ---
-                if kind == BoundaryKind.SECTION:
+                if kind == BoundaryKind.CUSTOM:
+                    if not custom_stack:
+                        errors.append(ValidationError(
+                            file_path=file_path,
+                            line_number=line_num,
+                            error_code="E002",
+                            message=f"Unmatched closing tag [[/CUSTOM:{name}]] (no open tag)",
+                        ))
+                    else:
+                        top_name, _top_line = custom_stack[-1]
+                        if top_name != name:
+                            errors.append(ValidationError(
+                                file_path=file_path,
+                                line_number=line_num,
+                                error_code="E003",
+                                message=(
+                                    f"Mismatched open/close names: "
+                                    f"opened {top_name!r}, closed {name!r}"
+                                ),
+                            ))
+                        custom_stack.pop()
+
+                elif kind == BoundaryKind.SECTION:
                     if not section_stack:
                         errors.append(ValidationError(
                             file_path=file_path,
@@ -498,7 +530,7 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
             # Blank lines and '---' section separators are exempt.
             # Bundle documents skip this check — prose between blocks is expected.
             if not is_bundle and stripped and stripped != "---":
-                if not section_stack and not injection_stack and not deployed_stack:
+                if not section_stack and not injection_stack and not deployed_stack and not custom_stack:
                     errors.append(ValidationError(
                         file_path=file_path,
                         line_number=line_num,
@@ -507,6 +539,13 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                     ))
 
     # Any remaining open tags are unmatched (E001).
+    for name, open_line_num in custom_stack:
+        errors.append(ValidationError(
+            file_path=file_path,
+            line_number=open_line_num,
+            error_code="E001",
+            message=f"Unmatched open tag [[CUSTOM:{name}]] (no close tag found)",
+        ))
     for name, open_line_num in section_stack:
         errors.append(ValidationError(
             file_path=file_path,

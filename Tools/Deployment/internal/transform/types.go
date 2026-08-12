@@ -45,6 +45,18 @@ type Request struct {
 	// the app layer. Required for agents whose source declares any bundle-sourced
 	// [[DEPLOYED:]] region; ignored for agents that declare none.
 	Bundle domain.BundleContent
+
+	// InjectionRenames overrides the package-level InjectionRenames table for this call.
+	// Nil means use transform.InjectionRenames. Intended for tests so that conflict,
+	// chain, precedence, and no-op cases are exercisable without mutating package state.
+	InjectionRenames []RenameEntry
+
+	// Timestamp is an RFC3339 UTC instant supplied by the caller that owns the clock.
+	// The transform never reads a clock (enforced by the build-time purity check). It is
+	// stamped onto parking TODO entries so a notice remains meaningful after the wholesale
+	// regeneration of the TODO report. Empty is legal and omits the timestamp clause from
+	// the parking gap detail message.
+	Timestamp string
 }
 
 // Result is the output of a successful Apply call.

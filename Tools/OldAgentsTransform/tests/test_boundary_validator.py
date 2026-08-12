@@ -1990,3 +1990,211 @@ class TestValidateFileBundleStillValidatesCleanAfterStage6:
             f"Bundle must validate clean after Stage 6 allowlist split but got "
             f"{len(errors)} error(s):\n" + "\n".join(error_summary)
         )
+
+
+# ---------------------------------------------------------------------------
+# CUSTOM kind validation — acceptance and error detection
+# ---------------------------------------------------------------------------
+
+
+def _make_agent_file(tmp_path: pathlib.Path, body: str, filename: str = "agent.md") -> pathlib.Path:
+    """Write a minimal valid agent file with the given body and return its path."""
+    content = (
+        "---\n"
+        "id: test-custom\n"
+        "version: 1.0.0\n"
+        "name: test-agent\n"
+        "description: Test agent for CUSTOM kind validation.\n"
+        "---\n"
+        + body
+    )
+    path = tmp_path / filename
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+class TestCustomKindValidatorAcceptance:
+    """The validator must accept [[CUSTOM:]] regions without raising E011 (unknown deployed
+    name) or any other spurious error. The name set for CUSTOM is open: any name is valid.
+
+    Tests are in RED between the enum+regex change (I3.1/I3.2) and the validator
+    update (I3.4): once CUSTOM is in TAG_PATTERN, the validator sees the tag, falls
+    into the else: DEPLOYED branch, and raises E011. After I3.4, the CUSTOM branch
+    returns is_canonical = True unconditionally and no E011 is raised.
+    """
+
+    def test_custom_region_inside_section_produces_no_errors(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A [[CUSTOM:CustomConstraints]] region nested inside a SECTION must produce no
+        validation errors — no E011, no E004, no balance error."""
+        path = _make_agent_file(tmp_path, (
+            "\n"
+            "[[SECTION:Constraints]]\n"
+            "## Constraints\n\n"
+            "[[CUSTOM:CustomConstraints]]\n"
+            "Never touch production credentials.\n"
+            "[[/CUSTOM:CustomConstraints]]\n\n"
+            "[[/SECTION:Constraints]]\n"
+        ))
+        errors = validate_file(path)
+        codes = [e.error_code for e in errors]
+        assert "E011" not in codes, (
+            "An unknown [[CUSTOM:]] name must never raise E011 — the custom name set is open"
+        )
+        assert "E004" not in codes, (
+            "A [[CUSTOM:]] region must never raise E004 (non-canonical SECTION name)"
+        )
+
+    def test_unknown_custom_name_does_not_raise_e011(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """An arbitrary [[CUSTOM:]] name that appears nowhere in any registry must not
+        raise E011 — the custom name set is fully open."""
+        path = _make_agent_file(tmp_path, (
+            "\n"
+            "[[SECTION:Constraints]]\n"
+            "## Constraints\n\n"
+            "[[CUSTOM:ArbitraryProjectSpecificName]]\n"
+            "Project-specific constraint text.\n"
+            "[[/CUSTOM:ArbitraryProjectSpecificName]]\n\n"
+            "[[/SECTION:Constraints]]\n"
+        ))
+        errors = validate_file(path)
+        codes = [e.error_code for e in errors]
+        assert "E011" not in codes, (
+            "An unknown custom name must not raise E011 — "
+            "'ArbitraryProjectSpecificName' is a valid CUSTOM name"
+        )
+
+    def test_custom_region_with_compound_name_produces_no_e011(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A [[CUSTOM:]] region with a compound name (Prefix:qualifier) must not raise
+        E011 or E004 — compound names are valid for CUSTOM just as for INJECTION."""
+        path = _make_agent_file(tmp_path, (
+            "\n"
+            "[[SECTION:Constraints]]\n"
+            "## Constraints\n\n"
+            "[[CUSTOM:Project:my-feature]]\n"
+            "Feature-specific constraints.\n"
+            "[[/CUSTOM:Project:my-feature]]\n\n"
+            "[[/SECTION:Constraints]]\n"
+        ))
+        errors = validate_file(path)
+        codes = [e.error_code for e in errors]
+        assert "E011" not in codes, (
+            "A compound CUSTOM name must not raise E011"
+        )
+        assert "E004" not in codes, (
+            "A compound CUSTOM name must not raise E004"
+        )
+
+    def test_canonical_deployed_name_as_custom_does_not_raise_e010(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A [[CUSTOM:]] region whose name also appears in CANONICAL_DEPLOYED must not
+        raise E010 — CUSTOM regions are always project class, never tool-managed."""
+        path = _make_agent_file(tmp_path, (
+            "\n"
+            "[[SECTION:Constraints]]\n"
+            "## Constraints\n\n"
+            "[[CUSTOM:CommunicationProtocol]]\n"
+            "Project overrides.\n"
+            "[[/CUSTOM:CommunicationProtocol]]\n\n"
+            "[[/SECTION:Constraints]]\n"
+        ))
+        errors = validate_file(path)
+        codes = [e.error_code for e in errors]
+        assert "E010" not in codes, (
+            "A [[CUSTOM:CommunicationProtocol]] region must not raise E010 — "
+            "a CUSTOM region named like a canonical deployed boundary is still project class"
+        )
+
+
+class TestCustomKindValidatorErrorDetection:
+    """The validator must enforce open/close balance on [[CUSTOM:]] regions, mirroring
+    the behavior it applies to [[INJECTION:]] regions.
+
+    Tests are in RED before I3.1/I3.2: CUSTOM is not in TAG_PATTERN, so tags are content
+    and no balance checks run. After I3.4, the validator tracks a custom stack and raises
+    the appropriate errors.
+    """
+
+    def test_unclosed_custom_region_raises_e001(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A [[CUSTOM:]] open tag with no matching close tag must raise E001."""
+        path = _make_agent_file(tmp_path, (
+            "\n"
+            "[[SECTION:Constraints]]\n"
+            "## Constraints\n\n"
+            "[[CUSTOM:CustomConstraints]]\n"
+            "Content.\n"
+            # intentionally no [[/CUSTOM:CustomConstraints]]
+            "[[/SECTION:Constraints]]\n"
+        ))
+        errors = validate_file(path)
+        codes = [e.error_code for e in errors]
+        assert "E001" in codes, (
+            "An unclosed [[CUSTOM:]] region must raise E001 (unmatched open tag)"
+        )
+
+    def test_orphan_custom_close_tag_raises_e002(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A [[/CUSTOM:]] close tag with no matching open tag must raise E002."""
+        path = _make_agent_file(tmp_path, (
+            "\n"
+            "[[SECTION:Constraints]]\n"
+            "## Constraints\n\n"
+            # intentionally no [[CUSTOM:CustomConstraints]] open tag
+            "[[/CUSTOM:CustomConstraints]]\n"
+            "[[/SECTION:Constraints]]\n"
+        ))
+        errors = validate_file(path)
+        codes = [e.error_code for e in errors]
+        assert "E002" in codes, (
+            "An orphan [[/CUSTOM:]] close tag must raise E002 (unmatched close tag)"
+        )
+
+    def test_mismatched_custom_open_close_names_raises_e003(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """A [[CUSTOM:Foo]] opened but [[/CUSTOM:Bar]] closed must raise E003."""
+        path = _make_agent_file(tmp_path, (
+            "\n"
+            "[[SECTION:Constraints]]\n"
+            "## Constraints\n\n"
+            "[[CUSTOM:Foo]]\n"
+            "Content.\n"
+            "[[/CUSTOM:Bar]]\n"
+            "[[/SECTION:Constraints]]\n"
+        ))
+        errors = validate_file(path)
+        codes = [e.error_code for e in errors]
+        assert "E003" in codes, (
+            "Mismatched [[CUSTOM:Foo]] / [[/CUSTOM:Bar]] must raise E003 (name mismatch)"
+        )
+
+    def test_duplicate_custom_name_raises_e006(
+        self, tmp_path: pathlib.Path
+    ) -> None:
+        """Two [[CUSTOM:]] regions with the same name must raise E006."""
+        path = _make_agent_file(tmp_path, (
+            "\n"
+            "[[SECTION:Constraints]]\n"
+            "## Constraints\n\n"
+            "[[CUSTOM:CustomConstraints]]\n"
+            "First region.\n"
+            "[[/CUSTOM:CustomConstraints]]\n\n"
+            "[[CUSTOM:CustomConstraints]]\n"
+            "Second region with same name.\n"
+            "[[/CUSTOM:CustomConstraints]]\n\n"
+            "[[/SECTION:Constraints]]\n"
+        ))
+        errors = validate_file(path)
+        codes = [e.error_code for e in errors]
+        assert "E006" in codes, (
+            "Two [[CUSTOM:]] regions with the same name must raise E006 (duplicate boundary name)"
+        )
