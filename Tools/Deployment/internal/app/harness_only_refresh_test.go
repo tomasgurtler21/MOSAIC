@@ -533,9 +533,10 @@ func injectionBytes(t *testing.T, doc []byte, name string) []byte {
 
 // expectedProtocolContent returns the expected bytes that refreshHarnessOnly should place
 // inside the CommunicationProtocol region for the given role and protocol version: the
-// version marker line followed by the role-matched block.
+// version marker line followed by the role-matched block. The marker line's terminator
+// matches the block's own line ending, so this helper mirrors the line-ending-aware contract
+// of harnessOnlyRegionContent.
 func expectedProtocolContent(role domain.AgentRole, version string) []byte {
-	marker := []byte(transform.ProtocolVersionComment(version))
 	var block []byte
 	switch role {
 	case domain.RoleOrchestrator:
@@ -543,6 +544,7 @@ func expectedProtocolContent(role domain.AgentRole, version string) []byte {
 	default:
 		block = []byte(fixtureRefreshSubagentProtocolBlock)
 	}
+	marker := []byte(transform.ProtocolVersionComment(version, block))
 	return append(marker, block...)
 }
 
@@ -586,8 +588,9 @@ func TestRefreshHarnessOnly_ProtocolOnlyScope_CommunicationProtocolRegionIsRefre
 }
 
 // TestRefreshHarnessOnly_ProtocolOnlyScope_VersionMarkerPrefixesContent verifies that the
-// CommunicationProtocol region content is prefixed by the protocol version marker line in
-// the format "<!-- protocol-version: X.Y -->\n", matching how the catalog-backed path fills it.
+// CommunicationProtocol region content is prefixed by the protocol version marker line
+// terminated to match the protocol block's own line ending, matching how the catalog-backed
+// path fills the region.
 func TestRefreshHarnessOnly_ProtocolOnlyScope_VersionMarkerPrefixesContent(t *testing.T) {
 	req := makeRefreshRequest([]byte(fixtureSubagentFull), RefreshProtocolOnly, domain.RoleSubagent)
 	result, err := refreshHarnessOnly(req)
@@ -596,7 +599,12 @@ func TestRefreshHarnessOnly_ProtocolOnlyScope_VersionMarkerPrefixesContent(t *te
 	}
 
 	content := deployedRegionContent(t, result.Output, "CommunicationProtocol")
-	expectedMarker := transform.ProtocolVersionComment(fixtureRefreshProtocolVersion)
+	// The subagent role uses the subagent block; pass it as content so the expected marker
+	// terminator matches the block's own line ending.
+	expectedMarker := transform.ProtocolVersionComment(
+		fixtureRefreshProtocolVersion,
+		[]byte(fixtureRefreshSubagentProtocolBlock),
+	)
 
 	if !bytes.HasPrefix(content, []byte(expectedMarker)) {
 		t.Errorf("CommunicationProtocol region content does not start with the version marker line;\n"+
@@ -1589,3 +1597,167 @@ func (m *minimalTransformHarnessModule) HookPlan(_ domain.HookPlanRequest) (doma
 	return domain.HookPlan{Supported: false, Reason: "regression stub"}, nil
 }
 func (m *minimalTransformHarnessModule) Close() error { return nil }
+
+// ---------------------------------------------------------------------------
+// T10.4 — Harness-only refresh path: line-ending-aware protocol-version marker
+// ---------------------------------------------------------------------------
+
+// fixtureRefreshProtocolCRLF returns a ProtocolContent whose blocks carry CRLF line endings,
+// simulating the protocol blocks as they appear on a Windows checkout with core.autocrlf=true.
+// The CRLF blocks are derived by normalising the shared LF fixture constants.
+func fixtureRefreshProtocolCRLF(version string) domain.ProtocolContent {
+	return domain.ProtocolContent{
+		Version: version,
+		Blocks: map[domain.ProtocolVariant][]byte{
+			domain.ProtocolSubagent:     []byte(strings.ReplaceAll(fixtureRefreshSubagentProtocolBlock, "\n", "\r\n")),
+			domain.ProtocolOrchestrator: []byte(strings.ReplaceAll(fixtureRefreshOrchestratorProtocolBlock, "\n", "\r\n")),
+		},
+	}
+}
+
+// TestRefreshHarnessOnly_CRLFProtocolBlock_RegionContainsNoLoneLF verifies that when the
+// protocol block carries CRLF line endings, the CommunicationProtocol region produced by
+// refreshHarnessOnly contains no lone LF: every '\n' is immediately preceded by '\r'. This
+// covers the protocol-version marker line specifically — without the Stage 10 fix, the
+// marker would carry a hardcoded '\n' even when the block is CRLF-terminated.
+func TestRefreshHarnessOnly_CRLFProtocolBlock_RegionContainsNoLoneLF(t *testing.T) {
+	req := HarnessOnlyRefreshRequest{
+		Deployed: []byte(fixtureSubagentFull),
+		Scope:    RefreshProtocolOnly,
+		Role:     domain.RoleSubagent,
+		Protocol: fixtureRefreshProtocolCRLF(fixtureRefreshProtocolVersion),
+		Bundle:   fixtureRefreshBundle(fixtureRefreshBundleVersion),
+		Subject:  "test-agent.agent.md",
+	}
+
+	result, err := refreshHarnessOnly(req)
+	if err != nil {
+		t.Fatalf("refreshHarnessOnly: %v", err)
+	}
+
+	content := deployedRegionContent(t, result.Output, "CommunicationProtocol")
+
+	// Every '\n' in the region must be immediately preceded by '\r'.
+	for i, b := range content {
+		if b == '\n' {
+			if i == 0 || content[i-1] != '\r' {
+				t.Errorf("lone LF at byte offset %d in CommunicationProtocol region "+
+					"produced by refreshHarnessOnly;\n"+
+					"a CRLF protocol block must produce a region with no lone LF, "+
+					"including on the protocol-version marker line;\n"+
+					"region (first 200 bytes): %q",
+					i, content[:min(200, len(content))])
+				return
+			}
+		}
+	}
+}
+
+// TestRefreshHarnessOnly_CRLFProtocolBlock_MarkerLineIsCRLFTerminated verifies that the
+// protocol-version marker line is CRLF-terminated when refreshHarnessOnly assembles the
+// CommunicationProtocol region from a CRLF protocol block. This confirms the same guarantee
+// holds for the harness-only path as for the catalog-backed transform path.
+func TestRefreshHarnessOnly_CRLFProtocolBlock_MarkerLineIsCRLFTerminated(t *testing.T) {
+	req := HarnessOnlyRefreshRequest{
+		Deployed: []byte(fixtureSubagentFull),
+		Scope:    RefreshProtocolOnly,
+		Role:     domain.RoleSubagent,
+		Protocol: fixtureRefreshProtocolCRLF(fixtureRefreshProtocolVersion),
+		Bundle:   fixtureRefreshBundle(fixtureRefreshBundleVersion),
+		Subject:  "test-agent.agent.md",
+	}
+
+	result, err := refreshHarnessOnly(req)
+	if err != nil {
+		t.Fatalf("refreshHarnessOnly: %v", err)
+	}
+
+	content := deployedRegionContent(t, result.Output, "CommunicationProtocol")
+	// Hardcode the expected marker literal so this test fails in RED phase.
+	// Deriving expectedMarker via transform.ProtocolVersionComment would produce the same
+	// stub output as the production path (both return "\n"), masking the CRLF requirement.
+	expectedMarker := "<!-- protocol-version: " + fixtureRefreshProtocolVersion + " -->\r\n"
+
+	if !bytes.HasPrefix(content, []byte(expectedMarker)) {
+		t.Errorf("CRLF block: refreshHarnessOnly protocol-version marker is not CRLF-terminated;\n"+
+			"want prefix: %q\ngot content:  %q", expectedMarker, content)
+	}
+}
+
+// TestRefreshHarnessOnly_HarnessOnlyRegionContent_MatchesCatalogBackedPath verifies that
+// harnessOnlyRegionContent produces the same protocol region bytes as ProtocolVersionComment
+// + block directly, confirming the documented invariant that both paths fill the
+// CommunicationProtocol region identically for identical inputs.
+func TestRefreshHarnessOnly_HarnessOnlyRegionContent_MatchesCatalogBackedPath(t *testing.T) {
+	cases := []struct {
+		name string
+		role domain.AgentRole
+		block []byte
+		variant domain.ProtocolVariant
+		// hardcodedMarker, when non-empty, is used as the expected marker prefix instead of
+		// calling transform.ProtocolVersionComment. Required for CRLF cases to avoid circular
+		// expected-value derivation: with the stub returning "\n" for all inputs, deriving want
+		// through ProtocolVersionComment would make expected and actual converge on the same LF
+		// output, masking the required CRLF verification in RED phase.
+		hardcodedMarker string
+	}{
+		{
+			name:    "LF subagent block",
+			role:    domain.RoleSubagent,
+			block:   []byte(fixtureRefreshSubagentProtocolBlock),
+			variant: domain.ProtocolSubagent,
+			// LF case: no circular dependency; stub and implementation agree on "\n" terminator.
+		},
+		{
+			name:            "CRLF subagent block",
+			role:            domain.RoleSubagent,
+			block:           []byte(strings.ReplaceAll(fixtureRefreshSubagentProtocolBlock, "\n", "\r\n")),
+			variant:         domain.ProtocolSubagent,
+			hardcodedMarker: "<!-- protocol-version: " + fixtureRefreshProtocolVersion + " -->\r\n",
+		},
+		{
+			name:    "LF orchestrator block",
+			role:    domain.RoleOrchestrator,
+			block:   []byte(fixtureRefreshOrchestratorProtocolBlock),
+			variant: domain.ProtocolOrchestrator,
+			// LF case: no circular dependency.
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			protocol := domain.ProtocolContent{
+				Version: fixtureRefreshProtocolVersion,
+				Blocks:  map[domain.ProtocolVariant][]byte{tc.variant: tc.block},
+			}
+			req := HarnessOnlyRefreshRequest{
+				Role:     tc.role,
+				Protocol: protocol,
+			}
+			got, err := harnessOnlyRegionContent("CommunicationProtocol", req)
+			if err != nil {
+				t.Fatalf("harnessOnlyRegionContent: %v", err)
+			}
+
+			// Build the expected content as marker + block. For CRLF cases use a hardcoded
+			// marker literal to ensure the test fails in RED phase (the stub returns "\n" for
+			// all inputs, so deriving want through ProtocolVersionComment would cause both
+			// expected and actual to share the same LF output, masking the CRLF requirement).
+			// For LF cases the stub and correct implementation agree, so ProtocolVersionComment
+			// is safe to use for the expected marker.
+			var want []byte
+			if tc.hardcodedMarker != "" {
+				want = []byte(tc.hardcodedMarker + string(tc.block))
+			} else {
+				marker := transform.ProtocolVersionComment(fixtureRefreshProtocolVersion, tc.block)
+				want = append([]byte(marker), tc.block...)
+			}
+
+			if !bytes.Equal(got, want) {
+				t.Errorf("harnessOnlyRegionContent output does not match expected marker + block;\n"+
+					"want: %q\ngot:  %q", want, got)
+			}
+		})
+	}
+}
+
+

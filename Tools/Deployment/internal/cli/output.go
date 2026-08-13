@@ -188,6 +188,56 @@ func renderUtilityInfraHuman(out io.Writer, dryRun bool, summary domain.RunSumma
 	}
 }
 
+// renderCheckIndexOutput writes the index-check result and returns the appropriate exit code.
+// When format is "json", the IndexCheckResult is encoded as a single JSON document.
+// Otherwise a human-readable summary is written. A non-nil error from the service means
+// the check could not be performed; it is written to errOut and ExitFailure is returned.
+// When the check ran and found drift, ExitWithSkips (2) is returned so the command is
+// usable as a CI/pre-push gate. A clean result (including an absent index) returns ExitSuccess.
+func renderCheckIndexOutput(out, errOut io.Writer, format string, result app.IndexCheckResult, svcErr error) int {
+	if svcErr != nil {
+		fmt.Fprintf(errOut, "error: %v\n", svcErr)
+		return ExitFailure
+	}
+	if strings.EqualFold(format, "json") {
+		enc := json.NewEncoder(out)
+		_ = enc.Encode(result)
+	} else {
+		renderCheckIndexHuman(out, result)
+	}
+	if result.Clean {
+		return ExitSuccess
+	}
+	return ExitWithSkips
+}
+
+// renderCheckIndexHuman writes a human-readable summary of the index-check result to out.
+// When the index is absent, a single line notes that fact. When drift was found, orphans
+// are listed by class. When the catalog is clean, a single clean-state line is printed.
+func renderCheckIndexHuman(out io.Writer, result app.IndexCheckResult) {
+	if !result.IndexPresent {
+		fmt.Fprintf(out, "no index: Catalog/Workflows/Index.md does not exist; nothing to compare\n")
+		return
+	}
+	if result.Clean {
+		fmt.Fprintf(out, "clean: no drift between Index.md (%d entries) and disk (%d files)\n",
+			result.IndexCount, result.DiskCount)
+		return
+	}
+	if len(result.FileOrphans) > 0 {
+		fmt.Fprintf(out, "file-orphans: workflow files on disk not listed in Index.md:\n")
+		for _, o := range result.FileOrphans {
+			fmt.Fprintf(out, "  %s — %s\n", o.Subject, o.Path)
+		}
+	}
+	if len(result.IndexOrphans) > 0 {
+		fmt.Fprintf(out, "index-orphans: index entries with no file on disk:\n")
+		for _, o := range result.IndexOrphans {
+			fmt.Fprintf(out, "  %s — %s\n", o.Subject, o.Path)
+		}
+	}
+}
+
 // splitTrimmedParts splits a comma-separated string into trimmed, non-empty parts.
 // An empty input string yields a non-nil empty slice, preserving the CD-6 nil/empty semantics:
 // the caller passes a non-nil empty slice to mean "none, do not ask".

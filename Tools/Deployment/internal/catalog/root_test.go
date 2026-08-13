@@ -60,25 +60,20 @@ func TestResolveRoot_FromPackageDirectory_RootIsAbsolute(t *testing.T) {
 	}
 }
 
-// TestResolveRoot_FromPackageDirectory_RootContainsExpectedMarkers verifies that
-// the resolved root directory actually contains the MOSAIC repository markers at
-// their Catalog/ locations: Catalog/Agents/Generic/SourceFilesFormat.md and
-// Catalog/Workflows/Index.md.
-func TestResolveRoot_FromPackageDirectory_RootContainsExpectedMarkers(t *testing.T) {
+// TestResolveRoot_FromPackageDirectory_RootContainsRequiredMarker verifies that
+// the resolved root directory contains the required MOSAIC root marker at its
+// Catalog/ location: Catalog/Agents/Generic/SourceFilesFormat.md.
+// Catalog/Workflows/Index.md is no longer a required root marker.
+func TestResolveRoot_FromPackageDirectory_RootContainsRequiredMarker(t *testing.T) {
 	root, err := catalog.ResolveRoot(repoRoot())
 	if err != nil {
 		t.Fatalf("ResolveRoot: %v", err)
 	}
 
-	markers := []string{
-		filepath.Join("Catalog", "Agents", "Generic", "SourceFilesFormat.md"),
-		filepath.Join("Catalog", "Workflows", "Index.md"),
-	}
-	for _, marker := range markers {
-		full := filepath.Join(root, marker)
-		if _, statErr := os.Stat(full); os.IsNotExist(statErr) {
-			t.Errorf("resolved root %q does not contain expected marker file %s", root, marker)
-		}
+	marker := filepath.Join("Catalog", "Agents", "Generic", "SourceFilesFormat.md")
+	full := filepath.Join(root, marker)
+	if _, statErr := os.Stat(full); os.IsNotExist(statErr) {
+		t.Errorf("resolved root %q does not contain required marker file %s", root, marker)
 	}
 }
 
@@ -133,35 +128,28 @@ func TestResolveRoot_NestedDirectory_ReturnsErrNotMosaicRoot(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestResolveRoot_CatalogPrefixedMarkers_RecognizedAsMosaicRoot verifies that a directory
-// carrying the root markers at their Catalog/ locations is recognised as a MOSAIC root.
-// The two required markers are:
+// carrying the required root marker at its Catalog/ location is recognised as a MOSAIC root.
+// The required marker is:
 //
 //	Catalog/Agents/Generic/SourceFilesFormat.md
-//	Catalog/Workflows/Index.md
 //
-// This test fails while isMosaicRoot still checks the legacy Agents/Generic/ and Workflows/
-// paths, and passes once it is repointed to the Catalog/ paths.
+// Catalog/Workflows/Index.md is no longer a required root marker; this test deliberately
+// omits it to verify that the root is recognised on SourceFilesFormat.md alone.
 func TestResolveRoot_CatalogPrefixedMarkers_RecognizedAsMosaicRoot(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create the Catalog/-prefixed marker files.
+	// Create only SourceFilesFormat.md — no Catalog/Workflows/Index.md.
 	if err := os.MkdirAll(filepath.Join(dir, "Catalog", "Agents", "Generic"), 0o755); err != nil {
 		t.Fatalf("setup MkdirAll Catalog/Agents/Generic: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "Catalog", "Agents", "Generic", "SourceFilesFormat.md"), []byte("# Source Files Format\n"), 0o644); err != nil {
 		t.Fatalf("setup WriteFile Catalog/Agents/Generic/SourceFilesFormat.md: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "Catalog", "Workflows"), 0o755); err != nil {
-		t.Fatalf("setup MkdirAll Catalog/Workflows: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "Catalog", "Workflows", "Index.md"), []byte("# Workflows Index\n"), 0o644); err != nil {
-		t.Fatalf("setup WriteFile Catalog/Workflows/Index.md: %v", err)
-	}
 
 	root, err := catalog.ResolveRoot(dir)
 	if err != nil {
-		t.Fatalf("ResolveRoot returned error for a dir with Catalog/-prefixed markers: %v; "+
-			"a tree with Catalog/Agents/Generic/SourceFilesFormat.md and Catalog/Workflows/Index.md must be recognised", err)
+		t.Fatalf("ResolveRoot returned error for a dir with Catalog/Agents/Generic/SourceFilesFormat.md: %v; "+
+			"a tree carrying this marker must be recognised as the MOSAIC root even without Catalog/Workflows/Index.md", err)
 	}
 	if root == "" {
 		t.Fatal("ResolveRoot returned an empty root with nil error")
@@ -231,21 +219,27 @@ func TestResolveRoot_EmptyTempDir_WrapsErrNotMosaicRoot(t *testing.T) {
 	}
 }
 
-// TestResolveRoot_DirectoryWithPartialMarkers_ReturnsErrNotMosaicRoot verifies
-// that a directory containing only some repository markers (but not all) is not
-// recognised as a MOSAIC root. This prevents false positives on partially cloned
-// or incomplete checkouts.
-func TestResolveRoot_DirectoryWithPartialMarkers_ReturnsErrNotMosaicRoot(t *testing.T) {
+// TestResolveRoot_WithoutIndexMd_Succeeds verifies that a directory carrying
+// Catalog/Agents/Generic/SourceFilesFormat.md is recognised as a MOSAIC root even when
+// Catalog/Workflows/Index.md is absent. Index.md is no longer a required root marker.
+func TestResolveRoot_WithoutIndexMd_Succeeds(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create only the Catalog/Agents/Generic directory — not the Catalog/Workflows/Index.md marker.
+	// Create ONLY SourceFilesFormat.md — no Catalog/Workflows/Index.md.
 	if err := os.MkdirAll(filepath.Join(dir, "Catalog", "Agents", "Generic"), 0o755); err != nil {
-		t.Fatalf("setup: MkdirAll: %v", err)
+		t.Fatalf("setup MkdirAll Catalog/Agents/Generic: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Catalog", "Agents", "Generic", "SourceFilesFormat.md"), []byte("# Source Files Format\n"), 0o644); err != nil {
+		t.Fatalf("setup WriteFile SourceFilesFormat.md: %v", err)
 	}
 
-	_, err := catalog.ResolveRoot(dir)
-	if !errors.Is(err, catalog.ErrNotMosaicRoot) {
-		t.Errorf("ResolveRoot with partial markers: got error %v, want ErrNotMosaicRoot", err)
+	root, err := catalog.ResolveRoot(dir)
+	if err != nil {
+		t.Fatalf("ResolveRoot returned error for a dir with SourceFilesFormat.md but no Index.md: %v; "+
+			"Catalog/Workflows/Index.md must not be a required root marker", err)
+	}
+	if root == "" {
+		t.Fatal("ResolveRoot returned an empty root with nil error")
 	}
 }
 
@@ -281,31 +275,24 @@ func TestResolveRoot_KnownNonMosaicFixture_ReturnsErrNotMosaicRoot(t *testing.T)
 // ---------------------------------------------------------------------------
 
 // TestResolveRoot_NewMarkerFilename_RecognizedAsMosaicRoot verifies that a directory
-// containing Catalog/Agents/Generic/SourceFilesFormat.md (the current marker name) together
-// with Catalog/Workflows/Index.md is resolved as a valid MOSAIC root. This is the primary
-// assertion for the marker migration: the tool must recognise exactly the file at the
-// Catalog/-prefixed location.
+// containing Catalog/Agents/Generic/SourceFilesFormat.md (the current, sole required marker)
+// is resolved as a valid MOSAIC root. Catalog/Workflows/Index.md is deliberately omitted
+// to confirm it is not required.
 func TestResolveRoot_NewMarkerFilename_RecognizedAsMosaicRoot(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create the marker file at its Catalog/-prefixed location.
+	// Create the marker file at its Catalog/-prefixed location only. No Index.md.
 	if err := os.MkdirAll(filepath.Join(dir, "Catalog", "Agents", "Generic"), 0o755); err != nil {
 		t.Fatalf("setup MkdirAll Catalog/Agents/Generic: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "Catalog", "Agents", "Generic", "SourceFilesFormat.md"), []byte("# Source Files Format\n"), 0o644); err != nil {
 		t.Fatalf("setup WriteFile SourceFilesFormat.md: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "Catalog", "Workflows"), 0o755); err != nil {
-		t.Fatalf("setup MkdirAll Catalog/Workflows: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "Catalog", "Workflows", "Index.md"), []byte("# Workflows Index\n"), 0o644); err != nil {
-		t.Fatalf("setup WriteFile Catalog/Workflows/Index.md: %v", err)
-	}
 
 	root, err := catalog.ResolveRoot(dir)
 	if err != nil {
 		t.Fatalf("ResolveRoot returned error for a dir with Catalog/Agents/Generic/SourceFilesFormat.md: %v; "+
-			"a tree containing the new marker at its Catalog/ location must be recognised as the MOSAIC root", err)
+			"a tree containing this marker must be recognised as the MOSAIC root", err)
 	}
 	if root == "" {
 		t.Fatal("ResolveRoot returned an empty root with nil error")

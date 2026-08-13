@@ -20,7 +20,11 @@ package app
 //     - A malformed file yields ProtocolVersion == "".
 
 import (
+	"strings"
 	"testing"
+
+	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/plan"
 )
 
 // ---------------------------------------------------------------------------
@@ -86,19 +90,24 @@ func TestExtractDeployedProtocolVersion_RegionPresentButNoVersionComment_Returns
 }
 
 // TestExtractDeployedProtocolVersion_MalformedFile_ReturnsEmpty verifies that when the file
-// content is malformed (e.g. unclosed markers, invalid UTF-8 in headers), the function returns
-// "" and does not panic or return an error. Like the workflow extractor, this function is used
-// during probing and must never fail the scan.
+// content is malformed (unclosed region marker), the function returns "" and does not panic.
+// Like the workflow extractor, this function is used during probing and must never fail the
+// scan. The contract says malformed documents degrade to empty — partial version data from
+// an unclosed region must not be returned.
 func TestExtractDeployedProtocolVersion_MalformedFile_ReturnsEmpty(t *testing.T) {
 	// Unclosed protocol region — malformed document.
 	data := []byte(
 		"[[DEPLOYED:CommunicationProtocol]]\n" +
 			"<!-- protocol-version: 1.9 -->\n" +
 			"Content that is never closed.\n")
-	// Note: depending on implementation, this may or may not extract the version from
-	// an unclosed region. The key requirement is: no panic, no error, graceful return.
-	// The test asserts only that the function does not panic.
-	_ = extractDeployedProtocolVersion(data) // must not panic
+
+	got := extractDeployedProtocolVersion(data)
+
+	if got != "" {
+		t.Errorf("extractDeployedProtocolVersion with malformed (unclosed) region: got %q, want empty string; "+
+			"partial version data from an unclosed region must not be returned",
+			got)
+	}
 }
 
 // TestExtractDeployedProtocolVersion_EmptyContent_ReturnsEmpty verifies that passing nil or
@@ -175,6 +184,103 @@ func TestExtractDeployedProtocolVersion_MultipleVersionComments_FirstInRegionCap
 	if got != "1.7" {
 		t.Errorf("extractDeployedProtocolVersion with two version comments in region: got %q, want %q (first comment)",
 			got, "1.7")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AC10.7 — Reader-side CRLF tolerance for extractDeployedProtocolVersion
+// ---------------------------------------------------------------------------
+
+// TestExtractDeployedProtocolVersion_CRLFTerminatedMarker_ReturnsVersionWithoutCR verifies
+// that when the [[DEPLOYED:CommunicationProtocol]] region contains a protocol-version marker
+// line terminated with CRLF ("\r\n") — as produced by the Stage 10 fix on a Windows checkout —
+// the extracted version string does not include the carriage return. The regex captures only
+// the version token, which is terminator-independent by design.
+func TestExtractDeployedProtocolVersion_CRLFTerminatedMarker_ReturnsVersionWithoutCR(t *testing.T) {
+	// Marker line is CRLF-terminated, as it would appear in a CRLF-checked-out file on Windows.
+	data := []byte(
+		"[[DEPLOYED:CommunicationProtocol]]\r\n" +
+			"<!-- protocol-version: 1.10 -->\r\n" +
+			"## Communication Protocol\r\n\r\n" +
+			"Some protocol content.\r\n\r\n" +
+			"[[/DEPLOYED:CommunicationProtocol]]\r\n")
+
+	got := extractDeployedProtocolVersion(data)
+
+	if got != "1.10" {
+		t.Errorf("extractDeployedProtocolVersion with CRLF-terminated marker: got %q, want %q; "+
+			"the extracted version must not include a trailing \\r",
+			got, "1.10")
+	}
+	if strings.Contains(got, "\r") {
+		t.Errorf("extractDeployedProtocolVersion with CRLF-terminated marker: returned version %q contains "+
+			"a carriage return; reader must strip or not capture \\r",
+			got)
+	}
+}
+
+// TestExtractDeployedProtocolVersion_CRLFAndLFMarkerYieldEqualVersions verifies that a
+// document whose protocol-version marker is CRLF-terminated and a document whose marker is
+// LF-terminated both yield the same extracted version string, and that the extracted version
+// carries no embedded "\r". This confirms terminator-independence of the reader end-to-end:
+// a document whose only change is the marker terminator must not be reported as stale.
+//
+// This also covers the staleness comparison path: since ProtocolStaleness compares the
+// extracted version string against the source version, equal extraction from CRLF and LF
+// markers guarantees that neither form is incorrectly reported as stale when the source
+// version matches.
+func TestExtractDeployedProtocolVersion_CRLFAndLFMarkerYieldEqualVersions(t *testing.T) {
+	const version = "1.10"
+
+	crlfDoc := []byte(
+		"[[DEPLOYED:CommunicationProtocol]]\r\n" +
+			"<!-- protocol-version: " + version + " -->\r\n" +
+			"## Communication Protocol\r\n\r\n" +
+			"Protocol content.\r\n\r\n" +
+			"[[/DEPLOYED:CommunicationProtocol]]\r\n")
+
+	lfDoc := []byte(
+		"[[DEPLOYED:CommunicationProtocol]]\n" +
+			"<!-- protocol-version: " + version + " -->\n" +
+			"## Communication Protocol\n\n" +
+			"Protocol content.\n\n" +
+			"[[/DEPLOYED:CommunicationProtocol]]\n")
+
+	crlfExtracted := extractDeployedProtocolVersion(crlfDoc)
+	lfExtracted := extractDeployedProtocolVersion(lfDoc)
+
+	// Both must return the same version string.
+	if crlfExtracted != lfExtracted {
+		t.Errorf("extractDeployedProtocolVersion: CRLF marker returned %q, LF marker returned %q; "+
+			"both must return the same version — a document whose only change is the marker terminator "+
+			"must not be treated as carrying a different version",
+			crlfExtracted, lfExtracted)
+	}
+
+	// Neither must contain a carriage return.
+	if strings.Contains(crlfExtracted, "\r") {
+		t.Errorf("extractDeployedProtocolVersion with CRLF marker: extracted version %q contains \\r; "+
+			"the version token must never include the line terminator",
+			crlfExtracted)
+	}
+
+	// Staleness comparison: a document with CRLF marker must not be stale against the same source
+	// version, just as an LF marker document would not be stale.
+	crlfState := domain.DeployedArtifactState{Present: true, ProtocolVersion: crlfExtracted}
+	lfState := domain.DeployedArtifactState{Present: true, ProtocolVersion: lfExtracted}
+
+	crlfDrift := plan.ProtocolStaleness(crlfState, version)
+	lfDrift := plan.ProtocolStaleness(lfState, version)
+
+	if crlfDrift.Stale() {
+		t.Errorf("staleness comparison: CRLF-marker document (extracted version %q) is reported as stale "+
+			"against source version %q; a CRLF terminator must not cause false staleness",
+			crlfExtracted, version)
+	}
+	if lfDrift.Stale() {
+		t.Errorf("staleness comparison: LF-marker document (extracted version %q) is reported as stale "+
+			"against source version %q; this is the baseline and must not be stale",
+			lfExtracted, version)
 	}
 }
 

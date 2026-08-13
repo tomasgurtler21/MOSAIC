@@ -325,7 +325,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		Conflicts:     conflicts,
 		VersionStamps: versionStamps,
 		Hooks:         nil, // no hook artifacts written in this mode
-		Todo:          s.deps.Todo.Items(),
+		TodoItems:     s.deps.Todo.Items,
 		TodoMeta: todo.Meta{
 			Harness: harnessRef.DisplayName, WorkspacePath: workspace, DeploymentRoot: workspace,
 			GeneratedAt: now, Mode: domain.ModeWorkflowsOnly,

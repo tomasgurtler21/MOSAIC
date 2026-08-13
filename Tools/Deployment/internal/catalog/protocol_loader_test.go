@@ -40,11 +40,9 @@ import (
 func makeTempMosaicRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	// Write the two marker files that isMosaicRoot checks.
-	mustMkdir(t, root, "Agents", "Generic")
-	mustWriteFile(t, root, filepath.Join("Agents", "Generic", "SourceFilesFormat.md"), []byte("# Source Files Format\n"))
-	mustMkdir(t, root, "Workflows")
-	mustWriteFile(t, root, filepath.Join("Workflows", "Index.md"), []byte("# Workflows Index\n"))
+	// Write the single marker file that isMosaicRoot checks.
+	mustMkdir(t, root, "Catalog", "Agents", "Generic")
+	mustWriteFile(t, root, filepath.Join("Catalog", "Agents", "Generic", "SourceFilesFormat.md"), []byte("# Source Files Format\n"))
 	return root
 }
 

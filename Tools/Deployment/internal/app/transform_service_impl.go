@@ -93,6 +93,7 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 				Title:     "Select target model (optional, enter to skip)",
 				AllowSkip: true,
 			},
+			Options: buildModelOptions(tgtModule.Descriptor().Models.IDs),
 		})
 		// FR-15: skipped or empty answer leaves TargetModel empty.
 		if ans.Status == domain.Answered {

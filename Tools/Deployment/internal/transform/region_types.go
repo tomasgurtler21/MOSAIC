@@ -98,8 +98,33 @@ var ErrSourceDeployedRegionNotEmpty = errors.New("source file carries a populate
 // The error message names the colliding name and where each occurrence lives.
 var ErrRegionNameCollision = errors.New("region name claimed by two user-owned regions")
 
+// DetectLineEnding reports the line terminator that content uses: "\r\n" or "\n".
+//
+// The first line terminator in content decides. Content with no line terminator, and
+// empty content, yield "\n".
+//
+// Detection is first-terminator-wins by deliberate choice: the transform never rewrites
+// existing bytes, so mixed-ending content keeps whatever it already has and this function
+// only answers what a newly emitted line should use to match its neighbours.
+func DetectLineEnding(content []byte) string {
+	for i, b := range content {
+		if b == '\n' {
+			if i > 0 && content[i-1] == '\r' {
+				return "\r\n"
+			}
+			return "\n"
+		}
+	}
+	return "\n"
+}
+
 // ProtocolVersionComment renders the version marker line written as the first line of the
-// deployed protocol region: "<!-- protocol-version: 1.9 -->\n".
-func ProtocolVersionComment(version string) string {
-	return fmt.Sprintf("<!-- protocol-version: %s -->\n", version)
+// deployed protocol region, terminated to match content's own line ending:
+// "<!-- protocol-version: 1.10 -->\r\n" for CRLF content, "<!-- protocol-version: 1.10 -->\n"
+// for LF content and for content with no line ending at all.
+//
+// content is the protocol block the marker line will be prepended to. Passing nil is legal
+// and yields the LF form.
+func ProtocolVersionComment(version string, content []byte) string {
+	return fmt.Sprintf("<!-- protocol-version: %s -->%s", version, DetectLineEnding(content))
 }

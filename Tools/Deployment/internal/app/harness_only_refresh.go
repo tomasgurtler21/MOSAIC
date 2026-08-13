@@ -220,7 +220,7 @@ func harnessOnlyRegionContent(regionName string, req HarnessOnlyRefreshRequest) 
 		if !ok {
 			return nil, transform.ErrProtocolContentMissing
 		}
-		versionComment := []byte(transform.ProtocolVersionComment(req.Protocol.Version))
+		versionComment := []byte(transform.ProtocolVersionComment(req.Protocol.Version, block))
 		content := make([]byte, 0, len(versionComment)+len(block))
 		content = append(content, versionComment...)
 		content = append(content, block...)

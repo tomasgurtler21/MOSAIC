@@ -60,6 +60,10 @@ func (s *stubNavService) RenderAgent(_ context.Context, _ app.RenderAgentRequest
 	return app.RenderAgentResult{}, nil
 }
 
+func (s *stubNavService) CheckWorkflowIndex(_ context.Context) (app.IndexCheckResult, error) {
+	return app.IndexCheckResult{}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

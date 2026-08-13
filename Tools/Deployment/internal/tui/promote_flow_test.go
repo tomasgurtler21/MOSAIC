@@ -637,6 +637,10 @@ func (s *capturingPromoteService) RenderAgent(ctx context.Context, req app.Rende
 	return s.inner.RenderAgent(ctx, req)
 }
 
+func (s *capturingPromoteService) CheckWorkflowIndex(ctx context.Context) (app.IndexCheckResult, error) {
+	return s.inner.CheckWorkflowIndex(ctx)
+}
+
 // TestPromoteMode_SuppliesSelectedHarnessIDInRequest verifies that when the TUI executes a
 // promote run, the PromoteRequest carries the harness id that was selected on the harness
 // screen. The TUI must not present any additional harness question during the promote flow;

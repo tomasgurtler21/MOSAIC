@@ -411,9 +411,18 @@ func applyHarnessRegion(node *docformat.Node, name string, class domain.Injectio
 		// when the document is serialised. Descriptor YAML strings do not always carry a
 		// trailing newline; without one, the closing [[/DEPLOYED:...]] tag is concatenated
 		// onto the last line of content rather than appearing on a line by itself.
+		//
+		// Harness injection content is normalised to LF by the harness loader so that content
+		// read from CRLF-checked-out files on Windows matches what LF-checked-out files
+		// produce. Adapt the LF content to the source document's prevailing line ending so the
+		// injected lines are consistent with the surrounding document.
+		lineEnding := DetectLineEnding(req.Source)
 		contentBytes := []byte(content)
-		if contentBytes[len(contentBytes)-1] != '\n' {
-			contentBytes = append(contentBytes, '\n')
+		if lineEnding == "\r\n" {
+			contentBytes = bytes.ReplaceAll(contentBytes, []byte("\n"), []byte("\r\n"))
+		}
+		if len(contentBytes) == 0 || contentBytes[len(contentBytes)-1] != '\n' {
+			contentBytes = append(contentBytes, []byte(lineEnding)...)
 		}
 		node.SetContent(contentBytes) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
 		return RegionOutcome{
@@ -552,10 +561,25 @@ func applyProtocolRegion(node *docformat.Node, name string, req Request) (Region
 		return RegionOutcome{}, fmt.Errorf("region %q: %w", name, ErrProtocolContentMissing)
 	}
 
-	versionComment := []byte(ProtocolVersionComment(req.Protocol.Version))
-	content := make([]byte, 0, len(versionComment)+len(block))
+	// Determine the effective line ending for the protocol region. The primary signal is the
+	// block's own line ending (which is CRLF when loaded from a CRLF-checked-out file).
+	// When the block is LF but the source document is CRLF, promote to CRLF so the region
+	// is consistent with the surrounding document. This handles test fixtures where protocol
+	// blocks are Go string literals (always LF) embedded in a real CRLF source file.
+	//
+	// The block is normalised to LF first to avoid double-converting an already-CRLF block.
+	lineEnding := DetectLineEnding(block)
+	if lineEnding == "\n" && DetectLineEnding(req.Source) == "\r\n" {
+		lineEnding = "\r\n"
+	}
+	adaptedBlock := bytes.ReplaceAll(block, []byte("\r\n"), []byte("\n"))
+	if lineEnding == "\r\n" {
+		adaptedBlock = bytes.ReplaceAll(adaptedBlock, []byte("\n"), []byte("\r\n"))
+	}
+	versionComment := []byte(ProtocolVersionComment(req.Protocol.Version, adaptedBlock))
+	content := make([]byte, 0, len(versionComment)+len(adaptedBlock))
 	content = append(content, versionComment...)
-	content = append(content, block...)
+	content = append(content, adaptedBlock...)
 
 	node.SetContent(content) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
 	return RegionOutcome{

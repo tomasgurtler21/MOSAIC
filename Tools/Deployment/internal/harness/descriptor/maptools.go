@@ -488,14 +488,23 @@ func ExtractToolEntries(d *domain.HarnessDescriptor, toolsValue domain.FieldValu
 			}
 		}
 	} else {
-		// List shape (and any other shape): value is a KindList; every scalar item counts.
-		if toolsValue.Kind != domain.KindList {
-			return nil
-		}
-		for _, item := range toolsValue.Items {
-			if item.Kind == domain.KindScalar {
-				addEntry(item.Scalar)
+		// List shape (and any other shape): value is a KindList or a comma-separated KindScalar;
+		// every scalar item counts.
+		switch toolsValue.Kind {
+		case domain.KindList:
+			for _, item := range toolsValue.Items {
+				if item.Kind == domain.KindScalar {
+					addEntry(item.Scalar)
+				}
 			}
+		case domain.KindScalar:
+			// Accept a comma-separated scalar (e.g. "Read, Write, Edit") as produced by the
+			// claude-code built-in harness. Split on commas, trim whitespace, discard empty parts.
+			for _, part := range strings.Split(toolsValue.Scalar, ",") {
+				addEntry(strings.TrimSpace(part))
+			}
+		default:
+			return nil
 		}
 	}
 

@@ -2,19 +2,14 @@ package catalog_test
 
 // Tests for the workflow catalog (T7.6) and byte-identical section extraction (T7.7).
 //
-// Workflows are listed in Workflows/Index.md (the canonical registry) and stored in
-// per-category subfolders. The catalog must:
+// Workflows are stored in per-category subfolders under Catalog/Workflows/. The catalog must:
 //
 // T7.6:
-//   - Return exactly the 15 workflows listed in the index, excluding underscore-prefixed
-//     files (_Template.md, _Legacy-Appendices.md) which are not workflows
+//   - Load every eligible .md file found on disk under Catalog/Workflows/ subdirectories,
+//     excluding underscore-prefixed files (_Template.md, _Legacy-Appendices.md)
 //   - Expose per-workflow frontmatter fields: id, name, description, hint, version,
 //     category, and referenced_agents
 //   - Group workflows by category folder for the browse UI (WorkflowCategories)
-//   - Maintain the ordering of workflows within each category as declared in the index
-//   - Detect and report index/disk mismatches:
-//       "index-orphan" — workflow in index with no matching file
-//       "file-orphan"  — workflow file on disk not listed in the index
 //
 // T7.7:
 //   - WorkflowSection extracts the [[SECTION:Workflow:{id}]] block including its
@@ -52,10 +47,13 @@ package catalog_test
 //     assertion that outer maintainer prose is excluded from the extracted section.
 //   - The underscore-prefix exclusion test (TestWorkflows_UnderscorePrefixed_Excluded) is a
 //     loader rule, not content coupling, and needed no change.
-//   - Everything else (non-empty-field checks, lookup-by-key, index/disk-orphan detection,
-//     and the two orphan/missing-section fixture-backed tests) asserts a property that
-//     holds over whatever the catalog returns, or already used a synthetic/testdata
-//     fixture, and needed no change.
+//   - Everything else (non-empty-field checks, lookup-by-key, and the missing-section
+//     fixture-backed test) asserts a property that holds over whatever the catalog
+//     returns, or already used a synthetic/testdata fixture, and needed no change.
+//   - Index/disk-orphan detection tests (TestIssues_IndexOrphan_*, TestIssues_FileOrphan_*,
+//     TestIssues_RealRepo_NoIndexOrFileOrphans) were retired: the new loader emits neither
+//     code from the normal load path; both codes are now the sole responsibility of the
+//     standalone index-check command.
 
 import (
 	"bytes"
@@ -111,9 +109,7 @@ func writeWorkflowFile(t *testing.T, root, category, fileName, id string, refere
 func makeWorkflowWithSectionFixture(t *testing.T) (catalog.Catalog, []byte) {
 	t.Helper()
 	root := makeTempMosaicRoot(t)
-	writeWorkflowIndex(t, root, [][7]string{
-		{"sample-workflow", "SampleCategory", "1.0.0", "Sample Workflow", "Sample workflow.", "Hint.", "SampleCategory/sample-workflow.md"},
-	})
+	// No Index.md is written: the disk-driven loader finds the workflow file directly.
 	content := []byte("---\nid: sample-workflow\nversion: \"1.0.0\"\nname: Sample Workflow\ndescription: Sample.\nhint: Hint.\n---\n\n" +
 		"OUTER_MAINTAINER_TEXT: prose that must never appear in the extracted section.\n\n" +
 		"[[SECTION:Workflow:sample-workflow]]\nThis is the workflow body.\n[[/SECTION:Workflow:sample-workflow]]\n\n" +
@@ -281,14 +277,12 @@ func TestWorkflows_AllHaveAbsoluteSourcePath(t *testing.T) {
 // T7.6 — Workflow field and referenced-agent parsing (synthetic fixture)
 // ---------------------------------------------------------------------------
 
-// TestWorkflow_Fields_PopulatedFromFrontmatterAndIndex verifies that a workflow's fields
-// are populated from its own frontmatter and index row on a synthetic fixture, rather
-// than reading a specific workflow out of the real repository.
-func TestWorkflow_Fields_PopulatedFromFrontmatterAndIndex(t *testing.T) {
+// TestWorkflow_Fields_PopulatedFromFrontmatter verifies that a workflow's fields are
+// populated from its own frontmatter on a synthetic fixture, rather than reading a
+// specific workflow out of the real repository. No Index.md is written; the loader
+// discovers the file from disk directly.
+func TestWorkflow_Fields_PopulatedFromFrontmatter(t *testing.T) {
 	root := makeTempMosaicRoot(t)
-	writeWorkflowIndex(t, root, [][7]string{
-		{"sample-workflow", "SampleCategory", "1.0.0", "Sample Workflow", "Sample workflow.", "Hint.", "SampleCategory/sample-workflow.md"},
-	})
 	writeWorkflowFile(t, root, "SampleCategory", "sample-workflow.md", "sample-workflow", nil)
 
 	cat, err := catalog.Load(root, "")
@@ -323,12 +317,10 @@ func TestWorkflow_Fields_PopulatedFromFrontmatterAndIndex(t *testing.T) {
 
 // TestWorkflow_ReferencedAgents_PopulatedFromFrontmatter verifies that a workflow's
 // ReferencedAgents list is populated from its referenced_agents frontmatter, on a
-// synthetic fixture rather than a specific real workflow.
+// synthetic fixture rather than a specific real workflow. No Index.md is written;
+// the loader discovers the file from disk directly.
 func TestWorkflow_ReferencedAgents_PopulatedFromFrontmatter(t *testing.T) {
 	root := makeTempMosaicRoot(t)
-	writeWorkflowIndex(t, root, [][7]string{
-		{"sample-workflow", "SampleCategory", "1.0.0", "Sample Workflow", "Sample workflow.", "Hint.", "SampleCategory/sample-workflow.md"},
-	})
 	wantAgents := []string{"agent-one", "agent-two", "agent-three"}
 	writeWorkflowFile(t, root, "SampleCategory", "sample-workflow.md", "sample-workflow", wantAgents)
 
@@ -422,75 +414,6 @@ func TestWorkflowLookup_UnknownID_ReturnsFalse(t *testing.T) {
 	_, ok := cat.Workflow("this-workflow-does-not-exist")
 	if ok {
 		t.Error("Workflow(\"this-workflow-does-not-exist\"): returned true, want false")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// T7.6 — Index / disk reconciliation
-// ---------------------------------------------------------------------------
-
-// TestIssues_IndexOrphan_ReportedAsIssue verifies that when an index entry has no
-// corresponding file on disk, the catalog reports an Issue with code "index-orphan".
-//
-// The workflow-orphan fixture has an index entry "missing-workflow" with no file.
-func TestIssues_IndexOrphan_ReportedAsIssue(t *testing.T) {
-	cat := loadFixtureCatalog(t, "workflow-orphan")
-
-	_, found := findIssue(cat.Issues(), "index-orphan")
-	if !found {
-		t.Errorf("Issues() does not contain an index-orphan issue; got: %v", cat.Issues())
-	}
-}
-
-// TestIssues_IndexOrphan_SubjectIsWorkflowID verifies that the index-orphan Issue's
-// Subject identifies the missing workflow by its id.
-func TestIssues_IndexOrphan_SubjectIsWorkflowID(t *testing.T) {
-	cat := loadFixtureCatalog(t, "workflow-orphan")
-
-	iss, found := findIssue(cat.Issues(), "index-orphan")
-	if !found {
-		t.Skip("No index-orphan issue found; skipping Subject check")
-	}
-	if iss.Subject != "missing-workflow" {
-		t.Errorf("index-orphan Issue.Subject = %q, want %q", iss.Subject, "missing-workflow")
-	}
-}
-
-// TestIssues_FileOrphan_ReportedAsIssue verifies that when a workflow file exists on
-// disk but is not listed in the index, the catalog reports an Issue with code "file-orphan".
-//
-// The workflow-orphan fixture has a file "orphan-on-disk.md" not in the index.
-func TestIssues_FileOrphan_ReportedAsIssue(t *testing.T) {
-	cat := loadFixtureCatalog(t, "workflow-orphan")
-
-	_, found := findIssue(cat.Issues(), "file-orphan")
-	if !found {
-		t.Errorf("Issues() does not contain a file-orphan issue; got: %v", cat.Issues())
-	}
-}
-
-// TestIssues_FileOrphan_SubjectIdentifiesFile verifies that the file-orphan Issue's
-// Subject or Path field identifies the orphaned file.
-func TestIssues_FileOrphan_SubjectIdentifiesFile(t *testing.T) {
-	cat := loadFixtureCatalog(t, "workflow-orphan")
-
-	iss, found := findIssue(cat.Issues(), "file-orphan")
-	if !found {
-		t.Skip("No file-orphan issue found; skipping Subject/Path check")
-	}
-	if iss.Subject == "" && iss.Path == "" {
-		t.Error("file-orphan Issue has empty Subject and empty Path; expected at least one to identify the file")
-	}
-}
-
-// TestIssues_RealRepo_NoIndexOrFileOrphans verifies that the real repository's workflow
-// index and disk files are perfectly in sync (no orphans in either direction).
-func TestIssues_RealRepo_NoIndexOrFileOrphans(t *testing.T) {
-	cat := loadRealCatalog(t)
-	for _, iss := range cat.Issues() {
-		if iss.Code == "index-orphan" || iss.Code == "file-orphan" {
-			t.Errorf("real repository has unexpected workflow reconciliation issue: %+v", iss)
-		}
 	}
 }
 
@@ -630,8 +553,8 @@ func TestWorkflowSection_UnknownID_ReturnsError(t *testing.T) {
 }
 
 // TestWorkflowSection_FileWithoutSectionBlock_ReturnsError verifies that WorkflowSection
-// returns an error when a workflow is present in the catalog (its file exists on disk and
-// is listed in the index) but the file does not contain a [[SECTION:Workflow:{id}]] block.
+// returns an error when a workflow is present in the catalog (its file exists on disk)
+// but the file does not contain a [[SECTION:Workflow:{id}]] block.
 //
 // This is a realistic failure mode for a malformed workflow file. The contract states that
 // section blocks must be byte-identically extractable (AC7.4); a missing block cannot

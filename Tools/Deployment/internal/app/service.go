@@ -134,6 +134,17 @@ type Service interface {
 	// ErrRenderDestinationExists. The overwrite check runs under DryRun too.
 	RenderAgent(ctx context.Context, req RenderAgentRequest) (RenderAgentResult, error)
 
+	// CheckWorkflowIndex reports staleness between Catalog/Workflows/Index.md and the workflow
+	// files on disk. It is a read-only, non-interactive diagnostic intended for manual and
+	// CI/pre-push use: it never consults domain.Interaction, never writes any file, and never
+	// participates in a deploy, update, or workflow-update run.
+	//
+	// The catalogue root inspected is the one the service's catalog was loaded from.
+	//
+	// Drift is reported in the result, never as an error. A non-nil error means the check could
+	// not be performed; the result is then the zero value.
+	CheckWorkflowIndex(ctx context.Context) (IndexCheckResult, error)
+
 	// Promote generates a generic agent source file from a single already boundary-tagged
 	// harness-only agent file, so that a one-off harness-specific agent becomes reusable
 	// across harnesses through the normal Deploy/Update flow.

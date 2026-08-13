@@ -254,7 +254,7 @@ func deployUtilityInfrastructure(ctx context.Context, s *service, req UtilityInf
 		Conflicts:     conflicts,
 		VersionStamps: buildVersionStamps(append(probeSet.Agents, infraAgents...), probeSet.Skills, nil, p.Items, module.Descriptor(), toolMappingsVersion),
 		Hooks:         nil,
-		Todo:          s.deps.Todo.Items(),
+		TodoItems:     s.deps.Todo.Items,
 		TodoMeta: todo.Meta{
 			Harness: harnessRef.DisplayName, WorkspacePath: workspace, DeploymentRoot: workspace,
 			GeneratedAt: now, Mode: domain.ModeUtilityInfraOnly,

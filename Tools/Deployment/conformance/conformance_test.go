@@ -26,10 +26,22 @@ package conformance_test
 //     set and the outputs are compared to golden files specific to that descriptor.
 //   - Including the descriptor-only tier here satisfies AC23.4 (all three provision tiers
 //     exercised by one suite).
+//
+//   T7.3 — Registry-discovered external module against contracttest.Run invariants:
+//   - A registry.Discover + Resolve path (not direct external.New) is used to obtain the
+//     module, closing the gap where the previous tests bypassed registry.Discover.
+//   - The module is exercised through the contracttest.Run universal invariant suite.
+//
+//   T7.4 — End-to-end transform through registry.Discover (not bypassing it):
+//   - A registry-discovered external module and a directly-constructed external.New module
+//     (both using the same binary and descriptor) are compared byte-for-byte for a
+//     representative transform input.
+//   - Any difference means the registry path is not correctly wiring external.New.
 
 import (
 	"bytes"
 	"flag"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -789,6 +801,198 @@ func TestAllThreeTiers_AreExercisedByThisSuite(t *testing.T) {
 			t.Errorf("Tier = %q, want TierExternal", m.Ref().Tier)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// T7.3 — Registry-discovered external module against contracttest.Run invariants
+// ---------------------------------------------------------------------------
+
+// createRegistryExternalHarness creates a temp MOSAIC root with one external harness
+// discoverable by registry.Discover. The harness executable is copied from binPath into
+// the harness directory. A minimal harness.yaml is written so the registry can load a
+// valid HarnessDescriptor. The OpenCode harness content files (HarnessInjections.md and
+// HarnessInjectionsOrchestrator.md) are copied from the actual repository so that the
+// OpenCode subprocess can initialise when external.New starts it with MOSAIC_ROOT=root.
+// The returned root is ready for registry.Discover as MosaicRoot.
+func createRegistryExternalHarness(t *testing.T, harnessID, displayName, binPath string) string {
+	t.Helper()
+	root := t.TempDir()
+	harnessDir := filepath.Join(root, "MosaicDeploy", "harnesses", harnessID)
+	if err := os.MkdirAll(harnessDir, 0o755); err != nil {
+		t.Fatalf("create harness dir: %v", err)
+	}
+	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: %q\n",
+		harnessID, displayName)
+	if err := os.WriteFile(filepath.Join(harnessDir, "harness.yaml"), []byte(yamlContent), 0o644); err != nil {
+		t.Fatalf("write harness.yaml: %v", err)
+	}
+	execName := "harness-exec"
+	if runtime.GOOS == "windows" {
+		execName = "harness-exec.exe"
+	}
+	binData, err := os.ReadFile(binPath)
+	if err != nil {
+		t.Fatalf("read reference binary %s: %v", binPath, err)
+	}
+	if err := os.WriteFile(filepath.Join(harnessDir, execName), binData, 0o755); err != nil {
+		t.Fatalf("write harness executable: %v", err)
+	}
+
+	// Copy OpenCode content files so the subprocess can initialise. The OpenCode module
+	// reads HarnessInjections.md and HarnessInjectionsOrchestrator.md from
+	// <MOSAIC_ROOT>/Catalog/Agents/OpenCode/ on startup; without these files the binary
+	// exits before responding to the handshake and external.New returns an error.
+	repoRoot := findRepoRoot(t)
+	contentSrc := filepath.Join(repoRoot, "Catalog", "Agents", "OpenCode")
+	contentDst := filepath.Join(root, "Catalog", "Agents", "OpenCode")
+	if err := os.MkdirAll(contentDst, 0o755); err != nil {
+		t.Fatalf("create OpenCode content dir: %v", err)
+	}
+	for _, name := range []string{"HarnessInjections.md", "HarnessInjectionsOrchestrator.md"} {
+		data, err := os.ReadFile(filepath.Join(contentSrc, name))
+		if err != nil {
+			t.Fatalf("copy OpenCode content file %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(contentDst, name), data, 0o644); err != nil {
+			t.Fatalf("write OpenCode content file %s: %v", name, err)
+		}
+	}
+
+	return root
+}
+
+// TestRegistryExternal_OpenCode_PassesContractTest exercises a registry-discovered external
+// module backed by the reference OpenCode binary through the contracttest.Run universal
+// invariants. This test closes the gap where the contract test suite was previously run
+// only on directly-constructed modules (bypassing registry.Discover entirely).
+//
+// The universal invariants include: Ref() stability and non-empty ID, Descriptor() non-nil
+// and stable across calls, TargetPath sentinel for unsupported artifact kinds, Injection
+// ok==false for unrecognised names, HookPlan Supported==false with non-empty Reason,
+// determinism (equal input → equal output), and Close() idempotency.
+//
+// RED NOTE: If the current (pre-I7.1) code returns a descriptor-driven newRuntimeModule
+// instead of an external.New adapter, the universal invariants will likely hold for a
+// minimal descriptor and the test will pass. The primary RED evidence for Stage 7 is in
+// the T7.2 tests in registry_test.go, which prove external.New is called by demonstrating
+// that a non-protocol binary causes construction failure. T7.3 pins the contracttest
+// coverage of the correctly-wired registry path.
+func TestRegistryExternal_OpenCode_PassesContractTest(t *testing.T) {
+	binPath := buildReferenceExternalModule(t)
+	harnessID := "registry-external-contracttest"
+	root := createRegistryExternalHarness(t, harnessID, "Registry External Contract Test", binPath)
+
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
+	if err != nil {
+		t.Fatalf("registry.Discover: %v", err)
+	}
+	m, err := reg.Resolve(harnessID)
+	if err != nil {
+		t.Fatalf("registry.Resolve(%q): %v\n"+
+			"(If this fails with 'harness is not usable', external.New was called but the "+
+			"handshake failed. That is a build or environment issue with the reference binary, "+
+			"not a test failure.)", harnessID, err)
+	}
+	defer m.Close() //nolint:errcheck
+
+	// External-tier specific invariants not covered by contracttest universal suite.
+	t.Run("external_specific", func(t *testing.T) {
+		ref := m.Ref()
+		if ref.Tier != domain.TierExternal {
+			t.Errorf("Ref().Tier = %q, want TierExternal; registry-discovered external module "+
+				"must report TierExternal provenance", ref.Tier)
+		}
+		if ref.ExecutablePath == "" {
+			t.Error("Ref().ExecutablePath is empty; must carry the path to the harness binary")
+		}
+	})
+
+	// Universal HarnessModule contract invariants.
+	contracttest.Run(t, m, contracttest.Fixtures{})
+}
+
+// ---------------------------------------------------------------------------
+// T7.4 — End-to-end transform through registry.Discover (not bypassing it)
+// ---------------------------------------------------------------------------
+
+// TestRegistryExternal_OpenCode_EndToEndTransformMatchesDirect verifies that a module
+// resolved through registry.Discover (going through the full discovery and construction
+// path) produces byte-identical transform output to a module constructed directly via
+// external.New with the same binary and descriptor.
+//
+// Both modules are given the same binary and the same descriptor (the descriptor is read
+// from the registry-resolved module to guarantee equality). If the registry path returns a
+// descriptor-driven newRuntimeModule instead of an external.New adapter, the transform
+// outputs may differ because the two implementations process the same descriptor through
+// different engines (local Go vs. subprocess).
+//
+// RED NOTE: This test may or may not fail with the current implementation depending on
+// whether newRuntimeModule and external.New produce identical transform outputs for a
+// minimal descriptor. When they do produce different outputs, this test is RED, providing
+// a behavioral signal that the registry path is wrong. The definitive RED evidence is in
+// T7.2.
+func TestRegistryExternal_OpenCode_EndToEndTransformMatchesDirect(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+	binPath := buildReferenceExternalModule(t)
+
+	harnessID := "registry-external-e2e"
+	root := createRegistryExternalHarness(t, harnessID, "Registry External E2E", binPath)
+
+	// Resolve via registry — this is the path under test.
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
+	if err != nil {
+		t.Fatalf("registry.Discover: %v", err)
+	}
+	registryMod, err := reg.Resolve(harnessID)
+	if err != nil {
+		t.Fatalf("registry.Resolve(%q): %v", harnessID, err)
+	}
+	defer registryMod.Close() //nolint:errcheck
+
+	// Construct the reference module directly via external.New using the same binary and
+	// the descriptor that the registry path produced. Both modules now operate with
+	// identical configuration, so any output difference indicates a path divergence.
+	directMod, err := external.New(binPath, registryMod.Descriptor(), external.Options{
+		Timeout:    15 * time.Second,
+		MosaicRoot: repoRoot,
+	})
+	if err != nil {
+		t.Fatalf("external.New (direct construction for comparison): %v\n"+
+			"(In the RED phase, the reference module may not speak the protocol yet;\n"+
+			"this failure is expected until the protocol is implemented.)", err)
+	}
+	defer directMod.Close() //nolint:errcheck
+
+	protocol := loadTestProtocol(t, repoRoot)
+	cases := goldenCases(t, repoRoot)
+	if len(cases) == 0 {
+		t.Skip("no golden cases available; skipping end-to-end comparison")
+	}
+
+	// Use the first golden case as the representative end-to-end input.
+	tc := cases[0]
+	registryOutput := applyTransform(t, registryMod, tc, protocol)
+	directOutput := applyTransform(t, directMod, tc, protocol)
+
+	if !bytes.Equal(registryOutput, directOutput) {
+		firstDiff := findFirstDiff(registryOutput, directOutput)
+		t.Errorf(
+			"registry-discovered module and directly-constructed external.New module "+
+				"produced different transform outputs for %q:\n"+
+				"registry output: %d bytes\n"+
+				"direct output:   %d bytes\n"+
+				"first difference at byte: %d\n\n"+
+				"This means registry.Discover is NOT correctly wiring external.New for "+
+				"TierExternal — the registry is likely returning a descriptor-driven module "+
+				"(newRuntimeModule) instead of an external.New adapter.\n\n"+
+				"--- registry (first 600 bytes) ---\n%s\n\n"+
+				"--- direct external.New (first 600 bytes) ---\n%s",
+			tc.name,
+			len(registryOutput), len(directOutput), firstDiff,
+			truncate(registryOutput, 600),
+			truncate(directOutput, 600),
+		)
+	}
 }
 
 // ---------------------------------------------------------------------------

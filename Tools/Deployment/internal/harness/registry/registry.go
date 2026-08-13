@@ -11,6 +11,7 @@ import (
 
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
+	"mosaic-deploy/internal/harness/external"
 )
 
 // ErrHarnessNotFound is returned by Resolve when no harness with the given id has been
@@ -168,6 +169,35 @@ func applyToolMappingsHook(id string, mod domain.HarnessModule, hook func(string
 	}
 }
 
+// refOverrideModule wraps a HarnessModule so that Ref() returns the registry's canonical
+// ref rather than the module's own internally-constructed ref. This is needed for external
+// modules: external.New builds a ref from the protocol handshake response, which does not
+// carry fields that only the registry knows — specifically SourcePath and RequiresOptIn.
+// Wrapping restores those fields so that callers of Resolve see a complete, consistent ref.
+type refOverrideModule struct {
+	inner domain.HarnessModule
+	ref   domain.HarnessRef
+}
+
+func (m *refOverrideModule) Ref() domain.HarnessRef                   { return m.ref }
+func (m *refOverrideModule) Descriptor() *domain.HarnessDescriptor     { return m.inner.Descriptor() }
+func (m *refOverrideModule) Close() error                              { return m.inner.Close() }
+func (m *refOverrideModule) Tools(req domain.ToolRequest) (domain.ToolResult, error) {
+	return m.inner.Tools(req)
+}
+func (m *refOverrideModule) Frontmatter(req domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
+	return m.inner.Frontmatter(req)
+}
+func (m *refOverrideModule) TargetPath(req domain.TargetPathRequest) (string, error) {
+	return m.inner.TargetPath(req)
+}
+func (m *refOverrideModule) Injection(req domain.InjectionRequest) (string, bool) {
+	return m.inner.Injection(req)
+}
+func (m *refOverrideModule) HookPlan(req domain.HookPlanRequest) (domain.HookPlan, error) {
+	return m.inner.HookPlan(req)
+}
+
 // harnessEntry holds a discovered harness's public ref and its pre-constructed module.
 // mod is nil when the harness is not usable (invalid descriptor, load failure, or ungated external).
 type harnessEntry struct {
@@ -294,7 +324,9 @@ func Discover(opts Options) (Registry, error) {
 			}
 
 		case tier == domain.TierExternal:
-			// External module: list always; usability depends on AllowExternal.
+			// External module: list always; usability depends on AllowExternal AND a successful
+			// protocol handshake. A failed construction is scoped to this entry and does not
+			// abort discovery — the user can still select a different working harness.
 			usable := opts.AllowExternal
 			unusableReason := ""
 			if !usable {
@@ -312,11 +344,27 @@ func Discover(opts Options) (Registry, error) {
 			}
 			var mod domain.HarnessModule
 			if usable {
-				// External tier: inject from HarnessInjections.md if present alongside harness.yaml.
-				extInjections, _ := loadInjections(h.yamlPath)
-				extOrchInjections, extOrchVersion, _ := loadOrchInjections(h.yamlPath)
+				// Load orchestrator injection version from HarnessInjectionsOrchestrator.md so
+				// the descriptor carries the correct version before being forwarded to the
+				// subprocess during the protocol handshake.
+				_, extOrchVersion, _ := loadOrchInjections(h.yamlPath)
 				h.desc.OrchestratorInjectionsVersion = extOrchVersion
-				mod = newRuntimeModule(ref, h.desc, extInjections, extOrchInjections)
+				// Spawn the subprocess and perform the JSON-over-stdio protocol handshake.
+				// If the executable is missing, non-executable, or does not speak the protocol,
+				// the error is captured and the harness is marked unusable with a clear reason.
+				var constructErr error
+				mod, constructErr = external.New(h.execPath, h.desc, external.Options{MosaicRoot: opts.MosaicRoot})
+				if constructErr != nil {
+					ref.Usable = false
+					ref.UnusableReason = fmt.Sprintf("external module construction failed: %v", constructErr)
+					mod = nil
+				} else {
+					// Wrap the adapter so that Ref() returns the registry's canonical ref
+					// (including SourcePath and RequiresOptIn) rather than the handshake-built
+					// ref that external.New produces. The adapter's own ref lacks SourcePath
+					// because external.New does not receive the descriptor file path.
+					mod = &refOverrideModule{inner: mod, ref: ref}
+				}
 				// External modules resolve tools through their subprocess protocol, not through
 				// Descriptor().Tools.Mappings. The ToolMappings hook is not applied to them so
 				// that their RPC-based Tools() implementation is preserved unchanged.

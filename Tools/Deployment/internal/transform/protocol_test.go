@@ -212,7 +212,8 @@ func TestProtocol_VersionMarkerAppearsAsFirstLineOfRegion(t *testing.T) {
 	regionContent := extractProtocolRegionContent(t, result.Output)
 
 	// The version comment must be present somewhere in the region.
-	expectedComment := transform.ProtocolVersionComment(version)
+	// Pass the subagent block as content (the request uses RoleWorker which maps to subagent).
+	expectedComment := transform.ProtocolVersionComment(version, []byte(subagentBlockContent))
 	if !bytes.Contains(regionContent, []byte(expectedComment)) {
 		t.Errorf("protocol region does not contain version comment %q;\ncontent: %q",
 			expectedComment, regionContent)
@@ -248,7 +249,8 @@ func TestProtocol_VersionMarkerReflectsSuppliedVersion(t *testing.T) {
 			}
 
 			regionContent := extractProtocolRegionContent(t, result.Output)
-			expectedComment := transform.ProtocolVersionComment(version)
+			// Pass the subagent block as content (the request uses RoleWorker which maps to subagent).
+			expectedComment := transform.ProtocolVersionComment(version, []byte(subagentBlockContent))
 
 			if !bytes.Contains(regionContent, []byte(expectedComment)) {
 				t.Errorf("protocol region does not contain expected version comment %q;\ncontent: %q",
@@ -259,15 +261,41 @@ func TestProtocol_VersionMarkerReflectsSuppliedVersion(t *testing.T) {
 }
 
 // TestProtocol_VersionMarkerMatchesProtocolVersionCommentHelper verifies the round-trip
-// symmetry between the emitter (ProtocolVersionComment) and the expected comment shape.
-// This pins the exact output format so a future change to the shape is caught by both
-// the emitter test and any reader that parses the same pattern.
+// symmetry between the emitter (ProtocolVersionComment) and the expected comment shape for
+// the three defined line-ending cases. This pins the exact output format so a future change
+// to the shape or terminator logic is caught by both the emitter test and any reader that
+// parses the same pattern.
 func TestProtocol_VersionMarkerMatchesProtocolVersionCommentHelper(t *testing.T) {
 	const version = "1.9"
-	want := "<!-- protocol-version: 1.9 -->\n"
-	got := transform.ProtocolVersionComment(version)
-	if got != want {
-		t.Errorf("ProtocolVersionComment(%q): want %q, got %q", version, want, got)
+	cases := []struct {
+		name    string
+		content []byte
+		want    string
+	}{
+		{
+			name:    "LF content yields LF-terminated marker",
+			content: []byte("## Communication Protocol\n\nContent.\n"),
+			want:    "<!-- protocol-version: 1.9 -->\n",
+		},
+		{
+			name:    "CRLF content yields CRLF-terminated marker",
+			content: []byte("## Communication Protocol\r\n\r\nContent.\r\n"),
+			want:    "<!-- protocol-version: 1.9 -->\r\n",
+		},
+		{
+			name:    "nil content yields LF-terminated marker (defined fallback)",
+			content: nil,
+			want:    "<!-- protocol-version: 1.9 -->\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := transform.ProtocolVersionComment(version, tc.content)
+			if got != tc.want {
+				t.Errorf("ProtocolVersionComment(%q, %q): want %q, got %q",
+					version, tc.content, tc.want, got)
+			}
+		})
 	}
 }
 

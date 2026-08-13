@@ -43,13 +43,11 @@ func extractDeployedProtocolVersion(data []byte) string {
 	// Find the closing tag within the remaining bytes.
 	closeIdx := bytes.Index(data[contentStart:], protocolRegionClose)
 
-	var regionContent []byte
-	if closeIdx >= 0 {
-		regionContent = data[contentStart : contentStart+closeIdx]
-	} else {
-		// Unclosed region: degrade gracefully — scan whatever content is present.
-		regionContent = data[contentStart:]
+	// Unclosed region is malformed — degrade gracefully to empty.
+	if closeIdx < 0 {
+		return ""
 	}
+	regionContent := data[contentStart : contentStart+closeIdx]
 
 	// Extract the first protocol-version comment within the region.
 	m := protocolVersionPattern.FindSubmatch(regionContent)

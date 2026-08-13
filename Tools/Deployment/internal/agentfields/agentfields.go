@@ -44,6 +44,10 @@ var genericVocabularyKeys = map[string]bool{
 	"recommended_tier": true,
 	"tier_rationale":   true,
 	"required_skills":  true,
+	// Infrastructure-agent fields — present only on infrastructure agents.
+	"infrastructure": true,
+	"triggers":       true,
+	"on_failure":     true,
 }
 
 // All returns every MOSAIC-only deployed field, in a stable declared order.

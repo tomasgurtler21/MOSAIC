@@ -52,9 +52,19 @@ type ExecRequest struct {
 	VersionStamps map[string]domain.VersionStamp
 	// Hooks carries the resolved hook plans from the app layer (one per active hook bundle).
 	Hooks []domain.HookPlan
-	// Todo is the set of pre-collected gaps (from transform and plan phases) to write into
-	// the checklist file. The executor appends its own gaps before rendering.
-	Todo []domain.TodoItem
+	// TodoItems provides the set of pre-collected gaps (from the transform and plan phases) to
+	// write into the checklist file. The executor calls it once, at checklist-write time, after
+	// every per-item Content callback has run — so gaps forwarded into the collector *during*
+	// Execute are included. The executor appends its own gaps to the returned items before
+	// rendering.
+	//
+	// The provider must be read-only with respect to the caller's collector: it returns items,
+	// it does not expose mutation. Callers pass their collector's items accessor directly
+	// (for example todo.Collector.Items).
+	//
+	// A nil TodoItems is valid and means "no pre-collected items"; only executor-generated gaps
+	// are then rendered.
+	TodoItems func() []domain.TodoItem
 	// TodoMeta holds the run-level metadata embedded in the MOSAIC-DEPLOYMENT-TODO.md header.
 	TodoMeta todo.Meta
 	// DryRun disables all filesystem writes when true; the result still reports what would
@@ -785,12 +795,15 @@ func computeOutcome(actions []domain.ActionRecord, partialErr error, fallback do
 }
 
 // writeTodoFile renders MOSAIC-DEPLOYMENT-TODO.md and writes it to the workspace root.
-// It combines pre-collected items from req.Todo with executor-generated gaps.
+// It combines pre-collected items from req.TodoItems (called once here, after all Content
+// callbacks have run) with executor-generated gaps.
 func (e *executor) writeTodoFile(req ExecRequest, execGaps []domain.Gap) (string, error) {
 	collector := todo.NewCollector()
 
-	for _, item := range req.Todo {
-		collector.Add(item)
+	if req.TodoItems != nil {
+		for _, item := range req.TodoItems() {
+			collector.Add(item)
+		}
 	}
 	for _, g := range execGaps {
 		collector.AddGap(g)

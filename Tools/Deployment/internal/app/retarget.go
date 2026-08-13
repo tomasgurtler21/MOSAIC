@@ -222,7 +222,7 @@ func DetectHarnessMatch(src []byte, module domain.HarnessModule, kind domain.Art
 	// No distinguishing signal in either direction.
 	return HarnessMatchVerdict{
 		Status:   HarnessMatchIndeterminate,
-		Reason:   "file is a transformed MOSAIC agent but carries no signal distinguishing this harness from another",
+		Reason:   "no signal distinguishing this harness from another was found; the transform proceeded normally",
 		Evidence: evidence,
 	}
 }

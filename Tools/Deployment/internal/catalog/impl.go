@@ -24,7 +24,7 @@ type catalogImpl struct {
 	hookIdx      map[string]domain.HookBundle
 	workflows    []domain.Workflow
 	wfIdx        map[string]domain.Workflow
-	categories   []domain.WorkflowCategory // in index order
+	categories   []domain.WorkflowCategory // in alphabetical order by category name
 	tiers        []domain.TierInfo
 	issues       []Issue
 	sourcePaths  map[string]bool // every absolute path emitted by the catalog
@@ -81,7 +81,8 @@ func (c *catalogImpl) Hook(key string) (domain.HookBundle, bool) {
 	return h, ok
 }
 
-// Workflows returns all workflows listed in the index, excluding underscore-prefixed files.
+// Workflows returns all eligible workflow files found on disk under Catalog/Workflows/
+// subdirectories, excluding root-level files and underscore-prefixed files.
 func (c *catalogImpl) Workflows() []domain.Workflow { return c.workflows }
 
 // Workflow looks up a workflow by its id.
@@ -90,7 +91,8 @@ func (c *catalogImpl) Workflow(id string) (domain.Workflow, bool) {
 	return w, ok
 }
 
-// WorkflowCategories returns workflows grouped by source-folder category, in index order.
+// WorkflowCategories returns workflows grouped by source-folder category, in alphabetical
+// order by category name. Within a category, workflows are sorted ascending by ID.
 func (c *catalogImpl) WorkflowCategories() []domain.WorkflowCategory { return c.categories }
 
 // Tiers returns exactly the tier strings present in source, unnormalised and unvalidated.
@@ -131,7 +133,8 @@ func (c *catalogImpl) ReadSource(path string) ([]byte, error) {
 	return os.ReadFile(absPath)
 }
 
-// Issues reports all index/disk reconciliation mismatches and hook integrity errors.
+// Issues reports hook bundle integrity errors encountered during Load. It does not emit
+// file-orphan or index-orphan codes; those are produced exclusively by CheckWorkflowIndex.
 func (c *catalogImpl) Issues() []Issue { return c.issues }
 
 // loadCatalog reads the full MOSAIC source tree and returns an immutable Catalog.

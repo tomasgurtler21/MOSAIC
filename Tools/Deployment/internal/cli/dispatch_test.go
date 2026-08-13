@@ -208,3 +208,7 @@ func (s *countingService) DeployUtilityInfrastructure(ctx context.Context, req a
 func (s *countingService) RenderAgent(_ context.Context, _ app.RenderAgentRequest) (app.RenderAgentResult, error) {
 	return app.RenderAgentResult{}, nil
 }
+
+func (s *countingService) CheckWorkflowIndex(_ context.Context) (app.IndexCheckResult, error) {
+	return app.IndexCheckResult{}, nil
+}

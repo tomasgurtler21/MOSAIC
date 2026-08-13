@@ -570,7 +570,26 @@ a prompt.`,
 	renderCmd.Flags().BoolVar(&renderDryRun, "dry-run", false, "Compute and validate everything; write nothing")
 	renderCmd.Flags().StringVar(&renderOutput, "output", "", "Output format (json)")
 
-	root.AddCommand(deployCmd, updateCmd, workflowsCmd, promoteCmd, transformCmd, utilityInfraCmd, renderCmd)
+	// ------------------------------------------------------------------
+	// check-index subcommand
+	// ------------------------------------------------------------------
+	var checkIndexOutput string
+
+	checkIndexCmd := &cobra.Command{
+		Use:           "check-index",
+		Short:         "Report drift between Catalog/Workflows/Index.md and the workflow files on disk",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, svcErr := svc.CheckWorkflowIndex(ctx)
+			exitCode = renderCheckIndexOutput(out, errOut, checkIndexOutput, result, svcErr)
+			return nil
+		},
+	}
+
+	checkIndexCmd.Flags().StringVar(&checkIndexOutput, "output", "", "Output format (json)")
+
+	root.AddCommand(deployCmd, updateCmd, workflowsCmd, promoteCmd, transformCmd, utilityInfraCmd, renderCmd, checkIndexCmd)
 	root.SetArgs(args)
 
 	if err := root.Execute(); err != nil {

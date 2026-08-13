@@ -178,9 +178,10 @@ depends on what `opencode.New()` does with an empty root. For a correct deployme
 set `MOSAIC_ROOT` to the same path you pass as `--mosaic-root` to the deploy tool.
 
 > Note: `MOSAIC_ROOT` is read by the **module subprocess** at the time it starts. The
-> deploy tool itself uses `--mosaic-root` (or the current directory) for discovery. Because
-> the subprocess is not currently launched during a deploy run (see Known Limitation below),
-> `MOSAIC_ROOT` has no practical effect until the registry gap is closed.
+> deploy tool itself uses `--mosaic-root` (or the current directory) for discovery and passes
+> that same root to the subprocess environment. Set `MOSAIC_ROOT` to the same path you pass
+> as `--mosaic-root` to the deploy tool so the subprocess and the host process agree on where
+> to find catalog sources.
 
 ---
 
@@ -247,29 +248,6 @@ not validate the external module folder layout or the opt-in mechanism.
 
 ---
 
-## Known limitation: the registry gap
-
-The deploy tool discovers external harness folders and gates them correctly, but it does
-**not** actually spawn the external executable during a real deploy or update run. When an
-external harness is admitted (opt-in provided), the registry constructs the same
-descriptor-driven module used by descriptor-only harnesses — the subprocess is never
-launched and the JSON-over-stdio protocol is never exercised.
-
-As a result:
-
-- The steps in this guide produce a correctly discovered `TierExternal` harness with
-  `Usable: true`.
-- The deploy run uses the OpenCode descriptor's built-in logic, not the external
-  subprocess's logic — so the observable behaviour is identical to a descriptor-only
-  harness with the same `harness.yaml`.
-- "Built-in behaviour still observed" is expected; it is not a sign of a misconfiguration.
-
-For the full explanation and for how to exercise the module through a Go test instead of
-the CLI, see [`EXTERNAL-MODULE-GAP.md`](../../../../EXTERNAL-MODULE-GAP.md) at the
-repository root.
-
----
-
 ## Note on git
 
 `MosaicDeploy/` is git-ignored in its entirety at the MOSAIC root. Files you place there
@@ -309,12 +287,6 @@ The folder and descriptor are found, but the executable file name is not recogni
 Confirm the `--mosaic-root` path points to the directory that contains `MosaicDeploy/`.
 If `--mosaic-root` is omitted, the tool uses the launch directory, which may not be the
 MOSAIC root.
-
-**Built-in behaviour still observed after setting up the external module**
-
-This is expected. See the Known Limitation section above. The registry gap means the
-external subprocess is never spawned; the descriptor-driven logic runs instead. The setup
-is correct — this is a limitation of the current deploy tool, not a misconfiguration.
 
 **Wrong `--harness` value**
 

@@ -26,16 +26,14 @@ package registry_test
 //     hooks.supported: false.
 //
 // Coverage (external tier):
-//   - Injection() returns content declared with [[DEPLOYED:]] in HarnessInjections.md.
+//   - Injection() returns content served by the subprocess over the JSON-over-stdio protocol.
 //   - A harness with no content file resolves without error and reports no content.
-//   - A [[INJECTION:]] region in a harness content file is not served as harness content.
 
 import (
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"mosaic-deploy/internal/domain"
@@ -102,53 +100,6 @@ func makeDescriptorRootWithOrchestratorContent(t *testing.T, id, yamlContent, in
 		t.Fatalf("write HarnessInjectionsOrchestrator.md: %v", err)
 	}
 	return root
-}
-
-// makeExternalRoot builds a MosaicRoot with a single external-tier harness. A
-// platform-appropriate executable stub is placed alongside harness.yaml so that the
-// discovery algorithm classifies the folder as external rather than descriptor-only.
-func makeExternalRoot(t *testing.T, id, yamlContent string) string {
-	t.Helper()
-	root := makeDescriptorRoot(t, id, yamlContent)
-	dir := filepath.Join(root, "MosaicDeploy", "harnesses", id)
-	execName := "harness-exec"
-	if runtime.GOOS == "windows" {
-		execName = "harness-exec.bat"
-	}
-	if err := os.WriteFile(filepath.Join(dir, execName), []byte("@echo off\n"), 0o755); err != nil {
-		t.Fatalf("write executable stub: %v", err)
-	}
-	return root
-}
-
-// makeExternalRootWithInjections builds an external-tier root and also writes
-// HarnessInjections.md with the provided content.
-func makeExternalRootWithInjections(t *testing.T, id, yamlContent, injectionsMd string) string {
-	t.Helper()
-	root := makeExternalRoot(t, id, yamlContent)
-	dir := filepath.Join(root, "MosaicDeploy", "harnesses", id)
-	if err := os.WriteFile(filepath.Join(dir, "HarnessInjections.md"), []byte(injectionsMd), 0o644); err != nil {
-		t.Fatalf("write HarnessInjections.md: %v", err)
-	}
-	return root
-}
-
-// resolveExternal calls Discover with AllowExternal: true and Resolve for an external-tier
-// harness, fatally failing if either step fails.
-func resolveExternal(t *testing.T, root, id string) domain.HarnessModule {
-	t.Helper()
-	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
-	if err != nil {
-		t.Fatalf("Discover: %v", err)
-	}
-	m, err := reg.Resolve(id)
-	if err != nil {
-		t.Fatalf("Resolve(%q): %v", id, err)
-	}
-	if m == nil {
-		t.Fatalf("Resolve(%q): returned nil module with nil error", id)
-	}
-	return m
 }
 
 // ---------------------------------------------------------------------------
@@ -837,56 +788,67 @@ func TestDescriptorOnly_AbsentContentFileYieldsUsableModuleWithNoContent(t *test
 // External tier: harness content serving
 // ---------------------------------------------------------------------------
 
-// TestExternal_Injection_ReturnsDeployedContent verifies that an external-tier harness serves
-// content declared with [[DEPLOYED:]] regions in HarnessInjections.md (AC17.1 for the external
-// tier).
-//
-// TDD RED: fails until loadInjections is updated to call ParseDeployedRegions instead of
-// ParseInjections. The current code finds no content because it searches for [[INJECTION:]]
-// markers in a file that uses [[DEPLOYED:]] markers.
+// TestExternal_Injection_ReturnsDeployedContent verifies that an external-tier harness
+// resolved through registry.Discover serves injection content over the JSON-over-stdio
+// subprocess protocol. The reference protocol binary (cmd/harness-opencode-module) is used
+// as the external module; it serves its own content independently of any harness-folder file.
 func TestExternal_Injection_ReturnsDeployedContent(t *testing.T) {
-	id := "external-deployed-content-test"
-	wantContent := "external-harness-language-patterns"
-	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"External Deployed Test\"\n", id)
-	injectionsMd := fmt.Sprintf(`---
-version: "1.0.0"
----
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
+	id := uniqueID(t, "ext-injection")
+	addProtocolBinary(t, root, id, "External Injection Content Test", binPath)
 
-# Shared Injections
-
-[[DEPLOYED:LanguagePatterns]]
-%s
-[[/DEPLOYED:LanguagePatterns]]
-`, wantContent)
-	root := makeExternalRootWithInjections(t, id, yamlContent, injectionsMd)
-	m := resolveExternal(t, root, id)
-
-	got, ok := m.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: "worker"})
-	if !ok {
-		t.Errorf("Injection(LanguagePatterns, worker) returned ok=false for external tier; " +
-			"[[DEPLOYED:]] content must be served")
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
 	}
-	if ok && got != wantContent {
-		t.Errorf("Injection(LanguagePatterns, worker) = %q, want %q", got, wantContent)
+	m, err := reg.Resolve(id)
+	if err != nil {
+		t.Fatalf("Resolve(%q): %v", id, err)
+	}
+	defer m.Close() //nolint:errcheck
+
+	// The OpenCode subprocess serves HarnessConstraints content declared in its own
+	// content files. Verify that the content reaches the caller through the protocol.
+	got, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "worker"})
+	if !ok {
+		t.Errorf("Injection(HarnessConstraints, worker) returned ok=false for external tier; " +
+			"the subprocess must serve its declared injection content over the protocol")
+	}
+	if ok && got == "" {
+		t.Errorf("Injection(HarnessConstraints, worker) returned empty content; " +
+			"the subprocess must return non-empty content for a declared injection name")
 	}
 }
 
 // TestExternal_AbsentContentFileYieldsUsableModule verifies that an external-tier harness
-// with no HarnessInjections.md resolves to a usable module with no content, not an error
-// (AC17.2 for the external tier).
+// with no HarnessInjections.md in the harness folder still resolves to a usable module.
+// After Stage 7, external modules are driven through the JSON-over-stdio subprocess
+// protocol. The subprocess handles its own content loading independently of the harness
+// folder's HarnessInjections.md, so the absence of that file does not affect usability.
 func TestExternal_AbsentContentFileYieldsUsableModule(t *testing.T) {
-	id := "external-nocontentfile-test"
-	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"External No Content File Test\"\n", id)
-	// Only harness.yaml and the executable stub — no HarnessInjections.md.
-	root := makeExternalRoot(t, id, yamlContent)
-	m := resolveExternal(t, root, id)
+	// Build the reference protocol binary and set up a root with the OpenCode content
+	// the subprocess needs to initialise. No HarnessInjections.md is written to the
+	// harness folder — its absence must not affect the module's usability.
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
+	id := uniqueID(t, "no-content-file")
+	addProtocolBinary(t, root, id, "External No Content File Test", binPath)
+
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	m, err := reg.Resolve(id)
+	if err != nil {
+		t.Fatalf("Resolve(%q): %v", id, err)
+	}
+	defer m.Close() //nolint:errcheck
 
 	if !m.Ref().Usable {
-		t.Errorf("Ref().Usable = false for external harness with absent content file; want true")
-	}
-	_, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "worker"})
-	if ok {
-		t.Errorf("Injection(HarnessConstraints) returned ok=true for external harness with absent content file; want false")
+		t.Errorf("Ref().Usable = false for external harness with absent harness-folder content file; "+
+			"a working protocol binary must yield a usable module regardless of whether "+
+			"HarnessInjections.md exists in the harness folder")
 	}
 }
 
@@ -924,36 +886,6 @@ content-under-injection-marker
 	_, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "worker"})
 	if ok {
 		t.Errorf("Injection(HarnessConstraints) returned ok=true when the region uses [[INJECTION:]] marker; " +
-			"only [[DEPLOYED:]] regions must be served as harness content")
-	}
-}
-
-// TestExternal_InjectionMarkerNotServedAsHarnessContent verifies the same
-// marker-distinguishability requirement as
-// TestDescriptorOnly_InjectionMarkerNotServedAsHarnessContent, but for the external
-// provision tier (AC17.4).
-//
-// TDD RED: fails until loadInjections is updated to call ParseDeployedRegions instead of
-// ParseInjections, for the same reason as the descriptor-only counterpart.
-func TestExternal_InjectionMarkerNotServedAsHarnessContent(t *testing.T) {
-	id := "external-injectionmarker-test"
-	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"External Injection Marker Test\"\n", id)
-	injectionsMd := `---
-version: "1.0.0"
----
-
-# Harness Content (mis-marked)
-
-[[INJECTION:HarnessConstraints]]
-content-under-injection-marker
-[[/INJECTION:HarnessConstraints]]
-`
-	root := makeExternalRootWithInjections(t, id, yamlContent, injectionsMd)
-	m := resolveExternal(t, root, id)
-
-	_, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "worker"})
-	if ok {
-		t.Errorf("Injection(HarnessConstraints) returned ok=true for external tier when the region uses [[INJECTION:]] marker; " +
 			"only [[DEPLOYED:]] regions must be served as harness content")
 	}
 }

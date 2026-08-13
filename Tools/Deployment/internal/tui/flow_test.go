@@ -74,6 +74,10 @@ func (s *stubFlowService) RenderAgent(_ context.Context, _ app.RenderAgentReques
 	return app.RenderAgentResult{}, nil
 }
 
+func (s *stubFlowService) CheckWorkflowIndex(_ context.Context) (app.IndexCheckResult, error) {
+	return app.IndexCheckResult{}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------

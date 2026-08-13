@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"mosaic-common/docformat"
@@ -33,84 +34,56 @@ type colIndices struct {
 // Scanner
 // ---------------------------------------------------------------------------
 
-// loadWorkflows reads Workflows/Index.md, scans the Workflows/ directory, reconciles
-// the two sets, parses workflow frontmatter, and builds category groups.
+// loadWorkflows scans the Workflows/ directory for eligible .md files and loads every
+// file it finds as an authoritative workflow. Index.md is never read during loading;
+// its content, staleness, or absence has no effect on which workflows are loaded.
 func (c *catalogImpl) loadWorkflows(root string) []Issue {
 	wfRoot := filepath.Join(root, "Workflows")
-	indexPath := filepath.Join(wfRoot, "Index.md")
 
-	indexData, err := os.ReadFile(indexPath)
-	if err != nil {
-		// Missing index is not a hard error — just no workflows.
-		return nil
-	}
-
-	rows, categoryOrder := parseWorkflowIndex(indexData)
-
-	// Build a set of file-relative paths (relative to Workflows/) expected by the index.
-	expected := make(map[string]indexRow, len(rows)) // key: relative path
-	for _, row := range rows {
-		expected[row.File] = row
-	}
-
-	// Scan Workflows/ subdirectories for .md files, excluding _ prefixed files.
+	// The set of eligible disk files is the authoritative workflow set.
 	diskFiles := scanWorkflowDiskFiles(wfRoot)
 
-	// Compute file-orphans: on disk but not in index.
-	var issues []Issue
-	for relPath, absPath := range diskFiles {
-		if _, ok := expected[relPath]; !ok {
-			issues = append(issues, Issue{
-				Severity: docformat.SeverityWarning,
-				Code:     "file-orphan",
-				Subject:  relPath,
-				Message:  "workflow file exists on disk but is not listed in Workflows/Index.md",
-				Path:     absPath,
-			})
-		}
-	}
-
-	// Process index rows in declaration order.
-	// Track per-category workflows for WorkflowCategories.
 	wfByCategory := make(map[string][]domain.Workflow)
 
-	for _, row := range rows {
-		absFilePath := filepath.Join(wfRoot, filepath.FromSlash(row.File))
-
-		if _, exists := diskFiles[row.File]; !exists {
-			// Index entry with no file on disk.
-			issues = append(issues, Issue{
-				Severity: docformat.SeverityWarning,
-				Code:     "index-orphan",
-				Subject:  row.ID,
-				Message:  "workflow listed in index has no corresponding file on disk",
-				Path:     absFilePath,
-			})
+	for relPath, absPath := range diskFiles {
+		// Extract category from the relative path (e.g., "Alpha/workflow.md" → "Alpha").
+		parts := strings.SplitN(relPath, "/", 2)
+		if len(parts) != 2 {
 			continue
 		}
+		category := parts[0]
 
-		wf, err := parseWorkflowFile(absFilePath, row)
+		wf, err := parseWorkflowFile(absPath, category)
 		if err != nil {
 			continue
 		}
 
-		c.workflows = append(c.workflows, wf)
 		c.wfIdx[wf.ID] = wf
-		c.sourcePaths[absFilePath] = true
-		wfByCategory[wf.Category] = append(wfByCategory[wf.Category], wf)
+		c.sourcePaths[absPath] = true
+		wfByCategory[category] = append(wfByCategory[category], wf)
 	}
 
-	// Build WorkflowCategories in index order.
-	for _, catName := range categoryOrder {
-		if wfs, ok := wfByCategory[catName]; ok {
-			c.categories = append(c.categories, domain.WorkflowCategory{
-				Name:      catName,
-				Workflows: wfs,
-			})
-		}
+	// Build WorkflowCategories in alphabetical order by category name.
+	categoryNames := make([]string, 0, len(wfByCategory))
+	for cat := range wfByCategory {
+		categoryNames = append(categoryNames, cat)
+	}
+	sort.Strings(categoryNames)
+
+	for _, catName := range categoryNames {
+		wfs := wfByCategory[catName]
+		// Sort workflows within each category ascending by ID.
+		sort.Slice(wfs, func(i, j int) bool {
+			return wfs[i].ID < wfs[j].ID
+		})
+		c.categories = append(c.categories, domain.WorkflowCategory{
+			Name:      catName,
+			Workflows: wfs,
+		})
+		c.workflows = append(c.workflows, wfs...)
 	}
 
-	return issues
+	return nil
 }
 
 // scanWorkflowDiskFiles walks Workflows/ subdirectories and returns a map of
@@ -148,9 +121,17 @@ func scanWorkflowDiskFiles(wfRoot string) map[string]string {
 	return result
 }
 
-// parseWorkflowFile reads a workflow .md file and extracts metadata from its frontmatter,
-// supplemented by the index row for fields not in the frontmatter.
-func parseWorkflowFile(path string, row indexRow) (domain.Workflow, error) {
+// parseWorkflowFile reads a workflow .md file and builds a domain.Workflow from its
+// frontmatter. category is the containing directory name and is used verbatim.
+//
+// Field sourcing rules:
+//   - ID: frontmatter `id`; when absent or empty, the file's base name without .md.
+//   - Name: frontmatter `name`; when absent or empty, falls back to ID.
+//   - Version, Description, Hint: frontmatter scalars; empty when absent.
+//   - ReferencedAgents: frontmatter `referenced_agents` list; nil when absent.
+//   - Category: the category parameter, verbatim.
+//   - SourcePath: path, verbatim.
+func parseWorkflowFile(path, category string) (domain.Workflow, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return domain.Workflow{}, err
@@ -161,27 +142,34 @@ func parseWorkflowFile(path string, row indexRow) (domain.Workflow, error) {
 	}
 	fm := doc.Frontmatter()
 
-	wf := domain.Workflow{
-		ID:         row.ID,
-		Category:   row.Category,
-		SourcePath: path,
-		// Seed from index row (may be overridden by frontmatter below).
-		Version:     row.Version,
-		Name:        row.Name,
-		Description: row.Description,
-		Hint:        row.Hint,
+	// ID: prefer frontmatter; fall back to base name without .md.
+	id := ""
+	if v, ok := fm.Get("id"); ok && v.Kind == domain.KindScalar && v.Scalar != "" {
+		id = v.Scalar
+	}
+	if id == "" {
+		base := filepath.Base(path)
+		id = strings.TrimSuffix(base, ".md")
 	}
 
-	// Prefer frontmatter values when present.
-	if v, ok := fm.Get("id"); ok && v.Kind == domain.KindScalar && v.Scalar != "" {
-		wf.ID = v.Scalar
+	wf := domain.Workflow{
+		ID:         id,
+		Category:   category,
+		SourcePath: path,
 	}
+
 	if v, ok := fm.Get("version"); ok && v.Kind == domain.KindScalar && v.Scalar != "" {
 		wf.Version = v.Scalar
 	}
+
+	// Name: prefer frontmatter; fall back to ID.
 	if v, ok := fm.Get("name"); ok && v.Kind == domain.KindScalar && v.Scalar != "" {
 		wf.Name = v.Scalar
 	}
+	if wf.Name == "" {
+		wf.Name = id
+	}
+
 	if v, ok := fm.Get("description"); ok && v.Kind == domain.KindScalar && v.Scalar != "" {
 		wf.Description = v.Scalar
 	}

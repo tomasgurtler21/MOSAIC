@@ -265,7 +265,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		Conflicts:     conflicts,
 		VersionStamps: buildVersionStamps(append(probeSet.Agents, infraAgents...), probeSet.Skills, probeSet.Hooks, p.Items, module.Descriptor(), toolMappingsVersion),
 		Hooks:         buildHookPlans(module, probeSet.Hooks, scope),
-		Todo:          s.deps.Todo.Items(),
+		TodoItems:     s.deps.Todo.Items,
 		TodoMeta: todo.Meta{
 			Harness: harnessRef.DisplayName, WorkspacePath: workspace, DeploymentRoot: workspace,
 			GeneratedAt: now, Mode: domain.ModeDeployNew,

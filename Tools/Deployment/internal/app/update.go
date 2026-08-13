@@ -367,7 +367,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		Conflicts:     conflicts,
 		VersionStamps: versionStamps,
 		Hooks:         hookPlans,
-		Todo:          s.deps.Todo.Items(),
+		TodoItems:     s.deps.Todo.Items,
 		TodoMeta: todo.Meta{
 			Harness: harnessRef.DisplayName, WorkspacePath: workspace, DeploymentRoot: workspace,
 			GeneratedAt: now, Mode: domain.ModeUpdate,

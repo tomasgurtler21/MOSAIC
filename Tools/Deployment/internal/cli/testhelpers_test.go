@@ -48,6 +48,9 @@ type spyService struct {
 	renderAgentReq  *app.RenderAgentRequest
 	renderAgentResp app.RenderAgentResult
 	renderAgentErr  error
+
+	checkIndexResp app.IndexCheckResult
+	checkIndexErr  error
 }
 
 func (s *spyService) ListHarnesses() []domain.HarnessRef { return s.harnessRefs }
@@ -85,6 +88,10 @@ func (s *spyService) DeployUtilityInfrastructure(ctx context.Context, req app.Ut
 func (s *spyService) RenderAgent(_ context.Context, req app.RenderAgentRequest) (app.RenderAgentResult, error) {
 	s.renderAgentReq = &req
 	return s.renderAgentResp, s.renderAgentErr
+}
+
+func (s *spyService) CheckWorkflowIndex(_ context.Context) (app.IndexCheckResult, error) {
+	return s.checkIndexResp, s.checkIndexErr
 }
 
 // ---------------------------------------------------------------------------

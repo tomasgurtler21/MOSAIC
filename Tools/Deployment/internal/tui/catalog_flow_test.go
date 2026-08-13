@@ -64,6 +64,10 @@ func (s *catalogStubService) RenderAgent(_ context.Context, _ app.RenderAgentReq
 	return app.RenderAgentResult{}, nil
 }
 
+func (s *catalogStubService) CheckWorkflowIndex(_ context.Context) (app.IndexCheckResult, error) {
+	return app.IndexCheckResult{}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Reload stub
 // ---------------------------------------------------------------------------

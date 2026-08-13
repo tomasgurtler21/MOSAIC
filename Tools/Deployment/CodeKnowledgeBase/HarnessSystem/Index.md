@@ -22,11 +22,10 @@ Three tiers can provide a `HarnessModule`, in ascending precedence:
    `<MosaicRoot>/MosaicDeploy/harnesses/<folder>/` with no code at all. Every
    method is driven purely by shared, descriptor-interpreting algorithms.
 3. **External** — a descriptor-only folder that additionally ships an
-   executable (`harness-exec[.exe|.bat]`). The intent is for that executable
-   to speak a JSON-over-stdio protocol so a harness can be implemented in any
-   language, out of process. See **Known Complexity** below — this tier's
-   client-side machinery is fully built but is not currently invoked by the
-   production discovery path.
+   executable (`harness-exec[.exe|.bat]`). The executable speaks a JSON-over-stdio
+   protocol so a harness can be implemented in any language, out of process.
+   `registry.Discover` spawns the executable via `external.New` when the external
+   tier is admitted, routing every `HarnessModule` method call to the subprocess.
 
 A fourth package, `contracttest`, is not a provision tier — it is the shared
 assertion suite every tier's own test package drives its module through, so
@@ -38,7 +37,7 @@ contract" checks.
 | Component | Purpose |
 |-----------|---------|
 | **descriptor** | Owns the YAML wire format for `harness.yaml` (`Load`/`Parse`/`Validate`), maps it onto the tag-free `domain.HarnessDescriptor`, and exports the three shared algorithms every tier ultimately delegates to: `MapTools`, `ApplyFrontmatterSpec`, `ResolveTargetPath`. |
-| **registry** | `Discover` walks built-in factories plus on-disk harness folders, applies tier precedence, and returns a `Registry` whose `List`/`Resolve` are the only way any other package obtains a `HarnessModule`. Also holds `runtimeModule`, the descriptor-driven implementation used for both the descriptor-only tier and (currently) the external tier. |
+| **registry** | `Discover` walks built-in factories plus on-disk harness folders, applies tier precedence, and returns a `Registry` whose `List`/`Resolve` are the only way any other package obtains a `HarnessModule`. Also holds `runtimeModule`, the descriptor-driven implementation used for the descriptor-only tier. External-tier harnesses are constructed via `external.New` instead. |
 | **builtin** | Parent namespace for four harness sub-packages (`claudecode`, `ghcpcli`, `opencode`, `vscodeghcp`). Each embeds its own descriptor YAML and adds the minimal module code needed for behaviour the descriptor schema cannot express. |
 | **external** | Client-side implementation of the JSON-over-stdio protocol: `external.New` spawns a subprocess, performs a version handshake, and forwards every `HarnessModule` method as one JSON request/response line. Defines the full error taxonomy for subprocess failure modes. |
 | **contracttest** | `contracttest.Run(t, module, fixtures)` drives universal invariants unconditionally, plus optional per-method sub-suites (`ToolCases`, `FrontmatterCases`, `InjectionCases`, `TargetPathCases`, `HookPlanCases`) when fixtures are supplied. |
@@ -205,4 +204,4 @@ claim independently.
 
 ## Known Complexity
 
-**The external-module subprocess protocol is fully implemented but not currently wired into production harness resolution.** `registry.Discover` — the only discovery path `cmd/mosaic-deploy/main.go` calls — constructs *every* on-disk harness, including ones it tags `TierExternal` (detected purely by the presence of a `harness-exec[.exe|.bat]` file next to `harness.yaml`), using the same descriptor-driven `runtimeModule` used for the descriptor-only tier. `registry` never calls `external.New`. The `external` package's complete JSON-over-stdio client (handshake, per-request timeout, full error taxonomy, transparent reconnect) exists and is exhaustively tested, but only by its own package tests and by `conformance/conformance_test.go`, both of which call `external.New` directly — bypassing the registry entirely. Practically, this means: in a real `deploy`/`update` run today, a harness folder that ships an executable behaves identically to one that doesn't — its `harness-exec` file is discovered (its path is recorded on `HarnessRef.ExecutablePath`) but never invoked; all of that harness's behaviour still comes from interpreting `harness.yaml` directly, in-process. Anyone extending harness discovery to actually spawn external modules needs to change `registry.Discover`'s `TierExternal` branch to call `external.New` instead of `newRuntimeModule`.
+**The external-module subprocess protocol is fully implemented and wired into production harness resolution.** `registry.Discover` — the only discovery path `cmd/mosaic-deploy/main.go` calls — constructs `TierExternal` harnesses (detected by the presence of a `harness-exec[.exe|.bat]` file next to `harness.yaml`) via `external.New`, which spawns the subprocess, performs the JSON-over-stdio version handshake, and forwards every subsequent `HarnessModule` method call to the subprocess. In a real `deploy`/`update` run, a harness folder that ships an executable spawns that executable and routes all harness logic through it; a descriptor-only folder (no executable) uses the descriptor-driven `runtimeModule` as before. The `external` package's complete JSON-over-stdio client (handshake, per-request timeout, full error taxonomy, transparent reconnect) is exercised end-to-end by CLI and TUI runs whenever an external harness is selected.

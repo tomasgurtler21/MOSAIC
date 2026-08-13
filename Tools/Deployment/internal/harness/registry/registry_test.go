@@ -21,6 +21,10 @@ package registry_test
 //   T6.4  External-module opt-in gate: listing, resolution, and reason text.
 //   T6.5  Provenance: every resolved harness reports its tier and source path.
 //   T6.6  Listing: the full set of data the harness selection screen consumes.
+//   T7.1  External module subprocess wiring: protocol binary resolves to a usable module;
+//         ToolMappings hook is not applied to external modules.
+//   T7.2  External construction failure handling: a dummy (non-protocol) executable causes
+//         Discover to list the harness as Usable: false rather than aborting discovery.
 //
 // RED NOTE (registry BuiltinFactory tests):
 //   Tests in the "BuiltinFactory wiring" section call registry.Register with the BuiltinFactory
@@ -30,9 +34,11 @@ package registry_test
 //   BuiltinFactory — that compilation failure IS the RED state for these tests.
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -51,6 +57,49 @@ func makeRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	must(t, os.MkdirAll(filepath.Join(root, "MosaicDeploy", "harnesses"), 0o755))
+	return root
+}
+
+// findRepoRoot_registry returns the absolute path to the MOSAIC repository root.
+// The module root (Tools/Deployment/, found by findGoModuleRoot_registry) is two directory
+// levels below the repository root (Tools/ and the repo root itself).
+func findRepoRoot_registry(t *testing.T) string {
+	t.Helper()
+	moduleRoot := findGoModuleRoot_registry(t)
+	abs, err := filepath.Abs(filepath.Join(moduleRoot, "..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root from module root %s: %v", moduleRoot, err)
+	}
+	return abs
+}
+
+// makeRootWithOpenCodeContent creates a temp MosaicRoot that contains both the harnesses
+// discovery directory and the content files the OpenCode harness module subprocess needs to
+// initialise. HarnessInjections.md and HarnessInjectionsOrchestrator.md are copied from the
+// actual repository so that external.New can spawn the OpenCode binary successfully.
+//
+// Use this helper instead of makeRoot when a test needs a usable external harness backed by
+// the OpenCode protocol binary (buildProtocolBinaryForRegistry). The root it returns may be
+// passed to addProtocolBinary and then to registry.Discover as MosaicRoot.
+func makeRootWithOpenCodeContent(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	must(t, os.MkdirAll(filepath.Join(root, "MosaicDeploy", "harnesses"), 0o755))
+
+	// The OpenCode subprocess reads its harness content from
+	// <MosaicRoot>/Catalog/Agents/OpenCode/. Copy those two files from the real repository
+	// so the binary can initialise when external.New spawns it with MOSAIC_ROOT=root.
+	repoRoot := findRepoRoot_registry(t)
+	contentSrc := filepath.Join(repoRoot, "Catalog", "Agents", "OpenCode")
+	contentDst := filepath.Join(root, "Catalog", "Agents", "OpenCode")
+	must(t, os.MkdirAll(contentDst, 0o755))
+	for _, name := range []string{"HarnessInjections.md", "HarnessInjectionsOrchestrator.md"} {
+		data, err := os.ReadFile(filepath.Join(contentSrc, name))
+		if err != nil {
+			t.Fatalf("copy OpenCode content file %s from repo: %v", name, err)
+		}
+		must(t, os.WriteFile(filepath.Join(contentDst, name), data, 0o644))
+	}
 	return root
 }
 
@@ -363,12 +412,13 @@ func TestResolve_DescriptorOnlyOverridesBuiltin_WhenSameID(t *testing.T) {
 // TestResolve_ExternalOverridesDescriptorOnly_WhenOptedIn verifies that an opted-in external
 // module wins over a descriptor-only harness with the same id.
 func TestResolve_ExternalOverridesDescriptorOnly_WhenOptedIn(t *testing.T) {
-	root := makeRoot(t)
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
 	id := uniqueID(t, "conflict")
 
 	// Add both a descriptor-only and an external harness with the same id.
-	// addExternal calls addDescriptorOnly internally then adds the executable.
-	addExternal(t, root, id, "External Override")
+	// addProtocolBinary calls addDescriptorOnly internally then places the executable.
+	addProtocolBinary(t, root, id, "External Override", binPath)
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
 	if err != nil {
@@ -379,6 +429,7 @@ func TestResolve_ExternalOverridesDescriptorOnly_WhenOptedIn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve(%q): %v", id, err)
 	}
+	defer m.Close() //nolint:errcheck
 	// External must win when opted in.
 	if m.Ref().Tier != domain.TierExternal {
 		t.Errorf("Resolve(%q): Ref().Tier = %q, want %q (external must override descriptor-only when opted in)",
@@ -389,13 +440,14 @@ func TestResolve_ExternalOverridesDescriptorOnly_WhenOptedIn(t *testing.T) {
 // TestResolve_ExternalOverridesBuiltin_WhenOptedIn verifies that an opted-in external module
 // wins over a built-in with the same id (external > descriptor-only > built-in).
 func TestResolve_ExternalOverridesBuiltin_WhenOptedIn(t *testing.T) {
-	root := makeRoot(t)
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
 	id := uniqueID(t, "conflict")
 
 	// Register a built-in.
 	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(id), nil })
 	// Add an external module with the same id.
-	addExternal(t, root, id, "External Override")
+	addProtocolBinary(t, root, id, "External Override", binPath)
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
 	if err != nil {
@@ -406,6 +458,7 @@ func TestResolve_ExternalOverridesBuiltin_WhenOptedIn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve(%q): %v", id, err)
 	}
+	defer m.Close() //nolint:errcheck
 	if m.Ref().Tier != domain.TierExternal {
 		t.Errorf("Resolve(%q): Ref().Tier = %q, want %q", id, m.Ref().Tier, domain.TierExternal)
 	}
@@ -587,12 +640,12 @@ func TestResolve_ExternalHarness_WithoutOptIn_ReturnsNilModule(t *testing.T) {
 
 // TestResolve_ExternalHarness_WithOptIn_ReturnsNonNilModule verifies that when
 // AllowExternal is true, Resolve returns a non-nil module and no error for an external
-// harness. The module may fail when methods are called (the dummy executable does not
-// implement the protocol); that is beyond this test's scope.
+// harness whose executable speaks the JSON-over-stdio protocol.
 func TestResolve_ExternalHarness_WithOptIn_ReturnsNonNilModule(t *testing.T) {
-	root := makeRoot(t)
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
 	id := uniqueID(t, "ext")
-	addExternal(t, root, id, "External Harness")
+	addProtocolBinary(t, root, id, "External Harness", binPath)
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
 	if err != nil {
@@ -606,14 +659,17 @@ func TestResolve_ExternalHarness_WithOptIn_ReturnsNonNilModule(t *testing.T) {
 	if m == nil {
 		t.Fatalf("Resolve(%q) with opt-in: returned nil module with nil error", id)
 	}
+	defer m.Close() //nolint:errcheck
 }
 
 // TestList_ExternalHarness_WithOptIn_UsableIsTrue verifies that when AllowExternal is true,
-// the HarnessRef for an external module carries Usable == true.
+// the HarnessRef for an external module carries Usable == true when the executable speaks
+// the JSON-over-stdio protocol successfully.
 func TestList_ExternalHarness_WithOptIn_UsableIsTrue(t *testing.T) {
-	root := makeRoot(t)
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
 	id := uniqueID(t, "ext")
-	addExternal(t, root, id, "External Harness")
+	addProtocolBinary(t, root, id, "External Harness", binPath)
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
 	if err != nil {
@@ -625,7 +681,13 @@ func TestList_ExternalHarness_WithOptIn_UsableIsTrue(t *testing.T) {
 		t.Fatalf("external harness %q absent from List()", id)
 	}
 	if !ref.Usable {
-		t.Errorf("external harness %q with opt-in: Usable = false, want true", id)
+		t.Errorf("external harness %q with opt-in: Usable = false, want true; UnusableReason: %q",
+			id, ref.UnusableReason)
+	}
+	// Resolve and close the module to release the subprocess that holds the executable
+	// file open. This prevents TempDir cleanup from failing on Windows (file lock).
+	if m, resolveErr := reg.Resolve(id); resolveErr == nil {
+		m.Close() //nolint:errcheck
 	}
 }
 
@@ -744,9 +806,10 @@ func TestProvenance_DescriptorOnlyHarness_SourcePathPointsInsideRoot(t *testing.
 // TestProvenance_ExternalHarness_TierIsExternal verifies that a resolved external module
 // reports TierExternal provenance when AllowExternal is true.
 func TestProvenance_ExternalHarness_TierIsExternal(t *testing.T) {
-	root := makeRoot(t)
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
 	id := uniqueID(t, "")
-	addExternal(t, root, id, "External")
+	addProtocolBinary(t, root, id, "External", binPath)
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
 	if err != nil {
@@ -757,6 +820,7 @@ func TestProvenance_ExternalHarness_TierIsExternal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve(%q): %v", id, err)
 	}
+	defer m.Close() //nolint:errcheck
 	if m.Ref().Tier != domain.TierExternal {
 		t.Errorf("external Ref().Tier = %q, want %q", m.Ref().Tier, domain.TierExternal)
 	}
@@ -765,9 +829,10 @@ func TestProvenance_ExternalHarness_TierIsExternal(t *testing.T) {
 // TestProvenance_ExternalHarness_SourcePathIsNonEmpty verifies that an external module's
 // HarnessRef.SourcePath is non-empty (points to the harness.yaml or the harness folder).
 func TestProvenance_ExternalHarness_SourcePathIsNonEmpty(t *testing.T) {
-	root := makeRoot(t)
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
 	id := uniqueID(t, "")
-	addExternal(t, root, id, "External")
+	addProtocolBinary(t, root, id, "External", binPath)
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
 	if err != nil {
@@ -778,6 +843,7 @@ func TestProvenance_ExternalHarness_SourcePathIsNonEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve(%q): %v", id, err)
 	}
+	defer m.Close() //nolint:errcheck
 	if m.Ref().SourcePath == "" {
 		t.Errorf("external Ref().SourcePath is empty; expected path to descriptor or harness folder")
 	}
@@ -786,9 +852,10 @@ func TestProvenance_ExternalHarness_SourcePathIsNonEmpty(t *testing.T) {
 // TestProvenance_ExternalHarness_ExecutablePathIsNonEmpty verifies that an external module's
 // HarnessRef.ExecutablePath is non-empty and points to the discovered executable file.
 func TestProvenance_ExternalHarness_ExecutablePathIsNonEmpty(t *testing.T) {
-	root := makeRoot(t)
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
 	id := uniqueID(t, "")
-	addExternal(t, root, id, "External")
+	addProtocolBinary(t, root, id, "External", binPath)
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
 	if err != nil {
@@ -799,6 +866,7 @@ func TestProvenance_ExternalHarness_ExecutablePathIsNonEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve(%q): %v", id, err)
 	}
+	defer m.Close() //nolint:errcheck
 	if m.Ref().ExecutablePath == "" {
 		t.Errorf("external Ref().ExecutablePath is empty; expected path to the harness executable")
 	}
@@ -807,14 +875,15 @@ func TestProvenance_ExternalHarness_ExecutablePathIsNonEmpty(t *testing.T) {
 // TestProvenance_RefIDIsNonEmptyForAllTiers verifies that every resolved module carries a
 // non-empty id in its Ref(), regardless of provision tier.
 func TestProvenance_RefIDIsNonEmptyForAllTiers(t *testing.T) {
-	root := makeRoot(t)
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
 	builtinID := uniqueID(t, "builtin")
 	descriptorID := uniqueID(t, "descriptor")
 	externalID := uniqueID(t, "external")
 
 	registry.Register(builtinID, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return stubModule(builtinID), nil })
 	addDescriptorOnly(t, root, descriptorID, "Descriptor")
-	addExternal(t, root, externalID, "External")
+	addProtocolBinary(t, root, externalID, "External", binPath)
 
 	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
 	if err != nil {
@@ -830,6 +899,7 @@ func TestProvenance_RefIDIsNonEmptyForAllTiers(t *testing.T) {
 		if m.Ref().ID == "" {
 			t.Errorf("Resolve(%q): Ref().ID is empty", id)
 		}
+		m.Close() //nolint:errcheck
 	}
 }
 
@@ -1274,4 +1344,469 @@ func refIDs(refs []domain.HarnessRef) []string {
 		ids[i] = r.ID
 	}
 	return ids
+}
+
+// ---------------------------------------------------------------------------
+// T7.1 — External module subprocess wiring and ToolMappings exclusion
+// ---------------------------------------------------------------------------
+//
+// Tests in this section use a protocol-speaking binary (built from
+// cmd/harness-opencode-module) to specify the expected happy-path behaviour of
+// the I7.1 fix. The complementary RED evidence comes from T7.2: those tests show
+// that a non-protocol dummy executable results in a usable module with the current
+// broken code (newRuntimeModule is called, ignoring the binary) but in an unusable
+// harness entry after I7.1 (external.New is called and fails the handshake). Together,
+// T7.1 and T7.2 specify the full external-wiring contract.
+//
+// ToolMappings-exclusion tests are regression-prevention tests: the invariant already
+// holds in the current code but must survive the I7.1 refactoring unchanged.
+
+// findGoModuleRoot_registry walks up from the test working directory to locate the
+// directory that contains go.mod (Tools/Deployment/). The registry package is at
+// internal/harness/registry/, four directory levels below the module root.
+func findGoModuleRoot_registry(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatalf("filepath.Abs(.): %v", err)
+	}
+	for {
+		if _, statErr := os.Stat(filepath.Join(dir, "go.mod")); statErr == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("could not locate go.mod walking up from the registry test directory")
+		}
+		dir = parent
+	}
+}
+
+// buildProtocolBinaryForRegistry builds the cmd/harness-opencode-module binary into a
+// temp directory and returns its absolute path. The test is fatally failed if the build
+// fails. This is the registry-test counterpart to buildReferenceExternalModule in
+// conformance/conformance_test.go; it exists there as well to keep each test package
+// self-contained.
+func buildProtocolBinaryForRegistry(t *testing.T) string {
+	t.Helper()
+	outDir := t.TempDir()
+	outBin := filepath.Join(outDir, "harness-exec")
+	if runtime.GOOS == "windows" {
+		outBin += ".exe"
+	}
+	modRoot := findGoModuleRoot_registry(t)
+	cmd := exec.Command("go", "build", "-o", outBin, "mosaic-deploy/cmd/harness-opencode-module")
+	cmd.Dir = modRoot
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("build protocol binary: %v\nstderr: %s\n"+
+			"(cmd/harness-opencode-module must build cleanly to test external-module wiring.)",
+			err, stderr.String())
+	}
+	return outBin
+}
+
+// addProtocolBinary creates an external harness folder under root/MosaicDeploy/harnesses/<id>/
+// using binPath as the harness executable (harness-exec on Unix, harness-exec.exe on Windows).
+// A minimal harness.yaml (id and display_name only) is written alongside the binary so the
+// registry detects the folder as TierExternal.
+func addProtocolBinary(t *testing.T, root, id, displayName, binPath string) {
+	t.Helper()
+	addDescriptorOnly(t, root, id, displayName)
+	dir := filepath.Join(root, "MosaicDeploy", "harnesses", id)
+	execName := "harness-exec"
+	if runtime.GOOS == "windows" {
+		execName = "harness-exec.exe"
+	}
+	data, err := os.ReadFile(binPath)
+	if err != nil {
+		t.Fatalf("read protocol binary %s: %v", binPath, err)
+	}
+	must(t, os.WriteFile(filepath.Join(dir, execName), data, 0o755))
+}
+
+// TestDiscover_ExternalHarness_ProtocolBinary_IsUsableWhenOptedIn verifies that an
+// external harness backed by a binary that speaks the JSON-over-stdio protocol is listed
+// as usable and resolves to a non-nil module when AllowExternal is true.
+//
+// This is the happy-path specification for I7.1. With the current broken code
+// (newRuntimeModule), the test also passes because the harness is listed as usable
+// regardless of whether the binary speaks the protocol. The critical RED evidence that
+// newRuntimeModule is wrong (and that external.New must be called instead) is in T7.2:
+// there, a dummy non-protocol binary produces Usable: true with the current code but
+// Usable: false after I7.1+I7.2.
+func TestDiscover_ExternalHarness_ProtocolBinary_IsUsableWhenOptedIn(t *testing.T) {
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
+	id := uniqueID(t, "proto-bin")
+	addProtocolBinary(t, root, id, "Protocol Binary Harness", binPath)
+
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	ref, ok := findRef(reg.List(), id)
+	if !ok {
+		t.Fatalf("external harness %q absent from List() after Discover with protocol binary", id)
+	}
+	if !ref.Usable {
+		t.Errorf("external harness %q: Usable = false, want true; UnusableReason: %q",
+			id, ref.UnusableReason)
+	}
+
+	m, err := reg.Resolve(id)
+	if err != nil {
+		t.Fatalf("Resolve(%q): unexpected error: %v", id, err)
+	}
+	if m == nil {
+		t.Fatal("Resolve returned nil module with nil error")
+	}
+	defer m.Close() //nolint:errcheck
+}
+
+// TestDiscover_ExternalHarness_ProtocolBinary_ResolvedModuleHasTierExternal verifies that
+// a registry-discovered external harness backed by a protocol-speaking binary carries
+// TierExternal provenance and a non-empty ExecutablePath after Resolve.
+func TestDiscover_ExternalHarness_ProtocolBinary_ResolvedModuleHasTierExternal(t *testing.T) {
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
+	id := uniqueID(t, "tier-ext")
+	addProtocolBinary(t, root, id, "Protocol Binary Harness", binPath)
+
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	m, err := reg.Resolve(id)
+	if err != nil {
+		t.Fatalf("Resolve(%q): %v", id, err)
+	}
+	defer m.Close() //nolint:errcheck
+
+	if m.Ref().Tier != domain.TierExternal {
+		t.Errorf("Ref().Tier = %q, want TierExternal", m.Ref().Tier)
+	}
+	if m.Ref().ExecutablePath == "" {
+		t.Error("Ref().ExecutablePath is empty; must carry the path to the binary")
+	}
+}
+
+// TestDiscover_ExternalHarness_ProtocolBinary_DescriptorIsNonNil verifies that the
+// Descriptor() returned by a registry-discovered external module is non-nil and its ID
+// matches the harness id declared in harness.yaml.
+func TestDiscover_ExternalHarness_ProtocolBinary_DescriptorIsNonNil(t *testing.T) {
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
+	id := uniqueID(t, "desc-check")
+	addProtocolBinary(t, root, id, "Protocol Binary Harness", binPath)
+
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	m, err := reg.Resolve(id)
+	if err != nil {
+		t.Fatalf("Resolve(%q): %v", id, err)
+	}
+	defer m.Close() //nolint:errcheck
+
+	desc := m.Descriptor()
+	if desc == nil {
+		t.Fatal("Descriptor() returned nil; must return a non-nil descriptor")
+	}
+	if desc.ID != id {
+		t.Errorf("Descriptor().ID = %q, want %q", desc.ID, id)
+	}
+}
+
+// TestDiscover_ExternalHarness_ToolMappingsHook_NotAppliedToExternalModule verifies that
+// the ToolMappings hook set on Options is NOT applied to external modules. External modules
+// resolve tools through their subprocess protocol; wrapping them in a toolMappingsModule
+// shim would override the RPC-based Tools() implementation with descriptor-driven
+// processing, defeating the purpose of the subprocess.
+//
+// This invariant is documented in the current code and must survive the I7.1 refactoring.
+// The test uses a protocol-speaking binary so the module is usable both before and after
+// I7.1.
+func TestDiscover_ExternalHarness_ToolMappingsHook_NotAppliedToExternalModule(t *testing.T) {
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
+	id := uniqueID(t, "no-hook")
+	addProtocolBinary(t, root, id, "Protocol Binary Harness", binPath)
+
+	// A sentinel mapping that the hook installs. If the hook is applied to the external
+	// module, the sentinel's generic key will appear in Descriptor().Tools.Mappings.
+	const sentinelGeneric = "hook-sentinel-should-not-appear"
+	hook := func(_ string, _ []domain.ToolMapping) []domain.ToolMapping {
+		return []domain.ToolMapping{
+			{
+				Generic: sentinelGeneric,
+				Destinations: []domain.ToolDestination{
+					{Kind: domain.DestMain, Names: []string{"hook-sentinel-tool"}},
+				},
+			},
+		}
+	}
+
+	reg, err := registry.Discover(registry.Options{
+		MosaicRoot:    root,
+		AllowExternal: true,
+		ToolMappings:  hook,
+	})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	m, err := reg.Resolve(id)
+	if err != nil {
+		t.Fatalf("Resolve(%q): %v", id, err)
+	}
+	defer m.Close() //nolint:errcheck
+
+	for _, mp := range m.Descriptor().Tools.Mappings {
+		if mp.Generic == sentinelGeneric {
+			t.Errorf("ToolMappings hook sentinel %q found in external module Descriptor().Tools.Mappings; "+
+				"the hook must NOT be applied to external modules — external modules resolve tools "+
+				"through their subprocess protocol, not through Descriptor().Tools.Mappings",
+				sentinelGeneric)
+			return
+		}
+	}
+}
+
+// TestDiscover_ToolMappingsHook_AppliedToDescriptorOnlyButNotExternal verifies that the
+// ToolMappings hook IS applied to descriptor-only modules and is NOT applied to external
+// modules when both are present in the same Discover call. This differential confirms that
+// the external-module exclusion is targeted and does not inadvertently skip descriptor-only
+// modules.
+func TestDiscover_ToolMappingsHook_AppliedToDescriptorOnlyButNotExternal(t *testing.T) {
+	binPath := buildProtocolBinaryForRegistry(t)
+	root := makeRootWithOpenCodeContent(t)
+	descriptorID := uniqueID(t, "descriptor")
+	externalID := uniqueID(t, "external")
+	addDescriptorOnly(t, root, descriptorID, "Descriptor Harness")
+	addProtocolBinary(t, root, externalID, "External Harness", binPath)
+
+	const sentinelGeneric = "hook-differential-sentinel"
+	hook := func(_ string, _ []domain.ToolMapping) []domain.ToolMapping {
+		return []domain.ToolMapping{
+			{
+				Generic: sentinelGeneric,
+				Destinations: []domain.ToolDestination{
+					{Kind: domain.DestMain, Names: []string{"sentinel-tool"}},
+				},
+			},
+		}
+	}
+
+	reg, err := registry.Discover(registry.Options{
+		MosaicRoot:    root,
+		AllowExternal: true,
+		ToolMappings:  hook,
+	})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	// Descriptor-only: hook must be applied (sentinel present in mappings).
+	dmod, err := reg.Resolve(descriptorID)
+	if err != nil {
+		t.Fatalf("Resolve(%q) (descriptor-only): %v", descriptorID, err)
+	}
+	descriptorHookApplied := false
+	for _, mp := range dmod.Descriptor().Tools.Mappings {
+		if mp.Generic == sentinelGeneric {
+			descriptorHookApplied = true
+			break
+		}
+	}
+	if !descriptorHookApplied {
+		t.Errorf("ToolMappings hook NOT applied to descriptor-only module %q; "+
+			"the hook must be applied to descriptor-only and built-in tiers", descriptorID)
+	}
+
+	// External: hook must NOT be applied (sentinel absent from mappings).
+	emod, err := reg.Resolve(externalID)
+	if err != nil {
+		t.Fatalf("Resolve(%q) (external): %v", externalID, err)
+	}
+	defer emod.Close() //nolint:errcheck
+	for _, mp := range emod.Descriptor().Tools.Mappings {
+		if mp.Generic == sentinelGeneric {
+			t.Errorf("ToolMappings hook sentinel %q found in external module %q; "+
+				"the hook must NOT be applied to external modules",
+				sentinelGeneric, externalID)
+			return
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T7.2 — External construction failure handling
+// ---------------------------------------------------------------------------
+//
+// These tests use the dummy executable created by addExternal (a shell script / batch
+// file that exits with code 1 without speaking the JSON-over-stdio protocol). After I7.1,
+// registry.Discover calls external.New for TierExternal harnesses; external.New fails the
+// handshake for this binary and the harness is listed as Usable: false. Before I7.1, the
+// code calls newRuntimeModule (which never interacts with the binary), so the harness is
+// listed as Usable: true — making these tests RED with the current implementation.
+
+// TestDiscover_ExternalHarness_FailedHandshake_ListedAsUnusable verifies that an external
+// harness whose executable exits without speaking the JSON-over-stdio protocol is listed
+// with Usable: false after Discover.
+//
+// RED NOTE: This test FAILS with the current (pre-I7.1) implementation. The current code
+// calls newRuntimeModule for all usable external harnesses, so the dummy binary is never
+// invoked and the harness is listed as Usable: true. After I7.1+I7.2, external.New is
+// called; the handshake fails; and I7.2 marks the harness as Usable: false with a reason.
+func TestDiscover_ExternalHarness_FailedHandshake_ListedAsUnusable(t *testing.T) {
+	root := makeRoot(t)
+	id := uniqueID(t, "bad-shake")
+	// addExternal creates a dummy executable (harness-exec.bat / harness-exec) that exits
+	// with code 1 without implementing the JSON-over-stdio protocol.
+	addExternal(t, root, id, "Non-Protocol Harness")
+
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
+	if err != nil {
+		t.Fatalf("Discover must not fail when one external harness fails to construct; "+
+			"the failure must be scoped to that harness entry: %v", err)
+	}
+
+	ref, ok := findRef(reg.List(), id)
+	if !ok {
+		t.Fatalf("harness %q absent from List(); must appear so the harness selection "+
+			"screen can explain why it is unavailable", id)
+	}
+	if ref.Usable {
+		t.Errorf("harness %q: Usable = true, want false — a harness whose executable "+
+			"does not speak the JSON-over-stdio protocol must be listed as Usable: false, "+
+			"not silently presented as available", id)
+	}
+}
+
+// TestDiscover_ExternalHarness_FailedHandshake_UnusableReasonIsNonEmpty verifies that a
+// harness listed as Usable: false due to a failed external.New call carries a non-empty
+// UnusableReason. This text is shown in the harness selection screen to explain why the
+// harness cannot be selected.
+//
+// RED NOTE: This test FAILS with the current implementation. When AllowExternal is true,
+// the current code sets UnusableReason to "" (the harness is considered usable and the
+// reason field is unused). After I7.1+I7.2, the error from external.New populates
+// UnusableReason.
+func TestDiscover_ExternalHarness_FailedHandshake_UnusableReasonIsNonEmpty(t *testing.T) {
+	root := makeRoot(t)
+	id := uniqueID(t, "no-reason")
+	addExternal(t, root, id, "Non-Protocol Harness")
+
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	ref, ok := findRef(reg.List(), id)
+	if !ok {
+		t.Fatalf("harness %q absent from List()", id)
+	}
+	if ref.Usable {
+		// The Usable=true case is already caught by TestDiscover_ExternalHarness_FailedHandshake_ListedAsUnusable.
+		// Skip the reason check here so this test's failure is unambiguous.
+		t.Errorf("harness %q: Usable = true (want false); UnusableReason check skipped", id)
+		return
+	}
+	if ref.UnusableReason == "" {
+		t.Errorf("harness %q: Usable is false but UnusableReason is empty; "+
+			"a construction failure must be described in UnusableReason so the "+
+			"harness selection screen can explain the problem to the user", id)
+	}
+}
+
+// TestDiscover_ExternalHarness_FailedHandshake_DiscoverDoesNotFail verifies that Discover
+// returns no error when one external harness fails to construct. A construction failure is
+// scoped to the individual harness entry and must never abort the entire discovery run.
+// This allows the user to select a different, working harness even if one entry is broken.
+func TestDiscover_ExternalHarness_FailedHandshake_DiscoverDoesNotFail(t *testing.T) {
+	root := makeRoot(t)
+	id := uniqueID(t, "no-abort")
+	addExternal(t, root, id, "Non-Protocol Harness")
+
+	_, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
+	if err != nil {
+		t.Fatalf("Discover returned error after external.New failure; "+
+			"a failed construction must be recorded in the harness entry, "+
+			"not propagated as a Discover error: %v", err)
+	}
+}
+
+// TestDiscover_ExternalHarness_FailedHandshake_ResolveReturnsError verifies that Resolve
+// returns a non-nil error for a harness listed as Usable: false due to a failed external.New.
+// The error must not be ErrExternalNotPermitted (the opt-in gate error); it must be the
+// "harness is not usable" error.
+//
+// RED NOTE: This test FAILS with the current implementation. The current code stores a
+// non-nil newRuntimeModule in the harness entry when AllowExternal is true; Resolve then
+// returns the module with a nil error. After I7.1+I7.2, external.New fails; the entry
+// stores a nil module; and Resolve returns the existing "harness is not usable" error path.
+func TestDiscover_ExternalHarness_FailedHandshake_ResolveReturnsError(t *testing.T) {
+	root := makeRoot(t)
+	id := uniqueID(t, "resolve-err")
+	addExternal(t, root, id, "Non-Protocol Harness")
+
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	m, resolveErr := reg.Resolve(id)
+	if resolveErr == nil {
+		t.Errorf("Resolve(%q): expected an error for a harness with failed external.New, "+
+			"got nil error (module: %v)", id, m)
+		return
+	}
+	if errors.Is(resolveErr, registry.ErrExternalNotPermitted) {
+		t.Errorf("Resolve(%q): got ErrExternalNotPermitted; this is the opt-in gate error "+
+			"and must not be returned for a harness that IS opted-in but failed to construct",
+			id)
+	}
+	if m != nil {
+		t.Errorf("Resolve(%q): returned non-nil module alongside error %v; "+
+			"module must be nil when Resolve returns an error", id, resolveErr)
+	}
+}
+
+// TestDiscover_ExternalHarness_FailedHandshake_OtherHarnessesUnaffected verifies that a
+// failed external.New for one harness does not prevent other harnesses in the same Discover
+// run from being discovered and resolved. The failure is scoped to the individual entry.
+func TestDiscover_ExternalHarness_FailedHandshake_OtherHarnessesUnaffected(t *testing.T) {
+	root := makeRoot(t)
+	badID := uniqueID(t, "bad")
+	goodID := uniqueID(t, "good")
+	addExternal(t, root, badID, "Non-Protocol Harness") // dummy binary — fails handshake after I7.1
+	addDescriptorOnly(t, root, goodID, "Good Descriptor") // descriptor-only — always usable
+
+	reg, err := registry.Discover(registry.Options{MosaicRoot: root, AllowExternal: true})
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	// The descriptor-only harness must be discoverable and resolvable.
+	m, err := reg.Resolve(goodID)
+	if err != nil {
+		t.Errorf("Resolve(%q) for the good descriptor-only harness: unexpected error: %v",
+			goodID, err)
+	}
+	if m == nil {
+		t.Errorf("Resolve(%q) returned nil module for the good harness; "+
+			"a failed external harness must not affect unrelated harnesses", goodID)
+	}
+
+	// The bad external harness must still appear in List() (with Usable: false after I7.1).
+	if !containsRef(reg.List(), badID) {
+		t.Errorf("bad external harness %q absent from List(); it must be listed even when "+
+			"unusable so the harness selection screen can render an explanation", badID)
+	}
 }

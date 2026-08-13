@@ -61,7 +61,9 @@ var ErrNotMosaicRoot = errors.New("working directory is not a MOSAIC repository"
 // Defined codes:
 //
 //	"index-orphan"         — workflow appears in the index but has no corresponding file on disk
+//	                         (produced exclusively by CheckWorkflowIndex, never by normal catalog loading)
 //	"file-orphan"          — workflow file exists on disk but is not listed in the index
+//	                         (produced exclusively by CheckWorkflowIndex, never by normal catalog loading)
 //	"hook-hash-mismatch"   — a hook bundle's content_hash field does not match the computed hash
 //	"missing-field"        — a required frontmatter field is absent from a source file
 //	"duplicate-agent-id"   — two catalog agents declare the same numeric `id`
@@ -122,13 +124,15 @@ type Catalog interface {
 	// Hook looks up a hook bundle by its id key.
 	Hook(key string) (domain.HookBundle, bool)
 
-	// Workflows returns all workflows listed in the index, excluding underscore-prefixed files.
+	// Workflows returns all eligible workflow files found on disk under Catalog/Workflows/
+	// subdirectories, excluding root-level files and underscore-prefixed files.
 	Workflows() []domain.Workflow
 
 	// Workflow looks up a workflow by its id.
 	Workflow(id string) (domain.Workflow, bool)
 
-	// WorkflowCategories returns workflows grouped by source-folder category, in index order.
+	// WorkflowCategories returns workflows grouped by source-folder category, in alphabetical
+	// order by category name. Within a category, workflows are sorted ascending by ID.
 	WorkflowCategories() []domain.WorkflowCategory
 
 	// Tiers returns exactly the tier strings present in source: unnormalised, not case-folded,
@@ -145,8 +149,9 @@ type Catalog interface {
 	// has emitted are valid inputs.
 	ReadSource(path string) ([]byte, error)
 
-	// Issues reports any index/disk reconciliation mismatches and hook bundle integrity errors
-	// encountered during Load. A non-empty list is always reported; it is never silently ignored.
+	// Issues reports hook bundle integrity errors encountered during Load. It does not emit
+	// file-orphan or index-orphan codes; those are produced exclusively by CheckWorkflowIndex.
+	// A non-empty list is always reported; it is never silently ignored.
 	Issues() []Issue
 
 	// AgentByNumericID looks up any agent by its frontmatter `id` scalar, compared as the
@@ -166,13 +171,13 @@ type Catalog interface {
 // directory is not the MOSAIC root, ErrNotMosaicRoot is returned — the function does NOT walk
 // up the directory tree. The deploy tool must be invoked from the repository root.
 //
-// A directory is the MOSAIC root when it contains both:
+// A directory is the MOSAIC root when it contains:
 //
 //	Catalog/Agents/Generic/SourceFilesFormat.md
-//	Catalog/Workflows/Index.md
 //
-// A directory carrying the markers only at the legacy Agents/Generic/ and Workflows/ locations
-// is not accepted.
+// Catalog/Workflows/Index.md is no longer a required marker; a root is recognised
+// identically whether or not that file exists. A directory carrying the marker only at
+// the legacy Agents/Generic/ location (without the Catalog/ prefix) is not accepted.
 func ResolveRoot(dir string) (string, error) {
 	return resolveRoot(dir)
 }
