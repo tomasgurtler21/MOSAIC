@@ -1,9 +1,10 @@
 package harness_test
 
-// Tests for the shared CLI harness catalog: enumeration order, lookup, and
-// entry validity (AC3.1-AC3.6). The catalog's implementation (catalog.go)
-// does not exist yet at the time these tests are written; they are expected
-// to fail to compile/pass until it is added (TDD RED phase).
+// Tests for the shared CLI harness catalog: invariant-based assertions on
+// enumeration order, defensive-copy behaviour, entry validity, lookup and
+// identity acceptance. Tests assert catalog properties rather than catalog
+// content so that adding a new entry breaks only the things it genuinely
+// affects.
 
 import (
 	"testing"
@@ -15,17 +16,33 @@ import (
 // Enumeration
 // ---------------------------------------------------------------------------
 
-func TestCLIHarnesses_EnumeratesInStableDeclaredOrder(t *testing.T) {
+// TestCLIHarnesses_IsNonEmpty verifies the catalog always has at least one
+// entry. A count assertion would break on every future addition; this
+// assertion breaks only if someone removes all entries.
+func TestCLIHarnesses_IsNonEmpty(t *testing.T) {
 	entries := harness.CLIHarnesses()
+	if len(entries) == 0 {
+		t.Fatal("CLIHarnesses() returned an empty slice: the catalog must have at least one entry")
+	}
+}
 
-	if len(entries) != 2 {
-		t.Fatalf("want 2 catalog entries, got %d: %+v", len(entries), entries)
+// TestCLIHarnesses_AllDeclaredConstantsAppearAsEntries verifies that every
+// exported HarnessID* constant the package declares has a corresponding
+// catalog entry. A constant without an entry is a silent dead value; an entry
+// without a constant cannot be safely switched on in a composition root.
+func TestCLIHarnesses_AllDeclaredConstantsAppearAsEntries(t *testing.T) {
+	// List every exported HarnessID* constant this package declares. When a
+	// new constant is added to catalog.go it must be added here too, giving
+	// a reviewer a single place to confirm both sides of the contract.
+	knownIDs := []string{
+		harness.HarnessIDClaudeCode,
+		harness.HarnessIDOpenCode,
+		harness.HarnessIDGHCPCLI,
 	}
-	if entries[0].ID != harness.HarnessIDClaudeCode {
-		t.Errorf("want entries[0].ID == %q, got %q", harness.HarnessIDClaudeCode, entries[0].ID)
-	}
-	if entries[1].ID != harness.HarnessIDOpenCode {
-		t.Errorf("want entries[1].ID == %q, got %q", harness.HarnessIDOpenCode, entries[1].ID)
+	for _, id := range knownIDs {
+		if _, ok := harness.LookupCLIHarness(id); !ok {
+			t.Errorf("exported constant %q has no corresponding catalog entry in CLIHarnesses()", id)
+		}
 	}
 }
 
@@ -156,6 +173,9 @@ func TestIsCLIHarness_TrueForKnownIdentities(t *testing.T) {
 	if !harness.IsCLIHarness(harness.HarnessIDOpenCode) {
 		t.Errorf("want IsCLIHarness(%q) == true", harness.HarnessIDOpenCode)
 	}
+	if !harness.IsCLIHarness(harness.HarnessIDGHCPCLI) {
+		t.Errorf("want IsCLIHarness(%q) == true", harness.HarnessIDGHCPCLI)
+	}
 }
 
 func TestIsCLIHarness_FalseForUnknownIdentity(t *testing.T) {
@@ -170,5 +190,50 @@ func TestIsCLIHarness_FalseForUnknownIdentity(t *testing.T) {
 func TestIsCLIHarness_FalseForEmptyIdentity(t *testing.T) {
 	if harness.IsCLIHarness("") {
 		t.Errorf("want IsCLIHarness(\"\") == false")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GHCP CLI catalog entry (T5.2)
+//
+// These tests pin the ghcp-cli catalog identity and label in the invariant
+// style established above: they assert presence and resolves-through-lookup
+// without asserting the catalog's size or the entry's index, so they survive
+// future additions and the ordering is tested above by the
+// TestCLIHarnesses_OrderIsStableAcrossCalls invariant.
+// ---------------------------------------------------------------------------
+
+// TestCLIHarnesses_GHCPCLIEntryPresent verifies that HarnessIDGHCPCLI
+// resolves through LookupCLIHarness. This confirms the catalog entry exists
+// and that the identity constant matches the entry's ID field.
+func TestCLIHarnesses_GHCPCLIEntryPresent(t *testing.T) {
+	entry, ok := harness.LookupCLIHarness(harness.HarnessIDGHCPCLI)
+	if !ok {
+		t.Fatalf("want %q to be found in the catalog via LookupCLIHarness, got not-found", harness.HarnessIDGHCPCLI)
+	}
+	if entry.ID != harness.HarnessIDGHCPCLI {
+		t.Errorf("want entry.ID == %q, got %q", harness.HarnessIDGHCPCLI, entry.ID)
+	}
+}
+
+// TestCLIHarnesses_GHCPCLIEntryHasExpectedLabel verifies that the ghcp-cli
+// catalog entry carries the expected human-readable label. The label is
+// presentation only but must be correct for selection UIs and help text.
+func TestCLIHarnesses_GHCPCLIEntryHasExpectedLabel(t *testing.T) {
+	entry, ok := harness.LookupCLIHarness(harness.HarnessIDGHCPCLI)
+	if !ok {
+		t.Fatalf("want %q to be found in the catalog", harness.HarnessIDGHCPCLI)
+	}
+	if entry.Label != "GitHub Copilot CLI" {
+		t.Errorf("want Label %q, got %q", "GitHub Copilot CLI", entry.Label)
+	}
+}
+
+// TestIsCLIHarness_TrueForGHCPCLI verifies that IsCLIHarness accepts the
+// ghcp-cli identity. This is the predicate Runner's buildTUIDelegate gates on
+// to decide whether to offer a harness in the TUI selection step.
+func TestIsCLIHarness_TrueForGHCPCLI(t *testing.T) {
+	if !harness.IsCLIHarness(harness.HarnessIDGHCPCLI) {
+		t.Errorf("want IsCLIHarness(%q) == true", harness.HarnessIDGHCPCLI)
 	}
 }

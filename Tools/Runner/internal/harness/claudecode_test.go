@@ -230,6 +230,40 @@ func runHelperProcess() {
 		// Emit a recognised event but never a terminal one. Exit 0.
 		os.Stdout.WriteString(`{"type":"step_start"}` + "\n") //nolint:errcheck
 
+	case "ghcpcli-success":
+		// Produce a valid GHCP CLI JSONL event stream: one assistant.message
+		// event carrying the protocol response as data.content, terminated by
+		// a result event with exitCode:0 at the top level (not inside data).
+		// The process exits 0.
+		protocolResp := `{"agent_instance_id":"test-agent#1","status_code":"SUCCESS","status_message":"ok"}`
+		os.Stdout.WriteString(`{"type":"assistant.message","data":{"content":` + opencodeJSONQuote(protocolResp) + `}}` + "\n") //nolint:errcheck
+		os.Stdout.WriteString(`{"type":"result","exitCode":0}` + "\n")                                                          //nolint:errcheck
+
+	case "ghcpcli-stream-error":
+		// Simulate the GHCP CLI stream-verdict failure: the result event has a
+		// non-zero exitCode at the top level, while the process itself exits 0.
+		// The adapter must report ErrGHCPCLIStreamError, not success.
+		os.Stderr.WriteString("Error: simulated ghcp-cli failure") //nolint:errcheck
+		os.Stdout.WriteString(`{"type":"assistant.message_delta","data":{"deltaContent":"partial"}}` + "\n") //nolint:errcheck
+		os.Stdout.WriteString(`{"type":"result","exitCode":1}` + "\n")                                       //nolint:errcheck
+
+	case "ghcpcli-incomplete":
+		// Emit a recognised assistant.message event but no terminal result
+		// event. Exit 0. The adapter must report ErrGHCPCLIStreamIncomplete
+		// rather than treating the absence of a result as success.
+		os.Stdout.WriteString(`{"type":"assistant.message","data":{"content":"partial"}}` + "\n") //nolint:errcheck
+
+	case "ghcpcli-decode-fail":
+		// Produce a stream that the GHCP CLI parser accepts as successful
+		// (result line with exitCode:0) but whose data.content, once
+		// accumulated and extracted, is a Communication Protocol candidate that
+		// cannot be decoded into domain.ProtocolResponse: error_code is a
+		// number where the target field is string-typed. Exercises the
+		// ErrMalformedOutput path inside GHCPCLIAdapter.
+		badProto := `{"agent_instance_id":"test-agent#1","status_code":"SUCCESS","status_message":"ok","error_code":99999}`
+		os.Stdout.WriteString(`{"type":"assistant.message","data":{"content":` + opencodeJSONQuote(badProto) + `}}` + "\n") //nolint:errcheck
+		os.Stdout.WriteString(`{"type":"result","exitCode":0}` + "\n")                                                       //nolint:errcheck
+
 	case "hang":
 		// Block indefinitely so the test can exercise timeout and context
 		// cancellation. time.Sleep avoids the goroutine-deadlock panic that

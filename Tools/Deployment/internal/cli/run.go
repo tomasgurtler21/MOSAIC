@@ -35,6 +35,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 	// Global persistent flags, shared by all subcommands.
 	var verbose bool
 	var mosaicRoot string
+	var catalogFolder string
 	var allowExternal bool
 
 	root := &cobra.Command{
@@ -53,6 +54,8 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 
 	root.PersistentFlags().BoolVar(&verbose, "verbose", false, "Enable verbose output")
 	root.PersistentFlags().StringVar(&mosaicRoot, "mosaic-root", "", "Override the MOSAIC root directory")
+	root.PersistentFlags().StringVar(&catalogFolder, "catalog-folder", "",
+		"Catalogue directory supplying agents and workflows (default: <mosaic-root>/Catalog)")
 	root.PersistentFlags().BoolVar(&allowExternal, "allow-external", false, "Enable external harness modules")
 
 	// ------------------------------------------------------------------

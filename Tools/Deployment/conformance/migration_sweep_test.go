@@ -91,16 +91,16 @@ var deprecatedInjectionNames = []string{
 // Corpus helper
 // ---------------------------------------------------------------------------
 
-// genericAgentPaths returns all .md file paths under Agents/Generic/ (excluding README files).
+// genericAgentPaths returns all .md file paths under Catalog/Agents/Generic/ (excluding README files).
 // The test is skipped if the directory is not found so the suite remains runnable in isolated
 // checkouts that contain only Tools/.
 func genericAgentPaths(t *testing.T) []string {
 	t.Helper()
 	repoRoot := findRepoRoot(t)
-	genericDir := filepath.Join(repoRoot, "Agents", "Generic")
+	genericDir := filepath.Join(repoRoot, "Catalog", "Agents", "Generic")
 
 	if _, err := os.Stat(genericDir); err != nil {
-		t.Skipf("Agents/Generic/ not found at %s: %v", genericDir, err)
+		t.Skipf("Catalog/Agents/Generic/ not found at %s: %v", genericDir, err)
 	}
 
 	var paths []string

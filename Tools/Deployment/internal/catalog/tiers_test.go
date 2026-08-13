@@ -47,7 +47,7 @@ import (
 // strings the live repository happens to use.
 func writeAgentWithTier(t *testing.T, root, category, name, tier, rationale string) {
 	t.Helper()
-	mustMkdir(t, root, "Agents", "Generic", "Agents", category)
+	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Agents", category)
 	fm := "---\n"
 	fm += "id: \"1\"\n"
 	fm += "version: \"1.0.0\"\n"
@@ -57,7 +57,7 @@ func writeAgentWithTier(t *testing.T, root, category, name, tier, rationale stri
 	fm += "recommended_tier: " + tier + "\n"
 	fm += "tier_rationale: " + rationale + "\n"
 	fm += "---\nContent.\n"
-	relPath := filepath.Join("Agents", "Generic", "Agents", category, name+".md")
+	relPath := filepath.Join("Catalog", "Agents", "Generic", "Agents", category, name+".md")
 	mustWriteFile(t, root, relPath, []byte(fm))
 }
 
@@ -133,7 +133,7 @@ func TestTiers_MixedCaseTier_PresentVerbatim(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeAgentWithTier(t, root, "Infrastructure", "sample-tier-agent", "MiXeD-Case", "Synthetic rationale.")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestTiers_MixedCaseTier_NotCaseFolded(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeAgentWithTier(t, root, "Infrastructure", "sample-tier-agent", "MiXeD-Case", "Synthetic rationale.")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}

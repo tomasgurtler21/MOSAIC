@@ -6,6 +6,7 @@ package harness
 const (
 	HarnessIDClaudeCode = "claude-code"
 	HarnessIDOpenCode   = "opencode"
+	HarnessIDGHCPCLI    = "ghcp-cli"
 )
 
 // CLIHarness is one CLI-backed harness this module can spawn through: its
@@ -42,6 +43,7 @@ type CLIHarness struct {
 var cliHarnesses = []CLIHarness{
 	{ID: HarnessIDClaudeCode, Label: "Claude Code CLI"},
 	{ID: HarnessIDOpenCode, Label: "OpenCode CLI"},
+	{ID: HarnessIDGHCPCLI, Label: "GitHub Copilot CLI"},
 }
 
 // CLIHarnesses returns every CLI-backed harness this module can spawn

@@ -11,7 +11,7 @@ package opencode_test
 // Test coverage:
 //
 //   RepoContentDir constant:
-//   - opencode.RepoContentDir equals "Agents/OpenCode".
+//   - opencode.RepoContentDir equals "Catalog/Agents/OpenCode".
 //
 //   Run-time loading from declared directory (T6.2):
 //   - An opencode module constructed against a temporary root reads HarnessInjections.md
@@ -116,7 +116,7 @@ Orchestrator-specific constraint content.
 // TestRepoContentDir_OpenCode_IsCorrect verifies that opencode.RepoContentDir is the correct
 // repository directory relative to the MOSAIC root.
 func TestRepoContentDir_OpenCode_IsCorrect(t *testing.T) {
-	const want = "Agents/OpenCode"
+	const want = "Catalog/Agents/OpenCode"
 	if opencode.RepoContentDir != want {
 		t.Errorf("opencode.RepoContentDir = %q, want %q", opencode.RepoContentDir, want)
 	}

@@ -16,6 +16,7 @@ package tui
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -70,11 +71,15 @@ var navUsableHarness = domain.HarnessRef{
 	Usable:      true,
 }
 
-// newNavModel creates a rootModel wired with a single usable harness and no pre-fills.
+// newNavModel creates a rootModel wired with a single usable harness. CatalogFolder is
+// pre-set to the OS temp directory so that the catalogue folder screen (inserted between
+// mode selection and the workspace screen by Stage 7) has a valid pre-filled path and can
+// advance on Enter without needing a typed path. os.TempDir() is always a readable directory.
 func newNavModel() *rootModel {
 	svc := &stubNavService{harnesses: []domain.HarnessRef{navUsableHarness}}
 	return newRootModel(context.Background(), svc, Options{
-		Theme: DefaultTheme(),
+		Theme:         DefaultTheme(),
+		CatalogFolder: os.TempDir(),
 	})
 }
 
@@ -163,9 +168,11 @@ func TestNavigation_HarnessEnter_RecordsSelectedHarnessID(t *testing.T) {
 	}
 }
 
-// TestNavigation_ModeEnter_TransitionsToWorkspace verifies the second forward transition:
-// pressing Enter on a mode option advances the root model to the workspace path entry screen.
-func TestNavigation_ModeEnter_TransitionsToWorkspace(t *testing.T) {
+// TestNavigation_ModeEnter_TransitionsToCatalogFolder verifies the second forward transition:
+// pressing Enter on a mode option advances the root model to the catalogue folder screen
+// (which now sits between mode selection and workspace entry). The workspace screen is reached
+// only after the catalogue folder is confirmed.
+func TestNavigation_ModeEnter_TransitionsToCatalogFolder(t *testing.T) {
 	// Arrange — advance to mode screen first
 	m := newNavModel()
 	sendKey(m, tea.KeyEnter) // harness → mode
@@ -176,9 +183,9 @@ func TestNavigation_ModeEnter_TransitionsToWorkspace(t *testing.T) {
 	// Act — Enter on the mode list (first mode is deploy-new)
 	sendKey(m, tea.KeyEnter)
 
-	// Assert
-	if m.screen != screenWorkspace {
-		t.Errorf("screen = %v after mode Enter, want screenWorkspace (%v)", m.screen, screenWorkspace)
+	// Assert: mode now advances to the catalogue folder screen, not directly to workspace.
+	if m.screen != screenCatalogFolder {
+		t.Errorf("screen = %v after mode Enter, want screenCatalogFolder (%v)", m.screen, screenCatalogFolder)
 	}
 }
 
@@ -392,12 +399,15 @@ func TestNavigation_ModeScreen_ViewContainsTitleText(t *testing.T) {
 }
 
 // TestNavigation_WorkspaceScreen_ViewContainsTitleText verifies that after transitioning to
-// the workspace screen, the view reflects the workspace path entry screen.
+// the workspace screen, the view reflects the workspace path entry screen. The catalogue
+// folder screen now sits between mode and workspace, so reaching workspace requires an
+// additional Enter to confirm the pre-filled catalogue folder.
 func TestNavigation_WorkspaceScreen_ViewContainsTitleText(t *testing.T) {
 	// Arrange
 	m := newNavModel()
 	sendKey(m, tea.KeyEnter) // harness → mode
-	sendKey(m, tea.KeyEnter) // mode → workspace
+	sendKey(m, tea.KeyEnter) // mode → catalogue folder screen
+	sendKey(m, tea.KeyEnter) // catalogue folder (pre-filled with os.TempDir()) → workspace
 
 	// Act
 	view := m.View()
@@ -437,6 +447,203 @@ func TestNavigation_WindowResize_PropagatedToAllScreens(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // Helper
+// ---------------------------------------------------------------------------
+// Stage 7 — T7.4: Catalogue folder screen placement and navigation
+//
+// These tests specify the post-Stage-7 navigation state machine. They are in the TDD RED
+// phase: screenCatalogFolder is defined but updateMode still advances to screenWorkspace,
+// so tests that expect screenCatalogFolder after mode Enter fail immediately.
+// ---------------------------------------------------------------------------
+
+// TestNavigation_ModeEnter_TransitionsToCatalogFolderScreen verifies that the root model
+// advances to the catalogue folder screen after the user selects a mode, not directly to
+// the workspace screen. This asserts the core ordering requirement for Stage 7:
+//   harness → mode → catalogue folder → workspace → service run.
+//
+// Fails RED because updateMode currently sets m.screen = screenWorkspace.
+func TestNavigation_ModeEnter_TransitionsToCatalogFolderScreen(t *testing.T) {
+	// Arrange
+	m := newNavModel()
+	sendKey(m, tea.KeyEnter) // harness → mode
+
+	if m.screen != screenMode {
+		t.Fatal("precondition: must be on mode screen")
+	}
+
+	// Act
+	sendKey(m, tea.KeyEnter) // mode → should be catalogFolder, not workspace
+
+	// Assert
+	if m.screen != screenCatalogFolder {
+		t.Errorf("screen = %v after mode Enter; want screenCatalogFolder — "+
+			"the catalogue folder screen must be inserted between mode selection and workspace entry; "+
+			"implement updateMode to transition to screenCatalogFolder instead of screenWorkspace",
+			m.screen)
+	}
+}
+
+// TestNavigation_CatalogFolderEnter_TransitionsToWorkspaceScreen verifies that after the
+// user confirms a valid catalogue folder, the root model advances to the workspace screen.
+//
+// Fails RED: cannot reach screenCatalogFolder without Stage 7 implementation.
+func TestNavigation_CatalogFolderEnter_TransitionsToWorkspaceScreen(t *testing.T) {
+	// Arrange — navigate to catalogFolder screen (requires Stage 7).
+	m := newNavModel()
+	sendKey(m, tea.KeyEnter) // harness → mode
+	sendKey(m, tea.KeyEnter) // mode → catalogFolder (post-Stage-7) or workspace (pre-Stage-7)
+
+	if m.screen != screenCatalogFolder {
+		t.Fatalf("screen = %v; want screenCatalogFolder — "+
+			"cannot test catalogue→workspace transition until Stage 7 places the screen after mode",
+			m.screen)
+	}
+
+	// Act: confirm the pre-filled catalogue folder.
+	sendKey(m, tea.KeyEnter)
+
+	// Assert
+	if m.screen != screenWorkspace {
+		t.Errorf("screen = %v after catalogue folder Enter; want screenWorkspace — "+
+			"confirming a valid catalogue folder must advance to the workspace path entry screen",
+			m.screen)
+	}
+}
+
+// TestNavigation_CatalogFolderEsc_TransitionsBackToMode verifies that pressing Esc on the
+// catalogue folder screen returns the user to mode selection. The back-navigation contract
+// for the catalogue folder screen matches all other entry screens: Esc goes to the
+// immediately preceding screen.
+//
+// Fails RED: cannot reach screenCatalogFolder without Stage 7 implementation.
+func TestNavigation_CatalogFolderEsc_TransitionsBackToMode(t *testing.T) {
+	// Arrange
+	m := newNavModel()
+	sendKey(m, tea.KeyEnter) // harness → mode
+	sendKey(m, tea.KeyEnter) // mode → catalogFolder
+
+	if m.screen != screenCatalogFolder {
+		t.Fatalf("screen = %v; want screenCatalogFolder", m.screen)
+	}
+
+	// Act
+	sendKey(m, tea.KeyEsc)
+
+	// Assert
+	if m.screen != screenMode {
+		t.Errorf("screen = %v after catalogue folder Esc; want screenMode — "+
+			"Esc on the catalogue folder screen must return to mode selection",
+			m.screen)
+	}
+}
+
+// TestNavigation_CatalogFolderEsc_PreservesModeSelection verifies that pressing Esc from the
+// catalogue folder screen does not lose the mode that was chosen on the mode screen.
+//
+// Fails RED: cannot reach screenCatalogFolder without Stage 7 implementation.
+func TestNavigation_CatalogFolderEsc_PreservesModeSelection(t *testing.T) {
+	// Arrange
+	m := newNavModel()
+	sendKey(m, tea.KeyEnter) // harness → mode
+	sendKey(m, tea.KeyEnter) // mode → catalogFolder; captures deploy-new (first mode)
+	capturedMode := m.selections.mode
+
+	if m.screen != screenCatalogFolder {
+		t.Fatalf("screen = %v; want screenCatalogFolder", m.screen)
+	}
+
+	// Act
+	sendKey(m, tea.KeyEsc) // catalogFolder → mode
+
+	// Assert
+	if m.selections.mode != capturedMode {
+		t.Errorf("selections.mode = %q after catalogue folder Esc; want %q — "+
+			"mode selection must survive back-navigation from the catalogue folder screen",
+			m.selections.mode, capturedMode)
+	}
+}
+
+// TestNavigation_CtrlC_FromCatalogFolder_CancelsContextAndQuits verifies that ctrl+c from
+// the catalogue folder screen cancels the model context and returns a quit command. The
+// global cancellation contract must hold from every entry screen including the new one.
+//
+// Fails RED: cannot reach screenCatalogFolder without Stage 7 implementation.
+func TestNavigation_CtrlC_FromCatalogFolder_CancelsContextAndQuits(t *testing.T) {
+	// Arrange
+	m := newNavModel()
+	sendKey(m, tea.KeyEnter) // harness → mode
+	sendKey(m, tea.KeyEnter) // mode → catalogFolder
+
+	if m.screen != screenCatalogFolder {
+		t.Fatalf("screen = %v; want screenCatalogFolder", m.screen)
+	}
+
+	// Act
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	// Assert
+	if m.ctx.Err() == nil {
+		t.Error("ctx.Err() = nil after ctrl+c from catalogue folder screen; " +
+			"context must be cancelled from any entry screen")
+	}
+	if cmd == nil {
+		t.Error("cmd = nil after ctrl+c from catalogue folder screen; want tea.Quit")
+	}
+}
+
+// TestNavigation_CatalogFolderScreen_ViewIsNonEmpty verifies that the catalogue folder
+// screen's View() is non-empty when the screen is active, confirming the screen renders
+// something useful rather than an empty string.
+//
+// Fails RED: cannot reach screenCatalogFolder without Stage 7 implementation.
+func TestNavigation_CatalogFolderScreen_ViewIsNonEmpty(t *testing.T) {
+	// Arrange
+	m := newNavModel()
+	sendKey(m, tea.KeyEnter) // harness → mode
+	sendKey(m, tea.KeyEnter) // mode → catalogFolder
+
+	if m.screen != screenCatalogFolder {
+		t.Fatalf("screen = %v; want screenCatalogFolder", m.screen)
+	}
+
+	// Act
+	view := m.View()
+
+	// Assert
+	if view == "" {
+		t.Error("View() returned empty string on catalogue folder screen; " +
+			"want non-empty content with title and input widget")
+	}
+}
+
+// TestNavigation_WindowResize_PropagatedToCatalogFolderScreen verifies that a WindowSizeMsg
+// does not panic when the catalogue folder screen is active and that the model dimensions
+// are updated correctly.
+//
+// Fails RED: cannot reach screenCatalogFolder without Stage 7 implementation.
+func TestNavigation_WindowResize_PropagatedToCatalogFolderScreen(t *testing.T) {
+	// Arrange
+	m := newNavModel()
+	sendKey(m, tea.KeyEnter) // harness → mode
+	sendKey(m, tea.KeyEnter) // mode → catalogFolder
+
+	if m.screen != screenCatalogFolder {
+		t.Fatalf("screen = %v; want screenCatalogFolder", m.screen)
+	}
+
+	// Act — send a resize; must not panic.
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("resize message caused a panic on catalogue folder screen: %v", r)
+		}
+	}()
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	// Assert
+	if m.width != 100 || m.height != 30 {
+		t.Errorf("after resize: width=%d height=%d, want 100/30", m.width, m.height)
+	}
+}
+
 // ---------------------------------------------------------------------------
 
 // containsAny reports whether s contains any of the given substrings.

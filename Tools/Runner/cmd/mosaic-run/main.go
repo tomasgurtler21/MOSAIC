@@ -555,6 +555,15 @@ func buildAdapter(harnessStr, claudePathStr string, timeout time.Duration, logge
 			timeout = 30 * time.Minute
 		}
 		return harness.NewOpenCodeAdapterWithLogger(exe, timeout, logger)
+	case commonharness.HarnessIDGHCPCLI:
+		exe := claudePathStr
+		if exe == "" {
+			exe = "copilot"
+		}
+		if timeout <= 0 {
+			timeout = 30 * time.Minute
+		}
+		return harness.NewGHCPCLIAdapterWithLogger(exe, timeout, logger)
 	default: // "fake" or unknown
 		return harness.NewFakeAdapter()
 	}

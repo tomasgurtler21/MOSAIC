@@ -49,7 +49,7 @@ import (
 // (a folder failed to load) and no more (a phantom entry with no backing folder).
 func TestSkills_MatchOnDiskSkillFolders(t *testing.T) {
 	cat := loadRealCatalog(t)
-	skillsDir := filepath.Join(cat.Root(), "Agents", "Generic", "Skills")
+	skillsDir := filepath.Join(cat.CatalogRoot(), "Agents", "Generic", "Skills")
 
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
@@ -215,9 +215,9 @@ func TestSkills_Files_AllExistOnDisk(t *testing.T) {
 func TestSkill_Files_IncludesCompanionFilesByName(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeSkillFolder(t, root, "sample-skill")
-	mustWriteFile(t, root, filepath.Join("Agents", "Generic", "Skills", "sample-skill", "COMPANION.md"), []byte("# Companion\n"))
+	mustWriteFile(t, root, filepath.Join("Catalog", "Agents", "Generic", "Skills", "sample-skill", "COMPANION.md"), []byte("# Companion\n"))
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -246,10 +246,10 @@ func TestSkill_Files_IncludesCompanionFilesByName(t *testing.T) {
 func TestSkill_FilesCount_MatchesFolderContents(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeSkillFolder(t, root, "sample-skill")
-	mustWriteFile(t, root, filepath.Join("Agents", "Generic", "Skills", "sample-skill", "COMPANION-ONE.md"), []byte("# Companion One\n"))
-	mustWriteFile(t, root, filepath.Join("Agents", "Generic", "Skills", "sample-skill", "COMPANION-TWO.md"), []byte("# Companion Two\n"))
+	mustWriteFile(t, root, filepath.Join("Catalog", "Agents", "Generic", "Skills", "sample-skill", "COMPANION-ONE.md"), []byte("# Companion One\n"))
+	mustWriteFile(t, root, filepath.Join("Catalog", "Agents", "Generic", "Skills", "sample-skill", "COMPANION-TWO.md"), []byte("# Companion Two\n"))
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestSkill_SkillWithoutCompanionFiles_HasExactlyOneFile(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeSkillFolder(t, root, "sample-skill")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}

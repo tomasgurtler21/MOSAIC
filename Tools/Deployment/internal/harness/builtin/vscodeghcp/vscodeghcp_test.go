@@ -269,7 +269,7 @@ func TestGoldenFile_VSCodeGHCP_ContractsReviewAgent(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Validation", "contracts-review.md")
+	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Agents", "Validation", "contracts-review.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic contracts-review agent not found at %s: %v", srcPath, err)
@@ -309,7 +309,7 @@ func TestGoldenFile_VSCodeGHCP_TestRunnerAgent(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
+	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic test-runner agent not found at %s: %v", srcPath, err)
@@ -344,7 +344,7 @@ func TestGoldenFile_VSCodeGHCP_PlannerTDDSoftAgent(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Planning", "planner-tdd-soft.md")
+	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Agents", "Planning", "planner-tdd-soft.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic planner-tdd-soft agent not found at %s: %v", srcPath, err)
@@ -386,7 +386,7 @@ func TestGoldenFile_VSCodeGHCP_Orchestrator(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Agents", "Generic", "Orchestrator", "orchestrator.md")
+	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Orchestrator", "orchestrator.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic orchestrator not found at %s: %v", srcPath, err)
@@ -836,7 +836,7 @@ func TestModel_CustomModelIDEmittedVerbatim(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Agents", "Generic", "Agents", "Execution", "test-runner.md")
+	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic test-runner agent not found at %s: %v", srcPath, err)

@@ -17,12 +17,13 @@ import (
 type screenID int
 
 const (
-	screenHarness   screenID = iota // harness selection (entry screen 1)
-	screenMode                      // deploy-new vs update (entry screen 2)
-	screenWorkspace                 // workspace path entry (entry screen 3)
-	screenQuestion                  // inline question overlay from the Interaction port
-	screenRunning                   // service call in progress
-	screenDone                      // run completed; showing final status / summary
+	screenHarness       screenID = iota // harness selection (entry screen 1)
+	screenMode                          // deploy-new vs update (entry screen 2)
+	screenCatalogFolder                 // catalogue folder path entry (entry screen 3)
+	screenWorkspace                     // workspace path entry (entry screen 4)
+	screenQuestion                      // inline question overlay from the Interaction port
+	screenRunning                       // service call in progress
+	screenDone                          // run completed; showing final status / summary
 )
 
 // Options configures the TUI run. All fields are optional; Run substitutes defaults.
@@ -35,6 +36,18 @@ type Options struct {
 	// to the app service. Run() wires the tea.Program into it so that questions from the
 	// service reach the TUI overlay system. If nil, service questions are silently skipped.
 	Interaction *ProgramRef
+
+	// CatalogFolder is the catalogue root the session started with — the resolved
+	// --catalog-folder value, or the default {mosaic-root}/Catalog. It pre-fills the
+	// catalogue folder screen so an ordinary deployment is Enter-through. Empty omits
+	// the catalogue folder screen entirely; the user proceeds directly from mode
+	// selection to the workspace screen.
+	CatalogFolder string
+
+	// ReloadCatalog rebuilds the session's service against a different catalogue folder.
+	// Supplied by the composition root; nil disables reloading, in which case the catalogue
+	// screen still displays and validates but the confirmed value has no further effect.
+	ReloadCatalog CatalogReloadFunc
 }
 
 // Run owns the terminal for the lifetime of the call. It presents the three entry screens to
@@ -66,10 +79,11 @@ func Run(ctx context.Context, svc app.Service, opts Options) error {
 	return err
 }
 
-// entrySelections holds the data gathered from the three entry screens.
+// entrySelections holds the data gathered from the entry screens.
 type entrySelections struct {
 	harnessID     string
 	mode          domain.RunMode
+	catalogFolder string
 	workspacePath string
 }
 
@@ -87,9 +101,15 @@ type rootModel struct {
 	height    int
 
 	// Entry screens (concrete types, not interfaces, so back-navigation preserves state).
-	harnessScreen *screens.HarnessScreen
-	modeScreen    *screens.ModeScreen
-	wsScreen      *screens.WorkspaceScreen
+	harnessScreen      *screens.HarnessScreen
+	modeScreen         *screens.ModeScreen
+	catalogFolderScreen *screens.WorkspaceScreen // catalogue folder path entry; nil until Stage 7 wires it
+	wsScreen           *screens.WorkspaceScreen
+
+	// reloadCatalog is the optional capability to rebuild the service against a new
+	// catalogue folder. Supplied by the composition root via Options.ReloadCatalog.
+	// Nil means no reload is performed even when a different folder is confirmed.
+	reloadCatalog CatalogReloadFunc
 
 	// Collected entry selections.
 	selections entrySelections
@@ -141,6 +161,17 @@ func newRootModel(ctx context.Context, svc app.Service, opts Options) *rootModel
 		wsScreen.SetPrefilledPath(opts.InitialRequest.WorkspacePath)
 	}
 
+	// Create the catalogue folder screen when a catalogue folder was supplied.
+	// When no CatalogFolder is set the screen is omitted and mode advances directly
+	// to the workspace screen (preserving existing flow for callers that do not supply
+	// the option).
+	var cfScreen *screens.WorkspaceScreen
+	if opts.CatalogFolder != "" {
+		cfScreen = screens.NewWorkspaceScreen(w, h, style)
+		cfScreen.SetPathKind(screens.PathKindCatalogFolder)
+		cfScreen.SetPrefilledPath(opts.CatalogFolder)
+	}
+
 	startScreen := screenHarness
 	preHarness := ""
 	if opts.InitialRequest != nil {
@@ -152,18 +183,21 @@ func newRootModel(ctx context.Context, svc app.Service, opts Options) *rootModel
 	}
 
 	return &rootModel{
-		ctx:           ctx,
-		ctxCancel:     cancel,
-		svc:           svc,
-		theme:         opts.Theme,
-		screen:        startScreen,
-		width:         w,
-		height:        h,
-		harnessScreen: hScreen,
-		modeScreen:    mScreen,
-		wsScreen:      wsScreen,
+		ctx:                 ctx,
+		ctxCancel:           cancel,
+		svc:                 svc,
+		theme:               opts.Theme,
+		screen:              startScreen,
+		width:               w,
+		height:              h,
+		harnessScreen:       hScreen,
+		modeScreen:          mScreen,
+		catalogFolderScreen: cfScreen,
+		wsScreen:            wsScreen,
+		reloadCatalog:       opts.ReloadCatalog,
 		selections: entrySelections{
-			harnessID: preHarness,
+			harnessID:     preHarness,
+			catalogFolder: opts.CatalogFolder,
 		},
 	}
 }
@@ -212,6 +246,9 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = sizeMsg.Height
 		m.harnessScreen.Resize(m.width, m.height)
 		m.modeScreen.Resize(m.width, m.height)
+		if m.catalogFolderScreen != nil {
+			m.catalogFolderScreen.Resize(m.width, m.height)
+		}
 		m.wsScreen.Resize(m.width, m.height)
 		m.resizeQuestionOverlays(m.width, m.height)
 		if m.summaryScreen != nil {
@@ -272,6 +309,8 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateHarness(msg)
 	case screenMode:
 		return m.updateMode(msg)
+	case screenCatalogFolder:
+		return m.updateCatalogFolder(msg)
 	case screenWorkspace:
 		return m.updateWorkspace(msg)
 	case screenQuestion:
@@ -383,8 +422,46 @@ func (m *rootModel) updateMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			m.wsScreen.SetPathKind(screens.PathKindDirectory)
 		}
+		// When a catalogue folder screen is configured, show it before the workspace
+		// screen so the user can confirm or change the catalogue source.
+		if m.catalogFolderScreen != nil {
+			m.screen = screenCatalogFolder
+			return m, m.catalogFolderScreen.InputInit()
+		}
 		m.screen = screenWorkspace
 		// Start the text input cursor blink.
+		return m, m.wsScreen.InputInit()
+	}
+	return m, cmd
+}
+
+func (m *rootModel) updateCatalogFolder(msg tea.Msg) (tea.Model, tea.Cmd) {
+	cmd := m.catalogFolderScreen.Update(msg)
+	if m.catalogFolderScreen.Back() {
+		// Back from catalogue folder returns to mode selection.
+		m.catalogFolderScreen.Reset()
+		m.screen = screenMode
+		return m, nil
+	}
+	if m.catalogFolderScreen.Done() {
+		confirmedPath := m.catalogFolderScreen.WorkspacePath()
+
+		// Only reload when the confirmed path differs from the currently loaded one.
+		if confirmedPath != m.selections.catalogFolder && m.reloadCatalog != nil {
+			newSvc, err := m.reloadCatalog(confirmedPath)
+			if err != nil {
+				// Reload failed: show the error inline, keep the user on this screen,
+				// and do not replace the session's working service.
+				m.catalogFolderScreen.Reset()
+				m.catalogFolderScreen.SetExternalError(err.Error())
+				// m.screen stays as screenCatalogFolder — no transition.
+				return m, nil
+			}
+			m.svc = newSvc
+		}
+		m.selections.catalogFolder = confirmedPath
+		m.catalogFolderScreen.Reset()
+		m.screen = screenWorkspace
 		return m, m.wsScreen.InputInit()
 	}
 	return m, cmd
@@ -393,9 +470,14 @@ func (m *rootModel) updateMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *rootModel) updateWorkspace(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd := m.wsScreen.Update(msg)
 	if m.wsScreen.Back() {
-		// Back from workspace returns to mode selection, preserving what was typed.
+		// Back from workspace returns to the catalogue folder screen when it is in the
+		// flow, or directly to mode selection when it is not.
 		m.wsScreen.Reset()
-		m.screen = screenMode
+		if m.catalogFolderScreen != nil {
+			m.screen = screenCatalogFolder
+		} else {
+			m.screen = screenMode
+		}
 		return m, nil
 	}
 	if m.wsScreen.Done() {
@@ -827,6 +909,11 @@ func (m *rootModel) View() string {
 		return m.harnessScreen.View()
 	case screenMode:
 		return m.modeScreen.View()
+	case screenCatalogFolder:
+		if m.catalogFolderScreen != nil {
+			return m.catalogFolderScreen.View()
+		}
+		return ""
 	case screenWorkspace:
 		return m.wsScreen.View()
 	case screenQuestion:

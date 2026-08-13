@@ -133,6 +133,7 @@ type miniCatalog struct {
 }
 
 func (c *miniCatalog) Root() string                                  { return "" }
+func (c *miniCatalog) CatalogRoot() string                           { return "" }
 func (c *miniCatalog) Agents() []domain.Agent                        { return c.workers }
 func (c *miniCatalog) Orchestrator() domain.Agent                    { return c.orchestrator }
 func (c *miniCatalog) UtilityAgents() []domain.Agent                 { return c.utilities }

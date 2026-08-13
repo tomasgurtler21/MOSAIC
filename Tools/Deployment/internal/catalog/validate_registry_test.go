@@ -54,26 +54,26 @@ import (
 // ---------------------------------------------------------------------------
 
 // writeAgentWithSkills writes a minimal subagent file with the given required_skills list
-// at <root>/Agents/Generic/Agents/<category>/<name>.md.
+// at <root>/Catalog/Agents/Generic/Agents/<category>/<name>.md.
 func writeAgentWithSkills(t *testing.T, root, category, name string, skills []string) {
 	t.Helper()
-	mustMkdir(t, root, "Agents", "Generic", "Agents", category)
+	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Agents", category)
 	fm := "---\nid: \"1\"\nversion: \"1.0.0\"\nname: " + name + "\ndescription: Test agent.\nrole: subagent\nrequired_skills:\n"
 	for _, s := range skills {
 		fm += "  - " + s + "\n"
 	}
 	fm += "---\nContent.\n"
-	relPath := filepath.Join("Agents", "Generic", "Agents", category, name+".md")
+	relPath := filepath.Join("Catalog", "Agents", "Generic", "Agents", category, name+".md")
 	mustWriteFile(t, root, relPath, []byte(fm))
 }
 
 // writeSkillFolder creates a minimal skill directory with a SKILL.md file under
-// <root>/Agents/Generic/Skills/<key>.
+// <root>/Catalog/Agents/Generic/Skills/<key>.
 func writeSkillFolder(t *testing.T, root, key string) {
 	t.Helper()
-	mustMkdir(t, root, "Agents", "Generic", "Skills", key)
+	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Skills", key)
 	mustWriteFile(t, root,
-		filepath.Join("Agents", "Generic", "Skills", key, "SKILL.md"),
+		filepath.Join("Catalog", "Agents", "Generic", "Skills", key, "SKILL.md"),
 		[]byte("# Skill "+key+"\n"))
 }
 
@@ -104,7 +104,7 @@ func TestValidateRegistry_Rule5_MissingSkillFolder_ReportsMissingSkillFolder(t *
 	writeAgentWithSkills(t, root, "Creation", "test-writer", []string{"lean-tdd"})
 	// Deliberately do NOT create Agents/Generic/Skills/lean-tdd/.
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestValidateRegistry_Rule5_SkillFolderPresent_NoMissingSkillFolderIssue(t *
 	writeAgentWithSkills(t, root, "Creation", "test-writer", []string{"lean-tdd"})
 	writeSkillFolder(t, root, "lean-tdd")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestValidateRegistry_Rule5_AgentWithNoSkills_NoMissingSkillFolderIssue(t *t
 	root := makeTempMosaicRoot(t)
 	writeWorkerAgentFile(t, root, "Creation", "test-writer", "1")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestValidateRegistry_Rule5_MissingSkillFolder_SubjectIdentifiesAgent(t *tes
 	root := makeTempMosaicRoot(t)
 	writeAgentWithSkills(t, root, "Creation", "test-writer-tdd", []string{"lean-tdd"})
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestValidateRegistry_Rule5_MultipleSkillsOneMissing_ReportsMissingSkillFold
 	writeSkillFolder(t, root, "lean-tdd") // present
 	// efficient-file-reading skill folder is deliberately absent
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestValidateRegistry_Rule5_BothSkillsFolderPresent_NoMissingSkillFolderIssu
 	writeSkillFolder(t, root, "lean-tdd")
 	writeSkillFolder(t, root, "efficient-file-reading")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestValidateRegistry_Rule6_DuplicateNumericID_ReportsDuplicateAgentID(t *te
 	writeWorkerAgentFile(t, root, "Creation", "agent-alpha", "77")
 	writeWorkerAgentFile(t, root, "Execution", "agent-beta", "77")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestValidateRegistry_Rule6_UniqueNumericIDs_NoDuplicateAgentIDIssue(t *test
 	writeWorkerAgentFile(t, root, "Execution", "agent-beta", "20")
 	writeWorkerAgentFile(t, root, "Validation", "agent-gamma", "30")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestValidateRegistry_Rule6_EmptyCatalog_NoDuplicateAgentIDIssue(t *testing.
 	// issues. ValidateRegistry on an empty catalog must return nil or an empty slice.
 	root := makeTempMosaicRoot(t)
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestValidateRegistry_Rule6_DuplicateID_SubjectIdentifiesDuplicatedID(t *tes
 	writeWorkerAgentFile(t, root, "Creation", "agent-alpha", "77")
 	writeWorkerAgentFile(t, root, "Execution", "agent-beta", "77")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}

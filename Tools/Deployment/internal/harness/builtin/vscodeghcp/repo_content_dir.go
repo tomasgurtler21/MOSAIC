@@ -7,4 +7,4 @@ package vscodeghcp
 // Built-in module construction reads HarnessInjections.md and HarnessInjectionsOrchestrator.md
 // from <MosaicRoot>/RepoContentDir at run time, so editing those files and rerunning the
 // tool changes the injected content with no rebuild.
-const RepoContentDir = "Agents/VS code GHCP"
+const RepoContentDir = "Catalog/Agents/VS code GHCP"

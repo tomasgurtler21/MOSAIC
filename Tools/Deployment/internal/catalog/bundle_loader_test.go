@@ -43,9 +43,11 @@ import (
 // ---------------------------------------------------------------------------
 
 // writeBundleDoc writes the given content to the canonical bundle source path inside root.
+// BundleSourceRelPath is "Catalog/Agents/Generic/DeployedSections.md", so the parent
+// directory created here is {root}/Catalog/Agents/Generic.
 func writeBundleDoc(t *testing.T, root string, content []byte) {
 	t.Helper()
-	mustMkdir(t, root, "Agents", "Generic")
+	mustMkdir(t, root, "Catalog", "Agents", "Generic")
 	mustWriteFile(t, root, catalog.BundleSourceRelPath, content)
 }
 
@@ -606,7 +608,7 @@ No matching section in the body.
 // Agents/Generic/DeployedSections.md in the MOSAIC repository is loadable. This confirms
 // that the real document has not drifted out of the loader's expected format.
 func TestBundleLoader_RealBundleDocument_CanBeLoaded(t *testing.T) {
-	root, err := catalog.ResolveRoot(".")
+	root, err := catalog.ResolveRoot(repoRoot())
 	if err != nil {
 		t.Fatalf("ResolveRoot: %v — cannot locate MOSAIC repository root", err)
 	}
@@ -628,7 +630,7 @@ func TestBundleLoader_RealBundleDocument_CanBeLoaded(t *testing.T) {
 // TestBundleLoader_RealBundleDocument_CarriesAllFiveBlocks verifies that the real bundle
 // document contains all five canonical target names.
 func TestBundleLoader_RealBundleDocument_CarriesAllFiveBlocks(t *testing.T) {
-	root, err := catalog.ResolveRoot(".")
+	root, err := catalog.ResolveRoot(repoRoot())
 	if err != nil {
 		t.Fatalf("ResolveRoot: %v", err)
 	}

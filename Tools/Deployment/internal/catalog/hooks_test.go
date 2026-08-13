@@ -517,7 +517,7 @@ func loadFixtureCatalog(t *testing.T, fixtureSubdir string) catalog.Catalog {
 	if _, err := os.Stat(fixtureRoot); os.IsNotExist(err) {
 		t.Skipf("Skipping: fixture directory %s not found", fixtureRoot)
 	}
-	cat, err := catalog.Load(fixtureRoot)
+	cat, err := catalog.Load(fixtureRoot, "")
 	if err != nil {
 		t.Fatalf("catalog.Load(%q): %v", fixtureRoot, err)
 	}

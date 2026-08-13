@@ -61,7 +61,7 @@ func main() {
 
 	// Step 1: Pre-scan global flags needed for dependency wiring. cobra will
 	// re-parse these when cli.Run calls root.Execute; the two parses agree.
-	mosaicRoot, allowExternal := scanGlobalFlags(args)
+	mosaicRoot, catalogFolderFlag, allowExternal := scanGlobalFlags(args)
 
 	// Step 2: Resolve the MOSAIC root from the working directory when the flag
 	// is not provided explicitly.
@@ -73,10 +73,20 @@ func main() {
 		}
 		resolved, err := catalog.ResolveRoot(wd)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "error: mosaic-deploy must be run from the MOSAIC repository root: %v\n", err)
 			os.Exit(cli.ExitFailure)
 		}
 		mosaicRoot = resolved
+	}
+
+	// Step 2b: Resolve and validate the catalogue folder. When --catalog-folder is
+	// absent, the default {mosaic-root}/Catalog is used without validation. When
+	// it is explicitly supplied, the path is made absolute and validated fail-fast
+	// before any further dependency construction.
+	catalogFolder, err := resolveCatalogFolder(mosaicRoot, catalogFolderFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(cli.ExitFailure)
 	}
 
 	// Step 3: Load project-level tool configuration. Absent file yields documented
@@ -103,8 +113,10 @@ func main() {
 	// inside the app layer per run, not here).
 	logger := logging.New(mosaicRoot, toolCfg)
 
-	// Step 5: Load the MOSAIC source catalog.
-	cat, err := catalog.Load(mosaicRoot)
+	// Step 5: Load the MOSAIC source catalog. The resolved catalogFolder is the
+	// exclusive source for agents and workflows; bundle and protocol always come
+	// from mosaicRoot.
+	cat, err := catalog.Load(mosaicRoot, catalogFolder)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: load catalog: %v\n", err)
 		os.Exit(cli.ExitFailure)
@@ -157,7 +169,12 @@ func main() {
 	if wantsTUI(args) {
 		ref := tui.NewInteraction()
 		deps.Interaction = ref
-		if err := tui.Run(context.Background(), app.New(deps), tui.Options{Interaction: ref}); err != nil {
+		reloadFunc := buildReloadFunc(mosaicRoot, deps)
+		if err := tui.Run(context.Background(), app.New(deps), tui.Options{
+			Interaction:   ref,
+			CatalogFolder: catalogFolder,
+			ReloadCatalog: reloadFunc,
+		}); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(cli.ExitFailure)
 		}
@@ -174,14 +191,17 @@ func main() {
 	os.Exit(code)
 }
 
-// scanGlobalFlags does a minimal pre-scan of args for the two global flags that
-// influence dependency wiring: --mosaic-root and --allow-external. cobra will
-// re-parse all flags when cli.Run executes; this pre-scan exists only so that
-// main.go can construct app.New(deps) before handing control to cli.Run.
+// scanGlobalFlags does a minimal pre-scan of args for the global flags that
+// influence dependency wiring: --mosaic-root, --catalog-folder, and --allow-external.
+// cobra will re-parse all flags when cli.Run executes; this pre-scan exists only so
+// that main.go can construct app.New(deps) before handing control to cli.Run.
+//
+// catalogFolder is the raw user-supplied value, or "" when the flag is absent.
+// Defaulting to {mosaic-root}/Catalog is done by resolveCatalogFolder, not here.
 //
 // The scan understands both --flag value and --flag=value forms. It does not
 // validate other flags — unknown flags are left for cobra to handle.
-func scanGlobalFlags(args []string) (mosaicRoot string, allowExternal bool) {
+func scanGlobalFlags(args []string) (mosaicRoot, catalogFolder string, allowExternal bool) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -190,11 +210,33 @@ func scanGlobalFlags(args []string) (mosaicRoot string, allowExternal bool) {
 			i++
 		case strings.HasPrefix(arg, "--mosaic-root="):
 			mosaicRoot = pathinput.Unquote(strings.TrimSpace(strings.TrimPrefix(arg, "--mosaic-root=")))
+		case arg == "--catalog-folder" && i+1 < len(args):
+			catalogFolder = pathinput.Unquote(strings.TrimSpace(args[i+1]))
+			i++
+		case strings.HasPrefix(arg, "--catalog-folder="):
+			catalogFolder = pathinput.Unquote(strings.TrimSpace(strings.TrimPrefix(arg, "--catalog-folder=")))
 		case arg == "--allow-external":
 			allowExternal = true
 		}
 	}
 	return
+}
+
+// buildReloadFunc constructs the catalogue reload capability supplied to the TUI.
+// When the user confirms a catalogue folder different from the one loaded at startup,
+// the TUI calls the returned function to reload the catalogue from the new folder and
+// rebuild the service around it. All other dependencies (registry, logger, config stores,
+// manifest store, todo collector, interaction) are reused unchanged from baseDeps.
+func buildReloadFunc(mosaicRoot string, baseDeps app.Deps) tui.CatalogReloadFunc {
+	return func(catalogFolder string) (app.Service, error) {
+		newCat, err := catalog.Load(mosaicRoot, catalogFolder)
+		if err != nil {
+			return nil, err
+		}
+		newDeps := baseDeps
+		newDeps.Catalog = newCat
+		return app.New(newDeps), nil
+	}
 }
 
 // buildPreAnswers pre-scans args for --selections and, when present, parses the file

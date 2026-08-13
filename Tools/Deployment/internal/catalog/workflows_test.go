@@ -71,8 +71,10 @@ import (
 // Synthetic workflow fixture helpers
 // ---------------------------------------------------------------------------
 
-// writeWorkflowIndex writes a minimal Workflows/Index.md table listing the given rows.
+// writeWorkflowIndex writes a minimal Catalog/Workflows/Index.md table listing the given rows.
 // Each row is {id, category, version, name, description, hint, file}.
+// Workflows are loaded from the catalogue root (Catalog/Workflows/), so the index is written
+// there rather than at the top-level Workflows/ path.
 func writeWorkflowIndex(t *testing.T, root string, rows [][7]string) {
 	t.Helper()
 	var sb strings.Builder
@@ -82,14 +84,15 @@ func writeWorkflowIndex(t *testing.T, root string, rows [][7]string) {
 	for _, r := range rows {
 		sb.WriteString("| " + r[0] + " | " + r[1] + " | " + r[2] + " | " + r[3] + " | " + r[4] + " | " + r[5] + " | `" + r[6] + "` |\n")
 	}
-	mustWriteFile(t, root, filepath.Join("Workflows", "Index.md"), []byte(sb.String()))
+	mustMkdir(t, root, "Catalog", "Workflows")
+	mustWriteFile(t, root, filepath.Join("Catalog", "Workflows", "Index.md"), []byte(sb.String()))
 }
 
 // writeWorkflowFile writes a minimal workflow markdown file with frontmatter at
-// <root>/Workflows/<category>/<fileName>.
+// <root>/Catalog/Workflows/<category>/<fileName>.
 func writeWorkflowFile(t *testing.T, root, category, fileName, id string, referencedAgents []string) {
 	t.Helper()
-	mustMkdir(t, root, "Workflows", category)
+	mustMkdir(t, root, "Catalog", "Workflows", category)
 	fm := "---\nid: " + id + "\nversion: \"1.0.0\"\nname: Sample Workflow\ndescription: Sample workflow for tests.\nhint: A quick hint.\n"
 	if len(referencedAgents) > 0 {
 		fm += "referenced_agents:\n"
@@ -98,7 +101,7 @@ func writeWorkflowFile(t *testing.T, root, category, fileName, id string, refere
 		}
 	}
 	fm += "---\nContent.\n"
-	mustWriteFile(t, root, filepath.Join("Workflows", category, fileName), []byte(fm))
+	mustWriteFile(t, root, filepath.Join("Catalog", "Workflows", category, fileName), []byte(fm))
 }
 
 // makeWorkflowWithSectionFixture builds a synthetic MOSAIC root containing one workflow,
@@ -115,10 +118,10 @@ func makeWorkflowWithSectionFixture(t *testing.T) (catalog.Catalog, []byte) {
 		"OUTER_MAINTAINER_TEXT: prose that must never appear in the extracted section.\n\n" +
 		"[[SECTION:Workflow:sample-workflow]]\nThis is the workflow body.\n[[/SECTION:Workflow:sample-workflow]]\n\n" +
 		"Trailing prose.\n")
-	mustMkdir(t, root, "Workflows", "SampleCategory")
-	mustWriteFile(t, root, filepath.Join("Workflows", "SampleCategory", "sample-workflow.md"), content)
+	mustMkdir(t, root, "Catalog", "Workflows", "SampleCategory")
+	mustWriteFile(t, root, filepath.Join("Catalog", "Workflows", "SampleCategory", "sample-workflow.md"), content)
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -138,7 +141,7 @@ func makeWorkflowWithSectionFixture(t *testing.T) (catalog.Catalog, []byte) {
 // moves like relocating a whole category out of the scanned tree.
 func TestWorkflowCategories_EveryOnDiskCategoryYieldsAtLeastOneWorkflow(t *testing.T) {
 	cat := loadRealCatalog(t)
-	wfRoot := filepath.Join(cat.Root(), "Workflows")
+	wfRoot := filepath.Join(cat.CatalogRoot(), "Workflows")
 
 	entries, err := os.ReadDir(wfRoot)
 	if err != nil {
@@ -288,7 +291,7 @@ func TestWorkflow_Fields_PopulatedFromFrontmatterAndIndex(t *testing.T) {
 	})
 	writeWorkflowFile(t, root, "SampleCategory", "sample-workflow.md", "sample-workflow", nil)
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -329,7 +332,7 @@ func TestWorkflow_ReferencedAgents_PopulatedFromFrontmatter(t *testing.T) {
 	wantAgents := []string{"agent-one", "agent-two", "agent-three"}
 	writeWorkflowFile(t, root, "SampleCategory", "sample-workflow.md", "sample-workflow", wantAgents)
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}

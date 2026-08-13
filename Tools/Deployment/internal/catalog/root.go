@@ -6,12 +6,10 @@ import (
 	"path/filepath"
 )
 
-// resolveRoot walks up the directory tree from dir looking for the MOSAIC repository
-// markers and returns the root path. If the input is "." or empty it is converted to an
-// absolute path first so the returned root is also absolute (satisfying callers that need
-// an absolute path). For all other relative inputs the walk is performed using the path as
-// supplied, keeping the returned root in the same relative coordinate system so that
-// filepath.Rel(root, input) remains computable on all platforms.
+// resolveRoot validates that dir is the MOSAIC repository root and returns its absolute path.
+// If the input is "." or empty it is converted to an absolute path first so the returned path
+// is also absolute. The supplied directory must itself carry the MOSAIC root markers; the
+// function does not walk up the tree looking for them.
 func resolveRoot(dir string) (string, error) {
 	startPath := dir
 	if dir == "" || dir == "." {
@@ -28,27 +26,25 @@ func resolveRoot(dir string) (string, error) {
 		return "", fmt.Errorf("catalog.ResolveRoot: %w", err)
 	}
 
-	current := startPath
-	for {
-		if isMosaicRoot(current) {
-			return current, nil
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			// Reached the top of the path (filesystem root for absolute paths,
-			// or "." for relative paths that have been fully consumed).
-			break
-		}
-		current = parent
+	// Validate that this directory is the MOSAIC root — no upward walk.
+	if !isMosaicRoot(startPath) {
+		return "", fmt.Errorf("catalog.ResolveRoot: %w", ErrNotMosaicRoot)
 	}
-	return "", fmt.Errorf("catalog.ResolveRoot: %w", ErrNotMosaicRoot)
+	return startPath, nil
 }
 
-// isMosaicRoot returns true when dir contains both required MOSAIC repository marker files.
+// isMosaicRoot returns true when dir contains both required MOSAIC repository marker files
+// at their Catalog/-prefixed locations:
+//
+//	Catalog/Agents/Generic/SourceFilesFormat.md
+//	Catalog/Workflows/Index.md
+//
+// A directory carrying the markers only at the legacy (pre-migration) Agents/Generic/ and
+// Workflows/ locations is not accepted.
 func isMosaicRoot(dir string) bool {
 	markers := []string{
-		filepath.Join("Agents", "Generic", "SourceFilesFormat.md"),
-		filepath.Join("Workflows", "Index.md"),
+		filepath.Join("Catalog", "Agents", "Generic", "SourceFilesFormat.md"),
+		filepath.Join("Catalog", "Workflows", "Index.md"),
 	}
 	for _, m := range markers {
 		if _, err := os.Stat(filepath.Join(dir, m)); err != nil {

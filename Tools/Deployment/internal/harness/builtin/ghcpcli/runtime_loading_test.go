@@ -11,7 +11,7 @@ package ghcpcli_test
 // Test coverage:
 //
 //   RepoContentDir constant:
-//   - ghcpcli.RepoContentDir equals "Agents/GHCP CLI".
+//   - ghcpcli.RepoContentDir equals "Catalog/Agents/GHCP CLI".
 //
 //   Run-time loading from declared directory (T6.2):
 //   - A ghcpcli module constructed against a temporary root reads HarnessInjections.md
@@ -116,7 +116,7 @@ Orchestrator-specific constraint content.
 // TestRepoContentDir_GhcpCli_IsCorrect verifies that ghcpcli.RepoContentDir is the correct
 // repository directory relative to the MOSAIC root.
 func TestRepoContentDir_GhcpCli_IsCorrect(t *testing.T) {
-	const want = "Agents/GHCP CLI"
+	const want = "Catalog/Agents/GHCP CLI"
 	if ghcpcli.RepoContentDir != want {
 		t.Errorf("ghcpcli.RepoContentDir = %q, want %q", ghcpcli.RepoContentDir, want)
 	}

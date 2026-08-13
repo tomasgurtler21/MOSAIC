@@ -11,7 +11,7 @@ package vscodeghcp_test
 // Test coverage:
 //
 //   RepoContentDir constant:
-//   - vscodeghcp.RepoContentDir equals "Agents/VS code GHCP".
+//   - vscodeghcp.RepoContentDir equals "Catalog/Agents/VS code GHCP".
 //
 //   Run-time loading from declared directory (T6.2):
 //   - A vscodeghcp module constructed against a temporary root reads HarnessInjections.md
@@ -116,7 +116,7 @@ Orchestrator-specific constraint content.
 // TestRepoContentDir_VsCodeGhcp_IsCorrect verifies that vscodeghcp.RepoContentDir is the
 // correct repository directory relative to the MOSAIC root.
 func TestRepoContentDir_VsCodeGhcp_IsCorrect(t *testing.T) {
-	const want = "Agents/VS code GHCP"
+	const want = "Catalog/Agents/VS code GHCP"
 	if vscodeghcp.RepoContentDir != want {
 		t.Errorf("vscodeghcp.RepoContentDir = %q, want %q", vscodeghcp.RepoContentDir, want)
 	}

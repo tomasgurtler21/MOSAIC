@@ -136,7 +136,7 @@ func TestBundleConformance_Rule21_MismatchedBundleVersion_ReportsBundleVersionMi
 	// A deployed file whose bundle_version stamp (1.0.0) differs from bundle.Version (2.0.0)
 	// must produce a "bundle-version-mismatch" issue at SeverityWarning. The file is stale
 	// and must be re-deployed to receive the current bundle content.
-	const targetPath = "Agents/Generic/Agents/Creation/test-writer-tdd.md"
+	const targetPath = "Catalog/Agents/Generic/Agents/Creation/test-writer-tdd.md"
 	bundle := makeSubagentBundle("2.0.0", "AuthorityHierarchy", []byte("New content."))
 	states := map[string]domain.DeployedArtifactState{
 		targetPath: {
@@ -161,7 +161,7 @@ func TestBundleConformance_Rule21_MismatchedBundleVersion_ReportsBundleVersionMi
 func TestBundleConformance_Rule21_MismatchedBundleVersion_SubjectIsTargetPath(t *testing.T) {
 	// The "bundle-version-mismatch" issue's Subject must be the target path of the stale
 	// deployed file so that the planner can identify which file to re-deploy.
-	const targetPath = "Agents/Generic/Agents/Creation/test-writer-tdd.md"
+	const targetPath = "Catalog/Agents/Generic/Agents/Creation/test-writer-tdd.md"
 	bundle := makeSubagentBundle("2.0.0", "AuthorityHierarchy", []byte("New content."))
 	states := map[string]domain.DeployedArtifactState{
 		targetPath: {Present: true, BundleVersion: "1.0.0"},
@@ -317,7 +317,7 @@ func TestBundleConformance_Rule22_DriftingRegionContent_ReportsBundleRegionDrift
 func TestBundleConformance_Rule22_DriftingRegion_SubjectIsTargetPath(t *testing.T) {
 	// The "bundle-region-drift" issue's Subject must be the target path of the drifted
 	// deployed file so that the planner can identify which file to re-deploy.
-	const targetPath = "Agents/Generic/Agents/Creation/test-writer-tdd.md"
+	const targetPath = "Catalog/Agents/Generic/Agents/Creation/test-writer-tdd.md"
 	bundle := makeSubagentBundle("1.0.0", "AuthorityHierarchy", []byte("Bundle content.\n"))
 	states := map[string]domain.DeployedArtifactState{
 		targetPath: {Present: true, BundleVersion: "1.0.0"},

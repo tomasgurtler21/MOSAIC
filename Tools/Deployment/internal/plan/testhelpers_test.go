@@ -29,15 +29,27 @@ import (
 // Real catalog loader
 // ---------------------------------------------------------------------------
 
-// loadRealCatalog resolves the MOSAIC repository root from the current working directory
-// and returns a loaded Catalog. The test is fatally failed if loading fails.
+// repoRoot returns the absolute path to the MOSAIC repository root by navigating up from
+// this package's directory with a fixed offset. Tests run with the working directory set to
+// the package directory (internal/plan). The path climbs four levels:
+// plan/ → internal/ → Deployment/ → Tools/ → repo root.
+func repoRoot() string {
+	abs, err := filepath.Abs(filepath.Join("..", "..", "..", ".."))
+	if err != nil {
+		panic("plan_test: resolve repo root: " + err.Error())
+	}
+	return abs
+}
+
+// loadRealCatalog resolves the MOSAIC repository root using a fixed offset from the package
+// directory and returns a loaded Catalog. The test is fatally failed if loading fails.
 func loadRealCatalog(t *testing.T) catalog.Catalog {
 	t.Helper()
-	root, err := catalog.ResolveRoot(".")
+	root, err := catalog.ResolveRoot(repoRoot())
 	if err != nil {
 		t.Fatalf("catalog.ResolveRoot: %v", err)
 	}
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load(%q): %v", root, err)
 	}
@@ -62,7 +74,8 @@ type fakeCatalog struct {
 	workflows     []domain.Workflow
 }
 
-func (f *fakeCatalog) Root() string { return f.root }
+func (f *fakeCatalog) Root() string        { return f.root }
+func (f *fakeCatalog) CatalogRoot() string { return f.root }
 
 func (f *fakeCatalog) Agents() []domain.Agent { return f.workers }
 

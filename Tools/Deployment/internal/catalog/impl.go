@@ -12,6 +12,7 @@ import (
 // catalogImpl is the concrete, immutable implementation of Catalog populated by loadCatalog.
 type catalogImpl struct {
 	root         string
+	catalogRoot  string
 	workers      []domain.Agent  // sorted by Key
 	orchestr     domain.Agent
 	utilities    []domain.Agent
@@ -31,6 +32,9 @@ type catalogImpl struct {
 
 // Root returns the absolute MOSAIC repository root passed to Load.
 func (c *catalogImpl) Root() string { return c.root }
+
+// CatalogRoot returns the absolute catalogue root used by this catalog.
+func (c *catalogImpl) CatalogRoot() string { return c.catalogRoot }
 
 // Agents returns all worker agents sorted by Key.
 func (c *catalogImpl) Agents() []domain.Agent { return c.workers }
@@ -130,15 +134,24 @@ func (c *catalogImpl) ReadSource(path string) ([]byte, error) {
 // Issues reports all index/disk reconciliation mismatches and hook integrity errors.
 func (c *catalogImpl) Issues() []Issue { return c.issues }
 
-// loadCatalog reads the full MOSAIC source tree rooted at root and returns an immutable Catalog.
-func loadCatalog(root string) (Catalog, error) {
-	absRoot, err := filepath.Abs(root)
+// loadCatalog reads the full MOSAIC source tree and returns an immutable Catalog.
+// mosaicRoot is the MOSAIC repository root; catalogRoot is the (already-absolute) catalogue root.
+// Agents and workflows are loaded exclusively from catalogRoot.
+// Skills and hooks are merged from both the default catalogue root and catalogRoot,
+// with catalogRoot winning on key collision. Bundle and protocol files are always read
+// from mosaicRoot regardless of catalogRoot.
+func loadCatalog(mosaicRoot, catalogRoot string) (Catalog, error) {
+	absRoot, err := filepath.Abs(mosaicRoot)
 	if err != nil {
 		return nil, fmt.Errorf("catalog.Load: %w", err)
 	}
 
+	// defaultCatalogRoot is the Catalog/ directory under the MOSAIC root.
+	defaultCatalogRoot := DefaultCatalogRoot(absRoot)
+
 	cat := &catalogImpl{
 		root:        absRoot,
+		catalogRoot: catalogRoot,
 		agentIdx:    make(map[string]domain.Agent),
 		skillIdx:    make(map[string]domain.Skill),
 		hookIdx:     make(map[string]domain.HookBundle),
@@ -146,11 +159,16 @@ func loadCatalog(root string) (Catalog, error) {
 		sourcePaths: make(map[string]bool),
 	}
 
-	cat.issues = append(cat.issues, cat.loadAgents(absRoot)...)
+	// Agents and workflows are loaded exclusively from the catalogue root.
+	cat.issues = append(cat.issues, cat.loadAgents(catalogRoot)...)
 	cat.issues = append(cat.issues, buildNumericIDIndex(cat)...)
-	cat.issues = append(cat.issues, cat.loadSkills(absRoot)...)
-	cat.issues = append(cat.issues, cat.loadHooks(absRoot)...)
-	cat.issues = append(cat.issues, cat.loadWorkflows(absRoot)...)
+	cat.issues = append(cat.issues, cat.loadWorkflows(catalogRoot)...)
+
+	// Skills and hooks merge from both the default catalogue root and the catalogue root.
+	// The catalogue root wins on key collision; shadowing is silent (no Issue produced).
+	cat.issues = append(cat.issues, cat.loadSkillsMerged(defaultCatalogRoot, catalogRoot)...)
+	cat.issues = append(cat.issues, cat.loadHooksMerged(defaultCatalogRoot, catalogRoot)...)
+
 	cat.tiers = buildTiers(cat.agentIdx)
 
 	return cat, nil

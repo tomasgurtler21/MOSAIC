@@ -30,7 +30,7 @@ var updateGolden = flag.Bool("update", false, "regenerate golden files from curr
 // To regenerate: go test ./internal/transform/... -run TestGoldenFile -update
 func TestGoldenFile_TestRunnerAgent(t *testing.T) {
 	// Locate the generic test-runner source.
-	srcPath := filepath.Join("..", "..", "..", "..", "Agents", "Generic", "Agents", "Execution", "test-runner.md")
+	srcPath := filepath.Join("..", "..", "..", "..", "Catalog", "Agents", "Generic", "Agents", "Execution", "test-runner.md")
 	srcAbs, err := filepath.Abs(srcPath)
 	if err != nil {
 		t.Fatalf("resolve test-runner source path: %v", err)

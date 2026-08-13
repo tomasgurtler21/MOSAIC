@@ -594,7 +594,7 @@ Subagent content.
 // This confirms that the implementation handles the real document's structure correctly
 // and that the source document has not drifted out of the loader's expected format.
 func TestProtocolLoader_RealProtocolDocument_CanBeLoaded(t *testing.T) {
-	root, err := catalog.ResolveRoot(".")
+	root, err := catalog.ResolveRoot(repoRoot())
 	if err != nil {
 		t.Fatalf("ResolveRoot: %v — cannot locate MOSAIC repository root for integration test", err)
 	}

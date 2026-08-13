@@ -28,6 +28,10 @@ import (
 
 type stubCatalog struct {
 	root          string
+	// catalogRoot, when non-empty, is returned by CatalogRoot(). When empty, CatalogRoot()
+	// returns root. Separate from root so tests can model a session whose MOSAIC root and
+	// active catalogue root differ — the production state after Stage 4.
+	catalogRoot   string
 	agents        []domain.Agent
 	orchestrator  domain.Agent
 	utilityAgents []domain.Agent
@@ -41,7 +45,13 @@ type stubCatalog struct {
 	sources       map[string][]byte
 }
 
-func (c *stubCatalog) Root() string                                       { return c.root }
+func (c *stubCatalog) Root() string { return c.root }
+func (c *stubCatalog) CatalogRoot() string {
+	if c.catalogRoot != "" {
+		return c.catalogRoot
+	}
+	return c.root
+}
 func (c *stubCatalog) Agents() []domain.Agent                             { return c.agents }
 func (c *stubCatalog) Agent(key string) (domain.Agent, bool) {
 	all := append(c.agents, append(c.utilityAgents, append(c.infraAgents, c.orchestrator)...)...)

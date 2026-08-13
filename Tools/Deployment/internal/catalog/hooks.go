@@ -51,6 +51,65 @@ func (c *catalogImpl) loadHooks(root string) []Issue {
 	return issues
 }
 
+// loadHooksMerged merges hook bundles from defaultCatalogRoot and catalogRoot into the receiver.
+// Bundles are first loaded from defaultCatalogRoot (building the base set), then from
+// catalogRoot. On id collision, the catalogRoot version replaces the default one silently —
+// no Issue is produced for shadowing. Integrity checking (content_hash) applies to bundles
+// from either root. When both roots are the same path, only one load pass is performed.
+func (c *catalogImpl) loadHooksMerged(defaultCatalogRoot, catalogRoot string) []Issue {
+	// Identical-roots case: load once to avoid doubling the result.
+	if defaultCatalogRoot == catalogRoot {
+		return c.loadHooks(defaultCatalogRoot)
+	}
+
+	// First pass: load from the default catalogue root (builds the base set).
+	var issues []Issue
+	issues = append(issues, c.loadHooks(defaultCatalogRoot)...)
+
+	// Second pass: scan the catalogue root and merge, with catalogue root winning on collision.
+	hooksDir := filepath.Join(catalogRoot, "Agents", "Generic", "Hooks")
+	entries, err := os.ReadDir(hooksDir)
+	if err != nil {
+		// Missing Hooks/ directory in catalogRoot is not a hard error.
+		return issues
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		bundleDir := filepath.Join(hooksDir, entry.Name())
+		bundle, bundleIssues, err := parseHookBundle(bundleDir)
+		if err != nil {
+			continue
+		}
+		// Integrity-check issues (e.g. hook-hash-mismatch) are always reported.
+		issues = append(issues, bundleIssues...)
+
+		if _, exists := c.hookIdx[bundle.Key]; exists {
+			// Id collision: catalogue root wins, replace the existing entry in the slice.
+			for i, h := range c.hooks {
+				if h.Key == bundle.Key {
+					c.hooks[i] = bundle
+					break
+				}
+			}
+		} else {
+			// New id: append.
+			c.hooks = append(c.hooks, bundle)
+		}
+		c.hookIdx[bundle.Key] = bundle
+
+		// Register hook file source paths.
+		for _, variant := range bundle.Variants {
+			for _, f := range variant.Files {
+				c.sourcePaths[f.SourcePath] = true
+			}
+		}
+	}
+	return issues
+}
+
 // parseHookBundle reads hook.yaml from bundleDir via mosaic-common/hookbundle, maps the
 // shared model onto the deployment tool's own domain types, resolves variant reuse, and
 // validates the content_hash when present. Content-hash validation, catalog scanning and

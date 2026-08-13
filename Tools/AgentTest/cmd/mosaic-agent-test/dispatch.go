@@ -125,6 +125,42 @@ func selectFrontend(args []string, isTerminal TerminalCheck) Frontend {
 	return FrontendCLI
 }
 
+// supportedHarnesses returns the shared catalog entries this tool's
+// newAdapter/decoderFor switches can actually resolve, in catalog order.
+//
+// AgentTest's adapter port is materially larger than Runner's (provisioning,
+// capabilities, scope inspection, hook bridging, plus the internal/harness/contract
+// conformance suite), so this tool gains harness support later than the shared
+// spawn layer does. Expressing that gap here — rather than passing the full
+// catalog directly to the frontends — makes it visible in flag validation
+// instead of surfacing as a late ErrUnknownHarness.
+//
+// The returned slice is built by filtering a defensive copy of the catalog; it
+// is fresh on every call. Labels are never restated: they come from the catalog
+// entries passed through unchanged.
+func supportedHarnesses() []commonharness.CLIHarness {
+	all := commonharness.CLIHarnesses()
+	out := make([]commonharness.CLIHarness, 0, len(all))
+	for _, e := range all {
+		if isSupportedHarness(e.ID) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// isSupportedHarness reports whether id names a harness this tool supports.
+// It derives from the shared catalog's own identity constants — never from a
+// local restatement of identity strings.
+func isSupportedHarness(id string) bool {
+	switch id {
+	case commonharness.HarnessIDClaudeCode, commonharness.HarnessIDOpenCode:
+		return true
+	default:
+		return false
+	}
+}
+
 // adapterOptions configures newAdapter's construction of a concrete harness
 // adapter.
 type adapterOptions struct {
@@ -547,10 +583,10 @@ func cliOptions(d Deps, stdout, stderr io.Writer) cli.Options {
 		FixtureRoot:    d.FixtureRoot,
 		DefaultHarness: d.HarnessID,
 
-		// Sourced from the shared catalog, never restated: the same set
-		// newAdapter/decoderFor switch on, so the CLI's flag validation
+		// Sourced from the tool-local supported set, never restated: the same
+		// set newAdapter/decoderFor switch on, so the CLI's flag validation
 		// cannot drift from what the composition root can actually wire.
-		Harnesses: commonharness.CLIHarnesses(),
+		Harnesses: supportedHarnesses(),
 	}
 }
 
@@ -577,9 +613,9 @@ func tuiOptions(d Deps, suites []string) (tui.Options, error) {
 		Harness:   d.HarnessID,
 		Retention: domain.RetainNever,
 
-		// Same catalog source as cliOptions: both frontends offer the
+		// Same supported-set source as cliOptions: both frontends offer the
 		// identical selectable set, so neither can drift from the other or
 		// from what the composition root can actually wire.
-		Harnesses: commonharness.CLIHarnesses(),
+		Harnesses: supportedHarnesses(),
 	}, nil
 }

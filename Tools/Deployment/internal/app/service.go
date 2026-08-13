@@ -111,7 +111,7 @@ type Service interface {
 	// deployed form at a caller-chosen destination.
 	//
 	// Source: exactly one of req.SourcePath (a generic-form file at any path, read directly)
-	// or req.SourceAgentKey (an agent resolved from the Agents/Generic/ catalogue). Neither
+	// or req.SourceAgentKey (an agent resolved from the Catalog/Agents/Generic/ catalogue). Neither
 	// is ErrRenderSourceRequired; both is ErrRenderSourceAmbiguous.
 	//
 	// Destination: exactly one of req.DestinationPath (honoured verbatim) or req.WorkspaceRoot
@@ -146,8 +146,8 @@ type Service interface {
 	// never inferred from the source file.
 	//
 	// Registration is automatic and is a consequence of placement: the catalog discovers
-	// agents by scanning Agents/Generic/Orchestrator/, Agents/Generic/Agents/{category}/, and
-	// Agents/Generic/UtilityAgents/, so writing a well-formed file into the chosen directory
+	// agents by scanning Catalog/Agents/Generic/Orchestrator/, Catalog/Agents/Generic/Agents/{category}/, and
+	// Catalog/Agents/Generic/UtilityAgents/, so writing a well-formed file into the chosen directory
 	// with a unique numeric id IS the registration. No catalog file is edited.
 	//
 	// The harness-only source file is never modified or deleted. Deploying the promoted agent
@@ -180,7 +180,7 @@ type Service interface {
 }
 
 // PromoteCategoryUtility is the sentinel Category value selecting
-// Agents/Generic/UtilityAgents/ rather than a subdirectory of Agents/Generic/Agents/.
+// Catalog/Agents/Generic/UtilityAgents/ rather than a subdirectory of Catalog/Agents/Generic/Agents/.
 const PromoteCategoryUtility = "UtilityAgents"
 
 // ErrPromoteFileRequired reports a PromoteRequest with an empty FilePath.
@@ -219,8 +219,8 @@ type PromoteRequest struct {
 	FilePath string
 	// Category is the destination placement. An empty value causes QPromoteCategory to
 	// be asked. A value of PromoteCategoryUtility places the file under
-	// Agents/Generic/UtilityAgents/; any other value names a subdirectory under
-	// Agents/Generic/Agents/.
+	// Catalog/Agents/Generic/UtilityAgents/; any other value names a subdirectory under
+	// Catalog/Agents/Generic/Agents/.
 	Category string
 	// Overwrite is explicit consent to replace an existing file at the destination
 	// path. Without it a collision is refused.
@@ -247,7 +247,7 @@ type PromoteResult struct {
 	// NumericID is the id assigned to the new agent.
 	NumericID string `json:"numericId"`
 	// Category is the resolved placement, either PromoteCategoryUtility or a
-	// subdirectory name under Agents/Generic/Agents/.
+	// subdirectory name under Catalog/Agents/Generic/Agents/.
 	Category string `json:"category"`
 	// DryRun reports that nothing was written.
 	DryRun bool `json:"dryRun"`

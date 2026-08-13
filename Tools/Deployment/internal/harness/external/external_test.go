@@ -656,25 +656,18 @@ func buildReferenceModule(t *testing.T) string {
 	return outBin
 }
 
-// findRepoRoot walks up from the test source tree to find the MOSAIC repository root,
-// identified by the presence of the "Agents" directory. The repository root is distinct from
-// the Go module root (Tools/Deployment/); it is two levels higher.
+// findRepoRoot returns the absolute path to the MOSAIC repository root by navigating
+// up from this package's directory with a fixed offset. The package is at
+// Tools/Deployment/internal/harness/external/, which is five levels below the
+// repository root.
 func findRepoRoot(t *testing.T) string {
 	t.Helper()
-	dir, err := filepath.Abs(".")
+	rel := filepath.Join("..", "..", "..", "..", "..")
+	abs, err := filepath.Abs(rel)
 	if err != nil {
-		t.Fatalf("abs .: %v", err)
+		t.Fatalf("resolve repo root: %v", err)
 	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "Agents")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("could not locate MOSAIC repo root (Agents/ directory) walking up from test directory")
-		}
-		dir = parent
-	}
+	return abs
 }
 
 // findModuleRoot walks up from the test source tree to find go.mod.
@@ -904,8 +897,6 @@ func TestProtocol_MessageTypesHaveProtocolField(t *testing.T) {
 	// Since those types are unexported, we verify through successful round-trips: if the
 	// echo server can process requests (it validates the id field), the protocol field
 	// must be present and correctly valued.
-	//
-	// If external.New is not yet implemented (RED phase), this test fails at the New() call.
 	desc := minimalDescriptor(t, "fake-echo")
 	exePath := fakeHarnessExe(t, "echo")
 
@@ -1372,8 +1363,7 @@ func permissionPairs(allowed map[string]bool) []domain.FieldPair {
 // must satisfy every universal invariant and produce identical per-method output.
 //
 // The reference module binary is built from cmd/harness-opencode-module. If the binary
-// cannot be built, the test is skipped. In the RED phase the binary exists but implements
-// no protocol, so the contract test fails with connection errors — the correct RED state.
+// cannot be built, the test is skipped.
 func TestContractTest_ExternalAdapter_PassesSharedContractSuite(t *testing.T) {
 	binPath := buildReferenceModule(t)
 	desc := openCodeDescriptor(t)
@@ -1383,9 +1373,7 @@ func TestContractTest_ExternalAdapter_PassesSharedContractSuite(t *testing.T) {
 		MosaicRoot: findRepoRoot(t),
 	})
 	if err != nil {
-		t.Fatalf("external.New with reference module binary: %v\n"+
-			"(In the RED phase, the reference module exits immediately without speaking the protocol;\n"+
-			"this error is expected until the external adapter and reference module are implemented.)", err)
+		t.Fatalf("external.New with reference module binary: %v", err)
 	}
 	defer m.Close() //nolint:errcheck
 

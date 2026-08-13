@@ -1,11 +1,11 @@
 package harness_test
 
-// Tests for Runner's harness selection set (T4.4): the composition of the
-// shared CLI harness catalog with Runner's tool-local "fake" test double,
-// consumed by internal/cli's flag surfaces and internal/tui/screens'
-// configuration screen.
+// Tests for Runner's harness selection set: the composition of the shared CLI
+// harness catalog with Runner's tool-local "fake" test double, consumed by
+// internal/cli's flag surfaces and internal/tui/screens' configuration screen.
 
 import (
+	"strings"
 	"testing"
 
 	commonharness "mosaic-common/harness"
@@ -72,6 +72,36 @@ func TestSelections_IncludesOpenCode(t *testing.T) {
 	}
 }
 
+// TestSelections_IncludesGHCPCLI verifies that "ghcp-cli" is among the
+// accepted selections once the catalog carries it.
+func TestSelections_IncludesGHCPCLI(t *testing.T) {
+	sels := harness.Selections()
+	found := false
+	for _, s := range sels {
+		if s.ID == commonharness.HarnessIDGHCPCLI {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want %q among Selections(), got %+v", commonharness.HarnessIDGHCPCLI, sels)
+	}
+}
+
+// TestSelections_GHCPCLIIsCLIBacked verifies that the ghcp-cli selection
+// is marked as CLI-backed so it is offered by the TUI selection step.
+func TestSelections_GHCPCLIIsCLIBacked(t *testing.T) {
+	sels := harness.Selections()
+	for _, s := range sels {
+		if s.ID == commonharness.HarnessIDGHCPCLI {
+			if !s.CLIBacked {
+				t.Errorf("want Selections entry for %q to have CLIBacked == true", commonharness.HarnessIDGHCPCLI)
+			}
+			return
+		}
+	}
+	t.Errorf("want %q among Selections() to check CLIBacked, not found in %+v", commonharness.HarnessIDGHCPCLI, sels)
+}
+
 // ---------------------------------------------------------------------------
 // Accepts
 // ---------------------------------------------------------------------------
@@ -91,6 +121,14 @@ func TestAccepts_TrueForEveryCatalogEntry(t *testing.T) {
 		if !harness.Accepts(entry.ID) {
 			t.Errorf("want Accepts(%q) == true for catalog entry", entry.ID)
 		}
+	}
+}
+
+// TestAccepts_TrueForGHCPCLI verifies that "ghcp-cli" is an accepted
+// --harness value once the catalog carries it.
+func TestAccepts_TrueForGHCPCLI(t *testing.T) {
+	if !harness.Accepts(commonharness.HarnessIDGHCPCLI) {
+		t.Errorf("want Accepts(%q) == true for the ghcp-cli catalog entry", commonharness.HarnessIDGHCPCLI)
 	}
 }
 
@@ -146,22 +184,79 @@ func TestCLISelections_MatchesCatalogExactly(t *testing.T) {
 // FlagValues / FlagValueList
 // ---------------------------------------------------------------------------
 
-// TestFlagValues_PipeSeparatedInAcceptedOrder verifies the usage string's
-// exact shape: "fake|claude-code|opencode".
+// TestFlagValues_PipeSeparatedInAcceptedOrder verifies that FlagValues()
+// produces a pipe-separated string in the documented accepted order: the
+// test double first, then every catalog entry in catalog order. Asserting
+// this from Selections() and CLIHarnesses() rather than a frozen string
+// means a catalog addition breaks this test only if the ordering contract
+// changes, not just because one more harness exists.
 func TestFlagValues_PipeSeparatedInAcceptedOrder(t *testing.T) {
 	got := harness.FlagValues()
-	want := "fake|claude-code|opencode"
-	if got != want {
-		t.Errorf("FlagValues() = %q, want %q", got, want)
+
+	// No leading or trailing separator.
+	if strings.HasPrefix(got, "|") {
+		t.Errorf("FlagValues() = %q: has leading separator", got)
+	}
+	if strings.HasSuffix(got, "|") {
+		t.Errorf("FlagValues() = %q: has trailing separator", got)
+	}
+
+	parts := strings.Split(got, "|")
+	sels := harness.Selections()
+
+	if len(parts) != len(sels) {
+		t.Fatalf("FlagValues() = %q: %d pipe-separated tokens, want %d (one per selection in Selections())", got, len(parts), len(sels))
+	}
+
+	// First token must be the test double (test-double-first ordering contract).
+	if parts[0] != harness.FakeHarnessID {
+		t.Errorf("FlagValues() first token = %q, want FakeHarnessID %q: test double must come first", parts[0], harness.FakeHarnessID)
+	}
+
+	// Remaining tokens must match CLIHarnesses() in catalog order so a silent
+	// reordering inside the catalog is still caught here.
+	catalog := commonharness.CLIHarnesses()
+	for i, entry := range catalog {
+		if parts[i+1] != entry.ID {
+			t.Errorf("FlagValues() token %d = %q, want %q (catalog entry in catalog order)", i+1, parts[i+1], entry.ID)
+		}
 	}
 }
 
-// TestFlagValueList_CommaSeparatedInAcceptedOrder verifies the usage-error
-// message's exact shape: "fake, claude-code, opencode".
+// TestFlagValueList_CommaSeparatedInAcceptedOrder verifies that FlagValueList()
+// produces a comma-space-separated string in the documented accepted order:
+// the test double first, then every catalog entry in catalog order. Asserting
+// this from Selections() and CLIHarnesses() rather than a frozen string means
+// a catalog addition breaks this test only if the ordering contract changes.
 func TestFlagValueList_CommaSeparatedInAcceptedOrder(t *testing.T) {
 	got := harness.FlagValueList()
-	want := "fake, claude-code, opencode"
-	if got != want {
-		t.Errorf("FlagValueList() = %q, want %q", got, want)
+
+	// No leading or trailing separator.
+	if strings.HasPrefix(got, ", ") {
+		t.Errorf("FlagValueList() = %q: has leading separator", got)
+	}
+	if strings.HasSuffix(got, ", ") {
+		t.Errorf("FlagValueList() = %q: has trailing separator", got)
+	}
+
+	parts := strings.Split(got, ", ")
+	sels := harness.Selections()
+
+	if len(parts) != len(sels) {
+		t.Fatalf("FlagValueList() = %q: %d comma-space-separated tokens, want %d (one per selection in Selections())", got, len(parts), len(sels))
+	}
+
+	// First token must be the test double (test-double-first ordering contract).
+	if parts[0] != harness.FakeHarnessID {
+		t.Errorf("FlagValueList() first token = %q, want FakeHarnessID %q: test double must come first", parts[0], harness.FakeHarnessID)
+	}
+
+	// Remaining tokens must match CLIHarnesses() in catalog order so a silent
+	// reordering inside the catalog is still caught here.
+	catalog := commonharness.CLIHarnesses()
+	for i, entry := range catalog {
+		if parts[i+1] != entry.ID {
+			t.Errorf("FlagValueList() token %d = %q, want %q (catalog entry in catalog order)", i+1, parts[i+1], entry.ID)
+		}
 	}
 }

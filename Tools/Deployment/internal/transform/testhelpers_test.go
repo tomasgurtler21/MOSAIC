@@ -58,7 +58,7 @@ func genericAgentsDir(t *testing.T) string {
 	t.Helper()
 	// From Tools/Deployment/internal/transform/ navigate four levels up to the repo root,
 	// then descend into the worker agents directory.
-	rel := filepath.Join("..", "..", "..", "..", "Agents", "Generic", "Agents")
+	rel := filepath.Join("..", "..", "..", "..", "Catalog", "Agents", "Generic", "Agents")
 	abs, err := filepath.Abs(rel)
 	if err != nil {
 		t.Fatalf("resolve generic agents directory: %v", err)

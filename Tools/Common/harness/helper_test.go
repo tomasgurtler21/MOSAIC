@@ -118,6 +118,41 @@ func runHelperProcess() {
 		// no error). Exit 0. The stream's outcome cannot be established.
 		os.Stdout.WriteString(`{"type":"step_start"}` + "\n") //nolint:errcheck
 
+	case "ghcpcli-success":
+		// A valid GHCP CLI event stream: one assistant.message carrying the
+		// Communication Protocol response, followed by a result line reporting
+		// exitCode 0. Exit 0.
+		protocolResp := `{"agent_instance_id":"test-agent#1","status_code":"SUCCESS","status_message":"ok"}`
+		os.Stdout.WriteString(`{"type":"assistant.message","data":{"content":` + jsonQuote(protocolResp) + `},"id":"id1","timestamp":"2026-08-12T21:00:00Z","parentId":"pid1"}` + "\n") //nolint:errcheck
+		os.Stdout.WriteString(`{"type":"result","timestamp":"2026-08-12T21:00:01Z","sessionId":"s1","exitCode":0,"usage":{}}` + "\n")                                                    //nolint:errcheck
+
+	case "ghcpcli-nonzero-exit-success-stream":
+		// The key GHCP CLI differentiator: the stream's terminal result event
+		// reports success (stream exitCode 0) but the process itself exits 1.
+		// The spawner must continue past ErrNonZeroExit from Run and use the
+		// stream's own verdict — success — rather than abandoning on the process
+		// exit code.
+		protocolResp := `{"agent_instance_id":"test-agent#1","status_code":"SUCCESS","status_message":"ok"}`
+		os.Stdout.WriteString(`{"type":"assistant.message","data":{"content":` + jsonQuote(protocolResp) + `},"id":"id1","timestamp":"2026-08-12T21:00:00Z","parentId":"pid1"}` + "\n") //nolint:errcheck
+		os.Stdout.WriteString(`{"type":"result","timestamp":"2026-08-12T21:00:01Z","sessionId":"s1","exitCode":0,"usage":{}}` + "\n")                                                    //nolint:errcheck
+		os.Exit(1)
+
+	case "ghcpcli-zero-exit-incomplete-stream":
+		// Some GHCP events but no terminal result line; exits 0. A zero process
+		// exit does not constitute success when the stream lacks a result event.
+		os.Stdout.WriteString(`{"type":"session.mcp_servers_loaded","data":{},"id":"id1","timestamp":"2026-08-12T21:00:00Z","parentId":"pid1"}` + "\n")                                  //nolint:errcheck
+		os.Stdout.WriteString(`{"type":"assistant.message","data":{"content":"partial"},"id":"id2","timestamp":"2026-08-12T21:00:00Z","parentId":"pid1"}` + "\n")                        //nolint:errcheck
+		// No result line. Exit 0.
+
+	case "ghcpcli-observed-failure":
+		// The observed failure signature: MCP events on stdout, model error on
+		// stderr, no terminal result event. Exits 1. Reproduces the real failure
+		// capture when an unavailable model is specified.
+		os.Stdout.WriteString(`{"type":"session.mcp_servers_loaded","data":{},"id":"id1","timestamp":"2026-08-12T21:00:00Z","parentId":"pid1"}` + "\n")                                  //nolint:errcheck
+		os.Stdout.WriteString(`{"type":"session.mcp_server_status_changed","data":{},"ephemeral":true,"id":"id2","timestamp":"2026-08-12T21:00:00Z","parentId":"pid1"}` + "\n")          //nolint:errcheck
+		os.Stderr.WriteString(`Error: Model "definitely-not-a-real-model" from --model flag is not available.`)                                                                          //nolint:errcheck
+		os.Exit(1)
+
 	case "hang":
 		// Block indefinitely so the test can exercise timeout and context
 		// cancellation. time.Sleep avoids the goroutine-deadlock panic that

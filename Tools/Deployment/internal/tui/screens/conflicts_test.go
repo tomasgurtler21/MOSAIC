@@ -45,7 +45,7 @@ func conflictQuestion(filePath, modDetail string) domain.ChoiceQuestion {
 // TestConflictScreen_View_ShowsFilePath verifies that the locally-modified file path is
 // prominently displayed so the user knows which file the decision applies to.
 func TestConflictScreen_View_ShowsFilePath(t *testing.T) {
-	filePath := "Agents/Generic/Agents/Execution/test-runner.md"
+	filePath := "Catalog/Agents/Generic/Agents/Execution/test-runner.md"
 	s := screens.NewConflictScreen(conflictQuestion(filePath, ""), 80, 24, plainStyles())
 
 	view := s.View()

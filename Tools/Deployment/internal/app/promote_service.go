@@ -365,19 +365,23 @@ func nextNumericID(c catalog.Catalog) string {
 }
 
 // promoteDestinationPath computes where the generated generic file is written, relative
-// to the MOSAIC root:
+// to the active catalogue root:
 //
-//	category == PromoteCategoryUtility → Agents/Generic/UtilityAgents/{key}.md
-//	otherwise                          → Agents/Generic/Agents/{category}/{key}.md
+//	category == PromoteCategoryUtility → <catalogRoot>/Agents/Generic/UtilityAgents/{key}.md
+//	otherwise                          → <catalogRoot>/Agents/Generic/Agents/{category}/{key}.md
+//
+// No Catalog/ segment appears in these sub-paths: the catalogue root already is the catalogue.
+// With no --catalog-folder supplied the resulting absolute path is byte-identical to the
+// pre-feature default under the MOSAIC root.
 //
 // key is the source file's base name with a trailing ".agent.md" or ".md" removed — the
 // same derivation the catalog uses to key an agent, so the promoted file lands under the
 // key the user expects.
-func promoteDestinationPath(mosaicRoot, category, key string) string {
+func promoteDestinationPath(catalogRoot, category, key string) string {
 	if category == PromoteCategoryUtility {
-		return filepath.Join(mosaicRoot, "Agents", "Generic", "UtilityAgents", key+".md")
+		return filepath.Join(catalogRoot, "Agents", "Generic", "UtilityAgents", key+".md")
 	}
-	return filepath.Join(mosaicRoot, "Agents", "Generic", "Agents", category, key+".md")
+	return filepath.Join(catalogRoot, "Agents", "Generic", "Agents", category, key+".md")
 }
 
 // Promote generates a generic agent source file from a single already boundary-tagged
@@ -454,8 +458,18 @@ func (s *service) Promote(ctx context.Context, req PromoteRequest) (PromoteResul
 		}
 	}
 
-	// Compute the destination path before checking for collisions.
-	destPath := promoteDestinationPath(s.deps.MosaicRoot, category, key)
+	// Containment guard: reject category values that contain ".." traversal segments or
+	// path separators. These must be rejected before any directory is created or path
+	// resolution occurs, so a crafted value cannot escape the catalogue root.
+	if strings.Contains(category, "..") || strings.ContainsAny(category, "/\\") {
+		return PromoteResult{}, fmt.Errorf("invalid category %q: category must be a single directory name without path traversal or separators", category)
+	}
+
+	// Compute the destination path before checking for collisions. All promote writes
+	// target the active catalogue root, not the MOSAIC root, so a custom --catalog-folder
+	// receives the promoted file where the catalogue read side will also look.
+	catalogRoot := s.deps.Catalog.CatalogRoot()
+	destPath := promoteDestinationPath(catalogRoot, category, key)
 
 	// Collision policy: refuse to overwrite an existing file without explicit consent.
 	// Promote never silently overwrites a generic agent; the caller must set Overwrite: true.
@@ -670,12 +684,12 @@ func (s *service) askPromoteCategory(ctx context.Context, srcPath string) (strin
 }
 
 // buildPromoteCategoryOptions returns the SelectOne options for QPromoteCategory.
-// Options are derived from the subdirectories present under Agents/Generic/Agents/ in the
-// MOSAIC root, each with Option.ID equal to the directory name, plus one option with
-// Option.ID equal to PromoteCategoryUtility. Options are sorted by ID so the presented
-// list is deterministic regardless of filesystem ordering.
+// Options are derived from the subdirectories present under Agents/Generic/Agents/
+// in the active catalogue root, each with Option.ID equal to the directory name, plus
+// one option with Option.ID equal to PromoteCategoryUtility. Options are sorted by ID
+// so the presented list is deterministic regardless of filesystem ordering.
 func (s *service) buildPromoteCategoryOptions() ([]domain.Option, error) {
-	agentsDir := filepath.Join(s.deps.MosaicRoot, "Agents", "Generic", "Agents")
+	agentsDir := filepath.Join(s.deps.Catalog.CatalogRoot(), "Agents", "Generic", "Agents")
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("reading Agents/Generic/Agents/: %w", err)

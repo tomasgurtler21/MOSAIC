@@ -15,7 +15,7 @@ import (
 )
 
 // BundleSourceRelPath is the bundle's path relative to the MOSAIC root.
-const BundleSourceRelPath = "Agents/Generic/DeployedSections.md"
+const BundleSourceRelPath = "Catalog/Agents/Generic/DeployedSections.md"
 
 // Sentinel errors returned by BundleLoader.LoadBundle. Each is distinct so callers can
 // discriminate failure modes with errors.Is.

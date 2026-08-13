@@ -75,26 +75,17 @@ func findGoModuleRoot(t *testing.T) string {
 	}
 }
 
-// findRepoRoot walks up from the test working directory to find the MOSAIC repository root.
-// The repo root is identified by the presence of the "Agents" directory, which is distinct
-// from the Go module root (Tools/Deployment/). The agents used as golden test inputs live
-// under <repoRoot>/Agents/, not under the Go module.
+// findRepoRoot returns the absolute path to the MOSAIC repository root by navigating
+// up from this package's directory with a fixed offset. The package is at
+// Tools/Deployment/conformance/, which is three levels below the repository root.
 func findRepoRoot(t *testing.T) string {
 	t.Helper()
-	dir, err := filepath.Abs(".")
+	rel := filepath.Join("..", "..", "..")
+	abs, err := filepath.Abs(rel)
 	if err != nil {
-		t.Fatalf("abs .: %v", err)
+		t.Fatalf("resolve repo root: %v", err)
 	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "Agents")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("could not locate MOSAIC repo root (Agents/ directory) walking up from conformance test directory")
-		}
-		dir = parent
-	}
+	return abs
 }
 
 // buildReferenceExternalModule builds the cmd/harness-opencode-module binary into a temp
@@ -122,10 +113,10 @@ func buildReferenceExternalModule(t *testing.T) string {
 }
 
 // goldenCases returns the list of test cases for the golden agent set. Each case has a
-// source file path (from the generic Agents tree) and a golden file name.
+// source file path (from the generic Catalog/Agents tree) and a golden file name.
 func goldenCases(t *testing.T, moduleRoot string) []goldenCase {
 	t.Helper()
-	agentsRoot := filepath.Join(moduleRoot, "Agents", "Generic")
+	agentsRoot := filepath.Join(moduleRoot, "Catalog", "Agents", "Generic")
 	return []goldenCase{
 		{
 			name:        "contracts-review",

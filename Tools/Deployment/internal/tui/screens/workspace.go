@@ -31,6 +31,16 @@ const (
 	// the path exists; it is a readable regular file or a readable directory. Writability
 	// is not required — this mode's output goes to the target harness's own resolved path.
 	PathKindFileOrDirectory
+
+	// PathKindCatalogFolder accepts an existing, READABLE directory. Writability is NOT
+	// required — a catalogue is only ever read by the deploy flow.
+	//
+	// Screen wording: title "Catalogue Folder", label "Catalogue folder path:",
+	// placeholder "/path/to/catalog". Guidance states that the folder supplies the agents
+	// and workflows offered in this session and may override individual skills and hooks by
+	// supplying same-keyed ones, and that the protocol document, the deployed-sections
+	// bundle, and SourceFilesFormat.md always come from the MOSAIC root regardless.
+	PathKindCatalogFolder
 )
 
 // WorkspaceScreen prompts the user for a workspace directory path and validates it before
@@ -46,17 +56,23 @@ const (
 //   2. Path must point to an existing regular file (not a directory).
 //   3. The file must be readable (checked by opening it for reading).
 //
+// Validation rules (PathKindCatalogFolder):
+//   1. Path must not be empty.
+//   2. Path must point to an existing directory (not a file).
+//   3. The directory must be readable. Writability is NOT required.
+//
 // Navigation contract:
 //   - Enter on a valid path -> Done() == true, WorkspacePath() returns the entered path.
 //   - Esc                   -> Back() == true (caller returns to mode selection, preserving
 //                              the previously entered value so prior valid input is not lost).
 type WorkspaceScreen struct {
-	input    *widgets.TextInput
-	lastPath string   // the last value the user entered, preserved across back navigation
-	pathKind PathKind // selects validation rules and on-screen wording; zero value is directory
-	width    int
-	height   int
-	styles   Styles
+	input         *widgets.TextInput
+	lastPath      string   // the last value the user entered, preserved across back navigation
+	pathKind      PathKind // selects validation rules and on-screen wording; zero value is directory
+	width         int
+	height        int
+	styles        Styles
+	externalError string // shown inline after a caller-detected failure; cleared on next Update
 }
 
 // NewWorkspaceScreen creates the workspace path entry screen.
@@ -111,6 +127,10 @@ func (s *WorkspaceScreen) SetPathKind(kind PathKind) {
 		label = "Agent file or folder path:"
 		placeholder = "/path/to/agent.md or /path/to/folder"
 		validateFn = validateFileOrDirPath
+	case PathKindCatalogFolder:
+		label = "Catalogue folder path:"
+		placeholder = "/path/to/catalog"
+		validateFn = validateCatalogFolderPath
 	default: // PathKindDirectory
 		label = "Workspace directory path:"
 		placeholder = "/path/to/workspace"
@@ -232,8 +252,42 @@ func validateFileOrDirPath(path string) error {
 	return nil
 }
 
+// validateCatalogFolderPath validates that the path is an existing, readable directory.
+// Writability is not checked — a catalogue folder is only ever read by the deploy flow.
+func validateCatalogFolderPath(path string) error {
+	path = pathinput.Unquote(strings.TrimSpace(path))
+	if path == "" {
+		return errors.New("path cannot be empty")
+	}
+
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return errors.New("path is not valid: " + err.Error())
+	}
+
+	info, err := os.Stat(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return errors.New("directory does not exist: " + abs)
+		}
+		return errors.New("cannot access path: " + err.Error())
+	}
+	if !info.IsDir() {
+		return errors.New("path is not a directory: " + abs)
+	}
+
+	// Probe readability by opening the directory — no writability check for catalogue folders.
+	f, openErr := os.Open(abs)
+	if openErr != nil {
+		return errors.New("directory is not readable: " + abs)
+	}
+	f.Close()
+	return nil
+}
+
 // Update processes a key message and delegates to the text input widget.
 func (s *WorkspaceScreen) Update(msg tea.Msg) tea.Cmd {
+	s.externalError = "" // clear any caller-injected error on the first user interaction
 	cmd := s.input.Update(msg)
 	if s.input.Done() || s.input.Back() {
 		s.lastPath = s.input.Value()
@@ -256,6 +310,13 @@ func (s *WorkspaceScreen) View() string {
 		subtitle = "Enter the path to an agent file or a folder of agent files."
 		guidanceText = "The path must be an existing, readable file or directory.\n" +
 			"For a folder, only files directly under it are processed (non-recursive).\n"
+	case PathKindCatalogFolder:
+		title = "Catalogue Folder"
+		subtitle = "Enter the catalogue directory supplying agents and workflows for this session."
+		guidanceText = "The folder supplies the agents and workflows offered in this session.\n" +
+			"It may also override individual skills and hooks by supplying same-keyed ones.\n" +
+			"The protocol document, the deployed-sections bundle, and SourceFilesFormat.md\n" +
+			"always come from the MOSAIC root regardless of the catalogue folder.\n"
 	default: // PathKindDirectory
 		title = "Workspace Path"
 		subtitle = "Enter the directory where agents will be deployed."
@@ -270,7 +331,13 @@ func (s *WorkspaceScreen) View() string {
 	inputView := s.input.View()
 	help := s.styles.Help.Width(s.width).Render("enter confirm  esc back  ctrl+c quit")
 
-	return strings.Join([]string{titleLine, subtitleLine, border, guidance, inputView, border, help}, "\n")
+	parts := []string{titleLine, subtitleLine, border, guidance, inputView}
+	if s.externalError != "" {
+		errLine := s.styles.Error.Width(s.width).Render(s.externalError)
+		parts = append(parts, errLine)
+	}
+	parts = append(parts, border, help)
+	return strings.Join(parts, "\n")
 }
 
 // Done reports whether the user confirmed a valid workspace path.
@@ -308,3 +375,10 @@ func (s *WorkspaceScreen) Reset() { s.input.Reset() }
 // InputInit returns the command required to start the text input cursor blink. The root
 // model calls this when it transitions to the workspace screen.
 func (s *WorkspaceScreen) InputInit() tea.Cmd { return s.input.Init() }
+
+// SetExternalError displays msg as the screen's inline error and holds the user on the
+// screen. Used to surface a failure that only the caller can detect — a failed catalogue
+// reload. The message is cleared on the next Update call.
+func (s *WorkspaceScreen) SetExternalError(msg string) {
+	s.externalError = msg
+}

@@ -7,7 +7,7 @@ package claudecode_test
 // Test coverage:
 //
 //   T6.1 — RepoContentDir constant (compile-time check):
-//   - claudecode.RepoContentDir equals "Agents/Claude Code".
+//   - claudecode.RepoContentDir equals "Catalog/Agents/Claude Code".
 //   - ghcpcli.RepoContentDir, opencode.RepoContentDir, vscodeghcp.RepoContentDir are each
 //     the correct path for their respective harness directories.
 //
@@ -121,7 +121,7 @@ Orchestrator-specific constraint content.
 // TestRepoContentDir_ClaudeCode verifies that claudecode.RepoContentDir is the correct
 // repository directory relative to the MOSAIC root.
 func TestRepoContentDir_ClaudeCode(t *testing.T) {
-	const want = "Agents/Claude Code"
+	const want = "Catalog/Agents/Claude Code"
 	if claudecode.RepoContentDir != want {
 		t.Errorf("claudecode.RepoContentDir = %q, want %q", claudecode.RepoContentDir, want)
 	}
@@ -129,7 +129,7 @@ func TestRepoContentDir_ClaudeCode(t *testing.T) {
 
 // TestRepoContentDir_GhcpCli verifies that ghcpcli.RepoContentDir is the correct path.
 func TestRepoContentDir_GhcpCli(t *testing.T) {
-	const want = "Agents/GHCP CLI"
+	const want = "Catalog/Agents/GHCP CLI"
 	if ghcpcli.RepoContentDir != want {
 		t.Errorf("ghcpcli.RepoContentDir = %q, want %q", ghcpcli.RepoContentDir, want)
 	}
@@ -137,7 +137,7 @@ func TestRepoContentDir_GhcpCli(t *testing.T) {
 
 // TestRepoContentDir_OpenCode verifies that opencode.RepoContentDir is the correct path.
 func TestRepoContentDir_OpenCode(t *testing.T) {
-	const want = "Agents/OpenCode"
+	const want = "Catalog/Agents/OpenCode"
 	if opencode.RepoContentDir != want {
 		t.Errorf("opencode.RepoContentDir = %q, want %q", opencode.RepoContentDir, want)
 	}
@@ -145,7 +145,7 @@ func TestRepoContentDir_OpenCode(t *testing.T) {
 
 // TestRepoContentDir_VsCodeGhcp verifies that vscodeghcp.RepoContentDir is the correct path.
 func TestRepoContentDir_VsCodeGhcp(t *testing.T) {
-	const want = "Agents/VS code GHCP"
+	const want = "Catalog/Agents/VS code GHCP"
 	if vscodeghcp.RepoContentDir != want {
 		t.Errorf("vscodeghcp.RepoContentDir = %q, want %q", vscodeghcp.RepoContentDir, want)
 	}

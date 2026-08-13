@@ -62,11 +62,11 @@ import (
 // loading fails. It is a shared helper used by all agent, skill, hook, workflow, and tier tests.
 func loadRealCatalog(t *testing.T) catalog.Catalog {
 	t.Helper()
-	root, err := catalog.ResolveRoot(".")
+	root, err := catalog.ResolveRoot(repoRoot())
 	if err != nil {
 		t.Fatalf("ResolveRoot: %v", err)
 	}
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load(%q): %v", root, err)
 	}
@@ -96,7 +96,7 @@ func TestAgents_ReturnsNonEmptyList(t *testing.T) {
 // like relocating a whole category out of the scanned tree.
 func TestAgents_EveryOnDiskCategoryYieldsAtLeastOneAgent(t *testing.T) {
 	cat := loadRealCatalog(t)
-	agentsDir := filepath.Join(cat.Root(), "Agents", "Generic", "Agents")
+	agentsDir := filepath.Join(cat.CatalogRoot(), "Agents", "Generic", "Agents")
 
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
@@ -546,11 +546,11 @@ func TestCatalog_Root_IsAbsolute(t *testing.T) {
 // was passed to Load. Callers that resolve the root first and then pass it to Load
 // should get back the exact same string.
 func TestCatalog_Root_MatchesLoadInput(t *testing.T) {
-	resolved, err := catalog.ResolveRoot(".")
+	resolved, err := catalog.ResolveRoot(repoRoot())
 	if err != nil {
 		t.Fatalf("ResolveRoot: %v", err)
 	}
-	cat, err := catalog.Load(resolved)
+	cat, err := catalog.Load(resolved, "")
 	if err != nil {
 		t.Fatalf("catalog.Load(%q): %v", resolved, err)
 	}
@@ -618,12 +618,12 @@ func TestCatalog_ReadSource_InventedPath_ReturnsError(t *testing.T) {
 
 // writeInfrastructureAgentFile writes a minimal subagent file carrying infrastructure-agent
 // frontmatter (infrastructure, triggers, on_failure) at
-// <root>/Agents/Generic/Agents/<category>/<name>.md. A trigger with an empty TriggerParam
+// <root>/Catalog/Agents/Generic/Agents/<category>/<name>.md. A trigger with an empty TriggerParam
 // is written as `trigger_param: null`, matching the real frontmatter convention that the
 // parser must normalise to an empty string.
 func writeInfrastructureAgentFile(t *testing.T, root, category, name, infrastructure, onFailure string, triggers []domain.InfrastructureTrigger) {
 	t.Helper()
-	mustMkdir(t, root, "Agents", "Generic", "Agents", category)
+	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Agents", category)
 	fm := "---\n"
 	fm += "id: \"1\"\n"
 	fm += "version: \"1.0.0\"\n"
@@ -642,7 +642,7 @@ func writeInfrastructureAgentFile(t *testing.T, root, category, name, infrastruc
 	}
 	fm += "on_failure: " + onFailure + "\n"
 	fm += "---\nContent.\n"
-	relPath := filepath.Join("Agents", "Generic", "Agents", category, name+".md")
+	relPath := filepath.Join("Catalog", "Agents", "Generic", "Agents", category, name+".md")
 	mustWriteFile(t, root, relPath, []byte(fm))
 }
 
@@ -658,7 +658,7 @@ func TestInfrastructureAgent_TwoTriggers_InfrastructureAndFirstTriggerParsed(t *
 			{Trigger: "INVOCATION_INTERVAL", TriggerParam: "10"},
 		})
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -691,7 +691,7 @@ func TestInfrastructureAgent_TwoTriggers_SecondTriggerAndOnFailureParsed(t *test
 			{Trigger: "INVOCATION_INTERVAL", TriggerParam: "10"},
 		})
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -721,7 +721,7 @@ func TestInfrastructureAgent_SingleNullTrigger_NormalisesToEmptyString(t *testin
 	writeInfrastructureAgentFile(t, root, "Infrastructure", "sample-commit-agent", "commit", "halt",
 		[]domain.InfrastructureTrigger{{Trigger: "STAGE_END", TriggerParam: ""}})
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -745,7 +745,7 @@ func TestInfrastructureAgent_SingleParamTrigger_AllFieldsParsed(t *testing.T) {
 	writeInfrastructureAgentFile(t, root, "Infrastructure", "sample-review-agent", "review", "continue",
 		[]domain.InfrastructureTrigger{{Trigger: "INVOCATION_INTERVAL", TriggerParam: "30"}})
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -778,7 +778,7 @@ func TestInfrastructureAgent_ManualTriggerNullParam_RestoreClassParsed(t *testin
 	writeInfrastructureAgentFile(t, root, "Infrastructure", "sample-restore-agent", "restore", "halt",
 		[]domain.InfrastructureTrigger{{Trigger: "MANUAL", TriggerParam: ""}})
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}

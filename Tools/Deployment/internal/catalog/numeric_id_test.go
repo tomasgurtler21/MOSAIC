@@ -30,13 +30,13 @@ import (
 
 // writeWorkerAgentFile writes a minimal, parseable agent source file at
 //
-//	<root>/Agents/Generic/Agents/<category>/<name>.md
+//	<root>/Catalog/Agents/Generic/Agents/<category>/<name>.md
 //
 // with numericID as the frontmatter `id` scalar. Pass numericID="" to omit the `id` field
 // entirely (simulating an agent that has no numeric id).
 func writeWorkerAgentFile(t *testing.T, root, category, name, numericID string) {
 	t.Helper()
-	mustMkdir(t, root, "Agents", "Generic", "Agents", category)
+	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Agents", category)
 	fm := "---\n"
 	if numericID != "" {
 		fm += "id: \"" + numericID + "\"\n"
@@ -46,7 +46,7 @@ func writeWorkerAgentFile(t *testing.T, root, category, name, numericID string) 
 	fm += "description: Test agent for numeric-id unit tests.\n"
 	fm += "role: subagent\n"
 	fm += "---\nContent.\n"
-	relPath := filepath.Join("Agents", "Generic", "Agents", category, name+".md")
+	relPath := filepath.Join("Catalog", "Agents", "Generic", "Agents", category, name+".md")
 	mustWriteFile(t, root, relPath, []byte(fm))
 }
 
@@ -62,7 +62,7 @@ func TestAgentByNumericID_KnownID_ReturnsAgent(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeWorkerAgentFile(t, root, "Creation", "test-writer-tdd", "99")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestAgentByNumericID_MultipleAgents_EachFoundByOwnID(t *testing.T) {
 	writeWorkerAgentFile(t, root, "Execution", "agent-beta", "20")
 	writeWorkerAgentFile(t, root, "Validation", "agent-gamma", "30")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestAgentByNumericID_EmptyID_ReturnsFalse(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeWorkerAgentFile(t, root, "Creation", "test-writer-tdd", "99")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestAgentByNumericID_NonExistentID_ReturnsFalse(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeWorkerAgentFile(t, root, "Creation", "test-writer-tdd", "99")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestAgentByNumericID_AgentWithNoID_NotInNumericIndex(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeWorkerAgentFile(t, root, "Creation", "no-id-agent", "")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestAgentByNumericID_OrchestratorIsExcluded(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeWorkerAgentFile(t, root, "Creation", "test-writer-tdd", "1")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestCatalog_DuplicateNumericID_RecordsDuplicateAgentIDIssue(t *testing.T) {
 	writeWorkerAgentFile(t, root, "Execution", "agent-beta", "77")
 
 	// Act
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestCatalog_DuplicateNumericID_IssueSubjectIdentifiesConflictingAgents(t *t
 	writeWorkerAgentFile(t, root, "Creation", "agent-alpha", "77")
 	writeWorkerAgentFile(t, root, "Execution", "agent-beta", "77")
 
-	cat, err := catalog.Load(root)
+	cat, err := catalog.Load(root, "")
 	if err != nil {
 		t.Fatalf("catalog.Load: %v", err)
 	}

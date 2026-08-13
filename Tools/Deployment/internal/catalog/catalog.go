@@ -7,13 +7,52 @@ package catalog
 
 import (
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 
 	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 )
 
-// ErrNotMosaicRoot is returned by ResolveRoot when no MOSAIC repository root can be
-// found by walking up from the supplied directory.
+// DefaultCatalogDirName is the name of the default catalogue subdirectory within
+// the MOSAIC root. DefaultCatalogRoot joins this name onto the MOSAIC root.
+const DefaultCatalogDirName = "Catalog"
+
+// DefaultCatalogRoot returns the absolute path of the default catalogue root,
+// which is mosaicRoot/Catalog. No I/O is performed.
+func DefaultCatalogRoot(mosaicRoot string) string {
+	return filepath.Join(mosaicRoot, DefaultCatalogDirName)
+}
+
+// ErrCatalogFolderMissing is returned by ValidateCatalogRoot when the supplied
+// path does not exist on disk.
+var ErrCatalogFolderMissing = errors.New("catalog folder does not exist")
+
+// ErrCatalogFolderNotDirectory is returned by ValidateCatalogRoot when the
+// supplied path exists but is not a directory.
+var ErrCatalogFolderNotDirectory = errors.New("catalog folder is not a directory")
+
+// ValidateCatalogRoot checks that path exists and is a directory.
+// A sparse directory (one with no agent or skill subdirectories) is valid.
+// Returns ErrCatalogFolderMissing if the path does not exist, or
+// ErrCatalogFolderNotDirectory if it exists but is not a directory.
+func ValidateCatalogRoot(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: %s", ErrCatalogFolderMissing, path)
+		}
+		return fmt.Errorf("catalog root: stat %s: %w", path, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%w: %s", ErrCatalogFolderNotDirectory, path)
+	}
+	return nil
+}
+
+// ErrNotMosaicRoot is returned by ResolveRoot when the supplied directory is not a
+// MOSAIC repository root.
 var ErrNotMosaicRoot = errors.New("working directory is not a MOSAIC repository")
 
 // Issue is a structured diagnostic produced during catalog loading. Codes are stable and
@@ -47,6 +86,10 @@ type Issue struct {
 type Catalog interface {
 	// Root returns the absolute path of the MOSAIC repository root that was passed to Load.
 	Root() string
+
+	// CatalogRoot returns the absolute path of the catalogue root used by this catalog.
+	// When Load was called with an empty catalogRoot, this equals DefaultCatalogRoot(Root()).
+	CatalogRoot() string
 
 	// Agents returns all worker agents sorted by Key. The orchestrator and utility agents
 	// are excluded; use Orchestrator and UtilityAgents to access them.
@@ -118,19 +161,35 @@ type Catalog interface {
 	AgentByNumericID(id string) (domain.Agent, bool)
 }
 
-// ResolveRoot walks up the directory tree from dir until it finds a MOSAIC repository root
-// and returns its absolute path. If no root is found it returns ErrNotMosaicRoot.
+// ResolveRoot validates that dir is the MOSAIC repository root and returns its absolute path.
+// If dir is "" or "." it is converted to an absolute path before validation. If the supplied
+// directory is not the MOSAIC root, ErrNotMosaicRoot is returned — the function does NOT walk
+// up the directory tree. The deploy tool must be invoked from the repository root.
 //
-// A directory is the MOSAIC root when it contains both Agents/Generic/SourceFilesFormat.md and
-// Workflows/Index.md. Other layouts are rejected.
+// A directory is the MOSAIC root when it contains both:
+//
+//	Catalog/Agents/Generic/SourceFilesFormat.md
+//	Catalog/Workflows/Index.md
+//
+// A directory carrying the markers only at the legacy Agents/Generic/ and Workflows/ locations
+// is not accepted.
 func ResolveRoot(dir string) (string, error) {
 	return resolveRoot(dir)
 }
 
-// Load reads the full MOSAIC source tree rooted at root and returns an immutable Catalog.
-// It opens no file for writing. Structural problems (missing fields, index/disk mismatches,
-// hook integrity errors) are accumulated into Catalog.Issues rather than returned as errors.
-// Load returns a non-nil error only when the root itself is unreadable or structurally invalid.
-func Load(root string) (Catalog, error) {
-	return loadCatalog(root)
+// Load reads the full MOSAIC source tree and returns an immutable Catalog.
+// mosaicRoot is the MOSAIC repository root (required). catalogRoot is the catalogue root
+// from which agents, workflows, skills, and hooks are loaded; when empty, it defaults to
+// DefaultCatalogRoot(mosaicRoot). Bundle and protocol files are always resolved from mosaicRoot.
+// Structural problems are accumulated into Catalog.Issues rather than returned as errors.
+// Load returns a non-nil error only when a root is unreadable or structurally invalid.
+func Load(mosaicRoot, catalogRoot string) (Catalog, error) {
+	if catalogRoot == "" {
+		catalogRoot = DefaultCatalogRoot(mosaicRoot)
+	}
+	absCatalogRoot, err := filepath.Abs(catalogRoot)
+	if err != nil {
+		return nil, fmt.Errorf("catalog.Load: catalogue root: %w", err)
+	}
+	return loadCatalog(mosaicRoot, absCatalogRoot)
 }

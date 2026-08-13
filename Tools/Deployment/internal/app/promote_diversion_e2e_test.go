@@ -229,6 +229,13 @@ func buildDivertedPromoteDeps(t *testing.T, stub *interactiontest.Stub, mosaicRo
 	t.Helper()
 	deps, _ := newBaseDeps(t, stub)
 	deps.MosaicRoot = mosaicRoot
+	// Set the catalog's CatalogRoot to the default catalogue root so promote writes under
+	// mosaicRoot/Catalog/ (unique per test, via writeMosaicRoot's t.TempDir()), matching
+	// the destination that catalog.Load(mosaicRoot, "") would discover.
+	deps.Catalog = &stubCatalog{
+		root:        mosaicRoot,
+		catalogRoot: filepath.Join(mosaicRoot, "Catalog"),
+	}
 
 	mod := newDivertedHarnessModule()
 	deps.Registry = &stubRegistry{
