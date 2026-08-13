@@ -92,48 +92,48 @@ func makeDistinctCatalogRoot(t *testing.T) string {
 }
 
 // writeAgentToDefaultCatalogue writes a minimal worker agent file under
-// mosaicRoot/Catalog/Agents/Generic/Agents/{category}/{key}.md.
-// This is the DEFAULT catalogue layout, present before Stage 4 changes the scan paths.
+// mosaicRoot/Catalog/Subagents/{category}/{key}.md.
+// This is the DEFAULT catalogue layout with the target path structure.
 func writeAgentToDefaultCatalogue(t *testing.T, mosaicRoot, category, key string) {
 	t.Helper()
-	mustMkdir(t, mosaicRoot, "Catalog", "Agents", "Generic", "Agents", category)
+	mustMkdir(t, mosaicRoot, "Catalog", "Subagents", category)
 	fm := "---\nid: \"" + key + "-id\"\nversion: \"1.0.0\"\nname: " + key + "\n" +
 		"description: Default catalogue agent for dual-root tests.\nrole: subagent\nrequired_skills: []\n---\nContent.\n"
-	relPath := filepath.Join("Catalog", "Agents", "Generic", "Agents", category, key+".md")
+	relPath := filepath.Join("Catalog", "Subagents", category, key+".md")
 	mustWriteFile(t, mosaicRoot, relPath, []byte(fm))
 }
 
 // writeAgentToCustomCatalogueRoot writes a minimal worker agent file under
-// catalogRoot/Agents/Generic/Agents/{category}/{key}.md.
-// This is the CUSTOM catalogue layout after Stage 4 (no Catalog/ prefix in the root).
+// catalogRoot/Subagents/{category}/{key}.md.
+// This is the CUSTOM catalogue layout (no Catalog/ prefix in the root).
 func writeAgentToCustomCatalogueRoot(t *testing.T, catalogRoot, category, key string) {
 	t.Helper()
-	mustMkdir(t, catalogRoot, "Agents", "Generic", "Agents", category)
+	mustMkdir(t, catalogRoot, "Subagents", category)
 	fm := "---\nid: \"" + key + "-id\"\nversion: \"1.0.0\"\nname: " + key + "\n" +
 		"description: Custom catalogue agent for dual-root tests.\nrole: subagent\nrequired_skills: []\n---\nContent.\n"
-	relPath := filepath.Join("Agents", "Generic", "Agents", category, key+".md")
+	relPath := filepath.Join("Subagents", category, key+".md")
 	mustWriteFile(t, catalogRoot, relPath, []byte(fm))
 }
 
 // writeSkillToDefaultCatalogue writes a minimal skill folder under
-// mosaicRoot/Catalog/Agents/Generic/Skills/{key}/SKILL.md.
+// mosaicRoot/Catalog/Skills/{key}/SKILL.md.
 func writeSkillToDefaultCatalogue(t *testing.T, mosaicRoot, key string) {
 	t.Helper()
-	mustMkdir(t, mosaicRoot, "Catalog", "Agents", "Generic", "Skills", key)
+	mustMkdir(t, mosaicRoot, "Catalog", "Skills", key)
 	content := "---\nname: " + key + "\ndescription: Default skill " + key + ".\nversion: \"1.0.0\"\n---\n# Skill\n"
 	mustWriteFile(t, mosaicRoot,
-		filepath.Join("Catalog", "Agents", "Generic", "Skills", key, "SKILL.md"),
+		filepath.Join("Catalog", "Skills", key, "SKILL.md"),
 		[]byte(content))
 }
 
 // writeSkillToCustomCatalogueRoot writes a minimal skill folder under
-// catalogRoot/Agents/Generic/Skills/{key}/SKILL.md.
+// catalogRoot/Skills/{key}/SKILL.md.
 func writeSkillToCustomCatalogueRoot(t *testing.T, catalogRoot, key string) {
 	t.Helper()
-	mustMkdir(t, catalogRoot, "Agents", "Generic", "Skills", key)
+	mustMkdir(t, catalogRoot, "Skills", key)
 	content := "---\nname: " + key + " custom\ndescription: Custom skill " + key + ".\nversion: \"2.0.0\"\n---\n# Skill\n"
 	mustWriteFile(t, catalogRoot,
-		filepath.Join("Agents", "Generic", "Skills", key, "SKILL.md"),
+		filepath.Join("Skills", key, "SKILL.md"),
 		[]byte(content))
 }
 
@@ -148,10 +148,10 @@ func minimalHookYAML(bundleID string) []byte {
 }
 
 // writeHookBundleToDefaultCatalogue writes a minimal hook bundle under
-// mosaicRoot/Catalog/Agents/Generic/Hooks/{bundleID}/.
+// mosaicRoot/Catalog/Hooks/{bundleID}/.
 func writeHookBundleToDefaultCatalogue(t *testing.T, mosaicRoot, bundleID string) {
 	t.Helper()
-	bundleDir := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Hooks", bundleID)
+	bundleDir := filepath.Join(mosaicRoot, "Catalog", "Hooks", bundleID)
 	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
 		t.Fatalf("writeHookBundleToDefaultCatalogue: MkdirAll(%q): %v", bundleDir, err)
 	}
@@ -166,10 +166,10 @@ func writeHookBundleToDefaultCatalogue(t *testing.T, mosaicRoot, bundleID string
 }
 
 // writeHookBundleToCustomCatalogueRoot writes a minimal hook bundle under
-// catalogRoot/Agents/Generic/Hooks/{bundleID}/.
+// catalogRoot/Hooks/{bundleID}/.
 func writeHookBundleToCustomCatalogueRoot(t *testing.T, catalogRoot, bundleID string) {
 	t.Helper()
-	bundleDir := filepath.Join(catalogRoot, "Agents", "Generic", "Hooks", bundleID)
+	bundleDir := filepath.Join(catalogRoot, "Hooks", bundleID)
 	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
 		t.Fatalf("writeHookBundleToCustomCatalogueRoot: MkdirAll(%q): %v", bundleDir, err)
 	}
@@ -214,7 +214,7 @@ func writeWorkflowToDefaultCatalogue(t *testing.T, mosaicRoot, category, id stri
 // wrong content_hash to the custom catalogue root, triggering a hook-hash-mismatch issue.
 func writeTamperedHookBundleToCustomCatalogueRoot(t *testing.T, catalogRoot, bundleID string) {
 	t.Helper()
-	bundleDir := filepath.Join(catalogRoot, "Agents", "Generic", "Hooks", bundleID)
+	bundleDir := filepath.Join(catalogRoot, "Hooks", bundleID)
 	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
 		t.Fatalf("writeTamperedHookBundleToCustomCatalogueRoot: MkdirAll: %v", err)
 	}
@@ -722,7 +722,7 @@ func TestLoad_HookMerge_CollisionCustomWins(t *testing.T) {
 	writeHookBundleToDefaultCatalogue(t, mosaicRoot, "shared-bundle")
 
 	// Write a custom version with version "2.0.0".
-	bundleDir := filepath.Join(catalogRoot, "Agents", "Generic", "Hooks", "shared-bundle")
+	bundleDir := filepath.Join(catalogRoot, "Hooks", "shared-bundle")
 	if err := os.MkdirAll(bundleDir, 0o755); err != nil {
 		t.Fatalf("setup: MkdirAll: %v", err)
 	}
@@ -1013,7 +1013,7 @@ func TestLoad_SparseCatalogRoot_EmptyAgentCategory_Graceful(t *testing.T) {
 	catalogRoot := makeDistinctCatalogRoot(t)
 
 	// Create an empty category directory.
-	if err := os.MkdirAll(filepath.Join(catalogRoot, "Agents", "Generic", "Agents", "EmptyCategory"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(catalogRoot, "Subagents", "EmptyCategory"), 0o755); err != nil {
 		t.Fatalf("setup: MkdirAll: %v", err)
 	}
 

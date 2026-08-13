@@ -100,17 +100,14 @@ func TestRoundTrip_SpecificReferenceFiles(t *testing.T) {
 
 	referenceFiles := []string{
 		// Generic agent: unquoted scalars, flow tools list.
-		"Agents/Generic/Agents/Execution/test-runner.md",
+		"Catalog/Subagents/Execution/test-runner.md",
 		// Orchestrator: tools: {tool-permissions} placeholder.
-		"Agents/Generic/Orchestrator/orchestrator.md",
-		// OpenCode agent: nested mapping under permission:.
-		"Agents/OpenCode/CodebaseAgnostic/Agents/test-runner.md",
-		// VS Code agent: flow list of single-quoted strings with slashes.
-		"Agents/VS code GHCP/CodebaseAgnostic/Agents/test-runner.md",
+		"Catalog/Orchestrator/orchestrator.md",
 		// Workflow: quoted scalars, block lists, values with * and {}.
-		"Workflows/Build/quick-fix.md",
+		// Note: Catalog/Workflows/ sits at the catalog root and does not move.
+		"Catalog/Workflows/Build/quick-fix.md",
 		// Skill: minimal frontmatter, long unquoted description with commas and parens.
-		"Agents/Generic/Skills/git-read-commands/SKILL.md",
+		"Catalog/Skills/git-read-commands/SKILL.md",
 	}
 
 	for _, rel := range referenceFiles {

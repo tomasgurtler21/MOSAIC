@@ -1690,11 +1690,11 @@ class TestHyphenatedFrontmatterKeyValidator:
 # Repository root is three levels up from this test file
 # (tests/ -> OldAgentsTransform/ -> Tools/ -> repo root)
 _REPO_ROOT = pathlib.Path(__file__).parent.parent.parent.parent
-_DEPLOYED_SECTIONS_PATH = _REPO_ROOT / "Agents" / "Generic" / "DeployedSections.md"
+_DEPLOYED_SECTIONS_PATH = _REPO_ROOT / "Catalog" / "DeployedSections.md"
 
 
 class TestBundleDocumentValidation:
-    """The canonical block bundle (Agents/Generic/DeployedSections.md) must validate
+    """The canonical block bundle (Catalog/DeployedSections.md) must validate
     with no errors after Stage 1 fixes compound-name matching and bundle frontmatter keys.
 
     Current failures:
@@ -1973,7 +1973,7 @@ class TestValidateFileBundleStillValidatesCleanAfterStage6:
 
     _DEPLOYED_SECTIONS_PATH = (
         pathlib.Path(__file__).parent.parent.parent.parent
-        / "Agents" / "Generic" / "DeployedSections.md"
+        / "Catalog" / "DeployedSections.md"
     )
 
     def test_bundle_validates_clean_after_stage_6_allowlist_split(self) -> None:

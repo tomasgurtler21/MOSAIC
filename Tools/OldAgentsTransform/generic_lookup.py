@@ -9,12 +9,12 @@ import pathlib
 # Three parent hops: generic_lookup.py → OldAgentsTransform/ → Tools/ → <repo>
 REPO_ROOT: pathlib.Path = pathlib.Path(__file__).parent.parent.parent
 
-# Root of the generic agent tree: REPO_ROOT / "Agents" / "Generic" / "Agents"
-GENERIC_AGENTS_ROOT: pathlib.Path = REPO_ROOT / "Agents" / "Generic" / "Agents"
+# Root of the generic agent tree: REPO_ROOT / "Catalog" / "Subagents"
+GENERIC_AGENTS_ROOT: pathlib.Path = REPO_ROOT / "Catalog" / "Subagents"
 
-# REPO_ROOT / "Agents" / "Generic" / "Orchestrator" / "orchestrator.md"
+# REPO_ROOT / "Catalog" / "Orchestrator" / "orchestrator.md"
 GENERIC_ORCHESTRATOR_PATH: pathlib.Path = (
-    REPO_ROOT / "Agents" / "Generic" / "Orchestrator" / "orchestrator.md"
+    REPO_ROOT / "Catalog" / "Orchestrator" / "orchestrator.md"
 )
 
 

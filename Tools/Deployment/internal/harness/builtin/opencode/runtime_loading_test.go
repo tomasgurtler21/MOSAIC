@@ -6,16 +6,16 @@ package opencode_test
 // These tests provide per-package RED-phase coverage for opencode, mirroring the pattern
 // established in claudecode/runtime_loading_test.go. They verify that once I6.4 changes
 // opencode.New to accept registry.BuiltinOptions, the module reads content from
-// <MosaicRoot>/Agents/OpenCode/ at construction time rather than from embedded bytes.
+// <MosaicRoot>/Catalog/HarnessInjections/OpenCode/ at construction time rather than from embedded bytes.
 //
 // Test coverage:
 //
 //   RepoContentDir constant:
-//   - opencode.RepoContentDir equals "Catalog/Agents/OpenCode".
+//   - opencode.RepoContentDir equals "Catalog/HarnessInjections/OpenCode".
 //
 //   Run-time loading from declared directory (T6.2):
 //   - An opencode module constructed against a temporary root reads HarnessInjections.md
-//     and HarnessInjectionsOrchestrator.md from <MosaicRoot>/Agents/OpenCode/.
+//     and HarnessInjectionsOrchestrator.md from <MosaicRoot>/Catalog/HarnessInjections/OpenCode/.
 //   - The injected content comes from those on-disk files, not from embedded bytes.
 //
 //   Failure modes (T6.3):
@@ -62,7 +62,7 @@ func writeOpenCodeContentFile(t *testing.T, dir, filename, src string) {
 }
 
 // makeTempRootForOpenCode creates a MosaicRoot temp directory and the OpenCode content
-// directory <root>/Agents/OpenCode/. Returns the root path and the content directory path.
+// directory <root>/Catalog/HarnessInjections/OpenCode/. Returns the root path and the content directory path.
 func makeTempRootForOpenCode(t *testing.T) (root string, contentDir string) {
 	t.Helper()
 	root = t.TempDir()
@@ -116,7 +116,7 @@ Orchestrator-specific constraint content.
 // TestRepoContentDir_OpenCode_IsCorrect verifies that opencode.RepoContentDir is the correct
 // repository directory relative to the MOSAIC root.
 func TestRepoContentDir_OpenCode_IsCorrect(t *testing.T) {
-	const want = "Catalog/Agents/OpenCode"
+	const want = "Catalog/HarnessInjections/OpenCode"
 	if opencode.RepoContentDir != want {
 		t.Errorf("opencode.RepoContentDir = %q, want %q", opencode.RepoContentDir, want)
 	}

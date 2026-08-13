@@ -6,16 +6,16 @@ package ghcpcli_test
 // These tests provide per-package RED-phase coverage for ghcpcli, mirroring the pattern
 // established in claudecode/runtime_loading_test.go. They verify that once I6.4 changes
 // ghcpcli.New to accept registry.BuiltinOptions, the module reads content from
-// <MosaicRoot>/Agents/GHCP CLI/ at construction time rather than from embedded bytes.
+// <MosaicRoot>/Catalog/HarnessInjections/GHCP CLI/ at construction time rather than from embedded bytes.
 //
 // Test coverage:
 //
 //   RepoContentDir constant:
-//   - ghcpcli.RepoContentDir equals "Catalog/Agents/GHCP CLI".
+//   - ghcpcli.RepoContentDir equals "Catalog/HarnessInjections/GHCP CLI".
 //
 //   Run-time loading from declared directory (T6.2):
 //   - A ghcpcli module constructed against a temporary root reads HarnessInjections.md
-//     and HarnessInjectionsOrchestrator.md from <MosaicRoot>/Agents/GHCP CLI/.
+//     and HarnessInjectionsOrchestrator.md from <MosaicRoot>/Catalog/HarnessInjections/GHCP CLI/.
 //   - The injected content comes from those on-disk files, not from embedded bytes.
 //
 //   Failure modes (T6.3):
@@ -62,7 +62,7 @@ func writeGhcpCliContentFile(t *testing.T, dir, filename, src string) {
 }
 
 // makeTempRootForGhcpCli creates a MosaicRoot temp directory and the GHCP CLI content
-// directory <root>/Agents/GHCP CLI/. Returns the root path and the content directory path.
+// directory <root>/Catalog/HarnessInjections/GHCP CLI/. Returns the root path and the content directory path.
 func makeTempRootForGhcpCli(t *testing.T) (root string, contentDir string) {
 	t.Helper()
 	root = t.TempDir()
@@ -116,7 +116,7 @@ Orchestrator-specific constraint content.
 // TestRepoContentDir_GhcpCli_IsCorrect verifies that ghcpcli.RepoContentDir is the correct
 // repository directory relative to the MOSAIC root.
 func TestRepoContentDir_GhcpCli_IsCorrect(t *testing.T) {
-	const want = "Catalog/Agents/GHCP CLI"
+	const want = "Catalog/HarnessInjections/GHCP CLI"
 	if ghcpcli.RepoContentDir != want {
 		t.Errorf("ghcpcli.RepoContentDir = %q, want %q", ghcpcli.RepoContentDir, want)
 	}

@@ -19,7 +19,7 @@ package catalog_test
 // and TestTiers_HighTier_NotLowercased, which named the five real tier strings) exist to
 // prove the loader does not lowercase, trim, or otherwise normalise tier strings — that is
 // behaviour-under-test (Plan.md's classification table), not format vocabulary:
-// Agents/Generic/SourceFilesFormat.md documents recommended_tier as "an open string...
+// Catalog/SourceFilesFormat.md documents recommended_tier as "an open string...
 // never validated against a fixed enum", and introduces
 // "LOW"/"MEDIUM"/"HIGH"/"LOW-MEDIUM"/"MEDIUM-HIGH" only as "examples in the current
 // source", not a closed set. Both tests were moved onto a synthetic fixture built via
@@ -42,12 +42,12 @@ import (
 )
 
 // writeAgentWithTier writes a minimal subagent file declaring the given recommended_tier
-// and tier_rationale at <root>/Agents/Generic/Agents/<category>/<name>.md. Used to prove
+// and tier_rationale at <root>/Catalog/Subagents/<category>/<name>.md. Used to prove
 // tier-string handling (verbatim, no normalisation) without depending on which tier
 // strings the live repository happens to use.
 func writeAgentWithTier(t *testing.T, root, category, name, tier, rationale string) {
 	t.Helper()
-	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Agents", category)
+	mustMkdir(t, root, "Catalog", "Subagents", category)
 	fm := "---\n"
 	fm += "id: \"1\"\n"
 	fm += "version: \"1.0.0\"\n"
@@ -57,7 +57,7 @@ func writeAgentWithTier(t *testing.T, root, category, name, tier, rationale stri
 	fm += "recommended_tier: " + tier + "\n"
 	fm += "tier_rationale: " + rationale + "\n"
 	fm += "---\nContent.\n"
-	relPath := filepath.Join("Catalog", "Agents", "Generic", "Agents", category, name+".md")
+	relPath := filepath.Join("Catalog", "Subagents", category, name+".md")
 	mustWriteFile(t, root, relPath, []byte(fm))
 }
 

@@ -14,15 +14,11 @@ package docformat_test
 //   - Body.Injection with an absent name returns false.
 //   - Node.Bytes for an injection includes the opening and closing boundary tag lines.
 //   - Content of a filled injection is accessible via Node.Content (the "lift" operation).
-//   - A deployed agent with filled injections has non-empty injection nodes.
+//   - A document with a filled injection has non-empty injection nodes.
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
 	"testing"
-
-	"mosaic-common/docformat"
 )
 
 // --- Section lookup ---
@@ -214,53 +210,35 @@ func TestAddressing_Section_CompoundName_ContentIsAccessible(t *testing.T) {
 // --- Real-world deployed agent: addressing and filled detection ---
 
 func TestAddressing_DeployedAgent_FilledInjection_IsNotEmpty(t *testing.T) {
-	// The OpenCode example project agent has a filled [[INJECTION:IdentityExtension]]
-	// block. After parsing, that injection must be non-empty, confirming that the body
-	// parser correctly classifies filled vs empty injections in a real deployed file.
-	fpath := filepath.Join(repoRoot(), "Agents", "OpenCode", "ExampleProject", "Agents", "test-runner.md")
-	src, err := os.ReadFile(fpath)
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
-
-	doc, err := docformat.Parse(src)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
+	// A document with a filled [[INJECTION:IdentityExtension]] block must be non-empty
+	// after parsing. Uses the filled-injection boundary fixture as a stand-in because no
+	// harness-specific deployed file with this structure exists at a stable catalog path.
+	doc := parsedBoundaryFixture(t, "filled-injection.md")
 
 	node, ok := doc.Body().Injection("IdentityExtension")
 	if !ok {
-		t.Fatal("Injection(\"IdentityExtension\") not found in deployed agent")
+		t.Fatal("Injection(\"IdentityExtension\") not found")
 	}
 	if node.IsEmpty() {
-		t.Error("IsEmpty: deployed agent injection is filled but IsEmpty returned true")
+		t.Error("IsEmpty: injection is filled but IsEmpty returned true")
 	}
 }
 
 func TestAddressing_DeployedAgent_FilledInjection_ContentContainsPayload(t *testing.T) {
-	// The Content of the filled injection must contain the agent-specific prose that
-	// was injected during deployment, confirming the lift operation can retrieve it.
-	fpath := filepath.Join(repoRoot(), "Agents", "OpenCode", "ExampleProject", "Agents", "test-runner.md")
-	src, err := os.ReadFile(fpath)
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
-
-	doc, err := docformat.Parse(src)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
+	// The Content of the filled injection must contain the inner prose, confirming the
+	// lift operation can retrieve it. Uses the filled-injection boundary fixture as a
+	// stand-in because no harness-specific deployed file with this structure exists at
+	// a stable catalog path.
+	doc := parsedBoundaryFixture(t, "filled-injection.md")
 
 	node, ok := doc.Body().Injection("IdentityExtension")
 	if !ok {
-		t.Fatal("Injection(\"IdentityExtension\") not found in deployed agent")
+		t.Fatal("Injection(\"IdentityExtension\") not found")
 	}
 	content := node.Content()
 
-	// The deployed test-runner has domain-specific step 6 injected (from the fixture we read).
-	// Verify the content is non-empty and does not contain the boundary tags.
-	if len(bytes.TrimSpace(content)) == 0 {
-		t.Error("Content of filled deployed injection must not be blank")
+	if !bytes.Contains(content, []byte("Filled injection content line one.")) {
+		t.Error("Content of filled injection must contain the inner prose")
 	}
 	if bytes.Contains(content, []byte("[[INJECTION:")) {
 		t.Error("Content of injection must not include boundary tag syntax")

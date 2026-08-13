@@ -125,35 +125,35 @@ func buildReferenceExternalModule(t *testing.T) string {
 }
 
 // goldenCases returns the list of test cases for the golden agent set. Each case has a
-// source file path (from the generic Catalog/Agents tree) and a golden file name.
+// source file path (from the target catalog layout) and a golden file name.
 func goldenCases(t *testing.T, moduleRoot string) []goldenCase {
 	t.Helper()
-	agentsRoot := filepath.Join(moduleRoot, "Catalog", "Agents", "Generic")
+	catalogRoot := filepath.Join(moduleRoot, "Catalog")
 	return []goldenCase{
 		{
 			name:        "contracts-review",
-			sourcePath:  filepath.Join(agentsRoot, "Agents", "Validation", "contracts-review.md"),
+			sourcePath:  filepath.Join(catalogRoot, "Subagents", "Validation", "contracts-review.md"),
 			key:         "contracts-review",
 			kind:        domain.ArtifactAgent,
 			goldenName:  "contracts-review.md",
 		},
 		{
 			name:        "test-runner",
-			sourcePath:  filepath.Join(agentsRoot, "Agents", "Execution", "test-runner.md"),
+			sourcePath:  filepath.Join(catalogRoot, "Subagents", "Execution", "test-runner.md"),
 			key:         "test-runner",
 			kind:        domain.ArtifactAgent,
 			goldenName:  "test-runner.md",
 		},
 		{
 			name:        "planner-tdd-soft",
-			sourcePath:  filepath.Join(agentsRoot, "Agents", "Planning", "planner-tdd-soft.md"),
+			sourcePath:  filepath.Join(catalogRoot, "Subagents", "Planning", "planner-tdd-soft.md"),
 			key:         "planner-tdd-soft",
 			kind:        domain.ArtifactAgent,
 			goldenName:  "planner-tdd-soft.md",
 		},
 		{
 			name:       "orchestrator",
-			sourcePath: filepath.Join(agentsRoot, "Orchestrator", "orchestrator.md"),
+			sourcePath: filepath.Join(catalogRoot, "Orchestrator", "orchestrator.md"),
 			key:        "orchestrator",
 			kind:       domain.ArtifactAgent,
 			goldenName: "orchestrator.md",
@@ -840,11 +840,11 @@ func createRegistryExternalHarness(t *testing.T, harnessID, displayName, binPath
 
 	// Copy OpenCode content files so the subprocess can initialise. The OpenCode module
 	// reads HarnessInjections.md and HarnessInjectionsOrchestrator.md from
-	// <MOSAIC_ROOT>/Catalog/Agents/OpenCode/ on startup; without these files the binary
+	// <MOSAIC_ROOT>/Catalog/HarnessInjections/OpenCode/ on startup; without these files the binary
 	// exits before responding to the handshake and external.New returns an error.
 	repoRoot := findRepoRoot(t)
-	contentSrc := filepath.Join(repoRoot, "Catalog", "Agents", "OpenCode")
-	contentDst := filepath.Join(root, "Catalog", "Agents", "OpenCode")
+	contentSrc := filepath.Join(repoRoot, "Catalog", "HarnessInjections", "OpenCode")
+	contentDst := filepath.Join(root, "Catalog", "HarnessInjections", "OpenCode")
 	if err := os.MkdirAll(contentDst, 0o755); err != nil {
 		t.Fatalf("create OpenCode content dir: %v", err)
 	}

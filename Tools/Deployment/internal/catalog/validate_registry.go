@@ -15,7 +15,7 @@ import (
 // Implemented rules:
 //
 //   - Rule 5 (missing-skill-folder): every entry in an agent's required_skills list must name
-//     an existing folder under Agents/Generic/Skills/.
+//     an existing folder under Skills/.
 //
 //   - Rule 6 (duplicate-agent-id): every subagent numeric `id` must be unique across the
 //     registry. When two agents share an id, one issue is appended per duplicate (the first
@@ -32,7 +32,7 @@ func ValidateRegistry(c Catalog) []Issue {
 					Code:     "missing-skill-folder",
 					Subject:  agent.Key,
 					Message: fmt.Sprintf(
-						"agent %q requires skill %q but no Agents/Generic/Skills/%s/ folder exists in the registry",
+						"agent %q requires skill %q but no Skills/%s/ folder exists in the registry",
 						agent.Key, skillKey, skillKey,
 					),
 					Path: agent.SourcePath,

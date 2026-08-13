@@ -57,7 +57,7 @@ The stubs' only instruction channel is their artifact paths. A routed dispatch c
 
 ## The script format
 
-Specified in full in `Agents/Generic/Agents/MosaicTest/mosaictest-scripted.md`, under **The MosaicTest script format**. That file is the specification; these files are instances of it. Two properties are easy to break when authoring a new script:
+Specified in full in `MosaicTestCatalog/Agents/MosaicTest/mosaictest-scripted.md`, under **The MosaicTest script format**. That file is the specification; these files are instances of it. Two properties are easy to break when authoring a new script:
 
 - **Fences are tildes (`~~~`), never backticks.** Payload fixtures carry backticks and whole fenced blocks, and tilde fences mean no escaping is needed anywhere. Escaping is precisely what must not happen to a payload under test.
 - **`status_message` is the primary readout.** Evaluation is a human watching the runner TUI, not a golden diff, so every message names its row, phase, stage where meaningful, and the status being returned. A message that is not self-describing makes the run unreadable.

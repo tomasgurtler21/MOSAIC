@@ -14,30 +14,30 @@ package app_test
 //
 // Custom catalogue root — destination paths (T6.1):
 //   - A worker-category promote into a custom catalogue root writes the file under
-//     <catalogRoot>/Agents/Generic/Agents/{category}/{key}.md, not under the MOSAIC root.
+//     <catalogRoot>/Subagents/{category}/{key}.md, not under the MOSAIC root.
 //   - A utility-category promote into a custom catalogue root writes the file under
-//     <catalogRoot>/Agents/Generic/UtilityAgents/{key}.md, not under the MOSAIC root.
+//     <catalogRoot>/UtilityAgents/{key}.md, not under the MOSAIC root.
 //   - The resolved absolute destination contains no double Catalog/ segment (double-prefix
 //     guard): the Catalog segment must appear exactly once per resolved path.
 //
 // Default catalogue root — destinations unchanged (T6.2):
 //   - When the active catalogue root is {mosaicRoot}/Catalog (the default), a worker
-//     promote lands at {mosaicRoot}/Catalog/Agents/Generic/Agents/{category}/{key}.md —
+//     promote lands at {mosaicRoot}/Catalog/Subagents/{category}/{key}.md —
 //     byte-for-byte equal to the pre-feature path (AC6.3).
 //   - When the active catalogue root is {mosaicRoot}/Catalog, a utility promote lands at
-//     {mosaicRoot}/Catalog/Agents/Generic/UtilityAgents/{key}.md (AC6.3).
+//     {mosaicRoot}/Catalog/UtilityAgents/{key}.md (AC6.3).
 //
 // Sparse custom catalogue — directory creation (T6.3):
-//   - Promoting a worker agent into a sparse custom catalogue (no Agents/ subdirectory)
+//   - Promoting a worker agent into a sparse custom catalogue (no Subagents/ subdirectory)
 //     creates the missing intermediate directories and writes the file successfully (AC6.4).
 //   - Promoting a utility agent into a sparse custom catalogue creates
-//     Agents/Generic/UtilityAgents/ and writes the file (AC6.4).
+//     UtilityAgents/ and writes the file (AC6.4).
 //
 // Category enumeration from the active catalogue root (T6.4):
 //   - When a category directory exists under the active catalogue root but not under the
 //     MOSAIC root, that category is offered among the QPromoteCategory options (AC6.5).
 //   - When the active catalogue root is a custom folder, categories that exist only under
-//     {mosaicRoot}/Catalog/Agents/Generic/Agents/ are not offered (AC6.5).
+//     {mosaicRoot}/Catalog/Subagents/ are not offered (AC6.5).
 //
 // Write-then-load round-trip (T6.5):
 //   - An agent promoted into a custom catalogue folder is found by a subsequent
@@ -124,7 +124,7 @@ func optionIDList(opts []domain.Option) []string {
 
 // TestPromote_CustomCatalogRoot_WorkerDestinationUnderCatalogRoot verifies that when
 // the active catalogue root is a custom folder (not the MOSAIC root's default Catalog/),
-// a worker-category promote writes the file at <catalogRoot>/Agents/Generic/Agents/{category}/{key}.md.
+// a worker-category promote writes the file at <catalogRoot>/Subagents/{category}/{key}.md.
 // FAILS until promoteDestinationPath is rebased on s.deps.Catalog.CatalogRoot().
 func TestPromote_CustomCatalogRoot_WorkerDestinationUnderCatalogRoot(t *testing.T) {
 	// Arrange — custom catalogue root is a separate temp dir, unrelated to the MOSAIC root.
@@ -149,7 +149,7 @@ func TestPromote_CustomCatalogRoot_WorkerDestinationUnderCatalogRoot(t *testing.
 		t.Fatalf("Promote: unexpected error: %v", err)
 	}
 
-	wantDest := filepath.Join(customCatalogRoot, "Agents", "Generic", "Agents", "TestCategory", "my-harness-agent.md")
+	wantDest := filepath.Join(customCatalogRoot, "Subagents", "TestCategory", "my-harness-agent.md")
 	if result.DestinationPath != wantDest {
 		t.Errorf("DestinationPath = %q, want %q\n"+
 			"Promote must write under the active catalogue root, not under the MOSAIC root.",
@@ -164,7 +164,7 @@ func TestPromote_CustomCatalogRoot_WorkerDestinationUnderCatalogRoot(t *testing.
 
 // TestPromote_CustomCatalogRoot_UtilityDestinationUnderCatalogRoot verifies that when
 // the active catalogue root is a custom folder, a utility-category promote writes the
-// file at <catalogRoot>/Agents/Generic/UtilityAgents/{key}.md.
+// file at <catalogRoot>/UtilityAgents/{key}.md.
 // FAILS until promoteDestinationPath is rebased on s.deps.Catalog.CatalogRoot().
 func TestPromote_CustomCatalogRoot_UtilityDestinationUnderCatalogRoot(t *testing.T) {
 	// Arrange
@@ -189,7 +189,7 @@ func TestPromote_CustomCatalogRoot_UtilityDestinationUnderCatalogRoot(t *testing
 		t.Fatalf("Promote: unexpected error: %v", err)
 	}
 
-	wantDest := filepath.Join(customCatalogRoot, "Agents", "Generic", "UtilityAgents", "my-utility-agent.md")
+	wantDest := filepath.Join(customCatalogRoot, "UtilityAgents", "my-utility-agent.md")
 	if result.DestinationPath != wantDest {
 		t.Errorf("DestinationPath = %q, want %q\n"+
 			"Promote must place utility agents under the active catalogue root, not the MOSAIC root.",
@@ -248,8 +248,8 @@ func TestPromote_CustomCatalogRoot_DestinationHasNoCatalogCatalogSegment(t *test
 
 // TestPromote_DefaultCatalogRoot_WorkerDestinationMatchesPreFeatureDefault verifies that
 // when the active catalogue root is the default {mosaicRoot}/Catalog, a worker promote
-// writes to the same path as before the feature: {mosaicRoot}/Catalog/Agents/Generic/Agents/
-// {category}/{key}.md. This guards the "double-prefix" risk in both directions (AC6.3).
+// writes to the same path as before the feature: {mosaicRoot}/Catalog/Subagents/{category}/{key}.md.
+// This guards the "double-prefix" risk in both directions (AC6.3).
 func TestPromote_DefaultCatalogRoot_WorkerDestinationMatchesPreFeatureDefault(t *testing.T) {
 	// Arrange — catalogue root is explicitly the default value.
 	mosaicRoot := writeMosaicRoot(t)
@@ -272,19 +272,18 @@ func TestPromote_DefaultCatalogRoot_WorkerDestinationMatchesPreFeatureDefault(t 
 		t.Fatalf("Promote: unexpected error: %v", err)
 	}
 
-	// The pre-feature path is {mosaicRoot}/Catalog/Agents/Generic/Agents/{category}/{key}.md.
-	wantDest := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", "TestCategory", "my-harness-agent.md")
+	// Target layout: {mosaicRoot}/Catalog/Subagents/{category}/{key}.md.
+	wantDest := filepath.Join(mosaicRoot, "Catalog", "Subagents", "TestCategory", "my-harness-agent.md")
 	if result.DestinationPath != wantDest {
 		t.Errorf("DestinationPath = %q, want %q\n"+
-			"With the default catalogue root, the destination must be byte-identical to the pre-feature path (AC6.3).",
+			"With the default catalogue root, the destination must use the target catalog layout (AC6.3).",
 			result.DestinationPath, wantDest)
 	}
 }
 
 // TestPromote_DefaultCatalogRoot_UtilityDestinationMatchesPreFeatureDefault verifies that
 // when the active catalogue root is the default {mosaicRoot}/Catalog, a utility promote
-// writes to {mosaicRoot}/Catalog/Agents/Generic/UtilityAgents/{key}.md — byte-for-byte
-// equal to the pre-feature path (AC6.3).
+// writes to {mosaicRoot}/Catalog/UtilityAgents/{key}.md — the target catalog layout (AC6.3).
 func TestPromote_DefaultCatalogRoot_UtilityDestinationMatchesPreFeatureDefault(t *testing.T) {
 	// Arrange
 	mosaicRoot := writeMosaicRoot(t)
@@ -307,10 +306,10 @@ func TestPromote_DefaultCatalogRoot_UtilityDestinationMatchesPreFeatureDefault(t
 		t.Fatalf("Promote: unexpected error: %v", err)
 	}
 
-	wantDest := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "UtilityAgents", "my-utility-agent.md")
+	wantDest := filepath.Join(mosaicRoot, "Catalog", "UtilityAgents", "my-utility-agent.md")
 	if result.DestinationPath != wantDest {
 		t.Errorf("DestinationPath = %q, want %q\n"+
-			"With the default catalogue root, the utility destination must be byte-identical to the pre-feature path (AC6.3).",
+			"With the default catalogue root, the utility destination must use the target catalog layout (AC6.3).",
 			result.DestinationPath, wantDest)
 	}
 }
@@ -349,7 +348,7 @@ func TestPromote_SparseCustomCatalog_WorkerCategory_CreatesDirectoriesAndWritesF
 			err)
 	}
 
-	wantDest := filepath.Join(sparseCatalogRoot, "Agents", "Generic", "Agents", "Audit", "promoted-agent.md")
+	wantDest := filepath.Join(sparseCatalogRoot, "Subagents", "Audit", "promoted-agent.md")
 	if result.DestinationPath != wantDest {
 		t.Errorf("DestinationPath = %q, want %q", result.DestinationPath, wantDest)
 	}
@@ -363,7 +362,7 @@ func TestPromote_SparseCustomCatalog_WorkerCategory_CreatesDirectoriesAndWritesF
 
 // TestPromote_SparseCustomCatalog_UtilityCategory_CreatesDirectoriesAndWritesFile verifies
 // that promoting a utility agent into a sparse custom catalogue creates
-// Agents/Generic/UtilityAgents/ (if absent) and writes the file (AC6.4).
+// UtilityAgents/ (if absent) and writes the file (AC6.4).
 // FAILS until os.MkdirAll is driven from the active catalogue root.
 func TestPromote_SparseCustomCatalog_UtilityCategory_CreatesDirectoriesAndWritesFile(t *testing.T) {
 	// Arrange — empty custom catalogue root.
@@ -385,11 +384,11 @@ func TestPromote_SparseCustomCatalog_UtilityCategory_CreatesDirectoriesAndWrites
 
 	if err != nil {
 		t.Fatalf("Promote utility into sparse catalogue: unexpected error: %v\n"+
-			"Promote must create Agents/Generic/UtilityAgents/ when absent.",
+			"Promote must create UtilityAgents/ when absent.",
 			err)
 	}
 
-	wantDest := filepath.Join(sparseCatalogRoot, "Agents", "Generic", "UtilityAgents", "my-utility-agent.md")
+	wantDest := filepath.Join(sparseCatalogRoot, "UtilityAgents", "my-utility-agent.md")
 	if result.DestinationPath != wantDest {
 		t.Errorf("DestinationPath = %q, want %q", result.DestinationPath, wantDest)
 	}
@@ -413,7 +412,7 @@ func TestPromote_CategoryEnumeration_OffersCustomCatalogRootCategories(t *testin
 	mosaicRoot := writeMosaicRoot(t)
 	customCatalogRoot := t.TempDir()
 
-	customCategoryDir := filepath.Join(customCatalogRoot, "Agents", "Generic", "Agents", "CustomRootCategory")
+	customCategoryDir := filepath.Join(customCatalogRoot, "Subagents", "CustomRootCategory")
 	if err := os.MkdirAll(customCategoryDir, 0o755); err != nil {
 		t.Fatalf("mkdir custom category under catalog root: %v", err)
 	}
@@ -454,14 +453,14 @@ func TestPromote_CategoryEnumeration_OffersCustomCatalogRootCategories(t *testin
 
 // TestPromote_CategoryEnumeration_DoesNotOfferMosaicRootOnlyCategories verifies that when
 // the active catalogue root is a custom folder, category directories that exist only under
-// {mosaicRoot}/Catalog/Agents/Generic/Agents/ are NOT offered in QPromoteCategory options.
+// {mosaicRoot}/Catalog/Subagents/ are NOT offered in QPromoteCategory options.
 // The enumeration must read from CatalogRoot(), not from the MOSAIC root.
 // FAILS until buildPromoteCategoryOptions is rebased on s.deps.Catalog.CatalogRoot().
 func TestPromote_CategoryEnumeration_DoesNotOfferMosaicRootOnlyCategories(t *testing.T) {
 	// Arrange — "MosaicOnlyCategory" exists under the MOSAIC root; custom catalogue root is empty.
 	mosaicRoot := writeMosaicRoot(t)
 
-	mosaicCategoryDir := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", "MosaicOnlyCategory")
+	mosaicCategoryDir := filepath.Join(mosaicRoot, "Catalog", "Subagents", "MosaicOnlyCategory")
 	if err := os.MkdirAll(mosaicCategoryDir, 0o755); err != nil {
 		t.Fatalf("mkdir mosaic-root-only category: %v", err)
 	}
@@ -541,7 +540,7 @@ func TestPromote_CategoryWithDotDot_IsRejected(t *testing.T) {
 // category value that contains a path separator, returning an error before any directory
 // is created or file written. PromoteRequest.Category is caller-supplied; a value such
 // as "foo/bar" must not cause promote to silently write into a nested sub-directory tree
-// (Agents/Generic/Agents/foo/bar/) rather than treating the entire string as the category
+// (Subagents/foo/bar/) rather than treating the entire string as the category
 // name, because the category name is expected to be a single directory component.
 // FAILS until promoteDestinationPath (or its caller in the service) rejects category
 // values containing path separators.
@@ -572,7 +571,7 @@ func TestPromote_CategoryWithPathSeparator_IsRejected(t *testing.T) {
 
 	// After a correctly rejected promote, no nested directory tree must exist inside the
 	// catalogue root at the path that an unguarded filepath.Join would have produced.
-	unexpectedDir := filepath.Join(customCatalogRoot, "Agents", "Generic", "Agents", "foo", "bar")
+	unexpectedDir := filepath.Join(customCatalogRoot, "Subagents", "foo", "bar")
 	if _, statErr := os.Stat(unexpectedDir); !os.IsNotExist(statErr) {
 		t.Errorf("directory %q was created under the catalogue root after Promote with a "+
 			"path-separator category; the containment guard must prevent directory creation "+
@@ -622,7 +621,7 @@ func TestPromote_PromotedAgent_IsFoundByCatalogLoadOfCustomFolder(t *testing.T) 
 	agent, found := cat.Agent(result.Key)
 	if !found {
 		t.Errorf("catalog.Agent(%q) returned false after promoting into the custom catalogue folder;\n"+
-			"an agent promoted to <catalogRoot>/Agents/Generic/Agents/{category}/ must be found by\n"+
+			"an agent promoted to <catalogRoot>/Subagents/{category}/ must be found by\n"+
 			"catalog.Load(mosaicRoot, catalogRoot).",
 			result.Key)
 	} else if agent.Key != result.Key {

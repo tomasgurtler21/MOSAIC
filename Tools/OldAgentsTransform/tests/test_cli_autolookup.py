@@ -278,7 +278,7 @@ class TestResolveCliGenericRef:
         """For a harness file whose stem is in the real generic map, return the mapped path.
 
         Uses 'contracts-designer' as a stable anchor that is known to exist in
-        the real repo tree (Agents/Generic/Agents/Planning/contracts-designer.md).
+        the real repo tree (Catalog/Subagents/Planning/contracts-designer.md).
         """
         harness_file = tmp_path / "contracts-designer.md"
         harness_file.write_text(_HARNESS_CONTENT, encoding="utf-8")

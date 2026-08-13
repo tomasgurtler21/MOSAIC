@@ -11,11 +11,12 @@ import (
 	"path/filepath"
 
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/catalog/catalogpaths"
 	"mosaic-deploy/internal/domain"
 )
 
 // BundleSourceRelPath is the bundle's path relative to the MOSAIC root.
-const BundleSourceRelPath = "Catalog/Agents/Generic/DeployedSections.md"
+const BundleSourceRelPath = catalogpaths.MosaicRelBundleFile
 
 // Sentinel errors returned by BundleLoader.LoadBundle. Each is distinct so callers can
 // discriminate failure modes with errors.Is.
@@ -53,7 +54,7 @@ var (
 // payload. Implementations are stateless; the app layer calls LoadBundle once per run,
 // before any file is written.
 type BundleLoader interface {
-	// LoadBundle reads <mosaicRoot>/Agents/Generic/DeployedSections.md, extracts the
+	// LoadBundle reads <mosaicRoot>/Catalog/DeployedSections.md, extracts the
 	// frontmatter `bundle_version` scalar and every entry of the frontmatter `blocks`
 	// list, and for each entry extracts the body region named by that entry's `name`
 	// via doc.Body().SectionDeep(name).

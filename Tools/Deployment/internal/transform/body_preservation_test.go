@@ -20,7 +20,7 @@ import (
 )
 
 // TestBodyPreservation_AllGenericAgentsBodyUnchanged asserts that for every .md file under
-// Agents/Generic/, the body structure is byte-identical before and after transformation,
+// Catalog/Subagents/, the body structure is byte-identical before and after transformation,
 // with tool-managed [[DEPLOYED:]] region content excluded from comparison.
 //
 // [[DEPLOYED:]] regions (CommunicationProtocol, AvailableWorkflows, InfrastructureAgents,
@@ -37,7 +37,7 @@ func TestBodyPreservation_AllGenericAgentsBodyUnchanged(t *testing.T) {
 
 	for _, p := range paths {
 		p := p // capture for subtest
-		// Use the path relative to Agents/Generic/ as the subtest name for readability.
+		// Use the path relative to Catalog/Subagents/ as the subtest name for readability.
 		rel, _ := filepath.Rel(agentsDir, p)
 		t.Run(rel, func(t *testing.T) {
 			t.Parallel()

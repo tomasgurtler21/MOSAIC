@@ -32,7 +32,7 @@ func TestIsGenericVocabularyKey_InfrastructureField_True(t *testing.T) {
 	if !agentfields.IsGenericVocabularyKey("infrastructure") {
 		t.Error("IsGenericVocabularyKey(\"infrastructure\") = false, want true; " +
 			"\"infrastructure\" is an infrastructure-agent frontmatter field declared in " +
-			"Catalog/Agents/Generic/SourceFilesFormat.md and must be added to " +
+			"Catalog/SourceFilesFormat.md and must be added to " +
 			"genericVocabularyKeys so it classifies as ClassMosaic rather than ClassUnknown")
 	}
 }

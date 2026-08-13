@@ -10,6 +10,7 @@ import (
 
 	"mosaic-common/docformat"
 	"mosaic-common/hookbundle"
+	"mosaic-deploy/internal/catalog/catalogpaths"
 	"mosaic-deploy/internal/domain"
 )
 
@@ -17,34 +18,42 @@ import (
 // Scanner
 // ---------------------------------------------------------------------------
 
-// loadHooks scans Agents/Generic/Hooks/ for bundle directories and populates hooks,
-// hookIdx, sourcePaths, and any integrity issues on the receiver.
+// loadHooks scans hook bundle directories for a given catalogue root and populates hooks,
+// hookIdx, sourcePaths, and any integrity issues on the receiver. The new target layout
+// path (Hooks/) is scanned first; the legacy path (Agents/Generic/Hooks/) is scanned
+// second. The first occurrence of any given bundle key wins.
 func (c *catalogImpl) loadHooks(root string) []Issue {
-	hooksDir := filepath.Join(root, "Agents", "Generic", "Hooks")
-	entries, err := os.ReadDir(hooksDir)
-	if err != nil {
-		// Missing hooks directory is not a hard error.
-		return nil
+	hooksDirCandidates := []string{
+		catalogpaths.HooksDir(root),
+		filepath.Join(root, "Agents", "Generic", "Hooks"),
 	}
-
 	var issues []Issue
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		bundleDir := filepath.Join(hooksDir, entry.Name())
-		bundle, bundleIssues, err := parseHookBundle(bundleDir)
+	for _, hooksDir := range hooksDirCandidates {
+		entries, err := os.ReadDir(hooksDir)
 		if err != nil {
 			continue
 		}
-		issues = append(issues, bundleIssues...)
-		c.hooks = append(c.hooks, bundle)
-		c.hookIdx[bundle.Key] = bundle
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			bundleDir := filepath.Join(hooksDir, entry.Name())
+			bundle, bundleIssues, err := parseHookBundle(bundleDir)
+			if err != nil {
+				continue
+			}
+			if _, exists := c.hookIdx[bundle.Key]; exists {
+				continue // Already loaded from a higher-priority path.
+			}
+			issues = append(issues, bundleIssues...)
+			c.hooks = append(c.hooks, bundle)
+			c.hookIdx[bundle.Key] = bundle
 
-		// Register hook file source paths.
-		for _, variant := range bundle.Variants {
-			for _, f := range variant.Files {
-				c.sourcePaths[f.SourcePath] = true
+			// Register hook file source paths.
+			for _, variant := range bundle.Variants {
+				for _, f := range variant.Files {
+					c.sourcePaths[f.SourcePath] = true
+				}
 			}
 		}
 	}
@@ -56,6 +65,9 @@ func (c *catalogImpl) loadHooks(root string) []Issue {
 // catalogRoot. On id collision, the catalogRoot version replaces the default one silently —
 // no Issue is produced for shadowing. Integrity checking (content_hash) applies to bundles
 // from either root. When both roots are the same path, only one load pass is performed.
+//
+// Each root is scanned at two locations: the new target layout path first, then the legacy
+// path. Within a single root, the first occurrence of a bundle key wins.
 func (c *catalogImpl) loadHooksMerged(defaultCatalogRoot, catalogRoot string) []Issue {
 	// Identical-roots case: load once to avoid doubling the result.
 	if defaultCatalogRoot == catalogRoot {
@@ -67,43 +79,53 @@ func (c *catalogImpl) loadHooksMerged(defaultCatalogRoot, catalogRoot string) []
 	issues = append(issues, c.loadHooks(defaultCatalogRoot)...)
 
 	// Second pass: scan the catalogue root and merge, with catalogue root winning on collision.
-	hooksDir := filepath.Join(catalogRoot, "Agents", "Generic", "Hooks")
-	entries, err := os.ReadDir(hooksDir)
-	if err != nil {
-		// Missing Hooks/ directory in catalogRoot is not a hard error.
-		return issues
+	// Track keys already processed in this pass so that within catalogRoot the new layout
+	// path wins over the legacy path (first-wins within this root).
+	seenInPass := make(map[string]bool)
+	catalogRootDirs := []string{
+		catalogpaths.HooksDir(catalogRoot),
+		filepath.Join(catalogRoot, "Agents", "Generic", "Hooks"),
 	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		bundleDir := filepath.Join(hooksDir, entry.Name())
-		bundle, bundleIssues, err := parseHookBundle(bundleDir)
+	for _, hooksDir := range catalogRootDirs {
+		entries, err := os.ReadDir(hooksDir)
 		if err != nil {
 			continue
 		}
-		// Integrity-check issues (e.g. hook-hash-mismatch) are always reported.
-		issues = append(issues, bundleIssues...)
-
-		if _, exists := c.hookIdx[bundle.Key]; exists {
-			// Id collision: catalogue root wins, replace the existing entry in the slice.
-			for i, h := range c.hooks {
-				if h.Key == bundle.Key {
-					c.hooks[i] = bundle
-					break
-				}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
 			}
-		} else {
-			// New id: append.
-			c.hooks = append(c.hooks, bundle)
-		}
-		c.hookIdx[bundle.Key] = bundle
+			bundleDir := filepath.Join(hooksDir, entry.Name())
+			bundle, bundleIssues, err := parseHookBundle(bundleDir)
+			if err != nil {
+				continue
+			}
+			if seenInPass[bundle.Key] {
+				continue // Already processed this key from a higher-priority path in this pass.
+			}
+			seenInPass[bundle.Key] = true
+			// Integrity-check issues (e.g. hook-hash-mismatch) are always reported.
+			issues = append(issues, bundleIssues...)
 
-		// Register hook file source paths.
-		for _, variant := range bundle.Variants {
-			for _, f := range variant.Files {
-				c.sourcePaths[f.SourcePath] = true
+			if _, exists := c.hookIdx[bundle.Key]; exists {
+				// Id collision: catalogue root wins, replace the existing entry in the slice.
+				for i, h := range c.hooks {
+					if h.Key == bundle.Key {
+						c.hooks[i] = bundle
+						break
+					}
+				}
+			} else {
+				// New id: append.
+				c.hooks = append(c.hooks, bundle)
+			}
+			c.hookIdx[bundle.Key] = bundle
+
+			// Register hook file source paths.
+			for _, variant := range bundle.Variants {
+				for _, f := range variant.Files {
+					c.sourcePaths[f.SourcePath] = true
+				}
 			}
 		}
 	}

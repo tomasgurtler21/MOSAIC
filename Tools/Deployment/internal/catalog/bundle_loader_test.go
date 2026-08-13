@@ -27,7 +27,7 @@ package catalog_test
 //     - No partial content is returned on error (zero-value BundleContent)
 //
 //   Real bundle document:
-//     - The real Agents/Generic/DeployedSections.md can be loaded successfully.
+//     - The real Catalog/DeployedSections.md can be loaded successfully.
 
 import (
 	"bytes"
@@ -43,8 +43,8 @@ import (
 // ---------------------------------------------------------------------------
 
 // writeBundleDoc writes the given content to the canonical bundle source path inside root.
-// BundleSourceRelPath is "Catalog/Agents/Generic/DeployedSections.md", so the parent
-// directory created here is {root}/Catalog/Agents/Generic.
+// After the Stage 3 constant flip, BundleSourceRelPath will be "Catalog/DeployedSections.md".
+// During Stage 2 the constant still holds the old value, so mkdir matches accordingly.
 func writeBundleDoc(t *testing.T, root string, content []byte) {
 	t.Helper()
 	mustMkdir(t, root, "Catalog", "Agents", "Generic")
@@ -605,7 +605,7 @@ No matching section in the body.
 // ---------------------------------------------------------------------------
 
 // TestBundleLoader_RealBundleDocument_CanBeLoaded verifies that the actual
-// Agents/Generic/DeployedSections.md in the MOSAIC repository is loadable. This confirms
+// Catalog/DeployedSections.md in the MOSAIC repository is loadable. This confirms
 // that the real document has not drifted out of the loader's expected format.
 func TestBundleLoader_RealBundleDocument_CanBeLoaded(t *testing.T) {
 	root, err := catalog.ResolveRoot(repoRoot())

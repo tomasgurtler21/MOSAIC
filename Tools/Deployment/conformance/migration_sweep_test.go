@@ -91,43 +91,62 @@ var deprecatedInjectionNames = []string{
 // Corpus helper
 // ---------------------------------------------------------------------------
 
-// genericAgentPaths returns all .md file paths under Catalog/Agents/Generic/ (excluding README files).
-// The test is skipped if the directory is not found so the suite remains runnable in isolated
-// checkouts that contain only Tools/.
+// genericAgentPaths returns all .md file paths under the target catalog layout directories
+// (Catalog/Orchestrator/, Catalog/Subagents/, Catalog/UtilityAgents/), excluding README and
+// documentation files. The test is skipped if none of the target directories are found so
+// the suite remains runnable in isolated checkouts that contain only Tools/.
 func genericAgentPaths(t *testing.T) []string {
 	t.Helper()
 	repoRoot := findRepoRoot(t)
-	genericDir := filepath.Join(repoRoot, "Catalog", "Agents", "Generic")
+	catalogRoot := filepath.Join(repoRoot, "Catalog")
 
-	if _, err := os.Stat(genericDir); err != nil {
-		t.Skipf("Catalog/Agents/Generic/ not found at %s: %v", genericDir, err)
+	// Target layout directories containing agent source files.
+	targetDirs := []string{
+		filepath.Join(catalogRoot, "Orchestrator"),
+		filepath.Join(catalogRoot, "Subagents"),
+		filepath.Join(catalogRoot, "UtilityAgents"),
+	}
+
+	isNotAgentFile := func(name string) bool {
+		return strings.EqualFold(name, "readme.md") ||
+			strings.EqualFold(name, "source-format.md") ||
+			strings.EqualFold(name, "sourcefilesformat.md") ||
+			strings.EqualFold(name, "deployedsections.md")
 	}
 
 	var paths []string
-	err := filepath.WalkDir(genericDir, func(p string, d fs.DirEntry, err error) error {
+	foundAny := false
+	for _, dir := range targetDirs {
+		if _, err := os.Stat(dir); err != nil {
+			continue // directory absent — skip silently
+		}
+		foundAny = true
+		err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			if !strings.HasSuffix(p, ".md") {
+				return nil
+			}
+			if isNotAgentFile(filepath.Base(p)) {
+				return nil
+			}
+			paths = append(paths, p)
+			return nil
+		})
 		if err != nil {
-			return err
+			t.Fatalf("walk %s: %v", dir, err)
 		}
-		if d.IsDir() {
-			return nil
-		}
-		if !strings.HasSuffix(p, ".md") {
-			return nil
-		}
-		if strings.EqualFold(filepath.Base(p), "readme.md") {
-			return nil // README files are not agent definitions
-		}
-		if strings.EqualFold(filepath.Base(p), "source-format.md") {
-			return nil // format documentation is not an agent definition
-		}
-		paths = append(paths, p)
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk Agents/Generic/: %v", err)
+	}
+
+	if !foundAny {
+		t.Skipf("target catalog directories not found under %s", catalogRoot)
 	}
 	if len(paths) == 0 {
-		t.Skip("no .md files found under Agents/Generic/")
+		t.Skip("no .md files found under target catalog directories")
 	}
 	return paths
 }

@@ -8,27 +8,47 @@ import (
 	"strings"
 
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/catalog/catalogpaths"
 	"mosaic-deploy/internal/domain"
 )
 
 // loadAgents scans the three agent directories and populates workers, orchestrator,
 // utilities, agentIdx, and sourcePaths on the receiver.
+//
+// Each directory type is scanned at two locations: the new target layout path first,
+// then the legacy path. The first occurrence of any given agent key wins; duplicates
+// from the fallback path are skipped. This allows the real catalogue (still at the
+// legacy layout) and synthetic test fixtures (already at the target layout) to both
+// work without restructuring on-disk files.
 func (c *catalogImpl) loadAgents(root string) []Issue {
 	var issues []Issue
 
-	// Orchestrator: single file at Agents/Generic/Orchestrator/orchestrator.md
-	orchPath := filepath.Join(root, "Agents", "Generic", "Orchestrator", "orchestrator.md")
-	if orch, orchIssues, err := parseAgentFile(orchPath, domain.RoleOrchestrator, ""); err == nil {
-		c.orchestr = orch
-		c.agentIdx[orch.Key] = orch
-		c.sourcePaths[orchPath] = true
-		issues = append(issues, orchIssues...)
+	// Orchestrator: single file. Try new path first, fall back to legacy path.
+	orchPaths := []string{
+		catalogpaths.OrchestratorFile(root),
+		filepath.Join(root, "Agents", "Generic", "Orchestrator", "orchestrator.md"),
+	}
+	for _, orchPath := range orchPaths {
+		if orch, orchIssues, err := parseAgentFile(orchPath, domain.RoleOrchestrator, ""); err == nil {
+			c.orchestr = orch
+			c.agentIdx[orch.Key] = orch
+			c.sourcePaths[orchPath] = true
+			issues = append(issues, orchIssues...)
+			break // Stop at the first path that resolves successfully.
+		}
 	}
 	// Missing orchestrator is not a hard error — loadCatalog still returns successfully.
 
-	// Worker agents: Agents/Generic/Agents/{category}/*.md (excluding README.md)
-	agentsDir := filepath.Join(root, "Agents", "Generic", "Agents")
-	if catEntries, err := os.ReadDir(agentsDir); err == nil {
+	// Worker agents: scan new path first, then legacy path; first occurrence of a key wins.
+	agentDirCandidates := []string{
+		catalogpaths.SubagentsDir(root),
+		filepath.Join(root, "Agents", "Generic", "Agents"),
+	}
+	for _, agentsDir := range agentDirCandidates {
+		catEntries, err := os.ReadDir(agentsDir)
+		if err != nil {
+			continue
+		}
 		for _, catEntry := range catEntries {
 			if !catEntry.IsDir() {
 				continue
@@ -47,6 +67,10 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 				if name == "README.md" || !strings.HasSuffix(name, ".md") {
 					continue
 				}
+				key := strings.TrimSuffix(name, ".md")
+				if _, exists := c.agentIdx[key]; exists {
+					continue // Already loaded from a higher-priority path.
+				}
 				agentPath := filepath.Join(catDir, name)
 				agent, agentIssues, err := parseAgentFile(agentPath, domain.RoleSubagent, category)
 				if err != nil {
@@ -63,9 +87,16 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 		return c.workers[i].Key < c.workers[j].Key
 	})
 
-	// Utility agents: Agents/Generic/UtilityAgents/*.md (excluding README.md)
-	utilDir := filepath.Join(root, "Agents", "Generic", "UtilityAgents")
-	if entries, err := os.ReadDir(utilDir); err == nil {
+	// Utility agents: scan new path first, then legacy path; first occurrence of a key wins.
+	utilDirCandidates := []string{
+		catalogpaths.UtilityAgentsDir(root),
+		filepath.Join(root, "Agents", "Generic", "UtilityAgents"),
+	}
+	for _, utilDir := range utilDirCandidates {
+		entries, err := os.ReadDir(utilDir)
+		if err != nil {
+			continue
+		}
 		for _, entry := range entries {
 			if entry.IsDir() {
 				continue
@@ -73,6 +104,10 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 			name := entry.Name()
 			if name == "README.md" || !strings.HasSuffix(name, ".md") {
 				continue
+			}
+			key := strings.TrimSuffix(name, ".md")
+			if _, exists := c.agentIdx[key]; exists {
+				continue // Already loaded from a higher-priority path.
 			}
 			utilPath := filepath.Join(utilDir, name)
 			agent, utilIssues, err := parseAgentFile(utilPath, domain.RoleUtility, "")

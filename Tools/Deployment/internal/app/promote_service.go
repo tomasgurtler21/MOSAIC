@@ -16,6 +16,7 @@ import (
 
 	"mosaic-common/docformat"
 	"mosaic-deploy/internal/catalog"
+	"mosaic-deploy/internal/catalog/catalogpaths"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
 )
@@ -367,8 +368,8 @@ func nextNumericID(c catalog.Catalog) string {
 // promoteDestinationPath computes where the generated generic file is written, relative
 // to the active catalogue root:
 //
-//	category == PromoteCategoryUtility → <catalogRoot>/Agents/Generic/UtilityAgents/{key}.md
-//	otherwise                          → <catalogRoot>/Agents/Generic/Agents/{category}/{key}.md
+//	category == PromoteCategoryUtility → <catalogRoot>/UtilityAgents/{key}.md
+//	otherwise                          → <catalogRoot>/Subagents/{category}/{key}.md
 //
 // No Catalog/ segment appears in these sub-paths: the catalogue root already is the catalogue.
 // With no --catalog-folder supplied the resulting absolute path is byte-identical to the
@@ -379,9 +380,9 @@ func nextNumericID(c catalog.Catalog) string {
 // key the user expects.
 func promoteDestinationPath(catalogRoot, category, key string) string {
 	if category == PromoteCategoryUtility {
-		return filepath.Join(catalogRoot, "Agents", "Generic", "UtilityAgents", key+".md")
+		return catalogpaths.UtilityAgentFile(catalogRoot, key)
 	}
-	return filepath.Join(catalogRoot, "Agents", "Generic", "Agents", category, key+".md")
+	return catalogpaths.SubagentFile(catalogRoot, category, key)
 }
 
 // Promote generates a generic agent source file from a single already boundary-tagged
@@ -684,15 +685,15 @@ func (s *service) askPromoteCategory(ctx context.Context, srcPath string) (strin
 }
 
 // buildPromoteCategoryOptions returns the SelectOne options for QPromoteCategory.
-// Options are derived from the subdirectories present under Agents/Generic/Agents/
-// in the active catalogue root, each with Option.ID equal to the directory name, plus
-// one option with Option.ID equal to PromoteCategoryUtility. Options are sorted by ID
-// so the presented list is deterministic regardless of filesystem ordering.
+// Options are derived from the subdirectories present under Subagents/ in the active
+// catalogue root, each with Option.ID equal to the directory name, plus one option with
+// Option.ID equal to PromoteCategoryUtility. Options are sorted by ID so the presented
+// list is deterministic regardless of filesystem ordering.
 func (s *service) buildPromoteCategoryOptions() ([]domain.Option, error) {
-	agentsDir := filepath.Join(s.deps.Catalog.CatalogRoot(), "Agents", "Generic", "Agents")
+	agentsDir := catalogpaths.SubagentsDir(s.deps.Catalog.CatalogRoot())
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("reading Agents/Generic/Agents/: %w", err)
+		return nil, fmt.Errorf("reading Subagents/: %w", err)
 	}
 
 	var opts []domain.Option
@@ -710,7 +711,7 @@ func (s *service) buildPromoteCategoryOptions() ([]domain.Option, error) {
 	// Add the utility-agents placement option.
 	opts = append(opts, domain.Option{
 		ID:    PromoteCategoryUtility,
-		Label: "Utility Agents (Agents/Generic/UtilityAgents/)",
+		Label: "Utility Agents (UtilityAgents/)",
 	})
 
 	// Sort by ID for deterministic ordering regardless of filesystem readdir order.

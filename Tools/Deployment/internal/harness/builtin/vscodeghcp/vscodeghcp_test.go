@@ -110,7 +110,7 @@ var testModel = domain.ModelSelection{
 // GHCP injects it as part of the harness-level HarnessConstraints injection because agents
 // running on this platform commonly stop reading mid-file. It is the first of two paragraphs
 // in the merged HarnessConstraints content; see vscodeGHCPHarnessConstraints.
-// Source: Agents/VS code GHCP/HarnessInjections.md (HarnessConstraints section, first paragraph).
+// Source: Catalog/HarnessInjections/VS Code GHCP/HarnessInjections.md (HarnessConstraints section, first paragraph).
 const vscodeGHCPFileReadingConstraint = "When reading a file with the intent to read it fully, **never assume the file is complete just because the last returned line is blank or ends a section.** Always verify you have reached the true end:\n" +
 	"- After reading a chunk, check if you received fewer lines than you requested — that signals the actual end of file\n" +
 	"- If you received as many lines as requested, the file likely continues — issue another read starting from where the last one ended\n" +
@@ -123,7 +123,7 @@ const vscodeGHCPFileReadingConstraint = "When reading a file with the intent to 
 // by this platform's cost model, not by any individual project. It formerly lived under a
 // separate CustomConstraints region; that name has been removed from the canonical vocabulary
 // and the text now lives alongside the file-reading guidance in HarnessConstraints.
-// Source: Agents/VS code GHCP/HarnessInjections.md (HarnessConstraints section, second paragraph).
+// Source: Catalog/HarnessInjections/VS Code GHCP/HarnessInjections.md (HarnessConstraints section, second paragraph).
 const vscodeGHCPParallelToolCalls = "**Parallel Tool Calls:** Issue multiple independent tool calls in a single response whenever possible. Sequential tool calls are only permitted when a later call depends on the result of an earlier one. This minimises inference API calls to improve speed and reduce cost."
 
 // vscodeGHCPHarnessConstraints is the full expected content of the merged HarnessConstraints
@@ -169,7 +169,7 @@ func newModule(t *testing.T) domain.HarnessModule {
 }
 
 // loadProtocol loads the protocol content from the repository root for use in transform requests.
-// All agents in Agents/Generic/ carry a [[DEPLOYED:CommunicationProtocol]] region, so Protocol
+// All agents in Catalog/Subagents/ carry a [[DEPLOYED:CommunicationProtocol]] region, so Protocol
 // must be populated for every transform.Apply call that processes those source files.
 func loadProtocol(t *testing.T, root string) domain.ProtocolContent {
 	t.Helper()
@@ -269,7 +269,7 @@ func TestGoldenFile_VSCodeGHCP_ContractsReviewAgent(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Agents", "Validation", "contracts-review.md")
+	srcPath := filepath.Join(root, "Catalog", "Subagents", "Validation", "contracts-review.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic contracts-review agent not found at %s: %v", srcPath, err)
@@ -309,7 +309,7 @@ func TestGoldenFile_VSCodeGHCP_TestRunnerAgent(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Agents", "Execution", "test-runner.md")
+	srcPath := filepath.Join(root, "Catalog", "Subagents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic test-runner agent not found at %s: %v", srcPath, err)
@@ -344,7 +344,7 @@ func TestGoldenFile_VSCodeGHCP_PlannerTDDSoftAgent(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Agents", "Planning", "planner-tdd-soft.md")
+	srcPath := filepath.Join(root, "Catalog", "Subagents", "Planning", "planner-tdd-soft.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic planner-tdd-soft agent not found at %s: %v", srcPath, err)
@@ -386,7 +386,7 @@ func TestGoldenFile_VSCodeGHCP_Orchestrator(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Orchestrator", "orchestrator.md")
+	srcPath := filepath.Join(root, "Catalog", "Orchestrator", "orchestrator.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic orchestrator not found at %s: %v", srcPath, err)
@@ -836,7 +836,7 @@ func TestModel_CustomModelIDEmittedVerbatim(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Agents", "Execution", "test-runner.md")
+	srcPath := filepath.Join(root, "Catalog", "Subagents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic test-runner agent not found at %s: %v", srcPath, err)

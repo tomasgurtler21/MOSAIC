@@ -79,7 +79,7 @@ func sampleManifest() domain.Manifest {
 		UpdatedAt:     time.Date(2024, 6, 15, 12, 30, 0, 0, time.UTC),
 		Entries: []domain.ManifestEntry{
 			sampleEntry(
-				"Catalog/Agents/Generic/Agents/Creation/test-writer.md",
+				"Catalog/Subagents/Creation/test-writer.md",
 				domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "test-writer"},
 			),
 			sampleEntry(
@@ -351,7 +351,7 @@ func TestStore_WriteRead_EntriesSortedByTargetPath(t *testing.T) {
 				domain.ArtifactRef{Kind: domain.ArtifactSkill, Key: "lean-tdd"},
 			),
 			sampleEntry(
-				"Catalog/Agents/Generic/Agents/Creation/test-writer.md", // lexicographically earlier — saved second
+				"Catalog/Subagents/Creation/test-writer.md", // lexicographically earlier — saved second
 				domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "test-writer"},
 			),
 		},
@@ -365,7 +365,7 @@ func TestStore_WriteRead_EntriesSortedByTargetPath(t *testing.T) {
 		t.Fatalf("entry count: got %d, want 2", len(snap.Manifest.Entries))
 	}
 
-	wantFirst := "Catalog/Agents/Generic/Agents/Creation/test-writer.md"
+	wantFirst := "Catalog/Subagents/Creation/test-writer.md"
 	wantSecond := "skills/lean-tdd/SKILL.md"
 
 	if snap.Manifest.Entries[0].TargetPath != wantFirst {

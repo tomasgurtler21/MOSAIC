@@ -8,7 +8,7 @@ package app_test
 //
 // Service-level Promote flow (T9.1):
 //   - An eligible harness-only file with a supplied category produces a PromoteResult with
-//     the correct SourcePath, DestinationPath (under Agents/Generic/Agents/{category}/),
+//     the correct SourcePath, DestinationPath (under Subagents/{category}/),
 //     Key, NumericID, and Category values.
 //   - After a successful promote, the source file is byte-identical to what it was before.
 //   - After a successful promote, the destination file exists on disk.
@@ -25,9 +25,9 @@ package app_test
 //   - When req.Category is empty, QPromoteCategory is asked through the Interaction port.
 //   - When req.Category is non-empty, QPromoteCategory is not asked.
 //   - A non-empty Category equal to PromoteCategoryUtility places the file under
-//     Agents/Generic/UtilityAgents/ rather than Agents/Generic/Agents/{category}/.
+//     UtilityAgents/ rather than Subagents/{category}/.
 //   - A non-empty Category naming a subdirectory places the file under
-//     Agents/Generic/Agents/{category}/.
+//     Subagents/{category}/.
 //   - A cancelled or skipped QPromoteCategory response returns ErrPromoteCategoryRequired
 //     and writes no file.
 //
@@ -144,11 +144,11 @@ func writeMosaicRoot(t *testing.T) string {
 	root := t.TempDir()
 
 	// Files that satisfy catalog.ResolveRoot.
-	if err := os.MkdirAll(filepath.Join(root, "Catalog", "Agents", "Generic"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "Catalog"), 0o755); err != nil {
 		t.Fatalf("writeMosaicRoot: %v", err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(root, "Catalog", "Agents", "Generic", "SourceFilesFormat.md"),
+		filepath.Join(root, "Catalog", "SourceFilesFormat.md"),
 		[]byte("# Source Files Format\n"),
 		0o644,
 	); err != nil {
@@ -209,7 +209,7 @@ func newPromoteDeps(t *testing.T, stub *interactiontest.Stub, mosaicRoot string)
 func TestPromote_EligibleFile_WithCategory_ReturnsPopulatedResult(t *testing.T) {
 	// Arrange
 	mosaicRoot := writeMosaicRoot(t)
-	agentDir := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", "TestCategory")
+	agentDir := filepath.Join(mosaicRoot, "Catalog", "Subagents", "TestCategory")
 	srcPath := writeEligibleSourceFile(t, t.TempDir(), "my-harness-agent.md")
 
 	stub := interactiontest.NewBuilder().Build()
@@ -420,7 +420,7 @@ func TestPromote_IneligibleSource_NoBoundaryTags_WrapsErrPromoteNotTransformed(t
 func TestPromote_IneligibleSource_WritesNoFile(t *testing.T) {
 	// Arrange
 	mosaicRoot := writeMosaicRoot(t)
-	destPath := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", "TestCategory", "not-eligible.md")
+	destPath := filepath.Join(mosaicRoot, "Catalog", "Subagents", "TestCategory", "not-eligible.md")
 	srcDir := t.TempDir()
 	srcPath := filepath.Join(srcDir, "not-eligible.md")
 	if err := os.WriteFile(srcPath, ineligibleSourceWithNoTransformVersion(), 0o644); err != nil {
@@ -482,7 +482,7 @@ func TestPromote_CategoryAbsent_AsksQPromoteCategory(t *testing.T) {
 	// Arrange
 	mosaicRoot := writeMosaicRoot(t)
 	// Create the TestCategory directory so it appears as an option.
-	if err := os.MkdirAll(filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", "TestCategory"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(mosaicRoot, "Catalog", "Subagents", "TestCategory"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	srcPath := writeEligibleSourceFile(t, t.TempDir(), "my-harness-agent.md")
@@ -551,8 +551,8 @@ func TestPromote_CategorySupplied_DoesNotAskQPromoteCategory(t *testing.T) {
 }
 
 // TestPromote_CategoryUtility_PlacesFileUnderUtilityAgentsDir verifies that a Category
-// equal to PromoteCategoryUtility places the generic file under Agents/Generic/UtilityAgents/
-// rather than Agents/Generic/Agents/{category}/.
+// equal to PromoteCategoryUtility places the generic file under UtilityAgents/
+// rather than Subagents/{category}/.
 func TestPromote_CategoryUtility_PlacesFileUnderUtilityAgentsDir(t *testing.T) {
 	// Arrange
 	mosaicRoot := writeMosaicRoot(t)
@@ -574,16 +574,16 @@ func TestPromote_CategoryUtility_PlacesFileUnderUtilityAgentsDir(t *testing.T) {
 	}
 
 	// Assert
-	wantDest := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "UtilityAgents", "my-harness-agent.md")
+	wantDest := filepath.Join(mosaicRoot, "Catalog", "UtilityAgents", "my-harness-agent.md")
 	if result.DestinationPath != wantDest {
 		t.Errorf("DestinationPath = %q, want %q (PromoteCategoryUtility must place under UtilityAgents/)",
 			result.DestinationPath, wantDest)
 	}
 }
 
-// TestPromote_CategoryNamed_PlacesFileUnderAgentsCategoryDir verifies that a non-utility
-// category places the file under Agents/Generic/Agents/{category}/.
-func TestPromote_CategoryNamed_PlacesFileUnderAgentsCategoryDir(t *testing.T) {
+// TestPromote_CategoryNamed_PlacesFileUnderSubagentsCategoryDir verifies that a non-utility
+// category places the file under Subagents/{category}/.
+func TestPromote_CategoryNamed_PlacesFileUnderSubagentsCategoryDir(t *testing.T) {
 	// Arrange
 	mosaicRoot := writeMosaicRoot(t)
 	category := "Audit"
@@ -605,9 +605,9 @@ func TestPromote_CategoryNamed_PlacesFileUnderAgentsCategoryDir(t *testing.T) {
 	}
 
 	// Assert
-	wantDest := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", category, "audit-specialist.md")
+	wantDest := filepath.Join(mosaicRoot, "Catalog", "Subagents", category, "audit-specialist.md")
 	if result.DestinationPath != wantDest {
-		t.Errorf("DestinationPath = %q, want %q (named category must place under Agents/Generic/Agents/{category}/)",
+		t.Errorf("DestinationPath = %q, want %q (named category must place under Subagents/{category}/)",
 			result.DestinationPath, wantDest)
 	}
 }
@@ -781,7 +781,7 @@ func TestPromote_ExistingDestination_WithoutOverwrite_WrapsErrPromoteDestination
 	// Arrange
 	mosaicRoot := writeMosaicRoot(t)
 	category := "TestCategory"
-	destDir := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", category)
+	destDir := filepath.Join(mosaicRoot, "Catalog", "Subagents", category)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -825,7 +825,7 @@ func TestPromote_ExistingDestination_RefusedCollision_LeavesDestinationUnchanged
 	// Arrange
 	mosaicRoot := writeMosaicRoot(t)
 	category := "TestCategory"
-	destDir := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", category)
+	destDir := filepath.Join(mosaicRoot, "Catalog", "Subagents", category)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -866,7 +866,7 @@ func TestPromote_ExistingDestination_WithOverwrite_ReplacesFile(t *testing.T) {
 	// Arrange
 	mosaicRoot := writeMosaicRoot(t)
 	category := "TestCategory"
-	destDir := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", category)
+	destDir := filepath.Join(mosaicRoot, "Catalog", "Subagents", category)
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -989,7 +989,7 @@ func TestPromote_DirectoryPath_WritesNothing(t *testing.T) {
 	dirPath := t.TempDir()
 	category := "TestCategory"
 	// The destination path that would be written if validation were skipped.
-	destPath := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", category, filepath.Base(dirPath)+".md")
+	destPath := filepath.Join(mosaicRoot, "Catalog", "Subagents", category, filepath.Base(dirPath)+".md")
 
 	stub := interactiontest.NewBuilder().Build()
 	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
@@ -1108,7 +1108,7 @@ func TestPromote_NonExistentPath_WritesNothing(t *testing.T) {
 	mosaicRoot := writeMosaicRoot(t)
 	missingPath := filepath.Join(t.TempDir(), "no-such-agent.md")
 	category := "TestCategory"
-	destPath := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", category, "no-such-agent.md")
+	destPath := filepath.Join(mosaicRoot, "Catalog", "Subagents", category, "no-such-agent.md")
 
 	stub := interactiontest.NewBuilder().Build()
 	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
@@ -1276,7 +1276,7 @@ func TestPromote_EmptyHarnessID_WritesNothing(t *testing.T) {
 	mosaicRoot := writeMosaicRoot(t)
 	srcPath := writeEligibleSourceFile(t, t.TempDir(), "my-harness-agent.md")
 	category := "TestCategory"
-	expectedDest := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", category, "my-harness-agent.md")
+	expectedDest := filepath.Join(mosaicRoot, "Catalog", "Subagents", category, "my-harness-agent.md")
 
 	stub := interactiontest.NewBuilder().Build()
 	deps, _ := newPromoteDeps(t, stub, mosaicRoot)
@@ -1361,7 +1361,7 @@ func TestPromote_UnknownHarnessID_WritesNothing(t *testing.T) {
 	mosaicRoot := writeMosaicRoot(t)
 	srcPath := writeEligibleSourceFile(t, t.TempDir(), "my-harness-agent.md")
 	category := "TestCategory"
-	expectedDest := filepath.Join(mosaicRoot, "Catalog", "Agents", "Generic", "Agents", category, "my-harness-agent.md")
+	expectedDest := filepath.Join(mosaicRoot, "Catalog", "Subagents", category, "my-harness-agent.md")
 
 	stub := interactiontest.NewBuilder().Build()
 	deps, _ := newPromoteDeps(t, stub, mosaicRoot)

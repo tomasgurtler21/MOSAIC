@@ -6,7 +6,7 @@ package catalog_test
 // Coverage (T7.1 — rules 5 and 6 via ValidateRegistry):
 //
 //   Rule 5 (missing-skill-folder, error severity): every entry in an agent's required_skills
-//   list must name an existing folder under Agents/Generic/Skills/.
+//   list must name an existing folder under Catalog/Skills/.
 //     - An agent whose required_skills references a skill folder that does not exist on disk
 //       causes ValidateRegistry to return a "missing-skill-folder" issue at SeverityError.
 //     - When the skill folder exists, ValidateRegistry returns no "missing-skill-folder" issue.
@@ -54,26 +54,26 @@ import (
 // ---------------------------------------------------------------------------
 
 // writeAgentWithSkills writes a minimal subagent file with the given required_skills list
-// at <root>/Catalog/Agents/Generic/Agents/<category>/<name>.md.
+// at <root>/Catalog/Subagents/<category>/<name>.md.
 func writeAgentWithSkills(t *testing.T, root, category, name string, skills []string) {
 	t.Helper()
-	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Agents", category)
+	mustMkdir(t, root, "Catalog", "Subagents", category)
 	fm := "---\nid: \"1\"\nversion: \"1.0.0\"\nname: " + name + "\ndescription: Test agent.\nrole: subagent\nrequired_skills:\n"
 	for _, s := range skills {
 		fm += "  - " + s + "\n"
 	}
 	fm += "---\nContent.\n"
-	relPath := filepath.Join("Catalog", "Agents", "Generic", "Agents", category, name+".md")
+	relPath := filepath.Join("Catalog", "Subagents", category, name+".md")
 	mustWriteFile(t, root, relPath, []byte(fm))
 }
 
 // writeSkillFolder creates a minimal skill directory with a SKILL.md file under
-// <root>/Catalog/Agents/Generic/Skills/<key>.
+// <root>/Catalog/Skills/<key>.
 func writeSkillFolder(t *testing.T, root, key string) {
 	t.Helper()
-	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Skills", key)
+	mustMkdir(t, root, "Catalog", "Skills", key)
 	mustWriteFile(t, root,
-		filepath.Join("Catalog", "Agents", "Generic", "Skills", key, "SKILL.md"),
+		filepath.Join("Catalog", "Skills", key, "SKILL.md"),
 		[]byte("# Skill "+key+"\n"))
 }
 
@@ -98,11 +98,11 @@ func hasRegistryIssueWithCode(issues []catalog.Issue, code string) bool {
 
 func TestValidateRegistry_Rule5_MissingSkillFolder_ReportsMissingSkillFolder(t *testing.T) {
 	// An agent that lists "lean-tdd" in required_skills but has no corresponding skill
-	// folder under Agents/Generic/Skills/ must produce a "missing-skill-folder" issue
+	// folder under Catalog/Skills/ must produce a "missing-skill-folder" issue
 	// at SeverityError from ValidateRegistry.
 	root := makeTempMosaicRoot(t)
 	writeAgentWithSkills(t, root, "Creation", "test-writer", []string{"lean-tdd"})
-	// Deliberately do NOT create Agents/Generic/Skills/lean-tdd/.
+	// Deliberately do NOT create Catalog/Skills/lean-tdd/.
 
 	cat, err := catalog.Load(root, "")
 	if err != nil {
@@ -121,7 +121,7 @@ func TestValidateRegistry_Rule5_MissingSkillFolder_ReportsMissingSkillFolder(t *
 
 func TestValidateRegistry_Rule5_SkillFolderPresent_NoMissingSkillFolderIssue(t *testing.T) {
 	// An agent that lists "lean-tdd" in required_skills and has a corresponding skill
-	// folder under Agents/Generic/Skills/ must produce no "missing-skill-folder" issue.
+	// folder under Catalog/Skills/ must produce no "missing-skill-folder" issue.
 	root := makeTempMosaicRoot(t)
 	writeAgentWithSkills(t, root, "Creation", "test-writer", []string{"lean-tdd"})
 	writeSkillFolder(t, root, "lean-tdd")

@@ -226,7 +226,7 @@ Pass `--dry-run` to see the plan without writing any files. See the [CLI Referen
 ## Harness-only agents
 
 A *harness-only agent* is an agent file that lives in the workspace's
-deployed-agents directory but has no counterpart in `Agents/Generic/` — it was
+deployed-agents directory but has no counterpart in `Catalog/` — it was
 authored specifically for one harness without a generic source backing it. The
 Update flow detects and refreshes these agents automatically, without any
 additional flag or configuration.
@@ -370,9 +370,9 @@ The source (harness-only) file is **never modified or deleted**.
 
 The target category is required and is never inferred from the source file.
 The tool asks interactively when `--category` is absent. Available categories
-are derived from the subdirectories present under `Agents/Generic/Agents/`, plus
+are derived from the subdirectories present under `Catalog/Subagents/`, plus
 a special `UtilityAgents` option that places the file under
-`Agents/Generic/UtilityAgents/`.
+`Catalog/UtilityAgents/`.
 
 Registration is automatic: writing a well-formed file into the chosen directory
 IS the registration — the catalog discovers agents by scanning those directories.
@@ -661,7 +661,7 @@ from `[[INJECTION:Name]]` regions, which belong to the user and are preserved
 across updates.
 
 For the generic source-file format reference (fields, boundary conventions,
-version bump rules), see [Agents/Generic/SourceFilesFormat.md](../../Agents/Generic/SourceFilesFormat.md).
+version bump rules), see [Catalog/SourceFilesFormat.md](../../Catalog/SourceFilesFormat.md).
 
 ---
 
@@ -670,7 +670,7 @@ version bump rules), see [Agents/Generic/SourceFilesFormat.md](../../Agents/Gene
 ### "not a MOSAIC repository"
 
 The tool could not find the MOSAIC repository root (the directory containing
-`Agents/Generic/`). Run from inside the MOSAIC repository, or pass the root
+`Catalog/`). Run from inside the MOSAIC repository, or pass the root
 explicitly:
 
 ```sh

@@ -54,8 +54,8 @@ func makeE2EMosaicRoot(t *testing.T) string {
 	root := t.TempDir()
 
 	// Marker files required by isMosaicRoot / ResolveRoot.
-	mustMkdirMain(t, root, "Agents", "Generic")
-	mustWriteFileMain(t, root, filepath.Join("Agents", "Generic", "SourceFilesFormat.md"),
+	mustMkdirMain(t, root, "Catalog")
+	mustWriteFileMain(t, root, filepath.Join("Catalog", "SourceFilesFormat.md"),
 		[]byte("# Source Files Format\n"))
 	mustMkdirMain(t, root, "Workflows")
 	mustWriteFileMain(t, root, filepath.Join("Workflows", "Index.md"),
@@ -86,24 +86,24 @@ Follow the closing procedure.
 `
 
 // writeE2EAgentToDefaultCatalogue writes a minimal worker agent into the default
-// catalogue location inside the MOSAIC root: {mosaicRoot}/Catalog/Agents/Generic/Agents/{category}/{key}.md.
+// catalogue location inside the MOSAIC root: {mosaicRoot}/Catalog/Subagents/{category}/{key}.md.
 func writeE2EAgentToDefaultCatalogue(t *testing.T, mosaicRoot, category, key string) {
 	t.Helper()
-	mustMkdirMain(t, mosaicRoot, "Catalog", "Agents", "Generic", "Agents", category)
+	mustMkdirMain(t, mosaicRoot, "Catalog", "Subagents", category)
 	fm := agentFrontmatter(key, "Default catalogue agent for E2E test.")
 	mustWriteFileMain(t, mosaicRoot,
-		filepath.Join("Catalog", "Agents", "Generic", "Agents", category, key+".md"),
+		filepath.Join("Catalog", "Subagents", category, key+".md"),
 		[]byte(fm))
 }
 
 // writeE2EAgentToCustomCatalogueRoot writes a minimal worker agent into the custom
-// catalogue root: {catalogRoot}/Agents/Generic/Agents/{category}/{key}.md (no Catalog/ prefix).
+// catalogue root: {catalogRoot}/Subagents/{category}/{key}.md (no Catalog/ prefix).
 func writeE2EAgentToCustomCatalogueRoot(t *testing.T, catalogRoot, category, key string) {
 	t.Helper()
-	mustMkdirMain(t, catalogRoot, "Agents", "Generic", "Agents", category)
+	mustMkdirMain(t, catalogRoot, "Subagents", category)
 	fm := agentFrontmatter(key, "Custom catalogue agent for E2E test.")
 	mustWriteFileMain(t, catalogRoot,
-		filepath.Join("Agents", "Generic", "Agents", category, key+".md"),
+		filepath.Join("Subagents", category, key+".md"),
 		[]byte(fm))
 }
 

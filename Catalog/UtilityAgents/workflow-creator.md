@@ -117,7 +117,7 @@ Before any design work, read these files:
 | `Workflows/Index.md` | The canonical workflow registry — category taxonomy, every existing workflow with its id, version and hint |
 | `Workflows/{Category}/{id}.md` | Individual workflow definitions. Read at least one in the target category before writing — it is the format reference |
 | `Workflows/_Template.md` | Skeleton for the free-form prose sections that follow the routing table |
-| `Agents/Generic/Agents/README.md` | The agent registry — every available subagent with its function, version, tier and description |
+| `Catalog/Subagents/README.md` (and per-category `README.md` files) | The agent registry — every available subagent with its function, version, tier and description |
 
 Read these when the workflow needs them:
 
@@ -129,7 +129,7 @@ Read these when the workflow needs them:
 | `Development/Designs/InfrastructureAgentConcept.md` | Agents fired by triggers rather than routing. These never appear as rows in a workflow table |
 | `Development/Designs/CommunicationProtocol.md` | The status codes your routing columns react to |
 
-If you need deeper understanding of a specific subagent's capabilities, read its definition file from the appropriate `Agents/Generic/Agents/{Function}/` folder.
+If you need deeper understanding of a specific subagent's capabilities, read its definition file from the appropriate `Catalog/Subagents/{Category}/` folder.
 
 There is no separate workflow schema document. The format is defined by the existing workflow files plus the two authoring guides above; where they disagree, the existing files win.
 
@@ -169,7 +169,7 @@ Collaborate with the user on each design decision:
 
 Before writing, verify the workflow design:
 
-- Every subagent referenced in the table exists in `Agents/Generic/Agents/README.md` (or is flagged as needing creation)
+- Every subagent referenced in the table exists in the `Catalog/Subagents/` category README files (or is flagged as needing creation)
 - On Success targets are valid (a subagent name in the table, or COMPLETE)
 - On Findings targets exist in the table or are clearly identified
 - No orphan subagents — every row is reachable from the workflow's first row

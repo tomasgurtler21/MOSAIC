@@ -10,6 +10,15 @@ import (
 	"mosaic-deploy/internal/domain"
 )
 
+// TransformModelMapping maps a source-harness model identifier to the target-harness
+// model identifier to write for agents carrying that source model.
+//
+// The key UnsetSourceModel ("") is the group of agents whose source file declares no
+// model at all. A present key with an empty value means "this group was answered:
+// leave the model field empty" and suppresses that group's question; an absent key
+// means "not answered" and is resolved by the fallback rules.
+type TransformModelMapping map[string]string
+
 // TransformHarnessRequest drives the harness-to-harness transform mode. Following CD-6,
 // any field that is set short-circuits its interactive question; an empty field triggers
 // the question through domain.Interaction.
@@ -22,10 +31,16 @@ type TransformHarnessRequest struct {
 	// Path is a single agent file or a directory of agent files. Empty triggers the
 	// existing workspace/path question. Quote-stripped by the frontend via pathinput.
 	Path string
-	// TargetModel is the target harness's model identifier. Empty triggers
-	// QTransformTargetModel; a skipped or empty answer leaves the output's model field
-	// empty. SkipAll[QTransformTargetModel] suppresses the question entirely.
+	// TargetModel is the default target model for source models not named in ModelMap.
+	// Empty, with no matching ModelMap entry, triggers QTransformTargetModel for that
+	// source model; a skipped or empty answer leaves that group's model field empty.
+	// SkipAll[QTransformTargetModel] suppresses all model questions entirely.
 	TargetModel string
+	// ModelMap pre-answers the per-source-model target selection. Each present key
+	// suppresses that source model's question. Keys are source model identifiers;
+	// UnsetSourceModel ("") addresses agents with no model set. Nil means "no
+	// pre-answers" and is the zero value every existing caller already supplies.
+	ModelMap TransformModelMapping
 	// Overwrite permits replacing an existing destination file. Without it, an existing
 	// destination is a per-file failure, never a silent overwrite.
 	Overwrite bool
@@ -80,8 +95,15 @@ type TransformFileOutcome struct {
 type TransformHarnessResult struct {
 	SourceHarnessID string `json:"sourceHarnessId"`
 	TargetHarnessID string `json:"targetHarnessId"`
-	// TargetModel is the model written into every output. Empty when skipped.
+	// TargetModel is the batch-wide target model when exactly one non-empty target
+	// model was applied across the whole run; empty otherwise (including when the
+	// run applied several different target models). Retained for the CLI/TUI report
+	// surfaces that predate the mapping.
 	TargetModel string `json:"targetModel,omitempty"`
+	// AppliedModelMap records the resolved source-model→target-model mapping the run
+	// actually applied, including groups resolved to an empty target model. Nil when
+	// the run produced no files.
+	AppliedModelMap TransformModelMapping `json:"appliedModelMap,omitempty"`
 	// InputPath is the file or directory the run was given, after quote stripping.
 	InputPath string `json:"inputPath"`
 	// InputIsDirectory records which input shape was used, so a size-1 batch is

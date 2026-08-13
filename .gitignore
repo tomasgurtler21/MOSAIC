@@ -2,8 +2,8 @@
 # Agentic harness working directories
 # ---------------------------------------------------------------------------
 # These hold DEPLOYED agents — derivatives produced by transformation from
-# Agents/Generic/. They are outputs, not sources. Committing them would create
-# a second, drifting copy of every agent.
+# the catalog's generic source files. They are outputs, not sources.
+# Committing them would create a second, drifting copy of every agent.
 #
 # Note: MOSAIC is developed using MOSAIC, so these directories are populated
 # in this very repository. That is expected. They still must not be tracked.
@@ -32,7 +32,7 @@ opencode.json
 # Orchestration runtime artifacts
 # ---------------------------------------------------------------------------
 # Produced by actually running MOSAIC. Per-run, per-machine, often large.
-# The TEMPLATE lives at Agents/Generic/Orchestrator/Orchestration.template.md
+# The TEMPLATE lives at Catalog/Orchestrator/Orchestration.template.md
 # and is tracked; instances are not.
 
 Orchestration-*/

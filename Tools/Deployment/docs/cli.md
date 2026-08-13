@@ -103,7 +103,8 @@ mosaic-deploy transform [flags]
 | `--harness <id>` | string | — | Source harness ID — the harness the input files were deployed for (required) |
 | `--target-harness <id>` | string | — | Target harness ID — the harness to transform into (required) |
 | `--path <path>` | string | — | Agent file or directory of agent files to transform (required) |
-| `--target-model <id>` | string | — | Target harness model identifier; absent means model field is left empty |
+| `--target-model <id>` | string | — | Target harness model identifier; used as fallback for source models not named in `--model-map`; absent means model field is left empty |
+| `--model-map <src=tgt>` | string (repeatable) | — | Map a source model to a target model; repeat per source model; unmapped sources fall back to `--target-model` |
 | `--overwrite` | bool | false | Replace an existing destination file |
 | `--dry-run` | bool | false | Compute and report outcomes without writing any file |
 | `--output <json>` | string | — | Machine-readable output format |

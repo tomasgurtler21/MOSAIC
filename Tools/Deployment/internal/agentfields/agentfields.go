@@ -9,7 +9,7 @@ package agentfields
 
 // FieldName pairs the three names one MOSAIC-only bookkeeping field can appear under.
 type FieldName struct {
-	// Generic is the key used in generic source files under Catalog/Agents/Generic/.
+	// Generic is the key used in generic source files under Catalog/Subagents/ or Catalog/UtilityAgents/.
 	// Empty when the field exists only in deployed files.
 	Generic string
 	// Deployed is the mosaic_-prefixed key written into deployed, harness-facing files.
@@ -32,7 +32,7 @@ var registry = []FieldName{
 }
 
 // genericVocabularyKeys is the set of keys belonging to the generic agent frontmatter
-// vocabulary documented in Catalog/Agents/Generic/SourceFilesFormat.md.
+// vocabulary documented in Catalog/SourceFilesFormat.md.
 var genericVocabularyKeys = map[string]bool{
 	"id":               true,
 	"version":          true,
@@ -92,7 +92,7 @@ func IsMosaicOnlyDeployedKey(key string) bool {
 }
 
 // IsGenericVocabularyKey reports whether key belongs to the generic agent frontmatter
-// vocabulary documented in Catalog/Agents/Generic/SourceFilesFormat.md:
+// vocabulary documented in Catalog/SourceFilesFormat.md:
 // id, version, name, description, role, model, tools, recommended_tier,
 // tier_rationale, required_skills.
 func IsGenericVocabularyKey(key string) bool {

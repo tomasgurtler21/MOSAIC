@@ -30,13 +30,13 @@ import (
 
 // writeWorkerAgentFile writes a minimal, parseable agent source file at
 //
-//	<root>/Catalog/Agents/Generic/Agents/<category>/<name>.md
+//	<root>/Catalog/Subagents/<category>/<name>.md
 //
 // with numericID as the frontmatter `id` scalar. Pass numericID="" to omit the `id` field
 // entirely (simulating an agent that has no numeric id).
 func writeWorkerAgentFile(t *testing.T, root, category, name, numericID string) {
 	t.Helper()
-	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Agents", category)
+	mustMkdir(t, root, "Catalog", "Subagents", category)
 	fm := "---\n"
 	if numericID != "" {
 		fm += "id: \"" + numericID + "\"\n"
@@ -46,7 +46,7 @@ func writeWorkerAgentFile(t *testing.T, root, category, name, numericID string) 
 	fm += "description: Test agent for numeric-id unit tests.\n"
 	fm += "role: subagent\n"
 	fm += "---\nContent.\n"
-	relPath := filepath.Join("Catalog", "Agents", "Generic", "Agents", category, name+".md")
+	relPath := filepath.Join("Catalog", "Subagents", category, name+".md")
 	mustWriteFile(t, root, relPath, []byte(fm))
 }
 

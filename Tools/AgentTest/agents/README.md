@@ -9,7 +9,7 @@ is a legal dispatch — they do not specify what the collaborator replies with.
 A file belongs here when:
 
 - It is a stub collaborator that test suites dispatch to
-- It has no place in the product's `Agents/Generic/` catalogue (it exists only in tests)
+- It has no place in the product's `Catalog/` catalogue (it exists only in tests)
 - It is sourced by a `stub_agents` entry in a test definition file
 
 What a stub *replies* is declared separately, in the `*.stubs.json` registry alongside each
@@ -17,7 +17,7 @@ test definition. These two things serve different purposes and must not be confl
 
 ## What does not belong here
 
-- No file from this directory is ever added under `Agents/Generic/`
+- No file from this directory is ever added under `Catalog/`
 - No file from this directory is registered in the product catalogue
 - No reply content belongs here — reply content goes in the stub registry
 

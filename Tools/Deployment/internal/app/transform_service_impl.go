@@ -2,8 +2,10 @@ package app
 
 // transform_service_impl.go implements the harness-to-harness transform service flow:
 // path resolution, non-recursive directory enumeration filtered by the source harness
-// extension, per-file detection/transform, overwrite protection, interactive question
-// routing per the CD-6 pre-answer convention, and whole-run vs per-file error handling.
+// extension, a pre-pass that reads every source file once and discovers the distinct
+// source-model set, per-source-model model questioning, per-file detection/transform,
+// overwrite protection, interactive question routing per the CD-6 pre-answer convention,
+// and whole-run vs per-file error handling.
 
 import (
 	"context"
@@ -16,6 +18,16 @@ import (
 	"mosaic-deploy/internal/config"
 	"mosaic-deploy/internal/domain"
 )
+
+// titleForSourceModel returns a user-facing Title for the per-source-model QTransformTargetModel
+// question. The title identifies which source model is being mapped so the user knows which group
+// they are answering for.
+func titleForSourceModel(sourceModel string) string {
+	if sourceModel == UnsetSourceModel {
+		return "Select target model for agents with no model set (optional, enter to skip)"
+	}
+	return fmt.Sprintf("Select target model for source model %q (optional, enter to skip)", sourceModel)
+}
 
 // transformHarness is the real implementation of Service.TransformHarness.
 func transformHarness(ctx context.Context, s *service, req TransformHarnessRequest) (TransformHarnessResult, error) {
@@ -84,23 +96,6 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 	}
 	defer tgtModule.Close()
 
-	// Ask for target model when not pre-answered and not suppressed.
-	targetModel := req.TargetModel
-	if targetModel == "" && !req.SkipAll[domain.QTransformTargetModel] {
-		ans, _ := s.deps.Interaction.SelectOne(ctx, domain.ChoiceQuestion{
-			Question: domain.Question{
-				ID:        domain.QTransformTargetModel,
-				Title:     "Select target model (optional, enter to skip)",
-				AllowSkip: true,
-			},
-			Options: buildModelOptions(tgtModule.Descriptor().Models.IDs),
-		})
-		// FR-15: skipped or empty answer leaves TargetModel empty.
-		if ans.Status == domain.Answered {
-			targetModel = ans.OptionID
-		}
-	}
-
 	// Compute the tool-mappings version hash so the written stamp can be used by a later
 	// update run to detect when the target harness's tool-destination configuration changed.
 	// A malformed or unreadable user config is a whole-run failure: the hash would be silently
@@ -145,21 +140,93 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 		filePaths = []string{req.Path}
 	}
 
-	// Process each file independently.
+	// Pre-pass: read every source file once and discover the distinct source-model set.
+	// The per-file loop below consumes the already-read bytes from the index so no file
+	// is read twice.
+	idx := IndexSourceModels(filePaths, *srcDesc)
+
+	// Resolve the target model for each distinct source model via the four-rule table.
+	// The resolved map is keyed by source model identifier (UnsetSourceModel for the
+	// unset group). It is built before the per-file loop so the loop does a simple lookup.
+	resolved := make(TransformModelMapping, len(idx.Distinct))
+	for _, k := range idx.Distinct {
+		// Rule 1: ModelMap entry present (even with an empty value — a present key is a
+		// deliberate answer, not an absent one).
+		if req.ModelMap != nil {
+			if target, ok := req.ModelMap[k]; ok {
+				resolved[k] = target
+				continue
+			}
+		}
+		// Rule 2: TargetModel non-empty — use it as the fallback for all unmapped groups.
+		if req.TargetModel != "" {
+			resolved[k] = req.TargetModel
+			continue
+		}
+		// Rule 3: SkipAll suppresses every model question; leave the group's target empty.
+		if req.SkipAll[domain.QTransformTargetModel] {
+			resolved[k] = ""
+			continue
+		}
+		// Rule 4: ask the user once for this source model.
+		ans, _ := s.deps.Interaction.SelectOne(ctx, domain.ChoiceQuestion{
+			Question: domain.Question{
+				ID:        domain.QTransformTargetModel,
+				Subject:   k,
+				Title:     titleForSourceModel(k),
+				AllowSkip: true,
+			},
+			Options: buildModelOptions(tgtModule.Descriptor().Models.IDs),
+		})
+		// Only domain.Answered sets a value; any other status (skip, cancel) leaves empty.
+		if ans.Status == domain.Answered {
+			target := ans.OptionID
+			if ans.Custom != "" {
+				target = ans.Custom
+			}
+			resolved[k] = target
+		} else {
+			resolved[k] = ""
+		}
+	}
+
+	// Compute result.TargetModel: the batch-wide value when exactly one non-empty target
+	// model was applied across all groups, empty when multiple distinct targets were used.
+	// This preserves backward compatibility for the summary screen and CLI report.
+	var resultTargetModel string
+	{
+		nonEmpty := make(map[string]struct{})
+		for _, v := range resolved {
+			if v != "" {
+				nonEmpty[v] = struct{}{}
+			}
+		}
+		if len(nonEmpty) == 1 {
+			for v := range nonEmpty {
+				resultTargetModel = v
+			}
+		}
+	}
+
+	// Process each file independently, using the pre-read content from the index.
 	var files []TransformFileOutcome
 	var transformed, skippedMismatch, skippedNotAgent, failed int
 
-	for _, srcPath := range filePaths {
-		srcBytes, readErr := os.ReadFile(srcPath)
-		if readErr != nil {
+	for _, sf := range idx.Files {
+		srcPath := sf.Path
+
+		// Handle files that could not be read in the pre-pass.
+		if sf.ReadErr != nil {
 			files = append(files, TransformFileOutcome{
 				SourcePath: srcPath,
 				Status:     StatusFailed,
-				Reason:     fmt.Sprintf("cannot read file: %v", readErr),
+				Reason:     fmt.Sprintf("cannot read file: %v", sf.ReadErr),
 			})
 			failed++
 			continue
 		}
+
+		srcBytes := sf.Content
 
 		// Derive agent key from source filename (strips the source harness extension).
 		name := filepath.Base(srcPath)
@@ -262,6 +329,9 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 			}
 		}
 
+		// Look up the target model for this file's own source model from the resolved map.
+		fileTargetModel := resolved[sf.SourceModel]
+
 		// Build the retargeted agent bytes (pure core function).
 		retargetIn := RetargetInput{
 			Source:              srcBytes,
@@ -269,7 +339,7 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 			TargetModule:        tgtModule,
 			Kind:                domain.ArtifactAgent,
 			AgentKey:            agentKey,
-			TargetModel:         targetModel,
+			TargetModel:         fileTargetModel,
 			ToolMappingsVersion: toolMappingsVersion,
 		}
 		tgtBytes, report, retargetErr := BuildRetargetedAgent(retargetIn)
@@ -326,10 +396,18 @@ func transformHarness(ctx context.Context, s *service, req TransformHarnessReque
 		transformed++
 	}
 
+	// Populate AppliedModelMap from the resolved map (nil when the batch is empty, matching
+	// the design invariant that AppliedModelMap is nil when the run produced no files).
+	var appliedModelMap TransformModelMapping
+	if len(resolved) > 0 {
+		appliedModelMap = resolved
+	}
+
 	return TransformHarnessResult{
 		SourceHarnessID:  req.SourceHarnessID,
 		TargetHarnessID:  targetHarnessID,
-		TargetModel:      targetModel,
+		TargetModel:      resultTargetModel,
+		AppliedModelMap:  appliedModelMap,
 		InputPath:        req.Path,
 		InputIsDirectory: inputIsDir,
 		DryRun:           req.DryRun,

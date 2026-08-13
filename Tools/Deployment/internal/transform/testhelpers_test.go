@@ -47,8 +47,8 @@ func fixtureModel() domain.ModelSelection {
 	}
 }
 
-// genericAgentsDir returns the absolute path to Agents/Generic/Agents/ in the repository
-// root — the directory that contains only worker agent .md files organised by category
+// genericAgentsDir returns the absolute path to Catalog/Subagents/ in the repository
+// root — the directory that contains worker agent .md files organised by category
 // (Audit, Creation, Execution, …). Skill files, hook README files, the orchestrator, and
 // utility agents live in sibling directories and are intentionally excluded.
 //
@@ -58,7 +58,7 @@ func genericAgentsDir(t *testing.T) string {
 	t.Helper()
 	// From Tools/Deployment/internal/transform/ navigate four levels up to the repo root,
 	// then descend into the worker agents directory.
-	rel := filepath.Join("..", "..", "..", "..", "Catalog", "Agents", "Generic", "Agents")
+	rel := filepath.Join("..", "..", "..", "..", "Catalog", "Subagents")
 	abs, err := filepath.Abs(rel)
 	if err != nil {
 		t.Fatalf("resolve generic agents directory: %v", err)

@@ -5,35 +5,44 @@ import (
 	"path/filepath"
 
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/catalog/catalogpaths"
 	"mosaic-deploy/internal/domain"
 )
 
-// loadSkills scans Agents/Generic/Skills/ for skill directories and populates skills,
-// skillIdx, and sourcePaths on the receiver.
+// loadSkills scans skill directories for a given catalogue root and populates skills,
+// skillIdx, and sourcePaths on the receiver. The new target layout path (Skills/) is
+// scanned first; the legacy path (Agents/Generic/Skills/) is scanned second. The first
+// occurrence of any given key wins; duplicates from the fallback path are skipped.
 func (c *catalogImpl) loadSkills(root string) []Issue {
-	skillsDir := filepath.Join(root, "Agents", "Generic", "Skills")
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		// Missing skills directory is not a hard error.
-		return nil
+	skillsDirCandidates := []string{
+		catalogpaths.SkillsDir(root),
+		filepath.Join(root, "Agents", "Generic", "Skills"),
 	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		key := entry.Name()
-		skillDir := filepath.Join(skillsDir, key)
-		skill, err := parseSkillDir(skillDir, key)
+	for _, skillsDir := range skillsDirCandidates {
+		entries, err := os.ReadDir(skillsDir)
 		if err != nil {
 			continue
 		}
-		c.skills = append(c.skills, skill)
-		c.skillIdx[key] = skill
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			key := entry.Name()
+			if _, exists := c.skillIdx[key]; exists {
+				continue // Already loaded from a higher-priority path.
+			}
+			skillDir := filepath.Join(skillsDir, key)
+			skill, err := parseSkillDir(skillDir, key)
+			if err != nil {
+				continue
+			}
+			c.skills = append(c.skills, skill)
+			c.skillIdx[key] = skill
 
-		// Register all skill file paths so ReadSource can serve them.
-		for _, f := range skill.Files {
-			c.sourcePaths[filepath.Join(skill.SourceDir, f)] = true
+			// Register all skill file paths so ReadSource can serve them.
+			for _, f := range skill.Files {
+				c.sourcePaths[filepath.Join(skill.SourceDir, f)] = true
+			}
 		}
 	}
 	return nil
@@ -44,6 +53,9 @@ func (c *catalogImpl) loadSkills(root string) []Issue {
 // catalogRoot. On key collision, the catalogRoot version replaces the default one silently —
 // no Issue is produced for shadowing. When both roots are the same path, only one load pass
 // is performed to prevent duplicate entries.
+//
+// Each root is scanned at two locations: the new target layout path first, then the legacy
+// path. Within a single root, the first occurrence of a key wins.
 func (c *catalogImpl) loadSkillsMerged(defaultCatalogRoot, catalogRoot string) []Issue {
 	// Identical-roots case: load once to avoid doubling the result.
 	if defaultCatalogRoot == catalogRoot {
@@ -54,41 +66,50 @@ func (c *catalogImpl) loadSkillsMerged(defaultCatalogRoot, catalogRoot string) [
 	c.loadSkills(defaultCatalogRoot)
 
 	// Second pass: scan the catalogue root and merge, with catalogue root winning on collision.
-	skillsDir := filepath.Join(catalogRoot, "Agents", "Generic", "Skills")
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		// Missing Skills/ directory in catalogRoot is not a hard error.
-		return nil
+	// Track keys already processed in this pass so that within catalogRoot the new layout
+	// path wins over the legacy path (first-wins within this root).
+	seenInPass := make(map[string]bool)
+	catalogRootDirs := []string{
+		catalogpaths.SkillsDir(catalogRoot),
+		filepath.Join(catalogRoot, "Agents", "Generic", "Skills"),
 	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		key := entry.Name()
-		skillDir := filepath.Join(skillsDir, key)
-		skill, err := parseSkillDir(skillDir, key)
+	for _, skillsDir := range catalogRootDirs {
+		entries, err := os.ReadDir(skillsDir)
 		if err != nil {
 			continue
 		}
-
-		if _, exists := c.skillIdx[key]; exists {
-			// Key collision: catalogue root wins, replace the existing entry in the slice.
-			for i, s := range c.skills {
-				if s.Key == key {
-					c.skills[i] = skill
-					break
-				}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
 			}
-		} else {
-			// New key: append.
-			c.skills = append(c.skills, skill)
-		}
-		c.skillIdx[key] = skill
+			key := entry.Name()
+			if seenInPass[key] {
+				continue // Already processed this key from a higher-priority path in this pass.
+			}
+			seenInPass[key] = true
+			skillDir := filepath.Join(skillsDir, key)
+			skill, err := parseSkillDir(skillDir, key)
+			if err != nil {
+				continue
+			}
+			if _, exists := c.skillIdx[key]; exists {
+				// Key collision: catalogue root wins, replace the existing entry in the slice.
+				for i, s := range c.skills {
+					if s.Key == key {
+						c.skills[i] = skill
+						break
+					}
+				}
+			} else {
+				// New key: append.
+				c.skills = append(c.skills, skill)
+			}
+			c.skillIdx[key] = skill
 
-		// Register all skill file paths so ReadSource can serve them.
-		for _, f := range skill.Files {
-			c.sourcePaths[filepath.Join(skill.SourceDir, f)] = true
+			// Register all skill file paths so ReadSource can serve them.
+			for _, f := range skill.Files {
+				c.sourcePaths[filepath.Join(skill.SourceDir, f)] = true
+			}
 		}
 	}
 	return nil

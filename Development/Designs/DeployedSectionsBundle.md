@@ -10,7 +10,7 @@ status: Draft
 
 ## 1. What This Specifies
 
-`Agents/Generic/DeployedSections.md` is the single file holding every piece of text MOSAIC deploys verbatim into agent files. This document specifies it: what qualifies for membership, how it is versioned, how the deployment tool consumes it, and how a stale deployment is detected.
+`Catalog/DeployedSections.md` is the single file holding every piece of text MOSAIC deploys verbatim into agent files. This document specifies it: what qualifies for membership, how it is versioned, how the deployment tool consumes it, and how a stale deployment is detected.
 
 The bundle is a **payload**. This document, and the per-block documents under `Development/Designs/DeploymentBlocks/`, are the **rationale**. The split is deliberate and one rule keeps it honest:
 

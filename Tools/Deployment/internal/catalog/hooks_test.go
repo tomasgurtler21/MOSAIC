@@ -2,7 +2,7 @@ package catalog_test
 
 // Tests for hook bundle enumeration (T7.4) and integrity validation (T7.5).
 //
-// Hook bundles live under Agents/Generic/Hooks/{bundle-id}/ and are described by a
+// Hook bundles live under Catalog/Hooks/{bundle-id}/ and are described by a
 // hook.yaml manifest. The repository currently contains one bundle: mosaic-logger.
 //
 // T7.4 covers:

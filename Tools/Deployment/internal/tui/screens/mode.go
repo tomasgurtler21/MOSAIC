@@ -47,7 +47,7 @@ var modeItems = []widgets.ListItem{
 		Label:       "Promote harness-only agent",
 		Description: "Generate a generic agent source file from an already-transformed harness-only agent.",
 		Detail: "Reads a harness-only agent file (one with transform_version and canonical\n" +
-			"boundary tags) and generates a generic source file under Catalog/Agents/Generic/.\n\n" +
+			"boundary tags) and generates a generic source file under the catalog root.\n\n" +
 			"After promotion the new agent is immediately available to the Deploy/Update\n" +
 			"flow. The original harness-only source file is left untouched.\n\n" +
 			"Use this to turn a one-off harness-specific agent into a reusable generic\n" +

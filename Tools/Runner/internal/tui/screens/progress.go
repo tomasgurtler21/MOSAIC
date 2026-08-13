@@ -140,6 +140,9 @@ func (s *ProgressScreen) View() string {
 		} else if row.Status == "" {
 			label := fmt.Sprintf("%s  phase=%s", row.AgentInstance, row.Phase)
 			line = indicator + s.styles.Body.Render(label)
+		} else if row.Status == "BLOCKED" || row.Status == "CAPABILITY_EXCEEDED" {
+			label := fmt.Sprintf("%s  %s", row.AgentInstance, row.Status)
+			line = indicator + s.styles.Error.Render(label)
 		} else {
 			label := fmt.Sprintf("%s  %s", row.AgentInstance, row.Status)
 			line = indicator + s.styles.Warning.Render(label)

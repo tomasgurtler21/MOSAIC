@@ -1177,7 +1177,7 @@ func TestUpdate_NoCatalogPathChange_WhenNoHarnessOnlyAgentsPresent(t *testing.T)
 	catalogItem := domain.PlanItem{
 		Ref:        domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "test-runner"},
 		TargetPath: "test-runner.md",
-		SourcePath: "Catalog/Agents/Generic/Agents/TestRunner/test-runner.md",
+		SourcePath: "Catalog/Subagents/TestRunner/test-runner.md",
 		Action:     domain.ActionUpdate,
 	}
 	deps.Planner = &stubPlanner{plan: domain.Plan{
@@ -1249,7 +1249,7 @@ func TestUpdate_CatalogBackedAndHarnessOnlyCoexist_BothPresentInPlan(t *testing.
 	catalogItem := domain.PlanItem{
 		Ref:        domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "test-runner"},
 		TargetPath: "test-runner.md",
-		SourcePath: "Catalog/Agents/Generic/Agents/TestRunner/test-runner.md",
+		SourcePath: "Catalog/Subagents/TestRunner/test-runner.md",
 		Action:     domain.ActionUpdate,
 	}
 	deps.Planner = &stubPlanner{plan: domain.Plan{

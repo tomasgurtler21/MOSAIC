@@ -87,11 +87,11 @@ func makeRootWithOpenCodeContent(t *testing.T) string {
 	must(t, os.MkdirAll(filepath.Join(root, "MosaicDeploy", "harnesses"), 0o755))
 
 	// The OpenCode subprocess reads its harness content from
-	// <MosaicRoot>/Catalog/Agents/OpenCode/. Copy those two files from the real repository
-	// so the binary can initialise when external.New spawns it with MOSAIC_ROOT=root.
+	// <MosaicRoot>/Catalog/HarnessInjections/OpenCode/. Copy those two files from the real
+	// repository so the binary can initialise when external.New spawns it with MOSAIC_ROOT=root.
 	repoRoot := findRepoRoot_registry(t)
-	contentSrc := filepath.Join(repoRoot, "Catalog", "Agents", "OpenCode")
-	contentDst := filepath.Join(root, "Catalog", "Agents", "OpenCode")
+	contentSrc := filepath.Join(repoRoot, "Catalog", "HarnessInjections", "OpenCode")
+	contentDst := filepath.Join(root, "Catalog", "HarnessInjections", "OpenCode")
 	must(t, os.MkdirAll(contentDst, 0o755))
 	for _, name := range []string{"HarnessInjections.md", "HarnessInjectionsOrchestrator.md"} {
 		data, err := os.ReadFile(filepath.Join(contentSrc, name))

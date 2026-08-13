@@ -60,7 +60,7 @@ func newPromoteFlowSvc(workspace string) *stubFlowService {
 	svc := newFlowSvc(workspace)
 	svc.promote = app.PromoteResult{
 		SourcePath:      workspace + "/my-harness-agent.md",
-		DestinationPath: "/mosaicroot/Agents/Generic/Agents/TestCategory/my-harness-agent.md",
+		DestinationPath: "/mosaicroot/Subagents/TestCategory/my-harness-agent.md",
 		Key:             "my-harness-agent",
 		NumericID:       "42",
 		Category:        "TestCategory",

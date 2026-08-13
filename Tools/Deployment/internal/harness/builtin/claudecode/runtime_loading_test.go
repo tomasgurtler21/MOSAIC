@@ -7,13 +7,13 @@ package claudecode_test
 // Test coverage:
 //
 //   T6.1 — RepoContentDir constant (compile-time check):
-//   - claudecode.RepoContentDir equals "Catalog/Agents/Claude Code".
+//   - claudecode.RepoContentDir equals "Catalog/HarnessInjections/Claude Code".
 //   - ghcpcli.RepoContentDir, opencode.RepoContentDir, vscodeghcp.RepoContentDir are each
 //     the correct path for their respective harness directories.
 //
 //   T6.2 — Run-time loading from declared directory:
 //   - A claudecode module constructed against a temporary root reads HarnessInjections.md
-//     and HarnessInjectionsOrchestrator.md from <MosaicRoot>/Agents/Claude Code/.
+//     and HarnessInjectionsOrchestrator.md from <MosaicRoot>/Catalog/HarnessInjections/Claude Code/.
 //   - The injected content comes from those on-disk files, not from embedded bytes.
 //
 //   T6.3 — Failure modes:
@@ -65,7 +65,7 @@ func writeHarnessContentFile(t *testing.T, dir, filename, src string) {
 }
 
 // makeTempRoot creates a MosaicRoot temp directory and the Claude Code content directory
-// <root>/Agents/Claude Code/. Returns the root path and the content directory path.
+// <root>/Catalog/HarnessInjections/Claude Code/. Returns the root path and the content directory path.
 func makeTempRoot(t *testing.T) (root string, contentDir string) {
 	t.Helper()
 	root = t.TempDir()
@@ -121,7 +121,7 @@ Orchestrator-specific constraint content.
 // TestRepoContentDir_ClaudeCode verifies that claudecode.RepoContentDir is the correct
 // repository directory relative to the MOSAIC root.
 func TestRepoContentDir_ClaudeCode(t *testing.T) {
-	const want = "Catalog/Agents/Claude Code"
+	const want = "Catalog/HarnessInjections/Claude Code"
 	if claudecode.RepoContentDir != want {
 		t.Errorf("claudecode.RepoContentDir = %q, want %q", claudecode.RepoContentDir, want)
 	}
@@ -129,7 +129,7 @@ func TestRepoContentDir_ClaudeCode(t *testing.T) {
 
 // TestRepoContentDir_GhcpCli verifies that ghcpcli.RepoContentDir is the correct path.
 func TestRepoContentDir_GhcpCli(t *testing.T) {
-	const want = "Catalog/Agents/GHCP CLI"
+	const want = "Catalog/HarnessInjections/GHCP CLI"
 	if ghcpcli.RepoContentDir != want {
 		t.Errorf("ghcpcli.RepoContentDir = %q, want %q", ghcpcli.RepoContentDir, want)
 	}
@@ -137,7 +137,7 @@ func TestRepoContentDir_GhcpCli(t *testing.T) {
 
 // TestRepoContentDir_OpenCode verifies that opencode.RepoContentDir is the correct path.
 func TestRepoContentDir_OpenCode(t *testing.T) {
-	const want = "Catalog/Agents/OpenCode"
+	const want = "Catalog/HarnessInjections/OpenCode"
 	if opencode.RepoContentDir != want {
 		t.Errorf("opencode.RepoContentDir = %q, want %q", opencode.RepoContentDir, want)
 	}
@@ -145,7 +145,7 @@ func TestRepoContentDir_OpenCode(t *testing.T) {
 
 // TestRepoContentDir_VsCodeGhcp verifies that vscodeghcp.RepoContentDir is the correct path.
 func TestRepoContentDir_VsCodeGhcp(t *testing.T) {
-	const want = "Catalog/Agents/VS code GHCP"
+	const want = "Catalog/HarnessInjections/VS Code GHCP"
 	if vscodeghcp.RepoContentDir != want {
 		t.Errorf("vscodeghcp.RepoContentDir = %q, want %q", vscodeghcp.RepoContentDir, want)
 	}

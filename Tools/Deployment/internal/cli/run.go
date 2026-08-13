@@ -317,6 +317,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 		transformTargetHarness string
 		transformPath          string
 		transformTargetModel   string
+		transformModelMap      []string
 		transformOverwrite     bool
 		transformDryRun        bool
 		transformOutput        string
@@ -358,6 +359,20 @@ are not descended into.`,
 				DryRun:          transformDryRun,
 			}
 
+			if len(transformModelMap) > 0 {
+				parsed, parseErr := parseModelMap(transformModelMap)
+				if parseErr != nil {
+					fmt.Fprintf(errOut, "error: %s\n", parseErr)
+					exitCode = ExitUsage
+					return nil
+				}
+				req.ModelMap = parsed
+				if req.SkipAll == nil {
+					req.SkipAll = make(map[domain.QuestionID]bool)
+				}
+				req.SkipAll[domain.QTransformTargetModel] = true
+			}
+
 			result, svcErr := svc.TransformHarness(ctx, req)
 			exitCode = renderTransformOutput(out, errOut, transformOutput, result, svcErr)
 			return nil
@@ -367,7 +382,14 @@ are not descended into.`,
 	transformCmd.Flags().StringVar(&transformHarness, "harness", "", "Source harness ID (required)")
 	transformCmd.Flags().StringVar(&transformTargetHarness, "target-harness", "", "Target harness ID (required)")
 	transformCmd.Flags().StringVar(&transformPath, "path", "", "Agent file or folder of agent files (required); non-recursive for directories")
-	transformCmd.Flags().StringVar(&transformTargetModel, "target-model", "", "Target harness model identifier; absent means model field is left empty")
+	transformCmd.Flags().StringArrayVar(&transformModelMap, "model-map", nil,
+		"Map a source model to a target model as sourceModel=targetModel; repeat once per "+
+			"source model. Use an empty source (=targetModel) for agents with no model set. "+
+			"Source models not mapped here fall back to --target-model, and are left empty when "+
+			"--target-model is absent.")
+	transformCmd.Flags().StringVar(&transformTargetModel, "target-model", "",
+		"Default target model for source models not covered by --model-map; absent means "+
+			"those agents' model field is left empty")
 	transformCmd.Flags().BoolVar(&transformOverwrite, "overwrite", false, "Overwrite an existing destination file")
 	transformCmd.Flags().BoolVar(&transformDryRun, "dry-run", false, "Compute outcomes without writing any file")
 	transformCmd.Flags().StringVar(&transformOutput, "output", "", "Output format (json)")
@@ -597,4 +619,34 @@ a prompt.`,
 		return ExitUsage
 	}
 	return exitCode
+}
+
+// parseModelMap converts repeated --model-map values into a TransformModelMapping.
+// Each value is split on its FIRST "=" so a target identifier may itself contain "=".
+//
+// Errors (each returned as a single, actionable message naming the offending value):
+//   - no "=" present
+//   - empty target (right-hand side empty or whitespace-only)
+//   - the same source model given twice
+//
+// A whitespace-only source is normalised to UnsetSourceModel; source and target are
+// trimmed of surrounding whitespace.
+func parseModelMap(values []string) (app.TransformModelMapping, error) {
+	result := make(app.TransformModelMapping, len(values))
+	for _, v := range values {
+		idx := strings.IndexByte(v, '=')
+		if idx < 0 {
+			return nil, fmt.Errorf("--model-map %q: missing '='; expected format is sourceModel=targetModel", v)
+		}
+		src := strings.TrimSpace(v[:idx])
+		tgt := strings.TrimSpace(v[idx+1:])
+		if tgt == "" {
+			return nil, fmt.Errorf("--model-map %q: target model (right-hand side) must not be empty", v)
+		}
+		if _, exists := result[src]; exists {
+			return nil, fmt.Errorf("--model-map: source model %q appears more than once; each source model must be mapped at most once", src)
+		}
+		result[src] = tgt
+	}
+	return result, nil
 }

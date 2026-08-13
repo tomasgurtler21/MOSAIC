@@ -366,7 +366,7 @@ func TestLoad_MissingBundleDirectory_ReturnsError(t *testing.T) {
 
 func realLoggerBundleDir(t *testing.T) string {
 	t.Helper()
-	dir := filepath.Join(repoRoot, "Agents", "Generic", "Hooks", "mosaic-logger")
+	dir := filepath.Join(repoRoot, "Catalog", "Hooks", "mosaic-logger")
 	if _, err := os.Stat(filepath.Join(dir, "hook.yaml")); err != nil {
 		t.Skipf("real mosaic-logger bundle not found at %q: %v", dir, err)
 	}

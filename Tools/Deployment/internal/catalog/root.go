@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"mosaic-deploy/internal/catalog/catalogpaths"
 )
 
 // resolveRoot validates that dir is the MOSAIC repository root and returns its absolute path.
@@ -36,15 +38,14 @@ func resolveRoot(dir string) (string, error) {
 // isMosaicRoot returns true when dir contains the required MOSAIC repository marker file
 // at its Catalog/-prefixed location:
 //
-//	Catalog/Agents/Generic/SourceFilesFormat.md
+//	Catalog/SourceFilesFormat.md
 //
 // Catalog/Workflows/Index.md is no longer a required marker; a root is recognised
 // identically whether or not that file exists.
 //
-// A directory carrying the marker only at the legacy (pre-migration) Agents/Generic/
-// location is not accepted.
+// The legacy marker location (Catalog/Agents/Generic/SourceFilesFormat.md) is not
+// accepted — only the target layout path satisfies the check.
 func isMosaicRoot(dir string) bool {
-	marker := filepath.Join("Catalog", "Agents", "Generic", "SourceFilesFormat.md")
-	_, err := os.Stat(filepath.Join(dir, marker))
+	_, err := os.Stat(filepath.Join(dir, catalogpaths.MosaicRelSourceFilesFormatFile))
 	return err == nil
 }

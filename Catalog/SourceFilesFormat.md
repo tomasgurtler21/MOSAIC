@@ -19,9 +19,9 @@ fields, hook bundle structure, and their version bump rules.
 
 ## Agent Frontmatter Fields
 
-Every generic agent file (`Agents/Generic/Agents/**/*.md`), the orchestrator
-(`Agents/Generic/Orchestrator/orchestrator.md`), and every generic utility
-agent (`Agents/Generic/UtilityAgents/*.md`) carries the following frontmatter.
+Every generic agent file (`Catalog/Subagents/**/*.md`), the orchestrator
+(`Catalog/Orchestrator/orchestrator.md`), and every generic utility
+agent (`Catalog/UtilityAgents/*.md`) carries the following frontmatter.
 
 Utility agents carry frontmatter only. They have no boundary tags, are never
 deployed into a run, and everything below about regions and canonical order
@@ -41,7 +41,7 @@ does not apply to them.
 
 A deployed agent file additionally carries MOSAIC bookkeeping fields written by
 the deployment tool. These are not source fields and are not present in generic
-source files under `Agents/Generic/`.
+source files under `Catalog/`.
 
 All MOSAIC-only bookkeeping fields in deployed files carry a `mosaic_` prefix,
 so a reader can distinguish MOSAIC bookkeeping from fields the harness runtime
@@ -76,7 +76,7 @@ names with values preserved, and a repeat run reports it unchanged.
 |-------|------|-------------|
 | `recommended_tier` | string | The tier token verbatim from the former `model:` line comment (e.g. `MEDIUM`, `HIGH`, `MEDIUM-HIGH`). Open string — no fixed vocabulary. |
 | `tier_rationale` | string | Explanatory text describing why the tier was chosen. Shown to the user during model selection. |
-| `required_skills` | flow-list | Skill keys this agent's instructions tell it to load. Empty list (`[]`) when the agent loads no skills. Values are folder names under `Agents/Generic/Skills/`. |
+| `required_skills` | flow-list | Skill keys this agent's instructions tell it to load. Empty list (`[]`) when the agent loads no skills. Values are folder names under `Catalog/Skills/`. |
 
 #### Placement
 
@@ -102,7 +102,7 @@ the field is an empty list. Skills are never inferred from context.
 
 ## Skill Frontmatter Fields
 
-Every generic skill entry file (`Agents/Generic/Skills/*/SKILL.md`) carries:
+Every generic skill entry file (`Catalog/Skills/*/SKILL.md`) carries:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -125,7 +125,7 @@ Initial version for skills that did not previously carry a version field is
 
 ## Hook Bundle Structure
 
-Hook bundles live under `Agents/Generic/Hooks/<bundle-id>/`. Each bundle
+Hook bundles live under `Catalog/Hooks/<bundle-id>/`. Each bundle
 contains a `hook.yaml` manifest and one sub-folder per harness variant.
 
 ### hook.yaml schema
@@ -228,7 +228,7 @@ place user-authored content inside them; it will be overwritten.
 | `ErrorHandlingCommon` | `ErrorHandling` | Bundle |
 | `ExecutionPhilosophyCommon` | `ExecutionPhilosophy` | Bundle |
 
-"Bundle" means `Agents/Generic/DeployedSections.md`.
+"Bundle" means `Catalog/DeployedSections.md`.
 
 Nine names, and every one of them names a generator that exists. A name with
 nothing to fill it does not belong here — see `AgentTemplateArchitecture.md`

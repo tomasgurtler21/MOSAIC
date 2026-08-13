@@ -59,7 +59,7 @@ func writeToolConfig(t *testing.T, root string, content []byte) {
 }
 
 // knownUtilityAgents returns the canonical set of utility agent keys shipped with MOSAIC.
-// These are the six agents listed in Agents/Generic/UtilityAgents/ and referenced by
+// These are the six agents listed in Catalog/UtilityAgents/ and referenced by
 // the Plan and ContractsDesign. They must all appear in the default allow-list (AC14.7).
 func knownUtilityAgents() []string {
 	return []string{

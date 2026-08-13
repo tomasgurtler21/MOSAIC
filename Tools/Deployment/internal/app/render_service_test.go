@@ -549,7 +549,7 @@ func TestRenderAgent_FullyPreAnswered_NoInteraction(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestRenderAgent_ValidSourceOutsideCatalogue_Succeeds verifies the happy path: a
-// generic-form agent at an arbitrary path outside Agents/Generic/ is read and rendered
+// generic-form agent at an arbitrary path outside Catalog/Subagents/ is read and rendered
 // to the destination with a nil error and a populated result.
 func TestRenderAgent_ValidSourceOutsideCatalogue_Succeeds(t *testing.T) {
 	// Arrange: source is in a non-catalogue directory.

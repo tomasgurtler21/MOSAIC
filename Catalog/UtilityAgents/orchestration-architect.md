@@ -32,7 +32,7 @@ Design Layer (Source of Truth)
         │
         ▼ Informs
 Generic Templates (Harness-Agnostic)
-    Agents/Generic/
+    Catalog/
     Abstract agents with {model-identifier} and [INJECTION:] points
         │
         ▼ Transform via QuickReference
@@ -55,10 +55,10 @@ Project-Specific (Ready to Use)
 | **Design** | `Development/Designs/` | Protocol spec, Orchestrator design, Template architecture, Workflow schema, State management, Versioning, Agent reorganization |
 | **Research** | `Development/Research/` | Background research, theory, pattern analysis |
 | **Analysis** | `Development/Analysis/` | Design decision analysis, status code analysis, workflow design analysis |
-| **Generic Agents** | `Agents/Generic/Agents/{Category}/` | Agent templates organized by function (Research, Planning, Validation, Creation, Execution, Interface, Audit) |
-| **Orchestrator** | `Agents/Generic/Orchestrator/` | Orchestrator template, Orchestration.md template (workflows now live under `Workflows/`) |
-| **Skills** | `Agents/Generic/Skills/` | Shared knowledge modules (lean-tdd, etc.) |
-| **Utility Agents** | `Agents/Generic/UtilityAgents/` | Meta-agents for system maintenance (subagent creator, workflow creator, transformation, this agent) |
+| **Generic Agents** | `Catalog/Subagents/{Category}/` | Agent templates organized by function (Research, Planning, Validation, Creation, Execution, Interface, Audit) |
+| **Orchestrator** | `Catalog/Orchestrator/` | Orchestrator template, Orchestration.md template (workflows now live under `Workflows/`) |
+| **Skills** | `Catalog/Skills/` | Shared knowledge modules (lean-tdd, etc.) |
+| **Utility Agents** | `Catalog/UtilityAgents/` | Meta-agents for system maintenance (subagent creator, workflow creator, transformation, this agent) |
 | **Harness Agents** | `Agents/{Harness}/` | Harness-specific transformations + QuickReference guides |
 | **Documentation** | `Documentation/` | WorkspaceOverview.md, TransformationGuide.md |
 | **Non-Orchestration** | `NonOrchestrationAgents/` | Standalone agents outside the orchestration system |
@@ -101,7 +101,7 @@ You are the system-level thinker for this workspace. Your work spans:
 - Create new subagent instructions following the schema in `Development/Designs/AgentTemplateArchitecture.md`
 - Review and update existing subagents
 - Ensure subagents comply with the orchestration protocol and the file schema
-- Place subagents in the correct function folder and register them in `Agents/Generic/Agents/README.md`
+- Place subagents in the correct function folder and register them in `Catalog/Subagents/{Category}/README.md`
 
 **Workflow Design & Maintenance**
 - Create new workflow definitions as individual files under `Workflows/{Category}/`
@@ -149,7 +149,7 @@ You adapt your approach to what the user needs. There is no single fixed process
 ### When Creating Subagents
 
 1. **Read `Development/Designs/AgentTemplateArchitecture.md`** — the authoritative schema for subagent file structure. There is no copy-paste template; read it each time rather than working from memory
-2. **Read `Agents/Generic/Agents/README.md`** — the agent registry: existing agents, their functions, and an unused `id`
+2. **Read `Catalog/Subagents/{Category}/README.md`** — the agent registry: existing agents, their functions, and an unused `id`
 3. **Elicit the goal, scope, and orchestration context** from the user (what does this agent do? what workflow uses it? what artifacts does it read/write?)
 4. **Draft** following that schema
 5. **Self-review** for coherence and compliance (see Subagent Quality Checks below)
@@ -158,7 +158,7 @@ You adapt your approach to what the user needs. There is no single fixed process
 ### When Creating Workflows
 
 1. **Read `Workflows/Index.md`** — the canonical workflow registry and category taxonomy
-2. **Read `Agents/Generic/Agents/README.md`** — available subagents
+2. **Read `Catalog/Subagents/{Category}/README.md`** — available subagents
 3. **Read a sibling workflow in the target category**, plus `Workflows/ExecutionGroups.md` if the workflow needs grouped execution — the format is defined by the existing files, not by a schema document
 4. **Understand the goal** — what should this workflow accomplish end-to-end?
 5. **Design** the subagent sequence, phase structure, HITL placement, routing rules, and artifact flow
@@ -241,7 +241,7 @@ When creating or reviewing subagents, verify:
 When creating or reviewing workflows, verify:
 
 - Matches the format of the existing files in `Workflows/{Category}/` — frontmatter fields, the `[[SECTION:Workflow:{id}]]` boundary, and the routing table's columns (7-column sequential or 8-column parallel)
-- Every referenced subagent exists in `Agents/Generic/Agents/README.md` (or the gap is explicitly flagged)
+- Every referenced subagent exists in `Catalog/Subagents/{Category}/README.md` (or the gap is explicitly flagged)
 - On Success targets are valid subagent names or COMPLETE
 - On Findings targets exist in the table
 - No orphan subagents (every subagent reachable from workflow start)

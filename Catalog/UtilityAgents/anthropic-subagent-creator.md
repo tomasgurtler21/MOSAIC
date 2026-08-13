@@ -128,7 +128,7 @@ Phrases like "think step by step", "be thorough", "analyze carefully" are legacy
 Restating protocol rules that are already in the Communication Protocol section. The template structure already includes the full protocol — adding extra protocol reminders creates maintenance burden and potential inconsistencies.
 
 ### 8. Scope Bleed Between Agents
-Giving a subagent responsibilities that overlap with existing agents in the workflow. Each subagent has a single responsibility — check the agent registry in `Agents/Generic/Agents/README.md` before defining scope.
+Giving a subagent responsibilities that overlap with existing agents in the workflow. Each subagent has a single responsibility — check the agent registry in the `Catalog/Subagents/{Category}/README.md` files before defining scope.
 
 ### 9. Agent Name Coupling
 Referencing other subagents by name in instructions creates tight coupling. If an agent is renamed, split, or removed, all referencing agents need updating. Subagents should be self-contained — they interact with artifacts and roles, not with specific agents.
@@ -162,7 +162,7 @@ Two things it says that change how you work and are easy to get wrong:
 - **There is no template to copy.** A copy-paste template is an explicit non-goal. You author agent-specific prose into a specified structure; shared text arrives at deploy time.
 - **You never author content inside a `[[DEPLOYED:]]` region.** In a source file those regions are empty. Hand-writing the protocol, the authority hierarchy, or the common error-handling text puts words in a region that is regenerated wholesale — they are discarded on the next deploy, and in the meantime they are a copy free to drift.
 
-**Do not use an existing agent file as a shape reference.** The agents in `Agents/Generic/Agents/` have not been migrated to the current schema — they still carry a separate provenance slot, hand-copied shared prose, and worked JSON response objects, and the deployment tool's vocabulary still matches that older shape. They are useful for judging *voice, specificity, and depth of content*; they are actively misleading about *structure*. Structure comes from the schema document and nowhere else.
+**Do not use an existing agent file as a shape reference.** The agents in `Catalog/Subagents/` have not been migrated to the current schema — they still carry a separate provenance slot, hand-copied shared prose, and worked JSON response objects, and the deployment tool's vocabulary still matches that older shape. They are useful for judging *voice, specificity, and depth of content*; they are actively misleading about *structure*. Structure comes from the schema document and nowhere else.
 
 Where the schema and the current tooling disagree, the schema is right and the tooling is the thing to change. If drafting to spec means a region the tool has no content source for yet, say so plainly when you present the draft — do not quietly regress the file to the old shape to keep a validator happy.
 
@@ -171,15 +171,15 @@ Supporting documents, read when relevant to the agent at hand:
 | Document | Read it for |
 |---|---|
 | `Development/Designs/CommunicationProtocol.md` | The message contract: status and error vocabularies, the HITL gate, the artifact provenance stamp |
-| `Agents/Generic/DeployedSections.md` | The canonical blocks' text — what each deployed region will actually contain |
+| `Catalog/DeployedSections.md` | The canonical blocks' text — what each deployed region will actually contain |
 | `Development/Designs/DeploymentBlocks/*.md` | Why a given canonical block says what it says |
 | `Development/Designs/DeployedSectionsBundle.md` | Bundle membership, versioning, staleness, the deploy algorithm |
 | `Development/Designs/InfrastructureAgentConcept.md` | Only when the agent is trigger-fired rather than workflow-routed |
-| `Agents/Generic/SourceFilesFormat.md` | The tool-side restatement of the schema, plus skill and hook conventions. Where it disagrees with the design document, the design document is right |
+| `Catalog/SourceFilesFormat.md` | The tool-side restatement of the schema, plus skill and hook conventions. Where it disagrees with the design document, the design document is right |
 
 ### Where Subagents Live
 
-`Agents/Generic/Agents/README.md` is the agent registry — every existing subagent with its function folder, id, version, tier, and one-line description. Read it during Phase 2: it is how you check for scope overlap, how you pick an unused `id`, and how you decide which folder the new file belongs in.
+The `Catalog/Subagents/{Category}/README.md` files form the agent registry — every existing subagent with its function folder, id, version, tier, and one-line description. Read the relevant category README during Phase 2: it is how you check for scope overlap, how you pick an unused `id`, and how you decide which folder the new file belongs in.
 
 An agent's function is its folder. There is no frontmatter field for it, and adding one would be a second statement of the same fact.
 
@@ -198,7 +198,7 @@ An infrastructure agent is an ordinary subagent by file shape — same frontmatt
 
 ### Utility Agents Are Outside the Schema
 
-Utility agents (`Agents/Generic/UtilityAgents/`) carry frontmatter only. No boundary tags, no protocol, no deployment into a run. If the user is asking for one of those, none of the schema above applies — use general agent-design judgement instead.
+Utility agents (`Catalog/UtilityAgents/`) carry frontmatter only. No boundary tags, no protocol, no deployment into a run. If the user is asking for one of those, none of the schema above applies — use general agent-design judgement instead.
 
 ---
 
@@ -225,7 +225,7 @@ Keep asking clarifying questions until you have a clear, specific goal. A vague 
 Understand how this subagent fits into the orchestration system:
 
 **Questions:**
-- "Which function does this belong to?" (one of the folders in `Agents/Generic/Agents/README.md`, or a new one?)
+- "Which function does this belong to?" (one of the category folders in `Catalog/Subagents/`, or a new one?)
 - "Which workflows will use this subagent?" (existing workflows from `Workflows/Index.md`, or a new workflow?)
 - "What artifacts does this subagent read and write?"
 - "Where in the workflow sequence does it fit?" (after which step? before which?)
@@ -368,7 +368,7 @@ Subagent instructions must not reference other subagents by name. Describe bound
 
 The field list and its rules are in the schema document. What it cannot decide for you:
 
-- **`id`** — the next unused integer. Check `Agents/Generic/Agents/README.md`; it must be unique across the registry and never changes afterwards.
+- **`id`** — the next unused integer. Check the `Catalog/Subagents/` category README files; it must be unique across the registry and never changes afterwards.
 - **`name`** — kebab-case, matching the file's base name.
 - **`tools`** — the generic vocabulary this agent actually needs. Read the `tools` line of two or three existing agents in the same function folder rather than guessing; terminal access in particular is granted only where the agent runs something.
 - **`recommended_tier` and `tier_rationale`** — the capability the work demands, and one line saying why. The rationale is shown to a person choosing a model, so make it a reason rather than a restatement of the tier.
@@ -376,7 +376,7 @@ The field list and its rules are in the schema document. What it cannot decide f
 
 ### File Placement
 
-`Agents/Generic/Agents/{Function}/{agent-name}.md`, where `{Function}` is one of the folders listed in `Agents/Generic/Agents/README.md`. After writing the file, add the agent to that README's summary table — it is the registry, and an agent missing from it is invisible to the next person checking for scope overlap.
+`Catalog/Subagents/{Category}/{agent-name}.md`, where `{Category}` is one of the category folders in `Catalog/Subagents/`. After writing the file, add the agent to that category's `README.md` summary table — it is the registry, and an agent missing from it is invisible to the next person checking for scope overlap.
 
 ---
 
@@ -390,7 +390,7 @@ The field list and its rules are in the schema document. What it cannot decide f
 6. **Self-review** - check for coherence AND orchestration compliance
 7. **Present with rationale** - explain your choices
 8. **Iterate** - refine based on user feedback
-9. **Finalize** - write the subagent file to its function folder and register it in `Agents/Generic/Agents/README.md`
+9. **Finalize** - write the subagent file to its category folder in `Catalog/Subagents/` and register it in that category's `README.md`
 
 Follow the creation phases as a general framework. Skip, combine, or reorder phases based on the conversation — the goal is gathering the right information, not checking boxes. Use your judgment on what the user needs.
 
@@ -404,12 +404,12 @@ When asked to review or update an existing subagent:
 
 1. Read the existing subagent file
 2. Read `Development/Designs/AgentTemplateArchitecture.md` for the current schema
-3. Read `Agents/Generic/Agents/README.md` for the agent registry, and `Workflows/Index.md` for which workflows route to this agent
+3. Read the `Catalog/Subagents/{Category}/README.md` files for the agent registry, and `Workflows/Index.md` for which workflows route to this agent
 4. Apply the Self-Review Checklist (both General Coherence and Orchestration Compliance)
 5. Report findings as a single numbered list: what passes, what needs updating, and why
 6. If updates are needed, propose specific changes with rationale
 7. Iterate with user before applying changes
-8. **Bump the agent's `version`** by the rules in `AgentTemplateArchitecture.md` §3.4, and update the version in the `Agents/Generic/Agents/README.md` summary table to match. Content arriving in a deployed region never bumps an agent's version — its own source did not change.
+8. **Bump the agent's `version`** by the rules in `AgentTemplateArchitecture.md` §3.4, and update the version in the category's `Catalog/Subagents/{Category}/README.md` summary table to match. Content arriving in a deployed region never bumps an agent's version — its own source did not change.
 
 ---
 

@@ -93,7 +93,7 @@ func newModule(t *testing.T) domain.HarnessModule {
 }
 
 // loadProtocol loads the protocol content from the repository root for use in transform requests.
-// All agents in Agents/Generic/ carry a [[DEPLOYED:CommunicationProtocol]] region, so Protocol
+// All agents in Catalog/Subagents/ carry a [[DEPLOYED:CommunicationProtocol]] region, so Protocol
 // must be populated for every transform.Apply call that processes those source files.
 func loadProtocol(t *testing.T, root string) domain.ProtocolContent {
 	t.Helper()
@@ -182,7 +182,7 @@ func TestGoldenFile_ClaudeCode_ContractsReviewAgent(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Agents", "Validation", "contracts-review.md")
+	srcPath := filepath.Join(root, "Catalog", "Subagents", "Validation", "contracts-review.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic contracts-review agent not found at %s: %v", srcPath, err)
@@ -218,7 +218,7 @@ func TestGoldenFile_ClaudeCode_TestRunnerAgent(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Agents", "Execution", "test-runner.md")
+	srcPath := filepath.Join(root, "Catalog", "Subagents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic test-runner agent not found at %s: %v", srcPath, err)
@@ -255,7 +255,7 @@ func TestGoldenFile_ClaudeCode_PlannerTDDSoftAgent(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Agents", "Planning", "planner-tdd-soft.md")
+	srcPath := filepath.Join(root, "Catalog", "Subagents", "Planning", "planner-tdd-soft.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic planner-tdd-soft agent not found at %s: %v", srcPath, err)
@@ -290,7 +290,7 @@ func TestGoldenFile_ClaudeCode_Orchestrator(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Agents", "Generic", "Orchestrator", "orchestrator.md")
+	srcPath := filepath.Join(root, "Catalog", "Orchestrator", "orchestrator.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
 		t.Skipf("generic orchestrator not found at %s: %v", srcPath, err)

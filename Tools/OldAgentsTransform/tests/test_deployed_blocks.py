@@ -43,7 +43,7 @@ class TestDefaultBundlePathCatalogPrefix:
 
     All tests in this class fail in RED: the current DEFAULT_BUNDLE_PATH is
     _REPO_ROOT / 'Agents' / 'Generic' / 'DeployedSections.md', which omits the
-    'Catalog' segment. GREEN after I3.2 inserts the segment.
+    'Catalog' segment. GREEN after the constant is corrected.
     """
 
     def test_default_bundle_path_has_catalog_segment(self):
@@ -59,11 +59,11 @@ class TestDefaultBundlePathCatalogPrefix:
         )
 
     def test_default_bundle_path_value_is_catalog_prefixed(self):
-        """DEFAULT_BUNDLE_PATH must equal <repo-root>/Catalog/Agents/Generic/DeployedSections.md.
+        """DEFAULT_BUNDLE_PATH must equal <repo-root>/Catalog/DeployedSections.md.
 
         Fails in RED: the current value omits the 'Catalog' segment.
         """
-        expected = _REPO_ROOT / "Catalog" / "Agents" / "Generic" / "DeployedSections.md"
+        expected = _REPO_ROOT / "Catalog" / "DeployedSections.md"
         assert deployed_blocks.DEFAULT_BUNDLE_PATH == expected, (
             f"DEFAULT_BUNDLE_PATH must be {expected!r}; "
             f"got {deployed_blocks.DEFAULT_BUNDLE_PATH!r}"
@@ -176,7 +176,7 @@ class TestDefaultBundleLoadsFromCatalog:
         Catalog path explicitly from the repo root and verifies the bundle can be loaded
         from it. Serves as an existence check that the Catalog tree has a valid bundle file.
         """
-        catalog_bundle_path = _REPO_ROOT / "Catalog" / "Agents" / "Generic" / "DeployedSections.md"
+        catalog_bundle_path = _REPO_ROOT / "Catalog" / "DeployedSections.md"
         assert catalog_bundle_path.exists(), (
             f"Catalog bundle file {catalog_bundle_path!r} must exist for this test to run"
         )

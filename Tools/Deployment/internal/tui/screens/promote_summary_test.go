@@ -21,7 +21,7 @@ import (
 func basicPromoteResult() app.PromoteResult {
 	return app.PromoteResult{
 		SourcePath:      "/workspace/.ai/Agents/my-agent.md",
-		DestinationPath: "/mosaicroot/Agents/Generic/Agents/Test/my-agent.md",
+		DestinationPath: "/mosaicroot/Subagents/Test/my-agent.md",
 		Key:             "my-agent",
 		NumericID:       "42",
 		Category:        "Test",

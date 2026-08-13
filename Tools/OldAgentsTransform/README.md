@@ -74,12 +74,12 @@ are printed but never cause a non-zero exit.
 ### Transform a single file
 
 ```bash
-# Generic source file (Agents/Generic/...)
+# Generic source file (Catalog/...)
 py Tools/OldAgentsTransform/boundary_transformer.py <input.md>
 
 # Harness/derived file with its generic counterpart (full-quality transform)
 py Tools/OldAgentsTransform/boundary_transformer.py <input.md> \
-    --generic-ref "Agents/Generic/Agents/Execution/implementation-tdd.md"
+    --generic-ref "Catalog/Subagents/Execution/implementation-tdd.md"
 
 # Harness-only agent — no generic counterpart (degraded-quality transform, automatic)
 py Tools/OldAgentsTransform/boundary_transformer.py <input.md>
@@ -118,7 +118,7 @@ A file is treated as a harness file when its frontmatter contains
   counterpart. Takes precedence over auto-lookup.
 - **Without `--generic-ref`, stem matches:** the single-file CLI automatically
   locates the generic counterpart by filename stem (e.g. `contracts-designer.md`
-  → `Agents/Generic/Agents/Planning/contracts-designer.md`) and produces a
+  → `Catalog/Subagents/Planning/contracts-designer.md`) and produces a
   full-quality result. No flag is required — passing `--generic-ref` is
   optional.
 - **Without `--generic-ref`, no stem match:** the tool automatically runs a
@@ -218,7 +218,7 @@ any working directory.
 ## Harness-only agents (no generic counterpart)
 
 A *harness-only agent* is a harness file whose filename stem has no matching
-file under `Agents/Generic/`. The batch runner and the single-file transformer
+file under `Catalog/`. The batch runner and the single-file transformer
 both support them through a degraded-quality transform that runs automatically
 — no flag is required to enable it.
 
@@ -417,7 +417,7 @@ described here now applies to any other subagent file that genuinely lacks a
 ### Harness-only files receive a degraded-quality transform
 
 The tool matches a file to its generic source **by filename stem**. Agents with
-no counterpart under `Agents/Generic/` were previously skipped; they now go
+no counterpart under `Catalog/Subagents/` were previously skipped; they now go
 through the degraded-quality transform described in
 [Harness-only agents](#harness-only-agents-no-generic-counterpart) above. In
 the original test corpus that was 7 of 27 files, including `platform-bug-hunter`,
@@ -442,7 +442,7 @@ path.
 `boundary_constants.py` is one of **four** copies of the boundary vocabulary:
 
 - `Development/Designs/AgentTemplateArchitecture.md` — the specification (source of truth)
-- `Agents/Generic/SourceFilesFormat.md` — the authoring reference
+- `Catalog/SourceFilesFormat.md` — the authoring reference
 - `Tools/Common/docformat/vocabulary.go` — the Go copy used by `mosaic-deploy`
 - `Tools/OldAgentsTransform/boundary_constants.py` — this Python copy
 

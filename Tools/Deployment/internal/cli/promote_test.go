@@ -80,7 +80,7 @@ func TestPromoteCmd_FileFlag_CallsPromoteWithFilePath(t *testing.T) {
 	svc := &spyService{
 		promoteResp: app.PromoteResult{
 			SourcePath:      filePath,
-			DestinationPath: "/mosaicroot/Agents/Generic/Agents/Test/my-harness-agent.md",
+			DestinationPath: "/mosaicroot/Subagents/Test/my-harness-agent.md",
 			Key:             "my-harness-agent",
 			NumericID:       "42",
 			Category:        "Test",
@@ -285,7 +285,7 @@ func TestPromoteCmd_ServiceSuccess_ReturnsExitSuccess(t *testing.T) {
 func TestPromoteCmd_HumanOutput_ContainsDestinationAndKey(t *testing.T) {
 	// Arrange
 	filePath := "/path/to/agent.md"
-	dest := "/mosaicroot/Agents/Generic/Agents/Audit/agent.md"
+	dest := "/mosaicroot/Subagents/Audit/agent.md"
 	key := "agent"
 	svc := &spyService{
 		promoteResp: app.PromoteResult{
@@ -319,7 +319,7 @@ func TestPromoteCmd_JSONOutput_DecodesAsPromoteResult(t *testing.T) {
 	filePath := "/path/to/agent.md"
 	wantResult := app.PromoteResult{
 		SourcePath:      filePath,
-		DestinationPath: "/mosaicroot/Agents/Generic/Agents/Audit/agent.md",
+		DestinationPath: "/mosaicroot/Subagents/Audit/agent.md",
 		Key:             "agent",
 		NumericID:       "10",
 		Category:        "Audit",
@@ -489,7 +489,7 @@ func TestPromoteCmd_HumanOutput_IncludesDivertedTools(t *testing.T) {
 	svc := &spyService{
 		promoteResp: app.PromoteResult{
 			SourcePath:      filePath,
-			DestinationPath: "/mosaicroot/Agents/Generic/Agents/Test/agent.md",
+			DestinationPath: "/mosaicroot/Subagents/Test/agent.md",
 			Key:             "agent",
 			NumericID:       "15",
 			DivertedTools:   []string{"Bash", "Read"},
@@ -521,7 +521,7 @@ func TestPromoteCmd_HumanOutput_IncludesStrippedFields(t *testing.T) {
 	svc := &spyService{
 		promoteResp: app.PromoteResult{
 			SourcePath:      filePath,
-			DestinationPath: "/mosaicroot/Agents/Generic/Agents/Test/agent.md",
+			DestinationPath: "/mosaicroot/Subagents/Test/agent.md",
 			Key:             "agent",
 			NumericID:       "16",
 			StrippedFields: []app.StrippedField{
@@ -782,7 +782,7 @@ func TestPromoteCmd_JSONOutput_RecoveredFields_IncludedWhenNonEmpty(t *testing.T
 	svc := &spyService{
 		promoteResp: app.PromoteResult{
 			SourcePath:      filePath,
-			DestinationPath: "/generic/Agents/Generic/Agents/Test/agent.md",
+			DestinationPath: "/generic/Subagents/Test/agent.md",
 			Key:             "agent",
 			NumericID:       "1",
 			Category:        "Test",
@@ -875,7 +875,7 @@ func TestPromoteCmd_HumanOutput_RecoveredFields_DoesNotCrash(t *testing.T) {
 	svc := &spyService{
 		promoteResp: app.PromoteResult{
 			SourcePath:      filePath,
-			DestinationPath: "/generic/Agents/Generic/Agents/Test/agent.md",
+			DestinationPath: "/generic/Subagents/Test/agent.md",
 			Key:             "agent",
 			NumericID:       "1",
 			Category:        "Test",

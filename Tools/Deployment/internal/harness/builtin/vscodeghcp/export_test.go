@@ -16,8 +16,8 @@ import (
 // entry point for the run-time construction path:
 //
 //	opts.MosaicRoot must point to a directory containing
-//	<MosaicRoot>/Agents/VS code GHCP/HarnessInjections.md and
-//	<MosaicRoot>/Agents/VS code GHCP/HarnessInjectionsOrchestrator.md.
+//	<MosaicRoot>/Catalog/HarnessInjections/VS Code GHCP/HarnessInjections.md and
+//	<MosaicRoot>/Catalog/HarnessInjections/VS Code GHCP/HarnessInjectionsOrchestrator.md.
 func NewWithOptsForTesting(_ testing.TB, opts registry.BuiltinOptions) (domain.HarnessModule, error) {
 	return New(opts)
 }

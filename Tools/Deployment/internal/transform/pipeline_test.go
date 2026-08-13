@@ -141,7 +141,7 @@ Body content for bytes check.
 // complete, run with -update on the orchestrator source to generate the golden file, then
 // remove the t.Skip call.
 //
-// Source: Agents/Generic/Orchestrator/orchestrator.md
+// Source: Catalog/Orchestrator/orchestrator.md
 // Golden: testdata/transform/golden/orchestrator.md
 func TestGoldenFile_OrchestratorAgent(t *testing.T) {
 	t.Skip("orchestrator golden file deferred: generate with -update once Stage 8 implementation is complete")

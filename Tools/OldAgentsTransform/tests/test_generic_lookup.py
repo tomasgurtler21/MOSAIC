@@ -1,12 +1,13 @@
 """Tests for the generic_lookup module.
 
-Covers: repo-root resolution (including cwd independence), build_generic_map()
-contents and error handling, file_base() double-extension semantics, and
-find_generic_ref() lookup and fallback behaviour.
+Covers: repo-root resolution (including cwd independence), the expected values of
+GENERIC_AGENTS_ROOT and GENERIC_ORCHESTRATOR_PATH against the restructured Catalog/
+layout, build_generic_map() contents and error handling, file_base() double-extension
+semantics, and find_generic_ref() lookup and fallback behaviour.
 
-All tests are in TDD RED phase: they compile and import successfully but fail
-at runtime because generic_lookup.py is a stub with NotImplementedError on
-every function and an intentionally wrong REPO_ROOT constant.
+Tests in TestGenericAgentsRootValue and TestGenericOrchestratorPathValue are in TDD
+RED phase: they assert the final Catalog/-prefixed constant values and will fail until
+generic_lookup.py is updated to use the new paths.
 """
 from __future__ import annotations
 
@@ -28,11 +29,11 @@ import generic_lookup  # noqa: E402
 class TestRepoRootResolution:
     """REPO_ROOT must point to the actual mosaic repo root, resolved from __file__."""
 
-    def test_repo_root_generic_agents_tree_exists(self):
-        """REPO_ROOT / 'Agents' / 'Generic' / 'Agents' must be an existing directory."""
-        assert (generic_lookup.REPO_ROOT / "Agents" / "Generic" / "Agents").is_dir(), (
+    def test_repo_root_catalog_subagents_tree_exists(self):
+        """REPO_ROOT / 'Catalog' / 'Subagents' must be an existing directory."""
+        assert (generic_lookup.REPO_ROOT / "Catalog" / "Subagents").is_dir(), (
             f"REPO_ROOT ({generic_lookup.REPO_ROOT!r}) does not contain "
-            "'Agents/Generic/Agents' — repo-root resolution is wrong"
+            "'Catalog/Subagents' — repo-root resolution is wrong"
         )
 
     def test_repo_root_is_cwd_independent(self, tmp_path, monkeypatch):
@@ -45,7 +46,7 @@ class TestRepoRootResolution:
         """
         expected = generic_lookup.REPO_ROOT
         monkeypatch.chdir(tmp_path)
-        assert (expected / "Agents" / "Generic" / "Agents").is_dir(), (
+        assert (expected / "Catalog" / "Subagents").is_dir(), (
             "REPO_ROOT must resolve correctly even when cwd is changed to an unrelated directory"
         )
 
@@ -71,6 +72,111 @@ class TestRepoRootResolution:
 
 
 # ---------------------------------------------------------------------------
+# GENERIC_AGENTS_ROOT value assertions (TDD RED — fails until I5.2)
+# ---------------------------------------------------------------------------
+
+class TestGenericAgentsRootValue:
+    """GENERIC_AGENTS_ROOT must equal REPO_ROOT / 'Catalog' / 'Subagents'.
+
+    All tests in this class fail in RED: the current constant is
+    REPO_ROOT / 'Agents' / 'Generic' / 'Agents', which uses the old path shape.
+    GREEN after the constant is corrected to the restructured Catalog/ layout.
+    """
+
+    def test_generic_agents_root_value_equals_catalog_subagents(self):
+        """GENERIC_AGENTS_ROOT must equal REPO_ROOT / 'Catalog' / 'Subagents'.
+
+        Fails in RED: the current value uses the old 'Agents/Generic/Agents' shape.
+        """
+        expected = generic_lookup.REPO_ROOT / "Catalog" / "Subagents"
+        assert generic_lookup.GENERIC_AGENTS_ROOT == expected, (
+            f"GENERIC_AGENTS_ROOT must be {expected!r}; "
+            f"got {generic_lookup.GENERIC_AGENTS_ROOT!r}"
+        )
+
+    def test_generic_agents_root_has_catalog_segment(self):
+        """GENERIC_AGENTS_ROOT must include 'Catalog' as a path segment.
+
+        Fails in RED: the current constant resolves to Agents/Generic/Agents
+        with no 'Catalog' segment.
+        """
+        assert "Catalog" in generic_lookup.GENERIC_AGENTS_ROOT.parts, (
+            f"GENERIC_AGENTS_ROOT ({generic_lookup.GENERIC_AGENTS_ROOT!r}) does not "
+            "contain 'Catalog' as a path segment — the constant has not been migrated "
+            "to the Catalog/ layout"
+        )
+
+    def test_generic_agents_root_catalog_segment_appears_exactly_once(self):
+        """GENERIC_AGENTS_ROOT must contain 'Catalog' exactly once — double-prefix guard.
+
+        Fails in RED: the current path has zero 'Catalog' occurrences.
+        GREEN after the fix, and guards against accidentally introducing
+        'Catalog/Catalog/...' in the path.
+        """
+        parts = generic_lookup.GENERIC_AGENTS_ROOT.parts
+        catalog_count = sum(1 for p in parts if p == "Catalog")
+        assert catalog_count == 1, (
+            f"GENERIC_AGENTS_ROOT must contain 'Catalog' exactly once; "
+            f"found {catalog_count} occurrence(s) in {generic_lookup.GENERIC_AGENTS_ROOT!r}. "
+            "A count of 0 means the Catalog segment is missing; "
+            "a count > 1 means a double-prefix was accidentally introduced."
+        )
+
+
+# ---------------------------------------------------------------------------
+# GENERIC_ORCHESTRATOR_PATH value assertions (TDD RED — fails until I5.2)
+# ---------------------------------------------------------------------------
+
+class TestGenericOrchestratorPathValue:
+    """GENERIC_ORCHESTRATOR_PATH must equal REPO_ROOT / 'Catalog' / 'Orchestrator' / 'orchestrator.md'.
+
+    All tests in this class fail in RED: the current constant is
+    REPO_ROOT / 'Agents' / 'Generic' / 'Orchestrator' / 'orchestrator.md',
+    which uses the old path shape.
+    GREEN after the constant is corrected to the restructured Catalog/ layout.
+    """
+
+    def test_generic_orchestrator_path_value_equals_catalog_orchestrator(self):
+        """GENERIC_ORCHESTRATOR_PATH must equal REPO_ROOT / 'Catalog' / 'Orchestrator' / 'orchestrator.md'.
+
+        Fails in RED: the current value uses the old 'Agents/Generic/Orchestrator' shape.
+        """
+        expected = generic_lookup.REPO_ROOT / "Catalog" / "Orchestrator" / "orchestrator.md"
+        assert generic_lookup.GENERIC_ORCHESTRATOR_PATH == expected, (
+            f"GENERIC_ORCHESTRATOR_PATH must be {expected!r}; "
+            f"got {generic_lookup.GENERIC_ORCHESTRATOR_PATH!r}"
+        )
+
+    def test_generic_orchestrator_path_has_catalog_segment(self):
+        """GENERIC_ORCHESTRATOR_PATH must include 'Catalog' as a path segment.
+
+        Fails in RED: the current constant uses the old 'Agents/Generic/Orchestrator'
+        shape with no 'Catalog' segment.
+        """
+        assert "Catalog" in generic_lookup.GENERIC_ORCHESTRATOR_PATH.parts, (
+            f"GENERIC_ORCHESTRATOR_PATH ({generic_lookup.GENERIC_ORCHESTRATOR_PATH!r}) "
+            "does not contain 'Catalog' as a path segment — the constant has not been "
+            "migrated to the Catalog/ layout"
+        )
+
+    def test_generic_orchestrator_path_catalog_segment_appears_exactly_once(self):
+        """GENERIC_ORCHESTRATOR_PATH must contain 'Catalog' exactly once — double-prefix guard.
+
+        Fails in RED: the current path has zero 'Catalog' occurrences.
+        GREEN after the fix, and guards against accidentally introducing
+        'Catalog/Catalog/...' in the path.
+        """
+        parts = generic_lookup.GENERIC_ORCHESTRATOR_PATH.parts
+        catalog_count = sum(1 for p in parts if p == "Catalog")
+        assert catalog_count == 1, (
+            f"GENERIC_ORCHESTRATOR_PATH must contain 'Catalog' exactly once; "
+            f"found {catalog_count} occurrence(s) in {generic_lookup.GENERIC_ORCHESTRATOR_PATH!r}. "
+            "A count of 0 means the Catalog segment is missing; "
+            "a count > 1 means a double-prefix was accidentally introduced."
+        )
+
+
+# ---------------------------------------------------------------------------
 # build_generic_map()
 # ---------------------------------------------------------------------------
 
@@ -89,7 +195,7 @@ class TestBuildGenericMap:
         result = generic_lookup.build_generic_map()
         assert len(result) > 0, (
             "build_generic_map() must return a non-empty mapping; "
-            "check that REPO_ROOT is correct and the Agents/Generic/Agents tree exists"
+            "check that REPO_ROOT is correct and the Catalog/Subagents tree exists"
         )
 
     def test_build_generic_map_contains_contracts_designer(self):
@@ -109,9 +215,9 @@ class TestBuildGenericMap:
         assert path.name == "contracts-designer.md", (
             f"Expected filename 'contracts-designer.md'; got {path.name!r}"
         )
-        # The path must live under the Generic agents tree, not under Tools/
-        assert "Generic" in path.parts, (
-            f"contracts-designer path {path!r} is not under the Generic agents tree"
+        # The path must live under the Catalog/Subagents tree, not under Tools/
+        assert "Subagents" in path.parts, (
+            f"contracts-designer path {path!r} is not under the Catalog/Subagents tree"
         )
 
     def test_build_generic_map_excludes_readme_keys(self):

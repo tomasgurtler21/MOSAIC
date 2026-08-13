@@ -51,9 +51,9 @@ func TestParseAgentFile_FrontmatterRoleWins_SubagentInOrchestratorPath(t *testin
 
 	// Place a fixture in the orchestrator path declaring role: subagent.
 	// Without frontmatter override the path-derived role would be RoleOrchestrator.
-	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Orchestrator")
+	mustMkdir(t, root, "Catalog", "Orchestrator")
 	writeAgentFixture(t, root,
-		filepath.Join("Catalog", "Agents", "Generic", "Orchestrator", "orchestrator.md"),
+		filepath.Join("Catalog", "Orchestrator", "orchestrator.md"),
 		"role: subagent\n")
 
 	cat, err := catalog.Load(root, "")
@@ -88,10 +88,10 @@ func TestParseAgentFile_FrontmatterRoleWins_SubagentInOrchestratorPath(t *testin
 func TestParseAgentFile_AbsentRole_FallsBackToPathDerivedRole(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 
-	// Worker-agent path: Catalog/Agents/Generic/Agents/{category}/*.md → path-derived RoleSubagent.
-	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Agents", "Validation")
+	// Worker-agent path: Catalog/Subagents/{category}/*.md → path-derived RoleSubagent.
+	mustMkdir(t, root, "Catalog", "Subagents", "Validation")
 	writeAgentFixture(t, root,
-		filepath.Join("Catalog", "Agents", "Generic", "Agents", "Validation", "no-role-agent.md"),
+		filepath.Join("Catalog", "Subagents", "Validation", "no-role-agent.md"),
 		"version: \"1.0\"\nname: No Role Agent\n")
 
 	cat, err := catalog.Load(root, "")
@@ -121,9 +121,9 @@ func TestParseAgentFile_UnrecognisedRole_AgentRetainedAndIssueAppended(t *testin
 	root := makeTempMosaicRoot(t)
 
 	// Write a fixture with an unrecognised role value.
-	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Agents", "Validation")
+	mustMkdir(t, root, "Catalog", "Subagents", "Validation")
 	writeAgentFixture(t, root,
-		filepath.Join("Catalog", "Agents", "Generic", "Agents", "Validation", "bad-role-agent.md"),
+		filepath.Join("Catalog", "Subagents", "Validation", "bad-role-agent.md"),
 		"role: bad-value\n")
 
 	cat, err := catalog.Load(root, "")

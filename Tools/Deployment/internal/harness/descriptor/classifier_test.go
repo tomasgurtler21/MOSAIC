@@ -161,7 +161,7 @@ func buildClassifier(t *testing.T, yaml string) descriptor.FieldClassifier {
 // ---------------------------------------------------------------------------
 
 // TestClassify_GenericVocabularyKey_IsMosaic verifies that every generic vocabulary key
-// (the set from Agents/Generic/SourceFilesFormat.md) classifies as ClassMosaic.
+// (the set from Catalog/SourceFilesFormat.md) classifies as ClassMosaic.
 func TestClassify_GenericVocabularyKey_IsMosaic(t *testing.T) {
 	clf := buildClassifier(t, noDestFieldClassifierDescriptorYAML)
 

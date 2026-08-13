@@ -15,7 +15,7 @@ status: Draft
 | **Block** | `AuthorityHierarchy:Subagent` |
 | **Fills** | `[[DEPLOYED:AuthorityHierarchy]]` — placement in `AgentTemplateArchitecture.md` §2.5 |
 | **Applies to** | `subagent` |
-| **Text lives in** | `Agents/Generic/DeployedSections.md` |
+| **Text lives in** | `Catalog/DeployedSections.md` |
 
 The block's text is in the bundle and nowhere else. This document is its reasoning (see `DeployedSectionsBundle.md` for why the two are separate).
 

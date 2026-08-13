@@ -1497,14 +1497,14 @@ class TestBatchTransformRepoRootAndLookupCompat:
     PASS (already): file_base tests — serve as non-regression anchors.
     """
 
-    def test_repo_root_generic_agents_tree_exists(self):
+    def test_repo_root_catalog_subagents_tree_exists(self):
         """bt.REPO_ROOT must point to the real mosaic repo root.
 
         Fails in RED: current REPO_ROOT resolves to <repo>/Tools/, which does not
-        contain Agents/Generic/Agents. GREEN after I1.2 rewires to generic_lookup.
+        contain Catalog/Subagents. GREEN after the REPO_ROOT is wired to generic_lookup.
         """
-        assert (bt.REPO_ROOT / "Agents" / "Generic" / "Agents").is_dir(), (
-            f"bt.REPO_ROOT ({bt.REPO_ROOT!r}) does not contain 'Agents/Generic/Agents'; "
+        assert (bt.REPO_ROOT / "Catalog" / "Subagents").is_dir(), (
+            f"bt.REPO_ROOT ({bt.REPO_ROOT!r}) does not contain 'Catalog/Subagents'; "
             "REPO_ROOT is one parent hop short of the true repo root"
         )
 

@@ -32,7 +32,7 @@ An agent file is a system prompt with a schema. This document is that schema: wh
 | The orchestration contract's content — message shape, status and error vocabularies, the HITL gate, the artifact provenance stamp | `CommunicationProtocol.md`. This document places the region; that one decides what goes in it. |
 | Bundle membership, versioning, staleness, the deploy algorithm | `DeployedSectionsBundle.md` |
 | What any canonical block says and why | The five documents under `DeploymentBlocks/` |
-| All canonical text itself | `Agents/Generic/DeployedSections.md`, and nowhere else (§7) |
+| All canonical text itself | `Catalog/DeployedSections.md`, and nowhere else (§7) |
 | The measurement and decision that produced the blocks | `Development/Analysis/AgentBodyDrift.md` |
 | Infrastructure agent declaration, trigger vocabulary, `Class` | `InfrastructureAgentConcept.md`. An infrastructure agent is an ordinary subagent by this schema; what makes it infrastructure is how the orchestrator reaches it, not how its file is shaped. |
 | Utility agents | Nothing. They carry no boundary tags, are never deployed into a run, and are outside this schema entirely. |
@@ -177,7 +177,7 @@ Every `[[DEPLOYED:]]` name, its required parent, and where its content comes fro
 
 Nine names. Three sources, and the distinction matters:
 
-- **Bundle** — `Agents/Generic/DeployedSections.md`, the five blocks whose text is identical across every agent of a role and which are not contracts. Governed by `DeployedSectionsBundle.md`.
+- **Bundle** — `Catalog/DeployedSections.md`, the five blocks whose text is identical across every agent of a role and which are not contracts. Governed by `DeployedSectionsBundle.md`.
 - **Contract source** — `CommunicationProtocol.md` ships its own text. It is a contract, so it is deliberately not in the bundle and carries its own version.
 - **Assembled** — no canonical text exists; the content is built from a deployment's own selections. `AvailableWorkflows` and `InfrastructureAgents` are assembled from what the deployment selected; `HarnessConstraints` comes from the one harness module in play.
 
@@ -213,9 +213,9 @@ Two groups. Identity fields describe the agent; deployment fields tell the deplo
 | `tools` | flow list or placeholder | Yes | deployment | Generic tool vocabulary, mapped to harness-specific names at deploy time. `{tool-permissions}` where the deployment supplies the whole list. |
 | `recommended_tier` | string | Source only | deployment | The capability tier this agent wants. Open string — no fixed vocabulary. Presented to the user during model selection and used as the key for tier-to-model mapping. Values in current source: `LOW`, `LOW-MEDIUM`, `MEDIUM`, `MEDIUM-HIGH`, `HIGH`. |
 | `tier_rationale` | string | Source only | deployment | Why that tier. Shown to the user alongside it, so a person choosing a model has the reasoning and not just the label. |
-| `required_skills` | flow list | Source only | deployment | Skill keys this agent's instructions explicitly tell it to load. `[]` when it loads none. Values are folder names under `Agents/Generic/Skills/`. Never inferred from context — a skill appears here only because a Process step names it. |
+| `required_skills` | flow list | Source only | deployment | Skill keys this agent's instructions explicitly tell it to load. `[]` when it loads none. Values are folder names under `Catalog/Skills/`. Never inferred from context — a skill appears here only because a Process step names it. |
 
-**"Source only"** means the field is required in source files under `Agents/Generic/` and is consumed by the deployment tool during transformation (for model selection, skill shipping, etc.), but is stripped from deployed output by every harness descriptor's `drop` list. It does not appear in deployed agent files. The three source-only fields — `recommended_tier`, `tier_rationale`, `required_skills` — serve the deployment pipeline, not the agent at runtime.
+**"Source only"** means the field is required in source files under `Catalog/` and is consumed by the deployment tool during transformation (for model selection, skill shipping, etc.), but is stripped from deployed output by every harness descriptor's `drop` list. It does not appear in deployed agent files. The three source-only fields — `recommended_tier`, `tier_rationale`, `required_skills` — serve the deployment pipeline, not the agent at runtime.
 
 A deployed file additionally carries `bundle_version`, written by the tool. It is not a source field; see `DeployedSectionsBundle.md` §3.2.
 
@@ -225,7 +225,7 @@ Key order in source is `id`, `version`, `name`, `description`, `role`, then the 
 
 `role` states what the agent is, in the same vocabulary the canonical blocks use in their `applies_to` fields: `subagent` or `orchestrator`.
 
-**Why it is declared rather than inferred.** Every block the tool selects is keyed on role. Today the tool derives role from the file's path — `Agents/Generic/Orchestrator/` means orchestrator, everything else means not. That works exactly as long as the layout does, which makes a reorganisation of the agent folders a silent change to which contract text ships. Moving a file should not be able to change what an agent is.
+**Why it is declared rather than inferred.** Every block the tool selects is keyed on role. Today the tool derives role from the file's path — `Catalog/Orchestrator/` means orchestrator, everything else means not. That works exactly as long as the layout does, which makes a reorganisation of the agent folders a silent change to which contract text ships. Moving a file should not be able to change what an agent is.
 
 There is a second reason, smaller but sharper: a role in frontmatter is checkable against the file's own regions. A file declaring `role: subagent` with no `OutputFormat` section is detectably wrong (§9). With role inferred from path, the same file is merely unusual.
 
@@ -474,7 +474,7 @@ Both `[[INJECTION:]]` and `[[CUSTOM:]]` hold project-authored content preserved 
 
 The names below are the `[[INJECTION:]]` regions MOSAIC declares in source files. They are preserved by name-matching between deployed and source on update — a name the author put in the source is a name that will be there next time.
 
-Most are carried by MOSAIC's own sources, declared empty so a project can see the slot exists. `LanguagePatterns` is the exception and is deliberately **not** declared anywhere in `Agents/Generic/`: a language pattern is meaningful only once a project has a language, so pre-declaring it in every agent would ship an empty region and a `TODO.md` line to fifty-odd files on the chance that one project fills them. A project that wants it uses `[[CUSTOM:LanguagePatterns]]` in their deployed file.
+Most are carried by MOSAIC's own sources, declared empty so a project can see the slot exists. `LanguagePatterns` is the exception and is deliberately **not** declared anywhere in `Catalog/`: a language pattern is meaningful only once a project has a language, so pre-declaring it in every agent would ship an empty region and a `TODO.md` line to fifty-odd files on the chance that one project fills them. A project that wants it uses `[[CUSTOM:LanguagePatterns]]` in their deployed file.
 
 | Name | Usual parent | Purpose |
 |------|--------------|---------|
@@ -551,7 +551,7 @@ One is enforced. The rest are guidance, and marked as such.
 
 ## 7. The Canonical Blocks
 
-Five fragments of shared body text are deployed into every subagent. Their text lives in `Agents/Generic/DeployedSections.md` and nowhere else; their reasoning lives one document per block.
+Five fragments of shared body text are deployed into every subagent. Their text lives in `Catalog/DeployedSections.md` and nowhere else; their reasoning lives one document per block.
 
 | Block | Fills region | Parent section | Reasoning |
 |-------|--------------|----------------|-----------|
@@ -619,7 +619,7 @@ The same rules, two appetites, selected by which tree is being checked.
 
 | Tree | Behaviour |
 |---|---|
-| **MOSAIC's own sources** (`Agents/Generic/**`) — strict | Every rule is an error, warnings included. CI fails. |
+| **MOSAIC's own sources** (`Catalog/**`) — strict | Every rule is an error, warnings included. CI fails. |
 | **Anyone else's agents** — lenient | Errors are errors. Warnings and advice are reported, and reported into `TODO.md` and the deployment summary rather than only to a console, because the author who most needs them is the one least likely to read stderr. |
 
 The asymmetry is the point rather than a compromise. MOSAIC's forty-two agents *are* the recipe, so they are held to all of it; a project's own agent is held to what would otherwise break. A newcomer who fills in the blanks passes either way, and an expert writing something the template did not anticipate is never blocked.
@@ -636,7 +636,7 @@ The asymmetry is the point rather than a compromise. MOSAIC's forty-two agents *
 | 2 | `role` is `subagent` or `orchestrator` | Error | Tool | No |
 | 3 | `name` matches the file's base name | Error | Tool | No |
 | 4 | `version` parses as semver | Error | Tool | No |
-| 5 | `required_skills` entries name existing folders under `Agents/Generic/Skills/` | Error | Tool | No |
+| 5 | `required_skills` entries name existing folders under `Catalog/Skills/` | Error | Tool | No |
 | 6 | `id` is unique across the agent registry | Error | Tool | No |
 
 All errors, and none of them can flag a creative agent: each is a field the tool reads, and a value it cannot use is a value that fails.
@@ -722,7 +722,7 @@ Steps 2–6 are verifiable two ways: after deployment, each region must be byte-
 
 ### 10.1 Vocabulary tables
 
-Three files hold the boundary vocabulary in machine-readable form: `Agents/Generic/SourceFilesFormat.md`, `Tools/Common/docformat/vocabulary.go`, and `Tools/OldAgentsTransform/boundary_constants.py`. This document is their specification; they are copies of it, and a partial update leaves them disagreeing about what is valid.
+Three files hold the boundary vocabulary in machine-readable form: `Catalog/SourceFilesFormat.md`, `Tools/Common/docformat/vocabulary.go`, and `Tools/OldAgentsTransform/boundary_constants.py`. This document is their specification; they are copies of it, and a partial update leaves them disagreeing about what is valid.
 
 Changes this document makes to them:
 
@@ -734,7 +734,7 @@ Changes this document makes to them:
 - `CanonicalOrder` becomes seven slots, of which slot 2 is deployed, and is consumed as a subsequence rather than an equality check (§2.3).
 - `InjectionParent` **stops being an allowlist.** Injection names are open (§6.2): an unlisted name is preserved like any other. What remains is a table of usual parents for the suggested names, consulted for advice-level reporting only. `ArtifactProvenanceExtension` leaves it; `ProtocolExtension` is absent — projects use `[[CUSTOM:ProtocolExtension]]` instead of `[[INJECTION:ProtocolExtension]]`, following the rule that MOSAIC defines `[[INJECTION:]]` slots and projects invent `[[CUSTOM:]]` ones.
 
-`SourceFilesFormat.md` should be reduced to a pointer at this document plus the skill and hook-bundle conventions it uniquely covers, rather than restating the agent format alongside it (§16).
+`Catalog/SourceFilesFormat.md` should be reduced to a pointer at this document plus the skill and hook-bundle conventions it uniquely covers, rather than restating the agent format alongside it (§16).
 
 ---
 
@@ -757,7 +757,7 @@ Changes this document makes to them:
 | Term | Meaning |
 |------|---------|
 | **Agent file** | A markdown file with frontmatter and boundary-delimited regions, deployed as an agent's system prompt. |
-| **Source file** | The MOSAIC-maintained agent file under `Agents/Generic/`. Deployed regions are empty; injections are empty. |
+| **Source file** | The MOSAIC-maintained agent file under `Catalog/`. Deployed regions are empty; injections are empty. |
 | **Deployed file** | The output of running the deployment tool over a source file. Deployed regions are filled; injections carry project content. |
 | **Region** | A named span of a file bounded by a matched pair of markers. |
 | **Section** | A `[[SECTION:]]` region — MOSAIC-authored, carried verbatim. |
@@ -765,7 +765,7 @@ Changes this document makes to them:
 | **Injection** | An `[[INJECTION:]]` region — declared in source, project-filled, preserved byte-identically. Follows source position on reorder. |
 | **Custom region** | A `[[CUSTOM:]]` region — project-invented, exists only in deployed files, preserved byte-identically. Parked at end of file on schema reorder. |
 | **Canonical block** | Deployed text maintained in one place and copied into every agent carrying the matching region. |
-| **Bundle** | `Agents/Generic/DeployedSections.md` — the file holding every canonical block. A payload, not a specification. |
+| **Bundle** | `Catalog/DeployedSections.md` — the file holding every canonical block. A payload, not a specification. |
 | **Bundle version** | The bundle's semver, stamped into every deployed file's frontmatter. Governed by `DeployedSectionsBundle.md`. |
 | **Contract** | Text defining something two parties must agree on. There is one: the orchestration contract in `CommunicationProtocol.md`. It carries its own version and is not in the bundle. |
 | **Specifying document** | The design document holding a block's rationale and changelog, named in the block's `specified_in`. Holds no copy of the block. |
@@ -781,18 +781,18 @@ A change to this schema is never local. The table below lists what must be check
 
 | Change | Must update |
 |--------|------------|
-| Canonical section order (§2.3) | `SourceFilesFormat.md`, `vocabulary.go` (`CanonicalOrder`), `boundary_constants.py`, all source agent files, test fixtures. Deployed agents with `[[CUSTOM:]]` regions may require repositioning after parking (§6.4). |
-| Injection name added (§6.2) | Source agent files carrying the injection, `SourceFilesFormat.md` injection catalogue. Adding to an already-deployed agent risks a Shape B collision if a project uses the same name as `[[CUSTOM:]]` — see §6.2.2. |
-| Injection name renamed (§6.2) | Rename table entry (§6.2.2, §10.1), source agent files, `SourceFilesFormat.md` injection catalogue. Without the table entry, project content is stranded. |
+| Canonical section order (§2.3) | `Catalog/SourceFilesFormat.md`, `vocabulary.go` (`CanonicalOrder`), `boundary_constants.py`, all source agent files, test fixtures. Deployed agents with `[[CUSTOM:]]` regions may require repositioning after parking (§6.4). |
+| Injection name added (§6.2) | Source agent files carrying the injection, `Catalog/SourceFilesFormat.md` injection catalogue. Adding to an already-deployed agent risks a Shape B collision if a project uses the same name as `[[CUSTOM:]]` — see §6.2.2. |
+| Injection name renamed (§6.2) | Rename table entry (§6.2.2, §10.1), source agent files, `Catalog/SourceFilesFormat.md` injection catalogue. Without the table entry, project content is stranded. |
 | Injection name removed (§6.2) | Source agent files. Project content is orphaned to `TODO.md` on the first update — §6.2.2 states the discipline that makes removal rare. |
-| Deployed region name added or removed (§2.5) | `vocabulary.go` (`CanonicalDeployed`, `DeployedParent`), `boundary_constants.py`, classifier, role matrix (§2.4), `SourceFilesFormat.md`. If bundle-sourced, the bundle gains a block and `DeployedSectionsBundle.md` is updated. |
+| Deployed region name added or removed (§2.5) | `vocabulary.go` (`CanonicalDeployed`, `DeployedParent`), `boundary_constants.py`, classifier, role matrix (§2.4), `Catalog/SourceFilesFormat.md`. If bundle-sourced, the bundle gains a block and `DeployedSectionsBundle.md` is updated. |
 | Bundle block content changed | `bundle_version` bump, specifying document changelog, all deployed agents (redeploy). If the changed region has nested user regions, the deploy tool should emit a TODO advising the project to review their content against the new text. |
 | Communication Protocol content changed | Protocol version bump in `CommunicationProtocol.md`. Projects with `[[CUSTOM:ProtocolExtension]]` must review their content against the new protocol. |
 | Frontmatter field added or renamed (§3) | `SourceFilesFormat.md`, harness descriptor `frontmatter_plan` (filter/add/remove lists), `agentfields` registry, all source agent files. |
 | Validator rule severity changed (§9) | `validate.go`. A promotion from warning to error may cause previously passing project agents to fail — this is intentional and motivated. |
 | Generic tool name changed in source `tools` list | Harness module tool mappings (internal). Projects with custom `tool_destinations` must update their configuration. |
 | Role matrix changed (§2.4) | Bundle block `applies_to` fields, classifier, validator, source agent files for the affected role. |
-| Skill folder renamed (`Agents/Generic/Skills/`) | Source agent `required_skills` fields, agent body text referencing the skill path. |
+| Skill folder renamed (`Catalog/Skills/`) | Source agent `required_skills` fields, agent body text referencing the skill path. |
 
 ---
 
@@ -832,7 +832,7 @@ A change to this schema is never local. The table below lists what must be check
 - **Reducing §4.6 to `status_message` alone.** Held until v1.3, on the premise that it was the only field varying between agents. It was not: `error_code` varies too, and the contract region can only supply the five-code vocabulary, never this agent's choice from it (§4.6). The premise also reached into migration step 7, where acting on it would have destroyed the choices rather than merely omitted them.
 - **A `[[DEPLOYED:]]` region for the Process list itself.** Every Process list is agent-specific; only its closing steps were shared. Deploying the whole list would have meant no list at all.
 - **"Deployment configuration" as a content source.** Held until v1.4 as the source for `LanguagePatterns` and `CustomConstraints`. It described no mechanism, had no specification behind it, and was never implemented — the `Specified in` column carried an em-dash for both rows, which is this document admitting in its own table that nobody had written the thing down. A source that exists only as a phrase in a table is worse than an acknowledged gap: the closed-set rule forced every harness to satisfy it with empty declarations, so the fiction propagated into four harness files and every deployed agent. §2.5.1 now requires a named, implemented generator.
-- **A per-agent `LanguagePatterns` region in MOSAIC's own sources.** Considered when reclassifying it as an injection in v1.4, on the precedent of `CodebaseContext`, which is declared empty in thirty-seven sources. Rejected: `CodebaseContext` describes a codebase every project has, while language patterns are meaningful only to a project that has settled on a language and wants its agents constrained by it. Declaring it everywhere would ship fifty-odd empty regions and `TODO.md` lines to make one project's case marginally easier. As of v1.5, `LanguagePatterns` is a `[[CUSTOM:]]` region if a project wants it.
+- **A per-agent `LanguagePatterns` region in MOSAIC's own catalog sources.** Considered when reclassifying it as an injection in v1.4, on the precedent of `CodebaseContext`, which is declared empty in thirty-seven sources. Rejected: `CodebaseContext` describes a codebase every project has, while language patterns are meaningful only to a project that has settled on a language and wants its agents constrained by it. Declaring it everywhere would ship fifty-odd empty regions and `TODO.md` lines to make one project's case marginally easier. As of v1.5, `LanguagePatterns` is a `[[CUSTOM:]]` region if a project wants it.
 - **A separate `ArtifactProvenance` canonical slot.** Held slot 3 in v1.0. Removed: the stamp is verified by the orchestrator, which makes it hard interop rather than an audit convenience, and a contract with two version numbers in two regions is a contract that can disagree with itself.
 
 ---
@@ -847,7 +847,7 @@ A change to this schema is never local. The table below lists what must be check
 - **The deployment tool does not read the bundle at all.** Until it does, the five blocks are deployed nowhere and the migration in §10 cannot complete. Tracked in `DeployedSectionsBundle.md` §10.
 - **The tool's role enum says `worker`; every design document says `subagent`.** `domain.AgentRole` is `worker` / `orchestrator` / `utility`. The frontmatter field uses `subagent` (§3.2); the code should follow, or map explicitly at the boundary.
 - **Role is still inferred from path in the tool.** The frontmatter field is specified here but nothing reads it. Until it does, `role` is documentation, and a file moved between folders still changes what it is.
-- **`SourceFilesFormat.md` and this document overlap.** That file states the agent format from the tool's side, with no rationale, and has already drifted. It should be reduced to a pointer plus the skill and hook conventions it uniquely covers (§10.1).
-- **`InfrastructureAgentConcept.md` §3.1 shows `[[INJECTION:InfrastructureAgents]]`.** The vocabulary has it as `[[DEPLOYED:]]`, and the orchestrator source uses `[[DEPLOYED:]]`. The design document is the one that is wrong, and it is the document a reader would trust. `Agents/Generic/Agents/Infrastructure/README.md` line 7 carries the same error and should be corrected with it.
+- **`Catalog/SourceFilesFormat.md` and this document overlap.** That file states the agent format from the tool's side, with no rationale, and has already drifted. It should be reduced to a pointer plus the skill and hook conventions it uniquely covers (§10.1).
+- **`InfrastructureAgentConcept.md` §3.1 shows `[[INJECTION:InfrastructureAgents]]`.** The vocabulary has it as `[[DEPLOYED:]]`, and the orchestrator source uses `[[DEPLOYED:]]`. The design document is the one that is wrong, and it is the document a reader would trust. `Catalog/Subagents/Infrastructure/README.md` line 7 carries the same error and should be corrected with it.
 - **The orchestrator's `ErrorHandling` section extends far past its injection.** `[[INJECTION:ErrorHandlingExtension]]` closes around line 493 and the section continues to line 715 with the Core Orchestration Loop, which is neither error handling nor an extension of it. The current arrangement means a project injection lands in the middle of unrelated material.
-- **The `MosaicTest` agents were not surveyed.** Three agents under `Agents/Generic/Agents/MosaicTest/` exist to exercise the harness rather than to do work. Whether they conform to this schema, and whether they should, is unexamined.
+- **The `MosaicTest` agents were not surveyed.** Three agents under `MosaicTestCatalog/Agents/MosaicTest/` exist to exercise the harness rather than to do work. Whether they conform to this schema, and whether they should, is unexamined.

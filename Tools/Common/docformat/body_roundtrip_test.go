@@ -43,7 +43,7 @@ func triggerBodyParse(t *testing.T, doc *docformat.Document) {
 
 func TestBodyRoundTrip_GenericAgent_ByteIdentical(t *testing.T) {
 	// Generic agent with all seven sections and empty injections.
-	fpath := filepath.Join(repoRoot(), "Agents", "Generic", "Agents", "Execution", "test-runner.md")
+	fpath := filepath.Join(repoRoot(), "Catalog", "Subagents", "Execution", "test-runner.md")
 	src, err := os.ReadFile(fpath)
 	if err != nil {
 		t.Fatalf("read file: %v", err)
@@ -64,7 +64,7 @@ func TestBodyRoundTrip_GenericAgent_ByteIdentical(t *testing.T) {
 
 func TestBodyRoundTrip_Orchestrator_ByteIdentical(t *testing.T) {
 	// Orchestrator contains [[INJECTION:AvailableWorkflows]] inside the Identity section.
-	fpath := filepath.Join(repoRoot(), "Agents", "Generic", "Orchestrator", "orchestrator.md")
+	fpath := filepath.Join(repoRoot(), "Catalog", "Orchestrator", "orchestrator.md")
 	src, err := os.ReadFile(fpath)
 	if err != nil {
 		t.Fatalf("read file: %v", err)
@@ -84,13 +84,11 @@ func TestBodyRoundTrip_Orchestrator_ByteIdentical(t *testing.T) {
 }
 
 func TestBodyRoundTrip_DeployedAgentWithFilledInjections_ByteIdentical(t *testing.T) {
-	// A deployed agent with filled injection content — the case the update flow must lift
-	// content from. This is the most important round-trip case for the update pipeline.
-	fpath := filepath.Join(repoRoot(), "Agents", "OpenCode", "ExampleProject", "Agents", "test-runner.md")
-	src, err := os.ReadFile(fpath)
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
+	// A document with a filled injection — the case the update flow must lift content from.
+	// Uses the filled-injection boundary fixture as a stand-in because no harness-specific
+	// deployed file with this structure exists at a stable catalog path. The round-trip
+	// property under test is identical: body parsing must not disturb the serialised output.
+	src := boundaryFixtureBytes(t, "filled-injection.md")
 
 	doc, err := docformat.Parse(src)
 	if err != nil {
@@ -100,7 +98,7 @@ func TestBodyRoundTrip_DeployedAgentWithFilledInjections_ByteIdentical(t *testin
 
 	got := doc.Bytes()
 	if !bytes.Equal(src, got) {
-		t.Errorf("round-trip failed for deployed agent with filled injections (original=%d bytes, got=%d bytes)", len(src), len(got))
+		t.Errorf("round-trip failed for document with filled injection (original=%d bytes, got=%d bytes)", len(src), len(got))
 		reportFirstDifference(t, src, got)
 	}
 }
@@ -109,7 +107,7 @@ func TestBodyRoundTrip_WorkflowFileWithCompoundSection_ByteIdentical(t *testing.
 	// Workflow file contains [[SECTION:Workflow:quick-fix]] — a compound section name.
 	// The content after [[/SECTION:Workflow:quick-fix]] is outside any boundary tag.
 	// Both must survive the round trip byte-for-byte.
-	fpath := filepath.Join(repoRoot(), "Workflows", "Build", "quick-fix.md")
+	fpath := filepath.Join(repoRoot(), "Catalog", "Workflows", "Build", "quick-fix.md")
 	src, err := os.ReadFile(fpath)
 	if err != nil {
 		t.Fatalf("read file: %v", err)

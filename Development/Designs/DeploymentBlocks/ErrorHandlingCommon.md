@@ -15,7 +15,7 @@ status: Draft
 | **Block** | `ErrorHandlingCommon:Subagent` |
 | **Fills** | `[[DEPLOYED:ErrorHandlingCommon]]` — placement in `AgentTemplateArchitecture.md` §2.5 |
 | **Applies to** | `subagent` |
-| **Text lives in** | `Agents/Generic/DeployedSections.md` |
+| **Text lives in** | `Catalog/DeployedSections.md` |
 
 One bullet: retry a transient error once before escalating. That is the whole block, and everything below is why.
 

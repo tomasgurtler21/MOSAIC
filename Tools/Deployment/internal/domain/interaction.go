@@ -63,7 +63,7 @@ const (
 	QHarnessOnlyRefreshScope QuestionID = "harness-only-refresh-scope"
 	// QPromoteCategory is asked when Service.Promote is called without a pre-answered
 	// category. The options are derived from the subdirectories present under
-	// Catalog/Agents/Generic/Agents/ plus the UtilityAgents sentinel.
+	// the catalog root's Subagents/ directory, plus the UtilityAgents sentinel.
 	QPromoteCategory QuestionID = "promote-category"
 
 	// QPromoteCustomTool is asked once per distinct harness-side tool entry that has no

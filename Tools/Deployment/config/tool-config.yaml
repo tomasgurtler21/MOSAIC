@@ -119,7 +119,7 @@ log_retention_runs: 0
 # it is tool-managed bookkeeping; do not hand-edit the stamped value.
 #
 # ---- Mapping fields ----
-#   generic       (required) the generic tool name used in Agents/Generic source.
+#   generic       (required) the generic tool name used in catalog source files.
 #                 Must be unique within one harness's list.
 #   destinations  (required) ordered list of output targets. An EMPTY list
 #                 (`destinations: []`) is legal and means "this harness

@@ -72,26 +72,26 @@ These connections are implemented, tested, and working end-to-end:
 
 ## 3. The Test Catalogue
 
-Test workflows and test orchestrator variants do not belong in the product catalogue (`Agents/Generic/`, `Workflows/`). They would pollute real deployments, and they exist to test specific conditions that may not correspond to any shipped workflow shape.
+Test workflows and test orchestrator variants do not belong in the product catalogue (`Catalog/`, `Catalog/Workflows/`). They would pollute real deployments, and they exist to test specific conditions that may not correspond to any shipped workflow shape.
 
 ### 3.1 The Problem with `--mosaic-root`
 
 `--mosaic-root` replaces the **entire** MOSAIC root, not just the catalogue. The deploy tool reads non-catalogue resources from the root too:
 
 - `Development/Designs/CommunicationProtocol.md` — the protocol document injected into every agent
-- `Agents/Generic/SourceFilesFormat.md` — the bundle spec
-- Skill folders under `Agents/Generic/Skills/`
+- `Catalog/SourceFilesFormat.md` — the bundle spec
+- Skill folders under `Catalog/Skills/`
 
-A test catalogue used as `--mosaic-root` would need copies of all of these, or protocol loading and bundle loading would fail. This is why `MosaicTestCatalog/` at the repo root does not follow the standard catalogue structure (its agents live under `Agents/MosaicTest/`, not `Agents/Generic/Agents/MosaicTest/`) — it was built for manual deployment, not as a `--mosaic-root` target for the `render` subcommand.
+A test catalogue used as `--mosaic-root` would need copies of all of these, or protocol loading and bundle loading would fail. This is why `MosaicTestCatalog/` at the repo root does not follow the standard catalogue structure (its agents live under `Agents/MosaicTest/`, not `Subagents/MosaicTest/`) — it was built for manual deployment, not as a `--mosaic-root` target for the `render` subcommand.
 
 ### 3.2 The Design: `--catalog-folder`
 
 Instead of replacing the entire MOSAIC root, the deploy tool needs a single new optional flag that redirects only the **catalogue source directories** — where agents and workflows are scanned from — while keeping everything else (protocol, bundles, skills, harness descriptors) resolved from the real MOSAIC root.
 
 The deploy tool's `catalog.Load` currently hardcodes:
-- Orchestrator: `{root}/Agents/Generic/Orchestrator/orchestrator.md`
-- Worker agents: `{root}/Agents/Generic/Agents/{category}/*.md`
-- Workflows: `{root}/Workflows/{category}/*.md` (via `Workflows/Index.md`)
+- Orchestrator: `{catalogDir}/Orchestrator/orchestrator.md`
+- Subagents: `{catalogDir}/Subagents/{category}/*.md`
+- Workflows: `{catalogDir}/Workflows/{category}/*.md` (via `Workflows/Index.md`)
 
 With `--catalog-folder <dir>`, these resolve against `<dir>` instead of the root, while the protocol, bundle, and other root-relative resources stay at the real root.
 
@@ -100,14 +100,12 @@ For AgentTest, this means the test catalogue is a simple directory:
 ```
 Tools/AgentTest/
 ├── catalog/
-│   ├── Agents/
-│   │   └── Generic/
-│   │       ├── Orchestrator/
-│   │       │   └── orchestrator.md     # production orchestrator (or a variant)
-│   │       └── Agents/
-│   │           └── TestStubs/
-│   │               ├── researcher.md
-│   │               └── planner.md
+│   ├── Orchestrator/
+│   │   └── orchestrator.md             # production orchestrator (or a variant)
+│   ├── Subagents/
+│   │   └── TestStubs/
+│   │       ├── researcher.md
+│   │       └── planner.md
 │   └── Workflows/
 │       ├── Index.md                     # workflow index for this catalogue
 │       └── AgentTest/
@@ -117,7 +115,7 @@ Tools/AgentTest/
 
 The test author puts the orchestrator under test into the catalogue tree as the orchestrator. The deploy tool resolves it by its standard path, renders it with the test workflows, and the result is a properly transformed orchestrator with exactly the workflows the test needs. No `--source`, no `--mosaic-root` — just `--catalog-folder` pointing at the test tree.
 
-**This dissolves the `subject.agent` vs `subject.source` question (§5.3 in the previous draft).** There is no need for an arbitrary source path in the test definition. The orchestrator variant goes into the test catalogue as `Agents/Generic/Orchestrator/orchestrator.md`. The test definition uses `subject.agent: orchestrator` as normal. If the test author wants to compare five variants, they either:
+**This dissolves the `subject.agent` vs `subject.source` question (§5.3 in the previous draft).** There is no need for an arbitrary source path in the test definition. The orchestrator variant goes into the test catalogue as `Orchestrator/orchestrator.md`. The test definition uses `subject.agent: orchestrator` as normal. If the test author wants to compare five variants, they either:
 - Run the same test five times, swapping the orchestrator file in the catalogue between runs
 - Or maintain five catalogue trees, one per variant (cheap — the only file that differs is the orchestrator)
 
@@ -151,11 +149,11 @@ If `--catalog-folder` existed, `MosaicTestCatalog/` could also use it instead of
 
 To test whether an orchestrator handles a specific routing condition correctly:
 
-1. **An orchestrator** (`catalog/Agents/Generic/Orchestrator/orchestrator.md`) — the production orchestrator, or a variant with a specific fix. This is a generic-form file, placed at the standard orchestrator path within the test catalogue.
+1. **An orchestrator** (`catalog/Orchestrator/orchestrator.md`) — the production orchestrator, or a variant with a specific fix. This is a generic-form file, placed at the standard orchestrator path within the test catalogue.
 
 2. **A test workflow** (`catalog/Workflows/AgentTest/<id>.md`) — a workflow definition whose routing table sets up the condition. Agent names in the routing table must match the stub agent definitions and the stub registry entries. Standard workflow schema (frontmatter with `id`, `referenced_agents`, `[[SECTION:Workflow:<id>]]` block).
 
-3. **Stub agent definitions** (`catalog/Agents/Generic/Agents/TestStubs/<name>.md`) — generic-form placeholder files for each collaborator the workflow references. These are empty stubs (content is just a `# stub: <name>` comment) — all actual behaviour comes from the stub registry. They exist solely to pass the deploy tool's agent-exists validation. Common stubs are shared across tests.
+3. **Stub agent definitions** (`catalog/Subagents/TestStubs/<name>.md`) — generic-form placeholder files for each collaborator the workflow references. These are empty stubs (content is just a `# stub: <name>` comment) — all actual behaviour comes from the stub registry. They exist solely to pass the deploy tool's agent-exists validation. Common stubs are shared across tests.
 
 4. **A stub registry** (`tests/<suite>/<test>.stubs.json`) — declares what each collaborator returns when intercepted. This is where the routing condition is created.
 
@@ -266,7 +264,7 @@ The core use case (§1.2) involves comparing variants. Running the same test aga
 
 ### 5.4 Stub Agents — Resolved
 
-**Decision: stubs live in the test catalogue.** Placeholder stub agent definitions live at `catalog/Agents/Generic/Agents/TestStubs/<name>.md` within the test catalogue. This lets the deploy tool's `deploy` subcommand resolve all agents referenced by the test workflow in a single call — no separate `--source` rendering needed per stub.
+**Decision: stubs live in the test catalogue.** Placeholder stub agent definitions live at `catalog/Subagents/TestStubs/<name>.md` within the test catalogue. This lets the deploy tool's `deploy` subcommand resolve all agents referenced by the test workflow in a single call — no separate `--source` rendering needed per stub.
 
 Stub files are empty placeholders (a `# stub: <name>` comment and minimal frontmatter). All actual stub behaviour comes from the stub registry (`.stubs.json`). This means the existing `stub_agents` field in `.test.yaml` becomes unnecessary for catalogue-deployed tests — the deploy tool handles stub agent rendering as part of the full deployment.
 

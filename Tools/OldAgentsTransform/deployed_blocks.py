@@ -20,7 +20,7 @@ from boundary_constants import TAG_PATTERN
 _TOOLS_DIR = pathlib.Path(__file__).parent        # Tools/OldAgentsTransform
 _REPO_ROOT = _TOOLS_DIR.parent.parent             # repo root (two levels up)
 
-DEFAULT_BUNDLE_PATH: pathlib.Path = _REPO_ROOT / "Agents" / "Generic" / "DeployedSections.md"
+DEFAULT_BUNDLE_PATH: pathlib.Path = _REPO_ROOT / "Catalog" / "DeployedSections.md"
 """Absolute path to the canonical block bundle in the repository."""
 
 # Patterns used for manual frontmatter parsing.

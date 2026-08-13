@@ -20,7 +20,7 @@ type RenderAgentRequest struct {
 	// SourcePath is a generic-form MOSAIC agent file at any path, inside or outside the
 	// catalogue. Mutually exclusive with SourceAgentKey; exactly one is required.
 	SourcePath string
-	// SourceAgentKey names an agent in the Catalog/Agents/Generic/ catalogue. Mutually exclusive
+	// SourceAgentKey names an agent in the catalog (Catalog/Subagents/ or Catalog/UtilityAgents/). Mutually exclusive
 	// with SourcePath; exactly one is required.
 	SourceAgentKey string
 
@@ -134,7 +134,7 @@ var ErrRenderSourceNotFound = errors.New("render source file does not exist")
 var ErrRenderSourceNotFile = errors.New("render source path is not a regular file")
 
 // ErrRenderAgentNotInCatalog is returned when SourceAgentKey names no agent in the
-// Catalog/Agents/Generic/ catalogue.
+// catalog (Catalog/Subagents/ or Catalog/UtilityAgents/).
 var ErrRenderAgentNotInCatalog = errors.New("render source agent key is not in the catalogue")
 
 // ErrRenderSourceNotGeneric is returned when the source file at SourcePath is not a

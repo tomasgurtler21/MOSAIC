@@ -68,7 +68,7 @@ var ErrNotMosaicRoot = errors.New("working directory is not a MOSAIC repository"
 //	"missing-field"        — a required frontmatter field is absent from a source file
 //	"duplicate-agent-id"   — two catalog agents declare the same numeric `id`
 //	"invalid-role"         — a frontmatter `role` value is not "subagent" or "orchestrator"
-//	"missing-skill-folder" — a required_skills entry names a key with no Agents/Generic/Skills/<key> folder
+//	"missing-skill-folder" — a required_skills entry names a key with no Skills/<key> folder
 //	"bundle-unknown-target"     — bundle block Target is not in docformat.CanonicalDeployed
 //	"bundle-unknown-applies-to" — bundle block AppliesTo is not "subagent" or "orchestrator"
 //	"bundle-missing-spec-doc"   — bundle block SpecifiedIn path does not exist under the MOSAIC root
@@ -101,7 +101,7 @@ type Catalog interface {
 	Agent(key string) (domain.Agent, bool)
 
 	// Orchestrator returns the single orchestrator agent. The orchestrator is identified by
-	// the file at Agents/Generic/Orchestrator/orchestrator.md.
+	// the file at Orchestrator/orchestrator.md.
 	Orchestrator() domain.Agent
 
 	// UtilityAgents returns all utility agents. They are never deployed automatically.
@@ -173,7 +173,7 @@ type Catalog interface {
 //
 // A directory is the MOSAIC root when it contains:
 //
-//	Catalog/Agents/Generic/SourceFilesFormat.md
+//	Catalog/SourceFilesFormat.md
 //
 // Catalog/Workflows/Index.md is no longer a required marker; a root is recognised
 // identically whether or not that file exists. A directory carrying the marker only at

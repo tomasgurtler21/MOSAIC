@@ -6,16 +6,16 @@ package vscodeghcp_test
 // These tests provide per-package RED-phase coverage for vscodeghcp, mirroring the pattern
 // established in claudecode/runtime_loading_test.go. They verify that once I6.4 changes
 // vscodeghcp.New to accept registry.BuiltinOptions, the module reads content from
-// <MosaicRoot>/Agents/VS code GHCP/ at construction time rather than from embedded bytes.
+// <MosaicRoot>/Catalog/HarnessInjections/VS Code GHCP/ at construction time rather than from embedded bytes.
 //
 // Test coverage:
 //
 //   RepoContentDir constant:
-//   - vscodeghcp.RepoContentDir equals "Catalog/Agents/VS code GHCP".
+//   - vscodeghcp.RepoContentDir equals "Catalog/HarnessInjections/VS Code GHCP".
 //
 //   Run-time loading from declared directory (T6.2):
 //   - A vscodeghcp module constructed against a temporary root reads HarnessInjections.md
-//     and HarnessInjectionsOrchestrator.md from <MosaicRoot>/Agents/VS code GHCP/.
+//     and HarnessInjectionsOrchestrator.md from <MosaicRoot>/Catalog/HarnessInjections/VS Code GHCP/.
 //   - The injected content comes from those on-disk files, not from embedded bytes.
 //
 //   Failure modes (T6.3):
@@ -62,7 +62,7 @@ func writeVsCodeGhcpContentFile(t *testing.T, dir, filename, src string) {
 }
 
 // makeTempRootForVsCodeGhcp creates a MosaicRoot temp directory and the VS Code GHCP
-// content directory <root>/Agents/VS code GHCP/. Returns the root path and content dir.
+// content directory <root>/Catalog/HarnessInjections/VS Code GHCP/. Returns the root path and content dir.
 func makeTempRootForVsCodeGhcp(t *testing.T) (root string, contentDir string) {
 	t.Helper()
 	root = t.TempDir()
@@ -116,7 +116,7 @@ Orchestrator-specific constraint content.
 // TestRepoContentDir_VsCodeGhcp_IsCorrect verifies that vscodeghcp.RepoContentDir is the
 // correct repository directory relative to the MOSAIC root.
 func TestRepoContentDir_VsCodeGhcp_IsCorrect(t *testing.T) {
-	const want = "Catalog/Agents/VS code GHCP"
+	const want = "Catalog/HarnessInjections/VS Code GHCP"
 	if vscodeghcp.RepoContentDir != want {
 		t.Errorf("vscodeghcp.RepoContentDir = %q, want %q", vscodeghcp.RepoContentDir, want)
 	}

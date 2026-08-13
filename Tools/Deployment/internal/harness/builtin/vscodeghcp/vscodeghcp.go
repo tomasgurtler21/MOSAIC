@@ -24,8 +24,8 @@
 //
 // File extension decision (recorded here per AC13.6):
 // The descriptor declares ".md" as the agent extension, matching the CodebaseAgnostic
-// canonical reference set (Catalog/Agents/VS code GHCP/CodebaseAgnostic/Agents/*.md). Files under
-// Catalog/Agents/VS code GHCP/UtilityAgents/ use ".agent.md" but were authored outside the deployment
+// canonical reference set (Catalog/HarnessInjections/VS Code GHCP/CodebaseAgnostic/Agents/*.md). Files under
+// Catalog/HarnessInjections/VS Code GHCP/UtilityAgents/ use ".agent.md" but were authored outside the deployment
 // tool and represent a deviation from the canonical output. VS Code GHCP recognises both
 // ".md" and ".agent.md" files in .github/agents/; the deployment tool emits ".md".
 //

@@ -2,7 +2,7 @@ package catalog_test
 
 // Tests for skill enumeration against the real repository tree.
 //
-// Skills live under Agents/Generic/Skills/{key}/SKILL.md. Two skills have companion
+// Skills live under Catalog/Skills/{key}/SKILL.md. Two skills have companion
 // files that must also be included in the skill's Files list:
 //   - lean-tdd: EXAMPLES-CSHARP.md
 //   - pr-scope-filtering: CONTEXT-ZONE.md
@@ -17,7 +17,7 @@ package catalog_test
 // four-known-skill-keys allowlist (was TestSkills_AllFourKnownSkillsPresent) were
 // content-coupled and are replaced by TestSkills_MatchOnDiskSkillFolders, a structural
 // invariant comparing Skills() against a direct directory listing of
-// Agents/Generic/Skills/. It detects a skill folder silently failing to load, or Skills()
+// Catalog/Skills/. It detects a skill folder silently failing to load, or Skills()
 // returning an entry with no backing folder, without naming any skill.
 //
 // The two exact companion-file counts (were TestSkill_LeanTDD_FilesCount and
@@ -45,11 +45,11 @@ import (
 // ---------------------------------------------------------------------------
 
 // TestSkills_MatchOnDiskSkillFolders verifies that Skills() returns exactly one entry
-// per subdirectory of the real repository's Agents/Generic/Skills/ folder — no fewer
+// per subdirectory of the real repository's Catalog/Skills/ folder — no fewer
 // (a folder failed to load) and no more (a phantom entry with no backing folder).
 func TestSkills_MatchOnDiskSkillFolders(t *testing.T) {
 	cat := loadRealCatalog(t)
-	skillsDir := filepath.Join(cat.CatalogRoot(), "Agents", "Generic", "Skills")
+	skillsDir := filepath.Join(cat.CatalogRoot(), "Skills")
 
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
@@ -62,7 +62,7 @@ func TestSkills_MatchOnDiskSkillFolders(t *testing.T) {
 		}
 	}
 	if len(onDisk) == 0 {
-		t.Fatal("no skill folders found on disk under Agents/Generic/Skills/; cannot verify the invariant")
+		t.Fatal("no skill folders found on disk under Skills/; cannot verify the invariant")
 	}
 
 	skills := cat.Skills()
@@ -215,7 +215,7 @@ func TestSkills_Files_AllExistOnDisk(t *testing.T) {
 func TestSkill_Files_IncludesCompanionFilesByName(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeSkillFolder(t, root, "sample-skill")
-	mustWriteFile(t, root, filepath.Join("Catalog", "Agents", "Generic", "Skills", "sample-skill", "COMPANION.md"), []byte("# Companion\n"))
+	mustWriteFile(t, root, filepath.Join("Catalog", "Skills", "sample-skill", "COMPANION.md"), []byte("# Companion\n"))
 
 	cat, err := catalog.Load(root, "")
 	if err != nil {
@@ -246,8 +246,8 @@ func TestSkill_Files_IncludesCompanionFilesByName(t *testing.T) {
 func TestSkill_FilesCount_MatchesFolderContents(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeSkillFolder(t, root, "sample-skill")
-	mustWriteFile(t, root, filepath.Join("Catalog", "Agents", "Generic", "Skills", "sample-skill", "COMPANION-ONE.md"), []byte("# Companion One\n"))
-	mustWriteFile(t, root, filepath.Join("Catalog", "Agents", "Generic", "Skills", "sample-skill", "COMPANION-TWO.md"), []byte("# Companion Two\n"))
+	mustWriteFile(t, root, filepath.Join("Catalog", "Skills", "sample-skill", "COMPANION-ONE.md"), []byte("# Companion One\n"))
+	mustWriteFile(t, root, filepath.Join("Catalog", "Skills", "sample-skill", "COMPANION-TWO.md"), []byte("# Companion Two\n"))
 
 	cat, err := catalog.Load(root, "")
 	if err != nil {

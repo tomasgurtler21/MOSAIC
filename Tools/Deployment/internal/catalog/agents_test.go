@@ -88,7 +88,7 @@ func TestAgents_ReturnsNonEmptyList(t *testing.T) {
 }
 
 // TestAgents_EveryOnDiskCategoryYieldsAtLeastOneAgent verifies that every category
-// directory present under Agents/Generic/Agents/ in the real repository tree produces at
+// directory present under Catalog/Subagents/ in the real repository tree produces at
 // least one agent in Agents() with a matching Category, and that Agents() contains no
 // category not backed by an on-disk directory. This is a structural invariant: it detects
 // a whole category (or every agent within one) silently disappearing from the catalog
@@ -96,7 +96,7 @@ func TestAgents_ReturnsNonEmptyList(t *testing.T) {
 // like relocating a whole category out of the scanned tree.
 func TestAgents_EveryOnDiskCategoryYieldsAtLeastOneAgent(t *testing.T) {
 	cat := loadRealCatalog(t)
-	agentsDir := filepath.Join(cat.CatalogRoot(), "Agents", "Generic", "Agents")
+	agentsDir := filepath.Join(cat.CatalogRoot(), "Subagents")
 
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestAgents_EveryOnDiskCategoryYieldsAtLeastOneAgent(t *testing.T) {
 		}
 	}
 	if len(onDiskCategories) == 0 {
-		t.Fatal("no category directories found under Agents/Generic/Agents/; cannot verify the invariant")
+		t.Fatal("no category directories found under Subagents/; cannot verify the invariant")
 	}
 
 	agents := cat.Agents()
@@ -618,12 +618,12 @@ func TestCatalog_ReadSource_InventedPath_ReturnsError(t *testing.T) {
 
 // writeInfrastructureAgentFile writes a minimal subagent file carrying infrastructure-agent
 // frontmatter (infrastructure, triggers, on_failure) at
-// <root>/Catalog/Agents/Generic/Agents/<category>/<name>.md. A trigger with an empty TriggerParam
+// <root>/Catalog/Subagents/<category>/<name>.md. A trigger with an empty TriggerParam
 // is written as `trigger_param: null`, matching the real frontmatter convention that the
 // parser must normalise to an empty string.
 func writeInfrastructureAgentFile(t *testing.T, root, category, name, infrastructure, onFailure string, triggers []domain.InfrastructureTrigger) {
 	t.Helper()
-	mustMkdir(t, root, "Catalog", "Agents", "Generic", "Agents", category)
+	mustMkdir(t, root, "Catalog", "Subagents", category)
 	fm := "---\n"
 	fm += "id: \"1\"\n"
 	fm += "version: \"1.0.0\"\n"
@@ -642,7 +642,7 @@ func writeInfrastructureAgentFile(t *testing.T, root, category, name, infrastruc
 	}
 	fm += "on_failure: " + onFailure + "\n"
 	fm += "---\nContent.\n"
-	relPath := filepath.Join("Catalog", "Agents", "Generic", "Agents", category, name+".md")
+	relPath := filepath.Join("Catalog", "Subagents", category, name+".md")
 	mustWriteFile(t, root, relPath, []byte(fm))
 }
 
