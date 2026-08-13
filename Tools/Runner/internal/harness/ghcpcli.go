@@ -1,0 +1,159 @@
+// Package harness — GHCPCLIAdapter implementation.
+//
+// GHCPCLIAdapter maps Runner's domain vocabulary onto mosaic-common/harness's
+// GHCP CLI spawner, mirroring OpenCodeAdapter's thin mapping-wrapper shape:
+// it converts domain.AgentReference/ProtocolRequest into the shared package's
+// neutral types, delegates the spawn, and converts the result back.
+//
+// Two deliberate differences from OpenCodeAdapter:
+//
+//  1. No SystemPrompt injection. OpenCodeAdapter sets SystemPrompt to an EnvBlock
+//     because OpenCode's --agent replaces the CLI's default system prompt. GHCP CLI
+//     layers instructions from files it discovers itself (.github/copilot-instructions.md,
+//     .agent.md profiles, etc.), and MOSAIC orchestration context is rendered into the
+//     agent's .agent.md profile at deploy time by Tools/Deployment. No runtime injection
+//     is needed or correct; the field is left unset for both invocation kinds.
+//
+//  2. Distinct sentinel alias names. The package already exports ErrStreamError and
+//     ErrStreamIncomplete, aliased onto OpenCode's stream sentinels in opencode.go.
+//     Those names are taken. Reusing them would silently conflate two harnesses'
+//     failure taxonomies. GHCP CLI's terminal result event carries the verdict (not the
+//     process exit code), which is structurally similar to OpenCode always exiting 0
+//     but for a different reason — and so the names are distinct rather than shared.
+package harness
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	commonharness "mosaic-common/harness"
+
+	"mosaic-run/internal/domain"
+)
+
+// Sentinel aliases, GHCP-specific names so they do not collide with the
+// OpenCode aliases ErrStreamError / ErrStreamIncomplete in this package.
+// OpenCode always exits 0 and its stream carries the verdict; GHCP CLI's
+// terminal result event, not its exit code, carries the verdict — a
+// structurally similar failure mode for a different reason, which is why
+// the names are distinct rather than shared.
+var (
+	ErrGHCPCLIStreamError      = commonharness.ErrGHCPCLIStreamError
+	ErrGHCPCLIStreamIncomplete = commonharness.ErrGHCPCLIStreamIncomplete
+)
+
+// GHCPCLIAdapter implements domain.HarnessAdapter by delegating to
+// mosaic-common/harness for spawning, argument construction and
+// event-stream parsing.
+type GHCPCLIAdapter struct {
+	spawner commonharness.Spawner
+	logger  domain.DebugLogger
+}
+
+// NewGHCPCLIAdapter creates an adapter with debug logging disabled.
+// A zero timeout means 30 minutes.
+func NewGHCPCLIAdapter(executablePath string, timeout time.Duration) *GHCPCLIAdapter {
+	return NewGHCPCLIAdapterWithLogger(executablePath, timeout, nil)
+}
+
+// NewGHCPCLIAdapterWithLogger creates an adapter that records every
+// invocation's raw stdout, raw stderr and outcome to the debug log. A nil
+// logger is normalised to domain.NopDebugLogger.
+func NewGHCPCLIAdapterWithLogger(executablePath string, timeout time.Duration, logger domain.DebugLogger) *GHCPCLIAdapter {
+	if timeout == 0 {
+		timeout = 30 * time.Minute
+	}
+	if logger == nil {
+		logger = domain.NopDebugLogger{}
+	}
+	sink := &debugLoggerSink{logger: logger}
+	spawner := commonharness.NewGHCPCLI(executablePath,
+		commonharness.WithTimeout(timeout),
+		commonharness.WithSink(sink),
+	)
+	return &GHCPCLIAdapter{spawner: spawner, logger: logger}
+}
+
+// Invoke implements domain.HarnessAdapter.
+//
+// SystemPrompt is deliberately left unset for both invocation kinds — unlike
+// OpenCodeAdapter which always injects an EnvBlock. GHCP CLI discovers context
+// from files on disk (.agent.md profiles, etc.), and MOSAIC orchestration
+// context is rendered into the agent profile at deploy time by Tools/Deployment.
+//
+// On context cancellation, terminates the subprocess and returns ctx.Err().
+func (a *GHCPCLIAdapter) Invoke(ctx context.Context, agent domain.AgentReference, request domain.ProtocolRequest) (domain.ProtocolResponse, error) {
+	a.logger.Log(domain.EventHarnessInvokeStart, "dispatching invocation",
+		domain.F("agent", request.AgentInstanceID),
+		domain.F("kind", string(agent.InvocationKind)),
+	)
+
+	reqBytes, err := MarshalRequest(request)
+	if err != nil {
+		return domain.ProtocolResponse{}, fmt.Errorf("marshal request: %w", err)
+	}
+
+	spawnReq := commonharness.SpawnRequest{
+		Agent: commonharness.AgentRef{
+			Identifier:     agent.Identifier,
+			DefinitionPath: agent.DefinitionPath,
+			Kind:           commonharness.InvocationKind(agent.InvocationKind),
+		},
+		Prompt:       string(reqBytes),
+		OutputFormat: "json",
+		// SystemPrompt is deliberately left unset for both invocation kinds.
+		// GHCP CLI layers instructions from files it discovers itself; MOSAIC
+		// orchestration context is rendered into the agent's .agent.md profile
+		// at deploy time by Tools/Deployment. No EnvBlock injection is correct.
+	}
+
+	resp, err := a.spawner.Spawn(ctx, spawnReq)
+	if err != nil {
+		// Log parse-class failures (stream verdict errors) before the
+		// cancellation check so the parse-failed event is always recorded
+		// when the stream itself is the problem.
+		switch {
+		case errors.Is(err, commonharness.ErrMalformedJSON),
+			errors.Is(err, commonharness.ErrProtocolNotExtractable),
+			errors.Is(err, ErrGHCPCLIStreamError),
+			errors.Is(err, ErrGHCPCLIStreamIncomplete):
+			a.logger.Log(domain.EventHarnessParseFailed, string(resp.Stdout),
+				domain.F("agent", request.AgentInstanceID),
+			)
+		}
+		// The shared package distinguishes parent-context cancellation from
+		// adapter timeout via ErrCancelled. Runner's existing call sites and
+		// tests expect ctx.Err() on cancellation, so translate it back here.
+		if ctx.Err() != nil {
+			a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+				domain.F("agent", request.AgentInstanceID),
+			)
+			return domain.ProtocolResponse{}, ctx.Err()
+		}
+		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+			domain.F("agent", request.AgentInstanceID),
+		)
+		return domain.ProtocolResponse{}, err
+	}
+
+	var protoResp domain.ProtocolResponse
+	if uErr := json.Unmarshal(resp.Protocol, &protoResp); uErr != nil {
+		wrapped := fmt.Errorf("%w: response decode failed", ErrMalformedOutput)
+		a.logger.Log(domain.EventHarnessParseFailed, string(resp.Protocol),
+			domain.F("agent", request.AgentInstanceID),
+		)
+		a.logger.Log(domain.EventHarnessInvokeError, wrapped.Error(),
+			domain.F("agent", request.AgentInstanceID),
+		)
+		return domain.ProtocolResponse{}, wrapped
+	}
+
+	a.logger.Log(domain.EventHarnessInvokeOK, "invocation succeeded",
+		domain.F("agent", request.AgentInstanceID),
+		domain.F("status", string(protoResp.StatusCode)),
+	)
+	return protoResp, nil
+}
