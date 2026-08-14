@@ -9,9 +9,14 @@ import (
 // The document's current body bytes (which may reflect mutations) are used for validation.
 // Structural errors (unbalanced tags, wrong nesting, etc.) are always returned.
 // Optional checks are gated behind ValidateOptions fields.
+//
+// All positional issue line numbers (Issue.Line and any line numbers embedded in
+// Issue.Message) are file-relative: they count from the start of the whole file,
+// frontmatter included. Issues with no positional origin keep Line == 0.
 func Validate(d *Document, opts ValidateOptions) []Issue {
 	raw := d.Body().bytes()
-	issues := validateBytes(raw, opts)
+	offset := d.BodyLineOffset()
+	issues := validateBytes(raw, opts, offset)
 	issues = append(issues, validateDocumentRules(d, opts)...)
 
 	// Strict mode: promote every SeverityWarning issue to SeverityError.
@@ -28,15 +33,18 @@ func Validate(d *Document, opts ValidateOptions) []Issue {
 }
 
 // validateBytes runs the full structural validation pipeline over raw body bytes.
+// offset is the number of frontmatter lines that precede the body in the source file
+// (Document.BodyLineOffset()); it is added to every body-relative line number so that
+// all positional issues carry file-relative line numbers.
 // It is separated from Validate so that tests can drive it directly if needed.
-func validateBytes(raw []byte, opts ValidateOptions) []Issue {
+func validateBytes(raw []byte, opts ValidateOptions, offset int) []Issue {
 	var issues []Issue
 	lines := splitLinesPreserving(raw)
 
 	type stackEntry struct {
 		kind    NodeKind
 		name    string
-		lineNum int
+		lineNum int // file-relative line number of the opening tag
 	}
 
 	var stack []stackEntry
@@ -58,8 +66,21 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 		return ""
 	}
 
+	// enclosingManaged returns the name of the nearest enclosing managed (NodeDeployed)
+	// region from the stack, or "" when none is open.
+	enclosingManaged := func() string {
+		for i := len(stack) - 1; i >= 0; i-- {
+			if stack[i].kind == NodeDeployed {
+				return stack[i].name
+			}
+		}
+		return ""
+	}
+
 	for _, line := range lines {
 		lineNum++
+		fileLine := lineNum + offset // file-relative line number for this body line
+
 		kind, isClose, name, _, matched := parseBoundaryTag(line)
 
 		if !matched {
@@ -68,8 +89,8 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 				issues = append(issues, Issue{
 					Severity: SeverityError,
 					Code:     "content-outside-boundary",
-					Message:  fmt.Sprintf("non-blank content at line %d appears outside all boundary tags", lineNum),
-					Line:     lineNum,
+					Message:  fmt.Sprintf("non-blank content at line %d appears outside all boundary tags", fileLine),
+					Line:     fileLine,
 				})
 			}
 			continue
@@ -87,9 +108,9 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 						Code:     "wrong-nesting",
 						Message: fmt.Sprintf(
 							"section %q is nested inside section %q at line %d — sections must not nest inside other sections",
-							name, parentEntry.name, lineNum,
+							name, parentEntry.name, fileLine,
 						),
-						Line: lineNum,
+						Line: fileLine,
 					})
 				}
 			}
@@ -99,8 +120,8 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 				issues = append(issues, Issue{
 					Severity: SeverityError,
 					Code:     "duplicate-name",
-					Message:  fmt.Sprintf("boundary name %q is used more than once at line %d", name, lineNum),
-					Line:     lineNum,
+					Message:  fmt.Sprintf("boundary name %q is used more than once at line %d", name, fileLine),
+					Line:     fileLine,
 				})
 			}
 			seenNames[name] = true
@@ -129,9 +150,9 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 					Code:     "wrong-marker",
 					Message: fmt.Sprintf(
 						"boundary name %q is a tool-managed name and must be declared with type=\"managed\" but was declared with type=\"project\" (line %d)",
-						name, lineNum,
+						name, fileLine,
 					),
-					Line: lineNum,
+					Line: fileLine,
 				})
 			}
 
@@ -158,9 +179,9 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 									Code:     "wrong-parent",
 									Message: fmt.Sprintf(
 										"injection %q must be at body top level but appears inside %q (line %d)",
-										name, current, lineNum,
+										name, current, fileLine,
 									),
-									Line: lineNum,
+									Line: fileLine,
 								})
 							}
 						} else if current != expectedParent {
@@ -168,19 +189,19 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 							if current == "" {
 								msg = fmt.Sprintf(
 									"injection %q must be inside section %q but appears at body top level (line %d)",
-									name, expectedParent, lineNum,
+									name, expectedParent, fileLine,
 								)
 							} else {
 								msg = fmt.Sprintf(
 									"injection %q must be inside section %q but is inside %q (line %d)",
-									name, expectedParent, current, lineNum,
+									name, expectedParent, current, fileLine,
 								)
 							}
 							issues = append(issues, Issue{
 								Severity: SeverityAdvice,
 								Code:     "wrong-parent",
 								Message:  msg,
-								Line:     lineNum,
+								Line:     fileLine,
 							})
 						}
 					}
@@ -195,9 +216,9 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 									Code:     "wrong-parent",
 									Message: fmt.Sprintf(
 										"deployed region %q must be at body top level but appears inside %q (line %d)",
-										name, stack[len(stack)-1].name, lineNum,
+										name, stack[len(stack)-1].name, fileLine,
 									),
-									Line: lineNum,
+									Line: fileLine,
 								})
 							}
 						} else {
@@ -207,19 +228,48 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 								if current == "" {
 									msg = fmt.Sprintf(
 										"deployed region %q must be inside section %q but appears at body top level (line %d)",
-										name, expectedParent, lineNum,
+										name, expectedParent, fileLine,
 									)
 								} else {
 									msg = fmt.Sprintf(
 										"deployed region %q must be inside section %q but is inside %q (line %d)",
-										name, expectedParent, current, lineNum,
+										name, expectedParent, current, fileLine,
 									)
 								}
 								issues = append(issues, Issue{
 									Severity: SeverityError,
 									Code:     "wrong-parent",
 									Message:  msg,
-									Line:     lineNum,
+									Line:     fileLine,
+								})
+							}
+						}
+					}
+					// Managed block parent check: a managed block name (e.g. Workflow) must
+					// appear inside the managed region registered in ManagedBlockParent.
+					// This check keying is by tag-name prefix. SeverityError; non-blocking.
+					if IsManagedBlockName(name) {
+						prefix := TagNamePrefix(name)
+						if requiredParent, hasReq := ManagedBlockParent[prefix]; hasReq {
+							actualParent := enclosingManaged()
+							if actualParent != requiredParent {
+								var msg string
+								if actualParent == "" {
+									msg = fmt.Sprintf(
+										"managed block %q must be nested inside %q but appears outside any managed region (line %d)",
+										name, requiredParent, fileLine,
+									)
+								} else {
+									msg = fmt.Sprintf(
+										"managed block %q must be nested inside %q but is inside %q (line %d)",
+										name, requiredParent, actualParent, fileLine,
+									)
+								}
+								issues = append(issues, Issue{
+									Severity: SeverityError,
+									Code:     "wrong-parent",
+									Message:  msg,
+									Line:     fileLine,
 								})
 							}
 						}
@@ -229,18 +279,21 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 
 			// unknown-deployed: flag unrecognised managed (type="managed") names unconditionally.
 			// Injection names are open and are never flagged.
+			// Managed block names (e.g. Workflow) are recognised and are not flagged.
 			// wrong-marker is raised in preference when a tool-managed name appears under
 			// type="project", so a single mistake produces one actionable diagnostic.
-			if kind == NodeDeployed && !isCanonicalDeployed(name) {
+			if kind == NodeDeployed && !isCanonicalDeployed(name) && !IsManagedBlockName(name) {
 				issues = append(issues, Issue{
 					Severity: SeverityError,
 					Code:     "unknown-deployed",
-					Message:  fmt.Sprintf("deployed region %q is not a recognised canonical tool-managed name (line %d)", name, lineNum),
-					Line:     lineNum,
+					Message:  fmt.Sprintf("deployed region %q is not a recognised canonical tool-managed name (line %d)", name, fileLine),
+					Line:     fileLine,
 				})
 			}
 
-			stack = append(stack, stackEntry{kind: kind, name: name, lineNum: lineNum})
+			// Store the file-relative line in the stack entry so downstream references
+			// (mismatched-tag, unbalanced-tag) emit file-relative numbers directly.
+			stack = append(stack, stackEntry{kind: kind, name: name, lineNum: fileLine})
 
 		} else {
 			// --- Closing tag ---
@@ -252,24 +305,27 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 					Code:     "unbalanced-tag",
 					Message: fmt.Sprintf(
 						"closing tag </%s> at line %d has no matching opening tag",
-						name, lineNum,
+						name, fileLine,
 					),
-					Line: lineNum,
+					Line: fileLine,
 				})
 			} else {
 				top := stack[len(stack)-1]
 				stack = stack[:len(stack)-1]
 
 				// mismatched-tag: opening and closing names must match.
-				if top.name != name {
+				// For compound opening names (e.g. "Workflow:brownfield-tdd"), compare
+				// only the tag-name prefix against the bare closing tag name, because
+				// closing tags are always serialised without the name-attribute suffix.
+				if TagNamePrefix(top.name) != name {
 					issues = append(issues, Issue{
 						Severity: SeverityError,
 						Code:     "mismatched-tag",
 						Message: fmt.Sprintf(
 							"opening tag %q (line %d) does not match closing tag %q (line %d)",
-							top.name, top.lineNum, name, lineNum,
+							top.name, top.lineNum, name, fileLine,
 						),
-						Line: lineNum,
+						Line: fileLine,
 						Node: top.name,
 					})
 				}
@@ -277,7 +333,8 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 		}
 	}
 
-	// Any tags remaining on the stack are unclosed.
+	// Any tags remaining on the stack are unclosed. Stack entries already carry
+	// file-relative line numbers (stored at push time).
 	for _, entry := range stack {
 		issues = append(issues, Issue{
 			Severity: SeverityError,

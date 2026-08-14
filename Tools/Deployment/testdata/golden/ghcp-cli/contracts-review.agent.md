@@ -298,16 +298,14 @@ Your review artifact should follow this template:
 [Brief overview of review findings - what was reviewed, overall assessment]
 ```
 
-### Issue Severity Levels
-
 <SeverityThresholds type="project">
 
-| Severity | Requires Rework | Notes (remove at injection) |
-|----------|-----------------|----------------------------|
-| CRITICAL | ✅ Always | Non-configurable |
-| MAJOR | ✅ No | Set to ✅ Yes for stricter reviews |
-| MINOR | ❌ No | Set to ✅ Yes if all issues must be addressed |
-| SUGGESTION | ❌ No | Set to ✅ Yes to require action on suggestions |
+| Severity | Requires Rework |
+|----------|-----------------|
+| CRITICAL | ✅ Always |
+| MAJOR | ✅ Yes |
+| MINOR | ❌ No |
+| SUGGESTION | ❌ No |
 
 **Status Code Logic:**
 - ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`

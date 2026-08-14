@@ -229,7 +229,7 @@ func TestInjectionAssembled_WorkflowsAssembledIntoAvailableWorkflows(t *testing.
 	if !ok {
 		t.Fatal("AvailableWorkflows injection absent from output")
 	}
-	if !bytes.Contains(node.Content(), []byte(`<Workflow type="core" name="tdd-workflow"`)) {
+	if !bytes.Contains(node.Content(), []byte(`<Workflow type="managed" name="tdd-workflow"`)) {
 		t.Errorf("AvailableWorkflows injection content does not contain the workflow block opening tag;\ncontent: %q", node.Content())
 	}
 	if !bytes.Contains(node.Content(), []byte("</Workflow>")) {

@@ -2,6 +2,7 @@
 version: 1.1.0
 name: orchestration-architect
 description: Workspace architect with deep knowledge of the multi-agent orchestration system. Creates and updates design documents, subagents, workflows, and transformations. Acts as a high-level sparring partner for architecture decisions.
+role: utility
 model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
 recommended_tier: HIGH

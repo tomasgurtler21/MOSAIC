@@ -396,17 +396,12 @@ func TestTransformHarness_UnsetModelGroup_QuestionHasEmptySubjectAndDescriptiveT
 		t.Errorf("question Subject = %q, want UnsetSourceModel (%q)", q.Subject, app.UnsetSourceModel)
 	}
 
-	// Title must identify the group as agents with no model set.
-	// RED: the current Title is "Select target model (optional, enter to skip)", which does
-	// NOT contain "no model set".
+	// Title must be present: the user needs something to read.
+	// No specific wording is asserted here — see TestTitleForSourceModel_UnsetAndNamedBranchesAreDistinguishable
+	// for the distinguishability behavioral property and TestTitleForSourceModel_DoesNotClaimEnterSkips
+	// for the key-binding correctness property.
 	if q.Title == "" {
-		t.Errorf("question Title is empty; want a descriptive title identifying the unset group")
-	}
-	// We check for the key phrase rather than an exact string to allow minor wording changes.
-	wantPhrase := "no model set"
-	if !strings.Contains(q.Title, wantPhrase) {
-		t.Errorf("question Title = %q; want it to contain %q to identify the unset group "+
-			"(RED: current Title does not mention the unset group)", q.Title, wantPhrase)
+		t.Errorf("question Title is empty; want a non-empty title for the unset group")
 	}
 }
 
@@ -696,5 +691,118 @@ func TestTransformHarness_FullModelMap_SuppressesAllModelQuestions(t *testing.T)
 			"captured subjects: %v "+
 			"(RED: service ignores ModelMap; deliver I7.3)",
 			len(spy.captured), spy.capturedSubjects())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T3.1: Unset group title is distinguishable from a named-model title
+// ---------------------------------------------------------------------------
+
+// TestTitleForSourceModel_UnsetAndNamedBranchesAreDistinguishable verifies that the
+// QTransformTargetModel question title for the unset group is not identical to the title for
+// a named source model. The user must be able to tell which group they are answering for from
+// the title alone. This is a behavioral property: no exact wording is prescribed.
+func TestTitleForSourceModel_UnsetAndNamedBranchesAreDistinguishable(t *testing.T) {
+	batchDir := t.TempDir()
+	writeTransformFile(t, batchDir, "a-unset.src.md", matchingAgentBytesWithModel(""))
+	writeTransformFile(t, batchDir, "b-named.src.md", matchingAgentBytesWithModel("claude-3-sonnet"))
+
+	spy := newCapturingModelSpy(
+		interactiontest.NewBuilder().Build(),
+		map[string]domain.ChoiceAnswer{
+			"":                {Status: domain.Answered, OptionID: "target-a"},
+			"claude-3-sonnet": {Status: domain.Answered, OptionID: "target-b"},
+		},
+	)
+	deps, _ := newMultiModelTransformDeps(t, spy)
+	svc := app.New(deps)
+
+	req := newPreAnsweredTransformRequest(batchDir)
+	req.TargetModel = ""
+
+	_, _ = svc.TransformHarness(context.Background(), req)
+
+	var unsetTitle, namedTitle string
+	for _, q := range spy.captured {
+		switch q.Subject {
+		case app.UnsetSourceModel:
+			unsetTitle = q.Title
+		case "claude-3-sonnet":
+			namedTitle = q.Title
+		}
+	}
+
+	if unsetTitle == "" {
+		t.Errorf("no QTransformTargetModel question captured for unset group; cannot verify distinguishability")
+	}
+	if namedTitle == "" {
+		t.Errorf("no QTransformTargetModel question captured for named model; cannot verify distinguishability")
+	}
+	if unsetTitle != "" && namedTitle != "" && unsetTitle == namedTitle {
+		t.Errorf("unset-group title %q is identical to named-model title %q; "+
+			"the two branches must produce different titles so the user knows which group they are answering for",
+			unsetTitle, namedTitle)
+	}
+
+	// The unset-group title must not contain the named source model's identifier.
+	// Asserting the absence of the named model identifier in the unset-group title is a
+	// sufficient negative-space discriminator: it confirms the title does not accidentally
+	// describe the named-model group and therefore must be describing something else (the
+	// unset group). No exact wording is prescribed.
+	namedModel := "claude-3-sonnet"
+	if unsetTitle != "" && strings.Contains(unsetTitle, namedModel) {
+		t.Errorf("unset-group title %q contains the named source model identifier %q; "+
+			"the unset-group title must describe the unset group, not the named source model — "+
+			"it must not include a model name that belongs to the named-model branch",
+			unsetTitle, namedModel)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T3.2: Titles do not claim Enter skips
+// ---------------------------------------------------------------------------
+
+// TestTitleForSourceModel_DoesNotClaimEnterSkips verifies that neither the unset-group title
+// nor the named-source-model title contains the phrase "enter to skip". The overlay binds Enter
+// exclusively to select and binds skip to the s key; a title that claims Enter skips contradicts
+// both the key bindings and the help line.
+//
+// RED: the current implementation appends " (optional, enter to skip)" to both branches of
+// titleForSourceModel, so both captured titles contain the forbidden phrase.
+func TestTitleForSourceModel_DoesNotClaimEnterSkips(t *testing.T) {
+	batchDir := t.TempDir()
+	writeTransformFile(t, batchDir, "a-unset.src.md", matchingAgentBytesWithModel(""))
+	writeTransformFile(t, batchDir, "b-named.src.md", matchingAgentBytesWithModel("claude-3-sonnet"))
+
+	spy := newCapturingModelSpy(
+		interactiontest.NewBuilder().Build(),
+		map[string]domain.ChoiceAnswer{
+			"":                {Status: domain.Answered, OptionID: "target-a"},
+			"claude-3-sonnet": {Status: domain.Answered, OptionID: "target-b"},
+		},
+	)
+	deps, _ := newMultiModelTransformDeps(t, spy)
+	svc := app.New(deps)
+
+	req := newPreAnsweredTransformRequest(batchDir)
+	req.TargetModel = ""
+
+	_, _ = svc.TransformHarness(context.Background(), req)
+
+	forbiddenPhrase := "enter to skip"
+	for _, q := range spy.captured {
+		if strings.Contains(strings.ToLower(q.Title), forbiddenPhrase) {
+			if q.Subject == app.UnsetSourceModel {
+				t.Errorf("unset-group title %q claims Enter skips (contains %q); "+
+					"Enter is bound to select in the overlay, not skip — the title must not contradict the key binding "+
+					"(RED: current titleForSourceModel appends \"(optional, enter to skip)\" in the unset branch)",
+					q.Title, forbiddenPhrase)
+			} else {
+				t.Errorf("named-model title %q for source model %q claims Enter skips (contains %q); "+
+					"Enter is bound to select in the overlay, not skip — the title must not contradict the key binding "+
+					"(RED: current titleForSourceModel appends \"(optional, enter to skip)\" in the named-model branch)",
+					q.Title, q.Subject, forbiddenPhrase)
+			}
+		}
 	}
 }

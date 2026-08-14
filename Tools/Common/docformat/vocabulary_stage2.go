@@ -46,6 +46,7 @@ var ErrUnclassifiedDeployedName = errors.New("tool-managed boundary name has no 
 // and whether the name is in the tool-managed registry.
 //
 //   - A name in CanonicalDeployed returns (NodeDeployed, true).
+//   - A managed block name (bare or compound form) returns (NodeDeployed, true).
 //   - Every other name returns ("", false). Injection names are open: there is no
 //     user-owned registry to consult.
 func ExpectedMarker(name string) (kind NodeKind, known bool) {
@@ -53,6 +54,9 @@ func ExpectedMarker(name string) (kind NodeKind, known bool) {
 		if n == name {
 			return NodeDeployed, true
 		}
+	}
+	if IsManagedBlockName(name) {
+		return NodeDeployed, true
 	}
 	return "", false
 }
@@ -80,6 +84,12 @@ func ClassifyRegion(kind NodeKind, name string) (mosaic.InjectionClass, error) {
 	isDeployed := isCanonicalDeployed(name)
 
 	if kind == NodeDeployed {
+		// Managed block names are nested tool-emitted blocks (e.g. Workflow inside
+		// AvailableWorkflows). They are not in CanonicalDeployed but are still valid
+		// managed regions; classify by tag-name prefix via classifyManagedBlockName.
+		if IsManagedBlockName(name) {
+			return classifyManagedBlockName(name)
+		}
 		if !isDeployed {
 			// Unrecognised tool-managed name — no generator exists.
 			return "", fmt.Errorf("name %q is not a recognised tool-managed boundary name: %w", name, ErrUnknownDeployedName)
@@ -129,4 +139,17 @@ func isCanonicalDeployed(name string) bool {
 		}
 	}
 	return false
+}
+
+// classifyManagedBlockName returns the InjectionClass for a managed block name (a name in
+// CanonicalManagedBlocks, matched on tag-name prefix). Every prefix has an explicit case;
+// a prefix with no registered case returns an error wrapping ErrUnclassifiedDeployedName.
+func classifyManagedBlockName(name string) (mosaic.InjectionClass, error) {
+	prefix := TagNamePrefix(name)
+	switch prefix {
+	case "Workflow":
+		return mosaic.InjectionWorkflow, nil
+	default:
+		return "", fmt.Errorf("managed block name %q (prefix %q) has no registered classifier case: %w", name, prefix, ErrUnclassifiedDeployedName)
+	}
 }

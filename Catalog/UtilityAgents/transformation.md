@@ -2,6 +2,7 @@
 version: 2.4.0
 name: transformation
 description: Maintains and transforms generic agent templates into harness-specific or project-specific agents. Detects outdated transformations and propagates changes while preserving harness syntax and injection content.
+role: utility
 model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction, bash]
 recommended_tier: MEDIUM

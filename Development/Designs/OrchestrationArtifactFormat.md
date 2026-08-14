@@ -67,7 +67,7 @@ A boundary tag is an XML-style name-first tag occupying its own line. The trimme
 </Workflow>
 ```
 
-No attributes. The tag name alone — for a compound region, just the prefix. Same own-line rule.
+No attributes. The tag name alone. Same own-line rule.
 
 **Type attribute values:**
 
@@ -78,13 +78,13 @@ No attributes. The tag name alone — for a compound region, just the prefix. Sa
 | `managed` | Tool-regenerated content | Regions written by the deployment tool, discarded and regenerated on each deploy |
 | `custom` | Project-invented regions | Regions a project adds entirely on its own, with no MOSAIC-declared anchor |
 
-**Compound names:** An enumerable region puts its prefix in the tag name and its id in a `name` attribute. The `Name()` accessor on a parsed node reassembles `prefix + ":" + id` so that callers doing prefix matching or colon-splitting keep working without modification.
+**Enumerable regions:** Where multiple regions share a common prefix (workflows, infrastructure agent declarations), the prefix is the tag name and the instance id is carried in a `name` attribute. The closing tag uses only the tag name — no attributes, no id.
 
-| Region identity | Open tag | Close tag |
-|---|---|---|
-| `ExecutionLog` | `<ExecutionLog type="core">` | `</ExecutionLog>` |
-| `Workflow:quick-fix` | `<Workflow type="core" name="quick-fix">` | `</Workflow>` |
-| `InfrastructureAgent:build-runner` | `<InfrastructureAgent type="core" name="build-runner">` | `</InfrastructureAgent>` |
+| Open tag | Close tag |
+|---|---|
+| `<ExecutionLog type="core">` | `</ExecutionLog>` |
+| `<Workflow type="core" name="quick-fix">` | `</Workflow>` |
+| `<InfrastructureAgent type="core" name="build-runner">` | `</InfrastructureAgent>` |
 
 **Version attribute:** Where a region carries a declared version, it appears as a `version` attribute on the opening tag. Regions that carry no version today do not gain one; the attribute is optional and its absence is not an error.
 

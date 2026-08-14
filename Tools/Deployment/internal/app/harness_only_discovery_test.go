@@ -567,6 +567,56 @@ func TestEligibleHarnessOnly_DuplicateSectionName_ReturnsIneligible(t *testing.T
 	}
 }
 
+// TestEligibleHarnessOnly_CompoundNamedSection_NowEligible verifies that a document
+// containing a compound-named section (<Workflow type="core" name="brownfield-tdd">
+// ... </Workflow>) alongside a well-formed canonical section is treated as eligible
+// once the mismatched-tag false positive is fixed.
+//
+// Before the Stage 1 fix: parseBoundaryTag assembles the opening name as
+// "Workflow:brownfield-tdd" but the closing tag supplies the bare name "Workflow";
+// the validator's direct comparison ("Workflow:brownfield-tdd" != "Workflow") fires a
+// blocking "mismatched-tag" issue, making the verdict ineligible.
+//
+// After the Stage 1 fix: the comparison uses the tag-name prefix
+// (TagNamePrefix("Workflow:brownfield-tdd") == "Workflow"), which matches the closing
+// tag name, so no "mismatched-tag" issue is raised. The document then satisfies both
+// eligibility signals and the verdict is Eligible true.
+func TestEligibleHarnessOnly_CompoundNamedSection_NowEligible(t *testing.T) {
+	// Arrange — a document satisfying both eligibility signals:
+	//   Signal 1: transform_version is present.
+	//   Signal 2: at least one canonical section (<Identity type="core">) is present and
+	//             the document has no blocking validation issue.
+	// The compound-named section (<Workflow type="core" name="brownfield-tdd">) uses the
+	// real-world pattern that triggered the mismatched-tag false positive reported in the
+	// Stage 1 bug description.
+	src := []byte("---\n" +
+		"transform_version: \"1.0.0\"\n" +
+		"version: \"2.1.0\"\n" +
+		"id: \"99\"\n" +
+		"---\n" +
+		"<Identity type=\"core\">\n" +
+		"Agent identity content.\n" +
+		"</Identity>\n" +
+		"<Workflow type=\"core\" name=\"brownfield-tdd\">\n" +
+		"Workflow section content.\n" +
+		"</Workflow>\n")
+
+	// Act
+	verdict := eligibleHarnessOnly(src)
+
+	// Assert — the compound-named section must no longer block eligibility.
+	if !verdict.Eligible {
+		t.Errorf("eligibleHarnessOnly returned Eligible false for a document with a "+
+			"compound-named section; want Eligible true after the Stage 1 fix removes "+
+			"the false-positive 'mismatched-tag' issue for compound open/close name pairs. "+
+			"Reason: %q", verdict.Reason)
+	}
+	if verdict.Reason != "" {
+		t.Errorf("eligibleHarnessOnly set Reason = %q on an eligible verdict; "+
+			"Reason must be empty when Eligible is true", verdict.Reason)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // T4.1 — isOrchestratorFileName: orchestrator filename classification
 // ---------------------------------------------------------------------------

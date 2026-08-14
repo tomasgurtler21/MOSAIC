@@ -322,7 +322,7 @@ func TestToolManagedRegion_Workflows_AssembledInDeployedRegion(t *testing.T) {
 	if !nodeOK {
 		t.Fatal("AvailableWorkflows deployed region absent from output")
 	}
-	if !bytes.Contains(node.Content(), []byte(`<Workflow type="core" name="lean-tdd"`)) {
+	if !bytes.Contains(node.Content(), []byte(`<Workflow type="managed" name="lean-tdd"`)) {
 		t.Errorf("AvailableWorkflows region does not contain workflow block opening tag;\ncontent: %q", node.Content())
 	}
 

@@ -2,6 +2,7 @@
 version: 1.0.0
 name: injections-helper
 description: Collaboratively fills and adds injection regions (type="project") in a deployed workspace's agent files, insisting on real project context before writing and refusing to write at all in a session that spent its budget discovering that context itself
+role: utility
 model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
 recommended_tier: MEDIUM-HIGH

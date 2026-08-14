@@ -3,6 +3,7 @@ version: 2.0.0
 base-version: 1.4.0
 name: anthropic-subagent-creator
 description: Creates high-quality orchestration subagent instructions through iterative collaboration, ensuring compliance with the multi-agent orchestration system architecture and protocols
+role: utility
 model: {model-identifier}
 tools: [file_read, file_write, file_edit, file_search, content_search, user_interaction]
 recommended_tier: HIGH

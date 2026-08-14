@@ -60,6 +60,16 @@ func init() {
 		"ExecutionPhilosophyCommon": "ExecutionPhilosophy",
 	}
 
+	// CanonicalManagedBlocks lists the tool-managed block names — managed regions the tool
+	// emits nested inside a managed parent region. Members have no generator of their own,
+	// are not refresh-scope regions, and are not valid bundle targets.
+	// Initial content: exactly one entry — "Workflow".
+	CanonicalManagedBlocks = []string{"Workflow"}
+
+	// ManagedBlockParent maps each managed block name to the managed region it must be nested
+	// inside. "Workflow" must appear inside "AvailableWorkflows".
+	ManagedBlockParent = map[string]string{"Workflow": "AvailableWorkflows"}
+
 	// InjectionParent maps each advisory injection name to its usual parent section,
 	// mirroring boundary_constants.py. This is an advisory table only: injection names
 	// are open, and an unlisted name is preserved like any other and is never flagged.

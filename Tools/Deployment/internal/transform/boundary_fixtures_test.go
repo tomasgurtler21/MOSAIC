@@ -38,13 +38,15 @@ const deploymentBoundaryDir = "../../testdata/boundary"
 // warnings (e.g. identity-shape for minimal Identity sections) are expected and are not
 // flagged by this test.
 //
-// compound-section.md is intentionally excluded: it is a parser fixture (not a
-// validator fixture) exercised by TestValidate_CompoundSectionNames_WorkflowFileExcluded
-// in the docformat package. Its close tag is syntactically valid but triggers a
-// mismatched-tag error because the validator compares the compound name
-// "Workflow:my-workflow" with the simple close-tag name "Workflow".
+// compound-section.md is intentionally excluded: that file contains content outside
+// any boundary tag (a prose line after the closing tag), which produces a
+// "content-outside-boundary" error. It is a parser fixture (not a validator fixture)
+// and is exercised by TestValidate_CompoundSectionNames_WorkflowFileExcluded in the
+// docformat package. compound-named-section.md is the validator fixture for well-formed
+// compound-named regions and is included here.
 func TestDeploymentBoundaryFixtures_ValidCases_NoIssues(t *testing.T) {
 	cases := []string{
+		"compound-named-section.md",
 		"empty-deployed.md",
 		"empty-injection.md",
 		"filled-deployed.md",
@@ -72,6 +74,35 @@ func TestDeploymentBoundaryFixtures_ValidCases_NoIssues(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stage 1 — compound-name open/close matching
+// ---------------------------------------------------------------------------
+
+// TestDeploymentBoundaryFixtures_CompoundNamedSection_NoMismatchedTag asserts that the
+// compound-named-section.md fixture — which uses a compound section name
+// (<Workflow type="core" name="brownfield-tdd">) paired with a bare closing tag
+// (</Workflow>) — produces no "mismatched-tag" validation issue. This is the canonical
+// positive test for the Stage 1 compound-tag mismatch fix: the closing tag name
+// ("Workflow") must be accepted as a valid close for the opening compound name
+// ("Workflow:brownfield-tdd") by comparing only the tag-name prefix.
+func TestDeploymentBoundaryFixtures_CompoundNamedSection_NoMismatchedTag(t *testing.T) {
+	src := readDeploymentBoundaryFixture(t, "compound-named-section.md")
+
+	doc, err := docformat.Parse(src)
+	if err != nil {
+		t.Fatalf("docformat.Parse: %v", err)
+	}
+
+	issues := docformat.Validate(doc, docformat.ValidateOptions{})
+
+	if deploymentBoundaryHasCode(issues, "mismatched-tag") {
+		t.Errorf("expected no 'mismatched-tag' issue for compound-named-section.md; "+
+			"<Workflow type=\"core\" name=\"brownfield-tdd\"> closed by </Workflow> "+
+			"must be accepted once mismatched-tag compares the tag-name prefix. Issues: %s",
+			deploymentBoundaryFormatIssues(issues))
 	}
 }
 

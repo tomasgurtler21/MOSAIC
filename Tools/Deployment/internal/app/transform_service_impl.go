@@ -24,9 +24,9 @@ import (
 // they are answering for.
 func titleForSourceModel(sourceModel string) string {
 	if sourceModel == UnsetSourceModel {
-		return "Select target model for agents with no model set (optional, enter to skip)"
+		return "Select target model for agents with no model set (s to skip)"
 	}
-	return fmt.Sprintf("Select target model for source model %q (optional, enter to skip)", sourceModel)
+	return fmt.Sprintf("Select target model for source model %q (s to skip)", sourceModel)
 }
 
 // transformHarness is the real implementation of Service.TransformHarness.

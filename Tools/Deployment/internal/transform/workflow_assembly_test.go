@@ -50,6 +50,7 @@ You are the Orchestrator.
 
 // deployedOrchestratorWithOneWorkflow is a deployed orchestrator whose AvailableWorkflows
 // injection already contains one workflow block. Used by re-injection tests.
+// After Stage 4, deployed files carry type="managed" on injected Workflow blocks.
 const deployedOrchestratorWithOneWorkflow = `---
 version: 6.0.0
 transform_version: 3.0.0
@@ -66,7 +67,7 @@ tools: [read-file, write-file, edit-file, search-file, search-text, run-terminal
 You are the Orchestrator.
 
 <AvailableWorkflows type="managed">
-<Workflow type="core" name="quick-fix" version="3.0">
+<Workflow type="managed" name="quick-fix" version="3.0">
 ## Quick Fix Workflow
 
 **Use when:** Small changes and bug fixes.
@@ -181,10 +182,11 @@ func TestAvailableWorkflows_SingleWorkflow_BlockCopiedVerbatim(t *testing.T) {
 		t.Fatal("AvailableWorkflows injection absent from output")
 	}
 
-	// The block content must be present verbatim inside the injection.
-	// We check that the section open tag (with version), the prose, and the close tag all appear.
+	// The block content must be present inside the injection with the opening tag retyped to
+	// type="managed". We check that the retyped open tag (with version), the prose, and the
+	// close tag all appear. The name and version attributes are preserved from the source block.
 	for _, want := range []string{
-		`<Workflow type="core" name="quick-fix" version="3.0">`,
+		`<Workflow type="managed" name="quick-fix" version="3.0">`,
 		"## Quick Fix Workflow",
 		"</Workflow>",
 	} {
