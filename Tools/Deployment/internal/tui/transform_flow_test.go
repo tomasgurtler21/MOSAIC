@@ -381,6 +381,10 @@ func (s *capturingTransformService) DeployUtilityInfrastructure(ctx context.Cont
 	return s.inner.DeployUtilityInfrastructure(ctx, req)
 }
 
+func (s *capturingTransformService) DeployStandalone(ctx context.Context, req app.StandaloneRequest) (domain.RunSummary, error) {
+	return s.inner.DeployStandalone(ctx, req)
+}
+
 func (s *capturingTransformService) RenderAgent(ctx context.Context, req app.RenderAgentRequest) (app.RenderAgentResult, error) {
 	return s.inner.RenderAgent(ctx, req)
 }

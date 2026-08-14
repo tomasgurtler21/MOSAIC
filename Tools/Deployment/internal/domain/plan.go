@@ -17,6 +17,10 @@ const (
 	// ModeUtilityInfraOnly deploys only Utility and Infrastructure agents, asking no
 	// workflow or hook questions.
 	ModeUtilityInfraOnly RunMode = "utility-infra-only"
+
+	// ModeStandaloneOnly deploys only standalone agents, asking no workflow, hook, utility,
+	// or infrastructure questions.
+	ModeStandaloneOnly RunMode = "standalone-only"
 )
 
 // PlanAction is the intended deployment action for one artifact.

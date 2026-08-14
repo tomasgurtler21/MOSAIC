@@ -6,7 +6,7 @@ package deploy_test
 // After a run, the workspace must contain only files and directories under:
 //   - the deployment directories named by PlanItem.TargetPath (relative to workspace root)
 //   - <workspace>/.mosaic/  (manifest and backups)
-//   - <workspace>/MOSAIC-DEPLOYMENT-TODO.md
+//   - a timestamped MOSAIC-DEPLOYMENT-TODO-<timestamp>.md file at the workspace root
 //
 // No stray files — debug output, uncleaned temp files, etc. — may appear at the workspace
 // root or in any unrelated directory. An implementation that leaks unexpected files would
@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"mosaic-deploy/internal/deploy"
@@ -48,13 +49,12 @@ func TestBoundary_NoStrayFilesAtWorkspaceRoot(t *testing.T) {
 	}
 
 	// Allowed top-level workspace entries:
-	//   "agents"           — deployment directory for this plan item's target path
-	//   ".mosaic"          — manifest.Dir: holds manifest.yaml and backups/
-	//   todo.FileName      — MOSAIC-DEPLOYMENT-TODO.md written by the executor
+	//   "agents"  — deployment directory for this plan item's target path
+	//   ".mosaic" — manifest.Dir: holds manifest.yaml and backups/
+	//   any name matching MOSAIC-DEPLOYMENT-TODO-<timestamp>.md
 	allowed := map[string]bool{
-		"agents":        true,
-		".mosaic":       true,
-		todo.FileName:   true,
+		"agents":  true,
+		".mosaic": true,
 	}
 
 	entries, err := os.ReadDir(workspace)
@@ -63,10 +63,12 @@ func TestBoundary_NoStrayFilesAtWorkspaceRoot(t *testing.T) {
 	}
 
 	for _, e := range entries {
-		if !allowed[e.Name()] {
-			t.Errorf("unexpected entry %q at workspace root — only %s are permitted (AC17.7)",
-				e.Name(), formatAllowed(allowed))
+		name := e.Name()
+		if allowed[name] || isTodoFileName(name) {
+			continue
 		}
+		t.Errorf("unexpected entry %q at workspace root — only %s and MOSAIC-DEPLOYMENT-TODO-<timestamp>.md are permitted (AC17.7)",
+			name, formatAllowed(allowed))
 	}
 }
 
@@ -96,9 +98,8 @@ func TestBoundary_NoStrayFilesAfterConflictSkip(t *testing.T) {
 	// After a skip, the workspace root must still contain only allowed entries.
 	// The pre-existing "agents" directory is permitted because the plan targeted it.
 	allowed := map[string]bool{
-		"agents":      true,
-		".mosaic":     true,
-		todo.FileName: true,
+		"agents":  true,
+		".mosaic": true,
 	}
 
 	entries, err := os.ReadDir(workspace)
@@ -107,11 +108,19 @@ func TestBoundary_NoStrayFilesAfterConflictSkip(t *testing.T) {
 	}
 
 	for _, e := range entries {
-		if !allowed[e.Name()] {
-			t.Errorf("unexpected entry %q at workspace root after conflict-skip — only %s are permitted (AC17.7)",
-				e.Name(), formatAllowed(allowed))
+		name := e.Name()
+		if allowed[name] || isTodoFileName(name) {
+			continue
 		}
+		t.Errorf("unexpected entry %q at workspace root after conflict-skip — only %s and MOSAIC-DEPLOYMENT-TODO-<timestamp>.md are permitted (AC17.7)",
+			name, formatAllowed(allowed))
 	}
+}
+
+// isTodoFileName reports whether name looks like a timestamped TODO checklist file:
+// prefix "MOSAIC-DEPLOYMENT-TODO" followed by any suffix and ending in ".md".
+func isTodoFileName(name string) bool {
+	return strings.HasPrefix(name, todo.FileNamePrefix) && strings.HasSuffix(name, todo.FileNameExt)
 }
 
 // formatAllowed formats the keys of an allowed map as a human-readable list for error messages.

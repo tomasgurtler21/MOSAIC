@@ -1,18 +1,18 @@
 package domain_test
 
-// role_test.go covers domain.ParseAgentRole and the renamed RoleSubagent constant.
+// role_test.go covers domain.ParseAgentRole, the AgentRole constants, and VariantForRole.
 //
-// After Stage 4 the internal role vocabulary aligns with the frontmatter vocabulary:
+// The frontmatter role vocabulary has four accepted values:
 //
-//	RoleSubagent     = "subagent"     (renamed from RoleWorker / "worker")
-//	RoleOrchestrator = "orchestrator" (unchanged)
-//	RoleUtility      = "utility"      (internal marker only — not a frontmatter value)
+//	RoleSubagent     = "subagent"     — worker agents
+//	RoleOrchestrator = "orchestrator" — orchestrator agent
+//	RoleUtility      = "utility"      — shared utility agents
+//	RoleStandalone   = "standalone"   — standalone-deployed agents
 //
 // ParseAgentRole is the single entry point for converting a frontmatter `role` scalar
-// to an AgentRole value. It accepts only "subagent" and "orchestrator"; every other
-// input (including "utility", "worker", the empty string, and arbitrary strings) is
-// rejected with ok = false so the caller can record an issue rather than silently
-// coerce an agent's role.
+// to an AgentRole value. It accepts exactly those four values; every other input
+// (including "worker", the empty string, and arbitrary strings) is rejected with
+// ok = false so the caller can record an issue rather than silently coerce an agent's role.
 
 import (
 	"testing"
@@ -21,7 +21,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// RoleSubagent constant value
+// AgentRole constant values
 // ---------------------------------------------------------------------------
 
 // TestRoleSubagent_Value_IsSubagent verifies that RoleSubagent equals the string
@@ -34,29 +34,46 @@ func TestRoleSubagent_Value_IsSubagent(t *testing.T) {
 }
 
 // TestRoleOrchestrator_Value_IsOrchestrator verifies that RoleOrchestrator retains its
-// existing value and is unchanged by the Stage 4 rename.
+// existing value.
 func TestRoleOrchestrator_Value_IsOrchestrator(t *testing.T) {
 	if string(domain.RoleOrchestrator) != "orchestrator" {
 		t.Errorf("RoleOrchestrator = %q, want %q", domain.RoleOrchestrator, "orchestrator")
 	}
 }
 
-// TestRoleUtility_Value_IsUtility verifies that RoleUtility retains its existing value.
-// Utility agents are never exposed via frontmatter; the constant is an internal marker
-// only and is not changed by the vocabulary alignment.
+// TestRoleUtility_Value_IsUtility verifies that RoleUtility has the correct string value.
 func TestRoleUtility_Value_IsUtility(t *testing.T) {
 	if string(domain.RoleUtility) != "utility" {
 		t.Errorf("RoleUtility = %q, want %q", domain.RoleUtility, "utility")
 	}
 }
 
+// TestRoleStandalone_Value_IsStandalone verifies that RoleStandalone has the string value
+// "standalone", which is the canonical frontmatter vocabulary for standalone-deployed agents.
+func TestRoleStandalone_Value_IsStandalone(t *testing.T) {
+	if string(domain.RoleStandalone) != "standalone" {
+		t.Errorf("RoleStandalone = %q, want %q", domain.RoleStandalone, "standalone")
+	}
+}
+
+// TestRoleWorker_AliasEqualsRoleSubagent verifies that RoleWorker is exactly equal to
+// RoleSubagent. RoleWorker is a backward-compatible alias declared in artifacts.go; new code
+// must use RoleSubagent, but existing call sites that still reference RoleWorker must not
+// silently receive a different value if the alias drifts. This test pins the identity.
+func TestRoleWorker_AliasEqualsRoleSubagent(t *testing.T) {
+	if domain.RoleWorker != domain.RoleSubagent {
+		t.Errorf("RoleWorker = %q, want %q (RoleSubagent); "+
+			"RoleWorker is a backward-compatible alias and must equal RoleSubagent exactly",
+			domain.RoleWorker, domain.RoleSubagent)
+	}
+}
+
 // ---------------------------------------------------------------------------
-// ParseAgentRole — accepted values ("subagent" and "orchestrator")
+// ParseAgentRole — accepted values
 // ---------------------------------------------------------------------------
 
 // TestParseAgentRole_Subagent_ReturnsRoleSubagentAndTrue verifies that "subagent" is
-// accepted and maps to RoleSubagent. This is the canonical frontmatter value for
-// worker agents.
+// accepted and maps to RoleSubagent.
 func TestParseAgentRole_Subagent_ReturnsRoleSubagentAndTrue(t *testing.T) {
 	role, ok := domain.ParseAgentRole("subagent")
 	if !ok {
@@ -81,20 +98,39 @@ func TestParseAgentRole_Orchestrator_ReturnsRoleOrchestratorAndTrue(t *testing.T
 	}
 }
 
+// TestParseAgentRole_Utility_ReturnsRoleUtilityAndTrue verifies that "utility" is accepted
+// and maps to RoleUtility. Utility is a first-class frontmatter role value: agents may
+// declare it explicitly and must be parsed as RoleUtility, not rejected.
+func TestParseAgentRole_Utility_ReturnsRoleUtilityAndTrue(t *testing.T) {
+	role, ok := domain.ParseAgentRole("utility")
+	if !ok {
+		t.Fatal("ParseAgentRole(\"utility\") returned ok = false; want ok = true; " +
+			"\"utility\" is a valid frontmatter role value and must be accepted")
+	}
+	if role != domain.RoleUtility {
+		t.Errorf("ParseAgentRole(\"utility\") = %q, want RoleUtility (%q)",
+			role, domain.RoleUtility)
+	}
+}
+
+// TestParseAgentRole_Standalone_ReturnsRoleStandaloneAndTrue verifies that "standalone" is
+// accepted and maps to RoleStandalone. Standalone agents are deployed on their own, outside
+// any workflow; the parser must recognise the value without requiring a separate code path.
+func TestParseAgentRole_Standalone_ReturnsRoleStandaloneAndTrue(t *testing.T) {
+	role, ok := domain.ParseAgentRole("standalone")
+	if !ok {
+		t.Fatal("ParseAgentRole(\"standalone\") returned ok = false; want ok = true; " +
+			"\"standalone\" is a valid frontmatter role value and must be accepted")
+	}
+	if role != domain.RoleStandalone {
+		t.Errorf("ParseAgentRole(\"standalone\") = %q, want RoleStandalone (%q)",
+			role, domain.RoleStandalone)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ParseAgentRole — rejected values
 // ---------------------------------------------------------------------------
-
-// TestParseAgentRole_Utility_ReturnsFalse verifies that "utility" is rejected.
-// Utility agents carry no frontmatter role value; the "utility" string is an
-// internal marker and must not be accepted via the frontmatter parse path.
-func TestParseAgentRole_Utility_ReturnsFalse(t *testing.T) {
-	_, ok := domain.ParseAgentRole("utility")
-	if ok {
-		t.Error("ParseAgentRole(\"utility\") returned ok = true; " +
-			"\"utility\" is not a frontmatter role value and must be rejected")
-	}
-}
 
 // TestParseAgentRole_Empty_ReturnsFalse verifies that the empty string is rejected.
 // An absent frontmatter field is handled by the caller (path-derived fallback), not
@@ -150,24 +186,29 @@ func TestParseAgentRole_CaseSensitive_UppercaseOrchestrator_ReturnsFalse(t *test
 	}
 }
 
-// TestParseAgentRole_Mixed_TableDriven runs the accepted/rejected cases as a table
-// to catch off-by-one expansion in future changes. A value that should be accepted
-// has a non-zero want; a value that should be rejected has want == "".
+// TestParseAgentRole_Mixed_TableDriven runs accepted and rejected cases as a table to
+// catch unintended expansion or contraction of the vocabulary in future changes. A row
+// with wantOk = true has a non-empty wantVal; a rejected row has wantVal == "".
 func TestParseAgentRole_Mixed_TableDriven(t *testing.T) {
 	cases := []struct {
 		input   string
 		wantOk  bool
 		wantVal domain.AgentRole
 	}{
+		// Accepted: the four first-class frontmatter role values.
 		{"subagent", true, domain.RoleSubagent},
 		{"orchestrator", true, domain.RoleOrchestrator},
-		{"utility", false, ""},
+		{"utility", true, domain.RoleUtility},
+		{"standalone", true, domain.RoleStandalone},
+
+		// Rejected: legacy, empty, whitespace-padded, and case-variant forms.
 		{"worker", false, ""},
 		{"", false, ""},
 		{"SUBAGENT", false, ""},
 		{"Subagent", false, ""},
-		{"orchestrator ", false, ""},  // trailing space
-		{" subagent", false, ""},     // leading space
+		{"orchestrator ", false, ""}, // trailing space
+		{" subagent", false, ""},    // leading space
+		{"analyst", false, ""},
 	}
 
 	for _, tc := range cases {
@@ -185,13 +226,11 @@ func TestParseAgentRole_Mixed_TableDriven(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// VariantForRole — role-to-protocol-variant mapping survives the rename
+// VariantForRole — role-to-protocol-variant mapping
 // ---------------------------------------------------------------------------
 
 // TestVariantForRole_RoleSubagent_ReturnsProtocolSubagent verifies that the renamed
-// RoleSubagent constant still maps to ProtocolSubagent. The many-to-one mapping
-// (subagent, utility → ProtocolSubagent) must not break when the constant is renamed
-// from RoleWorker.
+// RoleSubagent constant still maps to ProtocolSubagent.
 func TestVariantForRole_RoleSubagent_ReturnsProtocolSubagent(t *testing.T) {
 	variant := domain.VariantForRole(domain.RoleSubagent)
 	if variant != domain.ProtocolSubagent {
@@ -201,7 +240,7 @@ func TestVariantForRole_RoleSubagent_ReturnsProtocolSubagent(t *testing.T) {
 }
 
 // TestVariantForRole_RoleOrchestrator_ReturnsProtocolOrchestrator verifies that the
-// orchestrator mapping is unchanged after the vocabulary alignment.
+// orchestrator mapping is unchanged.
 func TestVariantForRole_RoleOrchestrator_ReturnsProtocolOrchestrator(t *testing.T) {
 	variant := domain.VariantForRole(domain.RoleOrchestrator)
 	if variant != domain.ProtocolOrchestrator {
@@ -211,8 +250,8 @@ func TestVariantForRole_RoleOrchestrator_ReturnsProtocolOrchestrator(t *testing.
 }
 
 // TestVariantForRole_RoleUtility_ReturnsProtocolSubagent verifies that the utility
-// role still maps to ProtocolSubagent (the "everything else" branch). Utility agents
-// receive subagent-variant protocol content if they receive any protocol at all.
+// role maps to ProtocolSubagent (the "everything else" branch). Utility agents receive
+// the subagent-variant protocol content when they receive any protocol at all.
 func TestVariantForRole_RoleUtility_ReturnsProtocolSubagent(t *testing.T) {
 	variant := domain.VariantForRole(domain.RoleUtility)
 	if variant != domain.ProtocolSubagent {
@@ -221,8 +260,20 @@ func TestVariantForRole_RoleUtility_ReturnsProtocolSubagent(t *testing.T) {
 	}
 }
 
-// TestVariantForRole_AllRoles_TableDriven runs all role-to-variant mappings as a
-// table to catch any unintended change in the mapping after the rename.
+// TestVariantForRole_RoleStandalone_ReturnsProtocolSubagent verifies that the standalone
+// role maps to ProtocolSubagent. Standalone agents are deployed without a protocol marker,
+// but the variant mapping itself routes them to the subagent variant — the absence of
+// protocol injection is the responsibility of the deployment path, not the mapping.
+func TestVariantForRole_RoleStandalone_ReturnsProtocolSubagent(t *testing.T) {
+	variant := domain.VariantForRole(domain.RoleStandalone)
+	if variant != domain.ProtocolSubagent {
+		t.Errorf("VariantForRole(RoleStandalone) = %q, want ProtocolSubagent (%q)",
+			variant, domain.ProtocolSubagent)
+	}
+}
+
+// TestVariantForRole_AllRoles_TableDriven runs all role-to-variant mappings as a table
+// to catch any unintended change in the mapping when the vocabulary expands.
 func TestVariantForRole_AllRoles_TableDriven(t *testing.T) {
 	cases := []struct {
 		role domain.AgentRole
@@ -231,6 +282,7 @@ func TestVariantForRole_AllRoles_TableDriven(t *testing.T) {
 		{domain.RoleSubagent, domain.ProtocolSubagent},
 		{domain.RoleOrchestrator, domain.ProtocolOrchestrator},
 		{domain.RoleUtility, domain.ProtocolSubagent},
+		{domain.RoleStandalone, domain.ProtocolSubagent},
 	}
 
 	for _, tc := range cases {

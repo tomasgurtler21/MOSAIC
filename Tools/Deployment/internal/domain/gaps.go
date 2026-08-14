@@ -39,14 +39,25 @@ const (
 	// regions, whose content survived regeneration untouched and may now contradict or
 	// duplicate the updated canonical text. One gap is produced per affected region.
 	GapDeployedRegionContentChanged GapKind = "deployed-region-content-changed"
+
+	// GapDefaultContentDeployed reports a project region whose source carried non-empty default
+	// content that was deployed into the output on its first appearance in the file. The content
+	// is present in the deployed file and ready for review; it will never be overwritten by a
+	// subsequent update. The user should review and adapt it to their project's needs.
+	// Distinct from GapEmptyInjection, which signals a region that still needs user input.
+	GapDefaultContentDeployed GapKind = "default-content-deployed"
 )
 
 // Gap is produced by transform, plan, and deploy when a decision could not be made automatically.
 // It is the only input to TodoItem, so a component that reports a gap never needs to know how the
 // checklist is rendered.
 type Gap struct {
-	Kind     GapKind
-	Subject  string // agent key, tool name, file path, injection name
+	Kind    GapKind
+	Subject string // agent key, tool name, file path, injection name
+	// Owner is the artifact key (usually an agent key) the gap belongs to. It answers "which
+	// file is this about" when Subject alone is ambiguous — many agents declare a region of
+	// the same name. Empty when the gap is run-level rather than artifact-level.
+	Owner    string
 	Detail   string
 	Fragment string // optional literal content the user must paste somewhere
 }
@@ -68,6 +79,9 @@ const (
 type TodoItem struct {
 	Category TodoCategory
 	Subject  string
+	// Owner is copied verbatim from Gap.Owner by Collector.AddGap; empty for items added
+	// directly via Collector.Add unless the caller sets it.
+	Owner    string
 	Detail   string
 	Fragment string
 }

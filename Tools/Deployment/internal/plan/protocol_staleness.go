@@ -22,10 +22,12 @@ type ProtocolDrift struct {
 // version. An empty deployed version is always stale — agents deployed before the protocol
 // marker existed carry no version and must be picked up.
 //
-// Applies to every agent regardless of role, unlike WorkflowStaleness which is restricted
-// to orchestrator-role agents.
-//
-// Implementation stub — add comparison logic in I7.2.
+// Applies only to agents whose role carries version markers (RoleSubagent and RoleOrchestrator).
+// The caller is responsible for gating the call via domain.RoleCarriesVersionMarkers; this
+// function is a pure comparison and does not consult the agent role itself. Unlike
+// WorkflowStaleness, which is restricted to orchestrators, this function applies to all managed
+// roles — but not to RoleUtility or RoleStandalone, whose deployed files carry no protocol
+// marker by design.
 func ProtocolStaleness(deployed domain.DeployedArtifactState, sourceVersion string) ProtocolDrift {
 	return ProtocolDrift{
 		Deployed: deployed.ProtocolVersion,

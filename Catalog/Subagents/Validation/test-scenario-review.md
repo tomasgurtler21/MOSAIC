@@ -154,18 +154,19 @@ Your review artifact should follow this structure:
 ### Issue Severity Levels
 
 <SeverityThresholds type="project">
-</SeverityThresholds>
 
-| Severity | Requires Rework | Notes (remove at injection) |
-|----------|-----------------|----------------------------|
-| CRITICAL | ✅ Always | Non-configurable |
-| MAJOR | ❌ No | Set to ✅ Yes for stricter reviews |
-| MINOR | ❌ No | Set to ✅ Yes if all issues must be addressed |
-| SUGGESTION | ❌ No | Set to ✅ Yes to require action on suggestions |
+| Severity | Requires Rework |
+|----------|-----------------|
+| CRITICAL | ✅ Always |
+| MAJOR | ✅ Yes |
+| MINOR | ❌ No |
+| SUGGESTION | ❌ No |
 
 **Status Code Logic:**
-- ANY issue at a severity marked "Requires Rework: ✅" → return `COMPLETED_NEEDS_ACTION`
-- ALL issues at "Requires Rework: ❌" severities → return `SUCCESS`, with every issue still recorded in the report
+- ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`
+- ALL issues at "Requires Rework: ❌" levels → return `SUCCESS` with issues noted in report
+
+</SeverityThresholds>
 
 ### Handling Objections at the Approval Gate
 

@@ -46,5 +46,20 @@ type SummaryLine struct {
 	Text     string
 }
 
-// FileName is the name of the todo checklist file written to the workspace root.
-const FileName = "MOSAIC-DEPLOYMENT-TODO.md"
+// FileNamePrefix and FileNameExt compose the deployment TODO checklist's file name.
+const (
+	FileNamePrefix = "MOSAIC-DEPLOYMENT-TODO"
+	FileNameExt    = ".md"
+)
+
+// FileNameTimestampLayout is the time layout used for the run-identifying suffix.
+const FileNameTimestampLayout = "20060102-150405"
+
+// FileNameAt returns the checklist file name for a run generated at t, with the run's
+// timestamp as a suffix before the extension — e.g. "MOSAIC-DEPLOYMENT-TODO-20260814-142405.md".
+// t is converted to UTC before formatting, so the same instant always yields the same name
+// regardless of the caller's location. A zero t yields the zero instant's formatting; callers
+// pass the run's Meta.GeneratedAt, which the service layer always populates.
+func FileNameAt(t time.Time) string {
+	return FileNamePrefix + "-" + t.UTC().Format(FileNameTimestampLayout) + FileNameExt
+}

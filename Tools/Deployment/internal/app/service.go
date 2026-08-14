@@ -107,6 +107,13 @@ type Service interface {
 	// skip path and the resulting GapNoModel entries.
 	DeployUtilityInfrastructure(ctx context.Context, req UtilityInfraRequest) (domain.RunSummary, error)
 
+	// DeployStandalone deploys only standalone agents plus the artifacts they require
+	// (their skills). It asks exactly the QStandaloneAgents question and the model questions
+	// those agents imply. It never asks QWorkflows, QHooks, QUtilityAgents, or
+	// QInfrastructureAgents, and never rewrites the deployed orchestrator's workflow or
+	// infrastructure regions.
+	DeployStandalone(ctx context.Context, req StandaloneRequest) (domain.RunSummary, error)
+
 	// RenderAgent renders exactly one generic-form MOSAIC agent into one target harness's
 	// deployed form at a caller-chosen destination.
 	//

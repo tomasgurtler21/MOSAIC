@@ -16,7 +16,8 @@ type catalogImpl struct {
 	workers      []domain.Agent  // sorted by Key
 	orchestr     domain.Agent
 	utilities    []domain.Agent
-	agentIdx     map[string]domain.Agent  // all agents by key (workers + orchestrator + utilities)
+	standalones  []domain.Agent  // sorted by Key; populated by loadAgents standalone scan
+	agentIdx     map[string]domain.Agent  // all agents by key (workers + orchestrator + utilities + standalones)
 	numericIDIdx map[string]domain.Agent  // agents by numeric frontmatter `id`; excludes empty-id agents
 	skills       []domain.Skill
 	skillIdx     map[string]domain.Skill
@@ -50,6 +51,10 @@ func (c *catalogImpl) Orchestrator() domain.Agent { return c.orchestr }
 
 // UtilityAgents returns all utility agents.
 func (c *catalogImpl) UtilityAgents() []domain.Agent { return c.utilities }
+
+// StandaloneAgents returns all standalone agents sorted by Key.
+// Populated by the loadAgents standalone scan (I4.2); returns nil until that is implemented.
+func (c *catalogImpl) StandaloneAgents() []domain.Agent { return c.standalones }
 
 // InfrastructureAgents returns all worker agents with a non-empty Infrastructure field,
 // in the same sorted order as Agents().

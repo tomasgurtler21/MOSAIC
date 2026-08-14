@@ -43,6 +43,10 @@ func (s *stubRoutingService) DeployUtilityInfrastructure(_ context.Context, _ ap
 	return domain.RunSummary{}, nil
 }
 
+func (s *stubRoutingService) DeployStandalone(_ context.Context, _ app.StandaloneRequest) (domain.RunSummary, error) {
+	return domain.RunSummary{}, nil
+}
+
 func (s *stubRoutingService) RenderAgent(_ context.Context, _ app.RenderAgentRequest) (app.RenderAgentResult, error) {
 	return app.RenderAgentResult{}, nil
 }

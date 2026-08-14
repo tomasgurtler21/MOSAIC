@@ -150,6 +150,69 @@ func (s *service) askInfrastructureAgents(ctx context.Context) []string {
 	return ans.OptionIDs
 }
 
+// askStandaloneAgents prompts for standalone-agent selection. Every standalone agent in the
+// catalog is offered; unlike utility agents there is no allow-list gate.
+//
+// Each option carries Group = agent.Category, which is empty for an agent placed flat under
+// Catalog/StandaloneAgents/. Options are ordered by category (named categories ascending,
+// uncategorised last), then by agent key ascending, so the rendered list is deterministic.
+//
+// Returns an empty slice when the question is skipped, cancelled, or errors.
+func (s *service) askStandaloneAgents(ctx context.Context) []string {
+	agents := s.deps.Catalog.StandaloneAgents()
+
+	// Separate into categorised and uncategorised groups. The catalog already returns agents
+	// sorted by key, so within each category the key order is already correct. We then stable-
+	// sort the categorised slice by category name to get named categories in ascending order,
+	// with uncategorised agents appended last.
+	var categorised []domain.Agent
+	var uncategorised []domain.Agent
+	for _, a := range agents {
+		if a.Category != "" {
+			categorised = append(categorised, a)
+		} else {
+			uncategorised = append(uncategorised, a)
+		}
+	}
+
+	// Stable insertion sort by Category to keep key order within each category.
+	for i := 1; i < len(categorised); i++ {
+		for j := i; j > 0 && categorised[j].Category < categorised[j-1].Category; j-- {
+			categorised[j], categorised[j-1] = categorised[j-1], categorised[j]
+		}
+	}
+
+	// Build options: categorised first (ascending by category, then key), uncategorised last.
+	opts := make([]domain.Option, 0, len(agents))
+	for _, a := range append(categorised, uncategorised...) {
+		label := a.Name
+		if label == "" {
+			label = a.Key
+		}
+		opts = append(opts, domain.Option{
+			ID:          a.Key,
+			Label:       label,
+			Description: a.Description,
+			Group:       a.Category,
+		})
+	}
+
+	q := domain.ChoiceQuestion{
+		Question: domain.Question{
+			ID:           domain.QStandaloneAgents,
+			Title:        "Select standalone agents",
+			AllowSkip:    true,
+			AllowSkipAll: true,
+		},
+		Options: opts,
+	}
+	ans, err := s.deps.Interaction.SelectMany(ctx, q)
+	if err != nil || ans.Status != domain.Answered {
+		return []string{}
+	}
+	return ans.OptionIDs
+}
+
 // askHooks prompts for hook bundle selection from every bundle the catalog knows about.
 func (s *service) askHooks(ctx context.Context) []string {
 	opts := make([]domain.Option, 0)

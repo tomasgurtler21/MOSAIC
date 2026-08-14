@@ -3,6 +3,8 @@ package todo
 import (
 	"fmt"
 	"strings"
+
+	"mosaic-deploy/internal/domain"
 )
 
 // RenderMarkdown produces MOSAIC-DEPLOYMENT-TODO.md as a byte slice. When the groups slice is
@@ -25,17 +27,40 @@ func RenderMarkdown(groups []Group, meta Meta) []byte {
 
 	for _, g := range groups {
 		fmt.Fprintf(&sb, "## %s\n\n", string(g.Category))
-		for _, item := range g.Items {
-			fmt.Fprintf(&sb, "- [ ] **%s**", item.Subject)
-			if item.Detail != "" {
-				fmt.Fprintf(&sb, " — %s", item.Detail)
+		if g.Category == domain.TodoInjections {
+			// Group injection items by owner: named owners ascending, unattributed last.
+			ownerGroups := GroupByOwner(g.Items)
+			for _, og := range ownerGroups {
+				if og.Owner != "" {
+					fmt.Fprintf(&sb, "### agent: %s\n\n", og.Owner)
+				} else {
+					sb.WriteString("### unattributed\n\n")
+				}
+				for _, item := range og.Items {
+					fmt.Fprintf(&sb, "- [ ] **%s**", item.Subject)
+					if item.Detail != "" {
+						fmt.Fprintf(&sb, " — %s", item.Detail)
+					}
+					sb.WriteString("\n")
+					if item.Fragment != "" {
+						fmt.Fprintf(&sb, "\n```\n%s\n```\n", item.Fragment)
+					}
+				}
+				sb.WriteString("\n")
+			}
+		} else {
+			for _, item := range g.Items {
+				fmt.Fprintf(&sb, "- [ ] **%s**", item.Subject)
+				if item.Detail != "" {
+					fmt.Fprintf(&sb, " — %s", item.Detail)
+				}
+				sb.WriteString("\n")
+				if item.Fragment != "" {
+					fmt.Fprintf(&sb, "\n```\n%s\n```\n", item.Fragment)
+				}
 			}
 			sb.WriteString("\n")
-			if item.Fragment != "" {
-				fmt.Fprintf(&sb, "\n```\n%s\n```\n", item.Fragment)
-			}
 		}
-		sb.WriteString("\n")
 	}
 
 	return []byte(sb.String())

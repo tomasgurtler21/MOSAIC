@@ -38,6 +38,7 @@ var gapToCategory = map[domain.GapKind]domain.TodoCategory{
 	domain.GapCustomRegionFallthrough:      domain.TodoInjections,
 	domain.GapInjectionReparented:          domain.TodoInjections,
 	domain.GapDeployedRegionContentChanged: domain.TodoInjections,
+	domain.GapDefaultContentDeployed:       domain.TodoInjections,
 	domain.GapSkippedFile:                  domain.TodoSkippedFiles,
 	domain.GapHookRegistration:         domain.TodoRegistration,
 	domain.GapManualStep:               domain.TodoManual,
@@ -69,6 +70,7 @@ func (c *collector) AddGap(g domain.Gap) {
 	c.Add(domain.TodoItem{
 		Category: cat,
 		Subject:  g.Subject,
+		Owner:    g.Owner,
 		Detail:   g.Detail,
 		Fragment: g.Fragment,
 	})

@@ -56,7 +56,7 @@ func TestSummaryScreen_CrossRenderer_SubjectsMatchMarkdownChecklist(t *testing.T
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/workspace/.ai",
 		Todos:          items,
-		TodoFilePath:   "/workspace/" + todo.FileName,
+		TodoFilePath:   "/workspace/" + todo.FileNameAt(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
 		Outcome:        domain.OutcomeCompletedWithGaps,
 	}
 	// Use a generous height so that all content is visible without scrolling.

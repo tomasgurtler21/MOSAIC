@@ -166,7 +166,6 @@ Your validation artifact should follow this template:
 ### Issue Severity Levels
 
 <SeverityThresholds type="project">
-</SeverityThresholds>
 
 | Severity | Requires Rework | Notes (remove at injection) |
 |----------|-----------------|----------------------------|
@@ -183,6 +182,8 @@ Your validation artifact should follow this template:
 - CRITICAL = Blocking Issues
 - MAJOR = Needs Clarification
 - MINOR/SUGGESTION = Suggested Improvements
+
+</SeverityThresholds>
 
 <SeverityDefinitions type="project">
 </SeverityDefinitions>

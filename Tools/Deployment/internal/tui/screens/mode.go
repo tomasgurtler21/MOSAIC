@@ -81,6 +81,20 @@ var modeItems = []widgets.ListItem{
 			"Use this when you want to add or update utility and infrastructure agents\n" +
 			"without touching the orchestrator or workflow configuration.",
 	},
+	{
+		ID:          string(domain.ModeStandaloneOnly),
+		Label:       "Deploy standalone agents only",
+		Description: "Deploy only standalone agents, skipping workflows, hooks, and utility/infrastructure agents.",
+		Detail: "Asks only the standalone agent selection question.\n" +
+			"Workflow selection, hook configuration, and orchestrator rewriting are\n" +
+			"never performed in this mode.\n\n" +
+			"The run deploys only the selected standalone agents and the\n" +
+			"skills they require — nothing else.\n\n" +
+			"Only deploy is supported for standalone agents — promote, update, and\n" +
+			"other modes do not apply to standalone agents.\n\n" +
+			"Use this when you want to deploy standalone agents without touching\n" +
+			"the orchestrator, workflows, hooks, or utility/infrastructure agents.",
+	},
 }
 
 // ModeScreen presents the available run modes: deploy-new, update-existing,

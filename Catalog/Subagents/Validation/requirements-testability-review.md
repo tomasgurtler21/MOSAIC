@@ -173,18 +173,19 @@ You write to the same output artifact name as the generic requirements review ag
 ### Issue Severity Levels
 
 <SeverityThresholds type="project">
-</SeverityThresholds>
 
 | Severity | Requires Rework |
 |----------|-----------------|
-| CRITICAL | Always — not configurable |
-| MAJOR | No by default |
-| MINOR | No by default |
-| SUGGESTION | No by default |
+| CRITICAL | ✅ Always |
+| MAJOR | ✅ Yes |
+| MINOR | ❌ No |
+| SUGGESTION | ❌ No |
 
 **Status Code Logic:**
-- ANY issue at a severity marked as requiring rework → return `COMPLETED_NEEDS_ACTION`
-- ALL issues below that threshold → return `SUCCESS`, with the issues recorded in the review artifact
+- ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`
+- ALL issues at "Requires Rework: ❌" levels → return `SUCCESS` with issues noted in report
+
+</SeverityThresholds>
 
 <SeverityDefinitions type="project">
 </SeverityDefinitions>

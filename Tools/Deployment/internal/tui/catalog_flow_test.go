@@ -67,6 +67,9 @@ func (s *catalogStubService) RenderAgent(_ context.Context, _ app.RenderAgentReq
 func (s *catalogStubService) CheckWorkflowIndex(_ context.Context) (app.IndexCheckResult, error) {
 	return app.IndexCheckResult{}, nil
 }
+func (s *catalogStubService) DeployStandalone(_ context.Context, _ app.StandaloneRequest) (domain.RunSummary, error) {
+	return domain.RunSummary{}, nil
+}
 
 // ---------------------------------------------------------------------------
 // Reload stub

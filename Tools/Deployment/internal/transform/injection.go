@@ -76,6 +76,12 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 	}
 	// Gaps from rename resolution (old-name content when both old and new names are present)
 	// are accumulated here and merged with the final gap list at the end.
+	// buildDeployedRegionMap receives no Request, so Owner must be patched here where req.Key
+	// is available. Without this, rename-collision removal gaps would appear under the
+	// unattributed group instead of the correct agent's sub-heading.
+	for i := range renameGaps {
+		renameGaps[i].Owner = req.Key
+	}
 	gaps = append(gaps, renameGaps...)
 
 	body := doc.Body()
@@ -214,6 +220,7 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 					gaps = append(gaps, domain.Gap{
 						Kind:    domain.GapDeployedRegionContentChanged,
 						Subject: name,
+						Owner:   req.Key,
 						Detail:  DeployedRegionContentChangedDetail(name, nestedNames, req.Timestamp),
 					})
 				}
@@ -254,6 +261,7 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 				gaps = append(gaps, domain.Gap{
 					Kind:    domain.GapInjectionReparented,
 					Subject: name,
+					Owner:   req.Key,
 					Detail:  InjectionReparentedDetail(name, deployedParent, sourceParent, req.Timestamp),
 				})
 			}
@@ -307,6 +315,7 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 			gaps = append(gaps, domain.Gap{
 				Kind:     domain.GapRemovedInjection,
 				Subject:  name,
+				Owner:    req.Key,
 				Fragment: string(entry.Content),
 			})
 		}
@@ -378,6 +387,7 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 			gaps = append(gaps, domain.Gap{
 				Kind:    domain.GapCustomRegionFallthrough,
 				Subject: req.Key,
+				Owner:   req.Key,
 				Detail:  FallthroughCustomRegionsDetail(fallthroughNames, req.Timestamp),
 			})
 		}
@@ -393,6 +403,7 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 			gaps = append(gaps, domain.Gap{
 				Kind:    domain.GapParkedCustomRegion,
 				Subject: req.Key,
+				Owner:   req.Key,
 				Detail:  ParkedCustomRegionsDetail(parkedNames, req.Timestamp),
 			})
 		}
@@ -448,19 +459,47 @@ func applyHarnessRegion(node *docformat.Node, name string, class domain.Injectio
 
 // applyProjectRegion handles a user-owned injection region.
 //
-// On new deployment (req.Deployed == nil): the region is cleared and a GapEmptyInjection
-// gap is recorded, signalling to the user that this region requires their input.
+// On new deployment (req.Deployed == nil): when the source region carries non-empty
+// (non-whitespace-only) default content, that content is deployed verbatim and a
+// GapDefaultContentDeployed gap is recorded, signalling that the content is present and
+// ready for review. When the source region is empty or whitespace-only, the region is
+// cleared and a GapEmptyInjection gap is recorded, signalling that user input is needed.
 //
 // On update (req.Deployed non-nil): the content from the deployed file is lifted verbatim
-// into the region (RegionPreserved). When the region is new in the source and absent from
-// the deployed file, the region starts empty (RegionAdded).
+// into the region (RegionPreserved). When the region is newly added to the source and
+// absent from the deployed file, the same default-content rule applies as for a new
+// deployment: non-empty source default → RegionDefaulted with GapDefaultContentDeployed;
+// empty or whitespace-only → RegionAdded (no gap).
+//
+// The preserve-on-update branch (region already in deployed file) is byte-identical and
+// the source's default content is never consulted once the region exists in the deployed file.
 func applyProjectRegion(node *docformat.Node, name string, class domain.InjectionClass, req Request, deployedContent map[string]regionEntry) (RegionOutcome, *domain.Gap) {
 	if req.Deployed == nil {
-		// New deployment: emit empty and record a TODO gap.
+		// New deployment: carry non-empty source default content through; treat whitespace-only
+		// as empty (existing behaviour unchanged for empty and whitespace-only regions).
+		sourceContent := node.Content()
+		if len(bytes.TrimSpace(sourceContent)) > 0 {
+			// Non-empty default: deploy source content and record a reviewable gap.
+			node.SetContent(sourceContent) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
+			gap := &domain.Gap{
+				Kind:    domain.GapDefaultContentDeployed,
+				Subject: name,
+				Owner:   req.Key,
+			}
+			return RegionOutcome{
+				Name:   name,
+				Marker: node.Kind(),
+				Class:  class,
+				Action: RegionDefaulted,
+				Bytes:  len(sourceContent),
+			}, gap
+		}
+		// Empty or whitespace-only: clear and record that user input is required.
 		node.Clear() //nolint:errcheck // Node.Clear always returns nil; forward-compatible error return.
 		gap := &domain.Gap{
 			Kind:    domain.GapEmptyInjection,
 			Subject: name,
+			Owner:   req.Key,
 		}
 		return RegionOutcome{
 			Name:   name,
@@ -472,6 +511,7 @@ func applyProjectRegion(node *docformat.Node, name string, class domain.Injectio
 	}
 
 	// Update: lift from the deployed file when the region was present there.
+	// The source default is never consulted once the region exists in the deployed file.
 	if entry, present := deployedContent[name]; present {
 		node.SetContent(entry.Content) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
 		action := RegionPreserved
@@ -489,7 +529,25 @@ func applyProjectRegion(node *docformat.Node, name string, class domain.Injectio
 		}, nil
 	}
 
-	// Region added in the new source version — not in the deployed file.
+	// Region added in the new source version — not yet in the deployed file. Apply the same
+	// default-content rule as new deployment: non-empty source default → RegionDefaulted;
+	// empty or whitespace-only → RegionAdded (existing behaviour unchanged).
+	sourceContent := node.Content()
+	if len(bytes.TrimSpace(sourceContent)) > 0 {
+		node.SetContent(sourceContent) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
+		gap := &domain.Gap{
+			Kind:    domain.GapDefaultContentDeployed,
+			Subject: name,
+			Owner:   req.Key,
+		}
+		return RegionOutcome{
+			Name:   name,
+			Marker: node.Kind(),
+			Class:  class,
+			Action: RegionDefaulted,
+			Bytes:  len(sourceContent),
+		}, gap
+	}
 	node.Clear() //nolint:errcheck // Node.Clear always returns nil; forward-compatible error return.
 	return RegionOutcome{
 		Name:   name,

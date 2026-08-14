@@ -31,18 +31,19 @@ type stubCatalog struct {
 	// catalogRoot, when non-empty, is returned by CatalogRoot(). When empty, CatalogRoot()
 	// returns root. Separate from root so tests can model a session whose MOSAIC root and
 	// active catalogue root differ — the production state after Stage 4.
-	catalogRoot   string
-	agents        []domain.Agent
-	orchestrator  domain.Agent
-	utilityAgents []domain.Agent
-	infraAgents   []domain.Agent // agents with non-empty Infrastructure field
-	skills        []domain.Skill
-	hooks         []domain.HookBundle
-	workflows     []domain.Workflow
-	categories    []domain.WorkflowCategory
-	tiers         []domain.TierInfo
-	sections      map[string][]byte
-	sources       map[string][]byte
+	catalogRoot      string
+	agents           []domain.Agent
+	orchestrator     domain.Agent
+	utilityAgents    []domain.Agent
+	infraAgents      []domain.Agent // agents with non-empty Infrastructure field
+	standaloneAgents []domain.Agent // agents deployed only by the standalone mode
+	skills           []domain.Skill
+	hooks            []domain.HookBundle
+	workflows        []domain.Workflow
+	categories       []domain.WorkflowCategory
+	tiers            []domain.TierInfo
+	sections         map[string][]byte
+	sources          map[string][]byte
 }
 
 func (c *stubCatalog) Root() string { return c.root }
@@ -54,7 +55,7 @@ func (c *stubCatalog) CatalogRoot() string {
 }
 func (c *stubCatalog) Agents() []domain.Agent                             { return c.agents }
 func (c *stubCatalog) Agent(key string) (domain.Agent, bool) {
-	all := append(c.agents, append(c.utilityAgents, append(c.infraAgents, c.orchestrator)...)...)
+	all := append(c.agents, append(c.utilityAgents, append(c.infraAgents, append(c.standaloneAgents, c.orchestrator)...)...)...)
 	for _, a := range all {
 		if a.Key == key {
 			return a, true
@@ -65,6 +66,7 @@ func (c *stubCatalog) Agent(key string) (domain.Agent, bool) {
 func (c *stubCatalog) Orchestrator() domain.Agent                         { return c.orchestrator }
 func (c *stubCatalog) UtilityAgents() []domain.Agent                      { return c.utilityAgents }
 func (c *stubCatalog) InfrastructureAgents() []domain.Agent               { return c.infraAgents }
+func (c *stubCatalog) StandaloneAgents() []domain.Agent                   { return c.standaloneAgents }
 func (c *stubCatalog) Skills() []domain.Skill                             { return c.skills }
 func (c *stubCatalog) Skill(key string) (domain.Skill, bool) {
 	for _, sk := range c.skills {
@@ -115,7 +117,7 @@ func (c *stubCatalog) AgentByNumericID(id string) (domain.Agent, bool) {
 	if id == "" {
 		return domain.Agent{}, false
 	}
-	all := append(c.agents, append(c.utilityAgents, append(c.infraAgents, c.orchestrator)...)...)
+	all := append(c.agents, append(c.utilityAgents, append(c.infraAgents, append(c.standaloneAgents, c.orchestrator)...)...)...)
 	for _, a := range all {
 		if a.NumericID == id {
 			return a, true

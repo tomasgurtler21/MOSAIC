@@ -45,6 +45,10 @@ type spyService struct {
 	utilityInfraResp domain.RunSummary
 	utilityInfraErr  error
 
+	standaloneReq  *app.StandaloneRequest
+	standaloneResp domain.RunSummary
+	standaloneErr  error
+
 	renderAgentReq  *app.RenderAgentRequest
 	renderAgentResp app.RenderAgentResult
 	renderAgentErr  error
@@ -83,6 +87,11 @@ func (s *spyService) TransformHarness(ctx context.Context, req app.TransformHarn
 func (s *spyService) DeployUtilityInfrastructure(ctx context.Context, req app.UtilityInfraRequest) (domain.RunSummary, error) {
 	s.utilityInfraReq = &req
 	return s.utilityInfraResp, s.utilityInfraErr
+}
+
+func (s *spyService) DeployStandalone(_ context.Context, req app.StandaloneRequest) (domain.RunSummary, error) {
+	s.standaloneReq = &req
+	return s.standaloneResp, s.standaloneErr
 }
 
 func (s *spyService) RenderAgent(_ context.Context, req app.RenderAgentRequest) (app.RenderAgentResult, error) {

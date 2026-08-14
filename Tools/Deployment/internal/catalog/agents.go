@@ -124,6 +124,77 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 		return c.utilities[i].Key < c.utilities[j].Key
 	})
 
+	// Standalone agents: scan StandaloneAgents/ with two passes over one directory read.
+	// Pass 1 (flat): non-directory *.md files directly under StandaloneAgents/ → empty category.
+	// Pass 2 (category): for each directory entry, non-directory *.md files inside it → category = dir name.
+	// A missing StandaloneAgents/ directory is not an error.
+	standaloneDir := catalogpaths.StandaloneAgentsDir(root)
+	topEntries, err := os.ReadDir(standaloneDir)
+	if err == nil {
+		// Pass 1: flat files directly under StandaloneAgents/.
+		for _, entry := range topEntries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if name == "README.md" || !strings.HasSuffix(name, ".md") {
+				continue
+			}
+			key := strings.TrimSuffix(name, ".md")
+			if _, exists := c.agentIdx[key]; exists {
+				continue
+			}
+			agentPath := filepath.Join(standaloneDir, name)
+			agent, agentIssues, err := parseAgentFile(agentPath, domain.RoleStandalone, "")
+			if err != nil {
+				continue
+			}
+			issues = append(issues, agentIssues...)
+			c.standalones = append(c.standalones, agent)
+			c.agentIdx[agent.Key] = agent
+			c.sourcePaths[agentPath] = true
+		}
+
+		// Pass 2: categorised files one level deep under StandaloneAgents/<Category>/.
+		for _, entry := range topEntries {
+			if !entry.IsDir() {
+				continue
+			}
+			category := entry.Name()
+			catDir := filepath.Join(standaloneDir, category)
+			catEntries, err := os.ReadDir(catDir)
+			if err != nil {
+				continue
+			}
+			for _, fe := range catEntries {
+				if fe.IsDir() {
+					continue
+				}
+				name := fe.Name()
+				if name == "README.md" || !strings.HasSuffix(name, ".md") {
+					continue
+				}
+				key := strings.TrimSuffix(name, ".md")
+				if _, exists := c.agentIdx[key]; exists {
+					continue
+				}
+				agentPath := filepath.Join(catDir, name)
+				agent, agentIssues, err := parseAgentFile(agentPath, domain.RoleStandalone, category)
+				if err != nil {
+					continue
+				}
+				issues = append(issues, agentIssues...)
+				c.standalones = append(c.standalones, agent)
+				c.agentIdx[agent.Key] = agent
+				c.sourcePaths[agentPath] = true
+			}
+		}
+
+		sort.Slice(c.standalones, func(i, j int) bool {
+			return c.standalones[i].Key < c.standalones[j].Key
+		})
+	}
+
 	return issues
 }
 
@@ -160,7 +231,7 @@ func parseAgentFile(path string, role domain.AgentRole, category string) (domain
 				Severity: docformat.SeverityError,
 				Code:     "invalid-role",
 				Subject:  key,
-				Message:  fmt.Sprintf("agent %q has unrecognised frontmatter role %q; expected \"subagent\" or \"orchestrator\"", key, v.Scalar),
+				Message:  fmt.Sprintf("agent %q has unrecognised frontmatter role %q; expected \"subagent\", \"orchestrator\", \"utility\", or \"standalone\"", key, v.Scalar),
 				Path:     path,
 			})
 		}

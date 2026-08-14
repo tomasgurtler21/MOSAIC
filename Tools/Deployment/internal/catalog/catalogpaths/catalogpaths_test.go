@@ -427,6 +427,7 @@ func TestPathForms_CatalogRootRelativeDoesNotContainCatalogPrefix(t *testing.T) 
 		"RelWorkflowsDir":          catalogpaths.RelWorkflowsDir,
 		"RelSourceFilesFormatFile": catalogpaths.RelSourceFilesFormatFile,
 		"RelBundleFile":            catalogpaths.RelBundleFile,
+		"RelStandaloneAgentsDir":   catalogpaths.RelStandaloneAgentsDir,
 	}
 	for name, val := range relPaths {
 		if val == "" {
@@ -437,4 +438,96 @@ func TestPathForms_CatalogRootRelativeDoesNotContainCatalogPrefix(t *testing.T) 
 			t.Errorf("%s = %q starts with %q; catalog-root-relative paths must not include the Catalog/ prefix", name, val, prefix)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Standalone agent path builders (T4.1)
+// ---------------------------------------------------------------------------
+//
+// Tests verify:
+//   - RelStandaloneAgentsDir equals "StandaloneAgents" and is in the catalog-root-relative
+//     family (no leading "Catalog/" prefix).
+//   - StandaloneAgentsDir joins catalogRoot with RelStandaloneAgentsDir.
+//   - StandaloneAgentCategoryDir joins StandaloneAgentsDir with the category name.
+//   - StandaloneAgentFile with an empty category yields a flat path directly under
+//     StandaloneAgentsDir; with a non-empty category it descends one level.
+//   - All standalone builders are pure (no I/O, no panic for a non-existent root).
+
+func TestRelStandaloneAgentsDir_Value(t *testing.T) {
+	if catalogpaths.RelStandaloneAgentsDir != "StandaloneAgents" {
+		t.Errorf("RelStandaloneAgentsDir = %q; want %q",
+			catalogpaths.RelStandaloneAgentsDir, "StandaloneAgents")
+	}
+}
+
+func TestRelStandaloneAgentsDir_DoesNotContainCatalogPrefix(t *testing.T) {
+	// Standalone is in the catalog-root-relative family; its constant must not carry a
+	// leading "Catalog/" segment, or --catalog-folder would silently double the prefix.
+	prefix := catalogpaths.CatalogDirName + "/"
+	val := catalogpaths.RelStandaloneAgentsDir
+	if len(val) >= len(prefix) && val[:len(prefix)] == prefix {
+		t.Errorf("RelStandaloneAgentsDir = %q starts with %q; "+
+			"catalog-root-relative constants must not include the Catalog/ prefix", val, prefix)
+	}
+}
+
+func TestStandaloneAgentsDir_ProducesExpectedPath(t *testing.T) {
+	// StandaloneAgentsDir must mirror UtilityAgentsDir's construction: join catalogRoot
+	// with the corresponding Rel* constant.
+	root := "/test/catalog/root"
+	got := catalogpaths.StandaloneAgentsDir(root)
+	want := filepath.Join(root, "StandaloneAgents")
+	if got != want {
+		t.Errorf("StandaloneAgentsDir(%q) = %q; want %q", root, got, want)
+	}
+}
+
+func TestStandaloneAgentCategoryDir_ProducesExpectedPath(t *testing.T) {
+	// StandaloneAgentCategoryDir must join StandaloneAgentsDir with the category name,
+	// mirroring SubagentCategoryDir's construction.
+	root := "/test/catalog/root"
+	category := "Analytics"
+	got := catalogpaths.StandaloneAgentCategoryDir(root, category)
+	want := filepath.Join(root, "StandaloneAgents", category)
+	if got != want {
+		t.Errorf("StandaloneAgentCategoryDir(%q, %q) = %q; want %q", root, category, got, want)
+	}
+}
+
+func TestStandaloneAgentFile_EmptyCategory_ProducesFlatPath(t *testing.T) {
+	// An empty category must yield the file directly under StandaloneAgentsDir, with no
+	// intervening subdirectory. This is the "flat layout" for uncategorised standalone agents.
+	root := "/test/catalog/root"
+	agentKey := "my-agent"
+	got := catalogpaths.StandaloneAgentFile(root, "", agentKey)
+	want := filepath.Join(root, "StandaloneAgents", agentKey+".md")
+	if got != want {
+		t.Errorf("StandaloneAgentFile(%q, %q, %q) = %q; want %q",
+			root, "", agentKey, got, want)
+	}
+}
+
+func TestStandaloneAgentFile_NonEmptyCategory_ProducesCategorisedPath(t *testing.T) {
+	// A non-empty category must yield the file one level down under StandaloneAgentsDir/<Category>/.
+	root := "/test/catalog/root"
+	category := "Analytics"
+	agentKey := "my-agent"
+	got := catalogpaths.StandaloneAgentFile(root, category, agentKey)
+	want := filepath.Join(root, "StandaloneAgents", category, agentKey+".md")
+	if got != want {
+		t.Errorf("StandaloneAgentFile(%q, %q, %q) = %q; want %q",
+			root, category, agentKey, got, want)
+	}
+}
+
+func TestStandaloneBuilders_PerformNoIO(t *testing.T) {
+	// Standalone builders must be pure path joiners. A non-existent root must not cause
+	// a panic or any filesystem error — each builder returns a path string without touching
+	// the disk, matching the contract of every other builder in this package.
+	nonExistent := "/does/not/exist/on/any/disk/standalone"
+	_ = catalogpaths.StandaloneAgentsDir(nonExistent)
+	_ = catalogpaths.StandaloneAgentCategoryDir(nonExistent, "cat")
+	_ = catalogpaths.StandaloneAgentFile(nonExistent, "", "key")
+	_ = catalogpaths.StandaloneAgentFile(nonExistent, "cat", "key")
+	// Reaching here without panic confirms the builders perform no I/O.
 }

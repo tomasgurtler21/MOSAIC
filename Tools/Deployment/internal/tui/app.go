@@ -115,17 +115,18 @@ type rootModel struct {
 	selections entrySelections
 
 	// Question overlay shown during screenQuestion. Exactly one of these is non-nil at a time.
-	activeQuestion   *questionMsg
-	selectOverlay    *inlineSelectOne                   // generic SelectOne/SelectMany fallback
-	confirmOverlay   *inlineConfirm                     // Confirm questions
-	modelOverlay     *screens.ModelSelectScreen         // QTierModel, QAgentModel
-	textOverlay      *screens.TextPromptScreen          // AskText questions (QCustomTool, QCustomModel)
-	conflictOverlay  *screens.ConflictScreen            // QLocalModification
-	reviewOverlay    *screens.ReviewScreen              // Review() calls
-	workflowOverlay  *screens.WorkflowBrowserScreen     // QWorkflows multi-select
-	agentOverlay     *screens.UtilityAgentScreen        // QUtilityAgents multi-select
-	infraAgentOverlay *screens.InfrastructureAgentScreen // QInfrastructureAgents multi-select
-	hookOverlay      *screens.HookScreen                // QHooks multi-select
+	activeQuestion        *questionMsg
+	selectOverlay         *inlineSelectOne                   // generic SelectOne/SelectMany fallback
+	confirmOverlay        *inlineConfirm                     // Confirm questions
+	modelOverlay          *screens.ModelSelectScreen         // QTierModel, QAgentModel
+	textOverlay           *screens.TextPromptScreen          // AskText questions (QCustomTool, QCustomModel)
+	conflictOverlay       *screens.ConflictScreen            // QLocalModification
+	reviewOverlay         *screens.ReviewScreen              // Review() calls
+	workflowOverlay       *screens.WorkflowBrowserScreen     // QWorkflows multi-select
+	agentOverlay          *screens.UtilityAgentScreen        // QUtilityAgents multi-select
+	infraAgentOverlay     *screens.InfrastructureAgentScreen // QInfrastructureAgents multi-select
+	standaloneAgentOverlay *screens.StandaloneAgentScreen    // QStandaloneAgents multi-select
+	hookOverlay           *screens.HookScreen                // QHooks multi-select
 
 	// Post-run summary screen (shown on screenDone after a successful or partial run).
 	summaryScreen *screens.SummaryScreen
@@ -380,6 +381,9 @@ func (m *rootModel) resizeQuestionOverlays(width, height int) {
 	if m.infraAgentOverlay != nil {
 		m.infraAgentOverlay.Resize(width, height)
 	}
+	if m.standaloneAgentOverlay != nil {
+		m.standaloneAgentOverlay.Resize(width, height)
+	}
 	if m.hookOverlay != nil {
 		m.hookOverlay.Resize(width, height)
 	}
@@ -600,6 +604,22 @@ func (m *rootModel) updateQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	// StandaloneAgentScreen overlay (QStandaloneAgents).
+	if m.standaloneAgentOverlay != nil {
+		cmd := m.standaloneAgentOverlay.Update(msg)
+		if m.standaloneAgentOverlay.Done() {
+			ids := m.standaloneAgentOverlay.SelectedIDs()
+			m.dispatchMultiChoiceAnswer(ids)
+			m.standaloneAgentOverlay = nil
+			m.screen = screenRunning
+		} else if m.standaloneAgentOverlay.Back() {
+			m.dispatchMultiChoiceCancelled()
+			m.standaloneAgentOverlay = nil
+			m.screen = screenRunning
+		}
+		return m, cmd
+	}
+
 	// HookScreen overlay (QHooks).
 	if m.hookOverlay != nil {
 		cmd := m.hookOverlay.Update(msg)
@@ -765,6 +785,9 @@ func (m *rootModel) handleQuestionMsg(qMsg questionMsg) (tea.Model, tea.Cmd) {
 		case domain.QInfrastructureAgents:
 			agents := optionsToAgents(qMsg.choiceQ.Options)
 			m.infraAgentOverlay = screens.NewInfrastructureAgentScreen(agents, m.width, m.height, style)
+		case domain.QStandaloneAgents:
+			cats := optionsToAgentCategories(qMsg.choiceQ.Options)
+			m.standaloneAgentOverlay = screens.NewStandaloneAgentScreen(cats, m.width, m.height, style, "")
 		case domain.QHooks:
 			bundles, supported := optionsToHookBundles(qMsg.choiceQ.Options)
 			m.hookOverlay = screens.NewHookScreen(bundles, supported, m.width, m.height, style, "")
@@ -875,6 +898,18 @@ func (m *rootModel) startService() tea.Cmd {
 			}
 			return runDoneMsg{summary: summary}
 
+		case domain.ModeStandaloneOnly:
+			// StandaloneAgentIDs is left nil so the flow asks QStandaloneAgents interactively
+			// through the Interaction port. WorkspacePath comes from the workspace screen selection.
+			summary, err := svc.DeployStandalone(ctx, app.StandaloneRequest{
+				HarnessID:     sel.harnessID,
+				WorkspacePath: sel.workspacePath,
+			})
+			if err != nil {
+				return runErrorMsg{err: err}
+			}
+			return runDoneMsg{summary: summary}
+
 		default:
 			return runErrorMsg{err: fmt.Errorf("unknown mode: %q", sel.mode)}
 		}
@@ -947,6 +982,9 @@ func (m *rootModel) viewQuestion() string {
 	}
 	if m.infraAgentOverlay != nil {
 		return m.infraAgentOverlay.View()
+	}
+	if m.standaloneAgentOverlay != nil {
+		return m.standaloneAgentOverlay.View()
 	}
 	if m.hookOverlay != nil {
 		return m.hookOverlay.View()

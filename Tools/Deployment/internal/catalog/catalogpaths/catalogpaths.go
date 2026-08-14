@@ -160,3 +160,26 @@ func SourceFilesFormatFile(catalogRoot string) string {
 func BundleFile(catalogRoot string) string {
 	return filepath.Join(catalogRoot, RelBundleFile)
 }
+
+// RelStandaloneAgentsDir is the catalog-root-relative subpath for the standalone agents
+// directory. It must not contain a leading "Catalog/" segment.
+const RelStandaloneAgentsDir = "StandaloneAgents"
+
+// StandaloneAgentsDir returns the standalone agents root directory.
+func StandaloneAgentsDir(catalogRoot string) string {
+	return filepath.Join(catalogRoot, RelStandaloneAgentsDir)
+}
+
+// StandaloneAgentCategoryDir returns the directory for a specific standalone agent category.
+func StandaloneAgentCategoryDir(catalogRoot, category string) string {
+	return filepath.Join(StandaloneAgentsDir(catalogRoot), category)
+}
+
+// StandaloneAgentFile returns the path to a standalone agent file. An empty category yields
+// the flat, uncategorised location directly under StandaloneAgentsDir.
+func StandaloneAgentFile(catalogRoot, category, agentKey string) string {
+	if category == "" {
+		return filepath.Join(StandaloneAgentsDir(catalogRoot), agentKey+AgentFileExt)
+	}
+	return filepath.Join(StandaloneAgentCategoryDir(catalogRoot, category), agentKey+AgentFileExt)
+}

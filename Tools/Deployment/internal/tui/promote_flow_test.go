@@ -633,6 +633,10 @@ func (s *capturingPromoteService) DeployUtilityInfrastructure(ctx context.Contex
 	return s.inner.DeployUtilityInfrastructure(ctx, req)
 }
 
+func (s *capturingPromoteService) DeployStandalone(ctx context.Context, req app.StandaloneRequest) (domain.RunSummary, error) {
+	return s.inner.DeployStandalone(ctx, req)
+}
+
 func (s *capturingPromoteService) RenderAgent(ctx context.Context, req app.RenderAgentRequest) (app.RenderAgentResult, error) {
 	return s.inner.RenderAgent(ctx, req)
 }

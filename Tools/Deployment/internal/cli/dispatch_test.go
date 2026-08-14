@@ -205,6 +205,10 @@ func (s *countingService) DeployUtilityInfrastructure(ctx context.Context, req a
 	return domain.RunSummary{Outcome: domain.OutcomeSuccess}, nil
 }
 
+func (s *countingService) DeployStandalone(_ context.Context, _ app.StandaloneRequest) (domain.RunSummary, error) {
+	return domain.RunSummary{Outcome: domain.OutcomeSuccess}, nil
+}
+
 func (s *countingService) RenderAgent(_ context.Context, _ app.RenderAgentRequest) (app.RenderAgentResult, error) {
 	return app.RenderAgentResult{}, nil
 }

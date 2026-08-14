@@ -42,6 +42,9 @@ type Input struct {
 	WorkflowIDs            []string                         // selection order is preserved into Plan.Workflows
 	UtilityAgentIDs        []string                         // must already be filtered by the tool config allow-list
 	InfrastructureAgentIDs []string                         // explicitly selected infrastructure agents
+	// StandaloneAgentIDs are the explicitly selected standalone agents. Populated only by
+	// the standalone-only deploy mode; nil in every other mode.
+	StandaloneAgentIDs     []string
 	HookIDs                []string
 	Models          map[string]domain.ModelSelection // agent key -> resolved model selection
 	// DeployedState supplies the full probed state of every planned target path: presence,

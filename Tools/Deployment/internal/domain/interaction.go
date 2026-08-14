@@ -97,6 +97,10 @@ const (
 	// output file. Answer: one model id from the target descriptor's ModelCatalog, or a
 	// free-text id when the harness declares none.
 	QTransformTargetModel QuestionID = "transform-target-model"
+
+	// QStandaloneAgents asks which standalone agents to deploy in the standalone-only mode.
+	// Every standalone agent in the catalog is offered. Skippable and skip-all-able.
+	QStandaloneAgents QuestionID = "standalone-agents"
 )
 
 // PlanReviewer is the deployment-specific interface for plan review. The shared Interaction

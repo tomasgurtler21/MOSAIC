@@ -1,13 +1,16 @@
 package tui
 
 // multiselect_adapters.go holds pure-function adapters that translate the flat
-// domain.Option slices produced by askWorkflows, askUtilityAgents, and askHooks
-// into the typed inputs expected by their dedicated multi-select screens.
+// domain.Option slices produced by askWorkflows, askUtilityAgents, askHooks, and
+// askStandaloneAgents into the typed inputs expected by their dedicated multi-select screens.
 //
 // Because these adapters have no side effects they can be exercised in unit tests
 // without a running tea.Program.
 
-import "mosaic-deploy/internal/domain"
+import (
+	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/tui/screens"
+)
 
 // optionsToWorkflowCategories reconstructs an ordered list of workflow categories
 // from the flat option slice produced by askWorkflows. Categories are ordered by
@@ -67,6 +70,56 @@ func optionsToAgents(opts []domain.Option) []domain.Agent {
 		}
 	}
 	return agents
+}
+
+// optionsToAgentCategories reconstructs ordered agent categories from the flat option slice
+// produced by askStandaloneAgents. Categories are ordered by first appearance of each Group
+// value, except that the empty-Group category is always placed last. Each option maps to a
+// domain.Agent: ID→Key, Label→Name, Description→Description, Group→Category.
+func optionsToAgentCategories(opts []domain.Option) []screens.AgentCategory {
+	if len(opts) == 0 {
+		return nil
+	}
+
+	// Preserve first-appearance order of category groups, keeping empty-Group entries separate
+	// so they can be placed last regardless of where they appear in the input.
+	namedOrder := []string{}
+	namedMap := map[string][]domain.Agent{}
+	var uncategorised []domain.Agent
+
+	for _, opt := range opts {
+		agent := domain.Agent{
+			Key:         opt.ID,
+			Name:        opt.Label,
+			Description: opt.Description,
+			Category:    opt.Group,
+		}
+		if opt.Group == "" {
+			uncategorised = append(uncategorised, agent)
+		} else {
+			if _, exists := namedMap[opt.Group]; !exists {
+				namedOrder = append(namedOrder, opt.Group)
+				namedMap[opt.Group] = []domain.Agent{}
+			}
+			namedMap[opt.Group] = append(namedMap[opt.Group], agent)
+		}
+	}
+
+	// Build result: named categories first (in first-appearance order), then uncategorised.
+	var categories []screens.AgentCategory
+	for _, name := range namedOrder {
+		categories = append(categories, screens.AgentCategory{
+			Name:   name,
+			Agents: namedMap[name],
+		})
+	}
+	if len(uncategorised) > 0 {
+		categories = append(categories, screens.AgentCategory{
+			Name:   "",
+			Agents: uncategorised,
+		})
+	}
+	return categories
 }
 
 // optionsToHookBundles converts the flat option slice from askHooks into a slice

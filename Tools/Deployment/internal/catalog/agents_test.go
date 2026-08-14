@@ -802,3 +802,461 @@ func TestInfrastructureAgent_ManualTriggerNullParam_RestoreClassParsed(t *testin
 		t.Errorf("OnFailure = %q, want %q", a.OnFailure, "halt")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Standalone agents — discovery (T4.2)
+// ---------------------------------------------------------------------------
+//
+// Tests below verify that loadAgents correctly discovers standalone agent files under
+// Catalog/StandaloneAgents/ across flat and category-subfolder layouts.
+//
+// All tests build synthetic fixture trees under t.TempDir(); none reads from the real
+// repository tree. This keeps the suite independent of any standalone agents that may or
+// may not exist in the repository at any given time.
+//
+// Scenarios covered:
+//   - A flat file directly under StandaloneAgents/ is discovered.
+//   - A file one level deep under StandaloneAgents/<Category>/ is discovered.
+//   - Both layouts are discovered together in the same scan.
+//   - An absent StandaloneAgents/ directory loads cleanly (no error, no agents).
+//   - An empty StandaloneAgents/ directory loads cleanly with no agents.
+//   - README.md files under StandaloneAgents/ are skipped.
+//   - Non-.md files under StandaloneAgents/ are skipped.
+//   - Files more than one level deep (StandaloneAgents/Cat/Sub/file.md) are not discovered.
+//   - When a flat and categorised file share the same key, the flat entry wins (processed first).
+
+// agentKeys extracts the Key fields from a slice of agents for use in error messages.
+func agentKeys(agents []domain.Agent) []string {
+	keys := make([]string, len(agents))
+	for i, a := range agents {
+		keys[i] = a.Key
+	}
+	return keys
+}
+
+// writeStandaloneAgentFile writes a minimal standalone agent markdown file.
+// When category is empty the file is placed flat under Catalog/StandaloneAgents/.
+// When category is non-empty it is placed under Catalog/StandaloneAgents/<category>/.
+func writeStandaloneAgentFile(t *testing.T, root, category, agentKey string) {
+	t.Helper()
+	var relPath string
+	if category == "" {
+		mustMkdir(t, root, "Catalog", "StandaloneAgents")
+		relPath = filepath.Join("Catalog", "StandaloneAgents", agentKey+".md")
+	} else {
+		mustMkdir(t, root, "Catalog", "StandaloneAgents", category)
+		relPath = filepath.Join("Catalog", "StandaloneAgents", category, agentKey+".md")
+	}
+	content := []byte("---\nversion: \"1.0\"\nname: " + agentKey + "\ndescription: Synthetic standalone agent for catalog tests.\n---\nContent.\n")
+	mustWriteFile(t, root, relPath, content)
+}
+
+// TestStandaloneDiscovery_FlatFile_Discovered verifies that a standalone agent file placed
+// directly under Catalog/StandaloneAgents/ (flat layout) is discovered and returned by
+// StandaloneAgents().
+func TestStandaloneDiscovery_FlatFile_Discovered(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeStandaloneAgentFile(t, root, "", "standalone-flat")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	agents := cat.StandaloneAgents()
+	if len(agents) == 0 {
+		t.Fatal("StandaloneAgents() returned empty slice; expected standalone-flat to be discovered")
+	}
+	for _, a := range agents {
+		if a.Key == "standalone-flat" {
+			return
+		}
+	}
+	t.Errorf("standalone-flat not found in StandaloneAgents(); got keys: %v", agentKeys(agents))
+}
+
+// TestStandaloneDiscovery_CategorisedFile_Discovered verifies that a standalone agent file
+// placed one level deep under Catalog/StandaloneAgents/<Category>/ is discovered and
+// returned by StandaloneAgents().
+func TestStandaloneDiscovery_CategorisedFile_Discovered(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeStandaloneAgentFile(t, root, "Analytics", "standalone-categorised")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	agents := cat.StandaloneAgents()
+	if len(agents) == 0 {
+		t.Fatal("StandaloneAgents() returned empty slice; expected standalone-categorised to be discovered")
+	}
+	for _, a := range agents {
+		if a.Key == "standalone-categorised" {
+			return
+		}
+	}
+	t.Errorf("standalone-categorised not found in StandaloneAgents(); got keys: %v", agentKeys(agents))
+}
+
+// TestStandaloneDiscovery_BothLayouts_DiscoveredTogether verifies that a flat standalone
+// file and a categorised standalone file are both discovered in the same catalog load.
+func TestStandaloneDiscovery_BothLayouts_DiscoveredTogether(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeStandaloneAgentFile(t, root, "", "flat-agent")
+	writeStandaloneAgentFile(t, root, "Analytics", "categorised-agent")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	agents := cat.StandaloneAgents()
+	keys := make(map[string]bool, len(agents))
+	for _, a := range agents {
+		keys[a.Key] = true
+	}
+	if !keys["flat-agent"] {
+		t.Errorf("flat-agent not found in StandaloneAgents(); got keys: %v", agentKeys(agents))
+	}
+	if !keys["categorised-agent"] {
+		t.Errorf("categorised-agent not found in StandaloneAgents(); got keys: %v", agentKeys(agents))
+	}
+}
+
+// TestStandaloneDiscovery_AbsentDirectory_LoadsCleanly verifies that a catalog load succeeds
+// without error and returns an empty (or nil) StandaloneAgents() slice when
+// Catalog/StandaloneAgents/ does not exist on disk.
+func TestStandaloneDiscovery_AbsentDirectory_LoadsCleanly(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	// Deliberately do not create Catalog/StandaloneAgents/.
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load failed when standalone directory is absent: %v", err)
+	}
+
+	if n := len(cat.StandaloneAgents()); n != 0 {
+		t.Errorf("StandaloneAgents() returned %d agents for absent directory; want 0", n)
+	}
+}
+
+// TestStandaloneDiscovery_EmptyDirectory_LoadsCleanly verifies that a catalog load succeeds
+// without error and returns no agents when Catalog/StandaloneAgents/ exists but contains
+// no .md files.
+func TestStandaloneDiscovery_EmptyDirectory_LoadsCleanly(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	mustMkdir(t, root, "Catalog", "StandaloneAgents")
+	// Directory exists but has no .md files.
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load failed for empty standalone directory: %v", err)
+	}
+
+	if n := len(cat.StandaloneAgents()); n != 0 {
+		t.Errorf("StandaloneAgents() returned %d agents for empty directory; want 0", n)
+	}
+}
+
+// TestStandaloneDiscovery_ReadmeSkipped verifies that README.md files under
+// Catalog/StandaloneAgents/ are not treated as agent files, matching the convention
+// of the subagent and utility scans.
+func TestStandaloneDiscovery_ReadmeSkipped(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	mustMkdir(t, root, "Catalog", "StandaloneAgents")
+	mustWriteFile(t, root,
+		filepath.Join("Catalog", "StandaloneAgents", "README.md"),
+		[]byte("---\nversion: \"1.0\"\n---\nThis is a readme, not an agent.\n"))
+	// Write one valid agent to confirm the scan ran.
+	writeStandaloneAgentFile(t, root, "", "valid-standalone")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	for _, a := range cat.StandaloneAgents() {
+		if a.Key == "README" {
+			t.Error("README appeared in StandaloneAgents(); README.md must be skipped by the scanner")
+		}
+	}
+}
+
+// TestStandaloneDiscovery_NonMarkdownFileSkipped verifies that non-.md files under
+// Catalog/StandaloneAgents/ (including .gitkeep) are not treated as agent files.
+func TestStandaloneDiscovery_NonMarkdownFileSkipped(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	mustMkdir(t, root, "Catalog", "StandaloneAgents")
+	mustWriteFile(t, root,
+		filepath.Join("Catalog", "StandaloneAgents", ".gitkeep"),
+		[]byte(""))
+	// Write one valid agent to confirm the scan ran.
+	writeStandaloneAgentFile(t, root, "", "valid-standalone")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	for _, a := range cat.StandaloneAgents() {
+		if a.Key == ".gitkeep" || a.Key == "gitkeep" {
+			t.Error("non-.md file appeared in StandaloneAgents(); non-markdown files must be skipped")
+		}
+	}
+}
+
+// TestStandaloneDiscovery_DeeplyNestedFileIgnored verifies that a file placed more than
+// one level deep under Catalog/StandaloneAgents/ (e.g. Category/SubCategory/file.md) is
+// not discovered. Only one level of category nesting is supported.
+func TestStandaloneDiscovery_DeeplyNestedFileIgnored(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	mustMkdir(t, root, "Catalog", "StandaloneAgents", "Category", "SubCategory")
+	mustWriteFile(t, root,
+		filepath.Join("Catalog", "StandaloneAgents", "Category", "SubCategory", "deep-agent.md"),
+		[]byte("---\nversion: \"1.0\"\n---\nContent.\n"))
+	// Write one valid agent so we can confirm the scan ran without crashing.
+	writeStandaloneAgentFile(t, root, "", "valid-standalone")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	for _, a := range cat.StandaloneAgents() {
+		if a.Key == "deep-agent" {
+			t.Error("deep-agent appeared in StandaloneAgents(); files nested more than one level must be ignored")
+		}
+	}
+}
+
+// TestStandaloneDiscovery_DuplicateKey_FlatEntryWins verifies that when a flat file and a
+// categorised file share the same key (same base filename), the flat entry takes priority
+// because flat entries are processed before category entries. Exactly one entry with the
+// shared key must appear in StandaloneAgents(), and it must carry an empty Category.
+func TestStandaloneDiscovery_DuplicateKey_FlatEntryWins(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	// Flat entry: no category → Category will be "".
+	writeStandaloneAgentFile(t, root, "", "shared-key")
+	// Categorised entry: same base filename → same key "shared-key".
+	writeStandaloneAgentFile(t, root, "Analytics", "shared-key")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	agents := cat.StandaloneAgents()
+
+	// Exactly one entry must be present.
+	var matches []domain.Agent
+	for _, a := range agents {
+		if a.Key == "shared-key" {
+			matches = append(matches, a)
+		}
+	}
+	if len(matches) == 0 {
+		t.Fatal("shared-key not found in StandaloneAgents(); expected one entry")
+	}
+	if len(matches) > 1 {
+		t.Errorf("StandaloneAgents() contains %d entries with key shared-key; want exactly 1", len(matches))
+	}
+	// The flat entry must have won: its Category is empty.
+	if matches[0].Category != "" {
+		t.Errorf("shared-key Category = %q; want empty string (flat entry must win over categorised duplicate)", matches[0].Category)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Standalone agents — role, category, lookup, and accessor exclusion (T4.3)
+// ---------------------------------------------------------------------------
+//
+// Tests below verify the behavioral contract of the StandaloneAgents() accessor:
+//   - Flat-layout agents carry an empty Category field.
+//   - Categorised-layout agents carry the folder name as Category.
+//   - Every agent returned by StandaloneAgents() carries RoleStandalone.
+//   - Every standalone agent is reachable via Agent(key).
+//   - Standalone agents are excluded from Agents() (the worker-agent accessor).
+//   - StandaloneAgents() returns agents sorted ascending by Key.
+//   - A file declaring `role: standalone` in frontmatter confirms the path-derived role
+//     without producing an invalid-role issue.
+
+// TestStandaloneAgents_FlatFile_HasEmptyCategory verifies that a standalone agent discovered
+// from the flat layout (directly under StandaloneAgents/) has an empty Category field.
+func TestStandaloneAgents_FlatFile_HasEmptyCategory(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeStandaloneAgentFile(t, root, "", "flat-standalone")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	for _, a := range cat.StandaloneAgents() {
+		if a.Key == "flat-standalone" {
+			if a.Category != "" {
+				t.Errorf("flat-standalone Category = %q; want empty string for flat layout", a.Category)
+			}
+			return
+		}
+	}
+	t.Fatal("flat-standalone not found in StandaloneAgents(); cannot verify Category")
+}
+
+// TestStandaloneAgents_CategorisedFile_HasFolderNameAsCategory verifies that a standalone
+// agent discovered from a category subfolder carries the folder name verbatim as its Category.
+func TestStandaloneAgents_CategorisedFile_HasFolderNameAsCategory(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeStandaloneAgentFile(t, root, "Analytics", "categorised-standalone")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	for _, a := range cat.StandaloneAgents() {
+		if a.Key == "categorised-standalone" {
+			if a.Category != "Analytics" {
+				t.Errorf("categorised-standalone Category = %q; want %q (the folder name)", a.Category, "Analytics")
+			}
+			return
+		}
+	}
+	t.Fatal("categorised-standalone not found in StandaloneAgents(); cannot verify Category")
+}
+
+// TestStandaloneAgents_AllHaveStandaloneRole verifies that every agent returned by
+// StandaloneAgents() carries RoleStandalone, regardless of layout.
+func TestStandaloneAgents_AllHaveStandaloneRole(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeStandaloneAgentFile(t, root, "", "flat-standalone")
+	writeStandaloneAgentFile(t, root, "Analytics", "categorised-standalone")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	standalones := cat.StandaloneAgents()
+	if len(standalones) == 0 {
+		t.Fatal("StandaloneAgents() returned empty slice; cannot verify role assignment")
+	}
+	for _, a := range standalones {
+		if a.Role != domain.RoleStandalone {
+			t.Errorf("StandaloneAgents()[%q].Role = %q; want RoleStandalone", a.Key, a.Role)
+		}
+	}
+}
+
+// TestStandaloneAgents_ReachableByKey verifies that every agent returned by
+// StandaloneAgents() can be looked up via Agent(key), confirming the global agent index
+// includes standalone agents.
+func TestStandaloneAgents_ReachableByKey(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeStandaloneAgentFile(t, root, "", "flat-standalone")
+	writeStandaloneAgentFile(t, root, "Analytics", "categorised-standalone")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	standalones := cat.StandaloneAgents()
+	if len(standalones) == 0 {
+		t.Fatal("StandaloneAgents() returned empty slice; cannot verify Agent(key) lookup")
+	}
+	for _, a := range standalones {
+		found, ok := cat.Agent(a.Key)
+		if !ok {
+			t.Errorf("Agent(%q): returned not-found; standalone agents must be reachable via Agent(key)", a.Key)
+			continue
+		}
+		if found.Key != a.Key {
+			t.Errorf("Agent(%q).Key = %q; want %q", a.Key, found.Key, a.Key)
+		}
+	}
+}
+
+// TestStandaloneAgents_ExcludedFromAgents verifies that standalone agents do not appear in
+// the list returned by Agents() (the worker-agent accessor). Standalone agents are a distinct
+// role and must be reached exclusively through StandaloneAgents().
+func TestStandaloneAgents_ExcludedFromAgents(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeStandaloneAgentFile(t, root, "", "flat-standalone")
+	writeStandaloneAgentFile(t, root, "Analytics", "categorised-standalone")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	// Discovery must succeed for the exclusion assertion to be meaningful.
+	standalones := cat.StandaloneAgents()
+	if len(standalones) == 0 {
+		t.Fatal("StandaloneAgents() returned empty slice; cannot verify exclusion from Agents()")
+	}
+
+	standaloneKeys := make(map[string]bool, len(standalones))
+	for _, a := range standalones {
+		standaloneKeys[a.Key] = true
+	}
+	for _, a := range cat.Agents() {
+		if standaloneKeys[a.Key] {
+			t.Errorf("standalone agent %q appeared in Agents(); standalone agents must be excluded from the worker-agent accessor", a.Key)
+		}
+	}
+}
+
+// TestStandaloneAgents_SortedByKey verifies that StandaloneAgents() returns agents in
+// ascending key order. Deterministic ordering is required for stable UI rendering and
+// plan output.
+func TestStandaloneAgents_SortedByKey(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	writeStandaloneAgentFile(t, root, "", "zebra-agent")
+	writeStandaloneAgentFile(t, root, "Analytics", "alpha-agent")
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	agents := cat.StandaloneAgents()
+	if len(agents) < 2 {
+		t.Fatal("StandaloneAgents() returned fewer than 2 agents; cannot verify sort order")
+	}
+	for i := 1; i < len(agents); i++ {
+		if agents[i].Key < agents[i-1].Key {
+			t.Errorf("StandaloneAgents() is not sorted by Key at index %d: %q < %q",
+				i, agents[i].Key, agents[i-1].Key)
+		}
+	}
+}
+
+// TestStandaloneAgents_FrontmatterRoleConfirmsPathDerived verifies that when a standalone
+// agent file declares `role: standalone` in its frontmatter, it is loaded with RoleStandalone
+// (confirming, not contradicting, the path-derived role) and no invalid-role issue is produced.
+func TestStandaloneAgents_FrontmatterRoleConfirmsPathDerived(t *testing.T) {
+	root := makeTempMosaicRoot(t)
+	mustMkdir(t, root, "Catalog", "StandaloneAgents")
+	mustWriteFile(t, root,
+		filepath.Join("Catalog", "StandaloneAgents", "explicit-standalone.md"),
+		[]byte("---\nrole: standalone\nversion: \"1.0\"\nname: Explicit Standalone\ndescription: Declares its role explicitly.\n---\nContent.\n"))
+
+	cat, err := catalog.Load(root, "")
+	if err != nil {
+		t.Fatalf("catalog.Load: %v", err)
+	}
+
+	a, ok := cat.Agent("explicit-standalone")
+	if !ok {
+		t.Fatal("Agent(\"explicit-standalone\") not found; expected the agent to be present in catalog")
+	}
+	if a.Role != domain.RoleStandalone {
+		t.Errorf("explicit-standalone Role = %q; want RoleStandalone", a.Role)
+	}
+	for _, iss := range cat.Issues() {
+		if iss.Code == "invalid-role" && iss.Subject == "explicit-standalone" {
+			t.Errorf("unexpected invalid-role issue for agent with valid frontmatter role %q: %s", "standalone", iss.Message)
+		}
+	}
+}

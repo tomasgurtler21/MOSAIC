@@ -97,26 +97,52 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		}
 	}
 
-	// Resolve the artifact set for probing deployed state and model/tool resolution.
-	// Infrastructure agents are excluded from probeSet (used only for target-path probing);
-	// they are resolved from the catalog directly below for model resolution and content generation.
-	probeSet, err := plan.ResolveArtifacts(s.deps.Catalog, workflowIDs, utilityIDs, nil, hookIDs)
-	if err != nil {
-		return domain.RunSummary{}, err
-	}
-
-	orderedAgents := s.orderedAgentsForModelResolution(workflowIDs, probeSet.Agents)
-	modelRes, err := s.resolveModels(ctx, req.TierModels, req.AgentModels, req.SkipAll, harnessID, module, orderedAgents, nil, false, false)
-	if err != nil {
-		return domain.RunSummary{}, err
-	}
-
-	// Resolve infrastructure agent structs from the catalog for model resolution and content generation.
+	// Resolve infrastructure agent structs from the catalog for model resolution and content
+	// generation. Resolution happens before probe set construction so that only catalog-known
+	// agent keys are added to the probe set. Any ID that does not exist in the catalog is
+	// silently skipped, matching the existing behavior for content generation.
 	infraAgents := make([]domain.Agent, 0, len(infraAgentIDs))
 	for _, id := range infraAgentIDs {
 		if a, ok := s.deps.Catalog.Agent(id); ok {
 			infraAgents = append(infraAgents, a)
 		}
+	}
+	foundInfraKeys := make([]string, 0, len(infraAgents))
+	for _, a := range infraAgents {
+		foundInfraKeys = append(foundInfraKeys, a.Key)
+	}
+
+	// Resolve the artifact set for probing deployed state and model/tool resolution.
+	// Infrastructure agents are now included (foundInfraKeys) so their target paths are
+	// enumerated and their on-disk state is probed; without them the planner's DeployedState
+	// map would always miss their entries, causing every infra agent to be classified as a new
+	// create on every run after the first. Infrastructure agent model resolution is still
+	// handled in a dedicated second batch below; they are filtered out of the first batch to
+	// avoid duplicate prompts for the same agent.
+	probeSet, err := plan.ResolveArtifacts(s.deps.Catalog, workflowIDs, utilityIDs, foundInfraKeys, hookIDs)
+	if err != nil {
+		return domain.RunSummary{}, err
+	}
+
+	// Build a set of infrastructure agent keys to exclude from the first model-resolution
+	// batch. Including infra agents in probeSet makes their target paths probeable, but their
+	// models are resolved in the separate infraAgents batch below; resolving them in both
+	// batches would ask for each infrastructure agent's model twice.
+	infraAgentKeySet := make(map[string]bool, len(infraAgents))
+	for _, a := range infraAgents {
+		infraAgentKeySet[a.Key] = true
+	}
+	nonInfraProbeAgents := make([]domain.Agent, 0, len(probeSet.Agents))
+	for _, a := range probeSet.Agents {
+		if !infraAgentKeySet[a.Key] {
+			nonInfraProbeAgents = append(nonInfraProbeAgents, a)
+		}
+	}
+
+	orderedAgents := s.orderedAgentsForModelResolution(workflowIDs, nonInfraProbeAgents)
+	modelRes, err := s.resolveModels(ctx, req.TierModels, req.AgentModels, req.SkipAll, harnessID, module, orderedAgents, nil, false, false)
+	if err != nil {
+		return domain.RunSummary{}, err
 	}
 
 	// Second resolveModels call for infrastructure agents, threading accumulated state from the

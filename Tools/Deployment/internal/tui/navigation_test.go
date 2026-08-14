@@ -56,6 +56,10 @@ func (s *stubNavService) DeployUtilityInfrastructure(_ context.Context, _ app.Ut
 	return domain.RunSummary{}, nil
 }
 
+func (s *stubNavService) DeployStandalone(_ context.Context, _ app.StandaloneRequest) (domain.RunSummary, error) {
+	return domain.RunSummary{}, nil
+}
+
 func (s *stubNavService) RenderAgent(_ context.Context, _ app.RenderAgentRequest) (app.RenderAgentResult, error) {
 	return app.RenderAgentResult{}, nil
 }

@@ -64,14 +64,15 @@ func loadRealCatalog(t *testing.T) catalog.Catalog {
 // before use; every method returns the zero value of its return type if the corresponding
 // field is unset.
 type fakeCatalog struct {
-	root          string
-	workers       []domain.Agent
-	orchestrator  domain.Agent
-	utilityAgents []domain.Agent
-	infraAgents   []domain.Agent // agents with non-empty Infrastructure field
-	skills        []domain.Skill
-	hooks         []domain.HookBundle
-	workflows     []domain.Workflow
+	root             string
+	workers          []domain.Agent
+	orchestrator     domain.Agent
+	utilityAgents    []domain.Agent
+	standaloneAgents []domain.Agent // agents with Role == RoleStandalone
+	infraAgents      []domain.Agent // agents with non-empty Infrastructure field
+	skills           []domain.Skill
+	hooks            []domain.HookBundle
+	workflows        []domain.Workflow
 }
 
 func (f *fakeCatalog) Root() string        { return f.root }
@@ -80,7 +81,7 @@ func (f *fakeCatalog) CatalogRoot() string { return f.root }
 func (f *fakeCatalog) Agents() []domain.Agent { return f.workers }
 
 func (f *fakeCatalog) Agent(key string) (domain.Agent, bool) {
-	// Check workers, orchestrator, utility agents, and infrastructure agents.
+	// Check workers, orchestrator, utility agents, standalone agents, and infrastructure agents.
 	for _, a := range f.workers {
 		if a.Key == key {
 			return a, true
@@ -90,6 +91,11 @@ func (f *fakeCatalog) Agent(key string) (domain.Agent, bool) {
 		return f.orchestrator, true
 	}
 	for _, a := range f.utilityAgents {
+		if a.Key == key {
+			return a, true
+		}
+	}
+	for _, a := range f.standaloneAgents {
 		if a.Key == key {
 			return a, true
 		}
@@ -105,6 +111,8 @@ func (f *fakeCatalog) Agent(key string) (domain.Agent, bool) {
 func (f *fakeCatalog) Orchestrator() domain.Agent { return f.orchestrator }
 
 func (f *fakeCatalog) UtilityAgents() []domain.Agent { return f.utilityAgents }
+
+func (f *fakeCatalog) StandaloneAgents() []domain.Agent { return f.standaloneAgents }
 
 func (f *fakeCatalog) InfrastructureAgents() []domain.Agent { return f.infraAgents }
 
@@ -168,7 +176,7 @@ func (f *fakeCatalog) AgentByNumericID(id string) (domain.Agent, bool) {
 	if id == "" {
 		return domain.Agent{}, false
 	}
-	all := append(f.workers, append(f.utilityAgents, append(f.infraAgents, f.orchestrator)...)...)
+	all := append(f.workers, append(f.utilityAgents, append(f.standaloneAgents, append(f.infraAgents, f.orchestrator)...)...)...)
 	for _, a := range all {
 		if a.NumericID == id {
 			return a, true

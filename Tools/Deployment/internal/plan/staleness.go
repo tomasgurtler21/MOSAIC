@@ -73,6 +73,21 @@ func SkillStaleness(deployed domain.DeployedArtifactState, skill domain.Skill) [
 	return nil
 }
 
+// HookStalenessFromRecorded compares the version recorded in the manifest for a deployed hook
+// bundle against the source bundle version. Returns a single "version" VersionDelta when they
+// differ (including when recordedVersion is empty and sourceVersion is not, which is how a
+// manifest entry predating version recording surfaces as an update), nil when they match.
+func HookStalenessFromRecorded(recordedVersion, sourceVersion string) []domain.VersionDelta {
+	if recordedVersion == sourceVersion {
+		return nil
+	}
+	return []domain.VersionDelta{{
+		Field:    "version",
+		Deployed: recordedVersion,
+		Source:   sourceVersion,
+	}}
+}
+
 // HookStaleness compares the bundle's catalog version against the version read from the
 // deployed file. Returns at most one delta with Field "version".
 func HookStaleness(deployed domain.DeployedArtifactState, bundle domain.HookBundle) []domain.VersionDelta {

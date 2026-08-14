@@ -70,6 +70,10 @@ func (s *stubFlowService) DeployUtilityInfrastructure(_ context.Context, _ app.U
 	return s.utilityInfra, s.utilityInfraErr
 }
 
+func (s *stubFlowService) DeployStandalone(_ context.Context, _ app.StandaloneRequest) (domain.RunSummary, error) {
+	return domain.RunSummary{}, nil
+}
+
 func (s *stubFlowService) RenderAgent(_ context.Context, _ app.RenderAgentRequest) (app.RenderAgentResult, error) {
 	return app.RenderAgentResult{}, nil
 }

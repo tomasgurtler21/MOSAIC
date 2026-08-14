@@ -67,7 +67,7 @@ var ErrNotMosaicRoot = errors.New("working directory is not a MOSAIC repository"
 //	"hook-hash-mismatch"   — a hook bundle's content_hash field does not match the computed hash
 //	"missing-field"        — a required frontmatter field is absent from a source file
 //	"duplicate-agent-id"   — two catalog agents declare the same numeric `id`
-//	"invalid-role"         — a frontmatter `role` value is not "subagent" or "orchestrator"
+//	"invalid-role"         — a frontmatter `role` value is not one of "subagent", "orchestrator", "utility", or "standalone"
 //	"missing-skill-folder" — a required_skills entry names a key with no Skills/<key> folder
 //	"bundle-unknown-target"     — bundle block Target is not in docformat.CanonicalDeployed
 //	"bundle-unknown-applies-to" — bundle block AppliesTo is not "subagent" or "orchestrator"
@@ -93,8 +93,9 @@ type Catalog interface {
 	// When Load was called with an empty catalogRoot, this equals DefaultCatalogRoot(Root()).
 	CatalogRoot() string
 
-	// Agents returns all worker agents sorted by Key. The orchestrator and utility agents
-	// are excluded; use Orchestrator and UtilityAgents to access them.
+	// Agents returns all worker agents sorted by Key. The orchestrator, utility, and
+	// standalone agents are excluded; use Orchestrator, UtilityAgents, and StandaloneAgents
+	// to access them.
 	Agents() []domain.Agent
 
 	// Agent looks up any agent by key, regardless of role.
@@ -104,8 +105,14 @@ type Catalog interface {
 	// the file at Orchestrator/orchestrator.md.
 	Orchestrator() domain.Agent
 
-	// UtilityAgents returns all utility agents. They are never deployed automatically.
+	// UtilityAgents returns all utility agents. They are excluded from Agents() and
+	// StandaloneAgents(). They are never deployed automatically.
 	UtilityAgents() []domain.Agent
+
+	// StandaloneAgents returns all standalone agents sorted by Key. They are deployed only
+	// by the standalone-only deploy mode and are excluded from Agents(), UtilityAgents(),
+	// and InfrastructureAgents().
+	StandaloneAgents() []domain.Agent
 
 	// InfrastructureAgents returns all worker agents that have a non-empty Infrastructure
 	// field, sorted by Key. This is a filtered view of Agents(); it does not return a

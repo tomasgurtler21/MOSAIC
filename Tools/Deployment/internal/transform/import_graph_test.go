@@ -1,6 +1,6 @@
 package transform_test
 
-// import_graph_test.go mechanically verifies AC8.2: the transform package must import no
+// import_graph_test.go mechanically verifies AC8.9: the transform package must import no
 // filesystem, network, terminal, time, or randomness package. This property is what makes
 // byte-exact golden testing possible and guarantees the pipeline is a pure function.
 //
@@ -14,7 +14,7 @@ import (
 )
 
 // forbiddenImportPrefixes are the package prefixes banned from the transform package per
-// AC8.2. Any import whose path equals one of these or starts with "prefix/" is forbidden.
+// AC8.9. Any import whose path equals one of these or starts with "prefix/" is forbidden.
 var forbiddenImportPrefixes = []string{
 	"os",            // filesystem access — all os.* calls are I/O
 	"io/fs",         // filesystem abstraction
@@ -59,7 +59,7 @@ func TestPackageHasNoForbiddenImports(t *testing.T) {
 			if imp == prefix || strings.HasPrefix(imp, prefix+"/") {
 				t.Errorf("transform package imports %q which matches forbidden prefix %q\n"+
 					"The transform package must be free of filesystem, network, time, and "+
-					"randomness imports (AC8.2). All inputs must arrive via transform.Request.",
+					"randomness imports (AC8.9). All inputs must arrive via transform.Request.",
 					imp, prefix)
 			}
 		}
@@ -67,7 +67,7 @@ func TestPackageHasNoForbiddenImports(t *testing.T) {
 			if imp == exact {
 				t.Errorf("transform package imports %q which is explicitly forbidden\n"+
 					"The transform package must not perform subprocess, OS-level, or CLI "+
-					"operations (AC8.2).",
+					"operations (AC8.9).",
 					imp)
 			}
 		}

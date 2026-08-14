@@ -16,8 +16,14 @@ type planner struct{}
 
 // Build derives the complete plan from the given inputs. It performs no file writes.
 func (p *planner) Build(ctx context.Context, in Input) (domain.Plan, error) {
-	// Resolve the complete artifact set from workflow selections, utility agents, infrastructure agents, and hooks.
-	set, err := ResolveArtifacts(in.Catalog, in.WorkflowIDs, in.UtilityAgentIDs, in.InfrastructureAgentIDs, in.HookIDs)
+	// Resolve the complete artifact set from all selections, including standalone agents.
+	set, err := ResolveArtifactsFrom(in.Catalog, Selection{
+		WorkflowIDs:            in.WorkflowIDs,
+		UtilityAgentIDs:        in.UtilityAgentIDs,
+		InfrastructureAgentIDs: in.InfrastructureAgentIDs,
+		StandaloneAgentIDs:     in.StandaloneAgentIDs,
+		HookIDs:                in.HookIDs,
+	})
 	if err != nil {
 		return domain.Plan{}, err
 	}
@@ -209,8 +215,10 @@ func artifactKindOrder(k domain.ArtifactKind) int {
 //  4. Hash mismatch → ActionConflict (local modification)
 //  5. Version staleness check against deployed-file versions
 //  6a. For orchestrator-role agents: workflow staleness check; merged into deltas
-//  6b. For all agents: protocol staleness check; merged into deltas
-//  6c. For non-orchestrator agents: bundle staleness check; merged into deltas
+//  6b. For agents whose role carries version markers: protocol staleness check; merged into deltas.
+//      Excluded for RoleUtility and RoleStandalone: those roles receive no protocol marker by design.
+//  6c. For agents whose role carries version markers and is not orchestrator: bundle staleness check;
+//      merged into deltas. Excluded for RoleUtility and RoleStandalone alongside RoleOrchestrator.
 //  7. Stale or no version info → ActionUpdate
 //  8. → ActionUnchanged
 //
@@ -223,10 +231,13 @@ func artifactKindOrder(k domain.ArtifactKind) int {
 // delta is produced so the destination field is regenerated on the next update.
 //
 // protocolVersion is the current protocol source version from plan.Input.ProtocolVersion.
-// Protocol staleness applies to every agent regardless of role.
+// Protocol staleness applies to agents whose role carries version markers (RoleSubagent and
+// RoleOrchestrator). It is suppressed for RoleUtility and RoleStandalone, which receive harness
+// transformation only — the absence of a protocol marker in those files is by design.
 //
 // bundleVersion is the current bundle source version from plan.Input.BundleVersion.
-// Bundle staleness applies to subagent-role agents; the orchestrator carries no bundle blocks.
+// Bundle staleness applies to subagent-role agents whose role carries version markers;
+// the orchestrator and marker-free roles (utility, standalone) are excluded.
 func classifyAgentItem(
 	agent domain.Agent,
 	targetPath string,
@@ -311,16 +322,26 @@ func classifyAgentItem(
 		deltas = append(deltas, drift.Deltas()...)
 	}
 
-	// Step 6b: For every agent, compare the deployed protocol version against the source
-	// version. Protocol staleness applies regardless of role, unlike workflow drift.
-	protocolDrift := ProtocolStaleness(deployed, protocolVersion)
-	if delta, ok := protocolDrift.Delta(); ok {
-		deltas = append(deltas, delta)
+	// Steps 6b/6c precondition: evaluate once for all role-gated staleness checks.
+	// Utility and standalone agents receive harness transformation only; neither a protocol
+	// marker nor a bundle stamp is written to their deployed files by design. Reporting either
+	// as staleness would cause a perpetual-update loop.
+	markersApply := domain.RoleCarriesVersionMarkers(agent.Role)
+
+	// Step 6b: For agents whose role carries version markers, compare the deployed protocol
+	// version against the source version. Suppressed for RoleUtility and RoleStandalone.
+	var protocolDrift ProtocolDrift
+	if markersApply {
+		protocolDrift = ProtocolStaleness(deployed, protocolVersion)
+		if delta, ok := protocolDrift.Delta(); ok {
+			deltas = append(deltas, delta)
+		}
 	}
 
-	// Step 6c: For non-orchestrator agents, compare the deployed bundle version against the
-	// source version. Bundle blocks apply to subagent role; the orchestrator is excluded.
-	bundleApplies := agent.Role != domain.RoleOrchestrator
+	// Step 6c: For agents whose role carries version markers and is not the orchestrator,
+	// compare the deployed bundle version against the source version. Bundle blocks apply to
+	// subagent-role agents; the orchestrator and marker-free roles are excluded.
+	bundleApplies := markersApply && agent.Role != domain.RoleOrchestrator
 	bundleDrift := BundleStaleness(deployed, bundleVersion, bundleApplies)
 	if delta, ok := bundleDrift.Delta(); ok {
 		deltas = append(deltas, delta)
@@ -473,14 +494,22 @@ func classifyHookItem(
 		return item
 	}
 
-	// Step 5: Staleness check.
-	deltas := HookStaleness(deployed, hook)
+	// Step 5: Staleness check using the manifest-recorded version as the deployed version
+	// signal. Hook bundles are directories and carry no in-file version marker, so
+	// deployed.Version is always empty; the manifest entry's recorded Version is the only
+	// truthful "deployed version" for a hook bundle.
+	deltas := HookStalenessFromRecorded(entry.Version, hook.Version)
 
-	// Step 7.
-	if len(deltas) > 0 || !deployed.HasVersionInfo() {
+	// Step 7: The manifest-version comparison above is the sole update trigger on the hook
+	// path. The !deployed.HasVersionInfo() fallback that the pre-fix code ORed in is
+	// deliberately excluded here: probeDeployedHookBundle always leaves all four version
+	// fields empty (a directory carries no in-file marker), making HasVersionInfo()
+	// unconditionally false for every present hook bundle. Leaving that fallback in place
+	// would force every present hook to ActionUpdate regardless of step 5's result.
+	if len(deltas) > 0 {
 		item.Action = domain.ActionUpdate
 		item.Stale = deltas
-		reasons := buildUpdateReasons(deltas, !deployed.HasVersionInfo())
+		reasons := buildUpdateReasons(deltas, false)
 		item.Reason = "stale: " + reasons
 		return item
 	}

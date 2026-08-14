@@ -611,7 +611,72 @@ a prompt.`,
 
 	checkIndexCmd.Flags().StringVar(&checkIndexOutput, "output", "", "Output format (json)")
 
-	root.AddCommand(deployCmd, updateCmd, workflowsCmd, promoteCmd, transformCmd, utilityInfraCmd, renderCmd, checkIndexCmd)
+	// ------------------------------------------------------------------
+	// standalone subcommand
+	// ------------------------------------------------------------------
+	var (
+		standaloneHarness       string
+		standaloneWorkspace     string
+		standaloneAgents        string
+		standaloneOutput        string
+		standaloneDryRun        bool
+		standaloneAutoConfirm   bool
+		standaloneAgentsSet     bool
+	)
+
+	standaloneCmd := &cobra.Command{
+		Use:   "standalone",
+		Short: "Deploy only standalone agents",
+		Long: `Deploy only standalone agents and the skills they require.
+
+Asks only the standalone agent selection question. Workflow selection, hook
+configuration, and orchestrator rewriting are never performed.`,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			standaloneAgentsSet = cmd.Flags().Changed("standalone")
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if standaloneWorkspace == "" {
+				fmt.Fprintf(errOut, "error: --workspace is required for the standalone subcommand\n")
+				exitCode = ExitUsage
+				return nil
+			}
+			if standaloneHarness == "" {
+				fmt.Fprintf(errOut, "error: --harness is required for the standalone subcommand\n")
+				exitCode = ExitUsage
+				return nil
+			}
+
+			req := app.StandaloneRequest{
+				HarnessID:       standaloneHarness,
+				WorkspacePath:   pathinput.Unquote(strings.TrimSpace(standaloneWorkspace)),
+				Scope:           domain.ScopeProject,
+				DryRun:          standaloneDryRun,
+				AutoConfirmPlan: standaloneAutoConfirm,
+			}
+
+			// Nil means "ask interactively" (CD-6 nil/empty convention).
+			// An explicitly provided --standalone flag (even empty string) produces a non-nil slice.
+			if standaloneAgentsSet {
+				req.StandaloneAgentIDs = splitTrimmedParts(standaloneAgents)
+			}
+
+			summary, svcErr := svc.DeployStandalone(ctx, req)
+			exitCode = renderStandaloneOutput(out, errOut, standaloneOutput, standaloneDryRun, summary, svcErr)
+			return nil
+		},
+	}
+
+	standaloneCmd.Flags().StringVar(&standaloneHarness, "harness", "", "Harness ID (required)")
+	standaloneCmd.Flags().StringVar(&standaloneWorkspace, "workspace", "", "Workspace directory (required)")
+	standaloneCmd.Flags().StringVar(&standaloneAgents, "standalone", "", "Comma-separated standalone agent ids (absent = ask; empty string = none)")
+	standaloneCmd.Flags().StringVar(&standaloneOutput, "output", "", "Output format (json)")
+	standaloneCmd.Flags().BoolVar(&standaloneDryRun, "dry-run", false, "Compute and report without writing any file")
+	standaloneCmd.Flags().BoolVar(&standaloneAutoConfirm, "yes", false, "Auto-confirm the deployment plan without prompting")
+
+	root.AddCommand(deployCmd, updateCmd, workflowsCmd, promoteCmd, transformCmd, utilityInfraCmd, standaloneCmd, renderCmd, checkIndexCmd)
 	root.SetArgs(args)
 
 	if err := root.Execute(); err != nil {

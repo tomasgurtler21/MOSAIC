@@ -188,6 +188,42 @@ func renderUtilityInfraHuman(out io.Writer, dryRun bool, summary domain.RunSumma
 	}
 }
 
+// renderStandaloneOutput writes the standalone run summary and returns the exit code.
+// Contract is identical to renderUtilityInfraOutput: svcErr → error line on errOut + ExitFailure;
+// json → domain.RunSummary document; otherwise the human summary with a "dry run: " prefix when
+// dryRun. Success maps through outcomeExitCode(summary.Outcome).
+func renderStandaloneOutput(out, errOut io.Writer, format string, dryRun bool, summary domain.RunSummary, svcErr error) int {
+	if svcErr != nil {
+		fmt.Fprintf(errOut, "error: %v\n", svcErr)
+		return ExitFailure
+	}
+	if strings.EqualFold(format, "json") {
+		renderJSON(out, summary)
+	} else {
+		renderStandaloneHuman(out, dryRun, summary)
+	}
+	return outcomeExitCode(summary.Outcome)
+}
+
+// renderStandaloneHuman writes a human-readable summary of a standalone run.
+// It mirrors renderUtilityInfraHuman but prefixes with "dry run: " when the run was a dry-run.
+func renderStandaloneHuman(out io.Writer, dryRun bool, summary domain.RunSummary) {
+	prefix := ""
+	if dryRun {
+		prefix = "dry run: "
+	}
+	switch summary.Outcome {
+	case domain.OutcomeSuccess:
+		fmt.Fprintf(out, "%sstandalone deployment complete\nworkspace: %s\n", prefix, summary.WorkspacePath)
+	case domain.OutcomeCompletedWithGaps:
+		fmt.Fprintf(out, "%scompleted with skips: some items were skipped and recorded in the TODO list\nworkspace: %s\n", prefix, summary.WorkspacePath)
+	case domain.OutcomeFailed:
+		fmt.Fprintf(out, "%sstandalone deployment encountered errors\nworkspace: %s\n", prefix, summary.WorkspacePath)
+	default:
+		fmt.Fprintf(out, "%soutcome: %s\nworkspace: %s\n", prefix, string(summary.Outcome), summary.WorkspacePath)
+	}
+}
+
 // renderCheckIndexOutput writes the index-check result and returns the appropriate exit code.
 // When format is "json", the IndexCheckResult is encoded as a single JSON document.
 // Otherwise a human-readable summary is written. A non-nil error from the service means

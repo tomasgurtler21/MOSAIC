@@ -452,3 +452,70 @@ func TestBundleConformance_EmptyInputs_ReturnsNoIssues(t *testing.T) {
 		t.Errorf("expected no issues for empty states and bodies; got %d: %v", len(issues), issues)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Regression: utility and standalone roles must produce no bundle findings
+// ---------------------------------------------------------------------------
+
+// deployedFileWithRole builds a minimal deployed file with the given role value in
+// frontmatter. It includes a bundle_version stamp and a managed region so that, if
+// bundleConformance were to incorrectly apply bundle checks to this file, both rule 21
+// and rule 22 would fire. The presence of issues therefore unambiguously signals a bug.
+func deployedFileWithRole(role, bundleVer, regionName string, regionContent []byte) []byte {
+	front := "---\nrole: " + role + "\nbundle_version: " + bundleVer + "\n---\n\n"
+	region := "<" + regionName + " type=\"managed\">\n" + string(regionContent) + "\n</" + regionName + ">\n"
+	return []byte(front + region)
+}
+
+// TestBundleConformance_UtilityRole_ProducesNoFindings is a regression lock asserting that
+// a deployed file carrying `role: utility` produces no bundle-conformance issues, regardless
+// of its bundle_version stamp or managed region content. Utility agents never receive bundle
+// injection, so bundle conformance must not check them — even after ParseAgentRole begins
+// accepting "utility" and bundleConformance can no longer short-circuit on an invalid role.
+func TestBundleConformance_UtilityRole_ProducesNoFindings(t *testing.T) {
+	const targetPath = "path/to/utility-agent.md"
+	// Use the standard subagent bundle (no utility blocks). If bundleConformance incorrectly
+	// applies bundle checks to utility files, it would find a version mismatch (deployed stamp
+	// "0.9.0" vs bundle "1.0.0") and a drift on the region.
+	bundle := makeSubagentBundle("1.0.0", "AuthorityHierarchy", []byte("Current bundle content."))
+	states := map[string]domain.DeployedArtifactState{
+		targetPath: {Present: true, BundleVersion: "0.9.0"},
+	}
+	bodies := map[string][]byte{
+		targetPath: deployedFileWithRole("utility", "0.9.0", "AuthorityHierarchy", []byte("Old content.")),
+	}
+
+	issues := bundleConformance(bundle, states, bodies)
+
+	if len(issues) != 0 {
+		t.Errorf("bundleConformance produced %d issue(s) for a utility-role file; want 0. "+
+			"Utility agents never receive bundle content and must not be subject to bundle checks. "+
+			"Issues: %v", len(issues), issues)
+	}
+}
+
+// TestBundleConformance_StandaloneRole_ProducesNoFindings is a regression lock asserting
+// that a deployed file carrying `role: standalone` produces no bundle-conformance issues.
+// Standalone agents receive harness transformation only — no bundle content is ever injected
+// into them, so bundle conformance must never report findings for standalone files.
+func TestBundleConformance_StandaloneRole_ProducesNoFindings(t *testing.T) {
+	const targetPath = "path/to/standalone-agent.md"
+	// Use the standard subagent bundle (no standalone blocks). If bundleConformance
+	// incorrectly applies bundle checks to standalone files, it would find a version
+	// mismatch and a drift, making any issue an unambiguous regression signal.
+	bundle := makeSubagentBundle("1.0.0", "AuthorityHierarchy", []byte("Current bundle content."))
+	states := map[string]domain.DeployedArtifactState{
+		targetPath: {Present: true, BundleVersion: "0.9.0"},
+	}
+	bodies := map[string][]byte{
+		targetPath: deployedFileWithRole("standalone", "0.9.0", "AuthorityHierarchy", []byte("Old content.")),
+	}
+
+	issues := bundleConformance(bundle, states, bodies)
+
+	if len(issues) != 0 {
+		t.Errorf("bundleConformance produced %d issue(s) for a standalone-role file; want 0. "+
+			"Standalone agents never receive bundle content and must not be subject to bundle checks. "+
+			"Issues: %v", len(issues), issues)
+	}
+}

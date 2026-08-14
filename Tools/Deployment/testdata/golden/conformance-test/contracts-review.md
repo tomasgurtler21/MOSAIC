@@ -304,7 +304,6 @@ Your review artifact should follow this template:
 ### Issue Severity Levels
 
 <SeverityThresholds type="project">
-</SeverityThresholds>
 
 | Severity | Requires Rework | Notes (remove at injection) |
 |----------|-----------------|----------------------------|
@@ -316,6 +315,8 @@ Your review artifact should follow this template:
 **Status Code Logic:**
 - ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`
 - ALL issues at "Requires Rework: ❌" levels → return `SUCCESS` with issues noted in report
+
+</SeverityThresholds>
 
 <SeverityDefinitions type="project">
 </SeverityDefinitions>

@@ -811,7 +811,7 @@ func (e *executor) writeTodoFile(req ExecRequest, execGaps []domain.Gap) (string
 
 	content := todo.RenderMarkdown(collector.Groups(), req.TodoMeta)
 
-	path := filepath.Join(req.Plan.WorkspacePath, todo.FileName)
+	path := filepath.Join(req.Plan.WorkspacePath, todo.FileNameAt(req.TodoMeta.GeneratedAt))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}

@@ -49,6 +49,12 @@ const (
 	// RegionMigrated means content stored in the deployed file under a renamed injection's
 	// old name was carried into the region under its new name.
 	RegionMigrated RegionAction = "migrated-from-renamed"
+
+	// RegionDefaulted means a project region received its source-authored default content on
+	// its first appearance in the file (new deployment or first time the region appears in a
+	// deployed file). Content is byte-identical to the source region. Subsequent updates
+	// preserve the deployed content and never consult the source default again.
+	RegionDefaulted RegionAction = "defaulted-from-source"
 )
 
 // RegionOutcome records what happened to one managed region in the document body.

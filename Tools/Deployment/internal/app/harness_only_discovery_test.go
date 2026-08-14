@@ -137,6 +137,7 @@ func (c *miniCatalog) CatalogRoot() string                           { return ""
 func (c *miniCatalog) Agents() []domain.Agent                        { return c.workers }
 func (c *miniCatalog) Orchestrator() domain.Agent                    { return c.orchestrator }
 func (c *miniCatalog) UtilityAgents() []domain.Agent                 { return c.utilities }
+func (c *miniCatalog) StandaloneAgents() []domain.Agent              { return nil }
 func (c *miniCatalog) Agent(key string) (domain.Agent, bool)         { panic("miniCatalog: Agent not used") }
 func (c *miniCatalog) InfrastructureAgents() []domain.Agent          { panic("miniCatalog: InfrastructureAgents not used") }
 func (c *miniCatalog) Skills() []domain.Skill                        { panic("miniCatalog: Skills not used") }
@@ -1195,5 +1196,75 @@ func TestScanHarnessOnlyAgents_PerformsNoWrites_IneligibleFileBytesUnchanged(t *
 	if !bytes.Equal(original, after) {
 		t.Errorf("ineligible file %q was modified by scanHarnessOnlyAgents; "+
 			"files failing either signal must be left completely untouched", filename)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AC1.6 — Structural parsing checks not skipped for utility and standalone roles
+// ---------------------------------------------------------------------------
+
+// eligibleBytesWithRoleAndUnbalancedTag returns document bytes that satisfy signal one
+// (transform_version present) and declare a given `role` in frontmatter, but have an
+// unbalanced tag (open tag with no matching close tag). These bytes are used to verify
+// that structural validation runs regardless of the agent's declared role.
+func eligibleBytesWithRoleAndUnbalancedTag(role string) []byte {
+	return []byte("---\n" +
+		"transform_version: \"1.0.0\"\n" +
+		"version: \"1.0.0\"\n" +
+		"role: \"" + role + "\"\n" +
+		"---\n" +
+		"<Identity type=\"core\">\n" +
+		"Content with no closing tag — unbalanced open tag.\n")
+}
+
+// TestEligibleHarnessOnly_UtilityRole_UnbalancedTagStillBlocks verifies that a document
+// declaring `role: utility` is still subject to structural validation. When the body contains
+// an unbalanced section tag (a blocking "unbalanced-tag" issue), the verdict must be
+// Eligible: false regardless of the role value. This test locks the requirement from the
+// plan that boundary/structural parsing checks must not be gated on role — no role-based
+// skip may be added to the validation path.
+func TestEligibleHarnessOnly_UtilityRole_UnbalancedTagStillBlocks(t *testing.T) {
+	// Arrange — eligible document with role: "utility" and an unclosed section tag.
+	// After the vocabulary expansion, ParseAgentRole accepts "utility"; the structural
+	// validation path must still execute and block eligibility.
+	src := eligibleBytesWithRoleAndUnbalancedTag("utility")
+
+	// Act
+	verdict := eligibleHarnessOnly(src)
+
+	// Assert — the unbalanced tag must block eligibility even though the role is recognised.
+	if verdict.Eligible {
+		t.Error("eligibleHarnessOnly returned Eligible true for a document with role \"utility\" " +
+			"and an unclosed section tag; want Eligible false — structural validation " +
+			"(blocking \"unbalanced-tag\" issue) must run regardless of role")
+	}
+	if verdict.Reason == "" {
+		t.Error("eligibleHarnessOnly returned empty Reason for an ineligible verdict; " +
+			"a negative verdict must carry a human-readable Reason")
+	}
+}
+
+// TestEligibleHarnessOnly_StandaloneRole_UnbalancedTagStillBlocks verifies that a document
+// declaring `role: standalone` is subject to the same structural validation as any other
+// role. An unbalanced section tag produces a blocking "unbalanced-tag" issue; the verdict
+// must be Eligible: false. A role-based skip at the validation call site would cause this
+// test to fail with Eligible: true, which is the precise regression this test is designed
+// to detect.
+func TestEligibleHarnessOnly_StandaloneRole_UnbalancedTagStillBlocks(t *testing.T) {
+	// Arrange — eligible document with role: "standalone" and an unclosed section tag.
+	src := eligibleBytesWithRoleAndUnbalancedTag("standalone")
+
+	// Act
+	verdict := eligibleHarnessOnly(src)
+
+	// Assert — the unbalanced tag must block eligibility even though the role is recognised.
+	if verdict.Eligible {
+		t.Error("eligibleHarnessOnly returned Eligible true for a document with role \"standalone\" " +
+			"and an unclosed section tag; want Eligible false — structural validation " +
+			"(blocking \"unbalanced-tag\" issue) must run regardless of role")
+	}
+	if verdict.Reason == "" {
+		t.Error("eligibleHarnessOnly returned empty Reason for an ineligible verdict; " +
+			"a negative verdict must carry a human-readable Reason")
 	}
 }

@@ -1,7 +1,7 @@
 ---
 id: agent-template-architecture
 type: specification
-version: "1.7"
+version: "1.8"
 name: "Agent Template Architecture"
 description: "The structure of a MOSAIC agent file: frontmatter schema, the four region kinds and their ownership, canonical document order, the per-role region matrix, and what each section must contain."
 author: MOSAIC
@@ -35,7 +35,7 @@ An agent file is a system prompt with a schema. This document is that schema: wh
 | All canonical text itself | `Catalog/DeployedSections.md`, and nowhere else (§7) |
 | The measurement and decision that produced the blocks | `Development/Analysis/AgentBodyDrift.md` |
 | Infrastructure agent declaration, trigger vocabulary, `Class` | `InfrastructureAgentConcept.md`. An infrastructure agent is an ordinary subagent by this schema; what makes it infrastructure is how the orchestrator reaches it, not how its file is shaped. |
-| Utility agents | Nothing. They carry no boundary tags, are never deployed into a run, and are outside this schema entirely. |
+| Utility and standalone agents | §5A. Two roles that live in the catalog and receive harness transformation but are not governed by this schema's structure rules or deployment bundle. |
 | Workflow definitions and the orchestration artifact's schema | Their own documents. Both are consumed by an agent this document shapes; neither is shaped by it. |
 | Skill and hook-bundle file formats | `SourceFilesFormat.md`. Separate artefact kinds with their own conventions. |
 
@@ -80,7 +80,7 @@ An agent file has two parts: a YAML frontmatter block (§3) and a body composed 
 |--------|-----------|-----------|-----------|
 | `<Name type="core">` … `</Name>` | MOSAIC source authors | Carried from source byte-identically | Carried from source byte-identically |
 | `<Name type="managed">` … `</Name>` | The deployment tool | Body generated from a canonical source | Regenerated wholesale; prior content discarded |
-| `<Name type="project">` … `</Name>` | MOSAIC source authors | Left empty, listed in `TODO.md` | Preserved byte-identically |
+| `<Name type="project">` … `</Name>` | MOSAIC source authors | Carried from source; if non-empty, content is default (§2.1.1) | Preserved byte-identically |
 | `<Name type="custom">` … `</Name>` | Project authors | N/A — never in source | Preserved byte-identically |
 
 **`type="project"` vs `type="custom"`:** Both hold project-authored content preserved byte-identically on update. The difference is provenance. A `type="project"` region is **declared in the source file** by MOSAIC — the source defines where it sits, and on schema reorder the content follows the source's new position automatically (principle 10). A `type="custom"` region is **invented by the project** and exists only in the deployed file — it has no source anchor, so on schema reorder the tool parks it at end of file and emits a TODO for the user to reposition it (§6.4).
@@ -92,6 +92,21 @@ Four consequences follow and are worth stating outright:
 **A user-owned region (project or custom) may be nested inside a managed region.** The tool preserves nested user-owned regions when regenerating the managed parent — it writes the new canonical text around them. This is the natural placement for project extensions of deployed content (e.g. custom error handling inside `ErrorHandlingCommon`), and it gives the extension an anchor that survives schema reorder.
 
 **Region replacement precedes injection resolution.** Reversed, the tool would resolve an injection and then overwrite the region beside it, discarding content it had just placed.
+
+#### 2.1.1 Project Regions with Default Content
+
+A project region in a source file is usually empty. It may instead carry **default content** — text MOSAIC provides as a starting point that the project is free to replace.
+
+The rule is **deploy once, then forget:**
+
+1. **On initial deploy** (region does not yet exist in the deployed file): the source content — empty or default — is carried into the deployed file. If non-empty, the region is listed in `TODO.md` as reviewable rather than as requiring filling.
+2. **On every subsequent update** (region already exists in the deployed file): the deployed content is preserved byte-identically. The source's default content is ignored, even if MOSAIC has changed it since the first deploy.
+
+The consequence is that default content bootstraps the region and then ownership transfers to the project fully. A MOSAIC author updating a default in a source file is updating the experience for *new* deployments only; existing deployments are untouched.
+
+**What counts as default content.** Any non-empty project region in a source file. No attribute or marker is needed — the act of putting content inside a `type="project"` region in a source file is the declaration. The severity table in validation agents (§6.3) is the primary case.
+
+**Principle 3 still holds.** Empty remains the normal state of most project regions. Default content is the exception, used where an agent's instructions reference the region's content and need it to say something coherent on first deploy. A project region whose parent section works fine with it empty should stay empty.
 
 ### 2.2 Syntax and Nesting
 
@@ -278,15 +293,20 @@ Key order in source is `id`, `version`, `name`, `description`, `role`, then the 
 
 ### 3.2 `role`
 
-`role` states what the agent is, in the same vocabulary the canonical blocks use in their `applies_to` fields: `subagent` or `orchestrator`.
+`role` states what the agent is. Four values:
+
+| Value | What it means | Schema governed | Bundle deployed |
+|---|---|---|---|
+| `subagent` | An orchestration subagent | Yes — full §2–§4 | Yes |
+| `orchestrator` | The orchestrator | Yes — §5 deviations | No (§8) |
+| `utility` | A MOSAIC meta-agent (subagent creator, workflow creator, etc.) | No — §5A | No |
+| `standalone` | A user-authored agent outside the orchestration system | No — §5A | No |
+
+`subagent` and `orchestrator` are the two values the canonical blocks use in their `applies_to` fields and are the two values this schema fully governs. `utility` and `standalone` are recognised by the deployment tool for harness transformation but are outside this schema's structure rules and deployment bundle (§5A).
 
 **Why it is declared rather than inferred.** Every block the tool selects is keyed on role. Today the tool derives role from the file's path — `Catalog/Orchestrator/` means orchestrator, everything else means not. That works exactly as long as the layout does, which makes a reorganisation of the agent folders a silent change to which contract text ships. Moving a file should not be able to change what an agent is.
 
 There is a second reason, smaller but sharper: a role in frontmatter is checkable against the file's own regions. A file declaring `role: subagent` with no `OutputFormat` section is detectably wrong (§9). With role inferred from path, the same file is merely unusual.
-
-**On the vocabulary.** The deployment tool's internal role enum currently reads `worker` / `orchestrator` / `utility`, while every design document says `subagent`. The frontmatter field uses `subagent`, because that is the word the contract and this document both use, and because `worker` names nothing else in the system. Reconciling the code enum is recorded in §16.
-
-`utility` is not a value here. Utility agents carry no boundary tags, are never deployed into a run, and are outside this schema entirely (§1.1).
 
 Infrastructure agents declare `role: subagent`. They are ordinary subagents by file shape; their class and triggers are declared in the orchestrator, not in their own frontmatter.
 
@@ -510,6 +530,31 @@ The orchestrator's `Capabilities` contains nested core regions — `<ExecutionLo
 
 ---
 
+## 5A. Utility and Standalone Agents
+
+Two roles live in the catalog but are not governed by this schema's structure rules or deployment bundle.
+
+| | `utility` | `standalone` |
+|---|---|---|
+| **Lives in** | `Catalog/UtilityAgents/` | `Catalog/StandaloneAgents/` |
+| **What it is** | A MOSAIC meta-agent — tooling for the orchestration system itself (subagent creator, workflow creator, orchestration architect, etc.) | A user-authored agent outside the orchestration system entirely |
+| **Boundary tags** | May or may not use them — author's choice | May or may not use them — author's choice |
+| **Template structure** | May or may not follow §4 — author's choice | May or may not follow §4 — author's choice |
+
+**What the tool does with them:** harness transformation — frontmatter mapping, model substitution, tool name mapping. The same mechanical transforms that turn a source file into a harness-specific deployed file. It processes what it finds in the file and does not require or report anything that is not there.
+
+**What the tool does not do:**
+
+- No bundle deployment. No managed regions are filled, no `bundle_version` is stamped. If a utility agent happens to carry a managed region, the tool leaves it as-is.
+- No structural validation. No check for canonical section order, required regions, or role-matrix compliance. These agents are not promised to conform, so checking for conformance is noise.
+- No missing-region reporting. A utility agent with three sections instead of seven is not degraded — it is a three-section agent.
+
+**Why they are in the catalog at all.** The deployment tool needs a source file to transform. Keeping these agents in the catalog alongside subagents means one tool, one pipeline, one set of harness descriptors. The alternative — a separate transformation mechanism for non-orchestration agents — would duplicate machinery for a difference that is entirely about what gets skipped.
+
+The precise scope of tool behavior for these roles is expected to evolve with experience and is not fully specified here.
+
+---
+
 ## 6. Injection and Custom Points
 
 ### 6.1 Two Kinds of Project-Owned Region
@@ -563,7 +608,9 @@ The use case is unchanged: a deployment can have real business extending the pro
 
 ### 6.3 Severity Injections
 
-Validation agents carry two additional project injections. `SeverityThresholds` is followed in source by a default table stating which severities require rework, which a project overrides:
+Validation agents carry two additional project injections. `SeverityThresholds` carries default content (§2.1.1) — a table stating which severities require rework. The default ships on first deploy; the project may then override it freely, and subsequent source updates to the default do not touch the deployed version.
+
+The default table:
 
 | Severity | Requires Rework |
 |----------|-----------------|
@@ -573,6 +620,8 @@ Validation agents carry two additional project injections. `SeverityThresholds` 
 | SUGGESTION | No by default |
 
 The status rule follows from it: any issue at a severity marked as requiring rework means `COMPLETED_NEEDS_ACTION`; otherwise `SUCCESS` with the issues recorded in the report. `SeverityDefinitions` optionally states what each level means in the project's terms.
+
+**In source files, the default table and its accompanying status-code logic sit inside the `<SeverityThresholds type="project">` region**, not after it. Content outside the region is core text and would not be preserved as the project's on update — the severity guidance must be inside the region it belongs to.
 
 ### 6.4 Custom Regions and Schema Reorder
 
@@ -597,7 +646,7 @@ One is enforced. The rest are guidance, and marked as such.
 **Guidance:**
 
 - **An agent carries only the injections its instructions could use.** An interface agent that transports data between systems has no use for `CodebaseContext` or `OutputArtifactTemplate`, and including them produces empty regions a project author must read and dismiss.
-- **A template must work with every injection empty.** That is the state of every source file and of every fresh deployment; an agent that only makes sense once a project has filled something in is broken by default.
+- **A template must work with every injection empty or at its default.** That is the state of every source file and of every fresh deployment; an agent that only makes sense once a project has filled something in is broken by default. Where a project region carries default content (§2.1.1), "works" means the default is coherent — the agent's instructions must not contradict or depend on content the default does not provide.
 - **Injections extend; they do not contradict.** An injection redefining a rule stated in a managed region leaves the agent two answers with no basis to choose, and it will follow the nearer one (principle 7). The tag itself does not convey this, so the `TODO.md` text for each injection should.
 
 **No injection or custom region is ever required to be filled.** Empty is the normal state, not a degraded one (principle 3), and unfilled regions belong in the `TODO.md` checklist rather than in a validator's output. This matters most where a parent section offers several alternative child injections: filling all of them is not the goal, and a rule demanding it would be demanding contradictory content. Which of them a project uses is the project's decision and nobody else's.
@@ -798,7 +847,7 @@ Changes this document makes to them:
 - **A copy-paste template.** A complete agent file offered for copying is how forty-two copies of shared text came to exist. §4 specifies each section; the bundle supplies the shared text at deploy time. Neither is a thing to paste.
 - **Contract wording.** Placed here, specified in `CommunicationProtocol.md`.
 - **Canonical block wording.** Placed here, reasoned about in `DeploymentBlocks/`, and held only in the bundle.
-- **Utility agents.** No boundary tags, never deployed into a run, outside the schema.
+- **Utility and standalone agent tool behavior.** §5A states what the tool does and does not do at a principle level. The precise scope is expected to evolve with experience and is not fully specified here.
 - **Infrastructure agent declaration.** Class, triggers, and failure policy are declared in the orchestrator, not in agent frontmatter (§3.5).
 - **Harness-specific content.** What goes into `HarnessConstraints` and how a harness maps generic tool names are the harness modules' business.
 - **Agent quality.** Whether an agent's scope is well-chosen, whether its constraints are justified, and whether it overlaps another agent are review questions. This document specifies the container.
@@ -825,7 +874,8 @@ Changes this document makes to them:
 | **Contract** | Text defining something two parties must agree on. There is one: the orchestration contract in `CommunicationProtocol.md`. It carries its own version and is not in the bundle. |
 | **Specifying document** | The design document holding a block's rationale and changelog, named in the block's `specified_in`. Holds no copy of the block. |
 | **Canonical order** | The fixed sequence of seven top-level boundaries every agent file follows (§2.3). |
-| **Role** | `subagent` or `orchestrator`. Declared in frontmatter; selects which canonical text a file receives. |
+| **Role** | `subagent`, `orchestrator`, `utility`, or `standalone`. Declared in frontmatter. `subagent` and `orchestrator` are schema-governed and select canonical text; `utility` and `standalone` receive harness transformation only (§5A). |
+| **Default content** | Non-empty content in a `type="project"` region in a source file. Deployed once on initial deploy; thereafter owned by the project and never overwritten (§2.1.1). |
 | **Drift** | Divergence between copies of text that was once identical and has no single source. |
 
 ---
@@ -855,6 +905,7 @@ A change to this schema is never local. The table below lists what must be check
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 1.8 | 2026-08-14 | **Utility and standalone roles added; project regions may carry default content.** Two new `role` values — `utility` and `standalone` — recognised by the deployment tool for harness transformation but outside this schema's structure rules and deployment bundle. New §5A covers both. `role` vocabulary in §3.2 expanded from two values to four, with a table stating what each receives. Project regions may now carry default content in source files (§2.1.1): non-empty content in a source `type="project"` region deploys on first deploy and is thereafter the project's property, never overwritten on update. §6.3 updated: the severity table belongs inside the `SeverityThresholds` region as default content, not after it. §6.5 guidance, §11, §12 glossary updated accordingly. |
 | 1.7 | 2026-08-14 | **Tag syntax migrated from `[[KIND:Name]]` to `<Name type="value">`.** The four region kinds (SECTION, DEPLOYED, INJECTION, CUSTOM) now use name-first XML tags with a `type` attribute carrying the ownership value (`core`, `managed`, `project`, `custom`). Closing tags are standard XML `</Name>` with no attributes. Empty regions use an open/close pair (no self-closing). Compound/enumerable names carry the id in a `name` attribute: `<Workflow type="core" name="quick-fix">` closes with `</Workflow>`. Region versions move from HTML comments inside region content to a `version` attribute on the opening tag. Tag-line matching rule updated: a tag is a MOSAIC boundary only when its trimmed line is exactly the tag and it carries a valid `type` attribute — foreign XML tags without `type` are inert content. All examples, tables, rule descriptions, glossary entries, and migration steps updated to the new syntax. The four kinds, their semantics, the canonical order, the role matrix, and the nine tool-managed names are unchanged in substance. |
 | 1.6 | 2026-08-12 | **`ProtocolExtension` removed from the injection catalogue.** The name is no longer an entry in `InjectionParent`; projects needing to extend the protocol use `<ProtocolExtension type="custom">` instead of a declared project injection. The name remains legal as an open injection name and is preserved byte-identically if used, but carries no advisory parent. This applies the project vs. custom provenance rule consistently: MOSAIC defines project slots in source; projects invent custom regions in deployed files. §4.2, §6.2, and §6.2.1 updated; §10.1 and §13 reconciled; `vocabulary.go` and `SourceFilesFormat.md` updated. Prior discussion (the v1.1 removal and v1.2 reinstatement) is preserved in §15. |
 | 1.5 | 2026-08-11 | **Custom region kind introduced; source-driven invariant stated; nesting inside managed regions permitted.** New fourth region kind `type="custom"` for project-invented regions that exist only in deployed files, distinct from `type="project"` which is declared in source. On schema reorder, source injections follow the source automatically; custom regions are parked at end of file with a TODO. Principle 10 added to §1.3 stating the source-driven structure invariant that makes reordering safe. `LanguagePatterns` removed from the injection catalogue — it is not declared in any source file and is a custom region if a project wants it. Rule 13 reversed: project and custom regions may now nest inside managed regions — the tool preserves them on regeneration. §6 restructured: §6.1 distinguishes the two kinds, §6.2 is the injection catalogue, §6.4 specifies custom region behavior on reorder, §6.5 is rules. Analysis in `SchemaEvolution-Problems.md`. |
@@ -901,9 +952,10 @@ A change to this schema is never local. The table below lists what must be check
 - **The provenance merge is specified but not executed.** The design layer is done — `CommunicationProtocol.md` v1.10 owns the stamp, and `ArtifactProvenance.md` is a tombstone. What remains is mechanical: forty-two agent files still carry older provenance regions and injections, and the three vocabulary copies plus the `Tools/Common/testdata/boundary/` fixtures still encode eight-slot ordering. Until that lands, deployed agents do not match §2.3.
 - **The HITL obligation is stated twice** in every subagent file: once in the contract's managed region, once in `ClosingProcedure`. Both single-sourced, so they cannot drift accidentally. Options and the argument are in `DeploymentBlocks/ClosingProcedure.md` §7.
 - **The deployment tool does not read the bundle at all.** Until it does, the five blocks are deployed nowhere and the migration in §10 cannot complete. Tracked in `DeployedSectionsBundle.md` §10.
-- **The tool's role enum says `worker`; every design document says `subagent`.** `domain.AgentRole` is `worker` / `orchestrator` / `utility`. The frontmatter field uses `subagent` (§3.2); the code should follow, or map explicitly at the boundary.
+- **The tool's role enum is partially aligned.** `domain.AgentRole` now has `subagent` / `orchestrator` / `utility`. The new `standalone` value (§3.2) is not yet represented in the code. `ParseAgentRole` accepts only `subagent` and `orchestrator`; it needs to accept `utility` and `standalone` as well.
 - **Role is still inferred from path in the tool.** The frontmatter field is specified here but nothing reads it. Until it does, `role` is documentation, and a file moved between folders still changes what it is.
 - **`Catalog/SourceFilesFormat.md` and this document overlap.** That file states the agent format from the tool's side, with no rationale, and has already drifted. It should be reduced to a pointer plus the skill and hook conventions it uniquely covers (§10.1).
 - **`InfrastructureAgentConcept.md` §3.1 shows an old project-injection marker for `InfrastructureAgents`.** The vocabulary has it as a managed region, and the orchestrator source uses the managed form. The design document is the one that is wrong, and it is the document a reader would trust. `Catalog/Subagents/Infrastructure/README.md` line 7 carries the same error and should be corrected with it.
 - **The orchestrator's `ErrorHandling` section extends far past its injection.** The project injection closes around line 493 and the section continues to line 715 with the Core Orchestration Loop, which is neither error handling nor an extension of it. The current arrangement means a project injection lands in the middle of unrelated material.
+- **Severity tables are outside `SeverityThresholds` in all validation agent source files.** The default content (§2.1.1, §6.3) currently sits after the empty project region rather than inside it. Each validation agent's source needs the table and status-code logic moved inside `<SeverityThresholds type="project">`. Until then, the update tool treats the table as core text and the project region as empty — a project overriding severity thresholds would get both their override and the stale default.
 - **The `MosaicTest` agents were not surveyed.** Three agents under `MosaicTestCatalog/Agents/MosaicTest/` exist to exercise the harness rather than to do work. Whether they conform to this schema, and whether they should, is unexamined.
