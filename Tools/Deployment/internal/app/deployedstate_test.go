@@ -203,19 +203,17 @@ func TestProbeDeployedArtifact_TargetIsDirectory_PresentIsFalse(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestProbeDeployedArtifact_OrchestratorWithWorkflows_WorkflowsPopulated verifies that when
-// the deployed file contains [[SECTION:Workflow:<id>]] blocks with version comments, the
+// the deployed file contains workflow section blocks with version attributes, the
 // Workflows field carries each workflow's ID and version in first-occurrence order.
 func TestProbeDeployedArtifact_OrchestratorWithWorkflows_WorkflowsPopulated(t *testing.T) {
 	ws := t.TempDir()
 	content := []byte("---\nversion: \"1.0\"\n---\n\n" +
-		"[[SECTION:Workflow:quick-fix]]\n" +
-		"<!-- workflow-version: 3.0 -->\n" +
+		"<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
 		"Quick fix workflow body.\n" +
-		"[[/SECTION:Workflow:quick-fix]]\n\n" +
-		"[[SECTION:Workflow:code-review]]\n" +
-		"<!-- workflow-version: 2.1 -->\n" +
+		"</Workflow>\n\n" +
+		"<Workflow type=\"core\" name=\"code-review\" version=\"2.1\">\n" +
 		"Code review workflow body.\n" +
-		"[[/SECTION:Workflow:code-review]]\n")
+		"</Workflow>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
 	state := probeDeployedArtifact(ws, "orchestrator.md", "")
@@ -245,14 +243,12 @@ func TestProbeDeployedArtifact_OrchestratorWithWorkflows_WorkflowsPopulated(t *t
 // only the first occurrence is retained in the Workflows list.
 func TestProbeDeployedArtifact_OrchestratorWithDuplicateWorkflowBlock_Deduplicates(t *testing.T) {
 	ws := t.TempDir()
-	content := []byte("[[SECTION:Workflow:quick-fix]]\n" +
-		"<!-- workflow-version: 3.0 -->\n" +
+	content := []byte("<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
 		"First occurrence.\n" +
-		"[[/SECTION:Workflow:quick-fix]]\n\n" +
-		"[[SECTION:Workflow:quick-fix]]\n" +
-		"<!-- workflow-version: 3.0 -->\n" +
+		"</Workflow>\n\n" +
+		"<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
 		"Second occurrence (duplicate).\n" +
-		"[[/SECTION:Workflow:quick-fix]]\n")
+		"</Workflow>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
 	state := probeDeployedArtifact(ws, "orchestrator.md", "")
@@ -262,14 +258,14 @@ func TestProbeDeployedArtifact_OrchestratorWithDuplicateWorkflowBlock_Deduplicat
 	}
 }
 
-// TestProbeDeployedArtifact_WorkflowBlockWithNoVersionComment_VersionIsEmpty verifies that a
-// workflow section that carries no <!-- workflow-version: X --> comment yields an empty
-// Version field, not an error or a default value.
-func TestProbeDeployedArtifact_WorkflowBlockWithNoVersionComment_VersionIsEmpty(t *testing.T) {
+// TestProbeDeployedArtifact_WorkflowBlockWithNoVersionAttribute_VersionIsEmpty verifies that a
+// workflow section that carries no version attribute yields an empty Version field, not an error
+// or a default value.
+func TestProbeDeployedArtifact_WorkflowBlockWithNoVersionAttribute_VersionIsEmpty(t *testing.T) {
 	ws := t.TempDir()
-	content := []byte("[[SECTION:Workflow:old-workflow]]\n" +
-		"This block has no version comment.\n" +
-		"[[/SECTION:Workflow:old-workflow]]\n")
+	content := []byte("<Workflow type=\"core\" name=\"old-workflow\">\n" +
+		"This block has no version attribute.\n" +
+		"</Workflow>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
 	state := probeDeployedArtifact(ws, "orchestrator.md", "")
@@ -445,10 +441,9 @@ func TestProbeDeployedArtifact_ModelIDDoesNotAffectVersionFields(t *testing.T) {
 func TestProbeDeployedArtifact_ModelIDDoesNotAffectWorkflows(t *testing.T) {
 	ws := t.TempDir()
 	content := []byte("---\nversion: \"1.0\"\nmodel: \"claude-opus-4-5\"\n---\n\n" +
-		"[[SECTION:Workflow:quick-fix]]\n" +
-		"<!-- workflow-version: 3.0 -->\n" +
+		"<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
 		"Quick fix workflow body.\n" +
-		"[[/SECTION:Workflow:quick-fix]]\n")
+		"</Workflow>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
 	state := probeDeployedArtifact(ws, "orchestrator.md", "model")
@@ -549,19 +544,17 @@ func TestProbeDeployedArtifact_ModelIDWithLeadingTrailingSpaces_PreservedVerbati
 // extractDeployedWorkflows
 // ---------------------------------------------------------------------------
 
-// TestExtractDeployedWorkflows_MultipleBlocksWithVersionComments_ReturnsAllInOrder verifies
-// that each [[SECTION:Workflow:<id>]] block is paired with the version from its
-// <!-- workflow-version: X --> comment in first-occurrence order.
-func TestExtractDeployedWorkflows_MultipleBlocksWithVersionComments_ReturnsAllInOrder(t *testing.T) {
+// TestExtractDeployedWorkflows_MultipleBlocksWithVersionAttributes_ReturnsAllInOrder verifies
+// that each workflow section block is paired with the version from its version attribute
+// in first-occurrence order.
+func TestExtractDeployedWorkflows_MultipleBlocksWithVersionAttributes_ReturnsAllInOrder(t *testing.T) {
 	data := []byte(
-		"[[SECTION:Workflow:quick-fix]]\n" +
-			"<!-- workflow-version: 3.0 -->\n" +
+		"<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
 			"Content.\n" +
-			"[[/SECTION:Workflow:quick-fix]]\n\n" +
-			"[[SECTION:Workflow:code-review]]\n" +
-			"<!-- workflow-version: 2.1 -->\n" +
+			"</Workflow>\n\n" +
+			"<Workflow type=\"core\" name=\"code-review\" version=\"2.1\">\n" +
 			"Content.\n" +
-			"[[/SECTION:Workflow:code-review]]\n")
+			"</Workflow>\n")
 
 	wfs := extractDeployedWorkflows(data)
 
@@ -580,14 +573,12 @@ func TestExtractDeployedWorkflows_MultipleBlocksWithVersionComments_ReturnsAllIn
 // same workflow ID appears more than once, only the first occurrence is included.
 func TestExtractDeployedWorkflows_DuplicateBlock_OnlyFirstOccurrenceKept(t *testing.T) {
 	data := []byte(
-		"[[SECTION:Workflow:quick-fix]]\n" +
-			"<!-- workflow-version: 3.0 -->\n" +
+		"<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
 			"First occurrence.\n" +
-			"[[/SECTION:Workflow:quick-fix]]\n\n" +
-			"[[SECTION:Workflow:quick-fix]]\n" +
-			"<!-- workflow-version: 3.0 -->\n" +
+			"</Workflow>\n\n" +
+			"<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
 			"Duplicate — must be ignored.\n" +
-			"[[/SECTION:Workflow:quick-fix]]\n")
+			"</Workflow>\n")
 
 	wfs := extractDeployedWorkflows(data)
 
@@ -596,13 +587,13 @@ func TestExtractDeployedWorkflows_DuplicateBlock_OnlyFirstOccurrenceKept(t *test
 	}
 }
 
-// TestExtractDeployedWorkflows_BlockWithNoVersionComment_VersionIsEmpty verifies that a block
-// without a <!-- workflow-version: X --> comment yields an entry with an empty Version.
-func TestExtractDeployedWorkflows_BlockWithNoVersionComment_VersionIsEmpty(t *testing.T) {
+// TestExtractDeployedWorkflows_BlockWithNoVersionAttribute_VersionIsEmpty verifies that a block
+// without a version attribute yields an entry with an empty Version.
+func TestExtractDeployedWorkflows_BlockWithNoVersionAttribute_VersionIsEmpty(t *testing.T) {
 	data := []byte(
-		"[[SECTION:Workflow:legacy]]\n" +
-			"Content without a version comment.\n" +
-			"[[/SECTION:Workflow:legacy]]\n")
+		"<Workflow type=\"core\" name=\"legacy\">\n" +
+			"Content without a version attribute.\n" +
+			"</Workflow>\n")
 
 	wfs := extractDeployedWorkflows(data)
 
@@ -626,14 +617,13 @@ func TestExtractDeployedWorkflows_NoWorkflowBlocks_ReturnsNil(t *testing.T) {
 	}
 }
 
-// TestExtractDeployedWorkflows_VersionCommentWithExtraWhitespace_VersionTrimmed verifies
-// that leading and trailing whitespace around the version value in a comment is stripped.
-func TestExtractDeployedWorkflows_VersionCommentWithExtraWhitespace_VersionTrimmed(t *testing.T) {
+// TestExtractDeployedWorkflows_VersionAttributeWithExtraWhitespace_VersionTrimmed verifies
+// that leading and trailing whitespace around the version attribute value is stripped.
+func TestExtractDeployedWorkflows_VersionAttributeWithExtraWhitespace_VersionTrimmed(t *testing.T) {
 	data := []byte(
-		"[[SECTION:Workflow:padded]]\n" +
-			"<!--  workflow-version:  4.2  -->\n" +
+		"<Workflow type=\"core\" name=\"padded\" version=\"  4.2  \">\n" +
 			"Content.\n" +
-			"[[/SECTION:Workflow:padded]]\n")
+			"</Workflow>\n")
 
 	wfs := extractDeployedWorkflows(data)
 
@@ -646,15 +636,13 @@ func TestExtractDeployedWorkflows_VersionCommentWithExtraWhitespace_VersionTrimm
 }
 
 // TestExtractDeployedWorkflows_UnclosedBlock_WorkflowCapturedWithVersion verifies that a
-// workflow section block that has an opening marker but no closing marker (e.g. a truncated
-// deployed file) is still captured: the ID comes from the opening marker and the version
-// comes from the workflow-version comment found in the block's content before end of file or
-// the next opening marker. Absent closing tags must not silently discard discovered workflow IDs.
+// workflow section block that has an opening tag but no closing tag (e.g. a truncated
+// deployed file) is still captured: the ID and version come from the opening tag's attributes.
+// Absent closing tags must not silently discard discovered workflow IDs.
 func TestExtractDeployedWorkflows_UnclosedBlock_WorkflowCapturedWithVersion(t *testing.T) {
-	// No [[/SECTION:Workflow:quick-fix]] closing tag.
+	// No </Workflow> closing tag.
 	data := []byte(
-		"[[SECTION:Workflow:quick-fix]]\n" +
-			"<!-- workflow-version: 1.0 -->\n" +
+		"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
 			"Content that is never closed.\n")
 
 	wfs := extractDeployedWorkflows(data)
@@ -671,23 +659,17 @@ func TestExtractDeployedWorkflows_UnclosedBlock_WorkflowCapturedWithVersion(t *t
 	}
 }
 
-// TestExtractDeployedWorkflows_VersionCommentBetweenBlocks_NotAssociatedWithEitherWorkflow
-// verifies that a <!-- workflow-version: X --> comment appearing between two closed workflow
-// blocks — that is, after one block's closing marker and before the next block's opening
-// marker — is not associated with any workflow. Each block's version must come only from a
-// comment inside its own opening/closing boundaries.
-func TestExtractDeployedWorkflows_VersionCommentBetweenBlocks_NotAssociatedWithEitherWorkflow(t *testing.T) {
-	// The "9.9" comment is an orphan: it is outside any workflow block boundary.
+// TestExtractDeployedWorkflows_TwoBlocksWithAttributes_BothVersionsIndependent
+// verifies that two closed workflow blocks each carry their own version independently from
+// their opening tag attributes. Each block's version comes only from its own opening tag.
+func TestExtractDeployedWorkflows_TwoBlocksWithAttributes_BothVersionsIndependent(t *testing.T) {
 	data := []byte(
-		"[[SECTION:Workflow:wf1]]\n" +
-			"<!-- workflow-version: 1.0 -->\n" +
+		"<Workflow type=\"core\" name=\"wf1\" version=\"1.0\">\n" +
 			"Content of wf1.\n" +
-			"[[/SECTION:Workflow:wf1]]\n" +
-			"<!-- workflow-version: 9.9 -->\n" + // orphan — must not affect wf1 or wf2
-			"[[SECTION:Workflow:wf2]]\n" +
-			"<!-- workflow-version: 2.0 -->\n" +
+			"</Workflow>\n" +
+			"<Workflow type=\"core\" name=\"wf2\" version=\"2.0\">\n" +
 			"Content of wf2.\n" +
-			"[[/SECTION:Workflow:wf2]]\n")
+			"</Workflow>\n")
 
 	wfs := extractDeployedWorkflows(data)
 

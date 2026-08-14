@@ -5,93 +5,92 @@ name: test-agent
 description: Valid file with 6 sections, one top-level DEPLOYED slot (CommunicationProtocol), and multiple non-empty regions
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 
 You are the TestAgent agent in a multi-agent orchestration system.
 
 **Goal:** Serve as a test fixture.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Additional identity content injected here.
-[[/INJECTION:IdentityExtension]]
+</IdentityExtension>
 
-[[DEPLOYED:AvailableWorkflows]]
+<AvailableWorkflows type="managed">
 Available workflows list injected here.
-[[/DEPLOYED:AvailableWorkflows]]
+</AvailableWorkflows>
 
-[[/SECTION:Identity]]
+</Identity>
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-<!-- protocol-version: 1.9 -->
+<CommunicationProtocol type="managed" version="1.9">
 ## Communication Protocol
 
 Standard protocol content delivered by the deploy tool.
 
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 ### Core Capabilities
 - Test valid boundary structures
 - Verify canonical names are accepted
 
-[[INJECTION:LanguagePatterns]]
+<LanguagePatterns type="project">
 Language pattern content injected here.
-[[/INJECTION:LanguagePatterns]]
+</LanguagePatterns>
 
-[[INJECTION:CodebaseContext]]
+<CodebaseContext type="project">
 Codebase context content injected here.
-[[/INJECTION:CodebaseContext]]
+</CodebaseContext>
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 - Stay within scope
 - Do not modify fixtures
 
-[[CUSTOM:CustomConstraints]]
+<CustomConstraints type="custom">
 Custom constraint content injected here.
-[[/CUSTOM:CustomConstraints]]
+</CustomConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 ---
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
 - Handle errors gracefully
 - Return structured results
 
-[[INJECTION:ErrorHandlingExtension]]
+<ErrorHandlingExtension type="project">
 Error handling extension content injected here.
-[[/INJECTION:ErrorHandlingExtension]]
+</ErrorHandlingExtension>
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 ---
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 
 Always return structured output.
 
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 ---
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 
 - Quality over speed
 - Context management
 
-[[INJECTION:ContextLimits]]
+<ContextLimits type="project">
 Context limit content injected here.
-[[/INJECTION:ContextLimits]]
+</ContextLimits>
 
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>

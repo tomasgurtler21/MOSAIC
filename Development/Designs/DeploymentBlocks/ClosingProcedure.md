@@ -13,7 +13,7 @@ status: Draft
 | | |
 |---|---|
 | **Block** | `ClosingProcedure:Subagent` |
-| **Fills** | `[[DEPLOYED:ClosingProcedure]]` — placement in `AgentTemplateArchitecture.md` §2.5 |
+| **Fills** | `<ClosingProcedure type="managed">` — placement in `AgentTemplateArchitecture.md` §2.5 |
 | **Applies to** | `subagent` |
 | **Text lives in** | `Catalog/DeployedSections.md` |
 
@@ -71,7 +71,7 @@ Membership follows the bundle's decidable test (`DeployedSectionsBundle.md` §2)
 
 ## 7. Open — the duplication with the contract
 
-The HITL obligation is now stated twice in every subagent file: once inside `[[DEPLOYED:CommunicationProtocol]]`, once here. Both are single-sourced, so accidental drift is impossible; deliberate drift, by someone editing one and not the other, is not.
+The HITL obligation is now stated twice in every subagent file: once inside `<CommunicationProtocol type="managed">`, once here. Both are single-sourced, so accidental drift is impossible; deliberate drift, by someone editing one and not the other, is not.
 
 Three ways to resolve it, none yet chosen:
 

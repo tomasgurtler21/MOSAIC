@@ -2,20 +2,20 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity section content.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 Capabilities content — appears before ArtifactProvenance, which is out of canonical order.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[DEPLOYED:ArtifactProvenance]]
+<ArtifactProvenance type="managed">
 ArtifactProvenance appears after Capabilities — out of canonical order (should be at slot 2, before Capabilities at slot 3).
-[[/DEPLOYED:ArtifactProvenance]]
+</ArtifactProvenance>
 
-[[INJECTION:ArtifactProvenanceExtension]]
-[[/INJECTION:ArtifactProvenanceExtension]]
+<ArtifactProvenanceExtension type="project">
+</ArtifactProvenanceExtension>

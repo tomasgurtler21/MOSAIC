@@ -140,8 +140,8 @@ type Catalog interface {
 	// text found in source and the sorted list of agent keys that declared this tier.
 	Tiers() []domain.TierInfo
 
-	// WorkflowSection extracts the [[SECTION:Workflow:{id}]] block from the workflow's source
-	// file and returns it byte-identically, including the two boundary-tag lines.
+	// WorkflowSection extracts the <Workflow type="core" name="{id}"> block from the workflow's
+	// source file and returns it byte-identically, including the two boundary-tag lines.
 	WorkflowSection(id string) ([]byte, error)
 
 	// ReadSource returns the raw bytes of a file previously reported by the catalog (via a

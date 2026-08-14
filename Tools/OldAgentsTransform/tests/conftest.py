@@ -106,19 +106,19 @@ def provenance_untagged_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
 
 @pytest.fixture
 def provenance_old_shape_empty_ext_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
-    """Already-tagged file with [[SECTION:ArtifactProvenance]] and an empty extension injection."""
+    """Already-tagged file with <ArtifactProvenance type="core"> and an empty extension injection."""
     return fixtures_dir / "provenance_old_shape_empty_ext_input.md"
 
 
 @pytest.fixture
 def provenance_old_shape_nonempty_ext_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
-    """Already-tagged file with [[SECTION:ArtifactProvenance]] and non-empty extension content."""
+    """Already-tagged file with <ArtifactProvenance type="core"> and non-empty extension content."""
     return fixtures_dir / "provenance_old_shape_nonempty_ext_input.md"
 
 
 @pytest.fixture
 def provenance_new_shape_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
-    """Already-tagged file with the new [[DEPLOYED:ArtifactProvenance]] shape (idempotency case)."""
+    """Already-tagged file with the new <ArtifactProvenance type="managed"> shape (idempotency case)."""
     return fixtures_dir / "provenance_new_shape_input.md"
 
 
@@ -206,8 +206,8 @@ def communication_protocol_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
 
 @pytest.fixture
 def communication_protocol_expected(fixtures_dir: pathlib.Path) -> pathlib.Path:
-    """Expected output for communication_protocol_input: [[DEPLOYED:CommunicationProtocol]]
-    at top level between [[/SECTION:Identity]] and [[SECTION:Capabilities]], IdentityExtension
+    """Expected output for communication_protocol_input: <CommunicationProtocol type="managed">
+    at top level between </Identity> and <Capabilities type="core">, IdentityExtension
     relocated inside Identity, ProtocolExtension as an empty top-level injection pair, old prose
     discarded.
     """
@@ -228,7 +228,7 @@ def fenced_protocol_heading_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
 @pytest.fixture
 def fenced_protocol_heading_expected(fixtures_dir: pathlib.Path) -> pathlib.Path:
     """Expected output for fenced_protocol_heading_input: fenced content byte-identical to
-    the input (no [[DEPLOYED:CommunicationProtocol]] generated from it, no
+    the input (no <CommunicationProtocol type="managed"> generated from it, no
     unclassifiable-content error); the genuine region transformed per the emission contract.
     """
     return fixtures_dir / "fenced_protocol_heading_expected.md"
@@ -237,7 +237,7 @@ def fenced_protocol_heading_expected(fixtures_dir: pathlib.Path) -> pathlib.Path
 @pytest.fixture
 def harness_only_transformed_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
     """Hand-authored harness-only agent that already carries a full set of correctly paired
-    canonical [[SECTION:...]] boundary tags.
+    canonical XML boundary tags.
 
     Used to verify that has_canonical_boundary_tags returns True for an already-transformed
     harness-only file, and as a reference fixture for Stage 2 and later stages.
@@ -249,7 +249,7 @@ def harness_only_transformed_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
 def harness_only_untransformed_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
     """Hand-authored harness-only agent in legacy (pre-boundary-tag) format.
 
-    Contains no [[SECTION:...]] or [[DEPLOYED:...]] tags.  Used to verify that
+    Contains no XML boundary tags.  Used to verify that
     has_canonical_boundary_tags returns False for an untagged harness-only file.
     """
     return fixtures_dir / "harness_only_untransformed_input.md"

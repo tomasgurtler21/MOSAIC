@@ -93,20 +93,20 @@ func newVsCodeGhcpModuleFromOpts(t *testing.T, root string) domain.HarnessModule
 const vsCodeGhcpSharedInjections = `---
 version: "1.0.0"
 ---
-[[DEPLOYED:LanguagePatterns]]
+<LanguagePatterns type="managed">
 Use idiomatic Go.
-[[/DEPLOYED:LanguagePatterns]]
+</LanguagePatterns>
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 `
 
 const vsCodeGhcpOrchestratorInjections = `---
 version: "1.0.0"
 ---
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Orchestrator-specific constraint content.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -150,9 +150,9 @@ func TestVsCodeGhcp_ContentFromDiskNotFromEmbed(t *testing.T) {
 	uniqueContent := "VSCODEGHCP_RUNTIME_LOADING_UNIQUE_SENTINEL_XYZ_9847612"
 	root, contentDir := makeTempRootForVsCodeGhcp(t)
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:LanguagePatterns]]\n"+uniqueContent+"\n[[/DEPLOYED:LanguagePatterns]]\n\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<LanguagePatterns type=\"managed\">\n"+uniqueContent+"\n</LanguagePatterns>\n\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	mod := newVsCodeGhcpModuleFromOpts(t, root)
 
@@ -263,9 +263,9 @@ func TestVsCodeGhcp_NoRebuild_ChangingSharedFileChangesInjectedContent(t *testin
 
 	const firstContent = "VSCODEGHCP_FIRST_VERSION_LANGUAGE_PATTERN_SENTINEL"
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:LanguagePatterns]]\n"+firstContent+"\n[[/DEPLOYED:LanguagePatterns]]\n\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<LanguagePatterns type=\"managed\">\n"+firstContent+"\n</LanguagePatterns>\n\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	mod1 := newVsCodeGhcpModuleFromOpts(t, root)
 	content1, ok1 := mod1.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: "subagent"})
@@ -279,7 +279,7 @@ func TestVsCodeGhcp_NoRebuild_ChangingSharedFileChangesInjectedContent(t *testin
 	// Edit the file to simulate an in-place update without rebuild.
 	const secondContent = "VSCODEGHCP_SECOND_VERSION_LANGUAGE_PATTERN_SENTINEL"
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:LanguagePatterns]]\n"+secondContent+"\n[[/DEPLOYED:LanguagePatterns]]\n\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<LanguagePatterns type=\"managed\">\n"+secondContent+"\n</LanguagePatterns>\n\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	// Construct a new module from the same root — no rebuild needed.
 	mod2 := newVsCodeGhcpModuleFromOpts(t, root)
@@ -304,9 +304,9 @@ func TestVsCodeGhcp_NoRebuild_ChangingSharedFileChangesInjectedContent(t *testin
 func TestVsCodeGhcp_Merging_SharedOnly_SubagentReceivesSharedContent(t *testing.T) {
 	root, contentDir := makeTempRootForVsCodeGhcp(t)
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:LanguagePatterns]]\nShared language patterns.\n[[/DEPLOYED:LanguagePatterns]]\n\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<LanguagePatterns type=\"managed\">\nShared language patterns.\n</LanguagePatterns>\n\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	mod := newVsCodeGhcpModuleFromOpts(t, root)
 
@@ -324,9 +324,9 @@ func TestVsCodeGhcp_Merging_SharedOnly_SubagentReceivesSharedContent(t *testing.
 func TestVsCodeGhcp_Merging_OrchestratorOnly_SubagentReceivesNothing(t *testing.T) {
 	root, contentDir := makeTempRootForVsCodeGhcp(t)
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\nOrch constraint.\n[[/DEPLOYED:HarnessConstraints]]\n\n[[DEPLOYED:LanguagePatterns]]\nOrchestrator-only patterns.\n[[/DEPLOYED:LanguagePatterns]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\nOrch constraint.\n</HarnessConstraints>\n\n<LanguagePatterns type=\"managed\">\nOrchestrator-only patterns.\n</LanguagePatterns>\n")
 
 	mod := newVsCodeGhcpModuleFromOpts(t, root)
 
@@ -344,9 +344,9 @@ func TestVsCodeGhcp_Merging_BothNonEmpty_OrchestratorReceivesMergedWithSeparator
 	const sharedPart = "Shared constraint line."
 	const orchPart = "Orchestrator-only constraint line."
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:HarnessConstraints]]\n"+sharedPart+"\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<HarnessConstraints type=\"managed\">\n"+sharedPart+"\n</HarnessConstraints>\n")
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n"+orchPart+"\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n"+orchPart+"\n</HarnessConstraints>\n")
 
 	mod := newVsCodeGhcpModuleFromOpts(t, root)
 
@@ -365,9 +365,9 @@ func TestVsCodeGhcp_Merging_BothNonEmpty_OrchestratorReceivesMergedWithSeparator
 func TestVsCodeGhcp_Merging_UndeclaredInBoth_OkFalse(t *testing.T) {
 	root, contentDir := makeTempRootForVsCodeGhcp(t)
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeVsCodeGhcpContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	mod := newVsCodeGhcpModuleFromOpts(t, root)
 

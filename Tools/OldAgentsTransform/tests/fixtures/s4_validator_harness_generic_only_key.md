@@ -7,60 +7,60 @@ description: Harness agent (has transform_version) carrying required_skills — 
 required_skills: [lean-tdd]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # HarnessGenericOnlyKeyTest Agent
 
 You are the **HarnessGenericOnlyKeyTest** agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
+</IdentityExtension>
 
-[[/SECTION:Identity]]
+</Identity>
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Fixture content.
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
-[[DEPLOYED:ProtocolConstraints]]
-[[/DEPLOYED:ProtocolConstraints]]
+<ProtocolConstraints type="managed">
+</ProtocolConstraints>
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 ---
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
-[[DEPLOYED:ErrorHandlingCommon]]
-[[/DEPLOYED:ErrorHandlingCommon]]
+<ErrorHandlingCommon type="managed">
+</ErrorHandlingCommon>
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 ---
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 
 Return JSON.
 
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 ---
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
-[[DEPLOYED:ExecutionPhilosophyCommon]]
-[[/DEPLOYED:ExecutionPhilosophyCommon]]
+<ExecutionPhilosophyCommon type="managed">
+</ExecutionPhilosophyCommon>
 
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>

@@ -1,7 +1,7 @@
 package transform_test
 
 // injection_follows_source_test.go contains regression tests verifying that
-// [[INJECTION:]] content follows its source-declared position across a schema
+// project-injection region content follows its source-declared position across a schema
 // reorder, byte-identically, with no parking and no TODO entry.
 //
 // Context: applyProjectRegion fills injection content from the deployed region
@@ -51,23 +51,23 @@ tier_rationale: injection position regression testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # InjectionFollowsSource Agent
 
 You are the InjectionFollowsSource agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
 
-[[INJECTION:CodebaseContext]]
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Capabilities]]
+<CodebaseContext type="project">
+</CodebaseContext>
+</Capabilities>
 `
 
 // injectionFollowsSourceDeployed: Capabilities first, Identity second → reorder vs source.
@@ -83,26 +83,26 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
 
-[[INJECTION:CodebaseContext]]
+<CodebaseContext type="project">
 Go monorepo. Architecture is hexagonal; business logic lives in internal/domain.
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Capabilities]]
+</CodebaseContext>
+</Capabilities>
 
-[[SECTION:Identity]]
+<Identity type="core">
 # InjectionFollowsSource Agent
 
 You are the InjectionFollowsSource agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 User-supplied identity extension: this agent handles schema evolution verification.
 It was written by the TDD agent and must survive all reorder scenarios byte-identically.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 `
 
 // ---------------------------------------------------------------------------
@@ -131,26 +131,26 @@ tier_rationale: injection and custom region coexistence testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Coexist Agent
 
 You are the Coexist agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // coexistDeployed: section order Identity → Capabilities → Constraints.
@@ -166,35 +166,35 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Coexist Agent
 
 You are the Coexist agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Identity extension content that must survive the reorder byte-identically.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
 
-[[CUSTOM:CapabilitiesNote]]
+<CapabilitiesNote type="custom">
 A note anchored to Capabilities. Capabilities still exists in the source.
-[[/CUSTOM:CapabilitiesNote]]
-[[/SECTION:Capabilities]]
+</CapabilitiesNote>
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[CUSTOM:TopNote]]
+<TopNote type="custom">
 A top-level custom region with no parent. Parked on reorder.
-[[/CUSTOM:TopNote]]
+</TopNote>
 `
 
 // ---------------------------------------------------------------------------
@@ -321,8 +321,8 @@ func TestInjectionFollowsSource_NoParkingGapForInjection(t *testing.T) {
 }
 
 // TestInjectionFollowsSource_NoRegionParkedActionForInjection verifies that no RegionOutcome
-// for an injection carries Action == RegionParked. Parking applies only to [[CUSTOM:]] regions
-// on reorder; [[INJECTION:]] regions are filled at their source-declared position.
+// for an injection carries Action == RegionParked. Parking applies only to custom-region regions
+// on reorder; project-injection region regions are filled at their source-declared position.
 func TestInjectionFollowsSource_NoRegionParkedActionForInjection(t *testing.T) {
 	req := injectionFollowsReq(t,
 		[]byte(injectionFollowsSourceSource),
@@ -338,7 +338,7 @@ func TestInjectionFollowsSource_NoRegionParkedActionForInjection(t *testing.T) {
 	for _, out := range result.Report.Regions {
 		if out.Marker == docformat.NodeInjection && out.Action == transform.RegionParked {
 			t.Errorf("injection region %q has action RegionParked; "+
-				"only [[CUSTOM:]] regions are parked on reorder", out.Name)
+				"only custom-region regions are parked on reorder", out.Name)
 		}
 	}
 }
@@ -466,7 +466,7 @@ func TestInjectionFollowsSource_CoexistsWithParkedCustomRegion(t *testing.T) {
 }
 
 // TestInjectionFollowsSource_InjectionNotListedInParkingGap verifies that the parking gap
-// detail lists only [[CUSTOM:]] region names, not any injection name.
+// detail lists only custom-region region names, not any injection name.
 func TestInjectionFollowsSource_InjectionNotListedInParkingGap(t *testing.T) {
 	req := injectionFollowsReq(t,
 		[]byte(coexistSource),

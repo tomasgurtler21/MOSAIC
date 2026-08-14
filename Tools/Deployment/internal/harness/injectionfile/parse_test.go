@@ -1,11 +1,11 @@
 package injectionfile_test
 
-// Tests for ParseDeployedRegions: extraction of [[DEPLOYED:Name]] regions from
+// Tests for ParseDeployedRegions: extraction of <Name type="managed"> regions from
 // MOSAIC-formatted Markdown harness content files into a name-to-content map.
 //
-// After the Stage 8 migration, harness content files (HarnessInjections.md,
-// HarnessInjectionsOrchestrator.md) use [[DEPLOYED:Name]] regions for tool-managed
-// content. ParseDeployedRegions is the canonical parser for these files.
+// Harness content files (HarnessInjections.md, HarnessInjectionsOrchestrator.md)
+// use <Name type="managed"> regions for tool-managed content.
+// ParseDeployedRegions is the canonical parser for these files.
 //
 // Comprehensive coverage lives in deployed_test.go. This file adds integration-style
 // tests that verify the parser behaves correctly with the complete set of harness region
@@ -25,31 +25,31 @@ import (
 // ---------------------------------------------------------------------------
 
 // multiDeployedRegionFixture is a well-formed harness content file with three
-// [[DEPLOYED:Name]] regions. Mirrors the format of a real HarnessInjections.md.
+// managed regions. Mirrors the format of a real HarnessInjections.md.
 const multiDeployedRegionFixture = `# Harness Injections
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Use only approved tools.
 Do not access external APIs without explicit permission.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[DEPLOYED:CustomConstraints]]
+<CustomConstraints type="managed">
 Follow the project coding standards.
 Submit work incrementally.
-[[/DEPLOYED:CustomConstraints]]
+</CustomConstraints>
 
-[[DEPLOYED:LanguagePatterns]]
+<LanguagePatterns type="managed">
 Prefer table-driven tests over individual test functions.
 Use errors.Is for error comparison.
-[[/DEPLOYED:LanguagePatterns]]
+</LanguagePatterns>
 `
 
-// emptyContentDeployedFixture has one [[DEPLOYED:]] region with no content between its tags.
+// emptyContentDeployedFixture has one managed region with no content between its tags.
 // Used to verify that "declared but empty" produces a map entry with value "".
 const emptyContentDeployedFixture = `# Harness Injections
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 `
 
 // contentFidelityDeployedFixture has a region with distinctive multi-line content that
@@ -58,7 +58,7 @@ const emptyContentDeployedFixture = `# Harness Injections
 // boundary tag lines and leading/trailing whitespace.
 const contentFidelityDeployedFixture = `# Harness Injections
 
-[[DEPLOYED:LanguagePatterns]]
+<LanguagePatterns type="managed">
 Use idiomatic Go:
 
   - Return errors explicitly; do not panic on recoverable conditions.
@@ -73,7 +73,7 @@ Example:
         }
         return x * 2, nil
     }
-[[/DEPLOYED:LanguagePatterns]]
+</LanguagePatterns>
 `
 
 // malformedFrontmatterDeployedFixture causes docformat.Parse to return an error because
@@ -83,20 +83,20 @@ harness: test-harness
 injections_version: "1.0.0"
 `
 
-// sectionWrappedDeployedFixture has a [[DEPLOYED:]] region nested inside a [[SECTION:]]
-// block. Used to verify that ParseDeployedRegions traverses all nesting depths.
-const sectionWrappedDeployedFixture = `[[SECTION:Constraints]]
+// sectionWrappedDeployedFixture has a managed region nested inside a core section.
+// Used to verify that ParseDeployedRegions traverses all nesting depths.
+const sectionWrappedDeployedFixture = `<Constraints type="core">
 ## Constraints
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 This is harness-level constraint content.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 `
 
 // withFrontmatterDeployedFixture is a complete file with valid YAML frontmatter followed
-// by [[DEPLOYED:]] regions. Mirrors the actual HarnessInjections.md file format.
+// by managed regions. Mirrors the actual HarnessInjections.md file format.
 const withFrontmatterDeployedFixture = `---
 version: "1.0.0"
 harness: test-harness
@@ -104,31 +104,31 @@ harness: test-harness
 
 # Harness Injections — Test Harness
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Do not modify system files.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[DEPLOYED:CustomConstraints]]
+<CustomConstraints type="managed">
 Project-specific rules apply.
-[[/DEPLOYED:CustomConstraints]]
+</CustomConstraints>
 `
 
 // whitespaceTrimmingDeployedFixture has a region whose content has leading blank lines,
 // trailing blank lines, and internal structure. Used to verify that only the outer
 // whitespace is stripped and the internal structure is preserved.
-const whitespaceTrimmingDeployedFixture = `[[DEPLOYED:HarnessConstraints]]
+const whitespaceTrimmingDeployedFixture = `<HarnessConstraints type="managed">
 
 First line of content.
 
 Second line of content.
 
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `
 
-// singleDeployedRegionFixture has exactly one [[DEPLOYED:]] region.
-const singleDeployedRegionFixture = `[[DEPLOYED:CustomConstraints]]
+// singleDeployedRegionFixture has exactly one managed region.
+const singleDeployedRegionFixture = `<CustomConstraints type="managed">
 Single constraint.
-[[/DEPLOYED:CustomConstraints]]
+</CustomConstraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -246,10 +246,10 @@ func TestParseDeployedRegions_ContentFidelity_BoundaryTagLinesExcluded(t *testin
 	}
 
 	// The boundary tag lines must not appear in the content.
-	if strings.Contains(content, "[[DEPLOYED:LanguagePatterns]]") {
+	if strings.Contains(content, `<LanguagePatterns type="managed">`) {
 		t.Errorf("content must not include the opening boundary tag line; content: %q", content)
 	}
-	if strings.Contains(content, "[[/DEPLOYED:LanguagePatterns]]") {
+	if strings.Contains(content, `</LanguagePatterns>`) {
 		t.Errorf("content must not include the closing boundary tag line; content: %q", content)
 	}
 }

@@ -1,6 +1,6 @@
 package docformat_test
 
-// Tests for body addressing and empty/filled injection detection (T4.3).
+// Tests for body addressing and empty/filled injection detection.
 //
 // Coverage:
 //   - Body.Section looks up a top-level section by name.
@@ -110,7 +110,7 @@ func TestAddressing_Injection_SecondSectionInjection_Found(t *testing.T) {
 // --- Empty/filled detection ---
 
 func TestAddressing_Injection_IsEmpty_TrueForWhitespaceOnlyContent(t *testing.T) {
-	// The empty-injection fixture has an [[INJECTION:IdentityExtension]] block with no
+	// The empty-injection fixture has an <IdentityExtension type="project"> block with no
 	// content between its tags (or only the newline that immediately follows the open tag).
 	doc := parsedBoundaryFixture(t, "empty-injection.md")
 	node, ok := doc.Body().Injection("IdentityExtension")
@@ -150,10 +150,10 @@ func TestAddressing_Injection_FilledContent_VisibleViaContent(t *testing.T) {
 	if !bytes.Contains(content, []byte("Filled injection content line one.")) {
 		t.Error("Content must include the inner prose of a filled injection")
 	}
-	if bytes.Contains(content, []byte("[[INJECTION:IdentityExtension]]")) {
+	if bytes.Contains(content, []byte(`<IdentityExtension type="project">`)) {
 		t.Error("Content must not include the opening boundary tag")
 	}
-	if bytes.Contains(content, []byte("[[/INJECTION:IdentityExtension]]")) {
+	if bytes.Contains(content, []byte("</IdentityExtension>")) {
 		t.Error("Content must not include the closing boundary tag")
 	}
 }
@@ -169,10 +169,10 @@ func TestAddressing_InjectionNode_Bytes_IncludesOpenAndCloseTags(t *testing.T) {
 
 	b := node.Bytes()
 
-	if !bytes.Contains(b, []byte("[[INJECTION:IdentityExtension]]")) {
+	if !bytes.Contains(b, []byte(`<IdentityExtension type="project">`)) {
 		t.Error("Node.Bytes must contain the opening injection boundary tag")
 	}
-	if !bytes.Contains(b, []byte("[[/INJECTION:IdentityExtension]]")) {
+	if !bytes.Contains(b, []byte("</IdentityExtension>")) {
 		t.Error("Node.Bytes must contain the closing injection boundary tag")
 	}
 }
@@ -180,7 +180,8 @@ func TestAddressing_InjectionNode_Bytes_IncludesOpenAndCloseTags(t *testing.T) {
 // --- Compound section lookup ---
 
 func TestAddressing_Section_CompoundName_Addressable(t *testing.T) {
-	// A [[SECTION:Workflow:my-workflow]] block is addressable by its full compound name.
+	// A <Workflow type="core" name="my-workflow"> block is addressable by its reassembled
+	// compound name "Workflow:my-workflow" (tag name + ":" + name attribute value).
 	doc := parsedBoundaryFixture(t, "compound-section.md")
 
 	node, ok := doc.Body().Section("Workflow:my-workflow")
@@ -210,7 +211,7 @@ func TestAddressing_Section_CompoundName_ContentIsAccessible(t *testing.T) {
 // --- Real-world deployed agent: addressing and filled detection ---
 
 func TestAddressing_DeployedAgent_FilledInjection_IsNotEmpty(t *testing.T) {
-	// A document with a filled [[INJECTION:IdentityExtension]] block must be non-empty
+	// A document with a filled <IdentityExtension type="project"> block must be non-empty
 	// after parsing. Uses the filled-injection boundary fixture as a stand-in because no
 	// harness-specific deployed file with this structure exists at a stable catalog path.
 	doc := parsedBoundaryFixture(t, "filled-injection.md")
@@ -240,7 +241,7 @@ func TestAddressing_DeployedAgent_FilledInjection_ContentContainsPayload(t *test
 	if !bytes.Contains(content, []byte("Filled injection content line one.")) {
 		t.Error("Content of filled injection must contain the inner prose")
 	}
-	if bytes.Contains(content, []byte("[[INJECTION:")) {
+	if bytes.Contains(content, []byte(`type="project"`)) {
 		t.Error("Content of injection must not include boundary tag syntax")
 	}
 }

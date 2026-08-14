@@ -1,58 +1,25 @@
 package app
 
-import (
-	"bytes"
-	"regexp"
-)
+import "mosaic-common/docformat"
 
-// protocolVersionPattern matches a protocol-version HTML comment inside the deployed
-// CommunicationProtocol region: <!-- protocol-version: X -->
+// extractDeployedProtocolVersion returns the protocol version recorded in the version
+// attribute on the deployed file's CommunicationProtocol region's opening tag.
 //
-// The shape mirrors workflowVersionPattern and is used by extractDeployedProtocolVersion
-// to read back the version marker that transform.applyProtocolRegion writes.
-var protocolVersionPattern = regexp.MustCompile(`<!--\s*protocol-version:\s*(\S+)\s*-->`)
-
-// protocolRegionOpen and protocolRegionClose are the boundary tag bytes that delimit the
-// deployed protocol region.
-var (
-	protocolRegionOpen  = []byte("[[DEPLOYED:CommunicationProtocol]]")
-	protocolRegionClose = []byte("[[/DEPLOYED:CommunicationProtocol]]")
-)
-
-// extractDeployedProtocolVersion returns the protocol version recorded inside the deployed
-// file's [[DEPLOYED:CommunicationProtocol]] region's <!-- protocol-version: X --> comment.
-//
-// Returns "" when the region is absent, when it carries no version comment, or when the file
-// is malformed. Extraction is scoped to the region's own bytes so a comment elsewhere in the
-// file is never mistaken for the protocol version. Like the workflow extractor, this function
-// degrades gracefully and never fails the scan.
+// Returns "" when the region is absent, when it carries no version attribute, or when
+// the file is malformed. Extraction uses the parser rather than byte search, so any
+// leniently formatted open tag is handled correctly. Like the workflow extractor, this
+// function degrades gracefully and never fails the scan.
 func extractDeployedProtocolVersion(data []byte) string {
 	if len(data) == 0 {
 		return ""
 	}
-
-	// Find the opening tag.
-	openIdx := bytes.Index(data, protocolRegionOpen)
-	if openIdx < 0 {
+	doc, err := docformat.Parse(data)
+	if err != nil {
 		return ""
 	}
-
-	// Content starts just after the opening tag.
-	contentStart := openIdx + len(protocolRegionOpen)
-
-	// Find the closing tag within the remaining bytes.
-	closeIdx := bytes.Index(data[contentStart:], protocolRegionClose)
-
-	// Unclosed region is malformed — degrade gracefully to empty.
-	if closeIdx < 0 {
+	node, ok := doc.Body().Deployed("CommunicationProtocol")
+	if !ok {
 		return ""
 	}
-	regionContent := data[contentStart : contentStart+closeIdx]
-
-	// Extract the first protocol-version comment within the region.
-	m := protocolVersionPattern.FindSubmatch(regionContent)
-	if m == nil {
-		return ""
-	}
-	return string(m[1])
+	return node.Version()
 }

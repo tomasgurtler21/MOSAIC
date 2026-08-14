@@ -17,8 +17,7 @@ artifacts:
   - TestResults.md
 ---
 
-[[SECTION:Workflow:implementation-only]]
-<!-- workflow-version: 3.1 -->
+<Workflow type="core" name="implementation-only" version="3.1">
 ## Implementation Only Workflow
 
 **Use when:** Research, planning, and design already complete. Direct implementation from existing artifacts.
@@ -33,7 +32,7 @@ artifacts:
 
 **Prerequisites:** ContractsDesign.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md must exist
 
-[[/SECTION:Workflow:implementation-only]]
+</Workflow>
 
 ---
 

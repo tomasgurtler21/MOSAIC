@@ -54,8 +54,8 @@ missing any of these will not render correctly through the deployment tool.
 
 At minimum, every definition must contain:
 
-- An `[[SECTION:Identity]]` block describing the agent's purpose
-- A `[[DEPLOYED:CommunicationProtocol]]` region, so the rendered stub receives the protocol
+- An `<Identity type="core">` block describing the agent's purpose
+- A `<CommunicationProtocol type="managed">` region, so the rendered stub receives the protocol
   the interception layer expects it to speak
 
 ## ID assignment

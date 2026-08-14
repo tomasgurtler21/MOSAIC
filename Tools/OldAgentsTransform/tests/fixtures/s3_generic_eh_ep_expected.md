@@ -9,7 +9,7 @@ recommended_tier: TODO
 tier_rationale: "TODO: state why this tier"
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Stage3TestAgent Agent
 
 You are the **Stage3TestAgent** agent.
@@ -23,74 +23,74 @@ You are the **Stage3TestAgent** agent.
 ### Process
 1. Read the task description.
 2. Do the work.
-[[DEPLOYED:ClosingProcedure]]
-[[/DEPLOYED:ClosingProcedure]]
-[[DEPLOYED:AuthorityHierarchy]]
-[[/DEPLOYED:AuthorityHierarchy]]
+<ClosingProcedure type="managed">
+</ClosingProcedure>
+<AuthorityHierarchy type="managed">
+</AuthorityHierarchy>
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
+</IdentityExtension>
 
-[[/SECTION:Identity]]
+</Identity>
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 ### Core Capabilities
 - Test Stage 3 region insertion
 
-[[INJECTION:LanguagePatterns]]
-[[/INJECTION:LanguagePatterns]]
-[[INJECTION:CodebaseContext]]
-[[/INJECTION:CodebaseContext]]
-[[INJECTION:OutputArtifactTemplate]]
-[[/INJECTION:OutputArtifactTemplate]]
+<LanguagePatterns type="project">
+</LanguagePatterns>
+<CodebaseContext type="project">
+</CodebaseContext>
+<OutputArtifactTemplate type="project">
+</OutputArtifactTemplate>
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
-[[DEPLOYED:ProtocolConstraints]]
-[[/DEPLOYED:ProtocolConstraints]]
+<ProtocolConstraints type="managed">
+</ProtocolConstraints>
 
 - Stay within scope
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 ---
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
-[[DEPLOYED:ErrorHandlingCommon]]
-[[/DEPLOYED:ErrorHandlingCommon]]
+<ErrorHandlingCommon type="managed">
+</ErrorHandlingCommon>
 
 - **Return CAPABILITY_EXCEEDED** when the task exceeds your ability to complete
 - **Return NEEDS_CLARIFICATION** when context is too ambiguous to proceed
 
-[[INJECTION:ErrorHandlingExtension]]
-[[/INJECTION:ErrorHandlingExtension]]
+<ErrorHandlingExtension type="project">
+</ErrorHandlingExtension>
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 ---
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 
 Return JSON status.
 
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 ---
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 
-[[DEPLOYED:ExecutionPhilosophyCommon]]
-[[/DEPLOYED:ExecutionPhilosophyCommon]]
-[[INJECTION:ContextLimits]]
-[[/INJECTION:ContextLimits]]
+<ExecutionPhilosophyCommon type="managed">
+</ExecutionPhilosophyCommon>
+<ContextLimits type="project">
+</ContextLimits>
 - **Fix Precision:** Change only what needs fixing; preserve correct test logic and existing structure.
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>

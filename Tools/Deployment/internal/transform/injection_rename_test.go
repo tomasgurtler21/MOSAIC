@@ -3,7 +3,7 @@ package transform_test
 // injection_rename_test.go covers the injection rename map: a mechanism that forwards
 // content stored in the deployed file under an injection's old name into the region the
 // source declares under its new name, preventing silent content loss when a source
-// [[INJECTION:]] region is renamed.
+// project-injection region region is renamed.
 //
 // Behaviour specified:
 //
@@ -60,17 +60,17 @@ tier_rationale: rename testing
 required_skills: []
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 # RenameTest Agent
 
-[[INJECTION:NewCapabilityDesc]]
-[[/INJECTION:NewCapabilityDesc]]
-[[/SECTION:Capabilities]]
+<NewCapabilityDesc type="project">
+</NewCapabilityDesc>
+</Capabilities>
 `
 
 // renameDeployedOldName is the deployed predecessor of renameSource.
 // It was deployed before the injection was renamed: the region is still stored as
-// [[INJECTION:CapabilityDesc]]. With a rename entry {Old:"CapabilityDesc", New:"NewCapabilityDesc"},
+// <CapabilityDesc type="project">. With a rename entry {Old:"CapabilityDesc", New:"NewCapabilityDesc"},
 // the content must reach the source-declared region NewCapabilityDesc in the output.
 const renameDeployedOldName = `---
 id: 800
@@ -83,14 +83,14 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 # RenameTest Agent
 
-[[INJECTION:CapabilityDesc]]
+<CapabilityDesc type="project">
 This is the user-authored capability description stored under the old injection name.
 It must land in NewCapabilityDesc after rename resolution, byte-identically.
-[[/INJECTION:CapabilityDesc]]
-[[/SECTION:Capabilities]]
+</CapabilityDesc>
+</Capabilities>
 `
 
 // renameDeployedBothNames is a deployed file that contains BOTH the old name
@@ -108,19 +108,19 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 # RenameTest Agent
 
-[[INJECTION:CapabilityDesc]]
+<CapabilityDesc type="project">
 OLD-NAME-CONTENT: content stored under the old injection name.
 This must not win; it must appear only in the GapRemovedInjection fragment.
-[[/INJECTION:CapabilityDesc]]
+</CapabilityDesc>
 
-[[INJECTION:NewCapabilityDesc]]
+<NewCapabilityDesc type="project">
 NEW-NAME-CONTENT: content stored under the new injection name.
 This is the winning content; it must appear in the output region.
-[[/INJECTION:NewCapabilityDesc]]
-[[/SECTION:Capabilities]]
+</NewCapabilityDesc>
+</Capabilities>
 `
 
 // renameDeployedBothNamesReversed is a deployed file that contains BOTH the old name
@@ -139,19 +139,19 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 # RenameTest Agent
 
-[[INJECTION:NewCapabilityDesc]]
+<NewCapabilityDesc type="project">
 NEW-NAME-CONTENT: content stored under the new injection name (declared first this time).
 This is the winning content; it must appear in the output region regardless of order.
-[[/INJECTION:NewCapabilityDesc]]
+</NewCapabilityDesc>
 
-[[INJECTION:CapabilityDesc]]
+<CapabilityDesc type="project">
 OLD-NAME-CONTENT: content stored under the old injection name (declared second this time).
 This must not win; it must appear only in the GapRemovedInjection fragment.
-[[/INJECTION:CapabilityDesc]]
-[[/SECTION:Capabilities]]
+</CapabilityDesc>
+</Capabilities>
 `
 
 // renameDeployedNewNameOnly is a deployed file that contains ONLY the new name
@@ -168,14 +168,14 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 # RenameTest Agent
 
-[[INJECTION:NewCapabilityDesc]]
+<NewCapabilityDesc type="project">
 NOOP-CONTENT: content already stored under the new injection name.
 The rename entry exists but the old name is absent; this must be a normal preserve.
-[[/INJECTION:NewCapabilityDesc]]
-[[/SECTION:Capabilities]]
+</NewCapabilityDesc>
+</Capabilities>
 `
 
 // renameAndOrphanSource is a source with one injection (NewName) and no
@@ -194,12 +194,12 @@ tier_rationale: rename orphan testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # RenameOrphanTest Agent
 
-[[INJECTION:NewName]]
-[[/INJECTION:NewName]]
-[[/SECTION:Identity]]
+<NewName type="project">
+</NewName>
+</Identity>
 `
 
 // renameAndOrphanDeployed is the deployed predecessor of renameAndOrphanSource.
@@ -218,18 +218,18 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # RenameOrphanTest Agent
 
-[[INJECTION:OldName]]
+<OldName type="project">
 MIGRATE-ME: content under the old name, must reach NewName in the output.
-[[/INJECTION:OldName]]
-[[/SECTION:Identity]]
+</OldName>
+</Identity>
 
-[[INJECTION:RemovedInjection]]
+<RemovedInjection type="project">
 ORPHAN-ME: content under a removed injection with no rename entry.
 This must produce RegionOrphaned and GapRemovedInjection, unchanged.
-[[/INJECTION:RemovedInjection]]
+</RemovedInjection>
 `
 
 // unmappedSource is a source where UnmappedInjection is present normally. No rename
@@ -246,12 +246,12 @@ tier_rationale: unmapped testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # UnmappedTest Agent
 
-[[INJECTION:UnmappedInjection]]
-[[/INJECTION:UnmappedInjection]]
-[[/SECTION:Identity]]
+<UnmappedInjection type="project">
+</UnmappedInjection>
+</Identity>
 `
 
 // unmappedDeployed has UnmappedInjection with content. The rename table maps some other
@@ -267,14 +267,14 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # UnmappedTest Agent
 
-[[INJECTION:UnmappedInjection]]
+<UnmappedInjection type="project">
 UNMAPPED-CONTENT: content under an injection not in the rename table.
 The rename table must not alter this region in any way.
-[[/INJECTION:UnmappedInjection]]
-[[/SECTION:Identity]]
+</UnmappedInjection>
+</Identity>
 `
 
 // renameEntry returns a single-entry rename slice mapping Old to New.

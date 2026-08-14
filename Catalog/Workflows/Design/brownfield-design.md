@@ -25,8 +25,7 @@ artifacts:
   - contracts-review.md
 ---
 
-[[SECTION:Workflow:brownfield-design]]
-<!-- workflow-version: 3.2 -->
+<Workflow type="core" name="brownfield-design" version="3.2">
 ## Brownfield Design Workflow
 
 > **Version:** 3.2
@@ -48,7 +47,7 @@ artifacts:
 - contracts-designer + contracts-review are optional - skip both if no new/modified contracts are needed
 - Enable HITL on contracts-designer/contracts-review if user review is required
 
-[[/SECTION:Workflow:brownfield-design]]
+</Workflow>
 
 ---
 

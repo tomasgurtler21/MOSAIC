@@ -21,12 +21,12 @@ import (
 
 // TestBodyPreservation_AllGenericAgentsBodyUnchanged asserts that for every .md file under
 // Catalog/Subagents/, the body structure is byte-identical before and after transformation,
-// with tool-managed [[DEPLOYED:]] region content excluded from comparison.
+// with tool-managed managed region region content excluded from comparison.
 //
-// [[DEPLOYED:]] regions (CommunicationProtocol, AvailableWorkflows, InfrastructureAgents,
+// managed region regions (CommunicationProtocol, AvailableWorkflows, InfrastructureAgents,
 // HarnessConstraints, etc.) are unconditionally regenerated on every transform: their
 // content is expected to change. The invariant being asserted is that everything else —
-// section names, boundary tag lines, plain prose, and user-owned [[INJECTION:]] regions —
+// section names, boundary tag lines, plain prose, and user-owned project-injection region regions —
 // is never altered. Clearing DEPLOYED region content in both source and output before
 // comparison isolates exactly this structural invariant.
 func TestBodyPreservation_AllGenericAgentsBodyUnchanged(t *testing.T) {
@@ -69,7 +69,7 @@ func TestBodyPreservation_AllGenericAgentsBodyUnchanged(t *testing.T) {
 				t.Fatalf("Apply(%s): %v", rel, err)
 			}
 
-			// Compare body structure with [[DEPLOYED:]] content cleared in both operands.
+			// Compare body structure with managed region content cleared in both operands.
 			// DEPLOYED region content is legitimately different before and after transform;
 			// the structural bytes surrounding those regions must remain identical.
 			srcBody := bodyWithDeployedContentCleared(t, src, rel+" (source)")
@@ -88,7 +88,7 @@ func TestBodyPreservation_AllGenericAgentsBodyUnchanged(t *testing.T) {
 	}
 }
 
-// bodyWithDeployedContentCleared parses src, clears every [[DEPLOYED:]] region's inner
+// bodyWithDeployedContentCleared parses src, clears every managed region region's inner
 // content, and returns the resulting body bytes (everything after the frontmatter delimiter).
 // The boundary tag lines themselves are preserved; only the bytes between them are erased.
 // This lets the caller compare body structure while tolerating expected changes to
@@ -127,16 +127,16 @@ tier_rationale: minimal task
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Synthetic Agent
 
 This body must arrive byte-for-byte in the output.
 No character may be altered, added, or removed.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
 	mod := newFixtureModule(t)
@@ -156,7 +156,7 @@ No character may be altered, added, or removed.
 		t.Fatalf("Apply: %v", err) // RED: fails here with ErrNotImplemented
 	}
 
-	// Compare body structure with [[DEPLOYED:]] content cleared in both operands.
+	// Compare body structure with managed region content cleared in both operands.
 	// Deployed region content is legitimately different before and after transform;
 	// the structural bytes surrounding those regions must remain identical.
 	srcBody := bodyWithDeployedContentCleared(t, src, "synthetic-agent (source)")

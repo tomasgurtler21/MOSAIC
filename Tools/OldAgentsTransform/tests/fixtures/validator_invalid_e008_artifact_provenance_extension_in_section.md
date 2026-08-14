@@ -5,44 +5,44 @@ name: test-agent
 description: Invalid file - ArtifactProvenanceExtension nested inside Identity instead of body top level
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 
 You are the TestAgent agent.
 
-[[INJECTION:ArtifactProvenanceExtension]]
+<ArtifactProvenanceExtension type="project">
 ArtifactProvenanceExtension placed inside Identity — must be at body top level.
-[[/INJECTION:ArtifactProvenanceExtension]]
+</ArtifactProvenanceExtension>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[DEPLOYED:ArtifactProvenance]]
-[[/DEPLOYED:ArtifactProvenance]]
+<ArtifactProvenance type="managed">
+</ArtifactProvenance>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 Content here.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 Content here.
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 Content here.
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 Content here.
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 Content here.
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>

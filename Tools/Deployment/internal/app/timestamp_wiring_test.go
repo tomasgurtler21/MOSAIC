@@ -56,17 +56,17 @@ tier_rationale: needs capable model
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Test Runner
 
 You are the test runner.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Run tests.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // timestampWiringDeployed is a harness-deployed agent file with sections in the reversed
@@ -86,21 +86,21 @@ model: model-a
 tools: [bash]
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Run tests.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Test Runner
 
 You are the test runner.
-[[/SECTION:Identity]]
+</Identity>
 
-[[CUSTOM:ParkedNote]]
+<ParkedNote type="custom">
 A top-level custom region to be parked when the schema reorder is detected.
-[[/CUSTOM:ParkedNote]]
+</ParkedNote>
 `
 
 // ---------------------------------------------------------------------------

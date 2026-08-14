@@ -9,7 +9,7 @@ import (
 )
 
 // nestedRegionRecord is one user-owned region that must survive regeneration of its
-// enclosing [[DEPLOYED:]] parent.
+// enclosing managed region parent.
 //
 // The record deliberately holds no content — content is resolved from the deployed region
 // map at re-emission time, so there is one source of truth for content and rename resolution
@@ -20,7 +20,7 @@ type nestedRegionRecord struct {
 	Order int // emission order; deployed-file-origin regions first, then source-only regions
 }
 
-// customRegionRecord is a [[CUSTOM:]] region found in the deployed file along with the
+// customRegionRecord is a custom region found in the deployed file along with the
 // anchor pair that determines where it goes in the output document.
 //
 // The anchor pair (ParentName + PrevSibling) matches the placement rule in ContractsDesign.md
@@ -37,14 +37,14 @@ type customRegionRecord struct {
 }
 
 // collectDeployedCustomRegions walks the deployed document and returns one record for every
-// [[CUSTOM:]] region in deployed-document order. Each record carries the full anchor pair
+// custom region in deployed-document order. Each record carries the full anchor pair
 // (ParentName + PrevSibling) that determines where the region is placed in the output.
 //
 // The anchor pair is derived from the deployed file only and is recomputed on every run;
 // the tool persists no placement state.
 func collectDeployedCustomRegions(depDoc *docformat.Document) []customRegionRecord {
 	body := depDoc.Body()
-	customs := body.CustomRegions() // all [[CUSTOM:]] regions at any depth, document order
+	customs := body.CustomRegions() // all custom regions at any depth, document order
 
 	records := make([]customRegionRecord, 0, len(customs))
 	for i, node := range customs {
@@ -88,8 +88,8 @@ func collectDeployedCustomRegions(depDoc *docformat.Document) []customRegionReco
 
 // placeCustomRegion inserts rec into the output document using the AD-1 anchor rule:
 //
-//  1. Resolve the parent. If rec.ParentName is non-empty, find the named [[SECTION:]] or
-//     [[DEPLOYED:]] node in the output body (by name, any depth). If rec.ParentName is empty,
+//  1. Resolve the parent. If rec.ParentName is non-empty, find the named section or
+//     managed region node in the output body (by name, any depth). If rec.ParentName is empty,
 //     the parent is the body.
 //  2. Within the resolved parent, find a node named rec.PrevSibling. If found, insert the
 //     custom region immediately after it via Body.InsertRegionAfter. If not found (or
@@ -159,7 +159,7 @@ func findTopLevelNodeByName(body *docformat.Body, name string) *docformat.Node {
 }
 
 // sourceAnchorNames returns the set of names that can anchor a custom region in the source
-// document: every [[SECTION:]] name and every [[DEPLOYED:]] region name, at any nesting
+// document: every section name and every managed region name, at any nesting
 // depth. Matching is by name only; position is never consulted.
 //
 // A custom region is considered anchored when its ParentName appears in this set. An empty
@@ -176,7 +176,7 @@ func sourceAnchorNames(sourceBody *docformat.Body) map[string]bool {
 }
 
 // parkCustomRegions appends the given custom region records at the end of the body as
-// [[CUSTOM:]] regions, content byte-identical, names in ascending sorted order. It returns
+// custom regions, content byte-identical, names in ascending sorted order. It returns
 // the sorted parked names and one RegionOutcome per parked region with Action RegionParked.
 //
 // Records are sorted by Name before appending so the output document is deterministic

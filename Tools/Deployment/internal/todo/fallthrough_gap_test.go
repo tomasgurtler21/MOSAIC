@@ -22,7 +22,7 @@ import (
 // TestCollector_AddGap_FallthroughCustomRegion_MapsToInjectionsCategory verifies that a
 // gap of kind GapCustomRegionFallthrough is catalogued under the TodoInjections category.
 // This is the expected mapping: a custom-region fallthrough is a user-content notice
-// concerning a [[CUSTOM:]] region's placement, and belongs in the same category as other
+// concerning a <Name type="custom"> region's placement, and belongs in the same category as other
 // user-content-preservation notices (parked custom regions, orphaned injections, etc.).
 func TestCollector_AddGap_FallthroughCustomRegion_MapsToInjectionsCategory(t *testing.T) {
 	c := todo.NewCollector()

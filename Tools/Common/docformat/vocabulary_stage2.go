@@ -9,14 +9,14 @@ import (
 
 // CanonicalOrder lists the seven canonical document slots in required order.
 // Entry at index 1 is "CommunicationProtocol", satisfied by a top-level
-// [[DEPLOYED:CommunicationProtocol]] boundary; every other entry is a section name.
+// <CommunicationProtocol type="managed"> boundary; every other entry is a section name.
 // This is the list the document-order check walks.
 //
 // Populated in vocabulary.go init().
 var CanonicalOrder []string
 
 // CanonicalDeployed lists the tool-managed boundary names, a closed set of nine.
-// A name in this list must be declared with [[DEPLOYED:]] in any document that uses it.
+// A name in this list must be declared with type="managed" in any document that uses it.
 //
 // Populated in vocabulary.go init().
 var CanonicalDeployed []string
@@ -29,11 +29,11 @@ var CanonicalDeployed []string
 var DeployedParent map[string]string
 
 // ErrMarkerMismatch reports a tool-managed name declared with the wrong marker kind.
-// A tool-managed name found under [[INJECTION:]] wraps this error.
+// A tool-managed name found under type="project" (injection) instead of type="managed" wraps this error.
 var ErrMarkerMismatch = errors.New("boundary name declared with the wrong marker")
 
-// ErrUnknownDeployedName reports a [[DEPLOYED:]] region whose name is not in the
-// canonical tool-managed registry. An unrecognised tool-managed name has no generator
+// ErrUnknownDeployedName reports a managed region (type="managed") whose name is not in
+// the canonical tool-managed registry. An unrecognised tool-managed name has no generator
 // and cannot be filled.
 var ErrUnknownDeployedName = errors.New("unrecognised tool-managed boundary name")
 
@@ -72,7 +72,7 @@ func ClassifyRegion(kind NodeKind, name string) (mosaic.InjectionClass, error) {
 	// NodeCustom: always project class for every name. The custom name set is fully open;
 	// a name that also appears in CanonicalDeployed is still project class, because a custom
 	// region can never be tool-managed. This branch must be evaluated before isCanonicalDeployed
-	// so that a canonical deployed name under [[CUSTOM:]] never triggers ErrMarkerMismatch.
+	// so that a canonical managed name under type="custom" never triggers ErrMarkerMismatch.
 	if kind == NodeCustom {
 		return mosaic.InjectionProject, nil
 	}
@@ -91,7 +91,7 @@ func ClassifyRegion(kind NodeKind, name string) (mosaic.InjectionClass, error) {
 	// kind == NodeInjection (or NodeSection, but ClassifyRegion is not called for sections).
 	if isDeployed {
 		// Tool-managed name declared under the wrong marker.
-		return "", fmt.Errorf("name %q requires [[DEPLOYED:]] but was declared with [[INJECTION:]]: %w", name, ErrMarkerMismatch)
+		return "", fmt.Errorf("name %q requires type=\"managed\" but was declared with type=\"project\": %w", name, ErrMarkerMismatch)
 	}
 	// Injection names are open: any name not in CanonicalDeployed returns InjectionProject.
 	// Unknown injection names are preserved, never rejected.

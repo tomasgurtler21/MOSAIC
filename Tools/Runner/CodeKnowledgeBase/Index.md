@@ -12,7 +12,7 @@ created_by: "knowledge-base-generator#1"
 | Area | Responsibility | Key Relationships |
 |------|---------------|-------------------|
 | **domain** | Defines all value types, enums, and port interfaces (`HarnessAdapter`, `ArtifactStore`, `DeviationResolver`, `Clock`) shared by every other package. Zero dependency on other internal packages. | Depended on by everything; depends on nothing internal. |
-| **orchfile** | Reads an orchestrator agent file and enumerates its embedded `[[SECTION:Workflow:{id}]]` regions (workflow definitions), each carrying an id, version, and raw content. | Feeds raw workflow content to **workflow**. |
+| **orchfile** | Reads an orchestrator agent file and enumerates its embedded `<Workflow type="core" name="{id}">` regions (workflow definitions), each carrying an id, version (from the region's `version` attribute), and raw content. | Feeds raw workflow content to **workflow**. |
 | **workflow** | Parses a workflow region's raw markdown into a flat, ordered, index-identified routing table (`RoutingTable`). | Consumes **orchfile** output; feeds **compat**. |
 | [**compat**](./compat/Index.md) | Validates that a parsed routing table is within the supported workflow subset ("admission") and resolves its EXECUTION rows into contiguous named execution groups partitioned by the Phase column's group segment. | Consumes **workflow** output; feeds **engine** (`AdmittedWorkflow`). |
 | **planstages** | Reads the stage table from a Plan.md artifact and returns a validated, ordered `StageSet` (consecutive numbering from 1, no forward dependencies, `Approach` column required when the workflow declares execution groups and ignored for bare workflows). | Feeds **engine**; re-invoked mid-run by **session** when stage output is re-derived. |

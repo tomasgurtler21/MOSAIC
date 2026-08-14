@@ -4,9 +4,9 @@ Parses DeployedSections.md (or any `type: bundle` file) into typed Python
 objects. Intended consumers are acceptance tests (uniformity checks against
 canonical block names) and future deployment-tool integrations.
 
-This module depends on the compound-name widening delivered by Stage 1
-(TAG_PATTERN must admit `[[SECTION:Prefix:id]]` names); it must not be loaded
-in an environment where that widening is absent.
+This module depends on the compound-name widening (TAG_PATTERN must admit
+`<Prefix type="core" name="id">` names); it must not be loaded in an
+environment where that widening is absent.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import pathlib
 import re
 from typing import TYPE_CHECKING
 
-from boundary_constants import TAG_PATTERN
+from boundary_constants import TAG_PATTERN, tag_base_name
 
 _TOOLS_DIR = pathlib.Path(__file__).parent        # Tools/OldAgentsTransform
 _REPO_ROOT = _TOOLS_DIR.parent.parent             # repo root (two levels up)
@@ -184,19 +184,24 @@ def _parse_frontmatter(
 
 
 def _extract_section_bodies(body_lines: list[str]) -> dict[str, str]:
-    """Scan body lines for SECTION regions and return name -> body text.
+    """Scan body lines for SECTION (core) regions and return name -> body text.
 
     The body text has line terminators included and excludes the open/close
     tags themselves. Uses TAG_PATTERN so only syntactically valid compound
     names are recognised.
+
+    Open tags look like ``<AuthorityHierarchy type="core" name="Subagent">``;
+    close tags carry no kind and use only the base tag name:
+    ``</AuthorityHierarchy>``.
     """
     sections: dict[str, str] = {}
     i = 0
     while i < len(body_lines):
         stripped = body_lines[i].rstrip("\r\n")
         m = TAG_PATTERN.match(stripped)
-        if m and not m.group("close") and m.group("kind") == "SECTION":
+        if m and m.group("close") == "" and m.group("kind") == "SECTION":
             name = m.group("name")
+            base = tag_base_name(name)
             body_start = i + 1
             j = body_start
             while j < len(body_lines):
@@ -205,8 +210,7 @@ def _extract_section_bodies(body_lines: list[str]) -> dict[str, str]:
                 if (
                     close_m
                     and close_m.group("close") == "/"
-                    and close_m.group("kind") == "SECTION"
-                    and close_m.group("name") == name
+                    and close_m.group("name") == base
                 ):
                     sections[name] = "".join(body_lines[body_start:j])
                     i = j + 1
@@ -229,7 +233,7 @@ def load_bundle(path: pathlib.Path = DEFAULT_BUNDLE_PATH) -> Bundle:
 
     Reads the ``blocks:`` frontmatter list for each block's declared
     ``name``, ``target``, ``applies_to`` and ``specified_in``, and the body
-    of each ``[[SECTION:<name>]] ... [[/SECTION:<name>]]`` region.
+    of each ``<Name type="core"> ... </Name>`` region.
 
     Raises ``BundleError`` when:
     - the file cannot be read;

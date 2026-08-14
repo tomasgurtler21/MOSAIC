@@ -8,7 +8,7 @@ id: no-section-workflow
 referenced_agents: []
 ---
 
-This workflow file is intentionally missing the [[SECTION:Workflow:no-section-workflow]] block.
+This workflow file is intentionally missing the <Workflow type="core" name="no-section-workflow"> block.
 WorkflowSection("no-section-workflow") must return an error because the block is absent.
 
 There is prose here, but no section boundary tags at all.

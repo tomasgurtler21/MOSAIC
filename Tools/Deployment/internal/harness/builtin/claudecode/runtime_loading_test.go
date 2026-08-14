@@ -93,25 +93,25 @@ func newModuleFromOpts(t *testing.T, root string) domain.HarnessModule {
 // Shared fixtures for content files
 // ---------------------------------------------------------------------------
 
-// sharedOnlyHarnessInjections is a minimal HarnessInjections.md with [[DEPLOYED:]] markers.
+// sharedOnlyHarnessInjections is a minimal HarnessInjections.md with managed regions.
 const sharedOnlyHarnessInjections = `---
 version: "1.0.0"
 ---
-[[DEPLOYED:LanguagePatterns]]
+<LanguagePatterns type="managed">
 Use idiomatic Go.
-[[/DEPLOYED:LanguagePatterns]]
+</LanguagePatterns>
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 `
 
-// orchestratorHarnessInjectionsOrchestrator is a minimal HarnessInjectionsOrchestrator.md.
+// orchestratorHarnessInjectionsOrchestrator is a minimal HarnessInjectionsOrchestrator.md with managed regions.
 const orchestratorHarnessInjectionsOrchestrator = `---
 version: "1.0.0"
 ---
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Orchestrator-specific constraint content.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -198,8 +198,8 @@ func TestRuntimeLoading_ReadsDeclaredDirectory(t *testing.T) {
 func TestRuntimeLoading_ContentFromDiskNotFromEmbed(t *testing.T) {
 	uniqueContent := "RUNTIME_LOADING_UNIQUE_SENTINEL_XYZ_9847612"
 	root, contentDir := makeTempRoot(t)
-	writeHarnessContentFile(t, contentDir, "HarnessInjections.md", "[[DEPLOYED:LanguagePatterns]]\n"+uniqueContent+"\n[[/DEPLOYED:LanguagePatterns]]\n\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
-	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md", "---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+	writeHarnessContentFile(t, contentDir, "HarnessInjections.md", "<LanguagePatterns type=\"managed\">\n"+uniqueContent+"\n</LanguagePatterns>\n\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
+	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md", "---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	mod := newModuleFromOpts(t, root)
 
@@ -311,9 +311,9 @@ func TestNoRebuild_ChangingSharedFileChangesInjectedContent(t *testing.T) {
 
 	const firstContent = "FIRST_VERSION_LANGUAGE_PATTERN_SENTINEL"
 	writeHarnessContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:LanguagePatterns]]\n"+firstContent+"\n[[/DEPLOYED:LanguagePatterns]]\n\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<LanguagePatterns type=\"managed\">\n"+firstContent+"\n</LanguagePatterns>\n\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	mod1 := newModuleFromOpts(t, root)
 	content1, ok1 := mod1.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: "subagent"})
@@ -327,7 +327,7 @@ func TestNoRebuild_ChangingSharedFileChangesInjectedContent(t *testing.T) {
 	// Edit the file to simulate an in-place update without rebuild.
 	const secondContent = "SECOND_VERSION_LANGUAGE_PATTERN_SENTINEL"
 	writeHarnessContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:LanguagePatterns]]\n"+secondContent+"\n[[/DEPLOYED:LanguagePatterns]]\n\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<LanguagePatterns type=\"managed\">\n"+secondContent+"\n</LanguagePatterns>\n\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	// Construct a new module from the same root — no rebuild needed.
 	mod2 := newModuleFromOpts(t, root)
@@ -351,14 +351,14 @@ func TestNoRebuild_ChangingOrchestratorFileChangesInjectedContent(t *testing.T) 
 
 	const firstOrchContent = "FIRST_ORCH_CONSTRAINT_SENTINEL"
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n"+firstOrchContent+"\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n"+firstOrchContent+"\n</HarnessConstraints>\n")
 
 	mod1 := newModuleFromOpts(t, root)
 	c1, _ := mod1.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
 
 	const secondOrchContent = "SECOND_ORCH_CONSTRAINT_SENTINEL"
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"2.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n"+secondOrchContent+"\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"2.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n"+secondOrchContent+"\n</HarnessConstraints>\n")
 
 	mod2 := newModuleFromOpts(t, root)
 	c2, _ := mod2.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
@@ -380,9 +380,9 @@ func TestNoRebuild_ChangingOrchestratorFileChangesInjectedContent(t *testing.T) 
 func TestMerging_SharedOnly_SubagentReceivesSharedContent(t *testing.T) {
 	root, contentDir := makeTempRoot(t)
 	writeHarnessContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:LanguagePatterns]]\nShared language patterns.\n[[/DEPLOYED:LanguagePatterns]]\n\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<LanguagePatterns type=\"managed\">\nShared language patterns.\n</LanguagePatterns>\n\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	mod := newModuleFromOpts(t, root)
 
@@ -401,9 +401,9 @@ func TestMerging_SharedOnly_OrchestratorReceivesSharedContent(t *testing.T) {
 	root, contentDir := makeTempRoot(t)
 	// LanguagePatterns is in shared only; orchestrator file has no LanguagePatterns.
 	writeHarnessContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:LanguagePatterns]]\nShared language patterns.\n[[/DEPLOYED:LanguagePatterns]]\n\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<LanguagePatterns type=\"managed\">\nShared language patterns.\n</LanguagePatterns>\n\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	mod := newModuleFromOpts(t, root)
 
@@ -422,10 +422,10 @@ func TestMerging_OrchestratorOnly_SubagentReceivesNothing(t *testing.T) {
 	root, contentDir := makeTempRoot(t)
 	// Shared file has only HarnessConstraints; LanguagePatterns is absent from shared.
 	writeHarnessContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	// Orchestrator file has LanguagePatterns.
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\nOrch constraint.\n[[/DEPLOYED:HarnessConstraints]]\n\n[[DEPLOYED:LanguagePatterns]]\nOrchestrator-only patterns.\n[[/DEPLOYED:LanguagePatterns]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\nOrch constraint.\n</HarnessConstraints>\n\n<LanguagePatterns type=\"managed\">\nOrchestrator-only patterns.\n</LanguagePatterns>\n")
 
 	mod := newModuleFromOpts(t, root)
 
@@ -440,9 +440,9 @@ func TestMerging_OrchestratorOnly_SubagentReceivesNothing(t *testing.T) {
 func TestMerging_OrchestratorOnly_OrchestratorReceivesContent(t *testing.T) {
 	root, contentDir := makeTempRoot(t)
 	writeHarnessContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\nOrchestrator-only constraint.\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\nOrchestrator-only constraint.\n</HarnessConstraints>\n")
 
 	mod := newModuleFromOpts(t, root)
 
@@ -463,9 +463,9 @@ func TestMerging_BothNonEmpty_OrchestratorReceivesMergedWithSeparator(t *testing
 	const sharedPart = "Shared constraint line."
 	const orchPart = "Orchestrator-only constraint line."
 	writeHarnessContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:HarnessConstraints]]\n"+sharedPart+"\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<HarnessConstraints type=\"managed\">\n"+sharedPart+"\n</HarnessConstraints>\n")
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n"+orchPart+"\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n"+orchPart+"\n</HarnessConstraints>\n")
 
 	mod := newModuleFromOpts(t, root)
 
@@ -484,9 +484,9 @@ func TestMerging_BothNonEmpty_OrchestratorReceivesMergedWithSeparator(t *testing
 func TestMerging_BothDeclaredEmpty_SubagentOkTrueEmptyString(t *testing.T) {
 	root, contentDir := makeTempRoot(t)
 	writeHarnessContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	mod := newModuleFromOpts(t, root)
 
@@ -504,9 +504,9 @@ func TestMerging_BothDeclaredEmpty_SubagentOkTrueEmptyString(t *testing.T) {
 func TestMerging_BothDeclaredEmpty_OrchestratorOkTrueEmptyString(t *testing.T) {
 	root, contentDir := makeTempRoot(t)
 	writeHarnessContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	mod := newModuleFromOpts(t, root)
 
@@ -525,9 +525,9 @@ func TestMerging_UndeclaredInBoth_SubagentOkFalse(t *testing.T) {
 	root, contentDir := makeTempRoot(t)
 	// Neither file declares LanguagePatterns.
 	writeHarnessContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	mod := newModuleFromOpts(t, root)
 
@@ -542,9 +542,9 @@ func TestMerging_UndeclaredInBoth_SubagentOkFalse(t *testing.T) {
 func TestMerging_UndeclaredInBoth_OrchestratorOkFalse(t *testing.T) {
 	root, contentDir := makeTempRoot(t)
 	writeHarnessContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 
 	mod := newModuleFromOpts(t, root)
 
@@ -560,9 +560,9 @@ func TestMerging_UndeclaredInBoth_OrchestratorOkFalse(t *testing.T) {
 func TestMerging_SharedEmptyOrchNonEmpty_OrchestratorReceivesOrchContent(t *testing.T) {
 	root, contentDir := makeTempRoot(t)
 	writeHarnessContentFile(t, contentDir, "HarnessInjections.md",
-		"[[DEPLOYED:HarnessConstraints]]\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"<HarnessConstraints type=\"managed\">\n</HarnessConstraints>\n")
 	writeHarnessContentFile(t, contentDir, "HarnessInjectionsOrchestrator.md",
-		"---\nversion: \"1.0.0\"\n---\n[[DEPLOYED:HarnessConstraints]]\nOrchestrator-specific content when shared is empty.\n[[/DEPLOYED:HarnessConstraints]]\n")
+		"---\nversion: \"1.0.0\"\n---\n<HarnessConstraints type=\"managed\">\nOrchestrator-specific content when shared is empty.\n</HarnessConstraints>\n")
 
 	mod := newModuleFromOpts(t, root)
 

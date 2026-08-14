@@ -7,7 +7,7 @@ package transform_test
 //
 // Regression assertions (AC5.4):
 //   - Transform output for a standard agent source contains no "<!-- provenance-version:" comment.
-//   - Transform output contains no [[DEPLOYED:ArtifactProvenance]] region.
+//   - Transform output contains no <ArtifactProvenance type="managed"> region.
 //   - The transform report contains no region outcome named "ArtifactProvenance".
 
 import (
@@ -23,7 +23,7 @@ import (
 // ---------------------------------------------------------------------------
 
 // sourceWithoutProvenanceRegion is a minimal agent source file that does not declare
-// [[DEPLOYED:ArtifactProvenance]]. This is the target state of all migrated agent source
+// <ArtifactProvenance type="managed">. This is the target state of all migrated agent source
 // files: the provenance region has been removed, so the transform has nothing to fill.
 const sourceWithoutProvenanceRegion = `---
 id: 55
@@ -37,30 +37,30 @@ tier_rationale: minimal
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 ## Identity
 
 Provenance retirement regression test agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
+</IdentityExtension>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Agent capabilities.
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // TestProvenanceRetirement_TransformOutput_NoProvenanceVersionComment verifies that
 // transform.Apply produces output containing no provenance version comment for a
-// migrated agent source file (one that no longer declares [[DEPLOYED:ArtifactProvenance]]).
+// migrated agent source file (one that no longer declares <ArtifactProvenance type="managed">).
 // The comment format "<!-- provenance-version: X -->" must not appear anywhere in the
 // output after the provenance system is retired.
 func TestProvenanceRetirement_TransformOutput_NoProvenanceVersionComment(t *testing.T) {
@@ -91,7 +91,7 @@ func TestProvenanceRetirement_TransformOutput_NoProvenanceVersionComment(t *test
 }
 
 // TestProvenanceRetirement_TransformOutput_NoProvenanceRegion verifies that
-// transform.Apply produces output containing no [[DEPLOYED:ArtifactProvenance]] region
+// transform.Apply produces output containing no <ArtifactProvenance type="managed"> region
 // for a migrated agent source file. After retirement, no agent source declares this
 // region, so the transform output must not contain it either.
 func TestProvenanceRetirement_TransformOutput_NoProvenanceRegion(t *testing.T) {
@@ -112,12 +112,12 @@ func TestProvenanceRetirement_TransformOutput_NoProvenanceRegion(t *testing.T) {
 	}
 
 	// Neither the opening nor the closing provenance region tag must appear in the output.
-	if bytes.Contains(result.Output, []byte("[[DEPLOYED:ArtifactProvenance]]")) {
-		t.Errorf("transform output contains [[DEPLOYED:ArtifactProvenance]] opening tag; "+
+	if bytes.Contains(result.Output, []byte("<ArtifactProvenance type=\"managed\">")) {
+		t.Errorf("transform output contains <ArtifactProvenance type=\"managed\"> opening tag; "+
 			"the provenance region must not appear in transform output after retirement")
 	}
-	if bytes.Contains(result.Output, []byte("[[/DEPLOYED:ArtifactProvenance]]")) {
-		t.Errorf("transform output contains [[/DEPLOYED:ArtifactProvenance]] closing tag; "+
+	if bytes.Contains(result.Output, []byte("</ArtifactProvenance>")) {
+		t.Errorf("transform output contains </ArtifactProvenance> closing tag; "+
 			"the provenance region must not appear in transform output after retirement")
 	}
 }
@@ -153,7 +153,7 @@ func TestProvenanceRetirement_TransformReport_NoProvenanceRegionOutcome(t *testi
 }
 
 // TestProvenanceRetirement_TransformOutput_AppliesSuccessfully verifies that a fully
-// migrated agent source (no [[DEPLOYED:ArtifactProvenance]], no Provenance field in
+// migrated agent source (no <ArtifactProvenance type="managed">, no Provenance field in
 // the request) transforms without error. This is the baseline for AC5.4: the transform
 // must succeed for any valid source that does not use provenance.
 func TestProvenanceRetirement_TransformOutput_AppliesSuccessfully(t *testing.T) {

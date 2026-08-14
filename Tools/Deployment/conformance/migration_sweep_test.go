@@ -6,30 +6,30 @@ package conformance_test
 //
 // Invariants swept for every .md file under Agents/Generic/:
 //
-//   (1) No tool-managed name under [[INJECTION:]].
+//   (1) No tool-managed name under type="project".
 //       Tool-managed names (all nine CanonicalDeployed names) are owned by the deployment
-//       tool and must appear under [[DEPLOYED:]], never [[INJECTION:]].
+//       tool and must appear as <Name type="managed">, never <Name type="project">.
 //
-//   (2) No user-owned name under [[DEPLOYED:]].
+//   (2) No user-owned name under type="managed".
 //       Injection names are open as of Stage 2. Names that happen to be injection-only
 //       (IdentityExtension, CodebaseContext, LanguagePatterns, OutputArtifactTemplate,
 //       SeverityThresholds, SeverityDefinitions, ErrorHandlingExtension, ContextLimits)
-//       must never appear under [[DEPLOYED:]] — they have no tool generator.
+//       must never appear as <Name type="managed"> — they have no tool generator.
 //       LanguagePatterns is a catalogued, project-authored injection name (parent
 //       Capabilities) — it was never a tool-managed name and belongs here, not above.
 //
-//   (3) No [[INJECTION:ProtocolExtension]] in any file.
+//   (3) No <ProtocolExtension type="project"> in any file.
 //       ProtocolExtension was briefly catalogued in the advisory InjectionParent map, then
-//       removed again in Stage 2: projects should use [[CUSTOM:ProtocolExtension]] instead
-//       of [[INJECTION:ProtocolExtension]]. No current agent file should declare the injection.
+//       removed again in Stage 2: projects should use <ProtocolExtension type="custom"> instead
+//       of <ProtocolExtension type="project">. No current agent file should declare the injection.
 //
 //   (4) No leftover hardcoded protocol section.
-//       The old [[SECTION:CommunicationProtocol]] marker is replaced by
-//       [[DEPLOYED:CommunicationProtocol]] in all migrated files. Any remaining
-//       [[SECTION:CommunicationProtocol]] tag means a file was not migrated.
+//       The old <CommunicationProtocol type="core"> open tag is replaced by
+//       <CommunicationProtocol type="managed"> in all migrated files. Any remaining
+//       <CommunicationProtocol type="core"> tag means a file was not migrated.
 //
 //   (5) Protocol boundary is empty in source files.
-//       Source files must have an empty [[DEPLOYED:CommunicationProtocol]] boundary — the
+//       Source files must have an empty <CommunicationProtocol type="managed"> boundary — the
 //       deployment tool fills it at deploy time. Non-empty content means either (a) a deployed
 //       file was committed as a source file, or (b) a pre-migration hardcoded block was
 //       incompletely converted.
@@ -48,7 +48,7 @@ import (
 // ---------------------------------------------------------------------------
 
 // toolManagedNames are the deployment-tool-owned region names (all CanonicalDeployed names).
-// They must appear under [[DEPLOYED:]] and must never appear under [[INJECTION:]] in agent
+// They must appear as type="managed" and must never appear as type="project" in agent
 // source files.
 var toolManagedNames = []string{
 	"CommunicationProtocol",
@@ -62,9 +62,9 @@ var toolManagedNames = []string{
 	"ExecutionPhilosophyCommon",
 }
 
-// userOwnedNames are the project-owner customisation names. They must never appear under
-// [[DEPLOYED:]] in agent source files — they have no tool generator and must be preserved
-// as-is via [[INJECTION:]]. LanguagePatterns is a catalogued, project-authored injection
+// userOwnedNames are the project-owner customisation names. They must never appear as
+// type="managed" in agent source files — they have no tool generator and must be preserved
+// as type="project". LanguagePatterns is a catalogued, project-authored injection
 // name (advisory parent Capabilities), not a tool-managed one.
 var userOwnedNames = []string{
 	"IdentityExtension",
@@ -78,8 +78,8 @@ var userOwnedNames = []string{
 }
 
 // deprecatedInjectionNames are names that are migrating out of all agent files entirely.
-// They must never appear under [[DEPLOYED:]] (no tool generator exists for them) and are
-// expected to disappear from [[INJECTION:]] use as well as migration proceeds.
+// They must never appear as type="managed" (no tool generator exists for them) and are
+// expected to disappear from type="project" use as well as migration proceeds.
 // CustomConstraints has no generator and is deleted outright — it is not re-catalogued
 // as an advisory injection name, unlike LanguagePatterns above.
 var deprecatedInjectionNames = []string{
@@ -152,13 +152,13 @@ func genericAgentPaths(t *testing.T) []string {
 }
 
 // ---------------------------------------------------------------------------
-// (1) No tool-managed name under [[INJECTION:]]
+// (1) No tool-managed name under type="project"
 // ---------------------------------------------------------------------------
 
 // TestMigrationSweep_NoToolManagedNameUnderInjection verifies that none of the tool-managed
-// region names appear under [[INJECTION:]] in any Agents/Generic/ file. Before migration,
-// HarnessConstraints, LanguagePatterns, and others were declared as [[INJECTION:]] regions
-// in generic agents; they must now all be [[DEPLOYED:]].
+// region names appear as type="project" in any Agents/Generic/ file. Before migration,
+// HarnessConstraints, LanguagePatterns, and others were declared as project-type regions
+// in generic agents; they must now all be type="managed".
 func TestMigrationSweep_NoToolManagedNameUnderInjection(t *testing.T) {
 	paths := genericAgentPaths(t)
 	for _, p := range paths {
@@ -169,10 +169,10 @@ func TestMigrationSweep_NoToolManagedNameUnderInjection(t *testing.T) {
 		}
 		rel := relPath(t, findRepoRoot(t), p)
 		for _, name := range toolManagedNames {
-			forbidden := []byte("[[INJECTION:" + name + "]]")
+			forbidden := []byte("<" + name + " type=\"project\">")
 			if bytes.Contains(data, forbidden) {
-				t.Errorf("%s: tool-managed name %q found under [[INJECTION:]]; "+
-					"tool-managed names must use [[DEPLOYED:]] (migration Stage 8-11 incomplete for this file)",
+				t.Errorf("%s: tool-managed name %q found as type=\"project\"; "+
+					"tool-managed names must use type=\"managed\" (migration Stage 8-11 incomplete for this file)",
 					rel, name)
 			}
 		}
@@ -180,12 +180,12 @@ func TestMigrationSweep_NoToolManagedNameUnderInjection(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// (2) No user-owned name under [[DEPLOYED:]]
+// (2) No user-owned name under type="managed"
 // ---------------------------------------------------------------------------
 
 // TestMigrationSweep_NoUserOwnedNameUnderDeployed verifies that none of the user-owned region
-// names appear under [[DEPLOYED:]] in any Agents/Generic/ file. User-owned names are project
-// customisation points that must be declared with [[INJECTION:]] so the update path preserves
+// names appear as type="managed" in any Agents/Generic/ file. User-owned names are project
+// customisation points that must be declared as type="project" so the update path preserves
 // them byte-identically.
 func TestMigrationSweep_NoUserOwnedNameUnderDeployed(t *testing.T) {
 	paths := genericAgentPaths(t)
@@ -197,10 +197,10 @@ func TestMigrationSweep_NoUserOwnedNameUnderDeployed(t *testing.T) {
 		}
 		rel := relPath(t, findRepoRoot(t), p)
 		for _, name := range userOwnedNames {
-			forbidden := []byte("[[DEPLOYED:" + name + "]]")
+			forbidden := []byte("<" + name + " type=\"managed\">")
 			if bytes.Contains(data, forbidden) {
-				t.Errorf("%s: user-owned name %q found under [[DEPLOYED:]]; "+
-					"user-owned names must use [[INJECTION:]] to be preserved across updates",
+				t.Errorf("%s: user-owned name %q found as type=\"managed\"; "+
+					"user-owned names must use type=\"project\" to be preserved across updates",
 					rel, name)
 			}
 		}
@@ -208,7 +208,7 @@ func TestMigrationSweep_NoUserOwnedNameUnderDeployed(t *testing.T) {
 }
 
 // TestMigrationSweep_NoDeprecatedNameUnderDeployed verifies that deprecated injection names
-// (those migrating out of files entirely) never appear under [[DEPLOYED:]] in any
+// (those migrating out of files entirely) never appear as type="managed" in any
 // Agents/Generic/ file. These names have no tool generator and must not be tool-managed.
 func TestMigrationSweep_NoDeprecatedNameUnderDeployed(t *testing.T) {
 	paths := genericAgentPaths(t)
@@ -220,9 +220,9 @@ func TestMigrationSweep_NoDeprecatedNameUnderDeployed(t *testing.T) {
 		}
 		rel := relPath(t, findRepoRoot(t), p)
 		for _, name := range deprecatedInjectionNames {
-			forbidden := []byte("[[DEPLOYED:" + name + "]]")
+			forbidden := []byte("<" + name + " type=\"managed\">")
 			if bytes.Contains(data, forbidden) {
-				t.Errorf("%s: deprecated name %q found under [[DEPLOYED:]]; "+
+				t.Errorf("%s: deprecated name %q found as type=\"managed\"; "+
 					"deprecated names have no tool generator and must not be tool-managed",
 					rel, name)
 			}
@@ -231,12 +231,12 @@ func TestMigrationSweep_NoDeprecatedNameUnderDeployed(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// (3) No [[INJECTION:ProtocolExtension]]
+// (3) No <ProtocolExtension type="project">
 // ---------------------------------------------------------------------------
 
 // TestMigrationSweep_NoProtocolExtension verifies that no Agents/Generic/ file declares
-// [[INJECTION:ProtocolExtension]]. ProtocolExtension is removed from the advisory
-// InjectionParent map in Stage 2; projects use [[CUSTOM:ProtocolExtension]] instead.
+// <ProtocolExtension type="project">. ProtocolExtension is removed from the advisory
+// InjectionParent map in Stage 2; projects use <ProtocolExtension type="custom"> instead.
 // The assertion is retained as a safety net: no current agent file should declare this
 // injection.
 func TestMigrationSweep_NoProtocolExtension(t *testing.T) {
@@ -248,8 +248,8 @@ func TestMigrationSweep_NoProtocolExtension(t *testing.T) {
 			continue
 		}
 		rel := relPath(t, findRepoRoot(t), p)
-		if bytes.Contains(data, []byte("[[INJECTION:ProtocolExtension]]")) {
-			t.Errorf("%s: [[INJECTION:ProtocolExtension]] found; "+
+		if bytes.Contains(data, []byte("<ProtocolExtension type=\"project\">")) {
+			t.Errorf("%s: <ProtocolExtension type=\"project\"> found; "+
 				"no agent file should declare this injection before explicit stage authorisation",
 				rel)
 		}
@@ -260,10 +260,10 @@ func TestMigrationSweep_NoProtocolExtension(t *testing.T) {
 // (4) No leftover hardcoded protocol section
 // ---------------------------------------------------------------------------
 
-// TestMigrationSweep_NoLegacyProtocolSection verifies that the old [[SECTION:CommunicationProtocol]]
-// marker does not appear in any Agents/Generic/ file. Before migration, agents hardcoded protocol
+// TestMigrationSweep_NoLegacyProtocolSection verifies that the old <CommunicationProtocol type="core">
+// open tag does not appear in any Agents/Generic/ file. Before migration, agents hardcoded protocol
 // prose inside a named section; after migration the section is replaced by the empty
-// [[DEPLOYED:CommunicationProtocol]] boundary.
+// <CommunicationProtocol type="managed"> boundary.
 func TestMigrationSweep_NoLegacyProtocolSection(t *testing.T) {
 	paths := genericAgentPaths(t)
 	for _, p := range paths {
@@ -273,10 +273,10 @@ func TestMigrationSweep_NoLegacyProtocolSection(t *testing.T) {
 			continue
 		}
 		rel := relPath(t, findRepoRoot(t), p)
-		if bytes.Contains(data, []byte("[[SECTION:CommunicationProtocol]]")) {
-			t.Errorf("%s: legacy [[SECTION:CommunicationProtocol]] found; "+
+		if bytes.Contains(data, []byte("<CommunicationProtocol type=\"core\">")) {
+			t.Errorf("%s: legacy <CommunicationProtocol type=\"core\"> found; "+
 				"pre-migration protocol sections must be replaced by the empty "+
-				"[[DEPLOYED:CommunicationProtocol]] boundary (migration Stage 8-11 incomplete)",
+				"<CommunicationProtocol type=\"managed\"> boundary (migration Stage 8-11 incomplete)",
 				rel)
 		}
 	}
@@ -288,13 +288,13 @@ func TestMigrationSweep_NoLegacyProtocolSection(t *testing.T) {
 // (Formerly numbered (4) before sweep (3) was restored above.)
 
 // TestMigrationSweep_ProtocolBoundaryIsEmptyInSources verifies that every
-// [[DEPLOYED:CommunicationProtocol]] boundary in a source file contains no non-whitespace
+// <CommunicationProtocol type="managed"> boundary in a source file contains no non-whitespace
 // content. Source files must have an empty protocol boundary because the deployment tool fills
 // it at deploy time. A non-empty source boundary means either a deployed artifact was committed
 // as a source file or a pre-migration hardcoded block was incompletely converted.
 func TestMigrationSweep_ProtocolBoundaryIsEmptyInSources(t *testing.T) {
-	const openTag = "[[DEPLOYED:CommunicationProtocol]]"
-	const closeTag = "[[/DEPLOYED:CommunicationProtocol]]"
+	const openTag = "<CommunicationProtocol type=\"managed\">"
+	const closeTag = "</CommunicationProtocol>"
 
 	paths := genericAgentPaths(t)
 	for _, p := range paths {
@@ -313,7 +313,7 @@ func TestMigrationSweep_ProtocolBoundaryIsEmptyInSources(t *testing.T) {
 		afterOpen := data[openIdx+len(openTag):]
 		closeIdx := bytes.Index(afterOpen, []byte(closeTag))
 		if closeIdx < 0 {
-			t.Errorf("%s: [[DEPLOYED:CommunicationProtocol]] is opened but never closed", rel)
+			t.Errorf("%s: <CommunicationProtocol type=\"managed\"> is opened but never closed", rel)
 			continue
 		}
 
@@ -323,7 +323,7 @@ func TestMigrationSweep_ProtocolBoundaryIsEmptyInSources(t *testing.T) {
 			if len(preview) > 120 {
 				preview = preview[:120]
 			}
-			t.Errorf("%s: [[DEPLOYED:CommunicationProtocol]] boundary has non-empty content in source file;\n"+
+			t.Errorf("%s: <CommunicationProtocol type=\"managed\"> boundary has non-empty content in source file;\n"+
 				"source files must have an empty protocol boundary (content between tags, first 120 bytes):\n%q",
 				rel, preview)
 		}

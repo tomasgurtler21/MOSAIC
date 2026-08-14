@@ -2,8 +2,8 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
-Content with legacy marker below — it is NOT a boundary tag.
-[INJECTION: identity_extension]
-More content after the legacy marker.
-[[/SECTION:Identity]]
+<Identity type="core">
+Content with near-miss tag below — it is NOT a boundary tag.
+<IdentityExtension>
+More content after the near-miss tag.
+</Identity>

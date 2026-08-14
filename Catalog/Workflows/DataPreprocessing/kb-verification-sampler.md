@@ -17,8 +17,7 @@ artifacts:
   - VerificationReport.md
 ---
 
-[[SECTION:Workflow:kb-verification-sampler]]
-<!-- workflow-version: 0.4 -->
+<Workflow type="core" name="kb-verification-sampler" version="0.4">
 ## Knowledge Verification (Sampler) Workflow
 
 **Use when:** Verify knowledge quality using **automated random sampling**. A sampler agent explores the codebase, generates challenge questions about non-obvious details, then tests whether available knowledge sources guide an agent to the correct answers. Produces a diagnostic report — remediation is a separate concern.
@@ -38,7 +37,7 @@ artifacts:
 **Notes:**
 - **Q/A artifact lifecycle** — `(create)` creates empty artifacts → `codebase-question-sampler` populates → `(validate)` validates and creates batched `VerificationAttemptedAnswers.md`
 - **Diagnostic only** — workflow ends at VerificationReport.md. To act on findings, run a separate remediation workflow (e.g., Knowledge Base Correction)
-[[/SECTION:Workflow:kb-verification-sampler]]
+</Workflow>
 
 ---
 

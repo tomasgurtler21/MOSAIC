@@ -2,10 +2,10 @@
 name: test-agent
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 Capabilities content.
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Harness constraint content line one.
 Harness constraint content line two.
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Capabilities]]
+</HarnessConstraints>
+</Capabilities>

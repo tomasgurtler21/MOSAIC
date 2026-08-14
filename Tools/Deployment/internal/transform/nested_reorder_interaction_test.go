@@ -1,20 +1,20 @@
 package transform_test
 
 // nested_reorder_interaction_test.go verifies the interaction between Stage 6
-// (nested-region preservation inside [[DEPLOYED:]] regions) and Stage 7 (parking
+// (nested-region preservation inside managed region regions) and Stage 7 (parking
 // on schema reorder), which neither stage covers alone.
 //
 // The specific gap: Stage 6 tests verify that nested user-owned regions survive
-// [[DEPLOYED:]] regeneration on a *normal* update. Stage 7 tests verify that
-// [[CUSTOM:]] regions outside [[DEPLOYED:]] are anchored or parked on a reorder.
-// Neither stage tests what happens when a [[DEPLOYED:]] region with nested user-owned
+// managed region regeneration on a *normal* update. Stage 7 tests verify that
+// custom-region regions outside managed region are anchored or parked on a reorder.
+// Neither stage tests what happens when a managed region region with nested user-owned
 // content is processed during a reorder.
 //
 // Properties verified:
-//   - A [[CUSTOM:]] region nested inside a [[DEPLOYED:]] region in the deployed file
+//   - A custom-region region nested inside a managed region region in the deployed file
 //     is re-emitted via the Stage 6 capture-reemit sequence even when a schema reorder
 //     is detected, with content byte-identical.
-//   - A [[INJECTION:]] region nested inside a [[DEPLOYED:]] region in the source is
+//   - A project-injection region region nested inside a managed region region in the source is
 //     preserved inside the parent after the reorder, with content byte-identical.
 //   - Neither of these nested regions is parked at end of file (they are re-emitted
 //     by the capture-reemit sequence before the parking decision runs).
@@ -40,7 +40,7 @@ import (
 //
 // In the deployed file, HarnessConstraints contains:
 //   - Canonical tool-managed content (regenerated on every transform)
-//   - [[CUSTOM:NestedTeamNote]] added by the project (Stage 6 must re-emit it)
+//   - <NestedTeamNote type="custom"> added by the project (Stage 6 must re-emit it)
 //
 // After Apply:
 //   - HarnessConstraints is regenerated at its source-declared position (inside Constraints)
@@ -62,31 +62,31 @@ tier_rationale: nested reorder interaction testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedReorder Agent
 
 You are the NestedReorder agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 // nestedReorderDeployed: section order Identity → Constraints → Capabilities.
 // Source has Identity → Capabilities → Constraints → reorder detected.
-// HarnessConstraints holds a nested [[CUSTOM:NestedTeamNote]] added by the project.
+// HarnessConstraints holds a nested <NestedTeamNote type="custom"> added by the project.
 const nestedReorderDeployed = `---
 id: 960
 version: 1.0.0
@@ -98,32 +98,32 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedReorder Agent
 
 You are the NestedReorder agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Old canonical harness content (regenerated each transform).
-[[CUSTOM:NestedTeamNote]]
+<NestedTeamNote type="custom">
 Project-added note nested inside HarnessConstraints.
 This content must survive the reorder byte-identically.
 It must be placed inside HarnessConstraints, not parked at end of file.
-[[/CUSTOM:NestedTeamNote]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</NestedTeamNote>
+</HarnessConstraints>
+</Constraints>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ This agent has various capabilities.
 // Source order:   Identity → Constraints (HarnessConstraints with nested injection) → Capabilities
 // Deployed order: Identity → Capabilities → Constraints  (reorder)
 //
-// The source HarnessConstraints has a nested [[INJECTION:LocalPolicy]].
+// The source HarnessConstraints has a nested <LocalPolicy type="project">.
 // LocalPolicy has content in the deployed file (lifted by the region map).
 //
 // After Apply:
@@ -153,28 +153,28 @@ tier_rationale: nested injection reorder testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedInjectionReorder Agent
 
 You are the NestedInjectionReorder agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[INJECTION:LocalPolicy]]
-[[/INJECTION:LocalPolicy]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+<LocalPolicy type="project">
+</LocalPolicy>
+</HarnessConstraints>
+</Constraints>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // nestedInjectionReorderDeployed: section order Identity → Capabilities → Constraints.
@@ -191,31 +191,31 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedInjectionReorder Agent
 
 You are the NestedInjectionReorder agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Old canonical harness content.
-[[INJECTION:LocalPolicy]]
+<LocalPolicy type="project">
 Team-specific local policy content.
 This injection is nested inside HarnessConstraints and must survive reorder.
-[[/INJECTION:LocalPolicy]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</LocalPolicy>
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -260,11 +260,11 @@ func TestNestedReorderInteraction_ReorderDetectedByFixture(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T9.6 — Nested [[CUSTOM:]] survives [[DEPLOYED:]] regeneration during reorder
+// T9.6 — Nested custom-region survives managed region regeneration during reorder
 // ---------------------------------------------------------------------------
 
-// TestNestedCustom_SurvivesDeployedRegenerationOnReorder verifies that a [[CUSTOM:]]
-// region nested inside a [[DEPLOYED:]] region in the deployed file is re-emitted
+// TestNestedCustom_SurvivesDeployedRegenerationOnReorder verifies that a custom-region
+// region nested inside a managed region region in the deployed file is re-emitted
 // inside the parent after regeneration, even when a schema reorder is detected.
 func TestNestedCustom_SurvivesDeployedRegenerationOnReorder(t *testing.T) {
 	req := nestedReorderReq(t,
@@ -286,14 +286,14 @@ func TestNestedCustom_SurvivesDeployedRegenerationOnReorder(t *testing.T) {
 	node, ok := outDoc.Body().Custom("NestedTeamNote")
 	if !ok {
 		t.Fatal("NestedTeamNote absent from output; " +
-			"a [[CUSTOM:]] region nested inside a [[DEPLOYED:]] region must survive " +
+			"a custom-region region nested inside a managed region region must survive " +
 			"the deployed region's regeneration, even when a schema reorder is detected")
 	}
 	_ = node
 }
 
 // TestNestedCustom_ContentByteIdenticalAfterReorder verifies that the content of a
-// [[CUSTOM:]] region nested inside a [[DEPLOYED:]] region is preserved byte-identically,
+// custom-region region nested inside a managed region region is preserved byte-identically,
 // not truncated or reformatted, after the reorder update.
 func TestNestedCustom_ContentByteIdenticalAfterReorder(t *testing.T) {
 	req := nestedReorderReq(t,
@@ -352,7 +352,7 @@ func TestNestedCustom_NotParkedDuringReorder(t *testing.T) {
 	if pg != nil {
 		if strings.Contains(pg.Detail, "NestedTeamNote") {
 			t.Errorf("NestedTeamNote appears in the parking gap detail; "+
-				"a region inside a still-existing [[DEPLOYED:]] parent must be handled by "+
+				"a region inside a still-existing managed region parent must be handled by "+
 				"the Stage 6 capture-reemit sequence, not the parking path: %s", pg.Detail)
 		}
 	}
@@ -403,11 +403,11 @@ func TestNestedCustom_RemainsInsideDeployedRegionAfterReorder(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T9.6 — Nested [[INJECTION:]] in [[DEPLOYED:]] survives reorder
+// T9.6 — Nested project-injection region in managed region survives reorder
 // ---------------------------------------------------------------------------
 
-// TestNestedInjection_SurvivesDeployedRegenerationOnReorder verifies that a [[INJECTION:]]
-// region declared in the source inside a [[DEPLOYED:]] region has its content re-emitted
+// TestNestedInjection_SurvivesDeployedRegenerationOnReorder verifies that a project-injection region
+// region declared in the source inside a managed region region has its content re-emitted
 // inside the parent after regeneration during a reorder update.
 func TestNestedInjection_SurvivesDeployedRegenerationOnReorder(t *testing.T) {
 	req := nestedReorderReq(t,
@@ -429,7 +429,7 @@ func TestNestedInjection_SurvivesDeployedRegenerationOnReorder(t *testing.T) {
 	outInj, outOK := outDoc.Body().Injection("LocalPolicy")
 	if !outOK {
 		t.Fatal("LocalPolicy absent from output; " +
-			"a [[INJECTION:]] nested inside a [[DEPLOYED:]] region must be re-emitted " +
+			"a project-injection region nested inside a managed region region must be re-emitted " +
 			"inside the parent after regeneration, even when a schema reorder is detected")
 	}
 	_ = outInj

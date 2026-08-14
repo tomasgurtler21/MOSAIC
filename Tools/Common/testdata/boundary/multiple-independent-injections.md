@@ -2,20 +2,20 @@
 name: test-agent
 ---
 
-[[SECTION:First]]
+<First type="core">
 Content in first section.
-[[INJECTION:SlotA]]
-[[SECTION:Workflow:first]]
+<SlotA type="project">
+<Workflow type="core" name="first">
 First workflow content.
-[[/SECTION:Workflow:first]]
-[[/INJECTION:SlotA]]
-[[/SECTION:First]]
+</Workflow>
+</SlotA>
+</First>
 
-[[SECTION:Second]]
+<Second type="core">
 Content in second section.
-[[INJECTION:SlotB]]
-[[SECTION:Workflow:second]]
+<SlotB type="project">
+<Workflow type="core" name="second">
 Second workflow content.
-[[/SECTION:Workflow:second]]
-[[/INJECTION:SlotB]]
-[[/SECTION:Second]]
+</Workflow>
+</SlotB>
+</Second>

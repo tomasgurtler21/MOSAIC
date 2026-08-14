@@ -164,66 +164,66 @@ transform_version: 3.0.0
 role: subagent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Test Harness-Only Subagent
 
 Section prose that must not be modified by refresh.
 
-[[DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
 old authority hierarchy content
-[[/DEPLOYED:AuthorityHierarchy]]
+</AuthorityHierarchy>
 
-[[DEPLOYED:ClosingProcedure]]
+<ClosingProcedure type="managed">
 old closing procedure content
-[[/DEPLOYED:ClosingProcedure]]
+</ClosingProcedure>
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 user-authored identity extension — this line must survive verbatim
 second line of user-authored injection content
-[[/INJECTION:IdentityExtension]]
+</IdentityExtension>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 old communication protocol content
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 Capability prose that must survive verbatim.
 
-[[INJECTION:CodebaseContext]]
+<CodebaseContext type="project">
 user codebase context injection — must survive verbatim
-[[/INJECTION:CodebaseContext]]
+</CodebaseContext>
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 
-[[DEPLOYED:ProtocolConstraints]]
+<ProtocolConstraints type="managed">
 old protocol constraints content
-[[/DEPLOYED:ProtocolConstraints]]
+</ProtocolConstraints>
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 old harness constraints content
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 
-[[DEPLOYED:ErrorHandlingCommon]]
+<ErrorHandlingCommon type="managed">
 old error handling common content
-[[/DEPLOYED:ErrorHandlingCommon]]
+</ErrorHandlingCommon>
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 
-[[DEPLOYED:ExecutionPhilosophyCommon]]
+<ExecutionPhilosophyCommon type="managed">
 old execution philosophy common content
-[[/DEPLOYED:ExecutionPhilosophyCommon]]
+</ExecutionPhilosophyCommon>
 
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>
 `
 
 // fixtureOrchestratorFull is a complete harness-only orchestrator file with all nine
@@ -238,68 +238,68 @@ transform_version: 3.0.0
 role: orchestrator
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Test Harness-Only Orchestrator
 
 Orchestrator identity prose.
 
-[[DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
 old authority hierarchy content
-[[/DEPLOYED:AuthorityHierarchy]]
+</AuthorityHierarchy>
 
-[[DEPLOYED:ClosingProcedure]]
+<ClosingProcedure type="managed">
 old closing procedure content
-[[/DEPLOYED:ClosingProcedure]]
+</ClosingProcedure>
 
-[[DEPLOYED:AvailableWorkflows]]
+<AvailableWorkflows type="managed">
 old available workflows content
-[[/DEPLOYED:AvailableWorkflows]]
+</AvailableWorkflows>
 
-[[DEPLOYED:InfrastructureAgents]]
+<InfrastructureAgents type="managed">
 old infrastructure agents content
-[[/DEPLOYED:InfrastructureAgents]]
+</InfrastructureAgents>
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 orchestrator identity injection — must survive verbatim
-[[/INJECTION:IdentityExtension]]
+</IdentityExtension>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 old communication protocol content
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 
-[[DEPLOYED:ProtocolConstraints]]
+<ProtocolConstraints type="managed">
 old protocol constraints content
-[[/DEPLOYED:ProtocolConstraints]]
+</ProtocolConstraints>
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 old harness constraints content
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 
-[[DEPLOYED:ErrorHandlingCommon]]
+<ErrorHandlingCommon type="managed">
 old error handling common content
-[[/DEPLOYED:ErrorHandlingCommon]]
+</ErrorHandlingCommon>
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 
-[[DEPLOYED:ExecutionPhilosophyCommon]]
+<ExecutionPhilosophyCommon type="managed">
 old execution philosophy common content
-[[/DEPLOYED:ExecutionPhilosophyCommon]]
+</ExecutionPhilosophyCommon>
 
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>
 `
 
 // fixtureSubagentNoProtocol is a subagent file with no CommunicationProtocol region.
@@ -310,26 +310,26 @@ transform_version: 3.0.0
 role: subagent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Agent Without Protocol Region
 
-[[DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
 old authority hierarchy content
-[[/DEPLOYED:AuthorityHierarchy]]
+</AuthorityHierarchy>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 old harness constraints content
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 `
 
 // fixtureOrchestratorMissingBundleRegion is an orchestrator file that has all parent
@@ -341,58 +341,58 @@ transform_version: 3.0.0
 role: orchestrator
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Orchestrator Missing One Bundle Region
 
-[[DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
 old authority hierarchy content
-[[/DEPLOYED:AuthorityHierarchy]]
+</AuthorityHierarchy>
 
-[[DEPLOYED:ClosingProcedure]]
+<ClosingProcedure type="managed">
 old closing procedure content
-[[/DEPLOYED:ClosingProcedure]]
+</ClosingProcedure>
 
-[[DEPLOYED:AvailableWorkflows]]
+<AvailableWorkflows type="managed">
 old available workflows content
-[[/DEPLOYED:AvailableWorkflows]]
+</AvailableWorkflows>
 
-[[DEPLOYED:InfrastructureAgents]]
+<InfrastructureAgents type="managed">
 old infrastructure agents content
-[[/DEPLOYED:InfrastructureAgents]]
+</InfrastructureAgents>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 old communication protocol content
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 
-[[DEPLOYED:ProtocolConstraints]]
+<ProtocolConstraints type="managed">
 old protocol constraints content
-[[/DEPLOYED:ProtocolConstraints]]
+</ProtocolConstraints>
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 old harness constraints content
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 
-[[DEPLOYED:ExecutionPhilosophyCommon]]
+<ExecutionPhilosophyCommon type="managed">
 old execution philosophy common content
-[[/DEPLOYED:ExecutionPhilosophyCommon]]
+</ExecutionPhilosophyCommon>
 
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>
 `
 
 // fixtureSubagentMissingSectionAndRegion is a subagent file missing both the
@@ -405,42 +405,42 @@ transform_version: 3.0.0
 role: subagent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Agent Missing ErrorHandling Section
 
-[[DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
 old authority hierarchy content
-[[/DEPLOYED:AuthorityHierarchy]]
+</AuthorityHierarchy>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 old communication protocol content
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 
-[[DEPLOYED:ProtocolConstraints]]
+<ProtocolConstraints type="managed">
 old protocol constraints content
-[[/DEPLOYED:ProtocolConstraints]]
+</ProtocolConstraints>
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 old harness constraints content
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 
-[[DEPLOYED:ExecutionPhilosophyCommon]]
+<ExecutionPhilosophyCommon type="managed">
 old execution philosophy common content
-[[/DEPLOYED:ExecutionPhilosophyCommon]]
+</ExecutionPhilosophyCommon>
 
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>
 `
 
 // fixtureMalformedUnclosedFrontmatter is a byte sequence whose frontmatter block is
@@ -458,26 +458,26 @@ transform_version: 3.0.0
 role: subagent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Agent Without Version Frontmatter Field
 
-[[DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
 old authority hierarchy content
-[[/DEPLOYED:AuthorityHierarchy]]
+</AuthorityHierarchy>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 old communication protocol content
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 old harness constraints content
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -532,20 +532,16 @@ func injectionBytes(t *testing.T, doc []byte, name string) []byte {
 }
 
 // expectedProtocolContent returns the expected bytes that refreshHarnessOnly should place
-// inside the CommunicationProtocol region for the given role and protocol version: the
-// version marker line followed by the role-matched block. The marker line's terminator
-// matches the block's own line ending, so this helper mirrors the line-ending-aware contract
-// of harnessOnlyRegionContent.
-func expectedProtocolContent(role domain.AgentRole, version string) []byte {
-	var block []byte
+// inside the CommunicationProtocol region for the given role. The version is stored as a
+// tag attribute on the opening tag, not as a comment in the region content, so the content
+// is just the role-matched block.
+func expectedProtocolContent(role domain.AgentRole, _ string) []byte {
 	switch role {
 	case domain.RoleOrchestrator:
-		block = []byte(fixtureRefreshOrchestratorProtocolBlock)
+		return []byte(fixtureRefreshOrchestratorProtocolBlock)
 	default:
-		block = []byte(fixtureRefreshSubagentProtocolBlock)
+		return []byte(fixtureRefreshSubagentProtocolBlock)
 	}
-	marker := []byte(transform.ProtocolVersionComment(version, block))
-	return append(marker, block...)
 }
 
 // containsString reports whether haystack contains needle.
@@ -587,29 +583,29 @@ func TestRefreshHarnessOnly_ProtocolOnlyScope_CommunicationProtocolRegionIsRefre
 	}
 }
 
-// TestRefreshHarnessOnly_ProtocolOnlyScope_VersionMarkerPrefixesContent verifies that the
-// CommunicationProtocol region content is prefixed by the protocol version marker line
-// terminated to match the protocol block's own line ending, matching how the catalog-backed
-// path fills the region.
-func TestRefreshHarnessOnly_ProtocolOnlyScope_VersionMarkerPrefixesContent(t *testing.T) {
+// TestRefreshHarnessOnly_ProtocolOnlyScope_VersionAttributeIsSetOnProtocolRegion verifies
+// that the CommunicationProtocol region's opening tag carries the protocol version in its
+// version attribute after a RefreshProtocolOnly refresh, matching how the catalog-backed
+// path stores the version.
+func TestRefreshHarnessOnly_ProtocolOnlyScope_VersionAttributeIsSetOnProtocolRegion(t *testing.T) {
 	req := makeRefreshRequest([]byte(fixtureSubagentFull), RefreshProtocolOnly, domain.RoleSubagent)
 	result, err := refreshHarnessOnly(req)
 	if err != nil {
 		t.Fatalf("refreshHarnessOnly: %v", err)
 	}
 
-	content := deployedRegionContent(t, result.Output, "CommunicationProtocol")
-	// The subagent role uses the subagent block; pass it as content so the expected marker
-	// terminator matches the block's own line ending.
-	expectedMarker := transform.ProtocolVersionComment(
-		fixtureRefreshProtocolVersion,
-		[]byte(fixtureRefreshSubagentProtocolBlock),
-	)
-
-	if !bytes.HasPrefix(content, []byte(expectedMarker)) {
-		t.Errorf("CommunicationProtocol region content does not start with the version marker line;\n"+
-			"want prefix: %q\ngot content:  %q",
-			expectedMarker, content)
+	outDoc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	node, ok := outDoc.Body().Deployed("CommunicationProtocol")
+	if !ok {
+		t.Fatal("CommunicationProtocol region not found in output")
+	}
+	if node.Version() != fixtureRefreshProtocolVersion {
+		t.Errorf("CommunicationProtocol region version attribute = %q; want %q;\n"+
+			"the protocol version must be stored as a tag attribute on the opening tag",
+			node.Version(), fixtureRefreshProtocolVersion)
 	}
 }
 
@@ -901,7 +897,7 @@ func TestRefreshHarnessOnly_MissingBundleRegion_ReportedInResultAdded(t *testing
 // TestRefreshHarnessOnly_MissingRegionWithAbsentParent_IsReportedInNotAdded verifies that
 // when an in-scope region's required parent section is absent from the file, the region is
 // not inserted and its name appears in result.NotAdded. The routine must never invent a
-// [[SECTION:]] tag to satisfy the insertion.
+// section region tag to satisfy the insertion.
 func TestRefreshHarnessOnly_MissingRegionWithAbsentParent_IsReportedInNotAdded(t *testing.T) {
 	// The fixture is missing the ErrorHandling section AND the ErrorHandlingCommon region.
 	// Under RefreshAllDeployed, the implementation cannot insert ErrorHandlingCommon because
@@ -1515,7 +1511,7 @@ func TestCatalogBackedTransform_TransformPackageDoesNotImportAppPackage(t *testi
 
 // TestCatalogBackedTransform_SentinelErrors_StillReturnedByTransformApply verifies that
 // transform.Apply returns ErrSourceDeployedRegionNotEmpty when a source file contains a
-// populated [[DEPLOYED:]] region, confirming the catalog-backed gate is still active.
+// populated managed region region, confirming the catalog-backed gate is still active.
 // This test uses a deliberately malformed request to trigger the sentinel early.
 func TestCatalogBackedTransform_SentinelErrors_StillReturnedByTransformApply(t *testing.T) {
 	// A generic source with a populated deployed region. This is the shape that a deployed
@@ -1532,14 +1528,14 @@ tier_rationale: test
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Content.
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 populated deployed region content — this must trigger ErrSourceDeployedRegionNotEmpty
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 	req := transform.Request{
 		Source: []byte(sourceWithPopulatedDeployed),
@@ -1653,11 +1649,11 @@ func TestRefreshHarnessOnly_CRLFProtocolBlock_RegionContainsNoLoneLF(t *testing.
 	}
 }
 
-// TestRefreshHarnessOnly_CRLFProtocolBlock_MarkerLineIsCRLFTerminated verifies that the
-// protocol-version marker line is CRLF-terminated when refreshHarnessOnly assembles the
-// CommunicationProtocol region from a CRLF protocol block. This confirms the same guarantee
-// holds for the harness-only path as for the catalog-backed transform path.
-func TestRefreshHarnessOnly_CRLFProtocolBlock_MarkerLineIsCRLFTerminated(t *testing.T) {
+// TestRefreshHarnessOnly_CRLFProtocolBlock_VersionAttributeIsSetCorrectly verifies that
+// even when the protocol block carries CRLF line endings, the CommunicationProtocol region's
+// opening tag carries the correct version attribute. The version is stored as a tag attribute,
+// not as a comment in the region content, so CRLF in the block content does not affect it.
+func TestRefreshHarnessOnly_CRLFProtocolBlock_VersionAttributeIsSetCorrectly(t *testing.T) {
 	req := HarnessOnlyRefreshRequest{
 		Deployed: []byte(fixtureSubagentFull),
 		Scope:    RefreshProtocolOnly,
@@ -1672,55 +1668,49 @@ func TestRefreshHarnessOnly_CRLFProtocolBlock_MarkerLineIsCRLFTerminated(t *test
 		t.Fatalf("refreshHarnessOnly: %v", err)
 	}
 
-	content := deployedRegionContent(t, result.Output, "CommunicationProtocol")
-	// Hardcode the expected marker literal so this test fails in RED phase.
-	// Deriving expectedMarker via transform.ProtocolVersionComment would produce the same
-	// stub output as the production path (both return "\n"), masking the CRLF requirement.
-	expectedMarker := "<!-- protocol-version: " + fixtureRefreshProtocolVersion + " -->\r\n"
-
-	if !bytes.HasPrefix(content, []byte(expectedMarker)) {
-		t.Errorf("CRLF block: refreshHarnessOnly protocol-version marker is not CRLF-terminated;\n"+
-			"want prefix: %q\ngot content:  %q", expectedMarker, content)
+	outDoc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	node, ok := outDoc.Body().Deployed("CommunicationProtocol")
+	if !ok {
+		t.Fatal("CommunicationProtocol region not found in output")
+	}
+	if node.Version() != fixtureRefreshProtocolVersion {
+		t.Errorf("CRLF block: CommunicationProtocol version attribute = %q; want %q;\n"+
+			"the protocol version must be stored as a tag attribute regardless of block line endings",
+			node.Version(), fixtureRefreshProtocolVersion)
 	}
 }
 
-// TestRefreshHarnessOnly_HarnessOnlyRegionContent_MatchesCatalogBackedPath verifies that
-// harnessOnlyRegionContent produces the same protocol region bytes as ProtocolVersionComment
-// + block directly, confirming the documented invariant that both paths fill the
-// CommunicationProtocol region identically for identical inputs.
-func TestRefreshHarnessOnly_HarnessOnlyRegionContent_MatchesCatalogBackedPath(t *testing.T) {
+// TestRefreshHarnessOnly_HarnessOnlyRegionContent_ReturnsRoleMatchedBlock verifies that
+// harnessOnlyRegionContent returns the role-matched protocol block as the region content.
+// The protocol version is stored as a tag attribute on the opening tag; the region content
+// is just the block text without any version comment prefix.
+func TestRefreshHarnessOnly_HarnessOnlyRegionContent_ReturnsRoleMatchedBlock(t *testing.T) {
 	cases := []struct {
-		name string
-		role domain.AgentRole
-		block []byte
+		name    string
+		role    domain.AgentRole
+		block   []byte
 		variant domain.ProtocolVariant
-		// hardcodedMarker, when non-empty, is used as the expected marker prefix instead of
-		// calling transform.ProtocolVersionComment. Required for CRLF cases to avoid circular
-		// expected-value derivation: with the stub returning "\n" for all inputs, deriving want
-		// through ProtocolVersionComment would make expected and actual converge on the same LF
-		// output, masking the required CRLF verification in RED phase.
-		hardcodedMarker string
 	}{
 		{
 			name:    "LF subagent block",
 			role:    domain.RoleSubagent,
 			block:   []byte(fixtureRefreshSubagentProtocolBlock),
 			variant: domain.ProtocolSubagent,
-			// LF case: no circular dependency; stub and implementation agree on "\n" terminator.
 		},
 		{
-			name:            "CRLF subagent block",
-			role:            domain.RoleSubagent,
-			block:           []byte(strings.ReplaceAll(fixtureRefreshSubagentProtocolBlock, "\n", "\r\n")),
-			variant:         domain.ProtocolSubagent,
-			hardcodedMarker: "<!-- protocol-version: " + fixtureRefreshProtocolVersion + " -->\r\n",
+			name:    "CRLF subagent block",
+			role:    domain.RoleSubagent,
+			block:   []byte(strings.ReplaceAll(fixtureRefreshSubagentProtocolBlock, "\n", "\r\n")),
+			variant: domain.ProtocolSubagent,
 		},
 		{
 			name:    "LF orchestrator block",
 			role:    domain.RoleOrchestrator,
 			block:   []byte(fixtureRefreshOrchestratorProtocolBlock),
 			variant: domain.ProtocolOrchestrator,
-			// LF case: no circular dependency.
 		},
 	}
 	for _, tc := range cases {
@@ -1738,22 +1728,12 @@ func TestRefreshHarnessOnly_HarnessOnlyRegionContent_MatchesCatalogBackedPath(t 
 				t.Fatalf("harnessOnlyRegionContent: %v", err)
 			}
 
-			// Build the expected content as marker + block. For CRLF cases use a hardcoded
-			// marker literal to ensure the test fails in RED phase (the stub returns "\n" for
-			// all inputs, so deriving want through ProtocolVersionComment would cause both
-			// expected and actual to share the same LF output, masking the CRLF requirement).
-			// For LF cases the stub and correct implementation agree, so ProtocolVersionComment
-			// is safe to use for the expected marker.
-			var want []byte
-			if tc.hardcodedMarker != "" {
-				want = []byte(tc.hardcodedMarker + string(tc.block))
-			} else {
-				marker := transform.ProtocolVersionComment(fixtureRefreshProtocolVersion, tc.block)
-				want = append([]byte(marker), tc.block...)
-			}
+			// Expected content is just the block; the version is stored as a tag attribute,
+			// not as a comment prefix in the region content.
+			want := tc.block
 
 			if !bytes.Equal(got, want) {
-				t.Errorf("harnessOnlyRegionContent output does not match expected marker + block;\n"+
+				t.Errorf("harnessOnlyRegionContent output does not match the role-matched block;\n"+
 					"want: %q\ngot:  %q", want, got)
 			}
 		})

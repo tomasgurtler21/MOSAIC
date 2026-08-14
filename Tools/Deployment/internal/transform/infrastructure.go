@@ -4,15 +4,16 @@ import (
 	"bytes"
 	"fmt"
 
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 )
 
 // InfrastructureBlock carries the metadata needed to assemble one
-// [[SECTION:InfrastructureAgent:{key}]] block in the orchestrator's
+// <InfrastructureAgent type="core" name="{key}"> block in the orchestrator's
 // InfrastructureAgents injection region.
 type InfrastructureBlock struct {
 	Key         string                        // agent key (section identifier)
-	Version     string                        // agent version (for infra-version comment)
+	Version     string                        // agent version (for the version attribute on the section tag)
 	Class       string                        // infrastructure class
 	Description string                        // agent description (prose for the table)
 	OnFailure   string                        // "halt" or "continue"
@@ -20,9 +21,9 @@ type InfrastructureBlock struct {
 }
 
 // AssembleInfrastructureBlocks produces the assembled bytes for the
-// [[INJECTION:InfrastructureAgents]] region from the given infrastructure agents.
+// <InfrastructureAgents type="project"> region from the given infrastructure agents.
 //
-// Each agent produces one [[SECTION:InfrastructureAgent:{key}]] block containing a
+// Each agent produces one <InfrastructureAgent type="core" name="{key}"> block containing a
 // markdown table with columns: Class | Trigger | Param | On Failure | Description.
 // One row is emitted per trigger entry; Class, On Failure, and Description are repeated
 // on every row. An empty TriggerParam is rendered as "-".
@@ -48,13 +49,14 @@ func AssembleInfrastructureBlocks(agents []InfrastructureBlock) (assembled []byt
 	return buf.Bytes(), keys
 }
 
-// writeInfrastructureBlock writes one [[SECTION:InfrastructureAgent:{key}]] block to buf.
+// writeInfrastructureBlock writes one infrastructure agent section block to buf.
+// The section open tag carries the agent's version as a tag attribute; no version
+// comment is emitted inside the section.
 func writeInfrastructureBlock(buf *bytes.Buffer, agent InfrastructureBlock) {
-	// Section open marker.
-	fmt.Fprintf(buf, "[[SECTION:InfrastructureAgent:%s]]\n", agent.Key)
-
-	// Version comment immediately inside the section.
-	fmt.Fprintf(buf, "<!-- infra-version: %s -->\n", agent.Version)
+	// Section open tag with version attribute. RenderOpenTagLine errors only on invalid
+	// names or kinds; both are controlled here, so the error is safely ignored.
+	openTag, _ := docformat.RenderOpenTagLine(docformat.NodeSection, "InfrastructureAgent:"+agent.Key, agent.Version)
+	buf.Write(openTag)
 
 	// Table header and separator.
 	buf.WriteString("| Class | Trigger | Param | On Failure | Description |\n")
@@ -70,6 +72,7 @@ func writeInfrastructureBlock(buf *bytes.Buffer, agent InfrastructureBlock) {
 			agent.Class, trig.Trigger, param, agent.OnFailure, agent.Description)
 	}
 
-	// Section close marker.
-	fmt.Fprintf(buf, "[[/SECTION:InfrastructureAgent:%s]]\n", agent.Key)
+	// Section close tag. RenderCloseTagLine errors only on invalid names; controlled here.
+	closeTag, _ := docformat.RenderCloseTagLine("InfrastructureAgent:" + agent.Key)
+	buf.Write(closeTag)
 }

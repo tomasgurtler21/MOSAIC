@@ -91,35 +91,35 @@ blocks:
 
 OUTER_BUNDLE_TEXT: this is maintainer documentation and must never reach a deployed agent.
 
-[[SECTION:AuthorityHierarchy:Subagent]]
+<AuthorityHierarchy type="core" name="Subagent">
 ### Authority Hierarchy
 
 Authority hierarchy content for subagents.
-[[/SECTION:AuthorityHierarchy:Subagent]]
+</AuthorityHierarchy>
 
-[[SECTION:ClosingProcedure:Subagent]]
+<ClosingProcedure type="core" name="Subagent">
 ### Closing Procedure
 
 Closing procedure content for subagents.
-[[/SECTION:ClosingProcedure:Subagent]]
+</ClosingProcedure>
 
-[[SECTION:ProtocolConstraints:Subagent]]
+<ProtocolConstraints type="core" name="Subagent">
 ### Protocol Constraints
 
 Protocol constraints content for subagents.
-[[/SECTION:ProtocolConstraints:Subagent]]
+</ProtocolConstraints>
 
-[[SECTION:ErrorHandlingCommon:Subagent]]
+<ErrorHandlingCommon type="core" name="Subagent">
 ### Error Handling Common
 
 Error handling common content for subagents.
-[[/SECTION:ErrorHandlingCommon:Subagent]]
+</ErrorHandlingCommon>
 
-[[SECTION:ExecutionPhilosophyCommon:Subagent]]
+<ExecutionPhilosophyCommon type="core" name="Subagent">
 ### Execution Philosophy Common
 
 Execution philosophy common content for subagents.
-[[/SECTION:ExecutionPhilosophyCommon:Subagent]]
+</ExecutionPhilosophyCommon>
 
 Trailing maintainer text that must not appear in any returned block.
 `
@@ -257,9 +257,11 @@ func TestBundleLoader_WellFormedDoc_AllFiveTargetsPresent(t *testing.T) {
 }
 
 // TestBundleLoader_WellFormedDoc_ContentExcludesOwnBoundaryTags verifies that the returned
-// block content does not include the block's own [[SECTION:]] boundary tag lines. The payload
+// block content does not include the block's own boundary tag lines. The payload
 // is the inner content only — the tag lines belong to the source document structure, not to
-// the deployed agent.
+// the deployed agent. In the new syntax, compound names like "AuthorityHierarchy:Subagent"
+// produce open tags of the form <AuthorityHierarchy type="core" name="Subagent"> and
+// close tags </AuthorityHierarchy>.
 func TestBundleLoader_WellFormedDoc_ContentExcludesOwnBoundaryTags(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	writeBundleDoc(t, root, []byte(wellFormedBundleDoc))
@@ -270,13 +272,25 @@ func TestBundleLoader_WellFormedDoc_ContentExcludesOwnBoundaryTags(t *testing.T)
 	}
 
 	for _, blk := range content.Blocks {
-		if bytes.Contains(blk.Content, []byte("[[SECTION:"+blk.Name+"]]")) {
-			t.Errorf("block %q Content contains its own opening boundary tag; "+
-				"only inner content must be returned, not the tag lines", blk.Name)
+		// Build the expected open and close tags for this block's compound name.
+		colonIdx := strings.Index(blk.Name, ":")
+		var openTag, closeTag string
+		if colonIdx >= 0 {
+			tagName := blk.Name[:colonIdx]
+			nameAttr := blk.Name[colonIdx+1:]
+			openTag = "<" + tagName + " type=\"core\" name=\"" + nameAttr + "\">"
+			closeTag = "</" + tagName + ">"
+		} else {
+			openTag = "<" + blk.Name + " type=\"core\">"
+			closeTag = "</" + blk.Name + ">"
 		}
-		if bytes.Contains(blk.Content, []byte("[[/SECTION:"+blk.Name+"]]")) {
-			t.Errorf("block %q Content contains its own closing boundary tag; "+
-				"only inner content must be returned, not the tag lines", blk.Name)
+		if bytes.Contains(blk.Content, []byte(openTag)) {
+			t.Errorf("block %q Content contains its own opening boundary tag %q; "+
+				"only inner content must be returned, not the tag lines", blk.Name, openTag)
+		}
+		if bytes.Contains(blk.Content, []byte(closeTag)) {
+			t.Errorf("block %q Content contains its own closing boundary tag %q; "+
+				"only inner content must be returned, not the tag lines", blk.Name, closeTag)
 		}
 	}
 }
@@ -408,9 +422,9 @@ blocks:
     specified_in: Development/Designs/AgentTemplateArchitecture.md
 ---
 
-[[SECTION:AuthorityHierarchy:Subagent]]
+<AuthorityHierarchy type="core" name="Subagent">
 Authority hierarchy content.
-[[/SECTION:AuthorityHierarchy:Subagent]]
+</AuthorityHierarchy>
 `)
 	writeBundleDoc(t, root, docNoVersion)
 
@@ -464,9 +478,9 @@ blocks:
     specified_in: Development/Designs/AgentTemplateArchitecture.md
 ---
 
-[[SECTION:AuthorityHierarchy:Subagent]]
+<AuthorityHierarchy type="core" name="Subagent">
 Content.
-[[/SECTION:AuthorityHierarchy:Subagent]]
+</AuthorityHierarchy>
 `)
 	writeBundleDoc(t, root, docMissingTarget)
 
@@ -495,7 +509,7 @@ blocks:
     specified_in: Development/Designs/AgentTemplateArchitecture.md
 ---
 
-Body text but no [[SECTION:AuthorityHierarchy:Subagent]] region.
+Body text but no <AuthorityHierarchy type="core" name="Subagent"> region.
 `)
 	writeBundleDoc(t, root, docMissingSection)
 
@@ -529,8 +543,8 @@ blocks:
     specified_in: Development/Designs/AgentTemplateArchitecture.md
 ---
 
-[[SECTION:AuthorityHierarchy:Subagent]]
-[[/SECTION:AuthorityHierarchy:Subagent]]
+<AuthorityHierarchy type="core" name="Subagent">
+</AuthorityHierarchy>
 `)
 	writeBundleDoc(t, root, docEmptySection)
 
@@ -553,7 +567,7 @@ blocks:
 // Whitespace-only content would produce an invisible deployed region.
 func TestBundleLoader_WhitespaceOnlyBlockSection_ReturnsErrBundleBlockEmpty(t *testing.T) {
 	root := makeTempMosaicRoot(t)
-	docWhitespace := []byte("---\nbundle_version: \"1.0.0\"\nblocks:\n  - name: \"AuthorityHierarchy:Subagent\"\n    target: AuthorityHierarchy\n    applies_to: subagent\n    specified_in: Development/Designs/AgentTemplateArchitecture.md\n---\n\n[[SECTION:AuthorityHierarchy:Subagent]]\n   \n\t\n\n[[/SECTION:AuthorityHierarchy:Subagent]]\n")
+	docWhitespace := []byte("---\nbundle_version: \"1.0.0\"\nblocks:\n  - name: \"AuthorityHierarchy:Subagent\"\n    target: AuthorityHierarchy\n    applies_to: subagent\n    specified_in: Development/Designs/AgentTemplateArchitecture.md\n---\n\n<AuthorityHierarchy type=\"core\" name=\"Subagent\">\n   \n\t\n\n</AuthorityHierarchy>\n")
 	writeBundleDoc(t, root, docWhitespace)
 
 	_, err := catalog.FileBundleLoader{}.LoadBundle(root)

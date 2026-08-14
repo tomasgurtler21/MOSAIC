@@ -30,8 +30,8 @@ var requiredColumns = []string{"Phase", "Subagent", "HITL", "Input", "Output"}
 // row-identified routing table model. It parses but does not interpret:
 // no refusal decisions, no grouping, no path resolution.
 //
-// The content is the raw bytes between the [[SECTION:Workflow:{id}]] boundary
-// tags. The info carries the identifier and version extracted by orchfile.
+// The content is the raw bytes inside the <Workflow type="core" name="{id}">
+// region. The info carries the identifier and version extracted by orchfile.
 //
 // Required columns: Phase, Subagent, HITL, Input, Output.
 // Optional columns: On Success, On Findings.

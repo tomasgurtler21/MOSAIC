@@ -8,10 +8,10 @@ id: orphan-on-disk
 referenced_agents: []
 ---
 
-[[SECTION:Workflow:orphan-on-disk]]
+<Workflow type="core" name="orphan-on-disk" version="1.0">
 ## Orphan On Disk Workflow
 
 This workflow file exists on disk but has no corresponding entry in Workflows/Index.md.
 The catalog must report a file-orphan issue for this workflow.
 
-[[/SECTION:Workflow:orphan-on-disk]]
+</Workflow>

@@ -24,7 +24,7 @@ func validateDocumentRules(d *Document, opts ValidateOptions) []Issue {
 		issues = append(issues, checkFrontmatterRules(fm, opts)...)
 	}
 
-	// Rule 8a: [[DEPLOYED:CommunicationProtocol]] must be present for all roles.
+	// Rule 8a: A CommunicationProtocol managed region must be present for all roles.
 	// Skipped when Role is not set (the validator cannot know what to expect).
 	if opts.Role != "" {
 		issues = append(issues, checkRule8a(body)...)
@@ -35,14 +35,14 @@ func validateDocumentRules(d *Document, opts ValidateOptions) []Issue {
 		issues = append(issues, checkConductRegions(body, opts.Role)...)
 	}
 
-	// Rule 12: In a source file, every [[DEPLOYED:]] region must be empty (or hold only
+	// Rule 12: In a source file, every managed region must be empty (or hold only
 	// empty nested user-owned markers). Skipped when Kind is DocumentUnknown or DocumentDeployed.
 	if opts.Kind == DocumentSource {
 		issues = append(issues, checkSourceDeployedRegions(body)...)
 	}
 
-	// Custom-region-in-source: a [[CUSTOM:]] region in a source document is an error.
-	// Custom regions are project-owned content that exists only in deployed files.
+	// Custom-region-in-source: a custom region (type="custom") in a source document is an
+	// error. Custom regions are project-owned content that exists only in deployed files.
 	// Skipped when Kind is DocumentUnknown or DocumentDeployed.
 	if opts.Kind == DocumentSource {
 		issues = append(issues, checkCustomRegionInSource(body)...)
@@ -191,13 +191,13 @@ var conductRegionNames = []string{
 }
 
 // checkRule8a reports a "missing-contract-region" error when the document lacks a
-// [[DEPLOYED:CommunicationProtocol]] region anywhere in the body.
+// <CommunicationProtocol type="managed"> region anywhere in the body.
 func checkRule8a(body *Body) []Issue {
 	if _, ok := body.Deployed("CommunicationProtocol"); !ok {
 		return []Issue{{
 			Severity: SeverityError,
 			Code:     "missing-contract-region",
-			Message:  "document is missing [[DEPLOYED:CommunicationProtocol]] which is required for all deployed agents",
+			Message:  "document is missing a CommunicationProtocol managed region which is required for all deployed agents",
 		}}
 	}
 	return nil
@@ -214,7 +214,7 @@ func checkConductRegions(body *Body, role string) []Issue {
 				issues = append(issues, Issue{
 					Severity: SeverityWarning,
 					Code:     "missing-conduct-region",
-					Message:  fmt.Sprintf("subagent is missing required conduct region [[DEPLOYED:%s]]", name),
+					Message:  fmt.Sprintf("subagent is missing required conduct region %q (type=\"managed\")", name),
 					Node:     name,
 				})
 			}
@@ -225,7 +225,7 @@ func checkConductRegions(body *Body, role string) []Issue {
 				issues = append(issues, Issue{
 					Severity: SeverityWarning,
 					Code:     "role-forbidden-region",
-					Message:  fmt.Sprintf("orchestrator carries [[DEPLOYED:%s]] which is reserved for subagents", name),
+					Message:  fmt.Sprintf("orchestrator carries managed region %q which is reserved for subagents", name),
 					Node:     name,
 				})
 			}
@@ -238,12 +238,12 @@ func checkConductRegions(body *Body, role string) []Issue {
 // Rule 12: Source deployed regions must be empty
 // ---------------------------------------------------------------------------
 
-// SourceDeployedRegionIsEmpty reports whether a [[DEPLOYED:]] region satisfies the
-// source-file emptiness requirement.
+// SourceDeployedRegionIsEmpty reports whether a managed region (type="managed") satisfies
+// the source-file emptiness requirement.
 //
-// A region is empty when its content, after removing every nested [[INJECTION:]] or
-// [[CUSTOM:]] node that is itself whitespace-only (removing the node's tags along with
-// its content), is whitespace-only.
+// A region is empty when its content, after removing every nested injection (type="project")
+// or custom (type="custom") node that is itself whitespace-only (removing the node's tags
+// along with its content), is whitespace-only.
 //
 // A nested user-owned region carrying non-whitespace content makes the parent non-empty.
 // Any other non-whitespace content makes the parent non-empty.
@@ -268,15 +268,15 @@ func SourceDeployedRegionIsEmpty(n *Node) bool {
 }
 
 // checkCustomRegionInSource reports a "custom-region-in-source" error for every
-// [[CUSTOM:]] region found in a source document. Custom regions are project-owned
-// content that exists only in deployed files.
+// custom region (type="custom") found in a source document. Custom regions are
+// project-owned content that exists only in deployed files.
 func checkCustomRegionInSource(body *Body) []Issue {
 	var issues []Issue
 	for _, node := range body.CustomRegions() {
 		issues = append(issues, Issue{
 			Severity: SeverityError,
 			Code:     "custom-region-in-source",
-			Message:  fmt.Sprintf("source file declares [[CUSTOM:%s]]; custom regions exist only in deployed files", node.Name()),
+			Message:  fmt.Sprintf("source file declares custom region %q; custom regions exist only in deployed files", node.Name()),
 			Node:     node.Name(),
 		})
 	}
@@ -284,8 +284,8 @@ func checkCustomRegionInSource(body *Body) []Issue {
 }
 
 // checkSourceDeployedRegions reports a "populated-source-region" error for every
-// [[DEPLOYED:]] region in a source file that contains non-whitespace content beyond
-// empty nested user-owned markers.
+// managed region (type="managed") in a source file that contains non-whitespace content
+// beyond empty nested user-owned markers.
 func checkSourceDeployedRegions(body *Body) []Issue {
 	var issues []Issue
 	for _, node := range body.DeployedRegions() {
@@ -293,7 +293,7 @@ func checkSourceDeployedRegions(body *Body) []Issue {
 			issues = append(issues, Issue{
 				Severity: SeverityError,
 				Code:     "populated-source-region",
-				Message:  fmt.Sprintf("source file has content inside [[DEPLOYED:%s]]; deployed regions in source files must be empty placeholders", node.Name()),
+				Message:  fmt.Sprintf("source file has content inside managed region %q; managed regions in source files must be empty placeholders", node.Name()),
 				Node:     node.Name(),
 			})
 		}

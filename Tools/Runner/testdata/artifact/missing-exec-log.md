@@ -15,13 +15,13 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:Artifacts]]
+<Artifacts type="core">
 | Artifact | Created In | Created By         |
 |----------|------------|--------------------|
 | Plan.md  | PLANNING   | planner-tdd-soft#1 |
-[[/SECTION:Artifacts]]
+</Artifacts>
 
-[[SECTION:WorkflowNotes]]
+<WorkflowNotes type="core">
 | Seq | Note |
 |-----|------|
-[[/SECTION:WorkflowNotes]]
+</WorkflowNotes>

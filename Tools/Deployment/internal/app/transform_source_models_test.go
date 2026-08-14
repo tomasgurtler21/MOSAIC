@@ -68,13 +68,13 @@ func writeSrcModelFile(t *testing.T, dir, name, model string) string {
 			"injections_version: \"3.0.0\"\n" +
 			"src_model: " + model + "\n" +
 			"---\n" +
-			"[[SECTION:Identity]]\nYou are the agent.\n[[/SECTION:Identity]]\n")
+			"<Identity type=\"core\">\nYou are the agent.\n</Identity>\n")
 	} else {
 		content = []byte("---\n" +
 			"transform_version: \"2.1.0\"\n" +
 			"injections_version: \"3.0.0\"\n" +
 			"---\n" +
-			"[[SECTION:Identity]]\nYou are the agent.\n[[/SECTION:Identity]]\n")
+			"<Identity type=\"core\">\nYou are the agent.\n</Identity>\n")
 	}
 	p := filepath.Join(dir, name)
 	if err := os.WriteFile(p, content, 0o644); err != nil {

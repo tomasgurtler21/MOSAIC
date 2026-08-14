@@ -119,11 +119,11 @@ func asRefusalError(t *testing.T, err error) *domain.RefusalError {
 
 // ---- Fixture content extracted from real workflow files ----
 //
-// quickFixContent is the raw bytes of the [[SECTION:Workflow:quick-fix]] region
-// from Workflows/Build/quick-fix.md (version 3.0). The content is the bytes
-// between the boundary tags, not including the tags themselves.
-const quickFixContent = `<!-- workflow-version: 3.0 -->
-## Quick Fix Workflow
+// quickFixContent is the raw bytes of the <Workflow type="core" name="quick-fix" version="3.0">
+// region from Workflows/Build/quick-fix.md (version 3.0). The content is the bytes
+// between the boundary tags, not including the tags themselves. The version is
+// supplied separately via WorkflowInfo when calling workflow.Parse.
+const quickFixContent = `## Quick Fix Workflow
 
 **Use when:** Small changes, bug fixes, or well-understood modifications. Skips research and design.
 
@@ -138,10 +138,9 @@ const quickFixContent = `<!-- workflow-version: 3.0 -->
 - Single-stage plans use Stage-1/ folder for consistency (Decision 15)
 `
 
-// brownfieldContent is the raw bytes of the [[SECTION:Workflow:brownfield-tdd-build-verified]]
+// brownfieldContent is the raw bytes of the <Workflow type="core" name="brownfield-tdd-build-verified" version="2.0">
 // region from Workflows/Build/brownfield-tdd-build-verified.md (version 2.0).
-const brownfieldContent = `<!-- workflow-version: 2.0 -->
-## Brownfield TDD Build-Verified Workflow
+const brownfieldContent = `## Brownfield TDD Build-Verified Workflow
 
 **Use when:** New features or significant changes to an **existing codebase** requiring test-first development where **compilation/build cannot be verified via standard terminal tools**.
 
@@ -162,11 +161,10 @@ const brownfieldContent = `<!-- workflow-version: 2.0 -->
 | EXECUTION.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-impl.md | Stage-{StageNumber}/implementation-review.md |
 `
 
-// implOnlyContent is the raw bytes of the [[SECTION:Workflow:implementation-only]]
+// implOnlyContent is the raw bytes of the <Workflow type="core" name="implementation-only" version="3.1">
 // region from Workflows/Build/implementation-only.md (version 3.1). This
 // workflow starts with EXECUTION rows (no pre-EXECUTION rows).
-const implOnlyContent = `<!-- workflow-version: 3.1 -->
-## Implementation Only Workflow
+const implOnlyContent = `## Implementation Only Workflow
 
 **Use when:** Research, planning, and design already complete.
 
@@ -179,16 +177,14 @@ const implOnlyContent = `<!-- workflow-version: 3.1 -->
 
 // minimalContent is a minimal routing table with only required columns.
 // Used to test that optional columns are absent (ColumnPresent == false).
-const minimalContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const minimalContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | PLANNING | planner | ✅ | - | Plan.md |
 | EXECUTION.[StageNumber] | implementer | ❌ | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
 `
 
 // emptyTableContent has a header and separator row but no data rows.
-const emptyTableContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const emptyTableContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 `
 
@@ -196,8 +192,7 @@ const emptyTableContent = `<!-- workflow-version: 1.0 -->
 // used to verify the symmetric no-hint behavior for that optional column.
 // KC-8/FR-27 requires that "-" in any optional column means no hint, yielding
 // OptionalHint{ColumnPresent: true, Value: ""}.
-const onSuccessDashContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | On Success | On Findings | Input | Output |
+const onSuccessDashContent = `| Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
 | PLANNING | planner | ✅ | - | next-step | - | Plan.md |
 `
@@ -205,8 +200,7 @@ const onSuccessDashContent = `<!-- workflow-version: 1.0 -->
 // outputDashContent is a routing table where the Output cell is "-",
 // used to verify that "-" in the Output column produces an empty OutputArtifacts slice,
 // symmetric with the Input column behavior tested in TestParse_QuickFix_DashInput_ProducesEmptyArtifacts.
-const outputDashContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const outputDashContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | PLANNING | planner | ✅ | Plan.md | - |
 `
@@ -680,7 +674,7 @@ func TestParse_OutputDash_ProducesEmptyArtifacts(t *testing.T) {
 // ---- Refusal cases ----
 
 func TestParse_NoTable_ReturnsError(t *testing.T) {
-	content := []byte("<!-- workflow-version: 1.0 -->\nNo routing table here.\n")
+	content := []byte("No routing table here.\n")
 	info := domain.WorkflowInfo{ID: "no-table", Version: "1.0"}
 
 	_, err := workflow.Parse(content, info)
@@ -691,7 +685,7 @@ func TestParse_NoTable_ReturnsError(t *testing.T) {
 }
 
 func TestParse_NoTable_ReturnsRefusalError(t *testing.T) {
-	content := []byte("<!-- workflow-version: 1.0 -->\nNo routing table here.\n")
+	content := []byte("No routing table here.\n")
 	info := domain.WorkflowInfo{ID: "no-table", Version: "1.0"}
 
 	_, err := workflow.Parse(content, info)
@@ -700,8 +694,7 @@ func TestParse_NoTable_ReturnsRefusalError(t *testing.T) {
 }
 
 func TestParse_MissingRequiredColumn_Phase_ReturnsRefusalError(t *testing.T) {
-	content := []byte(`<!-- workflow-version: 1.0 -->
-| Subagent | HITL | Input | Output |
+	content := []byte(`| Subagent | HITL | Input | Output |
 |----------|:----:|-------|--------|
 | planner | ✅ | - | Plan.md |
 `)
@@ -716,8 +709,7 @@ func TestParse_MissingRequiredColumn_Phase_ReturnsRefusalError(t *testing.T) {
 }
 
 func TestParse_MissingRequiredColumn_Subagent_ReturnsRefusalError(t *testing.T) {
-	content := []byte(`<!-- workflow-version: 1.0 -->
-| Phase | HITL | Input | Output |
+	content := []byte(`| Phase | HITL | Input | Output |
 |-------|:----:|-------|--------|
 | PLANNING | ✅ | - | Plan.md |
 `)
@@ -732,8 +724,7 @@ func TestParse_MissingRequiredColumn_Subagent_ReturnsRefusalError(t *testing.T) 
 }
 
 func TestParse_MissingRequiredColumn_HITL_ReturnsRefusalError(t *testing.T) {
-	content := []byte(`<!-- workflow-version: 1.0 -->
-| Phase | Subagent | Input | Output |
+	content := []byte(`| Phase | Subagent | Input | Output |
 |-------|----------|-------|--------|
 | PLANNING | planner | - | Plan.md |
 `)
@@ -748,8 +739,7 @@ func TestParse_MissingRequiredColumn_HITL_ReturnsRefusalError(t *testing.T) {
 }
 
 func TestParse_MissingRequiredColumn_Input_ReturnsRefusalError(t *testing.T) {
-	content := []byte(`<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Output |
+	content := []byte(`| Phase | Subagent | HITL | Output |
 |-------|----------|:----:|--------|
 | PLANNING | planner | ✅ | Plan.md |
 `)
@@ -764,8 +754,7 @@ func TestParse_MissingRequiredColumn_Input_ReturnsRefusalError(t *testing.T) {
 }
 
 func TestParse_MissingRequiredColumn_Output_ReturnsRefusalError(t *testing.T) {
-	content := []byte(`<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input |
+	content := []byte(`| Phase | Subagent | HITL | Input |
 |-------|----------|:----:|-------|
 | PLANNING | planner | ✅ | - |
 `)
@@ -786,8 +775,7 @@ func TestParse_MissingRequiredColumn_Output_ReturnsRefusalError(t *testing.T) {
 // callers and error messages can attribute and locate the problem.
 
 func TestParse_MissingRequiredColumn_Phase_RefusalError_ComponentAndResource(t *testing.T) {
-	content := []byte(`<!-- workflow-version: 1.0 -->
-| Subagent | HITL | Input | Output |
+	content := []byte(`| Subagent | HITL | Input | Output |
 |----------|:----:|-------|--------|
 | planner | ✅ | - | Plan.md |
 `)
@@ -805,8 +793,7 @@ func TestParse_MissingRequiredColumn_Phase_RefusalError_ComponentAndResource(t *
 }
 
 func TestParse_MissingRequiredColumn_Subagent_RefusalError_ComponentAndResource(t *testing.T) {
-	content := []byte(`<!-- workflow-version: 1.0 -->
-| Phase | HITL | Input | Output |
+	content := []byte(`| Phase | HITL | Input | Output |
 |-------|:----:|-------|--------|
 | PLANNING | ✅ | - | Plan.md |
 `)
@@ -824,8 +811,7 @@ func TestParse_MissingRequiredColumn_Subagent_RefusalError_ComponentAndResource(
 }
 
 func TestParse_MissingRequiredColumn_HITL_RefusalError_ComponentAndResource(t *testing.T) {
-	content := []byte(`<!-- workflow-version: 1.0 -->
-| Phase | Subagent | Input | Output |
+	content := []byte(`| Phase | Subagent | Input | Output |
 |-------|----------|-------|--------|
 | PLANNING | planner | - | Plan.md |
 `)
@@ -843,8 +829,7 @@ func TestParse_MissingRequiredColumn_HITL_RefusalError_ComponentAndResource(t *t
 }
 
 func TestParse_MissingRequiredColumn_Input_RefusalError_ComponentAndResource(t *testing.T) {
-	content := []byte(`<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Output |
+	content := []byte(`| Phase | Subagent | HITL | Output |
 |-------|----------|:----:|--------|
 | PLANNING | planner | ✅ | Plan.md |
 `)
@@ -862,8 +847,7 @@ func TestParse_MissingRequiredColumn_Input_RefusalError_ComponentAndResource(t *
 }
 
 func TestParse_MissingRequiredColumn_Output_RefusalError_ComponentAndResource(t *testing.T) {
-	content := []byte(`<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input |
+	content := []byte(`| Phase | Subagent | HITL | Input |
 |-------|----------|:----:|-------|
 | PLANNING | planner | ✅ | - |
 `)
@@ -923,8 +907,7 @@ func TestParse_RefusalError_ResourceNamesWorkflow(t *testing.T) {
 
 // groupedPhasesContent has a non-execution row, a bare EXECUTION row, and two
 // grouped EXECUTION rows (Test and Implementation groups). No approach table.
-const groupedPhasesContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const groupedPhasesContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | RESEARCH | agent-a | ❌ | - | out.md |
 | EXECUTION.[StageNumber] | agent-b | ❌ | - | out.md |
@@ -934,8 +917,7 @@ const groupedPhasesContent = `<!-- workflow-version: 1.0 -->
 
 // approachTableContent has a routing table with grouped EXECUTION rows followed
 // by a **Execution Groups:** heading and a two-row approach table.
-const approachTableContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.Test.[StageNumber] | agent-a | ❌ | - | out.md |
 | EXECUTION.Implementation.[StageNumber] | agent-b | ❌ | - | out.md |
@@ -950,8 +932,7 @@ const approachTableContent = `<!-- workflow-version: 1.0 -->
 
 // approachTableSingleGroupRowContent has approach rows that each list only one
 // group, testing that absent groups are correctly omitted.
-const approachTableSingleGroupRowContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableSingleGroupRowContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.Test.[StageNumber] | agent-a | ❌ | - | out.md |
 | EXECUTION.Implementation.[StageNumber] | agent-b | ❌ | - | out.md |
@@ -966,8 +947,7 @@ const approachTableSingleGroupRowContent = `<!-- workflow-version: 1.0 -->
 
 // approachTableThreeGroupsContent has an approach row that lists three groups,
 // verifying that more than two groups are decoded correctly.
-const approachTableThreeGroupsContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableThreeGroupsContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.Alpha.[StageNumber] | agent-a | ❌ | - | out.md |
 | EXECUTION.Beta.[StageNumber] | agent-b | ❌ | - | out.md |
@@ -982,32 +962,28 @@ const approachTableThreeGroupsContent = `<!-- workflow-version: 1.0 -->
 
 // malformedPhaseGroupNoStageContent has EXECUTION.Test with no [StageNumber]
 // segment following the group token (refusal P1).
-const malformedPhaseGroupNoStageContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const malformedPhaseGroupNoStageContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.Test | agent-a | ❌ | - | out.md |
 `
 
 // malformedPhaseEmptyGroupContent has EXECUTION..[StageNumber] where the group
 // segment between the two dots is empty (refusal P2).
-const malformedPhaseEmptyGroupContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const malformedPhaseEmptyGroupContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION..[StageNumber] | agent-a | ❌ | - | out.md |
 `
 
 // malformedPhaseStageNotBracketedContent has EXECUTION.Test.1 where the segment
 // after the group token does not begin with "[" (refusal P1).
-const malformedPhaseStageNotBracketedContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const malformedPhaseStageNotBracketedContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.Test.1 | agent-a | ❌ | - | out.md |
 `
 
 // approachTableHeadingPresentNoTableContent has the reserved heading but no
 // markdown table follows it (refusal P3).
-const approachTableHeadingPresentNoTableContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableHeadingPresentNoTableContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
 
@@ -1018,8 +994,7 @@ This is not a table.
 
 // approachTableMissingApproachColumnContent has a heading with a table that is
 // missing the required "Approach" column (refusal P4).
-const approachTableMissingApproachColumnContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableMissingApproachColumnContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
 
@@ -1032,8 +1007,7 @@ const approachTableMissingApproachColumnContent = `<!-- workflow-version: 1.0 --
 
 // approachTableMissingGroupsColumnContent has a heading with a table that is
 // missing the required "Groups" column (refusal P5).
-const approachTableMissingGroupsColumnContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableMissingGroupsColumnContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
 
@@ -1046,8 +1020,7 @@ const approachTableMissingGroupsColumnContent = `<!-- workflow-version: 1.0 -->
 
 // approachTableZeroDataRowsContent has a heading with a table header and
 // separator row but no data rows (refusal P6).
-const approachTableZeroDataRowsContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableZeroDataRowsContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
 
@@ -1059,8 +1032,7 @@ const approachTableZeroDataRowsContent = `<!-- workflow-version: 1.0 -->
 
 // approachTableEmptyApproachCellContent has a data row with an empty Approach
 // cell (refusal P7).
-const approachTableEmptyApproachCellContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableEmptyApproachCellContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
 
@@ -1073,8 +1045,7 @@ const approachTableEmptyApproachCellContent = `<!-- workflow-version: 1.0 -->
 
 // approachTableEmptyGroupsCellContent has a data row with an empty Groups cell
 // (refusal P7).
-const approachTableEmptyGroupsCellContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableEmptyGroupsCellContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
 
@@ -1087,8 +1058,7 @@ const approachTableEmptyGroupsCellContent = `<!-- workflow-version: 1.0 -->
 
 // approachTableEmptyTokenInGroupsCellContent has a Groups cell with an empty
 // token between commas: "Test, , Implementation" (refusal P7).
-const approachTableEmptyTokenInGroupsCellContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableEmptyTokenInGroupsCellContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
 
@@ -1101,8 +1071,7 @@ const approachTableEmptyTokenInGroupsCellContent = `<!-- workflow-version: 1.0 -
 
 // approachTableDuplicateApproachContent has two rows with the same Approach
 // token (refusal P8).
-const approachTableDuplicateApproachContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableDuplicateApproachContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
 
@@ -1116,8 +1085,7 @@ const approachTableDuplicateApproachContent = `<!-- workflow-version: 1.0 -->
 
 // approachTableDuplicateGroupWithinRowContent has a Groups cell that lists the
 // same group token twice: "Test, Implementation, Test" (refusal P8).
-const approachTableDuplicateGroupWithinRowContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableDuplicateGroupWithinRowContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
 
@@ -1719,8 +1687,7 @@ func TestParse_ApproachTable_Refusal_ResourceNamesWorkflow(t *testing.T) {
 // branch of the P2 rule, distinct from the empty-segment case (EXECUTION..[StageNumber]).
 // Per the algorithm contract: "the segment before the first '.' is empty after
 // trimming, or contains whitespace → error."
-const malformedPhaseWhitespaceGroupContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const malformedPhaseWhitespaceGroupContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.Te st.[StageNumber] | agent-a | ❌ | - | out.md |
 `
@@ -1754,8 +1721,7 @@ func TestParse_MalformedPhase_WhitespaceGroupSegment_ReturnsRefusalError(t *test
 // approachTableNearMissHeadingContent has a line that contains the reserved
 // heading text but is not an exact trimmed full-line match (trailing text appended).
 // The approach table that follows this near-miss line must NOT be decoded.
-const approachTableNearMissHeadingContent = `<!-- workflow-version: 1.0 -->
-| Phase | Subagent | HITL | Input | Output |
+const approachTableNearMissHeadingContent = `| Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | EXECUTION.[StageNumber] | agent-a | ❌ | - | out.md |
 

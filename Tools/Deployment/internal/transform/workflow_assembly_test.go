@@ -3,8 +3,8 @@ package transform_test
 // workflow_assembly_test.go covers Stage 10 AvailableWorkflows assembly (InjectionWorkflow):
 //
 //   - Zero workflows: the AvailableWorkflows injection is left empty.
-//   - Single workflow: the [[SECTION:Workflow:{id}]] block is copied verbatim into the
-//     injection content, including the workflow-version comment and the phase table.
+//   - Single workflow: the <Workflow type="core" name="{id}" version="..."> block is copied
+//     verbatim into the injection content, including the version attribute and the phase table.
 //   - Multiple workflows: blocks are composed in the order supplied by Request.Workflows.
 //     The order must be deterministic and match the caller's selection order.
 //   - Re-injection: passing the same set of workflows on a subsequent update does not
@@ -22,7 +22,7 @@ import (
 )
 
 // orchestratorWithWorkflows is an orchestrator-like source that has both an
-// [[INJECTION:IdentityExtension]] and a [[DEPLOYED:AvailableWorkflows]] inside the
+// <IdentityExtension type="project"> and a <AvailableWorkflows type="managed"> inside the
 // Identity section. This is the canonical shape of the real orchestrator agent.
 const orchestratorWithWorkflows = `---
 version: 6.0.0
@@ -35,17 +35,17 @@ tier_rationale: multi-phase coordination
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Orchestrator Agent
 
 You are the Orchestrator.
 
-[[DEPLOYED:AvailableWorkflows]]
-[[/DEPLOYED:AvailableWorkflows]]
+<AvailableWorkflows type="managed">
+</AvailableWorkflows>
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 `
 
 // deployedOrchestratorWithOneWorkflow is a deployed orchestrator whose AvailableWorkflows
@@ -60,14 +60,13 @@ model: claude/claude-sonnet
 tools: [read-file, write-file, edit-file, search-file, search-text, run-terminal, ask-user]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Orchestrator Agent
 
 You are the Orchestrator.
 
-[[DEPLOYED:AvailableWorkflows]]
-[[SECTION:Workflow:quick-fix]]
-<!-- workflow-version: 3.0 -->
+<AvailableWorkflows type="managed">
+<Workflow type="core" name="quick-fix" version="3.0">
 ## Quick Fix Workflow
 
 **Use when:** Small changes and bug fixes.
@@ -76,17 +75,16 @@ You are the Orchestrator.
 |-------|----------|:----:|
 | PLANNING | planner | ✅ |
 
-[[/SECTION:Workflow:quick-fix]]
-[[/DEPLOYED:AvailableWorkflows]]
+</Workflow>
+</AvailableWorkflows>
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 `
 
 // Workflow block fixtures matching real workflow file structure.
-const quickFixBlock = `[[SECTION:Workflow:quick-fix]]
-<!-- workflow-version: 3.0 -->
+const quickFixBlock = `<Workflow type="core" name="quick-fix" version="3.0">
 ## Quick Fix Workflow
 
 **Use when:** Small changes and bug fixes.
@@ -95,11 +93,10 @@ const quickFixBlock = `[[SECTION:Workflow:quick-fix]]
 |-------|----------|:----:|
 | PLANNING | planner | ✅ |
 
-[[/SECTION:Workflow:quick-fix]]
+</Workflow>
 `
 
-const greenfieldTDDBlock = `[[SECTION:Workflow:greenfield-tdd]]
-<!-- workflow-version: 3.3 -->
+const greenfieldTDDBlock = `<Workflow type="core" name="greenfield-tdd" version="3.3">
 ## Greenfield TDD Workflow
 
 **Use when:** Building a new project from scratch.
@@ -109,7 +106,7 @@ const greenfieldTDDBlock = `[[SECTION:Workflow:greenfield-tdd]]
 | RESEARCH | requirements-refinement | ✅ |
 | PLANNING | planner-tdd-soft | ✅ |
 
-[[/SECTION:Workflow:greenfield-tdd]]
+</Workflow>
 `
 
 // ---------------------------------------------------------------------------
@@ -185,16 +182,15 @@ func TestAvailableWorkflows_SingleWorkflow_BlockCopiedVerbatim(t *testing.T) {
 	}
 
 	// The block content must be present verbatim inside the injection.
-	// We check that the section open tag, the version comment, and the close tag all appear.
-	for _, marker := range []string{
-		"[[SECTION:Workflow:quick-fix]]",
-		"<!-- workflow-version: 3.0 -->",
+	// We check that the section open tag (with version), the prose, and the close tag all appear.
+	for _, want := range []string{
+		`<Workflow type="core" name="quick-fix" version="3.0">`,
 		"## Quick Fix Workflow",
-		"[[/SECTION:Workflow:quick-fix]]",
+		"</Workflow>",
 	} {
-		if !bytes.Contains(node.Content(), []byte(marker)) {
-			t.Errorf("AvailableWorkflows content missing expected marker %q\ncontent: %q",
-				marker, node.Content())
+		if !bytes.Contains(node.Content(), []byte(want)) {
+			t.Errorf("AvailableWorkflows content missing expected text %q\ncontent: %q",
+				want, node.Content())
 		}
 	}
 
@@ -255,16 +251,16 @@ func TestAvailableWorkflows_MultipleWorkflows_ComposedInSelectionOrder(t *testin
 	content := node.Content()
 
 	// Both blocks must be present.
-	if !bytes.Contains(content, []byte("[[SECTION:Workflow:greenfield-tdd]]")) {
+	if !bytes.Contains(content, []byte(`name="greenfield-tdd"`)) {
 		t.Error("AvailableWorkflows content missing greenfield-tdd block")
 	}
-	if !bytes.Contains(content, []byte("[[SECTION:Workflow:quick-fix]]")) {
+	if !bytes.Contains(content, []byte(`name="quick-fix"`)) {
 		t.Error("AvailableWorkflows content missing quick-fix block")
 	}
 
 	// Order: greenfield-tdd must appear before quick-fix.
-	gfPos := bytes.Index(content, []byte("[[SECTION:Workflow:greenfield-tdd]]"))
-	qfPos := bytes.Index(content, []byte("[[SECTION:Workflow:quick-fix]]"))
+	gfPos := bytes.Index(content, []byte(`name="greenfield-tdd"`))
+	qfPos := bytes.Index(content, []byte(`name="quick-fix"`))
 	if gfPos >= qfPos {
 		t.Errorf("workflow blocks not in selection order: greenfield-tdd at %d, quick-fix at %d (expected greenfield-tdd first)",
 			gfPos, qfPos)
@@ -371,19 +367,19 @@ func TestAvailableWorkflows_ReinjectionWithExpandedSet_NoDuplication(t *testing.
 	content := node.Content()
 
 	// Both workflows must appear.
-	if !bytes.Contains(content, []byte("[[SECTION:Workflow:quick-fix]]")) {
+	if !bytes.Contains(content, []byte(`name="quick-fix"`)) {
 		t.Error("quick-fix block absent from re-injected AvailableWorkflows")
 	}
-	if !bytes.Contains(content, []byte("[[SECTION:Workflow:greenfield-tdd]]")) {
+	if !bytes.Contains(content, []byte(`name="greenfield-tdd"`)) {
 		t.Error("greenfield-tdd block absent from re-injected AvailableWorkflows")
 	}
 
 	// Each workflow must appear exactly once (no duplication from the deployed file).
-	quickFixCount := bytes.Count(content, []byte("[[SECTION:Workflow:quick-fix]]"))
+	quickFixCount := bytes.Count(content, []byte(`name="quick-fix"`))
 	if quickFixCount != 1 {
 		t.Errorf("quick-fix block appears %d times in AvailableWorkflows; want exactly 1", quickFixCount)
 	}
-	greenfieldCount := bytes.Count(content, []byte("[[SECTION:Workflow:greenfield-tdd]]"))
+	greenfieldCount := bytes.Count(content, []byte(`name="greenfield-tdd"`))
 	if greenfieldCount != 1 {
 		t.Errorf("greenfield-tdd block appears %d times in AvailableWorkflows; want exactly 1", greenfieldCount)
 	}
@@ -428,17 +424,16 @@ func TestAvailableWorkflows_SameWorkflowReinjected_NoDuplication(t *testing.T) {
 	}
 
 	// quick-fix must appear exactly once.
-	count := bytes.Count(node.Content(), []byte("[[SECTION:Workflow:quick-fix]]"))
+	count := bytes.Count(node.Content(), []byte(`name="quick-fix"`))
 	if count != 1 {
 		t.Errorf("quick-fix block appears %d times in AvailableWorkflows after re-injection; want 1", count)
 	}
 }
 
-// TestAvailableWorkflows_BlockContentVerbatim_IncludesVersionComment asserts that the
-// workflow-version comment embedded in the section block is preserved verbatim in the
-// injection content. This comment is the mechanism by which staleness is detected on
-// subsequent updates.
-func TestAvailableWorkflows_BlockContentVerbatim_IncludesVersionComment(t *testing.T) {
+// TestAvailableWorkflows_BlockContentVerbatim_IncludesVersionAttribute asserts that the
+// version attribute on the Workflow section tag is preserved verbatim in the injection
+// content. The version is stored on the tag as version="X", not as an inline comment.
+func TestAvailableWorkflows_BlockContentVerbatim_IncludesVersionAttribute(t *testing.T) {
 	req := transform.Request{
 		Source: []byte(orchestratorWithWorkflows),
 		Kind:   domain.ArtifactAgent,
@@ -465,8 +460,13 @@ func TestAvailableWorkflows_BlockContentVerbatim_IncludesVersionComment(t *testi
 		t.Fatal("AvailableWorkflows injection absent from output")
 	}
 
-	if !bytes.Contains(node.Content(), []byte("<!-- workflow-version: 3.3 -->")) {
-		t.Errorf("workflow-version comment not preserved verbatim in injection;\ncontent: %q", node.Content())
+	// The version attribute must appear on the workflow block's opening tag.
+	if !bytes.Contains(node.Content(), []byte(`version="3.3"`)) {
+		t.Errorf("version attribute not preserved verbatim in injection;\ncontent: %q", node.Content())
+	}
+	// The version must NOT appear as a legacy HTML comment.
+	if bytes.Contains(node.Content(), []byte("<!-- workflow-version:")) {
+		t.Errorf("legacy workflow-version comment found in injection; version belongs on the tag attribute;\ncontent: %q", node.Content())
 	}
 }
 
@@ -475,11 +475,11 @@ func TestAvailableWorkflows_BlockContentVerbatim_IncludesVersionComment(t *testi
 // ---------------------------------------------------------------------------
 
 // TestWorkflowContent_ConfinedToAvailableWorkflowsInjection asserts that workflow section
-// tags (e.g. [[SECTION:Workflow:...]]) do not appear in the output body prose outside the
-// AvailableWorkflows injection region. Workflow files are never deployed as standalone
-// artifacts; their section blocks are exclusively assembled into the injection region.
-// An implementation that inadvertently propagates workflow metadata to other fields of
-// the result would be caught here.
+// tags (e.g. <Workflow type="core" name="...">) do not appear in the output body prose
+// outside the AvailableWorkflows injection region. Workflow files are never deployed as
+// standalone artifacts; their section blocks are exclusively assembled into the injection
+// region. An implementation that inadvertently propagates workflow metadata to other fields
+// of the result would be caught here.
 func TestWorkflowContent_ConfinedToAvailableWorkflowsInjection(t *testing.T) {
 	req := transform.Request{
 		Source: []byte(orchestratorWithWorkflows),
@@ -505,13 +505,12 @@ func TestWorkflowContent_ConfinedToAvailableWorkflowsInjection(t *testing.T) {
 	}
 
 	// Strip injection content from the output body. After stripping, the bytes between
-	// every [[INJECTION:...]] / [[/INJECTION:...]] pair are removed. Any [[SECTION:Workflow:
-	// tag that remains in the stripped output exists outside an injection region — a
-	// violation: workflow content must never appear in the body prose or any field other
-	// than inside AvailableWorkflows.
+	// every managed/project region pair are removed. Any <Workflow type= tag that remains
+	// in the stripped output exists outside a managed region — a violation: workflow content
+	// must never appear in the body prose or any field other than inside AvailableWorkflows.
 	strippedOut := stripInjectionContent(outBody)
 
-	if bytes.Contains(strippedOut, []byte("[[SECTION:Workflow:")) {
+	if bytes.Contains(strippedOut, []byte(`<Workflow type=`)) {
 		t.Errorf("workflow section tag found outside an injection region in the output body;\n"+
 			"stripped output (injection content removed):\n%q", strippedOut)
 	}

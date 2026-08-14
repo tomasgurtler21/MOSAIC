@@ -46,9 +46,9 @@ func minimalEligiblePrefixedSource() []byte {
 		"tools: [file_read, file_write]\n" +
 		"required_skills: []\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the PrefixTestAgent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // minimalEligibleMixedSource returns source bytes for a file that carries both the prefixed
@@ -66,9 +66,9 @@ func minimalEligibleMixedSource() []byte {
 		"description: An agent with both prefixed and legacy stamps\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the MixedTestAgent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // promoteWithPrefixedSource calls buildGenericAgent on the given source and returns the
@@ -238,9 +238,9 @@ func TestBuildGenericAgent_MixedIDSource_GenericIDCarriesCorrectValue(t *testing
 		"description: Agent with both id forms\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Mixed id source agent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out := promoteWithPrefixedSource(t, src, "88")
 

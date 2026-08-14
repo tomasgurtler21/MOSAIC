@@ -230,14 +230,12 @@ func TestUpdateWorkflows_ReplaceSemantics_PreviouslyDeployedWorkflowsDropped(t *
 
 	orchContent := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"[[SECTION:Workflow:quick-fix]]\n" +
-			"<!-- workflow-version: 1.0 -->\n" +
+			"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
 			"Quick fix content.\n" +
-			"[[/SECTION:Workflow:quick-fix]]\n" +
-			"[[SECTION:Workflow:greenfield-tdd]]\n" +
-			"<!-- workflow-version: 1.0 -->\n" +
+			"</Workflow>\n" +
+			"<Workflow type=\"core\" name=\"greenfield-tdd\" version=\"1.0\">\n" +
 			"Greenfield TDD content.\n" +
-			"[[/SECTION:Workflow:greenfield-tdd]]\n",
+			"</Workflow>\n",
 	)
 	writeTempFile(t, workspace, "orchestrator.md", orchContent)
 
@@ -344,10 +342,9 @@ func TestUpdate_WorkflowAddition_IsAdditive_DoesNotReplace(t *testing.T) {
 	// Write a deployed orchestrator with "quick-fix" so the update flow can discover it.
 	orchContent := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"[[SECTION:Workflow:quick-fix]]\n" +
-			"<!-- workflow-version: 1.0 -->\n" +
+			"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
 			"Quick fix content.\n" +
-			"[[/SECTION:Workflow:quick-fix]]\n",
+			"</Workflow>\n",
 	)
 	stub := interactiontest.NewBuilder().AnswerReview(true).Build()
 	deps, workspace := newBaseDeps(t, stub)

@@ -12,7 +12,7 @@ const ProtocolDeltaField = "protocol_version"
 // protocol source version. The zero value means no drift.
 type ProtocolDrift struct {
 	// Deployed is the protocol version read from the deployed file's
-	// <!-- protocol-version: X --> comment. "" when the marker was absent.
+	// <CommunicationProtocol type="managed"> opening tag's version attribute. "" when absent.
 	Deployed string
 	// Source is the current protocol source version from the protocol document frontmatter.
 	Source string

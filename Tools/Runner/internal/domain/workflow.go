@@ -3,16 +3,18 @@
 // mosaic-common packages -- never any internal runner package.
 package domain
 
-// WorkflowID is the identifier from the [[SECTION:Workflow:{id}]] boundary tag.
+// WorkflowID is the identifier from the name attribute of a
+// <Workflow type="core" name="{id}"> region tag.
 type WorkflowID string
 
-// WorkflowVersion is the version string from the <!-- workflow-version: {version} --> comment.
+// WorkflowVersion is the version string from the version attribute of a
+// <Workflow type="core" name="{id}" version="{version}"> region tag.
 type WorkflowVersion string
 
 // WorkflowInfo identifies a workflow definition.
 type WorkflowInfo struct {
-	ID      WorkflowID      // identifier from [[SECTION:Workflow:{id}]] tag
-	Version WorkflowVersion // from <!-- workflow-version: {version} --> comment
+	ID      WorkflowID      // identifier from the region's name attribute
+	Version WorkflowVersion // from the region's version attribute
 }
 
 // ExecutionGroupsHeading is the reserved line that locates a workflow's

@@ -244,17 +244,17 @@ func TestWorkflowStaleness_MatchingVersions_NotStale(t *testing.T) {
 }
 
 // TestWorkflowStaleness_DeployedVersionEmpty_Stale verifies that when a workflow block in the
-// deployed orchestrator carries no version comment, the block is treated as stale. An
+// deployed orchestrator carries no version attribute, the block is treated as stale. An
 // unversioned deployed block cannot be proven current.
 func TestWorkflowStaleness_DeployedVersionEmpty_Stale(t *testing.T) {
-	deployed := makeDeployedWorkflows("quick-fix", "") // no <!-- workflow-version: --> comment
+	deployed := makeDeployedWorkflows("quick-fix", "") // no version attribute on the workflow region's open tag
 	selected := makeSelectedWorkflows("quick-fix", "1.0")
 
 	drift := plan.WorkflowStaleness(deployed, selected)
 
 	if !drift.Stale() {
 		t.Error("WorkflowStaleness with empty deployed version: Stale() = false, want true; " +
-			"a missing workflow-version comment must be treated as stale")
+			"a missing workflow version attribute must be treated as stale")
 	}
 	if len(drift.Changed) != 1 {
 		t.Fatalf("expected 1 Changed entry for the unversioned deployed block, got %d: %v",
@@ -262,7 +262,7 @@ func TestWorkflowStaleness_DeployedVersionEmpty_Stale(t *testing.T) {
 	}
 	if drift.Changed[0].Deployed != "" {
 		t.Errorf("WorkflowDrift.Changed[0].Deployed = %q, want empty string "+
-			"(reflecting the absence of a workflow-version comment)", drift.Changed[0].Deployed)
+			"(reflecting the absence of a version attribute on the workflow region)", drift.Changed[0].Deployed)
 	}
 }
 

@@ -1,9 +1,9 @@
 """End-to-end test: old-format migration correctly handles the legacy custom_constraints marker.
 
 Verifies that the boundary_transformer handles the legacy custom_constraints marker without
-error and does NOT emit [[INJECTION:CustomConstraints]]. The end-to-end fixture
+error and does NOT emit <CustomConstraints type="project">. The end-to-end fixture
 (s4_generic_constraints_regions_input.md) carries the legacy marker with empty content;
-per the drop-when-empty rule, no [[CUSTOM:CustomConstraints]] tags are emitted for it —
+per the drop-when-empty rule, no <CustomConstraints type="custom"> tags are emitted for it —
 the region is silently dropped. The inline fixture class TestInlineCustomConstraintsPopulated
 covers the populated-content open/close-tag assertions end-to-end.
 
@@ -17,15 +17,15 @@ so the drop-when-empty rule applies and no CUSTOM open/close tags are emitted.
 Properties verified by the E2E fixture class (TestCustomConstraintsMigrationOutputKind):
   - transform_file succeeds on a file containing the legacy custom_constraints
     marker (no error, success=True).
-  - The output does NOT contain [[INJECTION:CustomConstraints]] (wrong kind).
-  - The output does NOT contain [[/INJECTION:CustomConstraints]] (wrong kind close).
+  - The output does NOT contain <CustomConstraints type="project"> (wrong kind).
+  - The output does NOT contain </CustomConstraints> (wrong kind close).
   - The legacy marker text ([INJECTION: custom_constraints]) is absent from the output.
   - When the legacy marker's content is empty (dropped by the transformer), the
     transform still succeeds and the CUSTOM region is absent (consistent with the
     drop-when-empty rule).
 
 Properties verified by the inline fixture classes:
-  - TestInlineCustomConstraintsPopulated: populated content emits [[CUSTOM:CustomConstraints]]
+  - TestInlineCustomConstraintsPopulated: populated content emits <CustomConstraints type="custom">
     open and close tags with content preserved.
   - TestInlineCustomConstraintsEmpty: empty content is dropped entirely (no CUSTOM tags).
 """
@@ -97,11 +97,11 @@ class TestCustomConstraintsMigrationSuccess:
 
 
 class TestCustomConstraintsMigrationOutputKind:
-    """The transformer must not emit [[INJECTION:CustomConstraints]] for the legacy marker.
+    """The transformer must not emit <CustomConstraints type="project"> for the legacy marker.
 
     The E2E fixture (s4_generic_constraints_regions_input.md) carries the legacy
     custom_constraints marker with empty content. Per the drop-when-empty rule, no
-    [[CUSTOM:CustomConstraints]] tags are emitted — the region is dropped silently.
+    <CustomConstraints type="custom"> tags are emitted — the region is dropped silently.
     The positive open/close-tag assertions for populated content are covered by the
     inline fixture class TestInlineCustomConstraintsPopulated.
 
@@ -112,8 +112,8 @@ class TestCustomConstraintsMigrationOutputKind:
     def test_output_does_not_contain_injection_open_tag(self, tmp_path: pathlib.Path) -> None:
         _, output_path = _transform_fixture(tmp_path)
         output = output_path.read_text(encoding="utf-8")
-        assert "[[INJECTION:CustomConstraints]]" not in output, (
-            "The output must NOT contain [[INJECTION:CustomConstraints]] — the legacy "
+        assert '<CustomConstraints type="project">' not in output, (
+            'The output must NOT contain <CustomConstraints type="project"> — the legacy '
             "custom_constraints marker must be emitted as CUSTOM, not INJECTION. "
             "CustomConstraints is deliberately absent from the canonical deployed registry "
             "and the injection parent map; it is project-invented content."
@@ -122,8 +122,8 @@ class TestCustomConstraintsMigrationOutputKind:
     def test_output_does_not_contain_injection_close_tag(self, tmp_path: pathlib.Path) -> None:
         _, output_path = _transform_fixture(tmp_path)
         output = output_path.read_text(encoding="utf-8")
-        assert "[[/INJECTION:CustomConstraints]]" not in output, (
-            "The output must NOT contain [[/INJECTION:CustomConstraints]]. "
+        assert "</CustomConstraints>" not in output, (
+            "The output must NOT contain </CustomConstraints>. "
             "If the open tag is CUSTOM, the close tag must also be CUSTOM."
         )
 
@@ -133,41 +133,41 @@ class TestCustomConstraintsMigrationOutputKind:
         # The old-format marker text must be completely absent.
         assert "[INJECTION: custom_constraints]" not in output, (
             "The legacy marker text '[INJECTION: custom_constraints]' must not "
-            "appear in the output — it must be replaced by [[CUSTOM:CustomConstraints]]."
+            'appear in the output — it must be replaced by <CustomConstraints type="custom">.'
         )
 
 
 class TestCustomConstraintsMigrationCustomTagRoundTrips:
-    """The emitted [[CUSTOM:CustomConstraints]] tags must form a matched pair and
+    """The emitted <CustomConstraints type="custom"> tags must form a matched pair and
     their content must be non-empty when the fixture carries populated content."""
 
     def test_open_and_close_tags_are_both_present(self, tmp_path: pathlib.Path) -> None:
         _, output_path = _transform_fixture(tmp_path)
         output = output_path.read_text(encoding="utf-8")
-        has_open = "[[CUSTOM:CustomConstraints]]" in output
-        has_close = "[[/CUSTOM:CustomConstraints]]" in output
+        has_open = '<CustomConstraints type="custom">' in output
+        has_close = "</CustomConstraints>" in output
         assert has_open == has_close, (
-            "[[CUSTOM:CustomConstraints]] and [[/CUSTOM:CustomConstraints]] must both be "
+            '<CustomConstraints type="custom"> and </CustomConstraints> must both be '
             f"present or both absent in the output. Open={has_open}, Close={has_close}."
         )
 
     def test_open_tag_precedes_close_tag(self, tmp_path: pathlib.Path) -> None:
         _, output_path = _transform_fixture(tmp_path)
         output = output_path.read_text(encoding="utf-8")
-        if "[[CUSTOM:CustomConstraints]]" not in output:
+        if '<CustomConstraints type="custom">' not in output:
             pytest.skip("Custom open tag absent — may be a populated-content drop; skipping ordering check")
-        open_idx = output.index("[[CUSTOM:CustomConstraints]]")
-        close_idx = output.index("[[/CUSTOM:CustomConstraints]]")
+        open_idx = output.index('<CustomConstraints type="custom">')
+        close_idx = output.index("</CustomConstraints>")
         assert open_idx < close_idx, (
-            f"[[CUSTOM:CustomConstraints]] (index {open_idx}) must precede "
-            f"[[/CUSTOM:CustomConstraints]] (index {close_idx}) in the output"
+            f'<CustomConstraints type="custom"> (index {open_idx}) must precede '
+            f"</CustomConstraints> (index {close_idx}) in the output"
         )
 
     def test_other_injections_still_emitted_as_injection(self, tmp_path: pathlib.Path) -> None:
-        """Non-custom-constraints injections must still be [[INJECTION:Name]], not [[CUSTOM:Name]].
+        """Non-custom-constraints injections must still be <Name type="project">, not <Name type="custom">.
 
         Only the legacy custom_constraints marker changes kind; all other markers remain
-        [[INJECTION:]]. This verifies the change is name-scoped to CustomConstraints.
+        <Name type="project">. This verifies the change is name-scoped to CustomConstraints.
         """
         _, output_path = _transform_fixture(tmp_path)
         output = output_path.read_text(encoding="utf-8")
@@ -175,10 +175,10 @@ class TestCustomConstraintsMigrationCustomTagRoundTrips:
         # tool-managed DEPLOYED region, not an injection. But it also carries other
         # injection markers like identity_extension. Check that the generic injection
         # output is not accidentally changed to CUSTOM.
-        # [[CUSTOM:IdentityExtension]] must not appear.
-        assert "[[CUSTOM:IdentityExtension]]" not in output, (
-            "[[CUSTOM:IdentityExtension]] must NOT appear in the output — "
-            "only custom_constraints maps to [[CUSTOM:]]; all other markers remain [[INJECTION:]]."
+        # <IdentityExtension type="custom"> must not appear.
+        assert '<IdentityExtension type="custom">' not in output, (
+            '<IdentityExtension type="custom"> must NOT appear in the output — '
+            'only custom_constraints maps to <Name type="custom">; all other markers remain <Name type="project">.'
         )
 
 
@@ -187,7 +187,7 @@ class TestCustomConstraintsMigrationCustomTagRoundTrips:
 # ---------------------------------------------------------------------------
 
 # Inline minimal old-format file that carries a populated [INJECTION: custom_constraints]
-# marker (non-empty content). The transformer must emit [[CUSTOM:CustomConstraints]] for it.
+# marker (non-empty content). The transformer must emit <CustomConstraints type="custom"> for it.
 _MINIMAL_WITH_CUSTOM_CONSTRAINTS = """\
 ---
 id: 42
@@ -216,7 +216,7 @@ Basic constraints.
 
 [INJECTION: harness_constraints]
 [INJECTION: custom_constraints]
-My custom project constraint that must survive as [[CUSTOM:CustomConstraints]].
+My custom project constraint that must survive as <CustomConstraints type="custom">.
 
 ---
 
@@ -238,7 +238,7 @@ Execute carefully.
 """
 
 # Inline minimal old-format file with EMPTY custom_constraints content.
-# The transformer's drop-when-empty rule applies: an empty [[CUSTOM:CustomConstraints]]
+# The transformer's drop-when-empty rule applies: an empty <CustomConstraints type="custom">
 # region is dropped entirely (no open or close tag in the output).
 _MINIMAL_EMPTY_CUSTOM_CONSTRAINTS = """\
 ---
@@ -291,7 +291,7 @@ Execute carefully.
 
 class TestInlineCustomConstraintsPopulated:
     """Inline fixture with populated custom_constraints content must produce
-    [[CUSTOM:CustomConstraints]] in the output."""
+    <CustomConstraints type="custom"> in the output."""
 
     def test_populated_custom_constraints_emitted_as_custom(self, tmp_path: pathlib.Path) -> None:
         input_path = tmp_path / "inline_populated.md"
@@ -302,11 +302,11 @@ class TestInlineCustomConstraintsPopulated:
 
         assert result.success is True, f"Transform must succeed: {result.errors}"
         output = output_path.read_text(encoding="utf-8")
-        assert "[[CUSTOM:CustomConstraints]]" in output, (
-            "Populated custom_constraints content must be emitted as [[CUSTOM:CustomConstraints]]"
+        assert '<CustomConstraints type="custom">' in output, (
+            'Populated custom_constraints content must be emitted as <CustomConstraints type="custom">'
         )
-        assert "[[INJECTION:CustomConstraints]]" not in output, (
-            "Populated custom_constraints content must not be emitted as [[INJECTION:CustomConstraints]]"
+        assert '<CustomConstraints type="project">' not in output, (
+            'Populated custom_constraints content must not be emitted as <CustomConstraints type="project">'
         )
 
     def test_populated_custom_constraints_content_preserved(self, tmp_path: pathlib.Path) -> None:
@@ -324,7 +324,7 @@ class TestInlineCustomConstraintsPopulated:
 
 class TestInlineCustomConstraintsEmpty:
     """Inline fixture with empty custom_constraints content: the drop-when-empty rule
-    applies and no [[CUSTOM:CustomConstraints]] tags appear in the output."""
+    applies and no <CustomConstraints type="custom"> tags appear in the output."""
 
     def test_empty_custom_constraints_dropped(self, tmp_path: pathlib.Path) -> None:
         input_path = tmp_path / "inline_empty.md"
@@ -337,10 +337,10 @@ class TestInlineCustomConstraintsEmpty:
         output = output_path.read_text(encoding="utf-8")
         # Empty custom_constraints is dropped (consistent with the existing drop-when-empty
         # behaviour documented in boundary_transformer.py).
-        assert "[[CUSTOM:CustomConstraints]]" not in output, (
+        assert '<CustomConstraints type="custom">' not in output, (
             "An empty custom_constraints region must be dropped entirely — "
             "the drop-when-empty rule is unchanged by the kind migration"
         )
-        assert "[[INJECTION:CustomConstraints]]" not in output, (
-            "An empty custom_constraints region must not be emitted as [[INJECTION:]] either"
+        assert '<CustomConstraints type="project">' not in output, (
+            'An empty custom_constraints region must not be emitted as <Name type="project"> either'
         )

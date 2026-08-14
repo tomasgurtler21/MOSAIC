@@ -2,9 +2,9 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Before injection.
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
+</IdentityExtension>
 After injection.
-[[/SECTION:Identity]]
+</Identity>

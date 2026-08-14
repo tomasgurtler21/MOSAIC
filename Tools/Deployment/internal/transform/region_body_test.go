@@ -3,14 +3,14 @@ package transform_test
 // region_body_test.go covers body preservation and determinism across documents that mix
 // all three marker kinds (T3.5):
 //
-//   - Body bytes outside ALL managed regions (both [[INJECTION:]] and [[DEPLOYED:]]) remain
+//   - Body bytes outside ALL managed regions (both project-injection region and managed region) remain
 //     byte-identical to the source across every scenario.
-//   - [[SECTION:]] structure bytes are preserved byte-identically.
+//   - core-section region structure bytes are preserved byte-identically.
 //   - Repeated transforms of identical inputs produce byte-identical output (determinism).
 //   - Transforms of distinct agents do not cross-contaminate.
 //
-// These tests use the Stage 3 canonical vocabulary where tool-managed names use [[DEPLOYED:]]
-// and user-owned names use [[INJECTION:]]. The helper stripManagedRegionContent strips content
+// These tests use the Stage 3 canonical vocabulary where tool-managed names use managed region
+// and user-owned names use project-injection region. The helper stripManagedRegionContent strips content
 // from both kinds so prose comparisons are independent of region content.
 
 import (
@@ -23,10 +23,10 @@ import (
 )
 
 // mixedMarkerSource is a document that contains all three boundary kinds:
-//   - [[SECTION:]] — structural sections
-//   - [[INJECTION:IdentityExtension]] — user-owned region
-//   - [[INJECTION:CodebaseContext]]   — user-owned region
-//   - [[DEPLOYED:HarnessConstraints]] — tool-managed region (harness class)
+//   - core-section region — structural sections
+//   - <IdentityExtension type="project"> — user-owned region
+//   - <CodebaseContext type="project">   — user-owned region
+//   - <HarnessConstraints type="managed"> — tool-managed region (harness class)
 //
 // The body prose inside sections but outside managed regions must survive byte-for-byte.
 const mixedMarkerSource = `---
@@ -41,40 +41,40 @@ tier_rationale: mixed marker testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MixedMarkersTest Agent
 
 You are the MixedMarkersTest agent.
 
 This prose must survive byte-for-byte.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
+</IdentityExtension>
 
 More prose after the injection.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Capability prose that must survive.
 
-[[INJECTION:CodebaseContext]]
-[[/INJECTION:CodebaseContext]]
+<CodebaseContext type="project">
+</CodebaseContext>
 
 Further capability prose that must survive.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Constraint prose that must survive.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 
 Final constraint prose.
-[[/SECTION:Constraints]]
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -82,7 +82,7 @@ Final constraint prose.
 // ---------------------------------------------------------------------------
 
 // TestAllMarkerKinds_BodyBytesPreservedOutsideRegions asserts that bytes outside ALL managed
-// regions — both [[INJECTION:]] and [[DEPLOYED:]] — are byte-identical to the source. Only
+// regions — both project-injection region and managed region — are byte-identical to the source. Only
 // region content is allowed to differ; structural boundary tags, section prose, and all
 // whitespace between elements must be unchanged.
 func TestAllMarkerKinds_BodyBytesPreservedOutsideRegions(t *testing.T) {
@@ -135,7 +135,7 @@ func TestAllMarkerKinds_BodyBytesPreservedOutsideRegions(t *testing.T) {
 				t.Fatalf("SplitFrontmatter (output): %v", err)
 			}
 
-			// Strip content from both [[INJECTION:]] and [[DEPLOYED:]] regions and compare.
+			// Strip content from both project-injection region and managed region regions and compare.
 			// The stripped form must be byte-identical: only region content may differ.
 			strippedSrc := stripManagedRegionContent(srcBody)
 			strippedOut := stripManagedRegionContent(outBody)
@@ -163,43 +163,43 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MixedMarkersTest Agent
 
 You are the MixedMarkersTest agent.
 
 This prose must survive byte-for-byte.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Deployed user identity extension content.
-[[/INJECTION:IdentityExtension]]
+</IdentityExtension>
 
 More prose after the injection.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Capability prose that must survive.
 
-[[INJECTION:CodebaseContext]]
+<CodebaseContext type="project">
 Deployed codebase context: Go monorepo.
-[[/INJECTION:CodebaseContext]]
+</CodebaseContext>
 
 Further capability prose that must survive.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Constraint prose that must survive.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Previously deployed harness constraint content.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
 Final constraint prose.
-[[/SECTION:Constraints]]
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -207,7 +207,7 @@ Final constraint prose.
 // ---------------------------------------------------------------------------
 
 // TestAllMarkerKinds_DeployedRegionFilledWithHarnessContent asserts that after applying to a
-// mixed-marker source, the [[DEPLOYED:HarnessConstraints]] region in the output contains the
+// mixed-marker source, the <HarnessConstraints type="managed"> region in the output contains the
 // harness module's declared content. This distinguishes a correct Stage 3 transform (which
 // fills the region) from a no-op (which would leave it empty or unchanged).
 func TestAllMarkerKinds_DeployedRegionFilledWithHarnessContent(t *testing.T) {
@@ -237,7 +237,7 @@ func TestAllMarkerKinds_DeployedRegionFilledWithHarnessContent(t *testing.T) {
 		t.Fatalf("parse output: %v", err)
 	}
 
-	// The [[DEPLOYED:HarnessConstraints]] region must contain the harness content.
+	// The <HarnessConstraints type="managed"> region must contain the harness content.
 	node, ok := outDoc.Body().Deployed("HarnessConstraints")
 	if !ok {
 		t.Fatal("HarnessConstraints deployed region absent from output")
@@ -350,7 +350,7 @@ func TestAllMarkerKinds_RepeatedTransformReportIsDeterministic(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestAllMarkerKinds_RegionsReportDocumentOrdered asserts that Report.Regions lists source
-// regions (both [[INJECTION:]] and [[DEPLOYED:]]) in document order, followed by any
+// regions (both project-injection region and managed region) in document order, followed by any
 // orphaned user-owned regions in sorted name order. This ordering makes the report a faithful
 // audit trail that maps to the document's structure.
 func TestAllMarkerKinds_RegionsReportDocumentOrdered(t *testing.T) {
@@ -367,51 +367,51 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MixedMarkersTest Agent
 
 You are the MixedMarkersTest agent.
 
 This prose must survive byte-for-byte.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Identity content.
-[[/INJECTION:IdentityExtension]]
+</IdentityExtension>
 
 More prose after the injection.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Capability prose that must survive.
 
-[[INJECTION:CodebaseContext]]
+<CodebaseContext type="project">
 Context content.
-[[/INJECTION:CodebaseContext]]
+</CodebaseContext>
 
 Further capability prose that must survive.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Constraint prose that must survive.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Old harness content.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
 Final constraint prose.
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## ErrorHandling
 
-[[INJECTION:ErrorHandlingExtension]]
+<ErrorHandlingExtension type="project">
 Error handling extension content: will become orphan.
-[[/INJECTION:ErrorHandlingExtension]]
-[[/SECTION:ErrorHandling]]
+</ErrorHandlingExtension>
+</ErrorHandling>
 `
 
 	req := transform.Request{
@@ -449,33 +449,45 @@ Error handling extension content: will become orphan.
 // Helper: stripManagedRegionContent
 // ---------------------------------------------------------------------------
 
-// stripManagedRegionContent replaces the content between every [[INJECTION:...]] and
-// [[DEPLOYED:...]] pair with a fixed placeholder, so the surrounding prose can be compared
-// independently of region content. [[SECTION:]] tags and inter-region prose are preserved.
+// stripManagedRegionContent replaces the content between every project-injection and
+// managed-region tag pair with a fixed placeholder, so the surrounding prose can be compared
+// independently of region content. core-section tags and inter-region prose are preserved.
+//
+// The helper is name-aware: it opens on <Name type="project|managed"> and closes only on
+// </Name> for the same tag name, so nested tags of different names do not trigger an early close.
 func stripManagedRegionContent(body []byte) []byte {
 	var out []byte
 	lines := bytes.Split(body, []byte("\n"))
 	insideManaged := false
+	var openName []byte // tag name of the currently open managed/project region
 
 	for _, line := range lines {
 		trimmed := bytes.TrimSpace(line)
 
 		if !insideManaged {
-			// Check for opening [[INJECTION:...]] or [[DEPLOYED:...]] tag.
-			if (bytes.HasPrefix(trimmed, []byte("[[INJECTION:")) ||
-				bytes.HasPrefix(trimmed, []byte("[[DEPLOYED:"))) &&
-				!bytes.HasPrefix(trimmed, []byte("[[/INJECTION:")) &&
-				!bytes.HasPrefix(trimmed, []byte("[[/DEPLOYED:")) {
-				insideManaged = true
-				out = append(out, line...)
-				out = append(out, '\n')
-				continue
+			// Check for opening <Name type="project"> or <Name type="managed"> tag.
+			if bytes.HasPrefix(trimmed, []byte("<")) &&
+				!bytes.HasPrefix(trimmed, []byte("</")) &&
+				(bytes.Contains(trimmed, []byte(`type="project"`)) ||
+					bytes.Contains(trimmed, []byte(`type="managed"`))) {
+				// Extract the tag name (first word after '<').
+				rest := trimmed[1:] // strip '<'
+				spaceIdx := bytes.IndexAny(rest, " \t>")
+				if spaceIdx > 0 {
+					insideManaged = true
+					openName = rest[:spaceIdx]
+					out = append(out, line...)
+					out = append(out, '\n')
+					continue
+				}
 			}
 		} else {
-			// Check for closing [[/INJECTION:...]] or [[/DEPLOYED:...]] tag.
-			if bytes.HasPrefix(trimmed, []byte("[[/INJECTION:")) ||
-				bytes.HasPrefix(trimmed, []byte("[[/DEPLOYED:")) {
+			// Check for closing </Name> where Name matches the open tag.
+			closeTag := append([]byte("</"), openName...)
+			closeTag = append(closeTag, '>')
+			if bytes.Equal(trimmed, closeTag) {
 				insideManaged = false
+				openName = nil
 				out = append(out, line...)
 				out = append(out, '\n')
 				continue

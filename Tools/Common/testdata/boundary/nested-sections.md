@@ -2,9 +2,9 @@
 name: test-agent
 ---
 
-[[SECTION:Outer]]
+<Outer type="core">
 Outer section content.
-[[SECTION:Inner]]
+<Inner type="core">
 Inner section content.
-[[/SECTION:Inner]]
-[[/SECTION:Outer]]
+</Inner>
+</Outer>

@@ -15,7 +15,7 @@ package transform_test
 //     - No partial output is returned on this error.
 //
 //   T6.5 — Hard error for populated deployed region in source file:
-//     - A source file carrying non-empty content between a [[DEPLOYED:]] region's tags causes
+//     - A source file carrying non-empty content between a managed region region's tags causes
 //       Apply to return an error wrapping ErrSourceDeployedRegionNotEmpty.
 //     - No partial output is returned on this error.
 //
@@ -27,7 +27,7 @@ package transform_test
 //       blocks all apply to subagent, produces no error and no mosaic_bundle_version stamp.
 //
 //   Ordering:
-//     - [[INJECTION:]] regions are resolved AFTER all [[DEPLOYED:]] bundle regions are filled,
+//     - project-injection region regions are resolved AFTER all managed region bundle regions are filled,
 //       so a regenerated injection immediately following a bundle region does not discard the
 //       freshly placed content.
 
@@ -79,7 +79,7 @@ func fixtureBundle(version string) domain.BundleContent {
 }
 
 // sourceWithAllBundleRegions is a minimal valid subagent source that declares all five
-// canonical bundle-sourced [[DEPLOYED:]] regions, each empty (as required for source files).
+// canonical bundle-sourced managed region regions, each empty (as required for source files).
 const sourceWithAllBundleRegions = `---
 id: 42
 version: 1.0.0
@@ -93,51 +93,51 @@ tier_rationale: minimal
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 ## Identity
 
 Bundle test agent.
 
-[[DEPLOYED:AuthorityHierarchy]]
-[[/DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
+</AuthorityHierarchy>
 
-[[DEPLOYED:ClosingProcedure]]
-[[/DEPLOYED:ClosingProcedure]]
+<ClosingProcedure type="managed">
+</ClosingProcedure>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
-[[DEPLOYED:ProtocolConstraints]]
-[[/DEPLOYED:ProtocolConstraints]]
+<ProtocolConstraints type="managed">
+</ProtocolConstraints>
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
-[[DEPLOYED:ErrorHandlingCommon]]
-[[/DEPLOYED:ErrorHandlingCommon]]
+<ErrorHandlingCommon type="managed">
+</ErrorHandlingCommon>
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 
-[[DEPLOYED:ExecutionPhilosophyCommon]]
-[[/DEPLOYED:ExecutionPhilosophyCommon]]
+<ExecutionPhilosophyCommon type="managed">
+</ExecutionPhilosophyCommon>
 
-[[INJECTION:ContextLimits]]
-[[/INJECTION:ContextLimits]]
+<ContextLimits type="project">
+</ContextLimits>
 
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>
 `
 
 // sourceWithOnlyTwoBundleRegions is a subagent source with only two of the five bundle
@@ -156,30 +156,30 @@ tier_rationale: minimal
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 ## Identity
 
 Partial bundle test agent.
 
-[[DEPLOYED:AuthorityHierarchy]]
-[[/DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
+</AuthorityHierarchy>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
-[[DEPLOYED:ErrorHandlingCommon]]
-[[/DEPLOYED:ErrorHandlingCommon]]
+<ErrorHandlingCommon type="managed">
+</ErrorHandlingCommon>
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 `
 
 // sourceOrchestratorNoBundleRegions is a minimal orchestrator source with no bundle-sourced
-// [[DEPLOYED:]] regions. Used to verify that an orchestrator-role file produces no error and
+// managed region regions. Used to verify that an orchestrator-role file produces no error and
 // no mosaic_bundle_version stamp.
 const sourceOrchestratorNoBundleRegions = `---
 version: 1.0.0
@@ -193,15 +193,15 @@ tier_rationale: minimal
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 ## Identity
 
 Orchestrator agent.
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // ---------------------------------------------------------------------------
@@ -248,13 +248,13 @@ func TestBundle_SubagentSource_BundleRegionsFilledVerbatim(t *testing.T) {
 	for _, target := range targets {
 		node, ok := doc.Body().Deployed(target)
 		if !ok {
-			t.Errorf("[[DEPLOYED:%s]] region absent from output", target)
+			t.Errorf("managed region %q absent from output", target)
 			continue
 		}
 		got := node.Content()
 		want := bundleBlockContent(target)
 		if !bytes.Equal(got, want) {
-			t.Errorf("[[DEPLOYED:%s]] region content: want %q, got %q; "+
+			t.Errorf("managed region %q content: want %q, got %q; "+
 				"bundle regions must be filled byte-for-byte from the bundle block", target, want, got)
 		}
 	}
@@ -318,13 +318,13 @@ func TestBundle_AbsentRegionFilled_ContentIsVerbatim(t *testing.T) {
 	for _, target := range []string{"AuthorityHierarchy", "ErrorHandlingCommon"} {
 		node, ok := doc.Body().Deployed(target)
 		if !ok {
-			t.Errorf("[[DEPLOYED:%s]] absent from output even though it was in the source", target)
+			t.Errorf("managed region %q absent from output even though it was in the source", target)
 			continue
 		}
 		got := node.Content()
 		want := bundleBlockContent(target)
 		if !bytes.Equal(got, want) {
-			t.Errorf("[[DEPLOYED:%s]] content mismatch: want %q, got %q",
+			t.Errorf("managed region %q content mismatch: want %q, got %q",
 				target, want, got)
 		}
 	}
@@ -477,7 +477,7 @@ func TestBundle_RegionWithNoMatchingBlock_NoPartialOutput(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // sourceWithPopulatedDeployedRegion is a source file that carries non-empty content inside
-// a [[DEPLOYED:AuthorityHierarchy]] region. Source regions must be empty by definition;
+// a <AuthorityHierarchy type="managed"> region. Source regions must be empty by definition;
 // content here is either a hand-edit about to be discarded or a deployed file committed
 // as source.
 const sourceWithPopulatedDeployedRegion = `---
@@ -493,23 +493,23 @@ tier_rationale: minimal
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 ## Identity
 
 Populated region test agent.
 
-[[DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
 THIS CONTENT SHOULD NOT BE HERE IN A SOURCE FILE.
-[[/DEPLOYED:AuthorityHierarchy]]
+</AuthorityHierarchy>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // TestBundle_SourceFileWithPopulatedDeployedRegion_ReturnsErrSourceDeployedRegionNotEmpty
-// verifies that when a source file carries non-empty content inside a [[DEPLOYED:]] region,
+// verifies that when a source file carries non-empty content inside a managed region region,
 // Apply returns an error wrapping ErrSourceDeployedRegionNotEmpty. A populated source region
 // is either a hand-edit about to be discarded or a deployed file mistakenly committed as
 // source — both are hard errors.
@@ -529,7 +529,7 @@ func TestBundle_SourceFileWithPopulatedDeployedRegion_ReturnsErrSourceDeployedRe
 	_, err := transform.Apply(req)
 
 	if err == nil {
-		t.Fatal("Apply returned nil error when source file carries a populated [[DEPLOYED:]] region; " +
+		t.Fatal("Apply returned nil error when source file carries a populated managed region region; " +
 			"this must be a hard error (ErrSourceDeployedRegionNotEmpty)")
 	}
 	if !errors.Is(err, transform.ErrSourceDeployedRegionNotEmpty) {
@@ -654,7 +654,7 @@ func TestBundle_SubagentOutput_StampValueMatchesBundleVersion(t *testing.T) {
 }
 
 // TestBundle_OrchestratorRoleWithNoBundleRegions_ReturnsNoError verifies that an
-// orchestrator-role source file with no bundle-sourced [[DEPLOYED:]] regions, transformed
+// orchestrator-role source file with no bundle-sourced managed region regions, transformed
 // with a bundle whose blocks all apply to subagent, produces no error. The orchestrator is
 // exempt from bundle filling because it carries no bundle regions and the bundle carries no
 // orchestrator blocks. A bundle block with no matching region must never be an error.
@@ -720,8 +720,8 @@ func TestBundle_OrchestratorRoleWithNoBundleRegions_NoVersionStamp(t *testing.T)
 // Ordering: injection resolution runs last
 // ---------------------------------------------------------------------------
 
-// sourceWithBundleAndInjection is an agent source where an [[INJECTION:]] region immediately
-// follows a [[DEPLOYED:AuthorityHierarchy]] bundle region inside the same section. This tests
+// sourceWithBundleAndInjection is an agent source where an project-injection region region immediately
+// follows a <AuthorityHierarchy type="managed"> bundle region inside the same section. This tests
 // the ordering contract: injection resolution must run AFTER all deployed bundle regions are
 // filled, so the freshly placed bundle content is not discarded when the adjacent injection is
 // processed.
@@ -738,25 +738,25 @@ tier_rationale: minimal
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 ## Identity
 
 Order test agent.
 
-[[DEPLOYED:AuthorityHierarchy]]
-[[/DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
+</AuthorityHierarchy>
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
+</IdentityExtension>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // TestBundle_InjectionResolvesAfterBundleRegions verifies that in a source document where an
-// [[INJECTION:]] region immediately follows a bundle-filled [[DEPLOYED:]] region, the bundle
+// project-injection region region immediately follows a bundle-filled managed region region, the bundle
 // content placed in the deployed region is not overwritten or discarded during injection
 // resolution. This pins the ordering contract from the design.
 func TestBundle_InjectionResolvesAfterBundleRegions(t *testing.T) {
@@ -797,12 +797,12 @@ func TestBundle_InjectionResolvesAfterBundleRegions(t *testing.T) {
 
 	node, ok := doc.Body().Deployed("AuthorityHierarchy")
 	if !ok {
-		t.Fatal("[[DEPLOYED:AuthorityHierarchy]] region absent from output")
+		t.Fatal("<AuthorityHierarchy type=\"managed\"> region absent from output")
 	}
 
 	// The bundle content must be intact — the adjacent injection must not have discarded it.
 	if !bytes.Contains(node.Content(), []byte("Do not overwrite this")) {
-		t.Errorf("[[DEPLOYED:AuthorityHierarchy]] content was discarded or overwritten; "+
+		t.Errorf("<AuthorityHierarchy type=\"managed\"> content was discarded or overwritten; "+
 			"injection resolution must run AFTER bundle region filling.\ncontent: %q",
 			node.Content())
 	}

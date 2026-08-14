@@ -27,10 +27,10 @@ package app
 //     and reported in RetargetReport.StrippedFields with StripReasonUnmappedDivertedValue.
 //
 // Region handling (T5.3):
-//   - Every [[INJECTION:...]] region's content survives the transform byte-for-byte.
+//   - Every <... type="project"> region's content survives the transform byte-for-byte.
 //   - RetargetReport.InjectionsPreserved lists every preserved injection name in document
 //     order.
-//   - [[DEPLOYED:...]] region content is carried through (not stripped to empty pairs as
+//   - <... type="managed"> region content is carried through (not stripped to empty pairs as
 //     buildGenericAgent does). This is the only permitted divergence from promote.
 //
 // Frontmatter shaping (T5.4):
@@ -269,9 +269,9 @@ func TestBuildRetargetedAgent_TargetSideToolUnmappedAbsentFromOutputAndRecorded(
 		"- AlphaWrite\n" + // AlphaWrite → generic Write; beta has no Write mapping
 		"alpha_stamp: alpha-v1\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Test agent for Write tool unmapped at target.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	alpha := newAlphaHarnessModule()
 	beta := newBetaHarnessModule()
@@ -339,9 +339,9 @@ func TestBuildRetargetedAgent_UnknownFrontmatterFieldStrippedAndReported(t *test
 		"alpha_stamp: alpha-v1\n" +
 		"truly_unknown_field: some-value-not-recognized-by-anyone\n" + // ClassUnknown
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Test agent for unknown-field stripping.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	alpha := newAlphaHarnessModule()
 	beta := newBetaHarnessModule()
@@ -402,9 +402,9 @@ func TestBuildRetargetedAgent_UnmappedDivertedValueStrippedAndReported(t *testin
 		"- unknown-server\n" + // Not gamma-mcp-server → cannot be reverse-mapped
 		"gamma_stamp: gamma-v3\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Test agent for unmapped diverted value stripping.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	gamma := newGammaHarnessModule()
 	beta := newBetaHarnessModule()
@@ -451,7 +451,7 @@ func TestBuildRetargetedAgent_UnmappedDivertedValueStrippedAndReported(t *testin
 // ---------------------------------------------------------------------------
 
 // TestBuildRetargetedAgent_InjectionContentPreservedByteForByte verifies that every
-// [[INJECTION:...]] region's content survives the transform byte-for-byte. This is the
+// <... type="project"> region's content survives the transform byte-for-byte. This is the
 // key divergence from buildGenericAgent, which strips injection content to empty pairs.
 func TestBuildRetargetedAgent_InjectionContentPreservedByteForByte(t *testing.T) {
 	src := alphaDeployedAgentBytes()
@@ -540,13 +540,13 @@ func TestBuildRetargetedAgent_DeployedRegionContentCarriedThrough(t *testing.T) 
 		"- AlphaBash\n" +
 		"alpha_stamp: alpha-v1\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Identity prose.\n" +
-		"[[DEPLOYED:ClosingProcedure]]\n" +
+		"<ClosingProcedure type=\"managed\">\n" +
 		"This closing procedure content must survive the transform.\n" +
 		"Step 1: summarize your work.\n" +
-		"[[/DEPLOYED:ClosingProcedure]]\n" +
-		"[[/SECTION:Identity]]\n")
+		"</ClosingProcedure>\n" +
+		"</Identity>\n")
 
 	alpha := newAlphaHarnessModule()
 	beta := newBetaHarnessModule()
@@ -592,17 +592,17 @@ func TestBuildRetargetedAgent_SectionStructurePreserved(t *testing.T) {
 	}
 
 	// Both canonical sections from the source fixture must survive.
-	if !bytes.Contains(out, []byte("[[SECTION:Identity]]")) {
-		t.Error("output must contain [[SECTION:Identity]] open tag")
+	if !bytes.Contains(out, []byte("<Identity type=\"core\">")) {
+		t.Error("output must contain <Identity type=\"core\"> open tag")
 	}
-	if !bytes.Contains(out, []byte("[[/SECTION:Identity]]")) {
-		t.Error("output must contain [[/SECTION:Identity]] close tag")
+	if !bytes.Contains(out, []byte("</Identity>")) {
+		t.Error("output must contain </Identity> close tag")
 	}
-	if !bytes.Contains(out, []byte("[[SECTION:Capabilities]]")) {
-		t.Error("output must contain [[SECTION:Capabilities]] open tag")
+	if !bytes.Contains(out, []byte("<Capabilities type=\"core\">")) {
+		t.Error("output must contain <Capabilities type=\"core\"> open tag")
 	}
-	if !bytes.Contains(out, []byte("[[/SECTION:Capabilities]]")) {
-		t.Error("output must contain [[/SECTION:Capabilities]] close tag")
+	if !bytes.Contains(out, []byte("</Capabilities>")) {
+		t.Error("output must contain </Capabilities> close tag")
 	}
 }
 
@@ -839,9 +839,9 @@ func TestBuildRetargetedAgent_BundleVersionCarriedThroughAsMosaicBundleVersion(t
 		"alpha_stamp: alpha-v1\n" +
 		"bundle_version: \"bundle-abc123\"\n" + // must appear in output as mosaic_bundle_version
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Test agent for bundle_version carry-through.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	alpha := newAlphaHarnessModule()
 	beta := newBetaHarnessModule()

@@ -16,8 +16,7 @@ artifacts:
   - VerificationReport.md
 ---
 
-[[SECTION:Workflow:kb-verification-human]]
-<!-- workflow-version: 0.4 -->
+<Workflow type="core" name="kb-verification-human" version="0.4">
 ## Knowledge Verification (Human) Workflow
 
 **Use when:** Verify knowledge quality using **architect-provided challenge questions**. Tests whether an agent can answer expert questions using available knowledge sources + codebase. Produces a diagnostic report — remediation is a separate concern.
@@ -35,7 +34,7 @@ artifacts:
 **Notes:**
 - **Diagnostic only** — workflow ends at VerificationReport.md. To act on findings, run a separate remediation workflow (e.g., Knowledge Base Correction)
 - **Knowledge-source agnostic** — verifies whether questions can be answered from whatever knowledge sources the codebase-research agent has access to (KB, docs, code comments, etc.)
-[[/SECTION:Workflow:kb-verification-human]]
+</Workflow>
 
 ---
 

@@ -5,23 +5,15 @@ package app
 // deploy-new and update flows to populate plan.Input.DeployedState before calling Build.
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
-	"regexp"
+	"strings"
 
 	"mosaic-common/docformat"
 	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/manifest"
 	"mosaic-deploy/internal/plan"
-)
-
-var (
-	// workflowOpeningPattern matches the opening tag of a workflow section block.
-	workflowOpeningPattern = regexp.MustCompile(`\[\[SECTION:Workflow:([^\]]+)\]\]`)
-	// workflowVersionPattern matches a workflow-version HTML comment inside a block.
-	workflowVersionPattern = regexp.MustCompile(`<!--\s*workflow-version:\s*(\S+)\s*-->`)
 )
 
 // probeDeployedArtifact reads a single deployed artifact at <workspace>/<targetPath> and
@@ -69,8 +61,8 @@ func probeDeployedArtifact(workspace, targetPath, modelKey string) domain.Deploy
 	// Extract workflow section markers; nil when none are present.
 	state.Workflows = extractDeployedWorkflows(data)
 
-	// Extract the protocol version from the deployed [[DEPLOYED:CommunicationProtocol]] region.
-	// Returns "" when the region is absent or carries no version comment; both are treated as
+	// Extract the protocol version from the deployed <CommunicationProtocol type="managed"> region.
+	// Returns "" when the region is absent or carries no version attribute; both are treated as
 	// stale by the planner. This call never fails the scan.
 	state.ProtocolVersion = extractDeployedProtocolVersion(data)
 
@@ -175,50 +167,38 @@ func probeDeployedStateWithIndex(
 	return result, nil
 }
 
-// extractDeployedWorkflows scans deployed content for [[SECTION:Workflow:<id>]] blocks and
-// returns each distinct workflow in first-occurrence order, paired with the version found in
-// that block's <!-- workflow-version: X --> comment. A block with no version comment yields
-// an entry with an empty Version field. Returns nil when no workflow section markers are found.
+// extractDeployedWorkflows parses deployed content for Workflow:<id> section nodes and
+// returns each distinct workflow in first-occurrence (document) order, paired with the
+// version attribute found on that section's opening tag. A section with no version
+// attribute yields an entry with an empty Version field. Returns nil when no workflow
+// sections are found or when the file cannot be parsed.
 func extractDeployedWorkflows(data []byte) domain.DeployedWorkflows {
-	openings := workflowOpeningPattern.FindAllSubmatchIndex(data, -1)
-	if len(openings) == 0 {
+	if len(data) == 0 {
+		return nil
+	}
+	doc, err := docformat.Parse(data)
+	if err != nil {
 		return nil
 	}
 
 	var result domain.DeployedWorkflows
-	seen := make(map[string]bool, len(openings))
+	seen := make(map[string]bool)
 
-	for i, match := range openings {
-		id := string(data[match[2]:match[3]])
-
-		// Determine this block's content boundary: from just after the opening tag to either
-		// the matching closing tag, the next opening tag, or end of content.
-		blockStart := match[1] // byte offset just after the opening tag
-
-		closingMarker := []byte("[[/SECTION:Workflow:" + id + "]]")
-		var blockEnd int
-		if idx := bytes.Index(data[blockStart:], closingMarker); idx >= 0 {
-			blockEnd = blockStart + idx
-		} else if i+1 < len(openings) {
-			// No closing tag found; use the start of the next opening marker.
-			blockEnd = openings[i+1][0]
-		} else {
-			// No closing tag and no next block; use end of content.
-			blockEnd = len(data)
+	for _, node := range doc.Body().SectionsDeep() {
+		name := node.Name()
+		if !strings.HasPrefix(name, "Workflow:") {
+			continue
 		}
-
-		// Find the first workflow-version comment inside this block's content.
-		version := ""
-		if vm := workflowVersionPattern.FindSubmatch(data[blockStart:blockEnd]); vm != nil {
-			version = string(vm[1])
-		}
-
+		id := name[len("Workflow:"):]
 		if !seen[id] {
 			seen[id] = true
-			result = append(result, domain.DeployedWorkflow{ID: id, Version: version})
+			result = append(result, domain.DeployedWorkflow{ID: id, Version: node.Version()})
 		}
 	}
 
+	if len(result) == 0 {
+		return nil
+	}
 	return result
 }
 

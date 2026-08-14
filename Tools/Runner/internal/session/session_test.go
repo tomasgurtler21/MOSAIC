@@ -434,14 +434,13 @@ func TestSession_Start_AdmissionFailure_ReturnsRefusal(t *testing.T) {
 
 	// Write an orchestrator file with a workflow that compat will refuse:
 	// agent-with-mode notation "agent-a(mode)" is refused by FR-18a.6.
-	const refusedContent = `[[SECTION:Workflow:refused]]
-<!-- workflow-version: 1.0 -->
+	const refusedContent = `<Workflow type="core" name="refused" version="1.0">
 ## Refused Workflow
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | PLANNING | agent-a(mode) | ❌ | - | out.md |
-[[/SECTION:Workflow:refused]]
+</Workflow>
 `
 	orchPath := filepath.Join(dir, "refused-orch.md")
 	if err := os.WriteFile(orchPath, []byte(refusedContent), 0600); err != nil {
@@ -618,15 +617,14 @@ func TestSession_Start_OnFindings_LoopBack_HarnessInvokedNotDeviation(t *testing
 	dir := t.TempDir()
 
 	// Workflow where agent-a has On Findings = "agent-a" (self-loop for CNA).
-	const loopbackContent = `[[SECTION:Workflow:loopback]]
-<!-- workflow-version: 1.0 -->
+	const loopbackContent = `<Workflow type="core" name="loopback" version="1.0">
 ## Loopback Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
 | PLANNING | agent-a | ❌ | agent-b | agent-a | - | plan.md |
 | PLANNING | agent-b | ❌ | COMPLETE | - | plan.md | result.md |
-[[/SECTION:Workflow:loopback]]
+</Workflow>
 `
 	orchPath := filepath.Join(dir, "loopback-orch.md")
 	if err := os.WriteFile(orchPath, []byte(loopbackContent), 0600); err != nil {
@@ -792,15 +790,14 @@ func TestSession_Start_Deviation_ResolvesAndResumes(t *testing.T) {
 
 	// Workflow where agent-a has absent On Findings → any non-SUCCESS triggers
 	// a deviation (the engine can't route it automatically).
-	const deviationWorkflow = `[[SECTION:Workflow:deviate]]
-<!-- workflow-version: 1.0 -->
+	const deviationWorkflow = `<Workflow type="core" name="deviate" version="1.0">
 ## Deviation Workflow
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
 | PLANNING | agent-a | ❌ | agent-b | - | plan.md |
 | PLANNING | agent-b | ❌ | COMPLETE | plan.md | result.md |
-[[/SECTION:Workflow:deviate]]
+</Workflow>
 `
 	orchPath := filepath.Join(dir, "deviation-orch.md")
 	if err := os.WriteFile(orchPath, []byte(deviationWorkflow), 0600); err != nil {
@@ -1712,15 +1709,14 @@ func TestSession_Start_Deviation_ResolverStop_ReturnsDeviationUnresolved(t *test
 
 	// Same deviation workflow as TestSession_Start_Deviation_ResolvesAndResumes:
 	// agent-a has no On Findings column, so PARTIALLY_DONE triggers a deviation.
-	const deviationWorkflow = `[[SECTION:Workflow:deviate-stop]]
-<!-- workflow-version: 1.0 -->
+	const deviationWorkflow = `<Workflow type="core" name="deviate-stop" version="1.0">
 ## Deviation Stop Workflow
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
 | PLANNING | agent-a | ❌ | agent-b | - | plan.md |
 | PLANNING | agent-b | ❌ | COMPLETE | plan.md | result.md |
-[[/SECTION:Workflow:deviate-stop]]
+</Workflow>
 `
 	orchPath := filepath.Join(dir, "deviation-stop-orch.md")
 	if err := os.WriteFile(orchPath, []byte(deviationWorkflow), 0600); err != nil {
@@ -2076,15 +2072,14 @@ func TestSession_Start_Dispatch_ResolvesInputArtifacts_ToRunScopedForm(t *testin
 	dir := t.TempDir()
 
 	// Workflow with explicit input artifacts to verify path resolution.
-	const resolveWorkflow = `[[SECTION:Workflow:resolve-test]]
-<!-- workflow-version: 1.0 -->
+	const resolveWorkflow = `<Workflow type="core" name="resolve-test" version="1.0">
 ## Resolve Test Workflow
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | PLANNING | agent-a | ❌ | Plan.md | Progress.md |
 | PLANNING | agent-b | ❌ | Progress.md | Result.md |
-[[/SECTION:Workflow:resolve-test]]
+</Workflow>
 `
 	orchPath := filepath.Join(dir, "resolve-orch.md")
 	if err := os.WriteFile(orchPath, []byte(resolveWorkflow), 0600); err != nil {
@@ -2152,15 +2147,14 @@ func TestSession_Start_Dispatch_ResolvesInputArtifacts_ToRunScopedForm(t *testin
 func TestSession_Start_Dispatch_ResolvesOutputArtifacts_ToRunScopedForm(t *testing.T) {
 	dir := t.TempDir()
 
-	const resolveWorkflow = `[[SECTION:Workflow:resolve-out]]
-<!-- workflow-version: 1.0 -->
+	const resolveWorkflow = `<Workflow type="core" name="resolve-out" version="1.0">
 ## Resolve Output Workflow
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | PLANNING | agent-a | ❌ | - | Progress.md |
 | PLANNING | agent-b | ❌ | Progress.md | Result.md |
-[[/SECTION:Workflow:resolve-out]]
+</Workflow>
 `
 	orchPath := filepath.Join(dir, "resolve-out-orch.md")
 	if err := os.WriteFile(orchPath, []byte(resolveWorkflow), 0600); err != nil {
@@ -2241,14 +2235,13 @@ func TestSession_Start_Dispatch_DoesNotDoublePrefixAlreadyScopedPaths(t *testing
 	scopedPrefix := "Orchestration-" + runID + "/"
 
 	// Workflow where input/output are already run-scoped.
-	resolveWorkflow := `[[SECTION:Workflow:already-scoped]]
-<!-- workflow-version: 1.0 -->
+	resolveWorkflow := `<Workflow type="core" name="already-scoped" version="1.0">
 ## Already Scoped Workflow
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | PLANNING | agent-a | ❌ | ` + scopedPrefix + `Plan.md | ` + scopedPrefix + `Progress.md |
-[[/SECTION:Workflow:already-scoped]]
+</Workflow>
 `
 	orchPath := filepath.Join(dir, "already-scoped-orch.md")
 	if err := os.WriteFile(orchPath, []byte(resolveWorkflow), 0600); err != nil {
@@ -2333,14 +2326,13 @@ func TestSession_Start_Dispatch_DoesNotDoublePrefixAlreadyScopedPaths(t *testing
 func TestSession_Start_Dispatch_EmptyRunID_PathsNotPrefixed(t *testing.T) {
 	dir := t.TempDir()
 
-	const resolveWorkflow = `[[SECTION:Workflow:no-runid]]
-<!-- workflow-version: 1.0 -->
+	const resolveWorkflow = `<Workflow type="core" name="no-runid" version="1.0">
 ## No RunID Workflow
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
 | PLANNING | agent-a | ❌ | Plan.md | Progress.md |
-[[/SECTION:Workflow:no-runid]]
+</Workflow>
 `
 	orchPath := filepath.Join(dir, "no-runid-orch.md")
 	if err := os.WriteFile(orchPath, []byte(resolveWorkflow), 0600); err != nil {
@@ -4720,15 +4712,14 @@ func buildDeviationWorkflowSession(
 ) (ses session.Session, f *harness.FakeAdapter, store *memStore, orchPath string) {
 	t.Helper()
 	dir := t.TempDir()
-	const deviationWorkflow = `[[SECTION:Workflow:deviate-log]]
-<!-- workflow-version: 1.0 -->
+	const deviationWorkflow = `<Workflow type="core" name="deviate-log" version="1.0">
 ## Deviation Log Workflow
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
 | PLANNING | agent-a | ❌ | agent-b | - | plan.md |
 | PLANNING | agent-b | ❌ | COMPLETE | plan.md | result.md |
-[[/SECTION:Workflow:deviate-log]]
+</Workflow>
 `
 	orchPath = filepath.Join(dir, "deviate-log-orch.md")
 	if err := os.WriteFile(orchPath, []byte(deviationWorkflow), 0600); err != nil {

@@ -1,13 +1,13 @@
 package app
 
 // harness_only_refresh.go implements refreshHarnessOnly, the narrow content-refresh routine
-// for harness-only agents. It regenerates in-scope [[DEPLOYED:]] regions from canonical
+// for harness-only agents. It regenerates in-scope managed regions from canonical
 // protocol and bundle content, leaving every other byte — injection content, section
 // structure, frontmatter, and out-of-scope deployed regions — byte-identical to the input.
 //
 // The defining constraint for harness-only agents: there is no generic source.
 // The file on disk is the source of truth. transform.Apply is built around a generic source
-// whose [[DEPLOYED:]] regions are empty placeholders and rejects a populated source region
+// whose managed regions are empty placeholders and rejects a populated source region
 // with transform.ErrSourceDeployedRegionNotEmpty. This routine therefore takes the dedicated-
 // narrow-routine approach: walk the parsed document's regions directly and rewrite only the
 // in-scope deployed regions. transform.ErrSourceDeployedRegionNotEmpty is never returned here.
@@ -27,7 +27,7 @@ import (
 type HarnessOnlyRefreshRequest struct {
 	// Deployed is the current file bytes, verbatim. This is the source of truth.
 	Deployed []byte
-	// Scope selects which [[DEPLOYED:]] regions are regenerated.
+	// Scope selects which managed regions are regenerated.
 	Scope RefreshScope
 	// Role selects the protocol variant and the bundle block variant. Taken from the
 	// file's own frontmatter `role`, defaulting to domain.RoleSubagent.
@@ -128,6 +128,12 @@ func refreshHarnessOnly(req HarnessOnlyRefreshRequest) (HarnessOnlyRefreshResult
 
 		content := canonicalContent[name]
 		_ = node.SetContent(content) // SetContent always returns nil (forward-compatible signature).
+		// Write the protocol version as a tag attribute. For all other regions the version
+		// attribute is not present (the protocol region is the only in-scope region that
+		// carries a version).
+		if name == "CommunicationProtocol" {
+			_ = node.SetVersion(req.Protocol.Version) // SetVersion errors only for invalid versions or tagless nodes; neither applies here.
+		}
 
 		class, _ := docformat.ClassifyRegion(docformat.NodeDeployed, name)
 		outcomes = append(outcomes, transform.RegionOutcome{
@@ -166,8 +172,15 @@ func refreshHarnessOnly(req HarnessOnlyRefreshRequest) (HarnessOnlyRefreshResult
 			continue
 		}
 
+		// Determine the version to embed in the opening tag for this region.
+		// Only CommunicationProtocol carries a version in the tag attribute.
+		var regionVersion string
+		if regionName == "CommunicationProtocol" {
+			regionVersion = req.Protocol.Version
+		}
+
 		// Attempt to insert it at the position the vocabulary dictates.
-		regionBytes := buildDeployedRegionBytes(regionName, content)
+		regionBytes := buildDeployedRegionBytes(regionName, content, regionVersion)
 		parent := docformat.DeployedParent[regionName]
 
 		if parent == "" {
@@ -179,7 +192,7 @@ func refreshHarnessOnly(req HarnessOnlyRefreshRequest) (HarnessOnlyRefreshResult
 		} else {
 			// Parent-section region. Insert before the parent section's close tag if the
 			// section is present. If the section is absent, the region cannot be inserted
-			// without inventing a [[SECTION:]] tag — which this routine must never do.
+			// without inventing a section tag — which this routine must never do.
 			if _, ok := doc.Body().Section(parent); ok {
 				currentBytes = insertSectionDeployedRegion(currentBytes, regionBytes, parent)
 				added = append(added, regionName)
@@ -210,8 +223,9 @@ func refreshHarnessOnly(req HarnessOnlyRefreshRequest) (HarnessOnlyRefreshResult
 
 // harnessOnlyRegionContent computes the canonical content for one in-scope deployed region.
 //
-// CommunicationProtocol is filled with the protocol version marker line followed by the
-// role-matched protocol block, exactly as the catalog-backed path fills it.
+// CommunicationProtocol is filled with the role-matched protocol block. The version is
+// written as a tag attribute by the caller via Node.SetVersion, not as a comment inside
+// the content.
 //
 // Every other in-scope region is filled with its role-matched bundle block.
 func harnessOnlyRegionContent(regionName string, req HarnessOnlyRefreshRequest) ([]byte, error) {
@@ -220,11 +234,7 @@ func harnessOnlyRegionContent(regionName string, req HarnessOnlyRefreshRequest) 
 		if !ok {
 			return nil, transform.ErrProtocolContentMissing
 		}
-		versionComment := []byte(transform.ProtocolVersionComment(req.Protocol.Version, block))
-		content := make([]byte, 0, len(versionComment)+len(block))
-		content = append(content, versionComment...)
-		content = append(content, block...)
-		return content, nil
+		return block, nil
 	}
 	// All other in-scope deployed regions are filled from the bundle.
 	block, ok := req.Bundle.BlockFor(regionName, req.Role)
@@ -249,21 +259,19 @@ func harnessOnlyRegionAction(class domain.InjectionClass) transform.RegionAction
 	}
 }
 
-// buildDeployedRegionBytes serialises a deployed region as:
-//
-//	[[DEPLOYED:Name]]\n
-//	<content>
-//	[[/DEPLOYED:Name]]\n
-//
-// The open tag, content, and close tag are each on their own line, matching how docformat
-// serialises an existing deployed region via bodyBytes().
-func buildDeployedRegionBytes(name string, content []byte) []byte {
-	openTag := fmt.Sprintf("[[DEPLOYED:%s]]\n", name)
-	closeTag := fmt.Sprintf("[[/DEPLOYED:%s]]\n", name)
+// buildDeployedRegionBytes serialises a deployed region using canonical tag syntax, with an
+// optional version attribute on the opening tag. The open tag, content, and close tag are
+// each on their own line, matching how docformat serialises an existing deployed region.
+// An empty version omits the version attribute.
+func buildDeployedRegionBytes(name string, content []byte, version string) []byte {
+	// RenderOpenTagLine and RenderCloseTagLine errors only for invalid names or kinds;
+	// both are controlled here, so the errors are safely ignored.
+	openTag, _ := docformat.RenderOpenTagLine(docformat.NodeDeployed, name, version)
+	closeTag, _ := docformat.RenderCloseTagLine(name)
 	var buf bytes.Buffer
-	buf.WriteString(openTag)
+	buf.Write(openTag)
 	buf.Write(content)
-	buf.WriteString(closeTag)
+	buf.Write(closeTag)
 	return buf.Bytes()
 }
 
@@ -296,8 +304,9 @@ func insertTopLevelDeployedRegion(src []byte, regionName string, regionBytes []b
 			}
 
 			// Prefer CRLF close tags if present; fall back to LF.
-			closeTagCRLF := []byte(fmt.Sprintf("[[/SECTION:%s]]\r\n", precedingName))
-			closeTagLF := []byte(fmt.Sprintf("[[/SECTION:%s]]\n", precedingName))
+			// In the new tag syntax, section close tags are </SectionName>.
+			closeTagCRLF := []byte(fmt.Sprintf("</%s>\r\n", precedingName))
+			closeTagLF := []byte(fmt.Sprintf("</%s>\n", precedingName))
 
 			var closeTag []byte
 			if bytes.Contains(src, closeTagCRLF) {
@@ -337,8 +346,9 @@ func insertTopLevelDeployedRegion(src []byte, regionName string, regionBytes []b
 // is responsible for verifying this before calling).
 func insertSectionDeployedRegion(src []byte, regionBytes []byte, parentSection string) []byte {
 	// Prefer CRLF close tags if present; fall back to LF.
-	closeTagCRLF := []byte(fmt.Sprintf("[[/SECTION:%s]]\r\n", parentSection))
-	closeTagLF := []byte(fmt.Sprintf("[[/SECTION:%s]]\n", parentSection))
+	// In the new tag syntax, section close tags are </SectionName>.
+	closeTagCRLF := []byte(fmt.Sprintf("</%s>\r\n", parentSection))
+	closeTagLF := []byte(fmt.Sprintf("</%s>\n", parentSection))
 
 	var closeTag []byte
 	if bytes.Contains(src, closeTagCRLF) {

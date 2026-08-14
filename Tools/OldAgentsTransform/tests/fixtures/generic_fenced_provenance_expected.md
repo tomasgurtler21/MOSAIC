@@ -10,40 +10,40 @@ recommended_tier: TODO
 tier_rationale: "TODO: state why this tier"
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # FencedProvenanceAgent Agent
 
 You are the **FencedProvenanceAgent** agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[DEPLOYED:ClosingProcedure]]
-[[/DEPLOYED:ClosingProcedure]]
-[[DEPLOYED:AuthorityHierarchy]]
-[[/DEPLOYED:AuthorityHierarchy]]
+<IdentityExtension type="project">
+</IdentityExtension>
+<ClosingProcedure type="managed">
+</ClosingProcedure>
+<AuthorityHierarchy type="managed">
+</AuthorityHierarchy>
 
-[[/SECTION:Identity]]
+</Identity>
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Capability description.
 
 ```
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 ---
 ## Artifact Provenance
 ```
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
-[[DEPLOYED:ProtocolConstraints]]
-[[/DEPLOYED:ProtocolConstraints]]
+<ProtocolConstraints type="managed">
+</ProtocolConstraints>
 
 - Operate within defined scope.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>

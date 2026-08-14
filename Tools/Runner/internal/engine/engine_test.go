@@ -96,8 +96,7 @@ import (
 
 // ---- Workflow content fixtures (reused from compat tests, inline for isolation) ----
 
-const quickFixContent = `<!-- workflow-version: 3.0 -->
-## Quick Fix Workflow
+const quickFixContent = `## Quick Fix Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -107,8 +106,7 @@ const quickFixContent = `<!-- workflow-version: 3.0 -->
 | REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
 `
 
-const brownfieldTDDContent = `<!-- workflow-version: 3.6 -->
-## Brownfield TDD Workflow
+const brownfieldTDDContent = `## Brownfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -135,8 +133,7 @@ const brownfieldTDDContent = `<!-- workflow-version: 3.6 -->
 | Tests-Only | Test |
 `
 
-const brownfieldBuildVerifiedContent = `<!-- workflow-version: 2.1 -->
-## Brownfield TDD Build-Verified Workflow
+const brownfieldBuildVerifiedContent = `## Brownfield TDD Build-Verified Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -164,8 +161,7 @@ const brownfieldBuildVerifiedContent = `<!-- workflow-version: 2.1 -->
 | Tests-Only | Test |
 `
 
-const implOnlyContent = `<!-- workflow-version: 3.1 -->
-## Implementation Only Workflow
+const implOnlyContent = `## Implementation Only Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -174,8 +170,7 @@ const implOnlyContent = `<!-- workflow-version: 3.1 -->
 | REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
 `
 
-const greenfieldTDDContent = `<!-- workflow-version: 3.3 -->
-## Greenfield TDD Workflow
+const greenfieldTDDContent = `## Greenfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -209,8 +204,7 @@ const greenfieldTDDContent = `<!-- workflow-version: 3.3 -->
 // but with TDD approach, group-order logic requires tests-review-tdd next.
 // A correct engine ignores On Success and dispatches tests-review-tdd; an incorrect
 // engine would dispatch implementation-tdd. This makes the two behaviours distinguishable.
-const onSuccessDivergentContent = `<!-- workflow-version: 1.0 -->
-## On-Success-Divergent Workflow
+const onSuccessDivergentContent = `## On-Success-Divergent Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -581,8 +575,7 @@ func TestNext_PreExecution_AbsentOnSuccess_ReturnsDeviation(t *testing.T) {
 	// Build a minimal workflow where the first pre-execution row has no On Success.
 	// brownfield-tdd row 0 (codebase-research) has OnSuccess="requirements-refinement",
 	// so we construct a minimal table with a column-absent On Success.
-	const noHintContent = `<!-- workflow-version: 1.0 -->
-## No Hint Workflow
+	const noHintContent = `## No Hint Workflow
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
@@ -1206,8 +1199,7 @@ func TestNext_OnFindings_UnambiguousHint_CNA_InsideExecution_ReturnsDispatch(t *
 // a DeviationDecision.
 func TestNext_OnFindings_AbsentColumn_CNA_ReturnsDeviation(t *testing.T) {
 	// Construct a minimal workflow without an On Findings column at all.
-	const noFindingsContent = `<!-- workflow-version: 1.0 -->
-## No Findings Workflow
+	const noFindingsContent = `## No Findings Workflow
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
@@ -1802,8 +1794,7 @@ func TestNext_Paths_UnresolvableStageNumber_ReturnsStop(t *testing.T) {
 	// A PLANNING row with {StageNumber} in its input — {StageNumber} is only valid
 	// inside EXECUTION phase. There is no current stage context when dispatching this
 	// pre-execution row, so the engine cannot substitute the placeholder.
-	const unresolvableTemplateContent = `<!-- workflow-version: 1.0 -->
-## Unresolvable Template Workflow
+	const unresolvableTemplateContent = `## Unresolvable Template Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -1838,8 +1829,7 @@ func TestNext_Paths_UnresolvableStageNumber_ReturnsStop(t *testing.T) {
 func TestNext_PreExecution_FreeFormOnSuccess_ReturnsDeviation(t *testing.T) {
 	// On Success = "agent-b (or other based on issue)" — presence of qualifying text
 	// makes this a free-form / ambiguous hint that cannot be auto-routed.
-	const freeFormOnSuccessContent = `<!-- workflow-version: 1.0 -->
-## Free-Form On Success Workflow
+	const freeFormOnSuccessContent = `## Free-Form On Success Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -1974,8 +1964,7 @@ func TestNext_Approach_ImplementationFirst_LastStageTestGroupComplete_AdvancesTo
 func TestNext_HITL_RowTrue_StageTrue_EffectiveTrue(t *testing.T) {
 	// Use a minimal EXECUTION-only workflow with HITL=true on the first row.
 	// Stage HITL=true as well → effective HITL must be true (OR of both).
-	const bothHITLTrueContent = `<!-- workflow-version: 1.0 -->
-## Both HITL True Workflow
+	const bothHITLTrueContent = `## Both HITL True Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -2025,8 +2014,7 @@ func TestNext_HITL_RowTrue_StageTrue_EffectiveTrue(t *testing.T) {
 //   BetaFirst        → Beta, Alpha, Gamma
 //   GammaOnly        → Gamma
 //   AlphaBeta        → Alpha, Beta
-const threeGroupContent = `<!-- workflow-version: 1.0 -->
-## Three-Group Workflow
+const threeGroupContent = `## Three-Group Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|

@@ -5,4 +5,4 @@ name: test-agent
 description: Invalid file - INJECTION close tag with no corresponding opening tag (E002)
 ---
 
-[[/INJECTION:IdentityExtension]]
+</IdentityExtension>

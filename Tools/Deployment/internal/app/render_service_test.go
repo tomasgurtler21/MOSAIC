@@ -154,13 +154,13 @@ func newRenderDeps(t *testing.T) app.Deps {
 func newRenderCatalog() *stubCatalog {
 	cat := newMinimalCatalog()
 	cat.sections = map[string][]byte{
-		"quick-fix": []byte("[[SECTION:Workflow:quick-fix]]\nQuick Fix workflow block.\n[[/SECTION:Workflow:quick-fix]]\n"),
+		"quick-fix": []byte("<Workflow type=\"core\" name=\"quick-fix\">\nQuick Fix workflow block.\n</Workflow>\n"),
 	}
 	return cat
 }
 
 // minimalGenericSubagentBytes returns a byte-valid generic-form MOSAIC agent for render
-// tests. It carries the required MOSAIC frontmatter fields and one [[SECTION:Identity]]
+// tests. It carries the required MOSAIC frontmatter fields and one <Identity type="core">
 // body block.
 func minimalGenericSubagentBytes() []byte {
 	return []byte("---\n" +
@@ -172,12 +172,12 @@ func minimalGenericSubagentBytes() []byte {
 		"model: \"{model-identifier}\"\n" +
 		"tools: [bash]\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"# RenderTest Agent\n\n" +
 		"You are the render test agent.\n" +
-		"[[/SECTION:Identity]]\n" +
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-		"[[/DEPLOYED:CommunicationProtocol]]\n")
+		"</Identity>\n" +
+		"<CommunicationProtocol type=\"managed\">\n" +
+		"</CommunicationProtocol>\n")
 }
 
 // minimalGenericSubagentNoVersionBytes returns a generic agent without a `version` field,
@@ -191,11 +191,11 @@ func minimalGenericSubagentNoVersionBytes() []byte {
 		"model: \"{model-identifier}\"\n" +
 		"tools: []\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the render test agent with no version.\n" +
-		"[[/SECTION:Identity]]\n" +
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-		"[[/DEPLOYED:CommunicationProtocol]]\n")
+		"</Identity>\n" +
+		"<CommunicationProtocol type=\"managed\">\n" +
+		"</CommunicationProtocol>\n")
 }
 
 // minimalGenericSubagentNoRoleBytes returns a generic agent without a `role` field, to
@@ -209,11 +209,11 @@ func minimalGenericSubagentNoRoleBytes() []byte {
 		"model: \"{model-identifier}\"\n" +
 		"tools: []\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the render test agent with no role.\n" +
-		"[[/SECTION:Identity]]\n" +
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-		"[[/DEPLOYED:CommunicationProtocol]]\n")
+		"</Identity>\n" +
+		"<CommunicationProtocol type=\"managed\">\n" +
+		"</CommunicationProtocol>\n")
 }
 
 // minimalGenericSubagentBadRoleBytes returns a generic agent with an unrecognised `role`
@@ -228,17 +228,17 @@ func minimalGenericSubagentBadRoleBytes() []byte {
 		"model: \"{model-identifier}\"\n" +
 		"tools: []\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the render test agent with a bad role.\n" +
-		"[[/SECTION:Identity]]\n" +
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-		"[[/DEPLOYED:CommunicationProtocol]]\n")
+		"</Identity>\n" +
+		"<CommunicationProtocol type=\"managed\">\n" +
+		"</CommunicationProtocol>\n")
 }
 
 // minimalGenericOrchestratorBytes returns a generic-form orchestrator agent for workflow
 // render tests. It carries role: orchestrator and the AvailableWorkflows deployed region.
 // AvailableWorkflows is in CanonicalDeployed, so docformat.ClassifyRegion requires the
-// [[DEPLOYED:]] marker; [[INJECTION:]] returns ErrMarkerMismatch.
+// managed region marker; project region returns ErrMarkerMismatch.
 func minimalGenericOrchestratorBytes() []byte {
 	return []byte("---\n" +
 		"id: \"46\"\n" +
@@ -249,17 +249,17 @@ func minimalGenericOrchestratorBytes() []byte {
 		"model: \"{model-identifier}\"\n" +
 		"tools: []\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the render test orchestrator.\n" +
-		"[[/SECTION:Identity]]\n" +
-		"[[DEPLOYED:AvailableWorkflows]]\n" +
-		"[[/DEPLOYED:AvailableWorkflows]]\n" +
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-		"[[/DEPLOYED:CommunicationProtocol]]\n")
+		"</Identity>\n" +
+		"<AvailableWorkflows type=\"managed\">\n" +
+		"</AvailableWorkflows>\n" +
+		"<CommunicationProtocol type=\"managed\">\n" +
+		"</CommunicationProtocol>\n")
 }
 
 // minimalGenericOrchestratorWithInfraRegionBytes returns a generic-form orchestrator that
-// carries both the [[DEPLOYED:InfrastructureAgents]] and [[DEPLOYED:AvailableWorkflows]]
+// carries both the <InfrastructureAgents type="managed"> and <AvailableWorkflows type="managed">
 // regions. Used to test that a caller-specified InfrastructureAgents set is injected and
 // appears in the rendered output.
 func minimalGenericOrchestratorWithInfraRegionBytes() []byte {
@@ -272,15 +272,15 @@ func minimalGenericOrchestratorWithInfraRegionBytes() []byte {
 		"model: \"{model-identifier}\"\n" +
 		"tools: []\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the render test orchestrator with infrastructure support.\n" +
-		"[[/SECTION:Identity]]\n" +
-		"[[DEPLOYED:InfrastructureAgents]]\n" +
-		"[[/DEPLOYED:InfrastructureAgents]]\n" +
-		"[[DEPLOYED:AvailableWorkflows]]\n" +
-		"[[/DEPLOYED:AvailableWorkflows]]\n" +
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-		"[[/DEPLOYED:CommunicationProtocol]]\n")
+		"</Identity>\n" +
+		"<InfrastructureAgents type=\"managed\">\n" +
+		"</InfrastructureAgents>\n" +
+		"<AvailableWorkflows type=\"managed\">\n" +
+		"</AvailableWorkflows>\n" +
+		"<CommunicationProtocol type=\"managed\">\n" +
+		"</CommunicationProtocol>\n")
 }
 
 // notAGenericAgentBytes returns content that is not a parseable generic-form MOSAIC agent:
@@ -1257,7 +1257,7 @@ func TestRenderAgent_Orchestrator_WithCallerInfrastructureAgents_AppearsInOutput
 	svc := app.New(deps)
 
 	dir := t.TempDir()
-	// Use the orchestrator fixture that carries the [[DEPLOYED:InfrastructureAgents]] region.
+	// Use the orchestrator fixture that carries the <InfrastructureAgents type="managed"> region.
 	src := writeRenderSourceFile(t, dir, "render-test-orchestrator-infra.md", minimalGenericOrchestratorWithInfraRegionBytes())
 	dest := filepath.Join(dir, "out.md")
 

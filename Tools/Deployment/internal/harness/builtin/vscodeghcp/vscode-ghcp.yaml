@@ -6,6 +6,7 @@ injections_version: "1.3.0"
 
 models:
   ids:
+    - "Claude Sonnet 5"
     - "Claude Sonnet 4.6"
     - "Claude Sonnet 4.5"
     - "Claude Opus 4.6"

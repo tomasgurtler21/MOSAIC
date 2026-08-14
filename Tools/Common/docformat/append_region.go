@@ -27,6 +27,14 @@ var ErrDuplicateRegionName = errors.New("region name already present in document
 // obtained from a different body.
 var ErrSiblingNotInDocument = errors.New("sibling node does not belong to this body")
 
+// ErrInvalidVersion is returned when a version value contains a quote character,
+// a line terminator, or leading/trailing whitespace.
+var ErrInvalidVersion = errors.New("region version value is not valid")
+
+// ErrVersionNotSettable is returned by Node.SetVersion when the node has no opening tag
+// to carry a version attribute (e.g. a synthetic orphan node with no opening tag).
+var ErrVersionNotSettable = errors.New("node has no opening tag to carry a version")
+
 // ---------------------------------------------------------------------------
 // Name validation
 // ---------------------------------------------------------------------------
@@ -58,22 +66,127 @@ func isValidTagName(name string) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Tag construction helpers
+// Version validation
 // ---------------------------------------------------------------------------
 
-// kindUpperCase maps a NodeKind to its uppercase tag keyword.
-func kindUpperCase(k NodeKind) string {
-	return strings.ToUpper(string(k))
+// validateVersion reports whether version is a valid version attribute value.
+// An empty version string is valid (it means "remove the attribute").
+// A non-empty version must not contain quote characters (single or double),
+// line terminators (LF or CR), or leading/trailing whitespace.
+func validateVersion(version string) error {
+	if version == "" {
+		return nil
+	}
+	if len(version) > 0 {
+		first := version[0]
+		last := version[len(version)-1]
+		if first == ' ' || first == '\t' || last == ' ' || last == '\t' {
+			return ErrInvalidVersion
+		}
+	}
+	for _, r := range version {
+		if r == '"' || r == '\'' || r == '\n' || r == '\r' {
+			return ErrInvalidVersion
+		}
+	}
+	return nil
 }
 
-// buildOpenTagLine returns the opening tag line for a region, including its trailing newline.
-func buildOpenTagLine(kind NodeKind, name string) []byte {
-	return []byte("[[" + kindUpperCase(kind) + ":" + name + "]]\n")
+// ---------------------------------------------------------------------------
+// Type attribute mapping
+// ---------------------------------------------------------------------------
+
+// kindTypeAttr maps each NodeKind to its wire-format type attribute value.
+var kindTypeAttr = map[NodeKind]string{
+	NodeSection:   "core",
+	NodeDeployed:  "managed",
+	NodeInjection: "project",
+	NodeCustom:    "custom",
 }
 
-// buildCloseTagLine returns the closing tag line for a region, including its trailing newline.
-func buildCloseTagLine(kind NodeKind, name string) []byte {
-	return []byte("[[/" + kindUpperCase(kind) + ":" + name + "]]\n")
+// ---------------------------------------------------------------------------
+// Tag construction helpers (shared by internal serialiser and exported Render functions)
+// ---------------------------------------------------------------------------
+
+// buildOpenTagLine returns the canonical opening tag line for a region, terminated by "\n".
+// The format is: <TagName type="typeVal"> or, for compound names,
+// <Prefix type="typeVal" name="id"> and optionally with version="v".
+// Canonical attribute order is: type, name (when present), version (when present).
+func buildOpenTagLine(kind NodeKind, name string, version string) []byte {
+	typeVal := kindTypeAttr[kind]
+
+	// Split compound name at the first colon.
+	tagName := name
+	nameAttr := ""
+	if idx := strings.IndexByte(name, ':'); idx >= 0 {
+		tagName = name[:idx]
+		nameAttr = name[idx+1:]
+	}
+
+	var sb strings.Builder
+	sb.WriteByte('<')
+	sb.WriteString(tagName)
+	sb.WriteString(` type="`)
+	sb.WriteString(typeVal)
+	sb.WriteByte('"')
+	if nameAttr != "" {
+		sb.WriteString(` name="`)
+		sb.WriteString(nameAttr)
+		sb.WriteByte('"')
+	}
+	if version != "" {
+		sb.WriteString(` version="`)
+		sb.WriteString(version)
+		sb.WriteByte('"')
+	}
+	sb.WriteString(">\n")
+	return []byte(sb.String())
+}
+
+// buildCloseTagLine returns the canonical closing tag line for a region, terminated by "\n".
+// For compound names only the prefix (before the first colon) appears in the close tag.
+func buildCloseTagLine(name string) []byte {
+	tagName := name
+	if idx := strings.IndexByte(name, ':'); idx >= 0 {
+		tagName = name[:idx]
+	}
+	return []byte("</" + tagName + ">\n")
+}
+
+// ---------------------------------------------------------------------------
+// Exported tag rendering functions
+// ---------------------------------------------------------------------------
+
+// RenderOpenTagLine returns a canonical opening tag line for a region, terminated by
+// a single "\n". kind maps to the type attribute; a compound name (Prefix:id) is split
+// at the first colon into the tag name and the name attribute; an empty version omits
+// the version attribute. Returns ErrInvalidRegionName when name is not a valid tag name,
+// ErrInvalidRegionKind when kind is not one of the four node kinds, and ErrInvalidVersion
+// for a malformed version value.
+func RenderOpenTagLine(kind NodeKind, name string, version string) ([]byte, error) {
+	switch kind {
+	case NodeSection, NodeDeployed, NodeInjection, NodeCustom:
+		// valid
+	default:
+		return nil, ErrInvalidRegionKind
+	}
+	if !isValidTagName(name) {
+		return nil, ErrInvalidRegionName
+	}
+	if err := validateVersion(version); err != nil {
+		return nil, err
+	}
+	return buildOpenTagLine(kind, name, version), nil
+}
+
+// RenderCloseTagLine returns the canonical closing tag line for a region, terminated by
+// a single "\n". Only the prefix of a compound name appears in the tag. Returns
+// ErrInvalidRegionName when name is not a valid tag name.
+func RenderCloseTagLine(name string) ([]byte, error) {
+	if !isValidTagName(name) {
+		return nil, ErrInvalidRegionName
+	}
+	return buildCloseTagLine(name), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -154,8 +267,9 @@ func ensureTrailingNewline(content []byte) []byte {
 // supplied content are represented as live child nodes. parent may be nil for top-level
 // nodes. The body pointer is set so that duplicate-name checks via Node.AppendRegion work.
 func buildRegionNode(kind NodeKind, name string, contentBytes []byte, parent *Node, body *Body) *Node {
-	openTag := buildOpenTagLine(kind, name)
-	closeTag := buildCloseTagLine(kind, name)
+	// version is not set at construction time; callers use SetVersion to add or change it.
+	openTag := buildOpenTagLine(kind, name, "")
+	closeTag := buildCloseTagLine(name)
 	items := parseBodyItems(contentBytes)
 
 	node := &Node{

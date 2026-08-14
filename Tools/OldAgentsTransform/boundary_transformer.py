@@ -144,24 +144,23 @@ def is_orchestrator_file(path: pathlib.Path) -> bool:
 
 def has_canonical_boundary_tags(body: str) -> bool:
     """Return True when body already carries a structurally valid set of canonical
-    [[SECTION:...]] boundary tags.
+    boundary tags in the current syntax (<Name type="..."> / </Name>).
 
     True requires ALL of:
-      - at least one [[SECTION:Name]] open tag whose Name is in
+      - at least one <Name type="core"> open tag whose Name is in
         boundary_constants.CANONICAL_SECTIONS;
-      - every [[SECTION:Name]] open tag present has a matching [[/SECTION:Name]] close
-        tag, and no close tag is unmatched;
+      - every such open tag has a matching close tag, and no close tag is unmatched;
       - every SECTION name present is in CANONICAL_SECTIONS;
-      - every [[DEPLOYED:Name]] name present is in boundary_constants.CANONICAL_DEPLOYED
+      - every DEPLOYED (type="managed") name present is in CANONICAL_DEPLOYED
         and is likewise correctly paired.
 
-    [[INJECTION:...]] names are open vocabulary and are not checked for membership, only
-    for pairing.
+    INJECTION (type="project") names are open vocabulary and are not checked for
+    membership, only for pairing.
 
-    An incidental "[[...]]"-shaped string in prose that is not a well-formed tag line,
-    an unpaired tag, or a non-canonical SECTION/DEPLOYED name each make this False.
-    A tag is recognised only when it occupies a whole line (after stripping the line
-    terminator), matching how the Go docformat lexer recognises tags.
+    A line that is not a well-formed boundary tag, an unpaired tag, or a
+    non-canonical SECTION/DEPLOYED name each make this False.
+    A tag is recognised only when it occupies a whole line (after stripping the
+    line terminator), matching how the Go docformat lexer recognises tags.
     """
     canonical_sections_set = set(CANONICAL_SECTIONS)
     canonical_deployed_set = set(CANONICAL_DEPLOYED)
@@ -176,44 +175,34 @@ def has_canonical_boundary_tags(body: str) -> bool:
         if m is None:
             continue
 
-        is_close = bool(m.group("close"))
-        kind = m.group("kind")
-        name = m.group("name")
+        is_close = m.group("close") == "/"
+        kind = m.group("kind")   # "" for close tags in new syntax
+        name = m.group("name")   # compound name for opens; base name for closes
 
-        if kind == "SECTION":
-            if not is_close:
-                # Membership check uses the base name so compound names like
-                # 'Identity:Something' are still recognised as canonical Identity.
+        if not is_close:
+            # --- Open tag: kind is always set ---
+            if kind == "SECTION":
                 if tag_base_name(name) not in canonical_sections_set:
                     return False
                 open_sections.append(name)
                 has_canonical_section = True
-            else:
-                # Pairing check uses the full name — the close tag must match
-                # the exact open tag name, not just the base name.
-                if not open_sections or open_sections[-1] != name:
-                    return False
-                open_sections.pop()
-
-        elif kind == "DEPLOYED":
-            if not is_close:
-                # Membership check uses the base name for the same reason.
+            elif kind == "DEPLOYED":
                 if tag_base_name(name) not in canonical_deployed_set:
                     return False
                 open_deployed.append(name)
-            else:
-                # Pairing check uses the full name.
-                if not open_deployed or open_deployed[-1] != name:
-                    return False
-                open_deployed.pop()
-
-        elif kind == "INJECTION":
-            if not is_close:
+            elif kind == "INJECTION":
                 open_injections.append(name)
-            else:
-                if not open_injections or open_injections[-1] != name:
-                    return False
-                open_injections.pop()
+        else:
+            # --- Close tag: name is the base name, kind is "" ---
+            # Search each stack for a matching entry (by base name).
+            found = False
+            for stk in [open_sections, open_deployed, open_injections]:
+                if stk and tag_base_name(stk[-1]) == name:
+                    stk.pop()
+                    found = True
+                    break
+            if not found:
+                return False
 
     if open_sections or open_deployed or open_injections:
         return False
@@ -279,9 +268,9 @@ def transform_file(
 ) -> TransformResult:
     """Transform a MOSAIC agent instruction file by adding boundary tags.
 
-    Reads the file at input_path, adds [[SECTION:...]] and [[INJECTION:...]]
-    boundary tags around all sections and injection points, bumps the major
-    version number, and writes the result.
+    Reads the file at input_path, adds boundary tags (e.g. <Identity type="core">)
+    around all sections and injection points, bumps the version number,
+    and writes the result.
 
     Args:
         input_path: Path to the agent .md file to transform.
@@ -691,10 +680,10 @@ def _transform_generic_body(lines: list[str], strict_identity: bool = True) -> d
     ArtifactProvenance is retired (Stage 5). Any input shape that carries it is
     handled by stripping the deployed tags and preserving only the sibling injection:
 
-    - New shape already present (``[[DEPLOYED:ArtifactProvenance]]`` at top
+    - New shape already present (ArtifactProvenance deployed open tag at top
       level): deployed tags are stripped; the sibling injection is kept unchanged.
-    - Old shape (``[[SECTION:ArtifactProvenance]]``): the section block is
-      removed; any ``[[INJECTION:ArtifactProvenanceExtension]]`` content inside
+    - Old shape (ArtifactProvenance section block): the section block is
+      removed; any ArtifactProvenanceExtension injection content inside
       is extracted and re-emitted as a top-level injection sibling (Contract T-B).
     - Untagged source (``## Artifact Provenance`` heading): the heading region
       is recognised and its prose body is discarded; the sibling injection is
@@ -710,13 +699,15 @@ def _transform_generic_body(lines: list[str], strict_identity: bool = True) -> d
         errors: list[TransformError] (if not success)
     """
     # Route based on what provenance shape (if any) is already present in the body.
+    _ap_deployed_open = open_tag(BoundaryKind.DEPLOYED, "ArtifactProvenance")
+    _ap_section_open  = open_tag(BoundaryKind.SECTION,  "ArtifactProvenance")
     for line in lines:
         stripped = line.strip()
-        if stripped == "[[DEPLOYED:ArtifactProvenance]]":
+        if stripped == _ap_deployed_open:
             # ArtifactProvenance is retired. Strip its deployed tags; keep injection.
             return _strip_artifact_provenance_deployed_tags(lines)
-        if stripped == "[[SECTION:ArtifactProvenance]]":
-            # Old shape — retire the section, preserving any injection content.
+        if stripped == _ap_section_open:
+            # Section shape — retire it, preserving any injection content.
             return _retire_old_provenance_section(lines)
 
     # Untagged source (or no provenance region at all): run the normal
@@ -795,13 +786,13 @@ def _transform_generic_body(lines: list[str], strict_identity: bool = True) -> d
         # is relocated into Identity (done below when the Identity section closes),
         # and ProtocolExtension is emitted as an empty top-level injection sibling.
         if comm_region is not None and i == comm_region["start_line"]:
-            result_lines.append("[[DEPLOYED:CommunicationProtocol]]\n")
-            result_lines.append("[[/DEPLOYED:CommunicationProtocol]]\n")
+            result_lines.append(open_tag(BoundaryKind.DEPLOYED, "CommunicationProtocol") + "\n")
+            result_lines.append(close_tag(BoundaryKind.DEPLOYED, "CommunicationProtocol") + "\n")
             deployed_added.append("CommunicationProtocol")
             if found_protocol_extension:
                 result_lines.append("\n")
-                result_lines.append("[[INJECTION:ProtocolExtension]]\n")
-                result_lines.append("[[/INJECTION:ProtocolExtension]]\n")
+                result_lines.append(open_tag(BoundaryKind.INJECTION, "ProtocolExtension") + "\n")
+                result_lines.append(close_tag(BoundaryKind.INJECTION, "ProtocolExtension") + "\n")
                 injections_added.append("ProtocolExtension")
             # When the region ends with a '---' separator, emit it verbatim so the
             # document structure (separator before next section) is preserved.
@@ -851,10 +842,10 @@ def _transform_generic_body(lines: list[str], strict_identity: bool = True) -> d
                     marker_kind = injection_match["kind"]
 
                     # Deliberate, name-scoped rule: the legacy custom_constraints
-                    # marker is preserved as [[CUSTOM:CustomConstraints]] only
-                    # when content immediately follows it; an empty marker is
-                    # dropped entirely (no open or close tag emitted). Every other
-                    # old marker keeps the unconditional empty-pair behaviour below.
+                    # marker is preserved as a CUSTOM region only when content
+                    # immediately follows it; an empty marker is dropped entirely
+                    # (no open or close tag emitted). Every other old marker keeps
+                    # the unconditional empty-pair behaviour below.
                     # CustomConstraints is project-invented content, so it uses the
                     # CUSTOM kind rather than INJECTION.
                     if injection_name == "CustomConstraints":
@@ -873,8 +864,8 @@ def _transform_generic_body(lines: list[str], strict_identity: bool = True) -> d
 
                     # Both standalone ("[INJECTION: name]") and list-item
                     # ("- [INJECTION: name]") markers become standalone boundary
-                    # tags with no "- " prefix: a tag must occupy its own line to
-                    # match TAG_PATTERN and be recognised by the validator.
+                    # tags with no "- " prefix: a tag must occupy its own line
+                    # to be recognised by the validator.
                     result_lines.append(f"{open_tag(marker_kind, injection_name)}\n")
                     result_lines.append(f"{close_tag(marker_kind, injection_name)}\n")
                     j += 1
@@ -884,17 +875,17 @@ def _transform_generic_body(lines: list[str], strict_identity: bool = True) -> d
                 result_lines.append(line)
                 j += 1
 
-            # When an [INJECTION: identity_extension] marker was found in the
-            # Communication Protocol region (past Identity's end_line), relocate
-            # it to the end of the Identity body. The marker's source line lies
-            # outside Identity's range so in-place emission is impossible; instead,
+            # When an identity_extension marker was found in the Communication
+            # Protocol region (past Identity's end_line), relocate it to the end
+            # of the Identity body. The marker's source line lies outside
+            # Identity's range so in-place emission is impossible; instead,
             # we inject it here immediately before the section close tag, preceded
             # by one blank line when the current last result line is non-blank.
             if section_name == "Identity" and found_identity_extension:
                 if result_lines and result_lines[-1].strip():
                     result_lines.append("\n")
-                result_lines.append("[[INJECTION:IdentityExtension]]\n")
-                result_lines.append("[[/INJECTION:IdentityExtension]]\n")
+                result_lines.append(open_tag(BoundaryKind.INJECTION, "IdentityExtension") + "\n")
+                result_lines.append(close_tag(BoundaryKind.INJECTION, "IdentityExtension") + "\n")
                 injections_added.append("IdentityExtension")
 
             # Add section close tag. If the last content line has no trailing
@@ -1160,12 +1151,10 @@ def _match_region_marker(line: str) -> Optional[dict]:
     Matches:
     - Old-style standalone: "[INJECTION: name]"
     - Old-style list-item:  "- [INJECTION: name]"
-    - New-style INJECTION open tag: "[[INJECTION:Name]]"
-    - New-style DEPLOYED open tag:  "[[DEPLOYED:Name]]" (present in already-transformed
-      generic reference files for tool-managed names)
+    - New-style INJECTION open tag: <Name type="project"> (already-transformed generic refs)
+    - New-style DEPLOYED open tag:  <Name type="managed"> (already-transformed generic refs)
 
-    Does NOT match new-style close tags — those are handled as generic-only lines
-    and dropped.
+    Does NOT match close tags.
 
     Returns dict with:
         name: str (canonical name)
@@ -1197,10 +1186,10 @@ def _match_region_marker(line: str) -> Optional[dict]:
             "is_list_item": False,
         }
 
-    # Try new-style open tag: "[[INJECTION:Name]]" or "[[DEPLOYED:Name]]"
-    # (present in already-transformed generic reference files)
+    # Try new-style open tag: <Name type="project"> or <Name type="managed">
+    # These appear in already-transformed generic reference files.
     m = TAG_PATTERN.match(stripped)
-    if m and m.group("kind") in ("INJECTION", "DEPLOYED") and not m.group("close"):
+    if m and m.group("kind") in ("INJECTION", "DEPLOYED") and m.group("close") != "/":
         return {
             "name": m.group("name"),
             "kind": BoundaryKind(m.group("kind")),
@@ -1239,17 +1228,17 @@ def _collect_custom_constraints_content(
 
 
 def _strip_artifact_provenance_deployed_tags(lines: list[str]) -> dict:
-    """Remove ``[[DEPLOYED:ArtifactProvenance]]`` and its close tag from the body.
+    """Remove the ArtifactProvenance deployed open and close tags from the body.
 
-    ArtifactProvenance is retired. When a file already carries the new-shape
-    deployed region, this function strips just those two tag lines (open and
-    close) while leaving every other line — including the sibling
-    ``[[INJECTION:ArtifactProvenanceExtension]]`` region — unchanged.
+    ArtifactProvenance is retired. When a file already carries the deployed
+    region, this function strips just those two tag lines (open and close)
+    while leaving every other line — including the sibling
+    ArtifactProvenanceExtension injection region — unchanged.
 
     Returns a body-transform result dict (same shape as ``_transform_generic_body``).
     """
-    DEPLOYED_OPEN = "[[DEPLOYED:ArtifactProvenance]]"
-    DEPLOYED_CLOSE = "[[/DEPLOYED:ArtifactProvenance]]"
+    DEPLOYED_OPEN  = open_tag(BoundaryKind.DEPLOYED, "ArtifactProvenance")
+    DEPLOYED_CLOSE = close_tag(BoundaryKind.DEPLOYED, "ArtifactProvenance")
 
     result_lines = [
         line for line in lines
@@ -1266,18 +1255,18 @@ def _strip_artifact_provenance_deployed_tags(lines: list[str]) -> dict:
 
 
 def _retire_old_provenance_section(lines: list[str]) -> dict:
-    """Remove the ``[[SECTION:ArtifactProvenance]]`` block, preserving injection content.
+    """Remove the ArtifactProvenance section block, preserving injection content.
 
-    ArtifactProvenance is retired. When a file carries the old section shape,
+    ArtifactProvenance is retired. When a file carries the section shape,
     this function finds the section span, extracts any nested
-    ``[[INJECTION:ArtifactProvenanceExtension]]`` content, and replaces the
+    ArtifactProvenanceExtension injection content, and replaces the
     entire section with only the injection sibling (using ``_build_injection_only``).
     Every line before and after the span is passed through unchanged.
 
     Returns a body-transform result dict (same shape as ``_transform_generic_body``).
     """
-    OLD_OPEN = "[[SECTION:ArtifactProvenance]]"
-    OLD_CLOSE = "[[/SECTION:ArtifactProvenance]]"
+    OLD_OPEN  = open_tag(BoundaryKind.SECTION, "ArtifactProvenance")
+    OLD_CLOSE = close_tag(BoundaryKind.SECTION, "ArtifactProvenance")
 
     sec_open_idx = None
     sec_close_idx = None
@@ -1294,7 +1283,7 @@ def _retire_old_provenance_section(lines: list[str]) -> dict:
             "success": False,
             "errors": [TransformError(
                 line_number=1,
-                message="Could not locate [[SECTION:ArtifactProvenance]] block",
+                message="Could not locate ArtifactProvenance section block",
             )],
         }
 
@@ -1317,33 +1306,33 @@ def _build_injection_only(ext_content: str) -> list[str]:
     """Return lines that make up only the injection sibling (no deployed region).
 
     ArtifactProvenance is retired. This function produces the injection without
-    the now-retired ``[[DEPLOYED:ArtifactProvenance]]`` region::
+    the now-retired ArtifactProvenance deployed region::
 
-        [[INJECTION:ArtifactProvenanceExtension]]
+        <ArtifactProvenanceExtension type="project">
         {ext_content}
-        [[/INJECTION:ArtifactProvenanceExtension]]
+        </ArtifactProvenanceExtension>
 
     ``ext_content`` is spliced in verbatim; an empty string yields an empty region.
     """
     shape: list[str] = [
-        "[[INJECTION:ArtifactProvenanceExtension]]\n",
+        open_tag(BoundaryKind.INJECTION, "ArtifactProvenanceExtension") + "\n",
     ]
     if ext_content:
         shape.append(ext_content)
-    shape.append("[[/INJECTION:ArtifactProvenanceExtension]]\n")
+    shape.append(close_tag(BoundaryKind.INJECTION, "ArtifactProvenanceExtension") + "\n")
     return shape
 
 
 def _extract_provenance_extension_content(inner_lines: list[str]) -> str:
-    """Extract content between [[INJECTION:ArtifactProvenanceExtension]] markers.
+    """Extract content between ArtifactProvenanceExtension injection markers.
 
     Scans ``inner_lines`` (the lines inside a provenance section or region) for the
     injection open/close pair and returns the bytes between them as a single string.
     Newlines on each content line are preserved exactly.  Returns ``""`` when the
     markers are absent or when the injection is empty.
     """
-    inj_open = "[[INJECTION:ArtifactProvenanceExtension]]"
-    inj_close = "[[/INJECTION:ArtifactProvenanceExtension]]"
+    inj_open  = open_tag(BoundaryKind.INJECTION, "ArtifactProvenanceExtension")
+    inj_close = close_tag(BoundaryKind.INJECTION, "ArtifactProvenanceExtension")
 
     inj_open_idx = None
     inj_close_idx = None
@@ -1365,41 +1354,41 @@ def _build_provenance_new_shape(ext_content: str) -> list[str]:
 
     Produces::
 
-        [[DEPLOYED:ArtifactProvenance]]
-        [[/DEPLOYED:ArtifactProvenance]]
+        <ArtifactProvenance type="managed">
+        </ArtifactProvenance>
 
-        [[INJECTION:ArtifactProvenanceExtension]]
+        <ArtifactProvenanceExtension type="project">
         {ext_content}
-        [[/INJECTION:ArtifactProvenanceExtension]]
+        </ArtifactProvenanceExtension>
 
     ``ext_content`` is spliced in verbatim between the injection markers; it
     already ends with ``\\n`` when non-empty (it is extracted directly from the
     input lines).  An empty ``ext_content`` yields an empty injection region.
     """
     shape: list[str] = [
-        "[[DEPLOYED:ArtifactProvenance]]\n",
-        "[[/DEPLOYED:ArtifactProvenance]]\n",
+        open_tag(BoundaryKind.DEPLOYED, "ArtifactProvenance") + "\n",
+        close_tag(BoundaryKind.DEPLOYED, "ArtifactProvenance") + "\n",
         "\n",
-        "[[INJECTION:ArtifactProvenanceExtension]]\n",
+        open_tag(BoundaryKind.INJECTION, "ArtifactProvenanceExtension") + "\n",
     ]
     if ext_content:
         shape.append(ext_content)
-    shape.append("[[/INJECTION:ArtifactProvenanceExtension]]\n")
+    shape.append(close_tag(BoundaryKind.INJECTION, "ArtifactProvenanceExtension") + "\n")
     return shape
 
 
 def _rewrite_old_provenance_to_new_shape(lines: list[str]) -> dict:
-    """Replace a [[SECTION:ArtifactProvenance]] block with the new deployed-region shape.
+    """Replace an ArtifactProvenance section block with the deployed-region shape.
 
-    Finds the old ``[[SECTION:ArtifactProvenance]]`` … ``[[/SECTION:ArtifactProvenance]]``
-    span, extracts any nested ``[[INJECTION:ArtifactProvenanceExtension]]`` content
-    (preserving it byte-identically), and replaces the entire span with the new shape.
+    Finds the ArtifactProvenance section open/close span, extracts any nested
+    ArtifactProvenanceExtension injection content (preserving it byte-identically),
+    and replaces the entire span with the new deployed-region shape.
     Every line before and after the span is passed through unchanged.
 
     Returns a body-transform result dict (same shape as ``_transform_generic_body``).
     """
-    OLD_OPEN = "[[SECTION:ArtifactProvenance]]"
-    OLD_CLOSE = "[[/SECTION:ArtifactProvenance]]"
+    OLD_OPEN  = open_tag(BoundaryKind.SECTION, "ArtifactProvenance")
+    OLD_CLOSE = close_tag(BoundaryKind.SECTION, "ArtifactProvenance")
 
     sec_open_idx = None
     sec_close_idx = None
@@ -1416,7 +1405,7 @@ def _rewrite_old_provenance_to_new_shape(lines: list[str]) -> dict:
             "success": False,
             "errors": [TransformError(
                 line_number=1,
-                message="Could not locate [[SECTION:ArtifactProvenance]] block",
+                message="Could not locate ArtifactProvenance section block",
             )],
         }
 
@@ -1447,20 +1436,20 @@ def _emit_comm_protocol_region(
 
     The region's prose is discarded: its content is tool-managed and regenerated
     on every deploy, so it is replaced by an empty top-level
-    ``[[DEPLOYED:CommunicationProtocol]]`` pair. A ``ProtocolExtension`` marker
+    empty CommunicationProtocol deployed pair. A ``ProtocolExtension`` marker
     found inside the region is re-emitted as an empty top-level injection
     sibling. A trailing ``---`` separator is preserved so the document structure
     around the following section is unchanged.
 
     Appends to ``out`` and returns the line index to resume reading from.
     """
-    out.append("[[DEPLOYED:CommunicationProtocol]]\n")
-    out.append("[[/DEPLOYED:CommunicationProtocol]]\n")
+    out.append(open_tag(BoundaryKind.DEPLOYED, "CommunicationProtocol") + "\n")
+    out.append(close_tag(BoundaryKind.DEPLOYED, "CommunicationProtocol") + "\n")
     deployed_added.append("CommunicationProtocol")
     if found_protocol_extension:
         out.append("\n")
-        out.append("[[INJECTION:ProtocolExtension]]\n")
-        out.append("[[/INJECTION:ProtocolExtension]]\n")
+        out.append(open_tag(BoundaryKind.INJECTION, "ProtocolExtension") + "\n")
+        out.append(close_tag(BoundaryKind.INJECTION, "ProtocolExtension") + "\n")
         injections_added.append("ProtocolExtension")
     region_end = min(region["end_line"], len(lines))
     if region_end > region["start_line"] and lines[region_end - 1].strip() == "---":
@@ -1494,8 +1483,8 @@ def _scan_region_for_relocated_markers(
 
 
 def _strip_deployed_pair(lines: list[str], name: str) -> list[str]:
-    """Return `lines` with any `[[DEPLOYED:name]]` / `[[/DEPLOYED:name]]` tag
-    lines removed, leaving everything between them untouched.
+    """Return `lines` with the deployed open/close tag lines for `name` removed,
+    leaving everything between them untouched.
 
     Sections are identified by heading range, so a section's range can extend
     past its own closing tag and swallow a following top-level deployed region.
@@ -1582,18 +1571,18 @@ def _transform_harness_body(harness_lines: list[str], generic_lines: list[str]) 
         else:
             result_lines.extend(harness_section)
 
-        # An [INJECTION: identity_extension] marker found inside the discarded
-        # Communication Protocol region belongs to Identity, whose range ends
-        # before it. Relocate it to the end of the Identity body — but only if
-        # the section merge did not already produce the boundary from the
-        # generic reference, which would otherwise duplicate it.
+        # An identity_extension marker found inside the discarded Communication
+        # Protocol region belongs to Identity, whose range ends before it.
+        # Relocate it to the end of the Identity body — but only if the section
+        # merge did not already produce the boundary from the generic reference,
+        # which would otherwise duplicate it.
         if (section["name"] == "Identity"
                 and found_identity_extension
                 and "IdentityExtension" not in injections_added):
             if result_lines and result_lines[-1].strip():
                 result_lines.append("\n")
-            result_lines.append("[[INJECTION:IdentityExtension]]\n")
-            result_lines.append("[[/INJECTION:IdentityExtension]]\n")
+            result_lines.append(open_tag(BoundaryKind.INJECTION, "IdentityExtension") + "\n")
+            result_lines.append(close_tag(BoundaryKind.INJECTION, "IdentityExtension") + "\n")
             injections_added.append("IdentityExtension")
 
         if result_lines and not result_lines[-1].endswith("\n"):
@@ -1631,9 +1620,7 @@ def _next_generic_anchor(generic_section: list[str], start: int) -> Optional[str
             continue
         if _match_region_marker(line):
             continue
-        # Skip any new-style boundary tags ([[SECTION:...]], [[/SECTION:...]],
-        # [[/INJECTION:...]], [[/DEPLOYED:...]]) that appear in already-transformed
-        # generic refs.
+        # Skip any boundary tags that appear in already-transformed generic refs.
         if TAG_PATTERN.match(line.strip()):
             continue
         return line
@@ -1648,7 +1635,7 @@ def _emit_injection(name: str, content: list[str], out: list[str],
     OUTSIDE the boundary; trailing blank lines also stay outside. The remaining
     lines become the region body. Empty content yields an empty boundary.
 
-    kind controls whether to emit [[INJECTION:...]] or [[DEPLOYED:...]].
+    kind controls whether to emit an injection or deployed region.
     """
     lead_end = 0
     if content and _is_h3_heading(content[0]):

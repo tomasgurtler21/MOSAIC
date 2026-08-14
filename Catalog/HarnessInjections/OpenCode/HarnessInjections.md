@@ -5,10 +5,10 @@ harness: opencode
 
 # Harness Injections — OpenCode
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 - **Parallel Tool Calls:** Issue multiple independent tool calls in a single response whenever possible. Sequential tool calls are only permitted when a later call depends on the result of an earlier one. This minimises inference API calls to improve speed and reduce cost.
 - **Working Directory vs Workspace Root:** File tool paths resolve relative to the **working directory**, not the workspace root. Orchestration is always at working directory.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
 ---
 

@@ -29,9 +29,9 @@ tier_rationale: moderate task
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Body for report tests.
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // TestReport_ChangedFieldsNamesEveryModifiedField asserts that Report.Fields contains at
@@ -230,13 +230,13 @@ tier_rationale: simple
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Body.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
 	req := transform.Request{
@@ -390,7 +390,7 @@ func TestProtocol_Report_OutcomeBytesPositive(t *testing.T) {
 }
 
 // TestProtocol_Report_BytesMatchActualRegionLength verifies that RegionOutcome.Bytes
-// equals the byte length of the content placed in the [[DEPLOYED:CommunicationProtocol]]
+// equals the byte length of the content placed in the <CommunicationProtocol type="managed">
 // region. The report value and the serialised document must agree on region size.
 func TestProtocol_Report_BytesMatchActualRegionLength(t *testing.T) {
 	req := transform.Request{

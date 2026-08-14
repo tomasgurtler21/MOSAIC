@@ -2,6 +2,6 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Section content.
-[[/SECTION:Identity]]
+</Identity>

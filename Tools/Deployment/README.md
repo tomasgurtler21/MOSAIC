@@ -247,10 +247,10 @@ deployed-agents directory. A file is recognised as a harness-only agent only whe
    this field and is left completely untouched.
 
 2. **A structurally valid set of canonical boundary tags.** The body must
-   contain at least one `[[SECTION:Name]]` tag whose name is in the MOSAIC
+   contain at least one `<Name type="core">` tag whose name is in the MOSAIC
    canonical vocabulary, and the document must pass structural validation
-   (no unbalanced tags, no mismatched tags, no unknown `[[DEPLOYED:]]` names,
-   no duplicate boundary names).
+   (no unbalanced tags, no mismatched tags, no unknown `<Name type="managed">`
+   names, no duplicate boundary names).
 
 A file that fails either signal is skipped silently and receives no treatment
 during the run. "Untouched" is an assertable property of the run, not an
@@ -269,8 +269,8 @@ how much of its content to regenerate. Two options are presented:
 
 | Option | What it regenerates |
 |--------|---------------------|
-| **Refresh CommunicationProtocol only** | Only the `[[DEPLOYED:CommunicationProtocol]]` region |
-| **Refresh all tool-managed DEPLOYED regions** | Every canonical `[[DEPLOYED:...]]` region in the MOSAIC vocabulary |
+| **Refresh CommunicationProtocol only** | Only the `<CommunicationProtocol type="managed">` region |
+| **Refresh all tool-managed DEPLOYED regions** | Every canonical `<Name type="managed">` region in the MOSAIC vocabulary |
 
 An "Apply to all" variant of each option applies the chosen scope to every
 remaining harness-only agent in the run without asking again, matching the
@@ -289,15 +289,15 @@ harness-only agents are found in the scan.
 For harness-only agents the tool owns only the regions it regenerates. Every
 other byte in the file is left unchanged:
 
-- **`[[INJECTION:...]]` content is preserved verbatim.** Injection regions
+- **`<Name type="project">` content is preserved verbatim.** Injection regions
   are never merged, compared, diffed, or replaced. There is no generic source
   to validate them against, so they are carried through byte-identical. This is
   a hard guarantee, not a best effort.
-- **`[[SECTION:...]]` tag structure and section body prose are not
+- **`<Name type="core">` tag structure and section body prose are not
   reformatted or validated.** Without a generic counterpart there is nothing to
   align section structure against, so section tags, their order, and all content
   between them are left exactly as they are under every scope.
-- **`[[DEPLOYED:...]]` regions that are not in scope** are preserved
+- **`<Name type="managed">` regions that are not in scope** are preserved
   byte-identical. Only the regions the chosen scope names are rewritten.
 - **Frontmatter is not touched at all.** No field is added, removed, reordered,
   or restamped: no `version`, `protocol_version`, `bundle_version`, or other
@@ -337,15 +337,15 @@ is written.
 
 The generated generic file:
 
-- **Strips every `[[INJECTION:...]]` region to an empty tag pair.** No
+- **Strips every `<Name type="project">` region to an empty tag pair.** No
   harness-specific injection content is carried over. Generic source files use
   empty injection placeholders, which `mosaic-deploy` fills with
   project-specific content at deploy time.
-- **Strips every `[[DEPLOYED:...]]` region to an empty tag pair.** This is
+- **Strips every `<Name type="managed">` region to an empty tag pair.** This is
   required: the deployment pipeline's `transform.Apply` rejects a source file
   whose deployed regions already carry content, so a generated file with filled
   regions would be unusable by the very pipeline it is generated for.
-- **Carries over `[[SECTION:...]]` tag structure and section body prose
+- **Carries over `<Name type="core">` tag structure and section body prose
   from the source as-is.**
 - **Writes frontmatter per a defined field policy:**
   - `id` — assigned automatically as one greater than the largest numeric id
@@ -648,16 +648,16 @@ git checkout internal/transform/transform.go  # restore
 `Tools/OldAgentsTransform/boundary_transformer.py` and
 `Tools/OldAgentsTransform/boundary_validator.py` are separate tools that perform
 a different, completed task: a one-shot structural retrofit of MOSAIC generic
-source files to add `[[SECTION:...]]` and `[[INJECTION:...]]` boundary tags. They
+source files to add `<Name type="core">` and `<Name type="project">` boundary tags. They
 are not part of the deployment pipeline and are not invoked by `mosaic-deploy`.
 See [Tools/OldAgentsTransform/README.md](../OldAgentsTransform/README.md).
 
 `mosaic-deploy` reads generic source files that already have the correct
 boundary structure and transforms them into harness-specific deployed files.
-It introduces a third marker kind, `[[DEPLOYED:Name]]`, for regions it
+It introduces a third boundary kind, `<Name type="managed">`, for regions it
 regenerates on every deploy (harness constraints, language patterns, the
 communication protocol, and similar tool-managed content). These are distinct
-from `[[INJECTION:Name]]` regions, which belong to the user and are preserved
+from `<Name type="project">` regions, which belong to the user and are preserved
 across updates.
 
 For the generic source-file format reference (fields, boundary conventions,

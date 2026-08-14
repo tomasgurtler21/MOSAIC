@@ -164,7 +164,7 @@ Be minimal and deterministic.
 
 # Harness content with canonical boundary tags already present. Carries
 # transform_version (so it is classified AGENT_HARNESS), but the body already
-# has paired [[SECTION:...]] tags — the idempotency-skip condition. Used to
+# has paired XML boundary tags — the idempotency-skip condition. Used to
 # verify that the ALREADY_TRANSFORMED skip path fires even when auto-lookup
 # resolves a real generic ref (the Stage 2 regression risk from the Plan).
 _ALREADY_TRANSFORMED_HARNESS_CONTENT = """\
@@ -177,7 +177,7 @@ description: Already-transformed harness for idempotency-skip tests
 role: subagent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestHarness Agent
 
 You are the **TestHarness** agent in a multi-agent orchestration system.
@@ -187,38 +187,38 @@ You are the **TestHarness** agent in a multi-agent orchestration system.
 **Scope:**
 - You DO: Provide fixture data
 - You DO NOT: Run in production
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 ### Core Capabilities
 - Provide fixture data for tests
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 - Stay within test scope
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
 - Handle errors gracefully
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 
 Return a JSON object.
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 
 Be minimal and deterministic.
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>
 """
 
 

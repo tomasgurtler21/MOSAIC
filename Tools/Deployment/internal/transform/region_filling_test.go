@@ -2,9 +2,9 @@ package transform_test
 
 // region_filling_test.go covers tool-managed region filling (T3.1):
 //
-//   - Harness content lands in [[DEPLOYED:HarnessConstraints]] on both create and update.
-//   - Workflow content lands in [[DEPLOYED:AvailableWorkflows]] on both create and update.
-//   - Infrastructure content lands in [[DEPLOYED:InfrastructureAgents]] on create and update.
+//   - Harness content lands in <HarnessConstraints type="managed"> on both create and update.
+//   - Workflow content lands in <AvailableWorkflows type="managed"> on both create and update.
+//   - Infrastructure content lands in <InfrastructureAgents type="managed"> on create and update.
 //   - Tool-managed region content is regenerated from the module/request on every transform,
 //     never lifted from the deployed file.
 //   - RegionOutcome carries Marker == NodeDeployed and ToolManaged() == true for every
@@ -20,7 +20,7 @@ import (
 )
 
 // sourceWithHarnessDeployedRegion is a source document whose Constraints section declares
-// HarnessConstraints as a [[DEPLOYED:]] region, reflecting the new marker vocabulary.
+// HarnessConstraints as a managed region, reflecting the XML-tag region vocabulary.
 const sourceWithHarnessDeployedRegion = `---
 id: 30
 version: 1.0.0
@@ -33,27 +33,27 @@ tier_rationale: harness deployed region testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # HarnessDeployedTest Agent
 
 You are the HarnessDeployedTest agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always use the approved tool list.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 // deployedWithOldHarnessContent represents a deployed file that still has content inside the
-// [[DEPLOYED:HarnessConstraints]] region — content that must NOT be lifted on an update
+// <HarnessConstraints type="managed"> region — content that must NOT be lifted on an update
 // (tool-managed regions are always regenerated from the module, never from the deployed file).
 const deployedWithOldHarnessContent = `---
 id: 30
@@ -66,29 +66,29 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # HarnessDeployedTest Agent
 
 You are the HarnessDeployedTest agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 User identity extension: pre-existing content.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always use the approved tool list.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 STALE HARNESS CONTENT FROM A PREVIOUS DEPLOYMENT — MUST NOT BE LIFTED.
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</HarnessConstraints>
+</Constraints>
 `
 
 // sourceWithWorkflowDeployedRegion is an orchestrator-like source that declares
-// AvailableWorkflows as a [[DEPLOYED:]] region inside the Identity section.
+// AvailableWorkflows as a managed region inside the Identity section.
 const sourceWithWorkflowDeployedRegion = `---
 version: 6.0.0
 name: orchestrator-deployed-test
@@ -100,21 +100,21 @@ tier_rationale: workflow deployed region testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # OrchestratorDeployedTest Agent
 
 You are the OrchestratorDeployedTest agent.
 
-[[DEPLOYED:AvailableWorkflows]]
-[[/DEPLOYED:AvailableWorkflows]]
+<AvailableWorkflows type="managed">
+</AvailableWorkflows>
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 `
 
 // sourceWithInfraDeployedRegion is an orchestrator-like source that declares
-// InfrastructureAgents as a [[DEPLOYED:]] region inside the Identity section.
+// InfrastructureAgents as a managed region inside the Identity section.
 const sourceWithInfraDeployedRegion = `---
 version: 6.0.0
 name: orchestrator-infra-test
@@ -126,25 +126,25 @@ tier_rationale: infra deployed region testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # OrchestratorInfraTest Agent
 
 You are the OrchestratorInfraTest agent.
 
-[[DEPLOYED:InfrastructureAgents]]
-[[/DEPLOYED:InfrastructureAgents]]
+<InfrastructureAgents type="managed">
+</InfrastructureAgents>
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 `
 
 // ---------------------------------------------------------------------------
-// T3.1: Harness content fills [[DEPLOYED:HarnessConstraints]]
+// T3.1: Harness content fills <HarnessConstraints type="managed">
 // ---------------------------------------------------------------------------
 
 // TestToolManagedRegion_HarnessContent_FilledOnCreate asserts that on a new deployment,
-// the [[DEPLOYED:HarnessConstraints]] region is filled with the harness module's declared
+// the <HarnessConstraints type="managed"> region is filled with the harness module's declared
 // content and the corresponding RegionOutcome in Report.Regions has:
 //   - Marker == NodeDeployed
 //   - Class == InjectionHarness
@@ -189,7 +189,7 @@ func TestToolManagedRegion_HarnessContent_FilledOnCreate(t *testing.T) {
 		t.Errorf("HarnessConstraints Marker: want %q, got %q", docformat.NodeDeployed, outcome.Marker)
 	}
 	if !outcome.ToolManaged() {
-		t.Error("HarnessConstraints ToolManaged() must be true for a [[DEPLOYED:]] region")
+		t.Error("HarnessConstraints ToolManaged() must be true for a managed region")
 	}
 	if outcome.Class != domain.InjectionHarness {
 		t.Errorf("HarnessConstraints Class: want %q, got %q", domain.InjectionHarness, outcome.Class)
@@ -214,8 +214,8 @@ func TestToolManagedRegion_HarnessContent_FilledOnCreate(t *testing.T) {
 }
 
 // TestToolManagedRegion_HarnessContent_RegeneratedOnUpdate asserts that on an update, the
-// [[DEPLOYED:HarnessConstraints]] region is filled from the harness module — NOT lifted from
-// the deployed file. Stale harness content in the deployed file must not survive.
+// <HarnessConstraints type="managed"> region is filled from the harness module — NOT lifted
+// from the deployed file. Stale harness content in the deployed file must not survive.
 func TestToolManagedRegion_HarnessContent_RegeneratedOnUpdate(t *testing.T) {
 	mod := newInjectionFixtureModule(t)
 	harnessContent, ok := mod.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: ""})
@@ -225,7 +225,7 @@ func TestToolManagedRegion_HarnessContent_RegeneratedOnUpdate(t *testing.T) {
 
 	req := transform.Request{
 		Source:   []byte(sourceWithHarnessDeployedRegion),
-		Deployed: []byte(deployedWithOldHarnessContent), // has stale content in [[DEPLOYED:HarnessConstraints]]
+		Deployed: []byte(deployedWithOldHarnessContent), // has stale content in <HarnessConstraints type="managed">
 		Kind:     domain.ArtifactAgent,
 		Key:      "harness-deployed-test",
 		Module:   mod,
@@ -265,14 +265,14 @@ func TestToolManagedRegion_HarnessContent_RegeneratedOnUpdate(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T3.1: Workflow content fills [[DEPLOYED:AvailableWorkflows]]
+// T3.1: Workflow content fills <AvailableWorkflows type="managed">
 // ---------------------------------------------------------------------------
 
 // TestToolManagedRegion_Workflows_AssembledInDeployedRegion asserts that when
-// Request.Workflows is non-empty, the [[DEPLOYED:AvailableWorkflows]] region of the output
-// contains the assembled workflow blocks and the RegionOutcome has Action == RegionAssembled.
+// Request.Workflows is non-empty, the <AvailableWorkflows type="managed"> region of the
+// output contains the assembled workflow blocks and the RegionOutcome has Action == RegionAssembled.
 func TestToolManagedRegion_Workflows_AssembledInDeployedRegion(t *testing.T) {
-	const workflowBlock = "[[SECTION:Workflow:lean-tdd]]\n<!-- workflow-version: 2.0 -->\n## Lean TDD Workflow\n\nPhase table here.\n[[/SECTION:Workflow:lean-tdd]]\n"
+	const workflowBlock = "<Workflow type=\"core\" name=\"lean-tdd\" version=\"2.0\">\n## Lean TDD Workflow\n\nPhase table here.\n</Workflow>\n"
 
 	req := transform.Request{
 		Source: []byte(sourceWithWorkflowDeployedRegion),
@@ -307,7 +307,7 @@ func TestToolManagedRegion_Workflows_AssembledInDeployedRegion(t *testing.T) {
 		t.Errorf("AvailableWorkflows Marker: want %q, got %q", docformat.NodeDeployed, outcome.Marker)
 	}
 	if !outcome.ToolManaged() {
-		t.Error("AvailableWorkflows ToolManaged() must be true for a [[DEPLOYED:]] region")
+		t.Error("AvailableWorkflows ToolManaged() must be true for a managed region")
 	}
 	if outcome.Action != transform.RegionAssembled {
 		t.Errorf("AvailableWorkflows Action: want %q, got %q", transform.RegionAssembled, outcome.Action)
@@ -322,7 +322,7 @@ func TestToolManagedRegion_Workflows_AssembledInDeployedRegion(t *testing.T) {
 	if !nodeOK {
 		t.Fatal("AvailableWorkflows deployed region absent from output")
 	}
-	if !bytes.Contains(node.Content(), []byte("[[SECTION:Workflow:lean-tdd]]")) {
+	if !bytes.Contains(node.Content(), []byte(`<Workflow type="core" name="lean-tdd"`)) {
 		t.Errorf("AvailableWorkflows region does not contain workflow block opening tag;\ncontent: %q", node.Content())
 	}
 
@@ -340,12 +340,12 @@ func TestToolManagedRegion_Workflows_AssembledInDeployedRegion(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T3.1: Infrastructure content fills [[DEPLOYED:InfrastructureAgents]]
+// T3.1: Infrastructure content fills <InfrastructureAgents type="managed">
 // ---------------------------------------------------------------------------
 
 // TestToolManagedRegion_Infrastructure_AssembledInDeployedRegion asserts that when
-// Request.InfrastructureAgents is non-empty, the [[DEPLOYED:InfrastructureAgents]] region
-// is assembled and the RegionOutcome has Action == RegionAssembledInfra.
+// Request.InfrastructureAgents is non-empty, the <InfrastructureAgents type="managed">
+// region is assembled and the RegionOutcome has Action == RegionAssembledInfra.
 func TestToolManagedRegion_Infrastructure_AssembledInDeployedRegion(t *testing.T) {
 	infraBlock := transform.InfrastructureBlock{
 		Key:         "checkpoint-agent",
@@ -389,7 +389,7 @@ func TestToolManagedRegion_Infrastructure_AssembledInDeployedRegion(t *testing.T
 		t.Errorf("InfrastructureAgents Marker: want %q, got %q", docformat.NodeDeployed, outcome.Marker)
 	}
 	if !outcome.ToolManaged() {
-		t.Error("InfrastructureAgents ToolManaged() must be true for a [[DEPLOYED:]] region")
+		t.Error("InfrastructureAgents ToolManaged() must be true for a managed region")
 	}
 	if outcome.Action != transform.RegionAssembledInfra {
 		t.Errorf("InfrastructureAgents Action: want %q, got %q", transform.RegionAssembledInfra, outcome.Action)
@@ -427,11 +427,11 @@ func TestToolManagedRegion_Infrastructure_AssembledInDeployedRegion(t *testing.T
 // ---------------------------------------------------------------------------
 
 // TestToolManagedRegion_AllOutcomesHaveDeployedMarker asserts that every RegionOutcome in
-// Report.Regions that corresponds to a [[DEPLOYED:]] region has Marker == NodeDeployed and
+// Report.Regions that corresponds to a managed region has Marker == NodeDeployed and
 // ToolManaged() == true, regardless of the specific class (harness, workflow, infra).
 func TestToolManagedRegion_AllOutcomesHaveDeployedMarker(t *testing.T) {
 	// sourceWithAllToolManagedRegions has all three tool-managed region classes in one
-	// document (harness, workflow, infra) declared with [[DEPLOYED:]] markers.
+	// document (harness, workflow, infra) declared with managed-region markers.
 	const sourceWithAllToolManagedRegions = `---
 version: 6.0.0
 name: orchestrator-all-regions-test
@@ -443,27 +443,27 @@ tier_rationale: all regions testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # AllRegions Agent
 
 You are the AllRegions agent.
 
-[[DEPLOYED:InfrastructureAgents]]
-[[/DEPLOYED:InfrastructureAgents]]
+<InfrastructureAgents type="managed">
+</InfrastructureAgents>
 
-[[DEPLOYED:AvailableWorkflows]]
-[[/DEPLOYED:AvailableWorkflows]]
+<AvailableWorkflows type="managed">
+</AvailableWorkflows>
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 	req := transform.Request{
@@ -474,7 +474,7 @@ You are the AllRegions agent.
 		Model:  fixtureModel(),
 		Scope:  domain.ScopeProject,
 		Workflows: []transform.WorkflowBlock{
-			{ID: "sample-wf", Block: []byte("[[SECTION:Workflow:sample-wf]]\ncontent\n[[/SECTION:Workflow:sample-wf]]\n")},
+			{ID: "sample-wf", Block: []byte("<Workflow type=\"core\" name=\"sample-wf\">\ncontent\n</Workflow>\n")},
 		},
 		InfrastructureAgents: []transform.InfrastructureBlock{
 			{

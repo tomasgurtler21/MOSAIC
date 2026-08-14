@@ -3,7 +3,7 @@ package transform
 import "strings"
 
 // FallthroughCustomRegionsDetail renders the TODO detail text emitted when one or more
-// [[CUSTOM:]] regions could not be anchored to their recorded parent in the output document
+// custom regions could not be anchored to their recorded parent in the output document
 // and were placed at body level instead. names must already be sorted ascending. When
 // timestamp is empty the trailing "(detected …)" clause is omitted.
 //

@@ -5,44 +5,44 @@ name: test-agent
 description: Invalid file - injection nested inside wrong parent section (E008)
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 Content here. CodebaseContext injection should be inside Capabilities, not Identity.
-[[INJECTION:CodebaseContext]]
+<CodebaseContext type="project">
 Codebase context placed in wrong parent section.
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Identity]]
+</CodebaseContext>
+</Identity>
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 ---
 
-[[DEPLOYED:ArtifactProvenance]]
-[[/DEPLOYED:ArtifactProvenance]]
+<ArtifactProvenance type="managed">
+</ArtifactProvenance>
 
 ---
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 Content here (CodebaseContext already placed incorrectly above).
-[[/SECTION:Capabilities]]
+</Capabilities>
 ---
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 Content here.
-[[/SECTION:Constraints]]
+</Constraints>
 ---
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 Content here.
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 ---
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 Content here.
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 ---
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 Content here.
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>

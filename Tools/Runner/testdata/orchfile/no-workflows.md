@@ -1,6 +1,6 @@
 ---
 name: agent-without-workflows
 ---
-[[SECTION:Identity]]
+<Identity type="core">
 This agent has no workflow sections.
-[[/SECTION:Identity]]
+</Identity>

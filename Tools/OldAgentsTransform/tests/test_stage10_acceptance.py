@@ -224,7 +224,7 @@ class TestUniformity:
                     continue
                 checked += 1
                 assert body == "", (
-                    f"{entry.label}: [[DEPLOYED:{name}]] must be empty; got {body!r}"
+                    f'{entry.label}: <{name} type="managed"> region must be empty; got {body!r}'
                 )
         assert checked > 0, "No conduct region was found in any corpus output; corpus is too thin"
 
@@ -239,7 +239,7 @@ class TestUniformity:
             lines = entry.output_text.splitlines(keepends=False)
             for i, line in enumerate(lines):
                 for name in conduct_names:
-                    if line == f"[[DEPLOYED:{name}]]" and i + 1 < len(lines):
+                    if line == f'<{name} type="managed">' and i + 1 < len(lines):
                         raw_by_name[name].add(f"{line}\n{lines[i + 1]}")
 
         variant_names = {
@@ -438,13 +438,13 @@ class TestOrderingConstraints:
         checked = 0
         for entry in successful_corpus:
             lines = entry.output_text.splitlines(keepends=False)
-            if "[[DEPLOYED:ClosingProcedure]]" not in lines:
+            if '<ClosingProcedure type="managed">' not in lines:
                 continue
-            if "[[DEPLOYED:AuthorityHierarchy]]" not in lines:
+            if '<AuthorityHierarchy type="managed">' not in lines:
                 continue
             checked += 1
-            cp_close_idx = lines.index("[[/DEPLOYED:ClosingProcedure]]")
-            ah_open_idx = lines.index("[[DEPLOYED:AuthorityHierarchy]]")
+            cp_close_idx = lines.index("</ClosingProcedure>")
+            ah_open_idx = lines.index('<AuthorityHierarchy type="managed">')
             assert ah_open_idx == cp_close_idx + 1, (
                 f"{entry.label}: AuthorityHierarchy must open on the line immediately "
                 f"after ClosingProcedure closes; found {ah_open_idx - cp_close_idx - 1} "
@@ -460,14 +460,14 @@ class TestOrderingConstraints:
             if entry.label not in _HAS_PROCESS_LIST_LABELS:
                 continue
             lines = entry.output_text.splitlines(keepends=False)
-            if "[[DEPLOYED:ClosingProcedure]]" not in lines:
+            if '<ClosingProcedure type="managed">' not in lines:
                 continue
             checked += 1
-            cp_open_idx = lines.index("[[DEPLOYED:ClosingProcedure]]")
+            cp_open_idx = lines.index('<ClosingProcedure type="managed">')
             preceding = lines[cp_open_idx - 1].strip()
             assert re.match(r"^\d+\.", preceding), (
                 f"{entry.label}: expected a numbered Process step immediately before "
-                f"[[DEPLOYED:ClosingProcedure]]; found {preceding!r}"
+                f'<ClosingProcedure type="managed">; found {preceding!r}'
             )
         assert checked > 0, "No corpus file with a real Process list was checked"
 
@@ -477,13 +477,13 @@ class TestOrderingConstraints:
         checked = 0
         for entry in successful_corpus:
             lines = entry.output_text.splitlines(keepends=False)
-            if "[[DEPLOYED:ExecutionPhilosophyCommon]]" not in lines:
+            if '<ExecutionPhilosophyCommon type="managed">' not in lines:
                 continue
-            if "[[INJECTION:ContextLimits]]" not in lines:
+            if '<ContextLimits type="project">' not in lines:
                 continue
             checked += 1
-            ep_idx = lines.index("[[DEPLOYED:ExecutionPhilosophyCommon]]")
-            cl_idx = lines.index("[[INJECTION:ContextLimits]]")
+            ep_idx = lines.index('<ExecutionPhilosophyCommon type="managed">')
+            cl_idx = lines.index('<ContextLimits type="project">')
             assert ep_idx < cl_idx, (
                 f"{entry.label}: ExecutionPhilosophyCommon (line {ep_idx}) must precede "
                 f"ContextLimits (line {cl_idx})"
@@ -498,12 +498,12 @@ class TestOrderingConstraints:
         checked_any = False
         for entry in successful_corpus:
             lines = entry.output_text.splitlines(keepends=False)
-            pc_idx = lines.index("[[DEPLOYED:ProtocolConstraints]]") \
-                if "[[DEPLOYED:ProtocolConstraints]]" in lines else None
-            hc_idx = lines.index("[[DEPLOYED:HarnessConstraints]]") \
-                if "[[DEPLOYED:HarnessConstraints]]" in lines else None
-            cc_idx = lines.index("[[CUSTOM:CustomConstraints]]") \
-                if "[[CUSTOM:CustomConstraints]]" in lines else None
+            pc_idx = lines.index('<ProtocolConstraints type="managed">') \
+                if '<ProtocolConstraints type="managed">' in lines else None
+            hc_idx = lines.index('<HarnessConstraints type="managed">') \
+                if '<HarnessConstraints type="managed">' in lines else None
+            cc_idx = lines.index('<CustomConstraints type="custom">') \
+                if '<CustomConstraints type="custom">' in lines else None
 
             if pc_idx is not None and hc_idx is not None:
                 checked_any = True

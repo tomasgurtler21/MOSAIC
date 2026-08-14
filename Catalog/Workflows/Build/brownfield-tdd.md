@@ -35,8 +35,7 @@ artifacts:
   - TestResults.md
 ---
 
-[[SECTION:Workflow:brownfield-tdd]]
-<!-- workflow-version: 3.7 -->
+<Workflow type="core" name="brownfield-tdd" version="3.7">
 ## Brownfield TDD Workflow
 
 **Use when:** New features or significant changes to an **existing codebase** requiring test-first development with full research and design.
@@ -72,7 +71,7 @@ artifacts:
 - contracts-designer + contracts-review are optional - skip both if no new contracts are needed
 - implementation-review may identify other issues than code itself → callback to codebase-research, planner-tdd-soft, contracts-designer
 
-[[/SECTION:Workflow:brownfield-tdd]]
+</Workflow>
 
 ---
 

@@ -8,9 +8,9 @@ id: present-workflow
 referenced_agents: []
 ---
 
-[[SECTION:Workflow:present-workflow]]
+<Workflow type="core" name="present-workflow" version="1.0">
 ## Present Workflow
 
 This workflow is listed in the index and has a file on disk. It should produce no issues.
 
-[[/SECTION:Workflow:present-workflow]]
+</Workflow>

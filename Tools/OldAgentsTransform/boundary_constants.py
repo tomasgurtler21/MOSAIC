@@ -2,6 +2,16 @@
 
 Both boundary_transformer.py and boundary_validator.py import from this module.
 It defines the canonical boundary vocabulary, tag syntax, and parent mappings.
+
+Tag syntax (current):
+  Open  : <Name type="core|managed|project|custom"> [name="qualifier"] [version="..."]
+  Close : </Name>
+
+Type attribute values map to boundary kinds:
+  core    -> SECTION   (canonical sections)
+  managed -> DEPLOYED  (tool-managed regions)
+  project -> INJECTION (project-provided fill)
+  custom  -> CUSTOM    (project-invented regions)
 """
 from __future__ import annotations
 
@@ -180,14 +190,132 @@ MARKER_TO_INJECTION_NAME: dict[str, str] = {
     v: k for k, v in INJECTION_OLD_MARKER_MAP.items()
 }
 
-# Name admits compound forms `Prefix:id` and hyphenated segments, matching the
-# Go parser in Tools/Common/docformat/boundary.go. Each segment must start with
-# a letter; digits and hyphens are allowed after the first character of a segment.
-# A trailing colon or a segment starting with a digit or hyphen does not match.
-TAG_PATTERN: re.Pattern[str] = re.compile(
-    r"^\[\[(?P<close>/?)(?P<kind>SECTION|INJECTION|DEPLOYED|CUSTOM):"
-    r"(?P<name>[A-Za-z][A-Za-z0-9-]*(?::[A-Za-z][A-Za-z0-9-]*)*)\]\]$"
+# ---------------------------------------------------------------------------
+# Tag grammar (new XML-style syntax)
+#
+# Open tag:  <TagName type="core|managed|project|custom" [name="qualifier"] [version="..."]>
+# Close tag: </TagName>
+#
+# A line is a MOSAIC boundary only when it is a well-formed tag on its own line
+# whose type attribute is one of the four recognised values.  Everything else is
+# treated as literal text (inert).  Lenient parsing: attribute order is free,
+# whitespace around attributes is unrestricted, single or double quotes accepted.
+# ---------------------------------------------------------------------------
+
+# Mapping between type attribute values and the BoundaryKind string values.
+_TYPE_TO_KIND: dict[str, str] = {
+    "core":    "SECTION",
+    "managed": "DEPLOYED",
+    "project": "INJECTION",
+    "custom":  "CUSTOM",
+}
+
+# Reverse map — used by open_tag() and close_tag() to produce type attribute values.
+_KIND_TO_TYPE: dict[str, str] = {v: k for k, v in _TYPE_TO_KIND.items()}
+
+# Internal regexes used by _TagPatternMatcher.
+_OPEN_TAG_RE: re.Pattern[str] = re.compile(
+    r"^<(?P<tagname>[A-Za-z][A-Za-z0-9-]*)(?P<attrs>\s[^>]*)?>$"
 )
+_CLOSE_TAG_RE: re.Pattern[str] = re.compile(
+    r"^</(?P<tagname>[A-Za-z][A-Za-z0-9-]*)\s*>$"
+)
+# Lenient attribute extractors — value may be single- or double-quoted.
+_TYPE_ATTR_RE: re.Pattern[str] = re.compile(
+    r"""(?:^|\s)type=["'](?P<type>core|managed|project|custom)["']"""
+)
+# The name attribute value may contain colons (e.g. name="id:sub" for deeper compound names).
+_NAME_ATTR_RE: re.Pattern[str] = re.compile(
+    r"""(?:^|\s)name=["'](?P<name>[A-Za-z][A-Za-z0-9:-]*)["']"""
+)
+
+
+class _TagMatchResult:
+    """Lightweight match-result object returned by _TagPatternMatcher.match().
+
+    Exposes .group(key) for the three logical fields so callers need not change
+    from the old re.Match usage.
+
+    close  : "/"  for a close tag, "" for an open tag
+    kind   : "SECTION" / "DEPLOYED" / "INJECTION" / "CUSTOM" for open tags;
+             "" for close tags (kind is not encoded in the new close-tag syntax)
+    name   : compound name "Prefix:qualifier" for open tags;
+             bare prefix "Prefix" for close tags
+    """
+    __slots__ = ("_close", "_kind", "_name")
+
+    def __init__(self, close: str, kind: str, name: str) -> None:
+        self._close = close
+        self._kind = kind
+        self._name = name
+
+    def group(self, key: str) -> str:
+        if key == "close":
+            return self._close
+        if key == "kind":
+            return self._kind
+        if key == "name":
+            return self._name
+        raise KeyError(f"Unknown group: {key!r}")
+
+
+class _TagPatternMatcher:
+    """Replacement for re.Pattern: recognises new-syntax MOSAIC boundary tags.
+
+    Accepts open tags of the form:
+        <Name type="core|managed|project|custom" [name="qualifier"] [version="..."]>
+    and close tags of the form:
+        </Name>
+
+    Returns None for lines that are not MOSAIC boundary tags (inert text):
+      - no type attribute
+      - unrecognised type value
+      - trailing content after the closing >
+      - self-closing tag (ends with /)
+    """
+
+    def match(self, line: str) -> "_TagMatchResult | None":  # noqa: ANN201
+        """Return a _TagMatchResult or None, mirroring re.Pattern.match semantics."""
+        stripped = line.strip()
+
+        # --- Close tag: </TagName> ---
+        cm = _CLOSE_TAG_RE.match(stripped)
+        if cm:
+            tagname = cm.group("tagname")
+            return _TagMatchResult(close="/", kind="", name=tagname)
+
+        # --- Open tag: <TagName attrs...> ---
+        om = _OPEN_TAG_RE.match(stripped)
+        if om:
+            tagname = om.group("tagname")
+            attrs: str = om.group("attrs") or ""
+
+            # Reject self-closing tags (<Foo type="core"/>).
+            if attrs.rstrip().endswith("/"):
+                return None
+
+            # Require a recognised type attribute value.
+            type_m = _TYPE_ATTR_RE.search(attrs)
+            if not type_m:
+                return None  # no type attribute → inert text
+            type_val = type_m.group("type")
+            kind = _TYPE_TO_KIND.get(type_val)
+            if not kind:
+                return None  # unrecognised type value → inert text
+
+            # Optional name attribute (compound names).
+            name_m = _NAME_ATTR_RE.search(attrs)
+            qualifier = name_m.group("name") if name_m else None
+            name = tagname + (":" + qualifier if qualifier else "")
+            return _TagMatchResult(close="", kind=kind, name=name)
+
+        return None
+
+
+# Public tag-pattern object.  Callers use TAG_PATTERN.match(line) exactly as
+# before, receiving a _TagMatchResult (or None) with .group("close"),
+# .group("kind"), and .group("name").
+TAG_PATTERN: _TagPatternMatcher = _TagPatternMatcher()
 
 
 def tag_base_name(name: str) -> str:
@@ -271,10 +399,34 @@ FRONTMATTER_KEYS_BY_KIND: dict[DocumentKind, frozenset[str]] = {
 
 
 def open_tag(kind: BoundaryKind, name: str) -> str:
-    """Return e.g. '[[SECTION:Identity]]', '[[INJECTION:ContextLimits]]', or '[[DEPLOYED:LanguagePatterns]]'."""
-    return f"[[{kind.value}:{name}]]"
+    """Return the canonical open tag for a region.
+
+    Simple name:   open_tag(SECTION, "Identity")             -> '<Identity type="core">'
+    Compound name: open_tag(SECTION, "Workflow:quick-fix")   -> '<Workflow type="core" name="quick-fix">'
+
+    A compound name is split at the first colon: the prefix becomes the tag name
+    and the remainder becomes the 'name' attribute.
+    """
+    type_val = _KIND_TO_TYPE[kind.value]
+    colon_pos = name.find(":")
+    if colon_pos == -1:
+        return f'<{name} type="{type_val}">'
+    tag_name = name[:colon_pos]
+    qualifier = name[colon_pos + 1:]
+    return f'<{tag_name} type="{type_val}" name="{qualifier}">'
 
 
 def close_tag(kind: BoundaryKind, name: str) -> str:
-    """Return e.g. '[[/SECTION:Identity]]', '[[/INJECTION:ContextLimits]]', or '[[/DEPLOYED:LanguagePatterns]]'."""
-    return f"[[/{kind.value}:{name}]]"
+    """Return the canonical close tag for a region.
+
+    Simple name:   close_tag(SECTION, "Identity")           -> '</Identity>'
+    Compound name: close_tag(SECTION, "Workflow:quick-fix") -> '</Workflow>'
+
+    Only the prefix of a compound name appears in the close tag.
+    The 'kind' parameter is accepted for API compatibility but is not used —
+    close tags carry only the tag name, not the type attribute.
+    """
+    colon_pos = name.find(":")
+    if colon_pos == -1:
+        return f"</{name}>"
+    return f"</{name[:colon_pos]}>"

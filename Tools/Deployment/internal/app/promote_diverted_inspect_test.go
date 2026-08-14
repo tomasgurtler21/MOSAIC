@@ -99,7 +99,7 @@ func noDestFieldDescriptorForInspect() *domain.HarnessDescriptor {
 
 // buildDivertedSource returns source bytes for a deployed agent that carries both a
 // main tools list and a diverted mcpServers field. The file satisfies both eligibility
-// signals (transform_version + [[SECTION:...]] tag).
+// signals (transform_version + <... type="core"> tag).
 func buildDivertedSource(mainTools []string, mcpServerNames []string) []byte {
 	toolsLine := "tools: [" + joinTools(mainTools) + "]\n"
 
@@ -119,9 +119,9 @@ func buildDivertedSource(mainTools []string, mcpServerNames []string) []byte {
 		toolsLine +
 		mcpBlock +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Test agent content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // joinTools produces a comma-separated list for a YAML flow sequence.
@@ -349,9 +349,9 @@ func TestInspectPromoteSource_MultipleDestFields_AllExtracted(t *testing.T) {
 		"fieldTwo:\n" +
 		"  - beta-server\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	facts, err := inspectPromoteSource(src, d)
 	if err != nil {

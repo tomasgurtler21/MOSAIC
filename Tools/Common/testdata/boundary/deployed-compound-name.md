@@ -2,5 +2,5 @@
 name: test-agent
 ---
 
-[[DEPLOYED:Workflow:quick-fix]]
-[[/DEPLOYED:Workflow:quick-fix]]
+<Workflow type="managed" name="quick-fix">
+</Workflow>

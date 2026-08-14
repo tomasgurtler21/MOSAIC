@@ -13,8 +13,7 @@ artifacts:
   - MosaicTestScript/payload-json.md
 ---
 
-[[SECTION:Workflow:payload-stress]]
-<!-- workflow-version: 1.0 -->
+<Workflow type="core" name="payload-stress" version="1.0">
 ## MosaicTest Payload Stress Workflow
 
 **Use when:** Checking whether a harness carries awkward `status_message` content through intact. This is where harnesses genuinely differ, and a failure here is usually an escaping or encoding bug rather than a routing one.
@@ -32,7 +31,7 @@ artifacts:
 - One payload class per row, so a failure names the class that broke rather than "the payload broke."
 - Nothing is written. The payload under test travels only in `status_message`, which is where a harness's own JSON envelope has to carry it.
 
-[[/SECTION:Workflow:payload-stress]]
+</Workflow>
 
 ---
 

@@ -2,14 +2,14 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity content.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 Capabilities content — at canonical index 2, before CommunicationProtocol below.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 Protocol content appearing after Capabilities — out of canonical order (CommunicationProtocol belongs at slot 1, before Capabilities at slot 2).
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>

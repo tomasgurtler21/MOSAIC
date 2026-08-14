@@ -9,6 +9,6 @@ recommended_tier: ""
 tier_rationale: ""
 required_skills: []
 ---
-[[SECTION:Identity]]
+<Identity type="core">
 You are a test agent.
-[[/SECTION:Identity]]
+</Identity>

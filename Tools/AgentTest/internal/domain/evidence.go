@@ -21,7 +21,7 @@ type OrchestrationState struct {
 }
 
 // ExecutionLogRow mirrors one row of the orchestration document's
-// [[SECTION:ExecutionLog]] table, whose columns are exactly:
+// ExecutionLog region table, whose columns are exactly:
 //
 //	Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint
 //

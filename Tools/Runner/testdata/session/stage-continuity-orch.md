@@ -1,5 +1,4 @@
-[[SECTION:Workflow:stage-continuity]]
-<!-- workflow-version: 1.0 -->
+<Workflow type="core" name="stage-continuity" version="1.0">
 ## Stage Continuity Workflow
 
 Workflow combining a pre-EXECUTION planning row that emits Stage-* outputs
@@ -14,4 +13,4 @@ EXECUTION and dispatch the stage 1 rows rather than stopping.
 | PLANNING | reviewer | ❌ | implementation-tdd | planner | Plan.md | Stage-*/Plan.md |
 | EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
 | EXECUTION.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/implementation-review.md |
-[[/SECTION:Workflow:stage-continuity]]
+</Workflow>

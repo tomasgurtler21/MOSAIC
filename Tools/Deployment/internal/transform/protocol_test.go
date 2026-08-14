@@ -4,8 +4,8 @@ package transform_test
 //
 //   - Role-based variant selection: an orchestrator receives the orchestrator block;
 //     a worker or utility receives the subagent block; neither block bleeds across roles.
-//   - Version marker: the deployed region opens with <!-- protocol-version: X --> matching
-//     the same comment shape used by workflow and infrastructure blocks.
+//   - Version attribute: the deployed CommunicationProtocol region carries a version
+//     attribute on its opening tag (node.Version() returns the protocol version).
 //   - Missing-content failure: absent, empty, or whitespace-only protocol content for the
 //     agent's role fails Apply with a distinct error wrapping ErrProtocolContentMissing,
 //     and no partial output is returned.
@@ -22,8 +22,9 @@ import (
 )
 
 // sourceWithProtocol is a minimal valid agent source that declares a top-level
-// [[DEPLOYED:CommunicationProtocol]] region, as specified by the agent source file contract.
-// The region is intentionally empty in the source; the transform fills it from the request.
+// <CommunicationProtocol type="managed"> region, as specified by the agent source file
+// contract. The region is intentionally empty in the source; the transform fills it from
+// the request.
 const sourceWithProtocol = `---
 id: 99
 version: 1.0.0
@@ -36,15 +37,15 @@ tier_rationale: minimal
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 ## Identity
 
 Protocol test agent.
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // orchestratorBlockContent and subagentBlockContent are the distinct, non-overlapping
@@ -183,14 +184,13 @@ func TestProtocol_OrchestratorAndSubagentOutputsDiffer(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T4.2: Version marker
+// T4.2: Version attribute on the CommunicationProtocol region
 // ---------------------------------------------------------------------------
 
-// TestProtocol_VersionMarkerAppearsAsFirstLineOfRegion verifies that the protocol version
-// comment is the first content line of the deployed CommunicationProtocol region, before
-// the protocol block text. This mirrors the established <!-- infra-version: X --> and
-// <!-- workflow-version: X --> conventions.
-func TestProtocol_VersionMarkerAppearsAsFirstLineOfRegion(t *testing.T) {
+// TestProtocol_VersionAttributeOnRegion verifies that the CommunicationProtocol region's
+// opening tag carries the version attribute matching Protocol.Version from the request.
+// In the new syntax the version is a tag attribute (node.Version()), not an inline comment.
+func TestProtocol_VersionAttributeOnRegion(t *testing.T) {
 	const version = "1.9"
 
 	req := transform.Request{
@@ -209,26 +209,24 @@ func TestProtocol_VersionMarkerAppearsAsFirstLineOfRegion(t *testing.T) {
 		t.Fatalf("Apply: %v", err)
 	}
 
-	regionContent := extractProtocolRegionContent(t, result.Output)
-
-	// The version comment must be present somewhere in the region.
-	// Pass the subagent block as content (the request uses RoleWorker which maps to subagent).
-	expectedComment := transform.ProtocolVersionComment(version, []byte(subagentBlockContent))
-	if !bytes.Contains(regionContent, []byte(expectedComment)) {
-		t.Errorf("protocol region does not contain version comment %q;\ncontent: %q",
-			expectedComment, regionContent)
+	doc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	node, ok := doc.Body().Deployed("CommunicationProtocol")
+	if !ok {
+		t.Fatal("<CommunicationProtocol type=\"managed\"> region absent from output")
 	}
 
-	// The version comment must appear as the first line (the region content starts with it).
-	if !bytes.HasPrefix(regionContent, []byte(expectedComment)) {
-		t.Errorf("version comment is not the first line of the protocol region;\nwant prefix: %q\ngot content: %q",
-			expectedComment, regionContent)
+	if got := node.Version(); got != version {
+		t.Errorf("CommunicationProtocol version attribute: want %q, got %q", version, got)
 	}
 }
 
-// TestProtocol_VersionMarkerReflectsSuppliedVersion verifies that the version stamped into
-// the region matches Protocol.Version from the request — not a hardcoded default.
-func TestProtocol_VersionMarkerReflectsSuppliedVersion(t *testing.T) {
+// TestProtocol_VersionAttributeReflectsSuppliedVersion verifies that the version attribute
+// on the CommunicationProtocol region's opening tag matches Protocol.Version from the
+// request — not a hardcoded default.
+func TestProtocol_VersionAttributeReflectsSuppliedVersion(t *testing.T) {
 	cases := []string{"1.0", "2.3", "1.11", "42"}
 	for _, version := range cases {
 		t.Run("version="+version, func(t *testing.T) {
@@ -248,54 +246,51 @@ func TestProtocol_VersionMarkerReflectsSuppliedVersion(t *testing.T) {
 				t.Fatalf("Apply: %v", err)
 			}
 
-			regionContent := extractProtocolRegionContent(t, result.Output)
-			// Pass the subagent block as content (the request uses RoleWorker which maps to subagent).
-			expectedComment := transform.ProtocolVersionComment(version, []byte(subagentBlockContent))
-
-			if !bytes.Contains(regionContent, []byte(expectedComment)) {
-				t.Errorf("protocol region does not contain expected version comment %q;\ncontent: %q",
-					expectedComment, regionContent)
+			doc, err := docformat.Parse(result.Output)
+			if err != nil {
+				t.Fatalf("parse output: %v", err)
+			}
+			node, ok := doc.Body().Deployed("CommunicationProtocol")
+			if !ok {
+				t.Fatal("<CommunicationProtocol type=\"managed\"> region absent from output")
+			}
+			if got := node.Version(); got != version {
+				t.Errorf("CommunicationProtocol version attribute: want %q, got %q", version, got)
 			}
 		})
 	}
 }
 
-// TestProtocol_VersionMarkerMatchesProtocolVersionCommentHelper verifies the round-trip
-// symmetry between the emitter (ProtocolVersionComment) and the expected comment shape for
-// the three defined line-ending cases. This pins the exact output format so a future change
-// to the shape or terminator logic is caught by both the emitter test and any reader that
-// parses the same pattern.
-func TestProtocol_VersionMarkerMatchesProtocolVersionCommentHelper(t *testing.T) {
+// TestProtocol_VersionNotEmbeddedAsComment verifies that protocol version information is
+// stored as a version attribute on the region's opening tag and NOT embedded as an inline
+// comment inside the region content. This is the new-syntax contract: version lives on the
+// tag, not in the body.
+func TestProtocol_VersionNotEmbeddedAsComment(t *testing.T) {
 	const version = "1.9"
-	cases := []struct {
-		name    string
-		content []byte
-		want    string
-	}{
-		{
-			name:    "LF content yields LF-terminated marker",
-			content: []byte("## Communication Protocol\n\nContent.\n"),
-			want:    "<!-- protocol-version: 1.9 -->\n",
-		},
-		{
-			name:    "CRLF content yields CRLF-terminated marker",
-			content: []byte("## Communication Protocol\r\n\r\nContent.\r\n"),
-			want:    "<!-- protocol-version: 1.9 -->\r\n",
-		},
-		{
-			name:    "nil content yields LF-terminated marker (defined fallback)",
-			content: nil,
-			want:    "<!-- protocol-version: 1.9 -->\n",
-		},
+	req := transform.Request{
+		Source:   []byte(sourceWithProtocol),
+		Kind:     domain.ArtifactAgent,
+		Key:      "protocol-test",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: fixtureProtocol(version),
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := transform.ProtocolVersionComment(version, tc.content)
-			if got != tc.want {
-				t.Errorf("ProtocolVersionComment(%q, %q): want %q, got %q",
-					version, tc.content, tc.want, got)
-			}
-		})
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	regionContent := extractProtocolRegionContent(t, result.Output)
+
+	// The version must NOT appear as a legacy HTML comment inside the region body.
+	legacyComment := "<!-- protocol-version: " + version + " -->"
+	if bytes.Contains(regionContent, []byte(legacyComment)) {
+		t.Errorf("protocol region must not embed version as an inline comment;\n"+
+			"found %q inside region content — version belongs on the opening tag attribute, not in the body;\n"+
+			"content: %q", legacyComment, regionContent)
 	}
 }
 
@@ -441,7 +436,7 @@ func TestProtocol_MissingContentFailsWithNoPartialOutput(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // extractProtocolRegionContent parses the output document and returns the inner content
-// bytes of the [[DEPLOYED:CommunicationProtocol]] region. The test is failed if the
+// bytes of the <CommunicationProtocol type="managed"> region. The test is failed if the
 // region cannot be located.
 func extractProtocolRegionContent(t *testing.T, output []byte) []byte {
 	t.Helper()
@@ -451,7 +446,7 @@ func extractProtocolRegionContent(t *testing.T, output []byte) []byte {
 	}
 	node, ok := doc.Body().Deployed("CommunicationProtocol")
 	if !ok {
-		t.Fatal("[[DEPLOYED:CommunicationProtocol]] region absent from output")
+		t.Fatal("<CommunicationProtocol type=\"managed\"> region absent from output")
 	}
 	return node.Content()
 }
@@ -463,9 +458,9 @@ func extractProtocolRegionContent(t *testing.T, output []byte) []byte {
 // sourceWithProtocolInterleaved is an agent source that declares a CommunicationProtocol
 // region interleaved between two user-owned injection regions. The order in the document is:
 //
-//  1. [[INJECTION:IdentityExtension]] — user-owned, inside the Identity section
-//  2. [[DEPLOYED:CommunicationProtocol]] — tool-managed, at the top level between sections
-//  3. [[INJECTION:CodebaseContext]] — user-owned, inside the Capabilities section
+//  1. <IdentityExtension type="project"> — user-owned, inside the Identity section
+//  2. <CommunicationProtocol type="managed"> — tool-managed, at the top level between sections
+//  3. <CodebaseContext type="project"> — user-owned, inside the Capabilities section
 //
 // This layout mirrors the canonical MOSAIC agent structure and pins the expected document
 // ordering of the protocol region in Report.Regions.
@@ -481,28 +476,28 @@ tier_rationale: ordering test
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 ## Identity
 
 Protocol order test agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
+</IdentityExtension>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Protocol order test capabilities.
 
-[[INJECTION:CodebaseContext]]
-[[/INJECTION:CodebaseContext]]
+<CodebaseContext type="project">
+</CodebaseContext>
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // TestProtocol_DocumentOrderProtocolRegionInterleaved verifies that the CommunicationProtocol

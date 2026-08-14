@@ -23,7 +23,7 @@ package app
 //     - When no agent in the bundle applies to the file's role, rule 21 is skipped for
 //       that file (the bundle does not concern it).
 //
-//   Rule 22 (bundle-region-drift, warning severity): a bundle-sourced [[DEPLOYED:]]
+//   Rule 22 (bundle-region-drift, warning severity): a bundle-sourced managed region
 //   region in the deployed file carries content that does not match the bundle block
 //   byte-for-byte.
 //     - When a deployed file's bundle region content matches the bundle block content
@@ -84,18 +84,18 @@ func makeSubagentBundle(version, targetRegion string, blockContent []byte) domai
 }
 
 // deployedFileWithRegion builds the raw bytes of a minimal deployed subagent file that
-// has `bundle_version: <bundleVersion>` in frontmatter and one [[DEPLOYED:regionName]]
+// has `bundle_version: <bundleVersion>` in frontmatter and one managed region (type="managed")
 // containing regionContent.
 func deployedFileWithRegion(bundleVer, regionName string, regionContent []byte) []byte {
 	front := "---\nrole: subagent\nbundle_version: " + bundleVer + "\n---\n\n"
-	region := "[[DEPLOYED:" + regionName + "]]\n" + string(regionContent) + "\n[[/DEPLOYED:" + regionName + "]]\n"
+	region := "<" + regionName + " type=\"managed\">\n" + string(regionContent) + "\n</" + regionName + ">\n"
 	return []byte(front + region)
 }
 
 // deployedFileNoBundleVersion builds a deployed file with no bundle_version frontmatter field.
 func deployedFileNoBundleVersion(regionName string, regionContent []byte) []byte {
 	front := "---\nrole: subagent\n---\n\n"
-	region := "[[DEPLOYED:" + regionName + "]]\n" + string(regionContent) + "\n[[/DEPLOYED:" + regionName + "]]\n"
+	region := "<" + regionName + " type=\"managed\">\n" + string(regionContent) + "\n</" + regionName + ">\n"
 	return []byte(front + region)
 }
 
@@ -270,7 +270,7 @@ func TestBundleConformance_Rule21_MultipleFiles_OneMismatch_ReportsOnlyStaleFile
 // ---------------------------------------------------------------------------
 
 func TestBundleConformance_Rule22_MatchingRegionContent_NoBundleRegionDriftIssue(t *testing.T) {
-	// A deployed file whose [[DEPLOYED:AuthorityHierarchy]] region content matches the
+	// A deployed file whose <AuthorityHierarchy type="managed"> region content matches the
 	// bundle block content byte-for-byte must produce no "bundle-region-drift" issue.
 	const targetPath = "path/to/agent.md"
 	const blockContent = "Verbatim authority hierarchy content.\n"
@@ -290,7 +290,7 @@ func TestBundleConformance_Rule22_MatchingRegionContent_NoBundleRegionDriftIssue
 }
 
 func TestBundleConformance_Rule22_DriftingRegionContent_ReportsBundleRegionDrift(t *testing.T) {
-	// A deployed file whose [[DEPLOYED:AuthorityHierarchy]] region carries content that
+	// A deployed file whose <AuthorityHierarchy type="managed"> region carries content that
 	// differs from the bundle block's content must produce a "bundle-region-drift" issue
 	// at SeverityWarning. The region has been hand-edited or deployed from an outdated
 	// bundle version.
@@ -339,7 +339,7 @@ func TestBundleConformance_Rule22_DriftingRegion_SubjectIsTargetPath(t *testing.
 
 func TestBundleConformance_Rule22_DriftingRegion_NodeIsRegionName(t *testing.T) {
 	// The "bundle-region-drift" issue's Node must be the region name
-	// (e.g. "AuthorityHierarchy") so that the operator can identify which [[DEPLOYED:]]
+	// (e.g. "AuthorityHierarchy") so that the operator can identify which managed region
 	// block within the file has drifted.
 	const targetPath = "path/to/agent.md"
 	bundle := makeSubagentBundle("1.0.0", "AuthorityHierarchy", []byte("Bundle content.\n"))
@@ -371,7 +371,7 @@ func TestBundleConformance_Rule22_RegionAbsentFromDeployedFile_ReportsBundleRegi
 		targetPath: {Present: true, BundleVersion: "1.0.0"},
 	}
 	bodies := map[string][]byte{
-		// The deployed file has NO [[DEPLOYED:AuthorityHierarchy]] region at all.
+		// The deployed file has NO <AuthorityHierarchy type="managed"> region at all.
 		targetPath: deployedFileWithoutRegion("1.0.0"),
 	}
 
@@ -384,7 +384,7 @@ func TestBundleConformance_Rule22_RegionAbsentFromDeployedFile_ReportsBundleRegi
 
 func TestBundleConformance_Rule22_NoBundleBlockForRegion_NoRegionDriftIssue(t *testing.T) {
 	// If the bundle has no block for a given region name, that region is not subject to
-	// drift checking. A deployed file may carry content in [[DEPLOYED:ClosingProcedure]]
+	// drift checking. A deployed file may carry content in <ClosingProcedure type="managed">
 	// without triggering "bundle-region-drift" if the bundle defines no block for
 	// ClosingProcedure.
 	const targetPath = "path/to/agent.md"
@@ -397,8 +397,8 @@ func TestBundleConformance_Rule22_NoBundleBlockForRegion_NoRegionDriftIssue(t *t
 	// correct AuthorityHierarchy region.
 	bodies := map[string][]byte{
 		targetPath: []byte("---\nrole: subagent\nbundle_version: 1.0.0\n---\n\n" +
-			"[[DEPLOYED:AuthorityHierarchy]]\nAuthority content.\n[[/DEPLOYED:AuthorityHierarchy]]\n\n" +
-			"[[DEPLOYED:ClosingProcedure]]\nSome closing procedure content.\n[[/DEPLOYED:ClosingProcedure]]\n"),
+			"<AuthorityHierarchy type=\"managed\">\nAuthority content.\n</AuthorityHierarchy>\n\n" +
+			"<ClosingProcedure type=\"managed\">\nSome closing procedure content.\n</ClosingProcedure>\n"),
 	}
 
 	issues := bundleConformance(bundle, states, bodies)

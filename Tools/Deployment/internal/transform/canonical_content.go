@@ -6,9 +6,9 @@ import (
 	"mosaic-common/docformat"
 )
 
-// CanonicalContent returns the tool-managed portion of a [[DEPLOYED:]] region's content:
+// CanonicalContent returns the tool-managed portion of a managed region's content:
 // the node's content bytes with the full marker block of every direct user-owned child
-// region ([[CUSTOM:]] and [[INJECTION:]]) removed, then leading and trailing whitespace
+// region (custom and injection) removed, then leading and trailing whitespace
 // trimmed from the result.
 //
 // It exists to make the previously-deployed and newly-generated forms of a region
@@ -24,7 +24,7 @@ func CanonicalContent(n *docformat.Node) []byte {
 	}
 	content := n.Content()
 	// Excise the full marker block of each direct user-owned child region.
-	// Both [[CUSTOM:]] and [[INJECTION:]] children are removed so the result
+	// Both custom and injection children are removed so the result
 	// contains only the tool-managed canonical text.
 	for _, child := range n.Children() {
 		if child.Kind() == docformat.NodeCustom || child.Kind() == docformat.NodeInjection {

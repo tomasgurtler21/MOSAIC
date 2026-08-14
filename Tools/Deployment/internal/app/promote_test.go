@@ -18,18 +18,18 @@ package app
 //   - Any rejection produces nil output — never a partial file.
 //
 // Injection region stripping:
-//   - Every [[INJECTION:...]] region in the generated output is an empty tag pair when
+//   - Every <... type="project"> region in the generated output is an empty tag pair when
 //     the source carries several populated injection regions.
 //   - The open and close tags for each injection region are present in the output (the
 //     regions exist as empty placeholders, not removed entirely).
 //
 // Deployed region stripping:
-//   - Every [[DEPLOYED:...]] region in the generated output is an empty tag pair when
+//   - Every <... type="managed"> region in the generated output is an empty tag pair when
 //     the source carries several populated deployed regions.
 //   - The open and close tags for each deployed region are present in the output.
 //
 // Section structure passthrough:
-//   - [[SECTION:...]] open and close tags are present in the output with the same names
+//   - <... type="core"> open and close tags are present in the output with the same names
 //     as in the source.
 //   - Section body prose (text outside injection/deployed region boundaries) is carried
 //     over byte-identically.
@@ -56,7 +56,7 @@ package app
 //   - Repeated calls with identical inputs produce byte-identical outputs (deterministic).
 //
 // Pipeline acceptance:
-//   - Every [[DEPLOYED:...]] region in the generated output has empty content
+//   - Every <... type="managed"> region in the generated output has empty content
 //     (no non-whitespace bytes), verifying that the transform pipeline's
 //     ErrSourceDeployedRegionNotEmpty check would not be triggered when the generated
 //     file is used as a deploy source.
@@ -84,7 +84,7 @@ import (
 
 // minimalEligiblePromoteSource returns the smallest possible source bytes that satisfy
 // both eligibility signals: frontmatter with transform_version and body with one properly
-// paired canonical [[SECTION:Identity]] tag. No injection or deployed regions are present,
+// paired canonical <Identity type="core"> tag. No injection or deployed regions are present,
 // making this suitable for frontmatter-focused tests that do not exercise region stripping.
 func minimalEligiblePromoteSource() []byte {
 	return []byte("---\n" +
@@ -99,9 +99,9 @@ func minimalEligiblePromoteSource() []byte {
 		"tools: [file_read, file_write]\n" +
 		"required_skills: [efficient-file-reading]\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the TestAgent. This prose must survive promotion unchanged.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // sourceWithPopulatedInjectionRegions returns source bytes with several injection regions
@@ -114,30 +114,30 @@ func sourceWithPopulatedInjectionRegions() []byte {
 		"description: Source with injection regions\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Identity section prose.\n" +
-		"[[INJECTION:IdentityExtension]]\n" +
+		"<IdentityExtension type=\"project\">\n" +
 		"Injection content one: custom project guidance for identity.\n" +
-		"[[/INJECTION:IdentityExtension]]\n" +
-		"[[/SECTION:Identity]]\n" +
+		"</IdentityExtension>\n" +
+		"</Identity>\n" +
 		"---\n" +
-		"[[SECTION:Capabilities]]\n" +
+		"<Capabilities type=\"core\">\n" +
 		"Capabilities prose.\n" +
-		"[[INJECTION:CodebaseContext]]\n" +
+		"<CodebaseContext type=\"project\">\n" +
 		"Injection content two: codebase uses Go 1.22 with modules.\n" +
 		"Multiple lines of context here.\n" +
-		"[[/INJECTION:CodebaseContext]]\n" +
-		"[[INJECTION:OutputArtifactTemplate]]\n" +
+		"</CodebaseContext>\n" +
+		"<OutputArtifactTemplate type=\"project\">\n" +
 		"Injection content three: artifact template definition.\n" +
-		"[[/INJECTION:OutputArtifactTemplate]]\n" +
-		"[[/SECTION:Capabilities]]\n" +
+		"</OutputArtifactTemplate>\n" +
+		"</Capabilities>\n" +
 		"---\n" +
-		"[[SECTION:ErrorHandling]]\n" +
+		"<ErrorHandling type=\"core\">\n" +
 		"Error handling prose.\n" +
-		"[[INJECTION:ErrorHandlingExtension]]\n" +
+		"<ErrorHandlingExtension type=\"project\">\n" +
 		"Injection content four: retry all 429 errors once.\n" +
-		"[[/INJECTION:ErrorHandlingExtension]]\n" +
-		"[[/SECTION:ErrorHandling]]\n")
+		"</ErrorHandlingExtension>\n" +
+		"</ErrorHandling>\n")
 }
 
 // sourceWithPopulatedDeployedRegions returns source bytes with deployed regions carrying
@@ -151,28 +151,27 @@ func sourceWithPopulatedDeployedRegions() []byte {
 		"description: Source with deployed regions\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Identity section prose.\n" +
-		"[[DEPLOYED:ClosingProcedure]]\n" +
+		"<ClosingProcedure type=\"managed\">\n" +
 		"These are the closing procedure steps.\n" +
 		"Step 1: summarise your work.\n" +
-		"[[/DEPLOYED:ClosingProcedure]]\n" +
-		"[[DEPLOYED:AuthorityHierarchy]]\n" +
+		"</ClosingProcedure>\n" +
+		"<AuthorityHierarchy type=\"managed\">\n" +
 		"Authority hierarchy: system instructions have the highest authority.\n" +
-		"[[/DEPLOYED:AuthorityHierarchy]]\n" +
-		"[[/SECTION:Identity]]\n" +
+		"</AuthorityHierarchy>\n" +
+		"</Identity>\n" +
 		"---\n" +
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-		"<!-- protocol-version: 1.9 -->\n" +
+		"<CommunicationProtocol type=\"managed\">\n" +
 		"You operate under Communication Protocol v1.9.\n" +
-		"[[/DEPLOYED:CommunicationProtocol]]\n" +
+		"</CommunicationProtocol>\n" +
 		"---\n" +
-		"[[SECTION:Constraints]]\n" +
+		"<Constraints type=\"core\">\n" +
 		"Constraints prose.\n" +
-		"[[DEPLOYED:ProtocolConstraints]]\n" +
+		"<ProtocolConstraints type=\"managed\">\n" +
 		"Never skip the JSON response block.\n" +
-		"[[/DEPLOYED:ProtocolConstraints]]\n" +
-		"[[/SECTION:Constraints]]\n")
+		"</ProtocolConstraints>\n" +
+		"</Constraints>\n")
 }
 
 // realisticHarnessOnlyAgentBytes reads the fixture file representing a realistic
@@ -207,7 +206,7 @@ func parseFrontmatterField(t *testing.T, src []byte, key string) (value string, 
 	return v.Scalar, true
 }
 
-// allDeployedRegionContents parses out and returns all [[DEPLOYED:...]] node contents,
+// allDeployedRegionContents parses out and returns all <... type="managed"> node contents,
 // keyed by region name.
 func allDeployedRegionContents(t *testing.T, out []byte) map[string][]byte {
 	t.Helper()
@@ -222,7 +221,7 @@ func allDeployedRegionContents(t *testing.T, out []byte) map[string][]byte {
 	return result
 }
 
-// allInjectionRegionContents parses out and returns all [[INJECTION:...]] node contents,
+// allInjectionRegionContents parses out and returns all <... type="project"> node contents,
 // keyed by region name.
 func allInjectionRegionContents(t *testing.T, out []byte) map[string][]byte {
 	t.Helper()
@@ -260,9 +259,9 @@ func TestBuildGenericAgent_MissingTransformVersion_WrapsErrPromoteNotTransformed
 	src := []byte("---\n" +
 		"version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"No transform_version in frontmatter.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(PromoteInput{Source: src, NumericID: "1", Key: "test-agent"})
 
@@ -284,9 +283,9 @@ func TestBuildGenericAgent_EmptyTransformVersion_WrapsErrPromoteNotTransformed(t
 		"transform_version: \"\"\n" +
 		"version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Has transform_version but its value is empty.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(PromoteInput{Source: src, NumericID: "1", Key: "test-agent"})
 
@@ -331,9 +330,9 @@ func TestBuildGenericAgent_TwoRejectionPaths_ProduceDistinguishableMessages(t *t
 	srcNoTV := []byte("---\n" +
 		"version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Signal one absent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 	srcNoTags := []byte("---\n" +
 		"transform_version: \"2.1.0\"\n" +
 		"version: \"1.0.0\"\n" +
@@ -389,12 +388,12 @@ func TestBuildGenericAgent_SingleInjectionRegion_IsStrippedToEmptyPair(t *testin
 		"id: \"5\"\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Section prose.\n" +
-		"[[INJECTION:IdentityExtension]]\n" +
+		"<IdentityExtension type=\"project\">\n" +
 		"This injection content must not appear in the generic source.\n" +
-		"[[/INJECTION:IdentityExtension]]\n" +
-		"[[/SECTION:Identity]]\n")
+		"</IdentityExtension>\n" +
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(standardPromoteInput(src))
 	if err != nil {
@@ -451,8 +450,8 @@ func TestBuildGenericAgent_InjectionRegions_TagPairsArePresentInOutput(t *testin
 		"OutputArtifactTemplate",
 		"ErrorHandlingExtension",
 	} {
-		openTag := "[[INJECTION:" + name + "]]"
-		closeTag := "[[/INJECTION:" + name + "]]"
+		openTag := "<" + name + " type=\"project\">"
+		closeTag := "</" + name + ">"
 		if !bytes.Contains(out, []byte(openTag)) {
 			t.Errorf("output is missing injection open tag %q", openTag)
 		}
@@ -505,13 +504,12 @@ func TestBuildGenericAgent_SingleDeployedRegion_IsStrippedToEmptyPair(t *testing
 		"id: \"5\"\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-		"<!-- protocol-version: 1.9 -->\n" +
+		"<CommunicationProtocol type=\"managed\" version=\"1.9\">\n" +
 		"Protocol content that must not appear in the generic source.\n" +
-		"[[/DEPLOYED:CommunicationProtocol]]\n" +
-		"[[SECTION:Identity]]\n" +
+		"</CommunicationProtocol>\n" +
+		"<Identity type=\"core\">\n" +
 		"Section prose.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(standardPromoteInput(src))
 	if err != nil {
@@ -552,7 +550,7 @@ func TestBuildGenericAgent_MultipleDeployedRegions_AllStrippedToEmptyPairs(t *te
 
 // TestBuildGenericAgent_DeployedRegions_TagPairsArePresentInOutput verifies that the
 // deployed region open and close tags survive stripping — the regions are empty pairs,
-// not removed entirely. A generic source must declare [[DEPLOYED:]] placeholders so the
+// not removed entirely. A generic source must declare managed region placeholders so the
 // deploy pipeline knows which regions to fill.
 func TestBuildGenericAgent_DeployedRegions_TagPairsArePresentInOutput(t *testing.T) {
 	src := sourceWithPopulatedDeployedRegions()
@@ -568,8 +566,8 @@ func TestBuildGenericAgent_DeployedRegions_TagPairsArePresentInOutput(t *testing
 		"AuthorityHierarchy",
 		"ProtocolConstraints",
 	} {
-		openTag := "[[DEPLOYED:" + name + "]]"
-		closeTag := "[[/DEPLOYED:" + name + "]]"
+		openTag := "<" + name + " type=\"managed\">"
+		closeTag := "</" + name + ">"
 		if !bytes.Contains(out, []byte(openTag)) {
 			t.Errorf("output is missing deployed open tag %q", openTag)
 		}
@@ -614,7 +612,7 @@ func TestBuildGenericAgent_RealisticFixture_AllDeployedRegionsStripped(t *testin
 // ---------------------------------------------------------------------------
 
 // TestBuildGenericAgent_SectionOpenAndCloseTags_ArePresentInOutput verifies that
-// [[SECTION:...]] open and close tags from the source are carried over unchanged.
+// <... type="core"> open and close tags from the source are carried over unchanged.
 func TestBuildGenericAgent_SectionOpenAndCloseTags_ArePresentInOutput(t *testing.T) {
 	src := minimalEligiblePromoteSource()
 
@@ -623,11 +621,11 @@ func TestBuildGenericAgent_SectionOpenAndCloseTags_ArePresentInOutput(t *testing
 		t.Fatalf("buildGenericAgent failed: %v", err)
 	}
 
-	if !bytes.Contains(out, []byte("[[SECTION:Identity]]")) {
-		t.Error("output is missing [[SECTION:Identity]] open tag")
+	if !bytes.Contains(out, []byte("<Identity type=\"core\">")) {
+		t.Error("output is missing <Identity type=\"core\"> open tag")
 	}
-	if !bytes.Contains(out, []byte("[[/SECTION:Identity]]")) {
-		t.Error("output is missing [[/SECTION:Identity]] close tag")
+	if !bytes.Contains(out, []byte("</Identity>")) {
+		t.Error("output is missing </Identity> close tag")
 	}
 }
 
@@ -642,9 +640,9 @@ func TestBuildGenericAgent_SectionBodyProse_IsCarriedOverUnchanged(t *testing.T)
 		"id: \"1\"\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		prose + "\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(standardPromoteInput(src))
 	if err != nil {
@@ -666,17 +664,17 @@ func TestBuildGenericAgent_MultipleSections_AllStructuresCarriedOver(t *testing.
 		"id: \"1\"\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Identity prose.\n" +
-		"[[/SECTION:Identity]]\n" +
+		"</Identity>\n" +
 		"---\n" +
-		"[[SECTION:Capabilities]]\n" +
+		"<Capabilities type=\"core\">\n" +
 		"Capabilities prose.\n" +
-		"[[/SECTION:Capabilities]]\n" +
+		"</Capabilities>\n" +
 		"---\n" +
-		"[[SECTION:Constraints]]\n" +
+		"<Constraints type=\"core\">\n" +
 		"Constraints prose.\n" +
-		"[[/SECTION:Constraints]]\n")
+		"</Constraints>\n")
 
 	out, err := buildGenericAgent(standardPromoteInput(src))
 	if err != nil {
@@ -684,8 +682,8 @@ func TestBuildGenericAgent_MultipleSections_AllStructuresCarriedOver(t *testing.
 	}
 
 	for _, sectionName := range []string{"Identity", "Capabilities", "Constraints"} {
-		openTag := "[[SECTION:" + sectionName + "]]"
-		closeTag := "[[/SECTION:" + sectionName + "]]"
+		openTag := "<" + sectionName + " type=\"core\">"
+		closeTag := "</" + sectionName + ">"
 		if !bytes.Contains(out, []byte(openTag)) {
 			t.Errorf("output missing section open tag %q", openTag)
 		}
@@ -706,17 +704,17 @@ func TestBuildGenericAgent_MultipleSections_OrderMatchesSource(t *testing.T) {
 		"id: \"1\"\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Identity prose.\n" +
-		"[[/SECTION:Identity]]\n" +
+		"</Identity>\n" +
 		"---\n" +
-		"[[SECTION:Capabilities]]\n" +
+		"<Capabilities type=\"core\">\n" +
 		"Capabilities prose.\n" +
-		"[[/SECTION:Capabilities]]\n" +
+		"</Capabilities>\n" +
 		"---\n" +
-		"[[SECTION:Constraints]]\n" +
+		"<Constraints type=\"core\">\n" +
 		"Constraints prose.\n" +
-		"[[/SECTION:Constraints]]\n")
+		"</Constraints>\n")
 
 	out, err := buildGenericAgent(standardPromoteInput(src))
 	if err != nil {
@@ -771,11 +769,11 @@ func TestBuildGenericAgent_RealisticFixture_AllSixSectionsPresent(t *testing.T) 
 		"Identity", "Capabilities", "Constraints",
 		"ErrorHandling", "OutputFormat", "ExecutionPhilosophy",
 	} {
-		if !bytes.Contains(out, []byte("[[SECTION:"+section+"]]")) {
-			t.Errorf("output missing [[SECTION:%s]] open tag", section)
+		if !bytes.Contains(out, []byte("<"+section+" type=\"core\">")) {
+			t.Errorf("output missing <%s type=\"core\"> open tag", section)
 		}
-		if !bytes.Contains(out, []byte("[[/SECTION:"+section+"]]")) {
-			t.Errorf("output missing [[/SECTION:%s]] close tag", section)
+		if !bytes.Contains(out, []byte("</"+section+">")) {
+			t.Errorf("output missing </%s> close tag", section)
 		}
 	}
 }
@@ -872,9 +870,9 @@ func TestBuildGenericAgent_Frontmatter_NameTakenFromSourceWhenPresent(t *testing
 		"name: source-provided-name\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(PromoteInput{
 		Source:    src,
@@ -906,9 +904,9 @@ func TestBuildGenericAgent_Frontmatter_NameFallsBackToKeyWhenSourceHasNone(t *te
 		"role: subagent\n" +
 		// No `name` field
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	wantName := "my-fallback-key"
 	out, err := buildGenericAgent(PromoteInput{
@@ -1001,9 +999,9 @@ func TestBuildGenericAgent_Frontmatter_HarnessStampsAreAbsent(t *testing.T) {
 		"description: Test agent\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(standardPromoteInput(src))
 	if err != nil {
@@ -1051,9 +1049,9 @@ func TestBuildGenericAgent_Frontmatter_CatalogFieldsCarryOver(t *testing.T) {
 		"tools: [file_read, file_write]\n" +
 		"required_skills: [efficient-file-reading]\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(standardPromoteInput(src))
 	if err != nil {
@@ -1161,7 +1159,7 @@ func TestBuildGenericAgent_DoesNotMutateSourceBytes(t *testing.T) {
 // rejected call (ineligible source) leaves the Source bytes unchanged.
 func TestBuildGenericAgent_DoesNotMutateSourceBytes_OnRejection(t *testing.T) {
 	// Source without transform_version — will be rejected.
-	src := []byte("---\nversion: \"1.0.0\"\n---\n[[SECTION:Identity]]\ncontent\n[[/SECTION:Identity]]\n")
+	src := []byte("---\nversion: \"1.0.0\"\n---\n<Identity type=\"core\">\ncontent\n</Identity>\n")
 	snapshot := make([]byte, len(src))
 	copy(snapshot, src)
 
@@ -1202,7 +1200,7 @@ func TestBuildGenericAgent_IsReferentiallyTransparent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestBuildGenericAgent_AllDeployedRegionsInOutput_HaveEmptyContent verifies that every
-// [[DEPLOYED:...]] region in the generated output carries no non-whitespace content.
+// <... type="managed"> region in the generated output carries no non-whitespace content.
 // This is the exact condition the transform pipeline's processRegions checks before
 // returning ErrSourceDeployedRegionNotEmpty. A generated file that passes this check
 // is safe to use as a deploy source.
@@ -1297,12 +1295,12 @@ func TestBuildGenericAgent_StructurallyInvalidBoundaryTags_WrapsErrPromoteNotTra
 		"transform_version: \"2.1.0\"\n" +
 		"version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"First identity section.\n" +
-		"[[/SECTION:Identity]]\n" +
-		"[[SECTION:Identity]]\n" + // duplicate — triggers blocking "duplicate-name" issue
+		"</Identity>\n" +
+		"<Identity type=\"core\">\n" + // duplicate — triggers blocking "duplicate-name" issue
 		"Duplicate identity section.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(PromoteInput{Source: src, NumericID: "1", Key: "test-agent"})
 
@@ -1372,9 +1370,9 @@ func TestBuildGenericAgent_DropKeys_HarnessSpecificKeyIsAbsent(t *testing.T) {
 		"  read: allow\n" +
 		"  write: deny\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(PromoteInput{
 		Source:    src,
@@ -1421,9 +1419,9 @@ func TestBuildGenericAgent_DropKeys_MultipleHarnessKeysAllAbsent(t *testing.T) {
 		"harness_beta: beta-value\n" +
 		"harness_gamma: gamma-value\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(PromoteInput{
 		Source:    src,
@@ -1471,9 +1469,9 @@ func TestBuildGenericAgent_DropKeys_ProtectedGenericKeysSurvive(t *testing.T) {
 		"description: This field must survive even if DropKeys names it\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	// Supply all five protected keys in DropKeys to prove the protection is active.
 	out, err := buildGenericAgent(PromoteInput{
@@ -1528,9 +1526,9 @@ func TestBuildGenericAgent_DropKeys_CrossHarnessStampDropsStillApply(t *testing.
 		"role: subagent\n" +
 		"mode: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(PromoteInput{
 		Source:    src,
@@ -1583,9 +1581,9 @@ func TestBuildGenericAgent_DropKeys_NilDropKeysPreservesCarriedFields(t *testing
 		"role: subagent\n" +
 		"custom_field: custom-value\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(PromoteInput{
 		Source:    src,
@@ -1631,9 +1629,9 @@ func TestBuildGenericAgent_DropKeys_OnlyHarnessKeysDropped_GenericFieldsCarryThr
 		"required_skills: [lean-tdd]\n" +
 		"mode: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(PromoteInput{
 		Source:    src,
@@ -1706,9 +1704,9 @@ func sourceWithToolsKey(toolsList string) []byte {
 		"role: subagent\n" +
 		"tools: " + toolsList + "\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // sourceWithoutToolsKey returns eligible source bytes that carry no `tools` key,
@@ -1722,9 +1720,9 @@ func sourceWithoutToolsKey() []byte {
 		"description: Agent with no tools key\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // parseFrontmatterList is a helper that parses src with docformat.Parse and reads the
@@ -2046,9 +2044,9 @@ func TestBuildGenericAgent_Frontmatter_GeneratedKeysAppearBeforeCarriedKeys(t *t
 		"role: subagent\n" +
 		"tier_rationale: moderate capability needed\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(PromoteInput{
 		Source:    src,
@@ -2142,9 +2140,9 @@ func sourceWithoutRecoverableFields() []byte {
 		"role: subagent\n" +
 		// Intentionally absent: recommended_tier, tier_rationale, required_skills
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content for field recovery tests.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // TestBuildGenericAgent_RecommendedTier_NonEmpty_WrittenAsScalar verifies that when
@@ -2692,9 +2690,9 @@ func TestBuildGenericAgent_RecoveredTier_OverwritesExistingSourceField(t *testin
 		"role: subagent\n" +
 		"recommended_tier: OLD\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, err := buildGenericAgent(PromoteInput{
 		Source:          src,

@@ -288,9 +288,9 @@ func TestDetectHarnessMatch_MixedPositiveAndUnknownEvidenceIsIndeterminate(t *te
 		"alpha_stamp: alpha-v1\n" +          // ClassHarness for alpha: positive evidence
 		"hand_added_annotation: my-value\n" + // unknown to alpha: not a different-harness identifier
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the MixedEvidenceAgent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	alpha := newAlphaHarnessModule()
 

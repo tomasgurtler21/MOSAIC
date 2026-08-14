@@ -644,13 +644,13 @@ tier_rationale: parity
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
 
-[[CUSTOM:ProjectNotes]]
+<ProjectNotes type="custom">
 Custom content in a source file — must be rejected.
-[[/CUSTOM:ProjectNotes]]
-[[/SECTION:Identity]]
+</ProjectNotes>
+</Identity>
 `
 	doc, err := docformat.Parse([]byte(srcDoc))
 	if err != nil {
@@ -660,7 +660,7 @@ Custom content in a source file — must be rejected.
 	issues := docformat.Validate(doc, docformat.ValidateOptions{Kind: docformat.DocumentSource})
 
 	if !hasIssueWithCode(issues, "custom-region-in-source") {
-		t.Errorf("Validate(DocumentSource) with [[CUSTOM:]] did not emit 'custom-region-in-source'; "+
+		t.Errorf("Validate(DocumentSource) with custom region did not emit 'custom-region-in-source'; "+
 			"parity table: CUSTOM is not legal in source files. Issues: %v", issues)
 	}
 }

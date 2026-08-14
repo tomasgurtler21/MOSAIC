@@ -5,8 +5,8 @@ harness: claude-code
 
 # Harness Injections — Claude Code
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 
 ---
 

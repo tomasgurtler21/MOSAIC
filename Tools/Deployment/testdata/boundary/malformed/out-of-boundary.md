@@ -4,6 +4,6 @@ name: test-agent
 
 This line is outside all boundaries and is not blank.
 
-[[SECTION:Identity]]
+<Identity type="core">
 Section content.
-[[/SECTION:Identity]]
+</Identity>

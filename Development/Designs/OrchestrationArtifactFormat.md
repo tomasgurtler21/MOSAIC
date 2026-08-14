@@ -1,9 +1,9 @@
 # Orchestration Artifact Format
 
 > **Status:** Approved
-> **Version:** 2.1
+> **Version:** 2.2
 > **Created:** 2026-07-28
-> **Last Updated:** 2026-08-09
+> **Last Updated:** 2026-08-14
 > **Scope:** The schema of `Orchestration.md` — the blackboard artifact an orchestrator (human-driven LLM or a future deterministic script) reads and writes to track execution state for one workflow run. Defines its sections, their mutability rules, and the format each section uses.
 
 ---
@@ -35,13 +35,68 @@ The file has three kinds of section, distinguished by how a parser is expected t
 | **2 — Structured, machine-read** | Execution Log, Artifacts | Parse fully as fixed-column tables. Mutability differs per section — see §5, §6. |
 | **3 — Delimited, opaque** | Workflow Notes | Locate the boundary so the parser can skip past it without misreading its content as something else; never parse the content itself. Nothing routes on what's inside. |
 
-All Tier 2 and Tier 3 sections are wrapped in an explicit boundary marker, `[[SECTION:{Name}]] ... [[/SECTION:{Name}]]`, consistent with the delimiter convention already in use across agent and workflow files in this workspace. The marker's only job here is to let a parser find the start and end of a section without depending on markdown heading structure or section ordering — it carries no meaning beyond that boundary.
+All Tier 2 and Tier 3 sections are wrapped in an explicit boundary tag, `<Name type="core"> ... </Name>`, consistent with the region-marker convention used across agent and workflow files in this workspace. The tag's only job here is to let a parser find the start and end of a section without depending on markdown heading structure or section ordering — it carries no meaning beyond that boundary.
 
-Tier 1 lives in the file's YAML frontmatter block, not inside a `[[SECTION:...]]` wrapper — frontmatter is already a well-defined, universally-parsed boundary (the leading `---` / `---` pair), so wrapping it again would be redundant.
+Tier 1 lives in the file's YAML frontmatter block, not inside a region tag — frontmatter is already a well-defined, universally-parsed boundary (the leading `---` / `---` pair), so wrapping it again would be redundant.
 
 **No dedicated resume section:** a mutable Last Action / Next Action / free-form Context block was considered as a way to make resumption cheap without re-deriving it, but proved unnecessary — Current State plus the last Execution Log row already give an orchestrator everything it needs to determine its next action, and any free-form deviation that matters to a future resume belongs in Workflow Notes, not a dedicated mutable section. This schema does not include one.
 
 **No dedicated checkpoints section either**, for the same reason: a checkpoint is always taken immediately after some invocation completes, and that invocation's Execution Log row already carries the phase, stage, and sequence a checkpoint would otherwise restate. Checkpointing is instead one optional column on the Execution Log — see §5.
+
+### 3.1 Tag Syntax
+
+A boundary tag is an XML-style name-first tag occupying its own line. The trimmed line must be exactly the tag — nothing before or after.
+
+**Open tag canonical form:**
+
+```
+<ExecutionLog type="core">
+<Workflow type="core" name="quick-fix">
+<Workflow type="core" name="quick-fix" version="3.0">
+```
+
+- Attribute values are double-quoted.
+- Attributes are separated by exactly one space.
+- Canonical attribute order: `type`, then `name` (when present), then `version` (when present).
+- The line carries no other content.
+
+**Close tag canonical form:**
+
+```
+</ExecutionLog>
+</Workflow>
+```
+
+No attributes. The tag name alone — for a compound region, just the prefix. Same own-line rule.
+
+**Type attribute values:**
+
+| `type` value | Region kind | Usage |
+|---|---|---|
+| `core` | MOSAIC-authored structure | The three data sections of this schema (`ExecutionLog`, `Artifacts`, `WorkflowNotes`); workflow regions and infrastructure agent regions in orchestrator files |
+| `project` | Project-supplied content | Injection points the deployment fills from a project profile (e.g. `InfrastructureAgents`) |
+| `managed` | Tool-regenerated content | Regions written by the deployment tool, discarded and regenerated on each deploy |
+| `custom` | Project-invented regions | Regions a project adds entirely on its own, with no MOSAIC-declared anchor |
+
+**Compound names:** An enumerable region puts its prefix in the tag name and its id in a `name` attribute. The `Name()` accessor on a parsed node reassembles `prefix + ":" + id` so that callers doing prefix matching or colon-splitting keep working without modification.
+
+| Region identity | Open tag | Close tag |
+|---|---|---|
+| `ExecutionLog` | `<ExecutionLog type="core">` | `</ExecutionLog>` |
+| `Workflow:quick-fix` | `<Workflow type="core" name="quick-fix">` | `</Workflow>` |
+| `InfrastructureAgent:build-runner` | `<InfrastructureAgent type="core" name="build-runner">` | `</InfrastructureAgent>` |
+
+**Version attribute:** Where a region carries a declared version, it appears as a `version` attribute on the opening tag. Regions that carry no version today do not gain one; the attribute is optional and its absence is not an error.
+
+**Inertness rule:** A line is a MOSAIC boundary **only if** it is a well-formed tag on its own line carrying a `type` attribute whose value is one of `core`, `managed`, `project`, or `custom`. Everything else is text, preserved byte-for-byte through parse and serialise:
+
+- `<Foo>` — no `type` attribute → inert text
+- `<Foo type="widget">` — unrecognised `type` value → inert text
+- `<Foo type="core"> trailing words` — not alone on its line → inert text
+- `<Foo type="core"/>` — self-closing → inert text (no self-closing form exists)
+- `</Foo>` with no matching open — inert text
+
+**Lenient parse, canonical write.** Attributes may appear in any order, separated by any run of spaces or tabs, and values may be single- or double-quoted. A hand-edited file with reordered attributes is still recognised as a boundary. On serialisation the output is always canonical form.
 
 ## 4. Frontmatter (Tier 1)
 
@@ -120,12 +175,12 @@ Group vocabulary itself — how a workflow declares groups, how the plan artifac
 ## 5. Execution Log (Tier 2, append-only)
 
 ```markdown
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
 |-----|-------|-------|-------|--------|-----------|---------|--------|------------|
 | 1 | Research#1 | RESEARCH | - | SUCCESS | 2026-01-29T09:05:00Z | Analyzed auth requirements, JWT approach selected | - | - |
 | 2 | Validator#2 | RESEARCH | - | SUCCESS | 2026-01-29T09:10:00Z | Validated JWT approach feasibility | Research.md | - |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 ```
 
 One row per completed subagent invocation, appended after that invocation completes — never before, and never modified afterward. Every field on a row, including `Checkpoint`, is fixed at the moment the row is written; nothing in this section is ever revisited.
@@ -157,13 +212,13 @@ The column is `Agent`. A now-removed `Orchestration.template.md` labelled it `Su
 ## 6. Artifacts (Tier 2, keyed registry)
 
 ```markdown
-[[SECTION:Artifacts]]
+<Artifacts type="core">
 | Artifact | Created In | Created By |
 |----------|------------|------------|
 | Research.md | RESEARCH | Research#1 |
 | Plan.md | PLANNING | Planner#3 |
 | Stage-1/PlanProgress.md | EXECUTION.Implementation.1 | Implementation#10 |
-[[/SECTION:Artifacts]]
+</Artifacts>
 ```
 
 Unlike the Execution Log, this section is **not** a history — it's a lookup table answering "what artifacts currently exist, and who most recently produced each one." Its whole purpose (letting an orchestrator determine what to pass to the next subagent without re-deriving it from the workflow table each time) is a current-state question, not a historical one; the invocation-by-invocation history of what happened when already lives in the Execution Log, so duplicating it here would only add noise without adding information nothing else already provides.
@@ -181,17 +236,17 @@ Unlike the Execution Log, this section is **not** a history — it's a lookup ta
 ## 7. Workflow Notes (Tier 3)
 
 ```markdown
-[[SECTION:WorkflowNotes]]
+<WorkflowNotes type="core">
 | Seq | Note |
 |-----|------|
 | 1 | Token expiry should be 24 hours per security policy |
 | 4 | User confirmed: use RS256 algorithm, not HS256 |
-[[/SECTION:WorkflowNotes]]
+</WorkflowNotes>
 ```
 
 Free-form context for downstream subagents — constraints, clarifications, decisions discovered mid-run that later invocations need but that don't belong in any structured field. Appended, never edited or removed.
 
-The `[[SECTION:...]]` boundary exists purely so a parser locating other sections doesn't misread this table as one of the structured ones — nothing ever routes on this section's content, and nothing here needs a fixed column contract beyond "human-readable enough to be useful." `Seq` ties a note back to the invocation that recorded it, for traceability, not for machine interpretation.
+The boundary tag exists purely so a parser locating other sections doesn't misread this table as one of the structured ones — nothing ever routes on this section's content, and nothing here needs a fixed column contract beyond "human-readable enough to be useful." `Seq` ties a note back to the invocation that recorded it, for traceability, not for machine interpretation.
 
 ## 8. Update Rules
 
@@ -248,7 +303,7 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
 |-----|-------|-------|-------|--------|-----------|---------|--------|------------|
 | 1 | Research#1 | RESEARCH | - | SUCCESS | 2026-01-29T08:10:00Z | Analyzed profile feature requirements | - | - |
@@ -260,9 +315,9 @@ current_state:
 | 14 | checkpoint-manager-git#14 | EXECUTION | Implementation.1 | SUCCESS | 2026-01-29T10:51:00Z | Committed checkpoint of working tree (7 files). [checkpoint:7c2e9f1] | - | 7c2e9f1 |
 | 15 | TestCreator#15 | EXECUTION | Test.2 | SUCCESS | 2026-01-29T11:15:00Z | Created tests for updateProfile endpoint | Plan.md | - |
 | 16 | Implementation#16 | EXECUTION | Implementation.2 | SUCCESS | 2026-01-29T12:45:00Z | Implemented updateProfile endpoint | Plan.md, Design.md | - |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 
-[[SECTION:Artifacts]]
+<Artifacts type="core">
 | Artifact | Created In | Created By |
 |----------|------------|------------|
 | Requirements.md | INIT | user |
@@ -270,14 +325,14 @@ current_state:
 | Plan.md | PLANNING | Planner#2 |
 | Design.md | DESIGN | Designer#3 |
 | ProfileService.ts | EXECUTION.Implementation.2 | Implementation#16 |
-[[/SECTION:Artifacts]]
+</Artifacts>
 
-[[SECTION:WorkflowNotes]]
+<WorkflowNotes type="core">
 | Seq | Note |
 |-----|------|
 | 1 | Avatar images max 2MB, stored in /uploads/avatars/ |
 | 6 | Use soft delete for profile removal per user clarification |
-[[/SECTION:WorkflowNotes]]
+</WorkflowNotes>
 ```
 
 checkpoint-manager-git rows #4 and #14 both carry a real commit reference — both are fully restorable rollback targets. Walking the table backward, a consumer retaining (say) its two most recent checkpoints would find #14 and #4 without anything in the file itself having to record that — how many to retain is that consumer's own policy, not something recorded here (§5).

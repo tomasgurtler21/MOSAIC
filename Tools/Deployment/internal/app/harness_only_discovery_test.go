@@ -16,15 +16,15 @@ package app
 //   - Body carries no boundary tags → Eligible false (no canonical section found).
 //   - Body carries only incidental [[...]]-shaped strings embedded mid-line (not whole-line
 //     tags) → Eligible false (no whole-line canonical section found).
-//   - Body carries an unclosed [[SECTION:]] tag (unbalanced) → Eligible false (blocking
+//   - Body carries an unclosed section region tag (unbalanced) → Eligible false (blocking
 //     "unbalanced-tag" issue).
 //   - Body carries mismatched open/close tag names → Eligible false (blocking
 //     "mismatched-tag" issue).
 //   - Body carries a non-canonical section name (no CanonicalSections member present) →
 //     Eligible false (requirement 1 of signal two fails).
-//   - Body carries an unknown [[DEPLOYED:]] region name → Eligible false (blocking
+//   - Body carries an unknown managed region region name → Eligible false (blocking
 //     "unknown-deployed" issue).
-//   - Body carries a duplicate [[SECTION:]] name → Eligible false (blocking
+//   - Body carries a duplicate section region name → Eligible false (blocking
 //     "duplicate-name" issue).
 //   - Completely unparseable bytes (invalid YAML) → Eligible false, no panic or error return.
 //   - Eligible verdict carries correct Meta (TransformVersion, Version, NumericID).
@@ -96,7 +96,7 @@ import (
 
 // minimalEligibleAgentBytes returns document bytes that satisfy both eligibility signals:
 // frontmatter carries transform_version and the body carries a properly paired canonical
-// [[SECTION:Identity]] boundary. No content appears outside the section so no advisory
+// <Identity type="core"> boundary. No content appears outside the section so no advisory
 // issues are produced. These bytes should cause eligibleHarnessOnly to return Eligible true.
 func minimalEligibleAgentBytes() []byte {
 	return []byte("---\n" +
@@ -104,9 +104,9 @@ func minimalEligibleAgentBytes() []byte {
 		"version: \"2.1.0\"\n" +
 		"id: \"42\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"This agent provides identity content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // eligibleAgentWithRoleBytes returns eligible agent bytes that include a `role` field in
@@ -118,9 +118,9 @@ func eligibleAgentWithRoleBytes(role string) []byte {
 		"id: \"7\"\n" +
 		"role: \"" + role + "\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Identity section.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // miniCatalog is a minimal catalog.Catalog stub used only by catalogAgentKeys tests.
@@ -174,9 +174,9 @@ func writeIneligibleParseable(t *testing.T, dir, filename string) {
 	content := []byte("---\n" +
 		"version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Generic-style agent with no transform_version.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 	writeHarnessOnlyAgentFile(t, dir, filename, content)
 }
 
@@ -238,9 +238,9 @@ func TestEligibleHarnessOnly_MissingTransformVersion_ReturnsIneligible(t *testin
 	src := []byte("---\n" +
 		"version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	// Act
 	verdict := eligibleHarnessOnly(src)
@@ -279,15 +279,15 @@ func TestEligibleHarnessOnly_NoBoundaryTags_ReturnsIneligible(t *testing.T) {
 }
 
 // TestEligibleHarnessOnly_IncidentalBracketString_ReturnsIneligible verifies that an
-// incidental [[...]]-shaped string embedded mid-line (not a whole-line tag) does not
+// incidental tag-shaped string embedded mid-line (not a whole-line tag) does not
 // satisfy signal two. Tags are only recognised when they occupy a complete line.
 func TestEligibleHarnessOnly_IncidentalBracketString_ReturnsIneligible(t *testing.T) {
-	// Arrange — the [[SECTION:Identity]] strings appear inside prose sentences, not as
+	// Arrange — the <Identity type="core"> strings appear inside prose sentences, not as
 	// whole lines. The docformat lexer does not recognise them as boundary tags.
 	src := []byte("---\n" +
 		"transform_version: \"1.0.0\"\n" +
 		"---\n" +
-		"See the [[SECTION:Identity]] marker for details and [[/SECTION:Identity]] close.\n" +
+		"See the <Identity type=\"core\"> marker for details and </Identity> close.\n" +
 		"These are mid-line and must not be treated as real tags.\n")
 
 	// Act
@@ -302,14 +302,14 @@ func TestEligibleHarnessOnly_IncidentalBracketString_ReturnsIneligible(t *testin
 }
 
 // TestEligibleHarnessOnly_UnpairedOpenTag_ReturnsIneligible verifies that an unclosed
-// [[SECTION:]] tag (producing an "unbalanced-tag" validation issue) makes the verdict
+// section tag (producing an "unbalanced-tag" validation issue) makes the verdict
 // ineligible. Structural errors in the boundary tag set are blocking.
 func TestEligibleHarnessOnly_UnpairedOpenTag_ReturnsIneligible(t *testing.T) {
-	// Arrange — [[SECTION:Identity]] is opened but never closed.
+	// Arrange — <Identity type="core"> is opened but never closed.
 	src := []byte("---\n" +
 		"transform_version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content with no closing tag.\n")
 
 	// Act
@@ -318,7 +318,7 @@ func TestEligibleHarnessOnly_UnpairedOpenTag_ReturnsIneligible(t *testing.T) {
 	// Assert
 	if verdict.Eligible {
 		t.Error("eligibleHarnessOnly returned Eligible true for a document with an unclosed " +
-			"[[SECTION:]] tag; want Eligible false (blocking \"unbalanced-tag\" issue)")
+			"section region tag; want Eligible false (blocking \"unbalanced-tag\" issue)")
 	}
 }
 
@@ -330,9 +330,9 @@ func TestEligibleHarnessOnly_MismatchedTags_ReturnsIneligible(t *testing.T) {
 	src := []byte("---\n" +
 		"transform_version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Capabilities]]\n")
+		"</Capabilities>\n")
 
 	// Act
 	verdict := eligibleHarnessOnly(src)
@@ -345,16 +345,16 @@ func TestEligibleHarnessOnly_MismatchedTags_ReturnsIneligible(t *testing.T) {
 }
 
 // TestEligibleHarnessOnly_NonCanonicalSectionName_ReturnsIneligible verifies that a
-// properly paired [[SECTION:]] whose name is not in docformat.CanonicalSections does not
+// properly paired section region whose name is not in docformat.CanonicalSections does not
 // satisfy signal two's first requirement (at least one canonical section must be present).
 func TestEligibleHarnessOnly_NonCanonicalSectionName_ReturnsIneligible(t *testing.T) {
 	// Arrange — section name "MyCustomSection" is not in CanonicalSections.
 	src := []byte("---\n" +
 		"transform_version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:MyCustomSection]]\n" +
+		"<MyCustomSection type=\"core\">\n" +
 		"Custom content.\n" +
-		"[[/SECTION:MyCustomSection]]\n")
+		"</MyCustomSection>\n")
 
 	// Act
 	verdict := eligibleHarnessOnly(src)
@@ -368,18 +368,18 @@ func TestEligibleHarnessOnly_NonCanonicalSectionName_ReturnsIneligible(t *testin
 }
 
 // TestEligibleHarnessOnly_UnknownDeployedRegion_ReturnsIneligible verifies that a
-// [[DEPLOYED:]] tag whose name is not in docformat.CanonicalDeployed produces an
+// managed region tag whose name is not in docformat.CanonicalDeployed produces an
 // "unknown-deployed" validation issue, which is a blocking signal-two failure.
 func TestEligibleHarnessOnly_UnknownDeployedRegion_ReturnsIneligible(t *testing.T) {
-	// Arrange — [[DEPLOYED:SomeUnknownRegion]] is not in CanonicalDeployed.
+	// Arrange — <SomeUnknownRegion type="managed"> is not in CanonicalDeployed.
 	src := []byte("---\n" +
 		"transform_version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[DEPLOYED:SomeUnknownRegion]]\n" +
-		"[[/DEPLOYED:SomeUnknownRegion]]\n" +
-		"[[/SECTION:Identity]]\n")
+		"<SomeUnknownRegion type=\"managed\">\n" +
+		"</SomeUnknownRegion>\n" +
+		"</Identity>\n")
 
 	// Act
 	verdict := eligibleHarnessOnly(src)
@@ -387,7 +387,7 @@ func TestEligibleHarnessOnly_UnknownDeployedRegion_ReturnsIneligible(t *testing.
 	// Assert
 	if verdict.Eligible {
 		t.Error("eligibleHarnessOnly returned Eligible true for a document containing an " +
-			"unknown [[DEPLOYED:]] region name; " +
+			"unknown managed region region name; " +
 			"want Eligible false (blocking \"unknown-deployed\" validation issue)")
 	}
 }
@@ -402,9 +402,9 @@ func TestEligibleHarnessOnly_UnparseableBytes_ReturnsIneligibleNoPanic(t *testin
 		"transform_version: \"1.0.0\"\n" +
 		"transform_version: \"2.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	// Act — must not panic.
 	verdict := eligibleHarnessOnly(src)
@@ -421,16 +421,16 @@ func TestEligibleHarnessOnly_UnparseableBytes_ReturnsIneligibleNoPanic(t *testin
 // does NOT make the verdict ineligible. The "content-outside-boundary" advisory is
 // explicitly non-blocking for harness-only agents.
 func TestEligibleHarnessOnly_ContentOutsideBoundary_IsNotBlocking(t *testing.T) {
-	// Arrange — a heading line appears before the first [[SECTION:]] tag.
+	// Arrange — a heading line appears before the first section region tag.
 	// This triggers a "content-outside-boundary" advisory, which must be ignored.
 	src := []byte("---\n" +
 		"transform_version: \"1.0.0\"\n" +
 		"---\n" +
 		"# My Agent Heading\n" +
 		"\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Identity section.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	// Act
 	verdict := eligibleHarnessOnly(src)
@@ -451,9 +451,9 @@ func TestEligibleHarnessOnly_EmptyTransformVersion_ReturnsIneligible(t *testing.
 	src := []byte("---\n" +
 		"transform_version: \"\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	// Act
 	verdict := eligibleHarnessOnly(src)
@@ -536,21 +536,21 @@ func TestEligibleHarnessOnly_UnrecognisedRole_DefaultsToSubagent(t *testing.T) {
 }
 
 // TestEligibleHarnessOnly_DuplicateSectionName_ReturnsIneligible verifies that a document
-// containing two [[SECTION:]] tags with the same name (producing a "duplicate-name"
+// containing two section region tags with the same name (producing a "duplicate-name"
 // validation issue) is treated as ineligible. "duplicate-name" is one of the five blocking
 // validation codes the eligibility function filters on.
 func TestEligibleHarnessOnly_DuplicateSectionName_ReturnsIneligible(t *testing.T) {
-	// Arrange — [[SECTION:Identity]] appears twice; docformat.Validate produces
+	// Arrange — <Identity type="core"> appears twice; docformat.Validate produces
 	// a "duplicate-name" issue on the second occurrence.
 	src := []byte("---\n" +
 		"transform_version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"First identity block.\n" +
-		"[[/SECTION:Identity]]\n" +
-		"[[SECTION:Identity]]\n" +
+		"</Identity>\n" +
+		"<Identity type=\"core\">\n" +
 		"Duplicate identity block — same name used twice.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	// Act
 	verdict := eligibleHarnessOnly(src)
@@ -558,7 +558,7 @@ func TestEligibleHarnessOnly_DuplicateSectionName_ReturnsIneligible(t *testing.T
 	// Assert
 	if verdict.Eligible {
 		t.Error("eligibleHarnessOnly returned Eligible true for a document with a duplicate " +
-			"[[SECTION:Identity]] name; want Eligible false (blocking \"duplicate-name\" issue)")
+			"<Identity type=\"core\"> name; want Eligible false (blocking \"duplicate-name\" issue)")
 	}
 	if verdict.Reason == "" {
 		t.Error("eligibleHarnessOnly returned empty Reason for an ineligible verdict; " +

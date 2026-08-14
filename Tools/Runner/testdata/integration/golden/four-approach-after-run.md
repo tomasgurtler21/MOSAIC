@@ -16,7 +16,7 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent                    | Phase     | Stage            | Status  | Timestamp            | Summary           | Inputs           | Checkpoint |
 | --- | ------------------------ | --------- | ---------------- | ------- | -------------------- | ----------------- | ---------------- | ---------- |
 | 1   | test-writer-tdd#1        | EXECUTION | Test.1           | SUCCESS | 2026-01-01T00:00:00Z | s1 tests written  | Stage-1/Plan.md  | -          |
@@ -37,9 +37,9 @@ current_state:
 | 16  | test-writer-tdd#16       | EXECUTION | Test.4           | SUCCESS | 2026-01-01T00:00:00Z | s4 tests written  | Stage-4/Plan.md  | -          |
 | 17  | build-review#17          | EXECUTION | Test.4           | SUCCESS | 2026-01-01T00:00:00Z | s4 test build ok  | Stage-4/tests.md | -          |
 | 18  | tests-review-tdd#18      | EXECUTION | Test.4           | SUCCESS | 2026-01-01T00:00:00Z | s4 tests reviewed | Stage-4/tests.md | -          |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 
-[[SECTION:Artifacts]]
+<Artifacts type="core">
 | Artifact                      | Created In                 | Created By               |
 | ----------------------------- | -------------------------- | ------------------------ |
 | Stage-1/tests.md              | EXECUTION.Test.1           | test-writer-tdd#1        |
@@ -60,9 +60,9 @@ current_state:
 | Stage-4/tests.md              | EXECUTION.Test.4           | test-writer-tdd#16       |
 | Stage-4/build-review-tests.md | EXECUTION.Test.4           | build-review#17          |
 | Stage-4/tests-review.md       | EXECUTION.Test.4           | tests-review-tdd#18      |
-[[/SECTION:Artifacts]]
+</Artifacts>
 
-[[SECTION:WorkflowNotes]]
+<WorkflowNotes type="core">
 | Seq | Note |
 | --- | ---- |
-[[/SECTION:WorkflowNotes]]
+</WorkflowNotes>

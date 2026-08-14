@@ -53,9 +53,9 @@ tier_rationale: medium-level task
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Minimal identity body for prefix stamp tests.
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // applyMosaicPrefixSource calls transform.Apply on mosaicPrefixSource with the fixture

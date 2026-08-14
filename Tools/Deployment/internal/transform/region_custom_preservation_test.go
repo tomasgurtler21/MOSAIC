@@ -3,14 +3,14 @@ package transform_test
 // region_custom_preservation_test.go covers custom region provenance and preservation
 // during a normal (no-reorder) update:
 //
-//   - The deployed region map must include [[CUSTOM:]] regions alongside [[INJECTION:]]
+//   - The deployed region map must include custom-region regions alongside project-injection region
 //     regions, keyed by name with byte-identical content, each entry carrying the
-//     originating marker kind. [[DEPLOYED:]] regions remain excluded from the map.
-//   - A [[CUSTOM:]] region present in the deployed file survives a normal update
+//     originating marker kind. managed region regions remain excluded from the map.
+//   - A custom-region region present in the deployed file survives a normal update
 //     byte-identically at its existing position — both at body top level and when nested
 //     inside a section that still exists in the source.
-//   - A genuinely removed [[INJECTION:]] name still produces RegionOrphaned and
-//     GapRemovedInjection, unchanged. A [[CUSTOM:]] region never produces RegionOrphaned
+//   - A genuinely removed project-injection region name still produces RegionOrphaned and
+//     GapRemovedInjection, unchanged. A custom-region region never produces RegionOrphaned
 //     and never routes to GapRemovedInjection.
 //   - The RegionOutcome for a preserved custom region carries Marker = NodeCustom,
 //     not NodeInjection.
@@ -33,7 +33,7 @@ import (
 //
 // customPreservationSource is a generic source with Identity and Constraints sections.
 // It declares one project injection (IdentityExtension) and one tool-managed deployed
-// region (HarnessConstraints). It has no [[CUSTOM:]] regions — custom regions exist only
+// region (HarnessConstraints). It has no custom-region regions — custom regions exist only
 // in deployed files, never in source files.
 // ---------------------------------------------------------------------------
 
@@ -49,30 +49,30 @@ tier_rationale: custom preservation testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # CustomPreservationTest Agent
 
 You are the CustomPreservationTest agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 // customPreservationDeployed is the deployed predecessor of customPreservationSource.
-// It has filled injection content and two [[CUSTOM:]] regions added by the project:
-//   - [[CUSTOM:IdentityCustom]] nested inside [[SECTION:Identity]], immediately after
-//     [[INJECTION:IdentityExtension]] (its PrevSibling)
-//   - [[CUSTOM:ProjectNotes]] at body top level, after the Constraints section
+// It has filled injection content and two custom-region regions added by the project:
+//   - <IdentityCustom type="custom"> nested inside <Identity type="core">, immediately after
+//     <IdentityExtension type="project"> (its PrevSibling)
+//   - <ProjectNotes type="custom"> at body top level, after the Constraints section
 //
 // Both custom regions must survive a normal update byte-identically at their existing positions.
 const customPreservationDeployed = `---
@@ -86,35 +86,35 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # CustomPreservationTest Agent
 
 You are the CustomPreservationTest agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 User identity extension content that must survive byte-identically.
-[[/INJECTION:IdentityExtension]]
+</IdentityExtension>
 
-[[CUSTOM:IdentityCustom]]
+<IdentityCustom type="custom">
 This is a project-specific custom note inside the Identity section.
 It must survive the update and remain nested inside Identity.
-[[/CUSTOM:IdentityCustom]]
-[[/SECTION:Identity]]
+</IdentityCustom>
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Old harness content that will be replaced on every transform.
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</HarnessConstraints>
+</Constraints>
 
-[[CUSTOM:ProjectNotes]]
+<ProjectNotes type="custom">
 These are project-specific notes at the top level.
 They span multiple lines and must survive byte-identically.
-[[/CUSTOM:ProjectNotes]]
+</ProjectNotes>
 `
 
 // customOrphanTestSource is a minimal source with no injection or custom regions that
@@ -133,17 +133,17 @@ tier_rationale: custom orphan testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # CustomOrphanTest Agent
 
 You are the CustomOrphanTest agent.
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // customOrphanTestDeployed is the deployed predecessor of customOrphanTestSource.
 // It contains:
-//   - [[INJECTION:RemovedInjection]] with user content, absent from the source (must orphan)
-//   - [[CUSTOM:ProjectNotes]] with user content (must never orphan, must be preserved)
+//   - <RemovedInjection type="project"> with user content, absent from the source (must orphan)
+//   - <ProjectNotes type="custom"> with user content (must never orphan, must be preserved)
 const customOrphanTestDeployed = `---
 id: 101
 version: 1.0.0
@@ -155,28 +155,28 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # CustomOrphanTest Agent
 
 You are the CustomOrphanTest agent.
 
-[[INJECTION:RemovedInjection]]
+<RemovedInjection type="project">
 This injection content will be orphaned because RemovedInjection is gone from the source.
 User content that must appear in the GapRemovedInjection fragment.
-[[/INJECTION:RemovedInjection]]
-[[/SECTION:Identity]]
+</RemovedInjection>
+</Identity>
 
-[[CUSTOM:ProjectNotes]]
+<ProjectNotes type="custom">
 Project-specific notes that must never be reported as orphaned.
 This content must be preserved in the output, not discarded or gapped.
-[[/CUSTOM:ProjectNotes]]
+</ProjectNotes>
 `
 
 // ---------------------------------------------------------------------------
 // Region map: custom regions are included with byte-identical content and provenance
 // ---------------------------------------------------------------------------
 
-// TestRegionMap_CustomRegion_IncludedWithByteIdenticalContent asserts that a [[CUSTOM:]]
+// TestRegionMap_CustomRegion_IncludedWithByteIdenticalContent asserts that a custom-region
 // region present in the deployed file is included in the deployed region map and its content
 // is carried into the output byte-identically. Since buildDeployedRegionMap is unexported,
 // this is observed through the transform output: the custom region must appear in the output
@@ -231,7 +231,7 @@ func TestRegionMap_CustomRegion_IncludedWithByteIdenticalContent(t *testing.T) {
 	}
 }
 
-// TestRegionMap_DeployedRegions_RemainsExcluded asserts that [[DEPLOYED:]] regions in the
+// TestRegionMap_DeployedRegions_RemainsExcluded asserts that managed region regions in the
 // deployed file are NOT lifted into the output — they are regenerated on every transform.
 // This verifies that the map's exclusion of tool-managed content is unchanged by the Stage 5
 // change that adds custom region inclusion.
@@ -255,7 +255,7 @@ func TestRegionMap_DeployedRegions_RemainsExcluded(t *testing.T) {
 	// Tool-managed regions are regenerated, never lifted from the deployed file.
 	if bytes.Contains(result.Output, []byte("Old harness content that will be replaced on every transform.")) {
 		t.Error("output contains stale deployed-region content from the deployed file; " +
-			"[[DEPLOYED:]] regions must be regenerated, not lifted from the deployed map")
+			"managed region regions must be regenerated, not lifted from the deployed map")
 	}
 }
 
@@ -264,7 +264,7 @@ func TestRegionMap_DeployedRegions_RemainsExcluded(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestNormalUpdate_CustomRegion_TopLevel_SurvivesByteIdenticallyAtTopLevel asserts that a
-// [[CUSTOM:]] region at body top level in the deployed file is present in the output after a
+// custom-region region at body top level in the deployed file is present in the output after a
 // normal update, with byte-identical content, and remains at the top level of the body (not
 // moved inside a section).
 func TestNormalUpdate_CustomRegion_TopLevel_SurvivesByteIdenticallyAtTopLevel(t *testing.T) {
@@ -314,7 +314,7 @@ func TestNormalUpdate_CustomRegion_TopLevel_SurvivesByteIdenticallyAtTopLevel(t 
 }
 
 // TestNormalUpdate_CustomRegion_NestedInSection_SurvivesByteIdenticallyInsideSection asserts
-// that a [[CUSTOM:]] region nested inside a [[SECTION:]] in the deployed file is present in
+// that a custom-region region nested inside a core-section region in the deployed file is present in
 // the output after a normal update, with byte-identical content, and remains nested inside
 // the same section by name (not relocated to the body top level or another section).
 func TestNormalUpdate_CustomRegion_NestedInSection_SurvivesByteIdenticallyInsideSection(t *testing.T) {
@@ -374,7 +374,7 @@ func TestNormalUpdate_CustomRegion_NestedInSection_SurvivesByteIdenticallyInside
 // ---------------------------------------------------------------------------
 
 // TestOrphanBranch_RemovedInjection_StillProducesOrphanedOutcomeAndGap asserts that the
-// Stage 5 provenance changes do not alter the behavior for a genuinely removed [[INJECTION:]]
+// Stage 5 provenance changes do not alter the behavior for a genuinely removed project-injection region
 // region. It must still produce RegionOrphaned and GapRemovedInjection, unchanged.
 func TestOrphanBranch_RemovedInjection_StillProducesOrphanedOutcomeAndGap(t *testing.T) {
 	req := transform.Request{
@@ -424,7 +424,7 @@ func TestOrphanBranch_RemovedInjection_StillProducesOrphanedOutcomeAndGap(t *tes
 	}
 }
 
-// TestOrphanBranch_CustomRegion_NeverProducesOrphanedOutcome asserts that a [[CUSTOM:]]
+// TestOrphanBranch_CustomRegion_NeverProducesOrphanedOutcome asserts that a custom-region
 // region in the deployed file never produces a RegionOrphaned outcome. Custom regions
 // are preserved in the output at their anchored position, not discarded via the orphan path.
 func TestOrphanBranch_CustomRegion_NeverProducesOrphanedOutcome(t *testing.T) {
@@ -455,7 +455,7 @@ func TestOrphanBranch_CustomRegion_NeverProducesOrphanedOutcome(t *testing.T) {
 	for _, g := range result.Report.Gaps {
 		if g.Kind == domain.GapRemovedInjection && g.Subject == "ProjectNotes" {
 			t.Errorf("custom region ProjectNotes must not produce a GapRemovedInjection gap; "+
-				"only genuinely removed [[INJECTION:]] names route to that gap: %+v", g)
+				"only genuinely removed project-injection region names route to that gap: %+v", g)
 		}
 	}
 
@@ -530,7 +530,7 @@ func TestOrphanBranch_MixedDeployed_InjectionOrphansAndCustomPreserved(t *testin
 // ---------------------------------------------------------------------------
 
 // TestOutcomeMarker_CustomRegion_ReportsNodeCustomNotNodeInjection asserts that the
-// RegionOutcome for a preserved [[CUSTOM:]] region carries Marker = NodeCustom. The
+// RegionOutcome for a preserved custom-region region carries Marker = NodeCustom. The
 // orphan branch must not hard-code NodeInjection for all map entries; it must use the
 // entry's recorded marker kind.
 func TestOutcomeMarker_CustomRegion_ReportsNodeCustomNotNodeInjection(t *testing.T) {
@@ -653,7 +653,7 @@ func TestNewDeployment_NilDeployed_NoCustomRegionsInOutput(t *testing.T) {
 }
 
 // TestOutcomeBytes_CustomPreservedRegion_CarriesContentLength asserts that the Bytes field
-// of a RegionOutcome for a preserved [[CUSTOM:]] region equals the byte length of the content
+// of a RegionOutcome for a preserved custom-region region equals the byte length of the content
 // that was placed in the output. Every other outcome-producing path in injection.go sets Bytes,
 // and the custom preservation path must do the same.
 func TestOutcomeBytes_CustomPreservedRegion_CarriesContentLength(t *testing.T) {
@@ -759,22 +759,22 @@ func TestNewDeployment_NilDeployed_ExistingInjectionBehaviorUnchanged(t *testing
 //
 // Two shapes must abort the transform with ErrRegionNameCollision:
 //
-//   Shape A — duplicate [[CUSTOM:]] name: the same name appears twice in the deployed file.
-//   Shape B — custom-vs-injection: a name appears as [[CUSTOM:]] in the deployed file and
-//             [[INJECTION:]] in the source.
+//   Shape A — duplicate custom-region name: the same name appears twice in the deployed file.
+//   Shape B — custom-vs-injection: a name appears as custom-region in the deployed file and
+//             project-injection region in the source.
 //
 // In both cases the transform must:
 //   - Return an error wrapping ErrRegionNameCollision.
 //   - Include the colliding name in the error text so the user can locate it.
 //   - Produce no output (mutate nothing before the error is raised).
 //
-// A non-colliding document where a [[CUSTOM:]] name and an [[INJECTION:]] name are merely
+// A non-colliding document where a custom-region name and an project-injection region name are merely
 // different must succeed without error.
 // ---------------------------------------------------------------------------
 
 // collisionSourceMinimal is a minimal source document used as the paired source for
 // the duplicate-custom collision fixture. It declares no injection named OverlapName,
-// so the only collision comes from the deployed file's duplicate [[CUSTOM:]] declarations.
+// so the only collision comes from the deployed file's duplicate custom-region declarations.
 const collisionSourceMinimal = `---
 id: 200
 version: 2.0.0
@@ -787,15 +787,15 @@ tier_rationale: collision testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # CollisionTest Agent
 
 You are the CollisionTest agent.
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // collisionDuplicateCustomDeployed is a deployed file that contains the same
-// [[CUSTOM:]] name ("OverlapName") twice. docformat.Parse accepts this; the duplicate
+// custom-region name ("OverlapName") twice. docformat.Parse accepts this; the duplicate
 // is a non-fatal validation issue, not a parse error. The transform must detect the
 // duplicate while building the region map and abort with ErrRegionNameCollision.
 const collisionDuplicateCustomDeployed = `---
@@ -809,24 +809,24 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # CollisionTest Agent
 
 You are the CollisionTest agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[CUSTOM:OverlapName]]
+<OverlapName type="custom">
 First occurrence of the colliding custom content.
-[[/CUSTOM:OverlapName]]
+</OverlapName>
 
-[[CUSTOM:OverlapName]]
+<OverlapName type="custom">
 Second occurrence of the colliding custom content.
-[[/CUSTOM:OverlapName]]
+</OverlapName>
 `
 
-// collisionCustomVsInjectionSource declares [[INJECTION:OverlapName]] in the source.
-// Its paired deployed file contains [[CUSTOM:OverlapName]]. This is Shape B: a name
-// claimed by [[CUSTOM:]] in the deployed file and [[INJECTION:]] in the source.
+// collisionCustomVsInjectionSource declares <OverlapName type="project"> in the source.
+// Its paired deployed file contains <OverlapName type="custom">. This is Shape B: a name
+// claimed by custom-region in the deployed file and project-injection region in the source.
 const collisionCustomVsInjectionSource = `---
 id: 201
 version: 2.0.0
@@ -839,19 +839,19 @@ tier_rationale: collision testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # CollisionCVI Agent
 
 You are the CollisionCVI agent.
 
-[[INJECTION:OverlapName]]
-[[/INJECTION:OverlapName]]
-[[/SECTION:Identity]]
+<OverlapName type="project">
+</OverlapName>
+</Identity>
 `
 
 // collisionCustomVsInjectionDeployed is the deployed predecessor of
-// collisionCustomVsInjectionSource. It contains [[CUSTOM:OverlapName]] rather than the
-// [[INJECTION:OverlapName]] that the source declares. This represents a scenario where a
+// collisionCustomVsInjectionSource. It contains <OverlapName type="custom"> rather than the
+// <OverlapName type="project"> that the source declares. This represents a scenario where a
 // project invented a custom region under a name that was later (or concurrently) given an
 // injection slot in the source — a name collision that must abort the transform.
 const collisionCustomVsInjectionDeployed = `---
@@ -865,19 +865,19 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # CollisionCVI Agent
 
 You are the CollisionCVI agent.
 
-[[CUSTOM:OverlapName]]
+<OverlapName type="custom">
 User content stored under a name that now collides with a source injection.
-[[/CUSTOM:OverlapName]]
-[[/SECTION:Identity]]
+</OverlapName>
+</Identity>
 `
 
-// nonCollidingMixSource declares [[INJECTION:InjectionOnly]] — a name not present as a
-// custom region in the paired deployed file. The deployed file's [[CUSTOM:CustomOnly]] has
+// nonCollidingMixSource declares <InjectionOnly type="project"> — a name not present as a
+// custom region in the paired deployed file. The deployed file's <CustomOnly type="custom"> has
 // a name absent from the source injections. This exercises the guard case: a document
 // where a custom name and an injection name merely coexist without sharing a name must
 // succeed without error.
@@ -893,18 +893,18 @@ tier_rationale: collision testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NonCollidingMix Agent
 
 You are the NonCollidingMix agent.
 
-[[INJECTION:InjectionOnly]]
-[[/INJECTION:InjectionOnly]]
-[[/SECTION:Identity]]
+<InjectionOnly type="project">
+</InjectionOnly>
+</Identity>
 `
 
 // nonCollidingMixDeployed is the deployed predecessor of nonCollidingMixSource.
-// Its [[CUSTOM:CustomOnly]] name is different from the source's [[INJECTION:InjectionOnly]]
+// Its <CustomOnly type="custom"> name is different from the source's <InjectionOnly type="project">
 // name: no collision, so the transform must succeed.
 const nonCollidingMixDeployed = `---
 id: 202
@@ -917,24 +917,24 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NonCollidingMix Agent
 
 You are the NonCollidingMix agent.
 
-[[INJECTION:InjectionOnly]]
+<InjectionOnly type="project">
 Lifted injection content that has no naming conflict with the custom region.
-[[/INJECTION:InjectionOnly]]
-[[/SECTION:Identity]]
+</InjectionOnly>
+</Identity>
 
-[[CUSTOM:CustomOnly]]
+<CustomOnly type="custom">
 A custom region whose name does not match any source injection.
 It must survive byte-identically and not trigger a collision error.
-[[/CUSTOM:CustomOnly]]
+</CustomOnly>
 `
 
 // TestCollision_DuplicateCustomNamesInDeployed_ReturnsErrRegionNameCollision asserts that
-// when the deployed file contains the same [[CUSTOM:]] name twice (Shape A), Apply returns
+// when the deployed file contains the same custom-region name twice (Shape A), Apply returns
 // an error wrapping ErrRegionNameCollision. The duplicate is detected while building the
 // region map, before any document mutation.
 func TestCollision_DuplicateCustomNamesInDeployed_ReturnsErrRegionNameCollision(t *testing.T) {
@@ -950,7 +950,7 @@ func TestCollision_DuplicateCustomNamesInDeployed_ReturnsErrRegionNameCollision(
 
 	_, err := transform.Apply(req)
 	if err == nil {
-		t.Fatal("Apply must return an error when the deployed file contains two [[CUSTOM:]] regions with the same name; got nil")
+		t.Fatal("Apply must return an error when the deployed file contains two custom-region regions with the same name; got nil")
 	}
 	if !errors.Is(err, transform.ErrRegionNameCollision) {
 		t.Errorf("expected error wrapping transform.ErrRegionNameCollision for duplicate custom name; got: %v", err)
@@ -958,7 +958,7 @@ func TestCollision_DuplicateCustomNamesInDeployed_ReturnsErrRegionNameCollision(
 }
 
 // TestCollision_CustomInDeployedAndInjectionInSource_ReturnsErrRegionNameCollision asserts
-// that when a name appears as [[CUSTOM:]] in the deployed file and [[INJECTION:]] in the
+// that when a name appears as custom-region in the deployed file and project-injection region in the
 // source (Shape B), Apply returns an error wrapping ErrRegionNameCollision. The collision
 // is detected after source injection names are collected, before any document mutation.
 func TestCollision_CustomInDeployedAndInjectionInSource_ReturnsErrRegionNameCollision(t *testing.T) {
@@ -974,7 +974,7 @@ func TestCollision_CustomInDeployedAndInjectionInSource_ReturnsErrRegionNameColl
 
 	_, err := transform.Apply(req)
 	if err == nil {
-		t.Fatal("Apply must return an error when a name is [[CUSTOM:]] in the deployed file and [[INJECTION:]] in the source; got nil")
+		t.Fatal("Apply must return an error when a name is custom-region in the deployed file and project-injection region in the source; got nil")
 	}
 	if !errors.Is(err, transform.ErrRegionNameCollision) {
 		t.Errorf("expected error wrapping transform.ErrRegionNameCollision for custom-vs-injection name collision; got: %v", err)
@@ -1031,7 +1031,7 @@ func TestCollision_ErrorTextContainsCollidingName(t *testing.T) {
 }
 
 // TestCollision_NonCollidingMixedNames_Unaffected asserts that a document where a
-// [[CUSTOM:]] region and an [[INJECTION:]] region merely coexist with different names is
+// custom-region region and an project-injection region region merely coexist with different names is
 // unaffected by the collision check. The transform must succeed and preserve both regions.
 func TestCollision_NonCollidingMixedNames_Unaffected(t *testing.T) {
 	req := transform.Request{
@@ -1113,23 +1113,23 @@ tier_rationale: position fidelity testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # PositionFidelity Agent
 
 You are the PositionFidelity agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
+</IdentityExtension>
 
 TRAILING-POSITION-MARKER: this paragraph is static source content that follows the injection.
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // positionFidelityDeployed is the deployed predecessor of positionFidelitySource.
-// It places [[CUSTOM:MidNote]] between the injection and the trailing paragraph:
+// It places <MidNote type="custom"> between the injection and the trailing paragraph:
 //
-//	[[INJECTION:IdentityExtension]] ... [[/INJECTION:IdentityExtension]]
-//	[[CUSTOM:MidNote]] ... [[/CUSTOM:MidNote]]
+//	<IdentityExtension type="project"> ... </IdentityExtension>
+//	<MidNote type="custom"> ... </MidNote>
 //	TRAILING-POSITION-MARKER: ...
 //
 // A correct placement re-inserts MidNote after IdentityExtension (its PrevSibling),
@@ -1146,25 +1146,25 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # PositionFidelity Agent
 
 You are the PositionFidelity agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 User identity content that must survive byte-identically.
-[[/INJECTION:IdentityExtension]]
+</IdentityExtension>
 
-[[CUSTOM:MidNote]]
+<MidNote type="custom">
 A mid-section custom note that must remain between the injection and the trailing paragraph.
-[[/CUSTOM:MidNote]]
+</MidNote>
 
 TRAILING-POSITION-MARKER: this paragraph is static source content that follows the injection.
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // TestNormalUpdate_CustomRegion_PositionFidelity_TrailingContentInSameParent asserts
-// that when a [[CUSTOM:]] region is followed by other content in the same parent, the
+// that when a custom-region region is followed by other content in the same parent, the
 // region appears before that trailing content in the output — not appended after it.
 //
 // This is the regression test for the append-only placement bug identified in AC5.2:
@@ -1221,14 +1221,14 @@ func TestNormalUpdate_CustomRegion_PositionFidelity_TrailingContentInSameParent(
 	// Locate MidNote's closing tag and the trailing paragraph sentinel in the output.
 	// The trailing paragraph comes from the source (static content is taken from the source
 	// document, not the deployed file), so the sentinel text matches positionFidelitySource.
-	midNoteClose := []byte("[[/CUSTOM:MidNote]]")
+	midNoteClose := []byte("</MidNote>")
 	trailingMarker := []byte("TRAILING-POSITION-MARKER")
 
 	closeIdx := bytes.Index(outputBytes, midNoteClose)
 	trailingIdx := bytes.Index(outputBytes, trailingMarker)
 
 	if closeIdx < 0 {
-		t.Fatal("[[/CUSTOM:MidNote]] closing tag not found in output")
+		t.Fatal("</MidNote> closing tag not found in output")
 	}
 	if trailingIdx < 0 {
 		t.Fatal("TRAILING-POSITION-MARKER not found in output; static source content must be preserved")

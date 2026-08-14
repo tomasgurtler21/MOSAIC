@@ -2,14 +2,14 @@
 name: test-agent
 ---
 
-[[SECTION:Level1]]
-[[SECTION:Level2]]
-[[SECTION:Level3]]
+<Level1 type="core">
+<Level2 type="core">
+<Level3 type="core">
 Deepest content.
-[[/SECTION:Level3]]
-[[/SECTION:Level2]]
-[[/SECTION:Level1]]
+</Level3>
+</Level2>
+</Level1>
 
-[[SECTION:Sibling]]
+<Sibling type="core">
 Sibling section content.
-[[/SECTION:Sibling]]
+</Sibling>

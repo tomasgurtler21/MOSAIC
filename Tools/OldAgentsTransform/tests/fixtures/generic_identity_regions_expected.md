@@ -9,7 +9,7 @@ recommended_tier: TODO
 tier_rationale: "TODO: state why this tier"
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # RegionTestAgent Agent
 
 You are the **RegionTestAgent** agent in a multi-agent orchestration system.
@@ -23,74 +23,74 @@ You are the **RegionTestAgent** agent in a multi-agent orchestration system.
 ### Process
 1. Read the task description.
 2. Write tests.
-[[DEPLOYED:ClosingProcedure]]
-[[/DEPLOYED:ClosingProcedure]]
-[[DEPLOYED:AuthorityHierarchy]]
-[[/DEPLOYED:AuthorityHierarchy]]
+<ClosingProcedure type="managed">
+</ClosingProcedure>
+<AuthorityHierarchy type="managed">
+</AuthorityHierarchy>
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
+</IdentityExtension>
 
-[[/SECTION:Identity]]
+</Identity>
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 ### Core Capabilities
 - Test region insertion
 
-[[INJECTION:LanguagePatterns]]
-[[/INJECTION:LanguagePatterns]]
-[[INJECTION:CodebaseContext]]
-[[/INJECTION:CodebaseContext]]
-[[INJECTION:OutputArtifactTemplate]]
-[[/INJECTION:OutputArtifactTemplate]]
+<LanguagePatterns type="project">
+</LanguagePatterns>
+<CodebaseContext type="project">
+</CodebaseContext>
+<OutputArtifactTemplate type="project">
+</OutputArtifactTemplate>
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
-[[DEPLOYED:ProtocolConstraints]]
-[[/DEPLOYED:ProtocolConstraints]]
+<ProtocolConstraints type="managed">
+</ProtocolConstraints>
 
 - Stay within scope
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 ---
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
-[[DEPLOYED:ErrorHandlingCommon]]
-[[/DEPLOYED:ErrorHandlingCommon]]
+<ErrorHandlingCommon type="managed">
+</ErrorHandlingCommon>
 
 - **Retry transient errors once** before escalating
 
-[[INJECTION:ErrorHandlingExtension]]
-[[/INJECTION:ErrorHandlingExtension]]
+<ErrorHandlingExtension type="project">
+</ErrorHandlingExtension>
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 ---
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 
 Return JSON status.
 
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 ---
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 
 - **Context Management:** Dedicate your full context window to this task.
-[[DEPLOYED:ExecutionPhilosophyCommon]]
-[[/DEPLOYED:ExecutionPhilosophyCommon]]
-[[INJECTION:ContextLimits]]
-[[/INJECTION:ContextLimits]]
+<ExecutionPhilosophyCommon type="managed">
+</ExecutionPhilosophyCommon>
+<ContextLimits type="project">
+</ContextLimits>
 - **Quality over Completeness:** Stop at a good stopping point.
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>

@@ -120,8 +120,7 @@ func asRefusalError(t *testing.T, err error) *domain.RefusalError {
 // brownfieldBuildVerifiedContent is the routing table region from
 // Workflows/Build/brownfield-tdd-build-verified.md (version 2.1).
 // This workflow has 13 rows: 7 pre-EXECUTION, 6 EXECUTION.
-const brownfieldBuildVerifiedContent = `<!-- workflow-version: 2.1 -->
-## Brownfield TDD Build-Verified Workflow
+const brownfieldBuildVerifiedContent = `## Brownfield TDD Build-Verified Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -153,8 +152,7 @@ const brownfieldBuildVerifiedContent = `<!-- workflow-version: 2.1 -->
 // Workflows/Build/greenfield-tdd.md (version 3.4).
 // This workflow has 13 rows: 8 pre-EXECUTION (2 RESEARCH, 2 ARCHITECTURE, 2 PLANNING, 2 DESIGN),
 // 4 EXECUTION, 1 REVIEW.
-const greenFieldTDDContent = `<!-- workflow-version: 3.4 -->
-## Greenfield TDD Workflow
+const greenFieldTDDContent = `## Greenfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -185,8 +183,7 @@ const greenFieldTDDContent = `<!-- workflow-version: 3.4 -->
 // brownfieldTDDContent is the routing table region from
 // Workflows/Build/brownfield-tdd.md (version 3.6).
 // This workflow has 12 rows: 7 pre-EXECUTION, 4 EXECUTION, 1 REVIEW.
-const brownfieldTDDContent = `<!-- workflow-version: 3.6 -->
-## Brownfield TDD Workflow
+const brownfieldTDDContent = `## Brownfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -216,8 +213,7 @@ const brownfieldTDDContent = `<!-- workflow-version: 3.6 -->
 // quickFixContent is the routing table region from
 // Workflows/Build/quick-fix.md (version 3.0).
 // This workflow has 4 rows: 2 PLANNING, 1 EXECUTION, 1 REVIEW.
-const quickFixContent = `<!-- workflow-version: 3.0 -->
-## Quick Fix Workflow
+const quickFixContent = `## Quick Fix Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -230,8 +226,7 @@ const quickFixContent = `<!-- workflow-version: 3.0 -->
 // implOnlyContent is the routing table region from
 // Workflows/Build/implementation-only.md (version 3.1).
 // This workflow has 3 rows: 2 EXECUTION, 1 REVIEW. No pre-EXECUTION rows.
-const implOnlyContent = `<!-- workflow-version: 3.1 -->
-## Implementation Only Workflow
+const implOnlyContent = `## Implementation Only Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -1398,8 +1393,7 @@ func TestAdmit_GroupByName_MissingGroupReturnsFalse(t *testing.T) {
 
 // threeGroupsContent is a synthetic workflow with three named groups (Alpha, Beta, Gamma)
 // and a single-row approach table. No fixed-vocabulary agent names appear.
-const threeGroupsContent = `<!-- workflow-version: 1.0 -->
-## Three Groups Workflow
+const threeGroupsContent = `## Three Groups Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
@@ -1488,8 +1482,7 @@ func TestAdmit_ThreeGroups_ContiguousRanges(t *testing.T) {
 
 // genericAgentGroupsContent is a synthetic workflow whose agent identifiers appear
 // in no hardcoded list. The group partition comes entirely from the Phase column.
-const genericAgentGroupsContent = `<!-- workflow-version: 1.0 -->
-## Generic Agent Groups
+const genericAgentGroupsContent = `## Generic Agent Groups
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|

@@ -2,7 +2,7 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 **Goal:** Do something useful.
 
 **Scope:**
@@ -15,9 +15,9 @@ name: test-agent
 1. Read the design.
 2. Write tests.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>

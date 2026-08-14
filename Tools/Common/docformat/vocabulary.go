@@ -3,7 +3,7 @@ package docformat
 func init() {
 	// CanonicalSections lists the six canonical MOSAIC section names in their required
 	// document order, mirroring boundary_constants.py. CommunicationProtocol is NOT a
-	// member; it is a tool-managed boundary name declared with [[DEPLOYED:]] and occupies
+	// member; it is a tool-managed boundary name declared as type="managed" and occupies
 	// a top-level slot in CanonicalOrder.
 	CanonicalSections = []string{
 		"Identity",
@@ -16,7 +16,7 @@ func init() {
 
 	// CanonicalOrder lists the seven canonical document slots in required order,
 	// mirroring boundary_constants.py. The entry at index 1 is "CommunicationProtocol",
-	// satisfied by a top-level [[DEPLOYED:CommunicationProtocol]] boundary; every other
+	// satisfied by a top-level <CommunicationProtocol type="managed"> boundary; every other
 	// entry is a section name. ArtifactProvenance is removed.
 	CanonicalOrder = []string{
 		"Identity",
@@ -29,7 +29,7 @@ func init() {
 	}
 
 	// CanonicalDeployed lists the nine tool-managed boundary names, a closed set.
-	// Every name here must be declared with [[DEPLOYED:]] in any document that uses it.
+	// Every name here must be declared with type="managed" in any document that uses it.
 	// ArtifactProvenance, LanguagePatterns, and CustomConstraints are removed;
 	// AuthorityHierarchy, ClosingProcedure, ProtocolConstraints, ErrorHandlingCommon,
 	// and ExecutionPhilosophyCommon are added.
@@ -66,8 +66,8 @@ func init() {
 	// An entry whose value is "" means the injection usually appears at body top level.
 	// ArtifactProvenanceExtension, CustomConstraints, and ProtocolExtension are removed;
 	// LanguagePatterns is added — moved here from CanonicalDeployed.
-	// Projects needing to extend the protocol use [[CUSTOM:ProtocolExtension]] instead:
-	// MOSAIC defines [[INJECTION:]] slots; projects invent [[CUSTOM:]] ones.
+	// Projects needing to extend the protocol use a custom ProtocolExtension region instead:
+	// MOSAIC defines injection (type="project") slots; projects invent custom (type="custom") ones.
 	InjectionParent = map[string]string{
 		"IdentityExtension":      "Identity",
 		"CodebaseContext":        "Capabilities",

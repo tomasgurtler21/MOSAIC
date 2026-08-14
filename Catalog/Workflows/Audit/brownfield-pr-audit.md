@@ -48,8 +48,7 @@ artifacts:
   - AuditTransformReport.md
 ---
 
-[[SECTION:Workflow:brownfield-pr-audit]]
-<!-- workflow-version: 3.1 -->
+<Workflow type="core" name="brownfield-pr-audit" version="3.1">
 ## Brownfield PR Audit Workflow
 
 > **Version:** 3.1
@@ -92,7 +91,7 @@ artifacts:
 - Audit category recommendations in Requirements.md are advisory — the workflow always dispatches the fixed architecture/contracts tracks; planner decides which staged types to create
 - `architecture-audit(staged)` / `contracts-audit(staged)` — same underlying agent as the fixed instances; parenthetical suffix disambiguates rows
 
-[[/SECTION:Workflow:brownfield-pr-audit]]
+</Workflow>
 
 ---
 

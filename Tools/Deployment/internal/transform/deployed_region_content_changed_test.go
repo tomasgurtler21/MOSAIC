@@ -1,7 +1,7 @@
 package transform_test
 
 // deployed_region_content_changed_test.go covers GapDeployedRegionContentChanged emission
-// when a [[DEPLOYED:]] region's canonical content changes relative to the previously
+// when a managed region region's canonical content changes relative to the previously
 // deployed file and the region contains nested user-owned regions (direct children).
 //
 // Key invariants under test:
@@ -58,27 +58,27 @@ tier_rationale: content change detection testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # ContentChanged Agent
 
 You are the ContentChanged agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
-// Fixture 700-A — Positive case: stale canonical content + nested [[CUSTOM:]] region.
+// Fixture 700-A — Positive case: stale canonical content + nested custom-region region.
 //
 // The deployed HarnessConstraints region contains content that differs from what the
-// fixture harness generates on a fresh transform. A [[CUSTOM:ConstraintsNote]] is nested
+// fixture harness generates on a fresh transform. A <ConstraintsNote type="custom"> is nested
 // directly inside it. Both conditions are met → gap must fire.
 // ---------------------------------------------------------------------------
 
@@ -93,30 +93,30 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # ContentChanged Agent
 
 You are the ContentChanged agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Stale harness content that does not match the current fixture harness output.
 This canonical content will be replaced, making the comparison unequal.
 
-[[CUSTOM:ConstraintsNote]]
+<ConstraintsNote type="custom">
 User note nested inside HarnessConstraints — must survive regeneration and trigger the TODO.
-[[/CUSTOM:ConstraintsNote]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</ConstraintsNote>
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
-// Fixture 700-B — Negative case 1: CURRENT canonical content + nested [[CUSTOM:]] region.
+// Fixture 700-B — Negative case 1: CURRENT canonical content + nested custom-region region.
 //
 // The deployed HarnessConstraints region contains the SAME canonical content that the
 // fixture harness will regenerate. CanonicalContent of both sides compares equal →
@@ -136,33 +136,33 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # ContentChanged Agent
 
 You are the ContentChanged agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Fixture harness constraint: always use the approved tool list.
 Do not invoke tools not declared in the agent's tools field.
 
-[[CUSTOM:ConstraintsNote]]
+<ConstraintsNote type="custom">
 User note nested inside HarnessConstraints — unchanged content so no TODO should fire.
-[[/CUSTOM:ConstraintsNote]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</ConstraintsNote>
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
 // Fixture 700-C — Negative case 2: stale canonical content, NO nested user regions.
 //
 // HarnessConstraints has stale content (will change on regeneration) but no nested
-// [[CUSTOM:]] or [[INJECTION:]] regions. The nested-regions condition is not met →
+// custom-region or project-injection region regions. The nested-regions condition is not met →
 // no gap even though canonical content changed.
 // ---------------------------------------------------------------------------
 
@@ -177,29 +177,29 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # ContentChanged Agent
 
 You are the ContentChanged agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Stale harness content with no nested user regions present.
 Content changes but the nested-regions condition is not met, so no gap fires.
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
-// Fixture 703 — Negative case 3: stale canonical content + SIBLING [[CUSTOM:]] region.
+// Fixture 703 — Negative case 3: stale canonical content + SIBLING custom-region region.
 //
-// HarnessConstraints has stale content AND there is a [[CUSTOM:SiblingNote]] region inside
-// [[SECTION:Constraints]] but OUTSIDE [[DEPLOYED:HarnessConstraints]] (a sibling, not a
+// HarnessConstraints has stale content AND there is a <SiblingNote type="custom"> region inside
+// <Constraints type="core"> but OUTSIDE <HarnessConstraints type="managed"> (a sibling, not a
 // nested child). Sibling user regions are explicitly out of scope for gap detection.
 // ---------------------------------------------------------------------------
 
@@ -215,20 +215,20 @@ tier_rationale: sibling custom testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # ContentChangedSibling Agent
 
 You are the ContentChangedSibling agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 const contentChangedWithSiblingDeployed = `---
@@ -242,26 +242,26 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # ContentChangedSibling Agent
 
 You are the ContentChangedSibling agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Stale harness content that will be replaced by the current fixture harness output.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[CUSTOM:SiblingNote]]
+<SiblingNote type="custom">
 A custom region adjacent to HarnessConstraints — a sibling, not a direct nested child.
 Sibling regions are out of scope and must never produce GapDeployedRegionContentChanged.
-[[/CUSTOM:SiblingNote]]
-[[/SECTION:Constraints]]
+</SiblingNote>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -279,7 +279,7 @@ func findContentChangedGap(gaps []domain.Gap, regionName string) *domain.Gap {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: build a minimal parseable document containing one [[DEPLOYED:]] region.
+// Helper: build a minimal parseable document containing one managed region region.
 // regionContent goes between the region opening and closing tags verbatim.
 // Used to construct Node arguments for CanonicalContent unit tests.
 // ---------------------------------------------------------------------------
@@ -287,8 +287,8 @@ func findContentChangedGap(gaps []domain.Gap, regionName string) *domain.Gap {
 func minimalDeployedDoc(regionName, regionContent string) []byte {
 	return []byte("---\nid: 0\nversion: 1.0.0\ntransform_version: 3.0.0\ninjections_version: 1.0.0\n" +
 		"description: canonical content test\nmode: subagent\nmodel: claude/claude-sonnet\ntools: []\n---\n\n" +
-		"[[DEPLOYED:" + regionName + "]]\n" + regionContent +
-		"[[/DEPLOYED:" + regionName + "]]\n")
+		"<" + regionName + " type=\"managed\">\n" + regionContent +
+		"</" + regionName + ">\n")
 }
 
 // ---------------------------------------------------------------------------
@@ -334,10 +334,10 @@ func TestCanonicalContent_NodeWithNoNestedRegions_ReturnsTrimmedContent(t *testi
 }
 
 // TestCanonicalContent_NodeWithCustomChild_ExcisesCustomBytes verifies that a deployed
-// node with a direct [[CUSTOM:]] child has the full marker block of the custom region
+// node with a direct custom-region child has the full marker block of the custom region
 // removed from the returned canonical bytes. The remaining content is trimmed.
 func TestCanonicalContent_NodeWithCustomChild_ExcisesCustomBytes(t *testing.T) {
-	const regionBody = "Canonical line one.\n\n[[CUSTOM:UserNote]]\nUser content here.\n[[/CUSTOM:UserNote]]\n"
+	const regionBody = "Canonical line one.\n\n<UserNote type=\"custom\">\nUser content here.\n</UserNote>\n"
 	doc, err := docformat.Parse(minimalDeployedDoc("TestRegion", regionBody))
 	if err != nil {
 		t.Fatalf("parse document: %v", err)
@@ -355,22 +355,22 @@ func TestCanonicalContent_NodeWithCustomChild_ExcisesCustomBytes(t *testing.T) {
 	if !bytes.Contains(got, []byte("Canonical line one.")) {
 		t.Errorf("CanonicalContent: canonical content absent from result: %q", got)
 	}
-	if bytes.Contains(got, []byte("[[CUSTOM:UserNote]]")) {
+	if bytes.Contains(got, []byte("<UserNote type=\"custom\">")) {
 		t.Errorf("CanonicalContent: custom region open tag must be excised; got: %q", got)
 	}
 	if bytes.Contains(got, []byte("User content here.")) {
 		t.Errorf("CanonicalContent: custom region inner content must be excised; got: %q", got)
 	}
-	if bytes.Contains(got, []byte("[[/CUSTOM:UserNote]]")) {
+	if bytes.Contains(got, []byte("</UserNote>")) {
 		t.Errorf("CanonicalContent: custom region close tag must be excised; got: %q", got)
 	}
 }
 
 // TestCanonicalContent_NodeWithInjectionChild_ExcisesInjectionBytes verifies that a
-// deployed node with a direct [[INJECTION:]] child has the injection's full marker block
+// deployed node with a direct project-injection region child has the injection's full marker block
 // removed. This is the injection-provenance counterpart to the custom test.
 func TestCanonicalContent_NodeWithInjectionChild_ExcisesInjectionBytes(t *testing.T) {
-	const regionBody = "Canonical content.\n\n[[INJECTION:UserInj]]\nInjection content.\n[[/INJECTION:UserInj]]\n"
+	const regionBody = "Canonical content.\n\n<UserInj type=\"project\">\nInjection content.\n</UserInj>\n"
 	doc, err := docformat.Parse(minimalDeployedDoc("TestRegion", regionBody))
 	if err != nil {
 		t.Fatalf("parse document: %v", err)
@@ -388,7 +388,7 @@ func TestCanonicalContent_NodeWithInjectionChild_ExcisesInjectionBytes(t *testin
 	if !bytes.Contains(got, []byte("Canonical content.")) {
 		t.Errorf("CanonicalContent: canonical content absent from result: %q", got)
 	}
-	if bytes.Contains(got, []byte("[[INJECTION:UserInj]]")) {
+	if bytes.Contains(got, []byte("<UserInj type=\"project\">")) {
 		t.Errorf("CanonicalContent: injection open tag must be excised; got: %q", got)
 	}
 	if bytes.Contains(got, []byte("Injection content.")) {
@@ -403,8 +403,8 @@ func TestCanonicalContent_NodeWithInjectionChild_ExcisesInjectionBytes(t *testin
 func TestCanonicalContent_SymmetricOnBothSides(t *testing.T) {
 	const canonicalLines = "Canonical line A.\nCanonical line B.\n"
 
-	// Deployed side: canonical lines + nested [[CUSTOM:]] region.
-	deployedBody := canonicalLines + "\n[[CUSTOM:SideNote]]\nUser side note.\n[[/CUSTOM:SideNote]]\n"
+	// Deployed side: canonical lines + nested custom-region region.
+	deployedBody := canonicalLines + "\n<SideNote type=\"custom\">\nUser side note.\n</SideNote>\n"
 	deployedDoc, err := docformat.Parse(minimalDeployedDoc("TestRegion", deployedBody))
 	if err != nil {
 		t.Fatalf("parse deployed document: %v", err)
@@ -520,13 +520,13 @@ func TestCanonicalContent_InteriorWhitespaceDifference_CountsAsChange(t *testing
 }
 
 // TestCanonicalContent_MultipleUserOwnedChildren_AllExcised verifies that when a deployed
-// node has multiple direct user-owned children (a mix of [[CUSTOM:]] and [[INJECTION:]]),
+// node has multiple direct user-owned children (a mix of custom-region and project-injection region),
 // all of them are excised from the canonical result.
 func TestCanonicalContent_MultipleUserOwnedChildren_AllExcised(t *testing.T) {
 	const regionBody = "Before.\n\n" +
-		"[[CUSTOM:CustomOne]]\nCustom one content.\n[[/CUSTOM:CustomOne]]\n\n" +
+		"<CustomOne type=\"custom\">\nCustom one content.\n</CustomOne>\n\n" +
 		"Middle.\n\n" +
-		"[[INJECTION:InjOne]]\nInjection one content.\n[[/INJECTION:InjOne]]\n\n" +
+		"<InjOne type=\"project\">\nInjection one content.\n</InjOne>\n\n" +
 		"After.\n"
 
 	doc, err := docformat.Parse(minimalDeployedDoc("TestRegion", regionBody))
@@ -946,7 +946,7 @@ func TestDeployedRegionContentChanged_ChangedContent_TransformSucceeds(t *testin
 }
 
 // TestDeployedRegionContentChanged_ChangedContent_NestedContentByteIdentical verifies that
-// the nested [[CUSTOM:]] region's content is byte-identical to the deployed file's content
+// the nested custom-region region's content is byte-identical to the deployed file's content
 // despite the canonical content change. The gap is signalling only; placement and content
 // are unaffected.
 func TestDeployedRegionContentChanged_ChangedContent_NestedContentByteIdentical(t *testing.T) {
@@ -968,7 +968,7 @@ func TestDeployedRegionContentChanged_ChangedContent_NestedContentByteIdentical(
 	}
 	outCustom, ok := outDoc.Body().Custom("ConstraintsNote")
 	if !ok {
-		t.Fatal("[[CUSTOM:ConstraintsNote]] absent from output; nested content must survive the content-change transform")
+		t.Fatal("<ConstraintsNote type=\"custom\"> absent from output; nested content must survive the content-change transform")
 	}
 
 	depDoc, err := docformat.Parse([]byte(contentChangedDeployed))
@@ -987,7 +987,7 @@ func TestDeployedRegionContentChanged_ChangedContent_NestedContentByteIdentical(
 }
 
 // TestDeployedRegionContentChanged_ChangedContent_NestedContentInsideDeployedParent verifies
-// that the nested [[CUSTOM:]] region remains inside the [[DEPLOYED:HarnessConstraints]] parent
+// that the nested custom-region region remains inside the <HarnessConstraints type="managed"> parent
 // in the output, not promoted to body level.
 func TestDeployedRegionContentChanged_ChangedContent_NestedContentInsideDeployedParent(t *testing.T) {
 	req := reorderReq(t,
@@ -1008,12 +1008,12 @@ func TestDeployedRegionContentChanged_ChangedContent_NestedContentInsideDeployed
 	}
 	outCustom, ok := outDoc.Body().Custom("ConstraintsNote")
 	if !ok {
-		t.Fatal("[[CUSTOM:ConstraintsNote]] absent from output")
+		t.Fatal("<ConstraintsNote type=\"custom\"> absent from output")
 	}
 
 	parent := outCustom.Parent()
 	if parent == nil {
-		t.Fatal("ConstraintsNote is at body top level in the output; it must remain nested inside [[DEPLOYED:HarnessConstraints]]")
+		t.Fatal("ConstraintsNote is at body top level in the output; it must remain nested inside <HarnessConstraints type=\"managed\">")
 	}
 	if parent.Kind() != docformat.NodeDeployed {
 		t.Errorf("ConstraintsNote parent kind: want NodeDeployed, got %q", parent.Kind())
@@ -1195,7 +1195,7 @@ func TestDeployedRegionContentChanged_Idempotent_FirstRunEmitsGap_SecondRunDoesN
 }
 
 // TestDeployedRegionContentChanged_Idempotent_NestedContentPreservedAcrossBothRuns verifies
-// that the nested [[CUSTOM:]] region's content survives byte-identically across both runs
+// that the nested custom-region region's content survives byte-identically across both runs
 // of the idempotence test. Content must not be corrupted or lost on either run.
 func TestDeployedRegionContentChanged_Idempotent_NestedContentPreservedAcrossBothRuns(t *testing.T) {
 	req1 := reorderReq(t,

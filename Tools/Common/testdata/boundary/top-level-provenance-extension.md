@@ -2,8 +2,8 @@
 name: test-agent
 ---
 
-[[DEPLOYED:ArtifactProvenance]]
-[[/DEPLOYED:ArtifactProvenance]]
+<ArtifactProvenance type="managed">
+</ArtifactProvenance>
 
-[[INJECTION:ArtifactProvenanceExtension]]
-[[/INJECTION:ArtifactProvenanceExtension]]
+<ArtifactProvenanceExtension type="project">
+</ArtifactProvenanceExtension>

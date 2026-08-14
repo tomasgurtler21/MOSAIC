@@ -3,9 +3,9 @@ package transform_test
 // reorder_parking_test.go covers Stage 7 parking and durable TODO reporting.
 //
 // When a schema reorder is detected the transform must:
-//   - Anchor every [[CUSTOM:]] region whose parent name still exists anywhere in the source
+//   - Anchor every custom-region region whose parent name still exists anywhere in the source
 //     (section or deployed region) — the region moves with its parent and is NOT parked.
-//   - Park every [[CUSTOM:]] region that is top-level (no parent) or whose parent name has
+//   - Park every custom-region region that is top-level (no parent) or whose parent name has
 //     been removed from the source — appended at end of body, content byte-identical.
 //   - Emit exactly one GapParkedCustomRegion gap per transform listing every parked region
 //     name in ascending sorted order, carrying the caller-supplied timestamp.
@@ -54,26 +54,26 @@ tier_rationale: reorder anchoring testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # ReorderAnchor Agent
 
 You are the ReorderAnchor agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
-[[/SECTION:Constraints]]
+</Constraints>
 `
 
 // reorderAnchorDeployed has sections in the order Identity → Constraints → Capabilities.
@@ -94,37 +94,37 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # ReorderAnchor Agent
 
 You are the ReorderAnchor agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Saved identity extension content that must survive.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[CUSTOM:ConstraintsNote]]
+<ConstraintsNote type="custom">
 A note anchored to the Constraints section.
 It must move with Constraints on a reorder and must NOT be parked.
-[[/CUSTOM:ConstraintsNote]]
-[[/SECTION:Constraints]]
+</ConstraintsNote>
+</Constraints>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[CUSTOM:TopLevelNote]]
+<TopLevelNote type="custom">
 A top-level custom note with no parent section.
 On a reorder, this must be parked at end of file.
-[[/CUSTOM:TopLevelNote]]
+</TopLevelNote>
 `
 
 // ---------------------------------------------------------------------------
@@ -149,17 +149,17 @@ tier_rationale: sorted parking testing
 required_skills: []
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Capabilities first in source.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Identity]]
+<Identity type="core">
 # SortedPark Agent
 
 You are the SortedPark agent.
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // sortedParkDeployed has sections Identity → Capabilities, which is the reverse of the
@@ -176,29 +176,29 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # SortedPark Agent
 
 You are the SortedPark agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Capabilities second in deployed.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[CUSTOM:ZetaNote]]
+<ZetaNote type="custom">
 Content of ZetaNote — must be listed after BetaNote in sorted output.
-[[/CUSTOM:ZetaNote]]
+</ZetaNote>
 
-[[CUSTOM:AlphaNote]]
+<AlphaNote type="custom">
 Content of AlphaNote — must be listed first in sorted output.
-[[/CUSTOM:AlphaNote]]
+</AlphaNote>
 
-[[CUSTOM:BetaNote]]
+<BetaNote type="custom">
 Content of BetaNote — must be listed second in sorted output.
-[[/CUSTOM:BetaNote]]
+</BetaNote>
 `
 
 // ---------------------------------------------------------------------------
@@ -224,23 +224,23 @@ tier_rationale: missing parent testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MissingParent Agent
 
 You are the MissingParent agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // missingParentDeployed has OldSection (removed in source) and a different section order.
@@ -259,43 +259,43 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MissingParent Agent
 
 You are the MissingParent agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:OldSection]]
+<OldSection type="core">
 ## Old Section
 
 This section was removed from the source file.
 
-[[CUSTOM:OldNote]]
+<OldNote type="custom">
 Content anchored to OldSection, which no longer exists in the source.
 On a reorder this content must be parked at end of file.
-[[/CUSTOM:OldNote]]
-[[/SECTION:OldSection]]
+</OldNote>
+</OldSection>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
-[[/SECTION:Constraints]]
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
-// Fixture D — Deployed-region parent: custom nested in a [[DEPLOYED:]] region
+// Fixture D — Deployed-region parent: custom nested in a managed region region
 //
 // Source order:   Identity → Constraints (with HarnessConstraints) → Capabilities
 // Deployed order: Identity → Capabilities → Constraints  (reorder)
 //
-// HarnessNote is nested inside [[DEPLOYED:HarnessConstraints]] in the deployed file.
+// HarnessNote is nested inside <HarnessConstraints type="managed"> in the deployed file.
 // HarnessConstraints still exists in the source.
 // The Stage 6 capture-regenerate-reemit sequence handles HarnessNote before the parking
 // decision runs, so HarnessNote ends up in reemittedNames and is excluded from parking.
@@ -313,26 +313,26 @@ tier_rationale: deployed parent anchor testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # DeployedParent Agent
 
 You are the DeployedParent agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // deployedParentDeployed has sections in the order Identity → Capabilities → Constraints,
@@ -351,31 +351,31 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # DeployedParent Agent
 
 You are the DeployedParent agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Old harness content that will be cleared by the fixture module.
-[[CUSTOM:HarnessNote]]
+<HarnessNote type="custom">
 A custom note inside the HarnessConstraints deployed region.
 It is preserved via the Stage 6 capture-reemit sequence, NOT via the parking path.
-[[/CUSTOM:HarnessNote]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</HarnessNote>
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -399,26 +399,26 @@ tier_rationale: no reorder testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NoReorder Agent
 
 You are the NoReorder agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
-[[/SECTION:Constraints]]
+</Constraints>
 `
 
 // noReorderDeployed has the same section order as noReorderSource (Identity → Capabilities →
@@ -435,35 +435,35 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NoReorder Agent
 
 You are the NoReorder agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Saved identity extension content.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[CUSTOM:ConstraintsNote]]
+<ConstraintsNote type="custom">
 A note in the Constraints section — must survive without parking.
-[[/CUSTOM:ConstraintsNote]]
-[[/SECTION:Constraints]]
+</ConstraintsNote>
+</Constraints>
 
-[[CUSTOM:TopLevelNote]]
+<TopLevelNote type="custom">
 A top-level note — no parent, but NO reorder, so must NOT be parked.
-[[/CUSTOM:TopLevelNote]]
+</TopLevelNote>
 `
 
 // ---------------------------------------------------------------------------
@@ -485,32 +485,32 @@ tier_rationale: section addition testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # SectionAdded Agent
 
 You are the SectionAdded agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
 Handle errors gracefully.
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 `
 
 // sectionAddedDeployed has Identity → Capabilities → Constraints (no ErrorHandling yet).
@@ -527,31 +527,31 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # SectionAdded Agent
 
 You are the SectionAdded agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Saved identity extension content.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[CUSTOM:TopLevelNote]]
+<TopLevelNote type="custom">
 A top-level note — no reorder when a section is merely added, so must NOT be parked.
-[[/CUSTOM:TopLevelNote]]
+</TopLevelNote>
 `
 
 // ---------------------------------------------------------------------------
@@ -575,20 +575,20 @@ tier_rationale: section removal testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # SectionRemoved Agent
 
 You are the SectionRemoved agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // sectionRemovedDeployed has Identity → OldSection → Capabilities.
@@ -606,35 +606,35 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # SectionRemoved Agent
 
 You are the SectionRemoved agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Saved identity extension content.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:OldSection]]
+<OldSection type="core">
 ## Old Section
 
 This section is removed from the source.
 
-[[CUSTOM:OldNote]]
+<OldNote type="custom">
 Content anchored to OldSection — parent gone, but NO reorder, so NOT parked.
-[[/CUSTOM:OldNote]]
-[[/SECTION:OldSection]]
+</OldNote>
+</OldSection>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[CUSTOM:TopLevelNote]]
+<TopLevelNote type="custom">
 A top-level note — no reorder, so NOT parked.
-[[/CUSTOM:TopLevelNote]]
+</TopLevelNote>
 `
 
 // ---------------------------------------------------------------------------
@@ -684,12 +684,12 @@ func findOutcomeByName(outcomes []transform.RegionOutcome, name string) *transfo
 // ---------------------------------------------------------------------------
 // T7.1 — Anchoring rule: section parent
 //
-// A [[CUSTOM:]] region nested in a section that still exists in the source must move
+// A custom-region region nested in a section that still exists in the source must move
 // with that section and must NOT be parked, even when a reorder is detected.
 // ---------------------------------------------------------------------------
 
 // TestAnchoring_SectionParentSurvivesReorder_CustomRegionNotParked verifies that when a
-// reorder is detected, a [[CUSTOM:]] region whose parent section still exists in the source
+// reorder is detected, a custom-region region whose parent section still exists in the source
 // is placed with its parent and does NOT produce a GapParkedCustomRegion gap.
 func TestAnchoring_SectionParentSurvivesReorder_CustomRegionNotParked(t *testing.T) {
 	req := reorderReq(t,
@@ -732,7 +732,7 @@ func TestAnchoring_SectionParentSurvivesReorder_CustomRegionNotParked(t *testing
 	}
 }
 
-// TestAnchoring_SectionParentSurvivesReorder_NestingPreserved verifies that a [[CUSTOM:]]
+// TestAnchoring_SectionParentSurvivesReorder_NestingPreserved verifies that a custom-region
 // region nested inside a section that survives the reorder remains inside that section in
 // the output — it must not be relocated to body top level or another section.
 func TestAnchoring_SectionParentSurvivesReorder_NestingPreserved(t *testing.T) {
@@ -773,13 +773,13 @@ func TestAnchoring_SectionParentSurvivesReorder_NestingPreserved(t *testing.T) {
 // ---------------------------------------------------------------------------
 // T7.1 — Anchoring rule: deployed-region parent
 //
-// A [[CUSTOM:]] region nested inside a [[DEPLOYED:]] region in the deployed file must not
+// A custom-region region nested inside a managed region region in the deployed file must not
 // be parked even when a reorder is detected, because the Stage 6 capture-reemit sequence
 // handles it before the parking decision: the region is in reemittedNames and excluded.
 // ---------------------------------------------------------------------------
 
 // TestAnchoring_DeployedParentSurvivesReorder_CustomRegionNotParked verifies that a
-// [[CUSTOM:]] region nested inside a [[DEPLOYED:]] region in the deployed file does not
+// custom-region region nested inside a managed region region in the deployed file does not
 // produce a GapParkedCustomRegion gap even when a reorder is detected. The Stage 6
 // capture-reemit sequence places the region inside its deployed parent before the parking
 // path runs, so it is excluded from parking consideration.
@@ -821,12 +821,12 @@ func TestAnchoring_DeployedParentSurvivesReorder_CustomRegionNotParked(t *testin
 // ---------------------------------------------------------------------------
 // T7.1 — Anchoring rule: missing parent
 //
-// A [[CUSTOM:]] region whose parent section no longer exists in the source is parked
+// A custom-region region whose parent section no longer exists in the source is parked
 // at end of file when a reorder is also detected.
 // ---------------------------------------------------------------------------
 
 // TestAnchoring_MissingParentOnReorder_IsParked verifies that when a reorder is detected
-// and a [[CUSTOM:]] region's parent section no longer exists in the source, the region is
+// and a custom-region region's parent section no longer exists in the source, the region is
 // appended at the end of the file and a GapParkedCustomRegion gap is emitted.
 func TestAnchoring_MissingParentOnReorder_IsParked(t *testing.T) {
 	req := reorderReq(t,
@@ -875,7 +875,7 @@ func TestAnchoring_MissingParentOnReorder_IsParked(t *testing.T) {
 // T7.2 — Top-level custom region is parked on reorder
 // ---------------------------------------------------------------------------
 
-// TestReorder_TopLevelCustomRegion_IsParked verifies that a [[CUSTOM:]] region at body top
+// TestReorder_TopLevelCustomRegion_IsParked verifies that a custom-region region at body top
 // level (ParentName = "") is parked at end of file and a GapParkedCustomRegion gap is
 // emitted when a reorder is detected.
 func TestReorder_TopLevelCustomRegion_IsParked(t *testing.T) {
@@ -956,7 +956,7 @@ func TestReorder_ParkedContent_ByteIdenticalToDeployed(t *testing.T) {
 }
 
 // TestReorder_ParkedRegion_PlacedAfterAllSections verifies that every parked custom region
-// appears after all [[SECTION:]] nodes in the output document. Parking must not interleave
+// appears after all core-section region nodes in the output document. Parking must not interleave
 // a custom region between sections.
 func TestReorder_ParkedRegion_PlacedAfterAllSections(t *testing.T) {
 	req := reorderReq(t,

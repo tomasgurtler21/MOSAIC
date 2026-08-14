@@ -2,8 +2,8 @@
 name: test-agent
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 Some constraints text.
-[[CUSTOM:CustomConstraints]]
-[[/CUSTOM:CustomConstraints]]
-[[/SECTION:Constraints]]
+<CustomConstraints type="custom">
+</CustomConstraints>
+</Constraints>

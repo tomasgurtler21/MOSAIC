@@ -1,14 +1,15 @@
 package docformat_test
 
-// Tests for body lexing and parsing (T4.1).
+// Tests for body lexing and parsing.
 //
 // Coverage:
-//   - Parsing a document body with a single [[SECTION:Name]] block returns a Section node.
+//   - Parsing a document body with a single <Name type="core"> block returns a Section node.
 //   - The section node reports Kind == NodeSection and the correct Name.
 //   - A section not present in the body returns false from Body.Section.
-//   - Parsing a body with [[INJECTION:Name]] nested inside a section returns an Injection node.
+//   - Parsing a body with <Name type="project"> nested inside a section returns an Injection node.
 //   - The injection node reports Kind == NodeInjection and the correct Name.
-//   - Compound section names (e.g. "Workflow:my-workflow") are parsed as a single opaque name.
+//   - Compound section names (e.g. "Workflow:my-workflow" via tag+name attr) are parsed and
+//     reassembled into the Prefix:id form by Name().
 //   - Body.Sections returns all top-level sections in document order.
 //   - Body.Injections returns all injections at any nesting depth in document order.
 //   - Nested injection nodes have the enclosing section as their Parent.
@@ -16,6 +17,7 @@ package docformat_test
 //   - Children of a section include its directly nested injections.
 //   - Node.Content returns the inner bytes of a node, excluding the two boundary tag lines.
 //   - Legacy [INJECTION: name] comment markers are treated as ordinary text, not boundary tags.
+//   - Old-style [[SECTION:Name]] double-bracket markers are treated as inert text, not boundaries.
 //   - An injection appearing absent from the document returns false from Body.Injection.
 
 import (
@@ -58,7 +60,7 @@ func TestBody_Section_SimpleSectionPresent_ReturnsNode(t *testing.T) {
 	node, ok := doc.Body().Section("Identity")
 
 	if !ok {
-		t.Fatal("Section(\"Identity\") returned false for a document that contains [[SECTION:Identity]]")
+		t.Fatal("Section(\"Identity\") returned false for a document that contains <Identity type=\"core\">")
 	}
 	if node == nil {
 		t.Fatal("Section(\"Identity\") returned a nil node with ok == true")
@@ -119,7 +121,7 @@ func TestBody_Injection_NestedInsideSection_ReturnsNode(t *testing.T) {
 	node, ok := doc.Body().Injection("IdentityExtension")
 
 	if !ok {
-		t.Fatal("Injection(\"IdentityExtension\") returned false for a document that contains [[INJECTION:IdentityExtension]]")
+		t.Fatal("Injection(\"IdentityExtension\") returned false for a document that contains <IdentityExtension type=\"project\">")
 	}
 	if node == nil {
 		t.Fatal("Injection(\"IdentityExtension\") returned nil node with ok == true")
@@ -210,11 +212,11 @@ func TestBody_Node_Content_ExcludesBoundaryTagLines(t *testing.T) {
 	content := node.Content()
 
 	// The content must not start with or contain the opening tag line.
-	if bytes.Contains(content, []byte("[[SECTION:Identity]]")) {
+	if bytes.Contains(content, []byte(`<Identity type="core">`)) {
 		t.Error("Node.Content must not contain the opening boundary tag")
 	}
 	// The content must not contain the closing tag line.
-	if bytes.Contains(content, []byte("[[/SECTION:Identity]]")) {
+	if bytes.Contains(content, []byte("</Identity>")) {
 		t.Error("Node.Content must not contain the closing boundary tag")
 	}
 	// The inner prose must be present.
@@ -231,7 +233,7 @@ func TestBody_Section_CompoundName_ParsesCorrectly(t *testing.T) {
 	node, ok := doc.Body().Section("Workflow:my-workflow")
 
 	if !ok {
-		t.Fatal("Section(\"Workflow:my-workflow\") returned false; compound section names must be parsed as a single opaque name")
+		t.Fatal("Section(\"Workflow:my-workflow\") returned false; compound section names using the name attribute must reassemble to Prefix:id via Name()")
 	}
 	if node.Name() != "Workflow:my-workflow" {
 		t.Errorf("Name: want %q, got %q", "Workflow:my-workflow", node.Name())
@@ -308,7 +310,26 @@ func TestBody_LegacyCommentMarkers_NotRecognisedAsBoundaryTags(t *testing.T) {
 	}
 	_, ok = doc.Body().Injection("IdentityExtension")
 	if ok {
-		t.Error("Body.Injection returned a node for IdentityExtension even though the document only has a legacy marker, not a real [[INJECTION:IdentityExtension]] tag")
+		t.Error("Body.Injection returned a node for IdentityExtension even though the document only has a legacy marker, not a real <IdentityExtension type=\"project\"> tag")
+	}
+}
+
+func TestBody_OldStyleDoubleBracketMarkers_NotRecognisedAsBoundaryTags(t *testing.T) {
+	// Old-style [[SECTION:Identity]] double-bracket markers are no longer the recognised
+	// boundary syntax. They must be treated as inert text and must not produce nodes.
+	src := []byte("[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc, err := docformat.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if nodes := doc.Body().Sections(); len(nodes) != 0 {
+		t.Errorf("[[SECTION:Identity]] (old syntax) must not produce a section node; got %d node(s)", len(nodes))
+	}
+	// The old-style markers must round-trip as inert text.
+	got := doc.Bytes()
+	if !bytes.Equal(src, got) {
+		t.Errorf("old-style markers must round-trip as literal text:\n  want: %q\n  got:  %q", src, got)
 	}
 }
 
@@ -323,13 +344,153 @@ func TestBody_Node_Bytes_IncludesBoundaryTagLines(t *testing.T) {
 
 	b := node.Bytes()
 
-	if !bytes.Contains(b, []byte("[[SECTION:Identity]]")) {
+	if !bytes.Contains(b, []byte(`<Identity type="core">`)) {
 		t.Error("Node.Bytes must include the opening boundary tag")
 	}
-	if !bytes.Contains(b, []byte("[[/SECTION:Identity]]")) {
+	if !bytes.Contains(b, []byte("</Identity>")) {
 		t.Error("Node.Bytes must include the closing boundary tag")
 	}
 	if !bytes.Contains(b, []byte("Section content.")) {
 		t.Error("Node.Bytes must include the inner content")
+	}
+}
+
+// --- Inertness: foreign tags are preserved as literal text ---
+
+func TestBoundaryLexer_ForeignTag_NoTypeAttribute_TreatedAsLiteralText(t *testing.T) {
+	// A tag-like line with no type attribute must not be recognised as a boundary tag.
+	// The fixture contains <Foo> with no type — it must be inert.
+	src := boundaryFixtureBytes(t, "foreign-tag-no-type.md")
+	doc, err := docformat.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse foreign-tag-no-type.md: %v", err)
+	}
+
+	// No section or injection nodes — the tag is inert.
+	if nodes := doc.Body().Sections(); len(nodes) != 0 {
+		t.Errorf("<Foo> with no type attribute must produce no section nodes; got %d", len(nodes))
+	}
+	// Round-trip: the file must be reproduced byte-for-byte.
+	got := doc.Bytes()
+	if !bytes.Equal(src, got) {
+		t.Errorf("foreign-tag-no-type.md round-trip failed — inert tag must be preserved byte-for-byte")
+		reportFirstDifference(t, src, got)
+	}
+}
+
+func TestBoundaryLexer_ForeignTag_UnrecognisedTypeValue_TreatedAsLiteralText(t *testing.T) {
+	// A tag with type="widget" (not core/managed/project/custom) must be inert.
+	src := boundaryFixtureBytes(t, "foreign-tag-unknown-type.md")
+	doc, err := docformat.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse foreign-tag-unknown-type.md: %v", err)
+	}
+
+	if nodes := doc.Body().Sections(); len(nodes) != 0 {
+		t.Errorf("<Foo type=\"widget\"> must produce no section nodes; got %d", len(nodes))
+	}
+	got := doc.Bytes()
+	if !bytes.Equal(src, got) {
+		t.Errorf("foreign-tag-unknown-type.md round-trip failed — inert tag must be preserved byte-for-byte")
+		reportFirstDifference(t, src, got)
+	}
+}
+
+func TestBoundaryLexer_ForeignTag_TrailingContentOnLine_TreatedAsLiteralText(t *testing.T) {
+	// A tag with valid type but trailing content on the same line is not alone on its line
+	// and must be inert.
+	src := boundaryFixtureBytes(t, "foreign-tag-trailing-content.md")
+	doc, err := docformat.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse foreign-tag-trailing-content.md: %v", err)
+	}
+
+	if nodes := doc.Body().Sections(); len(nodes) != 0 {
+		t.Errorf(`<Foo type="core"> trailing words must produce no section nodes; got %d`, len(nodes))
+	}
+	got := doc.Bytes()
+	if !bytes.Equal(src, got) {
+		t.Errorf("foreign-tag-trailing-content.md round-trip failed — inert tag must be preserved byte-for-byte")
+		reportFirstDifference(t, src, got)
+	}
+}
+
+func TestBoundaryLexer_ForeignTag_SelfClosing_TreatedAsLiteralText(t *testing.T) {
+	// A self-closing tag (<Foo type="core"/>) is not a valid MOSAIC boundary form and must be inert.
+	src := boundaryFixtureBytes(t, "foreign-tag-self-closing.md")
+	doc, err := docformat.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse foreign-tag-self-closing.md: %v", err)
+	}
+
+	if nodes := doc.Body().Sections(); len(nodes) != 0 {
+		t.Errorf(`<Foo type="core"/> (self-closing) must produce no section nodes; got %d`, len(nodes))
+	}
+	got := doc.Bytes()
+	if !bytes.Equal(src, got) {
+		t.Errorf("foreign-tag-self-closing.md round-trip failed — inert tag must be preserved byte-for-byte")
+		reportFirstDifference(t, src, got)
+	}
+}
+
+func TestBoundaryLexer_ValidTagInsideFencedBlock_RecognisedAsBoundary(t *testing.T) {
+	// The parser is line-oriented and code-fence-unaware. A valid MOSAIC boundary tag
+	// that appears inside a fenced code block is still recognised as a boundary, because
+	// the lexer classifies each line independently with no knowledge of fenced-code context.
+	//
+	// This is the documented design decision: a fenced tag line that satisfies the boundary
+	// rule is still a boundary, as it is under the current (old-syntax) behaviour.
+	src := boundaryFixtureBytes(t, "foreign-tag-inside-fenced-block.md")
+	doc, err := docformat.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse foreign-tag-inside-fenced-block.md: %v", err)
+	}
+
+	// The tag inside the fenced block must be recognised as a section boundary.
+	_, ok := doc.Body().Section("Identity")
+	if !ok {
+		t.Error("Section(\"Identity\") returned false; a valid MOSAIC tag inside a fenced code block must be recognised as a boundary because the parser is code-fence-unaware")
+	}
+
+	// Round-trip must be byte-exact: the fence markers and surrounding text are preserved verbatim.
+	got := doc.Bytes()
+	if !bytes.Equal(src, got) {
+		t.Errorf("foreign-tag-inside-fenced-block.md round-trip failed — surrounding content must be preserved byte-for-byte")
+		reportFirstDifference(t, src, got)
+	}
+}
+
+func TestBoundaryLexer_InlineTag_NoTypeAttribute_TreatedAsLiteralText(t *testing.T) {
+	// Inline: a bare tag-like line with no type attribute is inert text and must round-trip.
+	src := []byte("<SomeTag>\nContent.\n</SomeTag>\n")
+	doc, err := docformat.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if nodes := doc.Body().Sections(); len(nodes) != 0 {
+		t.Errorf("<SomeTag> with no type attribute must produce no boundary node; got %d node(s)", len(nodes))
+	}
+	got := doc.Bytes()
+	if !bytes.Equal(src, got) {
+		t.Errorf("bare tag without type attribute must round-trip:\n  want: %q\n  got:  %q", src, got)
+	}
+}
+
+func TestBoundaryLexer_UnmatchedCloseTag_TreatedAsLiteralText(t *testing.T) {
+	// An unmatched close tag encountered when no matching open is on the stack must be
+	// treated as literal text and must round-trip byte-for-byte.
+	src := []byte("</Orphan>\nSome other content.\n")
+	doc, err := docformat.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if nodes := doc.Body().Sections(); len(nodes) != 0 {
+		t.Errorf("unmatched </Orphan> must not produce a section node; got %d node(s)", len(nodes))
+	}
+	got := doc.Bytes()
+	if !bytes.Equal(src, got) {
+		t.Errorf("unmatched close tag must round-trip as literal text:\n  want: %q\n  got:  %q", src, got)
 	}
 }

@@ -17,11 +17,11 @@ package registry_test
 //   - TargetPath() returns ErrArtifactUnsupported when the descriptor declares no
 //     path support for the requested artifact kind.
 //   - Injection() returns ok == false for names not declared in any content file.
-//   - Injection() returns content declared with [[DEPLOYED:]] in HarnessInjections.md.
-//   - Content declared with [[DEPLOYED:]] in HarnessInjectionsOrchestrator.md is served
+//   - Injection() returns content declared with <Name type="managed"> in HarnessInjections.md.
+//   - Content declared with <Name type="managed"> in HarnessInjectionsOrchestrator.md is served
 //     to the "orchestrator" agent key and is not served to other agent keys.
 //   - A harness with no content file resolves without error and reports no content.
-//   - A [[INJECTION:]] region in a harness content file is not served as harness content.
+//   - A <Name type="project"> region in a harness content file is not served as harness content.
 //   - HookPlan() returns Supported == false with a reason when the descriptor has
 //     hooks.supported: false.
 //
@@ -511,9 +511,9 @@ harness: %s
 
 # Harness Injections — Test
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 %s
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `, id, wantContent)
 	root := makeDescriptorRootWithInjections(t, id, yamlContent, injectionsMd)
 	m := resolveDescriptorOnly(t, root, id)
@@ -660,12 +660,8 @@ hooks:
 // ---------------------------------------------------------------------------
 
 // TestDescriptorOnly_OrchestratorContent_OverlaidForOrchestratorAgent verifies that content
-// from HarnessInjectionsOrchestrator.md declared with [[DEPLOYED:]] regions is served when
+// from HarnessInjectionsOrchestrator.md declared with managed regions is served when
 // the "orchestrator" agent key is used. This is the AC17.3 positive case.
-//
-// TDD RED: fails until loadOrchInjections is updated to call ParseDeployedRegions instead of
-// ParseInjections, because the current code searches for [[INJECTION:]] markers and finds none
-// in a file that uses [[DEPLOYED:]] markers.
 func TestDescriptorOnly_OrchestratorContent_OverlaidForOrchestratorAgent(t *testing.T) {
 	id := "descriptor-orchoverlay-test"
 	wantContent := "orchestrator-tier-constraint"
@@ -677,9 +673,9 @@ version: "1.0.0"
 
 # Orchestrator Injections
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 %s
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `, wantContent)
 	root := makeDescriptorRootWithOrchestratorContent(t, id, yamlContent, injectionsMd, orchMd)
 	m := resolveDescriptorOnly(t, root, id)
@@ -687,7 +683,7 @@ version: "1.0.0"
 	got, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "orchestrator"})
 	if !ok {
 		t.Errorf("Injection(HarnessConstraints, orchestrator) returned ok=false; " +
-			"[[DEPLOYED:]] content from HarnessInjectionsOrchestrator.md must be served to the orchestrator agent")
+			"managed content from HarnessInjectionsOrchestrator.md must be served to the orchestrator agent")
 	}
 	if ok && got != wantContent {
 		t.Errorf("Injection(HarnessConstraints, orchestrator) = %q, want %q", got, wantContent)
@@ -695,11 +691,8 @@ version: "1.0.0"
 }
 
 // TestDescriptorOnly_SharedContent_ServedToAllAgents verifies that content from
-// HarnessInjections.md declared with [[DEPLOYED:]] regions is returned for every agent key,
+// HarnessInjections.md declared with managed regions is returned for every agent key,
 // including non-orchestrator agents.
-//
-// TDD RED: fails until loadInjections is updated to call ParseDeployedRegions instead of
-// ParseInjections.
 func TestDescriptorOnly_SharedContent_ServedToAllAgents(t *testing.T) {
 	id := "descriptor-sharedtoall-test"
 	wantContent := "shared-language-patterns-for-all"
@@ -710,9 +703,9 @@ version: "1.0.0"
 
 # Shared Injections
 
-[[DEPLOYED:LanguagePatterns]]
+<LanguagePatterns type="managed">
 %s
-[[/DEPLOYED:LanguagePatterns]]
+</LanguagePatterns>
 `, wantContent)
 	root := makeDescriptorRootWithInjections(t, id, yamlContent, injectionsMd)
 	m := resolveDescriptorOnly(t, root, id)
@@ -721,7 +714,7 @@ version: "1.0.0"
 		got, ok := m.Injection(domain.InjectionRequest{Name: "LanguagePatterns", AgentKey: agentKey})
 		if !ok {
 			t.Errorf("Injection(LanguagePatterns, %q) returned ok=false; "+
-				"shared [[DEPLOYED:]] content must be served to all agent keys", agentKey)
+				"shared managed content must be served to all agent keys", agentKey)
 			continue
 		}
 		if got != wantContent {
@@ -746,9 +739,9 @@ func TestDescriptorOnly_OrchestratorContent_NotServedToNonOrchestratorAgent(t *t
 version: "1.0.0"
 ---
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 %s
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `, orchContent)
 	root := makeDescriptorRootWithOrchestratorContent(t, id, yamlContent, injectionsMd, orchMd)
 	m := resolveDescriptorOnly(t, root, id)
@@ -856,37 +849,32 @@ func TestExternal_AbsentContentFileYieldsUsableModule(t *testing.T) {
 // Marker kind distinguishability (T17.2)
 // ---------------------------------------------------------------------------
 
-// TestDescriptorOnly_InjectionMarkerNotServedAsHarnessContent verifies that a [[INJECTION:]]
-// region placed in a harness content file is NOT returned by Injection(). Only [[DEPLOYED:]]
-// regions are harness content; user-owned regions must not be mistaken for tool-managed ones
-// (AC17.4).
-//
-// TDD RED: fails until loadInjections is updated to call ParseDeployedRegions instead of
-// ParseInjections. The current code uses ParseInjections which reads [[INJECTION:]] regions,
-// so placing a [[INJECTION:X]] region in a harness content file erroneously serves its content.
-// After the fix, ParseDeployedRegions ignores [[INJECTION:]] regions entirely.
+// TestDescriptorOnly_InjectionMarkerNotServedAsHarnessContent verifies that a project-injection
+// region placed in a harness content file is NOT returned by Injection(). Only managed regions
+// (type="managed") are harness content; user-owned regions must not be mistaken for tool-managed
+// ones (AC17.4). The fixture uses <HarnessConstraints type="project"> to represent the wrong kind.
 func TestDescriptorOnly_InjectionMarkerNotServedAsHarnessContent(t *testing.T) {
 	id := "descriptor-injectionmarker-test"
 	yamlContent := fmt.Sprintf("schema_version: \"1\"\nid: %q\ndisplay_name: \"Injection Marker Test\"\n", id)
-	// The region is declared with [[INJECTION:]] instead of [[DEPLOYED:]].
-	// This must not be served as harness content after the fix.
+	// The region is declared with type="project" instead of type="managed".
+	// This must not be served as harness content.
 	injectionsMd := `---
 version: "1.0.0"
 ---
 
 # Harness Content (mis-marked)
 
-[[INJECTION:HarnessConstraints]]
+<HarnessConstraints type="project">
 content-under-injection-marker
-[[/INJECTION:HarnessConstraints]]
+</HarnessConstraints>
 `
 	root := makeDescriptorRootWithInjections(t, id, yamlContent, injectionsMd)
 	m := resolveDescriptorOnly(t, root, id)
 
 	_, ok := m.Injection(domain.InjectionRequest{Name: "HarnessConstraints", AgentKey: "worker"})
 	if ok {
-		t.Errorf("Injection(HarnessConstraints) returned ok=true when the region uses [[INJECTION:]] marker; " +
-			"only [[DEPLOYED:]] regions must be served as harness content")
+		t.Errorf("Injection(HarnessConstraints) returned ok=true when the region uses type=\"project\"; " +
+			"only managed regions (type=\"managed\") must be served as harness content")
 	}
 }
 

@@ -5,12 +5,12 @@ name: test-agent
 description: Invalid file - same boundary name appears more than once (E006)
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 First occurrence of Identity section.
-[[/SECTION:Identity]]
+</Identity>
 ---
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 Second occurrence of Identity - duplicate boundary name.
-[[/SECTION:Identity]]
+</Identity>

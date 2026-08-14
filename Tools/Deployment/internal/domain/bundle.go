@@ -8,7 +8,7 @@ type BundleBlock struct {
 	// Name is the compound section name, e.g. "AuthorityHierarchy:Subagent". It is the key
 	// used to find the payload in the bundle body and is never a deployed region name.
 	Name string
-	// Target is the [[DEPLOYED:]] region name this block fills, e.g. "AuthorityHierarchy".
+	// Target is the managed region name this block fills, e.g. "AuthorityHierarchy".
 	Target string
 	// AppliesTo is the role vocabulary value: "subagent" or "orchestrator".
 	AppliesTo string

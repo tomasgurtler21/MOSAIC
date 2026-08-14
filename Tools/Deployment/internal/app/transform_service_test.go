@@ -151,9 +151,9 @@ func matchingAgentBytes() []byte {
 		"injections_version: \"3.0.0\"\n" +
 		"src_model: claude-3-sonnet\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the Source Harness Agent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // mismatchAgentBytes returns content that is a valid deployed agent (has transform_version
@@ -166,9 +166,9 @@ func mismatchAgentBytes() []byte {
 		"injections_version: \"3.0.0\"\n" +
 		"tgt_model: gpt-4\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the Target Harness Agent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // nonAgentBytes returns content that is not a deployed MOSAIC agent: it lacks both
@@ -876,9 +876,9 @@ func indeterminateAgentBytes() []byte {
 		"injections_version: \"3.0.0\"\n" +
 		// No src_model or tgt_model field — no harness-distinguishing signal in frontmatter.
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are an agent with no harness-distinguishing frontmatter field.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // ---------------------------------------------------------------------------

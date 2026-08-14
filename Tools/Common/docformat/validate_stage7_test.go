@@ -50,10 +50,10 @@ package docformat_test
 //
 // Coverage (T7.2 — Structure rules 8a, 8b, 8c):
 //
-//   Rule 8a: [[DEPLOYED:CommunicationProtocol]] must be present — Error.
-//     - A document containing [[DEPLOYED:CommunicationProtocol]] at body top level produces
+//   Rule 8a: <Name type="managed"> CommunicationProtocol must be present — Error.
+//     - A document containing <CommunicationProtocol type="managed"> at body top level produces
 //       no "missing-contract-region" issue.
-//     - A document without [[DEPLOYED:CommunicationProtocol]] produces a "missing-contract-region"
+//     - A document without <CommunicationProtocol type="managed"> produces a "missing-contract-region"
 //       issue at SeverityError.
 //
 //   Rule 8b: The five conduct regions must be present for role: subagent — Warning.
@@ -74,12 +74,12 @@ package docformat_test
 //
 // Coverage (T7.3 — Structure rule 12):
 //
-//   Rule 12: In a source file, every [[DEPLOYED:]] region is empty — Error.
-//     - A source document with empty [[DEPLOYED:]] regions produces no "populated-source-region"
+//   Rule 12: In a source file, every deployed region (<Name type="managed">) is empty — Error.
+//     - A source document with empty deployed regions produces no "populated-source-region"
 //       issue.
-//     - A source document with content inside a [[DEPLOYED:]] region produces a
+//     - A source document with content inside a deployed region produces a
 //       "populated-source-region" issue at SeverityError.
-//     - A deployed document (Kind = DocumentDeployed) with content inside [[DEPLOYED:]] produces
+//     - A deployed document (Kind = DocumentDeployed) with content inside <Name type="managed"> produces
 //       no "populated-source-region" issue (rule applies only to source files).
 //     - When Kind is DocumentUnknown (zero value), rule 12 is skipped.
 //
@@ -151,7 +151,7 @@ role: subagent
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 **Goal:** Do something useful.
 
 **Scope:**
@@ -163,10 +163,10 @@ required_skills: []
 ### Process
 1. Read the design.
 2. Write tests.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // conformingOrchestratorDoc is a minimal source document for an orchestrator. It has no
@@ -178,12 +178,12 @@ description: The orchestrator agent.
 role: orchestrator
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Content.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // subagentWithAllConductRegions has all five conduct regions required for subagents.
@@ -196,30 +196,30 @@ role: subagent
 required_skills: []
 ---
 
-[[SECTION:Identity]]
-[[DEPLOYED:AuthorityHierarchy]]
-[[/DEPLOYED:AuthorityHierarchy]]
-[[DEPLOYED:ClosingProcedure]]
-[[/DEPLOYED:ClosingProcedure]]
-[[/SECTION:Identity]]
+<Identity type="core">
+<AuthorityHierarchy type="managed">
+</AuthorityHierarchy>
+<ClosingProcedure type="managed">
+</ClosingProcedure>
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:Constraints]]
-[[DEPLOYED:ProtocolConstraints]]
-[[/DEPLOYED:ProtocolConstraints]]
-[[/SECTION:Constraints]]
+<Constraints type="core">
+<ProtocolConstraints type="managed">
+</ProtocolConstraints>
+</Constraints>
 
-[[SECTION:ErrorHandling]]
-[[DEPLOYED:ErrorHandlingCommon]]
-[[/DEPLOYED:ErrorHandlingCommon]]
-[[/SECTION:ErrorHandling]]
+<ErrorHandling type="core">
+<ErrorHandlingCommon type="managed">
+</ErrorHandlingCommon>
+</ErrorHandling>
 
-[[SECTION:ExecutionPhilosophy]]
-[[DEPLOYED:ExecutionPhilosophyCommon]]
-[[/DEPLOYED:ExecutionPhilosophyCommon]]
-[[/SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
+<ExecutionPhilosophyCommon type="managed">
+</ExecutionPhilosophyCommon>
+</ExecutionPhilosophy>
 `
 
 // subagentMissingOneConductRegion is missing ExecutionPhilosophyCommon.
@@ -232,29 +232,29 @@ role: subagent
 required_skills: []
 ---
 
-[[SECTION:Identity]]
-[[DEPLOYED:AuthorityHierarchy]]
-[[/DEPLOYED:AuthorityHierarchy]]
-[[DEPLOYED:ClosingProcedure]]
-[[/DEPLOYED:ClosingProcedure]]
-[[/SECTION:Identity]]
+<Identity type="core">
+<AuthorityHierarchy type="managed">
+</AuthorityHierarchy>
+<ClosingProcedure type="managed">
+</ClosingProcedure>
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:Constraints]]
-[[DEPLOYED:ProtocolConstraints]]
-[[/DEPLOYED:ProtocolConstraints]]
-[[/SECTION:Constraints]]
+<Constraints type="core">
+<ProtocolConstraints type="managed">
+</ProtocolConstraints>
+</Constraints>
 
-[[SECTION:ErrorHandling]]
-[[DEPLOYED:ErrorHandlingCommon]]
-[[/DEPLOYED:ErrorHandlingCommon]]
-[[/SECTION:ErrorHandling]]
+<ErrorHandling type="core">
+<ErrorHandlingCommon type="managed">
+</ErrorHandlingCommon>
+</ErrorHandling>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 Content without the ExecutionPhilosophyCommon region.
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>
 `
 
 // orchestratorConformingDoc is an orchestrator without any subagent-only bundle regions.
@@ -265,12 +265,12 @@ description: The orchestrator agent.
 role: orchestrator
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Content.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // orchestratorWithBundleRegion is an orchestrator that carries AuthorityHierarchy — a
@@ -282,16 +282,16 @@ description: The orchestrator agent.
 role: orchestrator
 ---
 
-[[SECTION:Identity]]
-[[DEPLOYED:AuthorityHierarchy]]
-[[/DEPLOYED:AuthorityHierarchy]]
-[[/SECTION:Identity]]
+<Identity type="core">
+<AuthorityHierarchy type="managed">
+</AuthorityHierarchy>
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
-// sourceDocWithEmptyDeployedRegions has a [[DEPLOYED:CommunicationProtocol]] with no inner
+// sourceDocWithEmptyDeployedRegions has a <CommunicationProtocol type="managed"> with no inner
 // content. This is the correct source-file form.
 const sourceDocWithEmptyDeployedRegions = `---
 id: "1"
@@ -302,11 +302,11 @@ role: subagent
 required_skills: []
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
-// sourceDocWithPopulatedDeployedRegion has content inside [[DEPLOYED:CommunicationProtocol]].
+// sourceDocWithPopulatedDeployedRegion has content inside <CommunicationProtocol type="managed">.
 // This violates rule 12 for source files.
 const sourceDocWithPopulatedDeployedRegion = `---
 id: "1"
@@ -317,9 +317,9 @@ role: subagent
 required_skills: []
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 This content must not appear in a source file's deployed region.
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>
 `
 
 // identityWithFullShape has all required elements of the Identity section (rule 15).
@@ -332,7 +332,7 @@ role: subagent
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 **Goal:** Do something useful for the user.
 
 **Scope:**
@@ -345,10 +345,10 @@ required_skills: []
 1. Read the design.
 2. Write tests.
 3. Return result.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // identityMissingGoal is missing the **Goal:** element from the Identity section.
@@ -361,7 +361,7 @@ role: subagent
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 **Scope:**
 - You DO: Write tests.
 - You DO NOT: Write implementation code.
@@ -370,10 +370,10 @@ required_skills: []
 
 ### Process
 1. Do something.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // identityMissingProcess is missing the ### Process subsection.
@@ -386,7 +386,7 @@ role: subagent
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 **Goal:** Do something.
 
 **Scope:**
@@ -394,10 +394,10 @@ required_skills: []
 - You DO NOT: Write implementation code.
 
 **Litmus Test:** If it involves tests, you handle it.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // noIdentitySection is a document without an Identity section.
@@ -410,12 +410,12 @@ role: subagent
 required_skills: []
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 Content.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // statusCodeInConstraints has a JSON status_code object inside the Constraints section
@@ -429,16 +429,16 @@ role: subagent
 required_skills: []
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 Some constraint prose.
 
 {"status_code": "SUCCESS", "agent_instance_id": "test-writer#1", "run_id": "abc123"}
 
 More content.
-[[/SECTION:Constraints]]
+</Constraints>
 `
 
 // statusCodeOnlyInOutputFormat has a status_code JSON only inside OutputFormat, which is
@@ -452,19 +452,19 @@ role: subagent
 required_skills: []
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 | Status | error_code | Example status_message |
 |--------|------------|------------------------|
 | SUCCESS | — | "Done." |
 | BLOCKED | E101 | "Input not found." |
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 `
 
 // outputFormatWithJsonFence has a JSON code fence inside OutputFormat. This violates rule 17.
-const outputFormatWithJsonFence = "---\nid: \"1\"\nversion: 1.0.0\nname: test-agent\ndescription: A test agent.\nrole: subagent\nrequired_skills: []\n---\n\n[[DEPLOYED:CommunicationProtocol]]\n[[/DEPLOYED:CommunicationProtocol]]\n\n[[SECTION:OutputFormat]]\nReturn your response as:\n\n```json\n{\"status_code\": \"SUCCESS\"}\n```\n[[/SECTION:OutputFormat]]\n"
+const outputFormatWithJsonFence = "---\nid: \"1\"\nversion: 1.0.0\nname: test-agent\ndescription: A test agent.\nrole: subagent\nrequired_skills: []\n---\n\n<CommunicationProtocol type=\"managed\">\n</CommunicationProtocol>\n\n<OutputFormat type=\"core\">\nReturn your response as:\n\n```json\n{\"status_code\": \"SUCCESS\"}\n```\n</OutputFormat>\n"
 
 // outputFormatWithTable has only a markdown table in OutputFormat — no JSON fence.
 // No rule 17 violation.
@@ -477,17 +477,17 @@ role: subagent
 required_skills: []
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 Your entire response is the JSON object the Communication Protocol defines. This section
 specifies only what your status_message should say.
 
 | Status | error_code | Example status_message |
 |--------|------------|------------------------|
 | SUCCESS | — | "All tests written." |
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 `
 
 // processWithHITLStep has a Process step mentioning "human-in-the-loop". Rule 18 violation.
@@ -500,7 +500,7 @@ role: subagent
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 **Goal:** Do something.
 
 **Scope:**
@@ -513,10 +513,10 @@ required_skills: []
 1. Read the design.
 2. If human_in_the_loop is true, present output to the user for review.
 3. Return the response.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // processWithoutHITLStep has no HITL mention in Process steps. No rule 18 violation.
@@ -529,7 +529,7 @@ role: subagent
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 **Goal:** Do something.
 
 **Scope:**
@@ -542,10 +542,10 @@ required_skills: []
 1. Read the design.
 2. Write tests.
 3. Return the response.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // skillsMatchedInProcessAndRequired has lean-tdd both in required_skills and in a Process
@@ -560,7 +560,7 @@ required_skills:
   - lean-tdd
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 **Goal:** Do something.
 
 **Scope:**
@@ -572,10 +572,10 @@ required_skills:
 ### Process
 1. Load the ` + "`lean-tdd`" + ` skill for test quality principles.
 2. Write tests.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // skillInProcessNotInRequired references lean-tdd in a Process step but does not list it
@@ -589,7 +589,7 @@ role: subagent
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 **Goal:** Do something.
 
 **Scope:**
@@ -601,10 +601,10 @@ required_skills: []
 ### Process
 1. Load the ` + "`lean-tdd`" + ` skill for test quality principles.
 2. Write tests.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // skillInRequiredNotInProcess lists lean-tdd in required_skills but does not mention it in
@@ -619,7 +619,7 @@ required_skills:
   - lean-tdd
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 **Goal:** Do something.
 
 **Scope:**
@@ -631,10 +631,10 @@ required_skills:
 ### Process
 1. Read the design.
 2. Write tests.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // ---------------------------------------------------------------------------
@@ -982,7 +982,7 @@ func TestValidate_Rule4_SemverWithPreRelease_NoInvalidVersionIssue(t *testing.T)
 // ---------------------------------------------------------------------------
 
 func TestValidate_Rule8a_CommunicationProtocolPresent_NoMissingContractRegionIssue(t *testing.T) {
-	// A document with [[DEPLOYED:CommunicationProtocol]] at body top level must produce no
+	// A document with <CommunicationProtocol type="managed"> at body top level must produce no
 	// "missing-contract-region" issue. Rule 8a requires the contract region to be present.
 	doc := parseInlineDoc(t, conformingSubagentDoc)
 
@@ -996,7 +996,7 @@ func TestValidate_Rule8a_CommunicationProtocolPresent_NoMissingContractRegionIss
 }
 
 func TestValidate_Rule8a_OrchestratorWithCommunicationProtocol_NoMissingContractRegionIssue(t *testing.T) {
-	// An orchestrator document with [[DEPLOYED:CommunicationProtocol]] must produce no
+	// An orchestrator document with <CommunicationProtocol type="managed"> must produce no
 	// "missing-contract-region" issue. Rule 8a requires the contract region for all roles;
 	// this is the conforming case paired with the orchestrator-violating case below.
 	doc := parseInlineDoc(t, conformingOrchestratorDoc)
@@ -1011,10 +1011,10 @@ func TestValidate_Rule8a_OrchestratorWithCommunicationProtocol_NoMissingContract
 }
 
 func TestValidate_Rule8a_CommunicationProtocolAbsent_ReportsMissingContractRegion(t *testing.T) {
-	// A document without [[DEPLOYED:CommunicationProtocol]] must produce a
+	// A document without <CommunicationProtocol type="managed"> must produce a
 	// "missing-contract-region" issue at SeverityError. Without the Communication Protocol
 	// the deployed agent has no operational contract.
-	src := "---\nid: \"1\"\nversion: 1.0.0\nname: test-agent\ndescription: A test.\nrole: subagent\nrequired_skills: []\n---\n\n[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n"
+	src := "---\nid: \"1\"\nversion: 1.0.0\nname: test-agent\ndescription: A test.\nrole: subagent\nrequired_skills: []\n---\n\n<Identity type=\"core\">\nContent.\n</Identity>\n"
 	doc := parseInlineDoc(t, src)
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
@@ -1032,7 +1032,7 @@ func TestValidate_Rule8a_CommunicationProtocolAbsent_ReportsMissingContractRegio
 func TestValidate_Rule8a_OrchestratorWithoutProtocol_ReportsMissingContractRegion(t *testing.T) {
 	// Rule 8a applies to all roles. An orchestrator document without CommunicationProtocol
 	// also produces a "missing-contract-region" issue at SeverityError.
-	src := "---\nversion: 1.0.0\nname: orchestrator\ndescription: The orchestrator.\nrole: orchestrator\n---\n\n[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n"
+	src := "---\nversion: 1.0.0\nname: orchestrator\ndescription: The orchestrator.\nrole: orchestrator\n---\n\n<Identity type=\"core\">\nContent.\n</Identity>\n"
 	doc := parseInlineDoc(t, src)
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{
@@ -1165,7 +1165,7 @@ func TestValidate_Rule8c_SubagentWithBundleRegions_NoRoleForbiddenRegionIssue(t 
 // ---------------------------------------------------------------------------
 
 func TestValidate_Rule12_SourceDocWithEmptyDeployedRegion_NoPopulatedSourceRegionIssue(t *testing.T) {
-	// A source document with empty [[DEPLOYED:]] regions (the correct form) must produce no
+	// A source document with empty <Name type="managed"> regions (the correct form) must produce no
 	// "populated-source-region" issue.
 	doc := parseInlineDoc(t, sourceDocWithEmptyDeployedRegions)
 
@@ -1179,7 +1179,7 @@ func TestValidate_Rule12_SourceDocWithEmptyDeployedRegion_NoPopulatedSourceRegio
 }
 
 func TestValidate_Rule12_SourceDocWithPopulatedDeployedRegion_ReportsPopulatedSourceRegion(t *testing.T) {
-	// A source document with content inside a [[DEPLOYED:]] region must produce a
+	// A source document with content inside a <Name type="managed"> region must produce a
 	// "populated-source-region" issue at SeverityError. In a source file, deployed regions
 	// are empty placeholders; content there is either a hand-edit or a deployed file
 	// committed as source.
@@ -1199,7 +1199,7 @@ func TestValidate_Rule12_SourceDocWithPopulatedDeployedRegion_ReportsPopulatedSo
 
 func TestValidate_Rule12_DeployedDocWithPopulatedRegion_NoPopulatedSourceRegionIssue(t *testing.T) {
 	// A deployed document (Kind = DocumentDeployed) is permitted to carry content inside
-	// [[DEPLOYED:]] regions. Rule 12 applies only to source files and must not fire for
+	// <Name type="managed"> regions. Rule 12 applies only to source files and must not fire for
 	// DocumentDeployed.
 	doc := parseInlineDoc(t, sourceDocWithPopulatedDeployedRegion)
 
@@ -1466,7 +1466,7 @@ func TestValidate_StrictMode_EscalatesStage7WarningToError(t *testing.T) {
 
 func TestValidate_StrictMode_DoesNotEscalateStage7AdviceToError(t *testing.T) {
 	// Strict mode must not promote SeverityAdvice findings — even from Stage 7 rules.
-	// A misplaced [[INJECTION:]] region produces "wrong-parent" at SeverityAdvice; that
+	// A misplaced <Name type="project"> injection region produces "wrong-parent" at SeverityAdvice; that
 	// must remain SeverityAdvice under Strict=true.
 	// (Fixture reuses malformed/wrong-parent.md from the Stage 3 boundary test suite.)
 	doc := parsedBoundaryFixture(t, "malformed/wrong-parent.md")

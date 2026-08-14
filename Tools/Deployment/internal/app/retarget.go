@@ -271,7 +271,7 @@ type RetargetReport struct {
 	CarriedVerbatimTools []string
 	// StrippedFields lists fields removed from the output and why.
 	StrippedFields []StrippedField
-	// InjectionsPreserved names every [[INJECTION:...]] region carried through, in
+	// InjectionsPreserved names every injection region carried through, in
 	// document order. Present so a test can assert preservation without diffing bytes.
 	InjectionsPreserved []string
 }
@@ -285,8 +285,8 @@ type RetargetReport struct {
 // Frontmatter(...) output, exactly as the deploy path does.
 //
 // Differences from buildGenericAgent, and the only permitted divergence from it:
-//   - every [[INJECTION:...]] region's content is carried through byte-for-byte;
-//   - every [[DEPLOYED:...]] region's content is carried through byte-for-byte;
+//   - every injection region's content is carried through byte-for-byte;
+//   - every managed region's content is carried through byte-for-byte;
 //   - the output is a deployed file, so MOSAIC-only bookkeeping fields carry their
 //     agentfields Deployed (mosaic_-prefixed) names.
 //

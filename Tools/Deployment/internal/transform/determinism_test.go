@@ -31,26 +31,26 @@ tier_rationale: complex coordination
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Determinism Agent
 
 Body content that must appear identically on every run.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 
-[[/SECTION:Identity]]
+</Identity>
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Some constraint text.
 
-[[DEPLOYED:ProtocolConstraints]]
-[[/DEPLOYED:ProtocolConstraints]]
+<ProtocolConstraints type="managed">
+</ProtocolConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 `
 
 // TestDeterminism_SequentialCallsProduceIdenticalOutput calls Apply twice with identical
@@ -142,9 +142,9 @@ func TestDeterminism_RepeatedCallsProduceSameReport(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestProtocol_RegenerationOnUpdate_ContentReplacedNotLifted verifies that on an update
-// (Request.Deployed non-nil), the content of the [[DEPLOYED:CommunicationProtocol]] region
-// is taken from Request.Protocol and not lifted from the deployed file. Tool-managed regions
-// are never preserved from the deployed file — they are always regenerated.
+// (Request.Deployed non-nil), the content of the <CommunicationProtocol type="managed">
+// region is taken from Request.Protocol and not lifted from the deployed file. Tool-managed
+// regions are never preserved from the deployed file — they are always regenerated.
 func TestProtocol_RegenerationOnUpdate_ContentReplacedNotLifted(t *testing.T) {
 	// The deployed file has stale protocol content that differs from what the current
 	// protocol source would produce. After the update transform, the output must contain
@@ -152,8 +152,8 @@ func TestProtocol_RegenerationOnUpdate_ContentReplacedNotLifted(t *testing.T) {
 	const staleProtocolContent = "STALE PROTOCOL CONTENT — must not appear in updated output\n"
 	deployedWithStaleProtocol := "---\nid: 99\nversion: 1.0.0\ntransform_version: 3.0.0\ninjections_version: 1.2.0\n" +
 		"description: Agent for protocol region testing\nmode: subagent\nmodel: claude/claude-sonnet\ntools: [read-file]\n---\n\n" +
-		"[[SECTION:Identity]]\n## Identity\n\nProtocol test agent.\n\n[[/SECTION:Identity]]\n\n" +
-		"[[DEPLOYED:CommunicationProtocol]]\n" + staleProtocolContent + "[[/DEPLOYED:CommunicationProtocol]]\n"
+		"<Identity type=\"core\">\n## Identity\n\nProtocol test agent.\n\n</Identity>\n\n" +
+		"<CommunicationProtocol type=\"managed\">\n" + staleProtocolContent + "</CommunicationProtocol>\n"
 
 	req := transform.Request{
 		Source:   []byte(sourceWithProtocol),
@@ -178,7 +178,7 @@ func TestProtocol_RegenerationOnUpdate_ContentReplacedNotLifted(t *testing.T) {
 	}
 	node, ok := outDoc.Body().Deployed("CommunicationProtocol")
 	if !ok {
-		t.Fatal("[[DEPLOYED:CommunicationProtocol]] absent from output")
+		t.Fatal("<CommunicationProtocol type=\"managed\"> absent from output")
 	}
 	regionContent := node.Content()
 
@@ -251,15 +251,15 @@ func TestDeterminism_MultipleAgentsDontCrossContaminate(t *testing.T) {
 	}{
 		{
 			key: "agent-alpha",
-			src: "---\nid: 1\nversion: 1.0.0\nname: agent-alpha\ndescription: Alpha\nmodel: {model-identifier}\ntools: [file_read]\nrecommended_tier: LOW\ntier_rationale: simple\nrequired_skills: []\n---\n\n[[SECTION:Identity]]\nAlpha body.\n[[/SECTION:Identity]]\n",
+			src: "---\nid: 1\nversion: 1.0.0\nname: agent-alpha\ndescription: Alpha\nmodel: {model-identifier}\ntools: [file_read]\nrecommended_tier: LOW\ntier_rationale: simple\nrequired_skills: []\n---\n\n<Identity type=\"core\">\nAlpha body.\n</Identity>\n",
 		},
 		{
 			key: "agent-beta",
-			src: "---\nid: 2\nversion: 2.0.0\nname: agent-beta\ndescription: Beta\nmodel: {model-identifier}\ntools: [file_write, content_search]\nrecommended_tier: MEDIUM\ntier_rationale: moderate\nrequired_skills: []\n---\n\n[[SECTION:Identity]]\nBeta body.\n[[/SECTION:Identity]]\n",
+			src: "---\nid: 2\nversion: 2.0.0\nname: agent-beta\ndescription: Beta\nmodel: {model-identifier}\ntools: [file_write, content_search]\nrecommended_tier: MEDIUM\ntier_rationale: moderate\nrequired_skills: []\n---\n\n<Identity type=\"core\">\nBeta body.\n</Identity>\n",
 		},
 		{
 			key: "agent-gamma",
-			src: "---\nid: 3\nversion: 3.0.0\nname: agent-gamma\ndescription: Gamma\nmodel: {model-identifier}\ntools: [terminal, user_interaction]\nrecommended_tier: HIGH\ntier_rationale: complex\nrequired_skills: []\n---\n\n[[SECTION:Identity]]\nGamma body.\n[[/SECTION:Identity]]\n",
+			src: "---\nid: 3\nversion: 3.0.0\nname: agent-gamma\ndescription: Gamma\nmodel: {model-identifier}\ntools: [terminal, user_interaction]\nrecommended_tier: HIGH\ntier_rationale: complex\nrequired_skills: []\n---\n\n<Identity type=\"core\">\nGamma body.\n</Identity>\n",
 		},
 	}
 

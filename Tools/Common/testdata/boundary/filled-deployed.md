@@ -2,7 +2,7 @@
 name: test-agent
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 Deployed content line one.
 Deployed content line two.
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>

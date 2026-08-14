@@ -13,7 +13,7 @@ status: Draft
 | | |
 |---|---|
 | **Block** | `AuthorityHierarchy:Subagent` |
-| **Fills** | `[[DEPLOYED:AuthorityHierarchy]]` — placement in `AgentTemplateArchitecture.md` §2.5 |
+| **Fills** | `<AuthorityHierarchy type="managed">` — placement in `AgentTemplateArchitecture.md` §2.5 |
 | **Applies to** | `subagent` |
 | **Text lives in** | `Catalog/DeployedSections.md` |
 
@@ -59,7 +59,7 @@ The fix was cheap only because the fragment was being single-sourced in the same
 
 ## 5. The orchestrator's hierarchy is hand-authored
 
-The orchestrator has an authority hierarchy too, and it is **not** a deployed block. It stays in `orchestrator.md` as ordinary `[[SECTION:Identity]]` content, with five ranks:
+The orchestrator has an authority hierarchy too, and it is **not** a deployed block. It stays in `orchestrator.md` as ordinary `<Identity type="core">` content, with five ranks:
 
 1. Your System Instructions
 2. User Communication

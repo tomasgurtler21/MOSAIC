@@ -11,8 +11,8 @@ const (
 	DocumentUnknown DocumentKind = ""
 
 	// DocumentSource indicates a source agent file. Source files must carry only empty
-	// [[DEPLOYED:]] regions (rule 12); populated regions indicate a hand-edit or a deployed
-	// file committed as source.
+	// managed regions (rule 12); populated regions indicate a hand-edit or a deployed file
+	// committed as source.
 	DocumentSource DocumentKind = "source"
 
 	// DocumentDeployed indicates a file that has been produced by the deployment tool.

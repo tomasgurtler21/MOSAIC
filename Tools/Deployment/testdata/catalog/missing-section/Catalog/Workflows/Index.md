@@ -2,7 +2,7 @@
 
 Fixture for WorkflowSection missing-block testing.
 The "no-section-workflow" entry has a corresponding file on disk, but that file does not
-contain a [[SECTION:Workflow:no-section-workflow]] block. WorkflowSection must return an
+contain a <Workflow type="core" name="no-section-workflow"> block. WorkflowSection must return an
 error for this case.
 
 | ID | Category | Version | Name | Description | Hint | Author | File |

@@ -6,57 +6,57 @@ description: Generic agent (no transform_version) carrying harness-only 'mode' k
 mode: subagent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # ValidatorGenericTest Agent
 
 You are the **ValidatorGenericTest** agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
+</IdentityExtension>
 
-[[/SECTION:Identity]]
+</Identity>
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Capabilities content.
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Constraint content.
 
-[[/SECTION:Constraints]]
+</Constraints>
 ---
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
 Error handling content.
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 ---
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 
 Output format content.
 
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 ---
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 
 Execution philosophy content.
 
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>

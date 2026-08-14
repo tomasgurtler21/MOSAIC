@@ -16,6 +16,7 @@ import json
 import pathlib
 from collections.abc import Mapping, Sequence
 
+from boundary_constants import TAG_PATTERN
 from fence import fence_mask
 
 
@@ -24,7 +25,7 @@ from fence import fence_mask
 # ---------------------------------------------------------------------------
 
 NC_JSON_ENVELOPE:    str = "NC-7A"   # OutputFormat retains JSON response envelopes
-NC_NO_INJECTIONS:    str = "NC-7B"   # output has zero [[INJECTION:]] regions
+NC_NO_INJECTIONS:    str = "NC-7B"   # output has zero injection regions (type="project")
 NC_HARNESS_PROSE:    str = "NC-7C"   # harness-specific prose in agent-authored sections
 NC_DRIFTED_BULLET:   str = "NC-D1F"  # superseded bullet found in drifted wording
 NC_TIER_PLACEHOLDER: str = "NC-TIER" # one missing tier key needs manual completion
@@ -45,8 +46,8 @@ NC_MESSAGES: Mapping[str, str] = {
         "JSON fence — a human must judge how to convert it"
     ),
     NC_NO_INJECTIONS: (
-        "Output carries zero [[INJECTION:]] regions; a project cannot customise this "
-        "agent — a human should decide whether that is correct"
+        "Output carries zero injection regions (type=\"project\"); a project cannot "
+        "customise this agent — a human should decide whether that is correct"
     ),
     NC_HARNESS_PROSE: (
         "Harness-specific prose found under heading '{detail}'; it belongs in "
@@ -191,9 +192,11 @@ def _detect_zero_injections(
     path: pathlib.Path,
     lines: Sequence[str],
 ) -> list[NonConformance]:
-    """Class 7b: output carries zero [[INJECTION: open tags."""
-    if any("[[INJECTION:" in line for line in lines):
-        return []
+    """Class 7b: output carries zero injection open tags (type="project")."""
+    for line in lines:
+        m = TAG_PATTERN.match(line.strip())
+        if m is not None and m.group("close") == "" and m.group("kind") == "INJECTION":
+            return []
     return [NonConformance(
         code=NC_NO_INJECTIONS,
         file=path,

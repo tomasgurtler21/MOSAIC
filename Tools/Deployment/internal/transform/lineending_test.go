@@ -3,19 +3,18 @@ package transform_test
 // lineending_test.go covers the line-ending-aware helper contract (Stage 10):
 //
 //   - DetectLineEnding: CRLF, LF, and fallback (no newline / empty / nil).
-//   - ProtocolVersionComment (revised): marker line terminator matches the content argument's
-//     own line ending.
-//   - Full-pipeline CRLF assertion: a protocol region assembled from a CRLF block carries a
-//     CRLF-terminated marker and contains no lone LF anywhere in the region.
-//   - Full-pipeline LF assertion: a protocol region assembled from an LF block yields a
-//     marker that is byte-identical to what the pre-change code produced, so the fix does
-//     not regress the Linux path.
+//   - Full-pipeline CRLF assertion: a protocol region assembled from a CRLF block contains
+//     no lone LF anywhere in the region content; the version is a tag attribute, not a
+//     comment line inside the region.
+//   - Full-pipeline LF assertion: a protocol region assembled from an LF block contains no
+//     CR bytes; the version is a tag attribute and is NOT embedded as an inline comment.
 
 import (
 	"bytes"
 	"strings"
 	"testing"
 
+	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/transform"
 )
@@ -98,101 +97,88 @@ func TestDetectLineEnding_LFAtIndexZero_ReturnsLF(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ProtocolVersionComment (revised) — line-ending-aware contract
+// Version attribute — full-pipeline contract for LF and CRLF blocks
 // ---------------------------------------------------------------------------
 
-// TestProtocolVersionComment_LFContent_YieldsLFTerminatedMarker verifies that LF content
-// causes the marker line to carry an LF terminator. This is also the LF-invariance check:
-// the output is byte-identical to what the pre-change single-argument form produced.
-func TestProtocolVersionComment_LFContent_YieldsLFTerminatedMarker(t *testing.T) {
-	content := []byte("## Communication Protocol\n\nSome content.\n")
-	got := transform.ProtocolVersionComment("1.10", content)
-	want := "<!-- protocol-version: 1.10 -->\n"
-	if got != want {
-		t.Errorf("ProtocolVersionComment(LF content): want %q, got %q", want, got)
+// TestProtocol_VersionAttribute_LFBlock_PresentOnTag verifies that when the protocol block
+// has LF line endings, the version appears as a tag attribute on the CommunicationProtocol
+// region's opening tag and is NOT embedded as an inline comment inside the region body.
+func TestProtocol_VersionAttribute_LFBlock_PresentOnTag(t *testing.T) {
+	const version = "1.9"
+	req := transform.Request{
+		Source:   []byte(sourceWithProtocol),
+		Kind:     domain.ArtifactAgent,
+		Key:      "protocol-test",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: fixtureProtocol(version),
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	doc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	node, ok := doc.Body().Deployed("CommunicationProtocol")
+	if !ok {
+		t.Fatal("<CommunicationProtocol type=\"managed\"> region absent from output")
+	}
+
+	if got := node.Version(); got != version {
+		t.Errorf("CommunicationProtocol version attribute: want %q, got %q", version, got)
+	}
+
+	// Version must NOT appear as a legacy comment inside the region body.
+	legacyComment := "<!-- protocol-version: " + version + " -->"
+	if bytes.Contains(node.Content(), []byte(legacyComment)) {
+		t.Errorf("region body must not contain legacy version comment %q; version belongs on the tag attribute", legacyComment)
 	}
 }
 
-// TestProtocolVersionComment_CRLFContent_YieldsCRLFTerminatedMarker verifies that CRLF
-// content causes the marker line to carry a CRLF terminator. This is the core Stage 10
-// fix: the deployed region on a CRLF checkout must not contain a lone LF.
-func TestProtocolVersionComment_CRLFContent_YieldsCRLFTerminatedMarker(t *testing.T) {
-	content := []byte("## Communication Protocol\r\n\r\nSome content.\r\n")
-	got := transform.ProtocolVersionComment("1.10", content)
-	want := "<!-- protocol-version: 1.10 -->\r\n"
-	if got != want {
-		t.Errorf("ProtocolVersionComment(CRLF content): want %q, got %q", want, got)
+// TestProtocol_VersionAttribute_CRLFBlock_PresentOnTag verifies that when the protocol block
+// has CRLF line endings, the version still appears correctly as a tag attribute (not in the
+// region body). CRLF content does not change where the version is stored.
+func TestProtocol_VersionAttribute_CRLFBlock_PresentOnTag(t *testing.T) {
+	const version = "1.10"
+	req := transform.Request{
+		Source:   []byte(sourceWithProtocol),
+		Kind:     domain.ArtifactAgent,
+		Key:      "protocol-test",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+		Role:     domain.RoleWorker,
+		Protocol: fixtureProtocolCRLF(version),
 	}
-}
 
-// TestProtocolVersionComment_NilContent_YieldsLFTerminatedMarker verifies that nil content
-// yields the LF form, consistent with the defined fallback of DetectLineEnding.
-func TestProtocolVersionComment_NilContent_YieldsLFTerminatedMarker(t *testing.T) {
-	got := transform.ProtocolVersionComment("1.9", nil)
-	want := "<!-- protocol-version: 1.9 -->\n"
-	if got != want {
-		t.Errorf("ProtocolVersionComment(nil content): want %q (LF fallback), got %q", want, got)
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
 	}
-}
 
-// TestProtocolVersionComment_LFInvariance_ByteIdenticalToPreChangeForm verifies that for LF
-// content, ProtocolVersionComment produces output that is byte-identical to what the
-// pre-change single-argument form produced. This is the regression guard for the Linux path
-// and for all 15 golden fixtures that already hold the correct bytes.
-func TestProtocolVersionComment_LFInvariance_ByteIdenticalToPreChangeForm(t *testing.T) {
-	lfContent := []byte("## Protocol\n\nContent.\n")
-	versions := []string{"1.9", "1.10", "2.0"}
-	for _, version := range versions {
-		t.Run("version="+version, func(t *testing.T) {
-			got := transform.ProtocolVersionComment(version, lfContent)
-			expected := "<!-- protocol-version: " + version + " -->\n"
-			if got != expected {
-				t.Errorf("ProtocolVersionComment(%q, LF content): want %q, got %q",
-					version, expected, got)
-			}
-		})
+	doc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
 	}
-}
-
-// TestProtocolVersionComment_ResultContainsExactlyOneTerminator verifies that the returned
-// string ends in a line terminator and contains exactly one line terminator, at the end.
-// This upholds the contract that the result is a complete single line with no embedded
-// newlines and no lone '\r'.
-func TestProtocolVersionComment_ResultContainsExactlyOneTerminator(t *testing.T) {
-	cases := []struct {
-		name    string
-		content []byte
-		wantEnd string
-	}{
-		{"LF content", []byte("content\n"), "\n"},
-		{"CRLF content", []byte("content\r\n"), "\r\n"},
-		{"nil content", nil, "\n"},
+	node, ok := doc.Body().Deployed("CommunicationProtocol")
+	if !ok {
+		t.Fatal("<CommunicationProtocol type=\"managed\"> region absent from output")
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := transform.ProtocolVersionComment("1.9", tc.content)
 
-			// Must end with the expected terminator.
-			if !strings.HasSuffix(got, tc.wantEnd) {
-				t.Errorf("ProtocolVersionComment result does not end with %q; got %q",
-					tc.wantEnd, got)
-			}
+	if got := node.Version(); got != version {
+		t.Errorf("CommunicationProtocol version attribute (CRLF block): want %q, got %q", version, got)
+	}
 
-			// Must contain exactly one '\n' (at the end).
-			newlineCount := strings.Count(got, "\n")
-			if newlineCount != 1 {
-				t.Errorf("ProtocolVersionComment result contains %d '\\n' bytes; want exactly 1; got %q",
-					newlineCount, got)
-			}
-
-			// Must not contain a lone '\r' (a '\r' not followed by '\n').
-			for i, b := range []byte(got) {
-				if b == '\r' && (i+1 >= len(got) || got[i+1] != '\n') {
-					t.Errorf("ProtocolVersionComment result contains lone '\\r' at index %d; got %q",
-						i, got)
-				}
-			}
-		})
+	// Version must NOT appear as a legacy comment inside the region body.
+	legacyComment := "<!-- protocol-version: " + version + " -->"
+	if bytes.Contains(node.Content(), []byte(legacyComment)) {
+		t.Errorf("region body must not contain legacy version comment %q; version belongs on the tag attribute", legacyComment)
 	}
 }
 
@@ -215,20 +201,15 @@ func fixtureProtocolCRLF(version string) domain.ProtocolContent {
 	}
 }
 
-// crlfSubagentBlock is the CRLF-normalised form of subagentBlockContent, precomputed so
-// tests can pass it as the content argument to ProtocolVersionComment when building the
-// expected marker.
-var crlfSubagentBlock = []byte(strings.ReplaceAll(subagentBlockContent, "\n", "\r\n"))
-
 // ---------------------------------------------------------------------------
 // T10.1 — Full-pipeline CRLF: no lone LF in the assembled region
 // ---------------------------------------------------------------------------
 
 // TestProtocol_CRLFBlock_RegionContainsNoLoneLF verifies that when the protocol block
-// carries CRLF line endings, the assembled CommunicationProtocol region contains no lone
-// LF: every '\n' in the region is immediately preceded by '\r'. This covers both the
-// protocol-version marker line (which previously emitted a hardcoded lone LF) and the
-// block content itself.
+// carries CRLF line endings, the assembled CommunicationProtocol region content contains
+// no lone LF: every '\n' in the region content is immediately preceded by '\r'. Because
+// the version is now a tag attribute (not an inline comment), this check is exclusively
+// about the block content bytes — no version marker line can introduce a lone LF.
 func TestProtocol_CRLFBlock_RegionContainsNoLoneLF(t *testing.T) {
 	req := transform.Request{
 		Source:   []byte(sourceWithProtocol),
@@ -264,10 +245,11 @@ func TestProtocol_CRLFBlock_RegionContainsNoLoneLF(t *testing.T) {
 	}
 }
 
-// TestProtocol_CRLFBlock_MarkerLineIsCRLFTerminated verifies that the protocol-version
-// marker line is CRLF-terminated when the protocol block uses CRLF line endings.
-// The marker must be the first content of the region and must end in "\r\n".
-func TestProtocol_CRLFBlock_MarkerLineIsCRLFTerminated(t *testing.T) {
+// TestProtocol_CRLFBlock_RegionContentStartsWithBlock verifies that when the protocol block
+// carries CRLF line endings, the assembled CommunicationProtocol region content begins with
+// the CRLF block content directly — no legacy version comment prefixes the body. The
+// version is stored as a tag attribute, not as the first line of the region body.
+func TestProtocol_CRLFBlock_RegionContentStartsWithBlock(t *testing.T) {
 	const version = "1.10"
 	req := transform.Request{
 		Source:   []byte(sourceWithProtocol),
@@ -285,28 +267,39 @@ func TestProtocol_CRLFBlock_MarkerLineIsCRLFTerminated(t *testing.T) {
 		t.Fatalf("Apply: %v", err)
 	}
 
-	regionContent := extractProtocolRegionContent(t, result.Output)
-	// Hardcode the expected marker literal so this test fails in RED phase.
-	// Deriving expectedMarker via transform.ProtocolVersionComment would produce the same
-	// stub output as the production path (both return "\n"), masking the CRLF requirement.
-	expectedMarker := "<!-- protocol-version: " + version + " -->\r\n"
+	doc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	node, ok := doc.Body().Deployed("CommunicationProtocol")
+	if !ok {
+		t.Fatal("<CommunicationProtocol type=\"managed\"> region absent from output")
+	}
 
-	if !bytes.HasPrefix(regionContent, []byte(expectedMarker)) {
-		t.Errorf("CRLF block: protocol-version marker is not CRLF-terminated or is not the first "+
-			"content of the region;\nwant prefix: %q\ngot region (first 200 bytes): %q",
-			expectedMarker, truncateBytes(regionContent, 200))
+	// Version must be on the tag, not inside the body.
+	if got := node.Version(); got != version {
+		t.Errorf("CRLF block: version attribute want %q, got %q", version, got)
+	}
+
+	regionContent := node.Content()
+
+	// No legacy version comment must appear in the region body.
+	legacyMarker := "<!-- protocol-version: "
+	if bytes.Contains(regionContent, []byte(legacyMarker)) {
+		t.Errorf("CRLF block: region body must not contain a legacy version comment;\n"+
+			"region content (first 200 bytes): %q", truncateBytes(regionContent, 200))
 	}
 }
 
 // ---------------------------------------------------------------------------
-// T10.2 — Full-pipeline LF: byte-identical to pre-change output
+// T10.2 — Full-pipeline LF: version on tag, no comment in body
 // ---------------------------------------------------------------------------
 
-// TestProtocol_LFBlock_MarkerLineIsLFTerminated verifies that when the protocol block
-// carries LF line endings, the protocol-version marker line is LF-terminated and
-// byte-identical to what the pre-change code produced. This is the regression guard for
-// the Linux path and for the 15 golden fixtures that already hold the correct bytes.
-func TestProtocol_LFBlock_MarkerLineIsLFTerminated(t *testing.T) {
+// TestProtocol_LFBlock_VersionAttributePresentNot InBody verifies that when the protocol
+// block carries LF line endings, the region's opening tag carries the version attribute
+// and the region body does NOT begin with a legacy version comment. This is the regression
+// guard for the LF path: version belongs on the tag, not as the first line of the body.
+func TestProtocol_LFBlock_VersionAttributePresentNotInBody(t *testing.T) {
 	const version = "1.9"
 	req := transform.Request{
 		Source:   []byte(sourceWithProtocol),
@@ -324,21 +317,30 @@ func TestProtocol_LFBlock_MarkerLineIsLFTerminated(t *testing.T) {
 		t.Fatalf("Apply: %v", err)
 	}
 
-	regionContent := extractProtocolRegionContent(t, result.Output)
+	doc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	node, ok := doc.Body().Deployed("CommunicationProtocol")
+	if !ok {
+		t.Fatal("<CommunicationProtocol type=\"managed\"> region absent from output")
+	}
 
-	// The marker line must be byte-identical to what the pre-change single-argument form
-	// produced: "<!-- protocol-version: X -->\n".
-	expectedMarker := "<!-- protocol-version: " + version + " -->\n"
-	if !bytes.HasPrefix(regionContent, []byte(expectedMarker)) {
-		t.Errorf("LF block: protocol-version marker is not LF-terminated or does not match "+
-			"the pre-change form;\nwant prefix: %q\ngot region (first 200 bytes): %q",
-			expectedMarker, truncateBytes(regionContent, 200))
+	if got := node.Version(); got != version {
+		t.Errorf("LF block: version attribute want %q, got %q", version, got)
+	}
+
+	// No legacy version comment must appear in the region body.
+	legacyMarker := "<!-- protocol-version: "
+	if bytes.Contains(node.Content(), []byte(legacyMarker)) {
+		t.Errorf("LF block: region body must not contain a legacy version comment;\n"+
+			"region content (first 200 bytes): %q", truncateBytes(node.Content(), 200))
 	}
 }
 
 // TestProtocol_LFBlock_RegionContainsNoCR verifies that an LF protocol block does not
-// introduce stray '\r' bytes anywhere in the assembled protocol region.
-// The LF path must remain purely LF.
+// introduce stray '\r' bytes anywhere in the assembled protocol region content.
+// The LF path must remain purely LF — no CR bytes from the formatting logic.
 func TestProtocol_LFBlock_RegionContainsNoCR(t *testing.T) {
 	req := transform.Request{
 		Source:   []byte(sourceWithProtocol),

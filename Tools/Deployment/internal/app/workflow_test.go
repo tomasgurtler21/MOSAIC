@@ -145,10 +145,9 @@ func TestUpdate_AddWorkflows_PlannerReceivesBothWorkflowSets(t *testing.T) {
 	// probe-based workflow discovery can find it. Without this file the probe returns no
 	// workflow IDs for the orchestrator path and "quick-fix" would be silently dropped.
 	orchestratorContent := []byte("---\nversion: \"1.0\"\n---\n\n" +
-		"[[SECTION:Workflow:quick-fix]]\n" +
-		"<!-- workflow-version: 1.0 -->\n" +
+		"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
 		"Quick fix content.\n" +
-		"[[/SECTION:Workflow:quick-fix]]\n")
+		"</Workflow>\n")
 	writeTempFile(t, workspace, "orchestrator.md", orchestratorContent)
 
 	// Use a capturing planner so we can inspect what WorkflowIDs were passed
@@ -288,10 +287,9 @@ func TestDeployNew_OrchestratorWorkflowExpanded_YieldsUpdateItem(t *testing.T) {
 	// It carries a quick-fix workflow block with a version comment so the probe can detect it.
 	orchContent := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"[[SECTION:Workflow:quick-fix]]\n" +
-			"<!-- workflow-version: 1.0 -->\n" +
+			"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
 			"Quick fix content.\n" +
-			"[[/SECTION:Workflow:quick-fix]]\n",
+			"</Workflow>\n",
 	)
 	writeTempFile(t, workspace, "orchestrator.md", orchContent)
 	orchHash := manifest.Hash(orchContent)
@@ -377,10 +375,9 @@ func TestUpdate_OrchestratorWorkflowExpanded_YieldsUpdateItem(t *testing.T) {
 	// Write the deployed orchestrator at "orchestrator.md" with the quick-fix workflow block.
 	orchContent := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"[[SECTION:Workflow:quick-fix]]\n" +
-			"<!-- workflow-version: 1.0 -->\n" +
+			"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
 			"Quick fix content.\n" +
-			"[[/SECTION:Workflow:quick-fix]]\n",
+			"</Workflow>\n",
 	)
 	writeTempFile(t, workspace, "orchestrator.md", orchContent)
 	orchHash := manifest.Hash(orchContent)
@@ -466,10 +463,9 @@ func TestDeployNew_OrchestratorWorkflowVersionBumped_YieldsUpdateItem(t *testing
 	// mismatch must be detected by WorkflowStaleness even though the selection is unchanged.
 	orchContent := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"[[SECTION:Workflow:quick-fix]]\n" +
-			"<!-- workflow-version: 1.0 -->\n" +
+			"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
 			"Quick fix content.\n" +
-			"[[/SECTION:Workflow:quick-fix]]\n",
+			"</Workflow>\n",
 	)
 	writeTempFile(t, workspace, "orchestrator.md", orchContent)
 	orchHash := manifest.Hash(orchContent)
@@ -536,10 +532,9 @@ func TestDeployNew_OrchestratorDeployedState_ContainsWorkflowData(t *testing.T) 
 	// Arrange — deployed orchestrator carries a quick-fix workflow block with version 1.0
 	orchContent := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"[[SECTION:Workflow:quick-fix]]\n" +
-			"<!-- workflow-version: 1.0 -->\n" +
+			"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
 			"Quick fix content.\n" +
-			"[[/SECTION:Workflow:quick-fix]]\n",
+			"</Workflow>\n",
 	)
 
 	cat := newMinimalCatalog()

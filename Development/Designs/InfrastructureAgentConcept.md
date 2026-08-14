@@ -44,43 +44,40 @@ That last point is the load-bearing one. Infrastructure agents are a new *reason
 An orchestrator declares its infrastructure agents in a dedicated injection region. This region, in the **deployed** orchestrator file, is the single authoritative statement of what fires and when:
 
 ```markdown
-[[INJECTION:InfrastructureAgents]]
+<InfrastructureAgents type="project">
 
-[[SECTION:InfrastructureAgent:checkpoint-manager-git]]
-<!-- infra-version: 1.0.0 -->
+<InfrastructureAgent type="core" name="checkpoint-manager-git" version="1.0.0">
 | Class | Trigger | Param | On Failure | Description |
 |-------|---------|-------|------------|-------------|
 | checkpoint | STAGE_END | - | halt | Commits a restorable checkpoint of the working tree. Returns a content-reference; never modifies files. |
 | checkpoint | INVOCATION_INTERVAL | 10 | halt | As above, covering the interior of a stage. |
-[[/SECTION:InfrastructureAgent:checkpoint-manager-git]]
+</InfrastructureAgent>
 
-[[SECTION:InfrastructureAgent:commit-manager-git]]
-<!-- infra-version: 1.0.0 -->
+<InfrastructureAgent type="core" name="commit-manager-git" version="1.0.0">
 | Class | Trigger | Param | On Failure | Description |
 |-------|---------|-------|------------|-------------|
 | commit | STAGE_END | - | continue | Commits completed stage work to the user's own branch. Not a restore point; never rolled back by any agent. |
-[[/SECTION:InfrastructureAgent:commit-manager-git]]
+</InfrastructureAgent>
 
-[[SECTION:InfrastructureAgent:orchestration-review]]
-<!-- infra-version: 1.0.0 -->
+<InfrastructureAgent type="core" name="orchestration-review" version="1.0.0">
 | Class | Trigger | Param | On Failure | Description |
 |-------|---------|-------|------------|-------------|
 | review | INVOCATION_INTERVAL | 30 | continue | Advisory — reports observations about the run's own bookkeeping. Never returns an instruction to act. |
-[[/SECTION:InfrastructureAgent:orchestration-review]]
+</InfrastructureAgent>
 
-[[/INJECTION:InfrastructureAgents]]
+</InfrastructureAgents>
 ```
 
-The structure deliberately mirrors how workflows are already embedded in the same file: one `[[SECTION:{Prefix}:{id}]]` block per item, a version comment immediately inside it, and discovery by depth-agnostic section lookup on the `InfrastructureAgent:` name prefix. A consumer that already enumerates workflow regions can enumerate these with the same machinery and a different prefix.
+The structure deliberately mirrors how workflows are already embedded in the same file: one `<{Prefix} type="core" name="{id}">` block per item, a version attribute on its opening tag, and discovery by depth-agnostic section lookup on the `InfrastructureAgent:` name prefix. A consumer that already enumerates workflow regions can enumerate these with the same machinery and a different prefix.
 
 **Declaration rules:**
 
 - The section name after the `InfrastructureAgent:` prefix is the agent name, and is what the executor dispatches to. An empty identifier is invalid.
 - Duplicate identifiers within one file are invalid. An executor encountering them must refuse to start rather than pick one.
 - **Multiple same-class agents are permitted in the declaration region; the executor selects one per gated class at run start.** A class is gated when concurrent operation of multiple agents of that class would be ambiguous or harmful — currently `checkpoint`, `commit`, and `restore`. Declaring two or more differently-named agents of a gated class is valid. When a run starts and the declaration region contains more than one agent of the same gated class, the executor prompts the user to select which one to use for that class; only the selected agent's triggers are evaluated for the life of the run. When exactly one agent of a gated class is declared, it is auto-selected without prompting. This selection model resolves the "both fire on the same boundary" concern without a deployment-time prohibition: the executor enforces that at most one agent per gated class is active per run, but allows a deployment to offer several options — for example, alternative checkpoint storage backends or restore mechanisms — and defers the choice to the moment when the user actually knows which they want. Non-gated classes are unrestricted and never subject to selection; multiple `review`-class agents with different remits may all fire concurrently. Note that gating is decoupled from activation switches (§6.1): `checkpoint` and `commit` are both gated and carry activation switches; `restore` is gated but carries no activation switch (it uses a `MANUAL` trigger instead). The gating criterion is "ambiguity or harm from concurrent operation", not "carries an activation switch".
-- The version comment is required, for the same staleness-detection reason workflow regions carry one.
+- The `version` attribute is required on each region's opening tag, for the same staleness-detection reason workflow regions carry one.
 - **A section may contain more than one row**, one per trigger the agent declares. `Class` and `On Failure` must be identical across those rows — they are properties of the agent, not of a trigger — and a section whose rows disagree on either is invalid. Duplicate triggers within one section are invalid for the same reason duplicate identifiers are: an executor must refuse rather than pick one.
-- An absent or empty `[[INJECTION:InfrastructureAgents]]` region means this orchestrator has no infrastructure agents. This is valid and must not be treated as an error — it is the correct state for a minimal deployment.
+- An absent or empty `<InfrastructureAgents type="project">` region means this orchestrator has no infrastructure agents. This is valid and must not be treated as an error — it is the correct state for a minimal deployment.
 
 **`Class` and `Description` address different readers, and neither substitutes for the other.**
 
@@ -183,7 +180,7 @@ Writing first is not incidental. Triggers are defined against artifact state (§
 **Procedure, after each workflow invocation:**
 
 1. Write the invocation's Execution Log row, then its `current_state` update, in the order the orchestration artifact schema already requires.
-2. Evaluate each declared infrastructure agent's trigger against the updated artifact, in the order the agents appear in the `[[INJECTION:InfrastructureAgents]]` region.
+2. Evaluate each declared infrastructure agent's trigger against the updated artifact, in the order the agents appear in the `<InfrastructureAgents type="project">` region.
 3. For each trigger that fired, dispatch that agent as an ordinary invocation (§8) and process its response fully — including writing its own Execution Log row — before evaluating the next.
 4. Do **not** evaluate triggers after an infrastructure agent completes.
 

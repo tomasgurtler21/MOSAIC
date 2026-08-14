@@ -17,8 +17,7 @@ artifacts:
   - VerificationReport.md
 ---
 
-[[SECTION:Workflow:kb-verification-sampler-human]]
-<!-- workflow-version: 1.0 -->
+<Workflow type="core" name="kb-verification-sampler-human" version="1.0">
 ## Knowledge Verification (Sampler + Human) Workflow
 
 **Use when:** Verify knowledge quality using **both** architect-provided challenge questions **and** automated random sampling. Gathers questions from both sources in parallel, tests whether an agent can answer them using available knowledge sources + codebase, and produces a unified diagnostic report. Remediation is a separate concern.
@@ -44,7 +43,7 @@ artifacts:
 - **Q/A artifact lifecycle** — `(create)` creates empty artifacts → `(human)` and `codebase-question-sampler` populate in parallel → `(validate)` validates all pairs from both sources and creates batched VerificationAttemptedAnswers.md
 - **Shared artifact concurrency** — both the human preparer and sampler append to the same VerificationQuestions.md and VerificationAnswers.md. The `Source` field (`user` vs `agent`) distinguishes origin. Both agents append with independent numbering — the validate step handles any numbering conflicts
 - **Question sources are independent** — if one source produces no questions (e.g., user has no questions, or sampler finds the codebase too small), the workflow continues with whatever questions the other source produced
-[[/SECTION:Workflow:kb-verification-sampler-human]]
+</Workflow>
 
 ---
 

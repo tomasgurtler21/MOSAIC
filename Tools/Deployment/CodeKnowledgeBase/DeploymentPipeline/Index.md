@@ -31,7 +31,7 @@ to make anything happen on disk.
 | Component | Purpose |
 |-----------|---------|
 | **catalog** | Reads the MOSAIC repository tree exactly once per run and exposes agents, skills, hook bundles, workflows, and tiers as typed, immutable values. The only package that opens MOSAIC source files for reading. |
-| **docformat** | The single authority on the MOSAIC document format (YAML-like frontmatter + markdown body with `[[SECTION:...]]` / `[[INJECTION:...]]` boundary tags). Parses and serialises with byte-exact fidelity — untouched regions of a document round-trip unchanged. Used by both `catalog` (to extract workflow sections) and `transform` (to mutate frontmatter and injection regions). |
+| **docformat** | The single authority on the MOSAIC document format (YAML-like frontmatter + markdown body with `<Name type="core">` / `<Name type="project">` boundary tags). Parses and serialises with byte-exact fidelity — untouched regions of a document round-trip unchanged. Used by both `catalog` (to extract workflow sections) and `transform` (to mutate frontmatter and injection regions). |
 | **plan** | Computes a complete `domain.Plan` — what would happen to every selected artifact — by resolving the artifact set, deriving each target path via the harness module, and classifying each item against the manifest snapshot and current on-disk hashes. Performs no I/O; the caller supplies all catalog/manifest reads and on-disk hash lookups as plain data. |
 | **transform** | A pure function (`Apply`): given one generic source file's bytes plus a harness module and request context, produces the harness-shaped output bytes and an audit `Report`. Drives all frontmatter field shaping and injection-region content through the harness module — no harness-specific logic lives in this package. |
 | **deploy** | Executes a `domain.Plan` against the real filesystem: resolves the deployment root once, writes/creates/updates/skips each item per its classified action, manages conflict resolution and backups, deploys and registers hooks, and persists the manifest and TODO file. The only package in the module that performs content writes. |
@@ -115,7 +115,7 @@ a pure function: source bytes + harness module + request context in, output byte
    `{tool-permissions}`) are resolved to harness-specific tool fields entirely through
    `Module.Tools`/descriptor `PlaceholderExpansion`; unmapped or skipped tools produce
    `GapUnmappedTool` rather than silently disappearing.
-3. **Injection region handling** — each `[[INJECTION:...]]` region in the body is resolved
+3. **Injection region handling** — each `<Name type="project">` region in the body is resolved
    according to its class:
    - **Harness-class** injections are always refreshed from the module on every transform
      (never lifted from the previously-deployed file) — they represent harness-owned content.

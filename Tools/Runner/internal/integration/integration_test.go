@@ -358,22 +358,22 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary | Checkpoint |
 | --- | --------- | -------- | ----- | ------- | -------------------- | ------- | ---------- |
 | 1   | agent-a#1 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | done    | -          |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 
-[[SECTION:Artifacts]]
+<Artifacts type="core">
 | Artifact | Created In | Created By |
 | -------- | ---------- | ---------- |
 | plan.md  | PLANNING   | agent-a#1  |
-[[/SECTION:Artifacts]]
+</Artifacts>
 
-[[SECTION:WorkflowNotes]]
+<WorkflowNotes type="core">
 | Seq | Note |
 | --- | ---- |
-[[/SECTION:WorkflowNotes]]
+</WorkflowNotes>
 `
 
 // TestIntegration_VersionDrift_Refused verifies that when an existing artifact
@@ -530,8 +530,7 @@ func TestIntegration_OptionalRow_IsDispatchedAndContributesToDeviation(t *testin
 	// Workflow with three rows: agent-a → optional-agent → agent-b.
 	// The middle row is described as "optional" in the workflow prose, but it
 	// is present in the routing table and must be dispatched.
-	const orchContent = `[[SECTION:Workflow:optional-row]]
-<!-- workflow-version: 1.0 -->
+	const orchContent = `<Workflow type="core" name="optional-row" version="1.0">
 ## Optional Row Regression Workflow
 
 **Note:** optional-agent is optional — skip if not needed (this prose is ignored by the runner).
@@ -541,7 +540,7 @@ func TestIntegration_OptionalRow_IsDispatchedAndContributesToDeviation(t *testin
 | PLANNING | agent-a     | ❌ | optional-agent | -           | -     | plan.md    |
 | DESIGN   | optional-agent | ❌ | agent-b       | -           | plan.md | design.md |
 | REVIEW   | agent-b     | ❌ | COMPLETE       | -           | design.md | result.md |
-[[/SECTION:Workflow:optional-row]]
+</Workflow>
 `
 	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
 	writeAgentFile(t, dir, "agent-a")
@@ -628,8 +627,7 @@ func TestIntegration_BuildReview_OnFindings_LoopBack_NoDev(t *testing.T) {
 	// A simplified workflow that mirrors the brownfield-tdd-build-verified
 	// EXECUTION phase pattern for one stage: test-writer-tdd → build-review →
 	// implementation-tdd (where build-review has On Findings = test-writer-tdd).
-	const orchContent = `[[SECTION:Workflow:build-review-loop]]
-<!-- workflow-version: 1.0 -->
+	const orchContent = `<Workflow type="core" name="build-review-loop" version="1.0">
 ## Build-Review Loop Workflow
 
 | Phase | Subagent          | HITL | On Success        | On Findings      | Input | Output         |
@@ -637,7 +635,7 @@ func TestIntegration_BuildReview_OnFindings_LoopBack_NoDev(t *testing.T) {
 | PLANNING | test-writer-tdd | ❌ | build-review      | -                | -     | tests.md       |
 | PLANNING | build-review    | ❌ | implementation-tdd| test-writer-tdd  | tests.md | build.md    |
 | PLANNING | implementation-tdd | ❌ | COMPLETE         | -                | tests.md | impl.md     |
-[[/SECTION:Workflow:build-review-loop]]
+</Workflow>
 `
 	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
 	writeAgentFile(t, dir, "test-writer-tdd")
@@ -737,8 +735,7 @@ func TestIntegration_AllFourApproaches_StagedWorkflow_GoldenFileMatch(t *testing
 	// Synthetic two-group workflow (test group rows 0-2, impl group rows 3-5),
 	// matching the brownfield-tdd-build-verified EXECUTION structure.
 	// No pre-execution rows (stage set is read from the Plan.md placed in dir).
-	const orchContent = `[[SECTION:Workflow:four-approach-staged]]
-<!-- workflow-version: 1.0 -->
+	const orchContent = `<Workflow type="core" name="four-approach-staged" version="1.0">
 ## Four Approach Staged Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
@@ -758,7 +755,7 @@ func TestIntegration_AllFourApproaches_StagedWorkflow_GoldenFileMatch(t *testing
 | Implementation-First | Implementation, Test |
 | Implementation-Only | Implementation |
 | Tests-Only | Test |
-[[/SECTION:Workflow:four-approach-staged]]
+</Workflow>
 `
 	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
 
@@ -929,8 +926,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 			// Two-group: test group (test-writer-tdd, tests-review-tdd) +
 			//            impl group (implementation-tdd, implementation-review).
 			// Seven pre-exec rows; post-exec row: test-runner.
-			orchContent: `[[SECTION:Workflow:brownfield-tdd]]
-<!-- workflow-version: 3.5 -->
+			orchContent: `<Workflow type="core" name="brownfield-tdd" version="3.5">
 ## Brownfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
@@ -956,7 +952,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 | Implementation-First | Implementation, Test |
 | Implementation-Only | Implementation |
 | Tests-Only | Test |
-[[/SECTION:Workflow:brownfield-tdd]]
+</Workflow>
 `,
 			plan: planImplOnly,
 			agents: []string{
@@ -987,8 +983,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 			// Two-group: test group (test-writer-tdd, build-review, tests-review-tdd) +
 			//            impl group (implementation-tdd, build-review, implementation-review).
 			// Seven pre-exec rows; no post-exec rows.
-			orchContent: `[[SECTION:Workflow:brownfield-tdd-build-verified]]
-<!-- workflow-version: 2.1 -->
+			orchContent: `<Workflow type="core" name="brownfield-tdd-build-verified" version="2.1">
 ## Brownfield TDD Build-Verified Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
@@ -1015,7 +1010,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 | Implementation-First | Implementation, Test |
 | Implementation-Only | Implementation |
 | Tests-Only | Test |
-[[/SECTION:Workflow:brownfield-tdd-build-verified]]
+</Workflow>
 `,
 			plan: planImplOnly,
 			agents: []string{
@@ -1045,8 +1040,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 			// Two-group: test group (test-writer-tdd, tests-review-tdd) +
 			//            impl group (implementation-tdd, implementation-review).
 			// Eight pre-exec rows; post-exec row: test-runner.
-			orchContent: `[[SECTION:Workflow:greenfield-tdd]]
-<!-- workflow-version: 3.4 -->
+			orchContent: `<Workflow type="core" name="greenfield-tdd" version="3.4">
 ## Greenfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
@@ -1073,7 +1067,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 | Implementation-First | Implementation, Test |
 | Implementation-Only | Implementation |
 | Tests-Only | Test |
-[[/SECTION:Workflow:greenfield-tdd]]
+</Workflow>
 `,
 			plan: planImplOnly,
 			agents: []string{
@@ -1105,8 +1099,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 			workflowID: "implementation-only",
 			// Single-group: implementation-tdd → implementation-review.
 			// No pre-exec rows; post-exec row: test-runner.
-			orchContent: `[[SECTION:Workflow:implementation-only]]
-<!-- workflow-version: 3.1 -->
+			orchContent: `<Workflow type="core" name="implementation-only" version="3.1">
 ## Implementation Only Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
@@ -1114,7 +1107,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 | EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
 | EXECUTION.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
 | REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
-[[/SECTION:Workflow:implementation-only]]
+</Workflow>
 `,
 			plan:   planSingleGroup,
 			agents: []string{"implementation-tdd", "implementation-review", "test-runner"},
@@ -1130,8 +1123,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 			workflowID: "quick-fix",
 			// Single-group: implementation-tdd (EXECUTION).
 			// Two pre-exec rows; post-exec row: test-runner.
-			orchContent: `[[SECTION:Workflow:quick-fix]]
-<!-- workflow-version: 3.0 -->
+			orchContent: `<Workflow type="core" name="quick-fix" version="3.0">
 ## Quick Fix Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
@@ -1140,7 +1132,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 | PLANNING | plan-review | ❌ | implementation-tdd | planner-tdd-soft | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
 | EXECUTION.[StageNumber] | implementation-tdd | ❌ | test-runner | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
 | REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
-[[/SECTION:Workflow:quick-fix]]
+</Workflow>
 `,
 			plan:   planSingleGroup,
 			agents: []string{"planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner"},
@@ -1222,15 +1214,14 @@ func TestIntegration_Deviation_ResolvesAndResumes_FileStore(t *testing.T) {
 	// Workflow where agent-a has no On Findings column. Any non-SUCCESS
 	// response from agent-a triggers a deviation because the engine cannot
 	// route it automatically.
-	const orchContent = `[[SECTION:Workflow:deviation-resume]]
-<!-- workflow-version: 1.0 -->
+	const orchContent = `<Workflow type="core" name="deviation-resume" version="1.0">
 ## Deviation Resume Workflow
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
 | PLANNING | agent-a | ❌ | agent-b | - | plan.md |
 | PLANNING | agent-b | ❌ | COMPLETE | plan.md | result.md |
-[[/SECTION:Workflow:deviation-resume]]
+</Workflow>
 `
 	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
 	writeAgentFile(t, dir, "agent-a")
@@ -1344,22 +1335,22 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary       | Checkpoint |
 | --- | --------- | -------- | ----- | ------- | -------------------- | ------------- | ---------- |
 | 1   | agent-a#1 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | planning done | -          |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 
-[[SECTION:Artifacts]]
+<Artifacts type="core">
 | Artifact | Created In | Created By |
 | -------- | ---------- | ---------- |
 | plan.md  | PLANNING   | agent-a#1  |
-[[/SECTION:Artifacts]]
+</Artifacts>
 
-[[SECTION:WorkflowNotes]]
+<WorkflowNotes type="core">
 | Seq | Note |
 | --- | ---- |
-[[/SECTION:WorkflowNotes]]
+</WorkflowNotes>
 `
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(interruptedArtifact), 0600); err != nil {
@@ -1428,14 +1419,13 @@ func TestIntegration_IncompatibleWorkflow_RefusedFR18a(t *testing.T) {
 			name:       "parallel-dispatch",
 			workflowID: "parallel-dispatch",
 			// Condition 5: comma in OnSuccess signals parallel routing.
-			content: `[[SECTION:Workflow:parallel-dispatch]]
-<!-- workflow-version: 1.0 -->
+			content: `<Workflow type="core" name="parallel-dispatch" version="1.0">
 ## Parallel Dispatch Workflow
 
 | Phase | Subagent | HITL | On Success       | Input | Output |
 |-------|----------|:----:|------------------|-------|--------|
 | EXECUTION.[StageNumber] | implementation-tdd | ❌ | agent-a, agent-b | Stage-{StageNumber}/Plan.md | out.md |
-[[/SECTION:Workflow:parallel-dispatch]]
+</Workflow>
 `,
 			wantMsgContains: "parallel",
 		},
@@ -1447,14 +1437,13 @@ func TestIntegration_IncompatibleWorkflow_RefusedFR18a(t *testing.T) {
 			// supported). The output uses the literal wildcard "Stage-*/Plan.md"
 			// rather than the template form "Stage-{StageNumber}/Plan.md" to
 			// exercise the exact pattern compat checks for.
-			content: `[[SECTION:Workflow:dynamic-stages]]
-<!-- workflow-version: 1.0 -->
+			content: `<Workflow type="core" name="dynamic-stages" version="1.0">
 ## Dynamic Stage Set Workflow
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
 | EXECUTION.[StageNumber] | implementation-tdd | ❌ | COMPLETE | Stage-{StageNumber}/Plan.md | Stage-*/Plan.md |
-[[/SECTION:Workflow:dynamic-stages]]
+</Workflow>
 `,
 			wantMsgContains: "dynamic",
 		},
@@ -1462,14 +1451,13 @@ func TestIntegration_IncompatibleWorkflow_RefusedFR18a(t *testing.T) {
 			name:       "agent-with-mode-notation",
 			workflowID: "mode-notation",
 			// Condition 6: parentheses in agent identifier.
-			content: `[[SECTION:Workflow:mode-notation]]
-<!-- workflow-version: 1.0 -->
+			content: `<Workflow type="core" name="mode-notation" version="1.0">
 ## Mode Notation Workflow
 
 | Phase | Subagent       | HITL | On Success | Input | Output |
 |-------|----------------|:----:|------------|-------|--------|
 | PLANNING | agent-a(mode) | ❌ | COMPLETE | - | out.md |
-[[/SECTION:Workflow:mode-notation]]
+</Workflow>
 `,
 			wantMsgContains: "parentheses",
 		},
@@ -1528,7 +1516,7 @@ func TestIntegration_NonCanonicalArtifact_Refused_FR7a(t *testing.T) {
 	writeAgentFile(t, dir, "agent-b")
 
 	// Write a file at the artifact path that is NOT in the canonical format:
-	// no YAML frontmatter, no [[SECTION:...]] tags. The real FileStore calls
+	// no YAML frontmatter, no <SectionName type="..."> tags. The real FileStore calls
 	// artifact.Parse which returns *domain.RefusalError for this content.
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	const nonCanonicalContent = `# Orchestration
@@ -1587,15 +1575,14 @@ func TestIntegration_StageWildcardResolution_NonExecutionRow(t *testing.T) {
 	// planner declares Stage-*/Plan.md as output; plan-review takes
 	// Stage-*/Plan.md (and Plan.md) as input. The stage-set re-derivation
 	// must expand Stage-* to the concrete stage numbers found in Plan.md.
-	const orchContent = `[[SECTION:Workflow:wildcard-resolve]]
-<!-- workflow-version: 1.0 -->
+	const orchContent = `<Workflow type="core" name="wildcard-resolve" version="1.0">
 ## Stage Wildcard Resolution Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
 | PLANNING | planner | ❌ | plan-review | - | - | Plan.md, Stage-*/Plan.md |
 | PLANNING | plan-review | ❌ | COMPLETE | planner | Plan.md, Stage-*/Plan.md | plan-review.md |
-[[/SECTION:Workflow:wildcard-resolve]]
+</Workflow>
 `
 	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
 	writeAgentFile(t, dir, "planner")
@@ -2009,21 +1996,21 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary | Checkpoint |
 | --- | --------- | -------- | ----- | ------- | -------------------- | ------- | ---------- |
 | 1   | agent-a#1 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | done    | -          |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 
-[[SECTION:Artifacts]]
+<Artifacts type="core">
 | Artifact | Created In | Created By |
 | -------- | ---------- | ---------- |
-[[/SECTION:Artifacts]]
+</Artifacts>
 
-[[SECTION:WorkflowNotes]]
+<WorkflowNotes type="core">
 | Seq | Note |
 | --- | ---- |
-[[/SECTION:WorkflowNotes]]
+</WorkflowNotes>
 `
 	artifactPath := filepath.Join(runDir, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(seedingResumeArtifact), 0600); err != nil {
@@ -2474,23 +2461,23 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Checkpoint |
 | --- | ----- | ----- | ----- | ------ | --------- | ------- | ---------- |
 | 1 | agent-a#1 | PLANNING | - | SUCCESS | 2026-01-01T00:00:00Z | planning done | - |
 | 2 | checkpoint-manager-git#2 | PLANNING | - | SUCCESS | 2026-01-01T00:00:00Z | checkpoint taken | - |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 
-[[SECTION:Artifacts]]
+<Artifacts type="core">
 | Artifact | Created In | Created By |
 | -------- | ---------- | ---------- |
 | plan.md | PLANNING | agent-a#1 |
-[[/SECTION:Artifacts]]
+</Artifacts>
 
-[[SECTION:WorkflowNotes]]
+<WorkflowNotes type="core">
 | Seq | Note |
 | --- | ---- |
-[[/SECTION:WorkflowNotes]]
+</WorkflowNotes>
 `
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(artifactContent), 0600); err != nil {
@@ -2566,24 +2553,24 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Checkpoint |
 | --- | ----- | ----- | ----- | ------ | --------- | ------- | ---------- |
 | 1 | agent-a#1 | PLANNING | - | SUCCESS | 2026-01-01T00:00:00Z | planning done | - |
 | 2 | checkpoint-manager-git#2 | PLANNING | - | SUCCESS | 2026-01-01T00:00:00Z | checkpoint taken | - |
 | 3 | agent-b#3 | PLANNING | - | SUCCESS | 2026-01-01T00:00:00Z | done | - |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 
-[[SECTION:Artifacts]]
+<Artifacts type="core">
 | Artifact | Created In | Created By |
 | -------- | ---------- | ---------- |
 | plan.md | PLANNING | agent-a#1 |
-[[/SECTION:Artifacts]]
+</Artifacts>
 
-[[SECTION:WorkflowNotes]]
+<WorkflowNotes type="core">
 | Seq | Note |
 | --- | ---- |
-[[/SECTION:WorkflowNotes]]
+</WorkflowNotes>
 `
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(artifactContent), 0600); err != nil {

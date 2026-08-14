@@ -1,14 +1,15 @@
 // Package orchfile reads an orchestrator agent file and enumerates its workflow
 // regions. It uses docformat's depth-first section lookup to find
-// [[SECTION:Workflow:{id}]] nodes at any nesting depth, making it independent
-// of the structural depth at which workflows are embedded (bare top-level files
-// as well as deployed agents with nested injection slots both work).
+// <Workflow type="core" name="{id}"> nodes at any nesting depth, making it
+// independent of the structural depth at which workflows are embedded (bare
+// top-level files as well as deployed agents with nested injection slots both
+// work).
 //
-// Each workflow region carries its identifier (from the section name), version
-// (from the <!-- workflow-version: {version} --> comment immediately inside the
-// region), and raw content bytes (for the workflow parser).
+// Each workflow region carries its identifier (from the region's name attribute),
+// version (from the region's version attribute via the parser), and raw content
+// bytes (for the workflow parser).
 //
-// Refusals: missing file, no workflow regions found, missing version comment,
+// Refusals: missing file, no workflow regions found, missing version attribute,
 // duplicate identifier, empty identifier. Every refusal produces a *domain.RefusalError
 // naming the specific condition and the resource involved.
 package orchfile
@@ -16,7 +17,6 @@ package orchfile
 import (
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 
 	"mosaic-common/docformat"
@@ -24,22 +24,16 @@ import (
 	"mosaic-run/internal/domain"
 )
 
-// versionCommentRe matches <!-- workflow-version: {version} --> comments.
-var versionCommentRe = regexp.MustCompile(`<!--\s*workflow-version:\s*(\S+)\s*-->`)
-
-// infraVersionCommentRe matches <!-- infra-version: {version} --> comments.
-var infraVersionCommentRe = regexp.MustCompile(`<!--\s*infra-version:\s*(\S+)\s*-->`)
-
 // EnumerateWorkflows reads the file at the given path and returns all workflow
 // regions found at any nesting depth, identified by their
-// [[SECTION:Workflow:{id}]] boundary tags.
+// <Workflow type="core" name="{id}"> boundary tags.
 //
 // Returns a *domain.RefusalError with a specific message naming the file and
 // region if:
 //   - The file does not exist or cannot be read
 //   - No workflow regions are found
 //   - A region has no parseable identifier (empty id part)
-//   - A region has no version comment
+//   - A region has no version attribute
 //   - Two regions declare the same identifier
 func EnumerateWorkflows(path string) ([]domain.WorkflowRegion, error) {
 	data, err := os.ReadFile(path)
@@ -91,18 +85,17 @@ func EnumerateWorkflows(path string) ([]domain.WorkflowRegion, error) {
 			}
 		}
 
-		content := node.Content()
-
-		// Extract version from the <!-- workflow-version: {version} --> comment.
-		submatch := versionCommentRe.FindSubmatch(content)
-		if submatch == nil {
+		// Read version from the region's version attribute.
+		version := node.Version()
+		if version == "" {
 			return nil, &domain.RefusalError{
 				Component: "orchfile",
 				Resource:  id,
-				Reason:    "no version comment found in workflow region",
+				Reason:    "no version attribute found in workflow region",
 			}
 		}
-		version := string(submatch[1])
+
+		content := node.Content()
 
 		// Refuse duplicate identifiers.
 		if seen[id] {
@@ -128,8 +121,8 @@ func EnumerateWorkflows(path string) ([]domain.WorkflowRegion, error) {
 
 // EnumerateInfrastructureAgents reads the file at the given path and returns
 // all infrastructure agent declarations found in the
-// [[INJECTION:InfrastructureAgents]] region. Each agent is identified by its
-// [[SECTION:InfrastructureAgent:{name}]] boundary tag.
+// <InfrastructureAgents type="project"> region. Each agent is identified by its
+// <InfrastructureAgent type="core" name="{name}"> boundary tag.
 //
 // Returns an empty slice (not an error) when the injection region is absent or
 // empty — this is valid per the design.
@@ -192,14 +185,10 @@ func EnumerateInfrastructureAgents(path string) ([]domain.DeclaredInfraAgent, er
 		}
 		seen[name] = true
 
-		content := node.Content()
+		// Read version from the region's version attribute (optional).
+		version := node.Version()
 
-		// Extract version from the <!-- infra-version: {version} --> comment.
-		version := ""
-		submatch := infraVersionCommentRe.FindSubmatch(content)
-		if submatch != nil {
-			version = string(submatch[1])
-		}
+		content := node.Content()
 
 		// Parse the markdown table inside the section.
 		agent, parseErr := parseInfraAgentTable(name, version, content)

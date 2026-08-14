@@ -1,7 +1,7 @@
 package transform_test
 
 // custom_region_fallthrough_test.go covers GapCustomRegionFallthrough emission when a
-// [[CUSTOM:]] region's recorded parent cannot be resolved in the output document and the
+// custom-region region's recorded parent cannot be resolved in the output document and the
 // region falls through to body-level placement — regardless of whether a schema reorder
 // was also detected.
 //
@@ -55,20 +55,20 @@ tier_rationale: multiple fallthrough testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MultipleFallthrough Agent
 
 You are the MultipleFallthrough agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // multipleFallthroughDeployed has Identity → OldSectionA → OldSectionB → Capabilities.
@@ -86,45 +86,45 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MultipleFallthrough Agent
 
 You are the MultipleFallthrough agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Saved identity content that must survive.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:OldSectionA]]
+<OldSectionA type="core">
 ## Old Section A
 
 This section is removed from the source.
 
-[[CUSTOM:ZetaNote]]
+<ZetaNote type="custom">
 Content of ZetaNote — parent OldSectionA is gone, must fall through to body level.
-[[/CUSTOM:ZetaNote]]
+</ZetaNote>
 
-[[CUSTOM:BetaNote]]
+<BetaNote type="custom">
 Content of BetaNote — parent OldSectionA is gone, must fall through to body level.
-[[/CUSTOM:BetaNote]]
-[[/SECTION:OldSectionA]]
+</BetaNote>
+</OldSectionA>
 
-[[SECTION:OldSectionB]]
+<OldSectionB type="core">
 ## Old Section B
 
 This section is also removed from the source.
 
-[[CUSTOM:AlphaNote]]
+<AlphaNote type="custom">
 Content of AlphaNote — parent OldSectionB is gone, must fall through to body level.
-[[/CUSTOM:AlphaNote]]
-[[/SECTION:OldSectionB]]
+</AlphaNote>
+</OldSectionB>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // ---------------------------------------------------------------------------
@@ -149,20 +149,20 @@ tier_rationale: mixed fallthrough testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MixedFallthrough Agent
 
 You are the MixedFallthrough agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // mixedFallthroughDeployed has Identity → OldSection → Capabilities.
@@ -179,44 +179,44 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MixedFallthrough Agent
 
 You are the MixedFallthrough agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Saved identity content that must survive.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:OldSection]]
+<OldSection type="core">
 ## Old Section
 
 This section is removed from the source.
 
-[[CUSTOM:OldNote]]
+<OldNote type="custom">
 Content anchored to OldSection — parent gone, must fall through to body level.
-[[/CUSTOM:OldNote]]
-[[/SECTION:OldSection]]
+</OldNote>
+</OldSection>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
 
-[[CUSTOM:CapabilitiesNote]]
+<CapabilitiesNote type="custom">
 A note anchored to the Capabilities section — parent still in source and output, no fallthrough.
-[[/CUSTOM:CapabilitiesNote]]
-[[/SECTION:Capabilities]]
+</CapabilitiesNote>
+</Capabilities>
 `
 
 // ---------------------------------------------------------------------------
 // Fixture 802 — Deployed-region parent fallthrough: custom region whose recorded parent
-// is a [[DEPLOYED:]] region absent from the output document.
+// is a managed region region absent from the output document.
 //
 // Source has Identity and Capabilities sections but does NOT declare OldHarnessRegion.
-// Deployed file has [[DEPLOYED:OldHarnessRegion]] nested inside [[SECTION:Capabilities]],
-// and [[CUSTOM:HarnessNote]] nested inside [[DEPLOYED:OldHarnessRegion]]. Because the source
+// Deployed file has <OldHarnessRegion type="managed"> nested inside <Capabilities type="core">,
+// and <HarnessNote type="custom"> nested inside <OldHarnessRegion type="managed">. Because the source
 // no longer declares OldHarnessRegion, the output will not contain it. When processing
 // HarnessNote (recorded parent "OldHarnessRegion", parentKind NodeDeployed), the caller-side
 // detection probes body.SectionDeep("OldHarnessRegion") — not found — then
@@ -243,24 +243,24 @@ tier_rationale: deployed region fallthrough testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # DeployedRegionFallthrough Agent
 
 You are the DeployedRegionFallthrough agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
-// deployedRegionFallthroughDeployed has HarnessNote nested inside [[DEPLOYED:OldHarnessRegion]],
-// which in turn is nested inside [[SECTION:Capabilities]]. The source no longer declares
+// deployedRegionFallthroughDeployed has HarnessNote nested inside <OldHarnessRegion type="managed">,
+// which in turn is nested inside <Capabilities type="core">. The source no longer declares
 // OldHarnessRegion, so the output will not contain it. HarnessNote's recorded parent is
 // "OldHarnessRegion" with parentKind NodeDeployed; when neither body.SectionDeep nor
 // body.Deployed resolves this name in the output, the fallthrough gap must be emitted and
@@ -276,29 +276,29 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # DeployedRegionFallthrough Agent
 
 You are the DeployedRegionFallthrough agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Saved identity content.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
 
-[[DEPLOYED:OldHarnessRegion]]
+<OldHarnessRegion type="managed">
 This deployed region is no longer declared in the source.
 
-[[CUSTOM:HarnessNote]]
+<HarnessNote type="custom">
 Content anchored to OldHarnessRegion — a deployed-region parent absent from the output.
-[[/CUSTOM:HarnessNote]]
-[[/DEPLOYED:OldHarnessRegion]]
-[[/SECTION:Capabilities]]
+</HarnessNote>
+</OldHarnessRegion>
+</Capabilities>
 `
 
 // ---------------------------------------------------------------------------
@@ -318,7 +318,7 @@ func findFallthroughGap(gaps []domain.Gap) *domain.Gap {
 // T3.1 — No-reorder fallthrough: GapCustomRegionFallthrough emitted
 // ---------------------------------------------------------------------------
 
-// TestFallthrough_NoReorder_MissingParent_EmitsGap verifies that when a [[CUSTOM:]] region's
+// TestFallthrough_NoReorder_MissingParent_EmitsGap verifies that when a custom-region region's
 // recorded parent is absent from the output document and no reorder is detected among the
 // surviving structural slots, a GapCustomRegionFallthrough gap is emitted. This is the core
 // Stage 3 requirement: the silence when a section is simply removed must be broken.
@@ -619,7 +619,7 @@ func TestFallthrough_OutcomeAction_IsCustomPreserved(t *testing.T) {
 // T3.2 — Negative case: parent resolves — no GapCustomRegionFallthrough
 // ---------------------------------------------------------------------------
 
-// TestFallthrough_ParentResolves_NoFallthroughGap verifies that a [[CUSTOM:]] region whose
+// TestFallthrough_ParentResolves_NoFallthroughGap verifies that a custom-region region whose
 // parent section still exists in the output document produces no GapCustomRegionFallthrough.
 // The gap is emitted only when the parent cannot be resolved.
 func TestFallthrough_ParentResolves_NoFallthroughGap(t *testing.T) {
@@ -645,7 +645,7 @@ func TestFallthrough_ParentResolves_NoFallthroughGap(t *testing.T) {
 	}
 }
 
-// TestFallthrough_TopLevel_NoFallthroughGap verifies that a top-level [[CUSTOM:]] region
+// TestFallthrough_TopLevel_NoFallthroughGap verifies that a top-level custom-region region
 // (ParentName = "") is never treated as a fallthrough. A top-level region was always at body
 // level and has no missing parent.
 func TestFallthrough_TopLevel_NoFallthroughGap(t *testing.T) {
@@ -823,13 +823,13 @@ func TestFallthrough_Regression_NoFallthroughOnCreate(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestFallthrough_DeployedRegionParent_MissingParent_EmitsGap verifies that when a
-// [[CUSTOM:]] region's recorded parent is a [[DEPLOYED:]] region that is absent from the
+// custom-region region's recorded parent is a managed region region that is absent from the
 // output document (the source no longer declares it), a GapCustomRegionFallthrough gap is
 // emitted. This exercises the body.Deployed lookup branch in the caller-side fallthrough
 // detection — a buggy implementation that checked only body.SectionDeep would still pass
 // all section-parent fixtures but would silently miss this case.
 func TestFallthrough_DeployedRegionParent_MissingParent_EmitsGap(t *testing.T) {
-	// deployedRegionFallthroughDeployed has HarnessNote nested inside [[DEPLOYED:OldHarnessRegion]].
+	// deployedRegionFallthroughDeployed has HarnessNote nested inside <OldHarnessRegion type="managed">.
 	// deployedRegionFallthroughSource no longer declares OldHarnessRegion, so the output will
 	// not contain it. HarnessNote (parentKind NodeDeployed, parent "OldHarnessRegion") must
 	// produce GapCustomRegionFallthrough because neither body.SectionDeep nor body.Deployed
@@ -855,8 +855,8 @@ func TestFallthrough_DeployedRegionParent_MissingParent_EmitsGap(t *testing.T) {
 	}
 }
 
-// TestFallthrough_DeployedRegionParent_ContentAtBodyLevel verifies that when a [[CUSTOM:]]
-// region's recorded parent is a [[DEPLOYED:]] region absent from the output, the region's
+// TestFallthrough_DeployedRegionParent_ContentAtBodyLevel verifies that when a custom-region
+// region's recorded parent is a managed region region absent from the output, the region's
 // content is still placed at body level. Fallthrough changes signalling only — content must
 // not be discarded even when the missing parent is a deployed region rather than a section.
 func TestFallthrough_DeployedRegionParent_ContentAtBodyLevel(t *testing.T) {

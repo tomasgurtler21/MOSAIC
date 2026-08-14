@@ -2,7 +2,6 @@ package transform
 
 import (
 	"errors"
-	"fmt"
 
 	"mosaic-common/docformat"
 	"mosaic-deploy/internal/domain"
@@ -37,12 +36,12 @@ const (
 	// block content, verbatim.
 	RegionBundleFilled RegionAction = "filled-from-bundle"
 
-	// RegionCustomPreserved means a [[CUSTOM:]] region found in the deployed file was
+	// RegionCustomPreserved means a custom region found in the deployed file was
 	// carried into the output at its anchored position. The content is byte-identical to
 	// the deployed file; no content is regenerated or reformatted.
 	RegionCustomPreserved RegionAction = "preserved-custom"
 
-	// RegionParked means a [[CUSTOM:]] region could not be anchored in the output after
+	// RegionParked means a custom region could not be anchored in the output after
 	// a schema reorder and was appended at the end of the file with content intact. The
 	// user must move it to the correct section.
 	RegionParked RegionAction = "parked-at-end-of-file"
@@ -53,7 +52,7 @@ const (
 )
 
 // RegionOutcome records what happened to one managed region in the document body.
-// It covers [[INJECTION:]] (user-owned), [[DEPLOYED:]] (tool-managed), and [[CUSTOM:]]
+// It covers injection (user-owned), managed (tool-managed), and custom
 // (project-invented, deployed-file only) regions, with the Marker field distinguishing them.
 type RegionOutcome struct {
 	Name   string
@@ -71,7 +70,7 @@ func (o RegionOutcome) ToolManaged() bool { return o.Marker == docformat.NodeDep
 var ErrMarkerMismatch = docformat.ErrMarkerMismatch
 
 // ErrUnknownDeployedName wraps docformat.ErrUnknownDeployedName for a source document
-// region that declares a [[DEPLOYED:]] boundary whose name is not in the tool-managed
+// region that declares a managed boundary whose name is not in the tool-managed
 // registry. An unrecognised name has no generator and cannot be filled.
 var ErrUnknownDeployedName = docformat.ErrUnknownDeployedName
 
@@ -84,14 +83,14 @@ var ErrProtocolContentMissing = errors.New("no protocol content for agent role")
 // an agent that appears complete and instructs nothing, so this is a hard error.
 var ErrBundleBlockMissingForRole = errors.New("no bundle block for region and role")
 
-// ErrSourceDeployedRegionNotEmpty reports a [[DEPLOYED:]] region carrying content in a
+// ErrSourceDeployedRegionNotEmpty reports a managed region carrying content in a
 // source file. Source regions are empty by definition; content there is either a hand-edit
 // about to be discarded or a deployed file mistakenly committed as source.
 var ErrSourceDeployedRegionNotEmpty = errors.New("source file carries a populated deployed region")
 
 // ErrRegionNameCollision reports a name that is claimed by two user-owned regions at once:
-// either the same name appears twice as [[CUSTOM:]] in the deployed file, or the same name
-// appears as [[CUSTOM:]] in the deployed file and [[INJECTION:]] in the source. Preserving
+// either the same name appears twice as a custom region in the deployed file, or the same name
+// appears as a custom region in the deployed file and an injection region in the source. Preserving
 // both would break the unique-name-per-file invariant; preserving one would silently lose
 // the other's content. The transform never guesses which copy to keep.
 //
@@ -118,13 +117,3 @@ func DetectLineEnding(content []byte) string {
 	return "\n"
 }
 
-// ProtocolVersionComment renders the version marker line written as the first line of the
-// deployed protocol region, terminated to match content's own line ending:
-// "<!-- protocol-version: 1.10 -->\r\n" for CRLF content, "<!-- protocol-version: 1.10 -->\n"
-// for LF content and for content with no line ending at all.
-//
-// content is the protocol block the marker line will be prepended to. Passing nil is legal
-// and yields the LF form.
-func ProtocolVersionComment(version string, content []byte) string {
-	return fmt.Sprintf("<!-- protocol-version: %s -->%s", version, DetectLineEnding(content))
-}

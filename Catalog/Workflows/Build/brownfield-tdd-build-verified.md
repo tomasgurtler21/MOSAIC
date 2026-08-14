@@ -36,8 +36,7 @@ artifacts:
   - Stage-{StageNumber}/implementation-review.md
 ---
 
-[[SECTION:Workflow:brownfield-tdd-build-verified]]
-<!-- workflow-version: 2.1 -->
+<Workflow type="core" name="brownfield-tdd-build-verified" version="2.1">
 ## Brownfield TDD Build-Verified Workflow
 
 **Use when:** New features or significant changes to an **existing codebase** requiring test-first development where **compilation/build cannot be verified via standard terminal tools** (e.g., PLC/SCL with proprietary toolchains, embedded systems, cross-compilation environments). Adds a dedicated build-and-deploy step between code writing and code review. Review agents execute tests on the target platform to verify TDD RED/GREEN phases.
@@ -77,7 +76,7 @@ artifacts:
 - contracts-designer + contracts-review are optional — skip both if no new contracts are needed
 - **When to use over standard Brownfield TDD:** Use this workflow when the build/compile toolchain is not accessible via standard terminal commands and requires specialized tool invocations (MCP servers, COM automation, proprietary IDEs, etc.)
 
-[[/SECTION:Workflow:brownfield-tdd-build-verified]]
+</Workflow>
 
 ---
 

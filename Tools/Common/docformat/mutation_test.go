@@ -1,8 +1,8 @@
 package docformat_test
 
-// Tests for body node mutation operations (T4.4) and single-node mutation fidelity (T4.6).
+// Tests for body node mutation operations and single-node mutation fidelity.
 //
-// Coverage (T4.4 — mutations):
+// Coverage (mutations):
 //   - Node.SetContent replaces a section's content; the new content is returned by Content.
 //   - Node.SetContent replaces an injection's content; the new content is returned by Content.
 //   - Node.Clear empties an injection's content; IsEmpty returns true afterwards.
@@ -11,7 +11,7 @@ package docformat_test
 //   - Node.Content after SetContent returns the new bytes (the "lift" use case).
 //   - Node.Clear followed by SetContent works as a two-step fill operation.
 //
-// Coverage (T4.6 — byte fidelity):
+// Coverage (byte fidelity):
 //   - After SetContent on one section, all other sections in the document are byte-identical.
 //   - After Clear on one injection, all other nodes in the document are byte-identical.
 //   - After SetContent on one injection, the document bytes differ only in that injection's region.
@@ -74,10 +74,10 @@ func TestMutation_Section_SetContent_BytesContainsBoundaryTagsAndNewContent(t *t
 	}
 
 	b := node.Bytes()
-	if !bytes.Contains(b, []byte("[[SECTION:Identity]]")) {
+	if !bytes.Contains(b, []byte(`<Identity type="core">`)) {
 		t.Error("Node.Bytes after SetContent must contain the opening boundary tag")
 	}
-	if !bytes.Contains(b, []byte("[[/SECTION:Identity]]")) {
+	if !bytes.Contains(b, []byte("</Identity>")) {
 		t.Error("Node.Bytes after SetContent must contain the closing boundary tag")
 	}
 	if !bytes.Contains(b, []byte("New section content.")) {
@@ -154,10 +154,10 @@ func TestMutation_Injection_Clear_BoundaryTagsRemainInNodeBytes(t *testing.T) {
 	}
 
 	b := node.Bytes()
-	if !bytes.Contains(b, []byte("[[INJECTION:IdentityExtension]]")) {
+	if !bytes.Contains(b, []byte(`<IdentityExtension type="project">`)) {
 		t.Error("Node.Bytes after Clear must still contain the opening boundary tag")
 	}
-	if !bytes.Contains(b, []byte("[[/INJECTION:IdentityExtension]]")) {
+	if !bytes.Contains(b, []byte("</IdentityExtension>")) {
 		t.Error("Node.Bytes after Clear must still contain the closing boundary tag")
 	}
 }
@@ -202,7 +202,7 @@ func TestMutation_Injection_ClearThenSetContent_ContentIsNew(t *testing.T) {
 	}
 }
 
-// --- T4.6: Byte fidelity — mutations leave all other bytes unchanged ---
+// --- Byte fidelity — mutations leave all other bytes unchanged ---
 
 func TestMutationFidelity_SetContent_OtherSectionBytesUnchanged(t *testing.T) {
 	// Mutating one section must leave every byte of every other section identical.
@@ -313,17 +313,17 @@ func TestMutationFidelity_SetContent_BoundaryTagsOfMutatedNodePreserved(t *testi
 	}
 
 	docBytes := doc.Bytes()
-	if !bytes.Contains(docBytes, []byte("[[SECTION:Identity]]")) {
+	if !bytes.Contains(docBytes, []byte(`<Identity type="core">`)) {
 		t.Error("doc.Bytes() after SetContent must still contain the opening boundary tag")
 	}
-	if !bytes.Contains(docBytes, []byte("[[/SECTION:Identity]]")) {
+	if !bytes.Contains(docBytes, []byte("</Identity>")) {
 		t.Error("doc.Bytes() after SetContent must still contain the closing boundary tag")
 	}
 }
 
 func TestMutationFidelity_SetContent_UntaggedSpanBetweenSectionsPreserved(t *testing.T) {
-	// The untagged span between sections (the blank line between [[/SECTION:Identity]]
-	// and [[SECTION:CommunicationProtocol]]) must be preserved verbatim after mutating
+	// The untagged span between sections (the blank line between </Identity>
+	// and <CommunicationProtocol type="core">) must be preserved verbatim after mutating
 	// either adjacent section.
 	doc := parsedBoundaryFixture(t, "multiple-sections.md")
 	src := boundaryFixtureBytes(t, "multiple-sections.md")
@@ -331,16 +331,16 @@ func TestMutationFidelity_SetContent_UntaggedSpanBetweenSectionsPreserved(t *tes
 	// Extract the exact untagged span bytes from the original source: the bytes that
 	// lie between the end of the Identity closing tag line and the start of the
 	// CommunicationProtocol opening tag line.
-	const closingIdentity = "[[/SECTION:Identity]]\n"
-	const openingProtocol = "[[SECTION:CommunicationProtocol]]"
+	const closingIdentity = "</Identity>\n"
+	const openingProtocol = "<CommunicationProtocol"
 	endOfClosing := bytes.Index(src, []byte(closingIdentity))
 	if endOfClosing < 0 {
-		t.Fatal("could not find [[/SECTION:Identity]] closing tag in fixture source")
+		t.Fatal("could not find </Identity> closing tag in fixture source")
 	}
 	spanStart := endOfClosing + len(closingIdentity)
 	startOfProto := bytes.Index(src, []byte(openingProtocol))
 	if startOfProto < 0 {
-		t.Fatal("could not find [[SECTION:CommunicationProtocol]] in fixture source")
+		t.Fatal("could not find <CommunicationProtocol...> in fixture source")
 	}
 	if spanStart > startOfProto {
 		t.Fatal("fixture layout unexpected: CommunicationProtocol appears before Identity closing tag")
@@ -372,9 +372,6 @@ func TestMutation_Section_SetContent_NestedInjectionRemainsAddressableWhenTagsIn
 	// Node.SetContent contract: "preserves nested nodes only if b contains their tags."
 	// When the replacement bytes include the nested injection's boundary tag lines, the
 	// injection node must remain live and addressable via Body.Injection and Section.Children.
-	//
-	// This path verifies that an implementation cannot silently drop all nested nodes on
-	// every SetContent call without violating the contract.
 	doc := parsedBoundaryFixture(t, "empty-injection.md")
 	body := doc.Body()
 
@@ -384,7 +381,7 @@ func TestMutation_Section_SetContent_NestedInjectionRemainsAddressableWhenTagsIn
 	}
 
 	// Supply replacement bytes that still contain the injection's boundary tag lines.
-	newContent := []byte("Updated preamble.\n[[INJECTION:IdentityExtension]]\n[[/INJECTION:IdentityExtension]]\nUpdated postamble.\n")
+	newContent := []byte("Updated preamble.\n<IdentityExtension type=\"project\">\n</IdentityExtension>\nUpdated postamble.\n")
 	if err := section.SetContent(newContent); err != nil {
 		t.Fatalf("SetContent with nested injection tags: %v", err)
 	}
@@ -414,8 +411,7 @@ func TestMutation_Section_SetContent_NestedInjectionRemainsAddressableWhenTagsIn
 func TestMutation_Section_SetContent_NestedInjectionRemovedWhenTagsOmitted(t *testing.T) {
 	// Node.SetContent contract: "preserves nested nodes only if b contains their tags."
 	// When the replacement bytes do NOT include the nested injection's boundary tag lines,
-	// the injection node must be removed — Body.Injection must return false and
-	// Section.Children must be empty.
+	// the injection node must be removed.
 	doc := parsedBoundaryFixture(t, "empty-injection.md")
 	body := doc.Body()
 

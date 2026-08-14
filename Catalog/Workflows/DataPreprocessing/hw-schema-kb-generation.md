@@ -19,8 +19,7 @@ artifacts:
   - KBFlagReport.md
 ---
 
-[[SECTION:Workflow:hw-schema-kb-generation]]
-<!-- workflow-version: 0.5 -->
+<Workflow type="core" name="hw-schema-kb-generation" version="0.5">
 ## HW Schema Knowledge Base Generation Workflow
 
 **Use when:** Generate knowledge base documentation for a **hardware schematic design**. Researches each sheet individually, then synthesizes domain-oriented KB documentation with tiered abstraction — from project overview down to complex circuit subsystems.
@@ -47,7 +46,7 @@ artifacts:
 - **Two progress artifacts** — HWResearchProgress.md tracks per-sheet research stages; KBProgress.md tracks KB generation/correction stages. Different concerns, different lifecycles
 - **Per-sheet research files are temporary** — project files in a dedicated directory (e.g., `SheetsResearch/`), referenced in HWResearchProgress.md. Can be cleaned up after workflow completion
 - **KBProgress.md bootstrap** — first KB generator run creates KBProgress.md based on its analysis of all sheet research; it does not exist as a prerequisite
-[[/SECTION:Workflow:hw-schema-kb-generation]]
+</Workflow>
 
 ---
 

@@ -79,7 +79,7 @@ import (
 
 // eligibleHarnessOnlyAgentBytes returns the bytes of a minimal harness-only agent that
 // satisfies both eligibility signals: frontmatter with transform_version and a body with
-// one properly paired canonical [[SECTION:Identity]] tag. The file also carries the catalog
+// one properly paired canonical <Identity type="core"> tag. The file also carries the catalog
 // fields (id, version, name, description, role, recommended_tier, tier_rationale, tools,
 // required_skills) so the generated generic file is catalog-discoverable after promotion.
 func eligibleHarnessOnlyAgentBytes() []byte {
@@ -98,19 +98,18 @@ func eligibleHarnessOnlyAgentBytes() []byte {
 		"tools: [file_read, bash]\n" +
 		"required_skills: [lean-tdd]\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are My Harness Agent, responsible for performing promote-test tasks.\n" +
-		"[[INJECTION:IdentityExtension]]\n" +
+		"<IdentityExtension type=\"project\">\n" +
 		"Some harness-specific injection content.\n" +
-		"[[/INJECTION:IdentityExtension]]\n" +
-		"[[/SECTION:Identity]]\n" +
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-		"<!-- protocol-version: 1.9 -->\n" +
+		"</IdentityExtension>\n" +
+		"</Identity>\n" +
+		"<CommunicationProtocol type=\"managed\" version=\"1.9\">\n" +
 		"Protocol content here.\n" +
-		"[[/DEPLOYED:CommunicationProtocol]]\n" +
-		"[[SECTION:Capabilities]]\n" +
+		"</CommunicationProtocol>\n" +
+		"<Capabilities type=\"core\">\n" +
 		"Some capability prose.\n" +
-		"[[/SECTION:Capabilities]]\n")
+		"</Capabilities>\n")
 }
 
 // ineligibleSourceWithNoTransformVersion returns source bytes that do not carry
@@ -122,9 +121,9 @@ func ineligibleSourceWithNoTransformVersion() []byte {
 		"name: not-harness-only\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Plain prose — no transform_version means ineligible.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // ineligibleSourceWithNoBoundaryTags returns source bytes that carry transform_version
@@ -134,7 +133,7 @@ func ineligibleSourceWithNoBoundaryTags() []byte {
 		"transform_version: \"2.1.0\"\n" +
 		"version: \"1.0.0\"\n" +
 		"---\n" +
-		"Just plain text. No [[SECTION:]] tags of any kind.\n")
+		"Just plain text. No section region tags of any kind.\n")
 }
 
 // writeMosaicRoot creates a minimal MOSAIC root in t.TempDir() that catalog.Load can parse.
@@ -1594,9 +1593,9 @@ func eligibleHarnessOnlyAgentWithOpenCodeKeys() []byte {
 		"  list: allow\n" +
 		"  bash: allow\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are My OpenCode Agent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // TestPromote_HarnessDropKeysWiredIntoService verifies the end-to-end drop-set wiring
@@ -1806,9 +1805,9 @@ func eligibleAgentWithHarnessTools(toolNames ...string) []byte {
 		"required_skills: [lean-tdd]\n" +
 		toolsLine + "\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the ToolTestAgent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // newToolResolutionPromoteDeps returns app.Deps wired with toolResolutionHarnessModule
@@ -2300,9 +2299,9 @@ func eligibleAgentWithoutRecoverableFields() []byte {
 		"role: subagent\n" +
 		// Intentionally absent: recommended_tier, tier_rationale, required_skills
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content for field recovery tests.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // writeSourceFile writes src to t.TempDir() as "field-recovery-agent.md" and returns the path.
@@ -3024,9 +3023,9 @@ func TestPromote_SourceHasTier_OnlyRationaleAndSkillsInRecoveredFields(t *testin
 		"recommended_tier: HIGH\n" +
 		// No tier_rationale, no required_skills
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 	srcPath := writeSourceFile(t, src)
 	mosaicRoot := t.TempDir()
 	stub := interactiontest.NewBuilder().
@@ -3301,9 +3300,9 @@ func TestPromote_RealOpenCodeFixture_NonInteractive_ZeroBlockingInteraction(t *t
 // already correct before this work remain correct after it:
 //
 // Body parity:
-//   - [[SECTION:...]] blocks carry their prose byte-identical from the source fixture
-//   - [[INJECTION:...]] regions are empty tag pairs (no content between open/close tags)
-//   - [[DEPLOYED:...]] regions are empty tag pairs
+//   - <... type="core"> blocks carry their prose byte-identical from the source fixture
+//   - <... type="project"> regions are empty tag pairs (no content between open/close tags)
+//   - <... type="managed"> regions are empty tag pairs
 //
 // Frontmatter parity:
 //   - id is derived from the catalog (empty catalog → "1"), not carried from the source
@@ -3374,7 +3373,7 @@ func TestPromote_RealOpenCodeFixture_Parity_BodyAndFrontmatter(t *testing.T) {
 		{"ExecutionPhilosophy", "Exploration Mindset"},
 	} {
 		if !strings.Contains(destStr, sc.excerpt) {
-			t.Errorf("output missing expected excerpt from [[SECTION:%s]]: %q", sc.section, sc.excerpt)
+			t.Errorf("output missing expected excerpt from <%s type=\"core\">: %q", sc.section, sc.excerpt)
 		}
 	}
 
@@ -3387,21 +3386,21 @@ func TestPromote_RealOpenCodeFixture_Parity_BodyAndFrontmatter(t *testing.T) {
 		"ContextLimits",
 		"ErrorHandlingExtension",
 	} {
-		open := "[[INJECTION:" + tag + "]]"
-		close := "[[/INJECTION:" + tag + "]]"
+		open := "<" + tag + " type=\"project\">"
+		closeTag := "</" + tag + ">"
 		openIdx := strings.Index(destStr, open)
 		if openIdx < 0 {
-			t.Errorf("output missing injection open tag [[INJECTION:%s]]", tag)
+			t.Errorf("output missing injection open tag <%s type=\"project\">", tag)
 			continue
 		}
-		closeIdx := strings.Index(destStr, close)
+		closeIdx := strings.Index(destStr, closeTag)
 		if closeIdx < 0 {
-			t.Errorf("output missing injection close tag [[/INJECTION:%s]]", tag)
+			t.Errorf("output missing injection close tag </%s>", tag)
 			continue
 		}
 		between := destStr[openIdx+len(open) : closeIdx]
 		if strings.TrimSpace(between) != "" {
-			t.Errorf("[[INJECTION:%s]] region is not empty: content = %q", tag, between)
+			t.Errorf("<%s type=\"project\"> region is not empty: content = %q", tag, between)
 		}
 	}
 
@@ -3409,21 +3408,21 @@ func TestPromote_RealOpenCodeFixture_Parity_BodyAndFrontmatter(t *testing.T) {
 	for _, tag := range []string{
 		"CommunicationProtocol",
 	} {
-		open := "[[DEPLOYED:" + tag + "]]"
-		close := "[[/DEPLOYED:" + tag + "]]"
+		open := "<" + tag + " type=\"managed\">"
+		closeTag := "</" + tag + ">"
 		openIdx := strings.Index(destStr, open)
 		if openIdx < 0 {
-			t.Errorf("output missing deployed open tag [[DEPLOYED:%s]]", tag)
+			t.Errorf("output missing deployed open tag <%s type=\"managed\">", tag)
 			continue
 		}
-		closeIdx := strings.Index(destStr, close)
+		closeIdx := strings.Index(destStr, closeTag)
 		if closeIdx < 0 {
-			t.Errorf("output missing deployed close tag [[/DEPLOYED:%s]]", tag)
+			t.Errorf("output missing deployed close tag </%s>", tag)
 			continue
 		}
 		between := destStr[openIdx+len(open) : closeIdx]
 		if strings.TrimSpace(between) != "" {
-			t.Errorf("[[DEPLOYED:%s]] region is not empty: content = %q", tag, between)
+			t.Errorf("<%s type=\"managed\"> region is not empty: content = %q", tag, between)
 		}
 	}
 }

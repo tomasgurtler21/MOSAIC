@@ -2,8 +2,8 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
-[[SECTION:Capabilities]]
+<Identity type="core">
+<Capabilities type="core">
 Nested section content — sections must not nest inside sections.
-[[/SECTION:Capabilities]]
-[[/SECTION:Identity]]
+</Capabilities>
+</Identity>

@@ -22,9 +22,9 @@ package artifact_test
 //   Parse — refusal cases:
 //   - Non-existent file → os.ErrNotExist (tested via Read, not Parse directly).
 //   - Missing "type: orchestration-artifact" → *domain.RefusalError.
-//   - Old template format (no [[SECTION:...]] tags) → *domain.RefusalError.
-//   - Missing [[SECTION:ExecutionLog]] section → *domain.RefusalError.
-//   - Missing [[SECTION:Artifacts]] section → *domain.RefusalError.
+//   - Old template format (no <Name type="..."> tags) → *domain.RefusalError.
+//   - Missing <ExecutionLog type="core"> section → *domain.RefusalError.
+//   - Missing <Artifacts type="core"> section → *domain.RefusalError.
 //   - Truncated file → *domain.RefusalError.
 //   - RefusalError.Component must be "artifact".
 //   - RefusalError.Resource must name the file path.
@@ -463,7 +463,7 @@ func TestParse_MissingTypeField_ReturnsRefusalError(t *testing.T) {
 }
 
 func TestParse_OldTemplateFormat_ReturnsRefusalError(t *testing.T) {
-	// Old template format uses markdown headings instead of [[SECTION:...]] tags
+	// Old template format uses plain markdown headings instead of <Name type="..."> region tags
 	// and may have the "Subgent" typo.  Both signatures indicate a non-canonical file.
 	data, err := os.ReadFile(fixturePath("old-template.md"))
 	if err != nil {
@@ -487,7 +487,7 @@ func TestParse_MissingExecutionLogSection_ReturnsRefusalError(t *testing.T) {
 	_, err = artifact.Parse(data)
 
 	if err == nil {
-		t.Fatal("Parse must return an error when [[SECTION:ExecutionLog]] is absent")
+		t.Fatal("Parse must return an error when <ExecutionLog type=\"core\"> is absent")
 	}
 	asRefusalError(t, err)
 }
@@ -501,7 +501,7 @@ func TestParse_MissingArtifactsSection_ReturnsRefusalError(t *testing.T) {
 	_, err = artifact.Parse(data)
 
 	if err == nil {
-		t.Fatal("Parse must return an error when [[SECTION:Artifacts]] is absent")
+		t.Fatal("Parse must return an error when <Artifacts type=\"core\"> is absent")
 	}
 	asRefusalError(t, err)
 }
@@ -1458,14 +1458,14 @@ func minimalArtifactBytes(runID string) []byte {
 		"  error_code: null\n" +
 		"---\n" +
 		"\n" +
-		"[[SECTION:ExecutionLog]]\n" +
-		"[[/SECTION:ExecutionLog]]\n" +
+		"<ExecutionLog type=\"core\">\n" +
+		"</ExecutionLog>\n" +
 		"\n" +
-		"[[SECTION:Artifacts]]\n" +
-		"[[/SECTION:Artifacts]]\n" +
+		"<Artifacts type=\"core\">\n" +
+		"</Artifacts>\n" +
 		"\n" +
-		"[[SECTION:WorkflowNotes]]\n" +
-		"[[/SECTION:WorkflowNotes]]\n")
+		"<WorkflowNotes type=\"core\">\n" +
+		"</WorkflowNotes>\n")
 }
 
 func TestParse_RunIDPresentInFrontmatter_PopulatesRunID(t *testing.T) {
@@ -1706,14 +1706,14 @@ func TestParse_FrontmatterWithCommitsLine_DoesNotRefuse(t *testing.T) {
 		"  error_code: null\n" +
 		"---\n" +
 		"\n" +
-		"[[SECTION:ExecutionLog]]\n" +
-		"[[/SECTION:ExecutionLog]]\n" +
+		"<ExecutionLog type=\"core\">\n" +
+		"</ExecutionLog>\n" +
 		"\n" +
-		"[[SECTION:Artifacts]]\n" +
-		"[[/SECTION:Artifacts]]\n" +
+		"<Artifacts type=\"core\">\n" +
+		"</Artifacts>\n" +
 		"\n" +
-		"[[SECTION:WorkflowNotes]]\n" +
-		"[[/SECTION:WorkflowNotes]]\n")
+		"<WorkflowNotes type=\"core\">\n" +
+		"</WorkflowNotes>\n")
 
 	_, err := artifact.Parse(data)
 
@@ -2068,21 +2068,21 @@ func minimalArtifactWithExecutionRow(inputs string) []byte {
 		"  error_code: null\n" +
 		"---\n" +
 		"\n" +
-		"[[SECTION:ExecutionLog]]\n" +
+		"<ExecutionLog type=\"core\">\n" +
 		"| Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary      | Inputs | Checkpoint |\n" +
 		"| --- | --------- | -------- | ----- | ------- | -------------------- | ------------ | ------ | ---------- |\n" +
 		"| 1   | planner#1 | PLANNING | -     | SUCCESS | 2026-01-01T01:00:00Z | Plan created | " + cell + " | - |\n" +
-		"[[/SECTION:ExecutionLog]]\n" +
+		"</ExecutionLog>\n" +
 		"\n" +
-		"[[SECTION:Artifacts]]\n" +
+		"<Artifacts type=\"core\">\n" +
 		"| Artifact | Created In | Created By |\n" +
 		"| -------- | ---------- | ---------- |\n" +
-		"[[/SECTION:Artifacts]]\n" +
+		"</Artifacts>\n" +
 		"\n" +
-		"[[SECTION:WorkflowNotes]]\n" +
+		"<WorkflowNotes type=\"core\">\n" +
 		"| Seq | Note |\n" +
 		"| --- | ---- |\n" +
-		"[[/SECTION:WorkflowNotes]]\n")
+		"</WorkflowNotes>\n")
 }
 
 // TestParse_CanonicalFile_ExecutionLog_FirstRow_DashInputs_ReturnsEmptyString
@@ -2264,14 +2264,14 @@ func minimalArtifactWithSingleOverrideBytes() []byte {
 		"  error_code: null\n" +
 		"---\n" +
 		"\n" +
-		"[[SECTION:ExecutionLog]]\n" +
-		"[[/SECTION:ExecutionLog]]\n" +
+		"<ExecutionLog type=\"core\">\n" +
+		"</ExecutionLog>\n" +
 		"\n" +
-		"[[SECTION:Artifacts]]\n" +
-		"[[/SECTION:Artifacts]]\n" +
+		"<Artifacts type=\"core\">\n" +
+		"</Artifacts>\n" +
 		"\n" +
-		"[[SECTION:WorkflowNotes]]\n" +
-		"[[/SECTION:WorkflowNotes]]\n")
+		"<WorkflowNotes type=\"core\">\n" +
+		"</WorkflowNotes>\n")
 }
 
 // minimalArtifactWithMultiTriggerOverrideBytes builds minimal valid artifact
@@ -2301,14 +2301,14 @@ func minimalArtifactWithMultiTriggerOverrideBytes() []byte {
 		"  error_code: null\n" +
 		"---\n" +
 		"\n" +
-		"[[SECTION:ExecutionLog]]\n" +
-		"[[/SECTION:ExecutionLog]]\n" +
+		"<ExecutionLog type=\"core\">\n" +
+		"</ExecutionLog>\n" +
 		"\n" +
-		"[[SECTION:Artifacts]]\n" +
-		"[[/SECTION:Artifacts]]\n" +
+		"<Artifacts type=\"core\">\n" +
+		"</Artifacts>\n" +
 		"\n" +
-		"[[SECTION:WorkflowNotes]]\n" +
-		"[[/SECTION:WorkflowNotes]]\n")
+		"<WorkflowNotes type=\"core\">\n" +
+		"</WorkflowNotes>\n")
 }
 
 // TestParse_InfrastructureOverrides_Absent_ReturnsNil verifies that

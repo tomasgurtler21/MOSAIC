@@ -2,9 +2,9 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity content.
-[[DEPLOYED:ProtocolConstraints]]
+<ProtocolConstraints type="managed">
 Protocol constraints content.
-[[/DEPLOYED:ProtocolConstraints]]
-[[/SECTION:Identity]]
+</ProtocolConstraints>
+</Identity>

@@ -146,13 +146,13 @@ func TestProtocolStaleness_OlderDeployedVersion_IsStale(t *testing.T) {
 }
 
 // TestProtocolStaleness_EmptyDeployedVersion_IsStale verifies that when the deployed file
-// carries no protocol version marker (ProtocolVersion == ""), ProtocolStaleness always reports
-// drift. Agents deployed before the protocol version marker was introduced carry no version;
-// they must be picked up and re-deployed to receive the marker.
+// carries no protocol version (ProtocolVersion == ""), ProtocolStaleness always reports
+// drift. Agents deployed without a version attribute on their protocol region carry no version;
+// they must be picked up and re-deployed to receive the version attribute.
 func TestProtocolStaleness_EmptyDeployedVersion_IsStale(t *testing.T) {
 	deployed := domain.DeployedArtifactState{
 		Present:         true,
-		ProtocolVersion: "", // no <!-- protocol-version: X --> comment in the deployed file
+		ProtocolVersion: "", // no version attribute on the protocol region's open tag
 	}
 
 	drift := plan.ProtocolStaleness(deployed, "1.9")

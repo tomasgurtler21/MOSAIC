@@ -70,103 +70,105 @@ mode: subagent
 ---
 """
 
-# A valid deployed-style file with a single [[CUSTOM:]] region.
+# A valid deployed-style file with a single <Name type="custom"> region.
 _CUSTOM_SINGLE = _FM + """\
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
 
 Some text.
 
-[[CUSTOM:ProjectNotes]]
+<ProjectNotes type="custom">
 User-owned notes.
-[[/CUSTOM:ProjectNotes]]
-[[/SECTION:Identity]]
+</ProjectNotes>
+</Identity>
 """
 
-# A valid deployed-style file with a [[CUSTOM:]] region using an arbitrary unknown name.
+# A valid deployed-style file with a <Name type="custom"> region using an arbitrary unknown name.
 _CUSTOM_UNKNOWN_NAME = _FM + """\
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
 
-[[CUSTOM:SomeCompletelyArbitraryUnregisteredName]]
+<SomeCompletelyArbitraryUnregisteredName type="custom">
 No registry, open name set — this must be valid.
-[[/CUSTOM:SomeCompletelyArbitraryUnregisteredName]]
-[[/SECTION:Identity]]
+</SomeCompletelyArbitraryUnregisteredName>
+</Identity>
 """
 
-# A deployed-style file with a [[CUSTOM:]] region using a compound name.
+# A deployed-style file with a <Name type="custom"> region using a compound name.
 _CUSTOM_COMPOUND_NAME = _FM + """\
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
 
-[[CUSTOM:Project:my-feature]]
+<Project type="custom" name="my-feature">
 Compound custom name — valid per name syntax.
-[[/CUSTOM:Project:my-feature]]
-[[/SECTION:Identity]]
+</Project>
+</Identity>
 """
 
-# A deployed-style file with multiple [[CUSTOM:]] regions at different nesting levels.
+# A deployed-style file with multiple <Name type="custom"> regions at different nesting levels.
 _CUSTOM_MULTIPLE = _FM + """\
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
 
-[[CUSTOM:TopLevelNote]]
+<TopLevelNote type="custom">
 Top-level custom region.
-[[/CUSTOM:TopLevelNote]]
+</TopLevelNote>
 
-[[CUSTOM:AnotherNote]]
+<AnotherNote type="custom">
 Second custom region.
-[[/CUSTOM:AnotherNote]]
-[[/SECTION:Identity]]
+</AnotherNote>
+</Identity>
 """
 
-# A file with a [[CUSTOM:]] region missing its close tag — must trigger E001.
+# A file with a <Name type="custom"> region missing its close tag — must trigger E001.
 _CUSTOM_MISSING_CLOSE = _FM + """\
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
 
-[[CUSTOM:ProjectNotes]]
+<ProjectNotes type="custom">
 No closing tag follows.
-[[/SECTION:Identity]]
+</Identity>
 """
 
-# A file with an orphan [[/CUSTOM:]] close tag — must trigger E002.
+# A file with an orphan </Name> close tag — must trigger E002.
+# The orphan tag appears AFTER the outer section closes so that all stacks are
+# empty when the validator encounters it; a close tag with an open section on
+# the stack would produce E003 (mismatch) rather than E002 (truly orphan).
 _CUSTOM_ORPHAN_CLOSE = _FM + """\
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
-
-[[/CUSTOM:ProjectNotes]]
-[[/SECTION:Identity]]
+</Identity>
+</ProjectNotes>
 """
 
-# A file with a duplicate [[CUSTOM:]] name — must trigger E006.
+# A file with a duplicate <Name type="custom"> name — must trigger E006.
 _CUSTOM_DUPLICATE = _FM + """\
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
 
-[[CUSTOM:ProjectNotes]]
+<ProjectNotes type="custom">
 First occurrence.
-[[/CUSTOM:ProjectNotes]]
+</ProjectNotes>
 
-[[CUSTOM:ProjectNotes]]
+<ProjectNotes type="custom">
 Second occurrence — duplicate name must be rejected.
-[[/CUSTOM:ProjectNotes]]
-[[/SECTION:Identity]]
+</ProjectNotes>
+</Identity>
 """
 
-# A file with a [[CUSTOM:]] region nested inside a [[DEPLOYED:]] region.
+# A file with a <Name type="custom"> region nested inside a <Name type="managed"> region.
 # Must be accepted: custom regions may nest inside DEPLOYED.
 _CUSTOM_IN_DEPLOYED = _FM + """\
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Canonical harness constraints content.
-[[CUSTOM:TeamNote]]
+<TeamNote type="custom">
 A custom note inside the deployed region — legal per the parity table.
-[[/CUSTOM:TeamNote]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</TeamNote>
+</HarnessConstraints>
+</Constraints>
 """
 
 
@@ -223,34 +225,34 @@ class TestFourMarkerParityTagPattern:
     other three kinds. This mirrors the Go test that parseBoundaryTag handles NodeCustom."""
 
     def test_custom_open_tag_matches(self) -> None:
-        assert TAG_PATTERN.match("[[CUSTOM:CustomConstraints]]") is not None, (
+        assert TAG_PATTERN.match('<CustomConstraints type="custom">') is not None, (
             "TAG_PATTERN must match a CUSTOM open tag — parity table: CUSTOM recognised"
         )
 
     def test_custom_close_tag_matches(self) -> None:
-        assert TAG_PATTERN.match("[[/CUSTOM:CustomConstraints]]") is not None, (
+        assert TAG_PATTERN.match("</CustomConstraints>") is not None, (
             "TAG_PATTERN must match a CUSTOM close tag"
         )
 
-    def test_custom_empty_name_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[CUSTOM:]]") is None, (
-            "TAG_PATTERN must not match [[CUSTOM:]] with an empty name — "
+    def test_custom_empty_tag_name_does_not_match(self) -> None:
+        assert TAG_PATTERN.match('< type="custom">') is None, (
+            'TAG_PATTERN must not match a tag with an empty name (< type="custom">) — '
             "parity table: empty name matches = no for all four kinds"
         )
 
     def test_custom_name_starting_with_digit_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[CUSTOM:1invalid]]") is None
+        assert TAG_PATTERN.match('<1invalid type="custom">') is None
 
     def test_compound_custom_name_matches(self) -> None:
-        assert TAG_PATTERN.match("[[CUSTOM:Project:my-feature]]") is not None
+        assert TAG_PATTERN.match('<Project type="custom" name="my-feature">') is not None
 
     def test_all_four_kinds_accepted_by_tag_pattern(self) -> None:
         """All four kinds must be in the TAG_PATTERN alternation."""
         examples = {
-            "SECTION":   "[[SECTION:Identity]]",
-            "INJECTION": "[[INJECTION:IdentityExtension]]",
-            "DEPLOYED":  "[[DEPLOYED:CommunicationProtocol]]",
-            "CUSTOM":    "[[CUSTOM:ProjectNotes]]",
+            "SECTION":   '<Identity type="core">',
+            "INJECTION": '<IdentityExtension type="project">',
+            "DEPLOYED":  '<CommunicationProtocol type="managed">',
+            "CUSTOM":    '<ProjectNotes type="custom">',
         }
         for kind, tag in examples.items():
             m = TAG_PATTERN.match(tag)
@@ -271,10 +273,10 @@ class TestFourMarkerParityTagHelpers:
     the Go parseBoundaryTag inverse."""
 
     def test_open_tag_custom(self) -> None:
-        assert open_tag(BoundaryKind.CUSTOM, "CustomConstraints") == "[[CUSTOM:CustomConstraints]]"
+        assert open_tag(BoundaryKind.CUSTOM, "CustomConstraints") == '<CustomConstraints type="custom">'
 
     def test_close_tag_custom(self) -> None:
-        assert close_tag(BoundaryKind.CUSTOM, "CustomConstraints") == "[[/CUSTOM:CustomConstraints]]"
+        assert close_tag(BoundaryKind.CUSTOM, "CustomConstraints") == "</CustomConstraints>"
 
     def test_open_tag_custom_round_trips_through_tag_pattern(self) -> None:
         result = open_tag(BoundaryKind.CUSTOM, "ProjectNotes")
@@ -290,7 +292,7 @@ class TestFourMarkerParityTagHelpers:
 # ---------------------------------------------------------------------------
 
 class TestCustomNameSetIsOpen:
-    """The validator must accept any [[CUSTOM:]] name without an E004-class error.
+    """The validator must accept any <Name type="custom"> name without an E004-class error.
 
     Parity table: CUSTOM name set = open; unknown name is NOT an error.
     This mirrors the Go assertion that ClassifyRegion(NodeCustom, anyName) never errors.
@@ -299,10 +301,10 @@ class TestCustomNameSetIsOpen:
     def test_known_custom_constraints_name_accepted(self, tmp_path: pathlib.Path) -> None:
         errors = _write_and_validate(tmp_path, "custom_known.md", _CUSTOM_SINGLE)
         non_e004 = [e for e in errors if e.error_code != "E004"]
-        # There must be no E004 for a [[CUSTOM:]] region regardless of name.
+        # There must be no E004 for a <Name type="custom"> region regardless of name.
         e004_errors = [e for e in errors if e.error_code == "E004"]
         assert len(e004_errors) == 0, (
-            f"Validator must not report E004 for [[CUSTOM:ProjectNotes]] — "
+            f'Validator must not report E004 for <ProjectNotes type="custom"> — '
             f"CUSTOM name set is open. E004 errors: {e004_errors}"
         )
 
@@ -310,7 +312,7 @@ class TestCustomNameSetIsOpen:
         errors = _write_and_validate(tmp_path, "custom_unknown.md", _CUSTOM_UNKNOWN_NAME)
         e004_errors = [e for e in errors if e.error_code == "E004"]
         assert len(e004_errors) == 0, (
-            f"Validator must not report E004 for an unknown [[CUSTOM:]] name — "
+            f'Validator must not report E004 for an unknown <Name type="custom"> name — '
             f"CUSTOM name set is open (same rule as INJECTION). Got: {e004_errors}"
         )
 
@@ -318,14 +320,14 @@ class TestCustomNameSetIsOpen:
         errors = _write_and_validate(tmp_path, "custom_compound.md", _CUSTOM_COMPOUND_NAME)
         e004_errors = [e for e in errors if e.error_code == "E004"]
         assert len(e004_errors) == 0, (
-            f"Validator must not report E004 for a compound [[CUSTOM:]] name. Got: {e004_errors}"
+            f'Validator must not report E004 for a compound <Name type="custom"> name. Got: {e004_errors}'
         )
 
     def test_multiple_different_custom_names_accepted(self, tmp_path: pathlib.Path) -> None:
         errors = _write_and_validate(tmp_path, "custom_multiple.md", _CUSTOM_MULTIPLE)
         e004_errors = [e for e in errors if e.error_code == "E004"]
         assert len(e004_errors) == 0, (
-            f"Validator must accept multiple [[CUSTOM:]] regions with arbitrary names — "
+            f'Validator must accept multiple <Name type="custom"> regions with arbitrary names — '
             f"open name set means no E004 for any of them. Got: {e004_errors}"
         )
 
@@ -335,28 +337,28 @@ class TestCustomNameSetIsOpen:
 # ---------------------------------------------------------------------------
 
 class TestCustomNoDocumentOrderCheck:
-    """The validator must not apply E007 (document-order) to [[CUSTOM:]] regions.
+    """The validator must not apply E007 (document-order) to <Name type="custom"> regions.
 
     Parity table: document-order check = not applied for CUSTOM.
     Custom regions are not canonical slots; they have no required position.
     """
 
     def test_custom_region_out_of_canonical_order_no_e007(self, tmp_path: pathlib.Path) -> None:
-        # A [[CUSTOM:]] region appearing before the canonical sections should not
+        # A <Name type="custom"> region appearing before the canonical sections should not
         # trigger E007. E007 only applies to SECTION and DEPLOYED canonical slots.
         content = _FM + """\
-[[CUSTOM:EarlyNote]]
+<EarlyNote type="custom">
 A custom region before any canonical section — must not trigger E007.
-[[/CUSTOM:EarlyNote]]
+</EarlyNote>
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
-[[/SECTION:Identity]]
+</Identity>
 """
         errors = _write_and_validate(tmp_path, "custom_early.md", content)
         e007_errors = [e for e in errors if e.error_code == "E007"]
         assert len(e007_errors) == 0, (
-            f"Validator must not report E007 for a [[CUSTOM:]] region — "
+            f'Validator must not report E007 for a <Name type="custom"> region — '
             f"parity table: document-order check not applied to CUSTOM. Got: {e007_errors}"
         )
 
@@ -366,7 +368,7 @@ A custom region before any canonical section — must not trigger E007.
 # ---------------------------------------------------------------------------
 
 class TestCustomNoRequiredParentCheck:
-    """The validator must not apply E008 (required-parent) to [[CUSTOM:]] regions.
+    """The validator must not apply E008 (required-parent) to <Name type="custom"> regions.
 
     Parity table: required-parent check = not applied for CUSTOM.
     There is no CUSTOM_PARENT_MAP and none should be added.
@@ -374,35 +376,35 @@ class TestCustomNoRequiredParentCheck:
 
     def test_top_level_custom_region_no_e008(self, tmp_path: pathlib.Path) -> None:
         content = _FM + """\
-[[CUSTOM:TopLevelNote]]
+<TopLevelNote type="custom">
 A custom region at body top level — no parent required, must not trigger E008.
-[[/CUSTOM:TopLevelNote]]
+</TopLevelNote>
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
-[[/SECTION:Identity]]
+</Identity>
 """
         errors = _write_and_validate(tmp_path, "custom_toplevel.md", content)
         e008_errors = [e for e in errors if e.error_code == "E008"]
         assert len(e008_errors) == 0, (
-            f"Validator must not report E008 for a top-level [[CUSTOM:]] region — "
+            f'Validator must not report E008 for a top-level <Name type="custom"> region — '
             f"parity table: required-parent check not applied to CUSTOM. Got: {e008_errors}"
         )
 
     def test_custom_inside_non_standard_section_no_e008(self, tmp_path: pathlib.Path) -> None:
         content = _FM + """\
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
 
-[[CUSTOM:LocalNote]]
+<LocalNote type="custom">
 Custom region in a non-standard section — valid, no parent restriction.
-[[/CUSTOM:LocalNote]]
-[[/SECTION:Identity]]
+</LocalNote>
+</Identity>
 """
         errors = _write_and_validate(tmp_path, "custom_nonsection.md", content)
         e008_errors = [e for e in errors if e.error_code == "E008"]
         assert len(e008_errors) == 0, (
-            f"Validator must not report E008 for a [[CUSTOM:]] region in any parent. Got: {e008_errors}"
+            f'Validator must not report E008 for a <Name type="custom"> region in any parent. Got: {e008_errors}'
         )
 
 
@@ -411,23 +413,23 @@ Custom region in a non-standard section — valid, no parent restriction.
 # ---------------------------------------------------------------------------
 
 class TestCustomOpenCloseBalance:
-    """The validator must track open/close balance for [[CUSTOM:]] regions.
+    """The validator must track open/close balance for <Name type="custom"> regions.
 
     Parity table: open/close balance = applied for CUSTOM (same as other kinds).
-    An unclosed [[CUSTOM:]] tag must produce E001; an orphan [[/CUSTOM:]] must produce E002.
+    An unclosed <Name type="custom"> tag must produce E001; an orphan </Name> must produce E002.
     """
 
     def test_missing_custom_close_tag_reports_e001(self, tmp_path: pathlib.Path) -> None:
         errors = _write_and_validate(tmp_path, "custom_no_close.md", _CUSTOM_MISSING_CLOSE)
         assert _has_error_code(errors, "E001"), (
-            f"Validator must report E001 for a [[CUSTOM:]] region missing its close tag — "
+            f'Validator must report E001 for a <Name type="custom"> region missing its close tag — '
             f"open/close balance applies to CUSTOM. Got error codes: {_error_codes(errors)}"
         )
 
     def test_orphan_custom_close_tag_reports_e002(self, tmp_path: pathlib.Path) -> None:
         errors = _write_and_validate(tmp_path, "custom_orphan.md", _CUSTOM_ORPHAN_CLOSE)
         assert _has_error_code(errors, "E002"), (
-            f"Validator must report E002 for an orphan [[/CUSTOM:]] close tag — "
+            f"Validator must report E002 for an orphan </Name> close tag — "
             f"open/close balance applies to CUSTOM. Got error codes: {_error_codes(errors)}"
         )
 
@@ -435,7 +437,7 @@ class TestCustomOpenCloseBalance:
         errors = _write_and_validate(tmp_path, "custom_paired.md", _CUSTOM_SINGLE)
         balance_errors = [e for e in errors if e.error_code in ("E001", "E002")]
         assert len(balance_errors) == 0, (
-            f"A well-paired [[CUSTOM:]] region must not trigger E001 or E002. "
+            f'A well-paired <Name type="custom"> region must not trigger E001 or E002. '
             f"Got: {balance_errors}"
         )
 
@@ -445,7 +447,7 @@ class TestCustomOpenCloseBalance:
 # ---------------------------------------------------------------------------
 
 class TestCustomDuplicateNameRejected:
-    """A duplicate [[CUSTOM:]] name must produce E006.
+    """A duplicate <Name type="custom"> name must produce E006.
 
     Parity table: duplicate-name check = applied for CUSTOM (names must be unique per file).
     """
@@ -453,7 +455,7 @@ class TestCustomDuplicateNameRejected:
     def test_duplicate_custom_name_reports_e006(self, tmp_path: pathlib.Path) -> None:
         errors = _write_and_validate(tmp_path, "custom_duplicate.md", _CUSTOM_DUPLICATE)
         assert _has_error_code(errors, "E006"), (
-            f"Validator must report E006 for a duplicate [[CUSTOM:]] name — "
+            f'Validator must report E006 for a duplicate <Name type="custom"> name — '
             f"names are unique per file across all marker kinds. Got: {_error_codes(errors)}"
         )
 
@@ -472,21 +474,21 @@ class TestCustomNestingRules:
 
     def test_custom_nested_inside_section_accepted(self, tmp_path: pathlib.Path) -> None:
         errors = _write_and_validate(tmp_path, "custom_in_section.md", _CUSTOM_SINGLE)
-        # _CUSTOM_SINGLE has [[CUSTOM:ProjectNotes]] inside [[SECTION:Identity]].
+        # _CUSTOM_SINGLE has <ProjectNotes type="custom"> inside <Identity type="core">.
         # The only errors should not be about the nesting itself.
         nesting_errors = [e for e in errors if e.error_code in ("E001", "E002", "E003")]
         assert len(nesting_errors) == 0, (
-            f"[[CUSTOM:]] nested inside [[SECTION:]] must not produce nesting errors. "
+            f'<Name type="custom"> nested inside <Name type="core"> must not produce nesting errors. '
             f"Got: {nesting_errors}"
         )
 
     def test_custom_nested_inside_deployed_accepted(self, tmp_path: pathlib.Path) -> None:
-        # _CUSTOM_IN_DEPLOYED has [[CUSTOM:TeamNote]] inside [[DEPLOYED:HarnessConstraints]].
+        # _CUSTOM_IN_DEPLOYED has <TeamNote type="custom"> inside <HarnessConstraints type="managed">.
         # This nesting is legal per the parity table.
         errors = _write_and_validate(tmp_path, "custom_in_deployed.md", _CUSTOM_IN_DEPLOYED)
         e001_e002 = [e for e in errors if e.error_code in ("E001", "E002")]
         assert len(e001_e002) == 0, (
-            f"[[CUSTOM:]] nested inside [[DEPLOYED:]] must not produce balance errors — "
+            f'<Name type="custom"> nested inside <Name type="managed"> must not produce balance errors — '
             f"parity table: CUSTOM may nest inside DEPLOYED. Got: {e001_e002}"
         )
 
@@ -502,34 +504,34 @@ class TestExistingNameSetRulesUnchanged:
 
     def test_injection_open_name_still_accepted(self, tmp_path: pathlib.Path) -> None:
         content = _FM + """\
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
 
-[[INJECTION:SomeCompletelyUnknownInjectionName]]
+<SomeCompletelyUnknownInjectionName type="project">
 Open injection name — must be accepted after CUSTOM is added to vocabulary.
-[[/INJECTION:SomeCompletelyUnknownInjectionName]]
-[[/SECTION:Identity]]
+</SomeCompletelyUnknownInjectionName>
+</Identity>
 """
         errors = _write_and_validate(tmp_path, "inj_open.md", content)
         e004_errors = [e for e in errors if e.error_code == "E004"]
         assert len(e004_errors) == 0, (
-            f"Unknown [[INJECTION:]] name must not trigger E004 — injection names remain open. "
+            f'Unknown <Name type="project"> name must not trigger E004 — injection names remain open. '
             f"Got: {e004_errors}"
         )
 
     def test_deployed_unknown_name_still_rejected_e011(self, tmp_path: pathlib.Path) -> None:
         content = _FM + """\
-[[SECTION:Identity]]
+<Identity type="core">
 # Parity Agent
 
-[[DEPLOYED:TotallyUnknownDeployedName]]
+<TotallyUnknownDeployedName type="managed">
 Unknown deployed name — must still be rejected with E011 after CUSTOM is added.
-[[/DEPLOYED:TotallyUnknownDeployedName]]
-[[/SECTION:Identity]]
+</TotallyUnknownDeployedName>
+</Identity>
 """
         errors = _write_and_validate(tmp_path, "dep_unknown.md", content)
         assert _has_error_code(errors, "E011"), (
-            f"Unknown [[DEPLOYED:]] name must still trigger E011 ('Unrecognised tool-managed "
+            f'Unknown <Name type="managed"> name must still trigger E011 (\'Unrecognised tool-managed '
             f"boundary name') — deployed names are closed. "
             f"Got error codes: {_error_codes(errors)}"
         )

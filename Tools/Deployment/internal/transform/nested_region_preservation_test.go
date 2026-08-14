@@ -1,7 +1,7 @@
 package transform_test
 
-// nested_region_preservation_test.go covers the bug fix where regenerating a [[DEPLOYED:]]
-// region destroys any [[INJECTION:]] or [[CUSTOM:]] region nested inside it.
+// nested_region_preservation_test.go covers the bug fix where regenerating a managed region
+// region destroys any project-injection region or custom-region region nested inside it.
 //
 // Root cause: every deployed-region generator calls SetContent or Clear on the parent node,
 // which replaces the node's item list, detaching any nested child nodes. The nested nodes
@@ -17,9 +17,9 @@ package transform_test
 // Reversing steps 2 and 3 reintroduces the bug. The ordering is the contract.
 //
 // Two provenances:
-//   - Source-declared: [[INJECTION:]] nodes nested in the source's deployed region; their
+//   - Source-declared: project-injection region nodes nested in the source's deployed region; their
 //     content is resolved from the deployed region map.
-//   - Deployed-only: [[CUSTOM:]] nodes nested in the deployed file's matching deployed region;
+//   - Deployed-only: custom-region nodes nested in the deployed file's matching deployed region;
 //     they have no source declaration and are discovered by walking the deployed tree.
 //
 // Source file relaxation: the ErrSourceDeployedRegionNotEmpty guard is relaxed so that a
@@ -56,28 +56,28 @@ tier_rationale: nested region preservation testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedPreservation Agent
 
 You are the NestedPreservation agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 // nestedPreservationDeployed is a deployed file whose HarnessConstraints region contains:
 //   - canonical harness content (what the tool wrote on the previous transform)
-//   - [[CUSTOM:DeployedNestedCustom]] nested inside the region (project-added, no source decl)
+//   - <DeployedNestedCustom type="custom"> nested inside the region (project-added, no source decl)
 //
-// The [[CUSTOM:]] region must survive regeneration byte-identically, positioned immediately
-// after the canonical content and inside the [[DEPLOYED:HarnessConstraints]] tags.
+// The custom-region region must survive regeneration byte-identically, positioned immediately
+// after the canonical content and inside the <HarnessConstraints type="managed"> tags.
 const nestedPreservationDeployed = `---
 id: 600
 version: 2.0.0
@@ -89,31 +89,31 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedPreservation Agent
 
 You are the NestedPreservation agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Fixture harness constraint: always use the approved tool list.
 Do not invoke tools not declared in the agent's tools field.
 
-[[CUSTOM:DeployedNestedCustom]]
+<DeployedNestedCustom type="custom">
 This is a project-specific constraint that was added inside HarnessConstraints.
 It must survive regeneration of HarnessConstraints byte-identically.
-[[/CUSTOM:DeployedNestedCustom]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</DeployedNestedCustom>
+</HarnessConstraints>
+</Constraints>
 `
 
-// nestedInjectionSource is a source that declares [[INJECTION:NestedInjection]] as an empty
-// marker nested inside the [[DEPLOYED:HarnessConstraints]] region. This tests the provenance
+// nestedInjectionSource is a source that declares <NestedInjection type="project"> as an empty
+// marker nested inside the <HarnessConstraints type="managed"> region. This tests the provenance
 // where a nested injection is source-declared (its content comes from the deployed region map).
 //
 // This source will fail Apply with ErrSourceDeployedRegionNotEmpty under the current
@@ -132,26 +132,26 @@ tier_rationale: nested injection preservation testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedInjection Agent
 
 You are the NestedInjection agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[INJECTION:NestedInjection]]
-[[/INJECTION:NestedInjection]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+<NestedInjection type="project">
+</NestedInjection>
+</HarnessConstraints>
+</Constraints>
 `
 
 // nestedInjectionDeployed is the deployed predecessor of nestedInjectionSource.
-// [[INJECTION:NestedInjection]] carries user content inside HarnessConstraints.
+// <NestedInjection type="project"> carries user content inside HarnessConstraints.
 // After regeneration, NestedInjection must survive with its content byte-identical,
 // positioned after the canonical HarnessConstraints content inside the parent tags.
 const nestedInjectionDeployed = `---
@@ -165,31 +165,31 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedInjection Agent
 
 You are the NestedInjection agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Fixture harness constraint: always use the approved tool list.
 Do not invoke tools not declared in the agent's tools field.
 
-[[INJECTION:NestedInjection]]
+<NestedInjection type="project">
 Project-specific injection content nested inside HarnessConstraints.
 This content must survive regeneration byte-identically.
-[[/INJECTION:NestedInjection]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</NestedInjection>
+</HarnessConstraints>
+</Constraints>
 `
 
-// nestedOrderSource is a source that declares [[INJECTION:OrderSecond]] and
-// [[INJECTION:OrderThirdSourceOnly]] as empty markers nested inside HarnessConstraints.
+// nestedOrderSource is a source that declares <OrderSecond type="project"> and
+// <OrderThirdSourceOnly type="project"> as empty markers nested inside HarnessConstraints.
 //   - OrderSecond is also in the deployed file (takes deployed-file position 1).
 //   - OrderThirdSourceOnly is new in the source with no deployed counterpart (position n=2).
 const nestedOrderSource = `---
@@ -204,32 +204,32 @@ tier_rationale: nested region ordering testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedOrder Agent
 
 You are the NestedOrder agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[INJECTION:OrderSecond]]
-[[/INJECTION:OrderSecond]]
-[[INJECTION:OrderThirdSourceOnly]]
-[[/INJECTION:OrderThirdSourceOnly]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+<OrderSecond type="project">
+</OrderSecond>
+<OrderThirdSourceOnly type="project">
+</OrderThirdSourceOnly>
+</HarnessConstraints>
+</Constraints>
 `
 
 // nestedOrderDeployed is the deployed predecessor of nestedOrderSource.
 // Inside HarnessConstraints:
-//   - [[CUSTOM:OrderFirst]] at deployed-file position 0 (deployed-only, no source decl)
-//   - [[INJECTION:OrderSecond]] at deployed-file position 1 (also in source)
+//   - <OrderFirst type="custom"> at deployed-file position 0 (deployed-only, no source decl)
+//   - <OrderSecond type="project"> at deployed-file position 1 (also in source)
 //
-// [[INJECTION:OrderThirdSourceOnly]] is not in this deployed file at all (source-only).
+// <OrderThirdSourceOnly type="project"> is not in this deployed file at all (source-only).
 //
 // Expected emission order after regeneration:
 //   1. OrderFirst  (deployed-file position 0)
@@ -246,30 +246,30 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedOrder Agent
 
 You are the NestedOrder agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Fixture harness constraint: always use the approved tool list.
 Do not invoke tools not declared in the agent's tools field.
 
-[[CUSTOM:OrderFirst]]
+<OrderFirst type="custom">
 First nested content, must appear before OrderSecond.
-[[/CUSTOM:OrderFirst]]
+</OrderFirst>
 
-[[INJECTION:OrderSecond]]
+<OrderSecond type="project">
 Second nested content, also source-declared, must appear after OrderFirst.
-[[/INJECTION:OrderSecond]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</OrderSecond>
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -277,7 +277,7 @@ Second nested content, also source-declared, must appear after OrderFirst.
 // ---------------------------------------------------------------------------
 
 // TestNestedRegionPreservation_Custom_SurvivesRegenerationByteIdentically asserts that a
-// [[CUSTOM:]] region nested inside a [[DEPLOYED:]] region in the deployed file survives
+// custom-region region nested inside a managed region region in the deployed file survives
 // regeneration of the deployed parent byte-identically.
 //
 // The regenerated parent has new canonical content (from the harness module). The nested
@@ -309,8 +309,8 @@ func TestNestedRegionPreservation_Custom_SurvivesRegenerationByteIdentically(t *
 
 	outCustom, outOK := outDoc.Body().Custom("DeployedNestedCustom")
 	if !outOK {
-		t.Fatal("[[CUSTOM:DeployedNestedCustom]] absent from output; a [[CUSTOM:]] region " +
-			"nested inside a [[DEPLOYED:]] region must survive regeneration of the parent")
+		t.Fatal("<DeployedNestedCustom type=\"custom\"> absent from output; a custom-region region " +
+			"nested inside a managed region region must survive regeneration of the parent")
 	}
 
 	// Content must be byte-identical to the deployed file.
@@ -331,7 +331,7 @@ func TestNestedRegionPreservation_Custom_SurvivesRegenerationByteIdentically(t *
 	parent := outCustom.Parent()
 	if parent == nil {
 		t.Fatal("DeployedNestedCustom is at body top level in the output; it must remain " +
-			"nested inside [[DEPLOYED:HarnessConstraints]]")
+			"nested inside <HarnessConstraints type=\"managed\">")
 	}
 	if parent.Kind() != docformat.NodeDeployed {
 		t.Errorf("DeployedNestedCustom parent kind: want NodeDeployed, got %q", parent.Kind())
@@ -342,8 +342,8 @@ func TestNestedRegionPreservation_Custom_SurvivesRegenerationByteIdentically(t *
 }
 
 // TestNestedRegionPreservation_Custom_AppearsAfterCanonicalContent asserts that the
-// preserved nested [[CUSTOM:]] region appears in the output immediately after the
-// regenerated canonical content of the parent [[DEPLOYED:]] region — not before it.
+// preserved nested custom-region region appears in the output immediately after the
+// regenerated canonical content of the parent managed region region — not before it.
 //
 // The canonical content is what the generator (harness, bundle, protocol, etc.) writes.
 // The nested region is appended after that content, still inside the parent's tags.
@@ -366,7 +366,7 @@ func TestNestedRegionPreservation_Custom_AppearsAfterCanonicalContent(t *testing
 	// The canonical harness content appears before the nested custom tag in the output.
 	// The harness content is the first line of the expected canonical content.
 	canonicalMarker := []byte("Fixture harness constraint")
-	customOpenTag := []byte("[[CUSTOM:DeployedNestedCustom]]")
+	customOpenTag := []byte("<DeployedNestedCustom type=\"custom\">")
 
 	canonicalIdx := bytes.Index(result.Output, canonicalMarker)
 	customIdx := bytes.Index(result.Output, customOpenTag)
@@ -375,30 +375,30 @@ func TestNestedRegionPreservation_Custom_AppearsAfterCanonicalContent(t *testing
 		t.Fatal("canonical harness content absent from output; the generator must fill HarnessConstraints")
 	}
 	if customIdx < 0 {
-		t.Fatal("[[CUSTOM:DeployedNestedCustom]] open tag absent from output; the nested custom must survive")
+		t.Fatal("<DeployedNestedCustom type=\"custom\"> open tag absent from output; the nested custom must survive")
 	}
 	if customIdx < canonicalIdx {
-		t.Errorf("[[CUSTOM:DeployedNestedCustom]] open tag at byte %d appears before canonical content at byte %d; "+
+		t.Errorf("<DeployedNestedCustom type=\"custom\"> open tag at byte %d appears before canonical content at byte %d; "+
 			"nested regions must be emitted after the regenerated canonical content, not before it",
 			customIdx, canonicalIdx)
 	}
 
-	// The nested custom must also appear before the closing [[/DEPLOYED:HarnessConstraints]] tag,
+	// The nested custom must also appear before the closing </HarnessConstraints> tag,
 	// confirming it is inside the parent's tags, not after them.
-	parentCloseTag := []byte("[[/DEPLOYED:HarnessConstraints]]")
+	parentCloseTag := []byte("</HarnessConstraints>")
 	parentCloseIdx := bytes.Index(result.Output, parentCloseTag)
 	if parentCloseIdx < 0 {
-		t.Fatal("[[/DEPLOYED:HarnessConstraints]] closing tag absent from output")
+		t.Fatal("</HarnessConstraints> closing tag absent from output")
 	}
 	if customIdx > parentCloseIdx {
-		t.Errorf("[[CUSTOM:DeployedNestedCustom]] open tag at byte %d appears after the parent's "+
+		t.Errorf("<DeployedNestedCustom type=\"custom\"> open tag at byte %d appears after the parent's "+
 			"closing tag at byte %d; the nested region must be inside the parent's tags",
 			customIdx, parentCloseIdx)
 	}
 }
 
 // TestNestedRegionPreservation_Custom_ReportOutcome asserts that a preserved nested
-// [[CUSTOM:]] region produces a RegionOutcome with Action = RegionCustomPreserved and
+// custom-region region produces a RegionOutcome with Action = RegionCustomPreserved and
 // Marker = NodeCustom, not the parent's NodeDeployed kind.
 func TestNestedRegionPreservation_Custom_ReportOutcome(t *testing.T) {
 	req := transform.Request{
@@ -442,12 +442,12 @@ func TestNestedRegionPreservation_Custom_ReportOutcome(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestNestedRegionPreservation_Injection_SurvivesRegenerationByteIdentically asserts that a
-// [[INJECTION:]] region declared empty in the source and nested inside a [[DEPLOYED:]] region
+// project-injection region region declared empty in the source and nested inside a managed region region
 // survives regeneration of that parent, with its content lifted byte-identically from the
 // deployed file.
 //
 // This test also exercises the source-guard relaxation: the source declares an empty nested
-// [[INJECTION:]] inside a [[DEPLOYED:]] region. Before the fix, this produces
+// project-injection region inside a managed region region. Before the fix, this produces
 // ErrSourceDeployedRegionNotEmpty (the nested marker is non-whitespace). After the fix,
 // SourceDeployedRegionIsEmpty permits empty nested user-owned markers.
 func TestNestedRegionPreservation_Injection_SurvivesRegenerationByteIdentically(t *testing.T) {
@@ -474,8 +474,8 @@ func TestNestedRegionPreservation_Injection_SurvivesRegenerationByteIdentically(
 	// NestedInjection must be present in the output.
 	outInj, outOK := outDoc.Body().Injection("NestedInjection")
 	if !outOK {
-		t.Fatal("[[INJECTION:NestedInjection]] absent from output; a source-declared injection " +
-			"nested inside a [[DEPLOYED:]] region must survive regeneration")
+		t.Fatal("<NestedInjection type=\"project\"> absent from output; a source-declared injection " +
+			"nested inside a managed region region must survive regeneration")
 	}
 
 	// Content must be byte-identical to the deployed file.
@@ -496,7 +496,7 @@ func TestNestedRegionPreservation_Injection_SurvivesRegenerationByteIdentically(
 	parent := outInj.Parent()
 	if parent == nil {
 		t.Fatal("NestedInjection is at body top level; it must remain nested inside " +
-			"[[DEPLOYED:HarnessConstraints]]")
+			"<HarnessConstraints type=\"managed\">")
 	}
 	if parent.Kind() != docformat.NodeDeployed {
 		t.Errorf("NestedInjection parent kind: want NodeDeployed, got %q", parent.Kind())
@@ -507,7 +507,7 @@ func TestNestedRegionPreservation_Injection_SurvivesRegenerationByteIdentically(
 }
 
 // TestNestedRegionPreservation_Injection_AppearsAfterCanonicalContent asserts that the
-// preserved nested [[INJECTION:]] region appears after the parent's canonical content
+// preserved nested project-injection region region appears after the parent's canonical content
 // in the output, still inside the parent's tags.
 func TestNestedRegionPreservation_Injection_AppearsAfterCanonicalContent(t *testing.T) {
 	req := transform.Request{
@@ -526,8 +526,8 @@ func TestNestedRegionPreservation_Injection_AppearsAfterCanonicalContent(t *test
 	}
 
 	canonicalMarker := []byte("Fixture harness constraint")
-	injOpenTag := []byte("[[INJECTION:NestedInjection]]")
-	parentCloseTag := []byte("[[/DEPLOYED:HarnessConstraints]]")
+	injOpenTag := []byte("<NestedInjection type=\"project\">")
+	parentCloseTag := []byte("</HarnessConstraints>")
 
 	canonicalIdx := bytes.Index(result.Output, canonicalMarker)
 	injIdx := bytes.Index(result.Output, injOpenTag)
@@ -537,25 +537,25 @@ func TestNestedRegionPreservation_Injection_AppearsAfterCanonicalContent(t *test
 		t.Fatal("canonical harness content absent from output")
 	}
 	if injIdx < 0 {
-		t.Fatal("[[INJECTION:NestedInjection]] open tag absent from output")
+		t.Fatal("<NestedInjection type=\"project\"> open tag absent from output")
 	}
 	if parentCloseIdx < 0 {
-		t.Fatal("[[/DEPLOYED:HarnessConstraints]] closing tag absent from output")
+		t.Fatal("</HarnessConstraints> closing tag absent from output")
 	}
 	if injIdx < canonicalIdx {
-		t.Errorf("[[INJECTION:NestedInjection]] at byte %d appears before canonical content at byte %d; "+
+		t.Errorf("<NestedInjection type=\"project\"> at byte %d appears before canonical content at byte %d; "+
 			"nested regions must appear after the regenerated canonical content",
 			injIdx, canonicalIdx)
 	}
 	if injIdx > parentCloseIdx {
-		t.Errorf("[[INJECTION:NestedInjection]] at byte %d appears after the parent's closing "+
+		t.Errorf("<NestedInjection type=\"project\"> at byte %d appears after the parent's closing "+
 			"tag at byte %d; the nested region must be inside the parent's tags",
 			injIdx, parentCloseIdx)
 	}
 }
 
 // TestNestedRegionPreservation_Injection_ReportOutcome asserts that a re-emitted nested
-// [[INJECTION:]] region produces a RegionOutcome with Marker == NodeInjection and Action ==
+// project-injection region region produces a RegionOutcome with Marker == NodeInjection and Action ==
 // RegionPreserved, mirroring TestNestedRegionPreservation_Custom_ReportOutcome for the
 // injection provenance.
 //
@@ -611,13 +611,13 @@ func TestNestedRegionPreservation_Injection_ReportOutcome(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestNestedRegionPreservation_MultipleNested_AllSurviveRegenerationByteIdentically asserts
-// that when a [[DEPLOYED:]] parent holds several nested user-owned regions, all of them
+// that when a managed region parent holds several nested user-owned regions, all of them
 // survive regeneration byte-identically.
 //
 // Three regions are tested:
-//   - [[CUSTOM:OrderFirst]]: deployed-only, at deployed-file position 0.
-//   - [[INJECTION:OrderSecond]]: source-declared and in deployed file, at position 1.
-//   - [[INJECTION:OrderThirdSourceOnly]]: source-declared only (no deployed counterpart);
+//   - <OrderFirst type="custom">: deployed-only, at deployed-file position 0.
+//   - <OrderSecond type="project">: source-declared and in deployed file, at position 1.
+//   - <OrderThirdSourceOnly type="project">: source-declared only (no deployed counterpart);
 //     appears at position n (after all deployed-file-origin regions).
 func TestNestedRegionPreservation_MultipleNested_AllSurviveRegenerationByteIdentically(t *testing.T) {
 	req := transform.Request{
@@ -642,14 +642,14 @@ func TestNestedRegionPreservation_MultipleNested_AllSurviveRegenerationByteIdent
 
 	// All three nested regions must survive.
 	if _, ok := outDoc.Body().Custom("OrderFirst"); !ok {
-		t.Error("[[CUSTOM:OrderFirst]] absent from output; deployed-only nested custom must survive")
+		t.Error("<OrderFirst type=\"custom\"> absent from output; deployed-only nested custom must survive")
 	}
 	if _, ok := outDoc.Body().Injection("OrderSecond"); !ok {
-		t.Error("[[INJECTION:OrderSecond]] absent from output; source-declared nested injection must survive")
+		t.Error("<OrderSecond type=\"project\"> absent from output; source-declared nested injection must survive")
 	}
 	outThird, outThirdOK := outDoc.Body().Injection("OrderThirdSourceOnly")
 	if !outThirdOK {
-		t.Error("[[INJECTION:OrderThirdSourceOnly]] absent from output; source-only nested injection must survive")
+		t.Error("<OrderThirdSourceOnly type=\"project\"> absent from output; source-only nested injection must survive")
 	} else if len(bytes.TrimSpace(outThird.Content())) != 0 {
 		// OrderThirdSourceOnly is declared in the source but has no entry in the deployed region
 		// map. Per the reemitNestedUserRegions contract, "a name absent from the map produces an
@@ -715,31 +715,31 @@ func TestNestedRegionPreservation_MultipleNested_DeterministicOrder(t *testing.T
 		t.Fatalf("Apply: %v", err)
 	}
 
-	firstTag := []byte("[[CUSTOM:OrderFirst]]")
-	secondTag := []byte("[[INJECTION:OrderSecond]]")
-	thirdTag := []byte("[[INJECTION:OrderThirdSourceOnly]]")
+	firstTag := []byte("<OrderFirst type=\"custom\">")
+	secondTag := []byte("<OrderSecond type=\"project\">")
+	thirdTag := []byte("<OrderThirdSourceOnly type=\"project\">")
 
 	firstIdx := bytes.Index(result.Output, firstTag)
 	secondIdx := bytes.Index(result.Output, secondTag)
 	thirdIdx := bytes.Index(result.Output, thirdTag)
 
 	if firstIdx < 0 {
-		t.Fatal("[[CUSTOM:OrderFirst]] open tag absent from output")
+		t.Fatal("<OrderFirst type=\"custom\"> open tag absent from output")
 	}
 	if secondIdx < 0 {
-		t.Fatal("[[INJECTION:OrderSecond]] open tag absent from output")
+		t.Fatal("<OrderSecond type=\"project\"> open tag absent from output")
 	}
 	if thirdIdx < 0 {
-		t.Fatal("[[INJECTION:OrderThirdSourceOnly]] open tag absent from output")
+		t.Fatal("<OrderThirdSourceOnly type=\"project\"> open tag absent from output")
 	}
 
 	if firstIdx >= secondIdx {
-		t.Errorf("[[CUSTOM:OrderFirst]] at byte %d must appear before [[INJECTION:OrderSecond]] at byte %d; "+
+		t.Errorf("<OrderFirst type=\"custom\"> at byte %d must appear before <OrderSecond type=\"project\"> at byte %d; "+
 			"deployed-file-origin regions must be emitted in deployed-file order",
 			firstIdx, secondIdx)
 	}
 	if secondIdx >= thirdIdx {
-		t.Errorf("[[INJECTION:OrderSecond]] at byte %d must appear before [[INJECTION:OrderThirdSourceOnly]] at byte %d; "+
+		t.Errorf("<OrderSecond type=\"project\"> at byte %d must appear before <OrderThirdSourceOnly type=\"project\"> at byte %d; "+
 			"deployed-file-origin regions must appear before source-only regions",
 			secondIdx, thirdIdx)
 	}
@@ -757,7 +757,7 @@ func TestNestedRegionPreservation_MultipleNested_DeterministicOrder(t *testing.T
 // has no nested injection — only a deployed custom region in the deployed file.
 // (Same as nestedPreservationSource — reused via const reference above.)
 
-// nestedBundleSource is a subagent source with [[DEPLOYED:AuthorityHierarchy]] in the
+// nestedBundleSource is a subagent source with <AuthorityHierarchy type="managed"> in the
 // Identity section. AuthorityHierarchy is a bundle-filled deployed region; its content
 // is regenerated from req.Bundle on every transform. The nested custom must survive
 // that regeneration.
@@ -774,19 +774,19 @@ tier_rationale: nested region bundle-path testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedBundle Agent
 
 You are the NestedBundle agent.
 
-[[DEPLOYED:AuthorityHierarchy]]
-[[/DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
+</AuthorityHierarchy>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // nestedBundleDeployed is the deployed predecessor of nestedBundleSource. AuthorityHierarchy
-// holds previously generated bundle content plus a nested [[CUSTOM:BundlePathCustom]] region.
+// holds previously generated bundle content plus a nested <BundlePathCustom type="custom"> region.
 const nestedBundleDeployed = `---
 id: 603
 version: 1.0.0
@@ -798,27 +798,27 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedBundle Agent
 
 You are the NestedBundle agent.
 
-[[DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
 ### AuthorityHierarchy
 
 This is the verbatim content for AuthorityHierarchy.
 
-[[CUSTOM:BundlePathCustom]]
+<BundlePathCustom type="custom">
 Project-specific content nested inside AuthorityHierarchy.
 Must survive the bundle regeneration of that parent region.
-[[/CUSTOM:BundlePathCustom]]
-[[/DEPLOYED:AuthorityHierarchy]]
+</BundlePathCustom>
+</AuthorityHierarchy>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
-// nestedProtocolSource is a source with [[DEPLOYED:CommunicationProtocol]] at the top level.
-// CommunicationProtocol is protocol-filled; a nested [[CUSTOM:]] must survive its regeneration.
+// nestedProtocolSource is a source with <CommunicationProtocol type="managed"> at the top level.
+// CommunicationProtocol is protocol-filled; a nested custom-region must survive its regeneration.
 const nestedProtocolSource = `---
 id: 604
 version: 2.0.0
@@ -831,19 +831,19 @@ tier_rationale: nested region protocol-path testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedProtocol Agent
 
 You are the NestedProtocol agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // nestedProtocolDeployed is the deployed predecessor of nestedProtocolSource.
 // CommunicationProtocol holds previously generated protocol content plus a nested
-// [[CUSTOM:ProtocolPathCustom]] region.
+// <ProtocolPathCustom type="custom"> region.
 const nestedProtocolDeployed = `---
 id: 604
 version: 1.0.0
@@ -855,28 +855,27 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedProtocol Agent
 
 You are the NestedProtocol agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-<!-- protocol-version: 1.9 -->
+<CommunicationProtocol type="managed" version="1.9">
 ## Communication Protocol (Subagent)
 
 Subagent-specific protocol content.
 
-[[CUSTOM:ProtocolPathCustom]]
+<ProtocolPathCustom type="custom">
 Project-specific extension nested inside CommunicationProtocol.
 Must survive the protocol regeneration of that parent region.
-[[/CUSTOM:ProtocolPathCustom]]
-[[/DEPLOYED:CommunicationProtocol]]
+</ProtocolPathCustom>
+</CommunicationProtocol>
 `
 
-// nestedWorkflowSource is an orchestrator-like source with [[DEPLOYED:AvailableWorkflows]]
+// nestedWorkflowSource is an orchestrator-like source with <AvailableWorkflows type="managed">
 // in the Identity section. AvailableWorkflows is assembled from req.Workflows on each run;
-// when req.Workflows is nil the region is cleared. A nested [[CUSTOM:]] must survive either
+// when req.Workflows is nil the region is cleared. A nested custom-region must survive either
 // path (assembled or cleared).
 const nestedWorkflowSource = `---
 version: 2.0.0
@@ -889,20 +888,20 @@ tier_rationale: nested region workflow-path testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedWorkflow Agent
 
 You are the NestedWorkflow agent.
 
-[[DEPLOYED:AvailableWorkflows]]
-[[/DEPLOYED:AvailableWorkflows]]
+<AvailableWorkflows type="managed">
+</AvailableWorkflows>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // nestedWorkflowDeployed is the deployed predecessor of nestedWorkflowSource.
 // AvailableWorkflows holds previously assembled workflow content plus a nested
-// [[CUSTOM:WorkflowPathCustom]] region.
+// <WorkflowPathCustom type="custom"> region.
 const nestedWorkflowDeployed = `---
 version: 2.0.0
 transform_version: 3.0.0
@@ -913,33 +912,32 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedWorkflow Agent
 
 You are the NestedWorkflow agent.
 
-[[DEPLOYED:AvailableWorkflows]]
-[[SECTION:Workflow:sample]]
-<!-- workflow-version: 1.0 -->
+<AvailableWorkflows type="managed">
+<Workflow type="core" name="sample" version="1.0">
 ## Sample Workflow
 
 | Phase | Subagent | HITL |
 |-------|----------|:----:|
 | PLAN | planner | ✅ |
 
-[[/SECTION:Workflow:sample]]
+</Workflow>
 
-[[CUSTOM:WorkflowPathCustom]]
+<WorkflowPathCustom type="custom">
 Project-specific content nested inside AvailableWorkflows.
 Must survive even when AvailableWorkflows is cleared (empty workflows).
-[[/CUSTOM:WorkflowPathCustom]]
-[[/DEPLOYED:AvailableWorkflows]]
+</WorkflowPathCustom>
+</AvailableWorkflows>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
-// TestNestedRegionPreservation_GeneratorPath_Harness asserts that a [[CUSTOM:]] region
-// nested inside [[DEPLOYED:HarnessConstraints]] survives regeneration via the harness
+// TestNestedRegionPreservation_GeneratorPath_Harness asserts that a custom-region region
+// nested inside <HarnessConstraints type="managed"> survives regeneration via the harness
 // generator path (applyHarnessRegion). This is the same assertion as T6.1 but exists
 // explicitly to pin that the harness generator path is covered.
 func TestNestedRegionPreservation_GeneratorPath_Harness(t *testing.T) {
@@ -963,14 +961,14 @@ func TestNestedRegionPreservation_GeneratorPath_Harness(t *testing.T) {
 		t.Fatalf("parse output: %v", err)
 	}
 	if _, ok := outDoc.Body().Custom("DeployedNestedCustom"); !ok {
-		t.Error("[[CUSTOM:DeployedNestedCustom]] absent after harness-path regeneration of " +
-			"[[DEPLOYED:HarnessConstraints]]; the harness generator must apply the " +
+		t.Error("<DeployedNestedCustom type=\"custom\"> absent after harness-path regeneration of " +
+			"<HarnessConstraints type=\"managed\">; the harness generator must apply the " +
 			"capture-regenerate-reemit sequence")
 	}
 }
 
-// TestNestedRegionPreservation_GeneratorPath_Bundle asserts that a [[CUSTOM:]] region nested
-// inside [[DEPLOYED:AuthorityHierarchy]] survives regeneration via the bundle generator path
+// TestNestedRegionPreservation_GeneratorPath_Bundle asserts that a custom-region region nested
+// inside <AuthorityHierarchy type="managed"> survives regeneration via the bundle generator path
 // (applyBundleRegion). The bundle regenerates the parent's content from req.Bundle; the
 // nested custom must appear after that content, still inside the parent.
 func TestNestedRegionPreservation_GeneratorPath_Bundle(t *testing.T) {
@@ -996,14 +994,14 @@ func TestNestedRegionPreservation_GeneratorPath_Bundle(t *testing.T) {
 		t.Fatalf("parse output: %v", err)
 	}
 	if _, ok := outDoc.Body().Custom("BundlePathCustom"); !ok {
-		t.Error("[[CUSTOM:BundlePathCustom]] absent after bundle-path regeneration of " +
-			"[[DEPLOYED:AuthorityHierarchy]]; the bundle generator must apply the " +
+		t.Error("<BundlePathCustom type=\"custom\"> absent after bundle-path regeneration of " +
+			"<AuthorityHierarchy type=\"managed\">; the bundle generator must apply the " +
 			"capture-regenerate-reemit sequence")
 	}
 }
 
-// TestNestedRegionPreservation_GeneratorPath_Protocol asserts that a [[CUSTOM:]] region
-// nested inside [[DEPLOYED:CommunicationProtocol]] survives regeneration via the protocol
+// TestNestedRegionPreservation_GeneratorPath_Protocol asserts that a custom-region region
+// nested inside <CommunicationProtocol type="managed"> survives regeneration via the protocol
 // generator path (applyProtocolRegion).
 func TestNestedRegionPreservation_GeneratorPath_Protocol(t *testing.T) {
 	req := transform.Request{
@@ -1028,14 +1026,14 @@ func TestNestedRegionPreservation_GeneratorPath_Protocol(t *testing.T) {
 		t.Fatalf("parse output: %v", err)
 	}
 	if _, ok := outDoc.Body().Custom("ProtocolPathCustom"); !ok {
-		t.Error("[[CUSTOM:ProtocolPathCustom]] absent after protocol-path regeneration of " +
-			"[[DEPLOYED:CommunicationProtocol]]; the protocol generator must apply the " +
+		t.Error("<ProtocolPathCustom type=\"custom\"> absent after protocol-path regeneration of " +
+			"<CommunicationProtocol type=\"managed\">; the protocol generator must apply the " +
 			"capture-regenerate-reemit sequence")
 	}
 }
 
-// TestNestedRegionPreservation_GeneratorPath_Workflow asserts that a [[CUSTOM:]] region
-// nested inside [[DEPLOYED:AvailableWorkflows]] survives even when the workflow region is
+// TestNestedRegionPreservation_GeneratorPath_Workflow asserts that a custom-region region
+// nested inside <AvailableWorkflows type="managed"> survives even when the workflow region is
 // cleared (req.Workflows is nil, so applyWorkflowRegion calls Clear). Clearing the parent
 // via Clear() also destroys nested child nodes — the fix must capture them first.
 //
@@ -1065,8 +1063,8 @@ func TestNestedRegionPreservation_GeneratorPath_Workflow(t *testing.T) {
 		t.Fatalf("parse output: %v", err)
 	}
 	if _, ok := outDoc.Body().Custom("WorkflowPathCustom"); !ok {
-		t.Error("[[CUSTOM:WorkflowPathCustom]] absent after workflow-path Clear of " +
-			"[[DEPLOYED:AvailableWorkflows]]; the workflow generator must apply the " +
+		t.Error("<WorkflowPathCustom type=\"custom\"> absent after workflow-path Clear of " +
+			"<AvailableWorkflows type=\"managed\">; the workflow generator must apply the " +
 			"capture-regenerate-reemit sequence even when Clear is called (not just SetContent)")
 	}
 }
@@ -1082,8 +1080,8 @@ func TestNestedRegionPreservation_GeneratorPath_Workflow(t *testing.T) {
 // All four tests below will fail until both fixes are in place.
 // ---------------------------------------------------------------------------
 
-// nestedBundleInjSource is a source with [[DEPLOYED:AuthorityHierarchy]] containing an
-// empty [[INJECTION:BundleNestedInj]] marker. This source is currently rejected by
+// nestedBundleInjSource is a source with <AuthorityHierarchy type="managed"> containing an
+// empty <BundleNestedInj type="project"> marker. This source is currently rejected by
 // ErrSourceDeployedRegionNotEmpty. After the source-guard relaxation and the
 // capture-regenerate-reemit fix, the injection must survive the bundle generator's
 // SetContent call.
@@ -1100,21 +1098,21 @@ tier_rationale: nested injection bundle-path testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedBundleInj Agent
 
 You are the NestedBundleInj agent.
 
-[[DEPLOYED:AuthorityHierarchy]]
-[[INJECTION:BundleNestedInj]]
-[[/INJECTION:BundleNestedInj]]
-[[/DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
+<BundleNestedInj type="project">
+</BundleNestedInj>
+</AuthorityHierarchy>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // nestedBundleInjDeployed is the deployed predecessor of nestedBundleInjSource.
-// [[INJECTION:BundleNestedInj]] is populated with user content inside AuthorityHierarchy.
+// <BundleNestedInj type="project"> is populated with user content inside AuthorityHierarchy.
 const nestedBundleInjDeployed = `---
 id: 610
 version: 1.0.0
@@ -1126,27 +1124,27 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedBundleInj Agent
 
 You are the NestedBundleInj agent.
 
-[[DEPLOYED:AuthorityHierarchy]]
+<AuthorityHierarchy type="managed">
 ### AuthorityHierarchy
 
 This is the verbatim content for AuthorityHierarchy.
 
-[[INJECTION:BundleNestedInj]]
+<BundleNestedInj type="project">
 User content nested inside AuthorityHierarchy via injection.
 Must survive after the bundle generator regenerates the parent.
-[[/INJECTION:BundleNestedInj]]
-[[/DEPLOYED:AuthorityHierarchy]]
+</BundleNestedInj>
+</AuthorityHierarchy>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
-// nestedProtocolInjSource is a source with [[DEPLOYED:CommunicationProtocol]] containing
-// an empty [[INJECTION:ProtocolNestedInj]] marker. Currently rejected by source guard.
+// nestedProtocolInjSource is a source with <CommunicationProtocol type="managed"> containing
+// an empty <ProtocolNestedInj type="project"> marker. Currently rejected by source guard.
 const nestedProtocolInjSource = `---
 id: 611
 version: 2.0.0
@@ -1159,20 +1157,20 @@ tier_rationale: nested injection protocol-path testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedProtocolInj Agent
 
 You are the NestedProtocolInj agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[INJECTION:ProtocolNestedInj]]
-[[/INJECTION:ProtocolNestedInj]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+<ProtocolNestedInj type="project">
+</ProtocolNestedInj>
+</CommunicationProtocol>
 `
 
 // nestedProtocolInjDeployed is the deployed predecessor of nestedProtocolInjSource.
-// [[INJECTION:ProtocolNestedInj]] is populated inside CommunicationProtocol.
+// <ProtocolNestedInj type="project"> is populated inside CommunicationProtocol.
 const nestedProtocolInjDeployed = `---
 id: 611
 version: 1.0.0
@@ -1184,27 +1182,26 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedProtocolInj Agent
 
 You are the NestedProtocolInj agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-<!-- protocol-version: 1.9 -->
+<CommunicationProtocol type="managed" version="1.9">
 ## Communication Protocol (Subagent)
 
 Subagent-specific protocol content.
 
-[[INJECTION:ProtocolNestedInj]]
+<ProtocolNestedInj type="project">
 User content nested inside CommunicationProtocol via injection.
 Must survive after the protocol generator regenerates the parent.
-[[/INJECTION:ProtocolNestedInj]]
-[[/DEPLOYED:CommunicationProtocol]]
+</ProtocolNestedInj>
+</CommunicationProtocol>
 `
 
-// nestedWorkflowInjSource is a source with [[DEPLOYED:AvailableWorkflows]] containing
-// an empty [[INJECTION:WorkflowNestedInj]] marker. Currently rejected by source guard.
+// nestedWorkflowInjSource is a source with <AvailableWorkflows type="managed"> containing
+// an empty <WorkflowNestedInj type="project"> marker. Currently rejected by source guard.
 const nestedWorkflowInjSource = `---
 version: 2.0.0
 name: nested-workflow-inj-test
@@ -1216,21 +1213,21 @@ tier_rationale: nested injection workflow-path testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedWorkflowInj Agent
 
 You are the NestedWorkflowInj agent.
 
-[[DEPLOYED:AvailableWorkflows]]
-[[INJECTION:WorkflowNestedInj]]
-[[/INJECTION:WorkflowNestedInj]]
-[[/DEPLOYED:AvailableWorkflows]]
+<AvailableWorkflows type="managed">
+<WorkflowNestedInj type="project">
+</WorkflowNestedInj>
+</AvailableWorkflows>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // nestedWorkflowInjDeployed is the deployed predecessor of nestedWorkflowInjSource.
-// [[INJECTION:WorkflowNestedInj]] is populated inside AvailableWorkflows.
+// <WorkflowNestedInj type="project"> is populated inside AvailableWorkflows.
 const nestedWorkflowInjDeployed = `---
 version: 2.0.0
 transform_version: 3.0.0
@@ -1241,23 +1238,23 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedWorkflowInj Agent
 
 You are the NestedWorkflowInj agent.
 
-[[DEPLOYED:AvailableWorkflows]]
-[[INJECTION:WorkflowNestedInj]]
+<AvailableWorkflows type="managed">
+<WorkflowNestedInj type="project">
 User content nested inside AvailableWorkflows via injection.
 Must survive even when AvailableWorkflows is cleared (empty Workflows).
-[[/INJECTION:WorkflowNestedInj]]
-[[/DEPLOYED:AvailableWorkflows]]
+</WorkflowNestedInj>
+</AvailableWorkflows>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // TestNestedRegionPreservation_GeneratorPath_Bundle_NestedInjection asserts that a
-// [[INJECTION:]] region declared empty in source, nested inside [[DEPLOYED:AuthorityHierarchy]],
+// project-injection region region declared empty in source, nested inside <AuthorityHierarchy type="managed">,
 // survives regeneration via the bundle generator. This requires both the source guard
 // relaxation (so the empty nested marker is accepted) and the capture-regenerate-reemit
 // sequence (so the injection survives SetContent on the parent).
@@ -1288,21 +1285,21 @@ func TestNestedRegionPreservation_GeneratorPath_Bundle_NestedInjection(t *testin
 
 	outInj, ok := outDoc.Body().Injection("BundleNestedInj")
 	if !ok {
-		t.Error("[[INJECTION:BundleNestedInj]] absent from output after bundle-path regeneration of " +
-			"[[DEPLOYED:AuthorityHierarchy]]; the bundle generator must apply " +
+		t.Error("<BundleNestedInj type=\"project\"> absent from output after bundle-path regeneration of " +
+			"<AuthorityHierarchy type=\"managed\">; the bundle generator must apply " +
 			"capture-regenerate-reemit for nested injection regions, not only for nested custom regions")
 	}
 
 	if ok && outInj.Parent() != nil {
 		if outInj.Parent().Kind() != docformat.NodeDeployed || outInj.Parent().Name() != "AuthorityHierarchy" {
-			t.Errorf("BundleNestedInj must be nested inside [[DEPLOYED:AuthorityHierarchy]]; " +
+			t.Errorf("BundleNestedInj must be nested inside <AuthorityHierarchy type=\"managed\">; " +
 				"got parent kind=%q name=%q", outInj.Parent().Kind(), outInj.Parent().Name())
 		}
 	}
 }
 
 // TestNestedRegionPreservation_GeneratorPath_Protocol_NestedInjection asserts that a
-// [[INJECTION:]] region declared empty in source, nested inside [[DEPLOYED:CommunicationProtocol]],
+// project-injection region region declared empty in source, nested inside <CommunicationProtocol type="managed">,
 // survives regeneration via the protocol generator.
 func TestNestedRegionPreservation_GeneratorPath_Protocol_NestedInjection(t *testing.T) {
 	req := transform.Request{
@@ -1331,21 +1328,21 @@ func TestNestedRegionPreservation_GeneratorPath_Protocol_NestedInjection(t *test
 
 	outInj, ok := outDoc.Body().Injection("ProtocolNestedInj")
 	if !ok {
-		t.Error("[[INJECTION:ProtocolNestedInj]] absent from output after protocol-path regeneration of " +
-			"[[DEPLOYED:CommunicationProtocol]]; the protocol generator must apply " +
+		t.Error("<ProtocolNestedInj type=\"project\"> absent from output after protocol-path regeneration of " +
+			"<CommunicationProtocol type=\"managed\">; the protocol generator must apply " +
 			"capture-regenerate-reemit for nested injection regions")
 	}
 
 	if ok && outInj.Parent() != nil {
 		if outInj.Parent().Kind() != docformat.NodeDeployed || outInj.Parent().Name() != "CommunicationProtocol" {
-			t.Errorf("ProtocolNestedInj must be nested inside [[DEPLOYED:CommunicationProtocol]]; " +
+			t.Errorf("ProtocolNestedInj must be nested inside <CommunicationProtocol type=\"managed\">; " +
 				"got parent kind=%q name=%q", outInj.Parent().Kind(), outInj.Parent().Name())
 		}
 	}
 }
 
 // TestNestedRegionPreservation_GeneratorPath_Workflow_NestedInjection asserts that a
-// [[INJECTION:]] region declared empty in source, nested inside [[DEPLOYED:AvailableWorkflows]],
+// project-injection region region declared empty in source, nested inside <AvailableWorkflows type="managed">,
 // survives even when AvailableWorkflows is cleared (req.Workflows is nil). The Clear path
 // and the SetContent path both destroy nested nodes; the fix must handle both.
 func TestNestedRegionPreservation_GeneratorPath_Workflow_NestedInjection(t *testing.T) {
@@ -1374,22 +1371,22 @@ func TestNestedRegionPreservation_GeneratorPath_Workflow_NestedInjection(t *test
 
 	outInj, ok := outDoc.Body().Injection("WorkflowNestedInj")
 	if !ok {
-		t.Error("[[INJECTION:WorkflowNestedInj]] absent from output after workflow-path Clear of " +
-			"[[DEPLOYED:AvailableWorkflows]]; the workflow generator must apply " +
+		t.Error("<WorkflowNestedInj type=\"project\"> absent from output after workflow-path Clear of " +
+			"<AvailableWorkflows type=\"managed\">; the workflow generator must apply " +
 			"capture-regenerate-reemit for nested injection regions, including the Clear path")
 	}
 
 	if ok && outInj.Parent() != nil {
 		if outInj.Parent().Kind() != docformat.NodeDeployed || outInj.Parent().Name() != "AvailableWorkflows" {
-			t.Errorf("WorkflowNestedInj must be nested inside [[DEPLOYED:AvailableWorkflows]]; " +
+			t.Errorf("WorkflowNestedInj must be nested inside <AvailableWorkflows type=\"managed\">; " +
 				"got parent kind=%q name=%q", outInj.Parent().Kind(), outInj.Parent().Name())
 		}
 	}
 }
 
-// nestedInfraSource is an orchestrator-like source with [[DEPLOYED:InfrastructureAgents]]
+// nestedInfraSource is an orchestrator-like source with <InfrastructureAgents type="managed">
 // inside the Identity section. InfrastructureAgents is regenerated by applyInfrastructureRegion
-// from req.InfrastructureAgents on each transform. A nested [[CUSTOM:]] region must survive
+// from req.InfrastructureAgents on each transform. A nested custom-region region must survive
 // that regeneration.
 const nestedInfraSource = `---
 version: 7.0.0
@@ -1402,19 +1399,19 @@ tier_rationale: nested region infrastructure-path testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedInfra Agent
 
 You are the NestedInfra agent.
 
-[[DEPLOYED:InfrastructureAgents]]
-[[/DEPLOYED:InfrastructureAgents]]
+<InfrastructureAgents type="managed">
+</InfrastructureAgents>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // nestedInfraDeployed is the deployed predecessor of nestedInfraSource. InfrastructureAgents
-// holds previously assembled infrastructure content plus a nested [[CUSTOM:InfraPathCustom]]
+// holds previously assembled infrastructure content plus a nested <InfraPathCustom type="custom">
 // region. The nested custom must survive the infrastructure generator's SetContent call.
 const nestedInfraDeployed = `---
 version: 7.0.0
@@ -1426,30 +1423,29 @@ model: claude/claude-sonnet
 tools: {tool-permissions}
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedInfra Agent
 
 You are the NestedInfra agent.
 
-[[DEPLOYED:InfrastructureAgents]]
-[[SECTION:InfrastructureAgent:orchestration-review]]
-<!-- infra-version: 1.0.0 -->
+<InfrastructureAgents type="managed">
+<InfrastructureAgent type="core" name="orchestration-review" version="1.0.0">
 | Class | Trigger | Param | On Failure | Description |
 |-------|---------|-------|------------|-------------|
 | review | INVOCATION_INTERVAL | 30 | continue | Advisory checks on run bookkeeping. |
-[[/SECTION:InfrastructureAgent:orchestration-review]]
+</InfrastructureAgent>
 
-[[CUSTOM:InfraPathCustom]]
+<InfraPathCustom type="custom">
 Project-specific content nested inside InfrastructureAgents.
 Must survive the infrastructure generator's SetContent call.
-[[/CUSTOM:InfraPathCustom]]
-[[/DEPLOYED:InfrastructureAgents]]
+</InfraPathCustom>
+</InfrastructureAgents>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
-// nestedInfraInjSource is a source with [[DEPLOYED:InfrastructureAgents]] containing an
-// empty [[INJECTION:InfraNestedInj]] marker. Currently rejected by the source guard.
+// nestedInfraInjSource is a source with <InfrastructureAgents type="managed"> containing an
+// empty <InfraNestedInj type="project"> marker. Currently rejected by the source guard.
 // After the relaxation and the capture-regenerate-reemit fix, the injection must survive
 // the infrastructure generator's SetContent call.
 const nestedInfraInjSource = `---
@@ -1463,21 +1459,21 @@ tier_rationale: nested injection infrastructure-path testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedInfraInj Agent
 
 You are the NestedInfraInj agent.
 
-[[DEPLOYED:InfrastructureAgents]]
-[[INJECTION:InfraNestedInj]]
-[[/INJECTION:InfraNestedInj]]
-[[/DEPLOYED:InfrastructureAgents]]
+<InfrastructureAgents type="managed">
+<InfraNestedInj type="project">
+</InfraNestedInj>
+</InfrastructureAgents>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // nestedInfraInjDeployed is the deployed predecessor of nestedInfraInjSource.
-// [[INJECTION:InfraNestedInj]] is populated with user content inside InfrastructureAgents.
+// <InfraNestedInj type="project"> is populated with user content inside InfrastructureAgents.
 const nestedInfraInjDeployed = `---
 version: 7.0.0
 transform_version: 3.0.0
@@ -1488,26 +1484,25 @@ model: claude/claude-sonnet
 tools: {tool-permissions}
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedInfraInj Agent
 
 You are the NestedInfraInj agent.
 
-[[DEPLOYED:InfrastructureAgents]]
-[[SECTION:InfrastructureAgent:orchestration-review]]
-<!-- infra-version: 1.0.0 -->
+<InfrastructureAgents type="managed">
+<InfrastructureAgent type="core" name="orchestration-review" version="1.0.0">
 | Class | Trigger | Param | On Failure | Description |
 |-------|---------|-------|------------|-------------|
 | review | INVOCATION_INTERVAL | 30 | continue | Advisory checks on run bookkeeping. |
-[[/SECTION:InfrastructureAgent:orchestration-review]]
+</InfrastructureAgent>
 
-[[INJECTION:InfraNestedInj]]
+<InfraNestedInj type="project">
 User content nested inside InfrastructureAgents via injection.
 Must survive after the infrastructure generator regenerates the parent.
-[[/INJECTION:InfraNestedInj]]
-[[/DEPLOYED:InfrastructureAgents]]
+</InfraNestedInj>
+</InfrastructureAgents>
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // fixtureInfraAgents returns a minimal InfrastructureBlock slice for use in the
@@ -1529,8 +1524,8 @@ func fixtureInfraAgents() []transform.InfrastructureBlock {
 	}
 }
 
-// TestNestedRegionPreservation_GeneratorPath_Infrastructure asserts that a [[CUSTOM:]] region
-// nested inside [[DEPLOYED:InfrastructureAgents]] survives regeneration via the infrastructure
+// TestNestedRegionPreservation_GeneratorPath_Infrastructure asserts that a custom-region region
+// nested inside <InfrastructureAgents type="managed"> survives regeneration via the infrastructure
 // generator path (applyInfrastructureRegion). This path calls SetContent with the assembled
 // infrastructure blocks, which replaces the node's item list and detaches any nested child
 // nodes. The fix must apply the capture-regenerate-reemit sequence here as well.
@@ -1561,14 +1556,14 @@ func TestNestedRegionPreservation_GeneratorPath_Infrastructure(t *testing.T) {
 		t.Fatalf("parse output: %v", err)
 	}
 	if _, ok := outDoc.Body().Custom("InfraPathCustom"); !ok {
-		t.Error("[[CUSTOM:InfraPathCustom]] absent after infrastructure-path regeneration of " +
-			"[[DEPLOYED:InfrastructureAgents]]; the infrastructure generator (applyInfrastructureRegion) " +
+		t.Error("<InfraPathCustom type=\"custom\"> absent after infrastructure-path regeneration of " +
+			"<InfrastructureAgents type=\"managed\">; the infrastructure generator (applyInfrastructureRegion) " +
 			"must apply the capture-regenerate-reemit sequence, matching the other four generator paths")
 	}
 }
 
 // TestNestedRegionPreservation_GeneratorPath_Infrastructure_NestedInjection asserts that a
-// [[INJECTION:]] region declared empty in source, nested inside [[DEPLOYED:InfrastructureAgents]],
+// project-injection region region declared empty in source, nested inside <InfrastructureAgents type="managed">,
 // survives regeneration via the infrastructure generator. This requires both the source guard
 // relaxation (so the empty nested marker is accepted) and the capture-regenerate-reemit
 // sequence (so the injection survives SetContent on the parent).
@@ -1598,14 +1593,14 @@ func TestNestedRegionPreservation_GeneratorPath_Infrastructure_NestedInjection(t
 
 	outInj, ok := outDoc.Body().Injection("InfraNestedInj")
 	if !ok {
-		t.Error("[[INJECTION:InfraNestedInj]] absent from output after infrastructure-path regeneration of " +
-			"[[DEPLOYED:InfrastructureAgents]]; the infrastructure generator must apply " +
+		t.Error("<InfraNestedInj type=\"project\"> absent from output after infrastructure-path regeneration of " +
+			"<InfrastructureAgents type=\"managed\">; the infrastructure generator must apply " +
 			"capture-regenerate-reemit for nested injection regions, not only for nested custom regions")
 	}
 
 	if ok && outInj.Parent() != nil {
 		if outInj.Parent().Kind() != docformat.NodeDeployed || outInj.Parent().Name() != "InfrastructureAgents" {
-			t.Errorf("InfraNestedInj must be nested inside [[DEPLOYED:InfrastructureAgents]]; "+
+			t.Errorf("InfraNestedInj must be nested inside <InfrastructureAgents type=\"managed\">; "+
 				"got parent kind=%q name=%q", outInj.Parent().Kind(), outInj.Parent().Name())
 		}
 	}
@@ -1620,7 +1615,7 @@ func TestNestedRegionPreservation_GeneratorPath_Infrastructure_NestedInjection(t
 // ---------------------------------------------------------------------------
 
 // sourceWithEmptyNestedMarkers is a source where a deployed region contains only an empty
-// nested [[INJECTION:]] marker. By the relaxed predicate, this region IS empty (the nested
+// nested project-injection region marker. By the relaxed predicate, this region IS empty (the nested
 // marker contributes no content). The transform must succeed, not error.
 //
 // Under the old check (len(TrimSpace(content)) > 0), the nested marker bytes are non-empty
@@ -1637,22 +1632,22 @@ tier_rationale: source check relaxation testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # SourceEmptyNested Agent
 
 You are the SourceEmptyNested agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[INJECTION:NestedMarker]]
-[[/INJECTION:NestedMarker]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+<NestedMarker type="project">
+</NestedMarker>
+</HarnessConstraints>
+</Constraints>
 `
 
 // sourceWithProseInDeployed is a source where a deployed region contains actual prose
@@ -1670,25 +1665,25 @@ tier_rationale: source check testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # SourceProse Agent
 
 You are the SourceProse agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 This is prose content inside a source deployed region and must still be an error.
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</HarnessConstraints>
+</Constraints>
 `
 
 // sourceWithNonEmptyNestedMarker is a source where a deployed region contains a nested
-// [[INJECTION:]] marker that has non-whitespace content. This must also error, because
+// project-injection region marker that has non-whitespace content. This must also error, because
 // the nested marker itself carries content — SourceDeployedRegionIsEmpty returns false
 // for non-empty nested nodes.
 const sourceWithNonEmptyNestedMarker = `---
@@ -1703,27 +1698,27 @@ tier_rationale: source check testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # SourceNonEmptyNested Agent
 
 You are the SourceNonEmptyNested agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[INJECTION:NestedWithContent]]
+<HarnessConstraints type="managed">
+<NestedWithContent type="project">
 This injection has content in the source, making the parent non-empty.
-[[/INJECTION:NestedWithContent]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</NestedWithContent>
+</HarnessConstraints>
+</Constraints>
 `
 
 // TestSourceCheck_EmptyNestedMarkers_DoesNotError asserts that a source deployed region
-// containing only empty nested [[INJECTION:]] markers is accepted by the transform.
+// containing only empty nested project-injection region markers is accepted by the transform.
 // This is the positive half of the source-guard relaxation: the old TrimSpace check
 // incorrectly rejects this, because the marker bytes are non-whitespace even when the
 // nested injection has no content between its tags.
@@ -1742,7 +1737,7 @@ func TestSourceCheck_EmptyNestedMarkers_DoesNotError(t *testing.T) {
 	if err != nil {
 		if errors.Is(err, transform.ErrSourceDeployedRegionNotEmpty) {
 			t.Fatalf("Apply returned ErrSourceDeployedRegionNotEmpty for a source deployed region "+
-				"containing only an empty nested [[INJECTION:]] marker; the relaxed "+
+				"containing only an empty nested project-injection region marker; the relaxed "+
 				"SourceDeployedRegionIsEmpty predicate must accept empty nested user-owned markers: %v", err)
 		}
 		t.Fatalf("Apply returned unexpected error: %v", err)
@@ -1776,7 +1771,7 @@ func TestSourceCheck_ProseInDeployed_StillErrors(t *testing.T) {
 }
 
 // TestSourceCheck_NonEmptyNestedMarker_StillErrors asserts that a source deployed region
-// containing a nested [[INJECTION:]] marker with non-whitespace content still errors.
+// containing a nested project-injection region marker with non-whitespace content still errors.
 // A nested user-owned marker with content makes the parent non-empty by the relaxed predicate,
 // so it must still be rejected.
 func TestSourceCheck_NonEmptyNestedMarker_StillErrors(t *testing.T) {
@@ -1793,7 +1788,7 @@ func TestSourceCheck_NonEmptyNestedMarker_StillErrors(t *testing.T) {
 	_, err := transform.Apply(req)
 	if err == nil {
 		t.Fatal("Apply must return an error when a source deployed region contains a nested " +
-			"[[INJECTION:]] with non-whitespace content; a non-empty nested marker makes the " +
+			"project-injection region with non-whitespace content; a non-empty nested marker makes the " +
 			"parent non-empty under the relaxed SourceDeployedRegionIsEmpty predicate")
 	}
 	if !errors.Is(err, transform.ErrSourceDeployedRegionNotEmpty) {
@@ -1811,7 +1806,7 @@ func TestSourceCheck_NonEmptyNestedMarker_StillErrors(t *testing.T) {
 // reemitNestedUserRegions must not touch the parent at all.
 // ---------------------------------------------------------------------------
 
-// noNestedDeployed is a deployed file where [[DEPLOYED:HarnessConstraints]] has canonical
+// noNestedDeployed is a deployed file where <HarnessConstraints type="managed"> has canonical
 // content but no nested user-owned regions. The output's HarnessConstraints content must
 // be exactly what the harness module supplies — nothing more, nothing less.
 const noNestedDeployed = `---
@@ -1825,22 +1820,22 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NoNested Agent
 
 You are the NoNested agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Fixture harness constraint: always use the approved tool list.
 Do not invoke tools not declared in the agent's tools field.
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</HarnessConstraints>
+</Constraints>
 `
 
 // noNestedSource matches noNestedDeployed as its source predecessor. It has no nested
@@ -1857,26 +1852,26 @@ tier_rationale: no-nested regression testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NoNested Agent
 
 You are the NoNested agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
-// Regression: nested [[INJECTION:]] fully absent from source is orphaned, not resurrected
+// Regression: nested project-injection region fully absent from source is orphaned, not resurrected
 //
-// A [[INJECTION:]] region that existed inside a [[DEPLOYED:]] parent in the deployed file,
+// A project-injection region region that existed inside a managed region parent in the deployed file,
 // but whose marker was entirely removed from the source (not left as an empty placeholder —
 // removed outright), must be treated as a removed injection: it must NOT appear in the output
 // and must produce exactly one RegionOrphaned outcome and one GapRemovedInjection gap.
@@ -1888,7 +1883,7 @@ Always be helpful.
 // ---------------------------------------------------------------------------
 
 // nestedInjectionRemovedDeployed is a deployed file whose HarnessConstraints region contains
-// a populated [[INJECTION:RemovedNested]] that the source (nestedPreservationSource) no
+// a populated <RemovedNested type="project"> that the source (nestedPreservationSource) no
 // longer declares at all. The marker was fully removed from the source — not left empty —
 // so it must be treated as a removed injection: orphaned, not resurrected.
 const nestedInjectionRemovedDeployed = `---
@@ -1902,31 +1897,31 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedPreservation Agent
 
 You are the NestedPreservation agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Fixture harness constraint: always use the approved tool list.
 Do not invoke tools not declared in the agent's tools field.
 
-[[INJECTION:RemovedNested]]
+<RemovedNested type="project">
 This injection was fully deleted from the source. It must not appear in the output.
 Resurrecting it would prevent the user from ever removing a nested injection.
-[[/INJECTION:RemovedNested]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</RemovedNested>
+</HarnessConstraints>
+</Constraints>
 `
 
 // TestNestedInjection_FullyRemovedFromSource_IsOrphanedNotResurrected asserts that a
-// [[INJECTION:]] that existed inside a [[DEPLOYED:]] parent in the deployed file but is
+// project-injection region that existed inside a managed region parent in the deployed file but is
 // entirely absent from the source produces exactly one RegionOrphaned outcome and one
 // GapRemovedInjection gap — and is NOT present in the output document.
 //
@@ -1958,7 +1953,7 @@ func TestNestedInjection_FullyRemovedFromSource_IsOrphanedNotResurrected(t *test
 		t.Fatalf("parse output: %v", err)
 	}
 	if _, ok := outDoc.Body().Injection("RemovedNested"); ok {
-		t.Error("[[INJECTION:RemovedNested]] is present in the output; a nested injection " +
+		t.Error("<RemovedNested type=\"project\"> is present in the output; a nested injection " +
 			"fully deleted from the source must be removed, not resurrected from the deployed file. " +
 			"captureNestedUserRegions must not capture NodeInjection children from the deployed tree.")
 	}
@@ -2006,7 +2001,7 @@ func TestNestedInjection_FullyRemovedFromSource_IsOrphanedNotResurrected(t *test
 	}
 }
 
-// TestNoNestedContent_RegeneratesWithoutStrayContent asserts that a [[DEPLOYED:]] region
+// TestNoNestedContent_RegeneratesWithoutStrayContent asserts that a managed region region
 // with no nested user-owned content regenerates with exactly the canonical content the
 // generator supplies — no trailing separator, no extra newline, no whitespace drift.
 //

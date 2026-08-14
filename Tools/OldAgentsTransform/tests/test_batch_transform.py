@@ -396,11 +396,11 @@ class TestNogenericCounterpartDegradedPath:
     def test_no_generic_counterpart_output_contains_boundary_tags(
         self, harness_file_no_generic, harness_dir
     ):
-        """The degraded-path output must contain [[SECTION:...]] boundary tags."""
+        """The degraded-path output must contain boundary tags in new XML syntax."""
         bt.run_batch([harness_dir], {}, "TEST")
         content_after = harness_file_no_generic.read_text(encoding="utf-8")
-        assert "[[SECTION:" in content_after, (
-            "Degraded-path output must contain [[SECTION:...]] boundary tags"
+        assert ' type="core">' in content_after, (
+            "Degraded-path output must contain boundary tags in new XML syntax"
         )
 
     def test_degraded_and_errors_are_mutually_exclusive(
@@ -1277,7 +1277,7 @@ class TestMixedUtilitySkipAndNormalFile:
 
 # A minimal harness-only agent with no injection markers in its source.
 # After transformation through the degraded path, its output carries no
-# [[INJECTION:]] regions, which should be detected as NC_NO_INJECTIONS
+# injection regions, which should be detected as NC_NO_INJECTIONS
 # once detect_output_non_conformances is wired into transform_file.
 _HARNESS_AGENT_NO_INJECTIONS = textwrap.dedent("""\
     ---
@@ -1329,7 +1329,7 @@ def harness_file_no_injections(harness_dir: pathlib.Path) -> pathlib.Path:
     """Write a harness agent with no injection markers into harness_dir/Agents/.
 
     After transformation through the degraded path, its output carries no
-    [[INJECTION:]] regions. Used to exercise NC_NO_INJECTIONS detection once
+    injection regions. Used to exercise NC_NO_INJECTIONS detection once
     detect_output_non_conformances is wired into transform_file.
     """
     agent_file = harness_dir / "Agents" / "no-injections-agent.md"

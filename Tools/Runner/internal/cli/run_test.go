@@ -468,16 +468,16 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent   | Phase     | Stage | Status  | Timestamp            | Summary | Checkpoint |
 | --- | ------- | --------- | ----- | ------- | -------------------- | ------- | ---------- |
 | 1   | agent#1 | EXECUTION | -     | SUCCESS | 2026-01-01T00:00:00Z | done    | -          |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 
-[[SECTION:Artifacts]]
+<Artifacts type="core">
 | Artifact | Created In | Created By |
 | -------- | ---------- | ---------- |
-[[/SECTION:Artifacts]]
+</Artifacts>
 `
 	artifactPath := filepath.Join(folderPath, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(artifactContent), 0600); err != nil {
@@ -520,16 +520,16 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent   | Phase     | Stage | Status  | Timestamp            | Summary | Checkpoint |
 | --- | ------- | --------- | ----- | ------- | -------------------- | ------- | ---------- |
 | 1   | agent#1 | EXECUTION | -     | SUCCESS | 2026-01-01T00:00:00Z | done    | -          |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 
-[[SECTION:Artifacts]]
+<Artifacts type="core">
 | Artifact | Created In | Created By |
 | -------- | ---------- | ---------- |
-[[/SECTION:Artifacts]]
+</Artifacts>
 `
 	artifactPath := filepath.Join(folderPath, "Orchestration.md")
 	if err := os.WriteFile(artifactPath, []byte(artifactContent), 0600); err != nil {

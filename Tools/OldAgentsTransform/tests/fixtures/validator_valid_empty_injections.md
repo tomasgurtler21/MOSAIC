@@ -5,77 +5,77 @@ name: test-agent
 description: Valid file where injection boundaries have open tag immediately followed by close tag
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 
 Content in identity section.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
+</IdentityExtension>
 
-[[DEPLOYED:AvailableWorkflows]]
-[[/DEPLOYED:AvailableWorkflows]]
+<AvailableWorkflows type="managed">
+</AvailableWorkflows>
 
-[[/SECTION:Identity]]
+</Identity>
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Capabilities content.
 
-[[INJECTION:LanguagePatterns]]
-[[/INJECTION:LanguagePatterns]]
+<LanguagePatterns type="project">
+</LanguagePatterns>
 
-[[INJECTION:CodebaseContext]]
-[[/INJECTION:CodebaseContext]]
+<CodebaseContext type="project">
+</CodebaseContext>
 
-[[INJECTION:OutputArtifactTemplate]]
-[[/INJECTION:OutputArtifactTemplate]]
+<OutputArtifactTemplate type="project">
+</OutputArtifactTemplate>
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Constraint content.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 
-[[/SECTION:Constraints]]
+</Constraints>
 ---
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
 Error handling content.
 
-[[INJECTION:ErrorHandlingExtension]]
-[[/INJECTION:ErrorHandlingExtension]]
+<ErrorHandlingExtension type="project">
+</ErrorHandlingExtension>
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 ---
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 
 Output format content.
 
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 ---
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 
 Execution philosophy content.
 
-[[INJECTION:ContextLimits]]
-[[/INJECTION:ContextLimits]]
+<ContextLimits type="project">
+</ContextLimits>
 
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>

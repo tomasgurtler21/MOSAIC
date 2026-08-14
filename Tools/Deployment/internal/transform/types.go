@@ -2,8 +2,8 @@ package transform
 
 import "mosaic-deploy/internal/domain"
 
-// WorkflowBlock is one workflow's [[SECTION:Workflow:{id}]] block, assembled verbatim into
-// the orchestrator's [[INJECTION:AvailableWorkflows]] region.
+// WorkflowBlock is one workflow's <Workflow type="core" name="{id}"> block, assembled verbatim
+// into the orchestrator's <AvailableWorkflows type="project"> region.
 type WorkflowBlock struct {
 	ID    string
 	Block []byte // the section block including its boundary tags, in source order
@@ -33,17 +33,17 @@ type Request struct {
 	ToolMappingsVersion string
 
 	// Role is the deploying agent's role. It selects the protocol variant for
-	// [[DEPLOYED:CommunicationProtocol]] regions.
+	// <CommunicationProtocol type="managed"> regions.
 	Role domain.AgentRole
 
 	// Protocol carries the role-keyed protocol blocks and the protocol source version,
 	// loaded once per run by the app layer. Required for agents whose source declares a
-	// [[DEPLOYED:CommunicationProtocol]] region.
+	// <CommunicationProtocol type="managed"> region.
 	Protocol domain.ProtocolContent
 
 	// Bundle carries the canonical blocks and the bundle version, loaded once per run by
-	// the app layer. Required for agents whose source declares any bundle-sourced
-	// [[DEPLOYED:]] region; ignored for agents that declare none.
+	// the app layer. Required for agents whose source declares any bundle-sourced managed
+	// region; ignored for agents that declare none.
 	Bundle domain.BundleContent
 
 	// InjectionRenames overrides the package-level InjectionRenames table for this call.
@@ -70,7 +70,7 @@ type Result struct {
 type Report struct {
 	Fields               []FieldChange
 	Tools                []domain.ToolResolution
-	Regions              []RegionOutcome    // covers both [[INJECTION:]] and [[DEPLOYED:]] regions
+	Regions              []RegionOutcome    // covers both injection and managed regions
 	Gaps                 []domain.Gap
 	Workflows            []string // workflow IDs present in the assembled injection, in emitted order
 	InfrastructureAgents []string // agent keys present in the assembled InfrastructureAgents injection, in emitted order

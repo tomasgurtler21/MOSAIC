@@ -2,9 +2,9 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Section content.
-[[INJECTION:NonExistentName]]
+<NonExistentName type="project">
 Unknown injection content.
-[[/INJECTION:NonExistentName]]
-[[/SECTION:Identity]]
+</NonExistentName>
+</Identity>

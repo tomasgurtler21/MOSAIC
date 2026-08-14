@@ -16,7 +16,7 @@ type DeployedArtifactState struct {
 	ToolMappingsVersion           string            // frontmatter `tool_mappings_version` scalar, verbatim; "" when absent
 	ModelID                       string            // frontmatter model scalar under the harness's ModelKey, verbatim; "" when absent, unparseable, or the harness emits no model
 	Workflows                     DeployedWorkflows // non-nil only when the file carries workflow section markers
-	ProtocolVersion               string            // version from <!-- protocol-version: X --> inside the deployed [[DEPLOYED:CommunicationProtocol]] region; "" when absent, region missing, or file unparseable
+	ProtocolVersion               string            // version from the `version` attribute on the deployed <CommunicationProtocol type="managed"> region's opening tag; "" when absent, region missing, or file unparseable
 	BundleVersion                 string            // frontmatter `bundle_version` scalar, verbatim; "" when absent, unparseable, or the file received no bundle region
 }
 
@@ -27,10 +27,10 @@ func (s DeployedArtifactState) HasVersionInfo() bool {
 }
 
 // DeployedWorkflow is one workflow block found in a deployed orchestrator, paired with the
-// version found in that block's <!-- workflow-version: X --> comment.
+// version found in that block's `version` attribute on its opening tag.
 type DeployedWorkflow struct {
-	ID      string // from [[SECTION:Workflow:<id>]]
-	Version string // from <!-- workflow-version: X -->; empty when no such comment is present
+	ID      string // from <Workflow type="core" name="<id>">
+	Version string // from the `version` attribute on the section's opening tag; empty when absent
 }
 
 // DeployedWorkflows is the ordered, deduplicated list of workflow blocks in a deployed file,

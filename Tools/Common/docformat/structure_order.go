@@ -1,15 +1,15 @@
 package docformat
 
-// StructureNames returns the document's ordered structural slot names: top-level
-// [[SECTION:]] names and top-level [[DEPLOYED:]] region names, interleaved in document
-// order. Nested sections and nested deployed regions are not included. Top-level
-// [[INJECTION:]] and [[CUSTOM:]] regions are not structural slots and are excluded.
+// StructureNames returns the document's ordered structural slot names: top-level section
+// names (type="core") and top-level deployed region names (type="managed"), interleaved in
+// document order. Nested sections and nested deployed regions are not included. Top-level
+// injection (type="project") and custom (type="custom") regions are not structural slots
+// and are excluded.
 //
-// The decision to include top-level [[DEPLOYED:]] regions is documented in AD-2 of the
-// design: a deployed region is a valid anchor for custom regions, and the existing
-// validator's canonical-order check already treats it as an ordered slot alongside
-// sections. Only top-level deployed regions participate; nested ones are content of their
-// enclosing section.
+// The decision to include top-level deployed regions is documented in AD-2 of the design:
+// a deployed region is a valid anchor for custom regions, and the existing validator's
+// canonical-order check already treats it as an ordered slot alongside sections. Only
+// top-level deployed regions participate; nested ones are content of their enclosing section.
 func StructureNames(b *Body) []string {
 	b.ensureParsed()
 	var names []string

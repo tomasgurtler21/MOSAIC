@@ -13,7 +13,7 @@ status: Draft
 | | |
 |---|---|
 | **Block** | `ProtocolConstraints:Subagent` |
-| **Fills** | `[[DEPLOYED:ProtocolConstraints]]` — placement in `AgentTemplateArchitecture.md` §2.5 |
+| **Fills** | `<ProtocolConstraints type="managed">` — placement in `AgentTemplateArchitecture.md` §2.5 |
 | **Applies to** | `subagent` |
 | **Text lives in** | `Catalog/DeployedSections.md` |
 

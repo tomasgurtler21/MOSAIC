@@ -7,7 +7,7 @@ description: A hand-authored harness-only agent already carrying canonical bound
 role: subagent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # ExampleHarnessOnly Agent
 
 You are the **ExampleHarnessOnly** agent in a multi-agent orchestration system.
@@ -18,54 +18,54 @@ You are the **ExampleHarnessOnly** agent in a multi-agent orchestration system.
 - You DO: Provide fixture data for tests
 - You DO NOT: Run in production
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 ### Core Capabilities
 - Provide fixture data for detection helper tests
 
-[[INJECTION:LanguagePatterns]]
-[[/INJECTION:LanguagePatterns]]
-[[/SECTION:Capabilities]]
+<LanguagePatterns type="project">
+</LanguagePatterns>
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 - Stay within test scope
 - Do not run in production
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
 - Handle errors gracefully
 - Return failure status on error
 
-[[DEPLOYED:ErrorHandlingCommon]]
-[[/DEPLOYED:ErrorHandlingCommon]]
-[[/SECTION:ErrorHandling]]
+<ErrorHandlingCommon type="managed">
+</ErrorHandlingCommon>
+</ErrorHandling>
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 
 Return results as structured data.
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 
 - Work efficiently and accurately
 
-[[DEPLOYED:ExecutionPhilosophyCommon]]
-[[/DEPLOYED:ExecutionPhilosophyCommon]]
-[[/SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophyCommon type="managed">
+</ExecutionPhilosophyCommon>
+</ExecutionPhilosophy>

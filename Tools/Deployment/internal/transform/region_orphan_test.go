@@ -2,10 +2,10 @@ package transform_test
 
 // region_orphan_test.go covers orphan detection for the new marker vocabulary (T3.3):
 //
-//   - A user-owned [[INJECTION:]] region present in the deployed file but absent from the
+//   - A user-owned project-injection region region present in the deployed file but absent from the
 //     source produces an orphaned RegionOutcome and a GapRemovedInjection gap carrying
 //     the user's content.
-//   - A tool-managed [[DEPLOYED:]] region present in the deployed file but absent from the
+//   - A tool-managed managed region region present in the deployed file but absent from the
 //     source produces no gap — tool-managed content is regenerated, never recovered.
 //   - When multiple orphaned user-owned regions exist, their outcomes are emitted in sorted
 //     (alphabetical) name order regardless of their order in the deployed file, ensuring
@@ -35,27 +35,27 @@ tier_rationale: orphan detection testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # OrphanTest Agent
 
 You are the OrphanTest agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 // deployedWithContextLimitsContent is the deployed predecessor of sourceWithoutContextLimits.
-// It has [[INJECTION:ContextLimits]] with user content, which has since been removed from
+// It has <ContextLimits type="project"> with user content, which has since been removed from
 // the source. The removal must produce a recovery gap carrying the user's content.
-// It also has [[DEPLOYED:HarnessConstraints]] whose removal from source must NOT produce a gap.
+// It also has <HarnessConstraints type="managed"> whose removal from source must NOT produce a gap.
 const deployedWithContextLimitsContent = `---
 id: 50
 version: 1.0.0
@@ -67,32 +67,32 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # OrphanTest Agent
 
 You are the OrphanTest agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 User identity extension content.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 
-[[INJECTION:ContextLimits]]
+<ContextLimits type="project">
 Context limit: focus on the single task described in the request.
 Do not start new investigations without completing the current one.
-[[/INJECTION:ContextLimits]]
-[[/SECTION:ExecutionPhilosophy]]
+</ContextLimits>
+</ExecutionPhilosophy>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Stale harness content — tool-managed, must never produce a recovery gap.
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ Stale harness content — tool-managed, must never produce a recovery gap.
 // ---------------------------------------------------------------------------
 
 // TestOrphanDetection_UserOwnedRegionRemovedFromSource_GapEmitted asserts that when a
-// [[INJECTION:]] region is present in the deployed file with user content but is absent
+// project-injection region region is present in the deployed file with user content but is absent
 // from the source, a GapRemovedInjection gap is emitted carrying the user's content.
 // The orphaned region must not appear in the output.
 func TestOrphanDetection_UserOwnedRegionRemovedFromSource_GapEmitted(t *testing.T) {
@@ -160,12 +160,12 @@ func TestOrphanDetection_UserOwnedRegionRemovedFromSource_GapEmitted(t *testing.
 // ---------------------------------------------------------------------------
 
 // TestOrphanDetection_ToolManagedRegionRemovedFromSource_NoGap asserts that when a
-// [[DEPLOYED:]] region is present in the deployed file but absent from the source, no
+// managed region region is present in the deployed file but absent from the source, no
 // GapRemovedInjection gap is emitted. Tool-managed content is regenerated on every
 // transform; it is never user-authored and therefore has no recovery value.
 func TestOrphanDetection_ToolManagedRegionRemovedFromSource_NoGap(t *testing.T) {
 	// sourceWithoutHarnessConstraints is a source that no longer declares
-	// [[DEPLOYED:HarnessConstraints]], which was present in deployedWithContextLimitsContent.
+	// <HarnessConstraints type="managed">, which was present in deployedWithContextLimitsContent.
 	const sourceWithoutHarnessConstraints = `---
 id: 50
 version: 3.0.0
@@ -178,14 +178,14 @@ tier_rationale: no-gap orphan testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # OrphanNoGapTest Agent
 
 You are the OrphanNoGapTest agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 `
 
 	req := transform.Request{
@@ -225,7 +225,7 @@ You are the OrphanNoGapTest agent.
 // T3.3: Multiple orphaned user-owned regions are emitted in sorted order
 // ---------------------------------------------------------------------------
 
-// deployedWithMultipleOrphans is a deployed file with three [[INJECTION:]] regions that are
+// deployedWithMultipleOrphans is a deployed file with three project-injection region regions that are
 // all absent from the source below. Their orphaned outcomes must be emitted in sorted name
 // order so the report and gap list are deterministic.
 const deployedWithMultipleOrphans = `---
@@ -239,33 +239,33 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
-[[INJECTION:CodebaseContext]]
+<CodebaseContext type="project">
 Codebase context: A-content.
-[[/INJECTION:CodebaseContext]]
+</CodebaseContext>
 
-[[INJECTION:OutputArtifactTemplate]]
+<OutputArtifactTemplate type="project">
 Output template content: B-content.
-[[/INJECTION:OutputArtifactTemplate]]
-[[/SECTION:Capabilities]]
+</OutputArtifactTemplate>
+</Capabilities>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
-[[INJECTION:ErrorHandlingExtension]]
+<ErrorHandlingExtension type="project">
 Error handling content: C-content.
-[[/INJECTION:ErrorHandlingExtension]]
-[[/SECTION:ErrorHandling]]
+</ErrorHandlingExtension>
+</ErrorHandling>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## ExecutionPhilosophy
 
-[[INJECTION:ContextLimits]]
+<ContextLimits type="project">
 Context limits: D-content.
-[[/INJECTION:ContextLimits]]
-[[/SECTION:ExecutionPhilosophy]]
+</ContextLimits>
+</ExecutionPhilosophy>
 `
 
 // sourceWithNoInjections is a source document that has none of the injection regions present
@@ -282,15 +282,15 @@ tier_rationale: orphan order testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # OrphanOrderTest Agent
 
 You are the OrphanOrderTest agent.
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // TestOrphanDetection_MultipleOrphans_EmittedInSortedNameOrder asserts that when multiple
-// user-owned [[INJECTION:]] regions are orphaned, their outcomes in Report.Regions appear
+// user-owned project-injection region regions are orphaned, their outcomes in Report.Regions appear
 // in alphabetically sorted name order, and the corresponding GapRemovedInjection gaps also
 // appear in sorted order. This determinism is required because Go's map iteration order is
 // randomised, and the report must be consistent across runs.
@@ -368,7 +368,7 @@ func TestOrphanDetection_MultipleOrphans_EmittedInSortedNameOrder(t *testing.T) 
 // ---------------------------------------------------------------------------
 
 // TestOrphanDetection_GapCarriesOrphanedContent asserts that the GapRemovedInjection gap
-// emitted for an orphaned [[INJECTION:]] region carries the region's content verbatim, so
+// emitted for an orphaned project-injection region region carries the region's content verbatim, so
 // the user can recover whatever they had written there.
 func TestOrphanDetection_GapCarriesOrphanedContent(t *testing.T) {
 	req := transform.Request{

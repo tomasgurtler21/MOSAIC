@@ -2,9 +2,9 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity content.
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 Protocol content nested in a section — should be at body top level.
-[[/DEPLOYED:CommunicationProtocol]]
-[[/SECTION:Identity]]
+</CommunicationProtocol>
+</Identity>

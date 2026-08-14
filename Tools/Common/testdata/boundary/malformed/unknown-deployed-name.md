@@ -2,9 +2,9 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity content.
-[[DEPLOYED:UnknownRegion]]
+<UnknownRegion type="managed">
 Unknown region content.
-[[/DEPLOYED:UnknownRegion]]
-[[/SECTION:Identity]]
+</UnknownRegion>
+</Identity>

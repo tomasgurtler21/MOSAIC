@@ -2,22 +2,22 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity section content.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 Communication protocol content.
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 Capabilities content.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ErrorHandling content.
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 Constraints appears after ErrorHandling — out of canonical order.
-[[/SECTION:Constraints]]
+</Constraints>

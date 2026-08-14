@@ -55,7 +55,7 @@ var blockingValidationCodes = map[string]bool{
 //
 // Signal two: the body carries a structurally valid set of canonical MOSAIC boundary
 // tags. Concretely, ALL of:
-//   - at least one [[SECTION:Name]] node whose Name is in docformat.CanonicalSections;
+//   - at least one <Name type="core"> node whose Name is in docformat.CanonicalSections;
 //   - docformat.Validate(doc, docformat.ValidateOptions{}) reports no issue whose Code
 //     is one of: "unbalanced-tag", "mismatched-tag", "duplicate-name",
 //     "unknown-deployed", "wrong-marker".

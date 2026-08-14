@@ -1,5 +1,4 @@
-[[SECTION:Workflow:stage-star-output]]
-<!-- workflow-version: 1.0 -->
+<Workflow type="core" name="stage-star-output" version="1.0">
 ## Stage-Star Output Workflow
 
 Workflow where the first row (planner) produces Stage-* output artifacts.
@@ -10,4 +9,4 @@ the reviewer row can expand Stage-*/Plan.md into per-stage paths.
 |-------|----------|:----:|------------|-------------|-------|--------|
 | PLANNING | planner | ❌ | reviewer | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
 | PLANNING | reviewer | ❌ | COMPLETE | planner | Plan.md, Stage-*/Plan.md | review.md |
-[[/SECTION:Workflow:stage-star-output]]
+</Workflow>

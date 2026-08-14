@@ -1,11 +1,10 @@
 // Package injectionfile provides parsing functions for harness content files.
 // This file adds ParseDeployedRegions, ParseDeployedRegionsWithVersion, and LoadDir,
-// which operate on [[DEPLOYED:Name]] regions — the format harness content files use
+// which operate on <Name type="managed"> regions — the format harness content files use
 // after the run-time harness content migration.
 package injectionfile
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,11 +32,11 @@ type HarnessContent struct {
 	OrchestratorVersion string
 }
 
-// ParseDeployedRegions extracts all [[DEPLOYED:Name]] regions from a MOSAIC-formatted
+// ParseDeployedRegions extracts all <Name type="managed"> regions from a MOSAIC-formatted
 // Markdown file and returns a map from region name to its whitespace-trimmed content.
 //
 // A region declared with empty content produces an entry with an empty-string value; an
-// absent region produces no key. [[INJECTION:]] and [[SECTION:]] regions are ignored.
+// absent region produces no key. Injection and section regions are ignored.
 // A file with no deployed regions returns an empty non-nil map and a nil error.
 func ParseDeployedRegions(src []byte) (map[string]string, error) {
 	regions, _, err := ParseDeployedRegionsWithVersion(src)
@@ -62,15 +61,13 @@ func ParseDeployedRegionsWithVersion(src []byte) (regions map[string]string, ver
 	result := make(map[string]string, len(nodes))
 
 	for _, node := range nodes {
-		// Detect unclosed regions: if the node has no close tag, its Bytes() will not
-		// contain the closing tag form.
-		closeTag := "[[/DEPLOYED:" + node.Name() + "]]"
-		if !bytes.Contains(node.Bytes(), []byte(closeTag)) {
-			return nil, "", fmt.Errorf("injectionfile: [[DEPLOYED:%s]] is opened but never closed", node.Name())
+		// Detect unclosed regions via the parser's closed-state query.
+		if !node.Closed() {
+			return nil, "", fmt.Errorf("injectionfile: <%s type=\"managed\"> is opened but never closed", node.Name())
 		}
 		// Detect duplicate names.
 		if _, exists := result[node.Name()]; exists {
-			return nil, "", fmt.Errorf("injectionfile: duplicate [[DEPLOYED:%s]] region; each boundary name must appear at most once per document", node.Name())
+			return nil, "", fmt.Errorf("injectionfile: duplicate <%s type=\"managed\"> region; each boundary name must appear at most once per document", node.Name())
 		}
 		// Trim whitespace and normalize line endings so that content read from CRLF-checked-out
 		// files (e.g. on Windows) matches what LF-checked-out files produce.

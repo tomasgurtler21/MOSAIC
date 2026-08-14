@@ -36,9 +36,9 @@ tier_rationale: medium-level task
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Minimal body.
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // applyFrontmatterSource calls transform.Apply on frontmatterSource with the fixture module

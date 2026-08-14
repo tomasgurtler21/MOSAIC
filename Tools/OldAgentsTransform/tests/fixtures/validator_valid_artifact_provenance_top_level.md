@@ -5,58 +5,57 @@ name: test-agent
 description: Valid file - ArtifactProvenance as top-level DEPLOYED boundary with sibling injection
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 
 You are the TestAgent agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
+</IdentityExtension>
 
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-<!-- protocol-version: 1.9 -->
+<CommunicationProtocol type="managed" version="1.9">
 Communication protocol content.
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>
 
-[[DEPLOYED:ArtifactProvenance]]
-[[/DEPLOYED:ArtifactProvenance]]
+<ArtifactProvenance type="managed">
+</ArtifactProvenance>
 
-[[INJECTION:ArtifactProvenanceExtension]]
-[[/INJECTION:ArtifactProvenanceExtension]]
+<ArtifactProvenanceExtension type="project">
+</ArtifactProvenanceExtension>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Core capabilities.
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Constraints content.
 
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
 Error handling content.
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 
 Output format content.
 
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 
 Execution philosophy content.
 
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>

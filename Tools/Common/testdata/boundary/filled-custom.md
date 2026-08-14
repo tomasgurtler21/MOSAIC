@@ -2,7 +2,7 @@
 name: test-agent
 ---
 
-[[CUSTOM:CustomConstraints]]
+<CustomConstraints type="custom">
 Project-specific constraints line one.
 Project-specific constraints line two.
-[[/CUSTOM:CustomConstraints]]
+</CustomConstraints>

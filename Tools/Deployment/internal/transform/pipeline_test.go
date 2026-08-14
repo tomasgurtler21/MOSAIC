@@ -107,9 +107,9 @@ tier_rationale: minimal
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Body content for bytes check.
-[[/SECTION:Identity]]
+</Identity>
 `
 
 	req := transform.Request{

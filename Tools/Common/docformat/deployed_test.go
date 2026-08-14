@@ -5,14 +5,14 @@ package docformat_test
 // Coverage:
 //
 //   Lexing:
-//   - [[DEPLOYED:Name]] open tag is recognised; the resulting node has Kind NodeDeployed.
-//   - [[/DEPLOYED:Name]] close tag correctly closes the deployed node.
-//   - Names containing colons are accepted (e.g. "Workflow:quick-fix").
-//   - Names containing hyphens are accepted (e.g. "my-harness").
-//   - [[DEPLOYED:]] with an empty name is not recognised as a boundary tag.
-//   - Lowercase kind keyword [[deployed:Name]] is not recognised as a boundary tag.
-//   - Near-miss prefix [[DEPLOY:Name]] is not recognised as a boundary tag.
-//   - An unmatched [[/DEPLOYED:Name]] close tag (no open on the stack) is treated as literal text.
+//   - <Name type="managed"> open tag is recognised; the resulting node has Kind NodeDeployed.
+//   - </Name> close tag correctly closes the deployed node.
+//   - Compound names expressed via the name attribute (e.g. name="quick-fix") are accepted.
+//   - Tag names containing hyphens (e.g. <my-harness type="managed">) are accepted.
+//   - Tags missing the type attribute are not recognised as boundary tags.
+//   - Tags with type="deployed" (misspelling of "managed") are not recognised.
+//   - Tags with type="MANAGED" (wrong case) are not recognised.
+//   - An unmatched </Name> close tag (no open on the stack) is treated as literal text.
 //
 //   Addressing and enumeration:
 //   - Body.Deployed(name) returns the deployed node by exact name.
@@ -48,14 +48,14 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestBoundaryLexer_Deployed_OpenTag_RecognisedAsDeployedNode(t *testing.T) {
-	// [[DEPLOYED:CommunicationProtocol]] must be recognised as an open boundary tag and
+	// <CommunicationProtocol type="managed"> must be recognised as an open boundary tag and
 	// produce a deployed node retrievable via Body.Deployed.
 	doc := parsedBoundaryFixture(t, "empty-deployed.md")
 
 	node, ok := doc.Body().Deployed("CommunicationProtocol")
 
 	if !ok {
-		t.Fatal("Deployed(\"CommunicationProtocol\") returned false for a document that contains [[DEPLOYED:CommunicationProtocol]]")
+		t.Fatal("Deployed(\"CommunicationProtocol\") returned false for a document that contains <CommunicationProtocol type=\"managed\">")
 	}
 	if node == nil {
 		t.Fatal("Deployed(\"CommunicationProtocol\") returned nil node with ok == true")
@@ -102,18 +102,18 @@ func TestBoundaryLexer_Deployed_CloseTag_CorrectlyClosesNode(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Lexing: name variants (colons, hyphens)
+// Lexing: name variants (compound via name attribute, hyphens)
 // ---------------------------------------------------------------------------
 
 func TestBoundaryLexer_Deployed_CompoundName_WithColons_Accepted(t *testing.T) {
-	// Names containing colons (e.g. "Workflow:quick-fix") must be treated as a single
-	// opaque name, matching the same allowance for SECTION and INJECTION markers.
+	// Compound names use the name attribute: <Workflow type="managed" name="quick-fix">.
+	// Body.Deployed must find such a node using the reassembled name "Workflow:quick-fix".
 	doc := parsedBoundaryFixture(t, "deployed-compound-name.md")
 
 	node, ok := doc.Body().Deployed("Workflow:quick-fix")
 
 	if !ok {
-		t.Fatal("Deployed(\"Workflow:quick-fix\") returned false; DEPLOYED names containing colons must be accepted")
+		t.Fatal("Deployed(\"Workflow:quick-fix\") returned false; deployed compound names must be accepted")
 	}
 	if node.Name() != "Workflow:quick-fix" {
 		t.Errorf("Name: want %q, got %q", "Workflow:quick-fix", node.Name())
@@ -121,13 +121,13 @@ func TestBoundaryLexer_Deployed_CompoundName_WithColons_Accepted(t *testing.T) {
 }
 
 func TestBoundaryLexer_Deployed_HyphenName_Accepted(t *testing.T) {
-	// Names containing hyphens must be accepted, matching the existing INJECTION behaviour.
+	// Tag names containing hyphens (<my-harness type="managed">) must be accepted.
 	doc := parsedBoundaryFixture(t, "deployed-hyphen-name.md")
 
 	node, ok := doc.Body().Deployed("my-harness")
 
 	if !ok {
-		t.Fatal("Deployed(\"my-harness\") returned false; DEPLOYED names containing hyphens must be accepted")
+		t.Fatal("Deployed(\"my-harness\") returned false; tag names containing hyphens must be accepted")
 	}
 	if node.Name() != "my-harness" {
 		t.Errorf("Name: want %q, got %q", "my-harness", node.Name())
@@ -135,60 +135,67 @@ func TestBoundaryLexer_Deployed_HyphenName_Accepted(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Lexing: rejected / near-miss forms
+// Lexing: rejected / near-miss forms (new XML syntax)
 // ---------------------------------------------------------------------------
 
-func TestBoundaryLexer_Deployed_EmptyName_NotRecognisedAsBoundaryTag(t *testing.T) {
-	// [[DEPLOYED:]] — empty name — must be treated as literal text, not as a boundary tag.
-	src := []byte("[[DEPLOYED:]]\n")
+func TestBoundaryLexer_Deployed_NoTypeAttribute_NotRecognisedAsBoundaryTag(t *testing.T) {
+	// <CommunicationProtocol> with no type attribute must be treated as literal text.
+	// The inertness rule requires the type attribute with a recognised value.
+	src := []byte("<CommunicationProtocol>\n</CommunicationProtocol>\n")
 	doc, err := docformat.Parse(src)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 
 	if nodes := doc.Body().DeployedRegions(); len(nodes) != 0 {
-		t.Errorf("[[DEPLOYED:]] with empty name must not produce a deployed node; got %d node(s)", len(nodes))
+		t.Errorf("tag without type attribute must not produce a deployed node; got %d node(s)", len(nodes))
+	}
+	// Round-trip: the tag-like lines must be preserved as literal text.
+	got := doc.Bytes()
+	if !bytes.Equal(src, got) {
+		t.Errorf("tag without type attribute must round-trip as literal text:\n  want: %q\n  got:  %q", src, got)
 	}
 }
 
-func TestBoundaryLexer_Deployed_LowercaseKind_NotRecognised(t *testing.T) {
-	// [[deployed:Name]] — lowercase keyword — must not be recognised as a deployed tag.
-	// Tag matching is case-sensitive; only the uppercase form is valid.
-	src := []byte("[[deployed:Name]]\n[[/deployed:Name]]\n")
+func TestBoundaryLexer_Deployed_WrongTypeValue_NotRecognised(t *testing.T) {
+	// <CommunicationProtocol type="deployed"> — type value "deployed" is not a recognised
+	// MOSAIC kind (the correct value is "managed"). Must be treated as literal text.
+	src := []byte("<CommunicationProtocol type=\"deployed\">\n</CommunicationProtocol>\n")
 	doc, err := docformat.Parse(src)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 
 	if nodes := doc.Body().DeployedRegions(); len(nodes) != 0 {
-		t.Errorf("lowercase [[deployed:Name]] must not produce a deployed node; got %d node(s)", len(nodes))
+		t.Errorf("type=\"deployed\" (misspelling of \"managed\") must not produce a deployed node; got %d node(s)", len(nodes))
 	}
 }
 
-func TestBoundaryLexer_Deployed_WrongPrefix_NotRecognised(t *testing.T) {
-	// [[DEPLOY:Name]] — truncated prefix — must not be recognised as a deployed tag.
-	src := []byte("[[DEPLOY:Name]]\n[[/DEPLOY:Name]]\n")
+func TestBoundaryLexer_Deployed_UppercaseTypeValue_NotRecognised(t *testing.T) {
+	// <CommunicationProtocol type="MANAGED"> — type value matching is case-sensitive;
+	// only lowercase "managed" is the canonical recognised form.
+	src := []byte("<CommunicationProtocol type=\"MANAGED\">\n</CommunicationProtocol>\n")
 	doc, err := docformat.Parse(src)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 
 	if nodes := doc.Body().DeployedRegions(); len(nodes) != 0 {
-		t.Errorf("near-miss prefix [[DEPLOY:Name]] must not produce a deployed node; got %d node(s)", len(nodes))
+		t.Errorf("type=\"MANAGED\" (wrong case) must not produce a deployed node; got %d node(s)", len(nodes))
 	}
 }
 
 func TestBoundaryLexer_Deployed_UnmatchedCloseTag_TreatedAsLiteralText(t *testing.T) {
-	// [[/DEPLOYED:Orphan]] encountered when no matching open tag is on the stack must be
+	// </CommunicationProtocol> encountered when no matching open tag is on the stack must be
 	// treated as literal text and must not produce a deployed node.
-	src := []byte("[[/DEPLOYED:Orphan]]\nSome other content.\n")
+	src := []byte("</CommunicationProtocol>\nSome other content.\n")
 	doc, err := docformat.Parse(src)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 
 	if nodes := doc.Body().DeployedRegions(); len(nodes) != 0 {
-		t.Errorf("unmatched [[/DEPLOYED:Orphan]] must not produce a deployed node; got %d node(s)", len(nodes))
+		t.Errorf("unmatched </CommunicationProtocol> must not produce a deployed node; got %d node(s)", len(nodes))
 	}
 	// The unmatched close tag must be preserved verbatim as literal text (round-trip).
 	got := doc.Bytes()
@@ -212,7 +219,7 @@ func TestBody_Deployed_AbsentName_ReturnsFalse(t *testing.T) {
 }
 
 func TestBody_Deployed_FindsNodeAtAnyNestingDepth(t *testing.T) {
-	// ProtocolConstraints is nested inside [[SECTION:Constraints]]; Deployed() must find it
+	// ProtocolConstraints is nested inside <Constraints type="core">; Deployed() must find it
 	// regardless of nesting depth.
 	doc := parsedBoundaryFixture(t, "deployed-in-section.md")
 
@@ -263,8 +270,8 @@ func TestBody_Deployed_TopLevelNode_HasNilParent(t *testing.T) {
 
 func TestBody_DeployedRegions_ReturnsAllDeployedNodesInDocumentOrder(t *testing.T) {
 	// mixed-markers.md has two deployed regions in document order:
-	//   1. CommunicationProtocol (top level, before Constraints section)
-	//   2. ProtocolConstraints (nested inside Constraints section)
+	//   1. CommunicationProtocol (top level)
+	//   2. ProtocolConstraints (nested inside <Constraints type="core">)
 	doc := parsedBoundaryFixture(t, "mixed-markers.md")
 
 	regions := doc.Body().DeployedRegions()
@@ -351,10 +358,10 @@ func TestBody_Regions_ReturnsInjectionAndDeployedNodesInterleavedInDocumentOrder
 	// depth, interleaved in document order.
 	//
 	// mixed-markers.md layout (document order):
-	//   [[INJECTION:IdentityExtension]]  — inside [[SECTION:Identity]]
-	//   [[DEPLOYED:CommunicationProtocol]] — top level
-	//   [[DEPLOYED:ProtocolConstraints]]    — inside [[SECTION:Constraints]]
-	//   [[INJECTION:CodebaseContext]]    — inside [[SECTION:Constraints]]
+	//   <IdentityExtension type="project">   — inside <Identity type="core">
+	//   <CommunicationProtocol type="managed"> — top level
+	//   <ProtocolConstraints type="managed">   — inside <Constraints type="core">
+	//   <CodebaseContext type="project">     — inside <Constraints type="core">
 	doc := parsedBoundaryFixture(t, "mixed-markers.md")
 
 	regions := doc.Body().Regions()
@@ -397,10 +404,10 @@ func TestMutation_Deployed_Content_ExcludesBoundaryTagLines(t *testing.T) {
 
 	content := node.Content()
 
-	if bytes.Contains(content, []byte("[[DEPLOYED:CommunicationProtocol]]")) {
+	if bytes.Contains(content, []byte(`<CommunicationProtocol type="managed">`)) {
 		t.Error("Node.Content must not contain the opening boundary tag")
 	}
-	if bytes.Contains(content, []byte("[[/DEPLOYED:CommunicationProtocol]]")) {
+	if bytes.Contains(content, []byte("</CommunicationProtocol>")) {
 		t.Error("Node.Content must not contain the closing boundary tag")
 	}
 	if !bytes.Contains(content, []byte("Deployed content line one.")) {
@@ -454,10 +461,10 @@ func TestMutation_Deployed_SetContent_BytesContainsBoundaryTagsAndNewContent(t *
 	}
 
 	b := node.Bytes()
-	if !bytes.Contains(b, []byte("[[DEPLOYED:CommunicationProtocol]]")) {
+	if !bytes.Contains(b, []byte(`<CommunicationProtocol type="managed">`)) {
 		t.Error("Node.Bytes after SetContent must contain the opening boundary tag")
 	}
-	if !bytes.Contains(b, []byte("[[/DEPLOYED:CommunicationProtocol]]")) {
+	if !bytes.Contains(b, []byte("</CommunicationProtocol>")) {
 		t.Error("Node.Bytes after SetContent must contain the closing boundary tag")
 	}
 	if !bytes.Contains(b, []byte("New deployed content.")) {
@@ -496,10 +503,10 @@ func TestMutation_Deployed_Clear_BoundaryTagsRemainInNodeBytes(t *testing.T) {
 	}
 
 	b := node.Bytes()
-	if !bytes.Contains(b, []byte("[[DEPLOYED:CommunicationProtocol]]")) {
+	if !bytes.Contains(b, []byte(`<CommunicationProtocol type="managed">`)) {
 		t.Error("Node.Bytes after Clear must still contain the opening boundary tag")
 	}
-	if !bytes.Contains(b, []byte("[[/DEPLOYED:CommunicationProtocol]]")) {
+	if !bytes.Contains(b, []byte("</CommunicationProtocol>")) {
 		t.Error("Node.Bytes after Clear must still contain the closing boundary tag")
 	}
 }
@@ -513,10 +520,10 @@ func TestMutation_Deployed_Bytes_IncludesBoundaryTagLinesAndContent(t *testing.T
 
 	b := node.Bytes()
 
-	if !bytes.Contains(b, []byte("[[DEPLOYED:CommunicationProtocol]]")) {
+	if !bytes.Contains(b, []byte(`<CommunicationProtocol type="managed">`)) {
 		t.Error("Node.Bytes must include the opening boundary tag")
 	}
-	if !bytes.Contains(b, []byte("[[/DEPLOYED:CommunicationProtocol]]")) {
+	if !bytes.Contains(b, []byte("</CommunicationProtocol>")) {
 		t.Error("Node.Bytes must include the closing boundary tag")
 	}
 	if !bytes.Contains(b, []byte("Deployed content line one.")) {

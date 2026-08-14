@@ -13,7 +13,7 @@ status: Draft
 | | |
 |---|---|
 | **Block** | `ErrorHandlingCommon:Subagent` |
-| **Fills** | `[[DEPLOYED:ErrorHandlingCommon]]` — placement in `AgentTemplateArchitecture.md` §2.5 |
+| **Fills** | `<ErrorHandlingCommon type="managed">` — placement in `AgentTemplateArchitecture.md` §2.5 |
 | **Applies to** | `subagent` |
 | **Text lives in** | `Catalog/DeployedSections.md` |
 

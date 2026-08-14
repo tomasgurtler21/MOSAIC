@@ -60,7 +60,7 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 
 	for _, line := range lines {
 		lineNum++
-		kind, isClose, name, matched := parseBoundaryTag(line)
+		kind, isClose, name, _, matched := parseBoundaryTag(line)
 
 		if !matched {
 			// Plain text content: flag non-blank content outside all boundaries.
@@ -128,7 +128,7 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 					Severity: SeverityError,
 					Code:     "wrong-marker",
 					Message: fmt.Sprintf(
-						"boundary name %q is a tool-managed name and must be declared with [[DEPLOYED:]] but was declared with [[INJECTION:]] (line %d)",
+						"boundary name %q is a tool-managed name and must be declared with type=\"managed\" but was declared with type=\"project\" (line %d)",
 						name, lineNum,
 					),
 					Line: lineNum,
@@ -227,10 +227,10 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 				}
 			}
 
-			// unknown-deployed: flag unrecognised [[DEPLOYED:]] names unconditionally.
+			// unknown-deployed: flag unrecognised managed (type="managed") names unconditionally.
 			// Injection names are open and are never flagged.
 			// wrong-marker is raised in preference when a tool-managed name appears under
-			// [[INJECTION:]], so a single mistake produces one actionable diagnostic.
+			// type="project", so a single mistake produces one actionable diagnostic.
 			if kind == NodeDeployed && !isCanonicalDeployed(name) {
 				issues = append(issues, Issue{
 					Severity: SeverityError,
@@ -251,8 +251,8 @@ func validateBytes(raw []byte, opts ValidateOptions) []Issue {
 					Severity: SeverityError,
 					Code:     "unbalanced-tag",
 					Message: fmt.Sprintf(
-						"closing tag [[/%s:%s]] at line %d has no matching opening tag",
-						tagTypeName(kind), name, lineNum,
+						"closing tag </%s> at line %d has no matching opening tag",
+						name, lineNum,
 					),
 					Line: lineNum,
 				})
@@ -335,14 +335,3 @@ func canonicalOrderIndex(name string) int {
 	return -1
 }
 
-// tagTypeName returns "SECTION", "INJECTION", or "DEPLOYED" for use in error messages.
-func tagTypeName(kind NodeKind) string {
-	switch kind {
-	case NodeSection:
-		return "SECTION"
-	case NodeDeployed:
-		return "DEPLOYED"
-	default:
-		return "INJECTION"
-	}
-}

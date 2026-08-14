@@ -17,8 +17,8 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
 |-----|-------|-------|-------|--------|-----------|---------|--------|------------|
 | 1 | researcher#1 | EXECUTION | - | SUCCESS | 2026-01-01T00:05:00Z | Research complete. | - | - |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>

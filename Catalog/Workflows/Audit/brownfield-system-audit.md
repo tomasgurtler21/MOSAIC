@@ -19,8 +19,7 @@ artifacts:
   - ContractsAudit.md
 ---
 
-[[SECTION:Workflow:brownfield-system-audit]]
-<!-- workflow-version: 1.0 -->
+<Workflow type="core" name="brownfield-system-audit" version="1.0">
 ## Brownfield System Audit Workflow
 
 > **Version:** 1.0
@@ -46,7 +45,7 @@ artifacts:
 - Output (ArchitectureAudit.md, ContractsAudit.md) can guide follow-up per-component PR Audit workflows
 - Workflow completes when all dispatched subagents have finished (both `architecture-audit` and `contracts-audit` return COMPLETE)
 
-[[/SECTION:Workflow:brownfield-system-audit]]
+</Workflow>
 
 ---
 

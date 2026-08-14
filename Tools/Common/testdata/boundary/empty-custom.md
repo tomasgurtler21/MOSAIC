@@ -2,5 +2,5 @@
 name: test-agent
 ---
 
-[[CUSTOM:CustomConstraints]]
-[[/CUSTOM:CustomConstraints]]
+<CustomConstraints type="custom">
+</CustomConstraints>

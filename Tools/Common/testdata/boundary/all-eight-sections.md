@@ -2,35 +2,35 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity section content.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[DEPLOYED:ArtifactProvenance]]
-[[/DEPLOYED:ArtifactProvenance]]
+<ArtifactProvenance type="managed">
+</ArtifactProvenance>
 
-[[INJECTION:ArtifactProvenanceExtension]]
-[[/INJECTION:ArtifactProvenanceExtension]]
+<ArtifactProvenanceExtension type="project">
+</ArtifactProvenanceExtension>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 Capabilities content.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 Constraints content.
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 Error handling content.
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 Output format content.
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 Execution philosophy content.
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>

@@ -11,8 +11,7 @@ artifacts:
   - Research.md
 ---
 
-[[SECTION:Workflow:brownfield-research-only]]
-<!-- workflow-version: 2.1 -->
+<Workflow type="core" name="brownfield-research-only" version="2.1">
 ## Brownfield Research Only Workflow
 
 > **Version:** 2.1
@@ -26,7 +25,7 @@ artifacts:
 **Notes:**
 - **Brownfield** = existing codebase to analyze
 
-[[/SECTION:Workflow:brownfield-research-only]]
+</Workflow>
 
 ---
 

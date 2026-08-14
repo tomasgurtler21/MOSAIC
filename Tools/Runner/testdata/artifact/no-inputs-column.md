@@ -15,18 +15,18 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary      | Checkpoint |
 | --- | --------- | -------- | ----- | ------- | -------------------- | ------------ | ---------- |
 | 1   | planner#1 | PLANNING | -     | SUCCESS | 2026-01-01T01:00:00Z | Plan created | -          |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 
-[[SECTION:Artifacts]]
+<Artifacts type="core">
 | Artifact | Created In | Created By |
 | -------- | ---------- | ---------- |
-[[/SECTION:Artifacts]]
+</Artifacts>
 
-[[SECTION:WorkflowNotes]]
+<WorkflowNotes type="core">
 | Seq | Note |
 | --- | ---- |
-[[/SECTION:WorkflowNotes]]
+</WorkflowNotes>

@@ -2,8 +2,8 @@
 name: test-agent
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 Protocol content.
-[[CUSTOM:CustomConstraints]]
-[[/CUSTOM:CustomConstraints]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CustomConstraints type="custom">
+</CustomConstraints>
+</CommunicationProtocol>

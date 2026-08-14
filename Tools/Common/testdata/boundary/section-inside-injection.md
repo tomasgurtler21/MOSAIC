@@ -2,12 +2,12 @@
 name: test-agent
 ---
 
-[[SECTION:Shell]]
+<Shell type="core">
 Content before injection.
-[[INJECTION:Slot]]
-[[SECTION:Workflow:embedded]]
+<Slot type="project">
+<Workflow type="core" name="embedded">
 Embedded workflow content.
-[[/SECTION:Workflow:embedded]]
-[[/INJECTION:Slot]]
+</Workflow>
+</Slot>
 Content after injection.
-[[/SECTION:Shell]]
+</Shell>

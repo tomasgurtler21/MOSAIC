@@ -2,9 +2,9 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity content.
-[[INJECTION:ArtifactProvenanceExtension]]
+<ArtifactProvenanceExtension type="project">
 ArtifactProvenanceExtension nested inside Identity — must be at body top level.
-[[/INJECTION:ArtifactProvenanceExtension]]
-[[/SECTION:Identity]]
+</ArtifactProvenanceExtension>
+</Identity>

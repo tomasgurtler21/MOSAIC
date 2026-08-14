@@ -13,7 +13,7 @@ status: Draft
 | | |
 |---|---|
 | **Block** | `ExecutionPhilosophyCommon:Subagent` |
-| **Fills** | `[[DEPLOYED:ExecutionPhilosophyCommon]]` — placement in `AgentTemplateArchitecture.md` §2.5 |
+| **Fills** | `<ExecutionPhilosophyCommon type="managed">` — placement in `AgentTemplateArchitecture.md` §2.5 |
 | **Applies to** | `subagent` |
 | **Text lives in** | `Catalog/DeployedSections.md` |
 

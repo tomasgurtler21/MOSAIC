@@ -55,8 +55,7 @@ import (
 
 // simpleLinearContent is a minimal two-row linear workflow used to build
 // routing table fixtures. Row 0: agent-a, Row 1: agent-b.
-const simpleLinearContent = `<!-- workflow-version: 1.0 -->
-## Simple Linear
+const simpleLinearContent = `## Simple Linear
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|

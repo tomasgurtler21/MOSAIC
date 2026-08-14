@@ -57,7 +57,7 @@ func newInjectionFixtureModule(t *testing.T) domain.HarnessModule {
 // HarnessConstraints is the sole InjectionHarness canonical name. CustomConstraints, which
 // this fixture set formerly used as a second harness-class region to exercise the
 // "declared but left empty by the module" path, has been removed from the canonical
-// vocabulary entirely and can no longer appear under [[DEPLOYED:]].
+// vocabulary entirely and can no longer appear under managed region.
 // ---------------------------------------------------------------------------
 
 // mergeSourceBase is a generic source that has one harness injection (HarnessConstraints)
@@ -74,23 +74,23 @@ tier_rationale: merge testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MergeTest Agent
 
 You are the MergeTest agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 // mergeDeployedFilled is the deployed version of mergeSourceBase with user content in
@@ -106,26 +106,26 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MergeTest Agent
 
 You are the MergeTest agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 User identity extension content line one.
 User identity extension content line two.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Old harness constraint text that should be replaced on every transform.
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</HarnessConstraints>
+</Constraints>
 `
 
 // sourceWithSingleHarnessInjection is a source with only one harness injection
@@ -143,12 +143,12 @@ tier_rationale: harness fill testing
 required_skills: []
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -414,13 +414,13 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Old harness constraint text that should be replaced on every transform.
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</HarnessConstraints>
+</Constraints>
 `
 
 // TestUpdate_HarnessInjection_RefreshedFromDescriptorNotDeployed asserts that on an update,
@@ -493,16 +493,16 @@ tier_rationale: prose refresh testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # ProseRefreshTest Agent
 
 You are the ProseRefreshTest agent.
 
 NEW GENERIC PROSE THAT DID NOT EXIST IN THE DEPLOYED VERSION.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 `
 
 // mergeDeployedStaleProse is a deployed agent with stale Identity section prose
@@ -518,17 +518,17 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # ProseRefreshTest Agent
 
 You are the ProseRefreshTest agent.
 
 STALE PROSE FROM AN OLD GENERIC SOURCE VERSION.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 User identity extension: TypeScript/Node.js project, Jest test framework.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 `
 
 // TestUpdate_SectionProse_RefreshedFromSource asserts that when the generic source changes
@@ -629,21 +629,21 @@ tier_rationale: version change testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # VersionChangeTest Agent
 
 You are the VersionChangeTest agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
-[[INJECTION:ErrorHandlingExtension]]
-[[/INJECTION:ErrorHandlingExtension]]
-[[/SECTION:ErrorHandling]]
+<ErrorHandlingExtension type="project">
+</ErrorHandlingExtension>
+</ErrorHandling>
 `
 
 // deployedWithoutAddedInjection is the deployed version that predates the
@@ -659,15 +659,15 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # VersionChangeTest Agent
 
 You are the VersionChangeTest agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 User identity extension content that must survive.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 `
 
 // sourceWithoutRemovedInjection has a source that no longer contains the CustomConstraints
@@ -684,14 +684,14 @@ tier_rationale: removed injection testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # RemovedInjectionTest Agent
 
 You are the RemovedInjectionTest agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 `
 
 // deployedWithRemovedInjection is the deployed version that still has CustomConstraints,
@@ -707,23 +707,23 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # RemovedInjectionTest Agent
 
 You are the RemovedInjectionTest agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 User identity content.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
-[[INJECTION:CustomConstraints]]
+<CustomConstraints type="project">
 User-defined constraint: never touch /etc/hosts.
-[[/INJECTION:CustomConstraints]]
-[[/SECTION:Constraints]]
+</CustomConstraints>
+</Constraints>
 `
 
 // TestUpdate_AddedInjectionPoint_StartsEmpty asserts that when the generic source gains a
@@ -928,7 +928,7 @@ func TestPurity_BodyProseOutsideInjections_ByteIdenticalToSource(t *testing.T) {
 
 			// Parse both bodies and compare all nodes that are NOT injection content.
 			// The simplest correct check: every byte of the source body that is NOT
-			// between [[INJECTION:...]] open and [[/INJECTION:...]] close tags must
+			// between project-injection or managed-region open and close tags must
 			// appear at the same relative position in the output body.
 			//
 			// We use a structural approach: strip injection content from both bodies
@@ -946,32 +946,45 @@ func TestPurity_BodyProseOutsideInjections_ByteIdenticalToSource(t *testing.T) {
 	}
 }
 
-// stripInjectionContent replaces the content between every [[INJECTION:...]] /
-// [[/INJECTION:...]] and every [[DEPLOYED:...]] / [[/DEPLOYED:...]] pair with a fixed
-// placeholder, so the surrounding prose can be compared independently of managed region
-// content. Both user-owned and tool-managed regions are stripped because the purity
-// invariant covers body bytes outside ALL managed regions.
+// stripInjectionContent replaces the content between every project-injection and
+// managed-region tag pair with a fixed placeholder, so the surrounding prose can be compared
+// independently of managed region content. Both user-owned and tool-managed regions are
+// stripped because the purity invariant covers body bytes outside ALL managed regions.
+//
+// The helper is name-aware: it opens on <Name type="project|managed"> and closes only on
+// </Name> for the same tag name, so nested tags of different names do not accidentally
+// trigger an early close.
 func stripInjectionContent(body []byte) []byte {
 	var out []byte
 	lines := bytes.Split(body, []byte("\n"))
 	inside := false
+	var openName []byte // tag name of the currently open managed/project region
 	for _, line := range lines {
 		trimmed := bytes.TrimSpace(line)
 		if !inside {
-			isOpen := (bytes.HasPrefix(trimmed, []byte("[[INJECTION:")) ||
-				bytes.HasPrefix(trimmed, []byte("[[DEPLOYED:"))) &&
-				!bytes.HasPrefix(trimmed, []byte("[[/INJECTION:")) &&
-				!bytes.HasPrefix(trimmed, []byte("[[/DEPLOYED:"))
-			if isOpen {
-				inside = true
-				out = append(out, line...)
-				out = append(out, '\n')
-				continue
+			// Detect <Name type="project"> or <Name type="managed"> open tags.
+			if bytes.HasPrefix(trimmed, []byte("<")) &&
+				!bytes.HasPrefix(trimmed, []byte("</")) &&
+				(bytes.Contains(trimmed, []byte(`type="project"`)) ||
+					bytes.Contains(trimmed, []byte(`type="managed"`))) {
+				// Extract the tag name (first word after '<').
+				rest := trimmed[1:] // strip '<'
+				spaceIdx := bytes.IndexAny(rest, " \t>")
+				if spaceIdx > 0 {
+					inside = true
+					openName = rest[:spaceIdx]
+					out = append(out, line...)
+					out = append(out, '\n')
+					continue
+				}
 			}
 		} else {
-			if bytes.HasPrefix(trimmed, []byte("[[/INJECTION:")) ||
-				bytes.HasPrefix(trimmed, []byte("[[/DEPLOYED:")) {
+			// Detect </Name> where Name matches the open tag name.
+			closeTag := append([]byte("</"), openName...)
+			closeTag = append(closeTag, '>')
+			if bytes.Equal(trimmed, closeTag) {
 				inside = false
+				openName = nil
 				out = append(out, line...)
 				out = append(out, '\n')
 				continue

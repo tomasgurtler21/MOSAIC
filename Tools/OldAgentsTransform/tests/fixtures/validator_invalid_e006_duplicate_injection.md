@@ -5,15 +5,15 @@ name: test-agent
 description: Invalid file - same INJECTION name appears more than once in the file (E006)
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 First occurrence of IdentityExtension injection.
-[[/INJECTION:IdentityExtension]]
+</IdentityExtension>
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Second occurrence - duplicate injection boundary name.
-[[/INJECTION:IdentityExtension]]
+</IdentityExtension>
 
-[[/SECTION:Identity]]
+</Identity>

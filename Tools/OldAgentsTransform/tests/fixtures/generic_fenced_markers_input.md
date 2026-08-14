@@ -23,7 +23,7 @@ The following lines appear verbatim inside a fenced code block and must not be c
 
 ```text
 [INJECTION: identity_extension]
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 ```
 
 [INJECTION: language_patterns]

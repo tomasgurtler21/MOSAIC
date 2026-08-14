@@ -31,7 +31,7 @@ var ErrDocumentAbsent = errors.New("orchstate: orchestration document absent")
 // but cannot be parsed as the MOSAIC document format.
 var ErrDocumentMalformed = errors.New("orchstate: orchestration document malformed")
 
-// executionLogSection is the [[SECTION:ExecutionLog]] boundary name.
+// executionLogSection is the ExecutionLog region name.
 const executionLogSection = "ExecutionLog"
 
 // Parse reads a MOSAIC orchestration document already loaded into memory.
@@ -94,7 +94,7 @@ func mappingString(v mosaic.FieldValue, key string) string {
 	return ""
 }
 
-// parseExecutionLogRows converts the parsed [[SECTION:ExecutionLog]] table
+// parseExecutionLogRows converts the parsed ExecutionLog region table
 // into domain.ExecutionLogRow values, one per column with no surplus (see
 // ContractsDesign.md's column-to-field mapping).
 func parseExecutionLogRows(t mdtable.Table) ([]domain.ExecutionLogRow, error) {

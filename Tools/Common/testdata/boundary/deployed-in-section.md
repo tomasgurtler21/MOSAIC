@@ -2,8 +2,8 @@
 name: test-agent
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 Some constraints text.
-[[DEPLOYED:ProtocolConstraints]]
-[[/DEPLOYED:ProtocolConstraints]]
-[[/SECTION:Constraints]]
+<ProtocolConstraints type="managed">
+</ProtocolConstraints>
+</Constraints>

@@ -22,11 +22,11 @@ The current membership, and where each block's reasoning lives:
 
 | Block | Fills region | Reasoning |
 |-------|--------------|-----------|
-| `AuthorityHierarchy:Subagent` | `[[DEPLOYED:AuthorityHierarchy]]` | `DeploymentBlocks/AuthorityHierarchy.md` |
-| `ClosingProcedure:Subagent` | `[[DEPLOYED:ClosingProcedure]]` | `DeploymentBlocks/ClosingProcedure.md` |
-| `ProtocolConstraints:Subagent` | `[[DEPLOYED:ProtocolConstraints]]` | `DeploymentBlocks/ProtocolConstraints.md` |
-| `ErrorHandlingCommon:Subagent` | `[[DEPLOYED:ErrorHandlingCommon]]` | `DeploymentBlocks/ErrorHandlingCommon.md` |
-| `ExecutionPhilosophyCommon:Subagent` | `[[DEPLOYED:ExecutionPhilosophyCommon]]` | `DeploymentBlocks/ExecutionPhilosophyCommon.md` |
+| `AuthorityHierarchy:Subagent` | `<AuthorityHierarchy type="managed">` | `DeploymentBlocks/AuthorityHierarchy.md` |
+| `ClosingProcedure:Subagent` | `<ClosingProcedure type="managed">` | `DeploymentBlocks/ClosingProcedure.md` |
+| `ProtocolConstraints:Subagent` | `<ProtocolConstraints type="managed">` | `DeploymentBlocks/ProtocolConstraints.md` |
+| `ErrorHandlingCommon:Subagent` | `<ErrorHandlingCommon type="managed">` | `DeploymentBlocks/ErrorHandlingCommon.md` |
+| `ExecutionPhilosophyCommon:Subagent` | `<ExecutionPhilosophyCommon type="managed">` | `DeploymentBlocks/ExecutionPhilosophyCommon.md` |
 
 Where each region sits in an agent file is `AgentTemplateArchitecture.md` §2.5, which owns that fact; this document does not restate it.
 
@@ -57,11 +57,11 @@ That is why `bundle_version` is never a compatibility number, and why an agent a
 
 ### 2.1 What is excluded
 
-**The orchestration contract.** Message shape, the status and error vocabularies, the human-in-the-loop gate, and the artifact provenance stamp are one contract with one version, deployed from its own source into `[[DEPLOYED:CommunicationProtocol]]`. It is exactly what orchestrator and subagent must agree on, and a version bump there means compatibility may have changed.
+**The orchestration contract.** Message shape, the status and error vocabularies, the human-in-the-loop gate, and the artifact provenance stamp are one contract with one version, deployed from its own source into `<CommunicationProtocol type="managed">`. It is exactly what orchestrator and subagent must agree on, and a version bump there means compatibility may have changed.
 
 Mixing it into the bundle would make every wording fix in an unrelated block look like a contract change. That is not a cosmetic problem: everything downstream that reasons about protocol compatibility would be reasoning about noise, and a contract version that moves without the contract moving is worse than no version at all.
 
-**Per-deployment assembled regions.** `AvailableWorkflows`, `InfrastructureAgents`, and `HarnessConstraints` are `[[DEPLOYED:]]` regions too, but their content comes from a deployment's own selections. There is no canonical text for the bundle to hold. The full list of deployed names and their sources is in `AgentTemplateArchitecture.md` §2.5.
+**Per-deployment assembled regions.** `AvailableWorkflows`, `InfrastructureAgents`, and `HarnessConstraints` are managed-type regions too, but their content comes from a deployment's own selections. There is no canonical text for the bundle to hold. The full list of deployed names and their sources is in `AgentTemplateArchitecture.md` §2.5.
 
 ---
 
@@ -106,10 +106,10 @@ The agent's own `version` field is untouched by any of this. When a block change
 For each agent being deployed:
 
 1. Read the agent's `role` from frontmatter.
-2. For each `[[DEPLOYED:{Target}]]` region present in the file, find the bundle block whose `target` matches and whose `applies_to` matches the role. Regions not sourced from the bundle are resolved from the contract's own source or from the deployment's selections (`AgentTemplateArchitecture.md` §2.5).
+2. For each `<{Target} type="managed">` region present in the file, find the bundle block whose `target` matches and whose `applies_to` matches the role. Regions not sourced from the bundle are resolved from the contract's own source or from the deployment's selections (`AgentTemplateArchitecture.md` §2.5).
 3. Replace the region's **entire** body with the block's content, verbatim.
 4. Write `bundle_version` into the deployed file's frontmatter.
-5. Resolve `[[INJECTION:]]` regions — preserving existing content on update, leaving them empty and listing them in `TODO.md` on create.
+5. Resolve project-type regions (`<Name type="project">`) — preserving existing content on update, leaving them empty and listing them in `TODO.md` on create.
 
 **Step 5 comes last, always.** A region regenerated after an adjacent injection is resolved would discard content the tool had just placed.
 
@@ -117,7 +117,7 @@ Three edge obligations:
 
 - **An absent region is graded, not automatically an error.** `AgentTemplateArchitecture.md` §2.4.1 sorts deployed regions into three tiers: a missing `CommunicationProtocol` is an error, a missing conduct region — which is what all five bundle blocks fill — is a warning, and a missing per-deployment region is silent. A block with no matching region in a given agent is likewise normal, and never an error.
 - **A region present with no block matching the role is a hard error.** Deploying it empty ships an agent that appears complete and instructs nothing.
-- **A `[[DEPLOYED:]]` region with content in a *source* file is an error.** Source regions are empty by definition; content there is either a hand-edit about to be silently discarded, or a deployed file mistakenly committed as source.
+- **A managed-type region (`<Name type="managed">`) with content in a *source* file is an error.** Source regions are empty by definition; content there is either a hand-edit about to be silently discarded, or a deployed file mistakenly committed as source.
 
 ---
 
@@ -171,7 +171,7 @@ These are the bundle's share of the validator rules; they are numbered as they a
 
 Severities and enforcement mechanisms are assigned there; they are repeated here so the rules read as they will be applied.
 
-20. **Error, tool.** Every bundle block declares a `target` that is a recognised `[[DEPLOYED:]]` name, an `applies_to` that is a recognised role, and a `specified_in` naming a file that exists.
+20. **Error, tool.** Every bundle block declares a `target` that is a recognised managed-type region name, an `applies_to` that is a recognised role, and a `specified_in` naming a file that exists.
 21. **Warning, tool.** Every deployed agent's frontmatter `bundle_version` equals the bundle's `bundle_version`, and all agents in one deployment agree (§3.1).
 22. **Warning, tool.** Every deployed region's body sourced from the bundle equals its block byte-for-byte.
 23. **Warning, review.** No document outside the bundle contains a block's opening or closing content line. This is the mechanical form of the no-reproduction rule, and it is what stops the split between payload and rationale from quietly reverting.
@@ -194,7 +194,7 @@ Rule 22 catches a hand-edited deployed file. Rule 23 catches a design document t
 
 | Version | Date | Summary |
 |---------|------|---------|
-| 1.2 | 2026-08-08 | **Per-deployment region list corrected** to follow `AgentTemplateArchitecture.md` v1.4. `LanguagePatterns` and `CustomConstraints` are removed from §4's list of assembled `[[DEPLOYED:]]` regions: neither had a generator, both were listed under a content source that was never implemented, and both leave the deployed vocabulary entirely. No change to the bundle itself — it never held either one, and the five blocks are untouched. |
+| 1.2 | 2026-08-08 | **Per-deployment region list corrected** to follow `AgentTemplateArchitecture.md` v1.4. `LanguagePatterns` and `CustomConstraints` are removed from §4's list of assembled managed-type regions: neither had a generator, both were listed under a content source that was never implemented, and both leave the deployed vocabulary entirely. No change to the bundle itself — it never held either one, and the five blocks are untouched. |
 | 1.1 | 2026-08-05 | **Aligned with the conformance rework** in `AgentTemplateArchitecture.md` v1.2. An absent deployed region is graded rather than uniformly permitted: the five bundle blocks fill conduct-tier regions, whose absence is a warning (§4). Bundle rules 20–23 gain severities and mechanisms — 20 errors, 21–23 warn, since a stale or hand-edited deployment still runs and `bundle_version` carries no wire semantics (§9). |
 | 1.0 | 2026-08-05 | **Initial specification.** Split from `AgentTemplateArchitecture.md` §10. Establishes the bundle as the single source and single version for all verbatim-deployed MOSAIC text, with the three-part membership test and its decidable contract criterion. Records that the bundle holds **no contracts** — the orchestration contract, including the artifact provenance stamp, deploys from its own source — so per-block contract versions in the bundle frontmatter are removed from the design. Moves the `bundle_version` stamp from a region-body comment to the deployed file's frontmatter, and states the one-version-per-deployment invariant. |
 

@@ -2,14 +2,14 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity section content.
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:CommunicationProtocol]]
+<SecondSection type="core">
 Protocol section content.
-[[INJECTION:ProtocolExtension]]
-[[/INJECTION:ProtocolExtension]]
-[[/SECTION:CommunicationProtocol]]
+<ProtocolExtension type="project">
+</ProtocolExtension>
+</SecondSection>

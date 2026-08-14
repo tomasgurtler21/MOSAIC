@@ -2,8 +2,8 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity content.
-[[INJECTION:AuthorityHierarchy]]
-[[/INJECTION:AuthorityHierarchy]]
-[[/SECTION:Identity]]
+<AuthorityHierarchy type="project">
+</AuthorityHierarchy>
+</Identity>

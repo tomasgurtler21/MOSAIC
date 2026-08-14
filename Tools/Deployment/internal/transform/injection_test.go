@@ -34,14 +34,14 @@ tier_rationale: minimal
 required_skills: []
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Core capabilities.
 
-[[INJECTION:CodebaseContext]]
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Capabilities]]
+<CodebaseContext type="project">
+</CodebaseContext>
+</Capabilities>
 `
 
 // deployedWithProjectInjectionContent is the deployed version of sourceWithProjectInjection
@@ -57,16 +57,16 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Core capabilities.
 
-[[INJECTION:CodebaseContext]]
+<CodebaseContext type="project">
 User-supplied codebase context: Go monorepo, hexagonal architecture.
 Domain logic lives in internal/domain; no third-party imports allowed there.
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Capabilities]]
+</CodebaseContext>
+</Capabilities>
 `
 
 // TestInjectionPreserved_ProjectInjectionContentLiftedByteIdentically asserts that when
@@ -139,7 +139,7 @@ func TestInjectionPreserved_ProjectInjectionContentLiftedByteIdentically(t *test
 }
 
 // sourceWithAvailableWorkflows is an orchestrator-like source that contains a
-// [[DEPLOYED:AvailableWorkflows]] region inside the Identity section.
+// <AvailableWorkflows type="managed"> region inside the Identity section.
 const sourceWithAvailableWorkflows = `---
 version: 6.0.0
 name: orchestrator
@@ -151,14 +151,14 @@ tier_rationale: multi-phase coordination
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Orchestrator Agent
 
 You are the Orchestrator.
 
-[[DEPLOYED:AvailableWorkflows]]
-[[/DEPLOYED:AvailableWorkflows]]
-[[/SECTION:Identity]]
+<AvailableWorkflows type="managed">
+</AvailableWorkflows>
+</Identity>
 `
 
 // TestInjectionAssembled_WorkflowsAssembledIntoAvailableWorkflows asserts that when
@@ -168,12 +168,12 @@ You are the Orchestrator.
 //
 // Expected behaviour:
 //   - Each WorkflowBlock in Request.Workflows is appended verbatim to the
-//     [[DEPLOYED:AvailableWorkflows]] region in the output, in the order provided.
+//     <AvailableWorkflows type="managed"> region in the output, in the order provided.
 //   - Report.Regions contains an outcome with Action == RegionAssembled for the
 //     AvailableWorkflows region.
 //   - Report.Workflows lists the IDs of each assembled workflow block, in emitted order.
 func TestInjectionAssembled_WorkflowsAssembledIntoAvailableWorkflows(t *testing.T) {
-	const workflowBlock = "[[SECTION:Workflow:tdd-workflow]]\n<!-- workflow-version: 1.0 -->\n## TDD Workflow\n\nPhase table here.\n[[/SECTION:Workflow:tdd-workflow]]\n"
+	const workflowBlock = "<Workflow type=\"core\" name=\"tdd-workflow\" version=\"1.0\">\n## TDD Workflow\n\nPhase table here.\n</Workflow>\n"
 
 	req := transform.Request{
 		Source: []byte(sourceWithAvailableWorkflows),
@@ -229,10 +229,10 @@ func TestInjectionAssembled_WorkflowsAssembledIntoAvailableWorkflows(t *testing.
 	if !ok {
 		t.Fatal("AvailableWorkflows injection absent from output")
 	}
-	if !bytes.Contains(node.Content(), []byte("[[SECTION:Workflow:tdd-workflow]]")) {
+	if !bytes.Contains(node.Content(), []byte(`<Workflow type="core" name="tdd-workflow"`)) {
 		t.Errorf("AvailableWorkflows injection content does not contain the workflow block opening tag;\ncontent: %q", node.Content())
 	}
-	if !bytes.Contains(node.Content(), []byte("[[/SECTION:Workflow:tdd-workflow]]")) {
+	if !bytes.Contains(node.Content(), []byte("</Workflow>")) {
 		t.Errorf("AvailableWorkflows injection content does not contain the workflow block closing tag;\ncontent: %q", node.Content())
 	}
 }

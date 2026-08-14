@@ -213,12 +213,12 @@ func inspectPromoteSource(src []byte, d *domain.HarnessDescriptor) (promoteSourc
 // ErrPromoteNotTransformed and no output.
 //
 // The generated file:
-//   - has every [[INJECTION:...]] region stripped to an empty tag pair — no harness-
+//   - has every injection region stripped to an empty tag pair — no harness-
 //     specific injection content; the deploy pipeline fills injections per-harness;
-//   - has every [[DEPLOYED:...]] region stripped to an empty tag pair — this matches
+//   - has every managed region stripped to an empty tag pair — this matches
 //     real generic source files and satisfies the transform pipeline's constraint that
 //     deployed regions in a source must be empty (ErrSourceDeployedRegionNotEmpty);
-//   - carries over the [[SECTION:...]] tag structure and section body prose as-is;
+//   - carries over the section tag structure and section body prose as-is;
 //   - carries frontmatter per the field policy documented at the top of promote.go.
 //
 // The function is pure: in.Source is not modified and no file is written or read.

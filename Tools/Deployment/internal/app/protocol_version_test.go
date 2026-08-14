@@ -2,15 +2,14 @@ package app
 
 // protocol_version_test.go covers reading the deployed protocol version from a deployed artifact.
 //
-//   extractDeployedProtocolVersion — scoped extraction of the <!-- protocol-version: X -->
-//   comment from inside the [[DEPLOYED:CommunicationProtocol]] region:
+//   extractDeployedProtocolVersion — reads the version attribute from the
+//   <CommunicationProtocol type="managed"> region's open tag:
 //
-//     - A file carrying the region with a version comment returns the version string.
-//     - A file carrying the region but no version comment returns "".
+//     - A file carrying the region with a version attribute returns the version string.
+//     - A file carrying the region but no version attribute returns "".
 //     - A file with no protocol region returns "".
 //     - A malformed file degrades gracefully — returns "", never fails.
-//     - A version comment appearing outside the region is not captured.
-//     - Extra whitespace around the version token is handled by the regex.
+//     - A version attribute appearing outside the region is not captured.
 //
 //   probeDeployedArtifact integration:
 //
@@ -31,17 +30,16 @@ import (
 // extractDeployedProtocolVersion
 // ---------------------------------------------------------------------------
 
-// TestExtractDeployedProtocolVersion_RegionWithVersionComment_ReturnsVersion verifies that
-// when the deployed file contains a [[DEPLOYED:CommunicationProtocol]] region whose first
-// content line is a <!-- protocol-version: X --> comment, the function returns "X" verbatim.
-func TestExtractDeployedProtocolVersion_RegionWithVersionComment_ReturnsVersion(t *testing.T) {
+// TestExtractDeployedProtocolVersion_RegionWithVersionAttribute_ReturnsVersion verifies that
+// when the deployed file contains a CommunicationProtocol managed region whose opening tag
+// carries a version attribute, the function returns that version string verbatim.
+func TestExtractDeployedProtocolVersion_RegionWithVersionAttribute_ReturnsVersion(t *testing.T) {
 	data := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"[[DEPLOYED:CommunicationProtocol]]\n" +
-			"<!-- protocol-version: 1.9 -->\n" +
+			"<CommunicationProtocol type=\"managed\" version=\"1.9\">\n" +
 			"## Communication Protocol\n\n" +
 			"Some protocol content.\n\n" +
-			"[[/DEPLOYED:CommunicationProtocol]]\n")
+			"</CommunicationProtocol>\n")
 
 	got := extractDeployedProtocolVersion(data)
 
@@ -52,15 +50,15 @@ func TestExtractDeployedProtocolVersion_RegionWithVersionComment_ReturnsVersion(
 }
 
 // TestExtractDeployedProtocolVersion_RegionAbsent_ReturnsEmpty verifies that when the deployed
-// file carries no [[DEPLOYED:CommunicationProtocol]] region, the function returns "". An agent
+// file carries no CommunicationProtocol managed region, the function returns "". An agent
 // deployed before this feature was added carries no such region.
 func TestExtractDeployedProtocolVersion_RegionAbsent_ReturnsEmpty(t *testing.T) {
-	// A typical agent file with frontmatter and a workflow section but no deployed protocol region.
+	// A typical agent file with frontmatter and a section but no deployed protocol region.
 	data := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"[[SECTION:Identity]]\n" +
+			"<Identity type=\"core\">\n" +
 			"Some identity content.\n" +
-			"[[/SECTION:Identity]]\n")
+			"</Identity>\n")
 
 	got := extractDeployedProtocolVersion(data)
 
@@ -70,16 +68,16 @@ func TestExtractDeployedProtocolVersion_RegionAbsent_ReturnsEmpty(t *testing.T) 
 	}
 }
 
-// TestExtractDeployedProtocolVersion_RegionPresentButNoVersionComment_ReturnsEmpty verifies that
-// when the [[DEPLOYED:CommunicationProtocol]] region exists but contains no
-// <!-- protocol-version: X --> comment, the function returns "". The region being present does
-// not guarantee a version comment — a legacy deployment may have been written without one.
-func TestExtractDeployedProtocolVersion_RegionPresentButNoVersionComment_ReturnsEmpty(t *testing.T) {
+// TestExtractDeployedProtocolVersion_RegionPresentButNoVersionAttribute_ReturnsEmpty verifies that
+// when the CommunicationProtocol managed region exists but carries no version attribute on its
+// opening tag, the function returns "". The region being present does not guarantee a version
+// attribute — a legacy deployment may have been written without one.
+func TestExtractDeployedProtocolVersion_RegionPresentButNoVersionAttribute_ReturnsEmpty(t *testing.T) {
 	data := []byte(
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
+		"<CommunicationProtocol type=\"managed\">\n" +
 			"## Communication Protocol\n\n" +
-			"Content with no version comment inside the region.\n\n" +
-			"[[/DEPLOYED:CommunicationProtocol]]\n")
+			"Content with no version attribute on the opening tag.\n\n" +
+			"</CommunicationProtocol>\n")
 
 	got := extractDeployedProtocolVersion(data)
 
@@ -90,22 +88,25 @@ func TestExtractDeployedProtocolVersion_RegionPresentButNoVersionComment_Returns
 }
 
 // TestExtractDeployedProtocolVersion_MalformedFile_ReturnsEmpty verifies that when the file
-// content is malformed (unclosed region marker), the function returns "" and does not panic.
-// Like the workflow extractor, this function is used during probing and must never fail the
-// scan. The contract says malformed documents degrade to empty — partial version data from
-// an unclosed region must not be returned.
+// content is malformed (invalid YAML causing a parse error), the function returns "" and does
+// not panic. Like the workflow extractor, this function is used during probing and must never
+// fail the scan. The contract says malformed documents degrade to empty.
 func TestExtractDeployedProtocolVersion_MalformedFile_ReturnsEmpty(t *testing.T) {
-	// Unclosed protocol region — malformed document.
+	// Duplicate YAML key causes docformat.Parse to return an error.
 	data := []byte(
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-			"<!-- protocol-version: 1.9 -->\n" +
-			"Content that is never closed.\n")
+		"---\n" +
+			"version: \"1.0\"\n" +
+			"version: \"2.0\"\n" +
+			"---\n" +
+			"<CommunicationProtocol type=\"managed\" version=\"1.9\">\n" +
+			"Protocol content.\n" +
+			"</CommunicationProtocol>\n")
 
 	got := extractDeployedProtocolVersion(data)
 
 	if got != "" {
-		t.Errorf("extractDeployedProtocolVersion with malformed (unclosed) region: got %q, want empty string; "+
-			"partial version data from an unclosed region must not be returned",
+		t.Errorf("extractDeployedProtocolVersion with malformed (unparseable) file: got %q, want empty string; "+
+			"parse failures must degrade gracefully to empty",
 			got)
 	}
 }
@@ -125,64 +126,58 @@ func TestExtractDeployedProtocolVersion_EmptyContent_ReturnsEmpty(t *testing.T) 
 	}
 }
 
-// TestExtractDeployedProtocolVersion_VersionCommentOutsideRegion_NotCaptured verifies that a
-// <!-- protocol-version: X --> comment appearing outside the [[DEPLOYED:CommunicationProtocol]]
-// region — for example in the document preamble or in another section — is not captured.
-// Extraction must be scoped to the region's own bytes to avoid false version reads.
-func TestExtractDeployedProtocolVersion_VersionCommentOutsideRegion_NotCaptured(t *testing.T) {
-	// The protocol-version comment appears BEFORE the region opens. It must not be returned.
+// TestExtractDeployedProtocolVersion_NoVersionAttribute_BodyVersionNotCaptured verifies that
+// when the CommunicationProtocol region carries no version attribute on its opening tag, the
+// function returns "" even when a version number appears in the region body content.
+// Extraction reads the tag attribute, not the body text.
+func TestExtractDeployedProtocolVersion_NoVersionAttribute_BodyVersionNotCaptured(t *testing.T) {
+	// Version number appears only in body text, not as a tag attribute.
 	data := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"<!-- protocol-version: 9.9 -->\n" + // outside the region — must be ignored
-			"[[DEPLOYED:CommunicationProtocol]]\n" +
-			"## Communication Protocol\n\n" +
-			"No version comment inside this region.\n\n" +
-			"[[/DEPLOYED:CommunicationProtocol]]\n")
+			"<CommunicationProtocol type=\"managed\">\n" + // no version attribute
+			"## Communication Protocol v9.9\n\n" +
+			"No version attribute on the opening tag.\n\n" +
+			"</CommunicationProtocol>\n")
 
 	got := extractDeployedProtocolVersion(data)
 
-	if got == "9.9" {
-		t.Errorf("extractDeployedProtocolVersion captured a version comment outside the protocol region: "+
-			"got %q; extraction must be scoped to the region bytes only", got)
+	if got != "" {
+		t.Errorf("extractDeployedProtocolVersion returned %q for a region with no version attribute; "+
+			"extraction must read the tag attribute, not body content", got)
 	}
 }
 
-// TestExtractDeployedProtocolVersion_VersionCommentWithExtraWhitespace_ReturnsTrimmedVersion
-// verifies that the regex correctly handles extra whitespace around the version token in the
-// comment body, consistent with the workflowVersionPattern behaviour.
-func TestExtractDeployedProtocolVersion_VersionCommentWithExtraWhitespace_ReturnsTrimmedVersion(t *testing.T) {
+// TestExtractDeployedProtocolVersion_VersionAttributeWithExtraWhitespace_ReturnsTrimmedVersion
+// verifies that extra whitespace around the version value in the version attribute is stripped.
+func TestExtractDeployedProtocolVersion_VersionAttributeWithExtraWhitespace_ReturnsTrimmedVersion(t *testing.T) {
 	data := []byte(
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-			"<!--  protocol-version:  2.1  -->\n" + // extra whitespace inside the comment
+		"<CommunicationProtocol type=\"managed\" version=\"  2.1  \">\n" + // extra whitespace in attribute
 			"Protocol content.\n" +
-			"[[/DEPLOYED:CommunicationProtocol]]\n")
+			"</CommunicationProtocol>\n")
 
 	got := extractDeployedProtocolVersion(data)
 
 	if got != "2.1" {
-		t.Errorf("extractDeployedProtocolVersion with whitespace-padded comment: got %q, want %q; "+
-			"whitespace around the version token must not be included in the returned string",
+		t.Errorf("extractDeployedProtocolVersion with whitespace-padded version attribute: got %q, want %q; "+
+			"whitespace around the version value must be stripped",
 			got, "2.1")
 	}
 }
 
-// TestExtractDeployedProtocolVersion_MultipleVersionComments_FirstInRegionCaptured verifies that
-// when the protocol region contains more than one version comment (which should not happen in
-// normal operation), the function returns the first one found, consistent with how other
-// extractor functions handle duplicate entries.
-func TestExtractDeployedProtocolVersion_MultipleVersionComments_FirstInRegionCaptured(t *testing.T) {
+// TestExtractDeployedProtocolVersion_VersionAttributeOnOpeningTag_Captured verifies that
+// the version attribute on the CommunicationProtocol opening tag is the authoritative source
+// for the version, regardless of any version-like text appearing in the body.
+func TestExtractDeployedProtocolVersion_VersionAttributeOnOpeningTag_Captured(t *testing.T) {
 	data := []byte(
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-			"<!-- protocol-version: 1.7 -->\n" +
+		"<CommunicationProtocol type=\"managed\" version=\"1.7\">\n" +
 			"Some content.\n" +
-			"<!-- protocol-version: 1.9 -->\n" + // second comment — must be ignored
-			"More content.\n" +
-			"[[/DEPLOYED:CommunicationProtocol]]\n")
+			"This text mentions version 1.9 but the tag attribute is 1.7.\n" +
+			"</CommunicationProtocol>\n")
 
 	got := extractDeployedProtocolVersion(data)
 
 	if got != "1.7" {
-		t.Errorf("extractDeployedProtocolVersion with two version comments in region: got %q, want %q (first comment)",
+		t.Errorf("extractDeployedProtocolVersion with version in tag attribute: got %q, want %q",
 			got, "1.7")
 	}
 }
@@ -191,19 +186,17 @@ func TestExtractDeployedProtocolVersion_MultipleVersionComments_FirstInRegionCap
 // AC10.7 — Reader-side CRLF tolerance for extractDeployedProtocolVersion
 // ---------------------------------------------------------------------------
 
-// TestExtractDeployedProtocolVersion_CRLFTerminatedMarker_ReturnsVersionWithoutCR verifies
-// that when the [[DEPLOYED:CommunicationProtocol]] region contains a protocol-version marker
-// line terminated with CRLF ("\r\n") — as produced by the Stage 10 fix on a Windows checkout —
-// the extracted version string does not include the carriage return. The regex captures only
-// the version token, which is terminator-independent by design.
-func TestExtractDeployedProtocolVersion_CRLFTerminatedMarker_ReturnsVersionWithoutCR(t *testing.T) {
-	// Marker line is CRLF-terminated, as it would appear in a CRLF-checked-out file on Windows.
+// TestExtractDeployedProtocolVersion_CRLFTerminatedRegion_ReturnsVersionWithoutCR verifies
+// that when the CommunicationProtocol region's lines are CRLF-terminated — as produced on a
+// Windows checkout — the extracted version string does not include the carriage return. The
+// version is read from the tag attribute, which is terminator-independent by design.
+func TestExtractDeployedProtocolVersion_CRLFTerminatedRegion_ReturnsVersionWithoutCR(t *testing.T) {
+	// Region lines are CRLF-terminated, as they would appear in a CRLF-checked-out file.
 	data := []byte(
-		"[[DEPLOYED:CommunicationProtocol]]\r\n" +
-			"<!-- protocol-version: 1.10 -->\r\n" +
+		"<CommunicationProtocol type=\"managed\" version=\"1.10\">\r\n" +
 			"## Communication Protocol\r\n\r\n" +
 			"Some protocol content.\r\n\r\n" +
-			"[[/DEPLOYED:CommunicationProtocol]]\r\n")
+			"</CommunicationProtocol>\r\n")
 
 	got := extractDeployedProtocolVersion(data)
 
@@ -233,18 +226,16 @@ func TestExtractDeployedProtocolVersion_CRLFAndLFMarkerYieldEqualVersions(t *tes
 	const version = "1.10"
 
 	crlfDoc := []byte(
-		"[[DEPLOYED:CommunicationProtocol]]\r\n" +
-			"<!-- protocol-version: " + version + " -->\r\n" +
+		"<CommunicationProtocol type=\"managed\" version=\"" + version + "\">\r\n" +
 			"## Communication Protocol\r\n\r\n" +
 			"Protocol content.\r\n\r\n" +
-			"[[/DEPLOYED:CommunicationProtocol]]\r\n")
+			"</CommunicationProtocol>\r\n")
 
 	lfDoc := []byte(
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-			"<!-- protocol-version: " + version + " -->\n" +
+		"<CommunicationProtocol type=\"managed\" version=\"" + version + "\">\n" +
 			"## Communication Protocol\n\n" +
 			"Protocol content.\n\n" +
-			"[[/DEPLOYED:CommunicationProtocol]]\n")
+			"</CommunicationProtocol>\n")
 
 	crlfExtracted := extractDeployedProtocolVersion(crlfDoc)
 	lfExtracted := extractDeployedProtocolVersion(lfDoc)
@@ -288,18 +279,17 @@ func TestExtractDeployedProtocolVersion_CRLFAndLFMarkerYieldEqualVersions(t *tes
 // probeDeployedArtifact — ProtocolVersion field population
 // ---------------------------------------------------------------------------
 
-// TestProbeDeployedArtifact_ProtocolRegionWithVersionComment_ProtocolVersionPopulated verifies
-// that when the deployed file contains a [[DEPLOYED:CommunicationProtocol]] region with a
-// <!-- protocol-version: X --> comment, the returned state's ProtocolVersion carries that version.
-func TestProbeDeployedArtifact_ProtocolRegionWithVersionComment_ProtocolVersionPopulated(t *testing.T) {
+// TestProbeDeployedArtifact_ProtocolRegionWithVersionAttribute_ProtocolVersionPopulated verifies
+// that when the deployed file contains a CommunicationProtocol managed region whose opening tag
+// carries a version attribute, the returned state's ProtocolVersion carries that version.
+func TestProbeDeployedArtifact_ProtocolRegionWithVersionAttribute_ProtocolVersionPopulated(t *testing.T) {
 	ws := t.TempDir()
 	content := []byte(
 		"---\nversion: \"1.0\"\ntransform_version: \"2.0\"\ninjections_version: \"1.5\"\n---\n\n" +
-			"[[DEPLOYED:CommunicationProtocol]]\n" +
-			"<!-- protocol-version: 1.9 -->\n" +
+			"<CommunicationProtocol type=\"managed\" version=\"1.9\">\n" +
 			"## Communication Protocol\n\n" +
 			"Protocol content here.\n\n" +
-			"[[/DEPLOYED:CommunicationProtocol]]\n")
+			"</CommunicationProtocol>\n")
 	writeFile(t, ws, "agent.md", content)
 
 	state := probeDeployedArtifact(ws, "agent.md", "")
@@ -309,13 +299,13 @@ func TestProbeDeployedArtifact_ProtocolRegionWithVersionComment_ProtocolVersionP
 	}
 	if state.ProtocolVersion != "1.9" {
 		t.Errorf("state.ProtocolVersion = %q, want %q; probeDeployedArtifact must populate ProtocolVersion "+
-			"from the <!-- protocol-version: X --> comment inside the deployed protocol region",
+			"from the version attribute on the CommunicationProtocol region's opening tag",
 			state.ProtocolVersion, "1.9")
 	}
 }
 
 // TestProbeDeployedArtifact_NoProtocolRegion_ProtocolVersionEmpty verifies that when the
-// deployed file carries no [[DEPLOYED:CommunicationProtocol]] region (e.g. an agent deployed
+// deployed file carries no <CommunicationProtocol type="managed"> region (e.g. an agent deployed
 // before this feature was introduced), ProtocolVersion is "" in the returned state. An empty
 // ProtocolVersion signals the planner to treat the agent as protocol-stale.
 func TestProbeDeployedArtifact_NoProtocolRegion_ProtocolVersionEmpty(t *testing.T) {
@@ -323,7 +313,7 @@ func TestProbeDeployedArtifact_NoProtocolRegion_ProtocolVersionEmpty(t *testing.
 	// A plain agent file with frontmatter only — no deployed protocol region.
 	content := []byte(
 		"---\nversion: \"1.0\"\ntransform_version: \"2.0\"\ninjections_version: \"1.5\"\n---\n\n" +
-			"[[SECTION:Identity]]\nAgent identity.\n[[/SECTION:Identity]]\n")
+			"<Identity type=\"core\">\nAgent identity.\n</Identity>\n")
 	writeFile(t, ws, "agent.md", content)
 
 	state := probeDeployedArtifact(ws, "agent.md", "")
@@ -338,18 +328,18 @@ func TestProbeDeployedArtifact_NoProtocolRegion_ProtocolVersionEmpty(t *testing.
 	}
 }
 
-// TestProbeDeployedArtifact_ProtocolRegionPresentNoVersionComment_ProtocolVersionEmpty verifies
-// that when the [[DEPLOYED:CommunicationProtocol]] region exists but carries no version comment,
-// ProtocolVersion is "" in the returned state. This can happen for a file written by a version
-// of the tool that emitted the region but not yet the version marker.
-func TestProbeDeployedArtifact_ProtocolRegionPresentNoVersionComment_ProtocolVersionEmpty(t *testing.T) {
+// TestProbeDeployedArtifact_ProtocolRegionPresentNoVersionAttribute_ProtocolVersionEmpty verifies
+// that when the CommunicationProtocol managed region exists but its opening tag carries no
+// version attribute, ProtocolVersion is "" in the returned state. This can happen for a file
+// written by a version of the tool that emitted the region but not yet the version attribute.
+func TestProbeDeployedArtifact_ProtocolRegionPresentNoVersionAttribute_ProtocolVersionEmpty(t *testing.T) {
 	ws := t.TempDir()
 	content := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"[[DEPLOYED:CommunicationProtocol]]\n" +
+			"<CommunicationProtocol type=\"managed\">\n" +
 			"## Communication Protocol\n\n" +
-			"Content with no version comment.\n\n" +
-			"[[/DEPLOYED:CommunicationProtocol]]\n")
+			"Content with no version attribute on the opening tag.\n\n" +
+			"</CommunicationProtocol>\n")
 	writeFile(t, ws, "agent.md", content)
 
 	state := probeDeployedArtifact(ws, "agent.md", "")
@@ -370,10 +360,9 @@ func TestProbeDeployedArtifact_ProtocolVersionDoesNotAffectOtherFields(t *testin
 	ws := t.TempDir()
 	content := []byte(
 		"---\nversion: \"2.0\"\ntransform_version: \"1.5\"\ninjections_version: \"1.2\"\n---\n\n" +
-			"[[DEPLOYED:CommunicationProtocol]]\n" +
-			"<!-- protocol-version: 1.9 -->\n" +
+			"<CommunicationProtocol type=\"managed\" version=\"1.9\">\n" +
 			"Protocol content.\n" +
-			"[[/DEPLOYED:CommunicationProtocol]]\n")
+			"</CommunicationProtocol>\n")
 	writeFile(t, ws, "agent.md", content)
 
 	state := probeDeployedArtifact(ws, "agent.md", "")
@@ -417,12 +406,11 @@ func TestProbeDeployedArtifact_AbsentFile_ProtocolVersionEmpty(t *testing.T) {
 // HasVersionInfo semantics.
 func TestProbeDeployedArtifact_ProtocolVersionNotCountedInHasVersionInfo(t *testing.T) {
 	ws := t.TempDir()
-	// File carries only a protocol region with a version — no frontmatter version stamps.
+	// File carries only a protocol region with a version attribute — no frontmatter version stamps.
 	content := []byte(
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
-			"<!-- protocol-version: 1.9 -->\n" +
+		"<CommunicationProtocol type=\"managed\" version=\"1.9\">\n" +
 			"Protocol content.\n" +
-			"[[/DEPLOYED:CommunicationProtocol]]\n")
+			"</CommunicationProtocol>\n")
 	writeFile(t, ws, "agent.md", content)
 
 	state := probeDeployedArtifact(ws, "agent.md", "")

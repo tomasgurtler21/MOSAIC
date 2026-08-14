@@ -193,7 +193,7 @@ func truncate(b []byte, n int) []byte {
 }
 
 // loadProtocol loads the protocol content from the repository root for use in transform requests.
-// All agents in Catalog/Subagents/ carry a [[DEPLOYED:CommunicationProtocol]] region, so Protocol
+// All agents in Catalog/Subagents/ carry a <CommunicationProtocol type="managed"> region, so Protocol
 // must be populated for every transform.Apply call that processes those source files.
 func loadProtocol(t *testing.T, root string) domain.ProtocolContent {
 	t.Helper()

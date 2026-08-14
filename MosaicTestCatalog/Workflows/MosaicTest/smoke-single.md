@@ -11,8 +11,7 @@ artifacts:
   - MosaicTestScript/smoke-success.md
 ---
 
-[[SECTION:Workflow:smoke-single]]
-<!-- workflow-version: 1.0 -->
+<Workflow type="core" name="smoke-single" version="1.0">
 ## MosaicTest Smoke Single Workflow
 
 **Use when:** Verifying that `mosaic-run` can drive a harness at all. This is the first workflow to run against any new or changed harness — if it fails, nothing else in the suite is worth running.
@@ -26,7 +25,7 @@ artifacts:
 - No `Plan.md` is read and no stage table is required.
 - The script fixture must be seeded into the run folder at run creation. Seed `Fixtures/smoke-single` — the whole directory, not anything inside it — as the single seed path. See `Fixtures/README.md`.
 
-[[/SECTION:Workflow:smoke-single]]
+</Workflow>
 
 ---
 

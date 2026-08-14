@@ -105,14 +105,14 @@ This also happens to be the right target on the merits. Checking a run against t
 ```
 Orchestration.md frontmatter:  workflow: quick-fix
                                     ↓
-search for the literal string:  [[SECTION:Workflow:quick-fix]]
+search for the literal string:  <Workflow type="core" name="quick-fix">
                                     ↓
-             keep only matches inside  [[INJECTION:AvailableWorkflows]]
+             keep only matches inside  <AvailableWorkflows type="project">
                                     ↓
                         → the deployed orchestrator file
 ```
 
-The containment filter is what makes the match unambiguous. Injected workflow tables live inside the orchestrator's `[[INJECTION:AvailableWorkflows]]` region by construction, so requiring containment selects deployed orchestrators and nothing else — including in a workspace that happens to also hold MOSAIC's own authoring files, such as MOSAIC's own repository.
+The containment filter is what makes the match unambiguous. Injected workflow tables live inside the orchestrator's `<AvailableWorkflows type="project">` region by construction, so requiring containment selects deployed orchestrators and nothing else — including in a workspace that happens to also hold MOSAIC's own authoring files, such as MOSAIC's own repository.
 
 | Outcome | Behaviour |
 |---|---|
@@ -130,7 +130,7 @@ The search target is a long, unusual literal string, which makes this an ordinar
 
 ### 5.3 The infrastructure agent declaration region
 
-`[[INJECTION:InfrastructureAgents]]`, in the same deployed orchestrator file located by §5.2, read in the same pass.
+`<InfrastructureAgents type="project">`, in the same deployed orchestrator file located by §5.2, read in the same pass.
 
 It supplies one thing: the names of the infrastructure agents this orchestrator may dispatch. Tier B reports agents appearing in the Execution Log that the workflow table does not name, and infrastructure agents are never in a workflow table — without this list, every `checkpoint-manager-git` row, and every one of this agent's own rows, would be reported as an anomaly. A drift detector whose most frequent finding is itself would be ignored within one run, taking its real findings with it.
 

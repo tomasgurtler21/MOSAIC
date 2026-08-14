@@ -63,7 +63,7 @@ func TestBodyRoundTrip_GenericAgent_ByteIdentical(t *testing.T) {
 }
 
 func TestBodyRoundTrip_Orchestrator_ByteIdentical(t *testing.T) {
-	// Orchestrator contains [[INJECTION:AvailableWorkflows]] inside the Identity section.
+	// Orchestrator contains <AvailableWorkflows type="project"> inside the Identity section.
 	fpath := filepath.Join(repoRoot(), "Catalog", "Orchestrator", "orchestrator.md")
 	src, err := os.ReadFile(fpath)
 	if err != nil {
@@ -104,8 +104,8 @@ func TestBodyRoundTrip_DeployedAgentWithFilledInjections_ByteIdentical(t *testin
 }
 
 func TestBodyRoundTrip_WorkflowFileWithCompoundSection_ByteIdentical(t *testing.T) {
-	// Workflow file contains [[SECTION:Workflow:quick-fix]] — a compound section name.
-	// The content after [[/SECTION:Workflow:quick-fix]] is outside any boundary tag.
+	// Workflow file contains <Workflow type="core" name="quick-fix"> — a compound section name.
+	// The content after </Workflow> is outside any boundary tag.
 	// Both must survive the round trip byte-for-byte.
 	fpath := filepath.Join(repoRoot(), "Catalog", "Workflows", "Build", "quick-fix.md")
 	src, err := os.ReadFile(fpath)

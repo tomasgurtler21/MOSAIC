@@ -29,7 +29,7 @@ import (
 	"mosaic-deploy/internal/transform"
 )
 
-// sourceWithHarnessConstraints is a source document containing an [[INJECTION:HarnessConstraints]]
+// sourceWithHarnessConstraints is a source document containing an <HarnessConstraints type="project">
 // harness-class injection region, used to exercise the injection plumbing in the pipeline.
 const sourceWithHarnessConstraints = `---
 id: 1
@@ -43,12 +43,12 @@ tier_rationale: minimal
 required_skills: []
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 // spyInjectionModule wraps the fixture module and overrides Injection to:

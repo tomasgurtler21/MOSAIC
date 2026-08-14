@@ -2,12 +2,12 @@
 name: test-agent
 ---
 
-[[SECTION:Duplicate]]
+<Duplicate type="core">
 First occurrence of Duplicate at top level.
-[[/SECTION:Duplicate]]
+</Duplicate>
 
-[[SECTION:Container]]
-[[SECTION:Duplicate]]
+<Container type="core">
+<Duplicate type="core">
 Second occurrence of Duplicate, nested inside Container.
-[[/SECTION:Duplicate]]
-[[/SECTION:Container]]
+</Duplicate>
+</Container>

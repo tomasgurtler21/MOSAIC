@@ -354,6 +354,7 @@ func (k NodeKind) UserOwned() bool {
 type Node struct {
 	kind     NodeKind
 	name     string
+	version  string     // value of the version attribute on the opening tag; "" when absent
 	openTag  []byte     // raw bytes of the opening tag line, including its terminator
 	items    []bodyItem // content items between the open and close tags
 	closeTag []byte     // raw bytes of the closing tag line; empty when the tag is unclosed

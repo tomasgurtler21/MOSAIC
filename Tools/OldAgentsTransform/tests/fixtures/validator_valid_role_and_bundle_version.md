@@ -7,7 +7,7 @@ role: subagent
 bundle_version: 1.0.0
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 Otherwise valid content inside boundary.
-[[/SECTION:Identity]]
+</Identity>

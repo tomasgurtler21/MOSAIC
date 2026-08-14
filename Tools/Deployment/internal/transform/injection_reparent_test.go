@@ -1,6 +1,6 @@
 package transform_test
 
-// injection_reparent_test.go covers advisory TODO emission when a source [[INJECTION:]]
+// injection_reparent_test.go covers advisory TODO emission when a source project-injection region
 // region that already existed in the previously deployed file is found under a different
 // parent section in the new source document than it had in the deployed file.
 //
@@ -12,7 +12,7 @@ package transform_test
 //   - An injection whose parent is unchanged produces no GapInjectionReparented gap.
 //   - An injection new in the source (absent from the deployed file) produces no gap.
 //   - A create run (req.Deployed == nil) produces no GapInjectionReparented gap.
-//   - Injections nested inside [[DEPLOYED:]] regions are in scope for re-parenting detection
+//   - Injections nested inside managed region regions are in scope for re-parenting detection
 //     (AD-E); the comparison is a read-only inspection independent of the main-loop skip.
 //   - The comparison is keyed on the resolved (post-rename) injection name, so a rename
 //     alone in the same parent never trips the check.
@@ -51,20 +51,20 @@ tier_rationale: reparent testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Reparent Agent
 
 You are the Reparent agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Capabilities]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Capabilities>
 `
 
 // reparentDeployed has IdentityExtension inside Identity (not Capabilities).
@@ -80,21 +80,21 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Reparent Agent
 
 You are the Reparent agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 User identity extension content — this must be preserved at the new location.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
-[[/SECTION:Capabilities]]
+</Capabilities>
 `
 
 // ---------------------------------------------------------------------------
@@ -116,14 +116,14 @@ tier_rationale: unchanged parent testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # UnchangedParent Agent
 
 You are the UnchangedParent agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 `
 
 const unchangedParentDeployed = `---
@@ -137,15 +137,15 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # UnchangedParent Agent
 
 You are the UnchangedParent agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Saved identity extension content.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 `
 
 // ---------------------------------------------------------------------------
@@ -169,23 +169,23 @@ tier_rationale: new injection testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NewInjection Agent
 
 You are the NewInjection agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
 
-[[INJECTION:ContextExtension]]
-[[/INJECTION:ContextExtension]]
-[[/SECTION:Capabilities]]
+<ContextExtension type="project">
+</ContextExtension>
+</Capabilities>
 `
 
 const newInjectionDeployed = `---
@@ -199,19 +199,19 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NewInjection Agent
 
 You are the NewInjection agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Saved identity extension content.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 `
 
 // ---------------------------------------------------------------------------
-// Fixture 903 — Injection nested inside [[DEPLOYED:]] region (AD-E: in scope)
+// Fixture 903 — Injection nested inside managed region region (AD-E: in scope)
 //
 // Source: ContextExtension nested inside HarnessConstraints (inside Constraints section).
 //   The injection's anchor parent name is "HarnessConstraints".
@@ -220,7 +220,7 @@ Saved identity extension content.
 //
 // The anchor parents differ → re-parenting gap must be emitted even though the injection
 // is skipped by the main source-region loop (it is nested inside a deployed region).
-// Detection walks all source [[INJECTION:]] nodes at any depth, independent of the loop skip.
+// Detection walks all source project-injection region nodes at any depth, independent of the loop skip.
 // ---------------------------------------------------------------------------
 
 const nestedReparentSource = `---
@@ -235,22 +235,22 @@ tier_rationale: nested reparent testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedReparent Agent
 
 You are the NestedReparent agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[INJECTION:ContextExtension]]
-[[/INJECTION:ContextExtension]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+<ContextExtension type="project">
+</ContextExtension>
+</HarnessConstraints>
+</Constraints>
 `
 
 // nestedReparentDeployed has ContextExtension in Identity — NOT nested inside a deployed
@@ -267,26 +267,26 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedReparent Agent
 
 You are the NestedReparent agent.
 
-[[INJECTION:ContextExtension]]
+<ContextExtension type="project">
 User context extension content inside Identity.
-[[/INJECTION:ContextExtension]]
-[[/SECTION:Identity]]
+</ContextExtension>
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Fixture harness constraint: always use the approved tool list.
 Do not invoke tools not declared in the agent's tools field.
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -309,22 +309,22 @@ tier_rationale: nested same parent testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedSameParent Agent
 
 You are the NestedSameParent agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[INJECTION:ContextExtension]]
-[[/INJECTION:ContextExtension]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+<ContextExtension type="project">
+</ContextExtension>
+</HarnessConstraints>
+</Constraints>
 `
 
 // nestedSameParentDeployed has ContextExtension nested inside HarnessConstraints — matching
@@ -340,26 +340,26 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedSameParent Agent
 
 You are the NestedSameParent agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Fixture harness constraint: always use the approved tool list.
 Do not invoke tools not declared in the agent's tools field.
 
-[[INJECTION:ContextExtension]]
+<ContextExtension type="project">
 User context extension content inside HarnessConstraints.
-[[/INJECTION:ContextExtension]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</ContextExtension>
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -382,14 +382,14 @@ tier_rationale: toplevel to nested testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TopLevelToNested Agent
 
 You are the TopLevelToNested agent.
 
-[[INJECTION:TopLevelInjection]]
-[[/INJECTION:TopLevelInjection]]
-[[/SECTION:Identity]]
+<TopLevelInjection type="project">
+</TopLevelInjection>
+</Identity>
 `
 
 // topLevelToNestedDeployed has TopLevelInjection at body top level (anchor parent: "").
@@ -405,15 +405,15 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[INJECTION:TopLevelInjection]]
+<TopLevelInjection type="project">
 User top-level injection content.
-[[/INJECTION:TopLevelInjection]]
+</TopLevelInjection>
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TopLevelToNested Agent
 
 You are the TopLevelToNested agent.
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // ---------------------------------------------------------------------------
@@ -436,14 +436,14 @@ tier_rationale: nested to toplevel testing
 required_skills: []
 ---
 
-[[INJECTION:TopLevelInjection]]
-[[/INJECTION:TopLevelInjection]]
+<TopLevelInjection type="project">
+</TopLevelInjection>
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedToTopLevel Agent
 
 You are the NestedToTopLevel agent.
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // nestedToTopLevelDeployed has TopLevelInjection inside Identity (anchor parent: "Identity").
@@ -459,15 +459,15 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # NestedToTopLevel Agent
 
 You are the NestedToTopLevel agent.
 
-[[INJECTION:TopLevelInjection]]
+<TopLevelInjection type="project">
 User injection content that was inside Identity.
-[[/INJECTION:TopLevelInjection]]
-[[/SECTION:Identity]]
+</TopLevelInjection>
+</Identity>
 `
 
 // ---------------------------------------------------------------------------
@@ -846,13 +846,13 @@ func TestInjectionReparented_CreateRun_NoGap(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T4.2 — Nested injection inside [[DEPLOYED:]] region: in scope for detection (AD-E)
+// T4.2 — Nested injection inside managed region region: in scope for detection (AD-E)
 // ---------------------------------------------------------------------------
 
 // TestInjectionReparented_NestedInsideDeployed_DifferentParent_EmitsGap verifies that when
-// an injection nested inside a [[DEPLOYED:]] region in the source had a different parent in
+// an injection nested inside a managed region region in the source had a different parent in
 // the deployed file, the re-parenting gap is still emitted. Per AD-E, detection walks all
-// source [[INJECTION:]] nodes at any depth, independent of the main-loop skip that bypasses
+// source project-injection region nodes at any depth, independent of the main-loop skip that bypasses
 // applyProjectRegion for nested injections.
 func TestInjectionReparented_NestedInsideDeployed_DifferentParent_EmitsGap(t *testing.T) {
 	// nestedReparentSource has ContextExtension nested inside HarnessConstraints (parent: HarnessConstraints).
@@ -877,7 +877,7 @@ func TestInjectionReparented_NestedInsideDeployed_DifferentParent_EmitsGap(t *te
 }
 
 // TestInjectionReparented_NestedInsideDeployed_SameParent_NoGap verifies that when an
-// injection nested inside a [[DEPLOYED:]] region in the source was also nested inside the
+// injection nested inside a managed region region in the source was also nested inside the
 // same deployed region in the deployed file, no re-parenting gap is emitted. The parent
 // is the same in both documents.
 func TestInjectionReparented_NestedInsideDeployed_SameParent_NoGap(t *testing.T) {
@@ -978,14 +978,14 @@ tier_rationale: rename same parent testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # RenameSameParent Agent
 
 You are the RenameSameParent agent.
 
-[[INJECTION:NewName]]
-[[/INJECTION:NewName]]
-[[/SECTION:Identity]]
+<NewName type="project">
+</NewName>
+</Identity>
 `
 	const renamedDeployed = `---
 id: 910
@@ -998,15 +998,15 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # RenameSameParent Agent
 
 You are the RenameSameParent agent.
 
-[[INJECTION:OldName]]
+<OldName type="project">
 Saved injection content for OldName, which maps to NewName.
-[[/INJECTION:OldName]]
-[[/SECTION:Identity]]
+</OldName>
+</Identity>
 `
 
 	req := transform.Request{

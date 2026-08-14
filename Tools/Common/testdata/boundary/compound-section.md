@@ -2,8 +2,8 @@
 name: workflow
 ---
 
-[[SECTION:Workflow:my-workflow]]
+<Workflow type="core" name="my-workflow">
 Workflow section content.
-[[/SECTION:Workflow:my-workflow]]
+</Workflow>
 
 Content outside any boundary.

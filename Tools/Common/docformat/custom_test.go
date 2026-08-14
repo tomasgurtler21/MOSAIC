@@ -3,21 +3,22 @@ package docformat_test
 // Tests for the CUSTOM boundary marker: lexing, body accessors, and round-trip fidelity.
 //
 // All tests in this file target behaviour that is not yet implemented. They are written
-// in TDD RED phase: the parser does not yet recognise [[CUSTOM:]] tags and the body
-// accessor stubs return nil / false. Every test is expected to fail until the matching
+// in TDD RED phase: the parser does not yet recognise <Name type="custom"> tags and the
+// body accessor stubs return nil / false. Every test is expected to fail until the matching
 // implementation tasks are complete.
 //
 // Coverage (Parser):
-//   - [[CUSTOM:Name]] open tag is recognised; the resulting node has Kind NodeCustom.
-//   - [[/CUSTOM:Name]] close tag correctly closes the custom node.
+//   - <Name type="custom"> open tag is recognised; the resulting node has Kind NodeCustom.
+//   - </Name> close tag correctly closes the custom node.
 //   - A custom region at body top level has nil Parent.
-//   - A custom region nested inside a [[SECTION:]] has that section as its Parent.
-//   - A custom region nested inside a [[DEPLOYED:]] region has the deployed node as Parent.
-//   - Names containing colons (compound names such as "Workflow:quick-fix") are accepted.
-//   - [[CUSTOM:]] with an empty name is not recognised as a boundary tag.
+//   - A custom region nested inside a section has that section as its Parent.
+//   - A custom region nested inside a deployed region has the deployed node as Parent.
+//   - Compound names expressed via the name attribute (e.g. name="quick-fix") are accepted.
+//   - Tags with type="custom" and no name attribute are recognised with the tag name as Name.
+//   - Tags missing the type attribute are not recognised as custom boundary tags.
 //
 // Coverage (Body accessors):
-//   - Body.CustomRegions() returns all [[CUSTOM:]] regions at any depth in document order.
+//   - Body.CustomRegions() returns all custom regions at any depth in document order.
 //   - Body.CustomRegions() returns nil or empty for a document with no custom regions.
 //   - Body.Custom(name) returns the first matching custom region at any depth.
 //   - Body.Custom(name) returns false for an absent name.
@@ -27,9 +28,9 @@ package docformat_test
 //   - Body.Regions() returns injections, deployed, and custom nodes interleaved in document order.
 //
 // Coverage (Round-trip):
-//   - A document containing [[CUSTOM:]] regions at top level round-trips byte-identically
+//   - A document containing custom regions at top level round-trips byte-identically
 //     after the body is parsed via CustomRegions().
-//   - A document containing [[CUSTOM:]] regions with non-blank content round-trips
+//   - A document containing custom regions with non-blank content round-trips
 //     byte-identically.
 //   - A document containing all four marker kinds round-trips byte-identically.
 //   - The three-marker document (SECTION, INJECTION, DEPLOYED) round-trips byte-identically
@@ -47,14 +48,14 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestBoundaryLexer_Custom_OpenTag_RecognisedAsCustomNode(t *testing.T) {
-	// [[CUSTOM:CustomConstraints]] must be recognised as a boundary open tag and produce
+	// <CustomConstraints type="custom"> must be recognised as a boundary open tag and produce
 	// a custom node retrievable via Body.Custom.
 	doc := parsedBoundaryFixture(t, "empty-custom.md")
 
 	node, ok := doc.Body().Custom("CustomConstraints")
 
 	if !ok {
-		t.Fatal("Custom(\"CustomConstraints\") returned false for a document that contains [[CUSTOM:CustomConstraints]]")
+		t.Fatal("Custom(\"CustomConstraints\") returned false for a document that contains <CustomConstraints type=\"custom\">")
 	}
 	if node == nil {
 		t.Fatal("Custom(\"CustomConstraints\") returned nil node with ok == true")
@@ -119,8 +120,8 @@ func TestBoundaryLexer_Custom_AtBodyTopLevel_HasNilParent(t *testing.T) {
 }
 
 func TestBoundaryLexer_Custom_NestedInsideSection_ParentIsSection(t *testing.T) {
-	// custom-in-section.md has [[CUSTOM:CustomConstraints]] directly inside
-	// [[SECTION:Constraints]]. The custom node's Parent must be the section node.
+	// custom-in-section.md has <CustomConstraints type="custom"> directly inside
+	// <Constraints type="core">. The custom node's Parent must be the section node.
 	doc := parsedBoundaryFixture(t, "custom-in-section.md")
 	custom, ok := doc.Body().Custom("CustomConstraints")
 	if !ok {
@@ -141,8 +142,8 @@ func TestBoundaryLexer_Custom_NestedInsideSection_ParentIsSection(t *testing.T) 
 }
 
 func TestBoundaryLexer_Custom_NestedInsideDeployed_ParentIsDeployedNode(t *testing.T) {
-	// custom-in-deployed.md has [[CUSTOM:CustomConstraints]] directly inside
-	// [[DEPLOYED:CommunicationProtocol]]. The custom node's Parent must be the deployed node.
+	// custom-in-deployed.md has <CustomConstraints type="custom"> directly inside
+	// <CommunicationProtocol type="managed">. The custom node's Parent must be the deployed node.
 	doc := parsedBoundaryFixture(t, "custom-in-deployed.md")
 	custom, ok := doc.Body().Custom("CustomConstraints")
 	if !ok {
@@ -167,14 +168,14 @@ func TestBoundaryLexer_Custom_NestedInsideDeployed_ParentIsDeployedNode(t *testi
 // ---------------------------------------------------------------------------
 
 func TestBoundaryLexer_Custom_CompoundName_WithColons_Accepted(t *testing.T) {
-	// Names containing colons (e.g. "Workflow:quick-fix") must be treated as a single
-	// opaque name, consistent with SECTION, INJECTION, and DEPLOYED markers.
+	// Compound names use the name attribute: <Workflow type="custom" name="quick-fix">.
+	// Body.Custom must find such a node using the reassembled name "Workflow:quick-fix".
 	doc := parsedBoundaryFixture(t, "custom-compound-name.md")
 
 	node, ok := doc.Body().Custom("Workflow:quick-fix")
 
 	if !ok {
-		t.Fatal("Custom(\"Workflow:quick-fix\") returned false; CUSTOM names containing colons must be accepted")
+		t.Fatal("Custom(\"Workflow:quick-fix\") returned false; custom compound names must be accepted")
 	}
 	if node.Name() != "Workflow:quick-fix" {
 		t.Errorf("Name: want %q, got %q", "Workflow:quick-fix", node.Name())
@@ -185,17 +186,31 @@ func TestBoundaryLexer_Custom_CompoundName_WithColons_Accepted(t *testing.T) {
 // Parser: rejected / near-miss forms
 // ---------------------------------------------------------------------------
 
-func TestBoundaryLexer_Custom_EmptyName_NotRecognisedAsBoundaryTag(t *testing.T) {
-	// [[CUSTOM:]] — empty name — must be treated as literal text, not as a boundary tag.
-	// Consistent with the same behaviour for SECTION, INJECTION, and DEPLOYED.
-	src := []byte("[[CUSTOM:]]\n")
+func TestBoundaryLexer_Custom_NoTypeAttribute_NotRecognisedAsBoundaryTag(t *testing.T) {
+	// <CustomConstraints> with no type attribute must be treated as literal text, not as
+	// a custom boundary tag. Consistent with the same rule for all MOSAIC marker kinds.
+	src := []byte("<CustomConstraints>\n</CustomConstraints>\n")
 	doc, err := docformat.Parse(src)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 
 	if nodes := doc.Body().CustomRegions(); len(nodes) != 0 {
-		t.Errorf("[[CUSTOM:]] with empty name must not produce a custom node; got %d node(s)", len(nodes))
+		t.Errorf("tag without type attribute must not produce a custom node; got %d node(s)", len(nodes))
+	}
+}
+
+func TestBoundaryLexer_Custom_WrongTypeValue_NotRecognisedAsBoundaryTag(t *testing.T) {
+	// <CustomConstraints type="user"> is not a recognised MOSAIC kind and must be inert.
+	// The only valid values are "core", "managed", "project", and "custom".
+	src := []byte("<CustomConstraints type=\"user\">\n</CustomConstraints>\n")
+	doc, err := docformat.Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+
+	if nodes := doc.Body().CustomRegions(); len(nodes) != 0 {
+		t.Errorf("type=\"user\" is not a recognised MOSAIC kind; must not produce a custom node; got %d node(s)", len(nodes))
 	}
 }
 
@@ -204,8 +219,8 @@ func TestBoundaryLexer_Custom_EmptyName_NotRecognisedAsBoundaryTag(t *testing.T)
 // ---------------------------------------------------------------------------
 
 func TestBody_CustomRegions_ReturnsAllCustomNodesAtAnyDepth_InDocumentOrder(t *testing.T) {
-	// mixed-markers-with-custom.md has two [[CUSTOM:]] regions in document order:
-	//   1. HarnessCustom — nested inside [[DEPLOYED:CommunicationProtocol]]
+	// mixed-markers-with-custom.md has two custom regions in document order:
+	//   1. HarnessCustom — nested inside <CommunicationProtocol type="managed">
 	//   2. ProjectNotes  — at body top level
 	doc := parsedBoundaryFixture(t, "mixed-markers-with-custom.md")
 
@@ -230,7 +245,7 @@ func TestBody_CustomRegions_EmptyWhenNoCustomNodes(t *testing.T) {
 	customs := doc.Body().CustomRegions()
 
 	if len(customs) != 0 {
-		t.Errorf("expected 0 custom regions for a document with no [[CUSTOM:]] markers, got %d", len(customs))
+		t.Errorf("expected 0 custom regions for a document with no custom markers, got %d", len(customs))
 	}
 }
 
@@ -249,7 +264,7 @@ func TestBody_Custom_AbsentName_ReturnsFalse(t *testing.T) {
 }
 
 func TestBody_Custom_FindsAtAnyNestingDepth(t *testing.T) {
-	// HarnessCustom is nested inside [[DEPLOYED:CommunicationProtocol]];
+	// HarnessCustom is nested inside <CommunicationProtocol type="managed">;
 	// Custom() must find it regardless of nesting depth.
 	doc := parsedBoundaryFixture(t, "mixed-markers-with-custom.md")
 
@@ -298,9 +313,9 @@ func TestBody_Injections_DoesNotReturnCustomNodes(t *testing.T) {
 
 func TestBody_UserRegions_ReturnsInjectionsAndCustomInterleavedInDocumentOrder(t *testing.T) {
 	// mixed-markers-with-custom.md layout (document order of user-owned regions):
-	//   [[INJECTION:IdentityExtension]]  — inside [[SECTION:Identity]]
-	//   [[CUSTOM:HarnessCustom]]         — inside [[DEPLOYED:CommunicationProtocol]]
-	//   [[CUSTOM:ProjectNotes]]          — top level
+	//   <IdentityExtension type="project">  — inside <Identity type="core">
+	//   <HarnessCustom type="custom">       — inside <CommunicationProtocol type="managed">
+	//   <ProjectNotes type="custom">        — top level
 	//
 	// UserRegions must include both injections and custom regions, interleaved, and must
 	// NOT include NodeDeployed nodes.
@@ -350,10 +365,10 @@ func TestBody_UserRegions_DoesNotReturnDeployedNodes(t *testing.T) {
 
 func TestBody_Regions_IncludesCustomNodesInterleavedInDocumentOrder(t *testing.T) {
 	// mixed-markers-with-custom.md layout (document order of all non-section nodes):
-	//   [[INJECTION:IdentityExtension]]      — inside [[SECTION:Identity]]
-	//   [[DEPLOYED:CommunicationProtocol]]   — top level
-	//   [[CUSTOM:HarnessCustom]]             — inside [[DEPLOYED:CommunicationProtocol]]
-	//   [[CUSTOM:ProjectNotes]]              — top level
+	//   <IdentityExtension type="project">      — inside <Identity type="core">
+	//   <CommunicationProtocol type="managed">  — top level
+	//   <HarnessCustom type="custom">           — inside <CommunicationProtocol type="managed">
+	//   <ProjectNotes type="custom">            — top level
 	//
 	// Regions() must interleave all three region kinds (injection, deployed, custom) in
 	// document order, with a parent visited before its children.
@@ -390,10 +405,8 @@ func TestBody_Regions_IncludesCustomNodesInterleavedInDocumentOrder(t *testing.T
 // ---------------------------------------------------------------------------
 
 func TestRoundTrip_Custom_EmptyCustomRegion_ByteIdentical(t *testing.T) {
-	// Parsing a document that contains an empty [[CUSTOM:]] region and then serialising it
-	// must reproduce the source bytes exactly. The accessor call below forces body parsing;
-	// if CustomRegions() returns the wrong count the test stops before the byte check to
-	// make the failure mode unambiguous.
+	// Parsing a document that contains an empty custom region and then serialising it
+	// must reproduce the source bytes exactly.
 	src := boundaryFixtureBytes(t, "empty-custom.md")
 	doc, err := docformat.Parse(src)
 	if err != nil {
@@ -402,7 +415,7 @@ func TestRoundTrip_Custom_EmptyCustomRegion_ByteIdentical(t *testing.T) {
 
 	customs := doc.Body().CustomRegions()
 	if len(customs) != 1 {
-		t.Fatalf("expected 1 custom region after parsing empty-custom.md, got %d — body parse must recognise [[CUSTOM:]] markers before round-trip is meaningful", len(customs))
+		t.Fatalf("expected 1 custom region after parsing empty-custom.md, got %d — body parse must recognise custom markers before round-trip is meaningful", len(customs))
 	}
 
 	got := doc.Bytes()

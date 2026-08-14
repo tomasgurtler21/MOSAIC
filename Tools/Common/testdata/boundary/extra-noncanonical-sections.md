@@ -2,23 +2,23 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity section content.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Preamble]]
+<Preamble type="core">
 A non-canonical section interspersed between canonical ones.
 The canonical-order subsequence check skips any name absent from CanonicalOrder.
-[[/SECTION:Preamble]]
+</Preamble>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 Capabilities section content.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:InternalContext]]
+<InternalContext type="core">
 Another non-canonical section appearing between two canonical sections.
-[[/SECTION:InternalContext]]
+</InternalContext>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 Constraints section content.
-[[/SECTION:Constraints]]
+</Constraints>

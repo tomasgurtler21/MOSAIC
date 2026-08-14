@@ -5,6 +5,6 @@ name: test-agent
 description: Invalid file - INJECTION tag uses a name not in the canonical list (E004)
 ---
 
-[[INJECTION:Bogus]]
+<Bogus type="project">
 Content inside a non-canonical injection name.
-[[/INJECTION:Bogus]]
+</Bogus>

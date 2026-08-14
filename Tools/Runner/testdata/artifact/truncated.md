@@ -15,5 +15,5 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent              | Phase    | Stage | Status  | Timestamp

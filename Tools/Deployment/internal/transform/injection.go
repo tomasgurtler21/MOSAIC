@@ -20,8 +20,8 @@ type regionEntry struct {
 }
 
 // processRegions applies the merge policy to every managed region in the document body.
-// It replaces processInjections and covers both [[INJECTION:]] (user-owned) and
-// [[DEPLOYED:]] (tool-managed) regions.
+// It replaces processInjections and covers both injection (user-owned) and
+// managed (tool-managed) regions.
 //
 // Routing is by marker kind first:
 //
@@ -37,9 +37,9 @@ type regionEntry struct {
 // the region; the transform never guesses.
 //
 // Orphan detection covers user-owned regions only. After the source region loop:
-//   - A name present as [[INJECTION:]] in the deployed file and absent from the source
+//   - A name present as an injection region in the deployed file and absent from the source
 //     produces an orphaned outcome and a GapRemovedInjection gap carrying the content.
-//   - A name present as [[CUSTOM:]] in the deployed file and absent from the source
+//   - A name present as a custom region in the deployed file and absent from the source
 //     (custom regions never appear in source files) is preserved in the output at its
 //     anchored position. It never produces RegionOrphaned and never routes to
 //     GapRemovedInjection.
@@ -48,9 +48,9 @@ type regionEntry struct {
 // Orphan and custom names are sorted before emission so the report is deterministic.
 //
 // Name-collision errors abort the transform before any document mutation:
-//   - Shape A: the same name appears twice as [[CUSTOM:]] in the deployed file.
-//   - Shape B: the same name appears as [[CUSTOM:]] in the deployed file and [[INJECTION:]]
-//     in the source.
+//   - Shape A: the same name appears twice as a custom region in the deployed file.
+//   - Shape B: the same name appears as a custom region in the deployed file and an injection
+//     region in the source.
 func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutcome, gaps []domain.Gap, workflowIDs []string, infraAgentKeys []string, err error) {
 	// Select the active rename table: use the per-request override when provided (for tests),
 	// falling back to the package-level InjectionRenames table for all real callers.
@@ -67,7 +67,7 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 
 	// Build a lookup of user-owned region content from the deployed file (update only).
 	// Returns nil map, nil document, and nil gaps when req.Deployed is nil (new deployment).
-	// A parse error or a Shape A collision (duplicate [[CUSTOM:]] name) is propagated here
+	// A parse error or a Shape A collision (duplicate custom region name) is propagated here
 	// before any mutation. Rename resolution runs inside: old injection names are translated
 	// to their new names so applyProjectRegion finds the content at the right key.
 	deployedContent, depDoc, renameGaps, err := buildDeployedRegionMap(req.Deployed, renames)
@@ -82,7 +82,7 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 	sourceRegions := body.Regions() // NodeInjection, NodeDeployed, and NodeCustom, document order
 
 	// Track source user-owned injection names for orphan detection and Shape B collision.
-	// Nested injection names (inside [[DEPLOYED:]] regions) are included so they are not
+	// Nested injection names (inside managed regions) are included so they are not
 	// reported as orphans — they are handled by the capture-regenerate-reemit sequence.
 	sourceInjectionNames := make(map[string]bool, len(sourceRegions))
 	for _, node := range sourceRegions {
@@ -96,8 +96,8 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 	// custom placement so they are not placed twice.
 	reemittedNames := make(map[string]bool)
 
-	// Shape B collision: a name that is [[CUSTOM:]] in the deployed file and [[INJECTION:]]
-	// in the source. Both claim user-authored content; preserving both breaks the unique-name
+	// Shape B collision: a name that is a custom region in the deployed file and an injection
+	// region in the source. Both claim user-authored content; preserving both breaks the unique-name
 	// invariant; the tool aborts rather than guessing which to keep.
 	// This check runs before the source region loop so no mutation occurs on the error path.
 	if req.Deployed != nil {
@@ -112,7 +112,7 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 	for _, node := range sourceRegions {
 		name := node.Name()
 
-		// Skip [[INJECTION:]] nodes nested directly inside a [[DEPLOYED:]] region.
+		// Skip injection nodes nested directly inside a managed region.
 		// These are captured before the parent's generator runs and re-emitted after it,
 		// inside the parent's regenerated content. Processing them here via applyProjectRegion
 		// would write to a detached node (one that SetContent already replaced) and produce
@@ -128,10 +128,10 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 			return nil, nil, nil, nil, classErr
 		}
 
-		// Reject any [[DEPLOYED:]] region that carries non-empty content in the source file.
+		// Reject any managed region that carries non-empty content in the source file.
 		// Source regions are empty by definition; content here is either a hand-edit about to
 		// be discarded or a deployed file mistakenly committed as source.
-		// Empty nested [[INJECTION:]] or [[CUSTOM:]] markers are permitted — they are empty
+		// Empty nested injection or custom markers are permitted — they are empty
 		// placeholders that the capture-regenerate-reemit sequence will populate from the
 		// deployed file.
 		if node.Kind() == docformat.NodeDeployed && !docformat.SourceDeployedRegionIsEmpty(node) {
@@ -236,8 +236,8 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 		}
 	}
 
-	// Injection re-parenting detection (AD-E, AD-F): walk all source [[INJECTION:]] nodes at
-	// any depth — including those nested inside [[DEPLOYED:]] regions, which are skipped by
+	// Injection re-parenting detection (AD-E, AD-F): walk all source injection nodes at
+	// any depth — including those nested inside managed regions, which are skipped by
 	// the main source-region loop above. This is a read-only inspection and does not affect
 	// placement or content. Runs only on update runs (depDoc != nil).
 	if depDoc != nil {
@@ -409,8 +409,8 @@ func applyHarnessRegion(node *docformat.Node, name string, class domain.Injectio
 	if ok && content != "" {
 		// Ensure the content ends with a newline so the closing tag appears on its own line
 		// when the document is serialised. Descriptor YAML strings do not always carry a
-		// trailing newline; without one, the closing [[/DEPLOYED:...]] tag is concatenated
-		// onto the last line of content rather than appearing on a line by itself.
+		// trailing newline; without one, the closing </Name> tag is concatenated onto the
+		// last line of content rather than appearing on a line by itself.
 		//
 		// Harness injection content is normalised to LF by the harness loader so that content
 		// read from CRLF-checked-out files on Windows matches what LF-checked-out files
@@ -446,7 +446,7 @@ func applyHarnessRegion(node *docformat.Node, name string, class domain.Injectio
 	}
 }
 
-// applyProjectRegion handles a user-owned [[INJECTION:]] region.
+// applyProjectRegion handles a user-owned injection region.
 //
 // On new deployment (req.Deployed == nil): the region is cleared and a GapEmptyInjection
 // gap is recorded, signalling to the user that this region requires their input.
@@ -576,22 +576,20 @@ func applyProtocolRegion(node *docformat.Node, name string, req Request) (Region
 	if lineEnding == "\r\n" {
 		adaptedBlock = bytes.ReplaceAll(adaptedBlock, []byte("\n"), []byte("\r\n"))
 	}
-	versionComment := []byte(ProtocolVersionComment(req.Protocol.Version, adaptedBlock))
-	content := make([]byte, 0, len(versionComment)+len(adaptedBlock))
-	content = append(content, versionComment...)
-	content = append(content, adaptedBlock...)
-
-	node.SetContent(content) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
+	node.SetContent(adaptedBlock) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
+	// Write the protocol version as a tag attribute on the region's opening tag.
+	// The version source is the protocol document's frontmatter; only the destination changes.
+	node.SetVersion(req.Protocol.Version) //nolint:errcheck // SetVersion errors only for invalid version strings or nodes without an open tag; neither applies here.
 	return RegionOutcome{
 		Name:   name,
 		Marker: node.Kind(),
 		Class:  domain.InjectionProtocol,
 		Action: RegionProtocolFilled,
-		Bytes:  len(content),
+		Bytes:  len(adaptedBlock),
 	}, nil
 }
 
-// applyBundleRegion fills a bundle-sourced [[DEPLOYED:]] region with the role-matched block
+// applyBundleRegion fills a bundle-sourced managed region with the role-matched block
 // from req.Bundle.
 //
 // When req.Bundle is the zero value (not loaded), the region is cleared and recorded as
@@ -631,14 +629,14 @@ func applyBundleRegion(node *docformat.Node, name string, req Request) (RegionOu
 }
 
 // captureNestedUserRegions records the user-owned regions that must survive regeneration of
-// the given source [[DEPLOYED:]] node. It is called BEFORE the generator mutates the node.
+// the given source managed region node. It is called BEFORE the generator mutates the node.
 //
 // Two provenances are merged into one deterministically ordered result:
 //
-//  1. Deployed-file-origin: [[INJECTION:]] and [[CUSTOM:]] direct children of the same-named
-//     [[DEPLOYED:]] region in depDoc. These take indices 0..n-1 in deployed-file order.
+//  1. Deployed-file-origin: injection and custom direct children of the same-named
+//     managed region in depDoc. These take indices 0..n-1 in deployed-file order.
 //
-//  2. Source-declared only: [[INJECTION:]] direct children of sourceNode that have no
+//  2. Source-declared only: injection direct children of sourceNode that have no
 //     counterpart in the deployed file. These take indices n.. in source declaration order.
 //
 // A source-declared injection that has a deployed-file counterpart takes the deployed-file
@@ -654,8 +652,8 @@ func captureNestedUserRegions(sourceNode *docformat.Node, depDoc *docformat.Docu
 		if depParent, ok := depDoc.Body().Deployed(sourceNode.Name()); ok {
 			idx := 0
 			for _, child := range depParent.Children() {
-				// Only capture [[CUSTOM:]] children from the deployed file here (deployed-only
-				// provenance). [[INJECTION:]] children must only enter via Pass 2 (source-declared),
+				// Only capture custom children from the deployed file here (deployed-only
+				// provenance). Injection children must only enter via Pass 2 (source-declared),
 				// because a nested injection absent from the source has been deliberately removed —
 				// silently re-emitting it from the deployed tree would resurrect it forever and
 				// prevent the user from actually deleting it.
@@ -765,7 +763,7 @@ func reemitNestedUserRegions(parent *docformat.Node, captured []nestedRegionReco
 }
 
 // anchorParentName returns the anchor parent name for a node: the name of its nearest
-// enclosing [[SECTION:]] or [[DEPLOYED:]] ancestor, or the empty string when the node sits
+// enclosing section or managed region ancestor, or the empty string when the node sits
 // at document top level (Parent == nil). This is the canonical identity used for
 // re-parenting comparison.
 func anchorParentName(node *docformat.Node) string {
@@ -776,7 +774,7 @@ func anchorParentName(node *docformat.Node) string {
 }
 
 // buildDeployedInjectionParents returns a map from resolved injection name to anchor parent
-// name for every [[INJECTION:]] node in the deployed document. Rename resolution is applied
+// name for every injection node in the deployed document. Rename resolution is applied
 // so the map is keyed on post-rename names, matching the keys in the deployedContent map.
 //
 // Returns nil when depDoc is nil (create run).
@@ -820,8 +818,8 @@ func buildDeployedInjectionParents(depDoc *docformat.Document, renames []RenameE
 // name to its content and originating marker kind (NodeInjection or NodeCustom), plus the
 // parsed document for anchor extraction and any removal gaps produced by rename resolution.
 //
-// Both [[INJECTION:]] and [[CUSTOM:]] regions are included at any nesting depth, keyed by
-// name with byte-identical content. [[DEPLOYED:]] regions are excluded: their content is
+// Both injection and custom regions are included at any nesting depth, keyed by
+// name with byte-identical content. Managed regions are excluded: their content is
 // regenerated on every transform and is never recovered from the deployed file.
 //
 // Injection names are resolved through the rename table (renames) before being used as
@@ -835,7 +833,7 @@ func buildDeployedInjectionParents(depDoc *docformat.Document, renames []RenameE
 //       a GapRemovedInjection so the user can recover it. This rule is order-independent
 //       — it does not depend on which name appeared first in the deployed document.
 //
-// A Shape A collision (the same name appearing twice as [[CUSTOM:]] in the deployed file)
+// A Shape A collision (the same name appearing twice as a custom region in the deployed file)
 // is detected here and returned as an error wrapping ErrRegionNameCollision, before any
 // mutation.
 //
@@ -854,11 +852,11 @@ func buildDeployedRegionMap(deployed []byte, renames []RenameEntry) (map[string]
 	userRegions := depDoc.Body().UserRegions()
 
 	// Pass 1: build the raw map with names exactly as they appear in the deployed file.
-	// Shape A collision detection runs here (duplicate [[CUSTOM:]] names).
+	// Shape A collision detection runs here (duplicate custom region names).
 	rawMap := make(map[string]regionEntry, len(userRegions))
 	for _, node := range userRegions {
 		name := node.Name()
-		// Detect Shape A collision: the same name appearing twice as [[CUSTOM:]] in the
+		// Detect Shape A collision: the same name appearing twice as a custom region in the
 		// deployed file. Whichever entry would be written second would silently overwrite the
 		// other's content; the tool aborts rather than guessing which copy to keep.
 		if node.Kind() == docformat.NodeCustom {

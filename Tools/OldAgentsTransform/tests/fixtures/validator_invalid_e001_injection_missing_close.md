@@ -5,9 +5,9 @@ name: test-agent
 description: Invalid file - INJECTION open tag with no matching close tag (E001)
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Extension content with no closing tag for the injection.
-[[/SECTION:Identity]]
+</Identity>

@@ -3,7 +3,7 @@ package transform
 import "strings"
 
 // InjectionReparentedDetail renders the advisory TODO detail text emitted when a source
-// [[INJECTION:]] region that existed in the previously deployed file now sits under a
+// injection region that existed in the previously deployed file now sits under a
 // different parent. oldParent and newParent are anchor names; either may be empty, meaning
 // the region sat at document top level, which renders as "top level". When timestamp is
 // empty the trailing "(detected …)" clause is omitted.

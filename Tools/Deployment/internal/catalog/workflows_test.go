@@ -12,7 +12,7 @@ package catalog_test
 //   - Group workflows by category folder for the browse UI (WorkflowCategories)
 //
 // T7.7:
-//   - WorkflowSection extracts the [[SECTION:Workflow:{id}]] block including its
+//   - WorkflowSection extracts the <Workflow type="core" name="{id}"> block including its
 //     boundary tags, byte-identically from the source file.
 //
 // Classification record (every loadRealCatalog-based assertion in this file):
@@ -104,7 +104,7 @@ func writeWorkflowFile(t *testing.T, root, category, fileName, id string, refere
 
 // makeWorkflowWithSectionFixture builds a synthetic MOSAIC root containing one workflow,
 // "sample-workflow", whose source file carries maintainer prose before and after its
-// [[SECTION:Workflow:sample-workflow]] block, and loads the catalog from it. It returns
+// <Workflow type="core" name="sample-workflow"> block, and loads the catalog from it. It returns
 // the loaded catalog and the raw source bytes, for byte-identity comparison.
 func makeWorkflowWithSectionFixture(t *testing.T) (catalog.Catalog, []byte) {
 	t.Helper()
@@ -112,7 +112,7 @@ func makeWorkflowWithSectionFixture(t *testing.T) (catalog.Catalog, []byte) {
 	// No Index.md is written: the disk-driven loader finds the workflow file directly.
 	content := []byte("---\nid: sample-workflow\nversion: \"1.0.0\"\nname: Sample Workflow\ndescription: Sample.\nhint: Hint.\n---\n\n" +
 		"OUTER_MAINTAINER_TEXT: prose that must never appear in the extracted section.\n\n" +
-		"[[SECTION:Workflow:sample-workflow]]\nThis is the workflow body.\n[[/SECTION:Workflow:sample-workflow]]\n\n" +
+		"<Workflow type=\"core\" name=\"sample-workflow\">\nThis is the workflow body.\n</Workflow>\n\n" +
 		"Trailing prose.\n")
 	mustMkdir(t, root, "Catalog", "Workflows", "SampleCategory")
 	mustWriteFile(t, root, filepath.Join("Catalog", "Workflows", "SampleCategory", "sample-workflow.md"), content)
@@ -422,7 +422,7 @@ func TestWorkflowLookup_UnknownID_ReturnsFalse(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestWorkflowSection_ByteIdentical verifies that WorkflowSection returns the
-// [[SECTION:Workflow:{id}]] block byte-identically to what is stored in the source file.
+// <Workflow type="core" name="{id}"> block byte-identically to what is stored in the source file.
 // No normalisation of any kind is allowed.
 func TestWorkflowSection_ByteIdentical(t *testing.T) {
 	cat, raw := makeWorkflowWithSectionFixture(t)
@@ -458,7 +458,7 @@ func TestWorkflowSection_ExcludesOuterProse(t *testing.T) {
 }
 
 // TestWorkflowSection_IncludesOpeningBoundary verifies that the extracted section
-// includes the [[SECTION:Workflow:{id}]] opening boundary tag.
+// includes the <Workflow type="core" name="{id}"> opening boundary tag.
 func TestWorkflowSection_IncludesOpeningBoundary(t *testing.T) {
 	cat, _ := makeWorkflowWithSectionFixture(t)
 	section, err := cat.WorkflowSection("sample-workflow")
@@ -466,14 +466,14 @@ func TestWorkflowSection_IncludesOpeningBoundary(t *testing.T) {
 		t.Fatalf("WorkflowSection(\"sample-workflow\"): %v", err)
 	}
 
-	openTag := []byte("[[SECTION:Workflow:sample-workflow]]")
+	openTag := []byte(`<Workflow type="core" name="sample-workflow">`)
 	if !bytes.Contains(section, openTag) {
 		t.Errorf("WorkflowSection does not contain the opening boundary tag %q", openTag)
 	}
 }
 
 // TestWorkflowSection_IncludesClosingBoundary verifies that the extracted section
-// includes the [[/SECTION:Workflow:{id}]] closing boundary tag.
+// includes the </Workflow> closing boundary tag.
 func TestWorkflowSection_IncludesClosingBoundary(t *testing.T) {
 	cat, _ := makeWorkflowWithSectionFixture(t)
 	section, err := cat.WorkflowSection("sample-workflow")
@@ -481,7 +481,7 @@ func TestWorkflowSection_IncludesClosingBoundary(t *testing.T) {
 		t.Fatalf("WorkflowSection(\"sample-workflow\"): %v", err)
 	}
 
-	closeTag := []byte("[[/SECTION:Workflow:sample-workflow]]")
+	closeTag := []byte("</Workflow>")
 	if !bytes.Contains(section, closeTag) {
 		t.Errorf("WorkflowSection does not contain the closing boundary tag %q", closeTag)
 	}
@@ -496,7 +496,7 @@ func TestWorkflowSection_StartsWithOpeningBoundary(t *testing.T) {
 		t.Fatalf("WorkflowSection(\"sample-workflow\"): %v", err)
 	}
 
-	openTag := "[[SECTION:Workflow:sample-workflow]]"
+	openTag := `<Workflow type="core" name="sample-workflow">`
 	if !bytes.HasPrefix(section, []byte(openTag)) {
 		first := string(section)
 		if len(first) > 60 {
@@ -515,7 +515,7 @@ func TestWorkflowSection_EndsWithClosingBoundary(t *testing.T) {
 		t.Fatalf("WorkflowSection(\"sample-workflow\"): %v", err)
 	}
 
-	closeTag := "[[/SECTION:Workflow:sample-workflow]]"
+	closeTag := "</Workflow>"
 	trimmed := bytes.TrimRight(section, "\n")
 	if !bytes.HasSuffix(trimmed, []byte(closeTag)) {
 		last := string(section)
@@ -554,7 +554,7 @@ func TestWorkflowSection_UnknownID_ReturnsError(t *testing.T) {
 
 // TestWorkflowSection_FileWithoutSectionBlock_ReturnsError verifies that WorkflowSection
 // returns an error when a workflow is present in the catalog (its file exists on disk)
-// but the file does not contain a [[SECTION:Workflow:{id}]] block.
+// but the file does not contain a <Workflow type="core" name="{id}"> block.
 //
 // This is a realistic failure mode for a malformed workflow file. The contract states that
 // section blocks must be byte-identically extractable (AC7.4); a missing block cannot

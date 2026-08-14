@@ -128,81 +128,183 @@ func (n *Node) visitUserRegions(fn func(*Node)) {
 // ---------------------------------------------------------------------------
 
 // parseBoundaryTag checks whether line is a boundary tag line. A tag line is a line that,
-// after stripping its line terminator, exactly matches one of:
+// after trimming its line terminator and surrounding whitespace, is exactly one of:
 //
-//	[[SECTION:Name]]     [[/SECTION:Name]]
-//	[[INJECTION:Name]]   [[/INJECTION:Name]]
+//	<Name type="core">                     opening section tag
+//	<Name type="managed">                  opening deployed tag
+//	<Name type="project">                  opening injection tag
+//	<Name type="custom">                   opening custom tag
+//	<Name type="..." name="id">            compound name (prefix in tag, id in name attr)
+//	<Name type="..." version="v">          versioned tag
+//	</Name>                                closing tag for any of the above
 //
-// Name may contain colons and hyphens (e.g. "Workflow:quick-fix"). The function returns
-// (kind, isClose, name, true) on a match, and ("", false, "", false) otherwise.
-func parseBoundaryTag(line []byte) (kind NodeKind, isClose bool, name string, matched bool) {
-	// Strip line terminator to get the pure content.
+// Attribute parsing is lenient: any attribute order, any run of spaces or tabs, and either
+// single or double quotes are accepted. A parsed tag is stored verbatim (raw bytes) and
+// never re-rendered on serialisation.
+//
+// A tag lacking a recognised type attribute value (core, managed, project, custom) is not
+// a boundary and is returned as (matched=false).
+//
+// The function returns (kind, isClose, name, version, true) on a match, and
+// ("", false, "", "", false) otherwise.
+func parseBoundaryTag(line []byte) (kind NodeKind, isClose bool, name string, version string, matched bool) {
+	// Strip line terminator and leading/trailing whitespace.
+	// A boundary tag must occupy its own line: the trimmed content is exactly the tag.
 	s := strings.TrimRight(string(line), "\r\n")
+	s = strings.TrimSpace(s)
 
-	if !strings.HasPrefix(s, "[[") || !strings.HasSuffix(s, "]]") {
-		return "", false, "", false
-	}
-	inner := s[2 : len(s)-2] // content between [[ and ]]
-
-	switch {
-	case strings.HasPrefix(inner, "SECTION:"):
-		n := inner[8:]
-		if n == "" {
-			return "", false, "", false
-		}
-		return NodeSection, false, n, true
-
-	case strings.HasPrefix(inner, "/SECTION:"):
-		n := inner[9:]
-		if n == "" {
-			return "", false, "", false
-		}
-		return NodeSection, true, n, true
-
-	case strings.HasPrefix(inner, "INJECTION:"):
-		n := inner[10:]
-		if n == "" {
-			return "", false, "", false
-		}
-		return NodeInjection, false, n, true
-
-	case strings.HasPrefix(inner, "/INJECTION:"):
-		n := inner[11:]
-		if n == "" {
-			return "", false, "", false
-		}
-		return NodeInjection, true, n, true
-
-	case strings.HasPrefix(inner, "DEPLOYED:"):
-		n := inner[9:]
-		if n == "" {
-			return "", false, "", false
-		}
-		return NodeDeployed, false, n, true
-
-	case strings.HasPrefix(inner, "/DEPLOYED:"):
-		n := inner[10:]
-		if n == "" {
-			return "", false, "", false
-		}
-		return NodeDeployed, true, n, true
-
-	case strings.HasPrefix(inner, "CUSTOM:"):
-		n := inner[7:]
-		if n == "" {
-			return "", false, "", false
-		}
-		return NodeCustom, false, n, true
-
-	case strings.HasPrefix(inner, "/CUSTOM:"):
-		n := inner[8:]
-		if n == "" {
-			return "", false, "", false
-		}
-		return NodeCustom, true, n, true
+	if len(s) < 3 || s[0] != '<' || s[len(s)-1] != '>' {
+		return "", false, "", "", false
 	}
 
-	return "", false, "", false
+	inner := s[1 : len(s)-1] // content between '<' and '>'
+
+	// Close tag: </Name>
+	if strings.HasPrefix(inner, "/") {
+		tagName := inner[1:]
+		if !isValidXMLTagName(tagName) {
+			return "", false, "", "", false
+		}
+		return "", true, tagName, "", true
+	}
+
+	// No self-closing tags (e.g. <Name type="core"/>).
+	if strings.HasSuffix(inner, "/") {
+		return "", false, "", "", false
+	}
+
+	// Open tag: TagName SP+ attributes
+	spaceIdx := strings.IndexAny(inner, " \t")
+	if spaceIdx < 0 {
+		// No attributes → no type attribute → inert text.
+		return "", false, "", "", false
+	}
+
+	tagName := inner[:spaceIdx]
+	if !isValidXMLTagName(tagName) {
+		return "", false, "", "", false
+	}
+
+	attrsStr := inner[spaceIdx:]
+	attrs := parseXMLAttributes(attrsStr)
+
+	typeVal, hasType := attrs["type"]
+	if !hasType {
+		return "", false, "", "", false
+	}
+
+	var nodeKind NodeKind
+	switch typeVal {
+	case "core":
+		nodeKind = NodeSection
+	case "managed":
+		nodeKind = NodeDeployed
+	case "project":
+		nodeKind = NodeInjection
+	case "custom":
+		nodeKind = NodeCustom
+	default:
+		return "", false, "", "", false
+	}
+
+	// Assemble the compound name: prefix (tag name) + ":" + id (name attribute).
+	nameAttr := attrs["name"]
+	var fullName string
+	if nameAttr != "" {
+		fullName = tagName + ":" + nameAttr
+	} else {
+		fullName = tagName
+	}
+
+	versionAttr := strings.TrimSpace(attrs["version"])
+
+	return nodeKind, false, fullName, versionAttr, true
+}
+
+// isValidXMLTagName reports whether s is a valid XML element name for MOSAIC boundary tags.
+// A valid name matches [A-Za-z][A-Za-z0-9-]* — no colons, since compound names split at
+// the first colon and put the id part into a name attribute.
+func isValidXMLTagName(s string) bool {
+	if s == "" {
+		return false
+	}
+	c := s[0]
+	if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+		return false
+	}
+	for i := 1; i < len(s); i++ {
+		b := s[i]
+		if !((b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') ||
+			(b >= '0' && b <= '9') || b == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// parseXMLAttributes parses a run of XML attribute text into a name→value map. The input
+// is the content after the tag name and its trailing space (i.e., everything up to but not
+// including the closing '>').
+//
+// Lenient rules:
+//   - Attributes may appear in any order.
+//   - Any run of spaces or tabs separates attributes.
+//   - Values may be enclosed in either single or double quotes.
+func parseXMLAttributes(s string) map[string]string {
+	attrs := make(map[string]string)
+	s = strings.TrimLeft(s, " \t")
+	for s != "" {
+		// Collect the attribute name (up to '=', space, or tab).
+		end := 0
+		for end < len(s) && s[end] != '=' && s[end] != ' ' && s[end] != '\t' {
+			end++
+		}
+		if end == 0 {
+			break
+		}
+		attrName := s[:end]
+		s = s[end:]
+		s = strings.TrimLeft(s, " \t")
+		if !strings.HasPrefix(s, "=") {
+			// Attribute without value — skip.
+			continue
+		}
+		s = s[1:] // skip '='
+		if s == "" {
+			break
+		}
+
+		var attrVal string
+		if s[0] == '"' {
+			closeIdx := strings.Index(s[1:], `"`)
+			if closeIdx < 0 {
+				break // unclosed quote — stop
+			}
+			attrVal = s[1 : 1+closeIdx]
+			s = s[2+closeIdx:]
+		} else if s[0] == '\'' {
+			closeIdx := strings.Index(s[1:], `'`)
+			if closeIdx < 0 {
+				break // unclosed quote — stop
+			}
+			attrVal = s[1 : 1+closeIdx]
+			s = s[2+closeIdx:]
+		} else {
+			// Unquoted value: take until space/tab.
+			end := strings.IndexAny(s, " \t")
+			if end < 0 {
+				attrVal = s
+				s = ""
+			} else {
+				attrVal = s[:end]
+				s = s[end:]
+			}
+		}
+
+		attrs[attrName] = attrVal
+		s = strings.TrimLeft(s, " \t")
+	}
+	return attrs
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +340,7 @@ func parseBodyItems(raw []byte) []bodyItem {
 	}
 
 	for _, line := range lines {
-		kind, isClose, name, matched := parseBoundaryTag(line)
+		kind, isClose, name, version, matched := parseBoundaryTag(line)
 		if !matched {
 			pending = append(pending, line...)
 			continue
@@ -254,6 +356,7 @@ func parseBodyItems(raw []byte) []bodyItem {
 			node := &Node{
 				kind:    kind,
 				name:    name,
+				version: version,
 				openTag: line, // subslice of raw; raw is never modified after parsing
 				parent:  parentNode,
 			}
@@ -501,7 +604,7 @@ func (b *Body) Regions() []*Node {
 	return regions
 }
 
-// CustomRegions returns every [[CUSTOM:]] region at any nesting depth, in document order.
+// CustomRegions returns every custom region at any nesting depth, in document order.
 func (b *Body) CustomRegions() []*Node {
 	b.ensureParsed()
 	var customs []*Node
@@ -513,7 +616,7 @@ func (b *Body) CustomRegions() []*Node {
 	return customs
 }
 
-// Custom returns the first [[CUSTOM:]] region with the given name at any nesting depth.
+// Custom returns the first custom region with the given name at any nesting depth.
 // The name is matched case-sensitively.
 func (b *Body) Custom(name string) (*Node, bool) {
 	b.ensureParsed()
@@ -543,7 +646,7 @@ func findCustom(n *Node, name string) *Node {
 	return nil
 }
 
-// UserRegions returns every [[INJECTION:]] and [[CUSTOM:]] region at any nesting depth,
+// UserRegions returns every injection and custom region at any nesting depth,
 // interleaved in document order.
 func (b *Body) UserRegions() []*Node {
 	b.ensureParsed()
@@ -560,10 +663,12 @@ func (b *Body) UserRegions() []*Node {
 // Node methods
 // ---------------------------------------------------------------------------
 
-// Kind reports whether this node is a section or an injection.
+// Kind reports the kind of this boundary node (section, injection, deployed, or custom).
 func (n *Node) Kind() NodeKind { return n.kind }
 
-// Name returns the boundary tag name (e.g. "Identity", "Workflow:quick-fix").
+// Name returns the boundary tag name (e.g. "Identity", "Workflow:quick-fix"). For compound
+// regions the name is the tag name and the name attribute joined with ":", so every consumer
+// that does strings.HasPrefix(node.Name(), "Workflow:") or splits on ":" keeps working.
 func (n *Node) Name() string { return n.name }
 
 // Parent returns the enclosing node, or nil when this node is at the top level of the body.
@@ -610,10 +715,33 @@ func (n *Node) SetContent(b []byte) error {
 	return nil
 }
 
-// Clear empties this node's content. IsEmpty returns true after Clear. The boundary tags
-// are preserved.
+// Clear empties this node's content. IsEmpty returns true after Clear. The open and close
+// boundary tags remain; only the bytes between them are erased.
+//
+// When the open tag carries a version attribute, Clear also removes that attribute by
+// re-rendering the open tag in canonical form without the version. This makes the cleared
+// tag byte-identical to a freshly-parsed tag that never carried a version, which is needed
+// for body-structural comparison: the transform pipeline calls SetVersion on deployed
+// regions before serialising the deployed file, so a post-transform clear must undo that
+// version annotation for comparison to be version-agnostic. The pipeline reinstates the
+// version via SetVersion before writing the deployed file, so this reset is invisible to
+// the final output.
 func (n *Node) Clear() error {
 	n.items = nil
+	if n.version != "" && len(n.openTag) > 0 {
+		// Preserve the original line terminator (LF or CRLF).
+		terminator := []byte("\n")
+		if bytes.HasSuffix(n.openTag, []byte("\r\n")) {
+			terminator = []byte("\r\n")
+		}
+		// Re-render without the version attribute.
+		newTag := buildOpenTagLine(n.kind, n.name, "")
+		if len(terminator) == 2 {
+			newTag = append(bytes.TrimSuffix(newTag, []byte("\n")), terminator...)
+		}
+		n.openTag = newTag
+		n.version = ""
+	}
 	return nil
 }
 

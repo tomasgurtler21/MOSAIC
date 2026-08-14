@@ -5,8 +5,8 @@ name: test-agent
 description: Invalid file - SECTION open tag with no matching close tag (E001)
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 
 This section is opened but never closed.
-The file ends here without a closing [[/SECTION:Identity]] tag.
+The file ends here without a closing </Identity> tag.

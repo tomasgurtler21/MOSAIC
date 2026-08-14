@@ -4,7 +4,7 @@ Agents that support orchestration itself rather than the task the run is about.
 
 ## Purpose
 
-Infrastructure agents belong to no workflow. They are declared once for an orchestrator, in its `[[INJECTION:InfrastructureAgents]]` region, and are invoked because a **trigger condition** became true — not because a status code routed to them. They perform orchestration-support work: preserving restorable state, committing completed work, checking the run's own bookkeeping.
+Infrastructure agents belong to no workflow. They are declared once for an orchestrator, in its `InfrastructureAgents` injection region, and are invoked because a **trigger condition** became true — not because a status code routed to them. They perform orchestration-support work: preserving restorable state, committing completed work, checking the run's own bookkeeping.
 
 They are a new *reason to invoke*, not a new *kind of invocation*. In every protocol respect they are ordinary subagents: same communication protocol, same instance-id scheme, same Execution Log rows, same sequence counter.
 

@@ -2,53 +2,53 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity section content.
-[[DEPLOYED:AuthorityHierarchy]]
-[[/DEPLOYED:AuthorityHierarchy]]
-[[DEPLOYED:ClosingProcedure]]
-[[/DEPLOYED:ClosingProcedure]]
-[[DEPLOYED:AvailableWorkflows]]
-[[/DEPLOYED:AvailableWorkflows]]
-[[DEPLOYED:InfrastructureAgents]]
-[[/DEPLOYED:InfrastructureAgents]]
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<AuthorityHierarchy type="managed">
+</AuthorityHierarchy>
+<ClosingProcedure type="managed">
+</ClosingProcedure>
+<AvailableWorkflows type="managed">
+</AvailableWorkflows>
+<InfrastructureAgents type="managed">
+</InfrastructureAgents>
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 Capabilities content.
-[[DEPLOYED:LanguagePatterns]]
-[[/DEPLOYED:LanguagePatterns]]
-[[INJECTION:CodebaseContext]]
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Capabilities]]
+<LanguagePatterns type="managed">
+</LanguagePatterns>
+<CodebaseContext type="project">
+</CodebaseContext>
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 Constraints content.
-[[DEPLOYED:ProtocolConstraints]]
-[[/DEPLOYED:ProtocolConstraints]]
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[DEPLOYED:CustomConstraints]]
-[[/DEPLOYED:CustomConstraints]]
-[[/SECTION:Constraints]]
+<ProtocolConstraints type="managed">
+</ProtocolConstraints>
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+<CustomConstraints type="managed">
+</CustomConstraints>
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 Error handling content.
-[[DEPLOYED:ErrorHandlingCommon]]
-[[/DEPLOYED:ErrorHandlingCommon]]
-[[/SECTION:ErrorHandling]]
+<ErrorHandlingCommon type="managed">
+</ErrorHandlingCommon>
+</ErrorHandling>
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 Output format content.
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 Execution philosophy content.
-[[DEPLOYED:ExecutionPhilosophyCommon]]
-[[/DEPLOYED:ExecutionPhilosophyCommon]]
-[[/SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophyCommon type="managed">
+</ExecutionPhilosophyCommon>
+</ExecutionPhilosophy>

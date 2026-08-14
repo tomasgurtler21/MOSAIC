@@ -2,10 +2,10 @@
 name: test-agent
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 Capabilities content.
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity content appears after Capabilities — out of canonical order.
-[[/SECTION:Identity]]
+</Identity>

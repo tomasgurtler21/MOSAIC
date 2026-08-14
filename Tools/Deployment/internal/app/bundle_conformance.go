@@ -16,7 +16,7 @@ import (
 // frontmatter stamp must match bundle.Version. A mismatching stamp means the file was last
 // deployed from an older bundle and must be re-deployed.
 //
-// Rule 22 (bundle-region-drift, SeverityWarning): a bundle-sourced [[DEPLOYED:]] region in
+// Rule 22 (bundle-region-drift, SeverityWarning): a bundle-sourced managed region in
 // a deployed file must carry exactly the same content as the bundle block. A drift means the
 // region has been hand-edited or deployed from a different bundle version.
 //
@@ -73,7 +73,7 @@ func bundleConformance(
 		}
 
 		// Rule 22: for each bundle block that applies to this file's role, verify that the
-		// [[DEPLOYED:]] region in the deployed file carries the expected content.
+		// managed region in the deployed file carries the expected content.
 		body := doc.Body()
 		for _, blk := range bundle.Blocks {
 			if domain.AgentRole(blk.AppliesTo) != role {
@@ -90,7 +90,7 @@ func bundleConformance(
 					Subject:  targetPath,
 					Node:     blk.Target,
 					Message: fmt.Sprintf(
-						"deployed file %q is missing bundle region [[DEPLOYED:%s]] which the current bundle declares",
+						"deployed file %q is missing managed region %q which the current bundle declares",
 						targetPath, blk.Target,
 					),
 					Path: targetPath,
@@ -112,7 +112,7 @@ func bundleConformance(
 					Subject:  targetPath,
 					Node:     blk.Target,
 					Message: fmt.Sprintf(
-						"deployed file %q: [[DEPLOYED:%s]] content differs from the current bundle block",
+						"deployed file %q: managed region %q content differs from the current bundle block",
 						targetPath, blk.Target,
 					),
 					Path: targetPath,

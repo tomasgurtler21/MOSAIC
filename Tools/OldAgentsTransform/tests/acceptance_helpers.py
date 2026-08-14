@@ -14,9 +14,24 @@ from boundary_constants import BoundaryKind, close_tag, open_tag
 # Recognises any boundary tag line (open or close), any kind, any name -- used
 # only to enumerate region names present in a text; does not enforce the strict
 # compound-name grammar of boundary_constants.TAG_PATTERN.
+#
+# Matches the new XML-tag syntax:
+#   open:  <Name type="core|managed|project|custom">  (with optional name="qualifier")
+#   close: </Name>
 _ANY_TAG_RE = re.compile(
-    r"^\[\[(?P<close>/?)(?P<kind>SECTION|INJECTION|DEPLOYED):(?P<name>[^\]]+)\]\]\s*$"
+    r'^<(?P<close>/?)(?P<tag>[A-Za-z][A-Za-z0-9]*)'
+    r'(?:\s+type="(?P<type>core|managed|project|custom)")?'
+    r'(?:\s+name="(?P<qualifier>[^"]*)")?'
+    r'\s*>\s*$'
 )
+
+# Maps the XML type attribute value to the BoundaryKind string value.
+_TYPE_TO_KIND: dict[str, str] = {
+    "core":    "SECTION",
+    "managed": "DEPLOYED",
+    "project": "INJECTION",
+    "custom":  "CUSTOM",
+}
 
 
 def extract_region(text: str, kind: BoundaryKind, name: str) -> str | None:
@@ -49,8 +64,12 @@ def region_names(text: str, kind: BoundaryKind) -> list[str]:
     names: list[str] = []
     for line in text.splitlines():
         m = _ANY_TAG_RE.match(line.strip())
-        if m and not m.group("close") and m.group("kind") == kind.value:
-            names.append(m.group("name"))
+        if m and not m.group("close"):
+            tag_kind = _TYPE_TO_KIND.get(m.group("type") or "", "")
+            if tag_kind == kind.value:
+                tag_name = m.group("tag")
+                qualifier = m.group("qualifier")
+                names.append(f"{tag_name}:{qualifier}" if qualifier else tag_name)
     return names
 
 

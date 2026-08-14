@@ -60,7 +60,7 @@ func hasIssueWithCode(issues []docformat.Issue, code string) bool {
 
 func TestValidate_WellFormedDocument_ReturnsNoIssues(t *testing.T) {
 	// Uses a fixture with canonical sections and CommunicationProtocol as a top-level
-	// [[DEPLOYED:]] boundary. ArtifactProvenance and ArtifactProvenanceExtension are
+	// <Name type="managed"> boundary. ArtifactProvenance and ArtifactProvenanceExtension are
 	// absent (removed from vocabulary in Stage 2).
 	doc := parsedBoundaryFixture(t, "canonical-order-with-deployed-protocol.md")
 
@@ -85,7 +85,7 @@ func TestValidate_UnbalancedOpenTag_ReportsUnbalancedTagIssue(t *testing.T) {
 	issues := docformat.Validate(doc, docformat.ValidateOptions{})
 
 	if !hasIssueWithCode(issues, "unbalanced-tag") {
-		t.Errorf("expected an \"unbalanced-tag\" issue for an unclosed [[SECTION:Identity]], got issues: %v", issues)
+		t.Errorf("expected an \"unbalanced-tag\" issue for an unclosed <Identity type=\"core\">, got issues: %v", issues)
 	}
 }
 
@@ -111,7 +111,7 @@ func TestValidate_UnmatchedCloseTag_ReportsUnbalancedTagIssue(t *testing.T) {
 	issues := docformat.Validate(doc, docformat.ValidateOptions{})
 
 	if !hasIssueWithCode(issues, "unbalanced-tag") {
-		t.Errorf("expected an \"unbalanced-tag\" issue for an unmatched [[/SECTION:Identity]], got issues: %v", issues)
+		t.Errorf("expected an \"unbalanced-tag\" issue for an unmatched </Identity>, got issues: %v", issues)
 	}
 }
 
@@ -201,7 +201,7 @@ func TestValidate_DuplicateBoundaryName_ReportsDuplicateNameIssue(t *testing.T) 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{})
 
 	if !hasIssueWithCode(issues, "duplicate-name") {
-		t.Errorf("expected a \"duplicate-name\" issue for [[SECTION:Identity]] used twice, got issues: %v", issues)
+		t.Errorf("expected a \"duplicate-name\" issue for <Identity type=\"core\"> used twice, got issues: %v", issues)
 	}
 }
 
@@ -252,7 +252,7 @@ func TestValidate_UnbalancedOpenTag_IssueLineIsNonZero(t *testing.T) {
 func TestInjectionParent_MapsEachAdvisoryInjectionToItsParent(t *testing.T) {
 	// Stage 2: ArtifactProvenanceExtension and ProtocolExtension are removed from
 	// InjectionParent. ProtocolExtension is removed from the advisory map — projects use
-	// [[CUSTOM:ProtocolExtension]] instead. The map is now advisory only.
+	// <ProtocolExtension type="custom"> instead. The map is now advisory only.
 	wantMap := map[string]string{
 		"IdentityExtension":      "Identity",
 		"CodebaseContext":        "Capabilities",
@@ -278,7 +278,7 @@ func TestInjectionParent_MapsEachAdvisoryInjectionToItsParent(t *testing.T) {
 	// ProtocolExtension must be absent from the advisory map after Stage 2.
 	if _, ok := got["ProtocolExtension"]; ok {
 		t.Error("InjectionParent must not contain \"ProtocolExtension\" — " +
-			"removed in Stage 2; projects use [[CUSTOM:ProtocolExtension]] instead")
+			"removed in Stage 2; projects use <ProtocolExtension type=\"custom\"> instead")
 	}
 }
 

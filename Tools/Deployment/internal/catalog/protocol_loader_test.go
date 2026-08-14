@@ -89,19 +89,19 @@ OUTER_MAINTAINER_TEXT: this prose is maintainer documentation and must never rea
 
 ## 1. Canonical Sections
 
-[[SECTION:CommunicationProtocol:Subagent]]
+<CommunicationProtocol type="core" name="Subagent">
 ## Communication Protocol
 
 You operate under the subagent protocol. This is the deployable subagent block.
-[[/SECTION:CommunicationProtocol:Subagent]]
+</CommunicationProtocol>
 
 Between-blocks text that must also be excluded from the returned payload.
 
-[[SECTION:CommunicationProtocol:Orchestrator]]
+<CommunicationProtocol type="core" name="Orchestrator">
 ## Communication Protocol
 
 You operate under the orchestrator protocol. This is the deployable orchestrator block.
-[[/SECTION:CommunicationProtocol:Orchestrator]]
+</CommunicationProtocol>
 
 Trailing maintainer text that must not appear in any returned block.
 `
@@ -265,11 +265,11 @@ func TestProtocolLoader_WellFormedDoc_SubagentBlockDoesNotContainBoundaryTags(t 
 	if !ok {
 		t.Fatal("subagent block absent; cannot check for boundary tags")
 	}
-	if bytes.Contains(subagentBlock, []byte("[[SECTION:CommunicationProtocol:Subagent]]")) {
+	if bytes.Contains(subagentBlock, []byte(`<CommunicationProtocol type="core" name="Subagent">`)) {
 		t.Error("subagent block payload contains its own opening boundary tag; " +
 			"only inner content must be returned, not the tag lines themselves")
 	}
-	if bytes.Contains(subagentBlock, []byte("[[/SECTION:CommunicationProtocol:Subagent]]")) {
+	if bytes.Contains(subagentBlock, []byte("</CommunicationProtocol>")) {
 		t.Error("subagent block payload contains its own closing boundary tag")
 	}
 }
@@ -355,9 +355,9 @@ func TestProtocolLoader_MissingSubagentBlock_ReturnsErrProtocolBlockMissing(t *t
 version: "1.9"
 ---
 
-[[SECTION:CommunicationProtocol:Orchestrator]]
+<CommunicationProtocol type="core" name="Orchestrator">
 Orchestrator content.
-[[/SECTION:CommunicationProtocol:Orchestrator]]
+</CommunicationProtocol>
 `)
 	writeProtocolDoc(t, root, docMissingSubagent)
 
@@ -386,9 +386,9 @@ func TestProtocolLoader_MissingOrchestratorBlock_ReturnsErrProtocolBlockMissing(
 version: "1.9"
 ---
 
-[[SECTION:CommunicationProtocol:Subagent]]
+<CommunicationProtocol type="core" name="Subagent">
 Subagent content.
-[[/SECTION:CommunicationProtocol:Subagent]]
+</CommunicationProtocol>
 `)
 	writeProtocolDoc(t, root, docMissingOrchestrator)
 
@@ -413,12 +413,12 @@ func TestProtocolLoader_EmptySubagentBlock_ReturnsErrProtocolBlockEmpty(t *testi
 version: "1.9"
 ---
 
-[[SECTION:CommunicationProtocol:Subagent]]
-[[/SECTION:CommunicationProtocol:Subagent]]
+<CommunicationProtocol type="core" name="Subagent">
+</CommunicationProtocol>
 
-[[SECTION:CommunicationProtocol:Orchestrator]]
+<CommunicationProtocol type="core" name="Orchestrator">
 Orchestrator content.
-[[/SECTION:CommunicationProtocol:Orchestrator]]
+</CommunicationProtocol>
 `)
 	writeProtocolDoc(t, root, docEmptySubagent)
 
@@ -445,12 +445,12 @@ func TestProtocolLoader_EmptyOrchestratorBlock_ReturnsErrProtocolBlockEmpty(t *t
 version: "1.9"
 ---
 
-[[SECTION:CommunicationProtocol:Subagent]]
+<CommunicationProtocol type="core" name="Subagent">
 Subagent content.
-[[/SECTION:CommunicationProtocol:Subagent]]
+</CommunicationProtocol>
 
-[[SECTION:CommunicationProtocol:Orchestrator]]
-[[/SECTION:CommunicationProtocol:Orchestrator]]
+<CommunicationProtocol type="core" name="Orchestrator">
+</CommunicationProtocol>
 `)
 	writeProtocolDoc(t, root, docEmptyOrchestrator)
 
@@ -470,8 +470,8 @@ Subagent content.
 func TestProtocolLoader_WhitespaceOnlySubagentBlock_ReturnsErrProtocolBlockEmpty(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	docWhitespaceOnly := []byte("---\nversion: \"1.9\"\n---\n\n" +
-		"[[SECTION:CommunicationProtocol:Subagent]]\n   \n\t\n\n[[/SECTION:CommunicationProtocol:Subagent]]\n\n" +
-		"[[SECTION:CommunicationProtocol:Orchestrator]]\nOrchestrator content.\n[[/SECTION:CommunicationProtocol:Orchestrator]]\n")
+		"<CommunicationProtocol type=\"core\" name=\"Subagent\">\n   \n\t\n\n</CommunicationProtocol>\n\n" +
+		"<CommunicationProtocol type=\"core\" name=\"Orchestrator\">\nOrchestrator content.\n</CommunicationProtocol>\n")
 	writeProtocolDoc(t, root, docWhitespaceOnly)
 
 	_, err := catalog.FileProtocolLoader{}.LoadProtocol(root)
@@ -492,8 +492,8 @@ func TestProtocolLoader_WhitespaceOnlySubagentBlock_ReturnsErrProtocolBlockEmpty
 func TestProtocolLoader_WhitespaceOnlyOrchestratorBlock_ReturnsErrProtocolBlockEmpty(t *testing.T) {
 	root := makeTempMosaicRoot(t)
 	docWhitespaceOrchestrator := []byte("---\nversion: \"1.9\"\n---\n\n" +
-		"[[SECTION:CommunicationProtocol:Subagent]]\nSubagent content.\n[[/SECTION:CommunicationProtocol:Subagent]]\n\n" +
-		"[[SECTION:CommunicationProtocol:Orchestrator]]\n   \n\t\n\n[[/SECTION:CommunicationProtocol:Orchestrator]]\n")
+		"<CommunicationProtocol type=\"core\" name=\"Subagent\">\nSubagent content.\n</CommunicationProtocol>\n\n" +
+		"<CommunicationProtocol type=\"core\" name=\"Orchestrator\">\n   \n\t\n\n</CommunicationProtocol>\n")
 	writeProtocolDoc(t, root, docWhitespaceOrchestrator)
 
 	_, err := catalog.FileProtocolLoader{}.LoadProtocol(root)
@@ -522,13 +522,13 @@ func TestProtocolLoader_MissingFrontmatterVersion_ReturnsErrProtocolVersionMissi
 name: "Communication Protocol"
 ---
 
-[[SECTION:CommunicationProtocol:Subagent]]
+<CommunicationProtocol type="core" name="Subagent">
 Subagent content.
-[[/SECTION:CommunicationProtocol:Subagent]]
+</CommunicationProtocol>
 
-[[SECTION:CommunicationProtocol:Orchestrator]]
+<CommunicationProtocol type="core" name="Orchestrator">
 Orchestrator content.
-[[/SECTION:CommunicationProtocol:Orchestrator]]
+</CommunicationProtocol>
 `)
 	writeProtocolDoc(t, root, docNoVersion)
 
@@ -563,9 +563,9 @@ func TestProtocolLoader_FailureReturnsNoPartialContent(t *testing.T) {
 version: "1.9"
 ---
 
-[[SECTION:CommunicationProtocol:Subagent]]
+<CommunicationProtocol type="core" name="Subagent">
 Subagent content.
-[[/SECTION:CommunicationProtocol:Subagent]]
+</CommunicationProtocol>
 `)
 	writeProtocolDoc(t, root, docMissingOrchestrator)
 

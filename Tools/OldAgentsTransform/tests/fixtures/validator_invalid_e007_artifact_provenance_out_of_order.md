@@ -5,38 +5,38 @@ name: test-agent
 description: Invalid file - DEPLOYED:ArtifactProvenance appears after Capabilities, violating canonical order
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 Content here.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 Content here (appears at canonical slot 3, before ArtifactProvenance at slot 2 — out of order).
-[[/SECTION:Capabilities]]
+</Capabilities>
 
-[[DEPLOYED:ArtifactProvenance]]
-[[/DEPLOYED:ArtifactProvenance]]
+<ArtifactProvenance type="managed">
+</ArtifactProvenance>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 Content here.
-[[/SECTION:Constraints]]
+</Constraints>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 Content here.
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 Content here.
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 Content here.
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>

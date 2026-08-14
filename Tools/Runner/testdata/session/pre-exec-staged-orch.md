@@ -1,5 +1,4 @@
-[[SECTION:Workflow:pre-exec-staged]]
-<!-- workflow-version: 1.0 -->
+<Workflow type="core" name="pre-exec-staged" version="1.0">
 ## Planning Then Staged Execution Workflow
 
 Workflow with pre-EXECUTION (PLANNING) rows ahead of a staged EXECUTION phase.
@@ -12,4 +11,4 @@ file exists yet, and dispatches its next pre-EXECUTION row normally.
 | PLANNING | reviewer | ❌ | implementation-tdd | planner | Plan.md | review.md |
 | EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
 | EXECUTION.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/implementation-review.md |
-[[/SECTION:Workflow:pre-exec-staged]]
+</Workflow>

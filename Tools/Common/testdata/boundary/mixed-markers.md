@@ -2,22 +2,22 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity content.
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 Protocol content.
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 Constraints content.
-[[DEPLOYED:ProtocolConstraints]]
+<ProtocolConstraints type="managed">
 Harness content.
-[[/DEPLOYED:ProtocolConstraints]]
-[[INJECTION:CodebaseContext]]
+</ProtocolConstraints>
+<CodebaseContext type="project">
 Project context.
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Constraints]]
+</CodebaseContext>
+</Constraints>

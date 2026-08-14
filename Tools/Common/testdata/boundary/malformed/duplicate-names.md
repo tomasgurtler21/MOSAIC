@@ -2,10 +2,10 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 First identity section.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Identity]]
+<Identity type="core">
 Duplicate identity section.
-[[/SECTION:Identity]]
+</Identity>

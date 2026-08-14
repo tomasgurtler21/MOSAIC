@@ -15,13 +15,13 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent              | Phase    | Stage | Status  | Timestamp            | Summary      | Checkpoint |
 |-----|--------------------|---------:|-------|---------|----------------------|--------------|------------|
 | 1   | planner-tdd-soft#1 | PLANNING | -     | SUCCESS | 2026-01-29T09:05:00Z | Plan created | -          |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 
-[[SECTION:WorkflowNotes]]
+<WorkflowNotes type="core">
 | Seq | Note |
 |-----|------|
-[[/SECTION:WorkflowNotes]]
+</WorkflowNotes>

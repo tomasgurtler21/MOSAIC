@@ -2,9 +2,9 @@
 name: test-agent
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 Constraints content.
-[[INJECTION:HarnessConstraints]]
+<HarnessConstraints type="project">
 Harness constraints content.
-[[/INJECTION:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</HarnessConstraints>
+</Constraints>

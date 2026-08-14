@@ -223,7 +223,7 @@ When creating or reviewing subagents, verify:
 
 **Orchestration Compliance:**
 - Follows canonical template from `AgentTemplateArchitecture.md` (all 7 sections)
-- Every `[[DEPLOYED:]]` region is empty — the protocol, authority hierarchy, and other shared text arrive at deploy time and are never hand-authored
+- Every `type="managed"` deployed region is empty — the protocol, authority hierarchy, and other shared text arrive at deploy time and are never hand-authored
 - Status code mapping in Error Handling is agent-specific and complete
 - Output Format states this agent's `status_message` examples and `error_code` choices, with no JSON envelope around them
 - All relevant injection points included and unfilled
@@ -240,7 +240,7 @@ When creating or reviewing subagents, verify:
 
 When creating or reviewing workflows, verify:
 
-- Matches the format of the existing files in `Workflows/{Category}/` — frontmatter fields, the `[[SECTION:Workflow:{id}]]` boundary, and the routing table's columns (7-column sequential or 8-column parallel)
+- Matches the format of the existing files in `Workflows/{Category}/` — frontmatter fields, the `<Workflow type="core" name="{id}" version="{version}">` boundary, and the routing table's columns (7-column sequential or 8-column parallel)
 - Every referenced subagent exists in `Catalog/Subagents/{Category}/README.md` (or the gap is explicitly flagged)
 - On Success targets are valid subagent names or COMPLETE
 - On Findings targets exist in the table

@@ -2,19 +2,19 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity content.
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 Protocol content.
-[[CUSTOM:HarnessCustom]]
+<HarnessCustom type="custom">
 Custom content inside deployed.
-[[/CUSTOM:HarnessCustom]]
-[[/DEPLOYED:CommunicationProtocol]]
+</HarnessCustom>
+</CommunicationProtocol>
 
-[[CUSTOM:ProjectNotes]]
+<ProjectNotes type="custom">
 Top-level custom notes.
-[[/CUSTOM:ProjectNotes]]
+</ProjectNotes>

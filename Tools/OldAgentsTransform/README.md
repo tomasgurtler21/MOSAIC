@@ -5,10 +5,14 @@ instruction files (plain Markdown with `[INJECTION: name]` comment markers, or n
 markers at all) to the **current generation** boundary-tag vocabulary:
 
 ```
-[[SECTION:Identity]] ... [[/SECTION:Identity]]
-[[INJECTION:CodebaseContext]] ... [[/INJECTION:CodebaseContext]]
-[[DEPLOYED:CommunicationProtocol]] ... [[/DEPLOYED:CommunicationProtocol]]
+<Identity type="core"> ... </Identity>
+<CodebaseContext type="project"> ... </CodebaseContext>
+<CommunicationProtocol type="managed"> ... </CommunicationProtocol>
 ```
+
+Each open tag carries a `type` attribute (`core` for sections, `managed` for
+deployed regions, `project` for injection points, `custom` for project-local
+regions). Close tags carry only the element name — no `type` attribute.
 
 Emitting this vocabulary is **not** the same as producing a conformant
 current-generation file. A clean [`boundary_validator.py`](#validate) run
@@ -17,7 +21,7 @@ nothing about whether the content inside them is right. Even after boundary
 tags, conduct regions and frontmatter fields are all in place, a transformed
 file can still carry gaps that this tooling detects and reports but does not
 fix on its own: a retained JSON response envelope in `Output Format`, zero
-`[[INJECTION:...]]` regions, or harness-specific prose sitting in an
+injection regions (`type="project"`), or harness-specific prose sitting in an
 agent-authored section. See [Non-conformance report](#non-conformance-report)
 below for what is detected and how it is reported.
 
@@ -191,7 +195,7 @@ listing per-file findings for gaps the tool can detect but not fix:
 | Code | Meaning |
 |------|---------|
 | `NC-7A` | `Output Format` still retains a JSON response envelope where the current convention is a table |
-| `NC-7B` | The output carries zero `[[INJECTION:...]]` regions — a project cannot customise the agent |
+| `NC-7B` | The output carries zero injection regions (`type="project"`) — a project cannot customise the agent |
 | `NC-7C` | A heading naming a specific harness (e.g. "Claude Code", "GHCP CLI") sits inside an agent-authored section, rather than under `HarnessConstraints` |
 | `NC-D1F` | A superseded bullet was found in drifted wording and left in place |
 | `NC-TIER` | `recommended_tier` or `tier_rationale` was absent and was written as a placeholder that needs manual completion. Only raised on the **generic path** — these fields are not written on the harness path, so no finding is raised there even when they are absent. |
@@ -233,8 +237,9 @@ When `transform_file()` receives a file whose frontmatter contains
    single-file transformer and the batch runner apply this check identically.
 
 2. **Idempotency guard.** If the file already carries a structurally valid set
-   of canonical `[[SECTION:...]]` boundary tags (all tags paired, all names
-   recognised), it is left byte-identical and a warning is printed to stderr:
+   of canonical section boundary tags (`type="core"`, all tags paired, all
+   names recognised), it is left byte-identical and a warning is printed to
+   stderr:
 
    ```
    <path> already carries canonical boundary tags; skipping
@@ -258,13 +263,13 @@ When `transform_file()` receives a file whose frontmatter contains
 
 A full-quality harness transform diffs the harness body against the generic
 source to locate project-specific injection content and place it under the
-correct `[[INJECTION:...]]` tags. The degraded path cannot do this because
+correct injection tags (`type="project"`). The degraded path cannot do this because
 there is no reference to diff against. As a result:
 
 - **Injection-merging accuracy is lost.** The tool cannot distinguish
   project-specific injection fill from boilerplate, so injection regions may
   be placed incorrectly or left empty.
-- **Section tags and `[[DEPLOYED:...]]` placeholder pairs are still produced.**
+- **Section tags and deployed (`type="managed"`) placeholder pairs are still produced.**
   The structural skeleton is correct; only the injection content placement
   is unreliable.
 
@@ -311,8 +316,8 @@ always hard-fail; they are never routed through the degraded path.
 2. `boundary_validator.py --batch` on the target tree to see the starting state.
 3. `boundary_transformer.py` (single file) or `batch_transform.py` (whole tree).
 4. `boundary_validator.py --batch` again — a clean run is the acceptance gate.
-5. Diff the result: expect boundary tag lines, inserted `[[DEPLOYED:...]]`
-   conduct regions (with the prose bullets they supersede removed), derived or
+5. Diff the result: expect boundary tag lines, inserted deployed conduct regions
+   (`type="managed"`, with the prose bullets they supersede removed), derived or
    reconciled frontmatter keys (`name`, `role`, `id`), and a minor version
    bump. For **generic source files** only, also expect `required_skills`,
    `recommended_tier`, and `tier_rationale` (with `TODO` placeholders) when
@@ -341,7 +346,7 @@ this table's date — before the conduct-region and frontmatter-completeness wor
 described elsewhere in this README existed. At that point the only removals
 were the old `[INJECTION: name]` markers and the `## Communication Protocol`
 block, and the only additions were blank lines and a `---` separator. That is
-no longer the whole story: the tool now also inserts `[[DEPLOYED:...]]` conduct
+no longer the whole story: the tool now also inserts deployed (`type="managed"`) conduct
 regions and deletes the prose bullets they supersede, derives missing
 frontmatter keys (`name`, `role`), and reconciles `id` against the generic
 reference. On the **generic path only**, it also appends `required_skills` and
@@ -354,9 +359,9 @@ addition to boundary tags.
 ### Communication Protocol regions are rewritten, not preserved
 
 An untagged `## Communication Protocol` section is **replaced** by an empty
-top-level `[[DEPLOYED:CommunicationProtocol]]` pair; its prose is discarded. This
-is correct: that content is tool-managed and regenerated by `mosaic-deploy` on
-every run. A `ProtocolExtension` marker inside the region is re-emitted as an
+top-level `<CommunicationProtocol type="managed">` pair; its prose is discarded.
+This is correct: that content is tool-managed and regenerated by `mosaic-deploy`
+on every run. A `ProtocolExtension` marker inside the region is re-emitted as an
 empty top-level injection sibling, and an `identity_extension` marker found there
 is relocated into the Identity section rather than lost.
 
@@ -364,15 +369,15 @@ Two subtleties this depends on, both worth knowing if you touch the code:
 
 - Sections are identified by *heading range*, so a section's range extends past
   its own closing tag and can swallow a following top-level deployed region. The
-  harness path strips `[[DEPLOYED:CommunicationProtocol]]` out of the generic
-  section slice before merging (`_strip_deployed_pair`), otherwise the boundary
-  name is emitted twice (`E006`).
+  harness path strips the `CommunicationProtocol` deployed pair out of the
+  generic section slice before merging (`_strip_deployed_pair`), otherwise the
+  boundary name is emitted twice (`E006`).
 - The generic and harness paths are separate implementations selected by whether
   `transform_version` is in frontmatter. A fix applied to the body-merge logic
   of one (`_transform_generic_body` / `_transform_harness_body`) does **not**
   automatically reach the other — this asymmetry has already caused one
-  regression. Conduct-region insertion (`[[DEPLOYED:ClosingProcedure]]`,
-  `AuthorityHierarchy`, and the rest) is a deliberate exception to it: it is a
+  regression. Conduct-region insertion (`ClosingProcedure`, `AuthorityHierarchy`,
+  and the rest, all `type="managed"`) is a deliberate exception to it: it is a
   single shared function (`region_insertion.apply_conduct_regions`), driven by
   one declarative table, called identically by both paths, specifically so a
   placement fix cannot land on only one of them. Frontmatter completion and
@@ -384,7 +389,7 @@ Two subtleties this depends on, both worth knowing if you touch the code:
 One file (`orchestrator.md`) still fails:
 
 ```
-E002 Unmatched closing tag [[/INJECTION:ErrorHandlingExtension]] (no open tag)
+E002 Unmatched closing tag </ErrorHandlingExtension> (no open tag)
 ```
 
 `_merge_section` aligns harness content against the generic's injection markers
@@ -401,10 +406,10 @@ move the opening tag to just before the fence.
 ### A clean validator run is not sufficient evidence
 
 A file with no `## Communication Protocol` heading emits only 2-4 boundary tags
-total — sometimes a single `[[SECTION:Identity]]` wrapping the whole file. The
-validator accepts this because it checks the relative order of the canonical
-slots that are *present*, not that all seven exist. Always diff the output;
-never trust exit code 0 alone.
+total — sometimes a single `<Identity type="core"> ... </Identity>` wrapping the
+whole file. The validator accepts this because it checks the relative order of
+the canonical slots that are *present*, not that all seven exist. Always diff
+the output; never trust exit code 0 alone.
 
 This no longer describes the specific utility agents this section originally
 named as examples. `transformation.md`, `anthropic-subagent-creator.md`, and

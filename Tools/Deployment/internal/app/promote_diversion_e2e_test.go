@@ -147,9 +147,9 @@ func divertedSourceWithMappableTool() []byte {
 		"mcpServers:\n" +
 		"  - mcp-skill-server\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are a test agent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // divertedSourceWithUnmappableTool builds a deployed agent source carrying
@@ -169,9 +169,9 @@ func divertedSourceWithUnmappableTool() []byte {
 		"mcpServers:\n" +
 		"  - unmapped-custom-server\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are a test agent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // divertedSourceWithMixedDivertedEntries builds a source with "mcpServers:" carrying
@@ -193,9 +193,9 @@ func divertedSourceWithMixedDivertedEntries() []byte {
 		"  - mcp-skill-server\n" +
 		"  - unmapped-custom-server\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are a test agent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // sourceWithUnknownField builds a deployed agent source that carries a frontmatter
@@ -214,9 +214,9 @@ func sourceWithUnknownField() []byte {
 		"  - read-file\n" +
 		"custom_unknown_field: some-value\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are a test agent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // ---------------------------------------------------------------------------

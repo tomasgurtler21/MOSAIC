@@ -17,8 +17,10 @@ from boundary_constants import (
     BoundaryKind,
     DEPLOYED_PARENT_MAP,
     SECTION_HEADING_MAP,
+    TAG_PATTERN,
     open_tag,
     close_tag,
+    tag_base_name,
 )
 from fence import fence_mask, first_unfenced, safe_insertion_index
 from non_conformance import NC_DRIFTED_BULLET, NC_MESSAGES, NonConformance
@@ -363,14 +365,7 @@ def _find_heading_block_end(lines: Sequence[str], heading_idx: int, mask: list[b
             if next_level <= level:
                 return i
         # Stop at any boundary tag — don't delete across region boundaries
-        if line.startswith("[[") and (
-            line.startswith("[[INJECTION:")
-            or line.startswith("[[/INJECTION:")
-            or line.startswith("[[DEPLOYED:")
-            or line.startswith("[[/DEPLOYED:")
-            or line.startswith("[[SECTION:")
-            or line.startswith("[[/SECTION:")
-        ):
+        if TAG_PATTERN.match(line) is not None:
             return i
     return len(lines)
 
@@ -492,10 +487,10 @@ def _apply_deletions(
 
 
 def _region_already_present(lines: Sequence[str], name: str) -> bool:
-    """Return True when a [[DEPLOYED:name]] open tag already exists in lines."""
-    open = f"[[DEPLOYED:{name}]]"
+    """Return True when a deployed region open tag for name already exists in lines."""
+    open_t = open_tag(BoundaryKind.DEPLOYED, name)
     for line in lines:
-        if line.strip() == open:
+        if line.strip() == open_t:
             return True
     return False
 
@@ -524,7 +519,7 @@ def _find_anchor_index(
     elif spec.anchor == Anchor.AFTER_REGION:
         if spec.anchor_ref is not None:
             kind, ref_name = spec.anchor_ref
-            close = f"[[/{kind.value}:{ref_name}]]"
+            close = close_tag(kind, ref_name)
             for i in range(section.start, section.content_end):
                 if lines[i].strip() == close:
                     idx = i + 1
@@ -539,7 +534,7 @@ def _find_anchor_index(
     elif spec.anchor == Anchor.BEFORE_REGION:
         if spec.anchor_ref is not None:
             kind, ref_name = spec.anchor_ref
-            open_t = f"[[{kind.value}:{ref_name}]]"
+            open_t = open_tag(kind, ref_name)
             for i in range(section.start, section.content_end):
                 if lines[i].strip() == open_t:
                     idx = i
@@ -641,8 +636,8 @@ def apply_conduct_regions(
 
         # Insert region tags
         tag_lines = [
-            f"[[DEPLOYED:{spec.name}]]\n",
-            f"[[/DEPLOYED:{spec.name}]]\n",
+            open_tag(BoundaryKind.DEPLOYED, spec.name) + "\n",
+            close_tag(BoundaryKind.DEPLOYED, spec.name) + "\n",
         ]
         working_lines = working_lines[:insert_idx] + tag_lines + working_lines[insert_idx:]
         deployed_added.append(spec.name)
@@ -704,7 +699,8 @@ def _relocate_section(lines: list[str], old_section: SectionSpan) -> SectionSpan
                     s = lines[j].strip()
                     if not s or s == "---":
                         continue
-                    if s.startswith("[[/SECTION:"):
+                    _m = TAG_PATTERN.match(s)
+                    if _m is not None and _m.group("close") == "/" and _m.group("name") == tag_base_name(old_section.name):
                         break
                     ce = j + 1
                 return SectionSpan(
@@ -735,7 +731,8 @@ def _relocate_section(lines: list[str], old_section: SectionSpan) -> SectionSpan
                     s = lines[j].strip()
                     if not s or s == "---":
                         continue
-                    if s.startswith("[[/SECTION:"):
+                    _m = TAG_PATTERN.match(s)
+                    if _m is not None and _m.group("close") == "/" and _m.group("name") == tag_base_name(old_section.name):
                         break
                     ce = j + 1
                 return SectionSpan(
@@ -849,14 +846,15 @@ def find_section_spans(lines: Sequence[str]) -> dict[str, SectionSpan]:
             end = next_heading_idx
 
         # content_end: one past the last non-blank, non-separator content line,
-        # stopping before any [[/SECTION:...]] close tag which is structural.
+        # stopping before the section's own close tag which is structural.
         content_end = start
         for j in range(start, end):
             stripped = lines[j].strip()
             if not stripped or stripped == "---":
                 continue
-            # Stop at a closing section tag — don't count it as content
-            if stripped.startswith("[[/SECTION:"):
+            # Stop at the section's own closing tag — don't count it as content
+            _cm = TAG_PATTERN.match(stripped)
+            if _cm is not None and _cm.group("close") == "/" and _cm.group("name") == tag_base_name(section_name):
                 break
             content_end = j + 1
 

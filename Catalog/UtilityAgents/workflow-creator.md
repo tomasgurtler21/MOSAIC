@@ -66,7 +66,7 @@ Three channels carry it, none of which is a workflow row:
 
 | Channel | Carries | Set by |
 |---------|---------|--------|
-| **Injections** — `[[INJECTION:]]` regions in an agent file | That agent's project-specific knowledge: coding conventions, domain expertise and vocabulary, the expected shape of its output artifact, severity thresholds, gold examples | The project author, once, filling the deployment's `TODO.md` checklist |
+| **Injections** — `type="project"` regions in an agent file | That agent's project-specific knowledge: coding conventions, domain expertise and vocabulary, the expected shape of its output artifact, severity thresholds, gold examples | The project author, once, filling the deployment's `TODO.md` checklist |
 | **Deployment configuration** | Harness constraints, language patterns, custom constraints, tier-to-model mapping | The deployment's own settings |
 | **Selection** | Which agents, skills and workflows ship into the workspace at all | `selections.yaml` |
 
@@ -176,7 +176,7 @@ Before writing, verify the workflow design:
 - Artifact flow is complete — no subagent reads an artifact that nothing upstream creates
 - The workflow is domain-free — no row, artifact name, or note encodes one project's conventions, formats, vocabulary, or thresholds. Anything that would be identical on every run belongs in an injection on the consuming agent, not in the table
 - Frontmatter matches the body: `referenced_agents` lists exactly the subagents in the table, and `artifacts` lists every artifact named in the Input and Output columns
-- The `id` is unique across `Workflows/Index.md` and matches both the file's base name and the `[[SECTION:Workflow:{id}]]` boundary name
+- The `id` is unique across `Workflows/Index.md` and matches both the file's base name and the `<Workflow type="core" name="{id}">` boundary name
 - Artifact names follow the convention: CamelCase for primary deliverables, kebab-case for review artifacts named after their producing subagent. Reserved keywords (Plan, Progress, Requirements, Research, Review, Audit, Verification) carry semantic meaning — do not reuse them for something else
 - If any EXECUTION row carries a group segment, every EXECUTION row does, and the `**Execution Groups:**` table sits immediately after the routing table inside the SECTION block
 
@@ -185,7 +185,7 @@ Before writing, verify the workflow design:
 Write the workflow definition to `Workflows/{Category}/{id}.md`, where `{Category}` is one of the folders in the taxonomy table of `Workflows/Index.md`:
 
 - Frontmatter first, matching the field set of the sibling workflow you used as reference
-- The routing table inside a `[[SECTION:Workflow:{id}]]` boundary, with the version comment the sibling files carry
+- The routing table inside a `<Workflow type="core" name="{id}" version="{version}">` boundary (version from frontmatter)
 - The free-form prose sections after the boundary, following `Workflows/_Template.md` — Design Rationale is the one worth actually writing, since it is the only record of why the workflow is shaped as it is
 - **Register the workflow in `Workflows/Index.md`** — add a row to the summary table in its category section with id, category, version, name, description, hint, author and file. Index.md is the canonical registry; an unregistered workflow is undiscoverable
 - Deployment is opt-in. Mention to the user that a workflow reaches a workspace only if named in the deployment's `selections.yaml`
@@ -211,7 +211,7 @@ Reference these common patterns when designing workflows:
 
 ## Constraints
 
-- **Format Compliance:** Workflow definitions must match the format of the existing files in `Workflows/{Category}/` — frontmatter fields, the `[[SECTION:Workflow:{id}]]` boundary, and the routing table's columns. The runner parses these mechanically, so a deviation is not a stylistic difference; it is a workflow the runner refuses at admission or misreads.
+- **Format Compliance:** Workflow definitions must match the format of the existing files in `Workflows/{Category}/` — frontmatter fields, the `<Workflow type="core" name="{id}" version="{version}">` boundary, and the routing table's columns. The runner parses these mechanically, so a deviation is not a stylistic difference; it is a workflow the runner refuses at admission or misreads.
 - **Existing Subagent Validation:** Do not include subagents in a workflow table that don't exist without clearly flagging this to the user — a workflow referencing non-existent subagents will fail at runtime.
 - **Modification Approval:** Always get explicit user approval before modifying existing workflows — other orchestrator instances and project-specific transformations may depend on the current definition.
 - **No Subagent Creation:** Creating subagent instruction files is outside your scope. If a workflow requires a subagent that doesn't exist, pause workflow design and present the gap to the user with these resolution options: (1) delegate creation to a dedicated subagent creator — if you can spawn one, offer to do so with user approval, (2) the user creates the subagent separately, (3) repurpose an existing subagent, or (4) redesign the workflow to avoid the gap. Do not finalize a workflow that references non-existent subagents — the workflow will fail at runtime.

@@ -27,12 +27,12 @@ tier_rationale: multi-phase coordination
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Orchestrator Agent
 
 You are the Orchestrator.
 
-[[/SECTION:Identity]]
+</Identity>
 `
 
 // TestSpecialCase_OrchestratorPlaceholder_ExpandedToHarnessTools asserts that when the

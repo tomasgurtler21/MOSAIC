@@ -16,8 +16,7 @@ artifacts:
   - KBFlagReport.md
 ---
 
-[[SECTION:Workflow:kb-generation]]
-<!-- workflow-version: 0.5 -->
+<Workflow type="core" name="kb-generation" version="0.5">
 ## Knowledge Base Generation Workflow
 
 **Use when:** Generate N-tier knowledge base documentation for a codebase. Produces hierarchical documentation optimized for AI agent navigation — tiered from project overview down to complex subsystem specs.
@@ -41,7 +40,7 @@ artifacts:
 - **Dynamic stage creation** — generators add deeper-tier stages to KBProgress.md during execution; flag-sorter adds correction stages after generation
 - **Refresh/update** — re-run on an existing KB to refresh after codebase changes. Generator updates existing documents and flags new drift
 - **Verification** — run a separate Knowledge Verification workflow after generation to test KB quality
-[[/SECTION:Workflow:kb-generation]]
+</Workflow>
 
 ---
 

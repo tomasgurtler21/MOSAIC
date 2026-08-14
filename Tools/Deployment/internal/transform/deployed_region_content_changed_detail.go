@@ -3,7 +3,7 @@ package transform
 import "strings"
 
 // DeployedRegionContentChangedDetail renders the TODO detail text emitted when a
-// [[DEPLOYED:]] region's canonical content changed relative to the previously deployed file
+// managed region's canonical content changed relative to the previously deployed file
 // and that region contains nested user-owned regions. nestedNames must already be sorted
 // ascending and must be non-empty. When timestamp is empty the trailing "(detected …)"
 // clause is omitted.

@@ -2,5 +2,5 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Section content without a closing tag.

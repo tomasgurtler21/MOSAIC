@@ -28,6 +28,8 @@ from boundary_constants import (
     KNOWN_FRONTMATTER_KEYS,
     TAG_PATTERN,
     BoundaryKind,
+    open_tag,
+    tag_base_name,
 )
 from document_kind import DocumentKind, classify_document as _classify_document_for_validator
 
@@ -169,29 +171,30 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
         A list of ValidationError instances. Empty list means the file is valid.
 
     Validation rules applied:
-    1. Every [[SECTION:Name]] has a matching [[/SECTION:Name]] (E001/E002).
-    2. Every [[INJECTION:Name]] has a matching [[/INJECTION:Name]] (E001/E002).
-    3. Every [[DEPLOYED:Name]] has a matching [[/DEPLOYED:Name]] (E001/E002).
-    4. Open/close tag names match within each pair (E003).
-    5. Only canonical boundary names are used under the right marker (E004/E010/E011).
-    6. All instructional content after YAML frontmatter falls within some
+    1. Every <Name type="..."> has a matching </Name> (E001/E002).
+    2. Open/close tag names match within each pair (E003).
+    3. Only canonical boundary names are used under the right type attribute (E004/E010/E011).
+    4. All instructional content after YAML frontmatter falls within some
        boundary (E005). Blank lines and --- separators between sections
        are exempt.
-    7. No duplicate boundary names within a single file (E006).
-    8. Sections and top-level deployed names appear in canonical order (E007).
-    9. Injection boundaries are nested inside their correct parent section (E008).
-    10. No unexpected YAML frontmatter keys (E009).
-    11. A canonical name declared under the wrong marker (E010).
-    12. An unknown [[DEPLOYED:]] name (E011).
+    5. No duplicate boundary names within a single file (E006).
+    6. Sections and top-level deployed names appear in canonical order (E007).
+    7. Injection boundaries are nested inside their correct parent section (E008).
+    8. No unexpected YAML frontmatter keys (E009).
+    9. A canonical name declared under the wrong type attribute value (E010).
+    10. An unknown managed (DEPLOYED) name (E011).
+
+    Near-miss detection (E005 trigger conditions):
+    - A tag with no type attribute: <Foo>
+    - A tag with an unrecognised type value: <Foo type="widget">
+    - A tag with trailing content: <Foo type="core"> extra text
+
+    These are treated as ordinary content and trigger E005 when outside a boundary.
 
     Edge cases:
     - If YAML frontmatter is malformed (missing closing '---' or
       unparseable YAML), returns a single ValidationError with
       error_code 'E000' and no further rules are checked.
-    - Lines resembling but not exactly matching TAG_PATTERN (e.g.,
-      '[[SECTION: Identity]]' with a space after the colon) are
-      treated as ordinary content and may trigger E005 if they fall
-      outside a boundary.
     """
     errors: list[ValidationError] = []
 
@@ -256,58 +259,58 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
 
         if m:
             # This line is a boundary tag.
-            is_close = bool(m.group("close"))
-            kind_str = m.group("kind")
-            name = m.group("name")
-            kind = BoundaryKind(kind_str)
-
-            # Check whether the name is canonical for its marker kind (E004/E010/E011).
-            # Bundle documents skip these checks — their compound SECTION names are
-            # intentional and do not require the agent canonical vocabulary.
-            expected = EXPECTED_MARKER.get(name)
-            if kind == BoundaryKind.CUSTOM:
-                # Custom names are open: any name is valid and project-owned.
-                # No canonical-name check, no required-parent check, no order check.
-                is_canonical = True
-            elif not is_bundle and expected is not None and expected != kind:
-                # Canonical name declared under the wrong marker.
-                errors.append(ValidationError(
-                    file_path=file_path,
-                    line_number=line_num,
-                    error_code="E010",
-                    message=(
-                        f"Name {name!r} must be declared with "
-                        f"[[{expected.value}:]] but found [[{kind_str}:]]"
-                    ),
-                ))
-                # Count as non-canonical for further checks below, but still
-                # track stacks so mismatched-name and unclosed errors are accurate.
-                is_canonical = False
-            elif kind == BoundaryKind.SECTION:
-                is_canonical = name in CANONICAL_SECTIONS
-                if not is_canonical and not is_bundle:
-                    errors.append(ValidationError(
-                        file_path=file_path,
-                        line_number=line_num,
-                        error_code="E004",
-                        message=f"Non-canonical SECTION name: {name!r}",
-                    ))
-            elif kind == BoundaryKind.INJECTION:
-                # Injection names are open: any name is valid and is preserved.
-                is_canonical = True
-            else:  # DEPLOYED
-                is_canonical = name in CANONICAL_DEPLOYED
-                if not is_bundle and not is_canonical:
-                    # Unknown DEPLOYED name — no generator exists for it.
-                    errors.append(ValidationError(
-                        file_path=file_path,
-                        line_number=line_num,
-                        error_code="E011",
-                        message=f"Unrecognised tool-managed boundary name: {name!r}",
-                    ))
+            is_close = m.group("close") == "/"
+            kind_str = m.group("kind")   # "" for close tags (new syntax: no kind on close)
+            name = m.group("name")       # compound name for opens; base name for closes
 
             if not is_close:
                 # --- Opening tag ---
+                # For open tags, kind_str is always populated ("SECTION", "DEPLOYED", etc.).
+                kind = BoundaryKind(kind_str)
+
+                # Check whether the name is canonical for its type attribute (E004/E010/E011).
+                # Bundle documents skip these checks.
+                expected = EXPECTED_MARKER.get(name)
+                if kind == BoundaryKind.CUSTOM:
+                    # Custom names are open: any name is valid and project-owned.
+                    is_canonical = True
+                elif not is_bundle and expected is not None and expected != kind:
+                    # Canonical name declared with the wrong type attribute.
+                    _expected_type = {"SECTION": "core", "DEPLOYED": "managed",
+                                      "INJECTION": "project", "CUSTOM": "custom"}
+                    errors.append(ValidationError(
+                        file_path=file_path,
+                        line_number=line_num,
+                        error_code="E010",
+                        message=(
+                            f"Name {name!r} must be declared with "
+                            f"type=\"{_expected_type[expected.value]}\" "
+                            f"but found type=\"{_expected_type[kind_str]}\""
+                        ),
+                    ))
+                    is_canonical = False
+                elif kind == BoundaryKind.SECTION:
+                    is_canonical = name in CANONICAL_SECTIONS
+                    if not is_canonical and not is_bundle:
+                        errors.append(ValidationError(
+                            file_path=file_path,
+                            line_number=line_num,
+                            error_code="E004",
+                            message=f"Non-canonical SECTION name: {name!r}",
+                        ))
+                elif kind == BoundaryKind.INJECTION:
+                    # Injection names are open: any name is valid.
+                    is_canonical = True
+                else:  # DEPLOYED
+                    is_canonical = name in CANONICAL_DEPLOYED
+                    if not is_bundle and not is_canonical:
+                        errors.append(ValidationError(
+                            file_path=file_path,
+                            line_number=line_num,
+                            error_code="E011",
+                            message=f"Unrecognised tool-managed boundary name: {name!r}",
+                        ))
+
                 # Check for duplicate boundary name (E006).
                 if name in seen_names:
                     errors.append(ValidationError(
@@ -349,10 +352,8 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                     # Bundle documents skip this check — their structure is not agent structure.
                     # INJECTION_PARENT_MAP sentinel values:
                     #   None (absent key): no parent requirement — no check performed
-                    #   ""   (present, empty): must be at body top level (not inside any section)
+                    #   ""   (empty string): must be at body top level (not inside any section)
                     #   str  (non-empty): must be inside that named section
-                    # Injection names are open (is_canonical is always True for INJECTION), so
-                    # the parent-map lookup runs unconditionally for any name present in the map.
                     if not is_bundle:
                         required_parent = INJECTION_PARENT_MAP.get(name)
                         current_section = section_stack[-1][0] if section_stack else None
@@ -437,93 +438,56 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
 
             else:
                 # --- Closing tag ---
-                if kind == BoundaryKind.CUSTOM:
-                    if not custom_stack:
-                        errors.append(ValidationError(
-                            file_path=file_path,
-                            line_number=line_num,
-                            error_code="E002",
-                            message=f"Unmatched closing tag [[/CUSTOM:{name}]] (no open tag)",
-                        ))
-                    else:
-                        top_name, _top_line = custom_stack[-1]
-                        if top_name != name:
-                            errors.append(ValidationError(
-                                file_path=file_path,
-                                line_number=line_num,
-                                error_code="E003",
-                                message=(
-                                    f"Mismatched open/close names: "
-                                    f"opened {top_name!r}, closed {name!r}"
-                                ),
-                            ))
-                        custom_stack.pop()
+                # In the new syntax, close tags carry only the base name (the tag-name
+                # element, without any type or name attribute).  We must search all open
+                # stacks to find which region this tag closes, matching by base name.
+                # Priority order: custom, section, injection, deployed.
+                matched_stack: list[tuple[str, int]] | None = None
+                matched_kind_enum: BoundaryKind | None = None
+                for _stk, _bk in [
+                    (custom_stack,    BoundaryKind.CUSTOM),
+                    (section_stack,   BoundaryKind.SECTION),
+                    (injection_stack, BoundaryKind.INJECTION),
+                    (deployed_stack,  BoundaryKind.DEPLOYED),
+                ]:
+                    if _stk and tag_base_name(_stk[-1][0]) == name:
+                        matched_stack = _stk
+                        matched_kind_enum = _bk
+                        break
 
-                elif kind == BoundaryKind.SECTION:
-                    if not section_stack:
+                if matched_stack is not None:
+                    matched_stack.pop()
+                else:
+                    # name not found at the top of any stack.
+                    # Emit E003 when any stack is non-empty (the tag appears to close
+                    # a different region than the one currently open), otherwise E002.
+                    any_open_stack = (
+                        custom_stack or section_stack
+                        or injection_stack or deployed_stack
+                    )
+                    if any_open_stack:
+                        # Report mismatch against the top of the most recently opened stack.
+                        for _stk in (custom_stack, section_stack,
+                                     injection_stack, deployed_stack):
+                            if _stk:
+                                top_name = _stk[-1][0]
+                                break
+                        errors.append(ValidationError(
+                            file_path=file_path,
+                            line_number=line_num,
+                            error_code="E003",
+                            message=(
+                                f"Mismatched open/close names: "
+                                f"opened {top_name!r}, closed {name!r}"
+                            ),
+                        ))
+                    else:
                         errors.append(ValidationError(
                             file_path=file_path,
                             line_number=line_num,
                             error_code="E002",
-                            message=f"Unmatched closing tag [[/SECTION:{name}]] (no open tag)",
+                            message=f"Unmatched closing tag </{name}> (no open tag)",
                         ))
-                    else:
-                        top_name, _top_line = section_stack[-1]
-                        if top_name != name:
-                            errors.append(ValidationError(
-                                file_path=file_path,
-                                line_number=line_num,
-                                error_code="E003",
-                                message=(
-                                    f"Mismatched open/close names: "
-                                    f"opened {top_name!r}, closed {name!r}"
-                                ),
-                            ))
-                        section_stack.pop()
-
-                elif kind == BoundaryKind.INJECTION:
-                    if not injection_stack:
-                        errors.append(ValidationError(
-                            file_path=file_path,
-                            line_number=line_num,
-                            error_code="E002",
-                            message=f"Unmatched closing tag [[/INJECTION:{name}]] (no open tag)",
-                        ))
-                    else:
-                        top_name, _top_line = injection_stack[-1]
-                        if top_name != name:
-                            errors.append(ValidationError(
-                                file_path=file_path,
-                                line_number=line_num,
-                                error_code="E003",
-                                message=(
-                                    f"Mismatched open/close names: "
-                                    f"opened {top_name!r}, closed {name!r}"
-                                ),
-                            ))
-                        injection_stack.pop()
-
-                else:  # DEPLOYED
-                    if not deployed_stack:
-                        errors.append(ValidationError(
-                            file_path=file_path,
-                            line_number=line_num,
-                            error_code="E002",
-                            message=f"Unmatched closing tag [[/DEPLOYED:{name}]] (no open tag)",
-                        ))
-                    else:
-                        top_name, _top_line = deployed_stack[-1]
-                        if top_name != name:
-                            errors.append(ValidationError(
-                                file_path=file_path,
-                                line_number=line_num,
-                                error_code="E003",
-                                message=(
-                                    f"Mismatched open/close names: "
-                                    f"opened {top_name!r}, closed {name!r}"
-                                ),
-                            ))
-                        deployed_stack.pop()
 
         else:
             # Not a boundary tag — check for content outside boundaries (E005).
@@ -539,33 +503,46 @@ def validate_file(file_path: pathlib.Path) -> list[ValidationError]:
                     ))
 
     # Any remaining open tags are unmatched (E001).
-    for name, open_line_num in custom_stack:
+    # For E001 we know the kind from the stack, so we can format the open tag.
+    for stk_name, open_line_num in custom_stack:
         errors.append(ValidationError(
             file_path=file_path,
             line_number=open_line_num,
             error_code="E001",
-            message=f"Unmatched open tag [[CUSTOM:{name}]] (no close tag found)",
+            message=(
+                f"Unmatched open tag {open_tag(BoundaryKind.CUSTOM, stk_name)!r} "
+                f"(no close tag found)"
+            ),
         ))
-    for name, open_line_num in section_stack:
+    for stk_name, open_line_num in section_stack:
         errors.append(ValidationError(
             file_path=file_path,
             line_number=open_line_num,
             error_code="E001",
-            message=f"Unmatched open tag [[SECTION:{name}]] (no close tag found)",
+            message=(
+                f"Unmatched open tag {open_tag(BoundaryKind.SECTION, stk_name)!r} "
+                f"(no close tag found)"
+            ),
         ))
-    for name, open_line_num in injection_stack:
+    for stk_name, open_line_num in injection_stack:
         errors.append(ValidationError(
             file_path=file_path,
             line_number=open_line_num,
             error_code="E001",
-            message=f"Unmatched open tag [[INJECTION:{name}]] (no close tag found)",
+            message=(
+                f"Unmatched open tag {open_tag(BoundaryKind.INJECTION, stk_name)!r} "
+                f"(no close tag found)"
+            ),
         ))
-    for name, open_line_num in deployed_stack:
+    for stk_name, open_line_num in deployed_stack:
         errors.append(ValidationError(
             file_path=file_path,
             line_number=open_line_num,
             error_code="E001",
-            message=f"Unmatched open tag [[DEPLOYED:{name}]] (no close tag found)",
+            message=(
+                f"Unmatched open tag {open_tag(BoundaryKind.DEPLOYED, stk_name)!r} "
+                f"(no close tag found)"
+            ),
         ))
 
     return errors

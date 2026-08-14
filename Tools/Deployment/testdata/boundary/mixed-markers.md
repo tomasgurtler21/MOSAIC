@@ -2,7 +2,7 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 **Goal:** Do something useful.
 
 **Scope:**
@@ -15,21 +15,21 @@ name: test-agent
 1. Read the design.
 2. Write tests.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 User identity extension.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 Protocol content.
-[[/DEPLOYED:CommunicationProtocol]]
+</CommunicationProtocol>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 Capabilities content.
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Harness constraint content.
-[[/DEPLOYED:HarnessConstraints]]
-[[INJECTION:CodebaseContext]]
+</HarnessConstraints>
+<CodebaseContext type="project">
 User codebase context.
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Capabilities]]
+</CodebaseContext>
+</Capabilities>

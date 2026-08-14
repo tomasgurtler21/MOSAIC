@@ -127,8 +127,8 @@ type WorkflowDrift struct {
 //
 // The comparison is order-insensitive for set membership: a reordered but otherwise identical
 // selection produces no drift. Per-workflow version comparison pairs the deployed file's
-// workflow-version comment (domain.DeployedWorkflow.Version) with the catalog's
-// domain.Workflow.Version. A deployed block with no version comment (empty string) is always
+// version attribute (domain.DeployedWorkflow.Version) with the catalog's
+// domain.Workflow.Version. A deployed block with no version attribute (empty string) is always
 // treated as a version change and reported in Changed.
 //
 // Callers must only invoke this for agents with Role == domain.RoleOrchestrator. The
@@ -171,7 +171,7 @@ func WorkflowStaleness(deployed domain.DeployedWorkflows, selected []domain.Work
 	}
 
 	// Determine Changed: in both sets but with differing versions. Preserve selection order.
-	// An empty deployed version (no workflow-version comment) is always a mismatch.
+	// An empty deployed version (no version attribute) is always a mismatch.
 	for _, s := range selected {
 		deployedVer, inDeployed := deployed.Version(s.ID)
 		if !inDeployed {

@@ -2,9 +2,9 @@ package app_test
 
 // e2e_protocol_propagation_test.go verifies the protocol propagation end-to-end path:
 //
-//   (a) Deploying an agent with a [[DEPLOYED:CommunicationProtocol]] region produces a
-//       <!-- protocol-version: X --> marker inside that region, where X is the version
-//       declared in the protocol source document.
+//   (a) Deploying an agent with a <CommunicationProtocol type="managed"> region produces a
+//       version="X" attribute on that region's open tag, where X is the version declared in
+//       the protocol source document.
 //
 //   (b) Writing a new version of the protocol source document and re-applying the transform
 //       (simulating "rerun the tool") changes every deployed agent's protocol block with no
@@ -41,13 +41,13 @@ const protocolSourceTemplate = `---
 version: "%s"
 ---
 
-[[SECTION:CommunicationProtocol:Subagent]]
+<CommunicationProtocol type="core" name="Subagent">
 %s
-[[/SECTION:CommunicationProtocol:Subagent]]
+</CommunicationProtocol>
 
-[[SECTION:CommunicationProtocol:Orchestrator]]
+<CommunicationProtocol type="core" name="Orchestrator">
 %s
-[[/SECTION:CommunicationProtocol:Orchestrator]]
+</CommunicationProtocol>
 `
 
 // writeProtocolSource writes a CommunicationProtocol.md to the canonical path under root
@@ -81,7 +81,7 @@ func loadProtocolFrom(t *testing.T, root string) domain.ProtocolContent {
 // ---------------------------------------------------------------------------
 
 // protocolOnlyAgentSource is a minimal agent source file that carries exactly one
-// [[DEPLOYED:CommunicationProtocol]] region and no harness-managed injections. Using a
+// <CommunicationProtocol type="managed"> region and no harness-managed injections. Using a
 // synthetic source isolates the protocol propagation behaviour from harness-specific shaping.
 const protocolOnlyAgentSource = `---
 id: 42
@@ -95,12 +95,12 @@ tier_rationale: minimal
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 This agent is used exclusively for protocol propagation testing.
-[[/SECTION:Identity]]
+</Identity>
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 `
 
 // applyProtocolTest calls transform.Apply for the synthetic agent source with the given
@@ -129,9 +129,9 @@ func applyProtocolTest(t *testing.T, role domain.AgentRole, protocol domain.Prot
 // ---------------------------------------------------------------------------
 
 // TestE2E_ProtocolPropagation_VersionMarkerAppearsInOutput verifies that deploying an agent
-// whose source carries an empty [[DEPLOYED:CommunicationProtocol]] boundary produces a
-// <!-- protocol-version: X --> marker inside that region, where X matches the version field
-// of the protocol source document loaded for the run.
+// whose source carries an empty <CommunicationProtocol type="managed"> boundary produces a
+// version="X" attribute on the region's open tag, where X matches the version field of the
+// protocol source document loaded for the run.
 func TestE2E_ProtocolPropagation_VersionMarkerAppearsInOutput(t *testing.T) {
 	root := t.TempDir()
 	const version = "1.9"
@@ -143,9 +143,9 @@ func TestE2E_ProtocolPropagation_VersionMarkerAppearsInOutput(t *testing.T) {
 	protocol := loadProtocolFrom(t, root)
 	output := applyProtocolTest(t, domain.RoleWorker, protocol)
 
-	wantMarker := []byte("<!-- protocol-version: " + version + " -->")
+	wantMarker := []byte("<CommunicationProtocol type=\"managed\" version=\"" + version + "\">")
 	if !bytes.Contains(output, wantMarker) {
-		t.Errorf("output does not contain protocol-version marker %q\n"+
+		t.Errorf("output does not contain protocol version attribute %q\n"+
 			"output (first 1200 bytes):\n%s",
 			wantMarker, e2eProtocolTruncate(output, 1200))
 	}
@@ -173,8 +173,8 @@ func TestE2E_ProtocolPropagation_VersionChangesWhenSourceChanges(t *testing.T) {
 	protocol1 := loadProtocolFrom(t, root)
 	output1 := applyProtocolTest(t, domain.RoleWorker, protocol1)
 
-	if !bytes.Contains(output1, []byte("<!-- protocol-version: 1.9 -->")) {
-		t.Fatalf("first deploy: expected protocol-version 1.9 in output; got (first 1200 bytes):\n%s",
+	if !bytes.Contains(output1, []byte("<CommunicationProtocol type=\"managed\" version=\"1.9\">")) {
+		t.Fatalf("first deploy: expected protocol version attribute 1.9 in output; got (first 1200 bytes):\n%s",
 			e2eProtocolTruncate(output1, 1200))
 	}
 
@@ -187,12 +187,12 @@ func TestE2E_ProtocolPropagation_VersionChangesWhenSourceChanges(t *testing.T) {
 	protocol2 := loadProtocolFrom(t, root)
 	output2 := applyProtocolTest(t, domain.RoleWorker, protocol2)
 
-	if !bytes.Contains(output2, []byte("<!-- protocol-version: 2.0 -->")) {
-		t.Errorf("second deploy: expected protocol-version 2.0 in output; got (first 1200 bytes):\n%s",
+	if !bytes.Contains(output2, []byte("<CommunicationProtocol type=\"managed\" version=\"2.0\">")) {
+		t.Errorf("second deploy: expected protocol version attribute 2.0 in output; got (first 1200 bytes):\n%s",
 			e2eProtocolTruncate(output2, 1200))
 	}
-	if bytes.Contains(output2, []byte("protocol-version: 1.9")) {
-		t.Errorf("second deploy: stale protocol-version 1.9 still present after source was updated to 2.0")
+	if bytes.Contains(output2, []byte("version=\"1.9\"")) {
+		t.Errorf("second deploy: stale protocol version 1.9 still present after source was updated to 2.0")
 	}
 }
 

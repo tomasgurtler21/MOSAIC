@@ -135,7 +135,7 @@ class TestValidateFileErrorDetection:
 
     def test_orphan_close_tag_returns_e002_error(self) -> None:
         # Arrange
-        # [[/SECTION:Identity]] appears with no corresponding open tag.
+        # </Identity> appears with no corresponding open tag.
         fixture = _fixture("validator_invalid_e002_orphan_close.md")
 
         # Act
@@ -167,7 +167,7 @@ class TestValidateFileErrorDetection:
 
     def test_mismatched_open_close_names_returns_e003_error(self) -> None:
         # Arrange
-        # [[SECTION:Identity]] is opened but [[/SECTION:CommunicationProtocol]] closes it.
+        # <Identity type="core"> is opened but </CommunicationProtocol> closes it.
         fixture = _fixture("validator_invalid_e003_name_mismatch.md")
 
         # Act
@@ -182,7 +182,7 @@ class TestValidateFileErrorDetection:
 
     def test_non_canonical_boundary_name_returns_e004_error(self) -> None:
         # Arrange
-        # [[SECTION:CustomSection]] uses a name not in CANONICAL_SECTIONS.
+        # <CustomSection type="core"> uses a name not in CANONICAL_SECTIONS.
         fixture = _fixture("validator_invalid_e004_non_canonical.md")
 
         # Act
@@ -212,7 +212,7 @@ class TestValidateFileErrorDetection:
 
     def test_near_miss_tag_with_space_treated_as_content_triggers_e005(self) -> None:
         # Arrange
-        # [[SECTION: Identity]] (space after colon) does not match TAG_PATTERN.
+        # <Identity type="widget"> (unrecognised type) does not match TAG_PATTERN.
         # It is treated as ordinary content and triggers E005 when outside a boundary.
         fixture = _fixture("validator_invalid_e005_near_miss_tag.md")
 
@@ -230,7 +230,7 @@ class TestValidateFileErrorDetection:
 
     def test_duplicate_boundary_name_returns_e006_error(self) -> None:
         # Arrange
-        # [[SECTION:Identity]] appears twice in the file.
+        # <Identity type="core"> appears twice in the file.
         fixture = _fixture("validator_invalid_e006_duplicate.md")
 
         # Act
@@ -334,7 +334,7 @@ class TestValidateFileErrorDetection:
 
     def test_unmatched_injection_open_tag_returns_e001_error(self) -> None:
         # Arrange
-        # [[INJECTION:IdentityExtension]] is opened inside Identity but never closed.
+        # <IdentityExtension type="project"> is opened inside Identity but never closed.
         fixture = _fixture("validator_invalid_e001_injection_missing_close.md")
 
         # Act
@@ -349,7 +349,7 @@ class TestValidateFileErrorDetection:
 
     def test_orphan_injection_close_tag_returns_e002_error(self) -> None:
         # Arrange
-        # [[/INJECTION:IdentityExtension]] appears with no corresponding open tag.
+        # </IdentityExtension> appears with no corresponding open tag.
         fixture = _fixture("validator_invalid_e002_injection_orphan_close.md")
 
         # Act
@@ -364,7 +364,7 @@ class TestValidateFileErrorDetection:
 
     def test_open_injection_name_is_valid_no_e004_error(self) -> None:
         # Arrange — injection names are open as of Stage 2: any name is accepted.
-        # [[INJECTION:Bogus]] is no longer rejected with E004; it is preserved as a
+        # <Bogus type="project"> is no longer rejected with E004; it is preserved as a
         # project-class injection. The fixture is re-used to confirm the absence of E004.
         fixture = _fixture("validator_invalid_e004_injection_non_canonical.md")
 
@@ -380,7 +380,7 @@ class TestValidateFileErrorDetection:
 
     def test_duplicate_injection_name_returns_e006_error(self) -> None:
         # Arrange
-        # [[INJECTION:IdentityExtension]] appears twice in the same file.
+        # <IdentityExtension type="project"> appears twice in the same file.
         fixture = _fixture("validator_invalid_e006_duplicate_injection.md")
 
         # Act
@@ -584,7 +584,7 @@ class TestValidateBatch:
         # Arrange
         # A .txt file with invalid content should be ignored.
         txt_file = tmp_path / "not_an_agent.txt"
-        txt_file.write_text("[[/SECTION:Identity]]\n", encoding="utf-8")
+        txt_file.write_text("</Identity>\n", encoding="utf-8")
         valid_md = tmp_path / "valid.md"
         shutil.copy(_fixture("validator_valid_full.md"), valid_md)
 
@@ -787,13 +787,13 @@ class TestCLIInterface:
 # ArtifactProvenance and ArtifactProvenanceExtension are removed from the vocabulary
 # in Stage 2. After Stage 2 implementation is complete:
 #
-#   - [[DEPLOYED:ArtifactProvenance]] produces E011 (unrecognised tool-managed boundary
+#   - <ArtifactProvenance type="managed"> produces E011 (unrecognised tool-managed boundary
 #     name), since ArtifactProvenance is no longer in CANONICAL_DEPLOYED or EXPECTED_MARKER.
 #     The parent check (E008) is skipped — it only applies to canonical deployed names.
 #     The order check (E007) is likewise skipped — ArtifactProvenance is absent from
 #     CANONICAL_ORDER.
 #
-#   - [[INJECTION:ArtifactProvenanceExtension]] produces no error. Injection names are
+#   - <ArtifactProvenanceExtension type="project"> produces no error. Injection names are
 #     open: an unlisted name is preserved and never flagged or rejected. The parent
 #     check (E008) is skipped for unlisted injection names. No E004 fires (the
 #     CANONICAL_INJECTIONS allowlist is removed along with the E004 injection check).
@@ -804,16 +804,16 @@ class TestCLIInterface:
 
 
 class TestArtifactProvenanceRemovedFromVocabulary:
-    """After Stage 2, [[DEPLOYED:ArtifactProvenance]] is unknown and produces E011.
+    """After Stage 2, <ArtifactProvenance type="managed"> is unknown and produces E011.
 
     ArtifactProvenance is absent from CANONICAL_DEPLOYED, CANONICAL_ORDER, and
-    DEPLOYED_PARENT_MAP. Any file carrying [[DEPLOYED:ArtifactProvenance]] receives
+    DEPLOYED_PARENT_MAP. Any file carrying <ArtifactProvenance type="managed"> receives
     E011 (unrecognised tool-managed boundary name). The parent (E008) and order (E007)
     checks are skipped for non-canonical deployed names.
     """
 
     def test_artifact_provenance_deployed_at_top_level_produces_e011(self) -> None:
-        # Fixture has [[DEPLOYED:ArtifactProvenance]] at body top level. After Stage 2,
+        # Fixture has <ArtifactProvenance type="managed"> at body top level. After Stage 2,
         # ArtifactProvenance is not in CANONICAL_DEPLOYED so E011 fires.
         fixture = _fixture("validator_valid_artifact_provenance_top_level.md")
 
@@ -821,7 +821,7 @@ class TestArtifactProvenanceRemovedFromVocabulary:
 
         codes = [e.error_code for e in errors]
         assert "E011" in codes, (
-            f"Expected E011 for [[DEPLOYED:ArtifactProvenance]] (removed from vocabulary), "
+            f'Expected E011 for <ArtifactProvenance type="managed"> (removed from vocabulary), '
             f"got codes: {codes}"
         )
 
@@ -848,7 +848,7 @@ class TestArtifactProvenanceRemovedFromVocabulary:
 
         codes = [e.error_code for e in errors]
         assert "E011" in codes, (
-            f"Expected E011 for [[DEPLOYED:ArtifactProvenance]] inside a section, "
+            f'Expected E011 for <ArtifactProvenance type="managed"> inside a section, '
             f"got codes: {codes}"
         )
 
@@ -862,7 +862,7 @@ class TestArtifactProvenanceRemovedFromVocabulary:
         e008_errors = [e for e in errors if e.error_code == "E008"]
         ap_e008 = [e for e in e008_errors if "ArtifactProvenance" in e.message]
         assert ap_e008 == [], (
-            f"Expected no E008 for non-canonical [[DEPLOYED:ArtifactProvenance]] "
+            f'Expected no E008 for non-canonical <ArtifactProvenance type="managed"> '
             f"(parent check skipped for unknown names), got: {ap_e008}"
         )
 
@@ -877,13 +877,13 @@ class TestArtifactProvenanceRemovedFromVocabulary:
         e007_errors = [e for e in errors if e.error_code == "E007"]
         ap_e007 = [e for e in e007_errors if "ArtifactProvenance" in e.message]
         assert ap_e007 == [], (
-            f"Expected no E007 for [[DEPLOYED:ArtifactProvenance]] (removed from CANONICAL_ORDER); "
+            f'Expected no E007 for <ArtifactProvenance type="managed"> (removed from CANONICAL_ORDER); '
             f"only E011 should fire. Got E007 errors: {ap_e007}"
         )
 
 
 class TestArtifactProvenanceExtensionAsOpenInjection:
-    """After Stage 2, [[INJECTION:ArtifactProvenanceExtension]] is an open, unlisted name.
+    """After Stage 2, <ArtifactProvenanceExtension type="project"> is an open, unlisted name.
 
     ArtifactProvenanceExtension is removed from INJECTION_PARENT_MAP. Injection names
     are open: an unlisted name is preserved and never flagged. No E004 (non-canonical
@@ -894,9 +894,9 @@ class TestArtifactProvenanceExtensionAsOpenInjection:
     def test_artifact_provenance_extension_at_top_level_produces_no_error_for_injection(
         self,
     ) -> None:
-        # Fixture has [[INJECTION:ArtifactProvenanceExtension]] at body top level.
+        # Fixture has <ArtifactProvenanceExtension type="project"> at body top level.
         # After Stage 2, this is an open injection name and must not produce any
-        # injection-related error. (The fixture also has [[DEPLOYED:ArtifactProvenance]]
+        # injection-related error. (The fixture also has <ArtifactProvenance type="managed">
         # which will produce E011 — we check only errors mentioning the injection name.)
         #
         # Vocabulary-state guard: before Stage 2 implementation removes it,
@@ -969,8 +969,8 @@ class TestArtifactProvenanceExtensionAsOpenInjection:
 # (AC2.5 / AC2.6)
 # ---------------------------------------------------------------------------
 #
-# AC2.5: an unrecognised [[INJECTION:]] name produces no error from the Python validator.
-# AC2.6: an unrecognised [[DEPLOYED:]] name still produces an error (E011).
+# AC2.5: an unrecognised <Name type="project"> name produces no error from the Python validator.
+# AC2.6: an unrecognised <Name type="managed"> name still produces an error (E011).
 #
 # These mirror the Go suite's TestValidate_OpenInjectionName_ProducesNoIssue and
 # TestValidate_BundleNameAsInjection_ReportsWrongMarkerIssue from
@@ -981,13 +981,13 @@ class TestArtifactProvenanceExtensionAsOpenInjection:
 class TestPythonValidatorOpenNamesAC2_5_AC2_6:
     """Python validator tests for AC2.5 and AC2.6.
 
-    AC2.5: validate_file produces no error for any unrecognised [[INJECTION:]] name.
-    AC2.6: validate_file produces E011 for any unrecognised [[DEPLOYED:]] name.
+    AC2.5: validate_file produces no error for any unrecognised <Name type="project"> name.
+    AC2.6: validate_file produces E011 for any unrecognised <Name type="managed"> name.
     """
 
     def test_open_injection_name_produces_no_error_from_python_validator(self) -> None:
         # AC2.5: the Python validator accepts an unrecognised injection name without error.
-        # Fixture has [[INJECTION:CustomOpenExtension]] inside Identity — an unlisted name.
+        # Fixture has <CustomOpenExtension type="project"> inside Identity — an unlisted name.
         fixture = _fixture("validator_valid_open_injection_name.md")
 
         errors = validate_file(fixture)
@@ -1011,7 +1011,7 @@ class TestPythonValidatorOpenNamesAC2_5_AC2_6:
         )
 
     def test_unknown_deployed_name_produces_e011_from_python_validator(self) -> None:
-        # AC2.6: the Python validator still reports an error for an unrecognised [[DEPLOYED:]] name.
+        # AC2.6: the Python validator still reports an error for an unrecognised <Name type="managed"> name.
         # ArtifactProvenance is removed from CANONICAL_DEPLOYED after Stage 2.
         fixture = _fixture("validator_valid_artifact_provenance_top_level.md")
 
@@ -1019,7 +1019,7 @@ class TestPythonValidatorOpenNamesAC2_5_AC2_6:
 
         codes = [e.error_code for e in errors]
         assert "E011" in codes, (
-            f"AC2.6: expected E011 for unknown [[DEPLOYED:ArtifactProvenance]], "
+            f'AC2.6: expected E011 for unknown <ArtifactProvenance type="managed">, '
             f"got codes: {codes}"
         )
 
@@ -1036,7 +1036,7 @@ class TestPythonValidatorOpenNamesAC2_5_AC2_6:
             if e.error_code == "E004" and "ArtifactProvenance" in e.message
         ]
         assert e004_for_deployed == [], (
-            f"AC2.6: expected no E004 for [[DEPLOYED:ArtifactProvenance]] (E011 is the correct "
+            f'AC2.6: expected no E004 for <ArtifactProvenance type="managed"> (E011 is the correct '
             f"code for unknown deployed names), got: {e004_for_deployed}"
         )
 
@@ -1161,10 +1161,10 @@ class TestKnownFrontmatterKeys_RoleAndBundleVersion:
             "description: Deployed file with bundle_version but no role field.\n"
             "bundle_version: 2.3.1\n"
             "---\n\n"
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# TestAgent Agent\n"
             "Content here.\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "deployed-agent.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1191,10 +1191,10 @@ class TestKnownFrontmatterKeys_RoleAndBundleVersion:
             "description: Source file with role field but no bundle_version stamp.\n"
             "role: subagent\n"
             "---\n\n"
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# TestAgent Agent\n"
             "Content here.\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "source-agent.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1217,7 +1217,7 @@ class TestKnownFrontmatterKeys_RoleAndBundleVersion:
 # Three checks are relaxed in Stage 3. The Python validator must match the Go
 # validator's behaviour for all three:
 #
-#   1. Unknown injection names: any [[INJECTION:]] name is valid and produces no
+#   1. Unknown injection names: any <Name type="project"> name is valid and produces no
 #      finding of any kind. (Already covered by Stage 2 tests; confirmed here as
 #      a regression guard.)
 #
@@ -1226,10 +1226,10 @@ class TestKnownFrontmatterKeys_RoleAndBundleVersion:
 #      names absent from CANONICAL_ORDER are skipped entirely. Missing canonical
 #      sections (only a subset present) also pass.
 #
-#   3. Injection parent advisory: a misplaced [[INJECTION:]] region is reported at
+#   3. Injection parent advisory: a misplaced <Name type="project"> region is reported at
 #      advisory severity rather than error severity. The finding is present but
 #      never fatal: the CLI exits 0 when only advisory findings exist. A misplaced
-#      [[DEPLOYED:]] region remains a hard error (E008 at error severity).
+#      <Name type="managed"> region remains a hard error (E008 at error severity).
 #
 # Implementation note: Stage 3 adds a `severity` attribute to ValidationError
 # (defaulting to "error") so callers can distinguish advisory findings from errors.
@@ -1239,7 +1239,7 @@ class TestKnownFrontmatterKeys_RoleAndBundleVersion:
 class TestStage3UnknownInjectionNamesRegression:
     """Unknown injection names produce no finding of any kind (regression guard).
 
-    Injection names are open unconditionally. Any [[INJECTION:]] name that is not in
+    Injection names are open unconditionally. Any <Name type="project"> name that is not in
     CanonicalDeployed is valid, preserved, and produces no finding — not even an advisory
     finding. This was established in Stage 2; the Stage 3 tests confirm it still holds
     after advisory severity is introduced.
@@ -1249,7 +1249,7 @@ class TestStage3UnknownInjectionNamesRegression:
         self, tmp_path: pathlib.Path
     ) -> None:
         # Arrange
-        # A document with [[INJECTION:CompletelyUnknownName]] — not in any table.
+        # A document with <CompletelyUnknownName type="project"> — not in any table.
         content = (
             "---\n"
             "id: test-unknown\n"
@@ -1257,12 +1257,12 @@ class TestStage3UnknownInjectionNamesRegression:
             "name: test-agent\n"
             "description: Agent with unknown injection name.\n"
             "---\n\n"
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# TestAgent Agent\n"
-            "[[INJECTION:CompletelyUnknownName]]\n"
+            '<CompletelyUnknownName type="project">\n'
             "Content.\n"
-            "[[/INJECTION:CompletelyUnknownName]]\n"
-            "[[/SECTION:Identity]]\n"
+            "</CompletelyUnknownName>\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "unknown-injection.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1288,10 +1288,10 @@ class TestStage3UnknownInjectionNamesRegression:
             "name: test-agent\n"
             "description: Agent with unknown injection name.\n"
             "---\n\n"
-            "[[SECTION:Identity]]\n"
-            "[[INJECTION:TotallyBogusName]]\n"
-            "[[/INJECTION:TotallyBogusName]]\n"
-            "[[/SECTION:Identity]]\n"
+            '<Identity type="core">\n'
+            '<TotallyBogusName type="project">\n'
+            "</TotallyBogusName>\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "unknown-injection2.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1351,14 +1351,14 @@ class TestStage3SubsequenceOrderCheck:
             "name: test-agent\n"
             "description: Document with only a subset of canonical sections.\n"
             "---\n\n"
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# TestAgent Agent\n"
             "Identity content.\n"
-            "[[/SECTION:Identity]]\n\n"
-            "[[SECTION:Constraints]]\n"
+            "</Identity>\n\n"
+            '<Constraints type="core">\n'
             "## Constraints\n"
             "Constraints content.\n"
-            "[[/SECTION:Constraints]]\n"
+            "</Constraints>\n"
         )
         agent_file = tmp_path / "subset-sections.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1387,14 +1387,14 @@ class TestStage3SubsequenceOrderCheck:
             "name: test-agent\n"
             "description: Document with canonical sections in wrong order.\n"
             "---\n\n"
-            "[[SECTION:Capabilities]]\n"
+            '<Capabilities type="core">\n'
             "## Capabilities\n"
             "Capabilities before Identity — wrong order.\n"
-            "[[/SECTION:Capabilities]]\n\n"
-            "[[SECTION:Identity]]\n"
+            "</Capabilities>\n\n"
+            '<Identity type="core">\n'
             "# TestAgent Agent\n"
             "Identity appears after Capabilities.\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "wrong-canonical-order.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1411,13 +1411,13 @@ class TestStage3SubsequenceOrderCheck:
 
 
 class TestStage3InjectionParentAdvisory:
-    """Misplaced [[INJECTION:]] regions are advisory, not errors.
+    """Misplaced <Name type="project"> regions are advisory, not errors.
 
     In Stage 3, an injection placed in an unusual location harms nobody. It is
     reported at advisory severity so the author is informed, but it never fails
-    validation (CLI exits 0). A misplaced [[DEPLOYED:]] region remains a hard
+    validation (CLI exits 0). A misplaced <Name type="managed"> region remains a hard
     error (E008 at error severity) — the advisory relaxation applies only to
-    [[INJECTION:]].
+    <Name type="project">.
 
     Implementation: Stage 3 adds a `severity` attribute to ValidationError
     (defaulting to "error"). Advisory findings use severity "advice". The CLI
@@ -1436,12 +1436,12 @@ class TestStage3InjectionParentAdvisory:
             "name: test-agent\n"
             "description: Agent with injection in wrong parent section.\n"
             "---\n\n"
-            "[[SECTION:Capabilities]]\n"
+            '<Capabilities type="core">\n'
             "## Capabilities\n"
-            "[[INJECTION:IdentityExtension]]\n"
+            '<IdentityExtension type="project">\n'
             "Extension content.\n"
-            "[[/INJECTION:IdentityExtension]]\n"
-            "[[/SECTION:Capabilities]]\n"
+            "</IdentityExtension>\n"
+            "</Capabilities>\n"
         )
         agent_file = tmp_path / "advisory-injection.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1477,12 +1477,12 @@ class TestStage3InjectionParentAdvisory:
             "name: test-agent\n"
             "description: Agent with only an advisory finding.\n"
             "---\n\n"
-            "[[SECTION:Capabilities]]\n"
+            '<Capabilities type="core">\n'
             "## Capabilities\n"
-            "[[INJECTION:IdentityExtension]]\n"
+            '<IdentityExtension type="project">\n'
             "Extension content.\n"
-            "[[/INJECTION:IdentityExtension]]\n"
-            "[[/SECTION:Capabilities]]\n"
+            "</IdentityExtension>\n"
+            "</Capabilities>\n"
         )
         agent_file = tmp_path / "advisory-only.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1503,9 +1503,9 @@ class TestStage3InjectionParentAdvisory:
         # Arrange
         # ProtocolConstraints (canonical parent: Constraints) placed inside Identity --
         # deployed region in wrong parent. Must remain a hard error. The advisory
-        # relaxation applies only to [[INJECTION:]] regions.
+        # relaxation applies only to <Name type="project"> regions.
         # LanguagePatterns is no longer usable as this sample: it left CANONICAL_DEPLOYED
-        # entirely, so a [[DEPLOYED:LanguagePatterns]] tag now signals an unknown/unclassified
+        # entirely, so a <LanguagePatterns type="managed"> tag now signals an unknown/unclassified
         # deployed name rather than a wrong-parent placement -- a different structural
         # meaning. ProtocolConstraints is a surviving canonical name with a non-empty
         # parent, preserving the original wrong-parent scenario.
@@ -1516,11 +1516,11 @@ class TestStage3InjectionParentAdvisory:
             "name: test-agent\n"
             "description: Agent with deployed region in wrong parent section.\n"
             "---\n\n"
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# TestAgent Agent\n"
-            "[[DEPLOYED:ProtocolConstraints]]\n"
-            "[[/DEPLOYED:ProtocolConstraints]]\n"
-            "[[/SECTION:Identity]]\n"
+            '<ProtocolConstraints type="managed">\n'
+            "</ProtocolConstraints>\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "deployed-wrong-parent.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1534,7 +1534,7 @@ class TestStage3InjectionParentAdvisory:
             if f.error_code == "E008" and "ProtocolConstraints" in f.message
         ]
         assert e008_findings, (
-            "A misplaced [[DEPLOYED:]] region must still produce an E008 finding after Stage 3"
+            'A misplaced <Name type="managed"> region must still produce an E008 finding after Stage 3'
         )
         for finding in e008_findings:
             assert hasattr(finding, "severity"), (
@@ -1560,11 +1560,11 @@ class TestStage3InjectionParentAdvisory:
             "name: test-agent\n"
             "description: Agent with deployed region in wrong parent section.\n"
             "---\n\n"
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# TestAgent Agent\n"
-            "[[DEPLOYED:ProtocolConstraints]]\n"
-            "[[/DEPLOYED:ProtocolConstraints]]\n"
-            "[[/SECTION:Identity]]\n"
+            '<ProtocolConstraints type="managed">\n'
+            "</ProtocolConstraints>\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "deployed-error.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1618,10 +1618,10 @@ class TestHyphenatedFrontmatterKeyValidator:
             "name: test-agent\n"
             "description: Agent with a known hyphenated frontmatter key.\n"
             "---\n\n"
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# TestAgent Agent\n"
             "Content here.\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "hyphen-known.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -1657,10 +1657,10 @@ class TestHyphenatedFrontmatterKeyValidator:
             "name: test-agent\n"
             "description: Agent with an unknown hyphenated frontmatter key.\n"
             "---\n\n"
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# TestAgent Agent\n"
             "Content here.\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "hyphen-unknown.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -2014,7 +2014,7 @@ def _make_agent_file(tmp_path: pathlib.Path, body: str, filename: str = "agent.m
 
 
 class TestCustomKindValidatorAcceptance:
-    """The validator must accept [[CUSTOM:]] regions without raising E011 (unknown deployed
+    """The validator must accept <Name type="custom"> regions without raising E011 (unknown deployed
     name) or any other spurious error. The name set for CUSTOM is open: any name is valid.
 
     Tests are in RED between the enum+regex change (I3.1/I3.2) and the validator
@@ -2026,39 +2026,39 @@ class TestCustomKindValidatorAcceptance:
     def test_custom_region_inside_section_produces_no_errors(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """A [[CUSTOM:CustomConstraints]] region nested inside a SECTION must produce no
+        """A <CustomConstraints type="custom"> region nested inside a SECTION must produce no
         validation errors — no E011, no E004, no balance error."""
         path = _make_agent_file(tmp_path, (
             "\n"
-            "[[SECTION:Constraints]]\n"
+            '<Constraints type="core">\n'
             "## Constraints\n\n"
-            "[[CUSTOM:CustomConstraints]]\n"
+            '<CustomConstraints type="custom">\n'
             "Never touch production credentials.\n"
-            "[[/CUSTOM:CustomConstraints]]\n\n"
-            "[[/SECTION:Constraints]]\n"
+            "</CustomConstraints>\n\n"
+            "</Constraints>\n"
         ))
         errors = validate_file(path)
         codes = [e.error_code for e in errors]
         assert "E011" not in codes, (
-            "An unknown [[CUSTOM:]] name must never raise E011 — the custom name set is open"
+            'An unknown <Name type="custom"> name must never raise E011 — the custom name set is open'
         )
         assert "E004" not in codes, (
-            "A [[CUSTOM:]] region must never raise E004 (non-canonical SECTION name)"
+            'A <Name type="custom"> region must never raise E004 (non-canonical SECTION name)'
         )
 
     def test_unknown_custom_name_does_not_raise_e011(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """An arbitrary [[CUSTOM:]] name that appears nowhere in any registry must not
+        """An arbitrary <Name type="custom"> name that appears nowhere in any registry must not
         raise E011 — the custom name set is fully open."""
         path = _make_agent_file(tmp_path, (
             "\n"
-            "[[SECTION:Constraints]]\n"
+            '<Constraints type="core">\n'
             "## Constraints\n\n"
-            "[[CUSTOM:ArbitraryProjectSpecificName]]\n"
+            '<ArbitraryProjectSpecificName type="custom">\n'
             "Project-specific constraint text.\n"
-            "[[/CUSTOM:ArbitraryProjectSpecificName]]\n\n"
-            "[[/SECTION:Constraints]]\n"
+            "</ArbitraryProjectSpecificName>\n\n"
+            "</Constraints>\n"
         ))
         errors = validate_file(path)
         codes = [e.error_code for e in errors]
@@ -2070,16 +2070,16 @@ class TestCustomKindValidatorAcceptance:
     def test_custom_region_with_compound_name_produces_no_e011(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """A [[CUSTOM:]] region with a compound name (Prefix:qualifier) must not raise
+        """A <Name type="custom"> region with a compound name (Prefix:qualifier) must not raise
         E011 or E004 — compound names are valid for CUSTOM just as for INJECTION."""
         path = _make_agent_file(tmp_path, (
             "\n"
-            "[[SECTION:Constraints]]\n"
+            '<Constraints type="core">\n'
             "## Constraints\n\n"
-            "[[CUSTOM:Project:my-feature]]\n"
+            '<Project type="custom" name="my-feature">\n'
             "Feature-specific constraints.\n"
-            "[[/CUSTOM:Project:my-feature]]\n\n"
-            "[[/SECTION:Constraints]]\n"
+            "</Project>\n\n"
+            "</Constraints>\n"
         ))
         errors = validate_file(path)
         codes = [e.error_code for e in errors]
@@ -2093,28 +2093,28 @@ class TestCustomKindValidatorAcceptance:
     def test_canonical_deployed_name_as_custom_does_not_raise_e010(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """A [[CUSTOM:]] region whose name also appears in CANONICAL_DEPLOYED must not
+        """A <Name type="custom"> region whose name also appears in CANONICAL_DEPLOYED must not
         raise E010 — CUSTOM regions are always project class, never tool-managed."""
         path = _make_agent_file(tmp_path, (
             "\n"
-            "[[SECTION:Constraints]]\n"
+            '<Constraints type="core">\n'
             "## Constraints\n\n"
-            "[[CUSTOM:CommunicationProtocol]]\n"
+            '<CommunicationProtocol type="custom">\n'
             "Project overrides.\n"
-            "[[/CUSTOM:CommunicationProtocol]]\n\n"
-            "[[/SECTION:Constraints]]\n"
+            "</CommunicationProtocol>\n\n"
+            "</Constraints>\n"
         ))
         errors = validate_file(path)
         codes = [e.error_code for e in errors]
         assert "E010" not in codes, (
-            "A [[CUSTOM:CommunicationProtocol]] region must not raise E010 — "
+            'A <CommunicationProtocol type="custom"> region must not raise E010 — '
             "a CUSTOM region named like a canonical deployed boundary is still project class"
         )
 
 
 class TestCustomKindValidatorErrorDetection:
-    """The validator must enforce open/close balance on [[CUSTOM:]] regions, mirroring
-    the behavior it applies to [[INJECTION:]] regions.
+    """The validator must enforce open/close balance on <Name type="custom"> regions, mirroring
+    the behavior it applies to <Name type="project"> regions.
 
     Tests are in RED before I3.1/I3.2: CUSTOM is not in TAG_PATTERN, so tags are content
     and no balance checks run. After I3.4, the validator tracks a custom stack and raises
@@ -2124,79 +2124,81 @@ class TestCustomKindValidatorErrorDetection:
     def test_unclosed_custom_region_raises_e001(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """A [[CUSTOM:]] open tag with no matching close tag must raise E001."""
+        """A <Name type="custom"> open tag with no matching close tag must raise E001."""
         path = _make_agent_file(tmp_path, (
             "\n"
-            "[[SECTION:Constraints]]\n"
+            '<Constraints type="core">\n'
             "## Constraints\n\n"
-            "[[CUSTOM:CustomConstraints]]\n"
+            '<CustomConstraints type="custom">\n'
             "Content.\n"
-            # intentionally no [[/CUSTOM:CustomConstraints]]
-            "[[/SECTION:Constraints]]\n"
+            # intentionally no </CustomConstraints>
+            "</Constraints>\n"
         ))
         errors = validate_file(path)
         codes = [e.error_code for e in errors]
         assert "E001" in codes, (
-            "An unclosed [[CUSTOM:]] region must raise E001 (unmatched open tag)"
+            'An unclosed <Name type="custom"> region must raise E001 (unmatched open tag)'
         )
 
     def test_orphan_custom_close_tag_raises_e002(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """A [[/CUSTOM:]] close tag with no matching open tag must raise E002."""
+        """A </Name> close tag with no matching open tag must raise E002."""
         path = _make_agent_file(tmp_path, (
             "\n"
-            "[[SECTION:Constraints]]\n"
+            '<Constraints type="core">\n'
             "## Constraints\n\n"
-            # intentionally no [[CUSTOM:CustomConstraints]] open tag
-            "[[/CUSTOM:CustomConstraints]]\n"
-            "[[/SECTION:Constraints]]\n"
+            "</Constraints>\n"
+            # intentionally no <CustomConstraints type="custom"> open tag;
+            # orphan close is placed AFTER the outer section closes so all
+            # stacks are empty → E002 (not E003 mismatch)
+            "</CustomConstraints>\n"
         ))
         errors = validate_file(path)
         codes = [e.error_code for e in errors]
         assert "E002" in codes, (
-            "An orphan [[/CUSTOM:]] close tag must raise E002 (unmatched close tag)"
+            "An orphan </Name> close tag must raise E002 (unmatched close tag)"
         )
 
     def test_mismatched_custom_open_close_names_raises_e003(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """A [[CUSTOM:Foo]] opened but [[/CUSTOM:Bar]] closed must raise E003."""
+        """A <Foo type="custom"> opened but </Bar> closed must raise E003."""
         path = _make_agent_file(tmp_path, (
             "\n"
-            "[[SECTION:Constraints]]\n"
+            '<Constraints type="core">\n'
             "## Constraints\n\n"
-            "[[CUSTOM:Foo]]\n"
+            '<Foo type="custom">\n'
             "Content.\n"
-            "[[/CUSTOM:Bar]]\n"
-            "[[/SECTION:Constraints]]\n"
+            "</Bar>\n"
+            "</Constraints>\n"
         ))
         errors = validate_file(path)
         codes = [e.error_code for e in errors]
         assert "E003" in codes, (
-            "Mismatched [[CUSTOM:Foo]] / [[/CUSTOM:Bar]] must raise E003 (name mismatch)"
+            'Mismatched <Foo type="custom"> / </Bar> must raise E003 (name mismatch)'
         )
 
     def test_duplicate_custom_name_raises_e006(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """Two [[CUSTOM:]] regions with the same name must raise E006."""
+        """Two <Name type="custom"> regions with the same name must raise E006."""
         path = _make_agent_file(tmp_path, (
             "\n"
-            "[[SECTION:Constraints]]\n"
+            '<Constraints type="core">\n'
             "## Constraints\n\n"
-            "[[CUSTOM:CustomConstraints]]\n"
+            '<CustomConstraints type="custom">\n'
             "First region.\n"
-            "[[/CUSTOM:CustomConstraints]]\n\n"
-            "[[CUSTOM:CustomConstraints]]\n"
+            "</CustomConstraints>\n\n"
+            '<CustomConstraints type="custom">\n'
             "Second region with same name.\n"
-            "[[/CUSTOM:CustomConstraints]]\n\n"
-            "[[/SECTION:Constraints]]\n"
+            "</CustomConstraints>\n\n"
+            "</Constraints>\n"
         ))
         errors = validate_file(path)
         codes = [e.error_code for e in errors]
         assert "E006" in codes, (
-            "Two [[CUSTOM:]] regions with the same name must raise E006 (duplicate boundary name)"
+            'Two <Name type="custom"> regions with the same name must raise E006 (duplicate boundary name)'
         )
 
 
@@ -2256,10 +2258,10 @@ class TestGenericOnlyKeyValidatorAllowlist:
             "recommended_tier: MEDIUM\n"
             "tier_rationale: A reason\n"
             "---\n\n"
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# HarnessAllGenericOnly Agent\n"
             "Content here.\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "harness-all-generic-only.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -2317,10 +2319,10 @@ class TestGenericOnlyKeyValidatorAllowlist:
             "recommended_tier: LOW\n"
             "tier_rationale: Low-stakes test fixture\n"
             "---\n\n"
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# GenericAllGenericOnly Agent\n"
             "Content here.\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "generic-all-generic-only.md"
         agent_file.write_text(content, encoding="utf-8")
@@ -2355,10 +2357,10 @@ class TestGenericOnlyKeyValidatorAllowlist:
             "description: Harness file with a genuinely unknown key.\n"
             "totally_unknown_key_xyz: some_value\n"
             "---\n\n"
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# HarnessUnknownKey Agent\n"
             "Content here.\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
         )
         agent_file = tmp_path / "harness-unknown-key.md"
         agent_file.write_text(content, encoding="utf-8")

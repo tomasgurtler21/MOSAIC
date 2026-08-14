@@ -13,8 +13,7 @@ artifacts:
   - KBProgress.md
 ---
 
-[[SECTION:Workflow:kb-correction]]
-<!-- workflow-version: 0.1 -->
+<Workflow type="core" name="kb-correction" version="0.1">
 ## Knowledge Base Correction Workflow
 
 **Use when:** Apply known corrections to an existing knowledge base. Input is user-provided correction instructions in Requirements.md — could be pasted verification findings, direct feedback, or change descriptions. Generator navigates existing KB via KnowledgeBase/Index.md, determines what needs updating, and applies corrections.
@@ -31,7 +30,7 @@ artifacts:
 - **KBProgress.md bootstrap** — first generator run creates KBProgress.md; it does not exist as a prerequisite
 - **May create new tiers** — if corrections reveal areas needing deeper documentation, generator adds new stages to KBProgress.md
 - **No re-verification** — after corrections, workflow completes. Run a separate verification workflow to confirm fixes
-[[/SECTION:Workflow:kb-correction]]
+</Workflow>
 
 ---
 

@@ -2,15 +2,15 @@ package transform_test
 
 // region_merge_test.go covers user-owned region merging (T3.2):
 //
-//   - [[INJECTION:]] content is emptied with a GapEmptyInjection gap on a new deployment.
-//   - [[INJECTION:]] content is lifted byte-identically from the deployed file on update.
-//   - A [[INJECTION:]] region that is new in the source (absent from deployed) starts
+//   - project-injection region content is emptied with a GapEmptyInjection gap on a new deployment.
+//   - project-injection region content is lifted byte-identically from the deployed file on update.
+//   - A project-injection region region that is new in the source (absent from deployed) starts
 //     empty with action RegionAdded.
 //   - RegionOutcome carries Marker == NodeInjection and ToolManaged() == false for every
 //     user-owned region.
 //
 // The test documents in this file use the new canonical marker vocabulary: user-owned regions
-// are declared with [[INJECTION:]] and tool-managed regions with [[DEPLOYED:]]. The mix of
+// are declared with project-injection region and tool-managed regions with managed region. The mix of
 // both kinds in a single document exercises the new routing logic introduced in Stage 3.
 
 import (
@@ -23,9 +23,9 @@ import (
 )
 
 // mergeSourceNewVocab is a source document using the Stage 3 marker vocabulary:
-//   - [[DEPLOYED:HarnessConstraints]] — tool-managed, filled from harness
-//   - [[INJECTION:IdentityExtension]] — user-owned, preserved on update
-//   - [[INJECTION:CodebaseContext]]  — user-owned, preserved on update
+//   - <HarnessConstraints type="managed"> — tool-managed, filled from harness
+//   - <IdentityExtension type="project"> — user-owned, preserved on update
+//   - <CodebaseContext type="project">  — user-owned, preserved on update
 const mergeSourceNewVocab = `---
 id: 40
 version: 3.0.0
@@ -38,36 +38,36 @@ tier_rationale: merge new vocab testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MergeNewVocabTest Agent
 
 You are the MergeNewVocabTest agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Core capabilities.
 
-[[INJECTION:CodebaseContext]]
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Capabilities]]
+<CodebaseContext type="project">
+</CodebaseContext>
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always use the approved tool list.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 // mergeDeployedNewVocabFilled is a deployed file (Stage 3 vocabulary) with user content in
-// the [[INJECTION:]] regions and harness content in the [[DEPLOYED:]] region. The harness
+// the project-injection region regions and harness content in the managed region region. The harness
 // content must be regenerated on update, not lifted. The injection content must survive.
 const mergeDeployedNewVocabFilled = `---
 id: 40
@@ -80,36 +80,36 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MergeNewVocabTest Agent
 
 You are the MergeNewVocabTest agent.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 User identity extension: Go project, hexagonal architecture.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Core capabilities.
 
-[[INJECTION:CodebaseContext]]
+<CodebaseContext type="project">
 User codebase context: mosaic-deploy module, domain-driven design.
 Three lines of context.
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Capabilities]]
+</CodebaseContext>
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always use the approved tool list.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Old harness content in the deployed file — must be regenerated, not lifted.
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</HarnessConstraints>
+</Constraints>
 `
 
 // ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ Old harness content in the deployed file — must be regenerated, not lifted.
 // ---------------------------------------------------------------------------
 
 // TestUserOwnedRegion_EmptyWithGapOnCreate asserts that when Deployed is nil (new
-// deployment), every [[INJECTION:]] region in the source is left empty in the output and a
+// deployment), every project-injection region region in the source is left empty in the output and a
 // GapEmptyInjection gap is emitted for it. The corresponding RegionOutcome must have:
 //   - Marker == NodeInjection
 //   - ToolManaged() == false
@@ -187,7 +187,7 @@ func TestUserOwnedRegion_EmptyWithGapOnCreate(t *testing.T) {
 				t.Errorf("%s Marker: want %q, got %q", name, docformat.NodeInjection, outcome.Marker)
 			}
 			if outcome.ToolManaged() {
-				t.Errorf("%s ToolManaged() must be false for a [[INJECTION:]] region", name)
+				t.Errorf("%s ToolManaged() must be false for a project-injection region region", name)
 			}
 			if outcome.Action != transform.RegionEmptied {
 				t.Errorf("%s Action: want %q, got %q", name, transform.RegionEmptied, outcome.Action)
@@ -201,7 +201,7 @@ func TestUserOwnedRegion_EmptyWithGapOnCreate(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestUserOwnedRegion_ContentLiftedByteIdenticallyOnUpdate asserts that when Deployed is
-// non-nil (update), [[INJECTION:]] region content is carried verbatim from the deployed file.
+// non-nil (update), project-injection region region content is carried verbatim from the deployed file.
 // The content must be byte-identical — no trimming, normalisation, or re-encoding.
 // The corresponding RegionOutcome must have Action == RegionPreserved.
 func TestUserOwnedRegion_ContentLiftedByteIdenticallyOnUpdate(t *testing.T) {
@@ -294,42 +294,42 @@ tier_rationale: added injection testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # MergeNewVocabTest Agent
 
 You are the MergeNewVocabTest agent.
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Core capabilities.
 
-[[INJECTION:CodebaseContext]]
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Capabilities]]
+<CodebaseContext type="project">
+</CodebaseContext>
+</Capabilities>
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
-[[INJECTION:ErrorHandlingExtension]]
-[[/INJECTION:ErrorHandlingExtension]]
-[[/SECTION:ErrorHandling]]
+<ErrorHandlingExtension type="project">
+</ErrorHandlingExtension>
+</ErrorHandling>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always use the approved tool list.
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
-// TestUserOwnedRegion_NewInSourceStartsEmpty asserts that when a [[INJECTION:]] region is
+// TestUserOwnedRegion_NewInSourceStartsEmpty asserts that when a project-injection region region is
 // present in the source but absent from the deployed file, it starts empty in the output
 // and the RegionOutcome has Action == RegionAdded.
 func TestUserOwnedRegion_NewInSourceStartsEmpty(t *testing.T) {
@@ -394,7 +394,7 @@ func TestUserOwnedRegion_NewInSourceStartsEmpty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestUserOwnedRegion_OutcomeMarkerIsNodeInjection asserts that every RegionOutcome in
-// Report.Regions for a user-owned [[INJECTION:]] region has Marker == NodeInjection and
+// Report.Regions for a user-owned project-injection region region has Marker == NodeInjection and
 // ToolManaged() returns false.
 func TestUserOwnedRegion_OutcomeMarkerIsNodeInjection(t *testing.T) {
 	req := transform.Request{

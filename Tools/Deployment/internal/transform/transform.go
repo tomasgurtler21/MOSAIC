@@ -64,8 +64,8 @@ func Apply(req Request) (Result, error) {
 	fieldChanges, gaps := applyFrontmatter(fm, fmPlan, toolResult, req, desc)
 
 	// Process managed regions in the body, applying the merge policy:
-	//   [[INJECTION:]] (user-owned) — preserved from deployed on update, emptied on create.
-	//   [[DEPLOYED:]] (tool-managed) — regenerated every transform from harness/workflows/infra.
+	//   injection regions (user-owned) — preserved from deployed on update, emptied on create.
+	//   managed regions (tool-managed) — regenerated every transform from harness/workflows/infra.
 	// Orphaned user-owned injection points produce gaps; tool-managed regions removed from
 	// the source produce no gap.
 	regionOutcomes, regionGaps, workflowIDs, infraAgentKeys, err := processRegions(doc, req)

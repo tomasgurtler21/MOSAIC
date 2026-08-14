@@ -5,19 +5,19 @@ import (
 	"fmt"
 )
 
-// RenameEntry is one old-name-to-new-name mapping for a renamed source [[INJECTION:]].
+// RenameEntry is one old-name-to-new-name mapping for a renamed source injection region.
 // Entries never expire. Adding one here is the whole cost of renaming an injection.
 // Do not remove or repurpose an entry once it is added — deployed files may still carry
 // the old name indefinitely.
 type RenameEntry struct {
-	Old string // the [[INJECTION:]] name as it appears in already-deployed files
-	New string // the [[INJECTION:]] name as declared in the source today
+	Old string // the injection region name as it appears in already-deployed files
+	New string // the injection region name as declared in the source today
 }
 
-// InjectionRenames is the canonical rename table for source [[INJECTION:]] names that
+// InjectionRenames is the canonical rename table for source injection region names that
 // have been renamed since their last deployment. It is a compile-time literal: no file
 // is read, so the transform stays a pure function. Add an entry when a source
-// [[INJECTION:]] name changes; never remove or repurpose one.
+// injection region name changes; never remove or repurpose one.
 var InjectionRenames = []RenameEntry{
 	// (initially empty)
 }
@@ -71,7 +71,7 @@ func ValidateRenames(entries []RenameEntry) error {
 	return nil
 }
 
-// resolveRenamed returns the current name for a deployed-file [[INJECTION:]] name and
+// resolveRenamed returns the current name for a deployed-file injection region name and
 // whether a rename was applied. Resolution is a single hop by construction: chains are
 // rejected by ValidateRenames before this function is called. Custom names are never
 // passed to this function — the rename table applies to NodeInjection only.

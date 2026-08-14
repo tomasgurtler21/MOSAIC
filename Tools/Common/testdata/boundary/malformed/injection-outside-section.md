@@ -2,6 +2,6 @@
 name: test-agent
 ---
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Canonical injection with no enclosing section.
-[[/INJECTION:IdentityExtension]]
+</IdentityExtension>

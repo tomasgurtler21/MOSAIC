@@ -266,7 +266,7 @@ class TestApplyConductRegionsClosingProcedure:
         )
 
     def test_closing_procedure_open_tag_placed_after_process_list(self):
-        """[[DEPLOYED:ClosingProcedure]] must appear immediately after the last Process step."""
+        """<ClosingProcedure type="managed"> must appear immediately after the last Process step."""
         lines = self._identity_with_process_list()
         identity = _identity_span(lines)
         cp_spec = _minimal_spec("ClosingProcedure", supersedes=(_CP_JSON_STEP,))
@@ -278,7 +278,7 @@ class TestApplyConductRegionsClosingProcedure:
         # "Step one." is the last remaining Process step.  The ClosingProcedure
         # open tag must appear on the very next line — adjacency is the load-bearing
         # part of AC2.2 ("nothing between the Process list and ClosingProcedure").
-        cp_open = "[[DEPLOYED:ClosingProcedure]]\n"
+        cp_open = '<ClosingProcedure type="managed">\n'
         step_idx = next(
             i for i, l in enumerate(out)
             if "Step one." in l
@@ -336,8 +336,8 @@ class TestApplyConductRegionsAuthorityHierarchy:
             "1. Step one.",
             "2. Return ONLY output json defined by communication protocol with status",
             "",
-            "[[DEPLOYED:ClosingProcedure]]",
-            "[[/DEPLOYED:ClosingProcedure]]",
+            '<ClosingProcedure type="managed">',
+            "</ClosingProcedure>",
             "",
             "### Authority Hierarchy",
             "",
@@ -348,7 +348,7 @@ class TestApplyConductRegionsAuthorityHierarchy:
         return lines, {"Identity": identity}
 
     def test_authority_hierarchy_emitted_after_closing_procedure(self):
-        """[[DEPLOYED:AuthorityHierarchy]] must appear after [[/DEPLOYED:ClosingProcedure]]."""
+        """<AuthorityHierarchy type="managed"> must appear after </ClosingProcedure>."""
         lines, sections = self._identity_with_both_specs_input()
         ah_spec = RegionSpec(
             name="AuthorityHierarchy",
@@ -362,11 +362,11 @@ class TestApplyConductRegionsAuthorityHierarchy:
         out = result.lines
         cp_close_idx = next(
             i for i, l in enumerate(out)
-            if l.strip() == "[[/DEPLOYED:ClosingProcedure]]"
+            if l.strip() == "</ClosingProcedure>"
         )
         ah_open_idx = next(
             (i for i, l in enumerate(out)
-             if l.strip() == "[[DEPLOYED:AuthorityHierarchy]]"),
+             if l.strip() == '<AuthorityHierarchy type="managed">'),
             None,
         )
         assert ah_open_idx is not None, "AuthorityHierarchy open tag not found in output"
@@ -414,8 +414,8 @@ class TestApplyConductRegionsAuthorityHierarchy:
         )
         result = apply_conduct_regions(lines, {"Identity": identity}, specs=(cp_spec, ah_spec))
         out = result.lines
-        cp_open_idx = next(i for i, l in enumerate(out) if "[[DEPLOYED:ClosingProcedure]]" in l)
-        ah_open_idx = next(i for i, l in enumerate(out) if "[[DEPLOYED:AuthorityHierarchy]]" in l)
+        cp_open_idx = next(i for i, l in enumerate(out) if '<ClosingProcedure type="managed">' in l)
+        ah_open_idx = next(i for i, l in enumerate(out) if '<AuthorityHierarchy type="managed">' in l)
         assert cp_open_idx < ah_open_idx
 
     def test_deployed_added_order_matches_document_order(self):
@@ -746,7 +746,7 @@ class TestApplyConductRegionsGuarantees:
     """Invariants that must hold regardless of the input content."""
 
     def test_no_tag_emitted_inside_fenced_block(self):
-        """No [[DEPLOYED:...]] tag must appear at a line masked by fence_mask."""
+        """No managed-region tag must appear at a line masked by fence_mask."""
         lines = _L(
             "# TestAgent Agent",
             "```python",
@@ -762,7 +762,7 @@ class TestApplyConductRegionsGuarantees:
         mask = fence_mask(result.lines)
         for i, (line, is_masked) in enumerate(zip(result.lines, mask)):
             if is_masked:
-                assert "[[DEPLOYED:" not in line, (
+                assert 'type="managed"' not in line, (
                     f"Tag emitted on fence-masked line {i}: {line!r}"
                 )
 
@@ -773,14 +773,14 @@ class TestApplyConductRegionsGuarantees:
             "",
             "### Process",
             "1. Step one.",
-            "[[DEPLOYED:ClosingProcedure]]",
-            "[[/DEPLOYED:ClosingProcedure]]",
+            '<ClosingProcedure type="managed">',
+            "</ClosingProcedure>",
             "",
         )
         identity = _identity_span(lines)
         cp_spec = _minimal_spec("ClosingProcedure")
         result = apply_conduct_regions(lines, {"Identity": identity}, specs=(cp_spec,))
-        cp_count = sum(1 for l in result.lines if l.strip() == "[[DEPLOYED:ClosingProcedure]]")
+        cp_count = sum(1 for l in result.lines if l.strip() == '<ClosingProcedure type="managed">')
         assert cp_count == 1, "ClosingProcedure must appear exactly once"
         assert "ClosingProcedure" not in result.deployed_added
 
@@ -800,16 +800,16 @@ class TestApplyConductRegionsGuarantees:
         assert result.non_conformances == []
 
     def test_emitted_region_is_exactly_two_lines(self):
-        """A deployed region must be emitted as exactly '[[DEPLOYED:Name]]\\n' then
-        '[[/DEPLOYED:Name]]\\n', with no blank line between them."""
+        """A deployed region must be emitted as exactly '<Name type="managed">\\n' then
+        '</Name>\\n', with no blank line between them."""
         lines = _L("# TestAgent Agent", "", "Prose.", "")
         identity = _identity_span(lines)
         cp_spec = _minimal_spec("ClosingProcedure")
         result = apply_conduct_regions(lines, {"Identity": identity}, specs=(cp_spec,))
         out = result.lines
-        cp_open_idx = next(i for i, l in enumerate(out) if "[[DEPLOYED:ClosingProcedure]]" in l)
-        assert out[cp_open_idx].strip() == "[[DEPLOYED:ClosingProcedure]]"
-        assert out[cp_open_idx + 1].strip() == "[[/DEPLOYED:ClosingProcedure]]"
+        cp_open_idx = next(i for i, l in enumerate(out) if '<ClosingProcedure type="managed">' in l)
+        assert out[cp_open_idx].strip() == '<ClosingProcedure type="managed">'
+        assert out[cp_open_idx + 1].strip() == "</ClosingProcedure>"
 
     def test_lines_outside_touched_regions_byte_identical(self):
         """Lines not involved in insertion or deletion must be byte-identical in the output."""
@@ -832,8 +832,8 @@ class TestApplyConductRegionsGuarantees:
         lines = _L(
             "# TestAgent Agent",
             "",
-            "[[DEPLOYED:AuthorityHierarchy]]",
-            "[[/DEPLOYED:AuthorityHierarchy]]",
+            '<AuthorityHierarchy type="managed">',
+            "</AuthorityHierarchy>",
             "",
         )
         identity = _identity_span(lines)
@@ -846,7 +846,7 @@ class TestApplyConductRegionsGuarantees:
         )
         result = apply_conduct_regions(lines, {"Identity": identity}, specs=(ah_spec,))
         ah_count = sum(
-            1 for l in result.lines if l.strip() == "[[DEPLOYED:AuthorityHierarchy]]"
+            1 for l in result.lines if l.strip() == '<AuthorityHierarchy type="managed">'
         )
         assert ah_count == 1, "AuthorityHierarchy must appear exactly once"
         assert "AuthorityHierarchy" not in result.deployed_added

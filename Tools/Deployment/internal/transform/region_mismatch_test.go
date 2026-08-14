@@ -3,11 +3,11 @@ package transform_test
 // region_mismatch_test.go covers marker/name mismatch rejection (T3.4):
 //
 //   - A source document that declares a tool-managed canonical name (e.g. HarnessConstraints)
-//     under [[INJECTION:]] fails the transform with an error wrapping ErrMarkerMismatch.
+//     under project-injection region fails the transform with an error wrapping ErrMarkerMismatch.
 //   - A source document that declares a user-owned canonical name (e.g. CodebaseContext)
-//     under [[DEPLOYED:]] fails the transform with an error wrapping ErrMarkerMismatch.
+//     under managed region fails the transform with an error wrapping ErrMarkerMismatch.
 //   - The error message names the offending region, so the user can locate and fix it.
-//   - A source document with an unrecognised name under [[DEPLOYED:]] fails the transform
+//   - A source document with an unrecognised name under managed region fails the transform
 //     with an error wrapping ErrUnknownDeployedName (a tool-managed name has no generator).
 //
 // These tests establish that the transform never guesses: marker/name pairings are validated
@@ -25,17 +25,17 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// T3.4: Tool-managed name under [[INJECTION:]] fails with ErrMarkerMismatch
+// T3.4: Tool-managed name under project-injection region fails with ErrMarkerMismatch
 // ---------------------------------------------------------------------------
 
 // TestMarkerMismatch_ToolManagedNameUnderInjection_Rejected asserts that a source document
-// that declares HarnessConstraints with [[INJECTION:]] — the wrong marker for a tool-managed
+// that declares HarnessConstraints with project-injection region — the wrong marker for a tool-managed
 // name — causes Apply to return an error wrapping ErrMarkerMismatch. The transform never
 // produces partial output for a mismatch.
 func TestMarkerMismatch_ToolManagedNameUnderInjection_Rejected(t *testing.T) {
-	// sourceWithHarnessConstraintsUnderInjection uses [[INJECTION:HarnessConstraints]] for a
+	// sourceWithHarnessConstraintsUnderInjection uses <HarnessConstraints type="project"> for a
 	// tool-managed name. This is the wrong marker: HarnessConstraints must be declared with
-	// [[DEPLOYED:]].
+	// managed region.
 	const sourceWithHarnessConstraintsUnderInjection = `---
 id: 60
 version: 1.0.0
@@ -48,12 +48,12 @@ tier_rationale: mismatch testing
 required_skills: []
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
-[[INJECTION:HarnessConstraints]]
-[[/INJECTION:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="project">
+</HarnessConstraints>
+</Constraints>
 `
 
 	req := transform.Request{
@@ -68,7 +68,7 @@ required_skills: []
 
 	_, err := transform.Apply(req)
 	if err == nil {
-		t.Fatal("Apply must return an error when a tool-managed name is declared under [[INJECTION:]], got nil")
+		t.Fatal("Apply must return an error when a tool-managed name is declared under project-injection region, got nil")
 	}
 	if !errors.Is(err, transform.ErrMarkerMismatch) {
 		t.Errorf("expected error wrapping transform.ErrMarkerMismatch; got: %v", err)
@@ -76,7 +76,7 @@ required_skills: []
 }
 
 // TestMarkerMismatch_WorkflowNameUnderInjection_Rejected asserts that
-// [[INJECTION:AvailableWorkflows]] — a tool-managed name declared under the wrong marker —
+// <AvailableWorkflows type="project"> — a tool-managed name declared under the wrong marker —
 // is rejected.
 func TestMarkerMismatch_WorkflowNameUnderInjection_Rejected(t *testing.T) {
 	const sourceWithAvailableWorkflowsUnderInjection = `---
@@ -91,12 +91,12 @@ tier_rationale: mismatch testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Mismatch Agent
 
-[[INJECTION:AvailableWorkflows]]
-[[/INJECTION:AvailableWorkflows]]
-[[/SECTION:Identity]]
+<AvailableWorkflows type="project">
+</AvailableWorkflows>
+</Identity>
 `
 
 	req := transform.Request{
@@ -111,7 +111,7 @@ required_skills: []
 
 	_, err := transform.Apply(req)
 	if err == nil {
-		t.Fatal("Apply must return an error when AvailableWorkflows is declared under [[INJECTION:]], got nil")
+		t.Fatal("Apply must return an error when AvailableWorkflows is declared under project-injection region, got nil")
 	}
 	if !errors.Is(err, transform.ErrMarkerMismatch) {
 		t.Errorf("expected error wrapping transform.ErrMarkerMismatch; got: %v", err)
@@ -119,20 +119,20 @@ required_skills: []
 }
 
 // ---------------------------------------------------------------------------
-// T3.4: Name with no tool-managed generator under [[DEPLOYED:]] fails with ErrUnknownDeployedName
+// T3.4: Name with no tool-managed generator under managed region fails with ErrUnknownDeployedName
 // ---------------------------------------------------------------------------
 //
 // In Stage 2, the user-owned injection registry (CanonicalInjections) is removed.
 // Names such as CodebaseContext and IdentityExtension are no longer in any canonical
-// registry. [[DEPLOYED:CodebaseContext]] is now an unknown deployed name (not a marker
+// registry. <CodebaseContext type="managed"> is now an unknown deployed name (not a marker
 // mismatch), because there is no user-owned registry to detect the mismatch against.
 // The transform still rejects them — only the error type changes.
 
 // TestMarkerMismatch_UserOwnedNameUnderDeployed_Rejected asserts that a source document
-// that declares CodebaseContext with [[DEPLOYED:]] — a name with no tool-managed generator —
+// that declares CodebaseContext with managed region — a name with no tool-managed generator —
 // causes Apply to return an error wrapping ErrUnknownDeployedName.
 func TestMarkerMismatch_UserOwnedNameUnderDeployed_Rejected(t *testing.T) {
-	// sourceWithCodebaseContextUnderDeployed uses [[DEPLOYED:CodebaseContext]] for a name
+	// sourceWithCodebaseContextUnderDeployed uses <CodebaseContext type="managed"> for a name
 	// that has no tool-managed generator. After Stage 2 there is no user-owned registry,
 	// so the name is unknown-deployed rather than a marker mismatch.
 	const sourceWithCodebaseContextUnderDeployed = `---
@@ -147,12 +147,12 @@ tier_rationale: user-owned mismatch testing
 required_skills: []
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
-[[DEPLOYED:CodebaseContext]]
-[[/DEPLOYED:CodebaseContext]]
-[[/SECTION:Capabilities]]
+<CodebaseContext type="managed">
+</CodebaseContext>
+</Capabilities>
 `
 
 	req := transform.Request{
@@ -167,7 +167,7 @@ required_skills: []
 
 	_, err := transform.Apply(req)
 	if err == nil {
-		t.Fatal("Apply must return an error when a name with no tool-managed generator is declared under [[DEPLOYED:]], got nil")
+		t.Fatal("Apply must return an error when a name with no tool-managed generator is declared under managed region, got nil")
 	}
 	if !errors.Is(err, transform.ErrUnknownDeployedName) {
 		t.Errorf("expected error wrapping transform.ErrUnknownDeployedName; got: %v", err)
@@ -175,7 +175,7 @@ required_skills: []
 }
 
 // TestMarkerMismatch_IdentityExtensionUnderDeployed_Rejected asserts that
-// [[DEPLOYED:IdentityExtension]] — a name with no tool-managed generator — is rejected.
+// <IdentityExtension type="managed"> — a name with no tool-managed generator — is rejected.
 func TestMarkerMismatch_IdentityExtensionUnderDeployed_Rejected(t *testing.T) {
 	const sourceWithIdentityExtensionUnderDeployed = `---
 id: 60
@@ -189,12 +189,12 @@ tier_rationale: identity mismatch testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Mismatch Agent
 
-[[DEPLOYED:IdentityExtension]]
-[[/DEPLOYED:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="managed">
+</IdentityExtension>
+</Identity>
 `
 
 	req := transform.Request{
@@ -209,7 +209,7 @@ required_skills: []
 
 	_, err := transform.Apply(req)
 	if err == nil {
-		t.Fatal("Apply must return an error when IdentityExtension is declared under [[DEPLOYED:]], got nil")
+		t.Fatal("Apply must return an error when IdentityExtension is declared under managed region, got nil")
 	}
 	if !errors.Is(err, transform.ErrUnknownDeployedName) {
 		t.Errorf("expected error wrapping transform.ErrUnknownDeployedName; got: %v", err)
@@ -243,12 +243,12 @@ tier_rationale: error name testing
 required_skills: []
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
-[[INJECTION:ProtocolConstraints]]
-[[/INJECTION:ProtocolConstraints]]
-[[/SECTION:Constraints]]
+<ProtocolConstraints type="project">
+</ProtocolConstraints>
+</Constraints>
 `,
 			regionName: "ProtocolConstraints",
 		},
@@ -266,12 +266,12 @@ tier_rationale: error name testing 2
 required_skills: []
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
-[[DEPLOYED:OutputArtifactTemplate]]
-[[/DEPLOYED:OutputArtifactTemplate]]
-[[/SECTION:Capabilities]]
+<OutputArtifactTemplate type="managed">
+</OutputArtifactTemplate>
+</Capabilities>
 `,
 			regionName: "OutputArtifactTemplate",
 		},
@@ -302,11 +302,11 @@ required_skills: []
 }
 
 // ---------------------------------------------------------------------------
-// T3.4: Unrecognised [[DEPLOYED:]] name fails with ErrUnknownDeployedName
+// T3.4: Unrecognised managed region name fails with ErrUnknownDeployedName
 // ---------------------------------------------------------------------------
 
 // TestMarkerMismatch_UnknownDeployedName_Rejected asserts that a source document that
-// declares an unrecognised name under [[DEPLOYED:]] fails the transform with an error
+// declares an unrecognised name under managed region fails the transform with an error
 // wrapping docformat.ErrUnknownDeployedName. An unrecognised tool-managed name has no
 // generator and cannot be filled; accepting it silently would produce an empty region.
 func TestMarkerMismatch_UnknownDeployedName_Rejected(t *testing.T) {
@@ -322,12 +322,12 @@ tier_rationale: unknown deployed testing
 required_skills: []
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
-[[DEPLOYED:UnrecognisedToolManagedName]]
-[[/DEPLOYED:UnrecognisedToolManagedName]]
-[[/SECTION:Capabilities]]
+<UnrecognisedToolManagedName type="managed">
+</UnrecognisedToolManagedName>
+</Capabilities>
 `
 
 	req := transform.Request{
@@ -342,7 +342,7 @@ required_skills: []
 
 	_, err := transform.Apply(req)
 	if err == nil {
-		t.Fatal("Apply must return an error for an unrecognised [[DEPLOYED:]] name, got nil")
+		t.Fatal("Apply must return an error for an unrecognised managed region name, got nil")
 	}
 	if !errors.Is(err, docformat.ErrUnknownDeployedName) {
 		t.Errorf("expected error wrapping docformat.ErrUnknownDeployedName; got: %v", err)
@@ -357,7 +357,7 @@ required_skills: []
 // ---------------------------------------------------------------------------
 
 // TestMarkerMismatch_CorrectMarkersNotRejected asserts that a source document that correctly
-// uses [[DEPLOYED:]] for tool-managed names and [[INJECTION:]] for user-owned names is
+// uses managed region for tool-managed names and project-injection region for user-owned names is
 // accepted by Apply with no error. This is the positive control for the rejection tests.
 func TestMarkerMismatch_CorrectMarkersNotRejected(t *testing.T) {
 	const sourceWithCorrectMarkers = `---
@@ -372,26 +372,26 @@ tier_rationale: correct markers testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # CorrectMarkersTest Agent
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
-[[INJECTION:CodebaseContext]]
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Capabilities]]
+<CodebaseContext type="project">
+</CodebaseContext>
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
+</Constraints>
 `
 
 	req := transform.Request{

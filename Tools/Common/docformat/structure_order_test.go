@@ -153,7 +153,7 @@ func TestOrderDiffers_DuplicatesInFirstList_FirstOccurrenceUsed_NoReorder(t *tes
 // ---------------------------------------------------------------------------
 
 func TestStructureNames_OnlySections_ReturnsSectionNamesInDocumentOrder(t *testing.T) {
-	// multiple-sections.md has [[SECTION:Identity]] then [[SECTION:CommunicationProtocol]].
+	// multiple-sections.md has <Identity type="core"> then <CommunicationProtocol type="core">.
 	doc := parsedBoundaryFixture(t, "multiple-sections.md")
 
 	names := docformat.StructureNames(doc.Body())
@@ -171,9 +171,9 @@ func TestStructureNames_OnlySections_ReturnsSectionNamesInDocumentOrder(t *testi
 
 func TestStructureNames_SectionsAndTopLevelDeployed_ReturnsAllInterleaved(t *testing.T) {
 	// mixed-markers.md top-level items in document order:
-	//   [[SECTION:Identity]]
-	//   [[DEPLOYED:CommunicationProtocol]]
-	//   [[SECTION:Constraints]]  (contains [[DEPLOYED:ProtocolConstraints]] — nested, excluded)
+	//   <Identity type="core">
+	//   <CommunicationProtocol type="managed">
+	//   <Constraints type="core"> (contains <ProtocolConstraints type="managed"> — nested, excluded)
 	// StructureNames must return all three top-level structural slots.
 	doc := parsedBoundaryFixture(t, "mixed-markers.md")
 
@@ -194,8 +194,8 @@ func TestStructureNames_SectionsAndTopLevelDeployed_ReturnsAllInterleaved(t *tes
 }
 
 func TestStructureNames_NestedDeployedRegion_NotIncluded(t *testing.T) {
-	// mixed-markers.md has [[DEPLOYED:ProtocolConstraints]] nested inside
-	// [[SECTION:Constraints]]. It must not appear in StructureNames.
+	// mixed-markers.md has <ProtocolConstraints type="managed"> nested inside
+	// <Constraints type="core">. It must not appear in StructureNames.
 	doc := parsedBoundaryFixture(t, "mixed-markers.md")
 
 	names := docformat.StructureNames(doc.Body())
@@ -208,7 +208,7 @@ func TestStructureNames_NestedDeployedRegion_NotIncluded(t *testing.T) {
 }
 
 func TestStructureNames_TopLevelCustomRegion_NotIncluded(t *testing.T) {
-	// mixed-markers-with-custom.md has [[CUSTOM:ProjectNotes]] at body top level.
+	// mixed-markers-with-custom.md has <ProjectNotes type="custom"> at body top level.
 	// Custom regions are not structural slots and must not appear in StructureNames.
 	doc := parsedBoundaryFixture(t, "mixed-markers-with-custom.md")
 
@@ -222,7 +222,7 @@ func TestStructureNames_TopLevelCustomRegion_NotIncluded(t *testing.T) {
 }
 
 func TestStructureNames_InjectionRegion_NotIncluded(t *testing.T) {
-	// mixed-markers-with-custom.md has [[INJECTION:IdentityExtension]] inside Identity.
+	// mixed-markers-with-custom.md has <IdentityExtension type="project"> inside Identity.
 	// Injection regions are not structural slots and must not appear in StructureNames.
 	doc := parsedBoundaryFixture(t, "mixed-markers-with-custom.md")
 
@@ -251,8 +251,8 @@ func TestStructureNames_EmptyBody_ReturnsNilOrEmpty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestReorderDetected_IdenticalSectionOrder_ReturnsFalse(t *testing.T) {
-	deployed := parseInlineDoc(t, "[[SECTION:Identity]]\n[[/SECTION:Identity]]\n[[SECTION:Constraints]]\n[[/SECTION:Constraints]]\n")
-	source := parseInlineDoc(t, "[[SECTION:Identity]]\n[[/SECTION:Identity]]\n[[SECTION:Constraints]]\n[[/SECTION:Constraints]]\n")
+	deployed := parseInlineDoc(t, "<Identity type=\"core\">\n</Identity>\n<Constraints type=\"core\">\n</Constraints>\n")
+	source := parseInlineDoc(t, "<Identity type=\"core\">\n</Identity>\n<Constraints type=\"core\">\n</Constraints>\n")
 
 	if docformat.ReorderDetected(deployed, source) {
 		t.Error("ReorderDetected: want false for documents with identical structural slot order")
@@ -263,8 +263,8 @@ func TestReorderDetected_SourceAddsSection_CommonSlotsUnchanged_ReturnsFalse(t *
 	// Source gains ExecutionPhilosophy between Identity and Constraints.
 	// The relative order of common slots (Identity, Constraints) is unchanged.
 	// A pure addition must not trigger a reorder.
-	deployed := parseInlineDoc(t, "[[SECTION:Identity]]\n[[/SECTION:Identity]]\n[[SECTION:Constraints]]\n[[/SECTION:Constraints]]\n")
-	source := parseInlineDoc(t, "[[SECTION:Identity]]\n[[/SECTION:Identity]]\n[[SECTION:ExecutionPhilosophy]]\n[[/SECTION:ExecutionPhilosophy]]\n[[SECTION:Constraints]]\n[[/SECTION:Constraints]]\n")
+	deployed := parseInlineDoc(t, "<Identity type=\"core\">\n</Identity>\n<Constraints type=\"core\">\n</Constraints>\n")
+	source := parseInlineDoc(t, "<Identity type=\"core\">\n</Identity>\n<ExecutionPhilosophy type=\"core\">\n</ExecutionPhilosophy>\n<Constraints type=\"core\">\n</Constraints>\n")
 
 	if docformat.ReorderDetected(deployed, source) {
 		t.Error("ReorderDetected: want false — source adds a section but common slots retain their relative order")
@@ -274,8 +274,8 @@ func TestReorderDetected_SourceAddsSection_CommonSlotsUnchanged_ReturnsFalse(t *
 func TestReorderDetected_SourceRemovesSection_CommonSlotsUnchanged_ReturnsFalse(t *testing.T) {
 	// Source removes ExecutionPhilosophy. Common slots (Identity, Constraints) retain
 	// their relative order. A pure removal must not trigger a reorder.
-	deployed := parseInlineDoc(t, "[[SECTION:Identity]]\n[[/SECTION:Identity]]\n[[SECTION:ExecutionPhilosophy]]\n[[/SECTION:ExecutionPhilosophy]]\n[[SECTION:Constraints]]\n[[/SECTION:Constraints]]\n")
-	source := parseInlineDoc(t, "[[SECTION:Identity]]\n[[/SECTION:Identity]]\n[[SECTION:Constraints]]\n[[/SECTION:Constraints]]\n")
+	deployed := parseInlineDoc(t, "<Identity type=\"core\">\n</Identity>\n<ExecutionPhilosophy type=\"core\">\n</ExecutionPhilosophy>\n<Constraints type=\"core\">\n</Constraints>\n")
+	source := parseInlineDoc(t, "<Identity type=\"core\">\n</Identity>\n<Constraints type=\"core\">\n</Constraints>\n")
 
 	if docformat.ReorderDetected(deployed, source) {
 		t.Error("ReorderDetected: want false — source removes a section but common slots retain their relative order")
@@ -284,8 +284,8 @@ func TestReorderDetected_SourceRemovesSection_CommonSlotsUnchanged_ReturnsFalse(
 
 func TestReorderDetected_SourceSwapsCommonSections_ReturnsTrue(t *testing.T) {
 	// Source swaps Identity and Constraints. The relative order of common slots differs.
-	deployed := parseInlineDoc(t, "[[SECTION:Identity]]\n[[/SECTION:Identity]]\n[[SECTION:Constraints]]\n[[/SECTION:Constraints]]\n")
-	source := parseInlineDoc(t, "[[SECTION:Constraints]]\n[[/SECTION:Constraints]]\n[[SECTION:Identity]]\n[[/SECTION:Identity]]\n")
+	deployed := parseInlineDoc(t, "<Identity type=\"core\">\n</Identity>\n<Constraints type=\"core\">\n</Constraints>\n")
+	source := parseInlineDoc(t, "<Constraints type=\"core\">\n</Constraints>\n<Identity type=\"core\">\n</Identity>\n")
 
 	if !docformat.ReorderDetected(deployed, source) {
 		t.Error("ReorderDetected: want true — source swaps Identity and Constraints")
@@ -302,12 +302,12 @@ func TestReorderDetected_BothDocumentsEmpty_ReturnsFalse(t *testing.T) {
 }
 
 func TestReorderDetected_TopLevelDeployedParticipatesInComparison_Swapped_ReturnsTrue(t *testing.T) {
-	// AD-2: top-level [[DEPLOYED:]] regions participate in the comparison.
-	// deployed has: [[SECTION:Identity]] then [[DEPLOYED:CommunicationProtocol]].
-	// source has:   [[DEPLOYED:CommunicationProtocol]] then [[SECTION:Identity]].
+	// AD-2: top-level deployed regions participate in the comparison.
+	// deployed has: <Identity type="core"> then <CommunicationProtocol type="managed">.
+	// source has:   <CommunicationProtocol type="managed"> then <Identity type="core">.
 	// The relative order of common slots is swapped → reorder.
-	deployed := parseInlineDoc(t, "[[SECTION:Identity]]\n[[/SECTION:Identity]]\n[[DEPLOYED:CommunicationProtocol]]\n[[/DEPLOYED:CommunicationProtocol]]\n")
-	source := parseInlineDoc(t, "[[DEPLOYED:CommunicationProtocol]]\n[[/DEPLOYED:CommunicationProtocol]]\n[[SECTION:Identity]]\n[[/SECTION:Identity]]\n")
+	deployed := parseInlineDoc(t, "<Identity type=\"core\">\n</Identity>\n<CommunicationProtocol type=\"managed\">\n</CommunicationProtocol>\n")
+	source := parseInlineDoc(t, "<CommunicationProtocol type=\"managed\">\n</CommunicationProtocol>\n<Identity type=\"core\">\n</Identity>\n")
 
 	if !docformat.ReorderDetected(deployed, source) {
 		t.Error("ReorderDetected: want true — top-level deployed region moved before the section (AD-2: deployed regions participate)")
@@ -315,11 +315,11 @@ func TestReorderDetected_TopLevelDeployedParticipatesInComparison_Swapped_Return
 }
 
 func TestReorderDetected_TopLevelDeployedAndSectionAddition_NoReorder(t *testing.T) {
-	// deployed has: [[SECTION:Identity]], [[DEPLOYED:CommunicationProtocol]].
-	// source has:   [[SECTION:Identity]], [[SECTION:NewSection]], [[DEPLOYED:CommunicationProtocol]].
+	// deployed has: <Identity type="core">, <CommunicationProtocol type="managed">.
+	// source has:   <Identity type="core">, <NewSection type="core">, <CommunicationProtocol type="managed">.
 	// NewSection is an addition; common slots remain in the same order.
-	deployed := parseInlineDoc(t, "[[SECTION:Identity]]\n[[/SECTION:Identity]]\n[[DEPLOYED:CommunicationProtocol]]\n[[/DEPLOYED:CommunicationProtocol]]\n")
-	source := parseInlineDoc(t, "[[SECTION:Identity]]\n[[/SECTION:Identity]]\n[[SECTION:NewSection]]\n[[/SECTION:NewSection]]\n[[DEPLOYED:CommunicationProtocol]]\n[[/DEPLOYED:CommunicationProtocol]]\n")
+	deployed := parseInlineDoc(t, "<Identity type=\"core\">\n</Identity>\n<CommunicationProtocol type=\"managed\">\n</CommunicationProtocol>\n")
+	source := parseInlineDoc(t, "<Identity type=\"core\">\n</Identity>\n<NewSection type=\"core\">\n</NewSection>\n<CommunicationProtocol type=\"managed\">\n</CommunicationProtocol>\n")
 
 	if docformat.ReorderDetected(deployed, source) {
 		t.Error("ReorderDetected: want false — NewSection is an addition; common slots Identity and CommunicationProtocol remain in the same order")
@@ -333,8 +333,8 @@ func TestReorderDetected_NestedDeployedRegionDoesNotParticipate(t *testing.T) {
 	// Both documents have the same top-level structure: Identity, then Constraints.
 	// The nested deployed regions inside each section are different (swapped contents),
 	// but that is irrelevant — only the top-level structural order matters.
-	const deployedSrc = "[[SECTION:Identity]]\n[[DEPLOYED:NestedA]]\n[[/DEPLOYED:NestedA]]\n[[/SECTION:Identity]]\n[[SECTION:Constraints]]\n[[DEPLOYED:NestedB]]\n[[/DEPLOYED:NestedB]]\n[[/SECTION:Constraints]]\n"
-	const sourceSrc = "[[SECTION:Identity]]\n[[DEPLOYED:NestedB]]\n[[/DEPLOYED:NestedB]]\n[[/SECTION:Identity]]\n[[SECTION:Constraints]]\n[[DEPLOYED:NestedA]]\n[[/DEPLOYED:NestedA]]\n[[/SECTION:Constraints]]\n"
+	const deployedSrc = "<Identity type=\"core\">\n<NestedA type=\"managed\">\n</NestedA>\n</Identity>\n<Constraints type=\"core\">\n<NestedB type=\"managed\">\n</NestedB>\n</Constraints>\n"
+	const sourceSrc = "<Identity type=\"core\">\n<NestedB type=\"managed\">\n</NestedB>\n</Identity>\n<Constraints type=\"core\">\n<NestedA type=\"managed\">\n</NestedA>\n</Constraints>\n"
 
 	deployed := parseInlineDoc(t, deployedSrc)
 	source := parseInlineDoc(t, sourceSrc)

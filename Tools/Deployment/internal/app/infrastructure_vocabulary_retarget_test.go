@@ -58,9 +58,9 @@ func infraAgentBytes() []byte {
 		"- on_stage_complete\n" +
 		"on_failure: notify\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the CheckpointAgent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // foreignFieldAgentBytes returns bytes of an agent file that carries a genuinely foreign
@@ -78,9 +78,9 @@ func foreignFieldAgentBytes() []byte {
 		"role: worker\n" +
 		"unknown_harness_field: some-value\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the ForeignFieldAgent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // infraAgentWithForeignFieldBytes returns bytes of an infrastructure agent that carries
@@ -101,9 +101,9 @@ func infraAgentWithForeignFieldBytes() []byte {
 		"on_failure: notify\n" +
 		"unknown_harness_field: intruding-value\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the MixedInfraAgent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // ---------------------------------------------------------------------------

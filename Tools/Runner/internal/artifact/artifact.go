@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"mosaic-common/docformat"
 	"mosaic-common/mdtable"
 	"mosaic-run/internal/domain"
 )
@@ -60,8 +61,7 @@ func IsRunScopedArtifactPath(path string) bool {
 // and returns the in-memory ArtifactState.
 //
 // Returns *domain.RefusalError if the content is not in the canonical format
-// (missing type field, missing required sections, truncated file, or old template
-// format without [[SECTION:...]] boundary tags).
+// (missing type field, missing required sections, or a truncated file).
 //
 // Empty-value convention: cells that contain "-" in the execution log Stage or
 // Checkpoint columns are returned as "" in the ArtifactState. No other component
@@ -94,17 +94,21 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 	}
 
 	// Check for required sections in raw bytes (before full parse).
-	if !bytes.Contains(data, []byte("[[SECTION:ExecutionLog]]")) {
-		return refuse("missing [[SECTION:ExecutionLog]] section")
+	execLogOpenTag, _ := docformat.RenderOpenTagLine(docformat.NodeSection, "ExecutionLog", "")
+	execLogCloseTag, _ := docformat.RenderCloseTagLine("ExecutionLog")
+	artifactsOpenTag, _ := docformat.RenderOpenTagLine(docformat.NodeSection, "Artifacts", "")
+	artifactsCloseTag, _ := docformat.RenderCloseTagLine("Artifacts")
+	if !bytes.Contains(data, execLogOpenTag) {
+		return refuse(`missing <ExecutionLog type="core"> section`)
 	}
-	if !bytes.Contains(data, []byte("[[/SECTION:ExecutionLog]]")) {
-		return refuse("file appears truncated: missing [[/SECTION:ExecutionLog]] closing tag")
+	if !bytes.Contains(data, execLogCloseTag) {
+		return refuse("file appears truncated: missing </ExecutionLog> closing tag")
 	}
-	if !bytes.Contains(data, []byte("[[SECTION:Artifacts]]")) {
-		return refuse("missing [[SECTION:Artifacts]] section")
+	if !bytes.Contains(data, artifactsOpenTag) {
+		return refuse(`missing <Artifacts type="core"> section`)
 	}
-	if !bytes.Contains(data, []byte("[[/SECTION:Artifacts]]")) {
-		return refuse("file appears truncated: missing [[/SECTION:Artifacts]] closing tag")
+	if !bytes.Contains(data, artifactsCloseTag) {
+		return refuse("file appears truncated: missing </Artifacts> closing tag")
 	}
 
 	// Build ArtifactState from frontmatter.
@@ -180,7 +184,7 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 
 	execContent, ok := extractSectionContent(body, "ExecutionLog")
 	if !ok {
-		return refuse("[[SECTION:ExecutionLog]] content could not be extracted")
+		return refuse("ExecutionLog section content could not be extracted")
 	}
 	logEntries, err := parseExecutionLog(execContent)
 	if err != nil {
@@ -190,7 +194,7 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 
 	artsContent, ok := extractSectionContent(body, "Artifacts")
 	if !ok {
-		return refuse("[[SECTION:Artifacts]] content could not be extracted")
+		return refuse("Artifacts section content could not be extracted")
 	}
 	regEntries, err := parseArtifactRegistry(artsContent)
 	if err != nil {
@@ -265,23 +269,47 @@ func Render(state domain.ArtifactState) ([]byte, error) {
 	buf.WriteString("\n")
 
 	// ExecutionLog section
-	buf.WriteString("[[SECTION:ExecutionLog]]\n")
+	execLogOpen, err := docformat.RenderOpenTagLine(docformat.NodeSection, "ExecutionLog", "")
+	if err != nil {
+		return nil, fmt.Errorf("artifact: render ExecutionLog open tag: %w", err)
+	}
+	execLogClose, err := docformat.RenderCloseTagLine("ExecutionLog")
+	if err != nil {
+		return nil, fmt.Errorf("artifact: render ExecutionLog close tag: %w", err)
+	}
+	buf.Write(execLogOpen)
 	buf.Write(renderExecutionLog(state.ExecutionLog))
-	buf.WriteString("[[/SECTION:ExecutionLog]]\n")
+	buf.Write(execLogClose)
 
 	buf.WriteString("\n")
 
 	// Artifacts section
-	buf.WriteString("[[SECTION:Artifacts]]\n")
+	artifactsOpen, err := docformat.RenderOpenTagLine(docformat.NodeSection, "Artifacts", "")
+	if err != nil {
+		return nil, fmt.Errorf("artifact: render Artifacts open tag: %w", err)
+	}
+	artifactsClose, err := docformat.RenderCloseTagLine("Artifacts")
+	if err != nil {
+		return nil, fmt.Errorf("artifact: render Artifacts close tag: %w", err)
+	}
+	buf.Write(artifactsOpen)
 	buf.Write(renderArtifactRegistry(state.ArtifactRegistry))
-	buf.WriteString("[[/SECTION:Artifacts]]\n")
+	buf.Write(artifactsClose)
 
 	buf.WriteString("\n")
 
 	// WorkflowNotes section
-	buf.WriteString("[[SECTION:WorkflowNotes]]\n")
+	workflowNotesOpen, err := docformat.RenderOpenTagLine(docformat.NodeSection, "WorkflowNotes", "")
+	if err != nil {
+		return nil, fmt.Errorf("artifact: render WorkflowNotes open tag: %w", err)
+	}
+	workflowNotesClose, err := docformat.RenderCloseTagLine("WorkflowNotes")
+	if err != nil {
+		return nil, fmt.Errorf("artifact: render WorkflowNotes close tag: %w", err)
+	}
+	buf.Write(workflowNotesOpen)
 	buf.Write(renderWorkflowNotes(state.WorkflowNotes))
-	buf.WriteString("[[/SECTION:WorkflowNotes]]\n")
+	buf.Write(workflowNotesClose)
 
 	return buf.Bytes(), nil
 }
@@ -668,11 +696,17 @@ func parseYAMLScalar(raw string) string {
 	return raw
 }
 
-// extractSectionContent extracts the bytes between [[SECTION:name]] and [[/SECTION:name]].
+// extractSectionContent extracts the bytes between a section's open and close tags.
 // Returns (content, true) on success, (nil, false) if the section is not found.
 func extractSectionContent(body []byte, sectionName string) ([]byte, bool) {
-	openTag := []byte("[[SECTION:" + sectionName + "]]\n")
-	closeTag := []byte("[[/SECTION:" + sectionName + "]]")
+	openTag, err := docformat.RenderOpenTagLine(docformat.NodeSection, sectionName, "")
+	if err != nil {
+		return nil, false
+	}
+	closeTag, err := docformat.RenderCloseTagLine(sectionName)
+	if err != nil {
+		return nil, false
+	}
 
 	openIdx := bytes.Index(body, openTag)
 	if openIdx < 0 {

@@ -5,60 +5,60 @@ name: test-agent
 description: Valid file with 6 sections, one top-level DEPLOYED slot, and only one user-owned injection
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 
 You are the TestAgent agent in a multi-agent orchestration system.
 
 **Goal:** Test that not all injections are required.
 
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Only this injection is present in this file.
-[[/INJECTION:IdentityExtension]]
+</IdentityExtension>
 
-[[/SECTION:Identity]]
+</Identity>
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+</CommunicationProtocol>
 
 ---
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 Capabilities content without any injection.
 
-[[/SECTION:Capabilities]]
+</Capabilities>
 ---
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Constraint content without any injection.
 
-[[/SECTION:Constraints]]
+</Constraints>
 ---
 
-[[SECTION:ErrorHandling]]
+<ErrorHandling type="core">
 ## Error Handling
 
 Error handling content without any injection.
 
-[[/SECTION:ErrorHandling]]
+</ErrorHandling>
 ---
 
-[[SECTION:OutputFormat]]
+<OutputFormat type="core">
 ## Output Format
 
 Output format content without any injection.
 
-[[/SECTION:OutputFormat]]
+</OutputFormat>
 ---
 
-[[SECTION:ExecutionPhilosophy]]
+<ExecutionPhilosophy type="core">
 ## Execution Philosophy
 
 Execution philosophy content without any injection.
 
-[[/SECTION:ExecutionPhilosophy]]
+</ExecutionPhilosophy>

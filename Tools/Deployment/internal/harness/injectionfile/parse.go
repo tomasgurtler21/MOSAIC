@@ -12,7 +12,7 @@ import (
 	"mosaic-common/mosaic"
 )
 
-// ParseInjections extracts all [[INJECTION:Name]] regions from a MOSAIC-formatted
+// ParseInjections extracts all <Name type="project"> regions from a MOSAIC-formatted
 // Markdown file (such as HarnessInjections.md) and returns a map from canonical
 // injection name to its content string.
 //

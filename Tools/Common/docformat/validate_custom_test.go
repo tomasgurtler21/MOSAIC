@@ -58,26 +58,26 @@ import (
 // Inline document fixtures
 // ---------------------------------------------------------------------------
 
-// customInSourceDoc is a source document with a top-level [[CUSTOM:CustomConstraints]]
+// customInSourceDoc is a source document with a top-level <CustomConstraints type="custom">
 // region. Custom regions must not appear in source files.
 const customInSourceDoc = `---
 name: test-agent
 ---
 
-[[CUSTOM:CustomConstraints]]
+<CustomConstraints type="custom">
 Project-specific constraint text.
-[[/CUSTOM:CustomConstraints]]
+</CustomConstraints>
 `
 
-// customInDeployedDoc is a deployed document with a [[CUSTOM:CustomConstraints]] region.
+// customInDeployedDoc is a deployed document with a <CustomConstraints type="custom"> region.
 // Custom regions are valid in deployed documents.
 const customInDeployedDoc = `---
 name: test-agent
 ---
 
-[[CUSTOM:CustomConstraints]]
+<CustomConstraints type="custom">
 Project-specific constraint text.
-[[/CUSTOM:CustomConstraints]]
+</CustomConstraints>
 `
 
 // arbitraryCustomNameDeployedDoc is a deployed document with a [[CUSTOM:]] region whose
@@ -86,9 +86,9 @@ const arbitraryCustomNameDeployedDoc = `---
 name: test-agent
 ---
 
-[[CUSTOM:AnArbitraryProjectSpecificName]]
+<AnArbitraryProjectSpecificName type="custom">
 Content invented entirely by the project.
-[[/CUSTOM:AnArbitraryProjectSpecificName]]
+</AnArbitraryProjectSpecificName>
 `
 
 // sourceDocDeployedHoldingEmptyInjection is a source document whose [[DEPLOYED:]] region
@@ -98,10 +98,10 @@ const sourceDocDeployedHoldingEmptyInjection = `---
 name: test-agent
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+<IdentityExtension type="project">
+</IdentityExtension>
+</CommunicationProtocol>
 `
 
 // sourceDocDeployedHoldingEmptyCustom is a source document whose [[DEPLOYED:]] region
@@ -111,10 +111,10 @@ const sourceDocDeployedHoldingEmptyCustom = `---
 name: test-agent
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
-[[CUSTOM:HarnessCustom]]
-[[/CUSTOM:HarnessCustom]]
-[[/DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
+<HarnessCustom type="custom">
+</HarnessCustom>
+</CommunicationProtocol>
 `
 
 // sourceDocDeployedHoldingProseAndNestedMarker is a source document whose [[DEPLOYED:]]
@@ -124,11 +124,11 @@ const sourceDocDeployedHoldingProseAndNestedMarker = `---
 name: test-agent
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 Prose that must not appear alongside a nested marker in a source deployed region.
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/DEPLOYED:CommunicationProtocol]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</CommunicationProtocol>
 `
 
 // deployedDocWithNestedCustomAndInjection is a deployed document whose [[DEPLOYED:]] region
@@ -138,15 +138,15 @@ const deployedDocWithNestedCustomAndInjection = `---
 name: test-agent
 ---
 
-[[DEPLOYED:CommunicationProtocol]]
+<CommunicationProtocol type="managed">
 Canonical protocol content.
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Injected content.
-[[/INJECTION:IdentityExtension]]
-[[CUSTOM:HarnessCustom]]
+</IdentityExtension>
+<HarnessCustom type="custom">
 Project-added content inside deployed.
-[[/CUSTOM:HarnessCustom]]
-[[/DEPLOYED:CommunicationProtocol]]
+</HarnessCustom>
+</CommunicationProtocol>
 `
 
 // ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ func TestValidate_CustomRegionInSource_ReportsCustomRegionInSourceIssue(t *testi
 	// Assert
 	if !hasIssueWithCode(issues, "custom-region-in-source") {
 		t.Errorf(
-			"expected a \"custom-region-in-source\" issue for [[CUSTOM:CustomConstraints]] in a source document, got issues: %v",
+			"expected a \"custom-region-in-source\" issue for <CustomConstraints type=\"custom\"> in a source document, got issues: %v",
 			issues,
 		)
 	}
@@ -252,7 +252,7 @@ func TestValidate_CustomRegionInDeployedDoc_NoCustomRegionInSourceIssue(t *testi
 
 	if hasIssueWithCode(issues, "custom-region-in-source") {
 		t.Errorf(
-			"unexpected \"custom-region-in-source\" issue for [[CUSTOM:CustomConstraints]] in a deployed document, got issues: %v",
+			"unexpected \"custom-region-in-source\" issue for <CustomConstraints type=\"custom\"> in a deployed document, got issues: %v",
 			issues,
 		)
 	}

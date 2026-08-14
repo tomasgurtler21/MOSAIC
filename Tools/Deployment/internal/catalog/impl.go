@@ -98,7 +98,7 @@ func (c *catalogImpl) WorkflowCategories() []domain.WorkflowCategory { return c.
 // Tiers returns exactly the tier strings present in source, unnormalised and unvalidated.
 func (c *catalogImpl) Tiers() []domain.TierInfo { return c.tiers }
 
-// WorkflowSection extracts the [[SECTION:Workflow:{id}]] block byte-identically.
+// WorkflowSection extracts the <Workflow type="core" name="{id}"> block byte-identically.
 func (c *catalogImpl) WorkflowSection(id string) ([]byte, error) {
 	w, ok := c.wfIdx[id]
 	if !ok {
@@ -115,7 +115,7 @@ func (c *catalogImpl) WorkflowSection(id string) ([]byte, error) {
 	sectionName := "Workflow:" + id
 	node, ok := doc.Body().Section(sectionName)
 	if !ok {
-		return nil, fmt.Errorf("catalog: workflow %q has no [[SECTION:%s]] block in source file", id, sectionName)
+		return nil, fmt.Errorf("catalog: workflow %q has no <Workflow type=\"core\" name=%q> block in source file", id, id)
 	}
 	return node.Bytes(), nil
 }

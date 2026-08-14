@@ -4,24 +4,23 @@ package orchfile_test
 //
 // Coverage:
 //   - EnumerateWorkflows finds one region in a hand-assembled file with a bare
-//     top-level [[SECTION:Workflow:{id}]] tag (KC-11 first-class input).
+//     top-level <Workflow type="core" name="{id}" version="{ver}"> tag.
 //   - The returned region carries the correct identifier extracted from the
-//     section name after the "Workflow:" prefix.
-//   - The returned region carries the version string from the
-//     <!-- workflow-version: {version} --> comment inside the section.
+//     tag's name attribute after the "Workflow:" compound-name reassembly.
+//   - The returned region carries the version string from the tag's version attribute.
 //   - The returned region Content contains the bytes between the boundary tags
 //     but does not include the boundary tag lines themselves.
 //   - EnumerateWorkflows finds a workflow nested at depth inside
-//     [[INJECTION:AvailableWorkflows]] inside [[SECTION:Identity]], the
+//     <AvailableWorkflows type="project"> inside <Identity type="core">, the
 //     structure of a deployed orchestrator agent file.
 //   - EnumerateWorkflows returns two regions from a file with two workflow
 //     sections, in declaration order.
 //   - Refusal: missing file → *domain.RefusalError naming the path.
 //   - Refusal: no workflow regions → *domain.RefusalError.
-//   - Refusal: version comment absent → *domain.RefusalError naming the region.
+//   - Refusal: version attribute absent → *domain.RefusalError naming the region.
 //   - Refusal: duplicate workflow identifiers → *domain.RefusalError naming
 //     the duplicate identifier.
-//   - Refusal: empty identifier (section named "Workflow:" with empty id part)
+//   - Refusal: empty identifier (tag with empty name attribute value)
 //     → *domain.RefusalError.
 //   - GetWorkflow returns the correct region for a known identifier.
 //   - GetWorkflow region Content is accessible.
@@ -71,8 +70,8 @@ func TestEnumerateWorkflows_BareFile_ReturnsOneRegion(t *testing.T) {
 }
 
 func TestEnumerateWorkflows_BareFile_RegionID_MatchesSectionSuffix(t *testing.T) {
-	// The identifier must be the part of the section name after "Workflow:".
-	// [[SECTION:Workflow:bare-workflow]] → ID = "bare-workflow".
+	// The identifier must be the name attribute of the Workflow tag.
+	// <Workflow type="core" name="bare-workflow" version="1.0"> → ID = "bare-workflow".
 	regions, err := orchfile.EnumerateWorkflows(orchfileFixture("bare-single.md"))
 	if err != nil {
 		t.Fatalf("EnumerateWorkflows: %v", err)
@@ -84,8 +83,8 @@ func TestEnumerateWorkflows_BareFile_RegionID_MatchesSectionSuffix(t *testing.T)
 	}
 }
 
-func TestEnumerateWorkflows_BareFile_RegionVersion_ExtractedFromComment(t *testing.T) {
-	// Version must be extracted from <!-- workflow-version: 1.0 --> inside the region.
+func TestEnumerateWorkflows_BareFile_RegionVersion_ReadFromTag(t *testing.T) {
+	// Version must be read from the version attribute on the opening tag.
 	regions, err := orchfile.EnumerateWorkflows(orchfileFixture("bare-single.md"))
 	if err != nil {
 		t.Fatalf("EnumerateWorkflows: %v", err)
@@ -99,31 +98,18 @@ func TestEnumerateWorkflows_BareFile_RegionVersion_ExtractedFromComment(t *testi
 
 func TestEnumerateWorkflows_BareFile_Content_ExcludesBoundaryTagLines(t *testing.T) {
 	// Content must be the raw bytes between the boundary tags, not including
-	// the [[SECTION:...]] and [[/SECTION:...]] lines themselves.
+	// the opening <Workflow ...> and closing </Workflow> lines themselves.
 	regions, err := orchfile.EnumerateWorkflows(orchfileFixture("bare-single.md"))
 	if err != nil {
 		t.Fatalf("EnumerateWorkflows: %v", err)
 	}
 
 	content := regions[0].Content
-	if bytes.Contains(content, []byte("[[SECTION:Workflow:bare-workflow]]")) {
+	if bytes.Contains(content, []byte("<Workflow type=\"core\" name=\"bare-workflow\"")) {
 		t.Error("Content must not contain the opening boundary tag line")
 	}
-	if bytes.Contains(content, []byte("[[/SECTION:Workflow:bare-workflow]]")) {
+	if bytes.Contains(content, []byte("</Workflow>")) {
 		t.Error("Content must not contain the closing boundary tag line")
-	}
-}
-
-func TestEnumerateWorkflows_BareFile_Content_ContainsVersionComment(t *testing.T) {
-	// The version comment line must be present in the content bytes so that
-	// the workflow parser and callers can access it.
-	regions, err := orchfile.EnumerateWorkflows(orchfileFixture("bare-single.md"))
-	if err != nil {
-		t.Fatalf("EnumerateWorkflows: %v", err)
-	}
-
-	if !bytes.Contains(regions[0].Content, []byte("workflow-version")) {
-		t.Error("Content must include the version comment line")
 	}
 }
 
@@ -131,7 +117,7 @@ func TestEnumerateWorkflows_BareFile_Content_ContainsVersionComment(t *testing.T
 
 func TestEnumerateWorkflows_DeployedFile_FindsWorkflow_NestedInInjection(t *testing.T) {
 	// A deployed orchestrator agent embeds workflow sections inside
-	// [[INJECTION:AvailableWorkflows]] inside [[SECTION:Identity]].
+	// <AvailableWorkflows type="project"> inside <Identity type="core">.
 	// EnumerateWorkflows must find the workflow at any nesting depth.
 	regions, err := orchfile.EnumerateWorkflows(orchfileFixture("deployed.md"))
 
@@ -256,7 +242,7 @@ func TestEnumerateWorkflows_MissingFile_RefusalError_ResourceNamesFile(t *testin
 }
 
 func TestEnumerateWorkflows_NoWorkflowRegions_ReturnsRefusalError(t *testing.T) {
-	// A file that parses correctly but has no [[SECTION:Workflow:{id}]] regions
+	// A file that parses correctly but has no <Workflow type="core" ...> regions
 	// must be refused.
 	_, err := orchfile.EnumerateWorkflows(orchfileFixture("no-workflows.md"))
 
@@ -266,21 +252,21 @@ func TestEnumerateWorkflows_NoWorkflowRegions_ReturnsRefusalError(t *testing.T) 
 	asRefusalError(t, err)
 }
 
-func TestEnumerateWorkflows_MissingVersionComment_ReturnsRefusalError(t *testing.T) {
-	// A workflow section without a <!-- workflow-version: ... --> comment
-	// immediately inside it must be refused.
+func TestEnumerateWorkflows_MissingVersionAttribute_ReturnsRefusalError(t *testing.T) {
+	// A workflow region whose opening tag carries no version attribute must be
+	// refused.
 	_, err := orchfile.EnumerateWorkflows(orchfileFixture("missing-version.md"))
 
 	if err == nil {
-		t.Fatal("EnumerateWorkflows must return an error when version comment is absent")
+		t.Fatal("EnumerateWorkflows must return an error when version attribute is absent")
 	}
 	asRefusalError(t, err)
 }
 
-func TestEnumerateWorkflows_MissingVersionComment_RefusalError_NamesRegion(t *testing.T) {
+func TestEnumerateWorkflows_MissingVersionAttribute_RefusalError_NamesRegion(t *testing.T) {
 	// The refusal error must name the specific workflow region whose version
-	// comment is missing so the user can locate and fix it.
-	// missing-version.md contains [[SECTION:Workflow:no-version-workflow]].
+	// attribute is missing so the user can locate and fix it.
+	// missing-version.md contains <Workflow type="core" name="no-version-workflow">.
 	_, err := orchfile.EnumerateWorkflows(orchfileFixture("missing-version.md"))
 
 	re := asRefusalError(t, err)
@@ -303,7 +289,7 @@ func TestEnumerateWorkflows_DuplicateIdentifiers_ReturnsRefusalError(t *testing.
 func TestEnumerateWorkflows_DuplicateIdentifiers_RefusalError_NamesDuplicate(t *testing.T) {
 	// The error message or Resource must contain the specific duplicate identifier
 	// so the user can locate it without reading the full file.
-	// duplicate-ids.md contains two [[SECTION:Workflow:shared-id]] sections.
+	// duplicate-ids.md contains two <Workflow type="core" name="shared-id"> tags.
 	_, err := orchfile.EnumerateWorkflows(orchfileFixture("duplicate-ids.md"))
 
 	re := asRefusalError(t, err)
@@ -313,8 +299,8 @@ func TestEnumerateWorkflows_DuplicateIdentifiers_RefusalError_NamesDuplicate(t *
 }
 
 func TestEnumerateWorkflows_EmptyIdentifier_ReturnsRefusalError(t *testing.T) {
-	// A [[SECTION:Workflow:]] tag has an empty id part (everything after the
-	// "Workflow:" prefix is empty). This is an unparseable identifier.
+	// A <Workflow type="core" name="" ...> tag has an empty name attribute.
+	// This is an unparseable identifier.
 	_, err := orchfile.EnumerateWorkflows(orchfileFixture("empty-id.md"))
 
 	if err == nil {

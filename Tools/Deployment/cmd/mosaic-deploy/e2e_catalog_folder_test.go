@@ -80,9 +80,9 @@ blocks:
     specified_in: Development/Designs/AgentTemplateArchitecture.md
 ---
 
-[[SECTION:ClosingProcedure:Subagent]]
+<ClosingProcedure type="core" name="Subagent">
 Follow the closing procedure.
-[[/SECTION:ClosingProcedure:Subagent]]
+</ClosingProcedure>
 `
 
 // writeE2EAgentToDefaultCatalogue writes a minimal worker agent into the default

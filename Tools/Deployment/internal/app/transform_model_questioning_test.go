@@ -55,17 +55,17 @@ func matchingAgentBytesWithModel(model string) []byte {
 			"injections_version: \"3.0.0\"\n" +
 			"src_model: " + model + "\n" +
 			"---\n" +
-			"[[SECTION:Identity]]\n" +
+			"<Identity type=\"core\">\n" +
 			"You are an agent with src_model " + model + ".\n" +
-			"[[/SECTION:Identity]]\n")
+			"</Identity>\n")
 	}
 	return []byte("---\n" +
 		"transform_version: \"2.1.0\"\n" +
 		"injections_version: \"3.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are an agent with no model set.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // ---------------------------------------------------------------------------

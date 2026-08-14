@@ -4,18 +4,17 @@ package injectionfile_test
 //
 // These tests specify the behaviour of the run-time harness content parsing layer that
 // replaces the old ParseInjections / ParseInjectionsWithVersion functions. Harness content
-// files use [[DEPLOYED:Name]] markers after the Stage 8 migration; this parser reads those
-// markers.
+// files use <Name type="managed"> regions; this parser reads those regions.
 //
 // Coverage:
 //
 //   ParseDeployedRegions:
-//   - A well-formed file with multiple [[DEPLOYED:Name]] regions returns a map with all
+//   - A well-formed file with multiple <Name type="managed"> regions returns a map with all
 //     names as keys and their trimmed content as values.
 //   - A file with no deployed regions returns a non-nil empty map with no error.
 //   - A deployed region with empty content produces an entry with empty-string value,
 //     distinguishable from an absent region (no key).
-//   - [[INJECTION:]] and [[SECTION:]] regions are ignored — only DEPLOYED regions appear.
+//   - <Name type="project"> and <Name type="core"> regions are ignored — only managed regions appear.
 //   - An empty byte slice returns a non-nil empty map with no error.
 //   - A malformed file (unclosed frontmatter) returns a non-nil error.
 //
@@ -34,6 +33,9 @@ package injectionfile_test
 //   - An unparseable HarnessInjectionsOrchestrator.md returns a non-nil error naming the file.
 //   - OrchestratorVersion in the returned HarnessContent matches the `version` in
 //     HarnessInjectionsOrchestrator.md's frontmatter.
+//
+// Note: all fixture strings use the new XML tag syntax (<Name type="managed">, </Name>)
+// that the docformat parser recognises after the region-marker syntax migration.
 
 import (
 	"os"
@@ -45,36 +47,36 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Fixtures: harness content files using [[DEPLOYED:Name]] markers
+// Fixtures: harness content files using <Name type="managed"> regions
 // ---------------------------------------------------------------------------
 
-// deployedMultiRegionFixture is a well-formed HarnessInjections.md with three DEPLOYED regions.
+// deployedMultiRegionFixture is a well-formed HarnessInjections.md with three managed regions.
 const deployedMultiRegionFixture = `---
 version: "1.0.0"
 ---
 # Harness Injections
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Do not invoke external APIs without explicit permission.
 Check tool availability before each use.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[DEPLOYED:LanguagePatterns]]
+<LanguagePatterns type="managed">
 Use idiomatic Go patterns.
 Prefer table-driven tests.
-[[/DEPLOYED:LanguagePatterns]]
+</LanguagePatterns>
 
-[[DEPLOYED:CustomConstraints]]
+<CustomConstraints type="managed">
 Project-specific rules apply.
-[[/DEPLOYED:CustomConstraints]]
+</CustomConstraints>
 `
 
-// deployedEmptyRegionFixture has one DEPLOYED region with no content between its tags.
+// deployedEmptyRegionFixture has one managed region with no content between its tags.
 // Used to verify that "declared but empty" produces a map entry with value "".
 const deployedEmptyRegionFixture = `# Harness Injections
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 `
 
 // deployedNoRegionsFixture is a valid Markdown file with no DEPLOYED regions at all.
@@ -83,53 +85,53 @@ const deployedNoRegionsFixture = `# Harness Injections
 This harness has no content regions.
 `
 
-// deployedMixedMarkersFixture has all three marker kinds. Only DEPLOYED regions should appear
+// deployedMixedMarkersFixture has all three region kinds. Only managed regions should appear
 // in the result.
-const deployedMixedMarkersFixture = `[[SECTION:Identity]]
+const deployedMixedMarkersFixture = `<Identity type="core">
 Identity content here.
-[[INJECTION:IdentityExtension]]
+<IdentityExtension type="project">
 Project-authored identity content.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Harness constraint from DEPLOYED marker.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[DEPLOYED:LanguagePatterns]]
+<LanguagePatterns type="managed">
 Language patterns from DEPLOYED marker.
-[[/DEPLOYED:LanguagePatterns]]
+</LanguagePatterns>
 `
 
-// deployedWithVersionFixture has frontmatter with a version key and two DEPLOYED regions.
+// deployedWithVersionFixture has frontmatter with a version key and two managed regions.
 const deployedWithVersionFixture = `---
 version: "2.3.1"
 harness: test-harness
 ---
 # Harness Injections
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Some constraint.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `
 
-// deployedNoFrontmatterFixture has DEPLOYED regions but no frontmatter at all.
+// deployedNoFrontmatterFixture has managed regions but no frontmatter at all.
 const deployedNoFrontmatterFixture = `# Harness Injections
 
-[[DEPLOYED:LanguagePatterns]]
+<LanguagePatterns type="managed">
 Some language patterns.
-[[/DEPLOYED:LanguagePatterns]]
+</LanguagePatterns>
 `
 
-// deployedFrontmatterNoVersionFixture has frontmatter but no `version` key.
+// deployedFrontmatterNoVersionFixture has frontmatter but no `version` key; uses a managed region.
 const deployedFrontmatterNoVersionFixture = `---
 harness: no-version-harness
 ---
 # Harness Injections
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Some constraint.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `
 
 // malformedUnclosedFrontmatter causes docformat.Parse to return an error.
@@ -266,7 +268,7 @@ func TestParseDeployedRegions_EmptyContentRegion_AbsentRegionHasNoKey(t *testing
 // ---------------------------------------------------------------------------
 
 // TestParseDeployedRegions_MixedMarkers_OnlyDeployedRegionsReturned verifies that
-// [[INJECTION:]] and [[SECTION:]] regions are silently ignored.
+// project-injection and core-section regions are silently ignored.
 func TestParseDeployedRegions_MixedMarkers_OnlyDeployedRegionsReturned(t *testing.T) {
 	result, err := injectionfile.ParseDeployedRegions([]byte(deployedMixedMarkersFixture))
 	if err != nil {
@@ -282,12 +284,12 @@ func TestParseDeployedRegions_MixedMarkers_OnlyDeployedRegionsReturned(t *testin
 	if _, ok := result["LanguagePatterns"]; !ok {
 		t.Error("map is missing LanguagePatterns (a DEPLOYED region)")
 	}
-	// INJECTION and SECTION regions must NOT appear.
+	// project-injection and core-section regions must NOT appear.
 	if _, ok := result["IdentityExtension"]; ok {
-		t.Error("map must not contain IdentityExtension (it is an INJECTION region, not DEPLOYED)")
+		t.Error("map must not contain IdentityExtension (it is a project-injection region, not managed)")
 	}
 	if _, ok := result["Identity"]; ok {
-		t.Error("map must not contain Identity (it is a SECTION region, not DEPLOYED)")
+		t.Error("map must not contain Identity (it is a core-section region, not managed)")
 	}
 }
 
@@ -332,39 +334,41 @@ func TestParseDeployedRegions_MalformedFrontmatter_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestParseDeployedRegions_UnclosedRegion_ReturnsError verifies that a [[DEPLOYED:Name]]
-// region that is opened but never closed is treated as malformed by ParseDeployedRegions.
+// TestParseDeployedRegions_UnclosedRegion_ReturnsError verifies that a managed region
+// that is opened but never closed is treated as malformed by ParseDeployedRegions.
 // This pins the public API surface that built-in harnesses depend on, independent of whether
 // the underlying docformat parser also rejects unclosed regions in its own suite.
+// The fixture uses the new XML tag syntax: an open tag with no matching close tag.
 func TestParseDeployedRegions_UnclosedRegion_ReturnsError(t *testing.T) {
 	const src = `# Harness Injections
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Content without a closing tag.
 `
 	_, err := injectionfile.ParseDeployedRegions([]byte(src))
 	if err == nil {
-		t.Error("expected non-nil error for [[DEPLOYED:]] region opened but never closed, got nil")
+		t.Error("expected non-nil error for managed region opened but never closed, got nil")
 	}
 }
 
-// TestParseDeployedRegions_DuplicateRegionName_ReturnsError verifies that two [[DEPLOYED:]]
+// TestParseDeployedRegions_DuplicateRegionName_ReturnsError verifies that two managed
 // regions with the same name in a single file are treated as malformed. The design states
 // "Each boundary name appears at most once per document, across all three kinds."
+// The fixture uses the new XML tag syntax: two HarnessConstraints open tags with type="managed".
 func TestParseDeployedRegions_DuplicateRegionName_ReturnsError(t *testing.T) {
 	const src = `# Harness Injections
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 First declaration.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Second declaration with same name — duplicate.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `
 	_, err := injectionfile.ParseDeployedRegions([]byte(src))
 	if err == nil {
-		t.Error("expected non-nil error for duplicate [[DEPLOYED:HarnessConstraints]] region name, got nil; " +
+		t.Error("expected non-nil error for duplicate HarnessConstraints managed region name, got nil; " +
 			"the design requires each boundary name to appear at most once per document")
 	}
 }
@@ -468,19 +472,19 @@ func writeContentFile(t *testing.T, dir, filename string, src string) {
 // returns a populated HarnessContent.
 func TestLoadDir_BothFilesPresent_PopulatesHarnessContent(t *testing.T) {
 	dir := t.TempDir()
-	writeContentFile(t, dir, injectionfile.SharedFileName, `[[DEPLOYED:LanguagePatterns]]
+	writeContentFile(t, dir, injectionfile.SharedFileName, `<LanguagePatterns type="managed">
 Use Go idioms.
-[[/DEPLOYED:LanguagePatterns]]
+</LanguagePatterns>
 
-[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
+</HarnessConstraints>
 `)
 	writeContentFile(t, dir, injectionfile.OrchestratorFileName, `---
 version: "1.2.3"
 ---
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Orchestrator-only constraint.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `)
 
 	content, err := injectionfile.LoadDir(dir)
@@ -520,14 +524,14 @@ Orchestrator-only constraint.
 // when HarnessInjectionsOrchestrator.md has no frontmatter version, OrchestratorVersion is "".
 func TestLoadDir_SharedContent_EmptyOrchestratorVersion_WhenNoFrontmatterVersion(t *testing.T) {
 	dir := t.TempDir()
-	writeContentFile(t, dir, injectionfile.SharedFileName, `[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+	writeContentFile(t, dir, injectionfile.SharedFileName, `<HarnessConstraints type="managed">
+</HarnessConstraints>
 `)
 	writeContentFile(t, dir, injectionfile.OrchestratorFileName, `# No frontmatter, no version.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Orch content.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `)
 
 	content, err := injectionfile.LoadDir(dir)
@@ -548,9 +552,9 @@ Orch content.
 func TestLoadDir_MissingSharedFile_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	// Only write the orchestrator file; shared file is absent.
-	writeContentFile(t, dir, injectionfile.OrchestratorFileName, `[[DEPLOYED:HarnessConstraints]]
+	writeContentFile(t, dir, injectionfile.OrchestratorFileName, `<HarnessConstraints type="managed">
 Orch content.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `)
 
 	_, err := injectionfile.LoadDir(dir)
@@ -563,9 +567,9 @@ Orch content.
 // HarnessInjections.md names the missing file so the user can diagnose the problem.
 func TestLoadDir_MissingSharedFile_ErrorNamesFile(t *testing.T) {
 	dir := t.TempDir()
-	writeContentFile(t, dir, injectionfile.OrchestratorFileName, `[[DEPLOYED:HarnessConstraints]]
+	writeContentFile(t, dir, injectionfile.OrchestratorFileName, `<HarnessConstraints type="managed">
 Orch.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `)
 
 	_, err := injectionfile.LoadDir(dir)
@@ -583,8 +587,8 @@ Orch.
 func TestLoadDir_MissingOrchestratorFile_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	// Only write the shared file; orchestrator file is absent.
-	writeContentFile(t, dir, injectionfile.SharedFileName, `[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+	writeContentFile(t, dir, injectionfile.SharedFileName, `<HarnessConstraints type="managed">
+</HarnessConstraints>
 `)
 
 	_, err := injectionfile.LoadDir(dir)
@@ -597,8 +601,8 @@ func TestLoadDir_MissingOrchestratorFile_ReturnsError(t *testing.T) {
 // HarnessInjectionsOrchestrator.md names the missing file.
 func TestLoadDir_MissingOrchestratorFile_ErrorNamesFile(t *testing.T) {
 	dir := t.TempDir()
-	writeContentFile(t, dir, injectionfile.SharedFileName, `[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+	writeContentFile(t, dir, injectionfile.SharedFileName, `<HarnessConstraints type="managed">
+</HarnessConstraints>
 `)
 
 	_, err := injectionfile.LoadDir(dir)
@@ -620,9 +624,9 @@ func TestLoadDir_MissingOrchestratorFile_ErrorNamesFile(t *testing.T) {
 func TestLoadDir_UnparseableSharedFile_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	writeContentFile(t, dir, injectionfile.SharedFileName, malformedUnclosedFrontmatter)
-	writeContentFile(t, dir, injectionfile.OrchestratorFileName, `[[DEPLOYED:HarnessConstraints]]
+	writeContentFile(t, dir, injectionfile.OrchestratorFileName, `<HarnessConstraints type="managed">
 Orch.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `)
 
 	_, err := injectionfile.LoadDir(dir)
@@ -636,9 +640,9 @@ Orch.
 func TestLoadDir_UnparseableSharedFile_ErrorNamesFile(t *testing.T) {
 	dir := t.TempDir()
 	writeContentFile(t, dir, injectionfile.SharedFileName, malformedUnclosedFrontmatter)
-	writeContentFile(t, dir, injectionfile.OrchestratorFileName, `[[DEPLOYED:HarnessConstraints]]
+	writeContentFile(t, dir, injectionfile.OrchestratorFileName, `<HarnessConstraints type="managed">
 Orch.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `)
 
 	_, err := injectionfile.LoadDir(dir)
@@ -655,8 +659,8 @@ Orch.
 // HarnessInjectionsOrchestrator.md causes LoadDir to return a non-nil error.
 func TestLoadDir_UnparseableOrchestratorFile_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
-	writeContentFile(t, dir, injectionfile.SharedFileName, `[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+	writeContentFile(t, dir, injectionfile.SharedFileName, `<HarnessConstraints type="managed">
+</HarnessConstraints>
 `)
 	writeContentFile(t, dir, injectionfile.OrchestratorFileName, malformedUnclosedFrontmatter)
 
@@ -670,8 +674,8 @@ func TestLoadDir_UnparseableOrchestratorFile_ReturnsError(t *testing.T) {
 // unparseable HarnessInjectionsOrchestrator.md names the file.
 func TestLoadDir_UnparseableOrchestratorFile_ErrorNamesFile(t *testing.T) {
 	dir := t.TempDir()
-	writeContentFile(t, dir, injectionfile.SharedFileName, `[[DEPLOYED:HarnessConstraints]]
-[[/DEPLOYED:HarnessConstraints]]
+	writeContentFile(t, dir, injectionfile.SharedFileName, `<HarnessConstraints type="managed">
+</HarnessConstraints>
 `)
 	writeContentFile(t, dir, injectionfile.OrchestratorFileName, malformedUnclosedFrontmatter)
 
@@ -712,25 +716,25 @@ func crlfify(s string) string {
 // DEPLOYED region, stored with LF endings. crlfify produces the Windows variant.
 const lfMultiLineRegionFixture = `# Harness Injections
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Do not invoke external APIs without explicit permission.
 Check tool availability before each use.
 Prefer read-only operations when write access is not required.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `
 
 // lfMultipleRegionsFixture has two multi-line DEPLOYED regions.
 const lfMultipleRegionsFixture = `# Harness Injections
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Constraint line one.
 Constraint line two.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[DEPLOYED:LanguagePatterns]]
+<LanguagePatterns type="managed">
 Use idiomatic Go patterns.
 Prefer table-driven tests over repeated test functions.
-[[/DEPLOYED:LanguagePatterns]]
+</LanguagePatterns>
 `
 
 // lfWithVersionAndRegionFixture has frontmatter with a version and a multi-line region.
@@ -739,10 +743,10 @@ version: "4.0.0"
 ---
 # Harness Injections
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 First constraint.
 Second constraint.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `
 
 // TestParseDeployedRegions_CRLF_MultiLineContent_MatchesLF verifies that a harness content
@@ -917,25 +921,25 @@ func TestParseDeployedRegionsWithVersion_CRLF_VersionAndRegionsMatchLF(t *testin
 func TestLoadDir_CRLF_StoredFiles_MatchLFStoredFiles(t *testing.T) {
 	const sharedLF = `# Harness Injections
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Do not invoke external APIs without explicit permission.
 Check tool availability before each use.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 
-[[DEPLOYED:LanguagePatterns]]
+<LanguagePatterns type="managed">
 Use idiomatic Go patterns.
 Prefer table-driven tests.
-[[/DEPLOYED:LanguagePatterns]]
+</LanguagePatterns>
 `
 	const orchLF = `---
 version: "2.0.0"
 ---
 # Harness Injections (Orchestrator)
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Orchestrator constraint line one.
 Orchestrator constraint line two.
-[[/DEPLOYED:HarnessConstraints]]
+</HarnessConstraints>
 `
 
 	// Write LF versions.

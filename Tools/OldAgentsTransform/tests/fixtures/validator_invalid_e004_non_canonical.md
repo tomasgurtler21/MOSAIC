@@ -5,6 +5,6 @@ name: test-agent
 description: Invalid file - boundary tag uses a name not in the canonical list (E004)
 ---
 
-[[SECTION:CustomSection]]
+<CustomSection type="core">
 Content inside a non-canonical section name.
-[[/SECTION:CustomSection]]
+</CustomSection>

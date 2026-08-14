@@ -27,7 +27,7 @@ package docformat_test
 //
 // Coverage (InjectionParent — advisory, ArtifactProvenanceExtension and ProtocolExtension
 // removed, LanguagePatterns added):
-//   - ProtocolExtension is absent from InjectionParent (removed in Stage 2; use [[CUSTOM:ProtocolExtension]]).
+//   - ProtocolExtension is absent from InjectionParent (removed in Stage 2; use <ProtocolExtension type="custom">).
 //   - ArtifactProvenanceExtension is absent from InjectionParent.
 //   - Tool-managed names are absent from InjectionParent.
 //
@@ -100,8 +100,8 @@ func TestCanonicalSections_Stage2_FullSixEntryOrder(t *testing.T) {
 
 func TestCanonicalOrder_Stage2_ContainsSevenSlots(t *testing.T) {
 	// Stage 2 removes ArtifactProvenance from CanonicalOrder, reducing the slot
-	// count from 8 to 7. Slot 1 is CommunicationProtocol (a top-level [[DEPLOYED:]]
-	// boundary); every other entry is a section name.
+	// count from 8 to 7. Slot 1 is CommunicationProtocol (a top-level
+	// <CommunicationProtocol type="managed"> boundary); every other entry is a section name.
 	got := docformat.CanonicalOrder
 	if len(got) != 7 {
 		t.Fatalf("CanonicalOrder length: want 7, got %d: %v", len(got), got)
@@ -119,7 +119,7 @@ func TestCanonicalOrder_Stage2_IndexZero_IsIdentity(t *testing.T) {
 }
 
 func TestCanonicalOrder_Stage2_IndexOne_IsCommunicationProtocol(t *testing.T) {
-	// Slot 1 is satisfied by a top-level [[DEPLOYED:CommunicationProtocol]] boundary.
+	// Slot 1 is satisfied by a top-level <CommunicationProtocol type="managed"> boundary.
 	got := docformat.CanonicalOrder
 	if len(got) <= 1 {
 		t.Fatalf("CanonicalOrder too short to have index 1: %v", got)
@@ -145,7 +145,7 @@ func TestCanonicalOrder_Stage2_ArtifactProvenance_IsAbsent(t *testing.T) {
 
 func TestCanonicalOrder_Stage2_FullSevenSlotList(t *testing.T) {
 	// Authoritative 7-slot canonical document order contract.
-	// CommunicationProtocol occupies slot 1 as a top-level [[DEPLOYED:]] boundary;
+	// CommunicationProtocol occupies slot 1 as a top-level <CommunicationProtocol type="managed"> boundary;
 	// every other slot is a canonical section name. ArtifactProvenance is absent.
 	want := []string{
 		"Identity",
@@ -347,8 +347,8 @@ func TestInjectionParent_Stage2_IsNotNil(t *testing.T) {
 
 func TestInjectionParent_Stage2_ProtocolExtension_IsAbsent(t *testing.T) {
 	// ProtocolExtension is removed from InjectionParent in Stage 2. Projects needing to
-	// extend the protocol use [[CUSTOM:ProtocolExtension]] instead — MOSAIC defines
-	// [[INJECTION:]] slots; projects invent [[CUSTOM:]] ones. The name remains legal as
+	// extend the protocol use <ProtocolExtension type="custom"> instead — MOSAIC defines
+	// <Name type="project"> slots; projects invent <Name type="custom"> ones. The name remains legal as
 	// an open injection name and is never flagged, but it no longer carries an advisory parent.
 	got := docformat.InjectionParent
 	if got == nil {
@@ -356,7 +356,7 @@ func TestInjectionParent_Stage2_ProtocolExtension_IsAbsent(t *testing.T) {
 	}
 	if _, ok := got["ProtocolExtension"]; ok {
 		t.Error("InjectionParent must not contain \"ProtocolExtension\" — " +
-			"it is removed from the advisory map in Stage 2; projects use [[CUSTOM:ProtocolExtension]] instead")
+			"it is removed from the advisory map in Stage 2; projects use <ProtocolExtension type=\"custom\"> instead")
 	}
 }
 
@@ -376,7 +376,7 @@ func TestInjectionParent_Stage2_ArtifactProvenanceExtension_IsAbsent(t *testing.
 func TestInjectionParent_Stage2_FullAdvisoryMap(t *testing.T) {
 	// InjectionParent is now advisory only (no enforcement of an allowlist).
 	// The eight entries are the usual parents used for advisory reporting.
-	// ProtocolExtension is removed in Stage 2 — projects use [[CUSTOM:ProtocolExtension]].
+	// ProtocolExtension is removed in Stage 2 — projects use <ProtocolExtension type="custom">.
 	// LanguagePatterns is included here after moving out of the tool-managed CanonicalDeployed set.
 	wantMap := map[string]string{
 		"IdentityExtension":      "Identity",
@@ -402,7 +402,7 @@ func TestInjectionParent_Stage2_FullAdvisoryMap(t *testing.T) {
 	}
 	// ProtocolExtension must be absent from the advisory map after Stage 2.
 	if _, ok := got["ProtocolExtension"]; ok {
-		t.Error("InjectionParent must not contain \"ProtocolExtension\" — removed in Stage 2; use [[CUSTOM:ProtocolExtension]]")
+		t.Error("InjectionParent must not contain \"ProtocolExtension\" — removed in Stage 2; use <ProtocolExtension type=\"custom\"> instead")
 	}
 }
 
@@ -617,7 +617,7 @@ func TestClassifyRegion_Stage2_BundleNames_ReturnBundleClass(t *testing.T) {
 }
 
 func TestClassifyRegion_Stage2_AllToolManagedNames_UnderInjection_ReturnMarkerMismatch(t *testing.T) {
-	// Every CanonicalDeployed name declared under [[INJECTION:]] must produce a marker
+	// Every CanonicalDeployed name declared under a project-type boundary must produce a marker
 	// mismatch error. This includes the new bundle names added in Stage 2.
 	for _, name := range docformat.CanonicalDeployed {
 		_, err := docformat.ClassifyRegion(docformat.NodeInjection, name)
@@ -632,7 +632,7 @@ func TestClassifyRegion_Stage2_AllToolManagedNames_UnderInjection_ReturnMarkerMi
 }
 
 func TestClassifyRegion_Stage2_UnknownName_UnderDeployed_ReturnsUnknownDeployedError(t *testing.T) {
-	// An unrecognised name under [[DEPLOYED:]] must return ErrUnknownDeployedName.
+	// An unrecognised name under a managed-type boundary must return ErrUnknownDeployedName.
 	// This applies to any name not in CanonicalDeployed, including names that were
 	// formerly in CanonicalInjections (the user-owned registry no longer exists).
 	_, err := docformat.ClassifyRegion(docformat.NodeDeployed, "SomeCompletelyUnknownBoundaryName")
@@ -646,7 +646,7 @@ func TestClassifyRegion_Stage2_UnknownName_UnderDeployed_ReturnsUnknownDeployedE
 
 func TestClassifyRegion_Stage2_InjectionName_UnderDeployed_ReturnsUnknownDeployedError(t *testing.T) {
 	// After Stage 2, IdentityExtension is not in any tool-managed registry, so
-	// [[DEPLOYED:IdentityExtension]] produces ErrUnknownDeployedName — not
+	// <IdentityExtension type="managed"> produces ErrUnknownDeployedName — not
 	// ErrMarkerMismatch (which requires a user-owned registry, which no longer exists).
 	_, err := docformat.ClassifyRegion(docformat.NodeDeployed, "IdentityExtension")
 	if err == nil {
@@ -661,7 +661,7 @@ func TestClassifyRegion_Stage2_InjectionName_UnderDeployed_ReturnsUnknownDeploye
 
 func TestClassifyRegion_Stage2_ArtifactProvenance_UnderDeployed_ReturnsUnknownDeployedError(t *testing.T) {
 	// ArtifactProvenance is removed from CanonicalDeployed in Stage 2.
-	// [[DEPLOYED:ArtifactProvenance]] must produce ErrUnknownDeployedName.
+	// <ArtifactProvenance type="managed"> must produce ErrUnknownDeployedName.
 	_, err := docformat.ClassifyRegion(docformat.NodeDeployed, "ArtifactProvenance")
 	if err == nil {
 		t.Fatal("ClassifyRegion(NodeDeployed, \"ArtifactProvenance\"): want error wrapping ErrUnknownDeployedName, got nil")
@@ -674,7 +674,7 @@ func TestClassifyRegion_Stage2_ArtifactProvenance_UnderDeployed_ReturnsUnknownDe
 }
 
 func TestClassifyRegion_Stage2_UnknownName_UnderInjection_ReturnsProjectClassAndNilError(t *testing.T) {
-	// Any name not in CanonicalDeployed under [[INJECTION:]] returns InjectionProject
+	// Any name not in CanonicalDeployed under a project-type boundary returns InjectionProject
 	// and a nil error. Injection names are open: an unlisted name is preserved like any
 	// other and is never flagged or rejected.
 	class, err := docformat.ClassifyRegion(docformat.NodeInjection, "SomeCompletelyUnknownBoundaryName")
@@ -700,7 +700,7 @@ func TestClassifyRegion_Stage2_FormerlyUserOwnedName_UnderInjection_ReturnsProje
 }
 
 func TestClassifyRegion_Stage2_ArtifactProvenance_UnderInjection_ReturnsProjectClass(t *testing.T) {
-	// ArtifactProvenance is removed from all registries. Under [[INJECTION:]] it falls
+	// ArtifactProvenance is removed from all registries. Under a project-type boundary it falls
 	// through to InjectionProject (open injection names are preserved).
 	class, err := docformat.ClassifyRegion(docformat.NodeInjection, "ArtifactProvenance")
 	if err != nil {

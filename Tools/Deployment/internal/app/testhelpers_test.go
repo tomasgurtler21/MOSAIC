@@ -100,7 +100,7 @@ func (c *stubCatalog) WorkflowSection(id string) ([]byte, error) {
 			return b, nil
 		}
 	}
-	return []byte("[[SECTION:Workflow:" + id + "]]\n[[/SECTION:Workflow:" + id + "]]"), nil
+	return []byte("<Workflow type=\"core\" name=\"" + id + "\">\n</Workflow>"), nil
 }
 func (c *stubCatalog) ReadSource(path string) ([]byte, error) {
 	if c.sources != nil {

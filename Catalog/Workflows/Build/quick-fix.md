@@ -20,8 +20,7 @@ artifacts:
   - TestResults.md
 ---
 
-[[SECTION:Workflow:quick-fix]]
-<!-- workflow-version: 3.0 -->
+<Workflow type="core" name="quick-fix" version="3.0">
 ## Quick Fix Workflow
 
 **Use when:** Small changes, bug fixes, or well-understood modifications. Skips research and design.
@@ -36,7 +35,7 @@ artifacts:
 **Notes:**
 - Single-stage plans use Stage-1/ folder for consistency (Decision 15)
 
-[[/SECTION:Workflow:quick-fix]]
+</Workflow>
 
 ---
 

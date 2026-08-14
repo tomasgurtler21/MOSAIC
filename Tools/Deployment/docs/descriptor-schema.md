@@ -358,7 +358,7 @@ Old descriptors with `injections:` blocks still parse without error (the field i
 in the Go structs for backward compatibility), but the content is silently ignored.
 
 **New harnesses:** Place injection content in `HarnessInjections.md` using the
-`[[INJECTION:Name]]...[[/INJECTION:Name]]` boundary-tag format. Omit the `injections:`
+`<Name type="project">...</Name>` boundary-tag format. Omit the `injections:`
 YAML field entirely.
 
 **Injection source precedence:** `HarnessInjections.md` is the sole authoritative source.

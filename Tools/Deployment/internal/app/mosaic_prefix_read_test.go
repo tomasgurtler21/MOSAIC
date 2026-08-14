@@ -38,10 +38,10 @@ func writeAgentFile(t *testing.T, dir, subdir, filename string, content []byte) 
 	}
 }
 
-// minimalCanonicalBody is a minimal document body with one canonical [[SECTION:Identity]]
+// minimalCanonicalBody is a minimal document body with one canonical <Identity type="core">
 // block. Combined with a frontmatter block carrying transform_version (or its prefixed
 // equivalent), it satisfies eligibleHarnessOnly's two-signal check.
-const minimalCanonicalBody = "[[SECTION:Identity]]\nMinimal identity section.\n[[/SECTION:Identity]]\n"
+const minimalCanonicalBody = "<Identity type=\"core\">\nMinimal identity section.\n</Identity>\n"
 
 // ---------------------------------------------------------------------------
 // probeDeployedArtifact — prefixed names

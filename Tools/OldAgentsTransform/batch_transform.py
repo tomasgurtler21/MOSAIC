@@ -133,20 +133,16 @@ def run_batch(harness_dirs: list[pathlib.Path], generic_map: dict[str, pathlib.P
 
 BATCH_DIRS: dict[str, list[pathlib.Path]] = {
     "B": [
-        REPO_ROOT / "Agents" / "Claude Code" / "CodebaseAgnostic",
-        REPO_ROOT / "Agents" / "Claude Code" / "ExampleProject",
+        REPO_ROOT / "Catalog" / "HarnessInjections" / "Claude Code",
     ],
     "C": [
-        REPO_ROOT / "Agents" / "GHCP CLI" / "CodebaseAgnostic",
-        REPO_ROOT / "Agents" / "GHCP CLI" / "ExampleProject",
+        REPO_ROOT / "Catalog" / "HarnessInjections" / "GHCP CLI",
     ],
     "D": [
-        REPO_ROOT / "Agents" / "OpenCode" / "CodebaseAgnostic",
-        REPO_ROOT / "Agents" / "OpenCode" / "ExampleProject",
+        REPO_ROOT / "Catalog" / "HarnessInjections" / "OpenCode",
     ],
     "E": [
-        REPO_ROOT / "Agents" / "VS code GHCP" / "CodebaseAgnostic",
-        REPO_ROOT / "Agents" / "VS code GHCP" / "ExampleProject",
+        REPO_ROOT / "Catalog" / "HarnessInjections" / "VS Code GHCP",
     ],
 }
 

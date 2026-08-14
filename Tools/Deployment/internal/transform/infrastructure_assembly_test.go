@@ -5,13 +5,14 @@ package transform_test
 //
 //   - Zero agents: the InfrastructureAgents injection is left empty; AssembleInfrastructureBlocks
 //     returns nil bytes and nil keys.
-//   - Single trigger: the [[SECTION:InfrastructureAgent:{key}]] block is produced with the
-//     correct section markers, infra-version comment, table header, and one data row.
+//   - Single trigger: the <InfrastructureAgent type="core" name="{key}" version="..."> block
+//     is produced with the correct section markers, version attribute, table header, and one
+//     data row.
 //   - Multi-trigger: one table row per trigger entry, Class and On Failure repeated on each.
 //   - Null/empty TriggerParam: rendered as "-" in the Param column.
 //   - Multiple agents: blocks are composed in the order of the input slice.
-//   - Pipeline: Request.InfrastructureAgents is assembled into [[INJECTION:InfrastructureAgents]]
-//     by transform.Apply, analogous to Request.Workflows and [[INJECTION:AvailableWorkflows]].
+//   - Pipeline: Request.InfrastructureAgents is assembled into <InfrastructureAgents type="managed">
+//     by transform.Apply, analogous to Request.Workflows and <AvailableWorkflows type="managed">.
 
 import (
 	"bytes"
@@ -23,7 +24,7 @@ import (
 )
 
 // orchestratorWithInfrastructureAgents is an orchestrator-like source with both a
-// [[DEPLOYED:InfrastructureAgents]] and a [[DEPLOYED:AvailableWorkflows]] inside the
+// <InfrastructureAgents type="managed"> and a <AvailableWorkflows type="managed"> inside the
 // Identity section. This mirrors the canonical shape the real orchestrator will have once
 // the InfrastructureAgents injection is wired in.
 const orchestratorWithInfrastructureAgents = `---
@@ -37,20 +38,20 @@ tier_rationale: multi-phase coordination
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Orchestrator Agent
 
 You are the Orchestrator.
 
-[[DEPLOYED:InfrastructureAgents]]
-[[/DEPLOYED:InfrastructureAgents]]
+<InfrastructureAgents type="managed">
+</InfrastructureAgents>
 
-[[DEPLOYED:AvailableWorkflows]]
-[[/DEPLOYED:AvailableWorkflows]]
+<AvailableWorkflows type="managed">
+</AvailableWorkflows>
 
-[[INJECTION:IdentityExtension]]
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Identity]]
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
 `
 
 // ---------------------------------------------------------------------------
@@ -83,7 +84,8 @@ func TestAssembleInfrastructureBlocks_EmptySlice_ReturnsNilBytes(t *testing.T) {
 }
 
 // TestAssembleInfrastructureBlocks_SingleTrigger_SectionMarkers verifies that the output
-// contains the correct [[SECTION:InfrastructureAgent:{key}]] open and close markers.
+// contains the correct <InfrastructureAgent type="core" name="{key}"> open tag and
+// </InfrastructureAgent> close tag.
 func TestAssembleInfrastructureBlocks_SingleTrigger_SectionMarkers(t *testing.T) {
 	blocks := []transform.InfrastructureBlock{
 		{
@@ -100,18 +102,18 @@ func TestAssembleInfrastructureBlocks_SingleTrigger_SectionMarkers(t *testing.T)
 
 	assembled, _ := transform.AssembleInfrastructureBlocks(blocks)
 
-	if !bytes.Contains(assembled, []byte("[[SECTION:InfrastructureAgent:orchestration-review]]")) {
-		t.Errorf("output missing section open marker; got:\n%s", assembled)
+	if !bytes.Contains(assembled, []byte(`<InfrastructureAgent type="core" name="orchestration-review"`)) {
+		t.Errorf("output missing section open tag; got:\n%s", assembled)
 	}
-	if !bytes.Contains(assembled, []byte("[[/SECTION:InfrastructureAgent:orchestration-review]]")) {
-		t.Errorf("output missing section close marker; got:\n%s", assembled)
+	if !bytes.Contains(assembled, []byte("</InfrastructureAgent>")) {
+		t.Errorf("output missing section close tag; got:\n%s", assembled)
 	}
 }
 
-// TestAssembleInfrastructureBlocks_SingleTrigger_VersionComment verifies that the
-// infra-version comment appears immediately inside the section, carrying the version field
-// from the InfrastructureBlock. This comment is used for staleness detection on updates.
-func TestAssembleInfrastructureBlocks_SingleTrigger_VersionComment(t *testing.T) {
+// TestAssembleInfrastructureBlocks_SingleTrigger_VersionAttribute verifies that the
+// section opening tag carries the version attribute matching the InfrastructureBlock's
+// Version field. The version is a tag attribute, not an inline comment.
+func TestAssembleInfrastructureBlocks_SingleTrigger_VersionAttribute(t *testing.T) {
 	blocks := []transform.InfrastructureBlock{
 		{
 			Key:         "orchestration-review",
@@ -127,8 +129,12 @@ func TestAssembleInfrastructureBlocks_SingleTrigger_VersionComment(t *testing.T)
 
 	assembled, _ := transform.AssembleInfrastructureBlocks(blocks)
 
-	if !bytes.Contains(assembled, []byte("<!-- infra-version: 1.0.0 -->")) {
-		t.Errorf("output missing infra-version comment; got:\n%s", assembled)
+	if !bytes.Contains(assembled, []byte(`version="1.0.0"`)) {
+		t.Errorf("output missing version attribute on section open tag; got:\n%s", assembled)
+	}
+	// The version must NOT appear as a legacy infra-version comment.
+	if bytes.Contains(assembled, []byte("<!-- infra-version:")) {
+		t.Errorf("output must not contain legacy infra-version comment; version belongs on the tag attribute; got:\n%s", assembled)
 	}
 }
 
@@ -273,8 +279,8 @@ func TestAssembleInfrastructureBlocks_MultiTrigger_ParamPopulated(t *testing.T) 
 }
 
 // TestAssembleInfrastructureBlocks_MultipleAgents_BothBlocksPresent verifies that when
-// two agents are supplied, both produce their [[SECTION:InfrastructureAgent:{key}]] blocks
-// in the output.
+// two agents are supplied, both produce their <InfrastructureAgent type="core" name="{key}">
+// blocks in the output.
 func TestAssembleInfrastructureBlocks_MultipleAgents_BothBlocksPresent(t *testing.T) {
 	blocks := []transform.InfrastructureBlock{
 		{
@@ -301,10 +307,10 @@ func TestAssembleInfrastructureBlocks_MultipleAgents_BothBlocksPresent(t *testin
 
 	assembled, _ := transform.AssembleInfrastructureBlocks(blocks)
 
-	if !bytes.Contains(assembled, []byte("[[SECTION:InfrastructureAgent:checkpoint-manager-git]]")) {
+	if !bytes.Contains(assembled, []byte(`name="checkpoint-manager-git"`)) {
 		t.Errorf("output missing checkpoint-manager-git block; got:\n%s", assembled)
 	}
-	if !bytes.Contains(assembled, []byte("[[SECTION:InfrastructureAgent:orchestration-review]]")) {
+	if !bytes.Contains(assembled, []byte(`name="orchestration-review"`)) {
 		t.Errorf("output missing orchestration-review block; got:\n%s", assembled)
 	}
 }
@@ -340,8 +346,8 @@ func TestAssembleInfrastructureBlocks_MultipleAgents_InInputOrder(t *testing.T) 
 
 	assembled, _ := transform.AssembleInfrastructureBlocks(blocks)
 
-	reviewPos := bytes.Index(assembled, []byte("[[SECTION:InfrastructureAgent:orchestration-review]]"))
-	checkpointPos := bytes.Index(assembled, []byte("[[SECTION:InfrastructureAgent:checkpoint-manager-git]]"))
+	reviewPos := bytes.Index(assembled, []byte(`name="orchestration-review"`))
+	checkpointPos := bytes.Index(assembled, []byte(`name="checkpoint-manager-git"`))
 
 	if reviewPos < 0 || checkpointPos < 0 {
 		t.Fatalf("one or both blocks absent from output; orchestration-review at %d, checkpoint-manager-git at %d", reviewPos, checkpointPos)
@@ -394,7 +400,7 @@ func TestAssembleInfrastructureBlocks_ReturnedKeys_MatchInputOrder(t *testing.T)
 
 // TestInfrastructureAgents_ZeroAgents_InjectionEmpty verifies that when
 // Request.InfrastructureAgents is nil (or empty), transform.Apply leaves the
-// [[INJECTION:InfrastructureAgents]] region empty in the output.
+// <InfrastructureAgents type="project"> region empty in the output.
 func TestInfrastructureAgents_ZeroAgents_InjectionEmpty(t *testing.T) {
 	req := transform.Request{
 		Source:               []byte(orchestratorWithInfrastructureAgents),
@@ -430,8 +436,8 @@ func TestInfrastructureAgents_ZeroAgents_InjectionEmpty(t *testing.T) {
 }
 
 // TestInfrastructureAgents_SingleAgent_BlockPresentInInjection verifies that when one
-// infrastructure agent is supplied, its [[SECTION:InfrastructureAgent:{key}]] block appears
-// inside the [[INJECTION:InfrastructureAgents]] region of the output.
+// infrastructure agent is supplied, its <InfrastructureAgent type="core" name="{key}"> block
+// appears inside the <InfrastructureAgents type="project"> region of the output.
 func TestInfrastructureAgents_SingleAgent_BlockPresentInInjection(t *testing.T) {
 	req := transform.Request{
 		Source: []byte(orchestratorWithInfrastructureAgents),
@@ -469,13 +475,13 @@ func TestInfrastructureAgents_SingleAgent_BlockPresentInInjection(t *testing.T) 
 	}
 
 	content := node.Content()
-	for _, marker := range []string{
-		"[[SECTION:InfrastructureAgent:orchestration-review]]",
-		"<!-- infra-version: 1.0.0 -->",
-		"[[/SECTION:InfrastructureAgent:orchestration-review]]",
+	for _, want := range []string{
+		`<InfrastructureAgent type="core" name="orchestration-review"`,
+		`version="1.0.0"`,
+		"</InfrastructureAgent>",
 	} {
-		if !bytes.Contains(content, []byte(marker)) {
-			t.Errorf("InfrastructureAgents content missing expected marker %q\ncontent: %q", marker, content)
+		if !bytes.Contains(content, []byte(want)) {
+			t.Errorf("InfrastructureAgents content missing expected text %q\ncontent: %q", want, content)
 		}
 	}
 

@@ -14,7 +14,7 @@ package app_test
 //     executor plan item for that agent with ActionUpdate and a SourcePath of "".
 //   - The Content callback for a harness-only plan item returns refreshed bytes: the
 //     CommunicationProtocol region carries canonical protocol content.
-//   - The Content callback for a harness-only plan item preserves [[INJECTION:]] content
+//   - The Content callback for a harness-only plan item preserves project region content
 //     verbatim — unchanged between the deployed file and the refreshed output.
 //
 // Ineligible files never touched (T7.2):
@@ -94,32 +94,32 @@ func newModuleWithAgentsDir(agentsDir string) *stubHarnessModule {
 
 // harnessOnlyAgentContent returns bytes for an eligible harness-only agent carrying:
 //   - transform_version in frontmatter (eligibility signal 1)
-//   - canonical [[SECTION:Identity]] boundary pair (eligibility signal 2)
-//   - [[DEPLOYED:CommunicationProtocol]] with stale content (to verify refresh replaces it)
-//   - [[INJECTION:IdentityExtension]] with user content (to verify verbatim preservation)
+//   - canonical <Identity type="core"> boundary pair (eligibility signal 2)
+//   - <CommunicationProtocol type="managed"> with stale content (to verify refresh replaces it)
+//   - <IdentityExtension type="project"> with user content (to verify verbatim preservation)
 //
 // The injection content string is unique enough to be detectable in the output bytes.
 func harnessOnlyAgentContent() []byte {
 	return []byte("---\n" +
 		"transform_version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
+		"<CommunicationProtocol type=\"managed\">\n" +
 		"OLD PROTOCOL CONTENT — must be replaced by refresh.\n" +
-		"[[/DEPLOYED:CommunicationProtocol]]\n" +
-		"[[SECTION:Identity]]\n" +
+		"</CommunicationProtocol>\n" +
+		"<Identity type=\"core\">\n" +
 		"# Harness-Only Agent For Stage 7 Tests\n" +
-		"[[INJECTION:IdentityExtension]]\n" +
+		"<IdentityExtension type=\"project\">\n" +
 		"user-authored-injection-content-sentinel-for-preservation-check\n" +
-		"[[/INJECTION:IdentityExtension]]\n" +
-		"[[/SECTION:Identity]]\n")
+		"</IdentityExtension>\n" +
+		"</Identity>\n")
 }
 
 // twoRegionAgentContent returns bytes for an eligible harness-only agent carrying two
-// canonical [[DEPLOYED:...]] regions so that protocol-only vs all-deployed scope answers
+// canonical <... type="managed"> regions so that protocol-only vs all-deployed scope answers
 // produce observably different output:
 //
-//   - [[DEPLOYED:CommunicationProtocol]] at body top level (in scope under both answers)
-//   - [[DEPLOYED:AuthorityHierarchy]] inside [[SECTION:Identity]] (in scope only under
+//   - <CommunicationProtocol type="managed"> at body top level (in scope under both answers)
+//   - <AuthorityHierarchy type="managed"> inside <Identity type="core"> (in scope only under
 //     all-deployed; must remain byte-identical under protocol-only)
 //
 // Both regions carry unique stale-content sentinels so a test can assert whether each
@@ -128,18 +128,18 @@ func twoRegionAgentContent() []byte {
 	return []byte("---\n" +
 		"transform_version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[DEPLOYED:CommunicationProtocol]]\n" +
+		"<CommunicationProtocol type=\"managed\">\n" +
 		"OLD PROTOCOL CONTENT — must be replaced by refresh.\n" +
-		"[[/DEPLOYED:CommunicationProtocol]]\n" +
-		"[[SECTION:Identity]]\n" +
+		"</CommunicationProtocol>\n" +
+		"<Identity type=\"core\">\n" +
 		"# Harness-Only Agent For Stage 7 Scope-Differentiation Tests\n" +
-		"[[DEPLOYED:AuthorityHierarchy]]\n" +
+		"<AuthorityHierarchy type=\"managed\">\n" +
 		"OLD AUTHORITY HIERARCHY CONTENT — preserved under protocol-only, replaced under all-deployed.\n" +
-		"[[/DEPLOYED:AuthorityHierarchy]]\n" +
-		"[[INJECTION:IdentityExtension]]\n" +
+		"</AuthorityHierarchy>\n" +
+		"<IdentityExtension type=\"project\">\n" +
 		"user-authored-injection-content-sentinel-for-preservation-check\n" +
-		"[[/INJECTION:IdentityExtension]]\n" +
-		"[[/SECTION:Identity]]\n")
+		"</IdentityExtension>\n" +
+		"</Identity>\n")
 }
 
 // ineligibleAgentContent returns bytes for a .md file that is NOT an eligible harness-only
@@ -148,9 +148,9 @@ func ineligibleAgentContent() []byte {
 	return []byte("---\n" +
 		"version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Generic-style agent without transform_version.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // writeAgentFile writes content into dir/filename, creating dir if needed. Returns the full path.
@@ -259,7 +259,7 @@ func TestUpdate_EligibleHarnessOnlyAgent_AppearsInPlanWithEmptySourcePath(t *tes
 
 // TestUpdate_EligibleHarnessOnlyAgent_ContentCallbackPreservesInjection verifies that the
 // Content callback produced by the Update flow for a harness-only plan item returns refreshed
-// bytes that preserve the [[INJECTION:]] content verbatim. Injection content is user-authored
+// bytes that preserve the project region content verbatim. Injection content is user-authored
 // and must never be modified by the tool.
 func TestUpdate_EligibleHarnessOnlyAgent_ContentCallbackPreservesInjection(t *testing.T) {
 	// Arrange — harness-only agent with a known injection sentinel string.
@@ -313,7 +313,7 @@ func TestUpdate_EligibleHarnessOnlyAgent_ContentCallbackPreservesInjection(t *te
 			}
 			if !contains(out, []byte(injectionSentinel)) {
 				t.Errorf("refreshed bytes for %q do not contain the injection sentinel %q; "+
-					"[[INJECTION:]] content must be preserved verbatim between the deployed "+
+					"project region content must be preserved verbatim between the deployed "+
 					"file and the refreshed output — it is user-authored and must not be cleared",
 					targetPath, injectionSentinel)
 			}
@@ -388,7 +388,7 @@ func TestUpdate_EligibleHarnessOnlyAgent_CommunicationProtocolRegionRefreshed(t 
 			}
 			if contains(out, []byte(oldContent)) {
 				t.Errorf("refreshed bytes for %q still contain the old protocol content %q; "+
-					"refreshHarnessOnly must replace the [[DEPLOYED:CommunicationProtocol]] region "+
+					"refreshHarnessOnly must replace the <CommunicationProtocol type=\"managed\"> region "+
 					"with canonical protocol content from the loaded protocol source",
 					targetPath, oldContent)
 			}
@@ -663,7 +663,7 @@ func TestUpdate_NoEligibleHarnessOnlyAgents_RefreshScopePromptNeverAsked(t *test
 
 // TestUpdate_ProtocolOnlyScopeAnswer_NonProtocolDeployedRegionPreservedUnchanged verifies
 // that when the user answers "protocol-only" for a harness-only agent whose file contains
-// two canonical [[DEPLOYED:...]] regions (CommunicationProtocol and AuthorityHierarchy),
+// two canonical <... type="managed"> regions (CommunicationProtocol and AuthorityHierarchy),
 // the Content callback output preserves the AuthorityHierarchy region byte-identical —
 // its stale content must not be replaced, because it is out of scope for protocol-only.
 //
@@ -707,7 +707,7 @@ func TestUpdate_ProtocolOnlyScopeAnswer_NonProtocolDeployedRegionPreservedUnchan
 
 	// Assert — the Content callback must preserve the AuthorityHierarchy region unchanged.
 	// Under protocol-only scope, only CommunicationProtocol is in scope; every other
-	// [[DEPLOYED:]] region must remain byte-identical to the deployed file.
+	// managed region region must remain byte-identical to the deployed file.
 	for _, item := range exec.capturedReq.Plan.Items {
 		if item.TargetPath == targetPath && item.SourcePath == "" {
 			if exec.capturedReq.Content == nil {
@@ -720,7 +720,7 @@ func TestUpdate_ProtocolOnlyScopeAnswer_NonProtocolDeployedRegionPreservedUnchan
 			if !contains(out, []byte(oldAuthorityContent)) {
 				t.Errorf("protocol-only scope replaced the AuthorityHierarchy region whose stale "+
 					"content is %q; under protocol-only scope only CommunicationProtocol is "+
-					"refreshed — every other [[DEPLOYED:]] region must remain byte-identical to "+
+					"refreshed — every other managed region region must remain byte-identical to "+
 					"the deployed file, so the old AuthorityHierarchy content must still appear "+
 					"in the output", oldAuthorityContent)
 			}
@@ -732,7 +732,7 @@ func TestUpdate_ProtocolOnlyScopeAnswer_NonProtocolDeployedRegionPreservedUnchan
 
 // TestUpdate_AllDeployedScopeAnswer_AllDeployedRegionsRefreshed verifies that when the
 // user answers "all-deployed" for a harness-only agent whose file contains two canonical
-// [[DEPLOYED:...]] regions (CommunicationProtocol and AuthorityHierarchy), the Content
+// <... type="managed"> regions (CommunicationProtocol and AuthorityHierarchy), the Content
 // callback output replaces the AuthorityHierarchy region's stale content — it must not
 // survive, because both regions are in scope for all-deployed.
 //
@@ -777,7 +777,7 @@ func TestUpdate_AllDeployedScopeAnswer_AllDeployedRegionsRefreshed(t *testing.T)
 	}
 
 	// Assert — the Content callback must have replaced the AuthorityHierarchy region.
-	// Under all-deployed scope, every canonical [[DEPLOYED:]] region is in scope, so the
+	// Under all-deployed scope, every canonical managed region region is in scope, so the
 	// stale AuthorityHierarchy content must not survive in the refreshed output.
 	for _, item := range exec.capturedReq.Plan.Items {
 		if item.TargetPath == targetPath && item.SourcePath == "" {
@@ -790,7 +790,7 @@ func TestUpdate_AllDeployedScopeAnswer_AllDeployedRegionsRefreshed(t *testing.T)
 			}
 			if contains(out, []byte(oldAuthorityContent)) {
 				t.Errorf("all-deployed scope left the AuthorityHierarchy region's stale content %q "+
-					"unchanged in the output; under all-deployed scope every canonical [[DEPLOYED:]] "+
+					"unchanged in the output; under all-deployed scope every canonical managed region "+
 					"region is refreshed — stale bytes must not survive",
 					oldAuthorityContent)
 			}

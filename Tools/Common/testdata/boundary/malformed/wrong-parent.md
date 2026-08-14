@@ -2,8 +2,8 @@
 name: test-agent
 ---
 
-[[SECTION:Capabilities]]
-[[INJECTION:IdentityExtension]]
+<Capabilities type="core">
+<IdentityExtension type="project">
 Injection in wrong parent section.
-[[/INJECTION:IdentityExtension]]
-[[/SECTION:Capabilities]]
+</IdentityExtension>
+</Capabilities>

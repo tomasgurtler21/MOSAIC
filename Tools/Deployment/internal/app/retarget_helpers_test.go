@@ -332,23 +332,23 @@ func alphaDeployedAgentBytes() []byte {
 		"- CustomMCP\n" +
 		"alpha_stamp: alpha-v1\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the RetargetTest agent. This prose must survive transformation unchanged.\n" +
-		"[[INJECTION:IdentityExtension]]\n" +
+		"<IdentityExtension type=\"project\">\n" +
 		"Project-specific identity guidance goes here.\n" +
 		"This content must survive byte-for-byte in the target output.\n" +
-		"[[/INJECTION:IdentityExtension]]\n" +
-		"[[DEPLOYED:ClosingProcedure]]\n" +
+		"</IdentityExtension>\n" +
+		"<ClosingProcedure type=\"managed\">\n" +
 		"These are the closing procedure steps from the source harness.\n" +
-		"[[/DEPLOYED:ClosingProcedure]]\n" +
-		"[[/SECTION:Identity]]\n" +
+		"</ClosingProcedure>\n" +
+		"</Identity>\n" +
 		"---\n" +
-		"[[SECTION:Capabilities]]\n" +
+		"<Capabilities type=\"core\">\n" +
 		"Core capabilities prose.\n" +
-		"[[INJECTION:CodebaseContext]]\n" +
+		"<CodebaseContext type=\"project\">\n" +
 		"The codebase uses Go 1.22. This context must survive transform unchanged.\n" +
-		"[[/INJECTION:CodebaseContext]]\n" +
-		"[[/SECTION:Capabilities]]\n")
+		"</CodebaseContext>\n" +
+		"</Capabilities>\n")
 }
 
 // betaDeployedAgentBytes returns bytes of a minimal deployed agent for "beta-harness".
@@ -370,9 +370,9 @@ func betaDeployedAgentBytes() []byte {
 		"- BetaRead\n" +
 		"beta_stamp: beta-v2\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the BetaAgent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // mosaicOnlyAgentBytes returns bytes of a deployed MOSAIC agent with no harness-distinctive
@@ -389,9 +389,9 @@ func mosaicOnlyAgentBytes() []byte {
 		"description: An agent with only MOSAIC-known fields\n" +
 		"role: subagent\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the BareAgent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // notAnAgentBytes returns bytes of a document that is parseable but does not satisfy
@@ -402,9 +402,9 @@ func notAnAgentBytes() []byte {
 		"name: plain-document\n" +
 		"version: \"1.0.0\"\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Just a plain document, not a transformed MOSAIC agent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // ---------------------------------------------------------------------------

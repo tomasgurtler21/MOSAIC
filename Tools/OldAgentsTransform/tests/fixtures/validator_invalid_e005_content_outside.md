@@ -7,7 +7,7 @@ description: Invalid file - instructional content appears outside any boundary (
 
 This line is outside any boundary and is not blank or a separator.
 
-[[SECTION:Identity]]
+<Identity type="core">
 # TestAgent Agent
 Content inside boundary.
-[[/SECTION:Identity]]
+</Identity>

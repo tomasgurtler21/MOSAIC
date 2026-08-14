@@ -81,7 +81,7 @@ class TestGenericStandard:
         """All 6 recognised section boundaries must be added to a standard generic file.
 
         CommunicationProtocol is no longer an authored section heading; the protocol
-        slot is a top-level [[DEPLOYED:CommunicationProtocol]] boundary filled by the
+        slot is a top-level <CommunicationProtocol type="managed"> boundary filled by the
         deploy tool, not by the transformer.
         """
         result, _ = _transform_to_tmp(generic_standard_input, tmp_path)
@@ -101,9 +101,9 @@ class TestGenericStandard:
         """All 7 managed region boundaries must be added (user-owned and tool-managed).
 
         ProtocolExtension has been removed from the vocabulary entirely.
-        HarnessConstraints remains tool-managed (emitted as [[DEPLOYED:...]]).
+        HarnessConstraints remains tool-managed (emitted as <Name type="managed">).
         LanguagePatterns has left the tool-managed set and is now emitted as
-        [[INJECTION:LanguagePatterns]] — it still appears in injections_added
+        <LanguagePatterns type="project"> — it still appears in injections_added
         because that field tracks all managed region names regardless of marker
         kind. CustomConstraints's legacy marker in this fixture is empty, so per
         the drop rule it is not emitted at all and does not appear here.
@@ -143,7 +143,7 @@ class TestGenericStandard:
         content = _read(output_path)
         lines = content.splitlines()
         # Frontmatter is between the first and second '---' delimiters.
-        # No [[SECTION or [[INJECTION tag should appear before the closing '---'.
+        # No XML boundary tag should appear before the closing '---'.
         in_frontmatter = False
         for line in lines:
             if line == "---":
@@ -172,7 +172,7 @@ class TestGenericStandard:
         # Guard: old-format markers must be gone — if any remain the transformer
         # failed to replace them (false-negative protection).
         assert "[INJECTION: " not in transformed, (
-            "Old-format [INJECTION: ...] markers must be replaced by [[INJECTION:...]] "
+            'Old-format [INJECTION: ...] markers must be replaced by <Name type="project"> '
             "boundary tags; at least one marker was left unconverted in the output."
         )
         # Verbatim check: non-target body text must be identical in both files.
@@ -183,7 +183,7 @@ class TestGenericStandard:
     def test_section_open_tags_precede_headings(
         self, generic_standard_input, tmp_path
     ):
-        """Each [[SECTION:X]] open tag must appear on the line immediately before its heading."""
+        """Each <X type="core"> open tag must appear on the line immediately before its heading."""
         _, output_path = _transform_to_tmp(generic_standard_input, tmp_path)
         lines = _read(output_path).splitlines()
         heading_to_section = {
@@ -197,23 +197,25 @@ class TestGenericStandard:
         for i, line in enumerate(lines):
             for prefix, section_name in heading_to_section.items():
                 if line.startswith(prefix) and not line.startswith("##"):
-                    # H1 heading — check previous line is [[SECTION:Identity]]
-                    assert i > 0 and lines[i - 1] == f"[[SECTION:{section_name}]]", (
-                        f"Expected [[SECTION:{section_name}]] before heading '{line}'"
+                    # H1 heading — check previous line is <Identity type="core">
+                    assert i > 0 and lines[i - 1] == f'<{section_name} type="core">', (
+                        f'Expected <{section_name} type="core"> before heading \'{line}\''
                     )
                 elif line == f"## {_heading_text(section_name)}":
-                    assert i > 0 and lines[i - 1] == f"[[SECTION:{section_name}]]", (
-                        f"Expected [[SECTION:{section_name}]] before heading '{line}'"
+                    assert i > 0 and lines[i - 1] == f'<{section_name} type="core">', (
+                        f'Expected <{section_name} type="core"> before heading \'{line}\''
                     )
 
     def test_section_close_tags_precede_separators(
         self, generic_standard_input, tmp_path
     ):
-        """Each [[/SECTION:X]] close tag must appear immediately before the '---' that ends it."""
+        """Each canonical section close tag must appear immediately before the '---' that ends it."""
+        from boundary_constants import CANONICAL_SECTIONS
+        canonical_closes = {f"</{s}>" for s in CANONICAL_SECTIONS}
         _, output_path = _transform_to_tmp(generic_standard_input, tmp_path)
         lines = _read(output_path).splitlines()
         for i, line in enumerate(lines):
-            if line.startswith("[[/SECTION:"):
+            if line in canonical_closes:
                 # The very next line must be '---' (section separator)
                 # OR this is the last section (EOF)
                 if i + 1 < len(lines):
@@ -224,21 +226,21 @@ class TestGenericStandard:
     def test_last_section_close_tag_at_eof(
         self, generic_standard_input, tmp_path
     ):
-        """The [[/SECTION:ExecutionPhilosophy]] close tag must be the last line of output."""
+        """The </ExecutionPhilosophy> close tag must be the last line of output."""
         _, output_path = _transform_to_tmp(generic_standard_input, tmp_path)
         last_line = _read(output_path).rstrip("\n").splitlines()[-1]
-        assert last_line == "[[/SECTION:ExecutionPhilosophy]]"
+        assert last_line == "</ExecutionPhilosophy>"
 
     def test_context_limits_standalone_format(
         self, generic_standard_input, tmp_path
     ):
-        """A standalone [INJECTION: context_limits] must become [[INJECTION:ContextLimits]] on its own line."""
+        """A standalone [INJECTION: context_limits] must become <ContextLimits type="project"> on its own line."""
         _, output_path = _transform_to_tmp(generic_standard_input, tmp_path)
         lines = _read(output_path).splitlines()
         # Find the ContextLimits open tag; it must NOT be prefixed with '- '
-        cl_lines = [l for l in lines if "[[INJECTION:ContextLimits]]" in l]
-        assert len(cl_lines) == 1, "Expected exactly one [[INJECTION:ContextLimits]] open tag"
-        assert cl_lines[0] == "[[INJECTION:ContextLimits]]", (
+        cl_lines = [l for l in lines if '<ContextLimits type="project">' in l]
+        assert len(cl_lines) == 1, 'Expected exactly one <ContextLimits type="project"> open tag'
+        assert cl_lines[0] == '<ContextLimits type="project">', (
             f"ContextLimits open tag has unexpected prefix: {cl_lines[0]!r}"
         )
 
@@ -282,9 +284,9 @@ class TestGenericValidation:
         """
         _, output_path = _transform_to_tmp(generic_validation_input, tmp_path)
         lines = _read(output_path).splitlines()
-        cl_lines = [l for l in lines if "[[INJECTION:ContextLimits]]" in l]
+        cl_lines = [l for l in lines if '<ContextLimits type="project">' in l]
         assert len(cl_lines) == 1
-        assert cl_lines[0] == "[[INJECTION:ContextLimits]]", (
+        assert cl_lines[0] == '<ContextLimits type="project">', (
             f"List-item ContextLimits must become a standalone tag with no '- ' "
             f"prefix, got: {cl_lines[0]!r}"
         )
@@ -292,17 +294,17 @@ class TestGenericValidation:
     def test_close_tag_after_list_item_injection(
         self, generic_validation_input, tmp_path
     ):
-        """The [[/INJECTION:ContextLimits]] close tag must follow on the very next line."""
+        """The </ContextLimits> close tag must follow on the very next line."""
         _, output_path = _transform_to_tmp(generic_validation_input, tmp_path)
         lines = _read(output_path).splitlines()
         for i, line in enumerate(lines):
-            if line == "[[INJECTION:ContextLimits]]":
-                assert i + 1 < len(lines) and lines[i + 1] == "[[/INJECTION:ContextLimits]]", (
+            if line == '<ContextLimits type="project">':
+                assert i + 1 < len(lines) and lines[i + 1] == "</ContextLimits>", (
                     "Close tag must immediately follow open tag for empty list-item injection"
                 )
                 break
         else:
-            pytest.fail("Did not find '[[INJECTION:ContextLimits]]' in output")
+            pytest.fail('Did not find \'<ContextLimits type="project">\' in output')
 
 
 # ---------------------------------------------------------------------------
@@ -340,8 +342,8 @@ class TestGenericOrchestrator:
         _, output_path = _transform_to_tmp(generic_orchestrator_input, tmp_path)
         content = _read(output_path)
         for name in ("CoreOrchestrationLoop", "AgentCallbacks", "StateRecovery"):
-            assert f"[[SECTION:{name}]]" not in content, (
-                f"Non-canonical subsection got an unexpected boundary: [[SECTION:{name}]]"
+            assert f'<{name} type="core">' not in content, (
+                f'Non-canonical subsection got an unexpected boundary: <{name} type="core">'
             )
         for heading in (
             "## Core Orchestration Loop",
@@ -355,11 +357,11 @@ class TestGenericOrchestrator:
     def test_unique_subsections_inside_error_handling_boundary(
         self, generic_orchestrator_input, tmp_path
     ):
-        """Non-canonical subsections must appear between [[SECTION:ErrorHandling]] and [[/SECTION:ErrorHandling]]."""
+        """Non-canonical subsections must appear between <ErrorHandling type="core"> and </ErrorHandling>."""
         _, output_path = _transform_to_tmp(generic_orchestrator_input, tmp_path)
         content = _read(output_path)
-        eh_open = content.find("[[SECTION:ErrorHandling]]")
-        eh_close = content.find("[[/SECTION:ErrorHandling]]")
+        eh_open = content.find('<ErrorHandling type="core">')
+        eh_close = content.find("</ErrorHandling>")
         assert eh_open != -1 and eh_close != -1
 
         # All three unique subsection headings must be between the two tags
@@ -371,7 +373,7 @@ class TestGenericOrchestrator:
             pos = content.find(heading)
             assert pos != -1, f"Heading '{heading}' not found in output"
             assert eh_open < pos < eh_close, (
-                f"Heading '{heading}' is not inside [[SECTION:ErrorHandling]] boundary"
+                f'Heading \'{heading}\' is not inside <ErrorHandling type="core"> boundary'
             )
 
     def test_version_bumped_5_3_1(self, generic_orchestrator_input, tmp_path):
@@ -464,7 +466,7 @@ class TestHarnessCodebaseAgnostic:
     ):
         """HarnessConstraints boundary must be inserted around the filled content.
 
-        HarnessConstraints is a tool-managed name so it is emitted as [[DEPLOYED:]].
+        HarnessConstraints is a tool-managed name so it is emitted as <Name type="managed">.
         """
         result, output_path = _transform_to_tmp(
             harness_codebase_agnostic_input, tmp_path,
@@ -472,8 +474,8 @@ class TestHarnessCodebaseAgnostic:
         )
         assert "HarnessConstraints" in result.injections_added
         content = _read(output_path)
-        assert "[[DEPLOYED:HarnessConstraints]]" in content
-        assert "[[/DEPLOYED:HarnessConstraints]]" in content
+        assert '<HarnessConstraints type="managed">' in content
+        assert "</HarnessConstraints>" in content
 
     def test_filled_harness_content_preserved_inside_boundary(
         self, harness_codebase_agnostic_input, generic_standard_input, tmp_path
@@ -492,12 +494,12 @@ class TestHarnessCodebaseAgnostic:
             generic_ref_path=generic_standard_input,
         )
         content = _read(output_path)
-        open_pos = content.find("[[DEPLOYED:HarnessConstraints]]")
-        close_pos = content.find("[[/DEPLOYED:HarnessConstraints]]")
+        open_pos = content.find('<HarnessConstraints type="managed">')
+        close_pos = content.find("</HarnessConstraints>")
         assert open_pos != -1 and close_pos != -1 and open_pos < close_pos
-        inner = content[open_pos + len("[[DEPLOYED:HarnessConstraints]]"):close_pos]
+        inner = content[open_pos + len('<HarnessConstraints type="managed">'):close_pos]
         assert inner.strip() == ""
-        after_close = content[close_pos + len("[[/DEPLOYED:HarnessConstraints]]"):]
+        after_close = content[close_pos + len("</HarnessConstraints>"):]
         assert "Use only the Read, Write, Edit, Bash" in after_close
 
     def test_same_boundary_set_as_generic_ref(
@@ -588,10 +590,10 @@ class TestHarnessExampleProject:
         harness-specific text that used to sit at the marker's position surviving
         afterward as ordinary section content rather than inside the boundary.
 
-        LanguagePatterns is no longer tool-managed — it uses [[INJECTION:]] like any
+        LanguagePatterns is no longer tool-managed — it uses <Name type="project"> like any
         other user-owned region, and its harness-authored fill content belongs inside
         the boundary rather than being discarded.
-        CodebaseContext and ContextLimits are user-owned so they use [[INJECTION:]] and
+        CodebaseContext and ContextLimits are user-owned so they use <Name type="project"> and
         their harness-authored fill content belongs inside the boundary.
         """
         _, output_path = _transform_to_tmp(
@@ -600,26 +602,26 @@ class TestHarnessExampleProject:
         )
         content = _read(output_path)
 
-        # LanguagePatterns is user-owned — emitted as [[INJECTION:]]
-        lp_open = content.find("[[INJECTION:LanguagePatterns]]")
-        lp_close = content.find("[[/INJECTION:LanguagePatterns]]")
+        # LanguagePatterns is user-owned — emitted as <Name type="project">
+        lp_open = content.find('<LanguagePatterns type="project">')
+        lp_close = content.find("</LanguagePatterns>")
         assert lp_open != -1 and lp_close != -1
-        assert "[[DEPLOYED:LanguagePatterns]]" not in content, (
-            "LanguagePatterns must never be emitted as a [[DEPLOYED:]] region"
+        assert '<LanguagePatterns type="managed">' not in content, (
+            'LanguagePatterns must never be emitted as a <Name type="managed"> region'
         )
         lp_inner = content[lp_open:lp_close]
         assert "Use Python 3.10+" in lp_inner
 
-        # CodebaseContext is user-owned — emitted as [[INJECTION:]]
-        cc_open = content.find("[[INJECTION:CodebaseContext]]")
-        cc_close = content.find("[[/INJECTION:CodebaseContext]]")
+        # CodebaseContext is user-owned — emitted as <Name type="project">
+        cc_open = content.find('<CodebaseContext type="project">')
+        cc_close = content.find("</CodebaseContext>")
         assert cc_open != -1 and cc_close != -1
         cc_inner = content[cc_open:cc_close]
         assert "MyProject API" in cc_inner
 
-        # ContextLimits is user-owned — emitted as [[INJECTION:]]
-        clim_open = content.find("[[INJECTION:ContextLimits]]")
-        clim_close = content.find("[[/INJECTION:ContextLimits]]")
+        # ContextLimits is user-owned — emitted as <Name type="project">
+        clim_open = content.find('<ContextLimits type="project">')
+        clim_close = content.find("</ContextLimits>")
         assert clim_open != -1 and clim_close != -1
         clim_inner = content[clim_open:clim_close]
         assert "200k tokens" in clim_inner
@@ -662,17 +664,17 @@ class TestArtifactTemplateProse:
                 in_fence = not in_fence
                 continue
             if in_fence:
-                assert not line.startswith("[[SECTION:"), (
+                assert not re.match(r'<[A-Za-z][A-Za-z0-9]* type="core">', line), (
                     f"Section tag found inside fenced code block: {line!r}"
                 )
 
     def test_capabilities_has_exactly_one_open_section_tag(
         self, generic_artifact_template_input, tmp_path
     ):
-        """Exactly one [[SECTION:Capabilities]] open tag must appear (not one per heading in the template)."""
+        """Exactly one <Capabilities type="core"> open tag must appear (not one per heading in the template)."""
         _, output_path = _transform_to_tmp(generic_artifact_template_input, tmp_path)
         content = _read(output_path)
-        assert content.count("[[SECTION:Capabilities]]") == 1
+        assert content.count('<Capabilities type="core">') == 1
 
     def test_static_template_prose_not_boundaried_as_injection(
         self, generic_artifact_template_input, tmp_path
@@ -684,9 +686,9 @@ class TestArtifactTemplateProse:
         assert "# Report Title" in content
         assert "## Summary" in content
         assert "## Findings" in content
-        # These headings inside the fenced block must not have [[SECTION:...]] wrappers
-        assert "[[SECTION:Summary]]" not in content
-        assert "[[SECTION:Findings]]" not in content
+        # These headings inside the fenced block must not have <Name type="core"> wrappers
+        assert '<Summary type="core">' not in content
+        assert '<Findings type="core">' not in content
 
     def test_empty_injection_markers_after_template_wrapped(
         self, generic_artifact_template_input, tmp_path
@@ -987,8 +989,8 @@ def _extract_body_lines_excluding_tags(content: str) -> list[str]:
 
     Excludes:
     - YAML frontmatter block and '---' separators
-    - New-format boundary tags: [[SECTION:...]], [[/SECTION:...]], [[INJECTION:...]], [[/INJECTION:...]]
-    - List-item variants of new-format injection tags (e.g. '- [[INJECTION:ContextLimits]]')
+    - New-format boundary tags: <Name type="core">, </Name>, <Name type="project">, </Name>
+    - List-item variants of new-format injection tags (e.g. '- <ContextLimits type="project">')
     - Old-format injection markers [INJECTION: name] (transformation targets that must
       not appear in the output; their exclusion here prevents false-negative passes if
       the transformer accidentally leaves them unconverted — the explicit assertion in
@@ -1008,15 +1010,13 @@ def _extract_body_lines_excluding_tags(content: str) -> list[str]:
                 continue
         if past_fm:
             stripped = line.strip()
-            # Skip new-format boundary tags (open and close) for all three kinds
-            if stripped.startswith("[[SECTION:") or stripped.startswith("[[/SECTION:"):
+            # Skip XML boundary tags (open and close) for all kinds
+            if re.match(r'^<[A-Za-z][A-Za-z0-9]* type="(?:core|managed|project|custom)"', stripped):
                 continue
-            if stripped.startswith("[[INJECTION:") or stripped.startswith("[[/INJECTION:"):
-                continue
-            if stripped.startswith("[[DEPLOYED:") or stripped.startswith("[[/DEPLOYED:"):
+            if re.match(r'^</[A-Za-z][A-Za-z0-9]*>$', stripped):
                 continue
             # Also skip lines that are ONLY a list-item wrapping an injection tag
-            if stripped.startswith("- [[INJECTION:") or stripped.startswith("- [[/INJECTION:"):
+            if re.match(r'^- <[A-Za-z][A-Za-z0-9]* type="project"', stripped):
                 continue
             # Skip old-format injection markers (should have been replaced; the explicit
             # assert in the verbatim test guards against them being left in the output)
@@ -1427,13 +1427,13 @@ class TestMalformedGenericRef:
 # The test classes below (TestProvenanceUntaggedInput, TestProvenanceOldShapeMigration,
 # TestProvenanceIdempotency, TestProvenanceValidatorIntegration) and the helpers in this
 # section test the transformer's provenance migration behavior: converting old
-# [[SECTION:ArtifactProvenance]] files or untagged '## Artifact Provenance' headings into
-# the [[DEPLOYED:ArtifactProvenance]] + [[INJECTION:ArtifactProvenanceExtension]] shape.
+# <ArtifactProvenance type="core"> files or untagged '## Artifact Provenance' headings into
+# the <ArtifactProvenance type="managed"> + <ArtifactProvenanceExtension type="project"> shape.
 #
 # These classes are deliberately out of scope for Stage 2 tests for the following reason:
 # Stage 2 removes ArtifactProvenance from the vocabulary entirely (not from CANONICAL_DEPLOYED,
 # CANONICAL_ORDER, or DEPLOYED_PARENT_MAP). The transformer's provenance migration feature
-# produces files that carry [[DEPLOYED:ArtifactProvenance]], which becomes an E011
+# produces files that carry <ArtifactProvenance type="managed">, which becomes an E011
 # (unrecognised tool-managed boundary name) after Stage 2 implementation is complete.
 # Whether the transformer should continue to do provenance migration (placing a now-retired
 # name) or should be updated to remove that migration path entirely is a design decision
@@ -1446,14 +1446,14 @@ class TestMalformedGenericRef:
 # fail against the pre-implementation baseline and must be reconciled before they can be
 # included in a passing test run.
 
-_TARGET_DEPLOYED_OPEN = "[[DEPLOYED:ArtifactProvenance]]"
-_TARGET_DEPLOYED_CLOSE = "[[/DEPLOYED:ArtifactProvenance]]"
-_TARGET_INJECTION_OPEN = "[[INJECTION:ArtifactProvenanceExtension]]"
-_TARGET_INJECTION_CLOSE = "[[/INJECTION:ArtifactProvenanceExtension]]"
-_OLD_SECTION_OPEN = "[[SECTION:ArtifactProvenance]]"
-_OLD_SECTION_CLOSE = "[[/SECTION:ArtifactProvenance]]"
-_IDENTITY_SECTION_OPEN = "[[SECTION:Identity]]"
-_IDENTITY_SECTION_CLOSE = "[[/SECTION:Identity]]"
+_TARGET_DEPLOYED_OPEN = '<ArtifactProvenance type="managed">'
+_TARGET_DEPLOYED_CLOSE = "</ArtifactProvenance>"
+_TARGET_INJECTION_OPEN = '<ArtifactProvenanceExtension type="project">'
+_TARGET_INJECTION_CLOSE = "</ArtifactProvenanceExtension>"
+_OLD_SECTION_OPEN = '<ArtifactProvenance type="core">'
+_OLD_SECTION_CLOSE = "</ArtifactProvenance>"
+_IDENTITY_SECTION_OPEN = '<Identity type="core">'
+_IDENTITY_SECTION_CLOSE = "</Identity>"
 
 
 def _body(content: str) -> str:
@@ -1473,8 +1473,8 @@ def _body_lines_outside_provenance(body: str) -> list[str]:
     """Return body lines with the entire provenance-related region stripped out.
 
     Removes every line from the first line of a provenance open tag
-    (``[[SECTION:ArtifactProvenance]]``, ``[[DEPLOYED:ArtifactProvenance]]``,
-    or ``[[INJECTION:ArtifactProvenanceExtension]]`` when at top level)
+    (``<ArtifactProvenance type="core">``, ``<ArtifactProvenance type="managed">``,
+    or ``<ArtifactProvenanceExtension type="project">`` when at top level)
     through the corresponding close tag.  All other lines are returned
     preserving their exact bytes.
 
@@ -1484,8 +1484,8 @@ def _body_lines_outside_provenance(body: str) -> list[str]:
     so callers get a stable basis for comparing the non-provenance body.
 
     NOTE: This function is only correct when the injection is NOT nested inside
-    a ``[[SECTION:ArtifactProvenance]]`` block. Do not use with old-shape inputs
-    that have a non-empty ``[[INJECTION:ArtifactProvenanceExtension]]`` inside
+    a ``<ArtifactProvenance type="core">`` block. Do not use with old-shape inputs
+    that have a non-empty ``<ArtifactProvenanceExtension type="project">`` inside
     their section — the injection close tag would prematurely end the skip.
     """
     lines = body.splitlines(keepends=True)
@@ -1507,16 +1507,16 @@ def _body_lines_outside_conduct_regions(body: str) -> list[str]:
     """Return body lines with provenance-related regions and the Identity section stripped out.
 
     Extends the provenance-only stripping of ``_body_lines_outside_provenance`` to also
-    exclude ``[[SECTION:Identity]]``.  Stage 2 intentionally adds ``ClosingProcedure``
+    exclude ``<Identity type="core">``.  Stage 2 intentionally adds ``ClosingProcedure``
     and ``AuthorityHierarchy`` inside the Identity section, so isolation tests that
     verify non-provenance content is unchanged must also exclude Identity from the
     comparison scope.
 
     Strips these open→close pairs:
-    - ``[[SECTION:ArtifactProvenance]]`` … ``[[/SECTION:ArtifactProvenance]]``
-    - ``[[DEPLOYED:ArtifactProvenance]]`` … ``[[/DEPLOYED:ArtifactProvenance]]``
-    - ``[[INJECTION:ArtifactProvenanceExtension]]`` … ``[[/INJECTION:ArtifactProvenanceExtension]]``
-    - ``[[SECTION:Identity]]`` … ``[[/SECTION:Identity]]``
+    - ``<ArtifactProvenance type="core">`` … ``</ArtifactProvenance>``
+    - ``<ArtifactProvenance type="managed">`` … ``</ArtifactProvenance>``
+    - ``<ArtifactProvenanceExtension type="project">`` … ``</ArtifactProvenanceExtension>``
+    - ``<Identity type="core">`` … ``</Identity>``
 
     All other lines are returned preserving their exact bytes.
     """
@@ -1548,7 +1548,7 @@ def _body_lines_outside_conduct_regions(body: str) -> list[str]:
 
 
 def _extract_injection_content(body: str) -> str:
-    """Return the bytes between [[INJECTION:ArtifactProvenanceExtension]] and its close tag.
+    """Return the bytes between <ArtifactProvenanceExtension type="project"> and its close tag.
 
     Returns '' if the markers are absent or the region is empty.  Preserves
     newlines exactly as they appear in the body, including any trailing newline
@@ -1614,7 +1614,7 @@ class TestProvenanceUntaggedInput:
         """ArtifactProvenance is retired; its deployed open tag must NOT appear in the output."""
         _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
         assert _TARGET_DEPLOYED_OPEN not in _read(output_path), (
-            "ArtifactProvenance is retired; [[DEPLOYED:ArtifactProvenance]] must not appear in output."
+            'ArtifactProvenance is retired; <ArtifactProvenance type="managed"> must not appear in output.'
         )
 
     def test_output_contains_deployed_close_tag(
@@ -1623,20 +1623,20 @@ class TestProvenanceUntaggedInput:
         """ArtifactProvenance is retired; its deployed close tag must NOT appear in the output."""
         _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
         assert _TARGET_DEPLOYED_CLOSE not in _read(output_path), (
-            "ArtifactProvenance is retired; [[/DEPLOYED:ArtifactProvenance]] must not appear in output."
+            "ArtifactProvenance is retired; </ArtifactProvenance> must not appear in output."
         )
 
     def test_output_contains_sibling_injection_open_tag(
         self, provenance_untagged_input, tmp_path
     ):
-        """Output must contain the [[INJECTION:ArtifactProvenanceExtension]] open tag."""
+        """Output must contain the <ArtifactProvenanceExtension type="project"> open tag."""
         _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
         assert _TARGET_INJECTION_OPEN in _read(output_path)
 
     def test_output_contains_sibling_injection_close_tag(
         self, provenance_untagged_input, tmp_path
     ):
-        """Output must contain the [[/INJECTION:ArtifactProvenanceExtension]] close tag."""
+        """Output must contain the </ArtifactProvenanceExtension> close tag."""
         _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
         assert _TARGET_INJECTION_CLOSE in _read(output_path)
 
@@ -1647,7 +1647,7 @@ class TestProvenanceUntaggedInput:
         _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
         content = _read(output_path)
         assert _TARGET_DEPLOYED_OPEN not in content, (
-            "ArtifactProvenance is retired; no [[DEPLOYED:ArtifactProvenance]] region should appear in output."
+            'ArtifactProvenance is retired; no <ArtifactProvenance type="managed"> region should appear in output.'
         )
 
     def test_deployed_region_before_sibling_injection(
@@ -1659,10 +1659,10 @@ class TestProvenanceUntaggedInput:
         deployed_pos = content.find(_TARGET_DEPLOYED_OPEN)
         injection_pos = content.find(_TARGET_INJECTION_OPEN)
         assert deployed_pos == -1, (
-            "ArtifactProvenance is retired; [[DEPLOYED:ArtifactProvenance]] must not appear in output."
+            'ArtifactProvenance is retired; <ArtifactProvenance type="managed"> must not appear in output.'
         )
         assert injection_pos != -1, (
-            "[[INJECTION:ArtifactProvenanceExtension]] must still appear in the output."
+            '<ArtifactProvenanceExtension type="project"> must still appear in the output.'
         )
 
     def test_provenance_region_at_canonical_slot_3(
@@ -1671,21 +1671,21 @@ class TestProvenanceUntaggedInput:
         """The injection sibling must appear after Identity and before Capabilities (canonical slot 3)."""
         _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
         content = _read(output_path)
-        identity_close_pos = content.find("[[/SECTION:Identity]]")
+        identity_close_pos = content.find("</Identity>")
         injection_pos = content.find(_TARGET_INJECTION_OPEN)
-        capabilities_open_pos = content.find("[[SECTION:Capabilities]]")
-        assert identity_close_pos != -1, "[[/SECTION:Identity]] must be present"
-        assert injection_pos != -1, "[[INJECTION:ArtifactProvenanceExtension]] must be present"
-        assert capabilities_open_pos != -1, "[[SECTION:Capabilities]] must be present"
+        capabilities_open_pos = content.find('<Capabilities type="core">')
+        assert identity_close_pos != -1, "</Identity> must be present"
+        assert injection_pos != -1, '<ArtifactProvenanceExtension type="project"> must be present'
+        assert capabilities_open_pos != -1, '<Capabilities type="core"> must be present'
         assert identity_close_pos < injection_pos < capabilities_open_pos, (
             "ArtifactProvenanceExtension injection must appear after Identity and before Capabilities."
         )
 
     def test_no_old_section_tag_in_output(self, provenance_untagged_input, tmp_path):
-        """The output must not contain the old [[SECTION:ArtifactProvenance]] tag."""
+        """The output must not contain the old <ArtifactProvenance type="core"> tag."""
         _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
         assert _OLD_SECTION_OPEN not in _read(output_path), (
-            "Old [[SECTION:ArtifactProvenance]] tag must not appear in the output; "
+            'Old <ArtifactProvenance type="core"> tag must not appear in the output; '
             "the section was migrated to a deployed region."
         )
 
@@ -1720,10 +1720,10 @@ class TestProvenanceUntaggedInput:
 # ---------------------------------------------------------------------------
 
 class TestProvenanceOldShapeMigration:
-    """A [[SECTION:ArtifactProvenance]] block is rewritten to the new deployed-region shape.
+    """A <ArtifactProvenance type="core"> block is rewritten to the new deployed-region shape.
 
-    Contract T-B: the [[SECTION:ArtifactProvenance]] ... [[/SECTION:ArtifactProvenance]]
-    block is replaced by [[DEPLOYED:ArtifactProvenance]] + [[INJECTION:ArtifactProvenanceExtension]],
+    Contract T-B: the <ArtifactProvenance type="core"> ... </ArtifactProvenance>
+    block is replaced by <ArtifactProvenance type="managed"> + <ArtifactProvenanceExtension type="project">,
     the extension injection's inner content is carried across byte-identically, and every
     byte outside the provenance region and its sibling injection is unchanged apart from
     the frontmatter version bump.
@@ -1732,7 +1732,7 @@ class TestProvenanceOldShapeMigration:
     def test_empty_ext_transformation_succeeds(
         self, provenance_old_shape_empty_ext_input, tmp_path
     ):
-        """Transformation of the old [[SECTION:ArtifactProvenance]] shape must succeed."""
+        """Transformation of the old <ArtifactProvenance type="core"> shape must succeed."""
         result, _ = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
         assert result.success is True
         assert result.errors == []
@@ -1757,19 +1757,19 @@ class TestProvenanceOldShapeMigration:
     def test_old_section_tag_absent_in_output(
         self, provenance_old_shape_empty_ext_input, tmp_path
     ):
-        """The old [[SECTION:ArtifactProvenance]] open tag must be absent from the output."""
+        """The old <ArtifactProvenance type="core"> open tag must be absent from the output."""
         _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
         assert _OLD_SECTION_OPEN not in _read(output_path), (
-            "[[SECTION:ArtifactProvenance]] must be replaced; the old open tag must not survive."
+            '<ArtifactProvenance type="core"> must be replaced; the old open tag must not survive.'
         )
 
     def test_old_section_close_tag_absent_in_output(
         self, provenance_old_shape_empty_ext_input, tmp_path
     ):
-        """The old [[/SECTION:ArtifactProvenance]] close tag must be absent from the output."""
+        """The old </ArtifactProvenance> close tag must be absent from the output."""
         _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
         assert _OLD_SECTION_CLOSE not in _read(output_path), (
-            "[[/SECTION:ArtifactProvenance]] must be replaced; the old close tag must not survive."
+            "</ArtifactProvenance> must be replaced; the old close tag must not survive."
         )
 
     def test_new_deployed_open_tag_present(
@@ -1778,7 +1778,7 @@ class TestProvenanceOldShapeMigration:
         """ArtifactProvenance is retired; its deployed open tag must NOT appear in the output."""
         _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
         assert _TARGET_DEPLOYED_OPEN not in _read(output_path), (
-            "ArtifactProvenance is retired; [[DEPLOYED:ArtifactProvenance]] must not appear in output."
+            'ArtifactProvenance is retired; <ArtifactProvenance type="managed"> must not appear in output.'
         )
 
     def test_new_deployed_close_tag_present(
@@ -1787,20 +1787,20 @@ class TestProvenanceOldShapeMigration:
         """ArtifactProvenance is retired; its deployed close tag must NOT appear in the output."""
         _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
         assert _TARGET_DEPLOYED_CLOSE not in _read(output_path), (
-            "ArtifactProvenance is retired; [[/DEPLOYED:ArtifactProvenance]] must not appear in output."
+            "ArtifactProvenance is retired; </ArtifactProvenance> must not appear in output."
         )
 
     def test_sibling_injection_open_tag_present(
         self, provenance_old_shape_empty_ext_input, tmp_path
     ):
-        """The sibling [[INJECTION:ArtifactProvenanceExtension]] open tag must be in the output."""
+        """The sibling <ArtifactProvenanceExtension type="project"> open tag must be in the output."""
         _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
         assert _TARGET_INJECTION_OPEN in _read(output_path)
 
     def test_sibling_injection_close_tag_present(
         self, provenance_old_shape_empty_ext_input, tmp_path
     ):
-        """The sibling [[/INJECTION:ArtifactProvenanceExtension]] close tag must be in the output."""
+        """The sibling </ArtifactProvenanceExtension> close tag must be in the output."""
         _, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
         assert _TARGET_INJECTION_CLOSE in _read(output_path)
 
@@ -1828,10 +1828,10 @@ class TestProvenanceOldShapeMigration:
         orig_inj_open = _TARGET_INJECTION_OPEN + "\n"
         orig_inj_close = _TARGET_INJECTION_CLOSE
         sec_start = input_body.find(orig_open)
-        assert sec_start != -1, "Precondition: input must contain [[SECTION:ArtifactProvenance]]"
+        assert sec_start != -1, 'Precondition: input must contain <ArtifactProvenance type="core">'
         region = input_body[sec_start:]
         inj_start = region.find(orig_inj_open)
-        assert inj_start != -1, "Precondition: input must contain [[INJECTION:ArtifactProvenanceExtension]]"
+        assert inj_start != -1, 'Precondition: input must contain <ArtifactProvenanceExtension type="project">'
         content_start = inj_start + len(orig_inj_open)
         inj_end = region.find(orig_inj_close, content_start)
         assert inj_end != -1, "Precondition: extension injection must have a close tag"
@@ -1921,7 +1921,7 @@ class TestProvenanceIdempotency:
         _, output_path = _transform_to_tmp(provenance_new_shape_input, tmp_path)
         output_body = _body(_read(output_path))
         assert _TARGET_DEPLOYED_OPEN not in output_body, (
-            "ArtifactProvenance is retired; [[DEPLOYED:ArtifactProvenance]] must be stripped "
+            'ArtifactProvenance is retired; <ArtifactProvenance type="managed"> must be stripped '
             "even when the input already carried the new-shape deployed region."
         )
         assert _TARGET_INJECTION_OPEN in output_body, (
@@ -1942,7 +1942,7 @@ class TestProvenanceIdempotency:
     def test_new_shape_no_old_section_tag_introduced(
         self, provenance_new_shape_input, tmp_path
     ):
-        """A second transformation must not introduce [[SECTION:ArtifactProvenance]] tags."""
+        """A second transformation must not introduce <ArtifactProvenance type="core"> tags."""
         _, output_path = _transform_to_tmp(provenance_new_shape_input, tmp_path)
         assert _OLD_SECTION_OPEN not in _read(output_path)
         assert _OLD_SECTION_CLOSE not in _read(output_path)
@@ -1950,24 +1950,24 @@ class TestProvenanceIdempotency:
     def test_new_shape_exactly_one_deployed_open_tag(
         self, provenance_new_shape_input, tmp_path
     ):
-        """ArtifactProvenance is retired; zero [[DEPLOYED:ArtifactProvenance]] tags must appear."""
+        """ArtifactProvenance is retired; zero <ArtifactProvenance type="managed"> tags must appear."""
         _, output_path = _transform_to_tmp(provenance_new_shape_input, tmp_path)
         content = _read(output_path)
         count = content.count(_TARGET_DEPLOYED_OPEN)
         assert count == 0, (
-            f"Expected 0 [[DEPLOYED:ArtifactProvenance]] open tags (retired); "
+            f'Expected 0 <ArtifactProvenance type="managed"> open tags (retired); '
             f"found {count}."
         )
 
     def test_new_shape_exactly_one_sibling_injection_open_tag(
         self, provenance_new_shape_input, tmp_path
     ):
-        """Exactly one [[INJECTION:ArtifactProvenanceExtension]] open tag must appear."""
+        """Exactly one <ArtifactProvenanceExtension type="project"> open tag must appear."""
         _, output_path = _transform_to_tmp(provenance_new_shape_input, tmp_path)
         content = _read(output_path)
         count = content.count(_TARGET_INJECTION_OPEN)
         assert count == 1, (
-            f"Expected exactly 1 [[INJECTION:ArtifactProvenanceExtension]] open tag; "
+            f'Expected exactly 1 <ArtifactProvenanceExtension type="project"> open tag; '
             f"found {count}. Idempotency failure: double-tagging detected."
         )
 
@@ -1986,10 +1986,10 @@ class TestProvenanceIdempotency:
         _, output_path = _transform_to_tmp(generic_standard_input, tmp_path)
         content = _read(output_path)
         assert _TARGET_DEPLOYED_OPEN not in content, (
-            "A file with no provenance region must not gain [[DEPLOYED:ArtifactProvenance]]."
+            'A file with no provenance region must not gain <ArtifactProvenance type="managed">.'
         )
         assert _TARGET_INJECTION_OPEN not in content, (
-            "A file with no provenance region must not gain [[INJECTION:ArtifactProvenanceExtension]]."
+            'A file with no provenance region must not gain <ArtifactProvenanceExtension type="project">.'
         )
 
     def test_no_provenance_region_identity_regions_deployed_added(
@@ -2047,7 +2047,7 @@ class TestProvenanceValidatorIntegration:
     def test_old_shape_empty_ext_output_validates(
         self, provenance_old_shape_empty_ext_input, tmp_path
     ):
-        """Transformer output for the old [[SECTION:ArtifactProvenance]] shape (empty ext) must pass."""
+        """Transformer output for the old <ArtifactProvenance type="core"> shape (empty ext) must pass."""
         result, output_path = _transform_to_tmp(provenance_old_shape_empty_ext_input, tmp_path)
         assert result.success is True, (
             "Precondition: transformation must succeed before validator check."
@@ -2057,7 +2057,7 @@ class TestProvenanceValidatorIntegration:
     def test_old_shape_nonempty_ext_output_validates(
         self, provenance_old_shape_nonempty_ext_input, tmp_path
     ):
-        """Transformer output for the old [[SECTION:ArtifactProvenance]] shape (non-empty ext) must pass."""
+        """Transformer output for the old <ArtifactProvenance type="core"> shape (non-empty ext) must pass."""
         result, output_path = _transform_to_tmp(
             provenance_old_shape_nonempty_ext_input, tmp_path
         )
@@ -2093,7 +2093,7 @@ class TestProvenanceValidatorIntegration:
 
         This is the 'wrong-parent' invariant from the validator: INJECTION_PARENT_MAP maps
         ArtifactProvenanceExtension to "" (top level).  A transformer that emits it nested
-        inside [[SECTION:Identity]] or any other section would fail E008.
+        inside <Identity type="core"> or any other section would fail E008.
         """
         _, output_path = _transform_to_tmp(provenance_untagged_input, tmp_path)
         content = _read(output_path)
@@ -2103,8 +2103,8 @@ class TestProvenanceValidatorIntegration:
         injection_pos = content.find(_TARGET_INJECTION_OPEN)
         assert injection_pos != -1, "ArtifactProvenanceExtension must be present in the output."
 
-        # Any [[SECTION:X]] open tag that precedes the injection's position must be
-        # closed before the injection (i.e., a [[/SECTION:X]] must exist between it
+        # Any <X type="core"> open tag that precedes the injection's position must be
+        # closed before the injection (i.e., a </X> must exist between it
         # and the injection position).
         import re as _re
         section_open_re = _re.compile(r"\[\[SECTION:[A-Za-z]+\]\]")
@@ -2216,7 +2216,7 @@ class TestFencedMarkersInput:
 
     The input fixture contains a fenced block inside the Capabilities section
     whose content includes old-style [INJECTION: ...] and new-style
-    [[INJECTION:...]] marker-like text.  One genuine [INJECTION: language_patterns]
+    <Name type="project"> marker-like text.  One genuine [INJECTION: language_patterns]
     marker sits outside the fence and must still be converted correctly.
 
     These tests are in TDD RED phase: they fail until the in_fenced_block guard
@@ -2248,7 +2248,7 @@ class TestFencedMarkersInput:
         """Fenced block content must be passed through verbatim — the transformer must not
         emit or inject boundary tags inside a fence.
 
-        The input fixture already contains a new-style [[INJECTION:IdentityExtension]] line
+        The input fixture already contains a new-style <IdentityExtension type="project"> line
         inside the fenced block as example syntax.  After transformation that line must
         survive unchanged.  The correct invariant is therefore not "no [[ inside a fence"
         but rather "fenced content in the output is byte-for-byte identical to fenced
@@ -2286,7 +2286,7 @@ class TestFencedMarkersInput:
         """The old-style marker inside the fence must survive in the output unchanged.
 
         [INJECTION: identity_extension] appears inside a fenced block in the input.
-        With the bug, the transformer converts it to a [[INJECTION:...]] pair,
+        With the bug, the transformer converts it to a <Name type="project"> pair,
         altering the fenced content.  With the fix, it passes through as-is.
         """
         _, output_path = _transform_to_tmp(generic_fenced_markers_input, tmp_path)
@@ -2314,7 +2314,7 @@ class TestFencedMarkersInput:
         not accidentally suppress conversion of markers that sit outside any fence.
 
         LanguagePatterns has left CANONICAL_DEPLOYED, so the old marker now resolves
-        to an [[INJECTION:]] region rather than [[DEPLOYED:]] — this outcome falls out
+        to an <Name type="project"> region rather than <Name type="managed"> — this outcome falls out
         of EXPECTED_MARKER.get(name, BoundaryKind.INJECTION) missing once the name is
         no longer canonical, with no name-specific code required.
         """
@@ -2324,13 +2324,13 @@ class TestFencedMarkersInput:
             "the [INJECTION: language_patterns] marker outside the fence was not converted."
         )
         content = _read(output_path)
-        assert "[[INJECTION:LanguagePatterns]]" in content, (
-            "[[INJECTION:LanguagePatterns]] must appear in the output; "
+        assert '<LanguagePatterns type="project">' in content, (
+            '<LanguagePatterns type="project"> must appear in the output; '
             "the genuine marker outside the fence was not converted to a boundary tag."
         )
-        assert "[[DEPLOYED:LanguagePatterns]]" not in content, (
+        assert '<LanguagePatterns type="managed">' not in content, (
             "LanguagePatterns is no longer tool-managed; it must never be emitted "
-            "as a [[DEPLOYED:]] region"
+            'as a <Name type="managed"> region'
         )
 
     def test_fenced_content_does_not_duplicate_injection_names(
@@ -2383,7 +2383,7 @@ class TestFencedMarkersInput:
 # and falls to the BoundaryKind.INJECTION default) -- no name-specific code.
 #
 # custom_constraints is the one deliberate, name-scoped rule this change adds:
-# a populated region survives as [[INJECTION:CustomConstraints]]; an empty one
+# a populated region survives as <CustomConstraints type="project">; an empty one
 # is dropped entirely (neither open nor close tag). A neighbouring empty
 # injection of a different name is the control proving the drop rule does not
 # become a general empty-region sweeper.
@@ -2419,7 +2419,7 @@ class TestLegacyLanguagePatternsMarkerResolution:
         self, tmp_path: pathlib.Path
     ) -> None:
         """End-to-end: a file carrying the legacy marker must emit
-        [[INJECTION:LanguagePatterns]], never [[DEPLOYED:LanguagePatterns]]."""
+        <LanguagePatterns type="project">, never <LanguagePatterns type="managed">."""
         content = (
             "---\n"
             "id: test-lp\n"
@@ -2446,15 +2446,15 @@ class TestLegacyLanguagePatternsMarkerResolution:
         result = transform_file(input_path, output_path)
         assert result.success is True, f"Transform must succeed; errors={result.errors}"
         out = _read(output_path)
-        assert "[[INJECTION:LanguagePatterns]]" in out
-        assert "[[DEPLOYED:LanguagePatterns]]" not in out, (
-            "LanguagePatterns must never be emitted as a [[DEPLOYED:]] region"
+        assert '<LanguagePatterns type="project">' in out
+        assert '<LanguagePatterns type="managed">' not in out, (
+            'LanguagePatterns must never be emitted as a <Name type="managed"> region'
         )
 
 
 class TestLegacyCustomConstraintsDropRule:
     """The one deliberate, name-scoped old-marker rule this change adds:
-    a populated custom_constraints region survives as [[INJECTION:CustomConstraints]];
+    a populated custom_constraints region survives as <CustomConstraints type="project">;
     an empty one is dropped entirely -- neither an open nor a close tag is emitted."""
 
     def _transformed_content(self, tmp_path: pathlib.Path, constraints_body: str) -> str:
@@ -2483,27 +2483,27 @@ class TestLegacyCustomConstraintsDropRule:
         self, tmp_path: pathlib.Path
     ) -> None:
         """A custom_constraints region with content must survive as
-        [[CUSTOM:CustomConstraints]], content preserved verbatim."""
+        <CustomConstraints type="custom">, content preserved verbatim."""
         out = self._transformed_content(
             tmp_path,
             "Some constraint.\n\n"
             "[INJECTION: custom_constraints]\n"
             "Never touch production credentials.\n",
         )
-        assert "[[CUSTOM:CustomConstraints]]" in out, (
+        assert '<CustomConstraints type="custom">' in out, (
             "A populated legacy custom_constraints marker must be preserved as "
-            "[[CUSTOM:CustomConstraints]] — project-invented content uses the "
+            '<CustomConstraints type="custom"> — project-invented content uses the '
             "CUSTOM kind, not INJECTION"
         )
         assert "Never touch production credentials." in out, (
             "The populated region's content must be preserved verbatim"
         )
-        assert "[[INJECTION:CustomConstraints]]" not in out, (
-            "[[INJECTION:CustomConstraints]] must NOT appear in the output — "
-            "the populated path now emits [[CUSTOM:CustomConstraints]]"
+        assert '<CustomConstraints type="project">' not in out, (
+            '<CustomConstraints type="project"> must NOT appear in the output — '
+            'the populated path now emits <CustomConstraints type="custom">'
         )
-        assert "[[DEPLOYED:CustomConstraints]]" not in out, (
-            "CustomConstraints must never be emitted as a [[DEPLOYED:]] region — "
+        assert '<CustomConstraints type="managed">' not in out, (
+            'CustomConstraints must never be emitted as a <Name type="managed"> region — '
             "it is not tool-managed"
         )
 
@@ -2535,12 +2535,12 @@ class TestLegacyCustomConstraintsDropRule:
         assert "CustomConstraints" not in out, (
             "The empty custom_constraints region must still be dropped"
         )
-        assert "[[INJECTION:ErrorHandlingExtension]]" in out, (
+        assert '<ErrorHandlingExtension type="project">' in out, (
             "A neighbouring empty injection of a different name must still be emitted "
             "as an empty region pair -- the drop rule must not generalise beyond "
             "CustomConstraints"
         )
-        assert "[[/INJECTION:ErrorHandlingExtension]]" in out
+        assert "</ErrorHandlingExtension>" in out
 
 
 # ---------------------------------------------------------------------------
@@ -2562,7 +2562,7 @@ class TestFencedProvenanceInput:
     When the outer loop reaches that line, in_fenced_block is True — carried
     from the inner section loop that toggled the flag on the opening delimiter.
     Without the I3.2 guard, the outer loop intercepts the provenance region,
-    emits a spurious [[INJECTION:ArtifactProvenanceExtension]] pair, skips the
+    emits a spurious <ArtifactProvenanceExtension type="project"> pair, skips the
     closing fence delimiter (leaving in_fenced_block True for all subsequent
     sections), and discards the fenced content.
 
@@ -2598,7 +2598,7 @@ class TestFencedProvenanceInput:
         """The '## Artifact Provenance' text must appear verbatim in the output.
 
         Without the I3.2 guard, provenance-region interception consumes the
-        line (replacing it with [[INJECTION:ArtifactProvenanceExtension]] tags)
+        line (replacing it with <ArtifactProvenanceExtension type="project"> tags)
         and skips the closing fence delimiter.  With the fix, the outer loop's
         else branch appends the line verbatim.
         """
@@ -2608,7 +2608,7 @@ class TestFencedProvenanceInput:
             "The literal text '## Artifact Provenance' must appear verbatim in "
             "the output.\n"
             "Without the I3.2 guard, the provenance-region interception replaces "
-            "it with [[INJECTION:ArtifactProvenanceExtension]] tags and discards "
+            'it with <ArtifactProvenanceExtension type="project"> tags and discards '
             "the fenced content entirely."
         )
 
@@ -2632,12 +2632,12 @@ class TestFencedProvenanceInput:
 # ---------------------------------------------------------------------------
 
 def _count_section_opens_before(content: str, pos: int) -> int:
-    """Return the number of [[SECTION:...]] open tags appearing before byte offset pos."""
+    """Return the number of <Name type="core"> open tags appearing before byte offset pos."""
     return len(re.findall(r"\[\[SECTION:[A-Za-z]+\]\]", content[:pos]))
 
 
 def _count_section_closes_before(content: str, pos: int) -> int:
-    """Return the number of [[/SECTION:...]] close tags appearing before byte offset pos."""
+    """Return the number of </Name> close tags appearing before byte offset pos."""
     return len(re.findall(r"\[\[/SECTION:[A-Za-z]+\]\]", content[:pos]))
 
 
@@ -2647,11 +2647,11 @@ class TestCommunicationProtocolInput:
     The input carries prose plus both [INJECTION: identity_extension] and
     [INJECTION: protocol_extension] inside the '## Communication Protocol' region.
     After transformation:
-    - [[DEPLOYED:CommunicationProtocol]] / [[/DEPLOYED:CommunicationProtocol]] appears at
-      top level between [[/SECTION:Identity]] and [[SECTION:Capabilities]].
-    - IdentityExtension is relocated inside [[SECTION:Identity]], at the end of the Identity
+    - <CommunicationProtocol type="managed"> / </CommunicationProtocol> appears at
+      top level between </Identity> and <Capabilities type="core">.
+    - IdentityExtension is relocated inside <Identity type="core">, at the end of the Identity
       body, preceded by one blank line.
-    - ProtocolExtension is emitted as an empty top-level [[INJECTION:ProtocolExtension]] pair
+    - ProtocolExtension is emitted as an empty top-level <ProtocolExtension type="project"> pair
       immediately after the deployed block.
     - Old prose is discarded; no untagged leftover text appears.
 
@@ -2691,20 +2691,20 @@ class TestCommunicationProtocolInput:
     def test_deployed_boundary_not_nested_in_any_section(
         self, communication_protocol_input, tmp_path
     ):
-        """[[DEPLOYED:CommunicationProtocol]] must be at body top level, not inside any [[SECTION:]].
+        """<CommunicationProtocol type="managed"> must be at body top level, not inside any <Name type="core">.
 
-        The structural invariant: at the byte offset of [[DEPLOYED:CommunicationProtocol]],
-        the number of [[SECTION:...]] open tags must equal the number of [[/SECTION:...]]
+        The structural invariant: at the byte offset of <CommunicationProtocol type="managed">,
+        the number of <Name type="core"> open tags must equal the number of </Name>
         close tags that precede it — i.e. the nesting depth is zero.
         """
         _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
         content = _read(output_path)
-        deployed_pos = content.find("[[DEPLOYED:CommunicationProtocol]]")
-        assert deployed_pos != -1, "[[DEPLOYED:CommunicationProtocol]] must be present in the output."
+        deployed_pos = content.find('<CommunicationProtocol type="managed">')
+        assert deployed_pos != -1, '<CommunicationProtocol type="managed"> must be present in the output.'
         opens_before = _count_section_opens_before(content, deployed_pos)
         closes_before = _count_section_closes_before(content, deployed_pos)
         assert opens_before == closes_before, (
-            f"[[DEPLOYED:CommunicationProtocol]] is nested inside a [[SECTION:...]] block. "
+            f'<CommunicationProtocol type="managed"> is nested inside a core-section block. '
             f"Found {opens_before} section open tags and {closes_before} section close tags "
             f"before it — they must balance for top-level placement."
         )
@@ -2712,20 +2712,20 @@ class TestCommunicationProtocolInput:
     def test_deployed_boundary_between_identity_and_capabilities(
         self, communication_protocol_input, tmp_path
     ):
-        """[[DEPLOYED:CommunicationProtocol]] must appear after [[/SECTION:Identity]] and before
-        [[SECTION:Capabilities]], satisfying CANONICAL_ORDER slot 1.
+        """<CommunicationProtocol type="managed"> must appear after </Identity> and before
+        <Capabilities type="core">, satisfying CANONICAL_ORDER slot 1.
         """
         _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
         content = _read(output_path)
-        identity_close_pos = content.find("[[/SECTION:Identity]]")
-        deployed_pos = content.find("[[DEPLOYED:CommunicationProtocol]]")
-        capabilities_open_pos = content.find("[[SECTION:Capabilities]]")
-        assert identity_close_pos != -1, "[[/SECTION:Identity]] must be present."
-        assert deployed_pos != -1, "[[DEPLOYED:CommunicationProtocol]] must be present."
-        assert capabilities_open_pos != -1, "[[SECTION:Capabilities]] must be present."
+        identity_close_pos = content.find("</Identity>")
+        deployed_pos = content.find('<CommunicationProtocol type="managed">')
+        capabilities_open_pos = content.find('<Capabilities type="core">')
+        assert identity_close_pos != -1, "</Identity> must be present."
+        assert deployed_pos != -1, '<CommunicationProtocol type="managed"> must be present.'
+        assert capabilities_open_pos != -1, '<Capabilities type="core"> must be present.'
         assert identity_close_pos < deployed_pos < capabilities_open_pos, (
-            "[[DEPLOYED:CommunicationProtocol]] must appear after [[/SECTION:Identity]] "
-            "and before [[SECTION:Capabilities]]."
+            '<CommunicationProtocol type="managed"> must appear after </Identity> '
+            'and before <Capabilities type="core">.'
         )
 
     def test_old_prose_not_in_output(
@@ -2752,7 +2752,7 @@ class TestCommunicationProtocolInput:
     ):
         """The raw '## Communication Protocol' heading line must not survive as bare Markdown.
 
-        After transformation, the heading is replaced by [[DEPLOYED:CommunicationProtocol]].
+        After transformation, the heading is replaced by <CommunicationProtocol type="managed">.
         Its appearance as a literal Markdown heading in the output would indicate the region
         was not intercepted and its prose was left as unclassifiable content.
         """
@@ -2777,8 +2777,8 @@ class TestCommunicationProtocolInput:
         """Transformer output must pass validate_file with no errors, specifically no E008.
 
         E008 fires when a DEPLOYED boundary is nested inside a section rather than at top level.
-        A correct implementation places [[DEPLOYED:CommunicationProtocol]] at body top level
-        (after [[/SECTION:Identity]]), so E008 must not appear.
+        A correct implementation places <CommunicationProtocol type="managed"> at body top level
+        (after </Identity>), so E008 must not appear.
         E007 (canonical order) is also covered: CommunicationProtocol is at CANONICAL_ORDER[1],
         and the emission contract places it after Identity and before Capabilities, satisfying
         the order check.
@@ -2797,7 +2797,7 @@ class TestCommunicationProtocolInput:
     def test_protocol_extension_pair_is_empty(
         self, communication_protocol_input, tmp_path
     ):
-        """[[INJECTION:ProtocolExtension]] open tag must be immediately followed by its close tag.
+        """<ProtocolExtension type="project"> open tag must be immediately followed by its close tag.
 
         The ProtocolExtension pair is contractually empty: [INJECTION: protocol_extension] is
         an old-style single-line sentinel with no wrapped body.  The open tag and close tag
@@ -2806,16 +2806,16 @@ class TestCommunicationProtocolInput:
         _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
         lines = _read(output_path).splitlines()
         for i, line in enumerate(lines):
-            if line == "[[INJECTION:ProtocolExtension]]":
-                assert i + 1 < len(lines) and lines[i + 1] == "[[/INJECTION:ProtocolExtension]]", (
-                    "[[INJECTION:ProtocolExtension]] open tag must be immediately followed by "
-                    "[[/INJECTION:ProtocolExtension]] close tag with nothing between them. "
+            if line == '<ProtocolExtension type="project">':
+                assert i + 1 < len(lines) and lines[i + 1] == "</ProtocolExtension>", (
+                    '<ProtocolExtension type="project"> open tag must be immediately followed by '
+                    "</ProtocolExtension> close tag with nothing between them. "
                     f"Line after open tag: {lines[i + 1]!r}"
                 )
                 break
         else:
             pytest.fail(
-                "[[INJECTION:ProtocolExtension]] not found in output. "
+                '<ProtocolExtension type="project"> not found in output. '
                 "The [INJECTION: protocol_extension] marker must be preserved as a tagged "
                 "top-level region rather than discarded with the surrounding prose."
             )
@@ -2823,19 +2823,19 @@ class TestCommunicationProtocolInput:
     def test_protocol_extension_not_nested_in_any_section(
         self, communication_protocol_input, tmp_path
     ):
-        """[[INJECTION:ProtocolExtension]] must be at body top level, not inside any [[SECTION:]].
+        """<ProtocolExtension type="project"> must be at body top level, not inside any <Name type="core">.
 
         INJECTION_PARENT_MAP maps ProtocolExtension to None (top level). Emitting it inside
         a section would violate the parent contract and cause the validator to report E008.
         """
         _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
         content = _read(output_path)
-        ext_pos = content.find("[[INJECTION:ProtocolExtension]]")
-        assert ext_pos != -1, "[[INJECTION:ProtocolExtension]] must be present in the output."
+        ext_pos = content.find('<ProtocolExtension type="project">')
+        assert ext_pos != -1, '<ProtocolExtension type="project"> must be present in the output.'
         opens_before = _count_section_opens_before(content, ext_pos)
         closes_before = _count_section_closes_before(content, ext_pos)
         assert opens_before == closes_before, (
-            f"[[INJECTION:ProtocolExtension]] is nested inside a [[SECTION:...]] block. "
+            f'<ProtocolExtension type="project"> is nested inside a core-section block. '
             f"Found {opens_before} section open tags and {closes_before} section close tags "
             f"before it — they must balance for top-level placement."
         )
@@ -2853,24 +2853,24 @@ class TestCommunicationProtocolInput:
     def test_identity_extension_emitted_inside_identity_section(
         self, communication_protocol_input, tmp_path
     ):
-        """[[INJECTION:IdentityExtension]] relocated from the CP region must appear inside
-        [[SECTION:Identity]], not at top level or inside a different section.
+        """<IdentityExtension type="project"> relocated from the CP region must appear inside
+        <Identity type="core">, not at top level or inside a different section.
 
         The marker's source line lies past Identity's end_line, so in-place emission is
         impossible.  The transformer must relocate it to the end of the Identity body,
-        immediately before [[/SECTION:Identity]], preceded by one blank line.
+        immediately before </Identity>, preceded by one blank line.
         """
         _, output_path = _transform_to_tmp(communication_protocol_input, tmp_path)
         content = _read(output_path)
-        identity_open_pos = content.find("[[SECTION:Identity]]")
-        identity_close_pos = content.find("[[/SECTION:Identity]]")
-        ext_pos = content.find("[[INJECTION:IdentityExtension]]")
-        assert identity_open_pos != -1, "[[SECTION:Identity]] must be present."
-        assert identity_close_pos != -1, "[[/SECTION:Identity]] must be present."
-        assert ext_pos != -1, "[[INJECTION:IdentityExtension]] must be present in the output."
+        identity_open_pos = content.find('<Identity type="core">')
+        identity_close_pos = content.find("</Identity>")
+        ext_pos = content.find('<IdentityExtension type="project">')
+        assert identity_open_pos != -1, '<Identity type="core"> must be present.'
+        assert identity_close_pos != -1, "</Identity> must be present."
+        assert ext_pos != -1, '<IdentityExtension type="project"> must be present in the output.'
         assert identity_open_pos < ext_pos < identity_close_pos, (
-            "[[INJECTION:IdentityExtension]] must appear between [[SECTION:Identity]] and "
-            "[[/SECTION:Identity]], i.e. inside the Identity section body."
+            '<IdentityExtension type="project"> must appear between <Identity type="core"> and '
+            "</Identity>, i.e. inside the Identity section body."
         )
 
     def test_identity_extension_in_injections_added(
@@ -2975,7 +2975,7 @@ class TestFencedProtocolHeadingInput:
         """The '## Communication Protocol' text inside the fence must appear verbatim in the output.
 
         If the fenced line is misdetected as a region start, the outer loop intercepts it,
-        discards its content, and emits [[DEPLOYED:CommunicationProtocol]] instead.  The
+        discards its content, and emits <CommunicationProtocol type="managed"> instead.  The
         fenced line would then be absent from the output, failing this assertion.
         """
         _, output_path = _transform_to_tmp(fenced_protocol_heading_input, tmp_path)
@@ -3014,8 +3014,8 @@ class TestFencedProtocolHeadingInput:
             "recorded in deployed_added."
         )
         content = _read(output_path)
-        assert "[[DEPLOYED:CommunicationProtocol]]" in content, (
-            "[[DEPLOYED:CommunicationProtocol]] must appear in the output from the genuine region."
+        assert '<CommunicationProtocol type="managed">' in content, (
+            '<CommunicationProtocol type="managed"> must appear in the output from the genuine region.'
         )
 
     def test_output_validates_cleanly(
@@ -3154,12 +3154,12 @@ class TestHasCanonicalBoundaryTags:
     """Tests for has_canonical_boundary_tags: body-level structural tag detection.
 
     Returns True only when the body carries a structurally valid set of canonical
-    [[SECTION:...]] boundary tags. "Structurally valid" requires:
-      - at least one [[SECTION:Name]] tag with a canonical name;
+    <Name type="core"> boundary tags. "Structurally valid" requires:
+      - at least one <Name type="core"> tag with a canonical name;
       - every open tag has a matching close tag and no close tag is unmatched;
       - every SECTION name is in CANONICAL_SECTIONS;
-      - every [[DEPLOYED:Name]] name is in CANONICAL_DEPLOYED and is paired;
-      - [[INJECTION:...]] names are open vocabulary but must be paired.
+      - every <Name type="managed"> name is in CANONICAL_DEPLOYED and is paired;
+      - <Name type="project"> names are open vocabulary but must be paired.
 
     A tag is recognised only when it occupies a whole line (after stripping the
     line terminator). An inline bracket string does not count.
@@ -3173,58 +3173,58 @@ class TestHasCanonicalBoundaryTags:
     def test_minimal_valid_body_returns_true(self):
         """A body with one correctly paired canonical SECTION tag must return True."""
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# Test Agent\n"
             "\n"
             "Some identity content.\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is True
 
     def test_multiple_canonical_sections_returns_true(self):
         """A body with several correctly paired canonical sections must return True."""
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# Agent\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
             "\n"
-            "[[SECTION:Capabilities]]\n"
+            '<Capabilities type="core">\n'
             "## Capabilities\n"
-            "[[/SECTION:Capabilities]]\n"
+            "</Capabilities>\n"
         )
         assert has_canonical_boundary_tags(body) is True
 
     def test_canonical_deployed_within_sections_returns_true(self):
-        """Canonical [[DEPLOYED:...]] tags paired within a valid section must return True."""
+        """Canonical <Name type="managed"> tags paired within a valid section must return True."""
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# Agent\n"
-            "[[DEPLOYED:AuthorityHierarchy]]\n"
-            "[[/DEPLOYED:AuthorityHierarchy]]\n"
-            "[[/SECTION:Identity]]\n"
+            '<AuthorityHierarchy type="managed">\n'
+            "</AuthorityHierarchy>\n"
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is True
 
     def test_top_level_canonical_deployed_returns_true(self):
-        """[[DEPLOYED:CommunicationProtocol]] at top level with a canonical section must return True."""
+        """<CommunicationProtocol type="managed"> at top level with a canonical section must return True."""
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# Agent\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
             "\n"
-            "[[DEPLOYED:CommunicationProtocol]]\n"
-            "[[/DEPLOYED:CommunicationProtocol]]\n"
+            '<CommunicationProtocol type="managed">\n'
+            "</CommunicationProtocol>\n"
         )
         assert has_canonical_boundary_tags(body) is True
 
     def test_correctly_paired_injection_in_valid_section_returns_true(self):
-        """Correctly paired [[INJECTION:...]] tags (open vocabulary) must not block True."""
+        """Correctly paired <Name type="project"> tags (open vocabulary) must not block True."""
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# Agent\n"
-            "[[INJECTION:IdentityExtension]]\n"
-            "[[/INJECTION:IdentityExtension]]\n"
-            "[[/SECTION:Identity]]\n"
+            '<IdentityExtension type="project">\n'
+            "</IdentityExtension>\n"
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is True
 
@@ -3278,108 +3278,108 @@ class TestHasCanonicalBoundaryTags:
     # --- False cases: pairing errors -------------------------------------
 
     def test_unpaired_open_section_tag_returns_false(self):
-        """An open [[SECTION:Identity]] with no matching close tag must return False."""
+        """An open <Identity type="core"> with no matching close tag must return False."""
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "Some content.\n"
         )
         assert has_canonical_boundary_tags(body) is False
 
     def test_orphan_close_section_tag_returns_false(self):
-        """An unmatched [[/SECTION:Identity]] with no corresponding open must return False."""
+        """An unmatched </Identity> with no corresponding open must return False."""
         body = (
             "Some prose.\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is False
 
     def test_mismatched_section_tag_names_returns_false(self):
-        """[[SECTION:Identity]] paired with [[/SECTION:Capabilities]] must return False."""
+        """<Identity type="core"> paired with </Capabilities> must return False."""
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "Some content.\n"
-            "[[/SECTION:Capabilities]]\n"
+            "</Capabilities>\n"
         )
         assert has_canonical_boundary_tags(body) is False
 
     def test_unpaired_deployed_tag_returns_false(self):
-        """An open [[DEPLOYED:CommunicationProtocol]] without a close must return False."""
+        """An open <CommunicationProtocol type="managed"> without a close must return False."""
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# Agent\n"
-            "[[/SECTION:Identity]]\n"
-            "[[DEPLOYED:CommunicationProtocol]]\n"
+            "</Identity>\n"
+            '<CommunicationProtocol type="managed">\n'
         )
         assert has_canonical_boundary_tags(body) is False
 
     def test_orphan_close_deployed_tag_returns_false(self):
-        """An unmatched [[/DEPLOYED:CommunicationProtocol]] without an open must return False."""
+        """An unmatched </CommunicationProtocol> without an open must return False."""
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# Agent\n"
-            "[[/SECTION:Identity]]\n"
-            "[[/DEPLOYED:CommunicationProtocol]]\n"
+            "</Identity>\n"
+            "</CommunicationProtocol>\n"
         )
         assert has_canonical_boundary_tags(body) is False
 
     def test_unpaired_injection_tag_returns_false(self):
-        """An open [[INJECTION:IdentityExtension]] with no close must return False."""
+        """An open <IdentityExtension type="project"> with no close must return False."""
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# Agent\n"
-            "[[INJECTION:IdentityExtension]]\n"
-            "[[/SECTION:Identity]]\n"
+            '<IdentityExtension type="project">\n'
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is False
 
     # --- False cases: non-canonical names --------------------------------
 
     def test_non_canonical_section_name_returns_false(self):
-        """A [[SECTION:FakeSection]] tag not in CANONICAL_SECTIONS must return False."""
+        """A <FakeSection type="core"> tag not in CANONICAL_SECTIONS must return False."""
         body = (
-            "[[SECTION:FakeSection]]\n"
+            '<FakeSection type="core">\n'
             "Some content.\n"
-            "[[/SECTION:FakeSection]]\n"
+            "</FakeSection>\n"
         )
         assert has_canonical_boundary_tags(body) is False
 
     def test_non_canonical_deployed_name_returns_false(self):
-        """A [[DEPLOYED:FakeRegion]] tag not in CANONICAL_DEPLOYED must return False."""
+        """A <FakeRegion type="managed"> tag not in CANONICAL_DEPLOYED must return False."""
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# Agent\n"
-            "[[DEPLOYED:FakeRegion]]\n"
-            "[[/DEPLOYED:FakeRegion]]\n"
-            "[[/SECTION:Identity]]\n"
+            '<FakeRegion type="managed">\n'
+            "</FakeRegion>\n"
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is False
 
     # --- False cases: incidental bracket strings -------------------------
 
     def test_incidental_bracket_string_embedded_mid_line_is_not_a_tag(self):
-        """A [[SECTION:Identity]]-shaped string embedded mid-line must not count as a tag.
+        """A <Identity type="core">-shaped string embedded mid-line must not count as a tag.
 
         Tags are recognised only when they occupy an entire line (after stripping the
         line terminator). A bracket string embedded in prose must not produce a True
         result.
         """
         body = (
-            "See the [[SECTION:Identity]] reference in this prose line.\n"
+            'See the <Identity type="core"> reference in this prose line.\n'
         )
         assert has_canonical_boundary_tags(body) is False
 
     def test_incidental_bracket_string_with_leading_text_is_not_a_tag(self):
         """A line that has text before [[...]] must not be treated as a tag line."""
         body = (
-            "Note: [[SECTION:Identity]] is described above.\n"
-            "[[/SECTION:Identity]]\n"
+            'Note: <Identity type="core"> is described above.\n'
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is False
 
     def test_incidental_bracket_string_with_trailing_text_is_not_a_tag(self):
         """A line that has text after [[...]] must not be treated as a tag line."""
         body = (
-            "[[SECTION:Identity]] — start of identity section\n"
+            '<Identity type="core"> — start of identity section\n'
             "Some content.\n"
         )
         assert has_canonical_boundary_tags(body) is False
@@ -3619,7 +3619,7 @@ class TestDegradedFallback:
     def test_output_has_canonical_boundary_tags(
         self, harness_only_untransformed_input, tmp_path
     ):
-        """The degraded-path output must carry a structurally valid set of canonical [[SECTION:...]] tags."""
+        """The degraded-path output must carry a structurally valid set of canonical <Name type="core"> tags."""
         _, output_path = _transform_to_tmp(harness_only_untransformed_input, tmp_path)
         output_body = _body(_read(output_path))
         assert has_canonical_boundary_tags(output_body) is True, (
@@ -4060,14 +4060,14 @@ class TestRelaxedIdentityHandling:
     def test_noncanonical_h2_inside_identity_boundary(
         self, harness_only_noncanonical_identity_input, tmp_path
     ):
-        """The '## System Context' heading must appear inside [[SECTION:Identity]]..[[/SECTION:Identity]]."""
+        """The '## System Context' heading must appear inside <Identity type="core">..</Identity>."""
         _, output_path = _transform_to_tmp(harness_only_noncanonical_identity_input, tmp_path)
         content = _read(output_path)
-        identity_open = content.find("[[SECTION:Identity]]")
-        identity_close = content.find("[[/SECTION:Identity]]")
+        identity_open = content.find('<Identity type="core">')
+        identity_close = content.find("</Identity>")
         system_context_pos = content.find("## System Context")
-        assert identity_open != -1, "[[SECTION:Identity]] must be present"
-        assert identity_close != -1, "[[/SECTION:Identity]] must be present"
+        assert identity_open != -1, '<Identity type="core"> must be present'
+        assert identity_close != -1, "</Identity> must be present"
         assert system_context_pos != -1, "## System Context heading must be present"
         assert identity_open < system_context_pos < identity_close, (
             "## System Context must be inside the Identity section boundary; "
@@ -5276,7 +5276,7 @@ class TestIdempotencyGuardCompoundNames:
     'AuthorityHierarchy:Subagent' now reach the canonical-membership checks.
     The guard must use tag_base_name() for membership (so a file carrying compound
     names is still recognised as already-transformed), but must use the full name
-    for pairing (an open '[[SECTION:A:b]]' is closed only by '[[/SECTION:A:b]]').
+    for pairing (an open '<A type="core" name="b">' is closed only by '</A>').
     """
 
     # --- Base-name membership: compound names that should return True ----
@@ -5292,9 +5292,9 @@ class TestIdempotencyGuardCompoundNames:
         CANONICAL_SECTIONS, so the guard correctly returns True.
         """
         body = (
-            "[[SECTION:Identity:Something]]\n"
+            '<Identity type="core" name="Something">\n'
             "Some agent identity content.\n"
-            "[[/SECTION:Identity:Something]]\n"
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is True, (
             "A body with a compound SECTION name whose base is 'Identity' (canonical) "
@@ -5311,11 +5311,11 @@ class TestIdempotencyGuardCompoundNames:
         IS in CANONICAL_DEPLOYED, so the guard still returns True.
         """
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "# Agent\n"
-            "[[DEPLOYED:AuthorityHierarchy:Subagent]]\n"
-            "[[/DEPLOYED:AuthorityHierarchy:Subagent]]\n"
-            "[[/SECTION:Identity]]\n"
+            '<AuthorityHierarchy type="managed" name="Subagent">\n'
+            "</AuthorityHierarchy>\n"
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is True, (
             "A body with canonical SECTION tags and a compound DEPLOYED name whose "
@@ -5334,12 +5334,12 @@ class TestIdempotencyGuardCompoundNames:
         CANONICAL_SECTIONS, so the guard returns False (correctly strict).
         """
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "Content.\n"
-            "[[/SECTION:Identity]]\n"
-            "[[SECTION:Bogus:Thing]]\n"
+            "</Identity>\n"
+            '<Bogus type="core" name="Thing">\n'
             "Extra content.\n"
-            "[[/SECTION:Bogus:Thing]]\n"
+            "</Bogus>\n"
         )
         assert has_canonical_boundary_tags(body) is False, (
             "A body containing a compound SECTION name whose base is not in "
@@ -5356,11 +5356,11 @@ class TestIdempotencyGuardCompoundNames:
         CANONICAL_DEPLOYED, so the guard returns False.
         """
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "Content.\n"
-            "[[DEPLOYED:Unknown:Subagent]]\n"
-            "[[/DEPLOYED:Unknown:Subagent]]\n"
-            "[[/SECTION:Identity]]\n"
+            '<Unknown type="managed" name="Subagent">\n'
+            "</Unknown>\n"
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is False, (
             "A body containing a compound DEPLOYED name whose base is not in "
@@ -5373,9 +5373,9 @@ class TestIdempotencyGuardCompoundNames:
         """An open compound SECTION tag with no matching close tag must make the
         guard return False.
 
-        Pairing checks use the full tag name, so '[[SECTION:Identity:Subagent]]'
-        is closed only by '[[/SECTION:Identity:Subagent]]', not by
-        '[[/SECTION:Identity]]'.
+        Pairing checks use the full tag name, so '<Identity type="core" name="Subagent">'
+        is closed only by '</Identity>', not by
+        '</Identity>'.
 
         Before the fix: the compound tag is skipped; the guard may return True
         based on other tags.
@@ -5383,38 +5383,40 @@ class TestIdempotencyGuardCompoundNames:
         returns False.
         """
         body = (
-            "[[SECTION:Identity]]\n"
-            "[[SECTION:Identity:Subagent]]\n"   # opened — never closed
+            '<Identity type="core">\n'
+            '<Identity type="core" name="Subagent">\n'   # opened — never closed
             "Content.\n"
-            "[[/SECTION:Identity]]\n"
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is False, (
             "An unpaired compound SECTION open tag must make the guard return False"
         )
 
-    def test_compound_open_and_simple_close_are_not_a_valid_pair(self) -> None:
-        """A compound open tag and a simple close tag with the same base name are
-        NOT a valid pair — pairing requires the full name to match.
+    def test_compound_open_with_matching_simple_close_is_a_valid_pair(self) -> None:
+        """In the XML format, a compound open tag is validly closed by the simple close tag.
 
-        '[[SECTION:Identity:Subagent]]' is NOT closed by '[[/SECTION:Identity]]'.
+        '<Identity type="core" name="Subagent">' is correctly closed by '</Identity>'.
+        In XML, close tags carry only the base tag name, never the qualifier attributes.
+        So a body with a balanced compound-open + simple-close must be recognised as
+        already-transformed, provided the base name is canonical.
         """
         body = (
-            "[[SECTION:Identity:Subagent]]\n"
+            '<Identity type="core" name="Subagent">\n'
             "Content.\n"
-            "[[/SECTION:Identity]]\n"         # close uses simple name — wrong
+            "</Identity>\n"
         )
-        assert has_canonical_boundary_tags(body) is False, (
-            "A compound open tag and a simple close tag with the same base name must "
-            "NOT satisfy the pairing check"
+        assert has_canonical_boundary_tags(body) is True, (
+            "A compound open tag with a matching simple close tag must satisfy the "
+            "pairing check in the XML format — simple close tags close any open of same base name"
         )
 
     def test_unpaired_compound_deployed_tag_returns_false(self) -> None:
         """An open compound DEPLOYED tag with no matching close tag must return False."""
         body = (
-            "[[SECTION:Identity]]\n"
+            '<Identity type="core">\n'
             "Content.\n"
-            "[[DEPLOYED:AuthorityHierarchy:Subagent]]\n"   # opened — never closed
-            "[[/SECTION:Identity]]\n"
+            '<AuthorityHierarchy type="managed" name="Subagent">\n'   # opened — never closed
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is False, (
             "An unpaired compound DEPLOYED open tag must make the guard return False"
@@ -5425,10 +5427,10 @@ class TestIdempotencyGuardCompoundNames:
     def test_already_transformed_body_with_simple_names_still_returns_true(self) -> None:
         """A body with only simple canonical names must still return True after the fix."""
         body = (
-            "[[SECTION:Identity]]\n"
-            "[[DEPLOYED:CommunicationProtocol]]\n"
-            "[[/DEPLOYED:CommunicationProtocol]]\n"
-            "[[/SECTION:Identity]]\n"
+            '<Identity type="core">\n'
+            '<CommunicationProtocol type="managed">\n'
+            "</CommunicationProtocol>\n"
+            "</Identity>\n"
         )
         assert has_canonical_boundary_tags(body) is True, (
             "Regression: simple canonical names must still satisfy the idempotency guard"
@@ -5471,7 +5473,7 @@ class TestClosingProcedureAndAuthorityHierarchyGenericPath:
         assert cp_idx < ah_idx
 
     def test_no_tag_emitted_inside_fenced_block(self, generic_identity_regions_input, tmp_path):
-        """No [[DEPLOYED:...]] tag may appear on a fence-masked line in the output."""
+        """No <Name type="managed"> tag may appear on a fence-masked line in the output."""
         _, output_path = _transform_to_tmp(generic_identity_regions_input, tmp_path)
         import sys as _sys
         import pathlib as _pathlib
@@ -5483,7 +5485,7 @@ class TestClosingProcedureAndAuthorityHierarchyGenericPath:
         mask = _fence_mask(out_lines)
         for i, (line, is_masked) in enumerate(zip(out_lines, mask)):
             if is_masked:
-                assert "[[DEPLOYED:" not in line, (
+                assert 'type="managed"' not in line, (
                     f"Deployed tag on fence-masked line {i}: {line!r}"
                 )
 
@@ -5530,7 +5532,7 @@ class TestClosingProcedureAndAuthorityHierarchyGenericPath:
     def test_closing_procedure_immediately_follows_process_list(
         self, generic_identity_regions_input, tmp_path
     ):
-        """[[DEPLOYED:ClosingProcedure]] must appear immediately after the last Process step,
+        """<ClosingProcedure type="managed"> must appear immediately after the last Process step,
         with nothing intervening between the list and the open tag."""
         _, output_path = _transform_to_tmp(generic_identity_regions_input, tmp_path)
         lines = _read(output_path).splitlines()
@@ -5541,8 +5543,8 @@ class TestClosingProcedureAndAuthorityHierarchyGenericPath:
             default=None,
         )
         assert last_step_idx is not None, "No surviving numbered step found in output"
-        # The very next line must be [[DEPLOYED:ClosingProcedure]]
-        assert lines[last_step_idx + 1].strip() == "[[DEPLOYED:ClosingProcedure]]", (
+        # The very next line must be <ClosingProcedure type="managed">
+        assert lines[last_step_idx + 1].strip() == '<ClosingProcedure type="managed">', (
             f"ClosingProcedure open tag must immediately follow the last Process step; "
             f"got: {lines[last_step_idx + 1]!r}"
         )
@@ -6595,8 +6597,8 @@ def _s3_make_eh_body(
     lines.append("- **Return CAPABILITY_EXCEEDED** when the task exceeds your ability\n")
     lines.append("- **Return NEEDS_CLARIFICATION** when context is ambiguous\n")
     lines.append("\n")
-    lines.append("[[INJECTION:ErrorHandlingExtension]]\n")
-    lines.append("[[/INJECTION:ErrorHandlingExtension]]\n")
+    lines.append('<ErrorHandlingExtension type="project">\n')
+    lines.append("</ErrorHandlingExtension>\n")
     return lines
 
 
@@ -6611,7 +6613,7 @@ def _s3_make_ep_body(
 ) -> list:
     """Build a minimal ExecutionPhilosophy section body for unit testing.
 
-    When context_limits_mid_bullet is True the [[INJECTION:ContextLimits]] tag is
+    When context_limits_mid_bullet is True the <ContextLimits type="project"> tag is
     placed between the Context Management and Memory bullets — the ordering-hazard
     layout.  When False, ContextLimits is at the end.
 
@@ -6628,8 +6630,8 @@ def _s3_make_ep_body(
         lines.append("- **Context Management:** Dedicate your full context window here.\n")
 
     if context_limits_mid_bullet:
-        lines.append("[[INJECTION:ContextLimits]]\n")
-        lines.append("[[/INJECTION:ContextLimits]]\n")
+        lines.append('<ContextLimits type="project">\n')
+        lines.append("</ContextLimits>\n")
 
     if memory_canonical:
         lines.append(
@@ -6655,8 +6657,8 @@ def _s3_make_ep_body(
         )
 
     if not context_limits_mid_bullet:
-        lines.append("[[INJECTION:ContextLimits]]\n")
-        lines.append("[[/INJECTION:ContextLimits]]\n")
+        lines.append('<ContextLimits type="project">\n')
+        lines.append("</ContextLimits>\n")
 
     lines.append(
         "- **Fix Precision:** Change only what needs fixing;"
@@ -6820,7 +6822,7 @@ class TestErrorHandlingCommonConductRegionUnit:
         )
 
     def test_error_handling_common_region_is_first_in_section(self) -> None:
-        """[[DEPLOYED:ErrorHandlingCommon]] must be the very first tag after the
+        """<ErrorHandlingCommon type="managed"> must be the very first tag after the
         section heading (nothing else may precede it in the section body)."""
         spec = _s3_find_spec("ErrorHandlingCommon")
         body = _s3_make_eh_body(retry_canonical=True, errcodes_canonical=True)
@@ -6828,7 +6830,7 @@ class TestErrorHandlingCommonConductRegionUnit:
         assert "ErrorHandlingCommon" in result.deployed_added
         output_text = "".join(result.lines)
         heading_pos = output_text.find("## Error Handling")
-        deployed_pos = output_text.find("[[DEPLOYED:ErrorHandlingCommon]]")
+        deployed_pos = output_text.find('<ErrorHandlingCommon type="managed">')
         assert heading_pos != -1 and deployed_pos != -1
         between = output_text[heading_pos + len("## Error Handling"):deployed_pos].strip()
         assert between == "", (
@@ -6841,8 +6843,8 @@ class TestErrorHandlingCommonConductRegionUnit:
         body = [
             "## Error Handling\n",
             "\n",
-            "[[DEPLOYED:ErrorHandlingCommon]]\n",
-            "[[/DEPLOYED:ErrorHandlingCommon]]\n",
+            '<ErrorHandlingCommon type="managed">\n',
+            "</ErrorHandlingCommon>\n",
             "- **Return CAPABILITY_EXCEEDED** when the task exceeds your ability\n",
             "\n",
         ]
@@ -6851,7 +6853,7 @@ class TestErrorHandlingCommonConductRegionUnit:
         result = apply_conduct_regions(body, sections, specs=(spec,))
         assert "ErrorHandlingCommon" not in result.deployed_added
         deployed_count = sum(
-            1 for ln in result.lines if ln.strip() == "[[DEPLOYED:ErrorHandlingCommon]]"
+            1 for ln in result.lines if ln.strip() == '<ErrorHandlingCommon type="managed">'
         )
         assert deployed_count == 1, "ErrorHandlingCommon must not be emitted a second time"
 
@@ -7014,18 +7016,18 @@ class TestExecutionPhilosophyCommonConductRegionUnit:
     # --- Placement, ordering hazard, and survival ---
 
     def test_execution_philosophy_common_precedes_context_limits(self) -> None:
-        """[[DEPLOYED:ExecutionPhilosophyCommon]] must appear before [[INJECTION:ContextLimits]]
+        """<ExecutionPhilosophyCommon type="managed"> must appear before <ContextLimits type="project">
         in the output regardless of the legacy marker's source position."""
         spec = _s3_find_spec("ExecutionPhilosophyCommon")
         body = _s3_make_ep_body(context_limits_mid_bullet=True)
         result = _s3_run_apply(body, spec)
         output_text = "".join(result.lines)
-        deployed_pos = output_text.find("[[DEPLOYED:ExecutionPhilosophyCommon]]")
-        cl_pos = output_text.find("[[INJECTION:ContextLimits]]")
+        deployed_pos = output_text.find('<ExecutionPhilosophyCommon type="managed">')
+        cl_pos = output_text.find('<ContextLimits type="project">')
         assert deployed_pos != -1, "ExecutionPhilosophyCommon must be emitted"
         assert cl_pos != -1, "ContextLimits must be present"
         assert deployed_pos < cl_pos, (
-            "[[DEPLOYED:ExecutionPhilosophyCommon]] must precede [[INJECTION:ContextLimits]]"
+            '<ExecutionPhilosophyCommon type="managed"> must precede <ContextLimits type="project">'
         )
 
     def test_ordering_hazard_context_limits_mid_bullet_still_places_region_first(self) -> None:
@@ -7042,8 +7044,8 @@ class TestExecutionPhilosophyCommonConductRegionUnit:
         result = _s3_run_apply(body, spec)
         assert "ExecutionPhilosophyCommon" in result.deployed_added
         output_text = "".join(result.lines)
-        deployed_pos = output_text.find("[[DEPLOYED:ExecutionPhilosophyCommon]]")
-        cl_pos = output_text.find("[[INJECTION:ContextLimits]]")
+        deployed_pos = output_text.find('<ExecutionPhilosophyCommon type="managed">')
+        cl_pos = output_text.find('<ContextLimits type="project">')
         assert deployed_pos < cl_pos, (
             "When ContextLimits was mid-bullet in the source, "
             "ExecutionPhilosophyCommon must still precede it after transformation"
@@ -7105,7 +7107,7 @@ class TestExecutionPhilosophyCommonConductRegionUnit:
         assert "ExecutionPhilosophyCommon" in result.deployed_added
         output_text = "".join(result.lines)
         heading_pos = output_text.find("## Execution Philosophy")
-        deployed_pos = output_text.find("[[DEPLOYED:ExecutionPhilosophyCommon]]")
+        deployed_pos = output_text.find('<ExecutionPhilosophyCommon type="managed">')
         assert heading_pos != -1 and deployed_pos != -1
         between = output_text[heading_pos + len("## Execution Philosophy"):deployed_pos].strip()
         assert between == "", (
@@ -7188,19 +7190,19 @@ class TestErrorHandlingAndExecutionPhilosophyGenericPath:
     def test_error_handling_common_first_in_error_handling_section(
         self, s3_generic_eh_ep_input, tmp_path
     ) -> None:
-        """[[DEPLOYED:ErrorHandlingCommon]] must be the first item in the ErrorHandling section."""
+        """<ErrorHandlingCommon type="managed"> must be the first item in the ErrorHandling section."""
         _, output_path = _transform_to_tmp(s3_generic_eh_ep_input, tmp_path)
         content = _read(output_path)
-        eh_section_start = content.find("[[SECTION:ErrorHandling]]")
-        deployed_open = content.find("[[DEPLOYED:ErrorHandlingCommon]]")
-        eh_section_end = content.find("[[/SECTION:ErrorHandling]]")
-        assert eh_section_start != -1, "[[SECTION:ErrorHandling]] not found"
-        assert deployed_open != -1, "[[DEPLOYED:ErrorHandlingCommon]] not found"
+        eh_section_start = content.find('<ErrorHandling type="core">')
+        deployed_open = content.find('<ErrorHandlingCommon type="managed">')
+        eh_section_end = content.find("</ErrorHandling>")
+        assert eh_section_start != -1, '<ErrorHandling type="core"> not found'
+        assert deployed_open != -1, '<ErrorHandlingCommon type="managed"> not found'
         assert eh_section_start < deployed_open < eh_section_end, (
-            "[[DEPLOYED:ErrorHandlingCommon]] must be inside [[SECTION:ErrorHandling]]"
+            '<ErrorHandlingCommon type="managed"> must be inside <ErrorHandling type="core">'
         )
         # Nothing non-whitespace between section open tag and deployed tag
-        between = content[eh_section_start + len("[[SECTION:ErrorHandling]]"):deployed_open]
+        between = content[eh_section_start + len('<ErrorHandling type="core">'):deployed_open]
         between_stripped = between.replace("\n", "").replace(" ", "")
         # Allow only the heading line between section tag and deployed tag
         # (section tag + newline + heading + newline + deployed tag)
@@ -7250,23 +7252,23 @@ class TestErrorHandlingAndExecutionPhilosophyGenericPath:
     def test_execution_philosophy_common_precedes_context_limits_on_generic_path(
         self, s3_generic_eh_ep_input, tmp_path
     ) -> None:
-        """[[DEPLOYED:ExecutionPhilosophyCommon]] must appear before [[INJECTION:ContextLimits]]
+        """<ExecutionPhilosophyCommon type="managed"> must appear before <ContextLimits type="project">
         even though the legacy marker was positioned mid-bullet-block in the source."""
         _, output_path = _transform_to_tmp(s3_generic_eh_ep_input, tmp_path)
         content = _read(output_path)
-        epc_pos = content.find("[[DEPLOYED:ExecutionPhilosophyCommon]]")
-        cl_pos = content.find("[[INJECTION:ContextLimits]]")
+        epc_pos = content.find('<ExecutionPhilosophyCommon type="managed">')
+        cl_pos = content.find('<ContextLimits type="project">')
         assert epc_pos != -1, "ExecutionPhilosophyCommon must be emitted"
         assert cl_pos != -1, "ContextLimits must be present"
         assert epc_pos < cl_pos, (
-            "[[DEPLOYED:ExecutionPhilosophyCommon]] must precede [[INJECTION:ContextLimits]] "
+            '<ExecutionPhilosophyCommon type="managed"> must precede <ContextLimits type="project"> '
             "even when the legacy ContextLimits marker was mid-bullet in the source"
         )
 
     def test_no_tag_emitted_inside_fenced_block_generic_path(
         self, s3_generic_eh_ep_input, tmp_path
     ) -> None:
-        """No [[DEPLOYED:...]] tag may appear on a fence-masked line in the generic-path output."""
+        """No <Name type="managed"> tag may appear on a fence-masked line in the generic-path output."""
         import sys as _sys
         import pathlib as _pathlib
         _TD = _pathlib.Path(__file__).parent.parent
@@ -7278,7 +7280,7 @@ class TestErrorHandlingAndExecutionPhilosophyGenericPath:
         mask = _fence_mask(out_lines)
         for i, (line, is_masked) in enumerate(zip(out_lines, mask)):
             if is_masked:
-                assert "[[DEPLOYED:" not in line, (
+                assert 'type="managed"' not in line, (
                     f"Deployed tag on fence-masked line {i + 1}: {line!r}"
                 )
 
@@ -7429,15 +7431,15 @@ class TestErrorHandlingAndExecutionPhilosophyHarnessPath:
         s3_harness_eh_ep_generic_ref,
         tmp_path,
     ) -> None:
-        """[[DEPLOYED:ExecutionPhilosophyCommon]] must precede [[INJECTION:ContextLimits]]
+        """<ExecutionPhilosophyCommon type="managed"> must precede <ContextLimits type="project">
         on the harness path even though the legacy marker was mid-bullet in the source."""
         _, output_path = _transform_to_tmp(
             s3_harness_eh_ep_input, tmp_path,
             generic_ref_path=s3_harness_eh_ep_generic_ref,
         )
         content = _read(output_path)
-        epc_pos = content.find("[[DEPLOYED:ExecutionPhilosophyCommon]]")
-        cl_pos = content.find("[[INJECTION:ContextLimits]]")
+        epc_pos = content.find('<ExecutionPhilosophyCommon type="managed">')
+        cl_pos = content.find('<ContextLimits type="project">')
         assert epc_pos != -1
         assert cl_pos != -1
         assert epc_pos < cl_pos, (
@@ -7995,19 +7997,19 @@ class TestHarnessConstraintsDeletionUnit:
         )
 
     def test_harness_constraints_emitted_after_protocol_constraints_when_present(self) -> None:
-        """HarnessConstraints must appear immediately after [[/DEPLOYED:ProtocolConstraints]]
+        """HarnessConstraints must appear immediately after </ProtocolConstraints>
         in the output — the primary AFTER_REGION anchor, exercised without any
         CustomConstraints region present at all (that region no longer exists)."""
         lines, sections = _constraints_section([
-            "[[DEPLOYED:ProtocolConstraints]]",
-            "[[/DEPLOYED:ProtocolConstraints]]",
+            '<ProtocolConstraints type="managed">',
+            "</ProtocolConstraints>",
             "- Some bullet",
         ])
         spec = _make_hc_inline_spec()
         result = apply_conduct_regions(lines, sections, specs=(spec,))
         out_stripped = [l.strip() for l in result.lines]
-        hc_open = "[[DEPLOYED:HarnessConstraints]]"
-        pc_close = "[[/DEPLOYED:ProtocolConstraints]]"
+        hc_open = '<HarnessConstraints type="managed">'
+        pc_close = "</ProtocolConstraints>"
         assert hc_open in out_stripped, "HarnessConstraints open tag must be in output"
         assert pc_close in out_stripped, "ProtocolConstraints close tag must be in output"
         hc_idx = out_stripped.index(hc_open)
@@ -8026,7 +8028,7 @@ class TestHarnessConstraintsDeletionUnit:
         spec = _make_hc_inline_spec()
         result = apply_conduct_regions(lines, sections, specs=(spec,))
         out_stripped = [l.strip() for l in result.lines]
-        assert "[[DEPLOYED:HarnessConstraints]]" in out_stripped, (
+        assert '<HarnessConstraints type="managed">' in out_stripped, (
             "HarnessConstraints must be emitted via fallback_anchor even when "
             "ProtocolConstraints is absent from the section"
         )
@@ -8034,15 +8036,15 @@ class TestHarnessConstraintsDeletionUnit:
     def test_harness_constraints_not_emitted_twice_when_already_present(self) -> None:
         """HarnessConstraints must not be emitted a second time if already in the lines."""
         lines, sections = _constraints_section([
-            "[[DEPLOYED:HarnessConstraints]]",
-            "[[/DEPLOYED:HarnessConstraints]]",
-            "[[DEPLOYED:CustomConstraints]]",
-            "[[/DEPLOYED:CustomConstraints]]",
+            '<HarnessConstraints type="managed">',
+            "</HarnessConstraints>",
+            '<CustomConstraints type="managed">',
+            "</CustomConstraints>",
         ])
         spec = _make_hc_inline_spec()
         result = apply_conduct_regions(lines, sections, specs=(spec,))
         hc_count = sum(
-            1 for l in result.lines if l.strip() == "[[DEPLOYED:HarnessConstraints]]"
+            1 for l in result.lines if l.strip() == '<HarnessConstraints type="managed">'
         )
         assert hc_count == 1, (
             f"HarnessConstraints open tag must appear exactly once; found {hc_count}"
@@ -8164,26 +8166,26 @@ class TestConstraintsRegionsGenericPath:
     def test_protocol_constraints_open_tag_in_output(
         self, s4_generic_constraints_regions_input, tmp_path
     ) -> None:
-        """[[DEPLOYED:ProtocolConstraints]] open tag must appear in the output."""
+        """<ProtocolConstraints type="managed"> open tag must appear in the output."""
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
-        assert "[[DEPLOYED:ProtocolConstraints]]" in _read(output_path)
+        assert '<ProtocolConstraints type="managed">' in _read(output_path)
 
     def test_harness_constraints_open_tag_in_output(
         self, s4_generic_constraints_regions_input, tmp_path
     ) -> None:
-        """[[DEPLOYED:HarnessConstraints]] open tag must appear in the output."""
+        """<HarnessConstraints type="managed"> open tag must appear in the output."""
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
-        assert "[[DEPLOYED:HarnessConstraints]]" in _read(output_path)
+        assert '<HarnessConstraints type="managed">' in _read(output_path)
 
     def test_protocol_constraints_precedes_harness_constraints_in_output(
         self, s4_generic_constraints_regions_input, tmp_path
     ) -> None:
-        """[[DEPLOYED:ProtocolConstraints]] must appear before [[DEPLOYED:HarnessConstraints]]
+        """<ProtocolConstraints type="managed"> must appear before <HarnessConstraints type="managed">
         in document order."""
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
         content = _read(output_path)
-        pc_pos = content.find("[[DEPLOYED:ProtocolConstraints]]")
-        hc_pos = content.find("[[DEPLOYED:HarnessConstraints]]")
+        pc_pos = content.find('<ProtocolConstraints type="managed">')
+        hc_pos = content.find('<HarnessConstraints type="managed">')
         assert pc_pos != -1, "ProtocolConstraints open tag missing from output"
         assert hc_pos != -1, "HarnessConstraints open tag missing from output"
         assert pc_pos < hc_pos, (
@@ -8195,7 +8197,7 @@ class TestConstraintsRegionsGenericPath:
     ) -> None:
         """The fixture's legacy '[INJECTION: custom_constraints]' marker is empty (no
         content precedes the next '---'), so it must be dropped entirely — neither a
-        [[DEPLOYED:CustomConstraints]] nor an [[INJECTION:CustomConstraints]] region
+        <CustomConstraints type="managed"> nor an <CustomConstraints type="project"> region
         may appear anywhere in the output (AC2.5)."""
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
         content = _read(output_path)
@@ -8207,25 +8209,25 @@ class TestConstraintsRegionsGenericPath:
     def test_no_tag_emitted_inside_fenced_block(
         self, s4_generic_constraints_regions_input, tmp_path
     ) -> None:
-        """No [[DEPLOYED:...]] tag may appear on a fence-masked line in the output."""
+        """No <Name type="managed"> tag may appear on a fence-masked line in the output."""
         from fence import fence_mask as _fence_mask
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
         out_lines = output_path.read_text(encoding="utf-8").splitlines(keepends=True)
         mask = _fence_mask(out_lines)
         for i, (line, is_masked) in enumerate(zip(out_lines, mask)):
             if is_masked:
-                assert "[[DEPLOYED:" not in line, (
+                assert 'type="managed"' not in line, (
                     f"Deployed tag found on fence-masked line {i + 1}: {line!r}"
                 )
 
     def test_harness_constraints_emitted_exactly_once_in_output(
         self, s4_generic_constraints_regions_input, tmp_path
     ) -> None:
-        """[[DEPLOYED:HarnessConstraints]] must appear exactly once even when the
+        """<HarnessConstraints type="managed"> must appear exactly once even when the
         legacy [INJECTION: harness_constraints] marker is also present."""
         _, output_path = _transform_to_tmp(s4_generic_constraints_regions_input, tmp_path)
         content = _read(output_path)
-        count = content.count("[[DEPLOYED:HarnessConstraints]]")
+        count = content.count('<HarnessConstraints type="managed">')
         assert count == 1, (
             f"HarnessConstraints open tag must appear exactly once; found {count}"
         )
@@ -8306,7 +8308,7 @@ class TestConstraintsRegionsHarnessPath:
         s4_harness_constraints_regions_generic_ref,
         tmp_path,
     ) -> None:
-        """[[DEPLOYED:ProtocolConstraints]] must appear before [[DEPLOYED:HarnessConstraints]]
+        """<ProtocolConstraints type="managed"> must appear before <HarnessConstraints type="managed">
         in the harness-path output."""
         _, output_path = _transform_to_tmp(
             s4_harness_constraints_regions_input,
@@ -8314,8 +8316,8 @@ class TestConstraintsRegionsHarnessPath:
             generic_ref_path=s4_harness_constraints_regions_generic_ref,
         )
         content = _read(output_path)
-        pc_pos = content.find("[[DEPLOYED:ProtocolConstraints]]")
-        hc_pos = content.find("[[DEPLOYED:HarnessConstraints]]")
+        pc_pos = content.find('<ProtocolConstraints type="managed">')
+        hc_pos = content.find('<HarnessConstraints type="managed">')
         assert pc_pos != -1, "ProtocolConstraints tag missing from harness-path output"
         assert hc_pos != -1, "HarnessConstraints tag missing from harness-path output"
         assert pc_pos < hc_pos
@@ -8333,7 +8335,7 @@ class TestConstraintsRegionsHarnessPath:
             generic_ref_path=s4_harness_constraints_regions_generic_ref,
         )
         content = _read(output_path)
-        count = content.count("[[DEPLOYED:HarnessConstraints]]")
+        count = content.count('<HarnessConstraints type="managed">')
         assert count == 1, (
             f"HarnessConstraints must appear exactly once in harness-path output; "
             f"found {count}"
@@ -8345,7 +8347,7 @@ class TestConstraintsRegionsHarnessPath:
         s4_harness_constraints_regions_generic_ref,
         tmp_path,
     ) -> None:
-        """No [[DEPLOYED:...]] tag may appear on a fence-masked line in harness-path output."""
+        """No <Name type="managed"> tag may appear on a fence-masked line in harness-path output."""
         from fence import fence_mask as _fence_mask
         _, output_path = _transform_to_tmp(
             s4_harness_constraints_regions_input,
@@ -8356,7 +8358,7 @@ class TestConstraintsRegionsHarnessPath:
         mask = _fence_mask(out_lines)
         for i, (line, is_masked) in enumerate(zip(out_lines, mask)):
             if is_masked:
-                assert "[[DEPLOYED:" not in line, (
+                assert 'type="managed"' not in line, (
                     f"Deployed tag on fence-masked line {i + 1}: {line!r}"
                 )
 
@@ -8405,20 +8407,20 @@ class TestHarnessConstraintsNoCustomConstraintsGenericPath:
     ) -> None:
         """CustomConstraints must NOT appear in the output when no marker was present."""
         _, output_path = _transform_to_tmp(s4_generic_no_custom_constraints_input, tmp_path)
-        assert "[[DEPLOYED:CustomConstraints]]" not in _read(output_path), (
+        assert '<CustomConstraints type="managed">' not in _read(output_path), (
             "CustomConstraints must not be emitted when no legacy marker was present"
         )
 
     def test_harness_constraints_immediately_follows_protocol_constraints_close_tag(
         self, s4_generic_no_custom_constraints_input, tmp_path
     ) -> None:
-        """HarnessConstraints must land immediately after [[/DEPLOYED:ProtocolConstraints]] —
+        """HarnessConstraints must land immediately after </ProtocolConstraints> —
         asserting adjacency (not merely "no error") is the load-bearing part of AC2.6:
         a broken primary anchor could still pass a looser ordering check via fallback."""
         _, output_path = _transform_to_tmp(s4_generic_no_custom_constraints_input, tmp_path)
         lines = _read(output_path).splitlines()
-        pc_close = "[[/DEPLOYED:ProtocolConstraints]]"
-        hc_open = "[[DEPLOYED:HarnessConstraints]]"
+        pc_close = "</ProtocolConstraints>"
+        hc_open = '<HarnessConstraints type="managed">'
         assert pc_close in lines, "ProtocolConstraints close tag missing from output"
         assert hc_open in lines, "HarnessConstraints open tag missing from output"
         pc_close_idx = lines.index(pc_close)
@@ -8435,8 +8437,8 @@ class TestHarnessConstraintsNoCustomConstraintsGenericPath:
         """ProtocolConstraints must still precede HarnessConstraints when CustomConstraints absent."""
         _, output_path = _transform_to_tmp(s4_generic_no_custom_constraints_input, tmp_path)
         content = _read(output_path)
-        pc_pos = content.find("[[DEPLOYED:ProtocolConstraints]]")
-        hc_pos = content.find("[[DEPLOYED:HarnessConstraints]]")
+        pc_pos = content.find('<ProtocolConstraints type="managed">')
+        hc_pos = content.find('<HarnessConstraints type="managed">')
         assert pc_pos != -1, "ProtocolConstraints tag missing"
         assert hc_pos != -1, "HarnessConstraints tag missing"
         assert pc_pos < hc_pos
@@ -8566,7 +8568,7 @@ class TestHarnessConstraintsTableDrivenHarnessPath:
 
     The five tests in TestConstraintsRegionsHarnessPath that assert HarnessConstraints
     presence currently pass because the generic reference file carries the legacy marker,
-    which is converted to [[DEPLOYED:HarnessConstraints]] by the pre-existing
+    which is converted to <HarnessConstraints type="managed"> by the pre-existing
     INJECTION_OLD_MARKER_MAP path — independent of whether CONDUCT_REGIONS has been
     updated.  This class uses a fixture pair that contains NO legacy harness_constraints
     marker, forcing HarnessConstraints emission to go through the new table-driven path.
@@ -8623,7 +8625,7 @@ class TestHarnessConstraintsTableDrivenHarnessPath:
         s4_harness_no_legacy_hc_generic_ref,
         tmp_path,
     ) -> None:
-        """[[DEPLOYED:HarnessConstraints]] must appear exactly once in harness-path output
+        """<HarnessConstraints type="managed"> must appear exactly once in harness-path output
         when no legacy marker is present."""
         _, output_path = _transform_to_tmp(
             s4_harness_no_legacy_hc_input,
@@ -8631,7 +8633,7 @@ class TestHarnessConstraintsTableDrivenHarnessPath:
             generic_ref_path=s4_harness_no_legacy_hc_generic_ref,
         )
         content = _read(output_path)
-        count = content.count("[[DEPLOYED:HarnessConstraints]]")
+        count = content.count('<HarnessConstraints type="managed">')
         assert count == 1, (
             f"HarnessConstraints open tag must appear exactly once; found {count}"
         )
@@ -8642,7 +8644,7 @@ class TestHarnessConstraintsTableDrivenHarnessPath:
         s4_harness_no_legacy_hc_generic_ref,
         tmp_path,
     ) -> None:
-        """[[DEPLOYED:ProtocolConstraints]] must appear before [[DEPLOYED:HarnessConstraints]]
+        """<ProtocolConstraints type="managed"> must appear before <HarnessConstraints type="managed">
         in harness-path output when no legacy marker is present."""
         _, output_path = _transform_to_tmp(
             s4_harness_no_legacy_hc_input,
@@ -8650,8 +8652,8 @@ class TestHarnessConstraintsTableDrivenHarnessPath:
             generic_ref_path=s4_harness_no_legacy_hc_generic_ref,
         )
         content = _read(output_path)
-        pc_pos = content.find("[[DEPLOYED:ProtocolConstraints]]")
-        hc_pos = content.find("[[DEPLOYED:HarnessConstraints]]")
+        pc_pos = content.find('<ProtocolConstraints type="managed">')
+        hc_pos = content.find('<HarnessConstraints type="managed">')
         assert pc_pos != -1, "ProtocolConstraints tag missing from harness-path output"
         assert hc_pos != -1, "HarnessConstraints tag missing from harness-path output"
         assert pc_pos < hc_pos, (
@@ -8708,7 +8710,7 @@ class TestHarnessConstraintsTableDrivenHarnessPath:
         s4_harness_no_legacy_hc_generic_ref,
         tmp_path,
     ) -> None:
-        """No [[DEPLOYED:...]] tag may appear on a fence-masked line in harness-path output
+        """No <Name type="managed"> tag may appear on a fence-masked line in harness-path output
         when no legacy harness_constraints marker is present."""
         from fence import fence_mask as _fence_mask
         _, output_path = _transform_to_tmp(
@@ -8720,7 +8722,7 @@ class TestHarnessConstraintsTableDrivenHarnessPath:
         mask = _fence_mask(out_lines)
         for i, (line, is_masked) in enumerate(zip(out_lines, mask)):
             if is_masked:
-                assert "[[DEPLOYED:" not in line, (
+                assert 'type="managed"' not in line, (
                     f"Deployed tag on fence-masked line {i + 1}: {line!r}"
                 )
 
@@ -9399,22 +9401,22 @@ class TestZeroInjectionDetection:
     """
 
     def test_zero_injection_tags_yields_nc_no_injections(self):
-        """Lines with no [[INJECTION: open tags must yield NC_NO_INJECTIONS."""
+        """Lines with no injection (type="project") open tags must yield NC_NO_INJECTIONS."""
         lines = [
-            "[[SECTION:Identity]]\n",
+            '<Identity type="core">\n',
             "# Test Agent\n",
             "\n",
             "Already-deployed content with no injections.\n",
-            "[[/SECTION:Identity]]\n",
+            "</Identity>\n",
             "\n",
-            "[[SECTION:OutputFormat]]\n",
+            '<OutputFormat type="core">\n',
             "## Output Format\n",
             "\n",
             "Return a two-column table.\n",
-            "[[/SECTION:OutputFormat]]\n",
+            "</OutputFormat>\n",
         ]
-        assert not any("[[INJECTION:" in line for line in lines), (
-            "Precondition: test content must have no [[INJECTION: tags"
+        assert not any('type="project"' in line for line in lines), (
+            'Precondition: test content must have no injection (type="project") tags'
         )
         sections = {
             "Identity": _section_span_for(lines, "# Test Agent", "Identity"),
@@ -9423,39 +9425,39 @@ class TestZeroInjectionDetection:
         result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
         codes = [nc.code for nc in result]
         assert NC_NO_INJECTIONS in codes, (
-            "Expected NC_NO_INJECTIONS when no [[INJECTION: tags are present in the output"
+            'Expected NC_NO_INJECTIONS when no injection (type="project") tags are present in the output'
         )
 
     def test_at_least_one_injection_tag_suppresses_nc_no_injections(self):
-        """Lines with at least one [[INJECTION: tag must NOT yield NC_NO_INJECTIONS."""
+        """Lines with at least one injection (type="project") tag must NOT yield NC_NO_INJECTIONS."""
         lines = [
-            "[[SECTION:Identity]]\n",
+            '<Identity type="core">\n',
             "# Test Agent\n",
             "\n",
             "You are the test agent.\n",
             "\n",
-            "[[INJECTION:IdentityExtension]]\n",
-            "[[/INJECTION:IdentityExtension]]\n",
-            "[[/SECTION:Identity]]\n",
+            '<IdentityExtension type="project">\n',
+            "</IdentityExtension>\n",
+            "</Identity>\n",
         ]
-        assert any("[[INJECTION:" in line for line in lines), (
-            "Precondition: test content must include at least one [[INJECTION: tag"
+        assert any('type="project"' in line for line in lines), (
+            'Precondition: test content must include at least one injection (type="project") tag'
         )
         sections = {"Identity": _section_span_for(lines, "# Test Agent", "Identity")}
         result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
         codes = [nc.code for nc in result]
         assert NC_NO_INJECTIONS not in codes, (
-            "Must not yield NC_NO_INJECTIONS when at least one [[INJECTION: tag is present"
+            'Must not yield NC_NO_INJECTIONS when at least one injection (type="project") tag is present'
         )
 
     def test_nc_no_injections_records_file_path(self):
         """The NC_NO_INJECTIONS finding must record the supplied file path."""
         lines = [
-            "[[SECTION:Capabilities]]\n",
+            '<Capabilities type="core">\n',
             "## Capabilities\n",
             "\n",
             "All deployed inline.\n",
-            "[[/SECTION:Capabilities]]\n",
+            "</Capabilities>\n",
         ]
         sections = {"Capabilities": _section_span_for(lines, "## Capabilities", "Capabilities")}
         target_path = pathlib.Path("deployed-agent.md")
@@ -9467,11 +9469,11 @@ class TestZeroInjectionDetection:
     def test_nc_no_injections_has_empty_evidence_tuple(self):
         """NC_NO_INJECTIONS must carry an empty evidence tuple (no per-example data)."""
         lines = [
-            "[[SECTION:Constraints]]\n",
+            '<Constraints type="core">\n',
             "## Constraints\n",
             "\n",
             "Constraints deployed.\n",
-            "[[/SECTION:Constraints]]\n",
+            "</Constraints>\n",
         ]
         sections = {"Constraints": _section_span_for(lines, "## Constraints", "Constraints")}
         result = detect_output_non_conformances(pathlib.Path("a.md"), lines, sections)
@@ -9484,11 +9486,11 @@ class TestZeroInjectionDetection:
     def test_detect_does_not_modify_input_lines(self):
         """detect_output_non_conformances must not modify the input lines sequence."""
         lines = [
-            "[[SECTION:Identity]]\n",
+            '<Identity type="core">\n',
             "# Test Agent\n",
             "\n",
             "No injections here.\n",
-            "[[/SECTION:Identity]]\n",
+            "</Identity>\n",
         ]
         original = list(lines)
         sections = {"Identity": _section_span_for(lines, "# Test Agent", "Identity")}
@@ -10637,15 +10639,15 @@ class TestNonConformanceRenderReport:
 
 
 # ---------------------------------------------------------------------------
-# Populated custom_constraints emits [[CUSTOM:CustomConstraints]] — both paths
+# Populated custom_constraints emits <CustomConstraints type="custom"> — both paths
 # ---------------------------------------------------------------------------
 
 
 class TestPopulatedCustomConstraintsEmitsCustomRegion:
     """A populated legacy [INJECTION: custom_constraints] marker must be emitted as
-    [[CUSTOM:CustomConstraints]] on both the generic and harness transform paths.
+    <CustomConstraints type="custom"> on both the generic and harness transform paths.
 
-    Tests fail in RED: the transformer currently emits [[INJECTION:CustomConstraints]]
+    Tests fail in RED: the transformer currently emits <CustomConstraints type="project">
     for the populated case. After the implementation change, the kind switches to CUSTOM.
     """
 
@@ -10717,16 +10719,16 @@ class TestPopulatedCustomConstraintsEmitsCustomRegion:
         return _read(output_path)
 
     def test_generic_path_emits_custom_open_tag(self, tmp_path: pathlib.Path) -> None:
-        """Generic path: populated custom_constraints must produce [[CUSTOM:CustomConstraints]]."""
+        """Generic path: populated custom_constraints must produce <CustomConstraints type="custom">."""
         out = self._generic_transformed(
             tmp_path,
             "Some constraint.\n\n"
             "[INJECTION: custom_constraints]\n"
             "Never touch production credentials.\n",
         )
-        assert "[[CUSTOM:CustomConstraints]]" in out, (
+        assert '<CustomConstraints type="custom">' in out, (
             "Populated custom_constraints on the generic path must emit "
-            "[[CUSTOM:CustomConstraints]] — project-invented content uses the CUSTOM kind"
+            '<CustomConstraints type="custom"> — project-invented content uses the CUSTOM kind'
         )
 
     def test_generic_path_emits_custom_close_tag(self, tmp_path: pathlib.Path) -> None:
@@ -10737,21 +10739,21 @@ class TestPopulatedCustomConstraintsEmitsCustomRegion:
             "[INJECTION: custom_constraints]\n"
             "Never touch production credentials.\n",
         )
-        assert "[[/CUSTOM:CustomConstraints]]" in out, (
-            "The [[/CUSTOM:CustomConstraints]] close tag must be present in the output"
+        assert "</CustomConstraints>" in out, (
+            "The </CustomConstraints> close tag must be present in the output"
         )
 
     def test_generic_path_does_not_emit_injection_region(self, tmp_path: pathlib.Path) -> None:
-        """Generic path: [[INJECTION:CustomConstraints]] must NOT appear in the output."""
+        """Generic path: <CustomConstraints type="project"> must NOT appear in the output."""
         out = self._generic_transformed(
             tmp_path,
             "Some constraint.\n\n"
             "[INJECTION: custom_constraints]\n"
             "Never touch production credentials.\n",
         )
-        assert "[[INJECTION:CustomConstraints]]" not in out, (
-            "[[INJECTION:CustomConstraints]] must not appear in the output; "
-            "the populated marker is now emitted as [[CUSTOM:CustomConstraints]]"
+        assert '<CustomConstraints type="project">' not in out, (
+            '<CustomConstraints type="project"> must not appear in the output; '
+            'the populated marker is now emitted as <CustomConstraints type="custom">'
         )
 
     def test_generic_path_preserves_fill_content(self, tmp_path: pathlib.Path) -> None:
@@ -10768,7 +10770,7 @@ class TestPopulatedCustomConstraintsEmitsCustomRegion:
 
     def test_harness_path_emits_custom_open_tag(self, tmp_path: pathlib.Path) -> None:
         """Harness path: populated custom_constraints (fill replaces marker) must produce
-        [[CUSTOM:CustomConstraints]] in the output."""
+        <CustomConstraints type="custom"> in the output."""
         out = self._harness_transformed(
             tmp_path,
             # Harness: marker replaced with fill content
@@ -10782,13 +10784,13 @@ class TestPopulatedCustomConstraintsEmitsCustomRegion:
                 "[INJECTION: custom_constraints]\n"
             ),
         )
-        assert "[[CUSTOM:CustomConstraints]]" in out, (
+        assert '<CustomConstraints type="custom">' in out, (
             "Populated custom_constraints on the harness path must emit "
-            "[[CUSTOM:CustomConstraints]], not [[INJECTION:CustomConstraints]]"
+            '<CustomConstraints type="custom">, not <CustomConstraints type="project">'
         )
 
     def test_harness_path_does_not_emit_injection_region(self, tmp_path: pathlib.Path) -> None:
-        """Harness path: [[INJECTION:CustomConstraints]] must NOT appear in the output."""
+        """Harness path: <CustomConstraints type="project"> must NOT appear in the output."""
         out = self._harness_transformed(
             tmp_path,
             harness_constraints_body=(
@@ -10800,9 +10802,9 @@ class TestPopulatedCustomConstraintsEmitsCustomRegion:
                 "[INJECTION: custom_constraints]\n"
             ),
         )
-        assert "[[INJECTION:CustomConstraints]]" not in out, (
-            "[[INJECTION:CustomConstraints]] must not appear in the harness-path output; "
-            "the populated marker is now emitted as [[CUSTOM:CustomConstraints]]"
+        assert '<CustomConstraints type="project">' not in out, (
+            '<CustomConstraints type="project"> must not appear in the harness-path output; '
+            'the populated marker is now emitted as <CustomConstraints type="custom">'
         )
 
     def test_harness_path_preserves_fill_content(self, tmp_path: pathlib.Path) -> None:
@@ -10831,7 +10833,7 @@ class TestPopulatedCustomConstraintsEmitsCustomRegion:
 
 class TestEmptyCustomConstraintsStillDropped:
     """An empty legacy custom_constraints marker must still be dropped entirely
-    after the populated path changes to emit [[CUSTOM:CustomConstraints]].
+    after the populated path changes to emit <CustomConstraints type="custom">.
 
     The drop-when-empty rule and the surrounding blank-line collapse are unchanged.
     These tests pin that behavior so it cannot regress when the populated path is modified.
@@ -10865,28 +10867,28 @@ class TestEmptyCustomConstraintsStillDropped:
     def test_empty_marker_produces_no_custom_open_tag(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """An empty custom_constraints marker must not produce [[CUSTOM:CustomConstraints]]."""
+        """An empty custom_constraints marker must not produce <CustomConstraints type="custom">."""
         out = self._transformed(
             tmp_path,
             "Some constraint.\n\n[INJECTION: custom_constraints]\n",
         )
-        assert "[[CUSTOM:CustomConstraints]]" not in out, (
+        assert '<CustomConstraints type="custom">' not in out, (
             "An empty legacy custom_constraints marker must not produce "
-            "[[CUSTOM:CustomConstraints]] — the drop rule is unchanged"
+            '<CustomConstraints type="custom"> — the drop rule is unchanged'
         )
 
     def test_empty_marker_produces_no_injection_open_tag(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """An empty custom_constraints marker must not produce [[INJECTION:CustomConstraints]]
+        """An empty custom_constraints marker must not produce <CustomConstraints type="project">
         either — the marker is dropped entirely, no region is emitted."""
         out = self._transformed(
             tmp_path,
             "Some constraint.\n\n[INJECTION: custom_constraints]\n",
         )
-        assert "[[INJECTION:CustomConstraints]]" not in out, (
+        assert '<CustomConstraints type="project">' not in out, (
             "An empty legacy custom_constraints marker must not produce "
-            "[[INJECTION:CustomConstraints]] — the drop rule is unchanged"
+            '<CustomConstraints type="project"> — the drop rule is unchanged'
         )
 
     def test_empty_marker_leaves_no_custom_constraints_text(
@@ -10948,8 +10950,8 @@ class TestEmptyCustomConstraintsStillDropped:
         out = _read(output_path)
         assert "CustomConstraints" not in out, (
             "An empty custom_constraints marker must still be dropped on the harness path "
-            "after the kind change — neither [[CUSTOM:CustomConstraints]] nor "
-            "[[INJECTION:CustomConstraints]] should appear"
+            'after the kind change — neither <CustomConstraints type="custom"> nor '
+            '<CustomConstraints type="project"> should appear'
         )
 
     def test_empty_marker_drop_does_not_affect_neighbouring_injection(
@@ -10966,11 +10968,11 @@ class TestEmptyCustomConstraintsStillDropped:
         assert "CustomConstraints" not in out, (
             "The empty custom_constraints region must still be dropped"
         )
-        assert "[[INJECTION:ErrorHandlingExtension]]" in out, (
+        assert '<ErrorHandlingExtension type="project">' in out, (
             "A neighbouring empty injection of a different name must still be emitted; "
             "the drop rule must not generalise beyond CustomConstraints"
         )
-        assert "[[/INJECTION:ErrorHandlingExtension]]" in out
+        assert "</ErrorHandlingExtension>" in out
 
 
 # ===========================================================================

@@ -6,10 +6,10 @@ package transform_test
 //
 // T9.5 — End-to-End Matrix:
 // A single realistic deployed file contains all scenario types simultaneously:
-//   1. A [[CUSTOM:]] region anchored to an existing parent (normal update — preserve in place)
-//   2. A [[CUSTOM:]] region nested inside a [[DEPLOYED:]] region (nested-region survival)
-//   3. A [[CUSTOM:]] region whose parent is removed by a schema reorder (parking + TODO entry)
-//   4. A [[INJECTION:]] region that has a rename in the rename table (rename migration)
+//   1. A custom-region region anchored to an existing parent (normal update — preserve in place)
+//   2. A custom-region region nested inside a managed region region (nested-region survival)
+//   3. A custom-region region whose parent is removed by a schema reorder (parking + TODO entry)
+//   4. A project-injection region region that has a rename in the rename table (rename migration)
 //
 // The source has a different section order from the deployed file, triggering reorder detection.
 // Source order: Identity → Capabilities → Constraints.
@@ -40,8 +40,8 @@ import (
 //
 // Source (order: Identity → Capabilities → Constraints):
 //   - Identity section (no INJECTION)
-//   - Capabilities section with [[INJECTION:CodebaseContext]]
-//   - Constraints section with [[DEPLOYED:HarnessConstraints]] (containing [[INJECTION:LocalPolicy]])
+//   - Capabilities section with <CodebaseContext type="project">
+//   - Constraints section with <HarnessConstraints type="managed"> (containing <LocalPolicy type="project">)
 //
 // Source no longer contains the "Debugging" section that was in the deployed file.
 // Source has an InjectionRenames entry: "LegacyHints" → "CodebaseContext".
@@ -50,10 +50,10 @@ import (
 //   - ReorderDetected: yes — Capabilities and Constraints are swapped relative to source order;
 //     the common names Identity, Capabilities, Constraints appear as Identity→Constraints→Capabilities
 //     in the deployed file, which differs from the source order Identity→Capabilities→Constraints.
-//   - [[CUSTOM:WorkspaceNote]] inside Identity (parent still in source) → anchored/preserved
-//   - [[CUSTOM:DebuggingNote]] inside Debugging section (parent removed from source) → parked
-//   - [[INJECTION:LegacyHints]] with content "Legacy hints content." → renamed to CodebaseContext
-//   - [[DEPLOYED:HarnessConstraints]] with [[CUSTOM:ConstraintsNote]] nested inside → nested-survival
+//   - <WorkspaceNote type="custom"> inside Identity (parent still in source) → anchored/preserved
+//   - <DebuggingNote type="custom"> inside Debugging section (parent removed from source) → parked
+//   - <LegacyHints type="project"> with content "Legacy hints content." → renamed to CodebaseContext
+//   - <HarnessConstraints type="managed"> with <ConstraintsNote type="custom"> nested inside → nested-survival
 // ---------------------------------------------------------------------------
 
 const matrixSource = `---
@@ -68,31 +68,31 @@ tier_rationale: e2e matrix testing
 required_skills: []
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Matrix Agent
 
 You are the Matrix agent.
-[[/SECTION:Identity]]
+</Identity>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
 
-[[INJECTION:CodebaseContext]]
-[[/INJECTION:CodebaseContext]]
-[[/SECTION:Capabilities]]
+<CodebaseContext type="project">
+</CodebaseContext>
+</Capabilities>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
-[[INJECTION:LocalPolicy]]
-[[/INJECTION:LocalPolicy]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+<HarnessConstraints type="managed">
+<LocalPolicy type="project">
+</LocalPolicy>
+</HarnessConstraints>
+</Constraints>
 `
 
 // matrixDeployed: section order Identity → Debugging → Constraints → Capabilities.
@@ -110,54 +110,54 @@ model: claude/claude-sonnet
 tools: [read-file]
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 # Matrix Agent
 
 You are the Matrix agent.
 
-[[CUSTOM:WorkspaceNote]]
+<WorkspaceNote type="custom">
 Project workspace configuration: use monorepo layout.
 This is a project-owned note anchored to the Identity section.
-[[/CUSTOM:WorkspaceNote]]
-[[/SECTION:Identity]]
+</WorkspaceNote>
+</Identity>
 
-[[SECTION:Debugging]]
+<Debugging type="core">
 ## Debugging Tips
 
 Some debugging content.
 
-[[CUSTOM:DebuggingNote]]
+<DebuggingNote type="custom">
 Team-added debugging guidance: always check logs first.
 This note is owned by the team and must survive the pipeline — parked when Debugging is removed.
-[[/CUSTOM:DebuggingNote]]
-[[/SECTION:Debugging]]
+</DebuggingNote>
+</Debugging>
 
-[[SECTION:Constraints]]
+<Constraints type="core">
 ## Constraints
 
 Always be helpful.
 
-[[DEPLOYED:HarnessConstraints]]
+<HarnessConstraints type="managed">
 Canonical harness constraint content (regenerated each transform).
-[[CUSTOM:ConstraintsNote]]
+<ConstraintsNote type="custom">
 Project-added constraint note nested inside HarnessConstraints.
-Must survive [[DEPLOYED:]] regeneration even during reorder.
-[[/CUSTOM:ConstraintsNote]]
-[[INJECTION:LocalPolicy]]
+Must survive managed region regeneration even during reorder.
+</ConstraintsNote>
+<LocalPolicy type="project">
 Site-specific local policy content.
-[[/INJECTION:LocalPolicy]]
-[[/DEPLOYED:HarnessConstraints]]
-[[/SECTION:Constraints]]
+</LocalPolicy>
+</HarnessConstraints>
+</Constraints>
 
-[[SECTION:Capabilities]]
+<Capabilities type="core">
 ## Capabilities
 
 This agent has various capabilities.
 
-[[INJECTION:LegacyHints]]
+<LegacyHints type="project">
 Legacy hints content.
-[[/INJECTION:LegacyHints]]
-[[/SECTION:Capabilities]]
+</LegacyHints>
+</Capabilities>
 `
 
 // matrixRenames is the rename table used by the matrix test: LegacyHints → CodebaseContext.
@@ -312,7 +312,7 @@ func TestMatrix_NestedCustomSurvivesDeployedRegeneration(t *testing.T) {
 	outNode, outOK := outDoc.Body().Custom("ConstraintsNote")
 	if !outOK {
 		t.Fatal("ConstraintsNote absent from output; " +
-			"a custom region nested inside a [[DEPLOYED:]] region must survive " +
+			"a custom region nested inside a managed region region must survive " +
 			"the region's regeneration via Stage 6 capture-reemit")
 	}
 

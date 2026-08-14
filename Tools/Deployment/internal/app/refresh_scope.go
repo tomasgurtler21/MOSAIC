@@ -1,7 +1,7 @@
 package app
 
 // refresh_scope.go declares the RefreshScope type and its two recognised values.
-// The Regions() method maps each scope to the set of [[DEPLOYED:]] region names it covers,
+// The Regions() method maps each scope to the set of managed region names it covers,
 // reading from docformat.CanonicalDeployed rather than duplicating the list here.
 
 import "mosaic-common/docformat"
@@ -12,10 +12,10 @@ import "mosaic-common/docformat"
 type RefreshScope string
 
 const (
-	// RefreshProtocolOnly refreshes only [[DEPLOYED:CommunicationProtocol]]. It is the
-	// narrow scope and the safe default for every non-answered prompt outcome.
+	// RefreshProtocolOnly refreshes only the <CommunicationProtocol type="managed"> region.
+	// It is the narrow scope and the safe default for every non-answered prompt outcome.
 	RefreshProtocolOnly RefreshScope = "protocol-only"
-	// RefreshAllDeployed refreshes every canonical tool-managed [[DEPLOYED:]] region.
+	// RefreshAllDeployed refreshes every canonical tool-managed managed region.
 	RefreshAllDeployed RefreshScope = "all-deployed"
 )
 

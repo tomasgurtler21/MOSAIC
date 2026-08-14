@@ -152,7 +152,7 @@ func (f *fakeCatalog) WorkflowSection(id string) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("workflow %q not found", id)
 	}
-	return []byte(fmt.Sprintf("[[SECTION:Workflow:%s]]\n[[/SECTION:Workflow:%s]]\n", id, id)), nil
+	return []byte(fmt.Sprintf("<Workflow type=\"core\" name=\"%s\">\n</Workflow>\n", id)), nil
 }
 
 func (f *fakeCatalog) ReadSource(path string) ([]byte, error) {

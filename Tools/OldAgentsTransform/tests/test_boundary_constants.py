@@ -567,106 +567,102 @@ class TestKnownFrontmatterKeys_ContainsRoleAndBundleVersion:
 
 
 class TestTagPatternCompoundNameAcceptance:
-    """TAG_PATTERN must match compound tag names of the form Prefix:id and Prefix:hyphen-id.
+    """TAG_PATTERN must match compound XML tags of the form <Prefix type="T" name="id">.
 
-    The current name class [A-Za-z]+ excludes colons and hyphens, so compound
-    names do not match.  After the Stage 1 fix the name class admits them, and
-    the group layout (close, kind, name) is preserved — name yields the full
-    compound string.
+    Simple tags carry only a type attribute; compound tags additionally carry a
+    name attribute for the qualifier segment.  The group layout (close, kind, name)
+    is preserved — name yields the full compound string "Prefix:qualifier".
     """
 
     # --- Regression: simple names must still match -----------------------
 
     def test_simple_section_open_tag_still_matches(self) -> None:
-        assert TAG_PATTERN.match("[[SECTION:Identity]]") is not None, (
-            "Simple SECTION open tag must still match TAG_PATTERN after the name-class relaxation"
+        assert TAG_PATTERN.match('<Identity type="core">') is not None, (
+            "Simple core open tag must still match TAG_PATTERN"
         )
 
     def test_simple_deployed_open_tag_still_matches(self) -> None:
-        assert TAG_PATTERN.match("[[DEPLOYED:CommunicationProtocol]]") is not None, (
-            "Simple DEPLOYED open tag must still match TAG_PATTERN"
+        assert TAG_PATTERN.match('<CommunicationProtocol type="managed">') is not None, (
+            "Simple managed open tag must still match TAG_PATTERN"
         )
 
     def test_simple_injection_open_tag_still_matches(self) -> None:
-        assert TAG_PATTERN.match("[[INJECTION:IdentityExtension]]") is not None, (
-            "Simple INJECTION open tag must still match TAG_PATTERN"
+        assert TAG_PATTERN.match('<IdentityExtension type="project">') is not None, (
+            "Simple project open tag must still match TAG_PATTERN"
         )
 
     def test_simple_section_close_tag_still_matches(self) -> None:
-        assert TAG_PATTERN.match("[[/SECTION:Identity]]") is not None, (
-            "Simple SECTION close tag must still match TAG_PATTERN"
+        assert TAG_PATTERN.match("</Identity>") is not None, (
+            "Simple close tag must still match TAG_PATTERN"
         )
 
-    # --- Compound-name acceptance (currently RED) ------------------------
+    # --- Compound-name acceptance ----------------------------------------
 
-    def test_compound_section_name_with_colon_matches(self) -> None:
-        m = TAG_PATTERN.match("[[SECTION:AuthorityHierarchy:Subagent]]")
+    def test_compound_section_name_with_name_attr_matches(self) -> None:
+        m = TAG_PATTERN.match('<AuthorityHierarchy type="core" name="Subagent">')
         assert m is not None, (
-            "TAG_PATTERN must match a compound SECTION name like "
-            "'[[SECTION:AuthorityHierarchy:Subagent]]'"
+            "TAG_PATTERN must match a compound core tag with name attribute"
         )
 
-    def test_compound_deployed_name_with_colon_matches(self) -> None:
-        m = TAG_PATTERN.match("[[DEPLOYED:ClosingProcedure:Subagent]]")
+    def test_compound_deployed_name_with_name_attr_matches(self) -> None:
+        m = TAG_PATTERN.match('<ClosingProcedure type="managed" name="Subagent">')
         assert m is not None, (
-            "TAG_PATTERN must match a compound DEPLOYED name like "
-            "'[[DEPLOYED:ClosingProcedure:Subagent]]'"
+            "TAG_PATTERN must match a compound managed tag with name attribute"
         )
 
-    def test_compound_injection_name_with_colon_matches(self) -> None:
-        m = TAG_PATTERN.match("[[INJECTION:Workflow:quick-fix]]")
+    def test_compound_injection_name_with_name_attr_matches(self) -> None:
+        m = TAG_PATTERN.match('<Workflow type="project" name="quick-fix">')
         assert m is not None, (
-            "TAG_PATTERN must match a compound INJECTION name like "
-            "'[[INJECTION:Workflow:quick-fix]]'"
+            "TAG_PATTERN must match a compound project tag with hyphenated name"
         )
 
-    def test_compound_close_tag_with_colon_matches(self) -> None:
-        m = TAG_PATTERN.match("[[/SECTION:AuthorityHierarchy:Subagent]]")
+    def test_compound_close_tag_matches(self) -> None:
+        m = TAG_PATTERN.match("</AuthorityHierarchy>")
         assert m is not None, (
-            "TAG_PATTERN must match a compound close SECTION tag"
+            "TAG_PATTERN must match a compound close tag (same format as simple close)"
         )
 
-    def test_hyphenated_segment_in_compound_name_matches(self) -> None:
-        m = TAG_PATTERN.match("[[SECTION:Workflow:quick-fix]]")
+    def test_hyphenated_qualifier_in_compound_name_matches(self) -> None:
+        m = TAG_PATTERN.match('<Workflow type="core" name="quick-fix">')
         assert m is not None, (
-            "TAG_PATTERN must match a compound name whose qualifier contains a hyphen"
+            "TAG_PATTERN must match a compound tag whose name attribute contains a hyphen"
         )
 
     def test_compound_name_yields_full_compound_string_in_name_group(self) -> None:
-        m = TAG_PATTERN.match("[[SECTION:AuthorityHierarchy:Subagent]]")
+        m = TAG_PATTERN.match('<AuthorityHierarchy type="core" name="Subagent">')
         assert m is not None, "Must match before checking groups"
         assert m.group("name") == "AuthorityHierarchy:Subagent", (
-            "The 'name' capture group must yield the full compound string including the colon"
+            "The 'name' capture group must yield the full compound string Prefix:qualifier"
         )
 
     def test_compound_deployed_name_yields_correct_name_group(self) -> None:
-        m = TAG_PATTERN.match("[[DEPLOYED:ClosingProcedure:Subagent]]")
+        m = TAG_PATTERN.match('<ClosingProcedure type="managed" name="Subagent">')
         assert m is not None, "Must match before checking groups"
         assert m.group("name") == "ClosingProcedure:Subagent"
 
     def test_compound_name_kind_group_is_preserved(self) -> None:
-        m = TAG_PATTERN.match("[[DEPLOYED:ClosingProcedure:Subagent]]")
+        m = TAG_PATTERN.match('<ClosingProcedure type="managed" name="Subagent">')
         assert m is not None, "Must match before checking groups"
         assert m.group("kind") == "DEPLOYED"
 
     def test_compound_close_tag_close_group_is_slash(self) -> None:
-        m = TAG_PATTERN.match("[[/DEPLOYED:ClosingProcedure:Subagent]]")
+        m = TAG_PATTERN.match("</ClosingProcedure>")
         assert m is not None, "Must match before checking groups"
         assert m.group("close") == "/", "Close group must be '/' for a close tag"
 
     def test_compound_open_tag_close_group_is_empty(self) -> None:
-        m = TAG_PATTERN.match("[[DEPLOYED:ClosingProcedure:Subagent]]")
+        m = TAG_PATTERN.match('<ClosingProcedure type="managed" name="Subagent">')
         assert m is not None, "Must match before checking groups"
         assert m.group("close") == "", "Close group must be empty for an open tag"
 
     def test_all_five_bundle_section_open_tags_match(self) -> None:
-        """All five DeployedSections.md block tags must match TAG_PATTERN."""
+        """All five DeployedSections.md block open tags must match TAG_PATTERN."""
         bundle_section_tags = [
-            "[[SECTION:AuthorityHierarchy:Subagent]]",
-            "[[SECTION:ClosingProcedure:Subagent]]",
-            "[[SECTION:ProtocolConstraints:Subagent]]",
-            "[[SECTION:ErrorHandlingCommon:Subagent]]",
-            "[[SECTION:ExecutionPhilosophyCommon:Subagent]]",
+            '<AuthorityHierarchy type="core" name="Subagent">',
+            '<ClosingProcedure type="core" name="Subagent">',
+            '<ProtocolConstraints type="core" name="Subagent">',
+            '<ErrorHandlingCommon type="core" name="Subagent">',
+            '<ExecutionPhilosophyCommon type="core" name="Subagent">',
         ]
         for tag in bundle_section_tags:
             assert TAG_PATTERN.match(tag) is not None, (
@@ -676,11 +672,11 @@ class TestTagPatternCompoundNameAcceptance:
     def test_all_five_bundle_section_close_tags_match(self) -> None:
         """All five DeployedSections.md close tags must match TAG_PATTERN."""
         bundle_section_close_tags = [
-            "[[/SECTION:AuthorityHierarchy:Subagent]]",
-            "[[/SECTION:ClosingProcedure:Subagent]]",
-            "[[/SECTION:ProtocolConstraints:Subagent]]",
-            "[[/SECTION:ErrorHandlingCommon:Subagent]]",
-            "[[/SECTION:ExecutionPhilosophyCommon:Subagent]]",
+            "</AuthorityHierarchy>",
+            "</ClosingProcedure>",
+            "</ProtocolConstraints>",
+            "</ErrorHandlingCommon>",
+            "</ExecutionPhilosophyCommon>",
         ]
         for tag in bundle_section_close_tags:
             assert TAG_PATTERN.match(tag) is not None, (
@@ -694,55 +690,45 @@ class TestTagPatternCompoundNameAcceptance:
 
 
 class TestTagPatternRejectionAfterRelaxation:
-    """TAG_PATTERN must still reject malformed tag lines after the name-class relaxation.
+    """TAG_PATTERN must reject malformed XML tag lines.
 
-    These tests guard against over-widening: accepting compound names must not
-    silently accept adjacent malformed forms.
+    These tests guard against over-widening: accepting compound names and all
+    four type values must not silently accept adjacent malformed forms.
     """
 
-    def test_name_starting_with_digit_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[SECTION:1invalid]]") is None, (
-            "A name starting with a digit must not match TAG_PATTERN"
+    def test_tag_name_starting_with_digit_does_not_match(self) -> None:
+        assert TAG_PATTERN.match('<1invalid type="core">') is None, (
+            "A tag name starting with a digit must not match TAG_PATTERN"
         )
 
-    def test_name_starting_with_hyphen_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[SECTION:-invalid]]") is None, (
-            "A name starting with a hyphen must not match TAG_PATTERN"
+    def test_tag_name_starting_with_hyphen_does_not_match(self) -> None:
+        assert TAG_PATTERN.match('<-invalid type="core">') is None, (
+            "A tag name starting with a hyphen must not match TAG_PATTERN"
         )
 
-    def test_trailing_colon_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[SECTION:trailing:]]") is None, (
-            "A name with a trailing colon (empty segment after it) must not match TAG_PATTERN"
+    def test_unrecognised_type_does_not_match(self) -> None:
+        assert TAG_PATTERN.match('<Identity type="widget">') is None, (
+            "A tag with an unrecognised type value must not match TAG_PATTERN"
         )
 
-    def test_doubled_colon_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[SECTION::doubled]]") is None, (
-            "A name starting with a colon (doubled separator) must not match TAG_PATTERN"
+    def test_missing_type_attribute_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("<Identity>") is None, (
+            "A tag without a type attribute must not match TAG_PATTERN"
         )
 
-    def test_empty_name_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[SECTION:]]") is None, (
-            "An empty name must not match TAG_PATTERN"
+    def test_empty_tag_name_does_not_match(self) -> None:
+        assert TAG_PATTERN.match('< type="core">') is None, (
+            "An empty tag name must not match TAG_PATTERN"
         )
 
-    def test_leading_space_inside_brackets_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[ SECTION:Identity]]") is None, (
-            "Leading whitespace inside the brackets must prevent a match"
+    def test_close_tag_with_type_does_not_match(self) -> None:
+        assert TAG_PATTERN.match('</Identity type="core">') is None, (
+            "A close tag that also carries a type attribute must not match TAG_PATTERN"
         )
 
-    def test_trailing_space_inside_brackets_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[SECTION:Identity ]]") is None, (
-            "Trailing whitespace inside the brackets must prevent a match"
-        )
-
-    def test_qualifier_starting_with_digit_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[SECTION:Valid:1bad]]") is None, (
-            "A compound qualifier starting with a digit must not match TAG_PATTERN"
-        )
-
-    def test_qualifier_starting_with_hyphen_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[SECTION:Valid:-bad]]") is None, (
-            "A compound qualifier starting with a hyphen must not match TAG_PATTERN"
+    def test_plain_bracket_syntax_does_not_match(self) -> None:
+        assert TAG_PATTERN.match("[[SECTION:Identity]]") is None, (
+            "Old bracket-syntax tags must not match TAG_PATTERN in the new XML format"
         )
 
 
@@ -981,57 +967,62 @@ class TestBoundaryKindCustomMember:
 
 class TestTagPatternCustomKindAcceptance:
     """TAG_PATTERN must match CUSTOM open and close tags, including compound and
-    hyphenated names, once the CUSTOM alternative is added to the kind group."""
+    hyphenated names, in the new XML format (type="custom")."""
 
     def test_simple_custom_open_tag_matches(self) -> None:
-        m = TAG_PATTERN.match("[[CUSTOM:CustomConstraints]]")
+        m = TAG_PATTERN.match('<CustomConstraints type="custom">')
         assert m is not None, (
-            "TAG_PATTERN must match a simple CUSTOM open tag like "
-            "'[[CUSTOM:CustomConstraints]]'"
+            'TAG_PATTERN must match a simple CUSTOM open tag like '
+            '\'<CustomConstraints type="custom">\''
         )
 
     def test_simple_custom_close_tag_matches(self) -> None:
-        m = TAG_PATTERN.match("[[/CUSTOM:CustomConstraints]]")
+        m = TAG_PATTERN.match("</CustomConstraints>")
         assert m is not None, (
-            "TAG_PATTERN must match a simple CUSTOM close tag like "
-            "'[[/CUSTOM:CustomConstraints]]'"
+            "TAG_PATTERN must match a simple CUSTOM close tag like '</CustomConstraints>'"
         )
 
     def test_custom_tag_kind_group_is_CUSTOM(self) -> None:
-        m = TAG_PATTERN.match("[[CUSTOM:CustomConstraints]]")
+        m = TAG_PATTERN.match('<CustomConstraints type="custom">')
         assert m is not None, "Must match before checking groups"
         assert m.group("kind") == "CUSTOM", (
             "The 'kind' capture group must yield 'CUSTOM' for a custom open tag"
         )
 
     def test_custom_tag_name_group_yields_name(self) -> None:
-        m = TAG_PATTERN.match("[[CUSTOM:CustomConstraints]]")
+        m = TAG_PATTERN.match('<CustomConstraints type="custom">')
         assert m is not None, "Must match before checking groups"
         assert m.group("name") == "CustomConstraints"
 
     def test_custom_open_tag_close_group_is_empty(self) -> None:
-        m = TAG_PATTERN.match("[[CUSTOM:CustomConstraints]]")
+        m = TAG_PATTERN.match('<CustomConstraints type="custom">')
         assert m is not None, "Must match before checking groups"
         assert m.group("close") == "", (
             "Close group must be empty string for an open tag"
         )
 
     def test_custom_close_tag_close_group_is_slash(self) -> None:
-        m = TAG_PATTERN.match("[[/CUSTOM:CustomConstraints]]")
+        m = TAG_PATTERN.match("</CustomConstraints>")
         assert m is not None, "Must match before checking groups"
         assert m.group("close") == "/", (
             "Close group must be '/' for a close tag"
         )
 
-    def test_compound_custom_name_with_colon_matches(self) -> None:
-        m = TAG_PATTERN.match("[[CUSTOM:Project:my-feature]]")
+    def test_custom_close_tag_kind_group_is_empty(self) -> None:
+        m = TAG_PATTERN.match("</CustomConstraints>")
+        assert m is not None, "Must match before checking groups"
+        assert m.group("kind") == "", (
+            "The 'kind' group must be empty for close tags (no type attr in close)"
+        )
+
+    def test_compound_custom_name_with_name_attr_matches(self) -> None:
+        m = TAG_PATTERN.match('<Project type="custom" name="my-feature">')
         assert m is not None, (
-            "TAG_PATTERN must match a compound CUSTOM name like "
-            "'[[CUSTOM:Project:my-feature]]'"
+            'TAG_PATTERN must match a compound CUSTOM tag with name attribute'
         )
 
     def test_compound_custom_name_yields_full_name_group(self) -> None:
-        m = TAG_PATTERN.match("[[CUSTOM:Project:my-feature]]")
+        m = TAG_PATTERN.match('<Project type="custom" name="my-feature">')
         assert m is not None, "Must match before checking groups"
         assert m.group("name") == "Project:my-feature", (
             "The 'name' capture group must yield the full compound string "
@@ -1039,70 +1030,48 @@ class TestTagPatternCustomKindAcceptance:
         )
 
     def test_hyphenated_custom_name_matches(self) -> None:
-        m = TAG_PATTERN.match("[[CUSTOM:My-component]]")
+        m = TAG_PATTERN.match('<My-component type="custom">')
         assert m is not None, (
             "TAG_PATTERN must match a CUSTOM tag whose name contains a hyphen"
         )
 
     def test_compound_custom_close_tag_matches(self) -> None:
-        m = TAG_PATTERN.match("[[/CUSTOM:Project:my-feature]]")
+        m = TAG_PATTERN.match("</Project>")
         assert m is not None, (
             "TAG_PATTERN must match a compound CUSTOM close tag"
         )
 
-    def test_compound_custom_close_tag_kind_group(self) -> None:
-        m = TAG_PATTERN.match("[[/CUSTOM:Project:my-feature]]")
-        assert m is not None, "Must match before checking groups"
-        assert m.group("kind") == "CUSTOM"
-
-    def test_existing_kinds_still_match_after_custom_added(self) -> None:
-        """Adding CUSTOM to the alternation must not break existing kind acceptance."""
-        assert TAG_PATTERN.match("[[SECTION:Identity]]") is not None
-        assert TAG_PATTERN.match("[[INJECTION:IdentityExtension]]") is not None
-        assert TAG_PATTERN.match("[[DEPLOYED:CommunicationProtocol]]") is not None
+    def test_existing_kinds_still_match_after_custom_verified(self) -> None:
+        """Verifying CUSTOM acceptance must not break existing kind acceptance."""
+        assert TAG_PATTERN.match('<Identity type="core">') is not None
+        assert TAG_PATTERN.match('<IdentityExtension type="project">') is not None
+        assert TAG_PATTERN.match('<CommunicationProtocol type="managed">') is not None
 
 
 class TestTagPatternCustomKindRejection:
-    """TAG_PATTERN must still reject malformed CUSTOM tags after the CUSTOM
-    alternative is added to the kind group."""
+    """TAG_PATTERN must reject malformed CUSTOM tags in the new XML format."""
 
-    def test_custom_empty_name_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[CUSTOM:]]") is None, (
-            "An empty CUSTOM name must not match TAG_PATTERN"
+    def test_custom_tag_name_starting_with_digit_does_not_match(self) -> None:
+        assert TAG_PATTERN.match('<1invalid type="custom">') is None, (
+            "A CUSTOM tag name starting with a digit must not match TAG_PATTERN"
         )
 
-    def test_custom_name_starting_with_digit_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[CUSTOM:1invalid]]") is None, (
-            "A CUSTOM name starting with a digit must not match TAG_PATTERN"
+    def test_custom_tag_name_starting_with_hyphen_does_not_match(self) -> None:
+        assert TAG_PATTERN.match('<-bad type="custom">') is None, (
+            "A CUSTOM tag name starting with a hyphen must not match TAG_PATTERN"
         )
 
-    def test_custom_name_starting_with_hyphen_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[CUSTOM:-bad]]") is None, (
-            "A CUSTOM name starting with a hyphen must not match TAG_PATTERN"
-        )
-
-    def test_custom_trailing_colon_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[CUSTOM:trailing:]]") is None, (
-            "A CUSTOM name with a trailing colon (empty segment after it) "
-            "must not match TAG_PATTERN"
-        )
-
-    def test_custom_qualifier_starting_with_digit_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[CUSTOM:Valid:1bad]]") is None, (
-            "A compound CUSTOM qualifier starting with a digit must not match TAG_PATTERN"
-        )
-
-    def test_custom_qualifier_starting_with_hyphen_does_not_match(self) -> None:
-        assert TAG_PATTERN.match("[[CUSTOM:Valid:-bad]]") is None, (
-            "A compound CUSTOM qualifier starting with a hyphen must not match TAG_PATTERN"
+    def test_custom_with_unrecognised_type_does_not_match(self) -> None:
+        assert TAG_PATTERN.match('<CustomConstraints type="other">') is None, (
+            "A tag with type other than core/managed/project/custom must not match"
         )
 
     def test_existing_malformed_rejections_still_hold(self) -> None:
-        """Adding CUSTOM must not break existing rejection rules for other kinds."""
-        assert TAG_PATTERN.match("[[SECTION:]]") is None
-        assert TAG_PATTERN.match("[[INJECTION:1bad]]") is None
-        assert TAG_PATTERN.match("[[DEPLOYED:-bad]]") is None
-        assert TAG_PATTERN.match("[[SECTION:trailing:]]") is None
+        """All-kinds rejection rules must still hold after CUSTOM is verified."""
+        assert TAG_PATTERN.match('<1bad type="core">') is None
+        assert TAG_PATTERN.match('<-bad type="project">') is None
+        assert TAG_PATTERN.match('<Identity type="unknown">') is None
+        assert TAG_PATTERN.match("[[SECTION:Identity]]") is None
 
 
 # ---------------------------------------------------------------------------
@@ -1111,55 +1080,52 @@ class TestTagPatternCustomKindRejection:
 
 
 class TestTagHelperCustomKind:
-    """open_tag and close_tag must render [[CUSTOM:Name]] / [[/CUSTOM:Name]] tags
-    once BoundaryKind.CUSTOM exists — they are already generic over BoundaryKind
-    and need no code change beyond the enum gaining the member."""
+    """open_tag and close_tag must render XML-format CUSTOM tags once
+    BoundaryKind.CUSTOM exists — they are already generic over BoundaryKind."""
 
     def test_open_tag_custom_simple_name(self) -> None:
         result = boundary_constants.open_tag(BoundaryKind.CUSTOM, "CustomConstraints")
-        assert result == "[[CUSTOM:CustomConstraints]]", (
+        assert result == '<CustomConstraints type="custom">', (
             f"open_tag(BoundaryKind.CUSTOM, 'CustomConstraints') must return "
-            f"'[[CUSTOM:CustomConstraints]]', got {result!r}"
+            f"'<CustomConstraints type=\"custom\">', got {result!r}"
         )
 
     def test_close_tag_custom_simple_name(self) -> None:
         result = boundary_constants.close_tag(BoundaryKind.CUSTOM, "CustomConstraints")
-        assert result == "[[/CUSTOM:CustomConstraints]]", (
+        assert result == "</CustomConstraints>", (
             f"close_tag(BoundaryKind.CUSTOM, 'CustomConstraints') must return "
-            f"'[[/CUSTOM:CustomConstraints]]', got {result!r}"
+            f"'</CustomConstraints>', got {result!r}"
         )
 
     def test_open_tag_custom_compound_name(self) -> None:
         result = boundary_constants.open_tag(BoundaryKind.CUSTOM, "Project:my-feature")
-        assert result == "[[CUSTOM:Project:my-feature]]"
+        assert result == '<Project type="custom" name="my-feature">'
 
     def test_close_tag_custom_compound_name(self) -> None:
         result = boundary_constants.close_tag(BoundaryKind.CUSTOM, "Project:my-feature")
-        assert result == "[[/CUSTOM:Project:my-feature]]"
+        assert result == "</Project>"
 
     def test_open_tag_custom_result_matches_tag_pattern(self) -> None:
-        """open_tag(CUSTOM, ...) output must round-trip through TAG_PATTERN once
-        CUSTOM is added to the kind alternation."""
+        """open_tag(CUSTOM, ...) output must round-trip through TAG_PATTERN."""
         result = boundary_constants.open_tag(BoundaryKind.CUSTOM, "CustomConstraints")
         m = TAG_PATTERN.match(result)
         assert m is not None, (
             "The result of open_tag(BoundaryKind.CUSTOM, 'CustomConstraints') must "
-            "match TAG_PATTERN once CUSTOM is in the alternation"
+            "match TAG_PATTERN"
         )
         assert m.group("kind") == "CUSTOM"
         assert m.group("close") == ""
         assert m.group("name") == "CustomConstraints"
 
     def test_close_tag_custom_result_matches_tag_pattern(self) -> None:
-        """close_tag(CUSTOM, ...) output must round-trip through TAG_PATTERN once
-        CUSTOM is added to the kind alternation."""
+        """close_tag(CUSTOM, ...) output must round-trip through TAG_PATTERN."""
         result = boundary_constants.close_tag(BoundaryKind.CUSTOM, "CustomConstraints")
         m = TAG_PATTERN.match(result)
         assert m is not None, (
             "The result of close_tag(BoundaryKind.CUSTOM, 'CustomConstraints') must "
-            "match TAG_PATTERN once CUSTOM is in the alternation"
+            "match TAG_PATTERN"
         )
-        assert m.group("kind") == "CUSTOM"
+        assert m.group("kind") == ""  # close tags carry no type attr
         assert m.group("close") == "/"
         assert m.group("name") == "CustomConstraints"
 

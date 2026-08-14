@@ -59,7 +59,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestBodyAppendRegion_Custom_ReturnsNonNilNodeWithCorrectKindAndName(t *testing.T) {
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 
 	node, err := doc.Body().AppendRegion(docformat.NodeCustom, "ProjectNotes", []byte("My notes.\n"))
 
@@ -78,7 +78,7 @@ func TestBodyAppendRegion_Custom_ReturnsNonNilNodeWithCorrectKindAndName(t *test
 }
 
 func TestBodyAppendRegion_Custom_FindableViaBodyCustom(t *testing.T) {
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 
 	_, err := doc.Body().AppendRegion(docformat.NodeCustom, "ProjectNotes", []byte("My notes.\n"))
 	if err != nil {
@@ -96,7 +96,7 @@ func TestBodyAppendRegion_Custom_FindableViaBodyCustom(t *testing.T) {
 
 func TestBodyAppendRegion_Custom_ContentMatchesSupplied(t *testing.T) {
 	content := []byte("My project notes.\n")
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 
 	node, err := doc.Body().AppendRegion(docformat.NodeCustom, "ProjectNotes", content)
 	if err != nil {
@@ -112,7 +112,7 @@ func TestBodyAppendRegion_Custom_ContentMatchesSupplied(t *testing.T) {
 func TestBodyAppendRegion_Custom_PreExistingBytesUnchanged(t *testing.T) {
 	// Every pre-existing byte must appear verbatim at the start of the serialised output.
 	// Appending a region must not rewrite any preceding byte.
-	original := "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n"
+	original := "<Identity type=\"core\">\nContent.\n</Identity>\n"
 	doc := parseInlineDoc(t, original)
 	originalBytes := []byte(original)
 
@@ -129,7 +129,7 @@ func TestBodyAppendRegion_Custom_PreExistingBytesUnchanged(t *testing.T) {
 
 func TestBodyAppendRegion_Injection_Accepted(t *testing.T) {
 	// NodeInjection is a user-owned kind and must be accepted by AppendRegion.
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 
 	node, err := doc.Body().AppendRegion(docformat.NodeInjection, "ExtraInjection", []byte("Injected.\n"))
 
@@ -148,7 +148,7 @@ func TestBodyAppendRegion_Custom_ReparseContainsRegionWithContent(t *testing.T) 
 	// After appending a region, serialising and re-parsing must produce a tree where the
 	// appended region is present with the correct content.
 	content := []byte("Custom content.\n")
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 
 	_, err := doc.Body().AppendRegion(docformat.NodeCustom, "ProjectNotes", content)
 	if err != nil {
@@ -173,7 +173,7 @@ func TestBodyAppendRegion_Custom_ReparseContainsRegionWithContent(t *testing.T) 
 func TestBodyAppendRegion_Custom_RoundTripStability(t *testing.T) {
 	// A document with an appended region must serialise byte-identically on a second
 	// round trip (append-then-parse round-trip stability).
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 	_, err := doc.Body().AppendRegion(docformat.NodeCustom, "ProjectNotes", []byte("Notes.\n"))
 	if err != nil {
 		t.Fatalf("AppendRegion: %v", err)
@@ -204,7 +204,7 @@ func TestBodyAppendRegion_NoTrailingNewline_OpeningTagOnItsOwnLine(t *testing.T)
 	// When the body does not end in a newline, the implementation must insert one before
 	// the opening tag so the tag is not concatenated onto the last content line.
 	// The pre-existing bytes must still appear verbatim at the start of the output.
-	bodyWithoutNewline := "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]" // no trailing newline
+	bodyWithoutNewline := "<Identity type=\"core\">\nContent.\n</Identity>" // no trailing newline
 	doc := parseInlineDoc(t, bodyWithoutNewline)
 
 	_, err := doc.Body().AppendRegion(docformat.NodeCustom, "ProjectNotes", []byte("Notes.\n"))
@@ -220,14 +220,14 @@ func TestBodyAppendRegion_NoTrailingNewline_OpeningTagOnItsOwnLine(t *testing.T)
 	}
 
 	// The opening tag must be on its own line: a newline must immediately precede it.
-	openTagOnOwnLine := []byte("\n[[CUSTOM:ProjectNotes]]")
+	openTagOnOwnLine := []byte("\n<ProjectNotes type=\"custom\">")
 	if !bytes.Contains(newBytes, openTagOnOwnLine) {
 		t.Errorf("opening tag is not on its own line; expected %q in output:\n  %q", openTagOnOwnLine, newBytes)
 	}
 }
 
 func TestBodyAppendRegion_MultipleSequentialAppends_BothRegionsPresentInOrder(t *testing.T) {
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 
 	_, err := doc.Body().AppendRegion(docformat.NodeCustom, "FirstNotes", []byte("First.\n"))
 	if err != nil {
@@ -251,13 +251,13 @@ func TestBodyAppendRegion_MultipleSequentialAppends_BothRegionsPresentInOrder(t 
 
 	// FirstNotes must precede SecondNotes in the serialised output.
 	output := doc.Bytes()
-	firstIdx := bytes.Index(output, []byte("[[CUSTOM:FirstNotes]]"))
-	secondIdx := bytes.Index(output, []byte("[[CUSTOM:SecondNotes]]"))
+	firstIdx := bytes.Index(output, []byte("<FirstNotes type=\"custom\">"))
+	secondIdx := bytes.Index(output, []byte("<SecondNotes type=\"custom\">"))
 	if firstIdx < 0 {
-		t.Error("[[CUSTOM:FirstNotes]] not found in output")
+		t.Error("<FirstNotes type=\"custom\"> not found in output")
 	}
 	if secondIdx < 0 {
-		t.Error("[[CUSTOM:SecondNotes]] not found in output")
+		t.Error("<SecondNotes type=\"custom\"> not found in output")
 	}
 	if firstIdx >= 0 && secondIdx >= 0 && firstIdx > secondIdx {
 		t.Error("FirstNotes must appear before SecondNotes in serialised output")
@@ -267,7 +267,7 @@ func TestBodyAppendRegion_MultipleSequentialAppends_BothRegionsPresentInOrder(t 
 func TestBodyAppendRegion_ContentWithNoBoundaryTags_AppendedVerbatim(t *testing.T) {
 	// Content that contains no boundary tag syntax must be preserved exactly as supplied.
 	content := []byte("Plain prose with no special markers.\nSecond line.\n")
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nSome content.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nSome content.\n</Identity>\n")
 
 	node, err := doc.Body().AppendRegion(docformat.NodeCustom, "ProseNotes", content)
 	if err != nil {
@@ -283,7 +283,7 @@ func TestBodyAppendRegion_ContentWithoutTrailingNewline_ClosingTagOnItsOwnLine(t
 	// When the supplied content does not end in a newline, AppendRegion must add one
 	// before the closing tag so the closing tag occupies its own line.
 	contentWithoutNewline := []byte("Notes without trailing newline")
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 
 	_, err := doc.Body().AppendRegion(docformat.NodeCustom, "ProjectNotes", contentWithoutNewline)
 	if err != nil {
@@ -292,7 +292,7 @@ func TestBodyAppendRegion_ContentWithoutTrailingNewline_ClosingTagOnItsOwnLine(t
 
 	output := doc.Bytes()
 	// The closing tag must be on its own line: a newline must immediately precede it.
-	closeTagOnOwnLine := []byte("\n[[/CUSTOM:ProjectNotes]]")
+	closeTagOnOwnLine := []byte("\n</ProjectNotes>")
 	if !bytes.Contains(output, closeTagOnOwnLine) {
 		t.Errorf("closing tag is not on its own line; expected %q in output:\n  %q", closeTagOnOwnLine, output)
 	}
@@ -303,7 +303,7 @@ func TestBodyAppendRegion_ContentWithoutTrailingNewline_ClosingTagOnItsOwnLine(t
 // ---------------------------------------------------------------------------
 
 func TestBodyAppendRegion_SectionKind_ReturnsErrInvalidRegionKind(t *testing.T) {
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 
 	_, err := doc.Body().AppendRegion(docformat.NodeSection, "NewSection", []byte("Content.\n"))
 
@@ -316,7 +316,7 @@ func TestBodyAppendRegion_SectionKind_ReturnsErrInvalidRegionKind(t *testing.T) 
 }
 
 func TestBodyAppendRegion_DeployedKind_ReturnsErrInvalidRegionKind(t *testing.T) {
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 
 	_, err := doc.Body().AppendRegion(docformat.NodeDeployed, "ToolRegion", []byte("Content.\n"))
 
@@ -343,7 +343,7 @@ func TestBodyAppendRegion_DuplicateName_ReturnsErrDuplicateRegionName(t *testing
 }
 
 func TestBodyAppendRegion_EmptyName_ReturnsErrInvalidRegionName(t *testing.T) {
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 
 	_, err := doc.Body().AppendRegion(docformat.NodeCustom, "", []byte("Content.\n"))
 
@@ -360,7 +360,7 @@ func TestBodyAppendRegion_EmptyName_ReturnsErrInvalidRegionName(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNodeAppendRegion_Custom_InsideSection_ReturnsNodeWithCorrectKindAndName(t *testing.T) {
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 	section, ok := doc.Body().Section("Identity")
 	if !ok {
 		t.Fatal("Section(\"Identity\") not found")
@@ -384,7 +384,7 @@ func TestNodeAppendRegion_Custom_InsideSection_ReturnsNodeWithCorrectKindAndName
 
 func TestNodeAppendRegion_Custom_FindableViaBodyCustom(t *testing.T) {
 	// A node appended inside a section must be reachable at the document level via Body.Custom.
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 	section, ok := doc.Body().Section("Identity")
 	if !ok {
 		t.Fatal("Section(\"Identity\") not found")
@@ -405,7 +405,7 @@ func TestNodeAppendRegion_Custom_FindableViaBodyCustom(t *testing.T) {
 }
 
 func TestNodeAppendRegion_Custom_ParentIsContainingSection(t *testing.T) {
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 	section, ok := doc.Body().Section("Identity")
 	if !ok {
 		t.Fatal("Section(\"Identity\") not found")
@@ -428,7 +428,7 @@ func TestNodeAppendRegion_Custom_ParentIsContainingSection(t *testing.T) {
 func TestNodeAppendRegion_Custom_SectionContentContainsBoundaryTags(t *testing.T) {
 	// After appending a custom region inside a section, the section's Content must contain
 	// both the opening and closing boundary tags of the new region.
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
 	section, ok := doc.Body().Section("Identity")
 	if !ok {
 		t.Fatal("Section(\"Identity\") not found")
@@ -440,10 +440,10 @@ func TestNodeAppendRegion_Custom_SectionContentContainsBoundaryTags(t *testing.T
 	}
 
 	sectionContent := section.Content()
-	if !bytes.Contains(sectionContent, []byte("[[CUSTOM:SectionNotes]]")) {
+	if !bytes.Contains(sectionContent, []byte("<SectionNotes type=\"custom\">")) {
 		t.Error("section Content must contain the opening tag of the appended region")
 	}
-	if !bytes.Contains(sectionContent, []byte("[[/CUSTOM:SectionNotes]]")) {
+	if !bytes.Contains(sectionContent, []byte("</SectionNotes>")) {
 		t.Error("section Content must contain the closing tag of the appended region")
 	}
 }
@@ -451,7 +451,7 @@ func TestNodeAppendRegion_Custom_SectionContentContainsBoundaryTags(t *testing.T
 func TestNodeAppendRegion_DuplicateName_ReturnsErrDuplicateRegionName(t *testing.T) {
 	// A name already present anywhere in the document must be rejected, even when the
 	// duplicate is in a different node.
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n[[CUSTOM:Existing]]\nExisting.\n[[/CUSTOM:Existing]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n<Existing type=\"custom\">\nExisting.\n</Existing>\n")
 	section, ok := doc.Body().Section("Identity")
 	if !ok {
 		t.Fatal("Section(\"Identity\") not found")
@@ -474,7 +474,7 @@ func TestNodeAppendRegion_DuplicateName_ReturnsErrDuplicateRegionName(t *testing
 func TestBodyInsertRegionAfter_InsertsAfterSpecifiedSibling_CorrectPosition(t *testing.T) {
 	// Document: Identity → Constraints (two top-level sections).
 	// Insert MiddleNotes after Identity → expected order: Identity → MiddleNotes → Constraints.
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n[[SECTION:Constraints]]\nConstraints.\n[[/SECTION:Constraints]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n<Constraints type=\"core\">\nConstraints.\n</Constraints>\n")
 	identity, ok := doc.Body().Section("Identity")
 	if !ok {
 		t.Fatal("Section(\"Identity\") not found")
@@ -486,18 +486,18 @@ func TestBodyInsertRegionAfter_InsertsAfterSpecifiedSibling_CorrectPosition(t *t
 	}
 
 	output := doc.Bytes()
-	identityEnd := bytes.Index(output, []byte("[[/SECTION:Identity]]"))
-	middleStart := bytes.Index(output, []byte("[[CUSTOM:MiddleNotes]]"))
-	constraintsStart := bytes.Index(output, []byte("[[SECTION:Constraints]]"))
+	identityEnd := bytes.Index(output, []byte("</Identity>"))
+	middleStart := bytes.Index(output, []byte("<MiddleNotes type=\"custom\">"))
+	constraintsStart := bytes.Index(output, []byte("<Constraints type=\"core\">"))
 
 	if identityEnd < 0 {
-		t.Fatal("[[/SECTION:Identity]] not found in output")
+		t.Fatal("</Identity> not found in output")
 	}
 	if middleStart < 0 {
-		t.Fatal("[[CUSTOM:MiddleNotes]] not found in output")
+		t.Fatal("<MiddleNotes type=\"custom\"> not found in output")
 	}
 	if constraintsStart < 0 {
-		t.Fatal("[[SECTION:Constraints]] not found in output")
+		t.Fatal("<Constraints type=\"core\"> not found in output")
 	}
 	if !(identityEnd < middleStart && middleStart < constraintsStart) {
 		t.Errorf("expected order Identity → MiddleNotes → Constraints; got byte positions: identity_end=%d, middle=%d, constraints=%d", identityEnd, middleStart, constraintsStart)
@@ -507,7 +507,7 @@ func TestBodyInsertRegionAfter_InsertsAfterSpecifiedSibling_CorrectPosition(t *t
 func TestBodyInsertRegionAfter_FollowingNodeBytesPreserved(t *testing.T) {
 	// After inserting MiddleNotes between Identity and Constraints, Constraints must still
 	// be present with its original content intact (no byte corruption of the trailing node).
-	doc := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n[[SECTION:Constraints]]\nConstraints content.\n[[/SECTION:Constraints]]\n")
+	doc := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n<Constraints type=\"core\">\nConstraints content.\n</Constraints>\n")
 	identity, ok := doc.Body().Section("Identity")
 	if !ok {
 		t.Fatal("Section(\"Identity\") not found")
@@ -522,18 +522,18 @@ func TestBodyInsertRegionAfter_FollowingNodeBytesPreserved(t *testing.T) {
 	if !bytes.Contains(output, []byte("Constraints content.")) {
 		t.Error("Constraints section content was lost or corrupted after InsertRegionAfter")
 	}
-	if !bytes.Contains(output, []byte("[[SECTION:Constraints]]")) {
-		t.Error("[[SECTION:Constraints]] opening tag not found in output after InsertRegionAfter")
+	if !bytes.Contains(output, []byte("<Constraints type=\"core\">")) {
+		t.Error("<Constraints type=\"core\"> opening tag not found in output after InsertRegionAfter")
 	}
-	if !bytes.Contains(output, []byte("[[/SECTION:Constraints]]")) {
-		t.Error("[[/SECTION:Constraints]] closing tag not found in output after InsertRegionAfter")
+	if !bytes.Contains(output, []byte("</Constraints>")) {
+		t.Error("</Constraints> closing tag not found in output after InsertRegionAfter")
 	}
 }
 
 func TestBodyInsertRegionAfter_SiblingNotInDocument_ReturnsErrSiblingNotInDocument(t *testing.T) {
 	// A sibling node obtained from a different document must be rejected.
-	doc1 := parseInlineDoc(t, "[[SECTION:Identity]]\nContent.\n[[/SECTION:Identity]]\n")
-	doc2 := parseInlineDoc(t, "[[SECTION:Other]]\nContent.\n[[/SECTION:Other]]\n")
+	doc1 := parseInlineDoc(t, "<Identity type=\"core\">\nContent.\n</Identity>\n")
+	doc2 := parseInlineDoc(t, "<Other type=\"core\">\nContent.\n</Other>\n")
 
 	foreignSibling, ok := doc2.Body().Section("Other")
 	if !ok {

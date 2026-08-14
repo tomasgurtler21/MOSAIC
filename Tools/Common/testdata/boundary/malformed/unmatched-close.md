@@ -2,4 +2,4 @@
 name: test-agent
 ---
 
-[[/SECTION:Identity]]
+</Identity>

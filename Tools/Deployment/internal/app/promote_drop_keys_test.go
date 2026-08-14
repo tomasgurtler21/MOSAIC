@@ -723,9 +723,9 @@ func TestPromoteHarnessDropKeys_ReturnedSetIsUsableByBuildGenericAgent(t *testin
 		"  read: allow\n" +
 		"  write: deny\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 
 	out, buildErr := buildGenericAgent(PromoteInput{
 		Source:    src,

@@ -195,14 +195,12 @@ func TestUpdate_WorkflowDiscovery_UsesDeployedOrchestratorContent(t *testing.T) 
 
 	// Write a deployed orchestrator containing two workflow sections.
 	orchestratorContent := []byte("---\nversion: \"1.0\"\n---\n\n" +
-		"[[SECTION:Workflow:quick-fix]]\n" +
-		"<!-- workflow-version: 1.0 -->\n" +
+		"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
 		"Quick fix content.\n" +
-		"[[/SECTION:Workflow:quick-fix]]\n\n" +
-		"[[SECTION:Workflow:code-review]]\n" +
-		"<!-- workflow-version: 1.0 -->\n" +
+		"</Workflow>\n\n" +
+		"<Workflow type=\"core\" name=\"code-review\" version=\"1.0\">\n" +
 		"Code review content.\n" +
-		"[[/SECTION:Workflow:code-review]]\n")
+		"</Workflow>\n")
 	// The stubHarnessModule maps orchestrator key -> "orchestrator.md"
 	writeProbeWiringFile(t, ws, "orchestrator.md", orchestratorContent)
 
@@ -263,10 +261,9 @@ func TestUpdate_WorkflowDiscovery_UsesDeployedOrchestratorContent(t *testing.T) 
 func TestUpdate_WorkflowDiscovery_NoSeparateOrchestratorRead(t *testing.T) {
 	ws := t.TempDir()
 	orchestratorContent := []byte("---\nversion: \"1.0\"\n---\n\n" +
-		"[[SECTION:Workflow:quick-fix]]\n" +
-		"<!-- workflow-version: 1.0 -->\n" +
+		"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
 		"Content.\n" +
-		"[[/SECTION:Workflow:quick-fix]]\n")
+		"</Workflow>\n")
 	writeProbeWiringFile(t, ws, "orchestrator.md", orchestratorContent)
 
 	spy := &spyPlanner{response: domain.Plan{

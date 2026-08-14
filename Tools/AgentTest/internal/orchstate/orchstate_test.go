@@ -38,13 +38,13 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
 |-----|-------|-------|-------|--------|-----------|---------|--------|------------|
 | 1 | researcher#1 | RESEARCH | - | SUCCESS | 2026-01-01T00:10:00Z | Did research. | Requirements.md | - |
 | 2 | planner#2 | PLANNING | - | SUCCESS | 2026-01-01T00:30:00Z | Wrote plan. | Requirements.md, Research.md | - |
 | 3 | implementer#3 | EXECUTION.Implementation | 2 | SUCCESS | 2026-01-01T01:00:00Z | Implemented stage 2. | Plan.md | - |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 `
 
 const emptyExecutionLogDocument = `---
@@ -66,10 +66,10 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
 |-----|-------|-------|-------|--------|-----------|---------|--------|------------|
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 `
 
 const midWorkflowDocument = `---
@@ -91,11 +91,11 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
 |-----|-------|-------|-------|--------|-----------|---------|--------|------------|
 | 1 | researcher#1 | RESEARCH | - | SUCCESS | 2026-01-01T00:10:00Z | Did research. | Requirements.md | - |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 `
 
 const dashInputsDocument = `---
@@ -117,11 +117,11 @@ current_state:
   error_code: null
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 | Seq | Agent | Phase | Stage | Status | Timestamp | Summary | Inputs | Checkpoint |
 |-----|-------|-------|-------|--------|-----------|---------|--------|------------|
 | 1 | researcher#1 | RESEARCH | - | SUCCESS | 2026-01-01T00:05:00Z | Started with no dispatched inputs. | - | - |
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 `
 
 const malformedDocument = `---
@@ -130,9 +130,9 @@ current_state:
   phase: [this is not valid yaml
 ---
 
-[[SECTION:ExecutionLog]]
+<ExecutionLog type="core">
 not a table
-[[/SECTION:ExecutionLog]]
+</ExecutionLog>
 `
 
 // --- Well-formed document ---

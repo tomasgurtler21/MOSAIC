@@ -2,9 +2,9 @@
 name: test-agent
 ---
 
-[[SECTION:Identity]]
+<Identity type="core">
 Identity content.
-[[DEPLOYED:IdentityExtension]]
+<IdentityExtension type="managed">
 Identity extension content.
-[[/DEPLOYED:IdentityExtension]]
-[[/SECTION:Identity]]
+</IdentityExtension>
+</Identity>

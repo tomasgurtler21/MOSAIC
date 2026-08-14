@@ -107,9 +107,9 @@ func claudeCodeDeployedAgentBytes() []byte {
 		"model: claude-sonnet-4-5\n" +
 		"tools: Read, Write, Edit, Bash, Glob, Grep\n" +
 		"---\n" +
-		"[[SECTION:Identity]]\n" +
+		"<Identity type=\"core\">\n" +
 		"You are the ClaudeCodeAgent.\n" +
-		"[[/SECTION:Identity]]\n")
+		"</Identity>\n")
 }
 
 // ---------------------------------------------------------------------------

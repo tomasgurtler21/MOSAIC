@@ -37,8 +37,7 @@ artifacts:
   - TestResults.md
 ---
 
-[[SECTION:Workflow:greenfield-tdd]]
-<!-- workflow-version: 3.4 -->
+<Workflow type="core" name="greenfield-tdd" version="3.4">
 ## Greenfield TDD Workflow
 
 **Use when:** Building a **new project from scratch** requiring system architecture, test-first development, and full design.
@@ -74,7 +73,7 @@ artifacts:
 - **Greenfield** = no existing codebase, architecture created from scratch
 - If system-design-review finds requirements issues → system-designer evaluates and may loop to requirements-refinement
 
-[[/SECTION:Workflow:greenfield-tdd]]
+</Workflow>
 
 ---
 

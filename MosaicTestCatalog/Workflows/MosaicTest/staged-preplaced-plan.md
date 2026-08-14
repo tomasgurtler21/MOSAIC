@@ -13,8 +13,7 @@ artifacts:
   - Stage-{StageNumber}/MosaicTestStage.md
 ---
 
-[[SECTION:Workflow:staged-preplaced-plan]]
-<!-- workflow-version: 1.0 -->
+<Workflow type="core" name="staged-preplaced-plan" version="1.0">
 ## MosaicTest Staged Pre-placed Plan Workflow
 
 **Use when:** Verifying that the runner reads a stage table, progresses through stages in order, and substitutes `{StageNumber}` into artifact paths — without any planner agent involved.
@@ -32,7 +31,7 @@ artifacts:
 - Bare rows, no groups, no `**Execution Groups:**` table. The fixture plan carries an `Approach` column anyway, which a bare workflow must ignore entirely — that non-effect is itself an assertion of this fixture.
 - `On Success` is `-` because it is ignored inside EXECUTION; row order and stage progression govern routing there.
 
-[[/SECTION:Workflow:staged-preplaced-plan]]
+</Workflow>
 
 ---
 

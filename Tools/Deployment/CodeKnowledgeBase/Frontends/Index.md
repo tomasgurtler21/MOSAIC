@@ -66,7 +66,7 @@ Each resolver follows the same rule (CD-6): a pre-answered `DeployRequest` field
 
 ### Update
 
-Same shape as DeployNew but scope is always `ScopeProject`, and workflow selection is replaced by **discovery**: `discoverExistingWorkflows` reads the deployed orchestrator file, extracts `[[SECTION:Workflow:<id>]]` markers to find what is already injected, and unions that with any `AddWorkflowIDs` the caller supplied — so an update never silently drops a previously-added workflow. Per-file conflict decisions use `req.ConflictDefault` when set (CLI's `--conflict` flag), otherwise ask via `askLocalModification` exactly like DeployNew. Update does not run model or custom-tool resolution — the update flow re-renders content using the harness module directly and does not re-prompt for models already baked into deployed files.
+Same shape as DeployNew but scope is always `ScopeProject`, and workflow selection is replaced by **discovery**: `discoverExistingWorkflows` reads the deployed orchestrator file, extracts `<Workflow type="core" name="<id>">` section nodes to find what is already injected, and unions that with any `AddWorkflowIDs` the caller supplied — so an update never silently drops a previously-added workflow. Per-file conflict decisions use `req.ConflictDefault` when set (CLI's `--conflict` flag), otherwise ask via `askLocalModification` exactly like DeployNew. Update does not run model or custom-tool resolution — the update flow re-renders content using the harness module directly and does not re-prompt for models already baked into deployed files.
 
 ### CLI dispatch
 
