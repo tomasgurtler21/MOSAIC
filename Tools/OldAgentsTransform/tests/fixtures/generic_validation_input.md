@@ -51,8 +51,6 @@ You are the **ValidationAgent** agent in a multi-agent orchestration system.
 
 ## Error Handling
 
-- **Retry transient errors once** before escalating
-
 [INJECTION: error_handling_extension]
 
 ---

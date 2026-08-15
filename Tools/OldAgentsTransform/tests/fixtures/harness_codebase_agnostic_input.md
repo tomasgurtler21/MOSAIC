@@ -49,7 +49,6 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 
 ## Error Handling
 
-- **Retry transient errors once** before escalating
 - **Return BLOCKED** if prerequisites are missing
 
 [INJECTION: error_handling_extension]

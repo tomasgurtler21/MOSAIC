@@ -274,6 +274,13 @@ func (f *fakeRecordingDeployer) Render(_ context.Context, req domain.RenderAgent
 	return domain.RenderAgentResult{}, errors.New("fakeRecordingDeployer: intentional failure for wiring assertion")
 }
 
+// Deploy is a stub that satisfies domain.AgentDeployer. Tests in this package
+// drive the deployer only through Render; Deploy support is added here so the
+// interface remains satisfied while Deploy's implementation is pending.
+func (f *fakeRecordingDeployer) Deploy(_ context.Context, _ domain.DeployRequest) (domain.DeployResult, error) {
+	return domain.DeployResult{}, errors.New("fakeRecordingDeployer: Deploy not implemented in this test double")
+}
+
 // TestEnvironmentBakedPreflight_DeployerIsCalledWhenSubjectHasAgentKey asserts
 // that the deployer passed to environmentBakedPreflight is the one
 // preflight.Validate actually invokes when a test definition carries a

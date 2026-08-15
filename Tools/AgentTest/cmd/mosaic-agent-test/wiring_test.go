@@ -90,6 +90,13 @@ func (fakeDeployer) Render(_ context.Context, req domain.RenderAgentRequest) (do
 	return domain.RenderAgentResult{}, errors.New("fakeDeployer: not exercised by this test")
 }
 
+// Deploy is a stub that satisfies domain.AgentDeployer. Tests in this package
+// drive the deployer only through Render; Deploy support is added here so the
+// interface remains satisfied while Deploy's implementation is pending.
+func (fakeDeployer) Deploy(_ context.Context, _ domain.DeployRequest) (domain.DeployResult, error) {
+	return domain.DeployResult{}, errors.New("fakeDeployer: Deploy not implemented in this test double")
+}
+
 type discardWriter struct{}
 
 func (*discardWriter) Write(p []byte) (int, error) { return len(p), nil }
@@ -160,6 +167,72 @@ func TestBuildDeps_PopulatesEveryField_OnSuccess(t *testing.T) {
 			t.Errorf("buildDeps returned a zero-valued field %q; every field must be populated on the success path (AC17.5)", rt.Field(i).Name)
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// I2.4 — buildDeps threads WiringConfig.CatalogFolder into
+// agentdeploy.Options.CatalogFolder at the composition root.
+// ---------------------------------------------------------------------------
+
+// TestBuildDeps_CatalogFolder_IsThreadedIntoDeployerOptions verifies that
+// buildDeps passes WiringConfig.CatalogFolder into agentdeploy.Options.CatalogFolder,
+// so the deployer emits --catalog-folder on every subprocess call. This is the
+// composition-root wiring joint: a buildDeps that correctly resolves CatalogFolder
+// but omits it from agentdeploy.Options leaves the deployer using the default
+// (empty field → no flag), breaking the feature end-to-end while every other
+// test passes.
+//
+// The WiringConfig.DeployInvoke seam captures the argument list without a real
+// binary: when buildDeps threads cfg.DeployInvoke into agentdeploy.Options.Invoke,
+// the Render call routes through the seam instead of execCommandRunner. This
+// test fails (RED) until I2.4 adds both CatalogFolder and Invoke threading to
+// the agentdeploy.Options construction in buildDeps.
+func TestBuildDeps_CatalogFolder_IsThreadedIntoDeployerOptions(t *testing.T) {
+	const wantCatalogFolder = "/opt/mosaic/Tools/AgentTest/catalog"
+	var capturedArgs []string
+
+	const resultJSON = `{
+		"destinationPath": "/sandbox/.claude/agents/orchestrator.md",
+		"sourceVersion": "2.1",
+		"agentKey": "orchestrator",
+		"createdDirectories": []
+	}`
+
+	cfg := WiringConfig{
+		HarnessID:       "claude-code",
+		FixtureRoot:     "C:/fixtures",
+		WorkspaceRoot:   "C:/workspaces",
+		SelfPath:        "C:/bin/mosaic-agent-test.exe",
+		LoggerBundleDir: "C:/bundles/logger",
+		CostToolPath:    "C:/bin/mosaic-log-analyzer.exe",
+		CostTimeout:     30 * time.Second,
+		Diag:            new(discardWriter),
+		CatalogFolder:   wantCatalogFolder,
+		DeployInvoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return []byte(resultJSON), nil, 0, nil
+		},
+	}
+
+	d, err := buildDeps(cfg)
+	if err != nil {
+		t.Fatalf("buildDeps(...) returned an error: %v", err)
+	}
+
+	req := domain.RenderAgentRequest{
+		CatalogAgentKey: "orchestrator",
+		HarnessID:       "claude-code",
+		WorkspaceRoot:   "/sandbox",
+	}
+	_, _ = d.Deploy.Render(context.Background(), req)
+
+	for i := 0; i+1 < len(capturedArgs); i++ {
+		if capturedArgs[i] == "--catalog-folder" && capturedArgs[i+1] == wantCatalogFolder {
+			return // PASS: the composition-root wiring joint is present
+		}
+	}
+	t.Errorf("args = %v, want --catalog-folder %s to be present: buildDeps must pass WiringConfig.CatalogFolder into agentdeploy.Options.CatalogFolder at the composition root",
+		capturedArgs, wantCatalogFolder)
 }
 
 // TestBuildDeps_UnrecognisedHarnessID_IsErrUnknownHarness verifies buildDeps

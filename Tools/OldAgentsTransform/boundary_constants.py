@@ -28,21 +28,23 @@ class BoundaryKind(Enum):
     CUSTOM = "CUSTOM"
 
 
-# Six canonical section names in document order.
+# Five canonical section names in document order.
 # CommunicationProtocol is NOT a member — it is a tool-managed boundary name
 # declared with [[DEPLOYED:]] and occupies position 2 in CANONICAL_ORDER.
+# OutputFormat is NOT a member — it was a legacy section whose content is deleted
+# outright during transform by delete_legacy_sections.
 CANONICAL_SECTIONS: tuple[str, ...] = (
     "Identity",
     "Capabilities",
     "Constraints",
     "ErrorHandling",
-    "OutputFormat",
     "ExecutionPhilosophy",
 )
 
-# Seven canonical document slots in required order. The entry at index 1 is
+# Six canonical document slots in required order. The entry at index 1 is
 # "CommunicationProtocol", satisfied by a top-level [[DEPLOYED:CommunicationProtocol]]
-# boundary; every other entry is a section name. ArtifactProvenance is removed.
+# boundary; every other entry is a section name. ArtifactProvenance and OutputFormat
+# are removed.
 # This is the list the document-order check walks.
 CANONICAL_ORDER: tuple[str, ...] = (
     "Identity",
@@ -50,7 +52,6 @@ CANONICAL_ORDER: tuple[str, ...] = (
     "Capabilities",
     "Constraints",
     "ErrorHandling",
-    "OutputFormat",
     "ExecutionPhilosophy",
 )
 
@@ -164,7 +165,6 @@ SECTION_HEADING_MAP: dict[str, str] = {
     "Capabilities": "## Capabilities",
     "Constraints": "## Constraints",
     "ErrorHandling": "## Error Handling",
-    "OutputFormat": "## Output Format",
     "ExecutionPhilosophy": "## Execution Philosophy",
 }
 

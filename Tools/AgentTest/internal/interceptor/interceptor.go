@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"mosaic-agent-test/internal/domain"
@@ -57,6 +58,12 @@ type Config struct {
 
 	TestID    string
 	RunNumber int
+
+	// RunID is the run's identifier, read back from the persisted run state
+	// by the caller. Empty when the read did not succeed — a legal state that
+	// leaves placeholder expansion yielding an empty segment rather than
+	// failing the interception.
+	RunID string
 
 	In   io.Reader
 	Out  io.Writer
@@ -205,7 +212,16 @@ func runOneInterception(ctx context.Context, cfg Config) {
 	// before the reply is emitted, so a subject acting immediately on the
 	// reply cannot outrun either.
 	if len(decision.SideEffects) > 0 {
-		if _, err := cfg.Effects.Apply(cfg.SubjectDir, decision.SideEffects); err != nil {
+		// Expand the run-ID placeholder in every effect's path before Apply
+		// is called. This mirrors seedFile's expand-then-write shape and
+		// ensures the escape guard inside Apply evaluates the post-expansion
+		// path. Effect content and Ref are never touched.
+		expanded := make([]domain.FileEffect, len(decision.SideEffects))
+		for i, e := range decision.SideEffects {
+			e.Path = strings.ReplaceAll(e.Path, domain.RunIDPlaceholder, cfg.RunID)
+			expanded[i] = e
+		}
+		if _, err := cfg.Effects.Apply(cfg.SubjectDir, expanded); err != nil {
 			handleFailure(cfg, &call, fmt.Errorf("applying side effects: %w", err))
 			return
 		}

@@ -25,6 +25,7 @@ _TOOLS_DIR = pathlib.Path(__file__).parent.parent
 sys.path.insert(0, str(_TOOLS_DIR))
 
 from boundary_constants import BoundaryKind  # noqa: E402
+from fence import fence_mask  # noqa: E402
 from non_conformance import NC_DRIFTED_BULLET  # noqa: E402
 from region_insertion import (  # noqa: E402
     Anchor,
@@ -35,11 +36,17 @@ from region_insertion import (  # noqa: E402
     RegionSpec,
     SectionSpan,
     apply_conduct_regions,
+    find_heading_block_end,
     find_section_spans,
     locate_process_list_end,
     _AH_BLOCK,
     _CP_HITL_STEP,
     _CP_JSON_STEP,
+    _EH_RETRY,
+    _EP_CONTEXT,
+    _PC_BULLET_1,
+    _PC_BULLET_2,
+    _PC_BULLET_5,
 )
 
 
@@ -931,3 +938,673 @@ class TestConductRegionsTable:
         ah = next(s for s in CONDUCT_REGIONS if s.name == "AuthorityHierarchy")
         rule_ids = {r.rule_id for r in ah.supersedes}
         assert "AH-block" in rule_ids
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by the orphan-deletion test classes below
+# ---------------------------------------------------------------------------
+
+def _eh_span(lines: list[str], heading: int = 0) -> SectionSpan:
+    """Build a SectionSpan for an ErrorHandling section."""
+    content_end = len(lines)
+    for i in range(len(lines) - 1, heading, -1):
+        if lines[i].strip():
+            content_end = i + 1
+            break
+    return SectionSpan(
+        name="ErrorHandling",
+        heading_line=heading,
+        start=heading + 1,
+        content_end=content_end,
+        end=len(lines),
+    )
+
+
+def _ep_span(lines: list[str], heading: int = 0) -> SectionSpan:
+    """Build a SectionSpan for an ExecutionPhilosophy section."""
+    content_end = len(lines)
+    for i in range(len(lines) - 1, heading, -1):
+        if lines[i].strip():
+            content_end = i + 1
+            break
+    return SectionSpan(
+        name="ExecutionPhilosophy",
+        heading_line=heading,
+        start=heading + 1,
+        content_end=content_end,
+        end=len(lines),
+    )
+
+
+def _constraints_span(lines: list[str], heading: int = 0) -> SectionSpan:
+    """Build a SectionSpan for a Constraints section."""
+    content_end = len(lines)
+    for i in range(len(lines) - 1, heading, -1):
+        if lines[i].strip():
+            content_end = i + 1
+            break
+    return SectionSpan(
+        name="Constraints",
+        heading_line=heading,
+        start=heading + 1,
+        content_end=content_end,
+        end=len(lines),
+    )
+
+
+# ---------------------------------------------------------------------------
+# find_heading_block_end — own_region transparency
+# ---------------------------------------------------------------------------
+
+class TestFindHeadingBlockEndOwnRegion:
+    """find_heading_block_end(own_region=...) treats the named region's own tags
+    as transparent while keeping every other region's tags as opaque stop
+    boundaries.  These tests pin both the fix (own-tag transparency) and the
+    surviving safety guard (foreign-tag opacity)."""
+
+    def test_own_region_open_tag_is_transparent(self):
+        """When own_region matches, the open tag of that region does not stop the scan.
+
+        The block extent must continue past the own-region open tag and include the
+        prose that follows it.
+        """
+        lines = _L(
+            "# Agent",
+            "### Authority Hierarchy",
+            "",
+            '<AuthorityHierarchy type="managed">',
+            "</AuthorityHierarchy>",
+            "",
+            "Four sources issue you instructions.",
+            "**Why this ranking.** Because.",
+            "",
+            "### Other Heading",
+        )
+        mask = fence_mask(list(lines))
+        end = find_heading_block_end(lines, 1, mask, own_region="AuthorityHierarchy")
+        # Must reach "### Other Heading" (index 9), not stop at the AH open tag (index 3)
+        assert end == 9, (
+            f"Block extent stopped at index {end} rather than reaching the next heading "
+            "at index 9; own-region tag must be transparent to the scan"
+        )
+
+    def test_own_region_close_tag_is_transparent(self):
+        """Both the open and close tags of own_region are transparent to the scan."""
+        lines = _L(
+            "# Agent",
+            "### Authority Hierarchy",
+            "",
+            '<AuthorityHierarchy type="managed">',
+            "</AuthorityHierarchy>",
+            "Prose below the close tag.",
+            "",
+            "### Next Heading",
+        )
+        mask = fence_mask(list(lines))
+        end = find_heading_block_end(lines, 1, mask, own_region="AuthorityHierarchy")
+        # Must reach "### Next Heading" (index 7)
+        assert end == 7, (
+            f"Own-region close tag at index 4 must be transparent; expected end=7 got {end}"
+        )
+
+    def test_full_block_deleted_when_own_tags_interrupt_heading_block(self):
+        """apply_conduct_regions deletes the heading AND the prose even when the region's
+        own tag pair has been merged in between the heading and the prose.
+
+        This is the merged-tag Defect A scenario: the generic reference's empty AH tags
+        land between the heading and the prose during the harness merge, causing the old
+        block-extent scan to stop too early.  With own_region="AuthorityHierarchy" the
+        scan is transparent to those tags and the full block is deleted.
+        """
+        lines = _L(
+            "# TestAgent Agent",
+            "",
+            "### Process",
+            "1. Step one.",
+            "",
+            "### Authority Hierarchy",
+            "",
+            '<AuthorityHierarchy type="managed">',
+            "</AuthorityHierarchy>",
+            "",
+            "Four sources issue you instructions.",
+            "**Why this ranking.** Because.",
+            "",
+            "### Other Heading",
+            "",
+            "Other content.",
+            "",
+        )
+        identity = _identity_span(lines)
+        ah_spec = RegionSpec(
+            name="AuthorityHierarchy",
+            parent_section="Identity",
+            anchor=Anchor.SECTION_CONTENT_END,
+            fallback_anchor=Anchor.SECTION_CONTENT_END,
+            supersedes=(_AH_BLOCK,),
+        )
+        result = apply_conduct_regions(lines, {"Identity": identity}, specs=(ah_spec,))
+        out_text = "".join(result.lines)
+        assert "### Authority Hierarchy" not in out_text, (
+            "Authority Hierarchy heading must be deleted when own tags interrupt the block"
+        )
+        assert "Four sources issue you instructions" not in out_text, (
+            "Authority Hierarchy prose must be deleted even when own tags interrupt the block"
+        )
+        assert "Why this ranking" not in out_text, (
+            "Full prose body must be deleted, not just lines before the merged-in tag pair"
+        )
+        assert "AH-block" in result.deletions_applied, (
+            "AH-block must appear in deletions_applied when the block was found and deleted"
+        )
+
+    def test_foreign_region_tag_still_stops_the_scan(self):
+        """A tag belonging to a different region must still stop the block extent.
+
+        The own_region exemption is scoped to the named region only.  Crossing a
+        different region's boundary via the heading-block deletion is forbidden and
+        the existing guard must remain unconditional.
+        """
+        lines = _L(
+            "# Agent",
+            "### Authority Hierarchy",
+            "",
+            "Prose before the foreign boundary.",
+            '<ClosingProcedure type="managed">',
+            "</ClosingProcedure>",
+            "",
+            "Prose after the foreign boundary.",
+        )
+        mask = fence_mask(list(lines))
+        end = find_heading_block_end(lines, 1, mask, own_region="AuthorityHierarchy")
+        # Must stop at ClosingProcedure open tag (index 4), not continue past it
+        assert end == 4, (
+            f"Foreign-region tag at index 4 must stop the scan; expected end=4 got {end}"
+        )
+
+    def test_no_own_region_preserves_all_tags_as_stop_boundaries(self):
+        """own_region=None preserves the original behaviour: every boundary tag stops the scan."""
+        lines = _L(
+            "# Agent",
+            "### Authority Hierarchy",
+            "",
+            '<AuthorityHierarchy type="managed">',
+            "</AuthorityHierarchy>",
+            "",
+            "Prose that must NOT be reached.",
+        )
+        mask = fence_mask(list(lines))
+        end = find_heading_block_end(lines, 1, mask, own_region=None)
+        # Must stop at the AH open tag (index 3) when own_region is None
+        assert end == 3, (
+            f"own_region=None must treat every tag as opaque; expected end=3 got {end}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# CP-hitl-step — "If" wording deletion (Defect B)
+# ---------------------------------------------------------------------------
+
+class TestCPHitlStepIfVariant:
+    """CP-hitl-step must delete the HITL process step regardless of whether it uses
+    'When' or 'If' to introduce the human_in_the_loop condition.
+
+    The "If" wording appears in the real legacy source (observed during planning).
+    The strict pattern must be widened to cover both forms without over-matching a
+    superficially similar but semantically different step.
+
+    Tests labelled RED will fail until the CP-hitl-step pattern is widened.
+    """
+
+    def _lines_with_if_hitl_step(self) -> tuple[list[str], dict]:
+        lines = _L(
+            "# TestAgent Agent",
+            "",
+            "### Process",
+            "1. Step one.",
+            "2. If `human_in_the_loop: true`, present all output artifacts to the user "
+               "for review/approval (final action before returning response)",
+            "3. Return ONLY output json defined by communication protocol with status",
+            "",
+        )
+        return lines, {"Identity": _identity_span(lines)}
+
+    def test_if_variant_deleted_from_output(self):
+        """The HITL step with 'If' wording must be deleted by CP-hitl-step (RED until I4.2)."""
+        lines, sections = self._lines_with_if_hitl_step()
+        cp_spec = _minimal_spec("ClosingProcedure", supersedes=(_CP_HITL_STEP, _CP_JSON_STEP))
+        result = apply_conduct_regions(lines, sections, specs=(cp_spec,))
+        out_text = "".join(result.lines)
+        assert "present all output artifacts to the user for review" not in out_text, (
+            "CP-hitl-step must delete the step when worded with 'If' (Defect B fix)"
+        )
+
+    def test_if_variant_in_deletions_applied(self):
+        """CP-hitl-step must appear in deletions_applied when the 'If' variant is matched (RED)."""
+        lines, sections = self._lines_with_if_hitl_step()
+        cp_spec = _minimal_spec("ClosingProcedure", supersedes=(_CP_HITL_STEP, _CP_JSON_STEP))
+        result = apply_conduct_regions(lines, sections, specs=(cp_spec,))
+        assert "CP-hitl-step" in result.deletions_applied, (
+            "CP-hitl-step must appear in deletions_applied for the 'If' variant"
+        )
+
+    def test_when_variant_still_deleted_from_output(self):
+        """The 'When' variant of the HITL step must still be deleted (regression guard)."""
+        when_step = (
+            "When `human_in_the_loop: true`, present all output artifacts to the user "
+            "for review/approval (final action before returning response)"
+        )
+        lines = _L(
+            "# TestAgent Agent",
+            "",
+            "### Process",
+            "1. Step one.",
+            f"2. {when_step}",
+            "3. Return ONLY output json defined by communication protocol with status",
+            "",
+        )
+        sections = {"Identity": _identity_span(lines)}
+        cp_spec = _minimal_spec("ClosingProcedure", supersedes=(_CP_HITL_STEP, _CP_JSON_STEP))
+        result = apply_conduct_regions(lines, sections, specs=(cp_spec,))
+        out_text = "".join(result.lines)
+        assert "present all output artifacts to the user for review" not in out_text, (
+            "The 'When' variant must still be deleted by CP-hitl-step"
+        )
+
+    def test_if_near_miss_not_deleted(self):
+        """A step using 'If human_in_the_loop' but taking a different action must not be deleted.
+
+        The widened pattern must remain narrow enough that an unrelated 'If ...' step
+        is not caught.  This near-miss proves the pattern cannot over-match.
+        """
+        near_miss = (
+            "If `human_in_the_loop: true`, ask the user a clarifying question "
+            "before proceeding"
+        )
+        lines = _L(
+            "# TestAgent Agent",
+            "",
+            "### Process",
+            "1. Step one.",
+            f"2. {near_miss}",
+            "3. Return ONLY output json defined by communication protocol with status",
+            "",
+        )
+        sections = {"Identity": _identity_span(lines)}
+        cp_spec = _minimal_spec("ClosingProcedure", supersedes=(_CP_HITL_STEP, _CP_JSON_STEP))
+        result = apply_conduct_regions(lines, sections, specs=(cp_spec,))
+        out_text = "".join(result.lines)
+        assert near_miss in out_text, (
+            "A near-miss step that uses 'If human_in_the_loop' but takes a different "
+            "action must not be deleted by CP-hitl-step"
+        )
+        assert "CP-hitl-step" not in result.deletions_applied, (
+            "CP-hitl-step must not appear in deletions_applied for the near-miss"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Drifted real-source wording — deletion (Defect C)
+# ---------------------------------------------------------------------------
+
+class TestDriftedRulePatterns:
+    """Each drifted rule must delete the real-source wording observed in the legacy corpus
+    while leaving near-miss prose intact.
+
+    PC-bullet-1 and PC-bullet-2 tests are RED until I4.3 widens their patterns and
+    changes their kind to REGEX_BULLET.  EH-retry and EP-context tests are GREEN
+    because those patterns were already widened in the implementation.
+    """
+
+    # --- PC-bullet-1: Orchestration Artifacts drifted wording (RED) ---
+
+    def test_pc_bullet_1_drifted_wording_deleted(self):
+        """PC-bullet-1 must delete the real-source drifted wording (RED until I4.3)."""
+        drifted = (
+            "- **Orchestration Artifacts:** NEVER access orchestration artifacts "
+            "not in your `input_artifacts`/`output_artifacts` lists"
+        )
+        lines = _L(
+            "## Constraints",
+            "",
+            drifted,
+            "- Other constraint.",
+            "",
+        )
+        sections = {"Constraints": _constraints_span(lines)}
+        pc_spec = _minimal_spec(
+            "ProtocolConstraints",
+            supersedes=(_PC_BULLET_1,),
+        )
+        pc_spec = RegionSpec(
+            name="ProtocolConstraints",
+            parent_section="Constraints",
+            anchor=Anchor.SECTION_START,
+            supersedes=(_PC_BULLET_1,),
+        )
+        result = apply_conduct_regions(lines, sections, specs=(pc_spec,))
+        out_text = "".join(result.lines)
+        assert "NEVER access orchestration artifacts not in your" not in out_text, (
+            "PC-bullet-1 must delete the drifted wording "
+            "'NEVER access orchestration artifacts not in your ...'"
+        )
+        assert "PC-bullet-1" in result.deletions_applied, (
+            "PC-bullet-1 must appear in deletions_applied for the drifted wording"
+        )
+
+    def test_pc_bullet_1_drifted_wording_not_silently_stranded(self):
+        """The drifted PC-bullet-1 wording must not survive adjacent to the inserted tag (RED)."""
+        drifted = (
+            "- **Orchestration Artifacts:** NEVER access orchestration artifacts "
+            "not in your `input_artifacts`/`output_artifacts` lists"
+        )
+        lines = _L(
+            "## Constraints",
+            "",
+            drifted,
+            "",
+        )
+        sections = {"Constraints": _constraints_span(lines)}
+        pc_spec = RegionSpec(
+            name="ProtocolConstraints",
+            parent_section="Constraints",
+            anchor=Anchor.SECTION_START,
+            supersedes=(_PC_BULLET_1,),
+        )
+        result = apply_conduct_regions(lines, sections, specs=(pc_spec,))
+        # The drifted bullet must be deleted, not left beside the inserted region tags
+        out_text = "".join(result.lines)
+        assert "NEVER access orchestration artifacts not in your" not in out_text, (
+            "Drifted PC-bullet-1 wording must be deleted, not stranded beside the region tags"
+        )
+
+    def test_pc_bullet_1_near_miss_not_deleted(self):
+        """A bullet resembling PC-bullet-1 but not superseded must not be deleted."""
+        near_miss = (
+            "- **Orchestration Artifacts:** Read every artifact named in your "
+            "`input_artifacts`/`output_artifacts` lists"
+        )
+        lines = _L(
+            "## Constraints",
+            "",
+            near_miss,
+            "",
+        )
+        sections = {"Constraints": _constraints_span(lines)}
+        pc_spec = RegionSpec(
+            name="ProtocolConstraints",
+            parent_section="Constraints",
+            anchor=Anchor.SECTION_START,
+            supersedes=(_PC_BULLET_1,),
+        )
+        result = apply_conduct_regions(lines, sections, specs=(pc_spec,))
+        out_text = "".join(result.lines)
+        assert "Read every artifact named" in out_text, (
+            "A near-miss that starts with '**Orchestration Artifacts:**' but uses different "
+            "phrasing must not be deleted by PC-bullet-1"
+        )
+        assert "PC-bullet-1" not in result.deletions_applied, (
+            "PC-bullet-1 must not appear in deletions_applied for a near-miss bullet"
+        )
+
+    # --- PC-bullet-2: Project Files drifted wording (RED) ---
+
+    def test_pc_bullet_2_drifted_wording_deleted(self):
+        """PC-bullet-2 must delete the real-source drifted wording (RED until I4.3)."""
+        drifted = (
+            "- **Project Files:** You MAY access any project file "
+            "(files not listed as orchestration artifacts)"
+        )
+        lines = _L(
+            "## Constraints",
+            "",
+            drifted,
+            "- Other constraint.",
+            "",
+        )
+        sections = {"Constraints": _constraints_span(lines)}
+        pc_spec = RegionSpec(
+            name="ProtocolConstraints",
+            parent_section="Constraints",
+            anchor=Anchor.SECTION_START,
+            supersedes=(_PC_BULLET_2,),
+        )
+        result = apply_conduct_regions(lines, sections, specs=(pc_spec,))
+        out_text = "".join(result.lines)
+        assert "You MAY access any project file" not in out_text, (
+            "PC-bullet-2 must delete the drifted wording 'You MAY access any project file'"
+        )
+        assert "PC-bullet-2" in result.deletions_applied, (
+            "PC-bullet-2 must appear in deletions_applied for the drifted wording"
+        )
+
+    def test_pc_bullet_2_near_miss_not_deleted(self):
+        """A bullet resembling PC-bullet-2 but not superseded must not be deleted."""
+        near_miss = (
+            "- **Project Files:** You MAY NOT modify any project file outside your output list"
+        )
+        lines = _L(
+            "## Constraints",
+            "",
+            near_miss,
+            "",
+        )
+        sections = {"Constraints": _constraints_span(lines)}
+        pc_spec = RegionSpec(
+            name="ProtocolConstraints",
+            parent_section="Constraints",
+            anchor=Anchor.SECTION_START,
+            supersedes=(_PC_BULLET_2,),
+        )
+        result = apply_conduct_regions(lines, sections, specs=(pc_spec,))
+        out_text = "".join(result.lines)
+        assert "You MAY NOT modify" in out_text, (
+            "A near-miss that starts with '**Project Files:**' but uses 'MAY NOT' must "
+            "not be deleted by PC-bullet-2"
+        )
+        assert "PC-bullet-2" not in result.deletions_applied
+
+    # --- EH-retry: drifted wording (GREEN — pattern already widened) ---
+
+    def test_eh_retry_drifted_wording_deleted(self):
+        """EH-retry must delete 'Retry transient errors once' (plural, no 'a')."""
+        drifted = "- **Retry transient errors once** before escalating"
+        lines = _L(
+            "## Error Handling",
+            "",
+            drifted,
+            "",
+        )
+        sections = {"ErrorHandling": _eh_span(lines)}
+        eh_spec = RegionSpec(
+            name="ErrorHandlingCommon",
+            parent_section="ErrorHandling",
+            anchor=Anchor.SECTION_START,
+            supersedes=(_EH_RETRY,),
+        )
+        result = apply_conduct_regions(lines, sections, specs=(eh_spec,))
+        out_text = "".join(result.lines)
+        assert "Retry transient errors once" not in out_text, (
+            "EH-retry must delete the drifted plural wording 'Retry transient errors once'"
+        )
+        assert "EH-retry" in result.deletions_applied
+
+    def test_eh_retry_near_miss_not_deleted(self):
+        """'Retry transient errors up to three times' must not be deleted by EH-retry."""
+        near_miss = "- Retry transient errors up to three times before escalating"
+        lines = _L(
+            "## Error Handling",
+            "",
+            near_miss,
+            "",
+        )
+        sections = {"ErrorHandling": _eh_span(lines)}
+        eh_spec = RegionSpec(
+            name="ErrorHandlingCommon",
+            parent_section="ErrorHandling",
+            anchor=Anchor.SECTION_START,
+            supersedes=(_EH_RETRY,),
+        )
+        result = apply_conduct_regions(lines, sections, specs=(eh_spec,))
+        out_text = "".join(result.lines)
+        assert "up to three times" in out_text, (
+            "EH-retry must not delete a bullet about retrying 'up to three times' "
+            "— that wording is a near-miss, not the superseded bullet"
+        )
+        assert "EH-retry" not in result.deletions_applied
+
+    # --- EP-context: drifted wording (GREEN — pattern already widened) ---
+
+    def test_ep_context_drifted_wording_deleted(self):
+        """EP-context must delete '...Follow-up tasks are handled by spawning new agent instances'."""
+        drifted = (
+            "- **Context Management:** You can dedicate your full context window to this task. "
+            "Follow-up tasks are handled by spawning new agent instances."
+        )
+        lines = _L(
+            "## Execution Philosophy",
+            "",
+            drifted,
+            "",
+        )
+        sections = {"ExecutionPhilosophy": _ep_span(lines)}
+        ep_spec = RegionSpec(
+            name="ExecutionPhilosophyCommon",
+            parent_section="ExecutionPhilosophy",
+            anchor=Anchor.SECTION_START,
+            supersedes=(_EP_CONTEXT,),
+        )
+        result = apply_conduct_regions(lines, sections, specs=(ep_spec,))
+        out_text = "".join(result.lines)
+        assert "Follow-up tasks are handled by spawning new agent instances" not in out_text, (
+            "EP-context must delete the drifted wording with 'tasks are'"
+        )
+        assert "EP-context" in result.deletions_applied
+
+    def test_ep_context_near_miss_not_deleted(self):
+        """'Follow-up tasks are handled by re-invoking this same agent' must not be deleted."""
+        near_miss = (
+            "- **Context Management:** Follow-up tasks are handled by "
+            "re-invoking this same agent."
+        )
+        lines = _L(
+            "## Execution Philosophy",
+            "",
+            near_miss,
+            "",
+        )
+        sections = {"ExecutionPhilosophy": _ep_span(lines)}
+        ep_spec = RegionSpec(
+            name="ExecutionPhilosophyCommon",
+            parent_section="ExecutionPhilosophy",
+            anchor=Anchor.SECTION_START,
+            supersedes=(_EP_CONTEXT,),
+        )
+        result = apply_conduct_regions(lines, sections, specs=(ep_spec,))
+        out_text = "".join(result.lines)
+        assert "re-invoking this same agent" in out_text, (
+            "EP-context must not delete a bullet about re-invoking the same agent "
+            "— that is a near-miss, not the superseded wording"
+        )
+        assert "EP-context" not in result.deletions_applied
+
+
+# ---------------------------------------------------------------------------
+# PC-bullet-5 — benign no-op when the line is absent
+# ---------------------------------------------------------------------------
+
+class TestPCBullet5AbsentIsNoOp:
+    """When the source never carried the PC-bullet-5 line, applying the rule must
+    leave the document unchanged.  This is a structural no-op, not a deletion failure.
+    The rule is required=True so it appears in deletions_unmatched, but nothing is
+    deleted and the probe only fires if there is a similar-looking line to fire on.
+    """
+
+    def test_pc_bullet_5_absent_no_content_deleted(self):
+        """No content is deleted when the source has no PC-bullet-5 wording."""
+        other_bullet = "- Stay within scope"
+        lines = _L(
+            "## Constraints",
+            "",
+            other_bullet,
+            "",
+        )
+        sections = {"Constraints": _constraints_span(lines)}
+        pc_spec = RegionSpec(
+            name="ProtocolConstraints",
+            parent_section="Constraints",
+            anchor=Anchor.SECTION_START,
+            supersedes=(_PC_BULLET_5,),
+        )
+        result = apply_conduct_regions(lines, sections, specs=(pc_spec,))
+        out_text = "".join(result.lines)
+        assert other_bullet in out_text, (
+            "An unrelated bullet must survive untouched when PC-bullet-5 finds no match"
+        )
+
+    def test_pc_bullet_5_absent_rule_in_deletions_unmatched(self):
+        """A required rule with no match records its id in deletions_unmatched."""
+        lines = _L(
+            "## Constraints",
+            "",
+            "- Stay within scope",
+            "",
+        )
+        sections = {"Constraints": _constraints_span(lines)}
+        pc_spec = RegionSpec(
+            name="ProtocolConstraints",
+            parent_section="Constraints",
+            anchor=Anchor.SECTION_START,
+            supersedes=(_PC_BULLET_5,),
+        )
+        result = apply_conduct_regions(lines, sections, specs=(pc_spec,))
+        assert "PC-bullet-5" in result.deletions_unmatched, (
+            "PC-bullet-5 is required=True; an unmatched no-op must land in deletions_unmatched"
+        )
+        assert "PC-bullet-5" not in result.deletions_applied, (
+            "PC-bullet-5 must not appear in deletions_applied when no line was deleted"
+        )
+
+    def test_pc_bullet_5_absent_no_non_conformances(self):
+        """When PC-bullet-5 finds nothing at all (neither strict nor probe), no NC is raised."""
+        lines = _L(
+            "## Constraints",
+            "",
+            "- Stay within scope",
+            "",
+        )
+        sections = {"Constraints": _constraints_span(lines)}
+        pc_spec = RegionSpec(
+            name="ProtocolConstraints",
+            parent_section="Constraints",
+            anchor=Anchor.SECTION_START,
+            supersedes=(_PC_BULLET_5,),
+        )
+        result = apply_conduct_regions(lines, sections, specs=(pc_spec,))
+        assert result.non_conformances == [], (
+            "An absent bullet that matches neither the strict pattern nor the probe "
+            "must not produce any NC_DRIFTED_BULLET finding"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Drift probe invariant — every rule in CONDUCT_REGIONS has a probe
+# ---------------------------------------------------------------------------
+
+class TestAllConductRegionsRulesHaveDriftProbe:
+    """Every DeletionRule in CONDUCT_REGIONS must carry a non-None drift_probe so that
+    a future wording drift is reported as NC_DRIFTED_BULLET rather than silently left
+    in place adjacent to the inserted region tags."""
+
+    def test_no_rule_has_none_drift_probe(self):
+        """All DeletionRules in CONDUCT_REGIONS must have drift_probe is not None."""
+        missing = [
+            f"{spec.name}/{rule.rule_id}"
+            for spec in CONDUCT_REGIONS
+            for rule in spec.supersedes
+            if rule.drift_probe is None
+        ]
+        assert missing == [], (
+            f"Rules with drift_probe=None violate the ContractsDesign.md invariant "
+            f"(every rule must have a probe so drifted wording is reported): {missing}"
+        )

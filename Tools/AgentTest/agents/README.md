@@ -48,6 +48,8 @@ missing any of these will not render correctly through the deployment tool.
 | `description` | One line describing the collaborator's role in tests. |
 | `role` | Always `subagent` for every stub. |
 | `model` | Use the `{model-identifier}` placeholder, as product agents do. |
+| `recommended_tier` | Always `TEST-STUB` for every stub in this directory. **Required, not optional:** this is the sole mechanism by which stubs receive the cheap model at deploy time. The deployment tool derives its tier list purely from `recommended_tier` frontmatter, and a stub that omits or deviates from `TEST-STUB` falls out of the shared cheap-model tier mapping, deploying with an unresolved model placeholder on a run that still reports success — a silent failure with a real cost. |
+| `tier_rationale` | One line, per catalogue convention. The deployment tool surfaces it when asking about a tier. |
 | `tools` | May be an empty list. |
 
 ## Required body structure
@@ -69,3 +71,14 @@ Current assignment:
 | 2  | researcher.md |
 | 3  | library-researcher.md |
 | 4  | planner.md |
+| 5  | codebase-research.md |
+| 6  | requirements-review.md |
+| 7  | planner-tdd-soft.md |
+| 8  | plan-review.md |
+| 9  | contracts-designer.md |
+| 10 | contracts-review.md |
+| 11 | test-writer-tdd.md |
+| 12 | tests-review-tdd.md |
+| 13 | implementation-tdd.md |
+| 14 | implementation-review.md |
+| 15 | test-runner.md |

@@ -55,12 +55,6 @@ You are the **ExampleHarnessOnly** agent in a multi-agent orchestration system.
 </ErrorHandlingCommon>
 </ErrorHandling>
 
-<OutputFormat type="core">
-## Output Format
-
-Return results as structured data.
-</OutputFormat>
-
 <ExecutionPhilosophy type="core">
 ## Execution Philosophy
 

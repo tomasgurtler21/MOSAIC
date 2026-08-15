@@ -81,6 +81,21 @@ func goldenDir(t *testing.T) string {
 	return abs
 }
 
+// agentFixturesDir returns the path to the frozen agent source fixtures used by golden file
+// tests. These fixtures are small, stable files that exercise specific transform behaviours
+// (tool-light, tool-heavy, skill-using, placeholder-expanding) without coupling the tests to
+// the live Catalog/ tree. Editing a live catalog agent leaves these tests unaffected.
+func agentFixturesDir(t *testing.T) string {
+	t.Helper()
+	// testdata/agent-fixtures/ is at Tools/Deployment/testdata/agent-fixtures/
+	rel := filepath.Join("..", "..", "..", "..", "testdata", "agent-fixtures")
+	abs, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatalf("resolve agent fixtures dir: %v", err)
+	}
+	return abs
+}
+
 // newModule constructs the Claude Code module against the real repository root, failing the
 // test immediately if construction fails.
 func newModule(t *testing.T) domain.HarnessModule {
@@ -182,10 +197,10 @@ func TestGoldenFile_ClaudeCode_ContractsReviewAgent(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Subagents", "Validation", "contracts-review.md")
+	srcPath := filepath.Join(agentFixturesDir(t), "contracts-review.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
-		t.Skipf("generic contracts-review agent not found at %s: %v", srcPath, err)
+		t.Fatalf("frozen fixture not found at %s: %v", srcPath, err)
 	}
 
 	req := transform.Request{
@@ -218,10 +233,10 @@ func TestGoldenFile_ClaudeCode_TestRunnerAgent(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Subagents", "Execution", "test-runner.md")
+	srcPath := filepath.Join(agentFixturesDir(t), "test-runner.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
-		t.Skipf("generic test-runner agent not found at %s: %v", srcPath, err)
+		t.Fatalf("frozen fixture not found at %s: %v", srcPath, err)
 	}
 
 	req := transform.Request{
@@ -255,10 +270,10 @@ func TestGoldenFile_ClaudeCode_PlannerTDDSoftAgent(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Subagents", "Planning", "planner-tdd-soft.md")
+	srcPath := filepath.Join(agentFixturesDir(t), "planner-tdd-soft.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
-		t.Skipf("generic planner-tdd-soft agent not found at %s: %v", srcPath, err)
+		t.Fatalf("frozen fixture not found at %s: %v", srcPath, err)
 	}
 
 	req := transform.Request{
@@ -290,10 +305,10 @@ func TestGoldenFile_ClaudeCode_Orchestrator(t *testing.T) {
 	protocol := loadProtocol(t, root)
 
 
-	srcPath := filepath.Join(root, "Catalog", "Orchestrator", "orchestrator.md")
+	srcPath := filepath.Join(agentFixturesDir(t), "orchestrator.md")
 	src, err := os.ReadFile(srcPath)
 	if err != nil {
-		t.Skipf("generic orchestrator not found at %s: %v", srcPath, err)
+		t.Fatalf("frozen fixture not found at %s: %v", srcPath, err)
 	}
 
 	req := transform.Request{

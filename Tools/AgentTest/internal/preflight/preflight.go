@@ -557,61 +557,200 @@ func rangeDiagnostic(path, field, reason string) authoring.Diagnostic {
 // each stub agent's source path against the real catalogue, reporting every
 // error found rather than stopping at the first.
 //
-// Field-inspection checks (missing-subject-agent, missing-stub-definition)
-// run unconditionally. Render-based checks run only when in.Deploy is non-nil,
-// following the same "not supplied means not checked" convention as
-// zero-valued Capabilities.
+// The check branches on the definition's provisioning path:
+//
+//   - ProvisioningConflicted: when Deploy is non-nil, adds a hard
+//     conflicting-provisioning-paths diagnostic before any dry-run, then
+//     continues with stub file-existence checks (os.Stat only — no Render)
+//     to surface all authoring errors in one pass. When Deploy is nil, the
+//     conflict is not flagged: nil Deploy means no deployment checks at all,
+//     and conflicting declarations are only meaningful when a deployment tool
+//     is present.
+//
+//   - ProvisioningCatalog: first validates the catalogue agent key and
+//     workflow ids via a dry-run Render (for unknown-subject-agent,
+//     unknown-workflow, and environment-problem diagnostics); if Render
+//     produces no diagnostic, validates the full deploy via a dry-run Deploy.
+//     When Deploy is nil, both checks are skipped.
+//
+//   - ProvisioningStubAgents (default): the original field-inspection check
+//     (missing-subject-agent) and the per-stub os.Stat + dry-run Render loop,
+//     both unchanged.
+//
+// Render-based and Deploy-based checks run only when in.Deploy is non-nil,
+// following the "not supplied means not checked" convention.
 func checkDeploymentDeclarations(report *authoring.Report, defPath, defDir string, def domain.TestDefinition, in Input) {
-	// missing-subject-agent: field inspection, no render needed.
-	if def.Subject.CatalogAgentKey == "" {
+	switch def.ProvisioningPath() {
+	case domain.ProvisioningConflicted:
+		// The conflict diagnostic is only meaningful when a deployment tool is
+		// present. Tests that supply no Deploy (nil) may validly declare both
+		// fields and still pass because no deployment check runs anyway.
+		if in.Deploy == nil {
+			return
+		}
+		// Hard error before any dry-run: the two paths are mutually exclusive.
+		// Naming both conflicting fields in the message so the author knows
+		// exactly what to fix.
 		report.Add(authoring.Diagnostic{
 			Severity: authoring.SeverityError,
-			Code:     "missing-subject-agent",
+			Code:     "conflicting-provisioning-paths",
 			Path:     defPath,
-			Pointer:  "subject.agent",
-			Message:  "subject declares no catalogue agent key; use subject.agent to name the agent to render",
+			Pointer:  "stub_agents",
+			Message: fmt.Sprintf(
+				"test declares both a catalogue agent key (%q via subject.agent) and stub_agents; "+
+					"these provisioning paths are mutually exclusive — "+
+					"remove stub_agents to use the catalogue path, or remove subject.agent to use the stub-agents path",
+				def.Subject.CatalogAgentKey,
+			),
 		})
-	} else if in.Deploy != nil {
-		// Dry-run the subject to validate the catalogue agent and workflow ids.
+		// After the hard diagnostic, still check stub file existence (os.Stat)
+		// to surface all authoring errors in one pass. Dry-run renders are
+		// skipped: a conflicted definition is invalid regardless, so no render
+		// cost should be incurred.
+		for si, sa := range def.StubAgents {
+			resolvedPath := filepath.Join(defDir, filepath.FromSlash(sa.SourcePath))
+			if _, err := os.Stat(resolvedPath); err != nil {
+				report.Add(authoring.Diagnostic{
+					Severity: authoring.SeverityError,
+					Code:     "missing-stub-definition",
+					Path:     defPath,
+					Pointer:  fmt.Sprintf("stub_agents[%d].source", si),
+					Message:  fmt.Sprintf("stub definition source file %q not found", sa.SourcePath),
+				})
+			}
+		}
+		return
+
+	case domain.ProvisioningCatalog:
+		if in.Deploy == nil {
+			return
+		}
+		// Validate the catalogue agent key and workflow ids via Render first.
+		// This surfaces unknown-subject-agent, unknown-workflow, and
+		// environment-problem diagnostics using the structured Render reason
+		// codes. If Render produces a diagnostic, skip the Deploy check:
+		// at most one subject diagnostic per test.
+		preCount := len(report.Diagnostics)
 		checkSubjectRender(report, defPath, def, in)
+		if len(report.Diagnostics) > preCount {
+			return
+		}
+		// Render passed. Now validate the full deploy in dry-run mode.
+		checkSubjectDeploy(report, defPath, def, in)
+		return
+
+	default:
+		// Stub-agents path (or neither declared): original field-inspection
+		// check and per-stub Render loop, unchanged.
+
+		// missing-subject-agent: field inspection, no render needed.
+		if def.Subject.CatalogAgentKey == "" {
+			report.Add(authoring.Diagnostic{
+				Severity: authoring.SeverityError,
+				Code:     "missing-subject-agent",
+				Path:     defPath,
+				Pointer:  "subject.agent",
+				Message:  "subject declares no catalogue agent key; use subject.agent to name the agent to render",
+			})
+		} else if in.Deploy != nil {
+			// Dry-run the subject to validate the catalogue agent and workflow ids.
+			checkSubjectRender(report, defPath, def, in)
+		}
+
+		// Stub agent checks: os.Stat for file existence, then dry-run render if
+		// the file exists and Deploy is non-nil.
+		for si, sa := range def.StubAgents {
+			resolvedPath := filepath.Join(defDir, filepath.FromSlash(sa.SourcePath))
+			if _, err := os.Stat(resolvedPath); err != nil {
+				report.Add(authoring.Diagnostic{
+					Severity: authoring.SeverityError,
+					Code:     "missing-stub-definition",
+					Path:     defPath,
+					Pointer:  fmt.Sprintf("stub_agents[%d].source", si),
+					Message:  fmt.Sprintf("stub definition source file %q not found", sa.SourcePath),
+				})
+				continue
+			}
+			if in.Deploy == nil {
+				continue
+			}
+			_, renderErr := in.Deploy.Render(context.Background(), domain.RenderAgentRequest{
+				SourcePath:    resolvedPath,
+				HarnessID:     in.HarnessID,
+				WorkspaceRoot: in.DeployScratchRoot,
+				DryRun:        true,
+			})
+			if renderErr != nil {
+				if isToolFailure(renderErr) {
+					addDeployToolProblem(report, renderErr)
+					return
+				}
+				report.Add(authoring.Diagnostic{
+					Severity: authoring.SeverityError,
+					Code:     "unrenderable-stub-definition",
+					Path:     defPath,
+					Pointer:  fmt.Sprintf("stub_agents[%d].source", si),
+					Message:  fmt.Sprintf("stub definition %q failed dry-run render: %v", sa.SourcePath, renderErr),
+				})
+			}
+		}
+	}
+}
+
+// checkSubjectDeploy performs a dry-run Deploy for a catalogue-path test and
+// maps the outcome to a preflight diagnostic. It reports at most one subject
+// diagnostic per test — a single dry run reveals only the first failure in
+// the tool's validation order.
+//
+// The deploy subcommand produces no structured reason codes, so diagnostics
+// carry the tool's own message verbatim. The known Render-path codes
+// (unknown-subject-agent, unknown-workflow) are NOT emitted here: they map
+// reason codes that Deploy never produces.
+func checkSubjectDeploy(report *authoring.Report, defPath string, def domain.TestDefinition, in Input) {
+	_, err := in.Deploy.Deploy(context.Background(), domain.DeployRequest{
+		HarnessID:     in.HarnessID,
+		WorkspaceRoot: in.DeployScratchRoot,
+		Workflows:     def.Subject.Workflows,
+		TierModels:    preflightTierModelMap(def.Subject),
+		DryRun:        true,
+	})
+	if err == nil {
+		return
 	}
 
-	// Stub agent checks: os.Stat for file existence, then dry-run render if
-	// the file exists and Deploy is non-nil.
-	for si, sa := range def.StubAgents {
-		resolvedPath := filepath.Join(defDir, filepath.FromSlash(sa.SourcePath))
-		if _, err := os.Stat(resolvedPath); err != nil {
-			report.Add(authoring.Diagnostic{
-				Severity: authoring.SeverityError,
-				Code:     "missing-stub-definition",
-				Path:     defPath,
-				Pointer:  fmt.Sprintf("stub_agents[%d].source", si),
-				Message:  fmt.Sprintf("stub definition source file %q not found", sa.SourcePath),
-			})
-			continue
-		}
-		if in.Deploy == nil {
-			continue
-		}
-		_, renderErr := in.Deploy.Render(context.Background(), domain.RenderAgentRequest{
-			SourcePath:    resolvedPath,
-			HarnessID:     in.HarnessID,
-			WorkspaceRoot: in.DeployScratchRoot,
-			DryRun:        true,
-		})
-		if renderErr != nil {
-			if isToolFailure(renderErr) {
-				addDeployToolProblem(report, renderErr)
-				return
-			}
-			report.Add(authoring.Diagnostic{
-				Severity: authoring.SeverityError,
-				Code:     "unrenderable-stub-definition",
-				Path:     defPath,
-				Pointer:  fmt.Sprintf("stub_agents[%d].source", si),
-				Message:  fmt.Sprintf("stub definition %q failed dry-run render: %v", sa.SourcePath, renderErr),
-			})
-		}
+	if isToolFailure(err) {
+		addDeployToolProblem(report, err)
+		return
+	}
+
+	// Deploy path: no structured reason codes — carry the tool's own message.
+	toolMsg := err.Error()
+	var de *agentdeploy.DeployError
+	if errors.As(err, &de) {
+		toolMsg = de.ToolMessage
+	}
+
+	report.Add(authoring.Diagnostic{
+		Severity: authoring.SeverityError,
+		Code:     "undeployable-subject-declaration",
+		Path:     defPath,
+		Pointer:  "subject",
+		Message:  fmt.Sprintf("subject declaration failed dry-run deploy: %s", toolMsg),
+	})
+}
+
+// preflightTierModelMap builds the two-entry tier-model map for preflight's
+// dry-run Deploy, using the same derivation as the runner's setup Deploy so
+// the preflight dry run validates the exact model selection the real run will
+// use.
+func preflightTierModelMap(subject domain.SubjectUnderTest) map[string]string {
+	stubModel := subject.StubModel
+	if stubModel == "" {
+		stubModel = subject.Model
+	}
+	return map[string]string{
+		domain.TierTestSubject: subject.Model,
+		domain.TierTestStub:    stubModel,
 	}
 }
 

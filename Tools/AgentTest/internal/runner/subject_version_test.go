@@ -1,18 +1,17 @@
 package runner_test
 
-// Tests for the subject version being captured from the deployment port and
-// carried into RunEvidence (TDD RED phase).
+// Tests for the subject version field in RunEvidence.
 //
-// The subject's source version is captured at render time from the deployment
-// port's own result, not re-derived later. This is the only moment the value
-// is available: the rendered file in the sandbox is gone by report time, and
-// re-deriving it from the rendered file could disagree with what was actually
-// deployed.
+// On the catalogue path, subject version is always recorded as empty because
+// the Deploy subcommand reports no per-agent version. On the stub-agents path,
+// the subject is not rendered (it uses a pre-existing DefinitionPath), so no
+// version is captured from a Render call either. Stub renders' SourceVersion
+// values belong to stubs, not to the subject, and must not flow into
+// RunEvidence.SubjectVersion.
 //
-// These tests drive runner.Run with a configured stubDeployer and assert that
-// domain.RunEvidence.SubjectVersion equals what the port reported. They say
-// nothing about the intermediate storage the implementation uses — only the
-// observable outcome matters.
+// These tests drive runner.Run with a configured stubDeployer and assert the
+// observable state of domain.RunEvidence.SubjectVersion. They say nothing
+// about the intermediate storage the implementation uses.
 
 import (
 	"context"
@@ -23,20 +22,22 @@ import (
 	"mosaic-agent-test/internal/runner"
 )
 
-// TestRun_SubjectVersionFromDeployPortCarriedIntoEvidence asserts that when
-// the deployment port returns a non-empty SourceVersion for the subject
-// render, that version appears in the resulting RunEvidence.SubjectVersion.
-func TestRun_SubjectVersionFromDeployPortCarriedIntoEvidence(t *testing.T) {
+// TestRun_StubRenderVersionDoesNotFlowIntoSubjectVersionEvidence asserts that
+// on the stub-agents path, a SourceVersion returned by Deploy.Render for a
+// stub agent does not flow into RunEvidence.SubjectVersion. The subject uses a
+// pre-existing DefinitionPath and is not rendered; only stubs are rendered.
+// Stub versions belong to the stub, not to the subject under test.
+func TestRun_StubRenderVersionDoesNotFlowIntoSubjectVersionEvidence(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	req := renderingRequest("evidence-carries-subject-version")
+	req := stubAgentsRenderRequest("evidence-stub-version-not-subject")
 
-	const wantVersion = "v2.5.0"
+	// Configure the stub render to return a non-empty SourceVersion. This must
+	// not appear in evidence.SubjectVersion — that field is for the subject only.
 	h.Deployer.renderFn = func(r domain.RenderAgentRequest) (domain.RenderAgentResult, error) {
 		return domain.RenderAgentResult{
-			DestinationPath: filepath.Join(r.WorkspaceRoot, r.CatalogAgentKey+".md"),
-			AgentKey:        r.CatalogAgentKey,
-			SourceVersion:   wantVersion,
+			DestinationPath: filepath.Join(r.WorkspaceRoot, "researcher.md"),
+			SourceVersion:   "v2.5.0",
 		}, nil
 	}
 
@@ -47,12 +48,12 @@ func TestRun_SubjectVersionFromDeployPortCarriedIntoEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
-	if evidence.SubjectVersion != wantVersion {
-		t.Errorf("evidence.SubjectVersion = %q, want %q; "+
-			"the version returned by Deploy.Render for the subject must be "+
-			"captured at render time and carried into RunEvidence, so a report "+
-			"can attribute a result to a specific version of the agent under test",
-			evidence.SubjectVersion, wantVersion)
+	if evidence.SubjectVersion != "" {
+		t.Errorf("evidence.SubjectVersion = %q, want empty string; "+
+			"a stub agent's SourceVersion must not flow into SubjectVersion — "+
+			"the subject is not rendered on the stub-agents path and its version "+
+			"is not available from stub renders",
+			evidence.SubjectVersion)
 	}
 }
 
@@ -89,22 +90,22 @@ func TestRun_AbsentSubjectVersionCarriedAsEmptyInEvidence(t *testing.T) {
 	}
 }
 
-// TestRun_SubjectVersionPreservesExactStringFromPort asserts that the version
-// string stored in RunEvidence is byte-identical to what the port returned.
-// The runner must not normalise, trim, or transform the value in any way.
-func TestRun_SubjectVersionPreservesExactStringFromPort(t *testing.T) {
+// TestRun_StubAgentsPathSubjectVersionIsAlwaysEmpty asserts that on the
+// stub-agents path, RunEvidence.SubjectVersion is always empty regardless of
+// any SourceVersion values returned by stub renders. The subject is not
+// rendered on this path (it uses a pre-existing DefinitionPath), so no version
+// is captured. The report layer renders an empty value as "unknown".
+func TestRun_StubAgentsPathSubjectVersionIsAlwaysEmpty(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	req := renderingRequest("evidence-preserves-exact-subject-version")
+	req := stubAgentsRenderRequest("evidence-stub-agents-path-version-empty")
 
-	// Use a version string with non-trivial characters to prove no
-	// transformation happens.
-	const wantVersion = "v3.14.159-alpha+build.42"
+	// Configure the stub render to return a non-trivial SourceVersion string
+	// with special characters to prove no transformation or pass-through happens.
 	h.Deployer.renderFn = func(r domain.RenderAgentRequest) (domain.RenderAgentResult, error) {
 		return domain.RenderAgentResult{
-			DestinationPath: filepath.Join(r.WorkspaceRoot, r.CatalogAgentKey+".md"),
-			AgentKey:        r.CatalogAgentKey,
-			SourceVersion:   wantVersion,
+			DestinationPath: filepath.Join(r.WorkspaceRoot, "researcher.md"),
+			SourceVersion:   "v3.14.159-alpha+build.42",
 		}, nil
 	}
 
@@ -115,10 +116,11 @@ func TestRun_SubjectVersionPreservesExactStringFromPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
-	if evidence.SubjectVersion != wantVersion {
-		t.Errorf("evidence.SubjectVersion = %q, want exactly %q; "+
-			"the runner must carry the version string byte-identical from the "+
-			"port's result — no normalisation, trimming, or transformation",
-			evidence.SubjectVersion, wantVersion)
+	if evidence.SubjectVersion != "" {
+		t.Errorf("evidence.SubjectVersion = %q, want empty string; "+
+			"on the stub-agents path the subject is not rendered and its version "+
+			"is not available — SubjectVersion must be empty (reported as 'unknown' "+
+			"by the report layer), never populated from a stub render result",
+			evidence.SubjectVersion)
 	}
 }

@@ -66,14 +66,6 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 </ErrorHandling>
 ---
 
-<OutputFormat type="core">
-## Output Format
-
-Always end with a JSON status block.
-
-</OutputFormat>
----
-
 <ExecutionPhilosophy type="core">
 ## Execution Philosophy
 

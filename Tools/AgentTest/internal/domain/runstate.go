@@ -5,6 +5,19 @@ import (
 	"time"
 )
 
+// RunIDPlaceholder is expanded to the run's identifier in any authored path
+// that may need to name a directory which only exists once the run identity
+// is known (e.g. an orchestration document under Orchestration-{run_id}/).
+//
+// It is expanded in two authored surfaces and no others:
+//   - a seed file's declared path
+//   - a stub side effect's declared create-file path
+//
+// It is NOT expanded in stub response content. A stub's response is returned
+// to the subject verbatim; the subject carries its own run identity and any
+// substitution there would corrupt the reply the test is measuring.
+const RunIDPlaceholder = "{run_id}"
+
 // RunState is the document shared between the driver and every interceptor
 // process. It is read-modify-written as a unit, which is why it is one JSON
 // document rather than a directory of shards.
@@ -12,6 +25,13 @@ type RunState struct {
 	SchemaVersion int    `json:"schema_version"`
 	TestID        string `json:"test_id"`
 	RunNumber     int    `json:"run_number"`
+
+	// RunID is the run's identifier, persisted by the driver at setup so
+	// every short-lived interceptor process can read it back. An interceptor
+	// process has no other reach to it: it receives only its workspace,
+	// control directory, harness and phase. This is the same reason TestID
+	// and RunNumber live here rather than arriving as flags.
+	RunID string `json:"run_id"`
 
 	// SequenceCounter is the global 1-based invocation counter. It names
 	// invocations; it is never used to match a stub.

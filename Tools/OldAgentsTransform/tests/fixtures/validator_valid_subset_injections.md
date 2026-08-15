@@ -48,14 +48,6 @@ Error handling content without any injection.
 </ErrorHandling>
 ---
 
-<OutputFormat type="core">
-## Output Format
-
-Output format content without any injection.
-
-</OutputFormat>
----
-
 <ExecutionPhilosophy type="core">
 ## Execution Philosophy
 

@@ -77,14 +77,6 @@ Do not trim, re-wrap, or re-indent this content.
 </ErrorHandling>
 ---
 
-<OutputFormat type="core">
-## Output Format
-
-Always end with a JSON status block.
-
-</OutputFormat>
----
-
 <ExecutionPhilosophy type="core">
 ## Execution Philosophy
 

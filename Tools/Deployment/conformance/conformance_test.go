@@ -124,39 +124,91 @@ func buildReferenceExternalModule(t *testing.T) string {
 	return outBin
 }
 
-// goldenCases returns the list of test cases for the golden agent set. Each case has a
-// source file path (from the target catalog layout) and a golden file name.
-func goldenCases(t *testing.T, moduleRoot string) []goldenCase {
+// agentFixturesDir returns the path to the frozen agent source fixtures used by golden file
+// tests. These fixtures are small, stable files that exercise specific transform behaviours
+// (tool-light, tool-heavy, skill-using, placeholder-expanding) without coupling the tests to
+// the live Catalog/ tree. Editing a live catalog agent leaves these tests unaffected.
+func agentFixturesDir(t *testing.T) string {
 	t.Helper()
-	catalogRoot := filepath.Join(moduleRoot, "Catalog")
+	// Package is at Tools/Deployment/conformance/
+	// Navigate one level up to Tools/Deployment/, then to testdata/agent-fixtures/
+	rel := filepath.Join("..", "testdata", "agent-fixtures")
+	abs, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatalf("resolve agent fixtures dir: %v", err)
+	}
+	return abs
+}
+
+// goldenCases returns the list of test cases for the golden agent set. Each case points to
+// a frozen fixture file under testdata/agent-fixtures/ rather than a live catalog path, so
+// the tests remain passing after any edit to a production agent source (version bump, removed
+// empty region, updated prose).
+func goldenCases(t *testing.T) []goldenCase {
+	t.Helper()
+	fixturesDir := agentFixturesDir(t)
 	return []goldenCase{
 		{
-			name:        "contracts-review",
-			sourcePath:  filepath.Join(catalogRoot, "Subagents", "Validation", "contracts-review.md"),
-			key:         "contracts-review",
-			kind:        domain.ArtifactAgent,
-			goldenName:  "contracts-review.md",
+			name:       "contracts-review",
+			sourcePath: filepath.Join(fixturesDir, "contracts-review.md"),
+			key:        "contracts-review",
+			kind:       domain.ArtifactAgent,
+			goldenName: "contracts-review.md",
 		},
 		{
-			name:        "test-runner",
-			sourcePath:  filepath.Join(catalogRoot, "Subagents", "Execution", "test-runner.md"),
-			key:         "test-runner",
-			kind:        domain.ArtifactAgent,
-			goldenName:  "test-runner.md",
+			name:       "test-runner",
+			sourcePath: filepath.Join(fixturesDir, "test-runner.md"),
+			key:        "test-runner",
+			kind:       domain.ArtifactAgent,
+			goldenName: "test-runner.md",
 		},
 		{
-			name:        "planner-tdd-soft",
-			sourcePath:  filepath.Join(catalogRoot, "Subagents", "Planning", "planner-tdd-soft.md"),
-			key:         "planner-tdd-soft",
-			kind:        domain.ArtifactAgent,
-			goldenName:  "planner-tdd-soft.md",
+			name:       "planner-tdd-soft",
+			sourcePath: filepath.Join(fixturesDir, "planner-tdd-soft.md"),
+			key:        "planner-tdd-soft",
+			kind:       domain.ArtifactAgent,
+			goldenName: "planner-tdd-soft.md",
+		},
+		{
+			name:       "orchestrator",
+			sourcePath: filepath.Join(fixturesDir, "orchestrator.md"),
+			key:        "orchestrator",
+			kind:       domain.ArtifactAgent,
+			goldenName: "orchestrator.md",
+		},
+	}
+}
+
+// liveCatalogCases returns the list of test cases pointing to live catalog agent sources.
+// These are used only by the smoke test (TestLiveCatalog_Smoke_TransformSucceeds), which
+// asserts transform success without byte-comparing against a golden file.
+func liveCatalogCases(t *testing.T, repoRoot string) []goldenCase {
+	t.Helper()
+	catalogRoot := filepath.Join(repoRoot, "Catalog")
+	return []goldenCase{
+		{
+			name:       "contracts-review",
+			sourcePath: filepath.Join(catalogRoot, "Subagents", "Validation", "contracts-review.md"),
+			key:        "contracts-review",
+			kind:       domain.ArtifactAgent,
+		},
+		{
+			name:       "test-runner",
+			sourcePath: filepath.Join(catalogRoot, "Subagents", "Execution", "test-runner.md"),
+			key:        "test-runner",
+			kind:       domain.ArtifactAgent,
+		},
+		{
+			name:       "planner-tdd-soft",
+			sourcePath: filepath.Join(catalogRoot, "Subagents", "Planning", "planner-tdd-soft.md"),
+			key:        "planner-tdd-soft",
+			kind:       domain.ArtifactAgent,
 		},
 		{
 			name:       "orchestrator",
 			sourcePath: filepath.Join(catalogRoot, "Orchestrator", "orchestrator.md"),
 			key:        "orchestrator",
 			kind:       domain.ArtifactAgent,
-			goldenName: "orchestrator.md",
 		},
 	}
 }
@@ -197,7 +249,7 @@ func applyTransform(t *testing.T, mod domain.HarnessModule, tc goldenCase, proto
 	t.Helper()
 	src, err := os.ReadFile(tc.sourcePath)
 	if err != nil {
-		t.Skipf("source file not found at %s: %v", tc.sourcePath, err)
+		t.Fatalf("source file not found at %s: %v", tc.sourcePath, err)
 	}
 
 	role := domain.RoleWorker
@@ -259,7 +311,7 @@ func TestConformance_BuiltinVsExternal_OpenCode(t *testing.T) {
 	defer externalMod.Close() //nolint:errcheck
 
 	protocol := loadTestProtocol(t, moduleRoot)
-	cases := goldenCases(t, moduleRoot)
+	cases := goldenCases(t)
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -301,7 +353,7 @@ func TestConformance_BuiltinVsExternal_OutputsMatchOpenCodeGoldenFiles(t *testin
 	defer builtinMod.Close() //nolint:errcheck
 
 	protocol := loadTestProtocol(t, repoRoot)
-	cases := goldenCases(t, repoRoot)
+	cases := goldenCases(t)
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -608,7 +660,7 @@ func TestDescriptorOnly_ConformanceHarness_TransformOutputMatchesGolden(t *testi
 	defer m.Close() //nolint:errcheck
 
 	protocol := loadTestProtocol(t, repoRoot)
-	cases := goldenCases(t, repoRoot)
+	cases := goldenCases(t)
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
@@ -648,7 +700,7 @@ func TestDescriptorOnly_ConformanceHarness_TransformOutputMatchesGolden(t *testi
 func TestDescriptorOnly_TransformOutput_IsParseableByDocformat(t *testing.T) {
 	repoRoot := findRepoRoot(t)
 	protocol := loadTestProtocol(t, repoRoot)
-	cases := goldenCases(t, repoRoot)
+	cases := goldenCases(t)
 
 	m := resolveDescriptorOnly(t)
 	defer m.Close() //nolint:errcheck
@@ -658,7 +710,7 @@ func TestDescriptorOnly_TransformOutput_IsParseableByDocformat(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			src, err := os.ReadFile(tc.sourcePath)
 			if err != nil {
-				t.Skipf("source file not found at %s: %v", tc.sourcePath, err)
+				t.Fatalf("source file not found at %s: %v", tc.sourcePath, err)
 			}
 
 			role := domain.RoleWorker
@@ -964,7 +1016,7 @@ func TestRegistryExternal_OpenCode_EndToEndTransformMatchesDirect(t *testing.T) 
 	defer directMod.Close() //nolint:errcheck
 
 	protocol := loadTestProtocol(t, repoRoot)
-	cases := goldenCases(t, repoRoot)
+	cases := goldenCases(t)
 	if len(cases) == 0 {
 		t.Skip("no golden cases available; skipping end-to-end comparison")
 	}
@@ -992,6 +1044,74 @@ func TestRegistryExternal_OpenCode_EndToEndTransformMatchesDirect(t *testing.T) 
 			truncate(registryOutput, 600),
 			truncate(directOutput, 600),
 		)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Live-catalog smoke test
+// ---------------------------------------------------------------------------
+
+// TestLiveCatalog_Smoke_TransformSucceeds verifies that real catalog agents transform
+// successfully through the OpenCode built-in module. This test replaces the genuine signal
+// the former golden-file coupling provided — that real catalog content transforms without
+// error — while asserting only structural well-formedness rather than byte-identical output.
+//
+// Editing a live agent source (bumping a version, removing an empty project extension
+// region, updating prose) leaves this test passing. The golden file tests in
+// harness/builtin/ and TestConformance_BuiltinVsExternal_OutputsMatchOpenCodeGoldenFiles
+// remain passing because they now draw from frozen fixtures rather than from this live
+// catalog, so only this test is touched by catalog edits.
+//
+// The test is deliberately t.Skip-friendly on missing paths: CI environments that do not
+// mount the live catalog (e.g. a module-only checkout) skip gracefully rather than fail.
+func TestLiveCatalog_Smoke_TransformSucceeds(t *testing.T) {
+	repoRoot := findRepoRoot(t)
+
+	mod, err := opencode.New(registry.BuiltinOptions{MosaicRoot: repoRoot})
+	if err != nil {
+		t.Fatalf("opencode.New: %v", err)
+	}
+	defer mod.Close() //nolint:errcheck
+
+	protocol := loadTestProtocol(t, repoRoot)
+
+	smokeAgents := liveCatalogCases(t, repoRoot)
+	for _, tc := range smokeAgents {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			src, err := os.ReadFile(tc.sourcePath)
+			if err != nil {
+				t.Skipf("live catalog agent not found at %s — skipping smoke test for this agent: %v", tc.sourcePath, err)
+			}
+
+			role := domain.RoleWorker
+			if tc.key == "orchestrator" {
+				role = domain.RoleOrchestrator
+			}
+
+			result, err := transform.Apply(transform.Request{
+				Source:   src,
+				Kind:     tc.kind,
+				Key:      tc.key,
+				Module:   mod,
+				Model:    testModel,
+				Scope:    domain.ScopeProject,
+				Role:     role,
+				Protocol: protocol,
+			})
+			if err != nil {
+				t.Fatalf("transform.Apply for live catalog agent %q: %v", tc.name, err)
+			}
+
+			// Assert transform success: non-empty output with YAML frontmatter present.
+			// This test deliberately does NOT byte-compare against a golden file.
+			if len(result.Output) == 0 {
+				t.Errorf("transform.Apply for %q returned empty output", tc.name)
+			}
+			if !bytes.HasPrefix(result.Output, []byte("---")) {
+				t.Errorf("transform.Apply for %q returned output without YAML frontmatter (expected output to start with \"---\")", tc.name)
+			}
+		})
 	}
 }
 

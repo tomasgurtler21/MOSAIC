@@ -33,7 +33,12 @@ from boundary_constants import (
     open_tag,
     tag_base_name,
 )
-from region_insertion import apply_conduct_regions, find_section_spans
+from region_insertion import (
+    apply_conduct_regions,
+    delete_legacy_sections,
+    find_section_spans,
+    move_artifact_structure_block,
+)
 
 import file_classification as _fc
 
@@ -148,21 +153,33 @@ def has_canonical_boundary_tags(body: str) -> bool:
 
     True requires ALL of:
       - at least one <Name type="core"> open tag whose Name is in
-        boundary_constants.CANONICAL_SECTIONS;
+        boundary_constants.CANONICAL_SECTIONS or in the retired-sections allowlist;
       - every such open tag has a matching close tag, and no close tag is unmatched;
-      - every SECTION name present is in CANONICAL_SECTIONS;
+      - every SECTION name present is in CANONICAL_SECTIONS or the retired allowlist;
       - every DEPLOYED (type="managed") name present is in CANONICAL_DEPLOYED
         and is likewise correctly paired.
 
     INJECTION (type="project") names are open vocabulary and are not checked for
     membership, only for pairing.
 
+    The retired-sections allowlist ("OutputFormat") allows files that were
+    transformed with an older vocabulary to be recognised as already-transformed
+    rather than re-processed with an error. Such files are structurally valid
+    transformed output; they just contain a section the current vocabulary no
+    longer includes.
+
     A line that is not a well-formed boundary tag, an unpaired tag, or a
-    non-canonical SECTION/DEPLOYED name each make this False.
+    non-canonical/non-retired SECTION/DEPLOYED name each make this False.
     A tag is recognised only when it occupies a whole line (after stripping the
     line terminator), matching how the Go docformat lexer recognises tags.
     """
-    canonical_sections_set = set(CANONICAL_SECTIONS)
+    # "OutputFormat" is listed here because files transformed before it was
+    # removed from the vocabulary may still carry <OutputFormat type="core">
+    # tags.  Such files are structurally valid transformed output and should be
+    # recognised as already-transformed by the idempotency guard rather than
+    # re-processed.
+    _RETIRED_SECTIONS: frozenset[str] = frozenset({"OutputFormat"})
+    canonical_sections_set = set(CANONICAL_SECTIONS) | _RETIRED_SECTIONS
     canonical_deployed_set = set(CANONICAL_DEPLOYED)
 
     open_sections: list[str] = []
@@ -391,7 +408,7 @@ def transform_file(
         # 2. Degraded transform: apply the generic-body logic with non-strict
         #    identity classification. When version is absent, default_version()
         #    supplies a substitute so the transform can proceed.
-        body_lines = lines[frontmatter_end:]
+        body_lines = delete_legacy_sections(lines[frontmatter_end:]).lines
         version_before = resolve_version(frontmatter)
         version_after = _bump_version(version_before)
         transform_version_after = _bump_version(frontmatter["transform_version"])
@@ -423,6 +440,15 @@ def transform_file(
             dataclasses.replace(nc, file=input_path)
             for nc in _region_result.non_conformances
         ]
+
+        # Move any artifact-structure block into the OutputArtifactTemplate region.
+        # Spans are recomputed because apply_conduct_regions may have shifted lines.
+        _deg_move_spans = find_section_spans(transformed_body["lines"])
+        _deg_move_result = move_artifact_structure_block(
+            transformed_body["lines"], _deg_move_spans
+        )
+        transformed_body = dict(transformed_body)
+        transformed_body["lines"] = _deg_move_result.lines
 
         # Emit the degraded-path warning to stderr (also carried in the result).
         warn = WARN_NO_GENERIC_REF.format(path=input_path)
@@ -484,8 +510,10 @@ def transform_file(
     if "transform_version" in frontmatter:
         transform_version_after = _bump_version(frontmatter["transform_version"])
 
-    # Parse body to identify sections and injections
-    body_lines = lines[frontmatter_end:]
+    # Parse body to identify sections and injections.
+    # Delete any retired legacy sections (e.g. ## Output Format) before either
+    # body-merge path sees the input, so both paths agree on the cleaned body.
+    body_lines = delete_legacy_sections(lines[frontmatter_end:]).lines
 
     if is_harness:
         # Load and parse generic reference
@@ -537,6 +565,15 @@ def transform_file(
         dataclasses.replace(nc, file=input_path)
         for nc in _region_result.non_conformances
     ]
+
+    # Move any artifact-structure block into the OutputArtifactTemplate region.
+    # Spans are recomputed because apply_conduct_regions may have shifted lines.
+    _move_spans = find_section_spans(transformed_body["lines"])
+    _move_result = move_artifact_structure_block(
+        transformed_body["lines"], _move_spans
+    )
+    transformed_body = dict(transformed_body)
+    transformed_body["lines"] = _move_result.lines
 
     # Determine the generic id for id reconciliation (harness path only).
     _generic_id: str | None = None

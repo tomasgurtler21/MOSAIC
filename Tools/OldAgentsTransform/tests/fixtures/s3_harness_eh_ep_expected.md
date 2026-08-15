@@ -78,14 +78,6 @@ You are the **Stage3TestAgent** agent.
 </ErrorHandling>
 ---
 
-<OutputFormat type="core">
-## Output Format
-
-Return JSON status.
-
-</OutputFormat>
----
-
 <ExecutionPhilosophy type="core">
 ## Execution Philosophy
 

@@ -46,7 +46,20 @@ type SubjectUnderTest struct {
 	OpeningMessage string // the first message the subject receives
 	InvocationKind string // maps to mosaic-common/harness InvocationKind
 	Model          string
-	AllowedTools   []string
+
+	// StubModel is the model identifier every stub agent deployed alongside
+	// the subject runs on. Optional: empty means "use Model".
+	//
+	// It exists because one Deploy call provisions both the subject and every
+	// stub its workflows reference, and the two want different models — the
+	// subject makes real judgement calls, while every stub dispatch is caught
+	// by interception before it reaches a model at all.
+	//
+	// Like Model, it is an opaque harness-specific string authored by the test
+	// author and passed through verbatim. This module never derives, defaults
+	// to a named model, or validates a model identifier.
+	StubModel    string
+	AllowedTools []string
 }
 
 // DispatchToolName is the normalized, harness-neutral name of the tool that

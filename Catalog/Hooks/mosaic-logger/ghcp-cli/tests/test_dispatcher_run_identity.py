@@ -20,6 +20,7 @@ Covers:
 - Never raises under any input shape
 """
 
+import datetime
 import os
 import pathlib
 import sys
@@ -39,11 +40,27 @@ _SESSION_ID = "ghcp-sess-dispatcher-test"
 _TS = "2026-08-04T15:05:37.000Z"
 
 
-def _make_ctx(event, tmp_path, session_id=_SESSION_ID, **payload_extra):
-    """Build a HookContext (run_id unset, as the dispatcher builds it)."""
+def _now_ts() -> str:
+    """Return the current UTC time as an ISO-8601 ms-precision timestamp.
+
+    Use this in tests that route ctx.timestamp into a created_at field that is
+    later read back through a staleness window, so the entry is always fresh.
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    ms = now.microsecond // 1000
+    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ms:03d}Z"
+
+
+def _make_ctx(event, tmp_path, session_id=_SESSION_ID, ts=_TS, **payload_extra):
+    """Build a HookContext (run_id unset, as the dispatcher builds it).
+
+    ts defaults to the frozen _TS constant so all existing callers are unchanged.
+    Pass ts=_now_ts() in tests whose write-back path stores ctx.timestamp as
+    created_at, to avoid the cache entry being stale on read-back.
+    """
     payload = {"sessionId": session_id, **payload_extra}
     paths = core.build_paths(tmp_path)
-    ctx = core.HookContext(event, payload, tmp_path, paths, _TS)
+    ctx = core.HookContext(event, payload, tmp_path, paths, ts)
     return ctx
 
 
@@ -186,14 +203,21 @@ class TestRunIdentityWriteBack(unittest.TestCase):
 
     def test_prompt_extracted_run_id_is_persisted_to_cache(self):
         prompt = f"run_id: {_RUN_ID}"
-        ctx = _make_ctx("userPromptSubmitted", self.tmp_path, prompt=prompt)
+        # Use a fresh timestamp so that resolve_run_identity writes the cache
+        # entry with a created_at that is within the staleness window on read-back.
+        # (The production code stores ctx.timestamp as created_at; a frozen constant
+        # that is more than 24 hours old causes get_session_run_id to return None.)
+        ctx = _make_ctx("userPromptSubmitted", self.tmp_path, ts=_now_ts(), prompt=prompt)
         mosaic_logger.resolve_run_identity(ctx)
         cached = runstate.get_session_run_id(ctx.paths, _SESSION_ID)
         self.assertEqual(_RUN_ID, cached)
 
     def test_subagent_start_prompt_run_id_is_cached(self):
         prompt = f'{{"agent_instance_id": "planner#1", "run_id": "{_RUN_ID}"}}'
-        ctx = _make_ctx("subagentStart", self.tmp_path, agentPrompt=prompt)
+        # Same rationale as test_prompt_extracted_run_id_is_persisted_to_cache:
+        # pass a fresh timestamp to keep the written cache entry within the
+        # staleness window.
+        ctx = _make_ctx("subagentStart", self.tmp_path, ts=_now_ts(), agentPrompt=prompt)
         mosaic_logger.resolve_run_identity(ctx)
         cached = runstate.get_session_run_id(ctx.paths, _SESSION_ID)
         self.assertEqual(_RUN_ID, cached)

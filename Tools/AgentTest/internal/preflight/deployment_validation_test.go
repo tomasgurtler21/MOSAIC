@@ -43,8 +43,17 @@ import (
 //
 // renderFn is called on every Render call. When nil, Render returns a
 // successful zero-valued result.
+//
+// deployFn is called on every Deploy call. When nil, Deploy returns a
+// successful result carrying a single agent entry so that catalogue-path
+// preflight can complete without a custom deployFn.
 type fakeDeployer struct {
 	renderFn func(ctx context.Context, req domain.RenderAgentRequest) (domain.RenderAgentResult, error)
+	deployFn func(ctx context.Context, req domain.DeployRequest) (domain.DeployResult, error)
+
+	// deployCalls records every Deploy invocation in order, so a test can
+	// assert on whether and how the catalogue-path preflight called the port.
+	deployCalls []domain.DeployRequest
 }
 
 func (f *fakeDeployer) Render(ctx context.Context, req domain.RenderAgentRequest) (domain.RenderAgentResult, error) {
@@ -52,6 +61,21 @@ func (f *fakeDeployer) Render(ctx context.Context, req domain.RenderAgentRequest
 		return f.renderFn(ctx, req)
 	}
 	return domain.RenderAgentResult{DestinationPath: "/fake/dest/agent.md"}, nil
+}
+
+// Deploy records the call and delegates to deployFn when set. When deployFn is
+// nil, a successful result is returned so catalogue-path preflight completes
+// without a custom function.
+func (f *fakeDeployer) Deploy(ctx context.Context, req domain.DeployRequest) (domain.DeployResult, error) {
+	f.deployCalls = append(f.deployCalls, req)
+	if f.deployFn != nil {
+		return f.deployFn(ctx, req)
+	}
+	return domain.DeployResult{
+		Agents: []domain.DeployedAgent{
+			{Key: "orchestrator", DestinationPath: "/fake/dest/orchestrator.md"},
+		},
+	}, nil
 }
 
 var _ domain.AgentDeployer = (*fakeDeployer)(nil)
@@ -389,6 +413,8 @@ stub_agents:
 // TestValidate_StubDefinitionRenderFails_ReportsUnrenderableStubDefinition
 // verifies that a stub whose source file exists on disk but whose dry-run
 // render returns an error is reported as unrenderable-stub-definition.
+// The definition uses the stub-agents path (stub_agents declared, no
+// subject agent key) so the stub Render is exercised by preflight.
 func TestValidate_StubDefinitionRenderFails_ReportsUnrenderableStubDefinition(t *testing.T) {
 	root := writeTree(t, map[string]string{
 		"suite.suite.yaml": validSuiteWithOneTest,
@@ -398,7 +424,6 @@ id: subject-test
 layer: orchestrator
 subject:
   identity: orchestrator
-  agent: orchestrator
 stub_registry: subject.stubs.json
 stub_agents:
   - identity:
@@ -410,8 +435,9 @@ stub_agents:
 		"agents/codebase-research.md": "# stub definition — exists on disk",
 	})
 
-	// The fake deployer succeeds for the subject render (CatalogAgentKey != "")
-	// but fails for the stub render (SourcePath != "").
+	// The fake deployer fails for the stub render (SourcePath != ""). On the
+	// stub-agents path there is no subject Render, so only the stub triggers
+	// the error branch.
 	deploy := &fakeDeployer{
 		renderFn: func(_ context.Context, req domain.RenderAgentRequest) (domain.RenderAgentResult, error) {
 			if req.SourcePath != "" {

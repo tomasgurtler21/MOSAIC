@@ -166,62 +166,117 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 	}
 	ledger.SandboxRoot = sb.Root
 
-	// 2. Render the subject and each declared stub collaborator into the
-	// sandbox through the deployment port. The subject is rendered first so
-	// its DefinitionPath is known before the adapter builds a spawn plan.
-	// Each result is appended to the ledger before the next render begins,
-	// so a partial failure still leaves the ledger describing what exists
-	// and teardown can remove exactly that.
-	if d.Deploy != nil && req.Test.Definition.Subject.CatalogAgentKey != "" {
-		result, renderErr := d.Deploy.Render(ctx, domain.RenderAgentRequest{
-			CatalogAgentKey: req.Test.Definition.Subject.CatalogAgentKey,
-			HarnessID:       d.Adapter.ID(),
-			WorkspaceRoot:   sb.SubjectDir,
-			Model:           req.Test.Definition.Subject.Model,
-			Workflows:       req.Test.Definition.Subject.Workflows,
-		})
-		if renderErr != nil {
-			return sb, ledger, fmt.Errorf("runner: rendering subject %q: %w",
-				req.Test.Definition.Subject.CatalogAgentKey, renderErr)
-		}
-		// Record before using so teardown sees the path even if a later step fails.
-		ledger.Provisioning.Files = append(ledger.Provisioning.Files, result.DestinationPath)
-		ledger.Provisioning.Dirs = append(ledger.Provisioning.Dirs, result.CreatedDirectories...)
-
-		// Capture the subject's source version at render time: the rendered
-		// file in the sandbox is gone by report time, so this is the only
-		// moment the value is available without risk of disagreement.
-		ledger.SubjectVersion = result.SourceVersion
-
-		// Resolve the subject's spawn-time definition path from the reported
-		// destination. It is never authored and never reconstructed from harness
-		// layout knowledge. A DestinationPath outside the sandbox is a port
-		// contract violation; fail diagnosably rather than proceeding with an
-		// empty definition path.
-		rel, relErr := filepath.Rel(sb.SubjectDir, result.DestinationPath)
-		if relErr != nil {
-			return sb, ledger, fmt.Errorf("runner: subject destination %q is not relative to sandbox %q: %w",
-				result.DestinationPath, sb.SubjectDir, relErr)
-		}
-		req.Test.Definition.Subject.DefinitionPath = rel
-	}
-
-	for _, stub := range req.Test.Definition.StubAgents {
+	// 2. Provision the subject and each declared stub collaborator into the
+	// sandbox through the deployment port. The path taken depends on the
+	// definition's provisioning path:
+	//
+	//  - Catalogue path: one Deploy call provisions the subject and every
+	//    workflow-referenced stub agent in one shot. The definition path is
+	//    derived from what Deploy reported; the subject version is recorded
+	//    as empty because Deploy reports no version.
+	//
+	//  - Stub-agents path: the existing per-agent Render loop is unchanged.
+	//
+	// In both cases each result is appended to the ledger before the next
+	// step begins, so a partial failure still leaves the ledger describing
+	// exactly what exists and teardown can remove exactly that.
+	switch req.Test.Definition.ProvisioningPath() {
+	case domain.ProvisioningCatalog:
 		if d.Deploy == nil {
+			// Not supplied means not checked; skip the deploy step gracefully.
 			break
 		}
-		result, renderErr := d.Deploy.Render(ctx, domain.RenderAgentRequest{
-			SourcePath:    stub.SourcePath,
+		result, deployErr := d.Deploy.Deploy(ctx, domain.DeployRequest{
 			HarnessID:     d.Adapter.ID(),
 			WorkspaceRoot: sb.SubjectDir,
+			Workflows:     req.Test.Definition.Subject.Workflows,
+			TierModels:    buildTierModelMap(req.Test.Definition.Subject),
 		})
-		if renderErr != nil {
-			return sb, ledger, fmt.Errorf("runner: rendering stub %q: %w",
-				stub.Identity.AgentIdentity, renderErr)
+		if deployErr != nil {
+			return sb, ledger, fmt.Errorf("runner: deploying catalogue path: %w", deployErr)
 		}
-		// Record before moving to the next stub.
-		ledger.Provisioning.Files = append(ledger.Provisioning.Files, result.DestinationPath)
+		// Record all deployed agent paths before the next step so teardown
+		// has an accurate ledger even after a later Provision failure.
+		for _, agent := range result.Agents {
+			ledger.Provisioning.Files = append(ledger.Provisioning.Files, agent.DestinationPath)
+		}
 		ledger.Provisioning.Dirs = append(ledger.Provisioning.Dirs, result.CreatedDirectories...)
+
+		// The subject version is empty on the catalogue path: Deploy reports
+		// no source version and we must not reconstruct one.
+		ledger.SubjectVersion = ""
+
+		// Derive the subject's definition path from the DeployedAgent entry
+		// whose Key matches the declared catalogue agent key. No positional
+		// assumption; key-based matching is the contract.
+		found := false
+		for _, agent := range result.Agents {
+			if agent.Key != req.Test.Definition.Subject.CatalogAgentKey {
+				continue
+			}
+			rel, relErr := filepath.Rel(sb.SubjectDir, agent.DestinationPath)
+			if relErr != nil {
+				return sb, ledger, fmt.Errorf("runner: subject destination %q is not relative to sandbox %q: %w",
+					agent.DestinationPath, sb.SubjectDir, relErr)
+			}
+			req.Test.Definition.Subject.DefinitionPath = rel
+			found = true
+			break
+		}
+		if !found {
+			return sb, ledger, fmt.Errorf("runner: deploy result contains no agent matching subject key %q",
+				req.Test.Definition.Subject.CatalogAgentKey)
+		}
+
+	default:
+		// Stub-agents path (or neither declared): the existing per-agent
+		// Render loop, unchanged from before this stage.
+		if d.Deploy != nil && req.Test.Definition.Subject.CatalogAgentKey != "" {
+			result, renderErr := d.Deploy.Render(ctx, domain.RenderAgentRequest{
+				CatalogAgentKey: req.Test.Definition.Subject.CatalogAgentKey,
+				HarnessID:       d.Adapter.ID(),
+				WorkspaceRoot:   sb.SubjectDir,
+				Model:           req.Test.Definition.Subject.Model,
+				Workflows:       req.Test.Definition.Subject.Workflows,
+			})
+			if renderErr != nil {
+				return sb, ledger, fmt.Errorf("runner: rendering subject %q: %w",
+					req.Test.Definition.Subject.CatalogAgentKey, renderErr)
+			}
+			// Record before using so teardown sees the path even if a later step fails.
+			ledger.Provisioning.Files = append(ledger.Provisioning.Files, result.DestinationPath)
+			ledger.Provisioning.Dirs = append(ledger.Provisioning.Dirs, result.CreatedDirectories...)
+
+			// Capture the subject's source version at render time.
+			ledger.SubjectVersion = result.SourceVersion
+
+			// Resolve the subject's spawn-time definition path from the reported
+			// destination.
+			rel, relErr := filepath.Rel(sb.SubjectDir, result.DestinationPath)
+			if relErr != nil {
+				return sb, ledger, fmt.Errorf("runner: subject destination %q is not relative to sandbox %q: %w",
+					result.DestinationPath, sb.SubjectDir, relErr)
+			}
+			req.Test.Definition.Subject.DefinitionPath = rel
+		}
+
+		for _, stub := range req.Test.Definition.StubAgents {
+			if d.Deploy == nil {
+				break
+			}
+			result, renderErr := d.Deploy.Render(ctx, domain.RenderAgentRequest{
+				SourcePath:    stub.SourcePath,
+				HarnessID:     d.Adapter.ID(),
+				WorkspaceRoot: sb.SubjectDir,
+			})
+			if renderErr != nil {
+				return sb, ledger, fmt.Errorf("runner: rendering stub %q: %w",
+					stub.Identity.AgentIdentity, renderErr)
+			}
+			// Record before moving to the next stub.
+			ledger.Provisioning.Files = append(ledger.Provisioning.Files, result.DestinationPath)
+			ledger.Provisioning.Dirs = append(ledger.Provisioning.Dirs, result.CreatedDirectories...)
+		}
 	}
 
 	// 3. Seed declared files, resolving $ref through the fixture resolver,
@@ -252,6 +307,7 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 	state := domain.RunState{
 		TestID:    req.Test.Definition.ID,
 		RunNumber: req.Key.RunNumber,
+		RunID:     req.Key.RunID,
 	}
 	if req.Settings.StopAfterInvocations != nil {
 		state.EarlyExitThreshold = *req.Settings.StopAfterInvocations
@@ -292,6 +348,28 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 	return sb, ledger, nil
 }
 
+// buildTierModelMap constructs the two-entry tier-model map the catalogue path
+// sends on both the setup Deploy and the preflight dry-run Deploy. Both entries
+// are always present:
+//
+//   - TierTestSubject → Subject.Model
+//   - TierTestStub    → Subject.StubModel, falling back to Subject.Model when
+//     StubModel is empty
+//
+// The fallback is deliberate: an absent StubModel yields a working run that
+// costs more (the expensive subject model is used for every stub too), rather
+// than a broken run. An empty Subject.Model propagates as empty for both tiers.
+func buildTierModelMap(subject domain.SubjectUnderTest) map[string]string {
+	stubModel := subject.StubModel
+	if stubModel == "" {
+		stubModel = subject.Model
+	}
+	return map[string]string{
+		domain.TierTestSubject: subject.Model,
+		domain.TierTestStub:    stubModel,
+	}
+}
+
 // subjectWithRunIDPrelude returns a copy of subject whose opening message
 // has domain.RunIDPrelude(runID) prepended, so the logger bundle's
 // extraction recovers the run id from the prompt the same way real MOSAIC
@@ -302,11 +380,6 @@ func subjectWithRunIDPrelude(subject domain.SubjectUnderTest, runID string) doma
 	out.OpeningMessage = domain.RunIDPrelude(runID) + subject.OpeningMessage
 	return out
 }
-
-// runIDPlaceholder is expanded in a seed file's declared path, so a seeded
-// artifact can name a directory that only exists once the run identity is
-// known (e.g. an orchestration document under Orchestration-{run_id}/).
-const runIDPlaceholder = "{run_id}"
 
 // seedFile resolves and writes one declared seed file beneath the subject
 // directory, returning its path relative to the subject directory.
@@ -322,7 +395,7 @@ func seedFile(d Deps, sb domain.Sandbox, key domain.RunKey, sf domain.SeedFile) 
 		content = []byte(sf.Content)
 	}
 
-	expandedPath := strings.ReplaceAll(sf.Path, runIDPlaceholder, key.RunID)
+	expandedPath := strings.ReplaceAll(sf.Path, domain.RunIDPlaceholder, key.RunID)
 	rel, full, err := resolveSubjectPath(sb.SubjectDir, expandedPath)
 	if err != nil {
 		return "", err

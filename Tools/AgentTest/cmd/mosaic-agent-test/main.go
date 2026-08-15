@@ -148,6 +148,13 @@ func resolveWiringConfig(args []string) WiringConfig {
 			args, "--mosaic-root", "MOSAIC_AGENT_TEST_MOSAIC_ROOT",
 			"",
 		),
+		// CatalogFolder defaults to empty, meaning "do not override" — the
+		// deploy tool resolves its own catalogue under its own root. A run
+		// against the test catalogue supplies an explicit path here.
+		CatalogFolder: resolveConfiguredPath(
+			args, "--catalog-folder", "MOSAIC_AGENT_TEST_CATALOG_FOLDER",
+			"",
+		),
 		// DeployScratchRoot is a per-process path under os.TempDir(). Nothing
 		// is written there (dry-run suppresses the write and directory
 		// creation), so it is never created and never cleaned up.

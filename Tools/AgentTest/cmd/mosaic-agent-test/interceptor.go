@@ -74,18 +74,19 @@ func runIntercept(args []string, stdin, stdout, stderr *os.File) int {
 		fmt.Fprintf(stderr, "mosaic-agent-test: intercept: loading parallel groups: %v\n", err)
 	}
 
-	// TestID and RunNumber are read from the run state document itself
-	// (setup writes them at Initialize), not from a command-line argument:
+	// TestID, RunNumber, and RunID are read from the run state document itself
+	// (setup writes them at Initialize), not from command-line arguments:
 	// the same sandbox is addressed by every interceptor process for the
 	// run's lifetime. Best-effort only — a failure here is exactly one of
 	// the failure classes interceptor.Run itself is built to contain, and it
-	// still runs (with an empty TestID/RunNumber) so the harness still gets
-	// a valid reply.
+	// still runs (with empty values) so the harness still gets a valid reply.
 	var testID string
 	var runNumber int
+	var runID string
 	if current, readErr := store.Read(); readErr == nil {
 		testID = current.TestID
 		runNumber = current.RunNumber
+		runID = current.RunID
 	}
 
 	cfg := interceptor.Config{
@@ -104,6 +105,7 @@ func runIntercept(args []string, stdin, stdout, stderr *os.File) int {
 
 		TestID:    testID,
 		RunNumber: runNumber,
+		RunID:     runID,
 
 		In:   stdin,
 		Out:  stdout,

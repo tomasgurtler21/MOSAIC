@@ -229,18 +229,25 @@ func (errNotUsedByRunnerTestsError) Error() string {
 }
 
 // stubDeployer is a minimal domain.AgentDeployer double. It records every
-// Render call and returns a configured result. When renderFn is nil, a default
-// result with a plausible DestinationPath under WorkspaceRoot is returned so
-// tests that do not care about specific paths still get a compilable, usable
-// result once the implementation starts calling the port.
+// Render and Deploy call and returns configured results. When renderFn or
+// deployFn is nil, a default result with a plausible DestinationPath under
+// WorkspaceRoot is returned so tests that do not care about specific paths
+// still get a compilable, usable result once the implementation starts calling
+// the port.
 type stubDeployer struct {
-	mu    sync.Mutex
-	calls []domain.RenderAgentRequest
+	mu          sync.Mutex
+	calls       []domain.RenderAgentRequest
+	deployCalls []domain.DeployRequest
 
 	// renderFn, when set, is called for every Render invocation; its return
 	// value replaces the default. Tests that need to control the reported path
 	// or inject failures set this field.
 	renderFn func(req domain.RenderAgentRequest) (domain.RenderAgentResult, error)
+
+	// deployFn, when set, is called for every Deploy invocation; its return
+	// value replaces the default. Tests that need to control the deployed-agent
+	// list, inject failures, or observe the full request set this field.
+	deployFn func(req domain.DeployRequest) (domain.DeployResult, error)
 }
 
 var _ domain.AgentDeployer = (*stubDeployer)(nil)
@@ -264,9 +271,39 @@ func (d *stubDeployer) Render(ctx context.Context, req domain.RenderAgentRequest
 	}, nil
 }
 
+// Deploy records the call and returns a configurable result. When deployFn is
+// nil, a default DeployResult is returned with the subject agent (keyed
+// "orchestrator") placed under WorkspaceRoot, so tests that exercise the
+// catalogue path get a usable result without configuring a deployFn.
+func (d *stubDeployer) Deploy(_ context.Context, req domain.DeployRequest) (domain.DeployResult, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.deployCalls = append(d.deployCalls, req)
+	if d.deployFn != nil {
+		return d.deployFn(req)
+	}
+	// Default: report the subject agent at a plausible path so the runner can
+	// derive a definition path without a custom deployFn.
+	return domain.DeployResult{
+		Agents: []domain.DeployedAgent{
+			{
+				Key:             "orchestrator",
+				DestinationPath: filepath.Join(req.WorkspaceRoot, ".claude", "agents", "orchestrator.md"),
+			},
+		},
+	}, nil
+}
+
 // allCalls returns all recorded Render invocations in order.
 func (d *stubDeployer) allCalls() []domain.RenderAgentRequest {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return append([]domain.RenderAgentRequest(nil), d.calls...)
+}
+
+// allDeployCalls returns all recorded Deploy invocations in order.
+func (d *stubDeployer) allDeployCalls() []domain.DeployRequest {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]domain.DeployRequest(nil), d.deployCalls...)
 }

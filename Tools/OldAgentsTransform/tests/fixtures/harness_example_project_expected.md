@@ -81,21 +81,12 @@ Follow the standard output template structure.
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
 
-- **Retry transient errors once** before escalating
 - **Return BLOCKED** if prerequisites are missing
 
 <ErrorHandlingExtension type="project">
 </ErrorHandlingExtension>
 
 </ErrorHandling>
----
-
-<OutputFormat type="core">
-## Output Format
-
-Always end with a JSON status block.
-
-</OutputFormat>
 ---
 
 <ExecutionPhilosophy type="core">

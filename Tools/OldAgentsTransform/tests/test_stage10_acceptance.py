@@ -4,6 +4,13 @@ Corpus-level acceptance tests that verify the run's overall success conditions
 across a multi-file transform: properties no single earlier stage's per-file
 unit tests can establish on their own.
 
+Also contains Stage 5 acceptance and cross-copy consistency tests:
+  - All four Stage 5 behaviours asserted together on a single real legacy
+    agent file (TestStage5AllFourBehaviours).
+  - Python-side pin of the cross-copy vocabulary invariant that must agree
+    with the Go pin in vocabulary_boundary_sync_test.go
+    (TestCrossCopyVocabularyInvariant).
+
 The corpus is assembled entirely from repository fixtures under
 tests/fixtures/ (see the `transformed_corpus` fixture below) -- never from any
 path outside the repository. It covers both transform paths (generic: no
@@ -36,6 +43,7 @@ import pytest
 _TOOLS_DIR = pathlib.Path(__file__).parent.parent
 sys.path.insert(0, str(_TOOLS_DIR))
 
+import boundary_constants as _bc  # noqa: E402  (used by TestCrossCopyVocabularyInvariant)
 from boundary_constants import BoundaryKind  # noqa: E402
 from boundary_transformer import TransformResult, transform_file  # noqa: E402
 from boundary_validator import validate_file  # noqa: E402
@@ -43,7 +51,6 @@ from deployed_blocks import DEFAULT_BUNDLE_PATH, load_bundle  # noqa: E402
 from region_insertion import CONDUCT_REGIONS, find_section_spans  # noqa: E402
 from non_conformance import (  # noqa: E402
     NC_HARNESS_PROSE,
-    NC_JSON_ENVELOPE,
     NC_NO_INJECTIONS,
     render_report,
 )
@@ -308,14 +315,18 @@ def _body_lines(text: str) -> list[str]:
 class TestIsolation:
     """Content outside the regions a transform was meant to touch is unchanged.
 
-    Capabilities and OutputFormat carry no rows in CONDUCT_REGIONS (see the
-    Region Placement Contract) -- they are the sections this run's conduct-
-    region insertions and deletions never touch. Their prose, with boundary
-    tag lines (new syntax) and legacy marker lines (pre-existing syntax) both
-    stripped from each side, must be identical before and after transform.
+    Capabilities carries no rows in CONDUCT_REGIONS (see the Region Placement
+    Contract) -- it is a section this run's conduct-region insertions and
+    deletions never touch. Its prose, with boundary tag lines (new syntax) and
+    legacy marker lines (pre-existing syntax) both stripped from each side,
+    must be identical before and after transform.
+
+    OutputFormat is excluded from this check: it is no longer a canonical section.
+    Its legacy heading and body are deleted outright by delete_legacy_sections, so
+    by definition the section cannot be "unchanged" -- it is gone.
     """
 
-    @pytest.mark.parametrize("section_name", ["Capabilities", "OutputFormat"])
+    @pytest.mark.parametrize("section_name", ["Capabilities"])
     def test_untouched_section_prose_is_unchanged(
         self, successful_corpus: list[CorpusEntry], section_name: str
     ):
@@ -614,7 +625,7 @@ class TestValidatorCleanAcrossTheTree:
 class TestReportCoverage:
     """The non-conformance report names each detectable class present in the corpus."""
 
-    def test_report_names_json_envelope_zero_injections_and_harness_prose(
+    def test_report_names_zero_injections_and_harness_prose(
         self, successful_corpus: list[CorpusEntry]
     ):
         all_findings = [
@@ -622,7 +633,7 @@ class TestReportCoverage:
         ]
         codes_present = {nc.code for nc in all_findings}
 
-        expected_codes = {NC_JSON_ENVELOPE, NC_NO_INJECTIONS, NC_HARNESS_PROSE}
+        expected_codes = {NC_NO_INJECTIONS, NC_HARNESS_PROSE}
         missing_from_corpus = expected_codes - codes_present
         assert missing_from_corpus == set(), (
             f"Corpus did not actually produce these detectable classes; the "
@@ -631,8 +642,579 @@ class TestReportCoverage:
         )
 
         report = render_report(all_findings)
-        assert f"[{NC_JSON_ENVELOPE}]" in report, "Report must name a retained JSON response envelope"
         assert f"[{NC_NO_INJECTIONS}]" in report, "Report must name a zero-injection file"
         assert f"[{NC_HARNESS_PROSE}]" in report, (
             "Report must name harness-specific prose in an agent-authored section"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Stage 5: End-to-end acceptance — all four behaviours on a real legacy file
+# (T5.1 / AC5.3, AC5.4)
+# ---------------------------------------------------------------------------
+
+_S5_INPUT_FIXTURE = "s5_harness_contracts_input.md"
+_S5_GENERIC_REF_FIXTURE = "s5_harness_contracts_generic_ref.md"
+
+
+@dataclasses.dataclass
+class _Stage5Result:
+    """Holds the transform outcome for the Stage 5 end-to-end acceptance test."""
+    input_path: pathlib.Path
+    output_path: pathlib.Path
+    result: TransformResult
+    output_text: str
+
+
+@pytest.fixture(scope="module")
+def stage5_acceptance(tmp_path_factory) -> _Stage5Result:
+    """Transform the Stage 5 harness legacy-agent fixture once per module.
+
+    Input: s5_harness_contracts_input.md — harness legacy agent with all four defects:
+      1. '## Output Format' H2 section (retired, must be deleted).
+      2. '### Design Artifact Structure' block in Capabilities outside any region
+         (must move inside OutputArtifactTemplate).
+      3. Orphaned legacy prose for all five conduct regions (must be deleted by
+         their respective deletion rules).
+      4. No existing boundary tags (raw legacy format — the transform must produce
+         a structurally valid output).
+
+    Generic reference: s5_harness_contracts_generic_ref.md — current-format ref
+      with no '## Output Format' section, so the output is clean on both sides.
+    """
+    out_dir = tmp_path_factory.mktemp("stage5_acceptance")
+    input_path = _FIXTURES_DIR / _S5_INPUT_FIXTURE
+    ref_path = _FIXTURES_DIR / _S5_GENERIC_REF_FIXTURE
+    output_path = out_dir / "stage5_output.md"
+    result = transform_file(input_path, output_path, ref_path)
+    output_text = output_path.read_text(encoding="utf-8") if output_path.exists() else ""
+    return _Stage5Result(
+        input_path=input_path,
+        output_path=output_path,
+        result=result,
+        output_text=output_text,
+    )
+
+
+class TestStage5AllFourBehaviours:
+    """End-to-end acceptance: all four defect fixes coexist on one real legacy agent.
+
+    The four behaviours are asserted independently because structural validation
+    alone does not catch them — the original defect validated cleanly while
+    duplicating its own content. Both content assertions (AC5.3) and structural
+    validation (AC5.4) are required.
+
+    Fixture: s5_harness_contracts_input.md — a real-structure harness legacy agent
+    modelled on firstGeneration contracts-designer.md, containing all four defects.
+    """
+
+    # ------------------------------------------------------------------
+    # Precondition
+    # ------------------------------------------------------------------
+
+    def test_fixture_input_contains_all_four_defects(self) -> None:
+        """Sanity guard: the fixture input contains all four defects before any transform.
+
+        Without this guard, absence assertions in the behaviour tests below would be
+        vacuous passes if the fixture were accidentally cleaned of its defects. Each
+        sentinel phrase is asserted to be present in the raw fixture text so that a
+        downstream absence assertion is meaningful.
+
+        Uses the same pattern as
+        TestDeletionCompleteness.test_fragment_present_pre_transform_somewhere_in_corpus.
+        """
+        fixture_text = (_FIXTURES_DIR / _S5_INPUT_FIXTURE).read_text(encoding="utf-8")
+        sentinel_phrases: list[tuple[str, str]] = [
+            ("OutputFormat-heading",       "## Output Format"),
+            ("OutputFormat-body",          "Always end with a JSON status block"),
+            ("CP-hitl-step",               "present all output artifacts to the user for review"),
+            ("CP-json-step",               "Return ONLY output json defined by communication protocol"),
+            ("AH-heading",                 "### Authority Hierarchy"),
+            ("PC-bullets",                 "NEVER access orchestration artifacts not in"),
+            ("EH-retry-variant",           "Retry transient errors once"),
+            ("EP-context-variant",         "Follow-up tasks are handled by spawning new agent instances"),
+            ("Design-Artifact-Structure",  "Design Artifact Structure"),
+        ]
+        missing = [
+            (name, phrase)
+            for name, phrase in sentinel_phrases
+            if not contains_fragment(fixture_text, phrase)
+        ]
+        assert missing == [], (
+            f"Fixture {_S5_INPUT_FIXTURE!r} is missing expected defect content — "
+            f"a sanitised fixture renders downstream absence assertions vacuous: {missing!r}"
+        )
+
+    def test_transform_succeeds(self, stage5_acceptance: _Stage5Result) -> None:
+        """The transform must succeed before any behaviour assertion can proceed."""
+        assert stage5_acceptance.result.success is True, (
+            f"Transform failed — behaviour assertions cannot proceed. "
+            f"Errors: {[e.message for e in stage5_acceptance.result.errors]}"
+        )
+        assert stage5_acceptance.output_text, "No output was produced by the transform"
+        assert set(stage5_acceptance.result.deployed_added) >= {
+            "ClosingProcedure",
+            "AuthorityHierarchy",
+            "ProtocolConstraints",
+            "ErrorHandlingCommon",
+            "ExecutionPhilosophyCommon",
+        }, (
+            f"result.deployed_added must record all five conduct regions as emitted; "
+            f"got: {set(stage5_acceptance.result.deployed_added)!r}"
+        )
+
+    # ------------------------------------------------------------------
+    # Behaviour 1: No OutputFormat section anywhere in the output
+    # ------------------------------------------------------------------
+
+    def test_output_format_h2_heading_absent_from_output(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """No '## Output Format' H2 heading must appear anywhere in the output.
+
+        The retired '## Output Format' section must be deleted from the harness
+        body by delete_legacy_sections before the body reaches any merge path.
+        The generic reference used here carries no '## Output Format' section
+        (current-format reference), so no such heading can enter from that side
+        either. The result must be clean on both counts.
+        """
+        lines = stage5_acceptance.output_text.splitlines()
+        offending = [
+            (i + 1, line)
+            for i, line in enumerate(lines)
+            if line.strip() == "## Output Format"
+        ]
+        assert offending == [], (
+            f"'## Output Format' H2 heading must not appear in the output; "
+            f"found at line(s): {[i for i, _ in offending]}"
+        )
+
+    def test_output_format_section_body_absent_from_output(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The body of the '## Output Format' section must be deleted with its heading.
+
+        The fixture's OutputFormat body contains 'Always end with a JSON status block'.
+        This sentinel phrase must not survive in the transformed output.
+        """
+        assert not contains_fragment(
+            stage5_acceptance.output_text,
+            "Always end with a JSON status block",
+        ), (
+            "OutputFormat body sentinel ('Always end with a JSON status block') must not "
+            "survive — the entire '## Output Format' section is deleted by "
+            "delete_legacy_sections, heading and body together"
+        )
+
+    # ------------------------------------------------------------------
+    # Behaviour 2: Artifact-structure block inside OutputArtifactTemplate
+    # ------------------------------------------------------------------
+
+    def test_output_artifact_template_region_is_present(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The OutputArtifactTemplate injection region must be present in the output."""
+        body = extract_region(
+            stage5_acceptance.output_text,
+            BoundaryKind.INJECTION,
+            "OutputArtifactTemplate",
+        )
+        assert body is not None, (
+            "OutputArtifactTemplate injection region must be present in the output; "
+            "the transform must have emitted its open and close tags"
+        )
+
+    def test_artifact_structure_block_is_inside_output_artifact_template(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The 'Design Artifact Structure' block must be inside the OutputArtifactTemplate region.
+
+        move_artifact_structure_block must have moved the block from its original position
+        in the Capabilities section (outside any region) to become project-default content
+        between the OutputArtifactTemplate open and close tags.
+        """
+        region_body = extract_region(
+            stage5_acceptance.output_text,
+            BoundaryKind.INJECTION,
+            "OutputArtifactTemplate",
+        )
+        assert region_body is not None, "OutputArtifactTemplate region must be present"
+        assert region_body.strip(), (
+            "OutputArtifactTemplate region must not be empty — "
+            "the artifact-structure block must have been moved inside it"
+        )
+        assert contains_fragment(region_body, "Design Artifact Structure"), (
+            "The 'Design Artifact Structure' heading must appear inside the "
+            "OutputArtifactTemplate region, not as stranded prose outside it"
+        )
+
+    def test_artifact_structure_heading_appears_exactly_once_in_output(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The artifact-structure heading must appear exactly once — moved, not duplicated.
+
+        The block must be removed from its original Capabilities location and inserted
+        once inside OutputArtifactTemplate. Duplicated content (the original defect
+        pattern) would show two occurrences.
+        """
+        count = stage5_acceptance.output_text.count("Design Artifact Structure")
+        assert count == 1, (
+            f"'Design Artifact Structure' must appear exactly once in the output "
+            f"(moved, not duplicated); found {count} occurrence(s)"
+        )
+
+    # ------------------------------------------------------------------
+    # Behaviour 3: No orphaned legacy prose beside any of the five conduct regions
+    # ------------------------------------------------------------------
+
+    def test_hitl_step_prose_does_not_survive(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The HITL step prose must not survive — it is superseded by ClosingProcedure.
+
+        The fixture's CP-hitl-step variant ('present all output artifacts to the user
+        for review/approval') must be deleted by the ClosingProcedure deletion rule.
+        """
+        assert not contains_fragment(
+            stage5_acceptance.output_text,
+            "present all output artifacts to the user for review",
+        ), (
+            "HITL step prose must not survive in the output — it is superseded "
+            "by the ClosingProcedure managed region"
+        )
+
+    def test_json_step_prose_does_not_survive(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The JSON step prose must not survive — it is superseded by ClosingProcedure.
+
+        The fixture's CP-json-step prose ('Return ONLY output json defined by
+        communication protocol') must be deleted.
+        """
+        assert not contains_fragment(
+            stage5_acceptance.output_text,
+            "Return ONLY output json defined by communication protocol",
+        ), (
+            "JSON step prose must not survive in the output — it is superseded "
+            "by the ClosingProcedure managed region"
+        )
+
+    def test_closing_procedure_region_is_empty(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The ClosingProcedure managed region must be empty (body is managed content)."""
+        body = extract_region(
+            stage5_acceptance.output_text,
+            BoundaryKind.DEPLOYED,
+            "ClosingProcedure",
+        )
+        assert body is not None, "ClosingProcedure region must be present in the output"
+        assert body.strip() == "", (
+            "ClosingProcedure managed region must be empty — "
+            "its canonical content is provided by the deployed bundle, not inlined"
+        )
+
+    def test_authority_hierarchy_heading_does_not_survive_as_orphan(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The '### Authority Hierarchy' heading must not survive as orphaned prose.
+
+        The AH-block deletion rule (with own_region='AuthorityHierarchy') must delete
+        the heading and its prose. The fix for Defect A (find_heading_block_end with
+        own_region) is what enables this deletion on the harness path.
+        """
+        lines = stage5_acceptance.output_text.splitlines()
+        ah_heading_occurrences = [
+            (i + 1, line)
+            for i, line in enumerate(lines)
+            if line.strip() == "### Authority Hierarchy"
+        ]
+        assert ah_heading_occurrences == [], (
+            f"'### Authority Hierarchy' heading must not survive as orphaned prose; "
+            f"found at line(s): {[i for i, _ in ah_heading_occurrences]}"
+        )
+
+    def test_authority_hierarchy_region_is_empty(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The AuthorityHierarchy managed region must be empty."""
+        body = extract_region(
+            stage5_acceptance.output_text,
+            BoundaryKind.DEPLOYED,
+            "AuthorityHierarchy",
+        )
+        assert body is not None, "AuthorityHierarchy region must be present"
+        assert body.strip() == "", (
+            "AuthorityHierarchy managed region must be empty — "
+            "the inline heading and prose were deleted by the AH-block rule"
+        )
+
+    def test_protocol_constraints_bullets_do_not_survive(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """Legacy ProtocolConstraints bullets must not survive — deleted by the PC rules.
+
+        The fixture contains the PC-bullet-1 variant ('NEVER access orchestration
+        artifacts not in your `input_artifacts`/`output_artifacts` lists'), the
+        PC-bullet-2 variant ('You MAY access any project file'), PC-bullet-3
+        ('NEVER skip the JSON response block'), and PC-bullet-4 ('NEVER invent
+        status codes'). All four must be absent from the output.
+        """
+        output = stage5_acceptance.output_text
+        assert not contains_fragment(
+            output,
+            "NEVER access orchestration artifacts not in your",
+        ), "PC-bullet-1 variant must not survive in the output"
+
+        assert not contains_fragment(
+            output,
+            "You MAY access any project file",
+        ), "PC-bullet-2 variant must not survive in the output"
+
+        assert not contains_fragment(output, "NEVER skip the JSON response block"), (
+            "PC-bullet-3 must not survive in the output"
+        )
+        assert not contains_fragment(output, "NEVER invent status codes"), (
+            "PC-bullet-4 must not survive in the output"
+        )
+
+    def test_protocol_constraints_region_is_empty(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The ProtocolConstraints managed region must be empty."""
+        body = extract_region(
+            stage5_acceptance.output_text,
+            BoundaryKind.DEPLOYED,
+            "ProtocolConstraints",
+        )
+        assert body is not None, "ProtocolConstraints region must be present"
+        assert body.strip() == "", (
+            "ProtocolConstraints managed region must be empty — "
+            "the legacy PC bullets were deleted by the PC deletion rules"
+        )
+
+    def test_eh_retry_prose_variant_does_not_survive(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The 'Retry transient errors once' EH-retry variant must not survive.
+
+        The fixture uses the non-canonical wording ('**Retry transient errors once**
+        before escalating') which Stage 5's widened EH-retry pattern now matches.
+        After deletion, this phrase must not appear in the output.
+        """
+        assert not contains_fragment(
+            stage5_acceptance.output_text,
+            "Retry transient errors once",
+        ), (
+            "EH-retry variant ('Retry transient errors once') must not survive — "
+            "Stage 5's widened EH-retry pattern deletes both the canonical and this "
+            "alternate wording, and the ErrorHandlingCommon region supersedes it"
+        )
+
+    def test_error_handling_common_region_is_empty(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The ErrorHandlingCommon managed region must be empty."""
+        body = extract_region(
+            stage5_acceptance.output_text,
+            BoundaryKind.DEPLOYED,
+            "ErrorHandlingCommon",
+        )
+        assert body is not None, "ErrorHandlingCommon region must be present"
+        assert body.strip() == "", (
+            "ErrorHandlingCommon managed region must be empty — "
+            "the legacy EH-retry prose was deleted by the EH-retry deletion rule"
+        )
+
+    def test_ep_context_prose_variant_does_not_survive(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The EP-context 'Follow-up tasks' variant must not survive.
+
+        The fixture uses the alternate wording ('Follow-up tasks are handled by
+        spawning new agent instances' — 'tasks' instead of 'work') which Stage 5's
+        widened EP-context pattern now matches. After deletion, this phrase must not
+        appear in the output.
+        """
+        assert not contains_fragment(
+            stage5_acceptance.output_text,
+            "Follow-up tasks are handled by spawning new agent instances",
+        ), (
+            "EP-context variant ('Follow-up tasks are handled by spawning new agent "
+            "instances') must not survive — Stage 5's widened EP-context pattern "
+            "deletes both the canonical ('Follow-up work') and this alternate wording"
+        )
+
+    def test_execution_philosophy_common_region_is_empty(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The ExecutionPhilosophyCommon managed region must be empty."""
+        body = extract_region(
+            stage5_acceptance.output_text,
+            BoundaryKind.DEPLOYED,
+            "ExecutionPhilosophyCommon",
+        )
+        assert body is not None, "ExecutionPhilosophyCommon region must be present"
+        assert body.strip() == "", (
+            "ExecutionPhilosophyCommon managed region must be empty — "
+            "the legacy EP-context prose was deleted by the EP-context deletion rule"
+        )
+
+    # ------------------------------------------------------------------
+    # Behaviour 4: Structural validation
+    # ------------------------------------------------------------------
+
+    def test_output_passes_structural_validation(
+        self, stage5_acceptance: _Stage5Result
+    ) -> None:
+        """The transformed output must pass the boundary validator with no structural errors.
+
+        This is separate from — and in addition to — the content assertions above.
+        AC5.4 requires both to pass: the original defect validated cleanly while
+        duplicating its own content, so structural validation alone is insufficient
+        as an acceptance gate.
+        """
+        errors = [
+            str(err)
+            for err in validate_file(stage5_acceptance.output_path)
+            if err.severity == "error"
+        ]
+        assert errors == [], (
+            f"Transformed output must validate structurally clean. "
+            f"Validator errors: {errors!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Stage 5: Cross-copy vocabulary invariant (T5.2 / AC5.5)
+# ---------------------------------------------------------------------------
+
+
+class TestCrossCopyVocabularyInvariant:
+    """The Python and Go canonical-vocabulary copies must agree on section list and order.
+
+    Both copies are pinned independently as ordered-sequence literals — the suites live
+    in different languages and cannot import each other, so a one-sided change fails
+    only on whichever side was not updated.
+
+    The Python-side pin is in this class. The Go-side pin is in:
+      Tools/Common/docformat/vocabulary_boundary_sync_test.go:
+        TestVocabulary_CanonicalSections_ExactFiveEntrySequence
+        TestVocabulary_CanonicalOrder_ExactSixSlotSequence
+
+    Both sides state the same sequences as literals. Disagreement between the two
+    test files is a drift in one of the vocabulary copies and must be resolved by
+    updating boundary_constants.py or vocabulary.go to restore agreement.
+    """
+
+    # Canonical sequences as declared by this Python-side pin.
+    # The Go pin (vocabulary_boundary_sync_test.go) declares the same sequences.
+    _EXPECTED_CANONICAL_SECTIONS: tuple[str, ...] = (
+        "Identity",
+        "Capabilities",
+        "Constraints",
+        "ErrorHandling",
+        "ExecutionPhilosophy",
+    )
+
+    _EXPECTED_CANONICAL_ORDER: tuple[str, ...] = (
+        "Identity",
+        "CommunicationProtocol",
+        "Capabilities",
+        "Constraints",
+        "ErrorHandling",
+        "ExecutionPhilosophy",
+    )
+
+    def test_canonical_sections_matches_expected_five_entry_sequence(self) -> None:
+        """CANONICAL_SECTIONS must equal the exact 5-entry sequence pinned here and in Go.
+
+        OutputFormat is removed. The sequence is ordered (not a set): order is part of
+        the contract, and a reordering would be a drift even if the set of names agreed.
+        """
+        assert _bc.CANONICAL_SECTIONS == self._EXPECTED_CANONICAL_SECTIONS, (
+            f"CANONICAL_SECTIONS does not match the cross-copy invariant.\n"
+            f"Expected (Python pin, must match Go pin): {self._EXPECTED_CANONICAL_SECTIONS}\n"
+            f"Got: {_bc.CANONICAL_SECTIONS}\n"
+            "Update boundary_constants.py OR vocabulary.go to restore cross-copy agreement."
+        )
+
+    def test_canonical_order_matches_expected_six_slot_sequence(self) -> None:
+        """CANONICAL_ORDER must equal the exact 6-slot sequence pinned here and in Go.
+
+        OutputFormat is removed. Index 1 is CommunicationProtocol (a top-level managed
+        boundary, not a section). Every other slot is a section name.
+        """
+        assert _bc.CANONICAL_ORDER == self._EXPECTED_CANONICAL_ORDER, (
+            f"CANONICAL_ORDER does not match the cross-copy invariant.\n"
+            f"Expected (Python pin, must match Go pin): {self._EXPECTED_CANONICAL_ORDER}\n"
+            f"Got: {_bc.CANONICAL_ORDER}\n"
+            "Update boundary_constants.py OR vocabulary.go to restore cross-copy agreement."
+        )
+
+    def test_canonical_sections_has_exactly_five_entries(self) -> None:
+        """CANONICAL_SECTIONS must have exactly 5 entries, matching Go CanonicalSections.
+
+        The vocabulary correction drops OutputFormat: six sections become five in both
+        the Python and Go copies. A count mismatch is a cross-copy drift.
+        """
+        assert len(_bc.CANONICAL_SECTIONS) == 5, (
+            f"CANONICAL_SECTIONS must have exactly 5 entries to match Go CanonicalSections "
+            f"(OutputFormat removed); got {len(_bc.CANONICAL_SECTIONS)}: {_bc.CANONICAL_SECTIONS}"
+        )
+
+    def test_canonical_order_has_exactly_six_slots(self) -> None:
+        """CANONICAL_ORDER must have exactly 6 slots, matching Go CanonicalOrder.
+
+        The vocabulary correction drops OutputFormat: seven ordered slots become six in
+        both copies. A count mismatch is a cross-copy drift.
+        """
+        assert len(_bc.CANONICAL_ORDER) == 6, (
+            f"CANONICAL_ORDER must have exactly 6 slots to match Go CanonicalOrder "
+            f"(OutputFormat removed); got {len(_bc.CANONICAL_ORDER)}: {_bc.CANONICAL_ORDER}"
+        )
+
+    def test_output_format_absent_from_canonical_sections(self) -> None:
+        """OutputFormat must not be in CANONICAL_SECTIONS, mirroring Go CanonicalSections."""
+        assert "OutputFormat" not in _bc.CANONICAL_SECTIONS, (
+            "OutputFormat must not be in CANONICAL_SECTIONS — it is retired; "
+            "this must agree with the Go CanonicalSections (which also excludes it)"
+        )
+
+    def test_output_format_absent_from_canonical_order(self) -> None:
+        """OutputFormat must not be in CANONICAL_ORDER, mirroring Go CanonicalOrder."""
+        assert "OutputFormat" not in _bc.CANONICAL_ORDER, (
+            "OutputFormat must not be in CANONICAL_ORDER — it is retired; "
+            "this must agree with the Go CanonicalOrder (which also excludes it)"
+        )
+
+    def test_non_protocol_slots_of_canonical_order_equal_canonical_sections(self) -> None:
+        """Filtering CommunicationProtocol from CANONICAL_ORDER must yield CANONICAL_SECTIONS.
+
+        This structural invariant holds in both copies: filtering the one non-section
+        slot (CommunicationProtocol) from the ordered document slots must reproduce
+        the ordered section list exactly. A failure here means the two tables have
+        drifted from each other within the Python copy.
+        """
+        non_protocol = tuple(
+            n for n in _bc.CANONICAL_ORDER if n != "CommunicationProtocol"
+        )
+        assert non_protocol == _bc.CANONICAL_SECTIONS, (
+            f"CANONICAL_ORDER minus CommunicationProtocol must equal CANONICAL_SECTIONS "
+            f"(structural invariant, both copies).\n"
+            f"Non-protocol slots: {non_protocol}\n"
+            f"CANONICAL_SECTIONS: {_bc.CANONICAL_SECTIONS}"
+        )
+
+    def test_communication_protocol_is_second_slot_of_canonical_order(self) -> None:
+        """CommunicationProtocol must occupy index 1 in CANONICAL_ORDER.
+
+        This matches the Go CanonicalOrder and the design doc: CommunicationProtocol
+        is a top-level managed boundary that occupies a slot between Identity and
+        Capabilities but is not itself a section name.
+        """
+        assert len(_bc.CANONICAL_ORDER) > 1, "CANONICAL_ORDER must have at least 2 slots"
+        assert _bc.CANONICAL_ORDER[1] == "CommunicationProtocol", (
+            f"CommunicationProtocol must be at index 1 in CANONICAL_ORDER, "
+            f"matching the Go CanonicalOrder; got {_bc.CANONICAL_ORDER[1]!r}"
         )

@@ -323,6 +323,34 @@ def harness_identity_regions_generic_ref(fixtures_dir: pathlib.Path) -> pathlib.
 
 
 @pytest.fixture
+def harness_ah_merged_tag_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Harness agent file whose Identity section carries an Authority Hierarchy block
+    with real prose.
+
+    The paired generic reference (harness_ah_merged_tag_generic_ref) already carries
+    the empty <AuthorityHierarchy type="managed"> / </AuthorityHierarchy> tag pair
+    in place of the prose, simulating an already-transformed Catalog generic reference.
+    On the harness merge path the merge inserts those empty tags between the heading
+    and the prose, reproducing the merged-tag scenario where the block-extent scan
+    must be transparent to the region's own tags.
+    """
+    return fixtures_dir / "harness_ah_merged_tag_input.md"
+
+
+@pytest.fixture
+def harness_ah_merged_tag_generic_ref(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Generic reference for harness_ah_merged_tag_input.
+
+    Contains <AuthorityHierarchy type="managed"> / </AuthorityHierarchy> tags already
+    in the Identity section (simulating an already-transformed Catalog file), so that
+    the harness merge places those empty tags between the '### Authority Hierarchy'
+    heading and the prose in the merged body.  The deletion scan must treat the region's
+    own tags as transparent and delete the full heading-plus-prose block.
+    """
+    return fixtures_dir / "harness_ah_merged_tag_generic_ref.md"
+
+
+@pytest.fixture
 def generic_no_version_no_transform_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
     """Generic agent file with neither 'version' nor 'transform_version' in frontmatter.
 
@@ -630,3 +658,75 @@ def s4_harness_no_legacy_hc_generic_ref(fixtures_dir: pathlib.Path) -> pathlib.P
     the table-driven path.
     """
     return fixtures_dir / "s4_harness_no_legacy_hc_generic_ref.md"
+
+
+# ---------------------------------------------------------------------------
+# OutputArtifactTemplate content move fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def art_move_generic_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Generic agent whose Capabilities section carries a '### Design Artifact Structure'
+    block placed *before* the injection markers.
+
+    Used to verify that move_artifact_structure_block relocates the block inside the
+    OutputArtifactTemplate region on the generic transform path.
+    """
+    return fixtures_dir / "art_move_generic_input.md"
+
+
+@pytest.fixture
+def art_move_generic_expected(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Expected output for art_move_generic_input: the Design Artifact Structure block
+    has been moved inside the OutputArtifactTemplate region and is absent from its
+    original position."""
+    return fixtures_dir / "art_move_generic_expected.md"
+
+
+@pytest.fixture
+def art_move_block_after_marker_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Generic agent whose Capabilities section carries a '### Design Artifact Structure'
+    block placed *after* the injection markers, testing order-independence of the move.
+
+    The block appears after [INJECTION: output_artifact_template], so after body transform
+    it sits after the already-emitted OutputArtifactTemplate region pair.  The move must
+    still relocate the block inside the region tags.
+    """
+    return fixtures_dir / "art_move_block_after_marker_input.md"
+
+
+@pytest.fixture
+def art_move_harness_input(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Harness agent carrying a '### Design Artifact Structure' block under Capabilities.
+
+    Used to verify that move_artifact_structure_block runs on the harness transform path
+    and produces the same Capabilities shape as the generic path.
+    """
+    return fixtures_dir / "art_move_harness_input.md"
+
+
+@pytest.fixture
+def art_move_harness_generic_ref(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Generic reference file for art_move_harness_input.
+
+    Carries the same Capabilities structure (with Design Artifact Structure block) as the
+    harness input so the harness merge produces a body where the block is present and
+    eligible for relocation.
+    """
+    return fixtures_dir / "art_move_harness_generic_ref.md"
+
+
+@pytest.fixture
+def art_move_block_after_marker_expected(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Expected output for art_move_block_after_marker_input: the Design Artifact Structure
+    block has been moved inside the OutputArtifactTemplate region, even though it originally
+    appeared after the [INJECTION: output_artifact_template] marker in the source."""
+    return fixtures_dir / "art_move_block_after_marker_expected.md"
+
+
+@pytest.fixture
+def art_move_harness_expected(fixtures_dir: pathlib.Path) -> pathlib.Path:
+    """Expected output for art_move_harness_input: the Design Artifact Structure block
+    has been moved inside the OutputArtifactTemplate region on the harness transform path."""
+    return fixtures_dir / "art_move_harness_expected.md"

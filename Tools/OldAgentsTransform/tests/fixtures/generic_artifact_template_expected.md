@@ -89,14 +89,6 @@ Your output artifact MUST follow this structure:
 </ErrorHandling>
 ---
 
-<OutputFormat type="core">
-## Output Format
-
-Always end with a JSON status block.
-
-</OutputFormat>
----
-
 <ExecutionPhilosophy type="core">
 ## Execution Philosophy
 

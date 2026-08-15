@@ -235,6 +235,16 @@ type WiringConfig struct {
 	// works with no flag and no environment variable, matching how the
 	// binary-relative default for DeployToolPath needs no configuration.
 	MosaicRoot string
+	// CatalogFolder overrides the catalogue the deployment tool sources
+	// agents and workflows from. Empty means "do not override". Resolved
+	// through the same three-tier chain as MosaicRoot.
+	CatalogFolder string
+	// DeployInvoke is a test seam for the deployment port's CommandRunner.
+	// When non-nil, buildDeps threads it into agentdeploy.Options.Invoke so
+	// tests can capture the argument list the deployer would pass to the
+	// subprocess without the real binary being present. nil selects real
+	// process execution via execCommandRunner.
+	DeployInvoke agentdeploy.CommandRunner
 	// DeployTimeout bounds every render invocation. The composition root sets
 	// this once; the port enforces it with context.WithTimeout on every call.
 	DeployTimeout time.Duration
@@ -371,7 +381,9 @@ func buildDeps(cfg WiringConfig) (Deps, error) {
 	deployProvider := agentdeploy.New(agentdeploy.Options{
 		ExecutablePath: cfg.DeployToolPath,
 		MosaicRoot:     cfg.MosaicRoot,
+		CatalogFolder:  cfg.CatalogFolder,
 		Timeout:        cfg.DeployTimeout,
+		Invoke:         cfg.DeployInvoke,
 	})
 
 	return Deps{

@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -55,6 +56,10 @@ var (
 	// ErrUnparseableOutput is returned when the tool exited zero but produced
 	// output that could not be decoded as the expected JSON result.
 	ErrUnparseableOutput = errors.New("agentdeploy: unparseable output")
+
+	// ErrDeployFailed is returned when the tool ran and exited non-zero on a
+	// deploy. Always unwrapped from a *DeployError.
+	ErrDeployFailed = errors.New("agentdeploy: deploy failed")
 )
 
 // RenderError carries diagnostic detail for a failed render. It always wraps
@@ -83,6 +88,31 @@ type RenderError struct {
 	// ExitCode is the delegate's process exit code.
 	ExitCode int
 }
+
+// DeployError carries diagnostic detail for a failed deploy. It always wraps
+// ErrDeployFailed.
+//
+// The deploy subcommand emits no structured JSON failure envelope: on a
+// service error it writes a plain-text line to stderr and exits, even under
+// --output json. Reason and Detail are therefore empty on every failure the
+// current tool can produce. They exist so that a future envelope can be
+// decoded without a breaking change to this type; callers must treat an
+// empty Reason as "undifferentiated failure" and must never map it to a
+// specific known condition.
+type DeployError struct {
+	Reason      string // empty with the current tool; reserved
+	Detail      string // empty with the current tool; reserved
+	ToolMessage string // the delegate's own text, from stderr
+	ExitCode    int
+}
+
+func (e *DeployError) Error() string {
+	return fmt.Sprintf("deploy failed (exit %d): %s", e.ExitCode, e.ToolMessage)
+}
+
+// Unwrap returns ErrDeployFailed so callers can use errors.Is(err, ErrDeployFailed)
+// to detect the class without knowing the concrete type.
+func (e *DeployError) Unwrap() error { return ErrDeployFailed }
 
 func (e *RenderError) Error() string {
 	return fmt.Sprintf("render failed (exit %d, reason %q, detail %q): %s",
@@ -115,6 +145,15 @@ type Options struct {
 	// means "do not override" — the flag is simply not passed and the tool
 	// resolves its own root.
 	MosaicRoot string
+	// CatalogFolder overrides the catalogue directory the deployment tool
+	// sources agents and workflows from. Empty means "do not override" — the
+	// flag is simply not passed and the tool resolves its own catalogue under
+	// its own root.
+	//
+	// It lives here rather than on any per-call request struct because it
+	// applies uniformly to every subprocess call this port makes, Render and
+	// Deploy alike.
+	CatalogFolder string
 	// Timeout bounds the delegate's runtime. A positive value causes every
 	// Render call to apply context.WithTimeout; zero means no added timeout
 	// beyond the caller's own context.
@@ -158,6 +197,31 @@ type wireFailure struct {
 	Detail   string `json:"detail"`
 	ExitCode int    `json:"exitCode"`
 }
+
+// wireRunSummary mirrors the JSON shape of domain.RunSummary from
+// Tools/Deployment/internal/domain/outcome.go. That type carries no JSON
+// struct tags, so its keys are its Go field names verbatim. Only the fields
+// this port reads are modelled; unknown keys are ignored by the decoder.
+type wireRunSummary struct {
+	Actions []wireActionRecord `json:"Actions"`
+	Outcome string             `json:"Outcome"`
+}
+
+type wireActionRecord struct {
+	Ref        wireArtifactRef `json:"Ref"`
+	TargetPath string          `json:"TargetPath"`
+	Taken      string          `json:"Taken"`
+	Err        string          `json:"Err"`
+}
+
+type wireArtifactRef struct {
+	Kind string `json:"Kind"`
+	Key  string `json:"Key"`
+}
+
+// artifactKindAgent is domain.ArtifactAgent's value, mirrored as a local
+// constant. This package must not import mosaic-deploy to learn it.
+const artifactKindAgent = "agent"
 
 // buildArgs constructs the argument list for the deployment tool's render
 // subcommand from the request and options. This is the only place the flag
@@ -207,6 +271,13 @@ func buildArgs(req domain.RenderAgentRequest, opts Options) []string {
 	// root — the correct behaviour for a correctly staged distribution.
 	if opts.MosaicRoot != "" {
 		args = append(args, "--mosaic-root", opts.MosaicRoot)
+	}
+
+	// --catalog-folder is omitted when empty, leaving the tool to resolve its
+	// own catalogue under its own root. Both root-scoped overrides sit together
+	// at the end of the list.
+	if opts.CatalogFolder != "" {
+		args = append(args, "--catalog-folder", opts.CatalogFolder)
 	}
 
 	return args
@@ -299,6 +370,177 @@ func (d *deployer) Render(ctx context.Context, req domain.RenderAgentRequest) (d
 		Detail:      failure.Detail,
 		ToolMessage: failure.Message,
 		ExitCode:    failure.ExitCode,
+	}
+}
+
+// buildDeployArgs constructs the argument list for the deployment tool's deploy
+// subcommand from the request, options, and an optional selections file path.
+// This is the only place the deploy subcommand's flag names are spelled.
+//
+// Unlike buildArgs for render, --workflows is always emitted — even when the
+// caller supplies nil — to prevent a nil selection from resolving silently to
+// an empty deployment that succeeds while writing only the orchestrator.
+func buildDeployArgs(req domain.DeployRequest, opts Options, selectionsPath string) []string {
+	args := []string{"deploy"}
+
+	// --harness and --workspace are always present.
+	args = append(args, "--harness", req.HarnessID)
+	args = append(args, "--workspace", req.WorkspaceRoot)
+
+	// --workflows is ALWAYS emitted on the deploy subcommand. nil Workflows
+	// ("caller did not specify") still emits the flag with an empty value rather
+	// than omitting it: an omitted flag causes the tool to silently resolve to
+	// an empty list, deploying only the orchestrator while reporting success.
+	// strings.Join handles nil and empty slices identically, producing "".
+	args = append(args, "--workflows", strings.Join(req.Workflows, ","))
+
+	// --auto-confirm suppresses the plan-review gate, which fires before every
+	// deploy including dry runs. Without it every call fails on the gate.
+	args = append(args, "--auto-confirm")
+
+	if req.DryRun {
+		args = append(args, "--dry-run")
+	}
+
+	// --output json is always present so the deployer can parse the run summary.
+	args = append(args, "--output", "json")
+
+	// --mosaic-root and --catalog-folder follow the empty-means-omitted convention,
+	// identical to buildArgs for render, keeping both root-scoped overrides together.
+	if opts.MosaicRoot != "" {
+		args = append(args, "--mosaic-root", opts.MosaicRoot)
+	}
+	if opts.CatalogFolder != "" {
+		args = append(args, "--catalog-folder", opts.CatalogFolder)
+	}
+
+	// --selections is appended when a temporary tier-models file was written.
+	if selectionsPath != "" {
+		args = append(args, "--selections", selectionsPath)
+	}
+
+	return args
+}
+
+// writeSelectionsFile creates a temporary YAML file whose only top-level key
+// is tier_models, carrying the caller's map verbatim. The file path is returned
+// so the caller can pass it to --selections and remove it unconditionally.
+//
+// No other key is written: an emitted workflows key — even empty — would fight
+// the --workflows flag the same Deploy call carries.
+func writeSelectionsFile(tierModels map[string]string) (string, error) {
+	f, err := os.CreateTemp("", "agentdeploy-selections-*.yaml")
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	if _, err := fmt.Fprintln(f, "tier_models:"); err != nil {
+		return f.Name(), err
+	}
+	for k, v := range tierModels {
+		if _, err := fmt.Fprintf(f, "  %s: %s\n", k, v); err != nil {
+			return f.Name(), err
+		}
+	}
+	return f.Name(), nil
+}
+
+// Deploy invokes the deployment tool through the CommandRunner seam, parses
+// its JSON run summary, and maps every outcome to a typed result or error.
+//
+// Exit 0 with decodable JSON → DeployResult with agent list, nil error.
+// Exit 0 with undecodable output → ErrUnparseableOutput.
+// Non-zero exit → *DeployError wrapping ErrDeployFailed; ToolMessage from stderr.
+// Invocation failure (binary missing, etc.) → ErrToolUnavailable.
+// Port timeout exceeded → ErrTimedOut.
+// Caller cancellation → the cancellation error propagated as-is.
+func (d *deployer) Deploy(ctx context.Context, req domain.DeployRequest) (domain.DeployResult, error) {
+	invoke := d.opts.Invoke
+	if invoke == nil {
+		invoke = execCommandRunner
+	}
+
+	runCtx := ctx
+	if d.opts.Timeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, d.opts.Timeout)
+		defer cancel()
+	}
+
+	// Write the temporary selections file when the caller supplies tier-model
+	// pre-answers. The defer ensures removal on every exit path: success,
+	// non-zero exit, undecodable output, tool-unavailable, timeout, and
+	// caller cancellation.
+	var selectionsPath string
+	if len(req.TierModels) > 0 {
+		path, err := writeSelectionsFile(req.TierModels)
+		if err != nil {
+			return domain.DeployResult{}, fmt.Errorf("agentdeploy: could not write selections file: %w", err)
+		}
+		selectionsPath = path
+		defer os.Remove(selectionsPath) //nolint:errcheck
+	}
+
+	args := buildDeployArgs(req, d.opts, selectionsPath)
+	stdout, stderr, exitCode, invokeErr := invoke(runCtx, d.opts.ExecutablePath, args)
+
+	if invokeErr != nil {
+		// The port's own timeout fired: the delegate did not respond in time.
+		if runCtx.Err() == context.DeadlineExceeded {
+			return domain.DeployResult{}, fmt.Errorf(
+				"%w: deployment tool %q did not respond within the configured timeout of %v",
+				ErrTimedOut, d.opts.ExecutablePath, d.opts.Timeout,
+			)
+		}
+		// Caller's context was cancelled: propagate as-is, never remap to
+		// ErrTimedOut or ErrToolUnavailable.
+		if errors.Is(invokeErr, context.Canceled) || errors.Is(invokeErr, context.DeadlineExceeded) {
+			return domain.DeployResult{}, fmt.Errorf(
+				"agentdeploy: invocation of %q cancelled: %w",
+				d.opts.ExecutablePath, invokeErr,
+			)
+		}
+		// Binary missing or not startable.
+		return domain.DeployResult{}, fmt.Errorf(
+			"%w: deployment tool %q could not be invoked: %v",
+			ErrToolUnavailable, d.opts.ExecutablePath, invokeErr,
+		)
+	}
+
+	if exitCode == exitSuccess {
+		var summary wireRunSummary
+		if err := json.Unmarshal(stdout, &summary); err != nil {
+			return domain.DeployResult{}, fmt.Errorf(
+				"%w: deployment tool %q exited 0 but produced %d bytes of stdout that could not be decoded: %v",
+				ErrUnparseableOutput, d.opts.ExecutablePath, len(stdout), err,
+			)
+		}
+		// Filter to agent artifacts only; all other kinds (skills, hooks,
+		// manifests) are dropped. Order is preserved from the tool's output.
+		var agents []domain.DeployedAgent
+		for _, action := range summary.Actions {
+			if action.Ref.Kind == artifactKindAgent {
+				agents = append(agents, domain.DeployedAgent{
+					Key:             action.Ref.Key,
+					DestinationPath: action.TargetPath,
+				})
+			}
+		}
+		return domain.DeployResult{
+			Agents:             agents,
+			CreatedDirectories: nil, // run summary carries no created-directory list
+		}, nil
+	}
+
+	// Non-zero exit: the deploy subcommand emits no structured failure envelope,
+	// so the degrade path is the only path. ToolMessage comes from stderr.
+	// Reason and Detail are empty by design — reserved for a future envelope.
+	return domain.DeployResult{}, &DeployError{
+		Reason:      "",
+		Detail:      "",
+		ToolMessage: string(stderr),
+		ExitCode:    exitCode,
 	}
 }
 

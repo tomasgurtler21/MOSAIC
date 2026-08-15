@@ -54,7 +54,6 @@ Follow the standard output template structure.
 
 ## Error Handling
 
-- **Retry transient errors once** before escalating
 - **Return BLOCKED** if prerequisites are missing
 
 ---

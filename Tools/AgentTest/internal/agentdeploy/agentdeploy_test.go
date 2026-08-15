@@ -1,10 +1,12 @@
 package agentdeploy_test
 
-// Tests for the delegating agent deployer: the outcome mapping across the
-// deployment tool's exit codes (T4.1), the successful-render contract that
-// destination path and source version come from the tool's JSON output rather
-// than being reconstructed (T4.2), the failure and degradation modes (T4.3),
-// and the argument pass-through including the workflow set (T4.5).
+// Tests for the delegating agent deployer. The Render tests cover exit-code
+// outcome mapping, the successful-render destination-path and source-version
+// contract, failure and degradation modes, and argument pass-through including
+// the workflow set. The Deploy tests cover argument-list construction for the
+// deploy subcommand, workflow-ID wire guarantees, result mapping from the
+// run-summary JSON, failure/timeout/cancellation mapping, and the temporary
+// selections file contract.
 //
 // No real deployment tool binary is present in these tests. Every interaction
 // with the delegate goes through the Invoke seam, exactly as internal/cost
@@ -20,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -881,6 +884,107 @@ func TestRender_MosaicRootEmpty_MosaicRootFlagAbsent(t *testing.T) {
 	}
 }
 
+// TestRender_CatalogFolder_PassedAsCatalogFolderFlag asserts that a non-empty
+// CatalogFolder in Options reaches the delegate as the --catalog-folder flag,
+// so the deployment tool sources agents and workflows from the caller-specified
+// catalogue rather than its own auto-resolved one. This mirrors the MosaicRoot
+// pattern exactly: both are root-scoped overrides and both follow the same
+// empty-means-omitted convention.
+func TestRender_CatalogFolder_PassedAsCatalogFolderFlag(t *testing.T) {
+	var capturedArgs []string
+
+	deployer := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		CatalogFolder:  "/opt/mosaic/Tools/AgentTest/catalog",
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return []byte(successJSON), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = deployer.Render(context.Background(), minimalRequest())
+
+	if !containsFlag(capturedArgs, "--catalog-folder", "/opt/mosaic/Tools/AgentTest/catalog") {
+		t.Errorf("args = %v, want --catalog-folder /opt/mosaic/Tools/AgentTest/catalog when CatalogFolder is set", capturedArgs)
+	}
+}
+
+// TestRender_CatalogFolderEmpty_CatalogFolderFlagAbsent asserts that when
+// CatalogFolder is empty (the default), --catalog-folder is not passed, so
+// the deployment tool resolves its own catalogue under its own root — the
+// correct behaviour for a correctly staged distribution. This is the
+// empty-means-omitted guard that keeps every existing Render call's argument
+// list byte-identical when the new field is left at its zero value.
+func TestRender_CatalogFolderEmpty_CatalogFolderFlagAbsent(t *testing.T) {
+	var capturedArgs []string
+
+	deployer := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		CatalogFolder:  "", // empty = do not override
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return []byte(successJSON), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = deployer.Render(context.Background(), minimalRequest())
+
+	if flagIndex(capturedArgs, "--catalog-folder") >= 0 {
+		t.Errorf("args = %v, want --catalog-folder to be absent when CatalogFolder is empty (empty means do not override)", capturedArgs)
+	}
+}
+
+// TestRender_CatalogFolderEmpty_ArgumentListByteIdenticalToBaseline pins the
+// backwards-compatibility contract: the argument list produced with CatalogFolder
+// explicitly empty must be byte-identical to the list produced when the field
+// is absent at all. Any deviation — including appending the flag with an empty
+// value — would silently change every pre-existing Render call's wire shape.
+//
+// This test proves the empty-means-omitted invariant is a compiler-verifiable
+// property, not just a comment: both Options values must produce the same slice.
+func TestRender_CatalogFolderEmpty_ArgumentListByteIdenticalToBaseline(t *testing.T) {
+	req := minimalRequest()
+
+	// Baseline: Options without CatalogFolder in the struct at all — this
+	// is the construction every pre-existing test uses.
+	var baselineArgs []string
+	baselineDeployer := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		MosaicRoot:     "/opt/mosaic",
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			baselineArgs = append([]string(nil), args...)
+			return []byte(successJSON), nil, exitSuccess, nil
+		},
+	})
+	_, _ = baselineDeployer.Render(context.Background(), req)
+
+	// Same Options but with CatalogFolder set to the empty string explicitly.
+	// Must produce the identical argument slice.
+	var withEmptyArgs []string
+	withEmptyDeployer := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		MosaicRoot:     "/opt/mosaic",
+		CatalogFolder:  "", // explicit empty — must not alter the argument list
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			withEmptyArgs = append([]string(nil), args...)
+			return []byte(successJSON), nil, exitSuccess, nil
+		},
+	})
+	_, _ = withEmptyDeployer.Render(context.Background(), req)
+
+	if len(baselineArgs) != len(withEmptyArgs) {
+		t.Errorf("arg count: baseline Options = %d args, Options with empty CatalogFolder = %d args; want byte-identical lists (empty CatalogFolder must not add any argument)",
+			len(baselineArgs), len(withEmptyArgs))
+		return
+	}
+	for i := range baselineArgs {
+		if baselineArgs[i] != withEmptyArgs[i] {
+			t.Errorf("args[%d]: baseline = %q, with empty CatalogFolder = %q; want byte-identical argument lists",
+				i, baselineArgs[i], withEmptyArgs[i])
+		}
+	}
+}
+
 // TestRender_Model_PassedAsModelFlag asserts that a non-empty Model in the
 // request reaches the delegate as the --model flag value. The rendered agent
 // declares the specified model; without this pass-through the field is silently
@@ -930,6 +1034,1133 @@ func TestRender_ModelEmpty_ModelFlagAbsent(t *testing.T) {
 // =============================================================================
 // Helpers
 // =============================================================================
+
+// =============================================================================
+// Deploy test helpers
+// =============================================================================
+
+// agentActionJSON returns a JSON object for an agent artifact action in the
+// wireActionRecord shape (capital field names — RunSummary carries no JSON tags).
+func agentActionJSON(key, targetPath string) string {
+	return `{"Ref":{"Kind":"agent","Key":"` + key + `"},"TargetPath":"` + targetPath + `","Taken":"created","Err":""}`
+}
+
+// nonAgentActionJSON returns a JSON object for a non-agent artifact action
+// (e.g. a skill or hook). These must not appear in DeployResult.Agents.
+func nonAgentActionJSON(kind, key, targetPath string) string {
+	return `{"Ref":{"Kind":"` + kind + `","Key":"` + key + `"},"TargetPath":"` + targetPath + `","Taken":"created","Err":""}`
+}
+
+// deploySuccessJSON builds a minimal valid run summary JSON for exit 0.
+// actions are individual wireActionRecord JSON objects.
+func deploySuccessJSON(actions ...string) []byte {
+	if len(actions) == 0 {
+		return []byte(`{"Actions":[],"Outcome":"success"}`)
+	}
+	return []byte(`{"Actions":[` + strings.Join(actions, ",") + `],"Outcome":"success"}`)
+}
+
+// minimalDeployRequest builds the smallest DeployRequest that satisfies the
+// always-present-workflows contract. Tests that care about specific field values
+// set them explicitly.
+func minimalDeployRequest() domain.DeployRequest {
+	return domain.DeployRequest{
+		HarnessID:     "claude-code",
+		WorkspaceRoot: "/sandbox",
+		Workflows:     []string{"brownfield-tdd"},
+	}
+}
+
+// =============================================================================
+// T3.1 — Deploy argument-list construction
+// =============================================================================
+
+// TestDeploy_SubcommandName_IsDeployNotRender asserts that Deploy invokes the
+// "deploy" subcommand. Using the wrong subcommand silently routes the call to
+// the render handler, which has a completely different argument surface.
+func TestDeploy_SubcommandName_IsDeployNotRender(t *testing.T) {
+	var capturedArgs []string
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), minimalDeployRequest())
+
+	if len(capturedArgs) == 0 {
+		t.Fatal("Deploy passed no arguments to CommandRunner, want at least the subcommand name")
+	}
+	if capturedArgs[0] != "deploy" {
+		t.Errorf("args[0] = %q, want %q (the deploy subcommand, not render)", capturedArgs[0], "deploy")
+	}
+}
+
+// TestDeploy_HarnessID_PassedAsHarnessFlag asserts that the HarnessID from the
+// request reaches the delegate as the --harness flag.
+func TestDeploy_HarnessID_PassedAsHarnessFlag(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.HarnessID = "claude-code"
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if !containsFlag(capturedArgs, "--harness", "claude-code") {
+		t.Errorf("args = %v, want --harness claude-code", capturedArgs)
+	}
+}
+
+// TestDeploy_WorkspaceRoot_PassedAsWorkspaceFlag asserts that WorkspaceRoot
+// from the request reaches the delegate as --workspace.
+func TestDeploy_WorkspaceRoot_PassedAsWorkspaceFlag(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.WorkspaceRoot = "/var/sandbox/run-99"
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if !containsFlag(capturedArgs, "--workspace", "/var/sandbox/run-99") {
+		t.Errorf("args = %v, want --workspace /var/sandbox/run-99", capturedArgs)
+	}
+}
+
+// TestDeploy_OutputJSONFlag_AlwaysPresent asserts that --output json is always
+// passed so the deployer can parse the run summary rather than scraping
+// human-readable output.
+func TestDeploy_OutputJSONFlag_AlwaysPresent(t *testing.T) {
+	var capturedArgs []string
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), minimalDeployRequest())
+
+	if !containsFlag(capturedArgs, "--output", "json") {
+		t.Errorf("args = %v, want --output json to always be present", capturedArgs)
+	}
+}
+
+// TestDeploy_AutoConfirmFlag_AlwaysPresent asserts that --auto-confirm is
+// always passed. Without it the deployment tool halts on a plan-review gate
+// and the non-interactive call fails before writing anything.
+func TestDeploy_AutoConfirmFlag_AlwaysPresent(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.DryRun = false
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	found := false
+	for _, arg := range capturedArgs {
+		if arg == "--auto-confirm" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("args = %v, want --auto-confirm to always be present (plan-review gate fires on every call)", capturedArgs)
+	}
+}
+
+// TestDeploy_AutoConfirmFlag_PresentEvenOnDryRun asserts that --auto-confirm is
+// present even when DryRun is true. The plan-review gate runs before the
+// dry-run check, so a dry-run call without --auto-confirm fails on the gate.
+func TestDeploy_AutoConfirmFlag_PresentEvenOnDryRun(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.DryRun = true
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	found := false
+	for _, arg := range capturedArgs {
+		if arg == "--auto-confirm" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("args = %v, want --auto-confirm even on a dry-run call (plan-review gate fires before the dry-run check)", capturedArgs)
+	}
+}
+
+// TestDeploy_DryRun_PassedAsDryRunFlag asserts that DryRun: true reaches the
+// delegate as --dry-run, so preflight validation calls do not write any file.
+func TestDeploy_DryRun_PassedAsDryRunFlag(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.DryRun = true
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	found := false
+	for _, arg := range capturedArgs {
+		if arg == "--dry-run" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("args = %v, want --dry-run when DryRun is true", capturedArgs)
+	}
+}
+
+// TestDeploy_DryRunFalse_DryRunFlagAbsent asserts that when DryRun is false,
+// --dry-run is absent so the tool actually writes the files.
+func TestDeploy_DryRunFalse_DryRunFlagAbsent(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.DryRun = false
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if len(capturedArgs) == 0 {
+		t.Fatal("Deploy did not invoke CommandRunner; cannot assert argument absence")
+	}
+	for i, arg := range capturedArgs {
+		if arg == "--dry-run" {
+			t.Errorf("args[%d] = --dry-run, want it absent when DryRun is false", i)
+		}
+	}
+}
+
+// TestDeploy_CatalogFolder_PassedAsCatalogFolderFlag asserts that a non-empty
+// CatalogFolder in Options reaches the delegate as --catalog-folder. This is
+// what makes a test run source from the test catalogue instead of the
+// production one.
+func TestDeploy_CatalogFolder_PassedAsCatalogFolderFlag(t *testing.T) {
+	var capturedArgs []string
+
+	d := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		CatalogFolder:  "/opt/mosaic/Tools/AgentTest/catalog",
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), minimalDeployRequest())
+
+	if !containsFlag(capturedArgs, "--catalog-folder", "/opt/mosaic/Tools/AgentTest/catalog") {
+		t.Errorf("args = %v, want --catalog-folder /opt/mosaic/Tools/AgentTest/catalog when CatalogFolder is set", capturedArgs)
+	}
+}
+
+// TestDeploy_CatalogFolderEmpty_CatalogFolderFlagAbsent asserts that when
+// CatalogFolder is empty, --catalog-folder is not passed. Empty-means-omitted
+// keeps real deployments unaffected when no catalogue override is configured.
+func TestDeploy_CatalogFolderEmpty_CatalogFolderFlagAbsent(t *testing.T) {
+	var capturedArgs []string
+
+	d := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		CatalogFolder:  "",
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), minimalDeployRequest())
+
+	if len(capturedArgs) == 0 {
+		t.Fatal("Deploy did not invoke CommandRunner; cannot assert argument absence")
+	}
+	if flagIndex(capturedArgs, "--catalog-folder") >= 0 {
+		t.Errorf("args = %v, want --catalog-folder absent when CatalogFolder is empty", capturedArgs)
+	}
+}
+
+// TestDeploy_MosaicRoot_PassedAsMosaicRootFlag asserts that a non-empty
+// MosaicRoot in Options reaches the delegate as --mosaic-root on the deploy
+// subcommand. This mirrors the Render variant: an implementation that passes
+// --mosaic-root to render but omits it from deploy would go undetected without
+// this test.
+func TestDeploy_MosaicRoot_PassedAsMosaicRootFlag(t *testing.T) {
+	var capturedArgs []string
+
+	d := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		MosaicRoot:     "/opt/mosaic",
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), minimalDeployRequest())
+
+	if !containsFlag(capturedArgs, "--mosaic-root", "/opt/mosaic") {
+		t.Errorf("args = %v, want --mosaic-root /opt/mosaic when MosaicRoot is set", capturedArgs)
+	}
+}
+
+// TestDeploy_MosaicRootEmpty_MosaicRootFlagAbsent asserts that when MosaicRoot
+// is empty (the default), --mosaic-root is not passed to the deploy subcommand,
+// so the deployment tool resolves its own root. Empty-means-omitted is symmetric
+// with the Render path.
+func TestDeploy_MosaicRootEmpty_MosaicRootFlagAbsent(t *testing.T) {
+	var capturedArgs []string
+
+	d := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		MosaicRoot:     "", // empty = do not override
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), minimalDeployRequest())
+
+	if len(capturedArgs) == 0 {
+		t.Fatal("Deploy did not invoke CommandRunner; cannot assert argument absence")
+	}
+	if flagIndex(capturedArgs, "--mosaic-root") >= 0 {
+		t.Errorf("args = %v, want --mosaic-root to be absent when MosaicRoot is empty", capturedArgs)
+	}
+}
+
+// =============================================================================
+// T3.2 — Workflow IDs are never nil/absent on the wire
+// =============================================================================
+
+// TestDeploy_WorkflowsNil_WorkflowsFlagPresentOnWire asserts the critical
+// non-nil guarantee: when the caller supplies nil Workflows ("not specified"),
+// Deploy must still emit --workflows. Without this guard, a nil selection
+// reaching the tool resolves to an empty list, deploys only the orchestrator,
+// and silently omits every workflow-referenced agent while reporting success.
+func TestDeploy_WorkflowsNil_WorkflowsFlagPresentOnWire(t *testing.T) {
+	var capturedArgs []string
+	req := domain.DeployRequest{
+		HarnessID:     "claude-code",
+		WorkspaceRoot: "/sandbox",
+		Workflows:     nil, // explicitly nil — caller did not specify
+	}
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if flagIndex(capturedArgs, "--workflows") < 0 {
+		t.Errorf("args = %v, want --workflows to be present even when request.Workflows is nil "+
+			"(nil means 'not specified' by the caller, but Deploy must always supply a selection on the wire "+
+			"to prevent a silent empty deployment)", capturedArgs)
+	}
+}
+
+// TestDeploy_WorkflowsNonNilEmpty_WorkflowsFlagPresentAsEmpty asserts that an
+// explicitly-empty workflow set (non-nil but zero-length) reaches the delegate
+// as --workflows with an empty value.
+func TestDeploy_WorkflowsNonNilEmpty_WorkflowsFlagPresentAsEmpty(t *testing.T) {
+	var capturedArgs []string
+	req := domain.DeployRequest{
+		HarnessID:     "claude-code",
+		WorkspaceRoot: "/sandbox",
+		Workflows:     []string{}, // non-nil empty = explicitly none
+	}
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	idx := flagIndex(capturedArgs, "--workflows")
+	if idx < 0 {
+		t.Errorf("args = %v, want --workflows flag to be present when Workflows is non-nil empty", capturedArgs)
+		return
+	}
+	if idx+1 < len(capturedArgs) && capturedArgs[idx+1] != "" {
+		t.Errorf("--workflows value = %q, want empty string for an explicitly-empty workflow set", capturedArgs[idx+1])
+	}
+}
+
+// TestDeploy_WorkflowsPopulated_WorkflowsFlagWithCommaJoinedValues asserts
+// that a populated Workflows slice reaches the delegate as
+// --workflows <comma-joined-ids>.
+func TestDeploy_WorkflowsPopulated_WorkflowsFlagWithCommaJoinedValues(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.Workflows = []string{"brownfield-tdd", "greenfield"}
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	idx := flagIndex(capturedArgs, "--workflows")
+	if idx < 0 || idx+1 >= len(capturedArgs) {
+		t.Errorf("args = %v, want --workflows <ids> when Workflows is populated", capturedArgs)
+		return
+	}
+	if capturedArgs[idx+1] != "brownfield-tdd,greenfield" {
+		t.Errorf("--workflows value = %q, want %q", capturedArgs[idx+1], "brownfield-tdd,greenfield")
+	}
+}
+
+// =============================================================================
+// T3.3 — Result mapping from the tool's JSON run summary
+// =============================================================================
+
+// TestDeploy_SuccessJSON_ReturnsNilError asserts that exit 0 with a valid run
+// summary produces a nil error.
+func TestDeploy_SuccessJSON_ReturnsNilError(t *testing.T) {
+	action := agentActionJSON("orchestrator", "/sandbox/.claude/agents/orchestrator.md")
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return deploySuccessJSON(action), nil, exitSuccess, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err != nil {
+		t.Errorf("Deploy returned error on exit 0 with valid JSON: %v", err)
+	}
+}
+
+// TestDeploy_SuccessJSON_AgentActionsInResult asserts that agent artifact
+// actions from the run summary appear in DeployResult.Agents with the correct
+// Key and DestinationPath from the JSON output.
+func TestDeploy_SuccessJSON_AgentActionsInResult(t *testing.T) {
+	action := agentActionJSON("orchestrator", "/sandbox/.claude/agents/orchestrator.md")
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return deploySuccessJSON(action), nil, exitSuccess, nil
+		},
+	})
+
+	result, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err != nil {
+		t.Fatalf("Deploy returned error: %v", err)
+	}
+	if len(result.Agents) != 1 {
+		t.Fatalf("DeployResult.Agents length = %d, want 1", len(result.Agents))
+	}
+	if result.Agents[0].Key != "orchestrator" {
+		t.Errorf("Agents[0].Key = %q, want %q", result.Agents[0].Key, "orchestrator")
+	}
+	if result.Agents[0].DestinationPath != "/sandbox/.claude/agents/orchestrator.md" {
+		t.Errorf("Agents[0].DestinationPath = %q, want %q",
+			result.Agents[0].DestinationPath, "/sandbox/.claude/agents/orchestrator.md")
+	}
+}
+
+// TestDeploy_SuccessJSON_NonAgentActionsDropped asserts that non-agent
+// artifacts in the run summary (skills, hooks) are not included in
+// DeployResult.Agents.
+func TestDeploy_SuccessJSON_NonAgentActionsDropped(t *testing.T) {
+	agentAction := agentActionJSON("orchestrator", "/sandbox/.claude/agents/orchestrator.md")
+	skillAction := nonAgentActionJSON("skill", "lean-tdd", "/sandbox/.claude/skills/lean-tdd.md")
+	hookAction := nonAgentActionJSON("hook", "pre-tool", "/sandbox/.claude/hooks/pre-tool.sh")
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return deploySuccessJSON(agentAction, skillAction, hookAction), nil, exitSuccess, nil
+		},
+	})
+
+	result, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err != nil {
+		t.Fatalf("Deploy returned error: %v", err)
+	}
+	if len(result.Agents) != 1 {
+		t.Errorf("DeployResult.Agents length = %d, want 1 (only the agent action; skill and hook must be dropped)",
+			len(result.Agents))
+	}
+	if len(result.Agents) == 1 && result.Agents[0].Key != "orchestrator" {
+		t.Errorf("Agents[0].Key = %q, want %q", result.Agents[0].Key, "orchestrator")
+	}
+}
+
+// TestDeploy_SuccessJSON_MultipleAgents_OrderPreservedFromJSONOutput asserts
+// that multiple agent entries are returned in the order the tool reported them.
+// No re-sorting or re-grouping is applied.
+func TestDeploy_SuccessJSON_MultipleAgents_OrderPreservedFromJSONOutput(t *testing.T) {
+	action1 := agentActionJSON("orchestrator", "/sandbox/.claude/agents/orchestrator.md")
+	action2 := agentActionJSON("codebase-research", "/sandbox/.claude/agents/codebase-research.md")
+	action3 := agentActionJSON("researcher", "/sandbox/.claude/agents/researcher.md")
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return deploySuccessJSON(action1, action2, action3), nil, exitSuccess, nil
+		},
+	})
+
+	result, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err != nil {
+		t.Fatalf("Deploy returned error: %v", err)
+	}
+	if len(result.Agents) != 3 {
+		t.Fatalf("DeployResult.Agents length = %d, want 3", len(result.Agents))
+	}
+	wantKeys := []string{"orchestrator", "codebase-research", "researcher"}
+	for i, want := range wantKeys {
+		if result.Agents[i].Key != want {
+			t.Errorf("Agents[%d].Key = %q, want %q (order must match the tool's reported order)",
+				i, result.Agents[i].Key, want)
+		}
+	}
+}
+
+// TestDeploy_SuccessJSON_EmptyActions_NoError asserts that a run summary with
+// no actions produces no error (empty is a valid outcome).
+func TestDeploy_SuccessJSON_EmptyActions_NoError(t *testing.T) {
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err != nil {
+		t.Errorf("Deploy returned error on exit 0 with empty Actions list: %v", err)
+	}
+}
+
+// =============================================================================
+// T3.4 — Failure, timeout, and cancellation mapping
+// =============================================================================
+
+// TestDeploy_NonZeroExit_ReturnsErrDeployFailed asserts that a non-zero exit
+// maps to ErrDeployFailed, not ErrRenderFailed (which belongs to a different
+// subcommand's failure vocabulary).
+func TestDeploy_NonZeroExit_ReturnsErrDeployFailed(t *testing.T) {
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return []byte("error: catalog not found"), []byte("catalog not found"), exitFailure, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error on exit 1, want ErrDeployFailed")
+	}
+	if !errors.Is(err, agentdeploy.ErrDeployFailed) {
+		t.Errorf("error = %v, want it to wrap ErrDeployFailed (not ErrRenderFailed)", err)
+	}
+}
+
+// TestDeploy_NonZeroExit_ReturnsDeployErrorType asserts that the error on a
+// non-zero exit is a *DeployError, which callers can inspect with errors.As.
+func TestDeploy_NonZeroExit_ReturnsDeployErrorType(t *testing.T) {
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return []byte("error: something failed"), []byte("something failed"), exitFailure, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error on exit 1")
+	}
+	var de *agentdeploy.DeployError
+	if !errors.As(err, &de) {
+		t.Errorf("error = %v, want a *DeployError carrying diagnostic detail", err)
+	}
+}
+
+// TestDeploy_NonZeroExit_DeployErrorCarriesExitCode asserts that the exit code
+// the seam returned is stored in DeployError.ExitCode. Without this pin, an
+// implementation that always stores 0 would pass the other DeployError tests
+// while breaking callers that branch on the code.
+func TestDeploy_NonZeroExit_DeployErrorCarriesExitCode(t *testing.T) {
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return []byte("error: something failed"), []byte("something failed"), exitFailure, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error on exit 1")
+	}
+	var de *agentdeploy.DeployError
+	if !errors.As(err, &de) {
+		t.Fatalf("error = %v, want a *DeployError", err)
+	}
+	if de.ExitCode != exitFailure {
+		t.Errorf("DeployError.ExitCode = %d, want %d (the exit code the seam returned)", de.ExitCode, exitFailure)
+	}
+}
+
+// TestDeploy_NonZeroExit_DeployErrorHasEmptyReason asserts that the deploy
+// subcommand's absence of a structured failure envelope means Reason is always
+// empty. Callers must treat an empty Reason as "undifferentiated failure".
+func TestDeploy_NonZeroExit_DeployErrorHasEmptyReason(t *testing.T) {
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return []byte("error: some deployment problem"), []byte("some deployment problem"), exitFailure, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error on exit 1")
+	}
+	var de *agentdeploy.DeployError
+	if !errors.As(err, &de) {
+		t.Fatalf("error = %v, want a *DeployError", err)
+	}
+	if de.Reason != "" {
+		t.Errorf("DeployError.Reason = %q, want empty (deploy subcommand emits no structured failure envelope)", de.Reason)
+	}
+}
+
+// TestDeploy_NonZeroExit_ToolMessageFromStderr asserts that the deployment
+// tool's stderr text is preserved in DeployError.ToolMessage. The deploy
+// subcommand writes its diagnostic to stderr even under --output json.
+func TestDeploy_NonZeroExit_ToolMessageFromStderr(t *testing.T) {
+	const stderrText = "Error: workflow 'unknown-wf' not found in catalog"
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return []byte("not json"), []byte(stderrText), exitFailure, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error on exit 1")
+	}
+	var de *agentdeploy.DeployError
+	if !errors.As(err, &de) {
+		t.Fatalf("error = %v, want a *DeployError carrying the stderr text", err)
+	}
+	if !strings.Contains(de.ToolMessage, stderrText) {
+		t.Errorf("DeployError.ToolMessage = %q, want it to contain the tool's stderr text %q verbatim", de.ToolMessage, stderrText)
+	}
+}
+
+// TestDeploy_ZeroExitUnparseableOutput_ReturnsErrUnparseableOutput asserts
+// that exit 0 with undecodable stdout is ErrUnparseableOutput — distinct from
+// ErrDeployFailed so a caller can tell apart infrastructure garbage from a
+// rejected request.
+func TestDeploy_ZeroExitUnparseableOutput_ReturnsErrUnparseableOutput(t *testing.T) {
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return []byte("not valid json"), nil, exitSuccess, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error on exit 0 with unparseable output, want ErrUnparseableOutput")
+	}
+	if !errors.Is(err, agentdeploy.ErrUnparseableOutput) {
+		t.Errorf("error = %v, want it to wrap ErrUnparseableOutput", err)
+	}
+}
+
+// TestDeploy_ZeroExitUnparseableOutput_ErrorNamesOutputSize asserts the
+// diagnosability requirement for the unparseable-output case on the Deploy path:
+// the error must name how many bytes were produced, so a developer can distinguish
+// "exited zero and said nothing" from "exited zero and said something garbled".
+// This mirrors TestRender_ZeroExitUnparseableOutput_ErrorNamesOutputSize.
+func TestDeploy_ZeroExitUnparseableOutput_ErrorNamesOutputSize(t *testing.T) {
+	const output = "not valid json at all"
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return []byte(output), nil, exitSuccess, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error on exit 0 with unparseable output")
+	}
+	// The error must name the byte count so "zero bytes" is distinguishable
+	// from "non-zero bytes that are garbled".
+	byteCount := fmt.Sprintf("%d", len(output))
+	if !strings.Contains(err.Error(), byteCount) && !strings.Contains(err.Error(), "bytes") {
+		t.Errorf("error = %q, want it to name the output size (%s bytes) for diagnosability", err.Error(), byteCount)
+	}
+}
+
+// TestDeploy_ToolUnavailable_ReturnsErrToolUnavailable asserts that an
+// invocation failure maps to ErrToolUnavailable, not ErrDeployFailed — a
+// missing binary is an infrastructure problem, not a bad declaration.
+func TestDeploy_ToolUnavailable_ReturnsErrToolUnavailable(t *testing.T) {
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			return nil, nil, 0, errors.New("exec: executable file not found in $PATH")
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), minimalDeployRequest())
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error when the tool cannot be invoked, want ErrToolUnavailable")
+	}
+	if !errors.Is(err, agentdeploy.ErrToolUnavailable) {
+		t.Errorf("error = %v, want it to wrap ErrToolUnavailable", err)
+	}
+}
+
+// TestDeploy_PortTimeout_ReturnsErrTimedOut asserts that when the configured
+// timeout fires before the tool responds, Deploy returns ErrTimedOut without
+// hanging.
+func TestDeploy_PortTimeout_ReturnsErrTimedOut(t *testing.T) {
+	d := newDeployer(agentdeploy.Options{
+		Timeout: 20 * time.Millisecond,
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			<-ctx.Done()
+			return nil, nil, 0, ctx.Err()
+		},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := d.Deploy(ctx, minimalDeployRequest())
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error when the port timeout fired, want ErrTimedOut")
+	}
+	if !errors.Is(err, agentdeploy.ErrTimedOut) {
+		t.Errorf("error = %v, want it to wrap ErrTimedOut (not ErrToolUnavailable or ErrDeployFailed)", err)
+	}
+}
+
+// TestDeploy_CallerContextCancelled_ReturnsError asserts that a cancelled
+// caller context produces an error that wraps context.Canceled and is NOT
+// ErrTimedOut and NOT ErrToolUnavailable — caller cancellation must propagate
+// as-is, not be remapped to a port-specific error class.
+func TestDeploy_CallerContextCancelled_ReturnsError(t *testing.T) {
+	d := newDeployer(agentdeploy.Options{
+		Timeout: 10 * time.Second,
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			<-ctx.Done()
+			return nil, nil, 0, ctx.Err()
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := d.Deploy(ctx, minimalDeployRequest())
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error when the caller's context was cancelled, want an error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want it to wrap context.Canceled (caller cancellation must propagate as-is)", err)
+	}
+	if errors.Is(err, agentdeploy.ErrTimedOut) {
+		t.Errorf("error = %v, want it NOT to wrap ErrTimedOut (caller cancellation is not a port timeout)", err)
+	}
+	if errors.Is(err, agentdeploy.ErrToolUnavailable) {
+		t.Errorf("error = %v, want it NOT to wrap ErrToolUnavailable (caller cancellation is not an invocation failure)", err)
+	}
+}
+
+// =============================================================================
+// T3.5 — Temporary selections file: creation, content, and cleanup
+// =============================================================================
+
+// TestDeploy_PopulatedTierModels_SelectionsFlagPresent asserts that a non-empty
+// TierModels map causes --selections to appear in the argument list. Without
+// this flag the tool receives no tier-model map and the run succeeds with
+// unresolved model placeholders.
+func TestDeploy_PopulatedTierModels_SelectionsFlagPresent(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.TierModels = map[string]string{
+		domain.TierTestSubject: "claude-opus-4-5",
+		domain.TierTestStub:    "claude-haiku-3-5",
+	}
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if flagIndex(capturedArgs, "--selections") < 0 {
+		t.Errorf("args = %v, want --selections <path> when TierModels is populated", capturedArgs)
+	}
+}
+
+// TestDeploy_PopulatedTierModels_SelectionsFileExistsDuringCall asserts that
+// the selections file exists while the CommandRunner seam is executing. The
+// seam is the only place where both the --selections path and an in-flight
+// file are simultaneously observable.
+func TestDeploy_PopulatedTierModels_SelectionsFileExistsDuringCall(t *testing.T) {
+	req := minimalDeployRequest()
+	req.TierModels = map[string]string{
+		domain.TierTestSubject: "claude-opus-4-5",
+	}
+
+	var fileExistedDuringCall bool
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				if _, err := os.Stat(args[idx+1]); err == nil {
+					fileExistedDuringCall = true
+				}
+			}
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if !fileExistedDuringCall {
+		t.Error("selections file did not exist while CommandRunner was executing, " +
+			"want a readable file at the --selections path during the call")
+	}
+}
+
+// TestDeploy_PopulatedTierModels_SelectionsFileHasTierModelsKey asserts that
+// the temporary selections file contains the tier_models key with the caller's
+// map entries verbatim. Without the correct key the deployment tool finds no
+// tier pre-answers.
+func TestDeploy_PopulatedTierModels_SelectionsFileHasTierModelsKey(t *testing.T) {
+	req := minimalDeployRequest()
+	req.TierModels = map[string]string{
+		domain.TierTestSubject: "claude-opus-4-5",
+		domain.TierTestStub:    "claude-haiku-3-5",
+	}
+
+	var fileContent []byte
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				fileContent, _ = os.ReadFile(args[idx+1])
+			}
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if len(fileContent) == 0 {
+		t.Fatal("selections file was empty or not readable during the call; cannot assert content")
+	}
+	s := string(fileContent)
+	for _, want := range []string{
+		"tier_models:",
+		domain.TierTestSubject,
+		"claude-opus-4-5",
+		domain.TierTestStub,
+		"claude-haiku-3-5",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("selections file content = %q, want it to contain %q", s, want)
+		}
+	}
+}
+
+// TestDeploy_PopulatedTierModels_SelectionsFileHasNoOtherTopLevelKeys asserts
+// that the temporary selections file contains ONLY the tier_models key. An
+// emitted workflows key — even empty — would fight the --workflows flag this
+// same call carries.
+func TestDeploy_PopulatedTierModels_SelectionsFileHasNoOtherTopLevelKeys(t *testing.T) {
+	req := minimalDeployRequest()
+	req.TierModels = map[string]string{
+		domain.TierTestSubject: "claude-opus-4-5",
+	}
+
+	var fileContent []byte
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				fileContent, _ = os.ReadFile(args[idx+1])
+			}
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if len(fileContent) == 0 {
+		t.Fatal("selections file was empty or not readable during the call; cannot assert content")
+	}
+	s := string(fileContent)
+	for _, forbidden := range []string{"workflows:", "utility_agents:", "infrastructure_agents:", "hooks:"} {
+		if strings.Contains(s, forbidden) {
+			t.Errorf("selections file content = %q, must not contain %q "+
+				"(only tier_models is permitted; any other key could conflict with explicit flags)", s, forbidden)
+		}
+	}
+}
+
+// TestDeploy_EmptyTierModels_NoSelectionsFlagOrFile asserts that an empty
+// TierModels map produces no --selections flag. Empty-means-omitted prevents
+// a no-op selections file from silently overriding a flag on a real call.
+func TestDeploy_EmptyTierModels_NoSelectionsFlagOrFile(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.TierModels = map[string]string{} // empty map
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if len(capturedArgs) == 0 {
+		t.Fatal("Deploy did not invoke CommandRunner; cannot assert argument absence")
+	}
+	if flagIndex(capturedArgs, "--selections") >= 0 {
+		t.Errorf("args = %v, want --selections to be absent when TierModels is empty", capturedArgs)
+	}
+}
+
+// TestDeploy_NilTierModels_NoSelectionsFlagOrFile asserts that a nil TierModels
+// map (the zero value) produces no --selections flag. Callers that do not
+// pre-answer tier models must not cause a file to be created.
+func TestDeploy_NilTierModels_NoSelectionsFlagOrFile(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.TierModels = nil // nil map
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if len(capturedArgs) == 0 {
+		t.Fatal("Deploy did not invoke CommandRunner; cannot assert argument absence")
+	}
+	if flagIndex(capturedArgs, "--selections") >= 0 {
+		t.Errorf("args = %v, want --selections to be absent when TierModels is nil", capturedArgs)
+	}
+}
+
+// TestDeploy_SelectionsFile_RemovedAfterSuccess asserts that no temporary
+// selections file remains on disk after a successful Deploy call. A file per
+// call accumulates across a long suite run.
+func TestDeploy_SelectionsFile_RemovedAfterSuccess(t *testing.T) {
+	var capturedPath string
+	req := minimalDeployRequest()
+	req.TierModels = map[string]string{domain.TierTestSubject: "claude-opus-4-5"}
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				capturedPath = args[idx+1]
+			}
+			return deploySuccessJSON(agentActionJSON("orchestrator", "/sandbox/.claude/agents/orchestrator.md")), nil, exitSuccess, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), req)
+
+	if err != nil {
+		t.Fatalf("Deploy returned error (want success for this cleanup test): %v", err)
+	}
+	if capturedPath == "" {
+		t.Fatal("--selections path was not captured from CommandRunner; cannot assert file removal")
+	}
+	if _, statErr := os.Stat(capturedPath); !os.IsNotExist(statErr) {
+		t.Errorf("selections file at %q still exists after Deploy returned successfully; "+
+			"it must be removed on every exit path including success", capturedPath)
+	}
+}
+
+// TestDeploy_SelectionsFile_RemovedAfterFailure asserts that no temporary
+// selections file remains on disk after a failed Deploy call. Cleanup must be
+// unconditional — a leaked file on the failure path is a defect.
+func TestDeploy_SelectionsFile_RemovedAfterFailure(t *testing.T) {
+	var capturedPath string
+	req := minimalDeployRequest()
+	req.TierModels = map[string]string{domain.TierTestSubject: "claude-opus-4-5"}
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				capturedPath = args[idx+1]
+			}
+			// Simulate a non-zero exit.
+			return []byte("error: something went wrong"), []byte("something went wrong"), exitFailure, nil
+		},
+	})
+
+	_, err := d.Deploy(context.Background(), req)
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error on exit 1 (want failure for this cleanup test)")
+	}
+	if capturedPath == "" {
+		t.Fatal("--selections path was not captured from CommandRunner; cannot assert file removal")
+	}
+	if _, statErr := os.Stat(capturedPath); !os.IsNotExist(statErr) {
+		t.Errorf("selections file at %q still exists after Deploy returned a failure; "+
+			"it must be removed on every exit path including failure", capturedPath)
+	}
+}
+
+// TestDeploy_SelectionsFile_RemovedAfterTimeout asserts that no temporary
+// selections file remains on disk when the port's own timeout fires. Cleanup
+// must be unconditional across all exit paths — a defer skipped by a panic or
+// placed in the wrong scope would leak the file on this path while passing the
+// success and failure cleanup tests.
+func TestDeploy_SelectionsFile_RemovedAfterTimeout(t *testing.T) {
+	var capturedPath string
+	req := minimalDeployRequest()
+	req.TierModels = map[string]string{domain.TierTestSubject: "claude-opus-4-5"}
+
+	d := newDeployer(agentdeploy.Options{
+		Timeout: 20 * time.Millisecond,
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				capturedPath = args[idx+1]
+			}
+			// Block until the port's timeout cancels the context.
+			<-ctx.Done()
+			return nil, nil, 0, ctx.Err()
+		},
+	})
+
+	// The outer context is generous; the port's own timeout fires first.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := d.Deploy(ctx, req)
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error on timeout (want ErrTimedOut for this cleanup test)")
+	}
+	if capturedPath == "" {
+		t.Fatal("--selections path was not captured from CommandRunner; cannot assert file removal")
+	}
+	if _, statErr := os.Stat(capturedPath); !os.IsNotExist(statErr) {
+		t.Errorf("selections file at %q still exists after Deploy returned on timeout; "+
+			"cleanup must be unconditional across all exit paths including timeout", capturedPath)
+	}
+}
+
+// TestDeploy_SelectionsFile_RemovedAfterCancellation asserts that no temporary
+// selections file remains on disk when the caller's context is cancelled while
+// the tool is running. Cleanup must be unconditional — a leaked file on the
+// cancellation path is a defect just as much as on the failure path.
+func TestDeploy_SelectionsFile_RemovedAfterCancellation(t *testing.T) {
+	var capturedPath string
+	req := minimalDeployRequest()
+	req.TierModels = map[string]string{domain.TierTestSubject: "claude-opus-4-5"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	d := newDeployer(agentdeploy.Options{
+		Timeout: 10 * time.Second, // much longer than the test will run
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			idx := flagIndex(args, "--selections")
+			if idx >= 0 && idx+1 < len(args) {
+				capturedPath = args[idx+1]
+			}
+			// Cancel the caller's context now that the path is captured, then
+			// block until the combined (port timeout + caller cancel) context fires.
+			cancel()
+			<-ctx.Done()
+			return nil, nil, 0, ctx.Err()
+		},
+	})
+
+	_, err := d.Deploy(ctx, req)
+
+	if err == nil {
+		t.Fatal("Deploy returned nil error when caller context was cancelled (want an error for this cleanup test)")
+	}
+	if capturedPath == "" {
+		t.Fatal("--selections path was not captured from CommandRunner; cannot assert file removal")
+	}
+	if _, statErr := os.Stat(capturedPath); !os.IsNotExist(statErr) {
+		t.Errorf("selections file at %q still exists after Deploy returned on cancellation; "+
+			"cleanup must be unconditional across all exit paths including caller cancellation", capturedPath)
+	}
+}
 
 // containsFlag reports whether args contains flag followed immediately by value.
 func containsFlag(args []string, flag, value string) bool {

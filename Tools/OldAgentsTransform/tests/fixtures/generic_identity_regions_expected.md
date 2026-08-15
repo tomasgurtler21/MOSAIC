@@ -68,20 +68,10 @@ You are the **RegionTestAgent** agent in a multi-agent orchestration system.
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
 
-- **Retry transient errors once** before escalating
-
 <ErrorHandlingExtension type="project">
 </ErrorHandlingExtension>
 
 </ErrorHandling>
----
-
-<OutputFormat type="core">
-## Output Format
-
-Return JSON status.
-
-</OutputFormat>
 ---
 
 <ExecutionPhilosophy type="core">

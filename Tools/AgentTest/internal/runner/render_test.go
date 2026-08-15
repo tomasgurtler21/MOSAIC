@@ -1,22 +1,24 @@
 package runner_test
 
-// Tests for setup rendering the subject and each declared stub collaborator
-// through the deployment port, recording every reported path in the
-// provisioning ledger, deriving the subject's spawn-time definition path from
-// the port's report, and handling render failures cleanly.
+// Tests for setup rendering stub agents through the deployment port on the
+// stub-agents provisioning path, recording every reported path in the
+// provisioning ledger, and handling render failures cleanly. Also covers
+// the catalogue path's workflow pass-through via Deploy.
 //
 // These tests cover:
-//   - setup calls Deploy.Render for the subject and each declared stub
-//   - the subject is rendered before any stub
-//   - the subject's declared workflow set is passed through to the port
-//   - the subject's DefinitionPath after setup comes from the port's reported
-//     DestinationPath, never from an authored value
-//   - every path and directory the port reports is appended to the provisioning
-//     ledger before the adapter's Provision is called
+//   - setup calls Deploy.Render for each declared stub on the stub-agents path
+//   - the subject is rendered before any stub on the conflicted path (both
+//     CatalogAgentKey and StubAgents declared — only preflight catches this)
+//   - the subject's declared workflow set is passed through to Deploy.Deploy on
+//     the catalogue path
+//   - the subject's DefinitionPath after setup comes from the deploy port's
+//     report on the catalogue path, never from an authored value
+//   - every path and directory the port reports for stubs is appended to the
+//     provisioning ledger before the adapter's Provision is called
 //   - the adapter's returned Provisioning is merged into the ledger, not
 //     assigned over it, so rendered paths survive the adapter step
-//   - a render failure for the subject or any stub aborts setup with a
-//     diagnosable error naming what failed
+//   - a render failure for any stub aborts setup with a diagnosable error
+//     naming what failed
 //   - a partial render failure still passes the ledger (containing what was
 //     recorded before the failure) to Teardown, so teardown is exact
 //   - adapter.Provision is still called after rendering, confirming the adapter
@@ -46,29 +48,48 @@ func renderingRequest(testID string) runner.Request {
 	return req
 }
 
+// stubAgentsRenderRequest builds a runner.Request on the stub-agents
+// provisioning path: the subject carries a pre-existing DefinitionPath and no
+// CatalogAgentKey, and one stub agent is declared so the definition is on the
+// stub-agents path. Setup on this path calls Deploy.Render once per declared
+// stub and never calls Deploy.Deploy.
+func stubAgentsRenderRequest(testID string) runner.Request {
+	req := newRequest(testID)
+	req.Test.Definition.Subject.DefinitionPath = "orchestrator.md"
+	req.Test.Definition.Subject.CatalogAgentKey = ""
+	req.Test.Definition.StubAgents = []domain.StubAgent{
+		{
+			Identity:   domain.CollaboratorIdentity{ToolName: "dispatch", AgentIdentity: "researcher"},
+			SourcePath: "/workspace/agents/researcher.md",
+		},
+	}
+	return req
+}
+
 // --- subject and stub rendering ---
 
-// TestSetup_RendersSubjectThroughDeployPort asserts that setup calls
-// Deploy.Render exactly once for the subject, passing the subject's
-// CatalogAgentKey, the adapter's harness ID, and the sandbox subject
+// TestSetup_RendersStubAgentThroughDeployPort asserts that setup calls
+// Deploy.Render for each declared stub agent on the stub-agents path, passing
+// the stub's SourcePath, the adapter's harness ID, and the sandbox subject
 // directory as the workspace root.
-func TestSetup_RendersSubjectThroughDeployPort(t *testing.T) {
+func TestSetup_RendersStubAgentThroughDeployPort(t *testing.T) {
 	h := newHarness(t)
-	req := renderingRequest("render-subject")
+	req := stubAgentsRenderRequest("render-stub")
 
 	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
 	calls := h.Deployer.allCalls()
-	subjectCalls := renderCallsByKey(calls, "orchestrator")
-	if len(subjectCalls) != 1 {
-		t.Fatalf("Deploy.Render called for subject %d time(s), want exactly 1; all calls: %+v",
-			len(subjectCalls), calls)
+	stubCalls := renderCallsBySourcePath(calls)
+	if len(stubCalls) != 1 {
+		t.Fatalf("Deploy.Render called for stub %d time(s), want exactly 1; all calls: %+v",
+			len(stubCalls), calls)
 	}
-	got := subjectCalls[0]
-	if got.CatalogAgentKey != "orchestrator" {
-		t.Errorf("Deploy.Render: CatalogAgentKey = %q, want %q", got.CatalogAgentKey, "orchestrator")
+	got := stubCalls[0]
+	if got.SourcePath != "/workspace/agents/researcher.md" {
+		t.Errorf("Deploy.Render: SourcePath = %q, want %q",
+			got.SourcePath, "/workspace/agents/researcher.md")
 	}
 	if got.HarnessID != h.Adapter.ID() {
 		t.Errorf("Deploy.Render: HarnessID = %q, want adapter ID %q", got.HarnessID, h.Adapter.ID())
@@ -82,46 +103,47 @@ func TestSetup_RendersSubjectThroughDeployPort(t *testing.T) {
 }
 
 // TestSetup_PassesSubjectWorkflowsThroughToDeployPort asserts that the
-// subject's declared workflow set is passed to Deploy.Render verbatim,
+// subject's declared workflow set is passed to the deploy port verbatim,
 // preserving the nil/empty distinction that governs how the deploy tool
-// renders the orchestrator's workflow region.
+// renders the orchestrator's workflow region. On the catalogue path, workflows
+// are carried in the single Deploy call; on the stub-agents path, only stubs
+// are rendered and the subject's workflow set is not passed to Render.
 func TestSetup_PassesSubjectWorkflowsThroughToDeployPort(t *testing.T) {
 	t.Run("declared_workflows_passed_through", func(t *testing.T) {
 		h := newHarness(t)
-		req := renderingRequest("render-workflows-declared")
+		req := catalogueRequest("deploy-workflows-declared")
 		req.Test.Definition.Subject.Workflows = []string{"tdd-soft", "tdd-hard"}
 
 		if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
 			t.Fatalf("Run returned unexpected error: %v", err)
 		}
 
-		calls := h.Deployer.allCalls()
-		subjectCalls := renderCallsByKey(calls, "orchestrator")
-		if len(subjectCalls) == 0 {
-			t.Fatal("Deploy.Render was never called for the subject")
+		deployCalls := h.Deployer.allDeployCalls()
+		if len(deployCalls) == 0 {
+			t.Fatal("Deploy.Deploy was never called for the catalogue-path subject")
 		}
-		got := subjectCalls[0].Workflows
+		got := deployCalls[0].Workflows
 		if len(got) != 2 || got[0] != "tdd-soft" || got[1] != "tdd-hard" {
-			t.Errorf("Deploy.Render: Workflows = %v, want [tdd-soft tdd-hard]", got)
+			t.Errorf("Deploy.Deploy: Workflows = %v, want [tdd-soft tdd-hard]", got)
 		}
 	})
 
 	t.Run("nil_workflow_set_stays_nil", func(t *testing.T) {
 		h := newHarness(t)
-		req := renderingRequest("render-workflows-nil")
+		req := catalogueRequest("deploy-workflows-nil")
 		req.Test.Definition.Subject.Workflows = nil
 
 		if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
 			t.Fatalf("Run returned unexpected error: %v", err)
 		}
 
-		calls := h.Deployer.allCalls()
-		subjectCalls := renderCallsByKey(calls, "orchestrator")
-		if len(subjectCalls) == 0 {
-			t.Fatal("Deploy.Render was never called for the subject")
+		deployCalls := h.Deployer.allDeployCalls()
+		if len(deployCalls) == 0 {
+			t.Fatal("Deploy.Deploy was never called for the catalogue-path subject")
 		}
-		if subjectCalls[0].Workflows != nil {
-			t.Errorf("Deploy.Render: Workflows = %v, want nil (unspecified, not empty)", subjectCalls[0].Workflows)
+		if deployCalls[0].Workflows != nil {
+			t.Errorf("Deploy.Deploy: Workflows = %v, want nil (unspecified, not empty)",
+				deployCalls[0].Workflows)
 		}
 	})
 }
@@ -253,44 +275,44 @@ func TestSetup_SubjectDefinitionPathComesFromDeployPortReport(t *testing.T) {
 
 // --- ledger exactness ---
 
-// TestSetup_RenderedSubjectPathRecordedInProvisioningLedger asserts that the
-// destination path the deploy port reports for the subject render is present
+// TestSetup_RenderedStubPathRecordedInProvisioningLedger asserts that the
+// destination path the deploy port reports for a stub render is present
 // in the Provisioning passed to Deprovision. The path must be in the ledger
 // before the adapter's Provision is called — if setup fails during Provision,
 // the rendered file is still removed.
-func TestSetup_RenderedSubjectPathRecordedInProvisioningLedger(t *testing.T) {
+func TestSetup_RenderedStubPathRecordedInProvisioningLedger(t *testing.T) {
 	h := newHarness(t)
 
 	var reportedPath string
 	h.Deployer.renderFn = func(req domain.RenderAgentRequest) (domain.RenderAgentResult, error) {
-		if req.CatalogAgentKey != "" {
-			reportedPath = filepath.Join(req.WorkspaceRoot, "agents", req.CatalogAgentKey+".md")
+		if req.SourcePath != "" {
+			reportedPath = filepath.Join(req.WorkspaceRoot, "agents", "researcher.md")
 			return domain.RenderAgentResult{DestinationPath: reportedPath}, nil
 		}
-		return domain.RenderAgentResult{DestinationPath: filepath.Join(req.WorkspaceRoot, "stub.md")}, nil
+		return domain.RenderAgentResult{DestinationPath: filepath.Join(req.WorkspaceRoot, "subject.md")}, nil
 	}
 
-	req := renderingRequest("ledger-subject-path")
+	req := stubAgentsRenderRequest("ledger-stub-path")
 
 	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
 	if reportedPath == "" {
-		t.Fatal("Deploy.Render was never called for the subject; " +
-			"setup must render the subject through the deploy port")
+		t.Fatal("Deploy.Render was never called for the stub agent; " +
+			"setup must render each declared stub through the deploy port")
 	}
 
 	deprovisioned := h.Adapter.lastDeprovisionedProv
 	if !containsPath(deprovisioned.Files, reportedPath) {
-		t.Errorf("rendered subject path %q not found in Provisioning.Files passed to Deprovision; "+
+		t.Errorf("rendered stub path %q not found in Provisioning.Files passed to Deprovision; "+
 			"setup must record every path the deploy port reports in the ledger so teardown removes it.\n"+
 			"got Files: %v", reportedPath, deprovisioned.Files)
 	}
 }
 
 // TestSetup_RenderedCreatedDirectoriesRecordedInProvisioningLedger asserts
-// that directories the deploy port reports it created during a render are
+// that directories the deploy port reports it created during a stub render are
 // appended to Provisioning.Dirs in the ledger, so Deprovision can remove
 // them too.
 func TestSetup_RenderedCreatedDirectoriesRecordedInProvisioningLedger(t *testing.T) {
@@ -298,25 +320,25 @@ func TestSetup_RenderedCreatedDirectoriesRecordedInProvisioningLedger(t *testing
 
 	var renderedDir string
 	h.Deployer.renderFn = func(req domain.RenderAgentRequest) (domain.RenderAgentResult, error) {
-		if req.CatalogAgentKey != "" {
+		if req.SourcePath != "" {
 			renderedDir = filepath.Join(req.WorkspaceRoot, ".claude", "agents")
 			return domain.RenderAgentResult{
-				DestinationPath:    filepath.Join(renderedDir, req.CatalogAgentKey+".md"),
+				DestinationPath:    filepath.Join(renderedDir, "researcher.md"),
 				CreatedDirectories: []string{renderedDir},
 			}, nil
 		}
-		return domain.RenderAgentResult{DestinationPath: filepath.Join(req.WorkspaceRoot, "stub.md")}, nil
+		return domain.RenderAgentResult{DestinationPath: filepath.Join(req.WorkspaceRoot, "subject.md")}, nil
 	}
 
-	req := renderingRequest("ledger-created-dirs")
+	req := stubAgentsRenderRequest("ledger-created-dirs")
 
 	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
 	if renderedDir == "" {
-		t.Fatal("Deploy.Render was never called for the subject; " +
-			"setup must render the subject through the deploy port")
+		t.Fatal("Deploy.Render was never called for the stub agent; " +
+			"setup must render each declared stub through the deploy port")
 	}
 
 	deprovisioned := h.Adapter.lastDeprovisionedProv
@@ -329,7 +351,7 @@ func TestSetup_RenderedCreatedDirectoriesRecordedInProvisioningLedger(t *testing
 
 // TestSetup_AdapterProvisioningMergedNotReplacedInLedger asserts that the
 // adapter's returned Provisioning is merged into the ledger rather than
-// replacing it: both the rendered paths (appended before Provision) and the
+// replacing it: both stub-rendered paths (appended before Provision) and the
 // adapter's own installed paths (from the Provision return) must be present
 // in the Provisioning passed to Deprovision.
 func TestSetup_AdapterProvisioningMergedNotReplacedInLedger(t *testing.T) {
@@ -353,20 +375,20 @@ func TestSetup_AdapterProvisioningMergedNotReplacedInLedger(t *testing.T) {
 		Sensitive:     []string{adapterSensitive},
 	}
 
-	req := renderingRequest("ledger-merge")
+	req := stubAgentsRenderRequest("ledger-merge")
 
 	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
 	if renderedPath == "" {
-		t.Fatal("Deploy.Render was never called; " +
-			"setup must render agents through the deploy port")
+		t.Fatal("Deploy.Render was never called for the stub agent; " +
+			"setup must render each declared stub through the deploy port")
 	}
 
 	deprovisioned := h.Adapter.lastDeprovisionedProv
 	if !containsPath(deprovisioned.Files, renderedPath) {
-		t.Errorf("rendered path %q not in Provisioning.Files passed to Deprovision; "+
+		t.Errorf("rendered stub path %q not in Provisioning.Files passed to Deprovision; "+
 			"adapter.Provision must merge its result into the ledger, not replace it — "+
 			"rendered paths must survive the adapter step.\n"+
 			"got Files: %v", renderedPath, deprovisioned.Files)
@@ -393,34 +415,34 @@ func TestSetup_AdapterProvisioningMergedNotReplacedInLedger(t *testing.T) {
 
 // --- render failure handling ---
 
-// TestSetup_SubjectRenderFailureAbortsSetupWithDiagnosableError asserts that
-// when the deploy port returns an error for the subject render, Run returns
-// a non-nil error whose message names the subject so an operator can diagnose
-// what went wrong.
-func TestSetup_SubjectRenderFailureAbortsSetupWithDiagnosableError(t *testing.T) {
+// TestSetup_StubAgentRenderFailureAbortsSetupWithDiagnosableError asserts
+// that when the deploy port returns an error for a stub render on the
+// stub-agents path, Run returns a non-nil error whose message names the
+// failing stub so an operator can diagnose what went wrong.
+func TestSetup_StubAgentRenderFailureAbortsSetupWithDiagnosableError(t *testing.T) {
 	h := newHarness(t)
 
-	renderErr := errors.New("deploy: agent-not-in-catalog: orchestrator")
+	renderErr := errors.New("deploy: source-not-generic: researcher")
 	h.Deployer.renderFn = func(req domain.RenderAgentRequest) (domain.RenderAgentResult, error) {
-		if req.CatalogAgentKey != "" {
+		if req.SourcePath != "" {
 			return domain.RenderAgentResult{}, renderErr
 		}
-		return domain.RenderAgentResult{DestinationPath: filepath.Join(req.WorkspaceRoot, "stub.md")}, nil
+		return domain.RenderAgentResult{DestinationPath: filepath.Join(req.WorkspaceRoot, "subject.md")}, nil
 	}
 
-	req := renderingRequest("subject-render-fail")
+	req := stubAgentsRenderRequest("stub-render-fail")
 
 	_, err := runner.Run(context.Background(), h.Deps, req)
 	if err == nil {
-		t.Fatal("Run returned nil error when the subject render failed; want a non-nil error")
+		t.Fatal("Run returned nil error when a stub render failed; want a non-nil error")
 	}
-	// The error must name the subject or the render operation so an operator
+	// The error must name the stub or the render operation so an operator
 	// can diagnose what failed without re-running.
 	errMsg := err.Error()
-	if !strings.Contains(errMsg, "orchestrator") &&
-		!strings.Contains(errMsg, "subject") &&
+	if !strings.Contains(errMsg, "researcher") &&
+		!strings.Contains(errMsg, "stub") &&
 		!strings.Contains(errMsg, "render") {
-		t.Errorf("error %q does not name the subject or render operation; "+
+		t.Errorf("error %q does not name the failing stub or render operation; "+
 			"want a diagnosable message that identifies what failed", errMsg)
 	}
 }

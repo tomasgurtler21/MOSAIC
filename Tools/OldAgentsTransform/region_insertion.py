@@ -16,6 +16,7 @@ from typing import Mapping, Sequence
 from boundary_constants import (
     BoundaryKind,
     DEPLOYED_PARENT_MAP,
+    MARKER_TO_INJECTION_NAME,
     SECTION_HEADING_MAP,
     TAG_PATTERN,
     open_tag,
@@ -24,6 +25,201 @@ from boundary_constants import (
 )
 from fence import fence_mask, first_unfenced, safe_insertion_index
 from non_conformance import NC_DRIFTED_BULLET, NC_MESSAGES, NonConformance
+
+
+# ---------------------------------------------------------------------------
+# Legacy section deletion data structures
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass(frozen=True)
+class LegacySectionDeletion:
+    """One retired legacy section that the transform deletes outright."""
+    section_id: str   # stable id for bookkeeping, e.g. "OutputFormat"
+    heading: str      # exact heading line text, e.g. "## Output Format"
+    level: int        # Markdown heading level the match requires, e.g. 2
+
+
+@dataclasses.dataclass
+class LegacySectionDeletionResult:
+    """Return value from delete_legacy_sections."""
+    lines: list[str]      # the body with matched sections removed
+    deleted: list[str]    # section_id values that matched, in document order
+
+
+# ---------------------------------------------------------------------------
+# Artifact-structure move data structures and constants
+# ---------------------------------------------------------------------------
+
+#: Name of the injection region that receives the moved artifact-structure block.
+ARTIFACT_TEMPLATE_REGION_NAME: str = "OutputArtifactTemplate"
+
+#: Matches an H3 heading whose text ends in "Artifact Structure" (any prefix).
+#: Exactly three '#' characters are required: H2 and H4 do not match.
+ARTIFACT_STRUCTURE_HEADING_PATTERN: str = r"^###\s+(?P<title>\S.*\bArtifact Structure)\s*$"
+
+_ARTIFACT_STRUCTURE_HEADING_RE: re.Pattern[str] = re.compile(
+    ARTIFACT_STRUCTURE_HEADING_PATTERN
+)
+
+
+@dataclasses.dataclass
+class ArtifactTemplateMoveResult:
+    """Return value from move_artifact_structure_block."""
+    lines: list[str]            # the body with the block relocated
+    moved: bool                 # True only when a block was actually relocated
+    heading_text: str | None    # the matched heading line, stripped; None when moved is False
+
+
+# ---------------------------------------------------------------------------
+# Declarative table of retired legacy sections.  Adding a future retired section
+# is one more tuple entry; no code changes are needed.
+LEGACY_SECTION_DELETIONS: tuple[LegacySectionDeletion, ...] = (
+    LegacySectionDeletion(
+        section_id="OutputFormat",
+        heading="## Output Format",
+        level=2,
+    ),
+)
+
+
+def delete_legacy_sections(
+    lines: Sequence[str],
+    *,
+    deletions: Sequence[LegacySectionDeletion] = LEGACY_SECTION_DELETIONS,
+) -> LegacySectionDeletionResult:
+    """Remove retired legacy sections from a raw body before any transform step runs.
+
+    Pure: reads and writes no files; mutates neither argument.
+
+    For each entry in `deletions`, the first unfenced line whose stripped text
+    equals `entry.heading` and whose heading level equals `entry.level` exactly
+    is treated as the start of the deleted span.  The span extends through the
+    line before the first subsequent line that is:
+      - an unfenced heading of level ≤ entry.level,
+      - a MOSAIC boundary tag line (TAG_PATTERN.match(...) is not None),
+      - a legacy region marker or old-style boundary marker,
+      - a '---' separator that is NOT preceded by a blank line (a '---' that IS
+        preceded by a blank line is a trailing section separator that falls inside
+        the deleted extent and is deleted with the section), or
+      - end of input.
+
+    Only the first match per declared entry is deleted.  A second occurrence of
+    the same heading is left in place.
+    """
+    if not lines:
+        return LegacySectionDeletionResult(lines=[], deleted=[])
+
+    mask = fence_mask(list(lines))
+    lines_list: list[str] = list(lines)
+    lines_to_delete: set[int] = set()
+    deleted: list[str] = []
+
+    # Build the set of legacy-marker strings for fast lookup
+    legacy_markers: frozenset[str] = frozenset(MARKER_TO_INJECTION_NAME.keys())
+    old_style_prefixes: tuple[str, ...] = ("[[SECTION:", "[[DEPLOYED:", "[[INJECTION:")
+
+    def _is_stop_line(stripped: str, prev_stripped: str) -> bool:
+        """Return True when the line is a deletion stop boundary.
+
+        A `---` separator line stops the deletion only when the line immediately
+        preceding it is non-blank.  A `---` preceded by a blank line is a trailing
+        section separator that falls inside the deleted extent and is deleted with it.
+        """
+        # MOSAIC boundary tag
+        if TAG_PATTERN.match(stripped) is not None:
+            return True
+        # Legacy region marker
+        if stripped in legacy_markers:
+            return True
+        # Old-style marker prefix
+        if any(stripped.startswith(p) for p in old_style_prefixes):
+            return True
+        # Section separator: stops only when NOT preceded by a blank line
+        if stripped == "---" and prev_stripped != "":
+            return True
+        return False
+
+    for entry in deletions:
+        # Find the first unfenced line matching the heading (text AND level)
+        heading_idx: int | None = None
+        for i, line in enumerate(lines_list):
+            if mask[i]:
+                continue
+            stripped = line.strip()
+            if stripped != entry.heading:
+                continue
+            # Verify heading level by counting leading '#' chars
+            level = 0
+            for ch in stripped:
+                if ch == "#":
+                    level += 1
+                else:
+                    break
+            if level == entry.level:
+                heading_idx = i
+                break
+
+        if heading_idx is None:
+            continue  # This entry did not match; no-op
+
+        # Find the end of the extent: first stop line after the heading.
+        # prev_stripped tracks the stripped content of the last non-fence line
+        # seen, so that the ---/blank-line distinction can be applied.
+        extent_end = len(lines_list)
+        prev_stripped = ""  # tracks the last non-fence, non-deleted line's stripped text
+        for i in range(heading_idx + 1, len(lines_list)):
+            if mask[i]:
+                continue
+            stripped = lines_list[i].strip()
+            # Stop at a heading of level ≤ entry.level
+            if stripped.startswith("#"):
+                next_level = 0
+                for ch in stripped:
+                    if ch == "#":
+                        next_level += 1
+                    else:
+                        break
+                if next_level <= entry.level:
+                    extent_end = i
+                    break
+            if _is_stop_line(stripped, prev_stripped):
+                extent_end = i
+                break
+            prev_stripped = stripped
+
+        # Mark heading and body lines for deletion
+        for i in range(heading_idx, extent_end):
+            lines_to_delete.add(i)
+        deleted.append(entry.section_id)
+
+    if not lines_to_delete:
+        return LegacySectionDeletionResult(lines=lines_list, deleted=[])
+
+    # Build new line list, applying blank-line hygiene at each gap
+    raw_result: list[str] = []
+    gap_positions: list[int] = []
+
+    i = 0
+    while i < len(lines_list):
+        if i in lines_to_delete:
+            while i < len(lines_list) and i in lines_to_delete:
+                i += 1
+            gap_positions.append(len(raw_result))
+            continue
+        raw_result.append(lines_list[i])
+        i += 1
+
+    # Collapse double blanks created by deletion: when both the line before and
+    # after a deletion gap are blank, remove the one immediately after the gap.
+    indices_to_remove: set[int] = set()
+    for g in gap_positions:
+        before_blank = g > 0 and raw_result[g - 1].strip() == ""
+        after_blank = g < len(raw_result) and raw_result[g].strip() == ""
+        if before_blank and after_blank:
+            indices_to_remove.add(g)
+
+    result_lines = [ln for idx, ln in enumerate(raw_result) if idx not in indices_to_remove]
+    return LegacySectionDeletionResult(lines=result_lines, deleted=deleted)
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +298,8 @@ _CP_HITL_STEP = DeletionRule(
     rule_id="CP-hitl-step",
     kind=DeletionKind.NUMBERED_STEP,
     pattern=(
-        r"When `human_in_the_loop: true`, present all output artifacts to the user "
-        r"for review/approval \(final action before returning response\)"
+        r"(?:When|If) `human_in_the_loop: true`, present all output artifacts to the user "
+        r"for review"
     ),
     required=False,
     drift_probe=r"(?i)(human|HITL).*(review|present)",
@@ -122,7 +318,7 @@ _AH_BLOCK = DeletionRule(
     kind=DeletionKind.HEADING_BLOCK,
     pattern=r"### Authority Hierarchy",
     required=True,
-    drift_probe=None,
+    drift_probe=r"(?i)^#{2,4}\s+Authority Hierarchy",
 )
 
 # ---------------------------------------------------------------------------
@@ -132,7 +328,7 @@ _AH_BLOCK = DeletionRule(
 _EH_RETRY = DeletionRule(
     rule_id="EH-retry",
     kind=DeletionKind.REGEX_BULLET,
-    pattern=r"Retry a transient error once",
+    pattern=r"Retry (?:a )?transient errors? once",
     required=True,
     drift_probe=r"(?i)retry.*(transient|error)",
 )
@@ -148,7 +344,7 @@ _EH_ERRCODES = DeletionRule(
 _EP_CONTEXT = DeletionRule(
     rule_id="EP-context",
     kind=DeletionKind.REGEX_BULLET,
-    pattern=r"Context Management.*Follow-up work is handled by spawning new agent instances",
+    pattern=r"Context Management.*Follow-up (?:work|tasks) (?:is|are) handled by spawning new agent instances",
     required=True,
     drift_probe=r"(?i)Context Management",
 )
@@ -176,24 +372,18 @@ _EP_QUALITY = DeletionRule(
 # PC-bullet-1 through PC-bullet-4: exact-match bullets, corpus-verified.
 _PC_BULLET_1 = DeletionRule(
     rule_id="PC-bullet-1",
-    kind=DeletionKind.EXACT_BULLET,
-    pattern=(
-        "**Orchestration Artifacts:** NEVER access an orchestration artifact"
-        " that is not named in your `input_artifacts`/`output_artifacts`"
-    ),
+    kind=DeletionKind.REGEX_BULLET,
+    pattern=r"\*\*Orchestration Artifacts:\*\* NEVER access .*`input_artifacts`/`output_artifacts`",
     required=True,
-    drift_probe=None,
+    drift_probe=r"(?i)^\*\*Orchestration Artifacts:\*\*",
 )
 
 _PC_BULLET_2 = DeletionRule(
     rule_id="PC-bullet-2",
-    kind=DeletionKind.EXACT_BULLET,
-    pattern=(
-        "**Project Files:** You MAY read, modify, or create any project file"
-        " — anything not named as an orchestration artifact"
-    ),
+    kind=DeletionKind.REGEX_BULLET,
+    pattern=r"\*\*Project Files:\*\* You MAY (?:read, modify, or create|access) any project file",
     required=True,
-    drift_probe=None,
+    drift_probe=r"(?i)^\*\*Project Files:\*\*",
 )
 
 _PC_BULLET_3 = DeletionRule(
@@ -201,7 +391,7 @@ _PC_BULLET_3 = DeletionRule(
     kind=DeletionKind.EXACT_BULLET,
     pattern="NEVER skip the JSON response block",
     required=True,
-    drift_probe=None,
+    drift_probe=r"(?i)^NEVER skip\b.*\bJSON\b",
 )
 
 _PC_BULLET_4 = DeletionRule(
@@ -209,7 +399,7 @@ _PC_BULLET_4 = DeletionRule(
     kind=DeletionKind.EXACT_BULLET,
     pattern="NEVER invent status codes",
     required=True,
-    drift_probe=None,
+    drift_probe=r"(?i)^NEVER invent\b",
 )
 
 # PC-bullet-5: regex rule matching both canonical and the known drifted wording.
@@ -330,7 +520,13 @@ def _line_matches_drift_probe(line: str, rule: DeletionRule) -> bool:
     return bool(re.search(rule.drift_probe, norm))
 
 
-def _find_heading_block_end(lines: Sequence[str], heading_idx: int, mask: list[bool]) -> int:
+def find_heading_block_end(
+    lines: Sequence[str],
+    heading_idx: int,
+    mask: Sequence[bool],
+    *,
+    own_region: str | None = None,
+) -> int:
     """Return the index one past the heading block starting at heading_idx.
 
     For a HEADING_BLOCK rule, the block runs from the heading through every
@@ -338,6 +534,11 @@ def _find_heading_block_end(lines: Sequence[str], heading_idx: int, mask: list[b
     outside any fence.
 
     heading_idx must point to a line starting with '### ' (H3).
+
+    own_region: when provided, boundary tags belonging to this region (matched
+    by tag_base_name) are transparent to the scan and do not stop it. Every
+    other region's tags remain opaque.  own_region=None (default) preserves the
+    original behaviour: every boundary tag stops the scan.
     """
     # Determine heading level from the pattern
     heading_line = lines[heading_idx].strip()
@@ -349,8 +550,7 @@ def _find_heading_block_end(lines: Sequence[str], heading_idx: int, mask: list[b
             break
 
     # Scan forward for next heading of same or higher level (fewer or equal #s),
-    # or a boundary tag ([[INJECTION:, [[DEPLOYED:, [[SECTION:, [[/...) — those
-    # mark regions that the deletion must not cross.
+    # or an opaque boundary tag.
     for i in range(heading_idx + 1, len(lines)):
         if mask[i]:
             continue
@@ -364,16 +564,25 @@ def _find_heading_block_end(lines: Sequence[str], heading_idx: int, mask: list[b
                     break
             if next_level <= level:
                 return i
-        # Stop at any boundary tag — don't delete across region boundaries
-        if TAG_PATTERN.match(line) is not None:
+        # Check boundary tags — transparent when they belong to own_region
+        m = TAG_PATTERN.match(line)
+        if m is not None:
+            if own_region is not None and tag_base_name(m.group("name")) == own_region:
+                continue  # own region's tag is transparent
             return i
     return len(lines)
+
+
+# Keep the private alias for backwards compatibility with any internal call sites
+# that pre-date the public promotion.
+_find_heading_block_end = find_heading_block_end
 
 
 def _apply_deletions(
     lines: list[str],
     section: SectionSpan,
     rules: tuple[DeletionRule, ...],
+    own_region: str | None = None,
 ) -> tuple[list[str], list[str], list[str], list[NonConformance]]:
     """Apply deletion rules within a section, returning
     (new_lines, applied, unmatched, non_conformances).
@@ -406,7 +615,9 @@ def _apply_deletions(
                 if mask[i]:
                     continue
                 if _line_matches_rule(lines[i], rule):
-                    block_end = _find_heading_block_end(lines, i, mask)
+                    block_end = find_heading_block_end(
+                        lines, i, mask, own_region=own_region
+                    )
                     # Clamp to section content_end
                     block_end = min(block_end, section.content_end)
                     for j in range(i, block_end):
@@ -612,7 +823,7 @@ def apply_conduct_regions(
             # The section span indices may be stale; we use the original section for now
             # (apply_conduct_regions is called once per file, sections from caller)
             working_lines, applied, unmatched, rule_ncs = _apply_deletions(
-                working_lines, section, spec.supersedes
+                working_lines, section, spec.supersedes, own_region=spec.name
             )
             deletions_applied.extend(applied)
             deletions_unmatched.extend(unmatched)
@@ -871,3 +1082,156 @@ def find_section_spans(lines: Sequence[str]) -> dict[str, SectionSpan]:
         )
 
     return result
+
+
+def move_artifact_structure_block(
+    lines: Sequence[str],
+    sections: Mapping[str, SectionSpan],
+    *,
+    region_name: str = ARTIFACT_TEMPLATE_REGION_NAME,
+    parent_section: str = "Capabilities",
+) -> ArtifactTemplateMoveResult:
+    """Locate an artifact-structure H3 block in Capabilities and move it into the
+    OutputArtifactTemplate region as project-region default content.
+
+    Pure: reads and writes no files; mutates neither argument.
+
+    The function is a no-op (moved=False, lines unchanged) in four cases:
+    - The parent_section is absent from sections.
+    - No OutputArtifactTemplate open/close tag pair exists within Capabilities.
+    - The OutputArtifactTemplate region already contains non-blank content.
+    - No H3 heading matching ARTIFACT_STRUCTURE_HEADING_PATTERN exists within Capabilities.
+
+    When a move succeeds the content appears exactly once in the output: removed
+    from its original position and inserted immediately after the open tag.
+    Trailing blank lines are trimmed from the moved block; the heading line itself
+    is retained as the first line of the moved content.
+    """
+    cap = sections.get(parent_section)
+    if cap is None:
+        return ArtifactTemplateMoveResult(lines=list(lines), moved=False, heading_text=None)
+
+    lines_list: list[str] = list(lines)
+    mask: list[bool] = fence_mask(lines_list)
+
+    open_t = open_tag(BoundaryKind.INJECTION, region_name)
+    close_t = close_tag(BoundaryKind.INJECTION, region_name)
+
+    # Locate the OutputArtifactTemplate open and close tags within Capabilities.
+    open_idx: int | None = None
+    close_idx: int | None = None
+    for i in range(cap.start, cap.content_end):
+        stripped = lines_list[i].strip()
+        if open_idx is None and stripped == open_t:
+            open_idx = i
+        elif open_idx is not None and stripped == close_t:
+            close_idx = i
+            break
+
+    if open_idx is None or close_idx is None:
+        # No region pair found — leave block in place.
+        return ArtifactTemplateMoveResult(lines=list(lines), moved=False, heading_text=None)
+
+    # Occupied-region guard: when the region already has non-blank content, do nothing.
+    for i in range(open_idx + 1, close_idx):
+        if lines_list[i].strip():
+            return ArtifactTemplateMoveResult(lines=list(lines), moved=False, heading_text=None)
+
+    # Find the artifact-structure heading within [cap.start, cap.content_end).
+    # Scoping the search to the Capabilities span is a contract, not an optimisation.
+    block_start: int | None = None
+    for i in range(cap.start, cap.content_end):
+        if mask[i]:
+            continue
+        if _ARTIFACT_STRUCTURE_HEADING_RE.match(lines_list[i].rstrip("\n")):
+            block_start = i
+            break
+
+    if block_start is None:
+        return ArtifactTemplateMoveResult(lines=list(lines), moved=False, heading_text=None)
+
+    heading_text: str = lines_list[block_start].strip()
+
+    # Compute block extent: from heading through the line before the first
+    # subsequent unfenced heading of level ≤ 3, MOSAIC boundary tag, or
+    # cap.content_end, whichever comes first.
+    block_end: int = cap.content_end
+    for i in range(block_start + 1, cap.content_end):
+        if mask[i]:
+            continue
+        stripped = lines_list[i].strip()
+        if stripped.startswith("#"):
+            nl = 0
+            for ch in stripped:
+                if ch == "#":
+                    nl += 1
+                else:
+                    break
+            if nl <= 3:
+                block_end = i
+                break
+        if TAG_PATTERN.match(stripped) is not None:
+            block_end = i
+            break
+
+    # Trim trailing blank lines from the block (spec contract).
+    actual_end: int = block_end
+    while actual_end > block_start + 1 and not lines_list[actual_end - 1].strip():
+        actual_end -= 1
+
+    block_lines: list[str] = lines_list[block_start:actual_end]
+
+    # Remove block from its original position and insert after open_idx,
+    # handling both orderings (block before region and block after region).
+    if block_start < open_idx:
+        # Block is before the region pair.
+        removal_count = actual_end - block_start
+        after_removal = lines_list[:block_start] + lines_list[actual_end:]
+
+        # Blank-line hygiene: collapse a double blank created by the removal.
+        gap_pos = block_start
+        before_blank = gap_pos > 0 and after_removal[gap_pos - 1].strip() == ""
+        after_blank = (
+            gap_pos < len(after_removal) and after_removal[gap_pos].strip() == ""
+        )
+        new_open_idx = open_idx - removal_count
+        if before_blank and after_blank:
+            after_removal = after_removal[:gap_pos] + after_removal[gap_pos + 1:]
+            new_open_idx -= 1
+
+        result_lines = (
+            after_removal[:new_open_idx + 1]
+            + block_lines
+            + after_removal[new_open_idx + 1:]
+        )
+    else:
+        # Block is after the region pair (block_start > close_idx).
+        # Insert the block after open_idx first, then remove from its (now-shifted)
+        # original position.
+        after_insert = (
+            lines_list[:open_idx + 1]
+            + block_lines
+            + lines_list[open_idx + 1:]
+        )
+        # block_start shifted forward by len(block_lines) due to insertion before it.
+        shift = len(block_lines)
+        new_block_start = block_start + shift
+        new_actual_end = actual_end + shift
+        after_removal = after_insert[:new_block_start] + after_insert[new_actual_end:]
+
+        # Blank-line hygiene: collapse a double blank at the removal gap.
+        gap_pos = new_block_start
+        before_blank = gap_pos > 0 and after_removal[gap_pos - 1].strip() == ""
+        after_blank = (
+            gap_pos < len(after_removal) and after_removal[gap_pos].strip() == ""
+        )
+        if before_blank and after_blank:
+            after_removal = after_removal[:gap_pos] + after_removal[gap_pos + 1:]
+
+        result_lines = after_removal
+
+    return ArtifactTemplateMoveResult(
+        lines=result_lines,
+        moved=True,
+        heading_text=heading_text,
+    )

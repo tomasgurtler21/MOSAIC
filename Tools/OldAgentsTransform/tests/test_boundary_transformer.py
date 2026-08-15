@@ -75,14 +75,16 @@ class TestGenericStandard:
         assert result.success is True
         assert result.errors == []
 
-    def test_all_six_sections_added(
+    def test_all_five_sections_added(
         self, generic_standard_input, tmp_path
     ):
-        """All 6 recognised section boundaries must be added to a standard generic file.
+        """All 5 canonical section boundaries must be added to a standard generic file.
 
         CommunicationProtocol is no longer an authored section heading; the protocol
         slot is a top-level <CommunicationProtocol type="managed"> boundary filled by the
-        deploy tool, not by the transformer.
+        deploy tool, not by the transformer.  OutputFormat is retired: its legacy
+        heading and body are deleted by delete_legacy_sections before the body-merge
+        path runs, so it never appears in sections_added.
         """
         result, _ = _transform_to_tmp(generic_standard_input, tmp_path)
         expected_sections = [
@@ -90,7 +92,6 @@ class TestGenericStandard:
             "Capabilities",
             "Constraints",
             "ErrorHandling",
-            "OutputFormat",
             "ExecutionPhilosophy",
         ]
         assert result.sections_added == expected_sections
@@ -191,9 +192,10 @@ class TestGenericStandard:
             "## Capabilities": "Capabilities",
             "## Constraints": "Constraints",
             "## Error Handling": "ErrorHandling",
-            "## Output Format": "OutputFormat",
             "## Execution Philosophy": "ExecutionPhilosophy",
         }
+        # OutputFormat is retired: its heading is deleted before the body-merge path
+        # runs, so no <OutputFormat type="core"> tag appears in the output.
         for i, line in enumerate(lines):
             for prefix, section_name in heading_to_section.items():
                 if line.startswith(prefix) and not line.startswith("##"):
@@ -414,10 +416,10 @@ class TestGenericInterface:
         assert result.version_before == "4.2.0"
         assert result.version_after == "4.3.0"
 
-    def test_all_six_sections_still_added(self, generic_interface_input, tmp_path):
-        """All 6 recognised section boundaries must still be added even when injections are missing."""
+    def test_all_five_sections_still_added(self, generic_interface_input, tmp_path):
+        """All 5 recognised section boundaries must still be added even when injections are missing."""
         result, _ = _transform_to_tmp(generic_interface_input, tmp_path)
-        assert len(result.sections_added) == 6
+        assert len(result.sections_added) == 5
 
     def test_output_matches_expected_exactly(
         self, generic_interface_input, generic_interface_expected, tmp_path
@@ -950,7 +952,6 @@ def _heading_text(section_name: str) -> str:
         "Capabilities": "Capabilities",
         "Constraints": "Constraints",
         "ErrorHandling": "Error Handling",
-        "OutputFormat": "Output Format",
         "ExecutionPhilosophy": "Execution Philosophy",
     }
     return _map.get(section_name, section_name)
@@ -1699,14 +1700,20 @@ class TestProvenanceUntaggedInput:
         )
 
     def test_other_sections_added(self, provenance_untagged_input, tmp_path):
-        """All six canonical sections must still be added despite the provenance heading removal."""
+        """All five canonical sections must still be added despite the provenance heading removal.
+
+        OutputFormat is retired and must not appear in sections_added.
+        """
         result, _ = _transform_to_tmp(provenance_untagged_input, tmp_path)
         for name in ("Identity", "Capabilities", "Constraints",
-                     "ErrorHandling", "OutputFormat", "ExecutionPhilosophy"):
+                     "ErrorHandling", "ExecutionPhilosophy"):
             assert name in result.sections_added, (
                 f"Section '{name}' missing from sections_added; provenance handling "
                 "must not affect other section boundaries."
             )
+        assert "OutputFormat" not in result.sections_added, (
+            "OutputFormat must not be in sections_added — it is a retired section"
+        )
 
     def test_version_bumped(self, provenance_untagged_input, tmp_path):
         """The version must be bumped from 2.2.0 to 2.3.0."""
@@ -1852,7 +1859,7 @@ class TestProvenanceOldShapeMigration:
         Comparison excludes the provenance region, its sibling injection, and the Identity
         section. The Identity section is excluded because Stage 2 intentionally adds
         ClosingProcedure and AuthorityHierarchy inside it. All other sections
-        (Capabilities, Constraints, ErrorHandling, OutputFormat, ExecutionPhilosophy)
+        (Capabilities, Constraints, ErrorHandling, ExecutionPhilosophy)
         must remain byte-identical to the input.
         The frontmatter version bump is excluded from the comparison (body only).
         """
@@ -2886,14 +2893,20 @@ class TestCommunicationProtocolInput:
     def test_all_canonical_sections_added(
         self, communication_protocol_input, tmp_path
     ):
-        """All six canonical sections must be added despite the Communication Protocol region removal."""
+        """All five canonical sections must be added despite the Communication Protocol region removal.
+
+        OutputFormat is retired and must not appear in sections_added.
+        """
         result, _ = _transform_to_tmp(communication_protocol_input, tmp_path)
         for name in ("Identity", "Capabilities", "Constraints",
-                     "ErrorHandling", "OutputFormat", "ExecutionPhilosophy"):
+                     "ErrorHandling", "ExecutionPhilosophy"):
             assert name in result.sections_added, (
                 f"Section '{name}' missing from sections_added; Communication Protocol region "
                 "handling must not affect other section boundaries."
             )
+        assert "OutputFormat" not in result.sections_added, (
+            "OutputFormat must not be in sections_added — it is a retired section"
+        )
 
     def test_version_bumped(
         self, communication_protocol_input, tmp_path
@@ -3635,20 +3648,27 @@ class TestDegradedFallback:
             "The degraded transform must add at least one canonical section boundary."
         )
 
-    def test_all_six_sections_identified(
+    def test_all_five_sections_identified(
         self, harness_only_untransformed_input, tmp_path
     ):
-        """All six canonical sections present in the fixture must appear in sections_added."""
+        """All five canonical sections present in the fixture must appear in sections_added.
+
+        OutputFormat is retired and must not appear in sections_added; its legacy heading
+        and body are deleted by delete_legacy_sections before the body-merge path runs.
+        """
         result, _ = _transform_to_tmp(harness_only_untransformed_input, tmp_path)
         expected_sections = [
             "Identity", "Capabilities", "Constraints",
-            "ErrorHandling", "OutputFormat", "ExecutionPhilosophy",
+            "ErrorHandling", "ExecutionPhilosophy",
         ]
         for name in expected_sections:
             assert name in result.sections_added, (
                 f"Section '{name}' missing from sections_added; "
                 f"got: {result.sections_added!r}"
             )
+        assert "OutputFormat" not in result.sections_added, (
+            "OutputFormat must not be in sections_added — it is a retired section"
+        )
 
     def test_version_bumped_correctly(
         self, harness_only_untransformed_input, tmp_path
@@ -5658,6 +5678,152 @@ class TestClosingProcedureAndAuthorityHierarchyHarnessPath:
 
 
 # ===========================================================================
+# Orphaned legacy prose deletion — harness merged-tag Authority Hierarchy
+# ===========================================================================
+#
+# Tests covering the merged-tag Defect A scenario on the harness transform path:
+# the generic reference already carries empty <AuthorityHierarchy type="managed">
+# tags (as a Catalog file would, having been previously transformed), so the
+# harness merge places those empty tags between the heading and the prose in the
+# merged body.  The block-extent scan must treat the region's own tags as
+# transparent and delete the full heading-plus-prose block.
+#
+# T4.7 adds the fixture pair; T4.8 asserts that no orphaned prose survives.
+#
+# These tests will fail until the block-extent scan correctly treats the region's
+# own tag pair as transparent (own_region parameter in find_heading_block_end,
+# threaded through _apply_deletions via apply_conduct_regions).
+# ---------------------------------------------------------------------------
+
+class TestHarnessAHMergedTagDeletion:
+    """Authority Hierarchy heading and prose must be deleted on the harness path even
+    when the generic reference's empty AH tag pair has been merged in between the
+    heading and the prose before the deletion rules run.
+
+    Uses the fixture pair harness_ah_merged_tag_input / harness_ah_merged_tag_generic_ref,
+    which reproduces the merged-tag scenario identified during planning.
+    """
+
+    def test_transform_succeeds(
+        self, harness_ah_merged_tag_input, harness_ah_merged_tag_generic_ref, tmp_path
+    ):
+        """Transformation of the merged-tag fixture must succeed with no errors."""
+        result, _ = _transform_to_tmp(
+            harness_ah_merged_tag_input, tmp_path,
+            generic_ref_path=harness_ah_merged_tag_generic_ref,
+        )
+        assert result.success is True
+        assert result.errors == []
+
+    def test_authority_hierarchy_heading_absent_from_output(
+        self, harness_ah_merged_tag_input, harness_ah_merged_tag_generic_ref, tmp_path
+    ):
+        """The '### Authority Hierarchy' heading must not appear in the output.
+
+        The heading is the entry point of the AH-block deletion rule.  If it
+        survives it means the deletion did not run, or the block was only partially
+        deleted.
+        """
+        _, output_path = _transform_to_tmp(
+            harness_ah_merged_tag_input, tmp_path,
+            generic_ref_path=harness_ah_merged_tag_generic_ref,
+        )
+        content = _read(output_path)
+        assert "### Authority Hierarchy" not in content, (
+            "Authority Hierarchy heading must be deleted when own tags interrupt the block"
+        )
+
+    def test_authority_hierarchy_prose_absent_from_output(
+        self, harness_ah_merged_tag_input, harness_ah_merged_tag_generic_ref, tmp_path
+    ):
+        """The Authority Hierarchy ranked-list prose must not survive in the output.
+
+        Defect A left the prose below the inserted tag pair because the block-extent
+        scan stopped at the own open tag rather than continuing through it.  With the
+        fix applied the prose is included in the deleted span.
+        """
+        _, output_path = _transform_to_tmp(
+            harness_ah_merged_tag_input, tmp_path,
+            generic_ref_path=harness_ah_merged_tag_generic_ref,
+        )
+        content = _read(output_path)
+        assert "Four sources issue you instructions" not in content, (
+            "Authority Hierarchy prose must be deleted even when own tags interrupt the block"
+        )
+        assert "Why this ranking" not in content, (
+            "Full prose body (including 'Why this ranking') must be absent from the output"
+        )
+
+    def test_authority_hierarchy_region_tag_present_in_output(
+        self, harness_ah_merged_tag_input, harness_ah_merged_tag_generic_ref, tmp_path
+    ):
+        """The <AuthorityHierarchy type="managed"> region tag must remain in the output.
+
+        After deleting the superseded prose the empty tag pair (merged in from the
+        generic reference) must survive, serving as the slot the deploy tool fills.
+        """
+        _, output_path = _transform_to_tmp(
+            harness_ah_merged_tag_input, tmp_path,
+            generic_ref_path=harness_ah_merged_tag_generic_ref,
+        )
+        content = _read(output_path)
+        assert '<AuthorityHierarchy type="managed">' in content, (
+            "The AuthorityHierarchy region open tag must remain in the output"
+        )
+        assert "</AuthorityHierarchy>" in content, (
+            "The AuthorityHierarchy region close tag must remain in the output"
+        )
+
+    def test_no_orphaned_prose_adjacent_to_authority_hierarchy_tags(
+        self, harness_ah_merged_tag_input, harness_ah_merged_tag_generic_ref, tmp_path
+    ):
+        """No superseded Authority Hierarchy prose may appear immediately after the close tag.
+
+        This assertion directly pins the orphan-prose symptom: prose that sits adjacent
+        to a region pair rather than inside it.  The region pair must be followed only
+        by the next structural boundary or section content, never by the deleted prose.
+        """
+        _, output_path = _transform_to_tmp(
+            harness_ah_merged_tag_input, tmp_path,
+            generic_ref_path=harness_ah_merged_tag_generic_ref,
+        )
+        content = _read(output_path)
+        close_pos = content.find("</AuthorityHierarchy>")
+        assert close_pos != -1
+        after_close = content[close_pos + len("</AuthorityHierarchy>"):]
+        # The first non-blank content after the close tag must not be AH prose
+        first_non_blank = next(
+            (line for line in after_close.splitlines() if line.strip()),
+            "",
+        )
+        ah_prose_fragments = [
+            "Four sources issue",
+            "ranking decides",
+            "MOSAIC system instructions",
+            "Why this ranking",
+        ]
+        for fragment in ah_prose_fragments:
+            assert fragment not in first_non_blank, (
+                f"Orphaned prose fragment {fragment!r} found immediately after "
+                "the AuthorityHierarchy close tag — the deletion did not cover "
+                "the full block"
+            )
+
+    def test_closing_procedure_also_present_in_output(
+        self, harness_ah_merged_tag_input, harness_ah_merged_tag_generic_ref, tmp_path
+    ):
+        """ClosingProcedure must also be emitted on this path (regression guard)."""
+        _, output_path = _transform_to_tmp(
+            harness_ah_merged_tag_input, tmp_path,
+            generic_ref_path=harness_ah_merged_tag_generic_ref,
+        )
+        content = _read(output_path)
+        assert '<ClosingProcedure type="managed">' in content, (
+            "ClosingProcedure must still be emitted on the merged-tag harness path"
+        )
+
+
+# ===========================================================================
 # Stage 6: Frontmatter Completeness & id Reconciliation
 # ===========================================================================
 #
@@ -7656,14 +7822,55 @@ class TestConstraintsRegionTableStructure:
                 f"Rule {rule.rule_id!r} must be required=True"
             )
 
-    def test_protocol_constraints_first_four_rules_have_no_drift_probe(self) -> None:
-        """PC-bullet-1 through PC-bullet-4 must not carry a drift_probe (byte-exact in corpus)."""
+    def test_protocol_constraints_first_four_rules_have_drift_probes(self) -> None:
+        """PC-bullet-1 through PC-bullet-4 must each carry a non-None drift_probe.
+
+        ContractsDesign.md states the invariant: every DeletionRule in CONDUCT_REGIONS
+        has drift_probe is not None — no exceptions. PC-bullet-1 through PC-bullet-4 are
+        explicitly named as rules that must receive probes so that a drifted wording is
+        reported as NC_DRIFTED_BULLET rather than silently left in place.
+
+        Expected probe anchors (from the ContractsDesign.md rule table):
+          PC-bullet-1: r"(?i)^\\*\\*Orchestration Artifacts:\\*\\*"
+          PC-bullet-2: r"(?i)^\\*\\*Project Files:\\*\\*"
+          PC-bullet-3: r"(?i)^NEVER skip\\b.*\\bJSON\\b"
+          PC-bullet-4: r"(?i)^NEVER invent\\b"
+        """
         spec = self._get_spec("ProtocolConstraints")
         assert len(spec.supersedes) >= 4
+        expected_probes = {
+            "PC-bullet-1": r"(?i)^\*\*Orchestration Artifacts:\*\*",
+            "PC-bullet-2": r"(?i)^\*\*Project Files:\*\*",
+            "PC-bullet-3": r"(?i)^NEVER skip\b.*\bJSON\b",
+            "PC-bullet-4": r"(?i)^NEVER invent\b",
+        }
         for rule in spec.supersedes[:4]:
-            assert rule.drift_probe is None, (
-                f"Rule {rule.rule_id!r} must have drift_probe=None (byte-exact in corpus)"
+            assert rule.drift_probe is not None, (
+                f"Rule {rule.rule_id!r} must carry a drift_probe per ContractsDesign.md invariant"
             )
+            if rule.rule_id in expected_probes:
+                assert rule.drift_probe == expected_probes[rule.rule_id], (
+                    f"Rule {rule.rule_id!r} drift_probe does not match design specification; "
+                    f"expected {expected_probes[rule.rule_id]!r}, got {rule.drift_probe!r}"
+                )
+
+    def test_all_conduct_regions_rules_have_drift_probes(self) -> None:
+        """Every DeletionRule in CONDUCT_REGIONS must carry a non-None drift_probe.
+
+        ContractsDesign.md Testability Notes: 'The drift-probe invariant is a single
+        table-walk test: all(r.drift_probe is not None for spec in CONDUCT_REGIONS for r
+        in spec.supersedes). It catches a future rule added without a probe, without
+        enumerating rules.'
+        """
+        missing = [
+            f"{spec.name}/{rule.rule_id}"
+            for spec in CONDUCT_REGIONS
+            for rule in spec.supersedes
+            if rule.drift_probe is None
+        ]
+        assert missing == [], (
+            f"Rules with drift_probe=None (violates ContractsDesign.md invariant): {missing}"
+        )
 
     def test_protocol_constraints_fifth_rule_has_drift_probe(self) -> None:
         """PC-bullet-5 must carry a drift_probe to catch the known drifted wording."""
@@ -8747,10 +8954,8 @@ import textwrap as _textwrap  # noqa: E402
 
 from non_conformance import (         # noqa: E402
     NonConformance,
-    JsonEnvelopeExample,
     detect_output_non_conformances,
     render_report,
-    NC_JSON_ENVELOPE,
     NC_NO_INJECTIONS,
     NC_HARNESS_PROSE,
     NC_DRIFTED_BULLET,
@@ -8794,38 +8999,6 @@ def _section_span_for(lines: list, heading_text: str, section_name: str) -> Sect
     )
 
 
-def _of_lines_with_envelopes(*json_objects: str):
-    """Build minimal body lines with an OutputFormat section containing JSON envelopes.
-
-    Each positional argument is a complete JSON object string (without the fence markers).
-    Returns (lines, sections_mapping) where sections_mapping is suitable for passing to
-    detect_output_non_conformances.
-    """
-    header = [
-        "# Test Agent\n",
-        "\n",
-        "You are the test agent.\n",
-        "\n",
-        "---\n",
-        "\n",
-    ]
-    section_lines = [
-        "## Output Format\n",
-        "\n",
-        "Always end with a JSON status block:\n",
-        "\n",
-    ]
-    for obj in json_objects:
-        section_lines.append("```json\n")
-        for row in obj.splitlines():
-            section_lines.append(row + "\n")
-        section_lines.append("```\n")
-        section_lines.append("\n")
-    all_lines = header + section_lines
-    span = _section_span_for(all_lines, "## Output Format", "OutputFormat")
-    return all_lines, {"OutputFormat": span}
-
-
 def _constraints_lines_with_h3(heading_text: str):
     """Build minimal body lines with a Constraints section containing an H3 heading.
 
@@ -8852,542 +9025,22 @@ def _constraints_lines_with_h3(heading_text: str):
     return all_lines, {"Constraints": span}
 
 
+
 # ---------------------------------------------------------------------------
-# T8.1 — Non-conformance record structure (guard tests)
+# AC1.6 — NC-7A retirement confirmation
 # ---------------------------------------------------------------------------
 
-class TestNonConformanceStructureStage8:
-    """Guard tests: TransformResult.non_conformances must remain valid after Stage 8.
 
-    Because the non_conformances field was introduced in Stage 6 with a default factory,
-    most of these tests pass even in RED. They guard against Stage 8 accidentally
-    removing the field, changing its default, or breaking the NC code constants.
-    The wiring test at the end fails in RED (transform_file does not yet call
-    detect_output_non_conformances).
+def test_nc_json_envelope_not_in_non_conformance_module():
+    """NC_JSON_ENVELOPE must not exist in non_conformance module after NC-7A retirement.
+
+    This test fails in RED because NC_JSON_ENVELOPE still exists until I1.4 removes it.
     """
-
-    def test_transform_result_non_conformances_defaults_to_empty_list(self):
-        """TransformResult constructed without non_conformances must have an empty list."""
-        result = TransformResult(
-            success=True,
-            errors=[],
-            sections_added=[],
-            injections_added=[],
-            deployed_added=[],
-            version_before="1.0.0",
-            version_after="1.1.0",
-        )
-        assert result.non_conformances == []
-
-    def test_transform_result_non_conformances_is_list(self):
-        """TransformResult.non_conformances must be a list instance."""
-        result = TransformResult(
-            success=True,
-            errors=[],
-            sections_added=[],
-            injections_added=[],
-            deployed_added=[],
-            version_before="1.0.0",
-            version_after="1.1.0",
-        )
-        assert isinstance(result.non_conformances, list)
-
-    def test_transform_result_accepts_non_conformance_instances(self):
-        """TransformResult can be constructed with a list containing NonConformance items."""
-        nc = NonConformance(
-            code=NC_TIER_PLACEHOLDER,
-            file=pathlib.Path("agent.md"),
-            message="recommended_tier absent",
-            detail="recommended_tier",
-        )
-        result = TransformResult(
-            success=True,
-            errors=[],
-            sections_added=[],
-            injections_added=[],
-            deployed_added=[],
-            version_before="1.0.0",
-            version_after="1.1.0",
-            non_conformances=[nc],
-        )
-        assert len(result.non_conformances) == 1
-        assert result.non_conformances[0].code == NC_TIER_PLACEHOLDER
-
-    def test_nc_json_envelope_code_value(self):
-        """NC_JSON_ENVELOPE must equal the stable string 'NC-7A'."""
-        assert NC_JSON_ENVELOPE == "NC-7A"
-
-    def test_nc_no_injections_code_value(self):
-        """NC_NO_INJECTIONS must equal the stable string 'NC-7B'."""
-        assert NC_NO_INJECTIONS == "NC-7B"
-
-    def test_nc_harness_prose_code_value(self):
-        """NC_HARNESS_PROSE must equal the stable string 'NC-7C'."""
-        assert NC_HARNESS_PROSE == "NC-7C"
-
-    def test_json_envelope_example_success_has_no_error_code(self):
-        """JsonEnvelopeExample for a SUCCESS example must have error_code=None."""
-        ex = JsonEnvelopeExample(
-            status_code="SUCCESS",
-            status_message="Task done, 5 tests written.",
-            error_code=None,
-            line_number=10,
-        )
-        assert ex.error_code is None
-
-    def test_json_envelope_example_blocked_carries_error_code(self):
-        """JsonEnvelopeExample for a BLOCKED example must carry the error_code string."""
-        ex = JsonEnvelopeExample(
-            status_code="BLOCKED",
-            status_message="Design spec not found.",
-            error_code="E101",
-            line_number=20,
-        )
-        assert ex.error_code == "E101"
-
-    def test_transform_file_wires_detect_output_non_conformances(self, tmp_path):
-        """transform_file on a file with JSON envelopes in OutputFormat must include NC_JSON_ENVELOPE.
-
-        This verifies that detect_output_non_conformances is wired into transform_file.
-        Fails in RED: the wiring does not yet exist.
-        """
-        source = _textwrap.dedent("""\
-            ---
-            id: 99
-            version: 1.0.0
-            name: json-envelope-agent
-            description: Agent with JSON envelopes in OutputFormat for wiring test
-            ---
-
-            # JsonEnvelopeAgent Agent
-
-            You are the **JsonEnvelopeAgent** agent.
-
-            [INJECTION: identity_extension]
-
-            ---
-
-            ## Capabilities
-
-            Core capabilities here.
-
-            ---
-
-            ## Constraints
-
-            - Stay within scope
-
-            ---
-
-            ## Error Handling
-
-            - Handle errors gracefully
-
-            ---
-
-            ## Output Format
-
-            Always end with a JSON status block:
-
-            ```json
-            {
-              "status_code": "SUCCESS",
-              "status_message": "Task done, wrote 5 tests."
-            }
-            ```
-
-            For BLOCKED:
-
-            ```json
-            {
-              "status_code": "BLOCKED",
-              "status_message": "Design spec not found.",
-              "error_code": "E101"
-            }
-            ```
-
-            ---
-
-            ## Execution Philosophy
-
-            Execute with focus.
-        """)
-        input_path = tmp_path / "json-envelope-agent.md"
-        input_path.write_text(source, encoding="utf-8")
-        output_path = tmp_path / "json-envelope-agent-out.md"
-        result = transform_file(input_path, output_path)
-        assert result.success, "Transformation must succeed before asserting non_conformances"
-        nc_codes = [nc.code for nc in result.non_conformances]
-        assert NC_JSON_ENVELOPE in nc_codes, (
-            f"Expected NC_JSON_ENVELOPE in result.non_conformances after transform; "
-            f"got codes: {nc_codes!r}"
-        )
-
-    def test_transform_file_json_envelope_retained_byte_identical(self, tmp_path):
-        """transform_file must leave the JSON envelope block byte-identical in the output.
-
-        This end-to-end test mirrors the unit-level non-mutation checks for class 7c
-        (harness-prose headings) at the transform_file integration level for class 7a
-        (JSON envelopes in OutputFormat). JSON envelopes are the class most likely to
-        tempt an implementer into 'helpfully' reformatting the retained block, so this
-        test pins that the fenced block text is preserved character-for-character.
-
-        Fails in RED: the detection wiring does not yet exist, but the byte-identical
-        assertion is independent of detection — it verifies the transform path does not
-        alter the envelope block regardless of whether it is flagged.
-        """
-        json_block_text = (
-            "```json\n"
-            "{\n"
-            '  "status_code": "BLOCKED",\n'
-            '  "status_message": "Design spec not found.",\n'
-            '  "error_code": "E101"\n'
-            "}\n"
-            "```\n"
-        )
-        source = _textwrap.dedent("""\
-            ---
-            id: 97
-            version: 1.0.0
-            name: byte-identical-envelope-agent
-            description: Agent for testing byte-identical retention of JSON envelopes
-            ---
-
-            # ByteIdenticalEnvelopeAgent Agent
-
-            You are the **ByteIdenticalEnvelopeAgent** agent.
-
-            [INJECTION: identity_ext]
-
-            ---
-
-            ## Capabilities
-
-            Core capabilities here.
-
-            ---
-
-            ## Constraints
-
-            - Stay within scope
-
-            ---
-
-            ## Error Handling
-
-            - Handle errors gracefully
-
-            ---
-
-            ## Output Format
-
-            Always end with a JSON status block:
-
-            """) + json_block_text + _textwrap.dedent("""\
-
-            ---
-
-            ## Execution Philosophy
-
-            Execute with focus.
-        """)
-        input_path = tmp_path / "byte-identical-envelope-agent.md"
-        input_path.write_text(source, encoding="utf-8")
-        output_path = tmp_path / "byte-identical-envelope-agent-out.md"
-        result = transform_file(input_path, output_path)
-        assert result.success, "Transformation must succeed before checking byte-identical output"
-        output_text = output_path.read_text(encoding="utf-8")
-        assert json_block_text in output_text, (
-            "The JSON envelope block must be retained byte-identical in the output; "
-            "the transform must not reformat, normalise or remove the fenced block"
-        )
-
-
-# ---------------------------------------------------------------------------
-# T8.2 — JSON-envelope detection
-# ---------------------------------------------------------------------------
-
-class TestJsonEnvelopeDetection:
-    """detect_output_non_conformances must detect JSON response envelopes in OutputFormat.
-
-    Each finding carries a JsonEnvelopeExample per envelope, with status_message and,
-    for BLOCKED examples, error_code. These tests fail in RED because the stub for
-    detect_output_non_conformances returns [].
-    """
-
-    def test_success_envelope_yields_nc_json_envelope(self):
-        """A JSON fenced block with status_code=SUCCESS in OutputFormat yields NC_JSON_ENVELOPE."""
-        json_block = (
-            '{\n'
-            '  "status_code": "SUCCESS",\n'
-            '  "status_message": "Wrote 5 tests."\n'
-            '}'
-        )
-        lines, sections = _of_lines_with_envelopes(json_block)
-        result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
-        codes = [nc.code for nc in result]
-        assert NC_JSON_ENVELOPE in codes, (
-            "Expected NC_JSON_ENVELOPE finding for a JSON fenced block in OutputFormat"
-        )
-
-    def test_success_envelope_evidence_carries_status_message(self):
-        """The NC_JSON_ENVELOPE evidence must include the verbatim status_message string."""
-        msg = "Wrote 5 tests and all compile."
-        json_block = (
-            '{\n'
-            '  "status_code": "SUCCESS",\n'
-            f'  "status_message": "{msg}"\n'
-            '}'
-        )
-        lines, sections = _of_lines_with_envelopes(json_block)
-        result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
-        nc = next((x for x in result if x.code == NC_JSON_ENVELOPE), None)
-        assert nc is not None, "Expected NC_JSON_ENVELOPE finding"
-        assert nc.evidence, "NC_JSON_ENVELOPE must carry at least one JsonEnvelopeExample"
-        assert any(ex.status_message == msg for ex in nc.evidence), (
-            f"Expected status_message {msg!r} in evidence; "
-            f"got {[ex.status_message for ex in nc.evidence]!r}"
-        )
-
-    def test_success_envelope_evidence_has_error_code_none(self):
-        """A SUCCESS envelope example must have error_code=None."""
-        json_block = (
-            '{\n'
-            '  "status_code": "SUCCESS",\n'
-            '  "status_message": "All done."\n'
-            '}'
-        )
-        lines, sections = _of_lines_with_envelopes(json_block)
-        result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
-        nc = next((x for x in result if x.code == NC_JSON_ENVELOPE), None)
-        assert nc is not None, "Expected NC_JSON_ENVELOPE finding"
-        success_examples = [ex for ex in nc.evidence if ex.status_code == "SUCCESS"]
-        assert success_examples, "Expected at least one SUCCESS example in evidence"
-        assert all(ex.error_code is None for ex in success_examples), (
-            f"SUCCESS examples must have error_code=None; "
-            f"got {[ex.error_code for ex in success_examples]!r}"
-        )
-
-    def test_blocked_envelope_carries_error_code_e101(self):
-        """A BLOCKED envelope example with error_code E101 must carry E101 in the evidence."""
-        json_block = (
-            '{\n'
-            '  "status_code": "BLOCKED",\n'
-            '  "status_message": "Design spec not found.",\n'
-            '  "error_code": "E101"\n'
-            '}'
-        )
-        lines, sections = _of_lines_with_envelopes(json_block)
-        result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
-        nc = next((x for x in result if x.code == NC_JSON_ENVELOPE), None)
-        assert nc is not None, "Expected NC_JSON_ENVELOPE finding"
-        blocked = [ex for ex in nc.evidence if ex.status_code == "BLOCKED"]
-        assert blocked, "Expected at least one BLOCKED example in evidence"
-        assert any(ex.error_code == "E101" for ex in blocked), (
-            f"Expected error_code='E101'; got {[ex.error_code for ex in blocked]!r}"
-        )
-
-    def test_blocked_envelope_carries_error_code_e501(self):
-        """A BLOCKED envelope with error_code E501 must carry E501 (test-runner corpus case)."""
-        json_block = (
-            '{\n'
-            '  "status_code": "BLOCKED",\n'
-            '  "status_message": "External tool unavailable.",\n'
-            '  "error_code": "E501"\n'
-            '}'
-        )
-        lines, sections = _of_lines_with_envelopes(json_block)
-        result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
-        nc = next((x for x in result if x.code == NC_JSON_ENVELOPE), None)
-        assert nc is not None
-        blocked = [ex for ex in nc.evidence if ex.status_code == "BLOCKED"]
-        assert any(ex.error_code == "E501" for ex in blocked), (
-            f"Expected error_code='E501'; got {[ex.error_code for ex in blocked]!r}"
-        )
-
-    def test_blocked_envelope_carries_error_code_e502(self):
-        """A BLOCKED envelope with error_code E502 must carry E502 (pull-request-comment corpus case)."""
-        json_block = (
-            '{\n'
-            '  "status_code": "BLOCKED",\n'
-            '  "status_message": "Permission denied to write file.",\n'
-            '  "error_code": "E502"\n'
-            '}'
-        )
-        lines, sections = _of_lines_with_envelopes(json_block)
-        result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
-        nc = next((x for x in result if x.code == NC_JSON_ENVELOPE), None)
-        assert nc is not None
-        blocked = [ex for ex in nc.evidence if ex.status_code == "BLOCKED"]
-        assert any(ex.error_code == "E502" for ex in blocked), (
-            f"Expected error_code='E502'; got {[ex.error_code for ex in blocked]!r}"
-        )
-
-    def test_blocked_envelope_carries_error_code_e503(self):
-        """A BLOCKED envelope with error_code E503 must carry E503 (requirements-refinement corpus case)."""
-        json_block = (
-            '{\n'
-            '  "status_code": "BLOCKED",\n'
-            '  "status_message": "User contact unavailable.",\n'
-            '  "error_code": "E503"\n'
-            '}'
-        )
-        lines, sections = _of_lines_with_envelopes(json_block)
-        result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
-        nc = next((x for x in result if x.code == NC_JSON_ENVELOPE), None)
-        assert nc is not None
-        blocked = [ex for ex in nc.evidence if ex.status_code == "BLOCKED"]
-        assert any(ex.error_code == "E503" for ex in blocked), (
-            f"Expected error_code='E503'; got {[ex.error_code for ex in blocked]!r}"
-        )
-
-    def test_blocked_envelope_carries_error_code_e401(self):
-        """A BLOCKED envelope with error_code E401 must carry E401 (audit-to-pull-request corpus case)."""
-        json_block = (
-            '{\n'
-            '  "status_code": "BLOCKED",\n'
-            '  "status_message": "Predecessor task incomplete.",\n'
-            '  "error_code": "E401"\n'
-            '}'
-        )
-        lines, sections = _of_lines_with_envelopes(json_block)
-        result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
-        nc = next((x for x in result if x.code == NC_JSON_ENVELOPE), None)
-        assert nc is not None
-        blocked = [ex for ex in nc.evidence if ex.status_code == "BLOCKED"]
-        assert any(ex.error_code == "E401" for ex in blocked), (
-            f"Expected error_code='E401'; got {[ex.error_code for ex in blocked]!r}"
-        )
-
-    def test_two_envelopes_produce_two_evidence_items(self):
-        """Two JSON blocks in OutputFormat must yield one NC with exactly two evidence items."""
-        success_block = (
-            '{\n'
-            '  "status_code": "SUCCESS",\n'
-            '  "status_message": "Done."\n'
-            '}'
-        )
-        blocked_block = (
-            '{\n'
-            '  "status_code": "BLOCKED",\n'
-            '  "status_message": "Input missing.",\n'
-            '  "error_code": "E101"\n'
-            '}'
-        )
-        lines, sections = _of_lines_with_envelopes(success_block, blocked_block)
-        result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
-        nc = next((x for x in result if x.code == NC_JSON_ENVELOPE), None)
-        assert nc is not None, "Expected NC_JSON_ENVELOPE finding"
-        assert len(nc.evidence) == 2, (
-            f"Expected exactly 2 JsonEnvelopeExample items (one per block); got {len(nc.evidence)}"
-        )
-
-    def test_distinct_error_codes_preserved_across_multiple_envelopes(self):
-        """Multiple BLOCKED blocks with different error codes each carry their own code."""
-        block_e101 = (
-            '{\n'
-            '  "status_code": "BLOCKED",\n'
-            '  "status_message": "Spec not found.",\n'
-            '  "error_code": "E101"\n'
-            '}'
-        )
-        block_e501 = (
-            '{\n'
-            '  "status_code": "BLOCKED",\n'
-            '  "status_message": "Tool unavailable.",\n'
-            '  "error_code": "E501"\n'
-            '}'
-        )
-        lines, sections = _of_lines_with_envelopes(block_e101, block_e501)
-        result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
-        nc = next((x for x in result if x.code == NC_JSON_ENVELOPE), None)
-        assert nc is not None
-        error_codes = {ex.error_code for ex in nc.evidence if ex.error_code is not None}
-        assert "E101" in error_codes, f"E101 missing from evidence error codes: {error_codes!r}"
-        assert "E501" in error_codes, f"E501 missing from evidence error codes: {error_codes!r}"
-
-    def test_json_envelope_outside_output_format_not_detected(self):
-        """A JSON fenced block outside the OutputFormat section must not yield NC_JSON_ENVELOPE."""
-        # The JSON block appears in the body BEFORE the OutputFormat heading.
-        # The OutputFormat section itself contains only a plain-text description.
-        lines = [
-            "# Test Agent\n",
-            "\n",
-            "Example response in Identity:\n",
-            "\n",
-            "```json\n",
-            '{\n',
-            '  "status_code": "SUCCESS",\n',
-            '  "status_message": "Example — not in OutputFormat."\n',
-            '}\n',
-            "```\n",
-            "\n",
-            "---\n",
-            "\n",
-            "## Output Format\n",
-            "\n",
-            "Return a two-column Markdown table, not a JSON block.\n",
-            "\n",
-        ]
-        of_span = _section_span_for(lines, "## Output Format", "OutputFormat")
-        sections = {"OutputFormat": of_span}
-        result = detect_output_non_conformances(pathlib.Path("agent.md"), lines, sections)
-        nc = next((x for x in result if x.code == NC_JSON_ENVELOPE), None)
-        assert nc is None, (
-            "JSON blocks outside the OutputFormat section must not yield NC_JSON_ENVELOPE; "
-            f"got finding: {nc!r}"
-        )
-
-    def test_nc_json_envelope_records_file_path(self):
-        """The NC_JSON_ENVELOPE finding must record the supplied file path."""
-        json_block = '{\n  "status_code": "SUCCESS",\n  "status_message": "Done."\n}'
-        lines, sections = _of_lines_with_envelopes(json_block)
-        target_path = pathlib.Path("my-agent.md")
-        result = detect_output_non_conformances(target_path, lines, sections)
-        nc = next((x for x in result if x.code == NC_JSON_ENVELOPE), None)
-        assert nc is not None, "Expected NC_JSON_ENVELOPE finding"
-        assert nc.file == target_path, f"Expected file={target_path!r}; got {nc.file!r}"
-
-    def test_bare_fence_with_status_code_content_yields_nc_json_envelope(self):
-        """A fenced block without a 'json' language tag whose content parses as a status_code-bearing JSON object must yield NC_JSON_ENVELOPE.
-
-        The contract specifies detection when the fenced block language is 'json' OR
-        when the content parses as a JSON object containing a 'status_code' key, even
-        without a language tag on the fence opener. This test exercises the 'or' branch.
-
-        Fails in RED because the stub returns [].
-        """
-        header = [
-            "# Test Agent\n",
-            "\n",
-            "You are the test agent.\n",
-            "\n",
-            "---\n",
-            "\n",
-        ]
-        section_lines = [
-            "## Output Format\n",
-            "\n",
-            "Always end with a status block:\n",
-            "\n",
-            "```\n",                          # bare fence — no 'json' language tag
-            '{\n',
-            '  "status_code": "SUCCESS",\n',
-            '  "status_message": "Task done."\n',
-            '}\n',
-            "```\n",
-            "\n",
-        ]
-        all_lines = header + section_lines
-        span = _section_span_for(all_lines, "## Output Format", "OutputFormat")
-        sections = {"OutputFormat": span}
-        result = detect_output_non_conformances(pathlib.Path("agent.md"), all_lines, sections)
-        codes = [nc.code for nc in result]
-        assert NC_JSON_ENVELOPE in codes, (
-            "A bare-fence block (no 'json' language tag) whose content parses as a "
-            "status_code-bearing JSON object must yield NC_JSON_ENVELOPE; "
-            "this is the 'or' branch of the class-7a detection rule"
-        )
+    import non_conformance
+    assert not hasattr(non_conformance, 'NC_JSON_ENVELOPE'), (
+        'NC_JSON_ENVELOPE must have been removed from non_conformance.py as part of '
+        'NC-7A retirement (I1.4); it should no longer be accessible on the module'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -9466,8 +9119,8 @@ class TestZeroInjectionDetection:
         assert nc is not None, "Expected NC_NO_INJECTIONS finding"
         assert nc.file == target_path, f"Expected file={target_path!r}; got {nc.file!r}"
 
-    def test_nc_no_injections_has_empty_evidence_tuple(self):
-        """NC_NO_INJECTIONS must carry an empty evidence tuple (no per-example data)."""
+    def test_nc_no_injections_is_raised(self):
+        """NC_NO_INJECTIONS must be raised when no injection open tags are present."""
         lines = [
             '<Constraints type="core">\n',
             "## Constraints\n",
@@ -9479,9 +9132,6 @@ class TestZeroInjectionDetection:
         result = detect_output_non_conformances(pathlib.Path("a.md"), lines, sections)
         nc = next((x for x in result if x.code == NC_NO_INJECTIONS), None)
         assert nc is not None, "Expected NC_NO_INJECTIONS finding"
-        assert nc.evidence == (), (
-            f"NC_NO_INJECTIONS must have an empty evidence tuple; got {nc.evidence!r}"
-        )
 
     def test_detect_does_not_modify_input_lines(self):
         """detect_output_non_conformances must not modify the input lines sequence."""
@@ -10483,43 +10133,29 @@ class TestNonConformanceRenderReport:
         )
 
     def test_render_report_includes_nc_code(self):
-        """render_report output must include the NC code (e.g. '[NC-7A]') for each finding."""
+        """render_report output must include the NC code string for each finding."""
         nc = NonConformance(
-            code=NC_JSON_ENVELOPE,
+            code=NC_TIER_PLACEHOLDER,
             file=pathlib.Path("agent.md"),
-            message="JSON envelope retained in OutputFormat",
-            evidence=(
-                JsonEnvelopeExample(
-                    status_code="SUCCESS",
-                    status_message="Task done.",
-                    error_code=None,
-                    line_number=10,
-                ),
-            ),
+            message="Frontmatter key 'recommended_tier' is absent or empty",
+            detail="recommended_tier",
         )
         report = render_report([nc])
-        assert "NC-7A" in report, (
-            f"render_report must include the NC code 'NC-7A' in its output; got: {report!r}"
+        assert "NC-TIER" in report, (
+            f"render_report must include the NC code 'NC-TIER' in its output; got: {report!r}"
         )
 
     def test_render_report_blocked_evidence_includes_error_code(self):
-        """render_report output must include the error_code for BLOCKED envelope examples."""
+        """render_report output must include the detail field content for each finding."""
         nc = NonConformance(
-            code=NC_JSON_ENVELOPE,
+            code=NC_TIER_PLACEHOLDER,
             file=pathlib.Path("agent.md"),
-            message="JSON envelope retained",
-            evidence=(
-                JsonEnvelopeExample(
-                    status_code="BLOCKED",
-                    status_message="Design spec not found.",
-                    error_code="E101",
-                    line_number=15,
-                ),
-            ),
+            message="Frontmatter key 'recommended_tier' is absent or empty",
+            detail="recommended_tier",
         )
         report = render_report([nc])
-        assert "E101" in report, (
-            f"render_report must include error_code 'E101' for BLOCKED example; got: {report!r}"
+        assert "recommended_tier" in report, (
+            f"render_report must include detail content 'recommended_tier' in its output; got: {report!r}"
         )
 
     def test_render_report_tier_placeholder_record_appears(self):
@@ -11488,4 +11124,1250 @@ class TestFrontmatterScopingE2E:
         assert len(tier_ncs) == 2, (
             "NC_TIER_PLACEHOLDER must still be raised twice on the generic path after Stage 4; "
             f"got: {tier_ncs}"
+        )
+
+
+# ===========================================================================
+# OutputArtifactTemplate Content Move
+# ===========================================================================
+#
+# TDD RED phase tests for move_artifact_structure_block and the public
+# find_heading_block_end(own_region=...) signature.
+#
+# All tests in this section fail until the following implementation lands:
+#   - region_insertion.move_artifact_structure_block() with
+#     ArtifactTemplateMoveResult return type and
+#     ARTIFACT_STRUCTURE_HEADING_PATTERN constant
+#   - region_insertion._find_heading_block_end promoted to the public name
+#     find_heading_block_end with an own_region keyword parameter
+#   - transform_file calls move_artifact_structure_block post-dispatch on
+#     both the generic path and the harness path
+#
+# Tests cover:
+#   T3.1 — block lands inside region on the generic path
+#   T3.2 — block lands inside region on the harness path
+#   T3.3 — two differently-worded headings both detected
+#   T3.4 — no-block case (region stays empty) and no-duplication case
+#   T3.5 — fixture pairs including block-after-marker ordering
+# ===========================================================================
+
+
+def _build_capabilities_body(
+    artifact_block_before_region: bool = True,
+    artifact_heading: str = "### Design Artifact Structure",
+) -> tuple[list[str], dict]:
+    """Return (lines, sections) for a minimal Capabilities section suitable for
+    move_artifact_structure_block unit tests.
+
+    The body contains:
+    - A Capabilities open tag and H2 heading
+    - A '### Core Capabilities' block
+    - An empty OutputArtifactTemplate region pair
+    - A customisable artifact-structure H3 block
+
+    When artifact_block_before_region is True the block appears before the region
+    pair (normal corpus order); when False it appears after the region pair.
+    """
+    from region_insertion import SectionSpan
+
+    cap_open = '<Capabilities type="core">\n'
+    cap_heading = "## Capabilities\n"
+    core_block = [
+        "\n",
+        "### Core Capabilities\n",
+        "- Do useful things\n",
+    ]
+    lp_region = [
+        "\n",
+        '<LanguagePatterns type="project">\n',
+        '</LanguagePatterns>\n',
+        '<CodebaseContext type="project">\n',
+        '</CodebaseContext>\n',
+    ]
+    oat_region = [
+        '<OutputArtifactTemplate type="project">\n',
+        '</OutputArtifactTemplate>\n',
+    ]
+    artifact_block = [
+        "\n",
+        artifact_heading + "\n",
+        "\n",
+        "Your output artifact must follow this structure:\n",
+        "\n",
+        "- `run_id` — copied verbatim from the task invocation's `run_id` field\n",
+        "- `created_by` — your own `agent_instance_id`\n",
+        "- `human_approved` — `false`\n",
+    ]
+    cap_close = ["\n", "</Capabilities>\n"]
+
+    if artifact_block_before_region:
+        content = core_block + artifact_block + lp_region + oat_region + cap_close
+    else:
+        content = core_block + lp_region + oat_region + artifact_block + cap_close
+
+    lines = [cap_open, cap_heading] + content
+    heading_line = 1  # "## Capabilities\n" is at index 1
+    start = 2         # first content line after heading
+    # content_end: one past the last non-blank line before the close tag
+    end = len(lines)
+    content_end = end - 1  # before "</Capabilities>"
+    while content_end > start and not lines[content_end - 1].strip():
+        content_end -= 1
+
+    sections = {
+        "Capabilities": SectionSpan(
+            name="Capabilities",
+            heading_line=heading_line,
+            start=start,
+            content_end=content_end,
+            end=end,
+        )
+    }
+    return lines, sections
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: move_artifact_structure_block — function and constant existence
+# ---------------------------------------------------------------------------
+
+class TestMoveArtifactStructureBlockExists:
+    """move_artifact_structure_block, ArtifactTemplateMoveResult, and
+    ARTIFACT_STRUCTURE_HEADING_PATTERN must be importable from region_insertion.
+
+    These tests fail until the implementation adds those names to the module."""
+
+    def test_move_function_is_importable(self) -> None:
+        """move_artifact_structure_block must be a callable in region_insertion."""
+        from region_insertion import move_artifact_structure_block  # noqa: F401
+        import inspect
+        assert callable(move_artifact_structure_block)
+
+    def test_result_dataclass_is_importable(self) -> None:
+        """ArtifactTemplateMoveResult must be a dataclass importable from region_insertion."""
+        from region_insertion import ArtifactTemplateMoveResult  # noqa: F401
+        import dataclasses
+        assert dataclasses.is_dataclass(ArtifactTemplateMoveResult)
+
+    def test_result_dataclass_has_lines_field(self) -> None:
+        """ArtifactTemplateMoveResult must have a 'lines' field (list[str])."""
+        from region_insertion import ArtifactTemplateMoveResult
+        import dataclasses
+        fields = {f.name for f in dataclasses.fields(ArtifactTemplateMoveResult)}
+        assert "lines" in fields, "ArtifactTemplateMoveResult must have a 'lines' field"
+
+    def test_result_dataclass_has_moved_field(self) -> None:
+        """ArtifactTemplateMoveResult must have a 'moved' field (bool)."""
+        from region_insertion import ArtifactTemplateMoveResult
+        import dataclasses
+        fields = {f.name for f in dataclasses.fields(ArtifactTemplateMoveResult)}
+        assert "moved" in fields, "ArtifactTemplateMoveResult must have a 'moved' field"
+
+    def test_result_dataclass_has_heading_text_field(self) -> None:
+        """ArtifactTemplateMoveResult must have a 'heading_text' field (str | None)."""
+        from region_insertion import ArtifactTemplateMoveResult
+        import dataclasses
+        fields = {f.name for f in dataclasses.fields(ArtifactTemplateMoveResult)}
+        assert "heading_text" in fields, (
+            "ArtifactTemplateMoveResult must have a 'heading_text' field"
+        )
+
+    def test_heading_pattern_constant_is_importable(self) -> None:
+        """ARTIFACT_STRUCTURE_HEADING_PATTERN must be a string constant in region_insertion."""
+        from region_insertion import ARTIFACT_STRUCTURE_HEADING_PATTERN  # noqa: F401
+        assert isinstance(ARTIFACT_STRUCTURE_HEADING_PATTERN, str)
+
+    def test_heading_pattern_matches_design_artifact_structure(self) -> None:
+        """ARTIFACT_STRUCTURE_HEADING_PATTERN must match '### Design Artifact Structure'."""
+        import re
+        from region_insertion import ARTIFACT_STRUCTURE_HEADING_PATTERN
+        assert re.match(ARTIFACT_STRUCTURE_HEADING_PATTERN, "### Design Artifact Structure"), (
+            "Pattern must match '### Design Artifact Structure'"
+        )
+
+    def test_heading_pattern_matches_audit_artifact_structure(self) -> None:
+        """ARTIFACT_STRUCTURE_HEADING_PATTERN must match '### Audit Artifact Structure'."""
+        import re
+        from region_insertion import ARTIFACT_STRUCTURE_HEADING_PATTERN
+        assert re.match(ARTIFACT_STRUCTURE_HEADING_PATTERN, "### Audit Artifact Structure"), (
+            "Pattern must match '### Audit Artifact Structure'"
+        )
+
+    def test_heading_pattern_does_not_match_non_artifact_structure(self) -> None:
+        """ARTIFACT_STRUCTURE_HEADING_PATTERN must not match '### Design Notes'."""
+        import re
+        from region_insertion import ARTIFACT_STRUCTURE_HEADING_PATTERN
+        assert not re.match(ARTIFACT_STRUCTURE_HEADING_PATTERN, "### Design Notes"), (
+            "Pattern must not match headings that do not end in 'Artifact Structure'"
+        )
+
+    def test_heading_pattern_does_not_match_h2(self) -> None:
+        """ARTIFACT_STRUCTURE_HEADING_PATTERN must not match an H2 heading."""
+        import re
+        from region_insertion import ARTIFACT_STRUCTURE_HEADING_PATTERN
+        assert not re.match(ARTIFACT_STRUCTURE_HEADING_PATTERN, "## Artifact Structure"), (
+            "Pattern must only match H3 headings (### prefix)"
+        )
+
+    def test_heading_pattern_does_not_match_h4(self) -> None:
+        """ARTIFACT_STRUCTURE_HEADING_PATTERN must not match an H4 heading.
+
+        The pattern anchors on exactly three '#' signs; four '#' signs must not match,
+        documenting the level-exactness contract.
+        """
+        import re
+        from region_insertion import ARTIFACT_STRUCTURE_HEADING_PATTERN
+        assert not re.match(
+            ARTIFACT_STRUCTURE_HEADING_PATTERN, "#### Design Artifact Structure"
+        ), (
+            "Pattern must not match H4 headings (#### prefix); "
+            "only exactly three '#' signs are valid"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: move_artifact_structure_block — T3.1 and T3.4 behavioural contract
+# ---------------------------------------------------------------------------
+
+class TestMoveArtifactStructureBlockBehaviour:
+    """Behavioural unit tests for move_artifact_structure_block using synthetic line
+    lists.  Tests fail until the function is implemented in region_insertion.py."""
+
+    def test_moved_flag_true_when_block_present(self) -> None:
+        """moved must be True when a matching heading is found and relocated."""
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(artifact_block_before_region=True)
+        result = move_artifact_structure_block(lines, sections)
+        assert result.moved is True, (
+            "move_artifact_structure_block must return moved=True when a "
+            "Design Artifact Structure block is found under Capabilities"
+        )
+
+    def test_heading_text_populated_when_moved(self) -> None:
+        """heading_text must carry the matched heading line when moved=True."""
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(artifact_block_before_region=True)
+        result = move_artifact_structure_block(lines, sections)
+        assert result.heading_text is not None, (
+            "heading_text must not be None when moved=True"
+        )
+        assert "Artifact Structure" in result.heading_text, (
+            f"heading_text must contain 'Artifact Structure'; got {result.heading_text!r}"
+        )
+
+    def test_content_appears_inside_region(self) -> None:
+        """Artifact-structure content must appear between the OutputArtifactTemplate tags."""
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(artifact_block_before_region=True)
+        result = move_artifact_structure_block(lines, sections)
+        text = "".join(result.lines)
+        open_pos = text.find('<OutputArtifactTemplate type="project">')
+        close_pos = text.find("</OutputArtifactTemplate>")
+        assert open_pos != -1, "OutputArtifactTemplate open tag must be present"
+        assert close_pos != -1, "OutputArtifactTemplate close tag must be present"
+        assert open_pos < close_pos, "open tag must precede close tag"
+        inner = text[open_pos + len('<OutputArtifactTemplate type="project">'):close_pos]
+        assert "Design Artifact Structure" in inner, (
+            "The heading and body of the artifact-structure block must appear "
+            "between the OutputArtifactTemplate tags after the move"
+        )
+        assert "run_id" in inner, (
+            "Artifact-structure body content ('run_id') must appear inside the region"
+        )
+
+    def test_content_absent_from_original_position(self) -> None:
+        """After the move the block must not remain at its original position."""
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(artifact_block_before_region=True)
+        result = move_artifact_structure_block(lines, sections)
+        text = "".join(result.lines)
+        open_pos = text.find('<OutputArtifactTemplate type="project">')
+        close_pos = text.find("</OutputArtifactTemplate>")
+        # Content before the open tag must not contain the artifact-structure heading
+        before_region = text[:open_pos]
+        assert "Design Artifact Structure" not in before_region, (
+            "The artifact-structure heading must be absent from the prose area "
+            "before the OutputArtifactTemplate open tag"
+        )
+
+    def test_content_appears_exactly_once(self) -> None:
+        """The artifact-structure heading must appear exactly once in the output.
+
+        Verifies the no-duplication contract: the content is moved, not copied.
+        """
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(artifact_block_before_region=True)
+        result = move_artifact_structure_block(lines, sections)
+        text = "".join(result.lines)
+        count = text.count("Design Artifact Structure")
+        assert count == 1, (
+            f"'Design Artifact Structure' must appear exactly once in the output; "
+            f"found {count} occurrences (no-duplication contract)"
+        )
+
+    def test_lines_count_unchanged(self) -> None:
+        """After the move the output has exactly one fewer line than the input.
+
+        The block is removed from its original position and inserted into the region.
+        At the removal gap the blank line before the heading and the blank line before
+        the region tag become adjacent; the implementation collapses them to a single
+        blank, reducing the total line count by one.  This test asserts that exact
+        reduction for the specific helper input used here (no trailing blank lines in
+        the artifact-structure block).
+        """
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(artifact_block_before_region=True)
+        result = move_artifact_structure_block(lines, sections)
+        assert len(result.lines) == len(lines) - 1, (
+            f"Line count must decrease by exactly 1 after the move (blank-line collapse "
+            f"at removal gap); before={len(lines)}, after={len(result.lines)}"
+        )
+
+    def test_region_type_attribute_is_project(self) -> None:
+        """The OutputArtifactTemplate region must carry type='project' in the output.
+
+        Corresponds to AC3.4: the region is emitted with type='project'.
+        """
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(artifact_block_before_region=True)
+        result = move_artifact_structure_block(lines, sections)
+        assert '<OutputArtifactTemplate type="project">' in "".join(result.lines), (
+            "OutputArtifactTemplate must carry type='project' after the move"
+        )
+
+    def test_no_block_case_moved_is_false(self) -> None:
+        """When no artifact-structure heading exists, moved must be False.
+
+        Corresponds to T3.4 no-block case.
+        """
+        from region_insertion import move_artifact_structure_block, SectionSpan
+        # Build a body with no artifact-structure heading (only core caps + region)
+        lines = [
+            '<Capabilities type="core">\n',
+            '## Capabilities\n',
+            '\n',
+            '### Core Capabilities\n',
+            '- Do useful things\n',
+            '\n',
+            '<OutputArtifactTemplate type="project">\n',
+            '</OutputArtifactTemplate>\n',
+            '\n',
+            '</Capabilities>\n',
+        ]
+        sections = {
+            "Capabilities": SectionSpan(
+                name="Capabilities",
+                heading_line=1,
+                start=2,
+                content_end=9,
+                end=10,
+            )
+        }
+        result = move_artifact_structure_block(lines, sections)
+        assert result.moved is False, (
+            "moved must be False when no artifact-structure heading is found under Capabilities"
+        )
+
+    def test_no_block_case_region_stays_empty(self) -> None:
+        """When no artifact-structure heading exists, the OutputArtifactTemplate region
+        must remain empty (no content between the tags).
+
+        Corresponds to AC3.6: the no-block case produces a well-formed empty region.
+        """
+        from region_insertion import move_artifact_structure_block, SectionSpan
+        lines = [
+            '<Capabilities type="core">\n',
+            '## Capabilities\n',
+            '\n',
+            '### Core Capabilities\n',
+            '- Do useful things\n',
+            '\n',
+            '<OutputArtifactTemplate type="project">\n',
+            '</OutputArtifactTemplate>\n',
+            '\n',
+            '</Capabilities>\n',
+        ]
+        sections = {
+            "Capabilities": SectionSpan(
+                name="Capabilities",
+                heading_line=1,
+                start=2,
+                content_end=9,
+                end=10,
+            )
+        }
+        result = move_artifact_structure_block(lines, sections)
+        text = "".join(result.lines)
+        open_pos = text.find('<OutputArtifactTemplate type="project">')
+        close_pos = text.find("</OutputArtifactTemplate>")
+        inner = text[open_pos + len('<OutputArtifactTemplate type="project">'):close_pos]
+        assert inner.strip() == "", (
+            "OutputArtifactTemplate region must remain empty when there is no artifact-structure block"
+        )
+
+    def test_no_block_case_heading_text_is_none(self) -> None:
+        """heading_text must be None when moved=False."""
+        from region_insertion import move_artifact_structure_block, SectionSpan
+        lines = [
+            '<Capabilities type="core">\n',
+            '## Capabilities\n',
+            '\n',
+            '<OutputArtifactTemplate type="project">\n',
+            '</OutputArtifactTemplate>\n',
+            '\n',
+            '</Capabilities>\n',
+        ]
+        sections = {
+            "Capabilities": SectionSpan(
+                name="Capabilities",
+                heading_line=1,
+                start=2,
+                content_end=6,
+                end=7,
+            )
+        }
+        result = move_artifact_structure_block(lines, sections)
+        assert result.heading_text is None, (
+            "heading_text must be None when moved=False"
+        )
+
+    def test_no_region_case_is_noop(self) -> None:
+        """When no OutputArtifactTemplate tag pair exists, the block is left in place
+        and moved=False.
+
+        The function never deletes a block it cannot re-home.
+        """
+        from region_insertion import move_artifact_structure_block, SectionSpan
+        lines = [
+            '<Capabilities type="core">\n',
+            '## Capabilities\n',
+            '\n',
+            '### Design Artifact Structure\n',
+            '\n',
+            'Your output artifact must follow this structure:\n',
+            '\n',
+            '</Capabilities>\n',
+        ]
+        sections = {
+            "Capabilities": SectionSpan(
+                name="Capabilities",
+                heading_line=1,
+                start=2,
+                content_end=7,
+                end=8,
+            )
+        }
+        result = move_artifact_structure_block(lines, sections)
+        assert result.moved is False, (
+            "moved must be False when no OutputArtifactTemplate destination region exists"
+        )
+        assert result.lines == list(lines), (
+            "lines must be unchanged when there is no destination region"
+        )
+
+    def test_occupied_region_is_noop(self) -> None:
+        """When the OutputArtifactTemplate region already contains non-blank content,
+        the function must be a no-op and return moved=False.
+
+        This makes the function idempotent.
+        """
+        from region_insertion import move_artifact_structure_block, SectionSpan
+        lines = [
+            '<Capabilities type="core">\n',
+            '## Capabilities\n',
+            '\n',
+            '### Design Artifact Structure\n',
+            '\n',
+            'Some content.\n',
+            '\n',
+            '<OutputArtifactTemplate type="project">\n',
+            '### Design Artifact Structure\n',  # already inside — region is occupied
+            '\n',
+            'Already moved content.\n',
+            '</OutputArtifactTemplate>\n',
+            '\n',
+            '</Capabilities>\n',
+        ]
+        sections = {
+            "Capabilities": SectionSpan(
+                name="Capabilities",
+                heading_line=1,
+                start=2,
+                content_end=13,
+                end=14,
+            )
+        }
+        result = move_artifact_structure_block(lines, sections)
+        assert result.moved is False, (
+            "moved must be False when the OutputArtifactTemplate region already has content"
+        )
+        assert result.lines == list(lines), (
+            "lines must be unchanged when the destination region is already occupied"
+        )
+
+    def test_missing_capabilities_is_noop(self) -> None:
+        """When 'Capabilities' is not in the sections mapping, the function is a no-op."""
+        from region_insertion import move_artifact_structure_block
+        lines = ['<Identity type="core">\n', '# Agent\n', '</Identity>\n']
+        result = move_artifact_structure_block(lines, {})
+        assert result.moved is False
+        assert result.lines == list(lines)
+
+    def test_pure_function_does_not_mutate_input(self) -> None:
+        """move_artifact_structure_block must not mutate the input lines list."""
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(artifact_block_before_region=True)
+        original = list(lines)
+        _ = move_artifact_structure_block(lines, sections)
+        assert lines == original, (
+            "move_artifact_structure_block must not mutate its input lines list"
+        )
+
+    def test_idempotent_second_call_returns_moved_false(self) -> None:
+        """Applying move_artifact_structure_block to its own output must return moved=False.
+
+        The region is occupied after the first call; the second call must be a no-op.
+        """
+        from region_insertion import move_artifact_structure_block, find_section_spans
+        lines, sections = _build_capabilities_body(artifact_block_before_region=True)
+        first = move_artifact_structure_block(lines, sections)
+        assert first.moved is True, "Precondition: first call must succeed"
+        # Recompute spans on the modified lines
+        sections2 = find_section_spans(first.lines)
+        second = move_artifact_structure_block(first.lines, sections2)
+        assert second.moved is False, (
+            "Second application of move_artifact_structure_block must be a no-op "
+            "(occupied-region guard)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: scope guards — fenced heading bypass and Capabilities scoping
+# ---------------------------------------------------------------------------
+
+class TestMoveArtifactStructureBlockScopeGuards:
+    """Negative-path unit tests verifying that move_artifact_structure_block respects
+    fence masking and Capabilities section scoping.
+
+    Both tests must return moved=False; a naïve implementation that does a
+    whole-document heading scan would fail one or both.
+    """
+
+    def test_fenced_heading_not_detected(self) -> None:
+        """A matching heading inside a fenced code block must not trigger a move.
+
+        The detection must use fence_mask to skip fenced lines; a naïve
+        str.startswith('###') scan would incorrectly match fenced content and
+        attempt to move non-existent prose.
+        """
+        from region_insertion import move_artifact_structure_block, SectionSpan
+        lines = [
+            '<Capabilities type="core">\n',
+            '## Capabilities\n',
+            '\n',
+            '### Core Capabilities\n',
+            '- Do useful things\n',
+            '\n',
+            'Example output:\n',
+            '\n',
+            '```\n',
+            '### Design Artifact Structure\n',  # inside fence — must not be detected
+            'run_id: ...\n',
+            '```\n',
+            '\n',
+            '<OutputArtifactTemplate type="project">\n',
+            '</OutputArtifactTemplate>\n',
+            '\n',
+            '</Capabilities>\n',
+        ]
+        sections = {
+            "Capabilities": SectionSpan(
+                name="Capabilities",
+                heading_line=1,
+                start=2,
+                content_end=16,
+                end=17,
+            )
+        }
+        result = move_artifact_structure_block(lines, sections)
+        assert result.moved is False, (
+            "A matching heading inside a fenced code block must not trigger a move; "
+            "fence_mask must be used to exclude fenced lines from the detection scan"
+        )
+
+    def test_heading_outside_capabilities_not_detected(self) -> None:
+        """A matching heading in a section other than Capabilities must not trigger a move.
+
+        The search is scoped to the Capabilities section span; a heading outside that
+        span (e.g. inside Identity) must be ignored even when the sections mapping
+        contains a Capabilities entry.  Scoping to Capabilities is a contract, not an
+        optimisation — a whole-document scan would produce an incorrect result here.
+        """
+        from region_insertion import move_artifact_structure_block, SectionSpan
+        # Document with the matching heading in the Identity section.
+        # Capabilities carries no artifact-structure heading — only Core Capabilities
+        # and an empty OutputArtifactTemplate region.
+        lines = [
+            '<Identity type="core">\n',
+            '# MyAgent Agent\n',
+            '\n',
+            'You are the MyAgent agent.\n',
+            '\n',
+            '### Design Artifact Structure\n',  # in Identity — outside Capabilities span
+            '\n',
+            'Some identity content.\n',
+            '\n',
+            '</Identity>\n',
+            '<Capabilities type="core">\n',
+            '## Capabilities\n',
+            '\n',
+            '### Core Capabilities\n',
+            '- Do things\n',
+            '\n',
+            '<OutputArtifactTemplate type="project">\n',
+            '</OutputArtifactTemplate>\n',
+            '\n',
+            '</Capabilities>\n',
+        ]
+        sections = {
+            "Capabilities": SectionSpan(
+                name="Capabilities",
+                heading_line=11,
+                start=12,
+                content_end=19,
+                end=20,
+            )
+        }
+        result = move_artifact_structure_block(lines, sections)
+        assert result.moved is False, (
+            "A matching heading in the Identity section must not trigger a move; "
+            "move_artifact_structure_block must search only within the Capabilities span"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: heading wording variation — T3.3
+# ---------------------------------------------------------------------------
+
+class TestMoveArtifactStructureBlockHeadingVariation:
+    """At least two differently-worded headings ending in 'Artifact Structure' must
+    both be detected and trigger a successful move.
+
+    Corresponds to T3.3 and AC3.5.
+    """
+
+    def _do_move(self, heading: str) -> "ArtifactTemplateMoveResult":  # type: ignore[name-defined]
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(
+            artifact_block_before_region=True,
+            artifact_heading=heading,
+        )
+        return move_artifact_structure_block(lines, sections)
+
+    def test_design_artifact_structure_heading_detected(self) -> None:
+        """'### Design Artifact Structure' must be detected and the block moved."""
+        result = self._do_move("### Design Artifact Structure")
+        assert result.moved is True, (
+            "'### Design Artifact Structure' must be recognised as an artifact-structure heading"
+        )
+
+    def test_audit_artifact_structure_heading_detected(self) -> None:
+        """'### Audit Artifact Structure' must be detected and the block moved."""
+        result = self._do_move("### Audit Artifact Structure")
+        assert result.moved is True, (
+            "'### Audit Artifact Structure' must be recognised as an artifact-structure heading"
+        )
+
+    def test_test_artifact_structure_heading_detected(self) -> None:
+        """'### Test Artifact Structure' must be detected and the block moved."""
+        result = self._do_move("### Test Artifact Structure")
+        assert result.moved is True, (
+            "'### Test Artifact Structure' must be recognised as an artifact-structure heading"
+        )
+
+    def test_heading_text_reflects_actual_wording(self) -> None:
+        """heading_text must match the actual heading, not a normalised form."""
+        result = self._do_move("### Audit Artifact Structure")
+        assert result.heading_text is not None
+        assert "Audit Artifact Structure" in result.heading_text, (
+            f"heading_text must reflect the actual heading wording; got {result.heading_text!r}"
+        )
+
+    def test_non_artifact_structure_heading_not_detected(self) -> None:
+        """An H3 heading that does not end in 'Artifact Structure' must not trigger a move."""
+        result = self._do_move("### Design Notes")
+        assert result.moved is False, (
+            "'### Design Notes' must not be treated as an artifact-structure heading"
+        )
+
+    def test_output_artifact_template_h3_not_detected(self) -> None:
+        """'### Output Artifact Template' must not trigger a move (ends in 'Template', not 'Structure')."""
+        result = self._do_move("### Output Artifact Template")
+        assert result.moved is False, (
+            "'### Output Artifact Template' must not match the artifact-structure pattern"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: order independence — T3.5 (block before vs after region)
+# ---------------------------------------------------------------------------
+
+class TestMoveArtifactStructureBlockOrderIndependence:
+    """The move must produce the same Capabilities content whether the artifact-structure
+    block appears before or after the OutputArtifactTemplate region pair.
+
+    Corresponds to T3.5 and the 'Order independence' contract in the design.
+    """
+
+    def test_block_before_region_moves_correctly(self) -> None:
+        """Block before region: moved=True and content inside region."""
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(artifact_block_before_region=True)
+        result = move_artifact_structure_block(lines, sections)
+        assert result.moved is True
+        text = "".join(result.lines)
+        open_pos = text.find('<OutputArtifactTemplate type="project">')
+        close_pos = text.find("</OutputArtifactTemplate>")
+        inner = text[open_pos + len('<OutputArtifactTemplate type="project">'):close_pos]
+        assert "Design Artifact Structure" in inner
+
+    def test_block_after_region_moves_correctly(self) -> None:
+        """Block after region: moved=True and content inside region."""
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(artifact_block_before_region=False)
+        result = move_artifact_structure_block(lines, sections)
+        assert result.moved is True, (
+            "move_artifact_structure_block must handle the case where the block "
+            "appears after the OutputArtifactTemplate region pair"
+        )
+        text = "".join(result.lines)
+        open_pos = text.find('<OutputArtifactTemplate type="project">')
+        close_pos = text.find("</OutputArtifactTemplate>")
+        inner = text[open_pos + len('<OutputArtifactTemplate type="project">'):close_pos]
+        assert "Design Artifact Structure" in inner, (
+            "Artifact-structure content must land inside the region even when the "
+            "block originally sat after the region pair"
+        )
+
+    def test_block_before_region_content_not_duplicated(self) -> None:
+        """Block before region: content appears exactly once (no duplication)."""
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(artifact_block_before_region=True)
+        result = move_artifact_structure_block(lines, sections)
+        assert "".join(result.lines).count("Design Artifact Structure") == 1
+
+    def test_block_after_region_content_not_duplicated(self) -> None:
+        """Block after region: content appears exactly once (no duplication)."""
+        from region_insertion import move_artifact_structure_block
+        lines, sections = _build_capabilities_body(artifact_block_before_region=False)
+        result = move_artifact_structure_block(lines, sections)
+        assert "".join(result.lines).count("Design Artifact Structure") == 1, (
+            "Artifact-structure content must appear exactly once regardless of "
+            "original block position"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Unit tests: find_heading_block_end — public promotion and own_region param
+# ---------------------------------------------------------------------------
+
+class TestFindHeadingBlockEndPublicPromotion:
+    """find_heading_block_end (public name) must be importable from region_insertion
+    and must accept an own_region keyword parameter.
+
+    The existing private _find_heading_block_end is promoted to public with the
+    own_region parameter as part of the Defect A fix.
+    """
+
+    def test_public_name_is_importable(self) -> None:
+        """find_heading_block_end must be importable from region_insertion (not only _find_heading_block_end)."""
+        from region_insertion import find_heading_block_end  # noqa: F401
+        assert callable(find_heading_block_end)
+
+    def test_accepts_own_region_keyword(self) -> None:
+        """find_heading_block_end must accept own_region as a keyword argument."""
+        from region_insertion import find_heading_block_end
+        from fence import fence_mask
+        lines = ["### My Heading\n", "Some content.\n"]
+        mask = fence_mask(lines)
+        # Must not raise TypeError for own_region keyword
+        result = find_heading_block_end(lines, 0, mask, own_region=None)
+        assert isinstance(result, int)
+
+    def test_own_region_none_stops_at_boundary_tag(self) -> None:
+        """With own_region=None (default), any boundary tag stops the scan.
+
+        This preserves the original behaviour of _find_heading_block_end.
+        """
+        from region_insertion import find_heading_block_end
+        from fence import fence_mask
+        lines = [
+            "### Authority Hierarchy\n",
+            "\n",
+            "Some authority content.\n",
+            '<AuthorityHierarchy type="managed">\n',  # boundary tag — must stop here
+            "</AuthorityHierarchy>\n",
+            "More content.\n",
+        ]
+        mask = fence_mask(lines)
+        end = find_heading_block_end(lines, 0, mask, own_region=None)
+        assert end == 3, (
+            f"With own_region=None any boundary tag stops the scan; "
+            f"expected end=3, got end={end}"
+        )
+
+    def test_own_region_tag_is_transparent(self) -> None:
+        """The owning region's own open and close tags must NOT stop the scan.
+
+        This is the Defect A fix: when own_region='AuthorityHierarchy', the tags
+        <AuthorityHierarchy type="managed"> and </AuthorityHierarchy> are transparent
+        and the scan continues past them to the next heading or foreign boundary tag.
+        """
+        from region_insertion import find_heading_block_end
+        from fence import fence_mask
+        lines = [
+            "### Authority Hierarchy\n",
+            "\n",
+            "Some authority content.\n",
+            '<AuthorityHierarchy type="managed">\n',  # own tag — must be transparent
+            "</AuthorityHierarchy>\n",                 # own tag — must be transparent
+            "More content.\n",
+            "### Next Heading\n",                      # H3 — same level, stops here
+        ]
+        mask = fence_mask(lines)
+        end = find_heading_block_end(lines, 0, mask, own_region="AuthorityHierarchy")
+        assert end == 6, (
+            f"With own_region='AuthorityHierarchy' its own tags must not stop the scan; "
+            f"expected end=6 (at '### Next Heading'), got end={end}"
+        )
+
+    def test_foreign_region_tag_still_stops_scan(self) -> None:
+        """A boundary tag for a *different* region must still stop the scan even when
+        own_region is set.
+
+        The own_region exemption is scoped to one named region; foreign tags remain opaque.
+        """
+        from region_insertion import find_heading_block_end
+        from fence import fence_mask
+        lines = [
+            "### Authority Hierarchy\n",
+            "\n",
+            "Some authority content.\n",
+            '<ClosingProcedure type="managed">\n',  # FOREIGN tag — must stop here
+            "</ClosingProcedure>\n",
+            "More content.\n",
+        ]
+        mask = fence_mask(lines)
+        end = find_heading_block_end(lines, 0, mask, own_region="AuthorityHierarchy")
+        assert end == 3, (
+            f"Foreign boundary tags must still stop the scan even when own_region is set; "
+            f"expected end=3 (at '<ClosingProcedure>'), got end={end}"
+        )
+
+    def test_own_region_compound_name_matched_by_base_name(self) -> None:
+        """own_region is matched by base name (before the first colon).
+
+        A tag like <AuthorityHierarchy:Subagent type="managed"> is owned by
+        'AuthorityHierarchy' and must be transparent.
+        """
+        from region_insertion import find_heading_block_end
+        from fence import fence_mask
+        lines = [
+            "### Authority Hierarchy\n",
+            "\n",
+            '<AuthorityHierarchy:Subagent type="managed">\n',
+            "</AuthorityHierarchy>\n",
+            "### Next Heading\n",
+        ]
+        mask = fence_mask(lines)
+        end = find_heading_block_end(lines, 0, mask, own_region="AuthorityHierarchy")
+        assert end == 4, (
+            "Compound-name tag (AuthorityHierarchy:Subagent) must be owned by "
+            "base name 'AuthorityHierarchy' and be transparent to the scan"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: generic path — T3.1 and T3.5
+# ---------------------------------------------------------------------------
+
+class TestArtifactMoveGenericPath:
+    """End-to-end integration tests for the artifact-structure move on the generic
+    transform path.  All tests fail until transform_file calls
+    move_artifact_structure_block post-dispatch.
+
+    Corresponds to T3.1 and AC3.2, AC3.3, AC3.4, AC3.6.
+    """
+
+    def test_transform_succeeds(
+        self, art_move_generic_input, tmp_path
+    ) -> None:
+        """Transformation of a file with a Design Artifact Structure block must succeed."""
+        result, _ = _transform_to_tmp(art_move_generic_input, tmp_path)
+        assert result.success is True
+        assert result.errors == []
+
+    def test_output_artifact_template_region_present(
+        self, art_move_generic_input, tmp_path
+    ) -> None:
+        """OutputArtifactTemplate region must appear in the output with type='project'."""
+        _, output_path = _transform_to_tmp(art_move_generic_input, tmp_path)
+        content = _read(output_path)
+        assert '<OutputArtifactTemplate type="project">' in content
+        assert "</OutputArtifactTemplate>" in content
+
+    def test_design_heading_inside_region(
+        self, art_move_generic_input, tmp_path
+    ) -> None:
+        """The Design Artifact Structure heading must appear inside the
+        OutputArtifactTemplate region, not outside it.
+
+        Corresponds to AC3.2.
+        """
+        _, output_path = _transform_to_tmp(art_move_generic_input, tmp_path)
+        content = _read(output_path)
+        open_pos = content.find('<OutputArtifactTemplate type="project">')
+        close_pos = content.find("</OutputArtifactTemplate>")
+        inner = content[open_pos + len('<OutputArtifactTemplate type="project">'):close_pos]
+        assert "Design Artifact Structure" in inner, (
+            "Design Artifact Structure heading must be inside the OutputArtifactTemplate region"
+        )
+
+    def test_design_heading_not_in_prose_area(
+        self, art_move_generic_input, tmp_path
+    ) -> None:
+        """The Design Artifact Structure heading must not appear outside the region."""
+        _, output_path = _transform_to_tmp(art_move_generic_input, tmp_path)
+        content = _read(output_path)
+        open_pos = content.find('<OutputArtifactTemplate type="project">')
+        before_region = content[:open_pos]
+        assert "Design Artifact Structure" not in before_region, (
+            "Design Artifact Structure heading must be absent from the prose area "
+            "before the OutputArtifactTemplate open tag"
+        )
+
+    def test_design_heading_appears_exactly_once(
+        self, art_move_generic_input, tmp_path
+    ) -> None:
+        """The Design Artifact Structure heading must appear exactly once in the output.
+
+        Corresponds to AC3.3: content is moved, not copied or dropped.
+        """
+        _, output_path = _transform_to_tmp(art_move_generic_input, tmp_path)
+        content = _read(output_path)
+        count = content.count("Design Artifact Structure")
+        assert count == 1, (
+            f"'Design Artifact Structure' must appear exactly once; found {count} occurrences"
+        )
+
+    def test_region_type_is_project(
+        self, art_move_generic_input, tmp_path
+    ) -> None:
+        """OutputArtifactTemplate must be emitted with type='project'.
+
+        Corresponds to AC3.4.
+        """
+        _, output_path = _transform_to_tmp(art_move_generic_input, tmp_path)
+        assert '<OutputArtifactTemplate type="project">' in _read(output_path), (
+            "OutputArtifactTemplate must carry type='project'"
+        )
+
+    def test_output_matches_expected_exactly(
+        self, art_move_generic_input, art_move_generic_expected, tmp_path
+    ) -> None:
+        """Full output must match the expected fixture byte-for-byte."""
+        _, output_path = _transform_to_tmp(art_move_generic_input, tmp_path)
+        assert _read(output_path) == _read(art_move_generic_expected)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: no-block case — T3.4 / AC3.6
+# ---------------------------------------------------------------------------
+
+class TestArtifactMoveNoBlockCase:
+    """When the Capabilities section carries no artifact-structure heading, the
+    OutputArtifactTemplate region must remain empty and transformation must succeed.
+
+    Reuses the existing generic_artifact_template_input fixture (which has no
+    artifact-structure heading) to verify the AC3.6 no-block contract.
+    """
+
+    def test_transform_succeeds_without_artifact_block(
+        self, generic_artifact_template_input, tmp_path
+    ) -> None:
+        """Transformation must succeed even when no artifact-structure block is present."""
+        result, _ = _transform_to_tmp(generic_artifact_template_input, tmp_path)
+        assert result.success is True
+
+    def test_empty_region_produced_when_no_block(
+        self, generic_artifact_template_input, tmp_path
+    ) -> None:
+        """OutputArtifactTemplate region must be empty when no artifact-structure block exists.
+
+        Corresponds to AC3.6.
+        """
+        _, output_path = _transform_to_tmp(generic_artifact_template_input, tmp_path)
+        content = _read(output_path)
+        open_pos = content.find('<OutputArtifactTemplate type="project">')
+        close_pos = content.find("</OutputArtifactTemplate>")
+        assert open_pos != -1 and close_pos != -1, (
+            "OutputArtifactTemplate region must still be present even without an artifact block"
+        )
+        inner = content[open_pos + len('<OutputArtifactTemplate type="project">'):close_pos]
+        assert inner.strip() == "", (
+            "OutputArtifactTemplate region must be empty when no artifact-structure block exists"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: block-after-marker order independence — T3.5
+# ---------------------------------------------------------------------------
+
+class TestArtifactMoveBlockAfterMarker:
+    """When the artifact-structure block appears AFTER the [INJECTION: output_artifact_template]
+    marker in the legacy source (and therefore after the emitted region pair after body
+    transform), the move must still relocate the block inside the region.
+
+    Corresponds to T3.5 and the 'Order independence' contract.
+    """
+
+    def test_transform_succeeds(
+        self, art_move_block_after_marker_input, tmp_path
+    ) -> None:
+        """Transformation of a file with block-after-marker ordering must succeed."""
+        result, _ = _transform_to_tmp(art_move_block_after_marker_input, tmp_path)
+        assert result.success is True
+
+    def test_design_heading_inside_region(
+        self, art_move_block_after_marker_input, tmp_path
+    ) -> None:
+        """Block-after-marker: heading must end up inside the OutputArtifactTemplate region."""
+        _, output_path = _transform_to_tmp(art_move_block_after_marker_input, tmp_path)
+        content = _read(output_path)
+        open_pos = content.find('<OutputArtifactTemplate type="project">')
+        close_pos = content.find("</OutputArtifactTemplate>")
+        inner = content[open_pos + len('<OutputArtifactTemplate type="project">'):close_pos]
+        assert "Design Artifact Structure" in inner, (
+            "Design Artifact Structure heading must land inside the region even when "
+            "the block originally sat after the OutputArtifactTemplate marker"
+        )
+
+    def test_design_heading_appears_exactly_once(
+        self, art_move_block_after_marker_input, tmp_path
+    ) -> None:
+        """Block-after-marker: content must appear exactly once (moved, not copied)."""
+        _, output_path = _transform_to_tmp(art_move_block_after_marker_input, tmp_path)
+        count = _read(output_path).count("Design Artifact Structure")
+        assert count == 1, (
+            f"'Design Artifact Structure' must appear exactly once in block-after-marker output; "
+            f"found {count} occurrences"
+        )
+
+    def test_design_heading_not_in_prose_area(
+        self, art_move_block_after_marker_input, tmp_path
+    ) -> None:
+        """Block-after-marker: heading must not remain after the close tag."""
+        _, output_path = _transform_to_tmp(art_move_block_after_marker_input, tmp_path)
+        content = _read(output_path)
+        close_pos = content.find("</OutputArtifactTemplate>")
+        after_region = content[close_pos + len("</OutputArtifactTemplate>"):]
+        assert "Design Artifact Structure" not in after_region, (
+            "Design Artifact Structure heading must not remain after the "
+            "OutputArtifactTemplate close tag"
+        )
+
+    def test_output_matches_expected_exactly(
+        self, art_move_block_after_marker_input, art_move_block_after_marker_expected, tmp_path
+    ) -> None:
+        """Block-after-marker: full output must match the expected fixture byte-for-byte.
+
+        Catches whitespace, blank-line trimming, and insertion-order bugs that
+        behavioural assertions alone cannot detect.
+        """
+        _, output_path = _transform_to_tmp(art_move_block_after_marker_input, tmp_path)
+        assert _read(output_path) == _read(art_move_block_after_marker_expected)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: harness path — T3.2 / AC3.7
+# ---------------------------------------------------------------------------
+
+class TestArtifactMoveHarnessPath:
+    """End-to-end integration tests for the artifact-structure move on the harness
+    transform path.  All tests fail until transform_file calls
+    move_artifact_structure_block on the harness path.
+
+    Corresponds to T3.2 and AC3.7.
+    """
+
+    def test_transform_succeeds(
+        self, art_move_harness_input, art_move_harness_generic_ref, tmp_path
+    ) -> None:
+        """Harness transformation with a Design Artifact Structure block must succeed."""
+        result, _ = _transform_to_tmp(
+            art_move_harness_input, tmp_path,
+            generic_ref_path=art_move_harness_generic_ref,
+        )
+        assert result.success is True
+
+    def test_design_heading_inside_region_on_harness_path(
+        self, art_move_harness_input, art_move_harness_generic_ref, tmp_path
+    ) -> None:
+        """Harness path: Design Artifact Structure heading must appear inside the region.
+
+        Corresponds to AC3.7: behaviour is identical on the generic and harness paths.
+        """
+        _, output_path = _transform_to_tmp(
+            art_move_harness_input, tmp_path,
+            generic_ref_path=art_move_harness_generic_ref,
+        )
+        content = _read(output_path)
+        open_pos = content.find('<OutputArtifactTemplate type="project">')
+        close_pos = content.find("</OutputArtifactTemplate>")
+        assert open_pos != -1 and close_pos != -1, (
+            "OutputArtifactTemplate region must be present in harness output"
+        )
+        inner = content[open_pos + len('<OutputArtifactTemplate type="project">'):close_pos]
+        assert "Design Artifact Structure" in inner, (
+            "Design Artifact Structure heading must land inside the region on the harness path"
+        )
+
+    def test_design_heading_appears_exactly_once_on_harness_path(
+        self, art_move_harness_input, art_move_harness_generic_ref, tmp_path
+    ) -> None:
+        """Harness path: content must appear exactly once (moved, not copied or dropped)."""
+        _, output_path = _transform_to_tmp(
+            art_move_harness_input, tmp_path,
+            generic_ref_path=art_move_harness_generic_ref,
+        )
+        count = _read(output_path).count("Design Artifact Structure")
+        assert count == 1, (
+            f"'Design Artifact Structure' must appear exactly once on the harness path; "
+            f"found {count} occurrences"
+        )
+
+    def test_design_heading_not_in_prose_area_on_harness_path(
+        self, art_move_harness_input, art_move_harness_generic_ref, tmp_path
+    ) -> None:
+        """Harness path: heading must not remain in the prose area before the region."""
+        _, output_path = _transform_to_tmp(
+            art_move_harness_input, tmp_path,
+            generic_ref_path=art_move_harness_generic_ref,
+        )
+        content = _read(output_path)
+        open_pos = content.find('<OutputArtifactTemplate type="project">')
+        before_region = content[:open_pos]
+        assert "Design Artifact Structure" not in before_region, (
+            "Design Artifact Structure heading must be absent from the prose area "
+            "before the OutputArtifactTemplate open tag on the harness path"
+        )
+
+    def test_harness_path_produces_same_region_shape_as_generic_path(
+        self,
+        art_move_harness_input,
+        art_move_harness_generic_ref,
+        art_move_generic_input,
+        tmp_path,
+    ) -> None:
+        """The OutputArtifactTemplate region content must be the same on both paths.
+
+        Corresponds to AC3.7: path agreement is structural for the move.
+        """
+        _, harness_output = _transform_to_tmp(
+            art_move_harness_input, tmp_path,
+            generic_ref_path=art_move_harness_generic_ref,
+        )
+        _, generic_output = _transform_to_tmp(art_move_generic_input, tmp_path)
+
+        def _extract_region_content(content: str) -> str:
+            open_tag = '<OutputArtifactTemplate type="project">'
+            close_tag = "</OutputArtifactTemplate>"
+            op = content.find(open_tag)
+            cp = content.find(close_tag)
+            return content[op + len(open_tag):cp].strip()
+
+        harness_inner = _extract_region_content(_read(harness_output))
+        generic_inner = _extract_region_content(_read(generic_output))
+        assert generic_inner != "", (
+            "OutputArtifactTemplate region content must be non-empty after the move; "
+            "if both regions are empty the equality assertion passes vacuously and "
+            "provides no RED-phase signal"
+        )
+        assert harness_inner == generic_inner, (
+            "OutputArtifactTemplate region content must be identical on the generic "
+            "and harness paths (AC3.7)"
+        )
+
+    def test_output_matches_expected_exactly(
+        self, art_move_harness_input, art_move_harness_generic_ref,
+        art_move_harness_expected, tmp_path
+    ) -> None:
+        """Harness path: full output must match the expected fixture byte-for-byte.
+
+        Behavioural assertions cannot catch off-by-one blank-line differences or
+        subtle insertion-point errors; a byte-for-byte comparison catches them.
+        """
+        _, output_path = _transform_to_tmp(
+            art_move_harness_input, tmp_path,
+            generic_ref_path=art_move_harness_generic_ref,
+        )
+        assert _read(output_path) == _read(art_move_harness_expected)
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: degraded path (harness + no generic ref) — design contract
+# ---------------------------------------------------------------------------
+
+class TestArtifactMoveDegradedPath:
+    """Integration tests for the artifact-structure move on the degraded transform path.
+
+    The degraded path is triggered when a harness file (transform_version present) is
+    processed WITHOUT a generic_ref_path.  The design contract states that the degraded
+    branch must call move_artifact_structure_block after its own apply_conduct_regions,
+    mirroring the shared post-dispatch stage step-for-step.
+
+    This class is not required by the plan's acceptance criteria (AC3.7 names only the
+    generic and harness paths) but is required by ContractsDesign.md, which states:
+    'a branch that produces a transformed document must produce the same shape of document.'
+    All tests fail until move_artifact_structure_block is wired into the degraded branch.
+    """
+
+    def test_degraded_transform_succeeds(
+        self, art_move_harness_input, tmp_path
+    ) -> None:
+        """Degraded path: transform without a generic ref must succeed for a harness file
+        carrying a Design Artifact Structure block."""
+        result, _ = _transform_to_tmp(art_move_harness_input, tmp_path)
+        assert result.success is True
+
+    def test_degraded_design_heading_inside_region(
+        self, art_move_harness_input, tmp_path
+    ) -> None:
+        """Degraded path: the Design Artifact Structure heading must appear inside the
+        OutputArtifactTemplate region even when no generic_ref_path is supplied.
+
+        Mirrors the main-path assertion in TestArtifactMoveHarnessPath; the degraded
+        branch's own move_artifact_structure_block call is what makes it pass.
+        """
+        _, output_path = _transform_to_tmp(art_move_harness_input, tmp_path)
+        content = _read(output_path)
+        open_pos = content.find('<OutputArtifactTemplate type="project">')
+        close_pos = content.find("</OutputArtifactTemplate>")
+        assert open_pos != -1 and close_pos != -1, (
+            "OutputArtifactTemplate region must be present in degraded-path output"
+        )
+        inner = content[open_pos + len('<OutputArtifactTemplate type="project">'):close_pos]
+        assert "Design Artifact Structure" in inner, (
+            "Design Artifact Structure heading must land inside the OutputArtifactTemplate "
+            "region on the degraded (harness, no generic ref) path"
+        )
+
+    def test_degraded_design_heading_appears_exactly_once(
+        self, art_move_harness_input, tmp_path
+    ) -> None:
+        """Degraded path: content must appear exactly once (moved, not copied or dropped)."""
+        _, output_path = _transform_to_tmp(art_move_harness_input, tmp_path)
+        count = _read(output_path).count("Design Artifact Structure")
+        assert count == 1, (
+            f"'Design Artifact Structure' must appear exactly once on the degraded path; "
+            f"found {count} occurrences"
         )

@@ -69,21 +69,12 @@ You are the **TestAgent** agent in a multi-agent orchestration system.
 <ErrorHandlingCommon type="managed">
 </ErrorHandlingCommon>
 
-- **Retry transient errors once** before escalating
 - **Return BLOCKED** if prerequisites are missing
 
 <ErrorHandlingExtension type="project">
 </ErrorHandlingExtension>
 
 </ErrorHandling>
----
-
-<OutputFormat type="core">
-## Output Format
-
-Always end with a JSON status block.
-
-</OutputFormat>
 ---
 
 <ExecutionPhilosophy type="core">

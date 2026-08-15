@@ -41,6 +41,7 @@ type wireSubject struct {
 	OpeningMessage string   `yaml:"opening_message"`
 	InvocationKind string   `yaml:"invocation_kind"`
 	Model          string   `yaml:"model"`
+	StubModel      string   `yaml:"stub_model"`
 	AllowedTools   []string `yaml:"allowed_tools"`
 }
 
@@ -240,6 +241,7 @@ func ParseTestDefinition(src Source) (domain.TestDefinition, Report) {
 			OpeningMessage:  wire.Subject.OpeningMessage,
 			InvocationKind:  wire.Subject.InvocationKind,
 			Model:           wire.Subject.Model,
+			StubModel:       wire.Subject.StubModel,
 			AllowedTools:    wire.Subject.AllowedTools,
 		},
 		StubRegistryPath: wire.StubRegistry,

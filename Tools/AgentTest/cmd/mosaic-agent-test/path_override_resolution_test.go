@@ -302,3 +302,84 @@ func TestSelectFrontend_MosaicRootFlagValue_NotMistakenForPositional(t *testing.
 		t.Errorf(`selectFrontend([--mosaic-root C:/mosaic], alwaysTerminal) = %q, want %q (the flag's value must not be mistaken for a positional command)`, got, FrontendTUI)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// CatalogFolder precedence
+// ---------------------------------------------------------------------------
+
+// TestResolveWiringConfig_CatalogFolder_FlagWinsOverEverything mirrors the
+// MosaicRoot flag-wins tests for --catalog-folder: the CLI flag must win over
+// both the MOSAIC_AGENT_TEST_CATALOG_FOLDER environment variable and the
+// default empty string, in both the space-separated and equals-separated forms.
+func TestResolveWiringConfig_CatalogFolder_FlagWinsOverEverything(t *testing.T) {
+	t.Setenv("MOSAIC_AGENT_TEST_CATALOG_FOLDER", "C:/from-env/catalog")
+
+	cases := map[string][]string{
+		"space":  {"run", "suite.yaml", "--catalog-folder", "C:/from-flag/catalog"},
+		"equals": {"run", "suite.yaml", "--catalog-folder=C:/from-flag/catalog"},
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := resolveWiringConfig(args)
+			if cfg.CatalogFolder != "C:/from-flag/catalog" {
+				t.Errorf("resolveWiringConfig(%v).CatalogFolder = %q, want the flag value %q (a flag must win over the environment variable)", args, cfg.CatalogFolder, "C:/from-flag/catalog")
+			}
+		})
+	}
+}
+
+// TestResolveWiringConfig_CatalogFolder_EnvWinsOverDefault asserts the
+// MOSAIC_AGENT_TEST_CATALOG_FOLDER variable, absent a flag, wins over the
+// default empty string. This mirrors the MosaicRoot env-over-default test.
+func TestResolveWiringConfig_CatalogFolder_EnvWinsOverDefault(t *testing.T) {
+	t.Setenv("MOSAIC_AGENT_TEST_CATALOG_FOLDER", "C:/from-env/catalog")
+
+	cfg := resolveWiringConfig([]string{"run", "suite.yaml"})
+
+	if cfg.CatalogFolder != "C:/from-env/catalog" {
+		t.Errorf("resolveWiringConfig(...).CatalogFolder = %q, want the environment value %q (the variable must win over the default when no flag is given)", cfg.CatalogFolder, "C:/from-env/catalog")
+	}
+}
+
+// TestResolveWiringConfig_CatalogFolder_DefaultsToEmpty asserts that with
+// neither a flag nor the environment variable set, CatalogFolder defaults to
+// the empty string. An empty CatalogFolder means "do not override" — the
+// --catalog-folder flag is not passed to the deployment tool, which then
+// resolves its own catalogue under its own root. A correctly staged
+// distribution therefore works with no flag and no environment variable,
+// exactly as MosaicRoot does.
+func TestResolveWiringConfig_CatalogFolder_DefaultsToEmpty(t *testing.T) {
+	t.Setenv("MOSAIC_AGENT_TEST_CATALOG_FOLDER", "")
+
+	cfg := resolveWiringConfig([]string{"run", "suite.yaml"})
+
+	if cfg.CatalogFolder != "" {
+		t.Errorf("resolveWiringConfig(...).CatalogFolder = %q, want empty string (empty means the deploy tool resolves its own catalogue; a correctly staged distribution needs no flag and no variable)", cfg.CatalogFolder)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Positional-detection coverage for --catalog-folder
+// ---------------------------------------------------------------------------
+
+// TestValueConsumingFlags_IncludesCatalogFolder asserts the composition root's
+// positional detection recognises --catalog-folder, so a space-separated value
+// never gets mistaken for a positional subcommand — the same property the
+// existing --mosaic-root test pins for that flag.
+func TestValueConsumingFlags_IncludesCatalogFolder(t *testing.T) {
+	if !valueConsumingFlags["--catalog-folder"] {
+		t.Errorf("valueConsumingFlags[%q] = false, want true (every value-consuming flag must be recognised by positional detection so its value is not mistaken for a subcommand)", "--catalog-folder")
+	}
+}
+
+// TestSelectFrontend_CatalogFolderFlagValue_NotMistakenForPositional mirrors
+// the existing path-override flag tests: a bare invocation carrying only
+// "--catalog-folder <path>" must fall through to the terminal check rather than
+// routing to the CLI frontend because the flag's own value was mistaken for a
+// positional command.
+func TestSelectFrontend_CatalogFolderFlagValue_NotMistakenForPositional(t *testing.T) {
+	got := selectFrontend([]string{"--catalog-folder", "C:/AgentTest/catalog"}, alwaysTerminal)
+	if got != FrontendTUI {
+		t.Errorf(`selectFrontend([--catalog-folder C:/AgentTest/catalog], alwaysTerminal) = %q, want %q (the flag's value must not be mistaken for a positional command)`, got, FrontendTUI)
+	}
+}

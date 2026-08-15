@@ -2,11 +2,10 @@
 
 Verifies the canonical section list, the canonical document order, the
 tool-managed deployed set, and the parent mappings — as defined after the
-vocabulary correction that drops `LanguagePatterns` and `CustomConstraints`
-from the tool-managed set:
+vocabulary correction that drops `OutputFormat` from the canonical sections:
 
-  - CANONICAL_SECTIONS: 6 section names (unchanged)
-  - CANONICAL_ORDER: 7 document slots (ArtifactProvenance removed)
+  - CANONICAL_SECTIONS: 5 section names (OutputFormat removed)
+  - CANONICAL_ORDER: 6 document slots (OutputFormat removed)
   - CANONICAL_DEPLOYED: 9 tool-managed names (ArtifactProvenance removed
     earlier; LanguagePatterns and CustomConstraints removed by this change)
   - DEPLOYED_PARENT_MAP: 9 entries
@@ -47,11 +46,18 @@ from boundary_constants import (  # noqa: E402
 
 
 class TestCanonicalSections:
-    """CANONICAL_SECTIONS: 6 section names in document order, unchanged in Stage 2."""
+    """CANONICAL_SECTIONS: 5 section names in document order (OutputFormat removed)."""
 
-    def test_canonical_sections_contains_six_entries(self) -> None:
-        assert len(CANONICAL_SECTIONS) == 6, (
-            f"Expected 6 canonical sections, got {len(CANONICAL_SECTIONS)}: {CANONICAL_SECTIONS}"
+    def test_canonical_sections_contains_five_entries(self) -> None:
+        assert len(CANONICAL_SECTIONS) == 5, (
+            f"Expected 5 canonical sections (OutputFormat removed), "
+            f"got {len(CANONICAL_SECTIONS)}: {CANONICAL_SECTIONS}"
+        )
+
+    def test_output_format_not_in_canonical_sections(self) -> None:
+        assert "OutputFormat" not in CANONICAL_SECTIONS, (
+            "OutputFormat must NOT be in CANONICAL_SECTIONS — it is a retired section "
+            "whose legacy content is deleted outright during transform"
         )
 
     def test_communication_protocol_not_in_canonical_sections(self) -> None:
@@ -65,13 +71,12 @@ class TestCanonicalSections:
         )
 
     def test_canonical_sections_full_order(self) -> None:
-        """CANONICAL_SECTIONS must equal the precise 6-entry ordered tuple."""
+        """CANONICAL_SECTIONS must equal the precise 5-entry ordered tuple (no OutputFormat)."""
         expected: tuple[str, ...] = (
             "Identity",
             "Capabilities",
             "Constraints",
             "ErrorHandling",
-            "OutputFormat",
             "ExecutionPhilosophy",
         )
         assert CANONICAL_SECTIONS == expected, (
@@ -87,12 +92,18 @@ class TestCanonicalSections:
 
 
 class TestCanonicalOrder:
-    """CANONICAL_ORDER: 7 document slots after Stage 2 removes ArtifactProvenance."""
+    """CANONICAL_ORDER: 6 document slots (OutputFormat removed)."""
 
-    def test_canonical_order_contains_seven_slots(self) -> None:
-        assert len(CANONICAL_ORDER) == 7, (
-            f"Expected 7 canonical document slots (ArtifactProvenance removed in Stage 2), "
+    def test_canonical_order_contains_six_slots(self) -> None:
+        assert len(CANONICAL_ORDER) == 6, (
+            f"Expected 6 canonical document slots (OutputFormat removed), "
             f"got {len(CANONICAL_ORDER)}: {CANONICAL_ORDER}"
+        )
+
+    def test_output_format_absent_from_canonical_order(self) -> None:
+        assert "OutputFormat" not in CANONICAL_ORDER, (
+            "OutputFormat must NOT be in CANONICAL_ORDER — it is a retired section "
+            "whose legacy heading is deleted during transform, not wrapped with a section tag"
         )
 
     def test_identity_is_first_slot(self) -> None:
@@ -111,14 +122,13 @@ class TestCanonicalOrder:
         )
 
     def test_canonical_order_full_sequence(self) -> None:
-        """CANONICAL_ORDER must match the seven-slot sequence exactly."""
+        """CANONICAL_ORDER must match the six-slot sequence exactly (no OutputFormat)."""
         expected: tuple[str, ...] = (
             "Identity",
             "CommunicationProtocol",
             "Capabilities",
             "Constraints",
             "ErrorHandling",
-            "OutputFormat",
             "ExecutionPhilosophy",
         )
         assert CANONICAL_ORDER == expected, (
@@ -478,11 +488,46 @@ class TestExpectedMarker:
 
 
 class TestSectionHeadingMap:
-    """SECTION_HEADING_MAP must NOT have an entry for ArtifactProvenance."""
+    """SECTION_HEADING_MAP must NOT have an entry for ArtifactProvenance or OutputFormat,
+    and its key set must equal CANONICAL_SECTIONS exactly (structural invariant)."""
 
     def test_artifact_provenance_not_in_section_heading_map(self) -> None:
         assert "ArtifactProvenance" not in SECTION_HEADING_MAP, (
             "ArtifactProvenance must NOT be in SECTION_HEADING_MAP — removed in Stage 2"
+        )
+
+    def test_output_format_not_in_section_heading_map(self) -> None:
+        assert "OutputFormat" not in SECTION_HEADING_MAP, (
+            "OutputFormat must NOT be in SECTION_HEADING_MAP — it is a retired section; "
+            "its legacy heading '## Output Format' is matched and deleted by "
+            "delete_legacy_sections, not resolved via this map"
+        )
+
+    def test_section_heading_map_keys_equal_canonical_sections(self) -> None:
+        """set(SECTION_HEADING_MAP) must equal set(CANONICAL_SECTIONS) exactly.
+
+        This structural invariant ensures the heading map stays in sync with the
+        canonical section list: a section added to CANONICAL_SECTIONS without a
+        corresponding heading entry (or vice-versa) would break _identify_sections.
+        """
+        assert set(SECTION_HEADING_MAP) == set(CANONICAL_SECTIONS), (
+            f"SECTION_HEADING_MAP keys must equal CANONICAL_SECTIONS exactly.\n"
+            f"Keys in SECTION_HEADING_MAP: {sorted(SECTION_HEADING_MAP)}\n"
+            f"CANONICAL_SECTIONS: {list(CANONICAL_SECTIONS)}"
+        )
+
+    def test_canonical_order_non_protocol_slots_equal_canonical_sections(self) -> None:
+        """Filtering CommunicationProtocol from CANONICAL_ORDER must yield CANONICAL_SECTIONS.
+
+        This structural invariant ensures CANONICAL_ORDER and CANONICAL_SECTIONS stay in sync:
+        every section in CANONICAL_SECTIONS appears in CANONICAL_ORDER (in the same relative
+        order), and every non-protocol slot in CANONICAL_ORDER is a canonical section.
+        """
+        non_protocol = tuple(n for n in CANONICAL_ORDER if n != "CommunicationProtocol")
+        assert non_protocol == CANONICAL_SECTIONS, (
+            f"CANONICAL_ORDER minus CommunicationProtocol must equal CANONICAL_SECTIONS.\n"
+            f"Got non-protocol slots: {non_protocol}\n"
+            f"CANONICAL_SECTIONS:     {CANONICAL_SECTIONS}"
         )
 
 

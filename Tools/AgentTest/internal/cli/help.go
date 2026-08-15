@@ -49,6 +49,7 @@ var flagSpecs = []FlagSpec{
 	{Name: "--cost-tool", Placeholder: "<path>", Summary: "Log-analysis tool path override", ConsumesValue: true},
 	{Name: "--deploy-tool", Placeholder: "<path>", Summary: "Deployment tool path override", ConsumesValue: true},
 	{Name: "--mosaic-root", Placeholder: "<dir>", Summary: "MOSAIC repository root override for the deployment tool", ConsumesValue: true},
+	{Name: "--catalog-folder", Placeholder: "<dir>", Summary: "Catalogue directory override for the deployment tool", ConsumesValue: true},
 	{Name: "--keep-sandbox", Summary: "Retain every sandbox for diagnosis", ConsumesValue: false},
 	{Name: "--keep-sandbox-on-failure", Summary: "Retain a sandbox when the attempt failed", ConsumesValue: false},
 	{Name: "--help", Summary: "Show this usage surface and exit (-h)", ConsumesValue: false},

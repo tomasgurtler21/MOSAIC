@@ -75,14 +75,6 @@ Error handling extension content injected here.
 </ErrorHandling>
 ---
 
-<OutputFormat type="core">
-## Output Format
-
-Always return structured output.
-
-</OutputFormat>
----
-
 <ExecutionPhilosophy type="core">
 ## Execution Philosophy
 

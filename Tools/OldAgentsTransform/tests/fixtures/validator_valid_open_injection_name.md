@@ -40,13 +40,6 @@ Error handling content.
 
 </ErrorHandling>
 
-<OutputFormat type="core">
-## Output Format
-
-Output format content.
-
-</OutputFormat>
-
 <ExecutionPhilosophy type="core">
 ## Execution Philosophy
 

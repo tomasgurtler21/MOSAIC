@@ -1,7 +1,7 @@
 # AgentTest — Design
 
-**Status:** Draft
-**Scope:** What AgentTest is, how its pieces connect, what full-control orchestrator testing requires, and what is not yet settled.
+**Status:** Active
+**Scope:** What AgentTest is, how its pieces connect, and what full-control orchestrator testing requires. All external dependencies (deploy tool `--catalog-folder`) are resolved; remaining work is AgentTest-internal wiring and test catalogue creation.
 
 ---
 
@@ -45,7 +45,7 @@ These use cases all require full control over every variable: which orchestrator
 | **Execution & Evaluation** | Complete — sandbox lifecycle, evidence assembly, pure verdict engine, repetitions, pass-rate aggregation | `internal/runner/`, `internal/suite/`, `internal/evaluate/`, `internal/concurrency/`, `internal/protocolcheck/`, `internal/orchstate/`, `internal/cost/` |
 | **Reporting** | Complete — single `report.Result` model, text + JSON renderings | `internal/report/` |
 | **Frontends** | CLI + TUI (bubbletea) | `internal/cli/`, `internal/tui/` |
-| **Deploy Integration** | Partial — `domain.AgentDeployer` port delegates to `mosaic-deploy render` subprocess (works for single-agent rendering). Design target: add `deploy` subcommand path with `--catalog-folder` for full test-catalogue deployment (§6) | `internal/agentdeploy/` |
+| **Deploy Integration** | Partial — `domain.AgentDeployer` port delegates to `mosaic-deploy render` subprocess (works for single-agent rendering). Port needs `--catalog-folder` wiring and a `Deploy` method for single-call catalogue deployment (§6) | `internal/agentdeploy/` |
 | **Architecture Enforcement** | Complete — static import-layer checker | `tools/importcheck/` |
 | **Stub Agent Definitions** | 4 generic-form stubs | `agents/` |
 | **Example Suites** | `examples/` (fake harness, exercised by Go e2e tests), `tests/smoke/` (real claude-code harness) | `examples/`, `tests/smoke/` |
@@ -66,7 +66,7 @@ These connections are implemented, tested, and working end-to-end:
 
 ### 2.3 What Is Not Yet Wired
 
-**Test catalogue and deployment integration.** No test-specific catalogue tree exists inside `Tools/AgentTest/`. The current deployment path uses `render` (single-agent rendering) for each agent individually. The design target (§3) is to use the deploy tool's `deploy` subcommand with `--catalog-folder`, deploying the orchestrator and all referenced agents in one call from a test catalogue. This requires the `--catalog-folder` capability in the deploy tool (§3.2).
+**Test catalogue and deployment integration.** No test-specific catalogue tree exists inside `Tools/AgentTest/`. The current deployment path uses `render` (single-agent rendering) for each agent individually. The deploy tool now supports `--catalog-folder` on all subcommands, so the remaining work is AgentTest-side: wiring `--catalog-folder` into the `agentdeploy` port's `Options`, adding a `Deploy` method that calls the `deploy` subcommand, creating the test catalogue tree, and updating the runner's setup phase to use the single-call deployment path.
 
 ---
 
@@ -84,16 +84,11 @@ Test workflows and test orchestrator variants do not belong in the product catal
 
 A test catalogue used as `--mosaic-root` would need copies of all of these, or protocol loading and bundle loading would fail. This is why `MosaicTestCatalog/` at the repo root does not follow the standard catalogue structure (its agents live under `Agents/MosaicTest/`, not `Subagents/MosaicTest/`) — it was built for manual deployment, not as a `--mosaic-root` target for the `render` subcommand.
 
-### 3.2 The Design: `--catalog-folder`
+### 3.2 `--catalog-folder`
 
-Instead of replacing the entire MOSAIC root, the deploy tool needs a single new optional flag that redirects only the **catalogue source directories** — where agents and workflows are scanned from — while keeping everything else (protocol, bundles, skills, harness descriptors) resolved from the real MOSAIC root.
+The deploy tool supports `--catalog-folder <dir>` as a persistent flag on all subcommands. It redirects only the **catalogue source directories** — where agents and workflows are scanned from — while keeping everything else (protocol, bundles, skills, harness descriptors) resolved from the real MOSAIC root.
 
-The deploy tool's `catalog.Load` currently hardcodes:
-- Orchestrator: `{catalogDir}/Orchestrator/orchestrator.md`
-- Subagents: `{catalogDir}/Subagents/{category}/*.md`
-- Workflows: `{catalogDir}/Workflows/{category}/*.md` (via `Workflows/Index.md`)
-
-With `--catalog-folder <dir>`, these resolve against `<dir>` instead of the root, while the protocol, bundle, and other root-relative resources stay at the real root.
+`catalog.Load(mosaicRoot, catalogFolder)` takes the two roots as separate arguments. When `--catalog-folder` is absent, the default `{mosaicRoot}/Catalog` is used. When present, agents and workflows resolve against the supplied folder while protocol, bundles, and other root-relative resources stay at the real root.
 
 For AgentTest, this means the test catalogue is a simple directory:
 
@@ -123,7 +118,7 @@ The second is heavier but fully parallel and automatable. The first is the commo
 
 ### 3.3 What This Means for AgentTest
 
-AgentTest already passes `--mosaic-root` to the deploy tool. The mechanism would change to `--catalog-folder` (or AgentTest could construct the flag from its own `--catalog` flag). The wiring through `agentdeploy` is identical — one flag name changes.
+AgentTest's `agentdeploy` port needs two additions: a `CatalogFolder` field in `Options` (emitting `--catalog-folder` to the subprocess), and a `Deploy` method that calls the `deploy` subcommand instead of `render`. The wiring through `WiringConfig` is identical to the existing `MosaicRoot` pattern.
 
 The net effect: the test author recreates just the agents/workflows directory structure, puts their orchestrator and test workflows there, and points the tool at it. Everything else — protocol injection, bundle loading, harness transformation — comes from the real MOSAIC root as it always has.
 
@@ -139,7 +134,7 @@ Three reasons, each sufficient alone:
 
 `MosaicTestCatalog/` at the repo root serves `Tools/Runner`'s harness conformance tests. It is a manually-deployed catalogue tree with test-only workflows and cheap-model stub agents. MosaicTest deploys manually via `mosaic-deploy` TUI/CLI.
 
-If `--catalog-folder` existed, `MosaicTestCatalog/` could also use it instead of its current informal deployment process. The two testing tools would share the same catalogue-redirection mechanism.
+Now that `--catalog-folder` exists, `MosaicTestCatalog/` could also use it instead of its current informal deployment process. The two testing tools share the same catalogue-redirection mechanism.
 
 ---
 
@@ -212,7 +207,7 @@ To test whether an orchestrator handles a specific routing condition correctly:
 ```
 
 1. **Preflight** dry-runs the deploy call to catch catalogue misses, bad workflow IDs, and missing agent definitions before any sandbox is created.
-2. **Setup** creates a fresh sandbox, deploys the orchestrator and all referenced agents into it via a single `mosaic-deploy deploy --catalog-folder <test-catalogue>` call, seeds declared files, provisions the interception hooks. The deploy tool resolves agents and workflows from the test catalogue while loading protocol, bundles, and skills from the real MOSAIC root.
+2. **Setup** creates a fresh sandbox, deploys the orchestrator and all referenced agents into it via a single `mosaic-deploy deploy --catalog-folder <test-catalogue>` call (or via per-agent `render` calls when using the `stub_agents` path), seeds declared files, provisions the interception hooks. The deploy tool resolves agents and workflows from the test catalogue while loading protocol, bundles, and skills from the real MOSAIC root.
 3. **Launch** starts the orchestrator through the harness CLI. The orchestrator sees a real harness environment with its workflow(s) baked into its system prompt.
 4. **Interception** — every time the orchestrator dispatches a collaborator, the harness routes the call through the interception pipeline. The pipeline matches the collaborator identity against the stub registry and returns the declared response. The orchestrator receives it as if a real collaborator produced it.
 5. **Snapshot** captures the invocation log, the orchestration document the orchestrator wrote, and any side effects, while the sandbox still exists.
@@ -238,7 +233,7 @@ Plus **echo fidelity** — evaluated unconditionally on every run, never declare
 
 ---
 
-## 5. Open Design Questions
+## 5. Design Decisions
 
 ### 5.1 Test Workflow ↔ Stub Consistency
 
@@ -278,22 +273,19 @@ AgentTest uses the deploy tool as a subprocess, through the `domain.AgentDeploye
 
 ### 6.1 Primary Interface: `deploy` Subcommand
 
-The design target is to use the `deploy` subcommand (not `render`) as AgentTest's primary deployment mechanism. `deploy` deploys an orchestrator and all agents referenced by selected workflows into a workspace in a single call. This matches the test setup need exactly: one call produces a fully-wired sandbox with the orchestrator and all its stub collaborators.
+The primary deployment mechanism is the `deploy` subcommand, which deploys an orchestrator and all agents referenced by selected workflows into a workspace in a single call. This matches the test setup need exactly: one call produces a fully-wired sandbox with the orchestrator and all its stub collaborators.
 
-The design requires one capability that does not yet exist:
-
-| Capability | Description | Status |
-|-----------|-------------|--------|
-| **`--catalog-folder` on `deploy`** | Redirects catalogue resolution (agents, workflows) to a specified directory, while keeping protocol, bundles, skills, and other root-relative resources at the real MOSAIC root. | Not implemented |
-
-Existing capabilities used:
+All required deploy tool capabilities exist:
 
 | Capability | Flag | Status |
 |-----------|------|--------|
-| Deploy orchestrator + agents for workflows | `deploy --workflows` | Exists |
-| Workspace destination | `deploy --workspace` | Exists |
-| Dry-run validation | `deploy --dry-run` | Exists |
-| JSON output | `deploy --output json` | Exists |
+| Redirect catalogue resolution | `deploy --catalog-folder` | Implemented |
+| Deploy orchestrator + agents for workflows | `deploy --workflows` | Implemented |
+| Workspace destination | `deploy --workspace` | Implemented |
+| Dry-run validation | `deploy --dry-run` | Implemented |
+| JSON output | `deploy --output json` | Implemented |
+
+The remaining work is AgentTest-side: wiring `--catalog-folder` into the `agentdeploy` port and adding a `Deploy` method that calls the `deploy` subcommand.
 
 ### 6.2 Secondary Interface: `render` Subcommand
 
@@ -311,6 +303,11 @@ The `render` subcommand (single-agent rendering) remains available for edge case
 
 ### 6.3 Implementation Path
 
-The `--catalog-folder` capability is a focused addition. It does not change the render or deploy pipeline — it changes where `catalog.Load` looks for source material. The deploy tool's code already separates catalogue loading from protocol/bundle loading, so the seam exists.
+The deploy tool's `--catalog-folder` is implemented. `catalog.Load(mosaicRoot, catalogFolder)` already separates catalogue loading from protocol/bundle loading.
 
-AgentTest's `agentdeploy` port would gain a second method (or the existing method would generalise) to call `deploy` instead of `render`. The wiring through `WiringConfig` is identical — one flag name changes from `--mosaic-root` to `--catalog-folder`, and the subprocess call switches from `render` to `deploy`.
+AgentTest's `agentdeploy` port needs:
+1. A `CatalogFolder` field in `Options`, emitting `--catalog-folder` when non-empty.
+2. A `Deploy` method on the `AgentDeployer` interface that calls the `deploy` subcommand with `--catalog-folder`, `--workspace`, `--workflows`, `--harness`, `--dry-run`, and `--output json`.
+3. The runner's setup phase must call `Deploy` (single call) for catalogue-based tests, falling back to per-agent `Render` for `stub_agents`-based tests.
+
+See `Requirements-agentTest.md` for the full requirement set.

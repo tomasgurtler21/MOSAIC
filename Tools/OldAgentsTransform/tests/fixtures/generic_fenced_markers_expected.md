@@ -69,14 +69,6 @@ The following lines appear verbatim inside a fenced code block and must not be c
 </ErrorHandling>
 ---
 
-<OutputFormat type="core">
-## Output Format
-
-Return a JSON status block.
-
-</OutputFormat>
----
-
 <ExecutionPhilosophy type="core">
 ## Execution Philosophy
 
