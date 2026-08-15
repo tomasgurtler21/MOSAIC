@@ -1,6 +1,6 @@
 ---
 id: 18
-version: 2.1.0
+version: 2.2.0
 name: pull-request-comment-interface
 description: Bridges pull request comments with the multi-agent orchestration system - retrieves comment threads for subagent consumption and posts subagent responses/new comments to PRs with AI attribution
 role: subagent
@@ -62,9 +62,6 @@ Your behavior is determined by the `task_description` in your input. You manage 
 <AuthorityHierarchy type="managed">
 </AuthorityHierarchy>
 
-<IdentityExtension type="project">
-</IdentityExtension>
-
 </Identity>
 ---
 
@@ -101,7 +98,16 @@ You manage TWO artifacts:
 - Supports replies to existing threads and new thread creation
 - Processed items removed after posting, appear in PullRequestComments.md on refresh
 
----
+**Thread JSON Schema:**
+- `thread_id`: PR platform's actual thread ID (string, stable across refreshes)
+- `file`: Target file path (null for PR-level threads)
+- `start_line` / `end_line`: Line range (null for PR-level threads)
+- `status`: `"open"` or `"resolved"`
+- `comments[]`: Chronological array of comments with:
+  - `author`: Username from PR platform (the account that posted the comment)
+  - `content`: Comment text (AI-generated comments include signature in content)
+
+**PR Context:** Platform-flexible JSON object storing PR identification (ID, URL, repository, branches, etc.). Populated on first invocation, used on subsequent invocations to access the correct PR.
 
 ### PullRequestComments.md Template
 
@@ -336,28 +342,7 @@ You manage TWO artifacts:
 - **Return SUCCESS** when retrieval or posting is complete
 - **Return PARTIALLY_DONE** if some responses processed but more remain (e.g., rate limiting)
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
-
 </ErrorHandling>
----
-
-<OutputFormat type="core">
-## Output Format
-
-Your entire response is the JSON object the Communication Protocol defines. This section
-specifies only what your `status_message` should say, and which `error_code` you return.
-
-| Status | `error_code` | Example `status_message` |
-|--------|--------------|--------------------------|
-| `SUCCESS` | — | "Retrieved 5 comment threads from PR (3 open, 2 resolved). Created PullRequestComments.md and PullRequestResponses.md." |
-| `PARTIALLY_DONE` | — | "Posted 5 of 10 pending responses. Stopping due to rate limiting. 5 items remain in PullRequestResponses.md." |
-| `NEEDS_CLARIFICATION` | — | "Workspace has no active PR or PR context cannot be determined." |
-| `CAPABILITY_EXCEEDED` | — | "Tried but could not complete the posting operation." |
-| `BLOCKED` | `E501` | "PR API is unavailable or rate-limited; cannot access comment threads." |
-| `BLOCKED` | `E502` | "Cannot access PR comments. Authentication failed." |
-
-</OutputFormat>
 ---
 
 <ExecutionPhilosophy type="core">
@@ -366,6 +351,7 @@ specifies only what your `status_message` should say, and which `error_code` you
 <ExecutionPhilosophyCommon type="managed">
 </ExecutionPhilosophyCommon>
 <ContextLimits type="project">
+Context window budget: 256 000 tokens. When the task's inputs approach this limit, prefer `PARTIALLY_DONE` with complete coverage of a subset over degraded coverage of the full scope.
 </ContextLimits>
 - **Faithful Translation:** Your role is faithful transfer, not interpretation. Preserve original meaning and context.
 - **Path Normalization Safeguard:** Upstream agents should produce file paths with a leading `/`, but you are the last line of defense before posting to ADO. Always verify and normalize — every `file` field in a pending response must start with `/` when posted. A missing prefix causes ADO inline comments to fail silently (comment appears orphaned from the file).

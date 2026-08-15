@@ -314,9 +314,6 @@ You have no memory across invocations — every deviation is a cold start, and t
 
 Rejoining into a repeating failure is not a neutral retry. It consumes the run's entire remaining budget arriving back at the same state, and the user pays for every iteration of it.
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
-
 </ErrorHandling>
 ---
 

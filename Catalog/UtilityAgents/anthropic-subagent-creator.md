@@ -1,6 +1,6 @@
 ---
 version: 2.0.0
-base-version: 1.4.0
+base-version: 1.5.0
 name: anthropic-subagent-creator
 description: Creates high-quality orchestration subagent instructions through iterative collaboration, ensuring compliance with the multi-agent orchestration system architecture and protocols
 role: utility
@@ -355,7 +355,12 @@ This cuts hardest for the obvious cases. A code-writing or code-reviewing agent 
 
 **Why not to include one.** The counterweight is real and the schema states it: an injection the agent's instructions could never consume produces an empty region every project author must read, understand, and dismiss. A checklist of twelve items where three matter trains its reader to skim all twelve. An interface agent shuttling data between two systems has no use for codebase conventions, and giving it the region is noise dressed as thoroughness.
 
-**The test that separates them:** name the sentence in *this agent's own instructions* that would behave differently once the region is filled. If you can point at it, include the injection. If you are reaching, leave it out.
+**The test that separates them — both conditions must hold:**
+
+1. **Generally applicable** — most projects would have something to put there. `CodebaseContext` passes: every project has a codebase to describe. `IdentityExtension` fails: "domain expertise" is too abstract for most projects to act on.
+2. **Improves agent performance when provided** — the agent works measurably better with it than without. `CodebaseContext` passes: agents navigate, search, and follow conventions better. `ErrorHandlingExtension` fails: "project recovery guidance" is unclear enough that no project would know what to write.
+
+A region that fails either condition is noise. A project with a genuine need the catalogue does not cover uses `type="custom"` in their deployed file.
 
 **On names.** The schema's catalogue is a suggestion, not an allowlist, and unlisted names are preserved exactly like listed ones. Prefer a catalogue name where one fits — those mean the same thing across projects and ship with TODO guidance. Where an agent has a natural customisation the catalogue does not cover, invent a name for it rather than forcing it into an ill-fitting one or dropping it. An invented region needs you to say, in the draft, what belongs in it; a catalogue name carries that meaning already.
 
@@ -454,7 +459,7 @@ The half no validator can check, and which is therefore yours:
 - [ ] **Status Mapping Is This Agent's:** Could the mapping be pasted into another agent unchanged? If yes, it has not been written.
 - [ ] **Examples Are Concrete:** Do the `status_message` examples name real outputs and real counts, and does each `BLOCKED` row carry the error code this agent's own failure mode actually produces?
 - [ ] **Constraints Justified:** Does each agent-specific constraint carry its reason, and does none of them restate the contract?
-- [ ] **Injections Earn Their Place:** For every injection present, can you name the instruction that changes once it is filled?
+- [ ] **Injections Earn Their Place:** For every injection present, is it generally applicable (most projects have something to put there) AND does it improve agent performance when provided?
 - [ ] **Injections Not Missing:** Is there a customisation a project would obviously need — conventions, standards, artifact shape, thresholds — with no region to receive it? An author who needs one and has none edits deployed prose that the next deploy overwrites.
 - [ ] **Artifact Clarity:** Are input and output artifacts clearly defined, and does something upstream produce every artifact this agent reads?
 - [ ] **Reachable:** Does at least one workflow route to this agent — or, for an infrastructure agent, does a trigger declaration exist — or is creating that routing an agreed follow-up?

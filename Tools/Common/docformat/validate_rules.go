@@ -9,7 +9,7 @@ import (
 )
 
 // validateDocumentRules applies the document-level validation rules (rules 1–4, 8a, 8b,
-// 8c, 12, 15–19) that require access to both the frontmatter and the parsed body. These
+// 8c, 12, 15–16, 18–19) that require access to both the frontmatter and the parsed body. These
 // rules are layered on top of the structural byte-scan performed by validateBytes.
 //
 // Strict mode promotion is NOT applied here — it is applied once by the caller (Validate)
@@ -52,11 +52,8 @@ func validateDocumentRules(d *Document, opts ValidateOptions) []Issue {
 	// Applied whenever an Identity section is present; no option gate.
 	issues = append(issues, checkIdentityShape(body)...)
 
-	// Rule 16: No section outside OutputFormat contains a JSON object with "status_code".
+	// Rule 16: No section contains a JSON object with "status_code".
 	issues = append(issues, checkNoContractRestated(body)...)
-
-	// Rule 17: OutputFormat section must not contain a JSON code fence.
-	issues = append(issues, checkOutputFormatNoJSONFence(body)...)
 
 	// Rule 18: No Process step mentions human-in-the-loop.
 	issues = append(issues, checkNoHITLInProcess(body)...)
@@ -351,18 +348,15 @@ func checkIdentityShape(body *Body) []Issue {
 }
 
 // ---------------------------------------------------------------------------
-// Rule 16: No status_code JSON object outside OutputFormat
+// Rule 16: No status_code JSON object in any section
 // ---------------------------------------------------------------------------
 
-// checkNoContractRestated reports a "contract-restated" warning for any non-OutputFormat
-// section that contains a line with both "{" and "\"status_code\"", which is a signature
-// of a JSON output-format example that restates the Communication Protocol contract.
+// checkNoContractRestated reports a "contract-restated" warning for any section that
+// contains a line with both "{" and "\"status_code\"", which is a signature of a JSON
+// output-format example that restates the Communication Protocol contract.
 func checkNoContractRestated(body *Body) []Issue {
 	var issues []Issue
 	for _, section := range body.SectionsDeep() {
-		if section.Name() == "OutputFormat" {
-			continue
-		}
 		content := string(section.Content())
 		for _, line := range strings.Split(content, "\n") {
 			if strings.Contains(line, "{") && strings.Contains(line, `"status_code"`) {
@@ -380,28 +374,6 @@ func checkNoContractRestated(body *Body) []Issue {
 		}
 	}
 	return issues
-}
-
-// ---------------------------------------------------------------------------
-// Rule 17: OutputFormat must not contain a JSON code fence
-// ---------------------------------------------------------------------------
-
-// checkOutputFormatNoJSONFence reports an "output-format-json-fence" warning when the
-// OutputFormat section contains a JSON code fence (```json). The OutputFormat section must
-// use a markdown table; JSON examples belong only in the deployed Communication Protocol.
-func checkOutputFormatNoJSONFence(body *Body) []Issue {
-	outputFormat, ok := body.Section("OutputFormat")
-	if !ok {
-		return nil
-	}
-	if strings.Contains(string(outputFormat.Content()), "```json") {
-		return []Issue{{
-			Severity: SeverityWarning,
-			Code:     "output-format-json-fence",
-			Message:  "OutputFormat section contains a JSON code fence (```json); use a markdown table instead",
-		}}
-	}
-	return nil
 }
 
 // ---------------------------------------------------------------------------

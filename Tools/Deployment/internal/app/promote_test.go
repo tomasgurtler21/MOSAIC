@@ -175,7 +175,7 @@ func sourceWithPopulatedDeployedRegions() []byte {
 }
 
 // realisticHarnessOnlyAgentBytes reads the fixture file representing a realistic
-// already-transformed harness-only agent. The fixture has all six canonical sections,
+// already-transformed harness-only agent. The fixture has all five canonical sections,
 // populated injection and deployed regions, all catalog frontmatter fields, and all
 // harness-specific stamps — making it representative of a real-world promote input.
 func realisticHarnessOnlyAgentBytes(t *testing.T) []byte {
@@ -749,9 +749,11 @@ func TestBuildGenericAgent_MultipleSections_OrderMatchesSource(t *testing.T) {
 	}
 }
 
-// TestBuildGenericAgent_RealisticFixture_AllSixSectionsPresent verifies that all six
-// canonical sections from the realistic fixture are present in the generated output.
-func TestBuildGenericAgent_RealisticFixture_AllSixSectionsPresent(t *testing.T) {
+// TestBuildGenericAgent_RealisticFixture_AllFiveCanonicalSectionsPresent verifies that
+// all five canonical sections are present in the generated output, and that the retired
+// OutputFormat section is absent. The canonical section vocabulary has five entries after
+// OutputFormat is removed.
+func TestBuildGenericAgent_RealisticFixture_AllFiveCanonicalSectionsPresent(t *testing.T) {
 	src := realisticHarnessOnlyAgentBytes(t)
 
 	out, err := buildGenericAgent(PromoteInput{
@@ -767,7 +769,7 @@ func TestBuildGenericAgent_RealisticFixture_AllSixSectionsPresent(t *testing.T) 
 
 	for _, section := range []string{
 		"Identity", "Capabilities", "Constraints",
-		"ErrorHandling", "OutputFormat", "ExecutionPhilosophy",
+		"ErrorHandling", "ExecutionPhilosophy",
 	} {
 		if !bytes.Contains(out, []byte("<"+section+" type=\"core\">")) {
 			t.Errorf("output missing <%s type=\"core\"> open tag", section)
@@ -775,6 +777,11 @@ func TestBuildGenericAgent_RealisticFixture_AllSixSectionsPresent(t *testing.T) 
 		if !bytes.Contains(out, []byte("</"+section+">")) {
 			t.Errorf("output missing </%s> close tag", section)
 		}
+	}
+
+	// OutputFormat is a retired section and must not appear in any promoted output.
+	if bytes.Contains(out, []byte("<OutputFormat type=\"core\">")) {
+		t.Error("output contains <OutputFormat type=\"core\"> — the OutputFormat section is retired and must be absent from promoted output")
 	}
 }
 

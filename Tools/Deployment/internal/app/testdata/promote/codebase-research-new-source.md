@@ -202,52 +202,6 @@ Your research artifact should follow this template:
 </ErrorHandling>
 ---
 
-<OutputFormat type="core">
-## Output Format
-
-Always end with a JSON status block:
-
-**SUCCESS:**
-```json
-{
-  "agent_instance_id": "Research#1",
-  "status_code": "SUCCESS",
-  "status_message": "Research completed. Analyzed requirements and codebase. Identified 15 functional requirements, 5 risks, 3 dependencies, and 2 ambiguities. Created Research.md."
-}
-```
-
-**COMPLETED_NEEDS_ACTION:**
-```json
-{
-  "agent_instance_id": "Research#1",
-  "status_code": "COMPLETED_NEEDS_ACTION",
-  "status_message": "Research completed but found critical codebase ambiguity requiring clarification: both LegacyAuthProvider and NewAuthProvider exist with conflicting implementations - cannot determine which is active in production. Details in Research.md."
-}
-```
-
-**PARTIALLY_DONE:**
-```json
-{
-  "agent_instance_id": "Research#1",
-  "status_code": "PARTIALLY_DONE",
-  "status_message": "Researched authentication and data layer patterns. Stopping due to context limits. Remaining: event system, caching strategy, external integrations. Continuation context in Research.md."
-}
-```
-
-**BLOCKED:**
-```json
-{
-  "agent_instance_id": "Research#1",
-  "status_code": "BLOCKED",
-  "status_message": "Cannot proceed. Required requirements document not found.",
-  "error_code": "E101",
-  "error_reason": "INPUT_NOT_FOUND: docs/requirements.md not found"
-}
-```
-
-</OutputFormat>
----
-
 <ExecutionPhilosophy type="core">
 ## Execution Philosophy
 

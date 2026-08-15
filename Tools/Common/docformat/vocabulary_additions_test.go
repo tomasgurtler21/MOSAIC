@@ -20,8 +20,8 @@ package docformat_test
 // Exact table-pinning tests live in vocabulary_boundary_sync_test.go.
 //
 // This file retains tests for aspects that are stable before and after Stage 2:
-//   - CanonicalSections is still 6 entries.
-//   - The six section names appear in CanonicalOrder.
+//   - CanonicalSections has five entries (OutputFormat removed).
+//   - The five section names appear in CanonicalOrder.
 //   - DeployedParent is non-nil and maps all CanonicalDeployed names.
 //   - InjectionParent is non-nil.
 
@@ -35,11 +35,11 @@ import (
 // CanonicalSections — stable across Stage 1 and Stage 2
 // ---------------------------------------------------------------------------
 
-func TestCanonicalSections_ContainsSixSections(t *testing.T) {
-	// CanonicalSections is unchanged across Stage 1 and Stage 2.
+func TestCanonicalSections_ContainsFiveSections(t *testing.T) {
+	// CanonicalSections has five entries after OutputFormat was removed.
 	got := docformat.CanonicalSections
-	if len(got) != 6 {
-		t.Fatalf("CanonicalSections length: want 6, got %d: %v", len(got), got)
+	if len(got) != 5 {
+		t.Fatalf("CanonicalSections length: want 5, got %d: %v", len(got), got)
 	}
 }
 

@@ -77,11 +77,8 @@ Note that `test-case-writer` deliberately carries **no** `OutputArtifactTemplate
 
 | Agent | Region | Content |
 |---|---|---|
-| `document-research` | `<IdentityExtension type="project">`, `<CodebaseContext type="project">` | Which retrieval tools exist, what they return, how they misbehave |
-| `document-research` | `<SourceLocatorConventions type="project">` | What locator the retrieval tooling provides — pages, clauses, chunk ids, or nothing. The citation discipline degrades honestly rather than inventing locators, but only if this states what is available |
+| `document-research` | `<CodebaseContext type="project">` | Which retrieval tools exist, what they return, how they misbehave |
 | `test-case-export` | `<TargetSystemSchema type="project">` | Target sheets, columns, identifier scheme, re-export policy. Not `OutputArtifactTemplate` — that region governs `ExportReport.md`, since the target workbook is a project file rather than an orchestration artifact |
-| `approval-presenter` | `<IdentityExtension type="project">` | How the user is contacted, how much detail they want up front, domain vocabulary for orienting them. Deployed once and used by both presenter rows |
-| `approval-presenter` | `<ErrorHandlingExtension type="project">` | Recovery when the user cannot be reached (`E503`), which is this agent's dominant failure mode and entirely deployment-shaped |
 
 `approval-presenter` deliberately carries **no** `OutputArtifactTemplate`. Reshaping its approval record would invite fields the presenter must *derive* — severity, priority, category — and deriving any of them is the evaluation its central constraint forbids. The record keeps a generic numbered-findings shape that the producing agent already knows how to read.
 
@@ -171,7 +168,7 @@ In a safety context an agent's plausible guess is the most dangerous possible ou
 
 **Dead ends (tried and rejected):**
 - **KB ingestion of the specification** — rejected; see Design Rationale.
-- **A `TestProfile.md` input artifact** carrying the output format, glossary and gold examples. Rejected: the agent template architecture already solves this with `<OutputArtifactTemplate type="project">` and `<IdentityExtension type="project">`, which bind at deploy rather than per run. Format is stable; making it a per-run artifact would be paying run-time cost for deploy-time data.
+- **A `TestProfile.md` input artifact** carrying the output format, glossary and gold examples. Rejected: the agent template architecture already solves this with `<OutputArtifactTemplate type="project">` and `<CodebaseContext type="project">`, which bind at deploy rather than per run. Format is stable; making it a per-run artifact would be paying run-time cost for deploy-time data.
 - **A third HITL column value (`✅ˢ`, on-success)** firing the gate only on the converging pass, implemented by re-dispatching the reviewer. Rejected by architect review — see `OnSuccessHITL.md` §4. It encodes a *policy* into a flag that carries an *amount*, which breaks the additive `row.hitl OR stage_hitl` merge that stage HITL depends on; it needs `already_presented` state the orchestration artifact has nowhere to store; and the re-dispatched reviewer would re-review and could contradict its own prior `SUCCESS`. Superseded by the presenter row in 1.1.
 - **Reviewer-held approval gates (workflow v1.0).** Correct in ordering, but the human approved the *creator's* artifact while only the reviewer could stamp provenance — so the approved artifact stayed `human_approved: false` permanently. Superseded by the presenter row in 1.1.
 - **Specialising `document-research` per retrieval flavour** (vector / graph / hybrid). Rejected: would produce one agent per stack for a process that is identical across all of them.

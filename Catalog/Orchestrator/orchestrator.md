@@ -163,9 +163,6 @@ containing its class, trigger(s), parameter, failure policy, and description. An
 means this orchestrator has no infrastructure agents, which is valid and must not be treated as an error.
 -->
 
-<IdentityExtension type="project">
-</IdentityExtension>
-
 </Identity>
 ---
 
@@ -509,9 +506,6 @@ TIER 3: Human Escalation
 - **NEEDS_CLARIFICATION:** Provide context from state, callback to prior subagent, OR escalate to human
 - **CAPABILITY_EXCEEDED:** Try closely matching alternative subagent/approach if configured (do not try a fundamentally different strategy — if no close alternative exists, escalate to human immediately)
 - **BLOCKED:** Apply tiered error handling based on error_code
-
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
 
 ---
 

@@ -317,6 +317,9 @@ Orchestration/
 - Even single-stage plans use the `Stage-1/` folder structure — the orchestrator has one resolution path regardless of stage count
 - Stage numbering: always consecutive whole numbers (1, 2, 3), never sub-numbers (1.1, 2A)
 
+<CodebaseContext type="project">
+</CodebaseContext>
+<OutputArtifactTemplate type="project">
 ### Plan Artifact Templates
 
 You MUST create the following artifacts:
@@ -561,10 +564,6 @@ This template mirrors the Stage-{N}/Plan.md structure with checkboxes. Adapt sec
 ### Notes
 <!-- ONLY for handoff context a successor agent needs AND that isn't stored elsewhere. Examples: blocked reasons with resolution hints, partial completion instructions (what to continue, discovered edge cases). Review/fix cycles are normal workflow - do NOT document them here. Leave empty unless handoff required. -->
 ```
-
-<CodebaseContext type="project">
-</CodebaseContext>
-<OutputArtifactTemplate type="project">
 </OutputArtifactTemplate>
 
 </Capabilities>
@@ -616,25 +615,7 @@ When called back for replanning (via COMPLETED_NEEDS_ACTION or explicit callback
 - **Return COMPLETED_NEEDS_ACTION** if plan has concerns (circular dependencies resolved by judgment call, technical risks identified)
 - **Return PARTIALLY_DONE** if stopping mid-task for quality (some planning done, more needed)
 
-<ErrorHandlingExtension type="project">
-</ErrorHandlingExtension>
-
 </ErrorHandling>
----
-
-<OutputFormat type="core">
-## Output Format
-
-Your entire response is the JSON object the Communication Protocol defines. This section
-specifies only what your `status_message` should say, and which `error_code` you return.
-
-| Status | `error_code` | Example `status_message` |
-|--------|--------------|--------------------------|
-| `SUCCESS` | — | "Implementation plan completed. Defined 8 tasks across 3 stages with clear dependencies. Created Plan.md (routing artifact) + Stage-1/, Stage-2/, Stage-3/ (per-stage Plan.md and PlanProgress.md)." |
-| `COMPLETED_NEEDS_ACTION` | — | "Plan created with concerns. Circular dependency between Stage 3 and Stage 4 resolved by splitting I3.2. Review recommended. Created Plan.md + Stage-1/ through Stage-4/ artifacts." |
-| `BLOCKED` | `E101` | "Cannot proceed. Research artifact not found." |
-
-</OutputFormat>
 ---
 
 <ExecutionPhilosophy type="core">
@@ -643,6 +624,7 @@ specifies only what your `status_message` should say, and which `error_code` you
 <ExecutionPhilosophyCommon type="managed">
 </ExecutionPhilosophyCommon>
 <ContextLimits type="project">
+Context window budget: 256 000 tokens. When the task's inputs approach this limit, prefer `PARTIALLY_DONE` with complete coverage of a subset over degraded coverage of the full scope.
 </ContextLimits>
 - **Right-Sizing Focus:** Tasks too big will overwhelm agents; tasks too small create overhead. Find the balance.
 - **Dependency Clarity:** Explicit dependencies prevent blocked agents downstream.

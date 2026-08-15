@@ -1,7 +1,7 @@
 ---
 id: agent-template-architecture
 type: specification
-version: "1.8"
+version: "2.0"
 name: "Agent Template Architecture"
 description: "The structure of a MOSAIC agent file: frontmatter schema, the four region kinds and their ownership, canonical document order, the per-role region matrix, and what each section must contain."
 author: MOSAIC
@@ -182,18 +182,17 @@ A file's top-level boundaries appear in this order. Every entry is a core region
 | 3 | `Capabilities` | core | subagent, orchestrator |
 | 4 | `Constraints` | core | subagent, orchestrator |
 | 5 | `ErrorHandling` | core | subagent, orchestrator |
-| 6 | `OutputFormat` | core | subagent |
-| 7 | `ExecutionPhilosophy` | core | subagent, orchestrator |
+| 6 | `ExecutionPhilosophy` | core | subagent, orchestrator |
 
-Seven slots. There is no separate provenance slot: the artifact provenance stamp is part of the orchestration contract and ships inside slot 2. §16 records the transitional state, since the files have not been migrated yet.
+Six slots. There is no separate provenance slot: the artifact provenance stamp is part of the orchestration contract and ships inside slot 2. §16 records the transitional state, since the files have not been migrated yet.
 
-**The rule is "not out of order", not "exactly these seven".** A file's top-level boundaries must form a *subsequence* of the list above. Concretely:
+**The rule is "not out of order", not "exactly these six".** A file's top-level boundaries must form a *subsequence* of the list above. Concretely:
 
 - A section may be **absent**. Whether that absence matters is §2.4's question, not this one.
 - A file may carry **additional** top-level sections of its own, under any name. They are skipped by this check.
 - Any two canonical sections that are both present must appear in the listed relative order. `Constraints` before `Capabilities` is a violation whether or not anything else is missing.
 
-**Why order is fixed but membership is not.** A model attends unevenly across a long prompt, so the position of an instruction is part of the instruction — identity first, then the contract it operates under, then what it can do, then what it must not, then how to fail, then how to report. That argument justifies the sequence. It does not justify demanding all seven: an agent that genuinely has nothing to say under a heading is better off without it than padding one, and an author with a real need for an eighth section is not writing a broken file. The check stays a single walk over two lists either way.
+**Why order is fixed but membership is not.** A model attends unevenly across a long prompt, so the position of an instruction is part of the instruction — identity first, then the contract it operates under, then what it can do, then what it must not, then how to fail, then the working posture. That argument justifies the sequence. It does not justify demanding all seven: an agent that genuinely has nothing to say under a heading is better off without it than padding one, and an author with a real need for an eighth section is not writing a broken file. The check stays a single walk over two lists either way.
 
 ### 2.4 Role Matrix
 
@@ -211,7 +210,6 @@ Seven slots. There is no separate provenance slot: the artifact provenance stamp
 | `<HarnessConstraints type="managed">` | Required | Required |
 | `ErrorHandling` core region | Required | Required |
 | `<ErrorHandlingCommon type="managed">` | Required | Absent (§8) |
-| `OutputFormat` core region | Required | Absent |
 | `ExecutionPhilosophy` core region | Required | Required |
 | `<ExecutionPhilosophyCommon type="managed">` | Required | Absent (§8) |
 
@@ -306,7 +304,7 @@ Key order in source is `id`, `version`, `name`, `description`, `role`, then the 
 
 **Why it is declared rather than inferred.** Every block the tool selects is keyed on role. Today the tool derives role from the file's path — `Catalog/Orchestrator/` means orchestrator, everything else means not. That works exactly as long as the layout does, which makes a reorganisation of the agent folders a silent change to which contract text ships. Moving a file should not be able to change what an agent is.
 
-There is a second reason, smaller but sharper: a role in frontmatter is checkable against the file's own regions. A file declaring `role: subagent` with no `OutputFormat` section is detectably wrong (§9). With role inferred from path, the same file is merely unusual.
+There is a second reason, smaller but sharper: a role in frontmatter is checkable against the file's own regions. A file declaring `role: subagent` with no `ErrorHandling` section is detectably wrong (§9). With role inferred from path, the same file is merely unusual.
 
 Infrastructure agents declare `role: subagent`. They are ordinary subagents by file shape; their class and triggers are declared in the orchestrator, not in their own frontmatter.
 
@@ -383,8 +381,6 @@ N. {Write results to output artifacts and files}
 
 The order is not arbitrary: the closing procedure continues the Process list and must read as its final steps, so nothing goes between them.
 
-**Project injection:** `<IdentityExtension type="project">`, last in the section — project-specific domain or language expertise.
-
 **Why Scope is stated positively and negatively.** The DO list alone defines a centre without an edge, and an agent asked to do something adjacent will reason its way in. The DO NOT list is where the single-responsibility architecture is actually enforced, and it works best when each entry names the other agent's job rather than a prohibition: "requirements are defined elsewhere" is followed more reliably than "do not define requirements", because the first tells the agent what to do with the request.
 
 ### 4.2 CommunicationProtocol
@@ -416,7 +412,7 @@ Examples: "preserve existing content, do not delete prior findings"; "track prog
 in the output artifact". Omit the subsection entirely where there is nothing to say.}
 ```
 
-Capabilities is the least constrained section by design. It is where an agent's actual expertise lives, and expertise does not have a common shape — a research agent needs an output template, an implementation agent needs its method's principles, an interface agent needs neither.
+Capabilities is the least constrained section by design. It is where an agent's actual expertise lives, and expertise does not have a common shape — a research agent needs an output template, an implementation agent needs its method's principles, an interface agent may need a detailed artifact schema that lives entirely in core prose because it defines an inter-agent contract rather than a project-customisable output shape (§6.5).
 
 **Managed:** none. The section carries no tool-managed region.
 
@@ -458,45 +454,7 @@ A mapping that could be pasted into any agent unchanged is a mapping that has no
 
 An agent may add a subsection where one distinction is repeatedly got wrong in practice, as several do for `NEEDS_CLARIFICATION` versus `BLOCKED`.
 
-**Project injection:** `<ErrorHandlingExtension type="project">`, last.
-
-### 4.6 OutputFormat
-
-**Purpose:** what this agent reports, in the two response fields whose content is the agent's own.
-
-**The JSON envelope is never restated here.** The contract region, a few inches up the same file, carries the full response schema for every status. This section carries only the parts that vary by agent.
-
-**Author writes:**
-
-```markdown
-## Output Format
-
-Your entire response is the JSON object the Communication Protocol defines. This section
-specifies only what your `status_message` should say, and which `error_code` you return.
-
-| Status | `error_code` | Example `status_message` |
-|--------|--------------|--------------------------|
-| `SUCCESS` | — | "{Concrete example naming real outputs and real counts.}" |
-| `COMPLETED_NEEDS_ACTION` | — | "{…}" |
-| `PARTIALLY_DONE` | — | "{What was done, why it stopped, what remains, where continuation context lives.}" |
-| `BLOCKED` | `{E1nn}` | "{What is missing, stated so the orchestrator can act on it.}" |
-```
-
-Only the statuses this agent actually returns need rows. The `error_code` column is `—` on every row but `BLOCKED`, since the contract permits the field nowhere else. An agent with several distinct blockers gets **several `BLOCKED` rows**, one per code.
-
-**Why this replaced worked JSON examples.** Every subagent used to carry three or four full JSON response objects. Outside `status_message` and `error_code` the envelope around them was identical — and thirty-five of forty-two had gone stale against the contract, showing responses with no `run_id`, several naming an `agent_instance_id` whose agent name was not the agent's own, and some still using pre-run-scoped artifact paths. Those agents were shown a non-conforming template immediately after being handed the contract that forbids it.
-
-Reducing the section to the varying part fixes that permanently rather than thirty-five times. The envelope now exists in exactly one place per file and cannot drift from itself.
-
-**Why the section survives at all**, and why it carries two columns rather than one:
-
-`status_message` is the field agents write worst and the field the orchestrator routes and reports on. A concrete example of a good one, phrased in this agent's own vocabulary, is real guidance no generic text can supply.
-
-`error_code` is the same case and was nearly lost to the same reasoning. The contract region supplies the *vocabulary* — the five codes and their meanings, rendered in the skeleton as the union placeholder `"E101|E401|E501|E502|E503"`. What it cannot supply is **this agent picking one**. That choice is agent-specific and demonstrably so: most agents block on a missing input and return `E101`, but `test-runner` returns `E501` when its runner is unavailable, `pull-request-comment-interface` returns `E502`, `requirements-refinement` returns `E503`, and `audit-to-pull-request` returns `E401`. Deleting the column would have replaced forty-two considered answers with a five-way menu, in the section a model reads immediately before it has to choose.
-
-`result_data` is the field that did not survive this test: it appears in no agent's examples at all, its presence is governed entirely by an input flag, and there is nothing agent-specific to state. The varying set is exactly two fields, and the table has exactly two columns.
-
-### 4.7 ExecutionPhilosophy
+### 4.6 ExecutionPhilosophy
 
 **Purpose:** the working posture — how the agent should think about context, quality, and its own limits.
 
@@ -512,19 +470,15 @@ Reducing the section to the varying part fixes that permanently rather than thir
 
 The orchestrator uses the same frontmatter schema, the same region kinds, and the same section names. Its body content is almost entirely its own.
 
-### 5.1 Sections it does not carry
-
-`OutputFormat` is absent. The orchestrator returns no protocol response — it *receives* them.
-
-### 5.2 Sections whose content is orchestrator-specific
+### 5.1 Sections whose content is orchestrator-specific
 
 `Identity`, `Capabilities`, `Constraints`, `ErrorHandling`, and `ExecutionPhilosophy` are all present and share nothing but their names with the subagent versions. The orchestrator's authority hierarchy ranks workflow configuration and subagent responses, not its own scope boundaries. Its constraints are about context discipline and append-only state. Its error handling is a tiered retry-and-escalate strategy for codes it receives rather than a mapping for codes it returns. None of that is a variant of subagent text; it is different text that happens to live under the same heading.
 
-### 5.3 Regions unique to it
+### 5.2 Regions unique to it
 
 `<AvailableWorkflows type="managed">` and `<InfrastructureAgents type="managed">`, both inside `Identity`, both assembled at deploy time from selected workflow and infrastructure declarations.
 
-### 5.4 Nested template sections
+### 5.3 Nested template sections
 
 The orchestrator's `Capabilities` contains nested core regions — `<ExecutionLog type="core">`, `<Artifacts type="core">`, `<WorkflowNotes type="core">` — holding the templates it writes into the orchestration artifact. These are the one sanctioned use of nested core regions, and they are nested because they are content *about* a capability rather than a document-level slot.
 
@@ -578,12 +532,10 @@ Most are carried by MOSAIC's own sources, declared empty so a project can see th
 
 | Name | Usual parent | Purpose |
 |------|--------------|---------|
-| `IdentityExtension` | `Identity` | Project or domain expertise added to the agent's identity |
 | `CodebaseContext` | `Capabilities` | Knowledge of the project's codebase |
 | `OutputArtifactTemplate` | `Capabilities` | The project's expected structure for this agent's output artifact |
 | `SeverityThresholds` | `Capabilities` | Which issue severities require rework (validation agents) |
 | `SeverityDefinitions` | `Capabilities` | What each severity means in this project (validation agents) |
-| `ErrorHandlingExtension` | `ErrorHandling` | Project-specific recovery guidance |
 | `ContextLimits` | `ExecutionPhilosophy` | Context window thresholds and guidance |
 
 "Usual parent" is where the region belongs when the agent is otherwise conventional, and where MOSAIC's own agents put it. Placing one elsewhere is an author's call, not a validation failure. The single hard rule about placement is §6.5's: never inside a managed region.
@@ -608,20 +560,15 @@ The use case is unchanged: a deployment can have real business extending the pro
 
 ### 6.3 Severity Injections
 
-Validation agents carry two additional project injections. `SeverityThresholds` carries default content (§2.1.1) — a table stating which severities require rework. The default ships on first deploy; the project may then override it freely, and subsequent source updates to the default do not touch the deployed version.
+Validation agents carry two additional project injections. `SeverityThresholds` states which issue severities require rework; `SeverityDefinitions` optionally states what each severity level means in the project's terms.
 
-The default table:
+`SeverityThresholds` carries default content (§2.1.1): a threshold table ships in the agent's source file, deploys on first deploy, and is the project's property from that moment on. Subsequent source updates to the default do not touch a deployed version.
 
-| Severity | Requires Rework |
-|----------|-----------------|
-| CRITICAL | Always — not configurable |
-| MAJOR | No by default |
-| MINOR | No by default |
-| SUGGESTION | No by default |
+**The default text itself lives in the validation agents' source files and nowhere else.** This document places the region and fixes its semantics; what a given agent's table actually says is that agent's decision, tuned to the cost of a missed issue in the artifact it reviews. A copy of the table here would be a second authority over a value that is expected to vary between agents and to change with experience — exactly the drift principle 4 exists to prevent.
 
-The status rule follows from it: any issue at a severity marked as requiring rework means `COMPLETED_NEEDS_ACTION`; otherwise `SUCCESS` with the issues recorded in the report. `SeverityDefinitions` optionally states what each level means in the project's terms.
+What the region resolves, whatever numbers a project puts in it, is the agent's status code: any issue at a severity the table marks as requiring rework means `COMPLETED_NEEDS_ACTION`; otherwise `SUCCESS` with the issues recorded in the report. That rule is the contract between the table and the agent's `ErrorHandling` section (§4.5), and it holds for every threshold table anyone might write. CRITICAL requiring rework is not configurable — a validation agent that can be configured to pass critical findings is not a validation agent.
 
-**In source files, the default table and its accompanying status-code logic sit inside the `<SeverityThresholds type="project">` region**, not after it. Content outside the region is core text and would not be preserved as the project's on update — the severity guidance must be inside the region it belongs to.
+**In source files, the threshold table and its accompanying status-code logic sit inside the `<SeverityThresholds type="project">` region**, not after it. Content outside the region is core text and would not be preserved as the project's on update — the severity guidance must be inside the region it belongs to.
 
 ### 6.4 Custom Regions and Schema Reorder
 
@@ -645,7 +592,8 @@ One is enforced. The rest are guidance, and marked as such.
 
 **Guidance:**
 
-- **An agent carries only the injections its instructions could use.** An interface agent that transports data between systems has no use for `CodebaseContext` or `OutputArtifactTemplate`, and including them produces empty regions a project author must read and dismiss.
+- **A project region earns its place when both conditions hold: it is generally applicable (most projects would have something to put there) and providing it improves agent performance.** `CodebaseContext` passes: every project has a codebase, and agents that know the repo layout, tech stack, and conventions navigate, search, and generate code measurably better. `IdentityExtension` fails: "domain expertise" is too abstract for most projects to act on, and its effect on agent behavior is negligible. A region that fails either condition is noise — an empty slot every project author must read and dismiss in their `TODO.md`. A project with a genuine need the catalogue does not cover uses `type="custom"` in their deployed file.
+- **An artifact template that is an inter-agent contract stays in core prose, not in `OutputArtifactTemplate`.** When an output artifact's schema is consumed by other agents whose core instructions reference its field names, types, or structure, the template defines a contract between tightly coupled workflow participants. Making it project-customisable via `OutputArtifactTemplate` would let one side of the contract change without the other — the producing agent would write a new shape while every consuming agent's core text still hardcodes the old one. The template belongs as ordinary core prose inside `Capabilities`, where it cannot be modified independently of the instructions that depend on it.
 - **A template must work with every injection empty or at its default.** That is the state of every source file and of every fresh deployment; an agent that only makes sense once a project has filled something in is broken by default. Where a project region carries default content (§2.1.1), "works" means the default is coherent — the agent's instructions must not contradict or depend on content the default does not provide.
 - **Injections extend; they do not contradict.** An injection redefining a rule stated in a managed region leaves the agent two answers with no basis to choose, and it will follow the nearer one (principle 7). The tag itself does not convey this, so the `TODO.md` text for each injection should.
 
@@ -770,18 +718,18 @@ Rule 9b is the clearest case of a check to relax: it currently errors on a proje
 | # | Rule | Severity | Mechanism | Implemented |
 |---|---|---|---|---|
 | 15 | `Identity` contains `**Goal:**`, `**Scope:**` with a DO and a DO NOT, `**Litmus Test:**`, and a `### Process` list | Warning | Tool | No |
-| 16 | No section outside `OutputFormat` contains a JSON object with a `status_code` key | Warning | Tool | No |
-| 17 | `OutputFormat` contains no JSON code fence (§4.6) | Warning | Tool | No |
+| 16 | No section contains a JSON object with a `status_code` key — the contract region owns the envelope | Warning | Tool | No |
+| 17 | *(Removed in v2.0 — `OutputFormat` section deleted)* | — | — | — |
 | 18 | No Process step mentions `human_in_the_loop` — `ClosingProcedure` deploys that | Warning | Tool | No |
 | 19 | Every skill named in a Process step appears in `required_skills`, and vice versa | Error | Tool | No |
 | 15r | Every constraint carries its justification (§4.4) | Advice | Review | — |
 | 16r | The status mapping is specific to this agent, not paste-able into another (§4.5) | Advice | Review | — |
-| 17r | `status_message` examples name real outputs and real counts, and each `BLOCKED` row's `error_code` is the one that agent's own failure mode produces (§4.6) | Advice | Review | — |
+| 17r | *(Removed in v2.0 — `OutputFormat` section deleted; status mapping lives in ErrorHandling §4.5)* | — | — | — |
 | 18r | The agent's scope does not overlap an existing agent's | Advice | Review | — |
 
 Rule 19 is an error despite sitting under Content: a skill an agent is told to load but does not declare is a skill the deployment does not ship, and the agent fails at step 1. That is a broken deployment, not a style lapse.
 
-Rules 15–18 warn in a project tree and error in MOSAIC's own. They caught nothing when they were unimplemented errors, and all three defects in `AgentBodyDrift.md` §5 sit in their scope.
+Rules 15–16 and 18 warn in a project tree and error in MOSAIC's own.
 
 The `r` rules are what §4 already asks for in prose. They are listed here so the specification stops implying that its unenforceable half does not count — and because MOSAIC can hand them to a validation subagent as a checklist.
 
@@ -812,9 +760,7 @@ The migration touches forty-two subagent files. It is mechanical apart from one 
 4. **Replace the five contract-restating constraint bullets** at the top of `Constraints` with an empty `<ProtocolConstraints type="managed">` region, keeping every agent-specific constraint below it.
 5. **Replace the retry bullet** at the top of `ErrorHandling` with an empty `<ErrorHandlingCommon type="managed">` region, keeping the agent's status mapping. Delete any error-code recall bullet outright — the contract's region carries the full table.
 6. **Replace the Context Management, Memory via Artifacts, and Quality over Completeness bullets** with an empty `<ExecutionPhilosophyCommon type="managed">` region at the top of `ExecutionPhilosophy`, ahead of `<ContextLimits type="project">`.
-7. **Rewrite `OutputFormat`** as the two-column table of §4.6, carrying across **both** varying fields of each existing example — its `status_message` text and, on `BLOCKED` examples, its `error_code` — and discarding the envelope around them. Where a file has several `BLOCKED` examples with different codes, each becomes its own row. **This is the one step requiring judgement per file** — the existing messages and code choices are good content in a stale wrapper, and they should survive.
-
-   The instruction to carry `error_code` is not a detail. An earlier draft of this step named `status_message` alone, on the mistaken premise that nothing else varied; run that way, it would have silently discarded forty-two considered error-code choices — including every non-`E101` one — in the step that is least verifiable afterwards. Losing hand-authored content to a mechanical sweep is the failure mode this whole migration exists to end.
+7. ~~**Rewrite `OutputFormat`**~~ **Superseded.** The `OutputFormat` section was removed entirely in v2.0 rather than rewritten. The `status_message` examples and `error_code` choices it would have carried were deleted from all forty-seven agents: the Communication Protocol already supplies the contract, `ErrorHandling` already carries the agent-specific status mapping, and the worked examples were actively causing verbose message parroting. If experience shows agents need more status guidance, `ErrorHandling` (§4.5) is the place to expand.
 8. **Update the three vocabulary files** together (§10.1).
 9. **Bump each agent's `version`** — minor, since regions were added and hand-authored content was removed. The bundle version does not move: its blocks did not change, only their destinations came into existence.
 
@@ -835,7 +781,7 @@ Changes this document makes to them:
 - `CanonicalDeployed` loses `LanguagePatterns` and `CustomConstraints` (§2.5.1), leaving nine names. `DeployedParent` loses the same two entries. `LanguagePatterns` becomes a catalogued injection name (§6.1); `CustomConstraints` ceases to exist in any vocabulary.
 - The managed-name classifier's `default:` branch stops resolving to the harness class. `HarnessConstraints` becomes an explicit case, and an unclassified name is an error (§2.5.1).
 - `DeployedParent` gains the five new names with the parents in §2.5.
-- `CanonicalOrder` becomes seven slots, of which slot 2 is managed, and is consumed as a subsequence rather than an equality check (§2.3).
+- `CanonicalOrder` becomes six slots (seven before v2.0 removed `OutputFormat`), of which slot 2 is managed, and is consumed as a subsequence rather than an equality check (§2.3).
 - `InjectionParent` **stops being an allowlist.** Project-region names are open (§6.2): an unlisted name is preserved like any other. What remains is a table of usual parents for the suggested names, consulted for advice-level reporting only. `ArtifactProvenanceExtension` leaves it; `ProtocolExtension` is absent — projects use `<ProtocolExtension type="custom">` instead of a project injection, following the rule that MOSAIC defines project slots in source and projects invent custom regions in deployed files.
 
 `Catalog/SourceFilesFormat.md` should be reduced to a pointer at this document plus the skill and hook-bundle conventions it uniquely covers, rather than restating the agent format alongside it (§16).
@@ -905,6 +851,9 @@ A change to this schema is never local. The table below lists what must be check
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 2.1 | 2026-08-15 | **`IdentityExtension` and `ErrorHandlingExtension` removed from catalogue and all agents.** Neither passed the inclusion test: `IdentityExtension` (47→0 agents) offered ambient "domain expertise" no instruction consumed; `ErrorHandlingExtension` (46→0) offered "project recovery guidance" no project would know how to fill. §6.5's inclusion guidance rewritten from the vague "could use" to a two-part test: the region must be generally applicable (most projects have something to put there) AND improve agent performance when provided. §4.1 and §4.5 project-injection lines removed. §6.2 catalogue drops from seven names to five. `SourceFilesFormat.md` updated. Analysis in `SubagentProjectRegions-Review.md` §4.5 and §4.9. |
+| 2.0 | 2026-08-15 | **`OutputFormat` section removed.** The section carried `status_message` examples and `error_code` choices per agent — two things the Communication Protocol's deployed region and `ErrorHandling` (§4.5) already cover between them. The examples were actively causing verbose message parroting rather than helping. Canonical order drops from seven slots to six; §2.3, §2.4, §5.1 updated. §4.6 deleted, §4.7 renumbered to §4.6. Conformance rules 17 and 17r retired; rule 16 simplified. Migration step 7 marked superseded. §15's rename item moved to Rejected. All forty-seven subagent files already migrated — no `OutputFormat` region remains in the catalog. Analysis in `SubagentProjectRegions-Review.md` §4.10. |
+| 1.9 | 2026-08-15 | **§6.3 stops specifying the severity default table.** The document held a concrete four-row threshold table as *the* default, while the nine validation agent sources shipped a different one (MAJOR requiring rework, changed on operational experience). A per-agent value that is expected to vary and to be retuned does not belong in the schema; stating it twice guaranteed one copy would be wrong, and it was. §6.3 now places the region, fixes the status-code rule the table feeds, fixes CRITICAL as non-configurable, and points at the source files for the text. §16's severity open item updated: the validation agents are done, the audit agents' core-text severity tables are the remaining gap. |
 | 1.8 | 2026-08-14 | **Utility and standalone roles added; project regions may carry default content.** Two new `role` values — `utility` and `standalone` — recognised by the deployment tool for harness transformation but outside this schema's structure rules and deployment bundle. New §5A covers both. `role` vocabulary in §3.2 expanded from two values to four, with a table stating what each receives. Project regions may now carry default content in source files (§2.1.1): non-empty content in a source `type="project"` region deploys on first deploy and is thereafter the project's property, never overwritten on update. §6.3 updated: the severity table belongs inside the `SeverityThresholds` region as default content, not after it. §6.5 guidance, §11, §12 glossary updated accordingly. |
 | 1.7 | 2026-08-14 | **Tag syntax migrated from `[[KIND:Name]]` to `<Name type="value">`.** The four region kinds (SECTION, DEPLOYED, INJECTION, CUSTOM) now use name-first XML tags with a `type` attribute carrying the ownership value (`core`, `managed`, `project`, `custom`). Closing tags are standard XML `</Name>` with no attributes. Empty regions use an open/close pair (no self-closing). Compound/enumerable names carry the id in a `name` attribute: `<Workflow type="core" name="quick-fix">` closes with `</Workflow>`. Region versions move from HTML comments inside region content to a `version` attribute on the opening tag. Tag-line matching rule updated: a tag is a MOSAIC boundary only when its trimmed line is exactly the tag and it carries a valid `type` attribute — foreign XML tags without `type` are inert content. All examples, tables, rule descriptions, glossary entries, and migration steps updated to the new syntax. The four kinds, their semantics, the canonical order, the role matrix, and the nine tool-managed names are unchanged in substance. |
 | 1.6 | 2026-08-12 | **`ProtocolExtension` removed from the injection catalogue.** The name is no longer an entry in `InjectionParent`; projects needing to extend the protocol use `<ProtocolExtension type="custom">` instead of a declared project injection. The name remains legal as an open injection name and is preserved byte-identically if used, but carries no advisory parent. This applies the project vs. custom provenance rule consistently: MOSAIC defines project slots in source; projects invent custom regions in deployed files. §4.2, §6.2, and §6.2.1 updated; §10.1 and §13 reconciled; `vocabulary.go` and `SourceFilesFormat.md` updated. Prior discussion (the v1.1 removal and v1.2 reinstatement) is preserved in §15. |
@@ -922,21 +871,24 @@ A change to this schema is never local. The table below lists what must be check
 **Under consideration**
 
 - **Retiring `id`.** No consumer was found — matching is by `name` throughout the inspected tooling (§3.3). Retiring it is a forty-two-file change and a round-trip contract change for no functional gain, so it stays. Worth reopening if a registry or an external reference ever needs a rename-stable key, and worth closing outright if a survey confirms nothing reads it.
-- **Renaming `OutputFormat`.** The section no longer specifies a format; it supplies this agent's `status_message` examples and `error_code` choices. `StatusReporting` would describe it. Deferred because a rename costs the canonical order, three vocabulary files, and forty-two files, for clarity alone.
 
 **Rejected**
 
 - **A required structure for `Capabilities`.** It is the one section with no specified shape (§4.3), which is right for expertise that genuinely varies. Considered requiring `### Core Capabilities` as a minimum; decided against. The template already shows it, every agent follows it, and promoting a convention to a rule buys nothing. If content validation lands it would be a warning at most, alongside rule 15.
 - **A closed vocabulary of injection names.** Held until v1.2. Its stated purpose was to stop a user's content being orphaned on update — but preservation matches names between the deployed file and the source file, so a name the author wrote into their own source is preserved with or without a list. The list bought nothing and cost an author the ability to name a region after their own project's concept (§6.2). Superseded in v1.5 by a different solution: project-invented regions use `type="custom"` instead of `type="project"`, making the distinction visible in the file. Managed names are the opposite case and stay closed: there the tool must find *content* for the name.
 - **`ProtocolExtension` as a catalogued injection.** Added to the catalogue in v1.2: a deployment with real transport needs should not be forced to fork the contract. Removed again in v1.6: project injections are declared in MOSAIC source files; protocol extension is a project invention that belongs in `<ProtocolExtension type="custom">`. The change does not forbid the use case — it routes it correctly. Projects that already use a project-typed `ProtocolExtension` find their content preserved as an open, uncatalogued injection name; new ones use `type="custom"`. The v1.1 removal for a different reason (the stamp folded into the contract and `ArtifactProvenanceExtension` died by the same argument) and the v1.2 reinstatement are both recorded in the changelog; this is the third entry in that sequence.
+- **`IdentityExtension` as a catalogued injection.** Present in all 47 agents from the start. Removed in v2.1: "project or domain expertise" is too abstract for most projects to act on, no agent instruction references it, and its effect on agent behavior is negligible. Fails both parts of the inclusion test (§6.5). A project with a genuine domain-expertise need uses `<DomainExpertise type="custom">` in their deployed file.
+- **`ErrorHandlingExtension` as a catalogued injection.** Present in 46 agents from the start. Removed in v2.1: "project-specific recovery guidance" is unclear enough that no project would know what to write, and no agent instruction references it. A project with recovery needs specific enough to state uses a custom region.
 - **One uniform strictness for every tree.** Would mean either blocking legitimate project agents or letting MOSAIC's own sources off the rules they exist to demonstrate. The strict/lenient split (§9.2) is what lets the recipe be enforced on the recipe without being enforced on its readers.
 - **Requiring every injection in a file to be filled.** Empty is the normal state of a source file and of a fresh deployment (principle 3), and where a section offers alternative child injections the rule would demand contradictory content (§6.5).
 - **A `function` or `category` frontmatter field.** The folder already states it, and a second copy is undetectably wrong when the two disagree (§3.5).
 - **`agent_class` in agent frontmatter.** Would create a second declaration of a fact the orchestrator's declaration region owns and the executor actually reads (§3.5).
 - **Single-sourcing everything repeated, or deleting every contract echo.** Both pure options were rejected in favour of a per-fragment split. Reasoning in `Development/Analysis/AgentBodyDrift.md` §4.
 - **Orchestrator variants of the five canonical blocks.** Four would share no sentence with their subagent counterparts, maintained in a file the orchestrator's author does not otherwise open, to protect a single copy from diverging from itself. `AuthorityHierarchy` is the close call — it genuinely is a variant — and was rejected on cost, leaving a review obligation instead (§8).
-- **Keeping worked JSON response examples per agent.** Outside `status_message` and `error_code` they were identical, and thirty-five of forty-two had gone stale against the contract they shipped beside. Both varying fields survive as columns of the §4.6 table; the envelope does not.
-- **Reducing §4.6 to `status_message` alone.** Held until v1.3, on the premise that it was the only field varying between agents. It was not: `error_code` varies too, and the contract region can only supply the five-code vocabulary, never this agent's choice from it (§4.6). The premise also reached into migration step 7, where acting on it would have destroyed the choices rather than merely omitted them.
+- **Keeping worked JSON response examples per agent.** Outside `status_message` and `error_code` they were identical, and thirty-five of forty-two had gone stale against the contract they shipped beside. Both varying fields survived as columns of the `OutputFormat` table until v2.0 removed the section entirely.
+- **Reducing `OutputFormat` to `status_message` alone.** Held until v1.3, on the premise that it was the only field varying between agents. It was not: `error_code` varies too. Moot since v2.0 removed the section.
+- **Renaming `OutputFormat` to `StatusReporting`.** Under consideration from v1.3 through v1.9: the section no longer specified a format, just `status_message` examples and `error_code` choices. Deferred because the rename cost the canonical order, three vocabulary files, and forty-seven files for clarity alone. Mooted in v2.0 by removing the section entirely — the rename's cost was the strongest argument for keeping a section whose value was already doubtful.
+- **Keeping `OutputFormat` as a section.** Removed in v2.0. The Communication Protocol deployed region already carries the full JSON envelope, status code table, error code table, and key rules 11–16 mapping when to use each status. `ErrorHandling` (§4.5) already carries the agent-specific status mapping. `OutputFormat` added only two things: example `status_message` strings and the agent's `error_code` choice. The examples were actively harmful — agents parroted the template phrasing instead of describing their actual outcome, producing unnecessarily verbose messages. The error code choice is a single line that fits naturally into `ErrorHandling`'s existing per-agent bullets. Surveyed in `SubagentProjectRegions-Review.md` §4.10.
 - **A managed region for the Process list itself.** Every Process list is agent-specific; only its closing steps were shared. Deploying the whole list would have meant no list at all.
 - **"Deployment configuration" as a content source.** Held until v1.4 as the source for `LanguagePatterns` and `CustomConstraints`. It described no mechanism, had no specification behind it, and was never implemented — the `Specified in` column carried an em-dash for both rows, which is this document admitting in its own table that nobody had written the thing down. A source that exists only as a phrase in a table is worse than an acknowledged gap: the closed-set rule forced every harness to satisfy it with empty declarations, so the fiction propagated into four harness files and every deployed agent. §2.5.1 now requires a named, implemented generator.
 - **A per-agent `LanguagePatterns` region in MOSAIC's own catalog sources.** Considered when reclassifying it as an injection in v1.4, on the precedent of `CodebaseContext`, which is declared empty in thirty-seven sources. Rejected: `CodebaseContext` describes a codebase every project has, while language patterns are meaningful only to a project that has settled on a language and wants its agents constrained by it. Declaring it everywhere would ship fifty-odd empty regions and `TODO.md` lines to make one project's case marginally easier. As of v1.5, `LanguagePatterns` is a custom region if a project wants it.
@@ -957,5 +909,5 @@ A change to this schema is never local. The table below lists what must be check
 - **`Catalog/SourceFilesFormat.md` and this document overlap.** That file states the agent format from the tool's side, with no rationale, and has already drifted. It should be reduced to a pointer plus the skill and hook conventions it uniquely covers (§10.1).
 - **`InfrastructureAgentConcept.md` §3.1 shows an old project-injection marker for `InfrastructureAgents`.** The vocabulary has it as a managed region, and the orchestrator source uses the managed form. The design document is the one that is wrong, and it is the document a reader would trust. `Catalog/Subagents/Infrastructure/README.md` line 7 carries the same error and should be corrected with it.
 - **The orchestrator's `ErrorHandling` section extends far past its injection.** The project injection closes around line 493 and the section continues to line 715 with the Core Orchestration Loop, which is neither error handling nor an extension of it. The current arrangement means a project injection lands in the middle of unrelated material.
-- **Severity tables are outside `SeverityThresholds` in all validation agent source files.** The default content (§2.1.1, §6.3) currently sits after the empty project region rather than inside it. Each validation agent's source needs the table and status-code logic moved inside `<SeverityThresholds type="project">`. Until then, the update tool treats the table as core text and the project region as empty — a project overriding severity thresholds would get both their override and the stale default.
+- **Severity default content is correct in the validation agents and absent everywhere else.** The nine validation agents carrying `SeverityThresholds` now hold the table and status-code logic inside the region, as §6.3 requires. The audit agents are the remaining gap: each states a "Severity Levels" definition table as core text with no `SeverityDefinitions` region beside it, so a project cannot restate what a severity means to them without editing core prose the next deploy overwrites. Two validation agents (`build-review`, `verification-answer-validator`) carry neither severity region, and `test-scenario-review` carries thresholds without definitions; whether those are deliberate is unexamined. Surveyed in `SubagentProjectRegions-Review.md`.
 - **The `MosaicTest` agents were not surveyed.** Three agents under `MosaicTestCatalog/Agents/MosaicTest/` exist to exercise the harness rather than to do work. Whether they conform to this schema, and whether they should, is unexamined.

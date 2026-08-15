@@ -92,14 +92,6 @@ Return BLOCKED with error_code E101 when a required file does not exist.
 </ErrorHandling>
 ---
 
-<OutputFormat type="core">
-## Output Format
-
-Return your entire response as the JSON object the Communication Protocol defines.
-
-</OutputFormat>
----
-
 <ExecutionPhilosophy type="core">
 ## Execution Philosophy
 

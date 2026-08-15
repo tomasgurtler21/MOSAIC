@@ -18,8 +18,8 @@ package docformat_test
 //     (the code and the AllowUnknownInjections option are both removed).
 //
 // Coverage (T2.4 — exact table pinning for cross-copy drift detection):
-//   - CanonicalSections exact 6-entry sequence.
-//   - CanonicalOrder exact 7-slot sequence (ArtifactProvenance absent).
+//   - CanonicalSections exact 5-entry sequence (OutputFormat removed).
+//   - CanonicalOrder exact 6-slot sequence (OutputFormat removed; ArtifactProvenance absent).
 //   - CanonicalDeployed exact 9-name sequence (LanguagePatterns and CustomConstraints
 //     removed from the tool-managed vocabulary).
 //   - DeployedParent exact 9-entry map (values are the primary drift signal).
@@ -247,14 +247,14 @@ func TestValidate_OpenInjectionName_DoesNotProduceWrongMarker(t *testing.T) {
 // T2.4 — Exact table pinning (Go copy — catches drift from the Python mirror)
 // ---------------------------------------------------------------------------
 
-func TestVocabulary_CanonicalSections_ExactSixEntrySequence(t *testing.T) {
-	// Authoritative 6-entry sequence. Any deviation is a drift from boundary_constants.py.
+func TestVocabulary_CanonicalSections_ExactFiveEntrySequence(t *testing.T) {
+	// Authoritative 5-entry sequence. OutputFormat is removed; any deviation is a drift
+	// from boundary_constants.py which also has 5 entries.
 	want := []string{
 		"Identity",
 		"Capabilities",
 		"Constraints",
 		"ErrorHandling",
-		"OutputFormat",
 		"ExecutionPhilosophy",
 	}
 	got := docformat.CanonicalSections
@@ -268,17 +268,16 @@ func TestVocabulary_CanonicalSections_ExactSixEntrySequence(t *testing.T) {
 	}
 }
 
-func TestVocabulary_CanonicalOrder_ExactSevenSlotSequence(t *testing.T) {
-	// Authoritative 7-slot sequence. Slot 1 is CommunicationProtocol (top-level DEPLOYED);
-	// every other slot is a section name. ArtifactProvenance is absent.
-	// Any deviation is a drift from boundary_constants.py.
+func TestVocabulary_CanonicalOrder_ExactSixSlotSequence(t *testing.T) {
+	// Authoritative 6-slot sequence. Slot 1 is CommunicationProtocol (top-level DEPLOYED);
+	// every other slot is a section name. OutputFormat is removed; ArtifactProvenance is absent.
+	// Any deviation is a drift from boundary_constants.py which also has 6 slots.
 	want := []string{
 		"Identity",
 		"CommunicationProtocol",
 		"Capabilities",
 		"Constraints",
 		"ErrorHandling",
-		"OutputFormat",
 		"ExecutionPhilosophy",
 	}
 	got := docformat.CanonicalOrder

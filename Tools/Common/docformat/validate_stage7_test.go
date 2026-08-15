@@ -95,18 +95,15 @@ package docformat_test
 //       issue at SeverityWarning.
 //     - A document with no Identity section does not produce an "identity-shape" issue.
 //
-//   Rule 16: No section outside OutputFormat contains a JSON object with a status_code key —
-//   Warning.
-//     - A document with a status_code JSON object only inside OutputFormat produces no
-//       "contract-restated" issue.
-//     - A document with a status_code JSON object inside a non-OutputFormat section produces
+//   Rule 16: No section contains a JSON object with a status_code key — Warning.
+//   The OutputFormat exemption is removed; Rule 16 applies uniformly to every section.
+//     - A document with a status_code JSON object inside the Constraints section produces
 //       a "contract-restated" issue at SeverityWarning.
+//     - A document with a status_code JSON object inside a section that was previously
+//       named OutputFormat also produces a "contract-restated" issue at SeverityWarning
+//       (no exemption exists for any section name).
 //
-//   Rule 17: OutputFormat section contains no JSON code fence — Warning.
-//     - An OutputFormat section containing only a markdown table produces no
-//       "output-format-json-fence" issue.
-//     - An OutputFormat section containing a JSON code fence (```json) produces an
-//       "output-format-json-fence" issue at SeverityWarning.
+//   Rule 17 is retired. No test depends on an OutputFormat section being valid.
 //
 //   Rule 18: No Process step mentions human-in-the-loop — Warning.
 //     - A Process list with no step mentioning "human-in-the-loop" produces no
@@ -441,9 +438,10 @@ More content.
 </Constraints>
 `
 
-// statusCodeOnlyInOutputFormat has a status_code JSON only inside OutputFormat, which is
-// the permitted location. No rule 16 violation.
-const statusCodeOnlyInOutputFormat = `---
+// statusCodeInOutputFormatSection has a status_code JSON object inside a section named
+// OutputFormat. Rule 16 applies uniformly to every section — there is no OutputFormat
+// exemption. This document must produce a "contract-restated" warning.
+const statusCodeInOutputFormatSection = `---
 id: "1"
 version: 1.0.0
 name: test-agent
@@ -456,37 +454,11 @@ required_skills: []
 </CommunicationProtocol>
 
 <OutputFormat type="core">
-| Status | error_code | Example status_message |
-|--------|------------|------------------------|
-| SUCCESS | — | "Done." |
-| BLOCKED | E101 | "Input not found." |
-</OutputFormat>
-`
+Some output format prose.
 
-// outputFormatWithJsonFence has a JSON code fence inside OutputFormat. This violates rule 17.
-const outputFormatWithJsonFence = "---\nid: \"1\"\nversion: 1.0.0\nname: test-agent\ndescription: A test agent.\nrole: subagent\nrequired_skills: []\n---\n\n<CommunicationProtocol type=\"managed\">\n</CommunicationProtocol>\n\n<OutputFormat type=\"core\">\nReturn your response as:\n\n```json\n{\"status_code\": \"SUCCESS\"}\n```\n</OutputFormat>\n"
+{"status_code": "SUCCESS", "agent_instance_id": "test-writer#1", "run_id": "abc123"}
 
-// outputFormatWithTable has only a markdown table in OutputFormat — no JSON fence.
-// No rule 17 violation.
-const outputFormatWithTable = `---
-id: "1"
-version: 1.0.0
-name: test-agent
-description: A test agent.
-role: subagent
-required_skills: []
----
-
-<CommunicationProtocol type="managed">
-</CommunicationProtocol>
-
-<OutputFormat type="core">
-Your entire response is the JSON object the Communication Protocol defines. This section
-specifies only what your status_message should say.
-
-| Status | error_code | Example status_message |
-|--------|------------|------------------------|
-| SUCCESS | — | "All tests written." |
+More content.
 </OutputFormat>
 `
 
@@ -1283,67 +1255,52 @@ func TestValidate_Rule15_NoIdentitySection_NoIdentityShapeIssue(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T7.4 — Rule 16: No status_code JSON object outside OutputFormat
+// T7.4 — Rule 16: No section contains a JSON object with a status_code key (no exemptions)
 // ---------------------------------------------------------------------------
 
 func TestValidate_Rule16_StatusCodeInConstraints_ReportsContractRestated(t *testing.T) {
-	// A section other than OutputFormat containing a JSON object with a "status_code" key
-	// must produce a "contract-restated" issue at SeverityWarning. Contract prose belongs
-	// in the deployed Communication Protocol, not restated per-agent.
+	// A section containing a JSON object with a "status_code" key must produce a
+	// "contract-restated" issue at SeverityWarning. Contract prose belongs in the
+	// deployed Communication Protocol, not restated per-agent.
 	doc := parseInlineDoc(t, statusCodeInConstraints)
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{})
 
 	iss := issueWithCode(issues, "contract-restated")
 	if iss == nil {
-		t.Error("expected a \"contract-restated\" issue for a status_code JSON object outside OutputFormat; got none")
+		t.Error("expected a \"contract-restated\" issue for a status_code JSON object in Constraints; got none")
 	} else if iss.Severity != docformat.SeverityWarning {
 		t.Errorf("contract-restated issue severity: want SeverityWarning, got %q", iss.Severity)
 	}
 }
 
-func TestValidate_Rule16_StatusCodeOnlyInOutputFormat_NoContractRestatedIssue(t *testing.T) {
-	// A document whose OutputFormat section contains status-related prose (as a markdown
-	// table) must produce no "contract-restated" issue. The table format does not contain
-	// a JSON object with a status_code key.
-	doc := parseInlineDoc(t, statusCodeOnlyInOutputFormat)
+func TestValidate_Rule16_StatusCodeInOutputFormatSection_ReportsContractRestated(t *testing.T) {
+	// Rule 16 applies uniformly to every section — there is no OutputFormat exemption.
+	// A status_code JSON object inside an OutputFormat-named section must produce a
+	// "contract-restated" issue at SeverityWarning, the same as any other section.
+	doc := parseInlineDoc(t, statusCodeInOutputFormatSection)
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{})
 
-	if hasIssueWithCode(issues, "contract-restated") {
-		t.Errorf("document with status info only in OutputFormat produced unexpected \"contract-restated\" issue; issues: %v", issues)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// T7.4 — Rule 17: OutputFormat contains no JSON code fence
-// ---------------------------------------------------------------------------
-
-func TestValidate_Rule17_OutputFormatWithJsonFence_ReportsOutputFormatJsonFence(t *testing.T) {
-	// An OutputFormat section containing a JSON code fence (```json) must produce an
-	// "output-format-json-fence" issue at SeverityWarning. OutputFormat must use a
-	// markdown table, not a JSON example — the Communication Protocol deploys the contract.
-	doc := parseInlineDoc(t, outputFormatWithJsonFence)
-
-	issues := docformat.Validate(doc, docformat.ValidateOptions{})
-
-	iss := issueWithCode(issues, "output-format-json-fence")
+	iss := issueWithCode(issues, "contract-restated")
 	if iss == nil {
-		t.Error("expected an \"output-format-json-fence\" issue for an OutputFormat section with a JSON fence; got none")
+		t.Error("expected a \"contract-restated\" issue for a status_code JSON object in OutputFormat section; " +
+			"Rule 16 applies to every section with no exemption")
 	} else if iss.Severity != docformat.SeverityWarning {
-		t.Errorf("output-format-json-fence issue severity: want SeverityWarning, got %q", iss.Severity)
+		t.Errorf("contract-restated issue severity: want SeverityWarning, got %q", iss.Severity)
 	}
 }
 
-func TestValidate_Rule17_OutputFormatWithTableOnly_NoOutputFormatJsonFenceIssue(t *testing.T) {
-	// An OutputFormat section containing only a markdown table (no JSON fence) must produce
-	// no "output-format-json-fence" issue.
-	doc := parseInlineDoc(t, outputFormatWithTable)
+func TestValidate_Rule16_NoOutputFormatJsonFenceIssueCode_Exists(t *testing.T) {
+	// Rule 17 (output-format-json-fence) is retired. The issue code
+	// "output-format-json-fence" must never appear in any validation result,
+	// regardless of document content.
+	doc := parseInlineDoc(t, statusCodeInConstraints) // any valid document
 
 	issues := docformat.Validate(doc, docformat.ValidateOptions{})
 
 	if hasIssueWithCode(issues, "output-format-json-fence") {
-		t.Errorf("OutputFormat with table only produced unexpected \"output-format-json-fence\" issue; issues: %v", issues)
+		t.Errorf("unexpected \"output-format-json-fence\" issue — Rule 17 is retired and must not fire; issues: %v", issues)
 	}
 }
 

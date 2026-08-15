@@ -3358,9 +3358,10 @@ func TestPromote_RealOpenCodeFixture_Parity_BodyAndFrontmatter(t *testing.T) {
 	}
 
 	// --- Body section prose parity ---
-	// Spot-check a characteristic excerpt from each SECTION block to confirm the prose was
-	// carried byte-identical from the source fixture. The full-file comparison in the
-	// interactive test covers exact bytes; these checks document per-section intent.
+	// Spot-check a characteristic excerpt from each canonical SECTION block to confirm the
+	// prose was carried byte-identical from the source fixture. The full-file comparison in
+	// the interactive test covers exact bytes; these checks document per-section intent.
+	// OutputFormat is a retired section and is intentionally absent from this list.
 	for _, sc := range []struct {
 		section string
 		excerpt string
@@ -3369,12 +3370,16 @@ func TestPromote_RealOpenCodeFixture_Parity_BodyAndFrontmatter(t *testing.T) {
 		{"Capabilities", "### Core Capabilities"},
 		{"Constraints", "Stay within your defined role"},
 		{"ErrorHandling", "Retry transient errors once"},
-		{"OutputFormat", "Always end with a JSON status block"},
 		{"ExecutionPhilosophy", "Exploration Mindset"},
 	} {
 		if !strings.Contains(destStr, sc.excerpt) {
 			t.Errorf("output missing expected excerpt from <%s type=\"core\">: %q", sc.section, sc.excerpt)
 		}
+	}
+
+	// OutputFormat is a retired section. A promoted generic output must not contain it.
+	if strings.Contains(destStr, "<OutputFormat type=\"core\">") {
+		t.Error("output contains <OutputFormat type=\"core\"> — the OutputFormat section is retired and must be absent from promoted output")
 	}
 
 	// --- Injection region parity: must be empty tag pairs ---

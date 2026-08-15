@@ -292,12 +292,10 @@ project-declared injection is ever required to be filled.
 
 | Name | Usual parent |
 |------|--------------|
-| `IdentityExtension` | `Identity` |
 | `CodebaseContext` | `Capabilities` |
 | `OutputArtifactTemplate` | `Capabilities` |
 | `SeverityThresholds` | `Capabilities` |
 | `SeverityDefinitions` | `Capabilities` |
-| `ErrorHandlingExtension` | `ErrorHandling` |
 | `ContextLimits` | `ExecutionPhilosophy` |
 
 `ArtifactProvenanceExtension` is retired: the stamp it extended folded into the
@@ -338,8 +336,7 @@ two of these that are both present must appear in this relative order:
 3. `Capabilities` (core)
 4. `Constraints` (core)
 5. `ErrorHandling` (core)
-6. `OutputFormat` (core)
-7. `ExecutionPhilosophy` (core)
+6. `ExecutionPhilosophy` (core)
 
 ---
 

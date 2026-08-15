@@ -1,17 +1,17 @@
 package docformat_test
 
-// Tests for Stage 2 vocabulary: the seven-slot canonical order, nine-name deployed
+// Tests for Stage 2 vocabulary: the six-slot canonical order, nine-name deployed
 // set, revised parent tables, and classification behaviour after CanonicalInjections
 // is removed.
 //
-// Coverage (CanonicalSections — unchanged in Stage 2):
-//   - CanonicalSections contains exactly 6 entries in the correct order.
-//   - CommunicationProtocol and ArtifactProvenance are absent from CanonicalSections.
+// Coverage (CanonicalSections — 5 entries after OutputFormat removal):
+//   - CanonicalSections contains exactly 5 entries in the correct order.
+//   - OutputFormat, CommunicationProtocol, and ArtifactProvenance are absent from CanonicalSections.
 //
-// Coverage (CanonicalOrder — 7 slots, ArtifactProvenance removed):
-//   - CanonicalOrder contains exactly 7 slots.
+// Coverage (CanonicalOrder — 6 slots, OutputFormat and ArtifactProvenance removed):
+//   - CanonicalOrder contains exactly 6 slots.
 //   - CanonicalOrder[0] is Identity, CanonicalOrder[1] is CommunicationProtocol.
-//   - ArtifactProvenance is absent from CanonicalOrder.
+//   - OutputFormat and ArtifactProvenance are absent from CanonicalOrder.
 //   - Every CanonicalSection appears in CanonicalOrder.
 //
 // Coverage (CanonicalDeployed — 9 names, ArtifactProvenance/LanguagePatterns/CustomConstraints removed):
@@ -62,25 +62,38 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// CanonicalSections — 6 entries, unchanged in Stage 2
+// CanonicalSections — 5 entries after OutputFormat removal
 // ---------------------------------------------------------------------------
 
-func TestCanonicalSections_Stage2_ContainsSixSections(t *testing.T) {
+func TestCanonicalSections_Stage2_ContainsFiveSections(t *testing.T) {
+	// OutputFormat is removed from CanonicalSections. The section count drops from 6 to 5.
 	got := docformat.CanonicalSections
-	if len(got) != 6 {
-		t.Fatalf("CanonicalSections length: want 6, got %d: %v", len(got), got)
+	if len(got) != 5 {
+		t.Fatalf("CanonicalSections length: want 5, got %d: %v", len(got), got)
 	}
 }
 
-func TestCanonicalSections_Stage2_FullSixEntryOrder(t *testing.T) {
-	// CanonicalSections is unchanged in Stage 2 (ArtifactProvenance was already
-	// removed by Stage 1; it is now also absent from CanonicalDeployed).
+func TestCanonicalSections_Stage2_OutputFormat_IsAbsent(t *testing.T) {
+	// OutputFormat is removed from CanonicalSections. It must not appear anywhere in the list.
+	for i, n := range docformat.CanonicalSections {
+		if n == "OutputFormat" {
+			t.Errorf(
+				"CanonicalSections[%d] is %q — OutputFormat must be removed from "+
+					"CanonicalSections; the section is retired",
+				i, n,
+			)
+		}
+	}
+}
+
+func TestCanonicalSections_Stage2_FullFiveEntryOrder(t *testing.T) {
+	// Authoritative 5-entry canonical section order. OutputFormat is removed.
+	// ArtifactProvenance was already removed by Stage 1.
 	want := []string{
 		"Identity",
 		"Capabilities",
 		"Constraints",
 		"ErrorHandling",
-		"OutputFormat",
 		"ExecutionPhilosophy",
 	}
 	got := docformat.CanonicalSections
@@ -95,16 +108,16 @@ func TestCanonicalSections_Stage2_FullSixEntryOrder(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// CanonicalOrder — 7 slots, ArtifactProvenance removed
+// CanonicalOrder — 6 slots, OutputFormat and ArtifactProvenance removed
 // ---------------------------------------------------------------------------
 
-func TestCanonicalOrder_Stage2_ContainsSevenSlots(t *testing.T) {
-	// Stage 2 removes ArtifactProvenance from CanonicalOrder, reducing the slot
-	// count from 8 to 7. Slot 1 is CommunicationProtocol (a top-level
-	// <CommunicationProtocol type="managed"> boundary); every other entry is a section name.
+func TestCanonicalOrder_Stage2_ContainsSixSlots(t *testing.T) {
+	// OutputFormat is removed from CanonicalOrder, reducing the slot count from 7 to 6.
+	// (ArtifactProvenance was already removed in Stage 1.) Slot 1 is CommunicationProtocol
+	// (a top-level <CommunicationProtocol type="managed"> boundary); every other entry is a section name.
 	got := docformat.CanonicalOrder
-	if len(got) != 7 {
-		t.Fatalf("CanonicalOrder length: want 7, got %d: %v", len(got), got)
+	if len(got) != 6 {
+		t.Fatalf("CanonicalOrder length: want 6, got %d: %v", len(got), got)
 	}
 }
 
@@ -143,17 +156,29 @@ func TestCanonicalOrder_Stage2_ArtifactProvenance_IsAbsent(t *testing.T) {
 	}
 }
 
-func TestCanonicalOrder_Stage2_FullSevenSlotList(t *testing.T) {
-	// Authoritative 7-slot canonical document order contract.
+func TestCanonicalOrder_Stage2_OutputFormat_IsAbsent(t *testing.T) {
+	// OutputFormat is removed from CanonicalOrder in Stage 2. It must not appear in the list.
+	for i, s := range docformat.CanonicalOrder {
+		if s == "OutputFormat" {
+			t.Errorf(
+				"CanonicalOrder[%d] is %q — OutputFormat must be removed from "+
+					"CanonicalOrder in Stage 2; the section is retired",
+				i, s,
+			)
+		}
+	}
+}
+
+func TestCanonicalOrder_Stage2_FullSixSlotList(t *testing.T) {
+	// Authoritative 6-slot canonical document order contract. OutputFormat is removed.
 	// CommunicationProtocol occupies slot 1 as a top-level <CommunicationProtocol type="managed"> boundary;
-	// every other slot is a canonical section name. ArtifactProvenance is absent.
+	// every other slot is a canonical section name. OutputFormat and ArtifactProvenance are absent.
 	want := []string{
 		"Identity",
 		"CommunicationProtocol",
 		"Capabilities",
 		"Constraints",
 		"ErrorHandling",
-		"OutputFormat",
 		"ExecutionPhilosophy",
 	}
 	got := docformat.CanonicalOrder

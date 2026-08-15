@@ -1,7 +1,7 @@
 package docformat
 
 func init() {
-	// CanonicalSections lists the six canonical MOSAIC section names in their required
+	// CanonicalSections lists the five canonical MOSAIC section names in their required
 	// document order, mirroring boundary_constants.py. CommunicationProtocol is NOT a
 	// member; it is a tool-managed boundary name declared as type="managed" and occupies
 	// a top-level slot in CanonicalOrder.
@@ -10,21 +10,19 @@ func init() {
 		"Capabilities",
 		"Constraints",
 		"ErrorHandling",
-		"OutputFormat",
 		"ExecutionPhilosophy",
 	}
 
-	// CanonicalOrder lists the seven canonical document slots in required order,
+	// CanonicalOrder lists the six canonical document slots in required order,
 	// mirroring boundary_constants.py. The entry at index 1 is "CommunicationProtocol",
 	// satisfied by a top-level <CommunicationProtocol type="managed"> boundary; every other
-	// entry is a section name. ArtifactProvenance is removed.
+	// entry is a section name.
 	CanonicalOrder = []string{
 		"Identity",
 		"CommunicationProtocol",
 		"Capabilities",
 		"Constraints",
 		"ErrorHandling",
-		"OutputFormat",
 		"ExecutionPhilosophy",
 	}
 
