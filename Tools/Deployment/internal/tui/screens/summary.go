@@ -184,7 +184,7 @@ func buildSummaryLines(s domain.RunSummary) []summaryLine {
 				currentCat = item.Category
 				add(fmt.Sprintf("  [%s]", item.Category), "body")
 			}
-			add(fmt.Sprintf("  • %s: %s", item.Subject, item.Detail), "muted")
+			add(formatFollowUpLine(item.Subject, item.Detail, item.Owner), "muted")
 		}
 		if s.TodoFilePath != "" {
 			add("", "body")

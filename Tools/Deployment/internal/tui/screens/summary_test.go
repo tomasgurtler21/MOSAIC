@@ -411,3 +411,138 @@ func TestSummaryScreen_AllThreeModes_ShowDistinctModeLabels(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Follow-up owner attribution
+// ---------------------------------------------------------------------------
+
+// TestSummaryScreen_FollowUp_InjectionItemWithOwner_ShowsAttributionWhenDetailEmpty verifies
+// that an injection follow-up item bearing an owner shows the owning agent in the post-run
+// summary screen even when the item's Detail field is empty.
+func TestSummaryScreen_FollowUp_InjectionItemWithOwner_ShowsAttributionWhenDetailEmpty(t *testing.T) {
+	// Arrange
+	summary := domain.RunSummary{
+		Mode:           domain.ModeDeployNew,
+		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
+		WorkspacePath:  "/workspace",
+		DeploymentRoot: "/workspace/.ai",
+		Todos: []domain.TodoItem{
+			{
+				Category: domain.TodoInjections,
+				Subject:  "CodebaseContext",
+				Owner:    "harness-bug-hunter",
+				Detail:   "", // empty — injection region awaiting user content
+			},
+		},
+		TodoFilePath: "/workspace/MOSAIC-DEPLOYMENT-TODO.md",
+		Outcome:      domain.OutcomeCompletedWithGaps,
+	}
+
+	// Act
+	s := screens.NewSummaryScreen(summary, 120, 80, plainStyles())
+	view := s.View()
+
+	// Assert: the owning agent must be visible on the follow-up line.
+	if !strings.Contains(view, "agent: harness-bug-hunter") {
+		t.Errorf("summary view does not show owner attribution for injection item with empty Detail;\n"+
+			"want a line containing \"agent: harness-bug-hunter\":\n%s", view)
+	}
+}
+
+// TestSummaryScreen_FollowUp_ItemDetailAlreadyNamesOwner_NoAgentNameDuplicate verifies that
+// when a follow-up item's Detail text already names the owning agent (as tool-mapping items
+// do), the agent name appears only once on that follow-up bullet line — not once in the
+// Detail text and again as a "(agent: …)" suffix.
+func TestSummaryScreen_FollowUp_ItemDetailAlreadyNamesOwner_NoAgentNameDuplicate(t *testing.T) {
+	// Arrange
+	const owner = "harness-bug-hunter"
+	summary := domain.RunSummary{
+		Mode:           domain.ModeDeployNew,
+		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
+		WorkspacePath:  "/workspace",
+		DeploymentRoot: "/workspace/.ai",
+		Todos: []domain.TodoItem{
+			{
+				Category: domain.TodoToolMappings,
+				Subject:  "file_read",
+				Owner:    owner,
+				Detail:   `generic tool "file_read" has no harness mapping for agent "harness-bug-hunter"`,
+			},
+		},
+		Outcome: domain.OutcomeCompletedWithGaps,
+	}
+
+	// Act
+	s := screens.NewSummaryScreen(summary, 120, 80, plainStyles())
+	view := s.View()
+
+	// Assert: the owner name must appear at most once on the follow-up bullet line.
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "file_read") && strings.Contains(line, "•") {
+			count := strings.Count(line, owner)
+			if count > 1 {
+				t.Errorf("follow-up bullet for tool-mapping item names owner %q %d times on one line; want at most 1:\n%q",
+					owner, count, line)
+			}
+		}
+	}
+}
+
+// TestSummaryScreen_FollowUp_BlankOwner_NoAttributionSuffix verifies that a follow-up item
+// whose Owner is empty renders without any "(agent: …)" attribution suffix.
+func TestSummaryScreen_FollowUp_BlankOwner_NoAttributionSuffix(t *testing.T) {
+	// Arrange
+	summary := domain.RunSummary{
+		Mode:           domain.ModeDeployNew,
+		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
+		WorkspacePath:  "/workspace",
+		DeploymentRoot: "/workspace/.ai",
+		Todos: []domain.TodoItem{
+			{
+				Category: domain.TodoModels,
+				Subject:  "fast-tier",
+				Owner:    "", // run-level item with no agent attribution
+				Detail:   "no model configured",
+			},
+		},
+		Outcome: domain.OutcomeCompletedWithGaps,
+	}
+
+	// Act
+	s := screens.NewSummaryScreen(summary, 120, 80, plainStyles())
+	view := s.View()
+
+	// Assert: the item is rendered but without any attribution suffix.
+	if !strings.Contains(view, "fast-tier") {
+		t.Errorf("summary view does not render follow-up item with blank owner at all:\n%s", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "fast-tier") {
+			if strings.Contains(line, "(agent:") {
+				t.Errorf("follow-up line for blank-owner item contains attribution suffix; want none:\n%q", line)
+			}
+		}
+	}
+}
+
+// TestSummaryScreen_NonFollowUpSections_UnaffectedByOwnerAttribution verifies that the parts
+// of the summary not related to follow-up items — the outcome banner, mode label, and action
+// records — continue to render correctly after attribution logic is applied to the follow-up
+// bullet lines.
+func TestSummaryScreen_NonFollowUpSections_UnaffectedByOwnerAttribution(t *testing.T) {
+	// Arrange: a clean run with action records but no todos.
+	s := screens.NewSummaryScreen(cleanSummary(), 120, 80, plainStyles())
+
+	// Act
+	view := collapseWhitespace(s.View())
+
+	// Assert: action-record items are visible as usual.
+	if !strings.Contains(view, "test-runner") {
+		t.Errorf("summary view does not show the created agent key;\n"+
+			"non-follow-up output must be unaffected by attribution changes:\n%s", s.View())
+	}
+	// Assert: no spurious attribution suffixes appear in a clean run with no owned items.
+	if strings.Contains(view, "(agent:") {
+		t.Errorf("clean-run summary view contains \"(agent:\" attribution where none is expected:\n%s", s.View())
+	}
+}

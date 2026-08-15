@@ -163,7 +163,7 @@ func buildReviewLines(p domain.Plan) []reviewLine {
 		add("", "body")
 		add(fmt.Sprintf("%d gap(s) will be recorded as follow-up TODO items:", len(p.Gaps)), "warning")
 		for _, g := range p.Gaps {
-			add(fmt.Sprintf("  • %s: %s", g.Kind, g.Subject), "muted")
+			add(formatFollowUpLine(string(g.Kind), g.Subject, g.Owner), "muted")
 		}
 	}
 

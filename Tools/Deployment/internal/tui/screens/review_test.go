@@ -406,3 +406,130 @@ func TestReviewScreen_View_BackupHint_FitsWithinConfiguredWidth(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Gap list owner attribution
+// ---------------------------------------------------------------------------
+
+// TestReviewScreen_GapList_InjectionGapWithOwner_ShowsAttributionInBullet verifies that a
+// plan gap bearing an owner displays that owning agent on its bullet in the pre-write gap
+// list, including injection gaps whose Subject is the region name and whose Owner is set.
+func TestReviewScreen_GapList_InjectionGapWithOwner_ShowsAttributionInBullet(t *testing.T) {
+	// Arrange
+	p := planWithItems(domain.ModeDeployNew, []domain.PlanItem{
+		{Ref: agentRef("test-runner"), Action: domain.ActionCreate, TargetPath: "Agents/test-runner.agent.md"},
+	})
+	p.Gaps = []domain.Gap{
+		{
+			Kind:    domain.GapEmptyInjection,
+			Subject: "CodebaseContext",
+			Owner:   "harness-bug-hunter",
+		},
+	}
+
+	// Act
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	// Assert: the owning agent must appear on the gap bullet line.
+	if !strings.Contains(view, "agent: harness-bug-hunter") {
+		t.Errorf("review gap list does not show owner attribution for injection gap;\n"+
+			"want a line containing \"agent: harness-bug-hunter\":\n%s", view)
+	}
+}
+
+// TestReviewScreen_GapList_GapSubjectAlreadyNamesOwner_NoAgentNameDuplicate verifies that
+// when a gap's Subject text already names the owning agent — as tool-mapping gaps do — the
+// agent name appears only once on the gap bullet line, not once in the Subject and again as
+// a "(agent: …)" suffix.
+func TestReviewScreen_GapList_GapSubjectAlreadyNamesOwner_NoAgentNameDuplicate(t *testing.T) {
+	// Arrange
+	const owner = "harness-bug-hunter"
+	p := planWithItems(domain.ModeDeployNew, []domain.PlanItem{
+		{Ref: agentRef("test-runner"), Action: domain.ActionCreate, TargetPath: "Agents/test-runner.agent.md"},
+	})
+	p.Gaps = []domain.Gap{
+		{
+			Kind:    domain.GapUnmappedTool,
+			Subject: `generic tool "bash" has no harness mapping for agent "harness-bug-hunter"`,
+			Owner:   owner,
+		},
+	}
+
+	// Act
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	// Assert: the owner name must appear at most once on the gap bullet line.
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "bash") && strings.Contains(line, "•") {
+			count := strings.Count(line, owner)
+			if count > 1 {
+				t.Errorf("gap bullet for tool-mapping gap names owner %q %d times on one line; want at most 1:\n%q",
+					owner, count, line)
+			}
+		}
+	}
+}
+
+// TestReviewScreen_GapList_BlankOwner_NoAttributionSuffix verifies that a gap whose Owner is
+// empty renders its bullet line without any "(agent: …)" attribution suffix.
+func TestReviewScreen_GapList_BlankOwner_NoAttributionSuffix(t *testing.T) {
+	// Arrange
+	p := planWithItems(domain.ModeDeployNew, []domain.PlanItem{
+		{Ref: agentRef("test-runner"), Action: domain.ActionCreate, TargetPath: "Agents/test-runner.agent.md"},
+	})
+	p.Gaps = []domain.Gap{
+		{
+			Kind:    domain.GapNoModel,
+			Subject: "fast-tier",
+			Owner:   "", // run-level gap with no agent attribution
+		},
+	}
+
+	// Act
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := s.View()
+
+	// Assert: the gap item is visible but without any attribution suffix.
+	if !strings.Contains(view, "fast-tier") {
+		t.Errorf("review view does not show gap subject for blank-owner gap:\n%s", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "fast-tier") {
+			if strings.Contains(line, "(agent:") {
+				t.Errorf("gap bullet for blank-owner gap contains attribution suffix; want none:\n%q", line)
+			}
+		}
+	}
+}
+
+// TestReviewScreen_GapList_Attribution_DoesNotAffectPlanActionSection verifies that adding
+// owner attribution to gap bullet lines does not disturb the plan action section. The [CREATE]
+// badge and agent key must continue to appear correctly even when gaps carry owners.
+func TestReviewScreen_GapList_Attribution_DoesNotAffectPlanActionSection(t *testing.T) {
+	// Arrange: a plan with one create action and one owned gap.
+	p := planWithItems(domain.ModeDeployNew, []domain.PlanItem{
+		{Ref: agentRef("new-agent"), Action: domain.ActionCreate, TargetPath: "Agents/new-agent.agent.md"},
+	})
+	p.Gaps = []domain.Gap{
+		{
+			Kind:    domain.GapEmptyInjection,
+			Subject: "CodebaseContext",
+			Owner:   "harness-bug-hunter",
+		},
+	}
+
+	// Act
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+	view := collapseWhitespace(s.View())
+
+	// Assert: the action badge and agent key are still visible.
+	if !strings.Contains(view, "[CREATE]") {
+		t.Errorf("plan action section does not show [CREATE] badge when gap list carries owners;\n"+
+			"attribution changes must be scoped to the gap bullet lines:\n%s", s.View())
+	}
+	if !strings.Contains(view, "new-agent") {
+		t.Errorf("plan action section does not show agent key when gap list carries owners:\n%s", s.View())
+	}
+}

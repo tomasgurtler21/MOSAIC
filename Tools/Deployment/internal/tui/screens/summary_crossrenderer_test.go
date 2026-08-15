@@ -85,6 +85,66 @@ func TestSummaryScreen_CrossRenderer_SubjectsMatchMarkdownChecklist(t *testing.T
 	}
 }
 
+// TestSummaryScreen_CrossRenderer_OwnedInjectionAttributedConsistently verifies that an
+// injection follow-up item bearing an owner is attributed in both the on-disk markdown
+// checklist and the TUI SummaryScreen view. The markdown uses "### agent: {owner}" section
+// headers; the screen must use "(agent: {owner})" line suffixes. Both renderers must contain
+// the shared "agent: {owner}" token — they cannot disagree on attribution.
+func TestSummaryScreen_CrossRenderer_OwnedInjectionAttributedConsistently(t *testing.T) {
+	// Arrange: one owned injection item. The Category must be TodoInjections so that
+	// todo.RenderMarkdown groups it under a "### agent: {owner}" header.
+	const ownerKey = "harness-bug-hunter"
+	coll := todo.NewCollector()
+	coll.Add(domain.TodoItem{
+		Category: domain.TodoInjections,
+		Subject:  "CodebaseContext",
+		Owner:    ownerKey,
+		Detail:   "", // empty — injection region awaiting user content
+	})
+
+	groups := coll.Groups()
+	items := coll.Items()
+
+	meta := todo.Meta{
+		Harness:       "claude-code",
+		WorkspacePath: "/workspace",
+		Mode:          domain.ModeDeployNew,
+		GeneratedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	// Act: render both the markdown checklist and the TUI summary screen from the same data.
+	markdownBytes := todo.RenderMarkdown(groups, meta)
+	markdown := string(markdownBytes)
+
+	summary := domain.RunSummary{
+		Mode:           domain.ModeDeployNew,
+		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
+		WorkspacePath:  "/workspace",
+		DeploymentRoot: "/workspace/.ai",
+		Todos:          items,
+		TodoFilePath:   "/workspace/" + todo.FileNameAt(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+		Outcome:        domain.OutcomeCompletedWithGaps,
+	}
+	screen := screens.NewSummaryScreen(summary, 120, 80, plainStyles())
+	screenView := screen.View()
+
+	// Assert: the shared attribution token "agent: {owner}" must appear in both outputs.
+	// The markdown uses it as "### agent: harness-bug-hunter"; the screen must show
+	// "(agent: harness-bug-hunter)" on the follow-up bullet line. Both share the token.
+	attributionToken := "agent: " + ownerKey
+
+	if !strings.Contains(markdown, attributionToken) {
+		t.Errorf("markdown checklist does not contain attribution token %q;\n"+
+			"todo.RenderMarkdown must group owned injection items under \"### agent: {owner}\" headers:\n%s",
+			attributionToken, markdown)
+	}
+	if !strings.Contains(screenView, attributionToken) {
+		t.Errorf("SummaryScreen view does not contain attribution token %q;\n"+
+			"the summary screen must show \"(agent: {owner})\" on owned follow-up lines:\n%s",
+			attributionToken, screenView)
+	}
+}
+
 // TestSummaryScreen_CrossRenderer_EmptyCollectorProducesConsistentOutputs verifies that when
 // the collector is empty (no gaps) both renderers still produce output and neither claims
 // follow-up items exist. An empty collector is the clean-run case.
