@@ -58,7 +58,18 @@ func (a *Adapter) translatePre(native []byte) (domain.InterceptedCall, error) {
 		return domain.InterceptedCall{}, err
 	}
 
-	token, _ := RecoverToken(args)
+	token, ok := RecoverToken(args)
+	if !ok {
+		// First-time dispatch: no token in the args, so mint one. The seam
+		// (opts.NewToken) allows tests to supply a deterministic token; nil
+		// selects the package-level generator, whose opacity is a tested
+		// property.
+		mint := a.opts.NewToken
+		if mint == nil {
+			mint = NewToken
+		}
+		token = mint()
+	}
 
 	return domain.InterceptedCall{
 		Phase:            domain.PhasePre,

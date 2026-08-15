@@ -76,13 +76,11 @@ func (a *Adapter) translatePre(native []byte) (domain.InterceptedCall, error) {
 		return domain.InterceptedCall{}, err
 	}
 
-	token, _ := RecoverToken(input)
-
 	return domain.InterceptedCall{
 		Phase:            domain.PhasePre,
 		Identity:         domain.CollaboratorIdentity{ToolName: normalizedToolName, AgentIdentity: input.SubagentType},
 		Message:          parseTaskMessage(input.Prompt),
-		CorrelationToken: token,
+		CorrelationToken: payload.ToolUseID,
 		RawPayload:       json.RawMessage(native),
 		Capabilities:     a.Capabilities(),
 	}, nil
@@ -110,26 +108,25 @@ func (a *Adapter) translatePost(native []byte) (domain.InterceptedCall, error) {
 		return domain.InterceptedCall{}, err
 	}
 
-	token, _ := RecoverToken(input)
-
 	return domain.InterceptedCall{
 		Phase:            domain.PhasePost,
 		Identity:         domain.CollaboratorIdentity{ToolName: normalizedToolName, AgentIdentity: input.SubagentType},
 		Message:          parseTaskMessage(input.Prompt),
-		CorrelationToken: token,
+		CorrelationToken: payload.ToolUseID,
 		RawPayload:       json.RawMessage(native),
 		Capabilities:     a.Capabilities(),
 		ObservedResponse: extractText(payload.ToolResponse),
 	}, nil
 }
 
-// translateCompletion translates the harness's SubagentStop completion
-// signal into a call carrying the recovered collaborator reply and, when
-// recoverable, the correlation token planted at the pre-invocation point.
+// translateCompletion translates the harness's SubagentStop completion signal
+// into a call carrying the recovered collaborator reply and the correlation
+// token. See correlation.go for the full mechanism basis documentation.
 //
-// An absent AgentTranscriptPath or a transcript carrying no planted token
-// are both legitimate outcomes for an un-stubbed or partially-stubbed
-// dispatch (AC12.7): CorrelationToken comes back empty, never an error.
+// CorrelationToken is populated directly from ToolUseID, the dispatch-scoped
+// identifier the harness sends on both the originating PreToolUse event and
+// this SubagentStop event. An absent ToolUseID produces an empty token — a
+// legitimate outcome for an un-stubbed dispatch — and is never an error.
 // Only a malformed payload or a wrong hook_event_name is an error, mirroring
 // translatePre/translatePost's own validation.
 func (a *Adapter) translateCompletion(native []byte) (domain.InterceptedCall, error) {
@@ -143,42 +140,11 @@ func (a *Adapter) translateCompletion(native []byte) (domain.InterceptedCall, er
 
 	return domain.InterceptedCall{
 		Phase:            domain.PhaseCompletion,
-		CorrelationToken: a.recoverCompletionToken(payload.AgentTranscriptPath),
+		CorrelationToken: payload.ToolUseID,
 		RawPayload:       json.RawMessage(native),
 		Capabilities:     a.Capabilities(),
 		ObservedResponse: payload.LastAssistantMessage,
 	}, nil
-}
-
-// recoverCompletionToken reads the collaborator's own transcript file
-// (through a.opts.TranscriptReader, or the real file reader when nil) and
-// scans its entries for the correlation token planted at the pre-invocation
-// point, using the same marker PlantToken/RecoverToken use. An empty
-// transcriptPath, an unreadable transcript, or a transcript carrying no
-// planted token all resolve to an empty token — none of them is an error
-// here, since none of them is anything but a legitimate un-stubbed or
-// partially-stubbed dispatch.
-func (a *Adapter) recoverCompletionToken(transcriptPath string) string {
-	if transcriptPath == "" {
-		return ""
-	}
-
-	reader := a.opts.TranscriptReader
-	if reader == nil {
-		reader = readTranscriptFile
-	}
-
-	entries, err := reader(transcriptPath)
-	if err != nil {
-		return ""
-	}
-
-	for _, entry := range entries {
-		if token, ok := RecoverToken(TaskToolInput{Prompt: entry}); ok {
-			return token
-		}
-	}
-	return ""
 }
 
 // decodeTaskToolInput decodes tool_input into TaskToolInput. An absent
@@ -275,9 +241,6 @@ func (a *Adapter) translateRewritePrompt(outcome domain.InterceptionOutcome, cal
 		SubagentType: orig.SubagentType,
 		Description:  orig.Description,
 		Prompt:       outcome.RewrittenPrompt,
-	}
-	if outcome.CorrelationToken != "" {
-		updated = PlantToken(updated, outcome.CorrelationToken)
 	}
 
 	updatedJSON, err := json.Marshal(updated)

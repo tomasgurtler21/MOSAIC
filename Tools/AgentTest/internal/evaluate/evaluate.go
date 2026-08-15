@@ -19,6 +19,30 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 	assertions := evaluateAssertions(ev)
 	conditions := evaluateConditions(ev)
 
+	// When the subject process refused to start, surface the real one-line
+	// cause and mark every assertion as not-evaluated. Nothing ran, so no
+	// assertion could have been satisfied or failed — reporting AssertionFail
+	// for assertions that nothing could have evaluated is misleading.
+	if ev.SubjectResult.Disposition == domain.DispositionSpawnFailed {
+		cause := findConditionDetail(conditions, domain.ConditionSubjectNeverStarted)
+		for i := range assertions {
+			assertions[i].Outcome = domain.AssertionNotEvaluated
+			assertions[i].Detail = cause
+		}
+		return domain.TestResult{
+			Key:                 ev.Key,
+			Verdict:             domain.VerdictFail,
+			Reasons:             []domain.FailureReason{domain.ReasonInfrastructure},
+			Assertions:          assertions,
+			Conditions:          conditions,
+			Cost:                ev.Cost,
+			Duration:            ev.Duration,
+			RetainedSandboxPath: ev.RetainedSandboxPath,
+			SubjectResult:       ev.SubjectResult,
+			SubjectVersion:      ev.SubjectVersion,
+		}
+	}
+
 	negative := ev.Definition.Negative
 	if negative {
 		invertAssertions(assertions)
@@ -126,6 +150,17 @@ func NeedsRetry(r domain.TestResult) bool {
 		}
 	}
 	return false
+}
+
+// findConditionDetail returns the Detail of the first condition matching kind,
+// or the empty string when none is found.
+func findConditionDetail(conditions []domain.RunCondition, kind domain.RunConditionKind) string {
+	for _, c := range conditions {
+		if c.Kind == kind {
+			return c.Detail
+		}
+	}
+	return ""
 }
 
 // sortedKeys returns m's keys in ascending order, so a result built from a

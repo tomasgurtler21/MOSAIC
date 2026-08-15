@@ -32,41 +32,39 @@ var conformanceWorkerID = domain.CollaboratorIdentity{ToolName: domain.DispatchT
 // the wire tool_name field, in contrast, always carries this harness's own
 // native dispatch-tool name, exactly as a live invocation would, regardless
 // of what identity vocabulary the caller supplied.
+//
+// token is placed in ToolUseID — the dispatch-scoped identifier the harness
+// sends on every PreToolUse event and echoes on the matching PostToolUse and
+// SubagentStop events. TranslateCall recovers the token from this field.
 func conformanceNativePre(id domain.CollaboratorIdentity, msg domain.TaskMessage, token string) []byte {
 	input := claudecode.TaskToolInput{
 		SubagentType: id.AgentIdentity,
 		Description:  msg.TaskDescription,
 		Prompt:       msg.Raw,
 	}
-	// A real caller plants the token via PlantToken before this payload is
-	// ever sent; this fixture stands in for that caller, so it must plant
-	// the token the same way rather than merely accepting one that never
-	// arrives. TranslateCall recovers the token from this exact field.
-	input = claudecode.PlantToken(input, token)
 	toolInput, _ := json.Marshal(input)
 	b, _ := json.Marshal(claudecode.PreToolUsePayload{
 		HookEventName: "PreToolUse",
 		ToolName:      claudecode.NativeDispatchToolName,
 		ToolInput:     toolInput,
+		ToolUseID:     token,
 	})
 	return b
 }
 
 // conformanceNativePost is conformanceNativePre's post-invocation
 // counterpart: the wire tool_name field always carries this harness's own
-// native dispatch-tool name, for the same reason.
+// native dispatch-tool name, and token is echoed in ToolUseID, for the same
+// reason as conformanceNativePre.
 func conformanceNativePost(id domain.CollaboratorIdentity, token string, observed string) []byte {
-	// The post-invocation payload echoes the tool's (already rewritten)
-	// input, which is where the harness preserves the planted token through
-	// to the post-invocation point. Plant it here too, for the same reason
-	// as conformanceNativePre.
-	input := claudecode.PlantToken(claudecode.TaskToolInput{SubagentType: id.AgentIdentity}, token)
+	input := claudecode.TaskToolInput{SubagentType: id.AgentIdentity}
 	toolInput, _ := json.Marshal(input)
 	b, _ := json.Marshal(claudecode.PostToolUsePayload{
 		HookEventName: "PostToolUse",
 		ToolName:      claudecode.NativeDispatchToolName,
 		ToolInput:     toolInput,
 		ToolResponse:  json.RawMessage(`"` + observed + `"`),
+		ToolUseID:     token,
 	})
 	return b
 }
@@ -98,15 +96,14 @@ func conformanceObserve(t *testing.T, native []byte) contract.ObservedEffect {
 	case "deny":
 		return contract.ObservedEffect{Kind: domain.OutcomeHalt}
 	case "allow":
-		var updated claudecode.TaskToolInput
-		if err := json.Unmarshal(out.UpdatedInput, &updated); err != nil {
-			t.Fatalf("conformanceObserve: malformed updated input: %v", err)
-		}
-		token, _ := claudecode.RecoverToken(updated)
+		// With the tool_use_id correlation mechanism, the correlation token
+		// is carried on the harness's own inbound field (tool_use_id), not
+		// planted in the outbound rewrite reply. The outbound reply contains
+		// only the rewritten prompt; CorrelationToken is left empty here
+		// because it is not observable in the outbound direction.
 		return contract.ObservedEffect{
-			Kind:             domain.OutcomeRewritePrompt,
-			RewrittenPrompt:  string(out.UpdatedInput),
-			CorrelationToken: token,
+			Kind:            domain.OutcomeRewritePrompt,
+			RewrittenPrompt: string(out.UpdatedInput),
 		}
 	default:
 		return contract.ObservedEffect{Kind: domain.OutcomePassthrough}

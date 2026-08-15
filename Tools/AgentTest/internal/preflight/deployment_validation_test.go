@@ -695,3 +695,141 @@ stub_registry: subject.stubs.json
 // no file-system calls are in scope. This is removed once the tests exercise
 // file-based checks.
 var _ = os.Stat
+
+// --- undeclared-stub-agent four-cell truth table ---
+//
+// The gate in checkUndeclaredStubAgents keys on two independent booleans:
+// whether the definition uses the catalogue provisioning path
+// (def.Subject.CatalogAgentKey != "") and whether a deployment tool is present
+// (in.Deploy != nil). All four cells are pinned here so no combination can
+// regress silently.
+//
+//   CatalogAgentKey != "" | Deploy != nil | undeclared-stub-agent emitted
+//   ----------------------|--------------|------------------------------
+//   false                 | false        | yes — non-catalogue path, no deploy
+//   false                 | true         | yes — deploy present does not suppress without catalogue key
+//   true                  | false        | yes — covered by existing test (cell pinned there)
+//   true                  | true         | NO  — the deadlock case; workflow provisions the collaborator
+
+// definitionWithCatalogueKeyNoStubAgents is a test definition that uses
+// subject.agent (the catalogue provisioning path) but declares no stub_agents.
+// This is the valid authoring shape on the catalogue path: stub_agents is
+// forbidden when subject.agent and a deploy tool are both present.
+const definitionWithCatalogueKeyNoStubAgents = `
+schema_version: 1
+id: subject-test
+layer: orchestrator
+subject:
+  identity: orchestrator
+  agent: orchestrator
+stub_registry: subject.stubs.json
+`
+
+// definitionWithNoSubjectAgent is a test definition that omits subject.agent
+// entirely (CatalogAgentKey is empty). This is the non-catalogue path.
+// Note: missing-subject-agent will also fire for this definition; the tests
+// below assert only on undeclared-stub-agent.
+const definitionWithNoSubjectAgent = `
+schema_version: 1
+id: subject-test
+layer: orchestrator
+subject:
+  identity: orchestrator
+stub_registry: subject.stubs.json
+`
+
+// TestValidate_CataloguePathWithDeployPresent_SuppressesUndeclaredStubAgent
+// pins cell (CatalogAgentKey != "", Deploy != nil) of the gate: this is the
+// deadlock case. With subject.agent and a deploy tool both present, the
+// workflow itself provisions the collaborator and stub_agents is forbidden by
+// conflicting-provisioning-paths. Emitting undeclared-stub-agent here makes it
+// impossible to author a valid test on the catalogue path — this is the fix
+// this test was written to drive. It must fail against the current
+// unconditional implementation.
+func TestValidate_CataloguePathWithDeployPresent_SuppressesUndeclaredStubAgent(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"suite.suite.yaml": validSuiteWithOneTest,
+		// Definition uses the catalogue provisioning path (subject.agent set)
+		// with no stub_agents — the only valid shape when Deploy is non-nil,
+		// because adding stub_agents would trigger conflicting-provisioning-paths.
+		"subject.test.yaml": definitionWithCatalogueKeyNoStubAgents,
+		// The stub registry names codebase-research, which has no stub_agents
+		// backing it. On the catalogue path with deploy present the workflow
+		// provisions it; preflight must not report undeclared-stub-agent.
+		"subject.stubs.json": validRegistryForDeployTests,
+	})
+
+	_, report := preflight.Validate(preflight.Input{
+		SuitePath:   filepath.Join(root, "suite.suite.yaml"),
+		FixtureRoot: filepath.Join(root, "fixtures"),
+		HarnessID:   "claude-code",
+		Deploy:      &fakeDeployer{},
+	})
+
+	if hasDiagnosticCode(report, "undeclared-stub-agent") {
+		t.Errorf("catalogue-path definition with a deploy tool present must not produce "+
+			"undeclared-stub-agent; the workflow provisions the collaborator and stub_agents "+
+			"is forbidden by conflicting-provisioning-paths; got: %v", report.Diagnostics)
+	}
+	// Sanity: conflicting-provisioning-paths must also not fire because no
+	// stub_agents is declared — there is no conflict to report.
+	if hasDiagnosticCode(report, "conflicting-provisioning-paths") {
+		t.Errorf("no stub_agents declared, so conflicting-provisioning-paths must not fire; "+
+			"got: %v", report.Diagnostics)
+	}
+}
+
+// TestValidate_NonCataloguePathNoDeployPresent_EmitsUndeclaredStubAgent
+// pins cell (CatalogAgentKey == "", Deploy == nil): the non-catalogue path
+// without a deploy tool. Nothing suppresses the check.
+func TestValidate_NonCataloguePathNoDeployPresent_EmitsUndeclaredStubAgent(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"suite.suite.yaml": validSuiteWithOneTest,
+		// Definition has no subject.agent (CatalogAgentKey empty) and no
+		// stub_agents, while the registry names a collaborator. The check
+		// must fire regardless of Deploy being nil.
+		"subject.test.yaml":  definitionWithNoSubjectAgent,
+		"subject.stubs.json": validRegistryForDeployTests,
+	})
+
+	_, report := preflight.Validate(preflight.Input{
+		SuitePath:   filepath.Join(root, "suite.suite.yaml"),
+		FixtureRoot: filepath.Join(root, "fixtures"),
+		HarnessID:   "claude-code",
+		Deploy:      nil,
+	})
+
+	if !hasDiagnosticCode(report, "undeclared-stub-agent") {
+		t.Errorf("non-catalogue path with no deploy tool must report undeclared-stub-agent "+
+			"for a registry collaborator that has no stub_agents entry; got: %v",
+			report.Diagnostics)
+	}
+}
+
+// TestValidate_NonCataloguePathWithDeployPresent_EmitsUndeclaredStubAgent
+// pins cell (CatalogAgentKey == "", Deploy != nil): the non-catalogue path
+// with a deploy tool present. A deploy tool present alone (without the
+// catalogue key) does not suppress the check — both signals are required.
+func TestValidate_NonCataloguePathWithDeployPresent_EmitsUndeclaredStubAgent(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"suite.suite.yaml": validSuiteWithOneTest,
+		// Definition has no subject.agent (CatalogAgentKey empty) and no
+		// stub_agents. The deploy tool being present must not suppress
+		// undeclared-stub-agent when the catalogue key is absent.
+		"subject.test.yaml":  definitionWithNoSubjectAgent,
+		"subject.stubs.json": validRegistryForDeployTests,
+	})
+
+	_, report := preflight.Validate(preflight.Input{
+		SuitePath:   filepath.Join(root, "suite.suite.yaml"),
+		FixtureRoot: filepath.Join(root, "fixtures"),
+		HarnessID:   "claude-code",
+		Deploy:      &fakeDeployer{},
+	})
+
+	if !hasDiagnosticCode(report, "undeclared-stub-agent") {
+		t.Errorf("non-catalogue path must report undeclared-stub-agent even when a deploy "+
+			"tool is present; the gate requires both the catalogue key and the deploy tool; "+
+			"got: %v", report.Diagnostics)
+	}
+}

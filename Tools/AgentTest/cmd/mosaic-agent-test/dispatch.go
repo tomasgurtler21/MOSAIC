@@ -229,11 +229,12 @@ type WiringConfig struct {
 	// reported as an EnvironmentProblem naming this path and the override that
 	// would change it — never a bare file-not-found.
 	DeployToolPath string
-	// MosaicRoot overrides the deployment tool's own root resolution. Empty
-	// means "do not override" — the flag is simply not passed and the deploy
-	// tool resolves its own root. A correctly staged distribution therefore
-	// works with no flag and no environment variable, matching how the
-	// binary-relative default for DeployToolPath needs no configuration.
+	// MosaicRoot is the repository root passed to the deployment tool. It
+	// defaults to the binary-relative repository root (three directories above
+	// the binary's own directory in a correctly staged distribution), so the
+	// deploy tool can locate the repository when invoked from an arbitrary
+	// working directory. An empty value is never used as a default; when the
+	// resolved path is non-empty it is passed as --mosaic-root.
 	MosaicRoot string
 	// CatalogFolder overrides the catalogue the deployment tool sources
 	// agents and workflows from. Empty means "do not override". Resolved

@@ -27,9 +27,9 @@ import (
 // that merely end in "tool", such as subject.allowed_tools.
 var unNormalizedToolPattern = regexp.MustCompile(`(?m)\btool"?\s*:\s*"?([A-Za-z][A-Za-z0-9_-]*)"?`)
 
-// sweptVocabularyDirs are the directories Stage 11's plan names explicitly as
-// needing the mechanical sweep to the normalized vocabulary.
-var sweptVocabularyDirs = []string{"examples", "tests/smoke", "testdata/e2e"}
+// sweptVocabularyDirs are the directories that hold authored suite, test and
+// stub files checked for normalized dispatch-tool vocabulary.
+var sweptVocabularyDirs = []string{"examples", "tests", "testdata/e2e"}
 
 func TestNoAuthoredArtifact_UsesUnNormalizedDispatchVocabulary(t *testing.T) {
 	root := moduleRoot(t)

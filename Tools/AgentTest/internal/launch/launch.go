@@ -26,13 +26,28 @@ type Decoder func(res commonharness.Response, err error) (domain.SubjectResult, 
 // Option configures a Launcher constructed by New.
 type Option func(*config)
 
+// ResolveExecutableFunc is the signature of a function that resolves an
+// executable path to a Command, matching commonharness.ResolveExecutable.
+// The field exists as a seam for testing; production code uses the default
+// (commonharness.ResolveExecutable).
+type ResolveExecutableFunc func(path string) (commonharness.Command, error)
+
 type config struct {
-	sink commonharness.Sink
+	sink            commonharness.Sink
+	resolveExe      ResolveExecutableFunc
 }
 
 // WithSink sets the diagnostic sink process output is logged through.
 func WithSink(s commonharness.Sink) Option {
 	return func(c *config) { c.sink = s }
+}
+
+// WithResolveExecutable overrides the executable resolver used by Launch.
+// The default is commonharness.ResolveExecutable. This seam exists so tests
+// can inject a failing resolver to verify DispositionSpawnFailed handling
+// without relying on OS-level executable resolution behavior.
+func WithResolveExecutable(fn ResolveExecutableFunc) Option {
+	return func(c *config) { c.resolveExe = fn }
 }
 
 // Launcher implements domain.SubjectLauncher.
@@ -47,7 +62,7 @@ var _ domain.SubjectLauncher = (*Launcher)(nil)
 // mosaic-common/harness's plan-execution entry point and hands the outcome
 // to dec.
 func New(dec Decoder, opts ...Option) domain.SubjectLauncher {
-	cfg := config{}
+	cfg := config{resolveExe: commonharness.ResolveExecutable}
 	for _, o := range opts {
 		o(&cfg)
 	}
@@ -57,20 +72,25 @@ func New(dec Decoder, opts ...Option) domain.SubjectLauncher {
 // Launch implements domain.SubjectLauncher.
 //
 // It performs process control through mosaic-common/harness.Run alone: no
-// argument construction, executable resolution or envelope parsing happens
-// in this package. Once the run finishes (or fails to start), the result
-// and error mosaic-common/harness produced are handed to the decoder
-// supplied at construction, unmodified.
+// argument construction or envelope parsing happens in this package. Executable
+// resolution is delegated to the shared package's ResolveExecutable (or, in
+// tests, the injected resolver supplied via WithResolveExecutable). Once the
+// run finishes (or fails to start), the result and error mosaic-common/harness
+// produced are handed to the decoder supplied at construction, unmodified.
 //
 // Launch returns a domain.SubjectResult on every path on which the subject
 // actually started, including a run the caller cancelled. It returns an
 // error only when the subject could not be started at all — signalled by
-// mosaic-common/harness.ErrExecutableNotFound — and then the returned result
-// carries domain.DispositionSpawnFailed rather than being zero-valued,
-// because a zero value would read downstream as a subject that completed
-// silently.
+// mosaic-common/harness.ErrExecutableNotFound or by the resolver — and then
+// the returned result carries domain.DispositionSpawnFailed rather than being
+// zero-valued, because a zero value would read downstream as a subject that
+// completed silently.
 func (l *Launcher) Launch(ctx context.Context, plan domain.SpawnPlan) (domain.SubjectResult, error) {
-	cmd := commonharness.Command{Path: plan.Executable}
+	cmd, resolveErr := l.cfg.resolveExe(plan.Executable)
+	if resolveErr != nil {
+		return domain.SubjectResult{Disposition: domain.DispositionSpawnFailed}, resolveErr
+	}
+
 	resp, runErr := commonharness.Run(ctx, cmd, plan.Args, commonharness.RunOptions{
 		WorkingDir: plan.WorkingDir,
 		Env:        plan.Env,

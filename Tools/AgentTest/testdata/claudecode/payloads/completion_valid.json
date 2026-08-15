@@ -2,6 +2,6 @@
   "hook_event_name": "SubagentStop",
   "session_id": "sess-completion-1",
   "agent_id": "agent-xyz",
-  "agent_transcript_path": "/sandbox/transcripts/agent-xyz.jsonl",
+  "tool_use_id": "tu-pre-valid-1",
   "last_assistant_message": "{\"status_code\":\"SUCCESS\"}"
 }

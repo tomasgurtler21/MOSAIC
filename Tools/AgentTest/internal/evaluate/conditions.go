@@ -2,6 +2,7 @@ package evaluate
 
 import (
 	"fmt"
+	"strings"
 
 	"mosaic-agent-test/internal/domain"
 )
@@ -56,5 +57,24 @@ func evaluateConditions(ev domain.RunEvidence) []domain.RunCondition {
 		})
 	}
 
+	if ev.SubjectResult.Disposition == domain.DispositionSpawnFailed {
+		out = append(out, domain.RunCondition{
+			Kind:   domain.ConditionSubjectNeverStarted,
+			Detail: subjectNeverStartedCause(ev.SubjectResult),
+		})
+	}
+
 	return out
+}
+
+// subjectNeverStartedCause returns the one-line cause of a spawn failure. It
+// uses the first non-blank line of sr.Stderr when one is present; otherwise
+// it falls back to naming the exit code so the returned string is never empty.
+func subjectNeverStartedCause(sr domain.SubjectResult) string {
+	for _, line := range strings.Split(sr.Stderr, "\n") {
+		if strings.TrimSpace(line) != "" {
+			return strings.TrimSpace(line)
+		}
+	}
+	return fmt.Sprintf("subject process did not start (exit code %d)", sr.ExitCode)
 }

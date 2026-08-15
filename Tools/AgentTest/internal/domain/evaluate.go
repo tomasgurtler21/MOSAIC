@@ -179,6 +179,16 @@ const (
 	// runner.Run returned an error, which is precisely the path on which no
 	// evidence — and therefore no log root to inspect — exists.
 	ConditionNoLogsProduced RunConditionKind = "no_logs_produced"
+
+	// ConditionSubjectNeverStarted reports that the subject process was launched
+	// but refused to start, so nothing was exercised and no assertion could be
+	// evaluated. Detail is the real one-line cause, taken from the subject's own
+	// standard error, and is never the empty string.
+	//
+	// It is distinct from ConditionRunNotStarted, which reports that the tool
+	// could not begin the attempt at all — there, no subject result exists. Here
+	// one does, and it is the evidence.
+	ConditionSubjectNeverStarted RunConditionKind = "subject_never_started"
 )
 
 // RepetitionPolicy is a test's declared repetition count and required pass

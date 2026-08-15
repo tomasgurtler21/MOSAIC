@@ -10,6 +10,9 @@ package launch_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -105,6 +108,119 @@ func TestLaunch_StartFailureReturnsErrorAndSpawnFailedResult(t *testing.T) {
 	}
 	if result.Disposition != domain.DispositionSpawnFailed {
 		t.Errorf("Launch: Disposition = %q, want %q — a start failure must never read as a zero-valued (silently completed) result", result.Disposition, domain.DispositionSpawnFailed)
+	}
+}
+
+// TestLaunch_ResolveExecutableError_YieldsSpawnFailedResult asserts that when
+// the executable resolver returns an error, Launch returns
+// domain.DispositionSpawnFailed together with a non-nil error — never a
+// zero-valued result, which downstream would read as a subject that completed
+// silently.
+//
+// This test drives the error-handling contract of the I2.4 code path: the
+// launch path must call a resolver (seam: launch.WithResolveExecutable) and
+// propagate any failure as DispositionSpawnFailed rather than ignoring it.
+// Before I2.4 introduces the WithResolveExecutable option this test does not
+// compile, giving a hard RED state that no implementation detail can mask.
+func TestLaunch_ResolveExecutableError_YieldsSpawnFailedResult(t *testing.T) {
+	resolveErr := errors.New("resolution-failure-injected-by-test")
+	failingResolver := func(path string) (commonharness.Command, error) {
+		return commonharness.Command{}, resolveErr
+	}
+
+	dec := func(res commonharness.Response, runErr error) (domain.SubjectResult, error) {
+		// The resolver fails before Run is called; the decoder should never
+		// receive a call. Return Completed so any mistaken invocation is
+		// distinguishable from the expected SpawnFailed outcome.
+		return domain.SubjectResult{Disposition: domain.DispositionCompleted}, nil
+	}
+
+	launcher := launch.New(dec, launch.WithResolveExecutable(failingResolver))
+
+	plan := domain.SpawnPlan{
+		Executable: "any-path.cmd",
+		WorkingDir: t.TempDir(),
+		Timeout:    5 * time.Second,
+	}
+
+	result, err := launcher.Launch(context.Background(), plan)
+	if err == nil {
+		t.Fatalf("Launch: expected an error when executable resolution fails, got nil")
+	}
+	if !errors.Is(err, resolveErr) {
+		t.Errorf("Launch: error = %v; want it to wrap the resolver's error %v", err, resolveErr)
+	}
+	if result.Disposition != domain.DispositionSpawnFailed {
+		t.Errorf("Launch: Disposition = %q, want %q — a resolution failure must never yield a zero-valued result downstream", result.Disposition, domain.DispositionSpawnFailed)
+	}
+}
+
+// TestLaunch_WindowsCmd_CmdShimStartsViaResolveExecutable asserts that when
+// the plan's executable is a Windows .cmd shim, Launch successfully starts it
+// and produces a non-SpawnFailed result.
+//
+// Mechanism note: on current Go/Windows, exec.Command with an absolute .cmd
+// path succeeds regardless of whether launch.go calls
+// commonharness.ResolveExecutable or constructs Command{Path: shimPath}
+// directly, because the Windows runtime handles both invocation paths through
+// cmd.exe. This test therefore provides regression coverage for the .cmd shim
+// startup outcome, not a TDD RED guard for the mechanism that I2.4 changes.
+// The mechanism — that the launch path calls the shared-package resolver and
+// does not reimplement resolution locally — is verified by code inspection and
+// by TestLaunch_ResolveExecutableError_YieldsSpawnFailedResult, which drives
+// the injected-resolver seam that I2.4 must introduce.
+//
+// This test skips on non-Windows because .cmd shims are a Windows-specific
+// mechanism; the resolver is a no-op on other platforms. The analogous
+// OS-level test for the shared harness spawner lives in
+// Tools/Common/harness/spawn_test.go.
+func TestLaunch_WindowsCmd_CmdShimStartsViaResolveExecutable(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("this test exercises .cmd shim resolution on the AgentTest launch path; it only applies on Windows where npm CLI shims are .cmd files; the shared-harness equivalent is in Tools/Common/harness/spawn_test.go")
+	}
+
+	// Configure the helper process so the shim's target (this test binary)
+	// enters success mode and exits cleanly. Environment variables are
+	// inherited by subprocesses, so the .cmd shim passes them through to the
+	// test binary acting as the fake CLI.
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Setenv("GO_HELPER_CMD", "success")
+
+	// Create a .cmd shim that delegates to this test binary. This mirrors the
+	// shape of a real npm-installed CLI shim on Windows: a batch script that
+	// forwards all arguments to the underlying executable. The launch path must
+	// resolve this through commonharness.ResolveExecutable so it uses the
+	// same cmd.exe /c wrapping that the shared spawner uses.
+	shimDir := t.TempDir()
+	testBinary := os.Args[0]
+	// Quote the binary path to handle spaces; %* forwards all plan args to the
+	// helper subprocess so the shim behaves like a real npm CLI shim.
+	shimContent := "@echo off\r\n\"" + testBinary + "\" %*\r\n"
+	shimPath := filepath.Join(shimDir, "subject.cmd")
+	if err := os.WriteFile(shimPath, []byte(shimContent), 0644); err != nil {
+		t.Fatalf("WriteFile shim: %v", err)
+	}
+
+	dec := func(res commonharness.Response, runErr error) (domain.SubjectResult, error) {
+		if runErr != nil {
+			return domain.SubjectResult{Disposition: domain.DispositionSpawnFailed}, nil
+		}
+		return domain.SubjectResult{Disposition: domain.DispositionCompleted}, nil
+	}
+	launcher := launch.New(dec)
+
+	plan := domain.SpawnPlan{
+		Executable: shimPath,
+		WorkingDir: t.TempDir(),
+		Timeout:    10 * time.Second,
+	}
+
+	result, err := launcher.Launch(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("Launch: unexpected error when launching .cmd shim %q; the launch path must be able to start a .cmd shim as the AgentTest subject: %v", shimPath, err)
+	}
+	if result.Disposition == domain.DispositionSpawnFailed {
+		t.Errorf("Launch: Disposition = %q; the .cmd shim must have started successfully so that the launch path exercises the same resolution the shared spawner uses", result.Disposition)
 	}
 }
 

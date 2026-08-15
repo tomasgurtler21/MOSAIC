@@ -141,12 +141,16 @@ func resolveWiringConfig(args []string) WiringConfig {
 			args, "--deploy-tool", "MOSAIC_AGENT_TEST_DEPLOY_TOOL",
 			filepath.Join(selfDir, "mosaic-deploy"+exeSuffix()),
 		),
-		// MosaicRoot defaults to empty, meaning "do not override" — the deploy
-		// tool resolves its own root. A correctly staged distribution therefore
-		// needs no flag and no environment variable for this field.
+		// MosaicRoot defaults to the binary-relative repository root, derived
+		// from the same selfDir anchor as LoggerBundleDir, CostToolPath, and
+		// DeployToolPath. In a correctly staged distribution the binary lives
+		// three directories below the repository root (dist/ inside the
+		// AgentTest module directory, itself inside Tools/), so the default
+		// resolves the repository root without requiring a flag or an
+		// environment variable. An explicit --mosaic-root always wins.
 		MosaicRoot: resolveConfiguredPath(
 			args, "--mosaic-root", "MOSAIC_AGENT_TEST_MOSAIC_ROOT",
-			"",
+			filepath.Join(selfDir, "../../.."),
 		),
 		// CatalogFolder defaults to empty, meaning "do not override" — the
 		// deploy tool resolves its own catalogue under its own root. A run

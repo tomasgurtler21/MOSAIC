@@ -55,7 +55,7 @@ func (s *claudeCodeSpawner) Spawn(ctx context.Context, req SpawnRequest) (Respon
 		return Response{}, err
 	}
 
-	args, err := BuildArgs(req)
+	args, stdin, err := BuildArgs(req)
 	if err != nil {
 		return Response{}, err
 	}
@@ -71,6 +71,7 @@ func (s *claudeCodeSpawner) Spawn(ctx context.Context, req SpawnRequest) (Respon
 	resp, err := Run(ctx, cmd, args, RunOptions{
 		WorkingDir: req.WorkingDir,
 		Env:        req.Env,
+		Stdin:      stdin,
 		Timeout:    timeout,
 		Sink:       s.cfg.sink,
 	})
@@ -106,7 +107,9 @@ func ResolveExecutable(path string) (Command, error) {
 	return Command{Path: path}, nil
 }
 
-// BuildArgs constructs the CLI arguments for one request. Pure.
+// BuildArgs constructs the CLI arguments for one request and the payload
+// delivered on the subprocess's standard input, such that no argv element
+// ever contains a newline.
 //
 // For InvocationOrdinary: uses --append-system-prompt-file with the agent's
 // definition file, keeping the CLI's default system prompt (including
@@ -115,27 +118,36 @@ func ResolveExecutable(path string) (Command, error) {
 // For InvocationOrchestrator: uses --agent <identifier> to launch the
 // orchestrator as the primary/main thread. Because --agent fully replaces
 // the default system prompt (losing the CLI's <env> block), an equivalent
-// <env> block is synthesized and prepended to the -p prompt content.
+// <env> block is synthesized and prepended to the stdin payload alongside the
+// prompt content.
 //
 // Both invocation kinds use --permission-mode auto and never include
 // --dangerously-skip-permissions.
-func BuildArgs(req SpawnRequest) ([]string, error) {
-	promptContent := req.Prompt
+//
+// The prompt content never appears as an argv value. -p is emitted as a bare
+// flag with no following value; the prompt content (with the <env> block
+// prepended for orchestrator invocations) is returned as stdin. stdin is nil
+// when req.Prompt is empty and no <env> block was prepended, so the caller's
+// existing if o.Stdin != nil guard behaves as it did before this change.
+//
+// Note: this function calls EnvBlock for orchestrator invocations, which reads
+// the clock and the process working directory and is therefore not pure.
+func BuildArgs(req SpawnRequest) (args []string, stdin []byte, err error) {
+	stdinContent := req.Prompt
 
-	var args []string
 	switch req.Agent.Kind {
 	case InvocationOrchestrator:
-		promptContent = EnvBlock("") + "\n" + promptContent
+		stdinContent = EnvBlock("") + "\n" + stdinContent
 		args = []string{
 			"--agent", req.Agent.Identifier,
-			"-p", promptContent,
+			"-p",
 			"--output-format", req.OutputFormat,
 			"--permission-mode", "auto",
 			"--no-session-persistence",
 		}
 	default: // InvocationOrdinary
 		args = []string{
-			"-p", promptContent,
+			"-p",
 			"--append-system-prompt-file", req.Agent.DefinitionPath,
 			"--output-format", req.OutputFormat,
 			"--permission-mode", "auto",
@@ -144,7 +156,11 @@ func BuildArgs(req SpawnRequest) ([]string, error) {
 	}
 
 	args = append(args, req.ExtraArgs...)
-	return args, nil
+
+	if stdinContent != "" {
+		stdin = []byte(stdinContent)
+	}
+	return args, stdin, nil
 }
 
 // EnvBlock synthesizes the <env> preamble a harness's default system prompt
@@ -158,9 +174,8 @@ func BuildArgs(req SpawnRequest) ([]string, error) {
 // that directory explicitly rather than letting the block describe the wrong
 // place.
 //
-// This function is deliberately NOT called from any argument builder: it
-// reads the clock and may read the process working directory, and builders
-// in this package are pure.
+// This function reads the clock and may read the process working directory.
+// BuildArgs calls it for InvocationOrchestrator requests.
 func EnvBlock(workingDir string) string {
 	dir := workingDir
 	if dir == "" {

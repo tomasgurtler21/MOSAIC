@@ -74,7 +74,14 @@ func CheckCapabilityHonesty(t *testing.T, cfg Config) error {
 			caps.SupportsDirectSubstitution, wantKind, observed.Kind,
 		)
 	}
-	if observed.CorrelationToken != token {
+	// For adapters that plant the correlation token in the outbound reply
+	// (prompt-based correlation), verify the token is visible in the observed
+	// effect. For identifier-based adapters, the token rides on the harness's
+	// own inbound field and is not present in the outbound reply — Config.Observe
+	// cannot extract it from the reply direction, so observed.CorrelationToken
+	// is empty and the check is skipped. The Correlation subtest covers token
+	// survival on the inbound path for all adapters.
+	if observed.CorrelationToken != "" && observed.CorrelationToken != token {
 		return fmt.Errorf("capability honesty: observed CorrelationToken = %q, want %q", observed.CorrelationToken, token)
 	}
 

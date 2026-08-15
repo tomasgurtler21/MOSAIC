@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "test_id": "one-dispatch",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "codebase-research", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "codebase-research#1",
+        "run_id": "one-dispatch-run",
+        "status_code": "SUCCESS",
+        "status_message": "Codebase research complete.",
+        "output_artifacts": ["Research.md"]
+      }
+    }
+  ]
+}

@@ -50,17 +50,43 @@ type Decision struct {
 //   - any call once the early-exit threshold has been reached yields
 //     OutcomeHalt with HaltEarlyExit.
 //
-// Post-invocation and completion:
-//   - the pending stub is recovered by correlation token, echo fidelity is
-//     compared, an end record is produced, and the outcome is always
-//     OutcomePassthrough. Neither phase ever halts or denies: both fire
-//     after the collaborator has already run, so refusing either can only
-//     damage the subject's run. PhaseCompletion is handled identically to
-//     PhasePost: it is the event that carries a real reply on a harness
-//     whose post-invocation point fires at launch (see
+// Post-invocation routing:
+//   - PhasePost with SupportsReplyRecovery=true: bare passthrough — no
+//     echo comparison, no state mutation, no end record. The pending
+//     dispatch and in-flight entry survive intact for the completion event.
+//     On this kind of harness the post point fires at launch and carries
+//     only a launch acknowledgement, so echo comparison here would produce
+//     a false mismatch.
+//   - PhasePost with SupportsReplyRecovery=false: full post-invocation
+//     handling — echo comparison, ResolvePending, ClearInFlight, one
+//     RecordEnd. The post point carries the real reply on this kind of
+//     harness.
+//   - PhaseCompletion (any capability): full post-invocation handling —
+//     echo comparison against the collaborator's real reply, ResolvePending,
+//     ClearInFlight, one RecordEnd. This is the phase that carries the real
+//     reply on a harness whose post point fires at launch (see
 //     domain.PhaseCompletion's doc comment).
+//
+// Neither post nor completion ever halts or denies: both fire after the
+// collaborator has already run, so refusing either can only damage the
+// subject's run.
 func Decide(in Input) (Decision, error) {
-	if in.Call.Phase == domain.PhasePost || in.Call.Phase == domain.PhaseCompletion {
+	if in.Call.Phase == domain.PhasePost {
+		if in.Call.Capabilities.SupportsReplyRecovery {
+			// Bare passthrough: the post event fires at launch on a
+			// reply-recovery harness and carries only a launch
+			// acknowledgement. Leave pending and in-flight intact so the
+			// completion event can compare the real reply.
+			return Decision{
+				Outcome: domain.InterceptionOutcome{
+					Kind:             domain.OutcomePassthrough,
+					CorrelationToken: in.Call.CorrelationToken,
+				},
+			}, nil
+		}
+		return decidePost(in), nil
+	}
+	if in.Call.Phase == domain.PhaseCompletion {
 		return decidePost(in), nil
 	}
 	return decidePre(in), nil
@@ -284,12 +310,22 @@ func decidePost(in Input) Decision {
 		delta.ResolvePending = []string{token}
 	}
 
+	// Identity for the end record: prefer the call's own identity; fall
+	// back to the correlated pending dispatch's identity when the call's
+	// identity is zero and a pending dispatch was found. Never a default or
+	// a guess — the fallback reaches only the dispatch the correlation token
+	// resolved to.
+	identity := in.Call.Identity
+	if identity == (domain.CollaboratorIdentity{}) && hasPending {
+		identity = pending.Identity
+	}
+
 	rec := domain.LogRecord{
 		Kind:             domain.RecordEnd,
 		TestID:           in.State.TestID,
 		RunNumber:        in.State.RunNumber,
 		Timestamp:        in.Now,
-		Identity:         in.Call.Identity,
+		Identity:         identity,
 		CorrelationToken: token,
 		Echo:             echo,
 	}
@@ -327,13 +363,27 @@ func EchoInstruction(stubResponse json.RawMessage) string {
 
 // CompareEcho decides echo fidelity: the observed response is normalized
 // (JSON object parsed, key order and insignificant whitespace ignored) and
-// compared against the expected stub. Surrounding prose in the observed
-// text is a mismatch, not a tolerated wrapper.
+// compared against the expected stub. A narrow fence tolerance is applied
+// before parsing: if the observed text, after trimming surrounding
+// whitespace, is enclosed in a single ```json or bare ``` fence with no
+// additional prose, the fence markers are stripped before parsing.
+// Surrounding prose, partial fences, wrong info strings, and fenced
+// non-JSON content remain mismatches.
 func CompareEcho(expected json.RawMessage, observed string) domain.EchoOutcome {
 	var expectedVal interface{}
 	_ = json.Unmarshal(expected, &expectedVal)
 
 	trimmed := strings.TrimSpace(observed)
+
+	// Bounded fence stripping, applied at most once. The conditions are:
+	// at least two lines, first line is exactly "```json" or "```" (after
+	// trimming its own trailing whitespace), last line is exactly "```"
+	// (after trimming its own trailing whitespace). Only these two info
+	// strings are tolerated; the check is case-sensitive.
+	if stripped, ok := stripCodeFence(trimmed); ok {
+		trimmed = strings.TrimSpace(stripped)
+	}
+
 	var observedVal interface{}
 	if err := json.Unmarshal([]byte(trimmed), &observedVal); err != nil {
 		return domain.EchoOutcome{
@@ -357,4 +407,24 @@ func CompareEcho(expected json.RawMessage, observed string) domain.EchoOutcome {
 		Observed: observed,
 		Diff:     "observed value differs from the expected stub response",
 	}
+}
+
+// stripCodeFence strips the opening and closing markers of a ```json or ```
+// code fence from s, returning the body and true when exactly one such fence
+// wraps the entire string with no surrounding prose. Returns ("", false)
+// when the conditions are not met.
+func stripCodeFence(s string) (string, bool) {
+	lines := strings.Split(s, "\n")
+	if len(lines) < 2 {
+		return "", false
+	}
+	first := strings.TrimRight(lines[0], " \t\r")
+	last := strings.TrimRight(lines[len(lines)-1], " \t\r")
+	if last != "```" {
+		return "", false
+	}
+	if first != "```json" && first != "```" {
+		return "", false
+	}
+	return strings.Join(lines[1:len(lines)-1], "\n"), true
 }

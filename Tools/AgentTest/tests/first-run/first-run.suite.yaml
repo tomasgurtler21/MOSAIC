@@ -1,0 +1,15 @@
+schema_version: 1
+id: first-run
+description: >
+  First-ever real-harness AgentTest run. The real production orchestrator,
+  deployed from the test catalogue via --catalog-folder and driven by the
+  real brownfield-tdd workflow, makes its first dispatch; a stub answers it
+  and the run early-exits. Proves the CLI's own plumbing works end-to-end
+  against a live claude-code harness.
+defaults:
+  timeout: 10m
+  turn_limit: 20
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: one-dispatch.test.yaml

@@ -17,6 +17,3 @@ This is a test stub standing in for the **contracts-review** collaborator. It ma
 dispatch to this collaborator a legal dispatch. What this stub replies is declared in the
 `*.stubs.json` registry alongside each test definition — not here.
 </Identity>
-
-<CommunicationProtocol type="managed">
-</CommunicationProtocol>

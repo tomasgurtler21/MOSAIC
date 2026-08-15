@@ -13,6 +13,7 @@ package harness_test
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,10 +93,10 @@ func runHelperProcess() {
 
 	case "echo-stdin":
 		// Echo whatever was piped to stdin, so tests can assert Stdin was
-		// honoured.
-		buf := make([]byte, 4096)
-		n, _ := os.Stdin.Read(buf)
-		os.Stdout.Write(buf[:n]) //nolint:errcheck
+		// honoured. io.ReadAll is used rather than a fixed-size buffer so
+		// that payloads larger than any fixed limit are captured intact.
+		data, _ := io.ReadAll(os.Stdin)
+		os.Stdout.Write(data) //nolint:errcheck
 
 	case "opencode-success":
 		// Produce a valid `opencode run --format json` event stream: one text

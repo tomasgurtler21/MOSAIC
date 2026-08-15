@@ -9,10 +9,19 @@ package harness_test
 // lifecycle code: the same helper-process scenarios must produce the same
 // sentinel classification through both paths. A behaviour asserted through
 // one and not the other would be a second implementation wearing one name.
+//
+// The Windows-only OS-level stdin delivery test at the end of this file
+// observes prompt delivery through a real .cmd shim driven by cmd.exe. It
+// skips on non-Windows with a stated reason so the intent is visible on all
+// platforms; the equivalent platform-neutral delivery assertions live in
+// buildargs_test.go.
 
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -256,5 +265,79 @@ func TestSpawnAndRun_ShareOneLifecycle_MissingExecutableSentinelMatches(t *testi
 	}
 	if !errors.Is(runErr, harness.ErrExecutableNotFound) {
 		t.Errorf("want Run to return ErrExecutableNotFound, got %v", runErr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Windows OS-level stdin delivery (T2.1)
+// ---------------------------------------------------------------------------
+
+// TestStdinDelivery_WindowsCmd_OrchestratorMultiLinePromptArrives drives a
+// real .cmd shim through cmd.exe and asserts that the full multi-line
+// orchestrator prompt arrives intact at the subprocess's standard input.
+//
+// This test exercises the exact OS-level path that previously caused
+// truncation: cmd.exe /c shim.cmd received the prompt as an argv element and
+// silently discarded everything after the first newline. Moving the prompt
+// to stdin — BuildArgs returning it as the second result, Run piping it —
+// is what this test is designed to observe.
+//
+// The test skips on non-Windows because the defect and the .cmd shim path
+// are Windows-specific. The platform-neutral delivery assertions (no newline
+// in argv, prompt in stdin payload) are in buildargs_test.go.
+func TestStdinDelivery_WindowsCmd_OrchestratorMultiLinePromptArrives(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("this test observes stdin delivery through a cmd.exe .cmd shim; run on Windows to exercise the truncation fix; platform-neutral delivery assertions are in buildargs_test.go")
+	}
+
+	// Configure the helper process so the .cmd shim's target (this test binary)
+	// reads stdin and echoes it to stdout, letting us observe what arrived.
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
+	t.Setenv("GO_HELPER_CMD", "echo-stdin")
+
+	// Create a .cmd shim that delegates to this test binary. ResolveExecutable
+	// wraps a .cmd path as "cmd /c shim.cmd" — that is the invocation shape
+	// that previously truncated multi-line argv elements.
+	shimDir := t.TempDir()
+	testBinary := os.Args[0]
+	// Quote the binary path to handle spaces; %* passes all built args through
+	// (the helper process ignores them, but they exercise the argv-is-not-the-prompt
+	// property: the helper must still echo the stdin payload, not any argv value).
+	shimContent := "@echo off\r\n\"" + testBinary + "\" %*\r\n"
+	shimPath := filepath.Join(shimDir, "claude.cmd")
+	if err := os.WriteFile(shimPath, []byte(shimContent), 0644); err != nil {
+		t.Fatalf("WriteFile shim: %v", err)
+	}
+
+	// Use a multi-line orchestrator prompt — the specific shape the defect
+	// truncated, because the env block alone makes it multi-line.
+	req := harness.SpawnRequest{
+		Agent:        orchestratorAgent(),
+		Prompt:       "first-prompt-line\nsecond-prompt-line\nthird-prompt-line",
+		OutputFormat: "json",
+	}
+	args, stdin, err := harness.BuildArgs(req)
+	if err != nil {
+		t.Fatalf("BuildArgs: %v", err)
+	}
+
+	cmd, resolveErr := harness.ResolveExecutable(shimPath)
+	if resolveErr != nil {
+		t.Fatalf("ResolveExecutable: %v", resolveErr)
+	}
+
+	resp, runErr := harness.Run(context.Background(), cmd, args, harness.RunOptions{
+		Stdin:   stdin,
+		Timeout: 10 * time.Second,
+	})
+	if runErr != nil {
+		t.Logf("harness.Run error: %v", runErr)
+	}
+
+	got := string(resp.Stdout)
+	for _, wantLine := range []string{"first-prompt-line", "second-prompt-line", "third-prompt-line"} {
+		if !strings.Contains(got, wantLine) {
+			t.Errorf("want %q to arrive intact at the subprocess via stdin through cmd.exe .cmd shim; got captured output: %q", wantLine, got)
+		}
 	}
 }

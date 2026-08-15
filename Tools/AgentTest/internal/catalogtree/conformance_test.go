@@ -687,9 +687,12 @@ func TestCatalogueTree_TestStubsInSyncWithAgentsDir(t *testing.T) {
 				if !strings.Contains(body, `<Identity type="core">`) {
 					t.Errorf("%s: body does not contain an Identity core block (<Identity type=\"core\">)", base)
 				}
-				if !strings.Contains(body, `<CommunicationProtocol type="managed">`) {
-					t.Errorf("%s: body does not contain a CommunicationProtocol managed region (<CommunicationProtocol type=\"managed\">)", base)
-				}
+				// CommunicationProtocol region is intentionally absent from
+				// test stub definitions: a stub that receives the full
+				// protocol block reasons about task structure and may refuse
+				// or rewrite the substituted reply. The deployment tool only
+				// fills regions that exist, so removing the region here is
+				// sufficient to suppress it in the deployed stub.
 			})
 		}
 	})
@@ -935,5 +938,63 @@ func TestCatalogueTree_TierLiteralSingleSpelling(t *testing.T) {
 				"After I6.0 is implemented, replace the local tier constants in the conformance test with domain imports.",
 			strings.Join(violations, "\n  "),
 		)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T6.2: stub definitions must not contain the protocol region
+// ---------------------------------------------------------------------------
+
+// TestStubDefinitions_DoNotContainProtocolRegion asserts that every stub
+// definition file under Tools/AgentTest/catalog/Subagents/TestStubs/ carries no
+// <CommunicationProtocol type="managed"> region.
+//
+// A deployed stub that receives the full communication-protocol region learns to
+// reason about task structure and refuses or rewrites the substituted reply
+// instead of echoing it faithfully. The region must therefore be absent from the
+// source file; the deployment tool fills regions that exist and skips files where
+// no region is present, so removal here is enough.
+//
+// This test reads only files under Tools/AgentTest/ and never touches the live
+// Catalog/ tree, which changes as ordinary project evolution and would break the
+// test on every such change.
+//
+// TDD RED: this test currently fails because every stub file carries an empty
+// <CommunicationProtocol type="managed"> region. It passes once I6.2 removes
+// that region from every stub definition.
+func TestStubDefinitions_DoNotContainProtocolRegion(t *testing.T) {
+	stubsDir := filepath.Join(agentTestRoot(t), "catalog", "Subagents", "TestStubs")
+	entries, err := os.ReadDir(stubsDir)
+	if err != nil {
+		t.Fatalf("ReadDir(%q) = %v — catalog/Subagents/TestStubs/ must exist", stubsDir, err)
+	}
+
+	const protocolRegionTag = `<CommunicationProtocol type="managed">`
+
+	found := false
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		path := filepath.Join(stubsDir, name)
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("%s: ReadFile error: %v", name, readErr)
+			continue
+		}
+		found = true
+		if strings.Contains(string(data), protocolRegionTag) {
+			t.Errorf(
+				"%s: contains a <CommunicationProtocol type=\"managed\"> region — "+
+					"test stubs must not receive the protocol block; the deployment tool "+
+					"fills regions that exist, so the region must be absent from the source file",
+				name,
+			)
+		}
+	}
+
+	if !found {
+		t.Error("no stub definition files found in catalog/Subagents/TestStubs/ — the directory must contain at least one *.md file")
 	}
 }

@@ -9,39 +9,45 @@ import (
 // These are the only types in the module that speak this harness's native
 // language, and no package outside internal/harness/ may name them.
 
-// PreToolUsePayload is the pre-invocation hook payload.
+// PreToolUsePayload is the pre-invocation hook payload. ToolUseID is the
+// harness's own dispatch-scoped identifier for this tool call; it is the
+// same value the harness will send on the PostToolUse and SubagentStop events
+// that correspond to this dispatch, and is the correlation token this adapter
+// uses on all three phases.
 type PreToolUsePayload struct {
 	HookEventName string          `json:"hook_event_name"`
 	SessionID     string          `json:"session_id"`
 	CWD           string          `json:"cwd"`
 	ToolName      string          `json:"tool_name"`
 	ToolInput     json.RawMessage `json:"tool_input"`
+	ToolUseID     string          `json:"tool_use_id,omitempty"`
 }
 
-// PostToolUsePayload is the post-invocation hook payload. ToolInput is echoed
-// back as the call actually ran, which is what makes the planted correlation
-// token recoverable here.
+// PostToolUsePayload is the post-invocation hook payload. ToolUseID echoes the
+// same dispatch-scoped identifier that was on the originating PreToolUse event,
+// carrying the correlation token through to the post-invocation point.
 type PostToolUsePayload struct {
 	HookEventName string          `json:"hook_event_name"`
 	SessionID     string          `json:"session_id"`
 	ToolName      string          `json:"tool_name"`
 	ToolInput     json.RawMessage `json:"tool_input"`
 	ToolResponse  json.RawMessage `json:"tool_response"`
+	ToolUseID     string          `json:"tool_use_id,omitempty"`
 }
 
 // CompletionPayload is this harness's completion signal (its SubagentStop
 // hook), fired when a dispatched collaborator finishes. It carries the
 // collaborator's real reply directly (LastAssistantMessage), which is what
 // makes reply recovery possible on a harness whose post-invocation point
-// fires at launch rather than at completion. The correlation token planted
-// at the pre-invocation point does not travel on this payload: it is
-// recovered from the transcript file AgentTranscriptPath names (see
-// translateCompletion).
+// fires at launch rather than at completion. ToolUseID is the same identifier
+// the harness sent on the originating PreToolUse event; this is how the
+// completion event is correlated back to the dispatch that produced it (see
+// translateCompletion for the mechanism basis documentation).
 type CompletionPayload struct {
 	HookEventName        string `json:"hook_event_name"`
 	SessionID            string `json:"session_id"`
 	AgentID              string `json:"agent_id"`
-	AgentTranscriptPath  string `json:"agent_transcript_path"`
+	ToolUseID            string `json:"tool_use_id,omitempty"`
 	LastAssistantMessage string `json:"last_assistant_message"`
 }
 

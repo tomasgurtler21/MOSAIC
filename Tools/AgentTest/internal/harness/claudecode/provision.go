@@ -44,29 +44,12 @@ type Options struct {
 	// seam rather than an ambient call.
 	SelfPath func() (string, error)
 
-	// NewToken generates a correlation token. nil selects the default
-	// generator, whose opacity is a tested property.
-	NewToken func() string
-
-	// TranscriptReader reads a collaborator's own transcript file (named by
-	// the completion signal's agent_transcript_path) and returns its entries
-	// as raw text, one string per entry, in file order. It exists so
-	// recovering the correlation token planted at the pre-invocation point
-	// (which the completion signal does not carry directly) does not perform
-	// direct file I/O in a code path a test cannot substitute. nil selects
-	// the real reader.
-	TranscriptReader TranscriptReader
-
 	// Credentials supplies the harness credential material Provision seeds
 	// into the relocated config home. nil selects the real
 	// user-home-based source. A test substitutes this seam so no test run
 	// ever reads or copies the developer's real credentials.
 	Credentials CredentialSource
 }
-
-// TranscriptReader reads a collaborator transcript file and returns its
-// entries' raw text in file order. See Options.TranscriptReader.
-type TranscriptReader func(path string) ([]string, error)
 
 // Adapter implements domain.HarnessAdapter for the Claude Code harness.
 type Adapter struct {
@@ -104,7 +87,12 @@ func (a *Adapter) ID() string {
 //	    The collaborator's real reply is recovered from the harness's own
 //	    completion signal (its SubagentStop hook) instead, which is what
 //	    makes echo-fidelity comparison possible on this harness.
-//	CorrelationField:           "tool_input.prompt"
+//	CorrelationField:           "tool_use_id"
+//	    The dispatch-scoped identifier the harness sends on every PreToolUse,
+//	    PostToolUse and SubagentStop event. The correlation token is populated
+//	    directly from this field on all three interception phases. It is not
+//	    planted in the prompt text; prompt-planting and transcript-scanning are
+//	    both retired. See correlation.go for the full mechanism basis.
 //	RegistrationModel:          domain.RegistrationSharedFile
 //	BridgeKind:                 domain.BridgeSpawned
 func Capabilities() domain.HarnessCapabilities {
@@ -112,7 +100,7 @@ func Capabilities() domain.HarnessCapabilities {
 		SupportsDirectSubstitution: false,
 		SupportsPostInterception:   true,
 		SupportsReplyRecovery:      true,
-		CorrelationField:           "tool_input.prompt",
+		CorrelationField:           "tool_use_id",
 		RegistrationModel:          domain.RegistrationSharedFile,
 		BridgeKind:                 domain.BridgeSpawned,
 		ProducibleToolNames:        []string{domain.DispatchToolName},

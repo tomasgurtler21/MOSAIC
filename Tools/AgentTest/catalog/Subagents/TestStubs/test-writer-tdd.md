@@ -17,6 +17,3 @@ This is a test stub standing in for the **test-writer-tdd** collaborator. It mak
 dispatch to this collaborator a legal dispatch. What this stub replies is declared in the
 `*.stubs.json` registry alongside each test definition — not here.
 </Identity>
-
-<CommunicationProtocol type="managed">
-</CommunicationProtocol>

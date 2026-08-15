@@ -421,3 +421,264 @@ func TestNeutralReply_IsAValidNativeReplyForBothPhases(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Correlation identity: first dispatch (pre phase must mint, not just recover)
+// ---------------------------------------------------------------------------
+
+// buildPrePayloadNoToken creates a raw tool.execute.before payload whose
+// args carry no correlation token. This simulates a genuinely first-time
+// dispatch — one where no earlier interceptor has planted a token — so the
+// adapter must mint one rather than recovering an existing one.
+func buildPrePayloadNoToken(t *testing.T, tool, subagentType, prompt string) []byte {
+	t.Helper()
+	args := opencode.TaskToolArgs{SubagentType: subagentType, Prompt: prompt}
+	rawArgs, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("buildPrePayloadNoToken: marshaling args: %v", err)
+	}
+	payload := opencode.ToolBeforePayload{
+		HookEventName: "tool.execute.before",
+		Tool:          tool,
+		Args:          rawArgs,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("buildPrePayloadNoToken: marshaling payload: %v", err)
+	}
+	return b
+}
+
+// buildPostPayloadFromArgs creates a raw tool.execute.after payload that
+// echoes the given args and wraps observed in the {"output":"…"} form.
+// It simulates the harness delivering the post-invocation event after the
+// real tool call ran with the (possibly rewritten) args.
+func buildPostPayloadFromArgs(t *testing.T, tool string, args opencode.TaskToolArgs, observed string) []byte {
+	t.Helper()
+	rawArgs, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("buildPostPayloadFromArgs: marshaling args: %v", err)
+	}
+	outputObj := struct {
+		Output string `json:"output"`
+	}{Output: observed}
+	rawOutput, err := json.Marshal(outputObj)
+	if err != nil {
+		t.Fatalf("buildPostPayloadFromArgs: marshaling output: %v", err)
+	}
+	payload := opencode.ToolAfterPayload{
+		HookEventName: "tool.execute.after",
+		Tool:          tool,
+		Args:          rawArgs,
+		Output:        rawOutput,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("buildPostPayloadFromArgs: marshaling payload: %v", err)
+	}
+	return b
+}
+
+// TestTranslateCall_Pre_FirstDispatch_ProducesNonEmptyCorrelationToken asserts
+// that a pre-invocation call whose args carry no existing correlation token
+// produces a non-empty CorrelationToken on the returned InterceptedCall. The
+// adapter must mint one rather than returning empty, so the post-phase event
+// can be matched to this dispatch.
+//
+// This test FAILS against the current recover-only implementation, where
+// translatePre only calls RecoverToken and returns empty when no token is
+// present in the payload.
+func TestTranslateCall_Pre_FirstDispatch_ProducesNonEmptyCorrelationToken(t *testing.T) {
+	a := opencode.New(opencode.Options{})
+	native := buildPrePayloadNoToken(t, "task", "Worker", "please do the work")
+
+	call, err := a.TranslateCall(domain.PhasePre, native)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePre): %v", err)
+	}
+
+	if call.CorrelationToken == "" {
+		t.Errorf("TranslateCall(PhasePre): CorrelationToken is empty for a first dispatch; every pre-invocation call must carry a non-empty correlation identity so the post-phase event can be matched to it")
+	}
+}
+
+// TestTranslateCall_Pre_FirstDispatch_UsesNewTokenSeam asserts that when
+// Options.NewToken is set, the adapter uses it to generate the token for a
+// first-time dispatch. The seam makes the planted token deterministic so
+// round-trip assertions can be precise without depending on a random source.
+//
+// This test FAILS against the current implementation, which does not read
+// opts.NewToken in translatePre.
+func TestTranslateCall_Pre_FirstDispatch_UsesNewTokenSeam(t *testing.T) {
+	const wantToken = "c8a3f2b1d7e4096a5f1b2e3d4c5a6b7c"
+	a := opencode.New(opencode.Options{
+		NewToken: func() string { return wantToken },
+	})
+	native := buildPrePayloadNoToken(t, "task", "Worker", "please do the work")
+
+	call, err := a.TranslateCall(domain.PhasePre, native)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePre): %v", err)
+	}
+
+	if call.CorrelationToken != wantToken {
+		t.Errorf("TranslateCall(PhasePre): CorrelationToken = %q, want the seam-supplied token %q; the adapter must use Options.NewToken for a first dispatch so tests can assert round-trip identity precisely", call.CorrelationToken, wantToken)
+	}
+}
+
+// TestTranslateCall_Pre_ExistingToken_RecoveredNotMinted asserts that a
+// pre-invocation call whose args already carry a correlation token recovers
+// that token rather than minting a new one. A call that already carries an
+// identity must never have a second one minted for it (idempotence).
+func TestTranslateCall_Pre_ExistingToken_RecoveredNotMinted(t *testing.T) {
+	const plantedToken = "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1"
+	a := opencode.New(opencode.Options{
+		NewToken: func() string { return "should-never-be-used-for-an-already-identified-call" },
+	})
+
+	args := opencode.PlantToken(opencode.TaskToolArgs{SubagentType: "Worker", Prompt: "please do the work"}, plantedToken)
+	rawArgs, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("marshaling args: %v", err)
+	}
+	payload := opencode.ToolBeforePayload{
+		HookEventName: "tool.execute.before",
+		Tool:          "task",
+		Args:          rawArgs,
+	}
+	native, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshaling payload: %v", err)
+	}
+
+	call, err := a.TranslateCall(domain.PhasePre, native)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePre): %v", err)
+	}
+
+	if call.CorrelationToken != plantedToken {
+		t.Errorf("TranslateCall(PhasePre): CorrelationToken = %q, want the already-planted token %q; a call that already carries an identity must not have a second one minted for it", call.CorrelationToken, plantedToken)
+	}
+}
+
+// TestTranslateCall_CorrelationIdentity_RecoverableAtPostPhase is the
+// end-to-end round-trip test: the adapter mints a token at the pre phase,
+// TranslateOutcome plants it in the rewritten args, the harness echoes those
+// args at the post phase, and TranslateCall at the post phase recovers the
+// same token. This is the core guarantee the correlation mechanism must
+// provide.
+//
+// This test FAILS against the current implementation because translatePre
+// does not mint a token, so preCall.CorrelationToken is empty and the seam
+// is unused.
+func TestTranslateCall_CorrelationIdentity_RecoverableAtPostPhase(t *testing.T) {
+	const wantToken = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+	a := opencode.New(opencode.Options{
+		NewToken: func() string { return wantToken },
+	})
+
+	// Pre phase: adapter must mint a token because none is present.
+	preNative := buildPrePayloadNoToken(t, "task", "Worker", "please do the work")
+	preCall, err := a.TranslateCall(domain.PhasePre, preNative)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePre): %v", err)
+	}
+	if preCall.CorrelationToken == "" {
+		t.Fatalf("TranslateCall(PhasePre): CorrelationToken is empty after first dispatch; cannot verify recovery at post phase — the pre phase must mint a token before this test can proceed")
+	}
+
+	// Outcome translation plants the token in the rewritten args.
+	outcome := domain.InterceptionOutcome{
+		Kind:             domain.OutcomeRewritePrompt,
+		RewrittenPrompt:  "please do the work",
+		CorrelationToken: preCall.CorrelationToken,
+	}
+	rewrittenNative, err := a.TranslateOutcome(outcome, preCall)
+	if err != nil {
+		t.Fatalf("TranslateOutcome: %v", err)
+	}
+
+	hookReply := decodeHookReply(t, rewrittenNative)
+	var plantedArgs opencode.TaskToolArgs
+	if err := json.Unmarshal(hookReply.UpdatedArgs, &plantedArgs); err != nil {
+		t.Fatalf("decoding updated args from hook reply: %v", err)
+	}
+
+	// Post phase: the harness echoes the rewritten (now token-carrying) args.
+	postNative := buildPostPayloadFromArgs(t, "task", plantedArgs, `{"status_code":"SUCCESS"}`)
+	postCall, err := a.TranslateCall(domain.PhasePost, postNative)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePost): %v", err)
+	}
+
+	if postCall.CorrelationToken != preCall.CorrelationToken {
+		t.Errorf("round-trip: post CorrelationToken = %q, want the same token planted at the pre phase %q; the token planted at pre-invocation must be recoverable from the echoed args at the post-invocation point", postCall.CorrelationToken, preCall.CorrelationToken)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Correlation identity: degradation path (un-rewritten dispatch)
+// ---------------------------------------------------------------------------
+
+// TestTranslateCall_Post_UnrewrittenDispatch_TranslatesWithoutError asserts
+// that a post-phase payload whose args carry no correlation token translates
+// without error. An un-rewritten dispatch — one whose pre-invocation hook was
+// not reached by this adapter — is a legitimate condition, not a fault.
+func TestTranslateCall_Post_UnrewrittenDispatch_TranslatesWithoutError(t *testing.T) {
+	a := opencode.New(opencode.Options{})
+	// Args with no planted token: the pre phase never intercepted this call.
+	native := buildPostPayloadFromArgs(t, "task",
+		opencode.TaskToolArgs{SubagentType: "Worker", Prompt: "an ordinary prompt this adapter never rewrote"},
+		`{"status_code":"SUCCESS"}`,
+	)
+
+	_, err := a.TranslateCall(domain.PhasePost, native)
+	if err != nil {
+		t.Errorf("TranslateCall(PhasePost, no token): unexpected error %v; an un-rewritten dispatch at the post phase is a legitimate condition, not a fault", err)
+	}
+}
+
+// TestTranslateCall_Post_UnrewrittenDispatch_CorrelationTokenIsEmpty asserts
+// that a post-phase payload with no planted token produces an empty
+// CorrelationToken. The post phase must never fabricate a correlation identity
+// for a dispatch the pre phase did not rewrite; an empty token is the correct
+// signal that this call was not intercepted end-to-end.
+func TestTranslateCall_Post_UnrewrittenDispatch_CorrelationTokenIsEmpty(t *testing.T) {
+	a := opencode.New(opencode.Options{})
+	native := buildPostPayloadFromArgs(t, "task",
+		opencode.TaskToolArgs{SubagentType: "Worker", Prompt: "an ordinary prompt this adapter never rewrote"},
+		`{"status_code":"SUCCESS"}`,
+	)
+
+	call, err := a.TranslateCall(domain.PhasePost, native)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePost): %v", err)
+	}
+
+	if call.CorrelationToken != "" {
+		t.Errorf("TranslateCall(PhasePost, no token): CorrelationToken = %q, want empty; the post phase must not fabricate a correlation identity for a dispatch the pre phase did not rewrite", call.CorrelationToken)
+	}
+}
+
+// TestTranslateCall_Post_NeverMintsToken asserts that the post phase never
+// uses the NewToken seam, even when one is supplied. Minting is exclusively
+// the pre phase's responsibility; a post-phase token must be a recovery or
+// nothing.
+func TestTranslateCall_Post_NeverMintsToken(t *testing.T) {
+	a := opencode.New(opencode.Options{
+		NewToken: func() string { return "should-never-be-used-at-post-phase" },
+	})
+	native := buildPostPayloadFromArgs(t, "task",
+		opencode.TaskToolArgs{SubagentType: "Worker", Prompt: "an ordinary prompt this adapter never rewrote"},
+		`{"status_code":"SUCCESS"}`,
+	)
+
+	call, err := a.TranslateCall(domain.PhasePost, native)
+	if err != nil {
+		t.Fatalf("TranslateCall(PhasePost): %v", err)
+	}
+
+	if call.CorrelationToken != "" {
+		t.Errorf("TranslateCall(PhasePost): CorrelationToken = %q, want empty; the post phase must not use the NewToken seam — minting belongs exclusively to the pre phase", call.CorrelationToken)
+	}
+}

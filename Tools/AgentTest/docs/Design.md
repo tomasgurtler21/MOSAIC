@@ -48,7 +48,7 @@ These use cases all require full control over every variable: which orchestrator
 | **Deploy Integration** | Partial — `domain.AgentDeployer` port delegates to `mosaic-deploy render` subprocess (works for single-agent rendering). Port needs `--catalog-folder` wiring and a `Deploy` method for single-call catalogue deployment (§6) | `internal/agentdeploy/` |
 | **Architecture Enforcement** | Complete — static import-layer checker | `tools/importcheck/` |
 | **Stub Agent Definitions** | 4 generic-form stubs | `agents/` |
-| **Example Suites** | `examples/` (fake harness, exercised by Go e2e tests), `tests/smoke/` (real claude-code harness) | `examples/`, `tests/smoke/` |
+| **Example Suites** | `examples/` (fake harness, exercised by Go e2e tests), `tests/first-run/` (real claude-code harness) | `examples/`, `tests/first-run/` |
 
 ### 2.2 Wiring That Is Complete
 

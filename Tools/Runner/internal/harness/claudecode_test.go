@@ -78,6 +78,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,6 +114,14 @@ func runHelperProcess() {
 	if argsFile := os.Getenv("GO_HELPER_ARGS_FILE"); argsFile != "" {
 		data, _ := json.Marshal(os.Args[1:])
 		os.WriteFile(argsFile, data, 0644) //nolint:errcheck
+	}
+
+	// Capture stdin if the test requested it. The prompt now travels on
+	// stdin rather than as a -p argv value, so tests that verify prompt
+	// delivery read this file instead of args[pIdx+1].
+	if stdinFile := os.Getenv("GO_HELPER_STDIN_FILE"); stdinFile != "" {
+		stdinData, _ := io.ReadAll(os.Stdin)
+		os.WriteFile(stdinFile, stdinData, 0644) //nolint:errcheck
 	}
 
 	switch os.Getenv("GO_HELPER_CMD") {
@@ -329,6 +338,29 @@ func readArgs(t *testing.T, argsFile string) []string {
 	return args
 }
 
+// setupStdinCapture configures the current process environment so that any
+// subprocess spawned by the adapter will write its received stdin to a file.
+// The prompt content travels on stdin (not as a -p argv value) since the
+// shared harness changed to stdin-based delivery to prevent truncation on
+// Windows. All env changes are reverted by t.Cleanup via t.Setenv.
+func setupStdinCapture(t *testing.T) (stdinFile string) {
+	t.Helper()
+	stdinFile = filepath.Join(t.TempDir(), "stdin.bin")
+	t.Setenv("GO_HELPER_STDIN_FILE", stdinFile)
+	return stdinFile
+}
+
+// readHelperStdin reads the stdin capture file written by the helper subprocess.
+// Returns the raw bytes the adapter delivered on the subprocess's standard input.
+func readHelperStdin(t *testing.T, stdinFile string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(stdinFile)
+	if err != nil {
+		t.Fatalf("readHelperStdin: could not read stdin file %q: %v", stdinFile, err)
+	}
+	return data
+}
+
 // containsArg reports whether arg appears anywhere in args.
 func containsArg(args []string, arg string) bool {
 	for _, a := range args {
@@ -411,9 +443,12 @@ func TestClaudeCodeAdapter_OrdinaryInvocation_IncludesAppendSystemPromptFile(t *
 }
 
 // TestClaudeCodeAdapter_OrdinaryInvocation_IncludesPromptFlag verifies that
-// ordinary invocations include -p with the marshalled request JSON.
+// ordinary invocations include -p as a bare flag and deliver the marshalled
+// request JSON on stdin. The prompt travels on stdin rather than as the value
+// following -p, so that multi-line prompts are not truncated by cmd.exe on Windows.
 func TestClaudeCodeAdapter_OrdinaryInvocation_IncludesPromptFlag(t *testing.T) {
 	argsFile := setHelperEnv(t, "success")
+	stdinFile := setupStdinCapture(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), ordinaryAgentRef(), minimalClaudeRequest("test-agent#1"))
@@ -422,14 +457,15 @@ func TestClaudeCodeAdapter_OrdinaryInvocation_IncludesPromptFlag(t *testing.T) {
 	}
 
 	args := readArgs(t, argsFile)
-	pIdx := indexOfArg(args, "-p")
-	if pIdx < 0 || pIdx+1 >= len(args) {
-		t.Fatalf("want -p <prompt> in args, got %v", args)
+	// -p must be present as a bare flag — the prompt travels on stdin, not as
+	// the following argv element.
+	if !containsArg(args, "-p") {
+		t.Fatalf("want bare -p flag in args, got %v", args)
 	}
-	// The prompt value must contain the marshalled request (agent_instance_id is a
-	// reliable field to check for).
-	if !strings.Contains(args[pIdx+1], "test-agent#1") {
-		t.Errorf("want -p value to contain agent_instance_id, got %q", args[pIdx+1])
+	// The prompt content (agent_instance_id is a reliable field) must be on stdin.
+	stdin := readHelperStdin(t, stdinFile)
+	if !strings.Contains(string(stdin), "test-agent#1") {
+		t.Errorf("want agent_instance_id %q in stdin payload, got %q", "test-agent#1", stdin)
 	}
 }
 
@@ -635,9 +671,12 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_NeverDangerouslySkipPermission
 
 // TestClaudeCodeAdapter_OrchestratorInvocation_IncludesEnvBlock verifies that
 // orchestrator invocations include a synthesized <env>...</env> block in the
-// -p prompt content.
+// stdin payload. The env block and prompt content travel on stdin rather than
+// as the value following -p, so that multi-line content is not truncated by
+// cmd.exe on Windows.
 func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesEnvBlock(t *testing.T) {
 	argsFile := setHelperEnv(t, "success")
+	stdinFile := setupStdinCapture(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
@@ -646,23 +685,26 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesEnvBlock(t *testing.T)
 	}
 
 	args := readArgs(t, argsFile)
-	pIdx := indexOfArg(args, "-p")
-	if pIdx < 0 || pIdx+1 >= len(args) {
-		t.Fatalf("want -p <prompt> in args, got %v", args)
+	// -p must be present as a bare flag.
+	if !containsArg(args, "-p") {
+		t.Fatalf("want bare -p flag in orchestrator args, got %v", args)
 	}
-	prompt := args[pIdx+1]
-	if !strings.Contains(prompt, "<env>") {
-		t.Errorf("want <env> opening tag in orchestrator -p prompt, got %q", prompt)
+	// The synthesized <env> block must be present in the stdin payload.
+	stdin := string(readHelperStdin(t, stdinFile))
+	if !strings.Contains(stdin, "<env>") {
+		t.Errorf("want <env> opening tag in orchestrator stdin payload, got %q", stdin)
 	}
-	if !strings.Contains(prompt, "</env>") {
-		t.Errorf("want </env> closing tag in orchestrator -p prompt, got %q", prompt)
+	if !strings.Contains(stdin, "</env>") {
+		t.Errorf("want </env> closing tag in orchestrator stdin payload, got %q", stdin)
 	}
 }
 
 // TestClaudeCodeAdapter_OrchestratorInvocation_EnvBlockContainsWorkingDir
-// verifies that the synthesized <env> block includes the working directory.
+// verifies that the synthesized <env> block in the stdin payload includes the
+// working directory.
 func TestClaudeCodeAdapter_OrchestratorInvocation_EnvBlockContainsWorkingDir(t *testing.T) {
-	argsFile := setHelperEnv(t, "success")
+	setHelperEnv(t, "success")
+	stdinFile := setupStdinCapture(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
@@ -670,20 +712,18 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_EnvBlockContainsWorkingDir(t *
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	args := readArgs(t, argsFile)
-	pIdx := indexOfArg(args, "-p")
-	if pIdx < 0 || pIdx+1 >= len(args) {
-		t.Fatalf("want -p <prompt> in args, got %v", args)
-	}
-	if !strings.Contains(args[pIdx+1], "Working directory:") {
-		t.Errorf("want 'Working directory:' in env block, got %q", args[pIdx+1])
+	stdin := string(readHelperStdin(t, stdinFile))
+	if !strings.Contains(stdin, "Working directory:") {
+		t.Errorf("want 'Working directory:' in orchestrator stdin payload (env block), got %q", stdin)
 	}
 }
 
 // TestClaudeCodeAdapter_OrchestratorInvocation_EnvBlockContainsPlatform
-// verifies that the synthesized <env> block includes the platform (runtime.GOOS).
+// verifies that the synthesized <env> block in the stdin payload includes the
+// platform (runtime.GOOS).
 func TestClaudeCodeAdapter_OrchestratorInvocation_EnvBlockContainsPlatform(t *testing.T) {
-	argsFile := setHelperEnv(t, "success")
+	setHelperEnv(t, "success")
+	stdinFile := setupStdinCapture(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
@@ -691,21 +731,18 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_EnvBlockContainsPlatform(t *te
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	args := readArgs(t, argsFile)
-	pIdx := indexOfArg(args, "-p")
-	if pIdx < 0 || pIdx+1 >= len(args) {
-		t.Fatalf("want -p <prompt> in args, got %v", args)
-	}
-	if !strings.Contains(args[pIdx+1], "Platform:") {
-		t.Errorf("want 'Platform:' in env block, got %q", args[pIdx+1])
+	stdin := string(readHelperStdin(t, stdinFile))
+	if !strings.Contains(stdin, "Platform:") {
+		t.Errorf("want 'Platform:' in orchestrator stdin payload (env block), got %q", stdin)
 	}
 }
 
 // TestClaudeCodeAdapter_OrchestratorInvocation_EnvBlockContainsDate verifies
-// that the synthesized <env> block includes the current date in the format
-// required by the design spec ("Current date: YYYY-MM-DD").
+// that the synthesized <env> block in the stdin payload includes the current
+// date in the format required by the design spec ("Current date: YYYY-MM-DD").
 func TestClaudeCodeAdapter_OrchestratorInvocation_EnvBlockContainsDate(t *testing.T) {
-	argsFile := setHelperEnv(t, "success")
+	setHelperEnv(t, "success")
+	stdinFile := setupStdinCapture(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
@@ -713,22 +750,19 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_EnvBlockContainsDate(t *testin
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	args := readArgs(t, argsFile)
-	pIdx := indexOfArg(args, "-p")
-	if pIdx < 0 || pIdx+1 >= len(args) {
-		t.Fatalf("want -p <prompt> in args, got %v", args)
-	}
-	if !strings.Contains(args[pIdx+1], "Current date:") {
-		t.Errorf("want 'Current date:' in env block, got %q", args[pIdx+1])
+	stdin := string(readHelperStdin(t, stdinFile))
+	if !strings.Contains(stdin, "Current date:") {
+		t.Errorf("want 'Current date:' in orchestrator stdin payload (env block), got %q", stdin)
 	}
 }
 
 // TestClaudeCodeAdapter_OrchestratorInvocation_IncludesRequestInPrompt verifies
-// that the marshalled request JSON is present in the orchestrator -p value.
+// that the marshalled request JSON is present in the orchestrator stdin payload.
 // An implementation that emits only the <env> block and omits the request would
 // fail this test.
 func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesRequestInPrompt(t *testing.T) {
-	argsFile := setHelperEnv(t, "success")
+	setHelperEnv(t, "success")
+	stdinFile := setupStdinCapture(t)
 
 	adapter := harness.NewClaudeCodeAdapter(helperExe(t), 5*time.Second)
 	_, err := adapter.Invoke(context.Background(), orchestratorAgentRef(), minimalClaudeRequest("orchestrator-agent#1"))
@@ -736,14 +770,10 @@ func TestClaudeCodeAdapter_OrchestratorInvocation_IncludesRequestInPrompt(t *tes
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	args := readArgs(t, argsFile)
-	pIdx := indexOfArg(args, "-p")
-	if pIdx < 0 || pIdx+1 >= len(args) {
-		t.Fatalf("want -p <prompt> in args, got %v", args)
-	}
 	// agent_instance_id is a reliable field from the marshalled request JSON.
-	if !strings.Contains(args[pIdx+1], "orchestrator-agent#1") {
-		t.Errorf("want marshalled request JSON (containing agent_instance_id) in orchestrator -p prompt, got %q", args[pIdx+1])
+	stdin := string(readHelperStdin(t, stdinFile))
+	if !strings.Contains(stdin, "orchestrator-agent#1") {
+		t.Errorf("want marshalled request JSON (containing agent_instance_id) in orchestrator stdin payload, got %q", stdin)
 	}
 }
 

@@ -8,9 +8,16 @@ import (
 // them (scope inspection, provisioning, correlation).
 type Options struct {
 	// ScopeProbe reads configuration-scope documents. Defaults to a real
-	// filesystem probe when nil (I6.1); overridden in tests with a fixture
-	// probe so inspection is testable without the real filesystem.
+	// filesystem probe when nil; overridden in tests with a fixture probe so
+	// inspection is testable without the real filesystem.
 	ScopeProbe ScopeProbe
+
+	// NewToken generates a correlation token for the adapter to plant at the
+	// pre-invocation point. nil selects the package-level NewToken function,
+	// whose opacity is a tested property. Override in tests to obtain a
+	// deterministic token so round-trip assertions are precise without a
+	// random generator.
+	NewToken func() string
 }
 
 // Adapter implements domain.HarnessAdapter for the OpenCode harness.

@@ -1,59 +1,35 @@
 package claudecode
 
-import (
-	"crypto/rand"
-	"encoding/hex"
-	"strings"
-)
-
-// tokenMarker separates a planted correlation token from the rest of the
-// prompt text it rides inside. It is a character no ordinary prompt would
-// contain and no dictionary word, so its presence never reads as anything
-// but incidental to whatever sees the prompt.
-const tokenMarker = "​"
-
-// NewToken returns an opaque correlation token: unguessable, and carrying no
-// dictionary word, no prefix and nothing naming this tool. The subject can
-// read the call it is handed, so a readable, test-flavoured token would tell
-// it that it is being exercised and invalidate every verdict the tool
-// produces. Opacity is a tested property of this function, not a
-// convention.
-func NewToken() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		// crypto/rand failing is effectively unrecoverable in practice; fall
-		// back to a still-opaque, still-varying byte sequence rather than a
-		// fixed token that would collide across calls.
-		for i := range b {
-			b[i] = byte(i) ^ 0x5a
-		}
-	}
-	return hex.EncodeToString(b)
-}
-
-// PlantToken embeds token in the rewritten call input, in the field this
-// adapter nominates as CorrelationField ("tool_input.prompt"), in a form
-// this harness preserves through to the post-invocation point: the token
-// rides inside the prompt text itself, separated by an invisible marker, so
-// it survives the round trip through the harness's own echo of the tool's
-// input without this adapter needing a field the harness does not offer.
-func PlantToken(input TaskToolInput, token string) TaskToolInput {
-	input.Prompt = input.Prompt + tokenMarker + token
-	return input
-}
-
-// RecoverToken extracts the token from a post-invocation payload's echoed
-// input. The second result distinguishes "no token present" from "a token
-// was present and is this" — a missing token is a legitimate condition for
-// a call this tool did not rewrite, not an error.
-func RecoverToken(input TaskToolInput) (string, bool) {
-	idx := strings.LastIndex(input.Prompt, tokenMarker)
-	if idx == -1 {
-		return "", false
-	}
-	token := input.Prompt[idx+len(tokenMarker):]
-	if token == "" {
-		return "", false
-	}
-	return token, true
-}
+// Correlation mechanism for the claude-code adapter.
+//
+// # Live observation findings (the basis for the shipped mechanism)
+//
+// The previous mechanism planted a correlation token inside the prompt text at
+// the pre-invocation point and attempted to recover it at the completion point
+// by reading the transcript file named by the SubagentStop payload's
+// agent_transcript_path field. That mechanism failed at runtime for one reason:
+// the transcript file does not exist when the SubagentStop hook fires. The path
+// is populated in the payload, but the file is written only after the hook
+// completes, making every read an immediate not-found error and reducing every
+// completion event to an empty correlation token.
+//
+// # The shipped mechanism
+//
+// The claude-code harness sends a tool_use_id field on every PreToolUse event
+// that uniquely identifies the tool call within the session. The same field is
+// echoed on the corresponding PostToolUse event. The SubagentStop event carries
+// the same tool_use_id to identify which Task call's subagent has finished.
+// This identifier is dispatch-scoped, unguessable, and carries no dictionary
+// word, no prefix, and nothing naming this tool: the subject can see the call
+// it is handed, and tool_use_id is a vendor-issued opaque identifier that does
+// not tip the subject off that it is being exercised.
+//
+// CorrelationToken is therefore populated directly from the ToolUseID field on
+// all three payload types (PreToolUsePayload, PostToolUsePayload,
+// CompletionPayload). No token is minted, planted, or recovered from the prompt
+// text. PlantToken, RecoverToken, tokenMarker, Options.NewToken and
+// Options.TranscriptReader are all retired by this mechanism.
+//
+// An absent ToolUseID decodes to the zero value and is never an error: a
+// completion event with no tool_use_id is a legitimate un-stubbed dispatch and
+// produces an empty CorrelationToken, exactly as the per-phase contract allows.

@@ -251,7 +251,7 @@ func TestResolveWiringConfig_MosaicRoot_FlagWinsOverEverything(t *testing.T) {
 
 // TestResolveWiringConfig_MosaicRoot_EnvWinsOverDefault asserts the
 // MOSAIC_AGENT_TEST_MOSAIC_ROOT variable, absent a flag, wins over the
-// default empty string.
+// binary-relative default.
 func TestResolveWiringConfig_MosaicRoot_EnvWinsOverDefault(t *testing.T) {
 	t.Setenv("MOSAIC_AGENT_TEST_MOSAIC_ROOT", "C:/from-env/mosaic-root")
 
@@ -262,19 +262,27 @@ func TestResolveWiringConfig_MosaicRoot_EnvWinsOverDefault(t *testing.T) {
 	}
 }
 
-// TestResolveWiringConfig_MosaicRoot_DefaultsToEmpty asserts that with neither
-// a flag nor the environment variable set, MosaicRoot defaults to the empty
-// string. An empty MosaicRoot means "do not override" — the --mosaic-root flag
-// is simply not passed to the deployment tool, which then resolves its own
-// MOSAIC root. A correctly staged distribution therefore works with no flag and
-// no environment variable.
-func TestResolveWiringConfig_MosaicRoot_DefaultsToEmpty(t *testing.T) {
+// TestResolveWiringConfig_MosaicRoot_DefaultsToBinaryRelativePath asserts that
+// with neither a flag nor the environment variable set, MosaicRoot defaults to a
+// non-empty binary-relative path — the same selfDir anchor that LoggerBundleDir,
+// CostToolPath, and DeployToolPath already use. An empty default leaves the
+// deploy tool unable to locate the repository root when invoked from a directory
+// other than the repository root, which is the failure this change fixes.
+//
+// The exact relative offset from the binary directory to the repository root is
+// an implementation determination against the staged distribution layout; what is
+// contractual is that the result is non-empty and is an absolute path derived
+// from the binary's location, not from the working directory.
+func TestResolveWiringConfig_MosaicRoot_DefaultsToBinaryRelativePath(t *testing.T) {
 	t.Setenv("MOSAIC_AGENT_TEST_MOSAIC_ROOT", "")
 
 	cfg := resolveWiringConfig([]string{"run", "suite.yaml"})
 
-	if cfg.MosaicRoot != "" {
-		t.Errorf("resolveWiringConfig(...).MosaicRoot = %q, want empty string (empty means the deploy tool resolves its own root; a correctly staged distribution needs no flag and no variable)", cfg.MosaicRoot)
+	if cfg.MosaicRoot == "" {
+		t.Fatal("resolveWiringConfig(...).MosaicRoot = empty string, want a non-empty binary-relative default; an empty value causes the deploy tool to resolve the MOSAIC root from the working directory, which fails when invoked from outside the repository tree")
+	}
+	if !filepath.IsAbs(cfg.MosaicRoot) {
+		t.Errorf("resolveWiringConfig(...).MosaicRoot = %q, want an absolute binary-relative path (the same selfDir anchor as LoggerBundleDir, CostToolPath, and DeployToolPath)", cfg.MosaicRoot)
 	}
 }
 

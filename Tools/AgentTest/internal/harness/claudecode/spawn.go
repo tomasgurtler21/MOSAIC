@@ -43,7 +43,7 @@ func (a *Adapter) SpawnPlan(ctx context.Context, subject domain.SubjectUnderTest
 		OutputFormat: "json",
 	}
 
-	args, err := commonharness.BuildArgs(spawnReq)
+	args, stdin, err := commonharness.BuildArgs(spawnReq)
 	if err != nil {
 		return domain.SpawnPlan{}, fmt.Errorf("claudecode: building spawn arguments: %w", err)
 	}
@@ -57,6 +57,7 @@ func (a *Adapter) SpawnPlan(ctx context.Context, subject domain.SubjectUnderTest
 	return domain.SpawnPlan{
 		Executable:        ClaudeCLIExecutable,
 		Args:              args,
+		Stdin:             stdin,
 		WorkingDir:        p.Sandbox.SubjectDir,
 		Env:               []string{ConfigHomeEnvVar + "=" + configHome},
 		Timeout:           DefaultSpawnTimeout,

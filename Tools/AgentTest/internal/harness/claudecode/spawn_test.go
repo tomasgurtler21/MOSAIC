@@ -93,9 +93,54 @@ func TestSpawnPlan_ArgsCarrySubjectDefinitionAndOpeningMessage(t *testing.T) {
 		t.Fatalf("SpawnPlan: %v", err)
 	}
 
-	joined := strings.Join(plan.Args, " ")
-	if !strings.Contains(joined, subject.OpeningMessage) {
-		t.Errorf("SpawnPlan: Args = %v, want the subject's opening message %q to appear somewhere", plan.Args, subject.OpeningMessage)
+	// The opening message travels on stdin (not in argv) so that multi-line
+	// prompts survive cmd.exe on Windows. Assert it is in Stdin.
+	if plan.Stdin == nil {
+		t.Fatalf("SpawnPlan: Stdin is nil; want the opening message %q delivered on stdin", subject.OpeningMessage)
+	}
+	if !strings.Contains(string(plan.Stdin), subject.OpeningMessage) {
+		t.Errorf("SpawnPlan: Stdin = %q, want the subject's opening message %q in the stdin payload", plan.Stdin, subject.OpeningMessage)
+	}
+}
+
+// TestSpawnPlan_StdinCarriesOpeningMessage is an explicit assertion that
+// SpawnPlan.Stdin is non-nil and contains the subject's opening message.
+// The prompt travels on stdin rather than as an argv value, so that
+// multi-line prompts are not truncated by cmd.exe on Windows.
+func TestSpawnPlan_StdinCarriesOpeningMessage(t *testing.T) {
+	a, _, prov := provisionedAdapter(t)
+	subject := spawnTestSubject()
+
+	plan, err := a.SpawnPlan(testContext(), subject, prov)
+	if err != nil {
+		t.Fatalf("SpawnPlan: %v", err)
+	}
+
+	if plan.Stdin == nil {
+		t.Fatalf("SpawnPlan: Stdin is nil; want the opening message %q delivered on stdin", subject.OpeningMessage)
+	}
+	if !strings.Contains(string(plan.Stdin), subject.OpeningMessage) {
+		t.Errorf("SpawnPlan: Stdin = %q, want %q in the stdin payload", plan.Stdin, subject.OpeningMessage)
+	}
+}
+
+// TestSpawnPlan_ArgsDoNotCarryOpeningMessageAsValue asserts that no argv
+// element equals the raw opening message. The prompt travels on stdin; an
+// argv element that equals the prompt would indicate the delivery fix is
+// absent.
+func TestSpawnPlan_ArgsDoNotCarryOpeningMessageAsValue(t *testing.T) {
+	a, _, prov := provisionedAdapter(t)
+	subject := spawnTestSubject()
+
+	plan, err := a.SpawnPlan(testContext(), subject, prov)
+	if err != nil {
+		t.Fatalf("SpawnPlan: %v", err)
+	}
+
+	for _, arg := range plan.Args {
+		if strings.Contains(arg, subject.OpeningMessage) {
+			t.Errorf("SpawnPlan: Args = %v, opening message %q must not appear in any argv element (including embedded in a larger value); it must travel on Stdin", plan.Args, subject.OpeningMessage)
+		}
 	}
 }
 

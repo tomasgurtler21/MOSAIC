@@ -199,7 +199,7 @@ func Validate(in Input) (Plan, authoring.Report) {
 		checkSuppressedAssertions(&report, defPath, def)
 		checkDeploymentDeclarations(&report, defPath, defDir, def, in)
 		if haveRegistry {
-			checkUndeclaredStubAgents(&report, defPath, def, registry)
+			checkUndeclaredStubAgents(&report, defPath, def, registry, in)
 		}
 
 		effective := mergeSettings(mergeSettings(suite.Defaults, entry.Settings), def.Settings)
@@ -849,7 +849,20 @@ func addDeployToolProblem(report *authoring.Report, err error) {
 // stub_agents entry. A dispatch to a collaborator with no deployed definition
 // file is a hard-to-diagnose run-time failure for a declaration error that is
 // fully knowable before the run.
-func checkUndeclaredStubAgents(report *authoring.Report, defPath string, def domain.TestDefinition, registry domain.StubRegistry) {
+//
+// The diagnostic is suppressed when both signals indicate the catalogue
+// provisioning path with a deployment tool present: in that case the workflow
+// itself provisions every collaborator, and stub_agents is forbidden by
+// conflicting-provisioning-paths. Gating on either signal alone would
+// silently disable a genuine authoring check.
+func checkUndeclaredStubAgents(report *authoring.Report, defPath string, def domain.TestDefinition, registry domain.StubRegistry, in Input) {
+	// On the catalogue path with a deploy tool present, the workflow provisions
+	// every collaborator. stub_agents is forbidden there (conflicting-provisioning-paths),
+	// so requiring it would create an unresolvable deadlock. Suppress the check.
+	if def.Subject.CatalogAgentKey != "" && in.Deploy != nil {
+		return
+	}
+
 	// Build a set of declared stub identities.
 	declared := make(map[domain.CollaboratorIdentity]bool, len(def.StubAgents))
 	for _, sa := range def.StubAgents {

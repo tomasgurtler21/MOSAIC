@@ -144,7 +144,7 @@ subject:
     Workflow: brownfield-tdd
     Checkpoints: disabled
   invocation_kind: orchestrator
-  model: default
+  model: sonnet
   allowed_tools: [Task, Read, Write, Edit]
 
 stub_registry: research-dispatch.stubs.json
@@ -196,7 +196,7 @@ subject:
     Workflow: brownfield-tdd
     Checkpoints: disabled
   invocation_kind: orchestrator
-  model: default
+  model: sonnet
   allowed_tools: [Task, Read, Write, Edit]
 
 stub_registry: research-planning-happy-path.stubs.json
@@ -301,7 +301,7 @@ assertions:
 | `workflows` | No | list of strings | Workflow IDs to inject. `null`/absent = all, `[]` = none, `["id"]` = exactly these |
 | `opening_message` | Yes | string | The initial message the subject receives |
 | `invocation_kind` | Yes | string | `orchestrator` or `subagent` |
-| `model` | No | string | Model identifier for the subject (e.g. `default`, `sonnet`) |
+| `model` | No | string | Model identifier for the subject (e.g. `sonnet`, `claude-sonnet-4-5`) |
 | `stub_model` | No | string | Model identifier for stubs deployed alongside the subject on the catalogue path. Optional: omitting it gives stubs the same model as `subject.model`. |
 | `allowed_tools` | No | list | Tools the subject may use |
 
@@ -1006,7 +1006,7 @@ subject:
     Workflow: brownfield-tdd
     Checkpoints: disabled
   invocation_kind: orchestrator
-  model: default
+  model: sonnet
   allowed_tools: [Task, Read, Write, Edit]
 
 stub_registry: findings-reroute.stubs.json
