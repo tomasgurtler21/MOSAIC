@@ -8,7 +8,7 @@ description: Tool-heavy fixture for golden file tests — exercises all seven ge
 model: claude-sonnet-4-6
 tools: ['read', 'edit', 'search', 'execute', 'ask_user']
 user-invocable: false
-role: subagent
+mosaic_role: subagent
 ---
 
 <Identity type="core">

@@ -150,11 +150,17 @@ func eligibleHarnessOnly(src []byte) EligibilityVerdict {
 		}
 	}
 
-	// Parse role; default to RoleSubagent when absent or unrecognised.
+	// Parse role; default to RoleSubagent when absent or unrecognised. Accept both the
+	// prefixed deployed form (mosaic_role) and the legacy bare form (role) via ReadOrder,
+	// preferring the prefixed form when both are present.
 	meta.Role = domain.RoleSubagent
-	if v, ok := fm.Get("role"); ok && v.Kind == domain.KindScalar {
-		if role, ok := domain.ParseAgentRole(v.Scalar); ok {
-			meta.Role = role
+	roleField, _ := agentfields.ByGeneric("role")
+	for _, key := range agentfields.ReadOrder(roleField) {
+		if v, ok := fm.Get(key); ok && v.Kind == domain.KindScalar {
+			if role, ok := domain.ParseAgentRole(v.Scalar); ok {
+				meta.Role = role
+			}
+			break
 		}
 	}
 

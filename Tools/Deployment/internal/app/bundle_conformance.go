@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"mosaic-common/docformat"
+	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/catalog"
 	"mosaic-deploy/internal/domain"
 )
@@ -42,14 +43,21 @@ func bundleConformance(
 		}
 
 		var role domain.AgentRole
-		if fv, ok := doc.Frontmatter().Get("role"); ok && fv.Kind == "scalar" {
-			r, valid := domain.ParseAgentRole(fv.Scalar)
-			if !valid {
-				continue // unrecognised role — not subject to bundle checks
+		var roleFound bool
+		roleField, _ := agentfields.ByGeneric("role")
+		for _, key := range agentfields.ReadOrder(roleField) {
+			if fv, ok := doc.Frontmatter().Get(key); ok && fv.Kind == domain.KindScalar {
+				r, valid := domain.ParseAgentRole(fv.Scalar)
+				if !valid {
+					break // unrecognised role — not subject to bundle checks
+				}
+				role = r
+				roleFound = true
+				break
 			}
-			role = r
-		} else {
-			continue // no role field — skip
+		}
+		if !roleFound {
+			continue // no role field or unrecognised value — skip
 		}
 
 		// Skip files whose role the bundle does not cover.

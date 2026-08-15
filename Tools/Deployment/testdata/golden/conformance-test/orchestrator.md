@@ -3,9 +3,9 @@ version: 1.0.0
 description: Placeholder-expanding fixture for golden file tests — exercises {tool-permissions} placeholder expansion and RoleOrchestrator
 model: github-copilot/claude-sonnet-4-6
 tools: [read, write, edit, search, execute, ask_user]
-role: orchestrator
 mosaic_transform_version: 1.0.0
 mosaic_injections_version: 1.0.0
+mosaic_role: orchestrator
 ---
 
 <Identity type="core">

@@ -65,7 +65,11 @@ func deployStandalone(ctx context.Context, s *service, req StandaloneRequest) (d
 		if req.SkipAll[domain.QStandaloneAgents] {
 			ids = []string{}
 		} else if len(s.deps.Catalog.StandaloneAgents()) > 0 {
-			ids = s.askStandaloneAgents(ctx)
+			selIDs, selErr := s.askStandaloneAgents(ctx)
+			if selErr != nil {
+				return domain.RunSummary{}, selErr
+			}
+			ids = selIDs
 		} else {
 			ids = []string{}
 		}
@@ -77,7 +81,8 @@ func deployStandalone(ctx context.Context, s *service, req StandaloneRequest) (d
 	// so their target paths are enumerated and their on-disk state is probed, preventing every
 	// standalone agent from being classified as a new create on every run after the first.
 	probeSet, err := plan.ResolveArtifactsFrom(s.deps.Catalog, plan.Selection{
-		StandaloneAgentIDs: ids,
+		StandaloneAgentIDs:  ids,
+		ExcludeOrchestrator: plan.OrchestratorExcludedFor(domain.ModeStandaloneOnly),
 	})
 	if err != nil {
 		return domain.RunSummary{}, err

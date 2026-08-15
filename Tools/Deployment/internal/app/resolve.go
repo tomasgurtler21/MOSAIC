@@ -70,7 +70,12 @@ func (s *service) askWorkspace(ctx context.Context) (string, error) {
 }
 
 // askWorkflows prompts for workflow selection, grouped by category for browsable display.
-func (s *service) askWorkflows(ctx context.Context) []string {
+//
+// Error contract: returns a non-nil error (wrapping ErrSelectionCancelled) only when the
+// answer status is domain.Cancelled. Transport errors and skip statuses (SkippedOne,
+// SkippedAll) return an empty slice with a nil error, preserving pre-existing behaviour for
+// non-interactive CLI runs that supply no pre-answer for this question.
+func (s *service) askWorkflows(ctx context.Context) ([]string, error) {
 	opts := make([]domain.Option, 0)
 	for _, cat := range s.deps.Catalog.WorkflowCategories() {
 		for _, wf := range cat.Workflows {
@@ -84,15 +89,26 @@ func (s *service) askWorkflows(ctx context.Context) []string {
 		Options:  opts,
 	}
 	ans, err := s.deps.Interaction.SelectMany(ctx, q)
-	if err != nil || ans.Status != domain.Answered {
-		return []string{}
+	if err != nil {
+		return []string{}, nil
 	}
-	return ans.OptionIDs
+	switch ans.Status {
+	case domain.Cancelled:
+		return nil, fmt.Errorf("%w: %s", ErrSelectionCancelled, q.ID)
+	case domain.Answered:
+		return ans.OptionIDs, nil
+	default:
+		return []string{}, nil
+	}
 }
 
 // askUtilityAgents prompts for utility-agent selection, restricted to the tool config's
 // allow-list (FR-8).
-func (s *service) askUtilityAgents(ctx context.Context) []string {
+//
+// Error contract: returns a non-nil error (wrapping ErrSelectionCancelled) only when the
+// answer status is domain.Cancelled. Transport errors and skip statuses return an empty
+// slice with a nil error, preserving pre-existing behaviour for non-interactive CLI runs.
+func (s *service) askUtilityAgents(ctx context.Context) ([]string, error) {
 	cfg, _ := s.deps.ToolConfig.Load()
 	allowed := make(map[string]bool, len(cfg.UtilityAgentAllowList))
 	for _, k := range cfg.UtilityAgentAllowList {
@@ -110,17 +126,28 @@ func (s *service) askUtilityAgents(ctx context.Context) []string {
 		Options:  opts,
 	}
 	ans, err := s.deps.Interaction.SelectMany(ctx, q)
-	if err != nil || ans.Status != domain.Answered {
-		return []string{}
+	if err != nil {
+		return []string{}, nil
 	}
-	return ans.OptionIDs
+	switch ans.Status {
+	case domain.Cancelled:
+		return nil, fmt.Errorf("%w: %s", ErrSelectionCancelled, q.ID)
+	case domain.Answered:
+		return ans.OptionIDs, nil
+	default:
+		return []string{}, nil
+	}
 }
 
 // askInfrastructureAgents prompts for infrastructure-agent selection. All agents with a
 // non-empty Infrastructure field from the catalog are presented. Unlike utility agents,
 // infrastructure agents are not gated by an allow-list. Multiple agents of the same class
 // may be selected without restriction.
-func (s *service) askInfrastructureAgents(ctx context.Context) []string {
+//
+// Error contract: returns a non-nil error (wrapping ErrSelectionCancelled) only when the
+// answer status is domain.Cancelled. Transport errors and skip statuses return an empty
+// slice with a nil error, preserving pre-existing behaviour for non-interactive CLI runs.
+func (s *service) askInfrastructureAgents(ctx context.Context) ([]string, error) {
 	opts := make([]domain.Option, 0)
 	for _, a := range s.deps.Catalog.InfrastructureAgents() {
 		label := a.Name
@@ -144,10 +171,17 @@ func (s *service) askInfrastructureAgents(ctx context.Context) []string {
 		Options: opts,
 	}
 	ans, err := s.deps.Interaction.SelectMany(ctx, q)
-	if err != nil || ans.Status != domain.Answered {
-		return []string{}
+	if err != nil {
+		return []string{}, nil
 	}
-	return ans.OptionIDs
+	switch ans.Status {
+	case domain.Cancelled:
+		return nil, fmt.Errorf("%w: %s", ErrSelectionCancelled, q.ID)
+	case domain.Answered:
+		return ans.OptionIDs, nil
+	default:
+		return []string{}, nil
+	}
 }
 
 // askStandaloneAgents prompts for standalone-agent selection. Every standalone agent in the
@@ -157,8 +191,10 @@ func (s *service) askInfrastructureAgents(ctx context.Context) []string {
 // Catalog/StandaloneAgents/. Options are ordered by category (named categories ascending,
 // uncategorised last), then by agent key ascending, so the rendered list is deterministic.
 //
-// Returns an empty slice when the question is skipped, cancelled, or errors.
-func (s *service) askStandaloneAgents(ctx context.Context) []string {
+// Error contract: returns a non-nil error (wrapping ErrSelectionCancelled) only when the
+// answer status is domain.Cancelled. Transport errors and skip statuses return an empty
+// slice with a nil error, preserving pre-existing behaviour for non-interactive CLI runs.
+func (s *service) askStandaloneAgents(ctx context.Context) ([]string, error) {
 	agents := s.deps.Catalog.StandaloneAgents()
 
 	// Separate into categorised and uncategorised groups. The catalog already returns agents
@@ -207,14 +243,25 @@ func (s *service) askStandaloneAgents(ctx context.Context) []string {
 		Options: opts,
 	}
 	ans, err := s.deps.Interaction.SelectMany(ctx, q)
-	if err != nil || ans.Status != domain.Answered {
-		return []string{}
+	if err != nil {
+		return []string{}, nil
 	}
-	return ans.OptionIDs
+	switch ans.Status {
+	case domain.Cancelled:
+		return nil, fmt.Errorf("%w: %s", ErrSelectionCancelled, q.ID)
+	case domain.Answered:
+		return ans.OptionIDs, nil
+	default:
+		return []string{}, nil
+	}
 }
 
 // askHooks prompts for hook bundle selection from every bundle the catalog knows about.
-func (s *service) askHooks(ctx context.Context) []string {
+//
+// Error contract: returns a non-nil error (wrapping ErrSelectionCancelled) only when the
+// answer status is domain.Cancelled. Transport errors and skip statuses return an empty
+// slice with a nil error, preserving pre-existing behaviour for non-interactive CLI runs.
+func (s *service) askHooks(ctx context.Context) ([]string, error) {
 	opts := make([]domain.Option, 0)
 	for _, h := range s.deps.Catalog.Hooks() {
 		opts = append(opts, domain.Option{ID: h.Key, Label: h.Key, Description: h.Description})
@@ -224,10 +271,17 @@ func (s *service) askHooks(ctx context.Context) []string {
 		Options:  opts,
 	}
 	ans, err := s.deps.Interaction.SelectMany(ctx, q)
-	if err != nil || ans.Status != domain.Answered {
-		return []string{}
+	if err != nil {
+		return []string{}, nil
 	}
-	return ans.OptionIDs
+	switch ans.Status {
+	case domain.Cancelled:
+		return nil, fmt.Errorf("%w: %s", ErrSelectionCancelled, q.ID)
+	case domain.Answered:
+		return ans.OptionIDs, nil
+	default:
+		return []string{}, nil
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ description: Skill-using fixture for golden file tests — exercises skill plus 
 model: claude-sonnet-4-6
 tools: ['read', 'edit', 'search', 'execute', 'ask_user', 'skill']
 user-invocable: false
-role: subagent
+mosaic_role: subagent
 ---
 
 <Identity type="core">

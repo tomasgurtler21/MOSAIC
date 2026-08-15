@@ -9,10 +9,10 @@ tools:
   - search
   - execute
   - ask_user
-role: subagent
 mosaic_transform_version: 1.0.0
 mosaic_injections_version: 1.0.0
 mosaic_id: 2
+mosaic_role: subagent
 ---
 
 <Identity type="core">

@@ -214,6 +214,21 @@ func applyFrontmatter(
 		})
 	}
 
+	// Step 4d: Rename the generic "role" field to its mosaic_-prefixed deployed name. The
+	// generic source carries "role"; deployed files must carry the prefixed form. This is
+	// parallel to the id rename above; the agentfields registry supplies both names.
+	roleField, _ := agentfields.ByGeneric("role")
+	if v, ok := fm.Get(roleField.Legacy); ok {
+		fm.Remove(roleField.Legacy)
+		fm.Set(roleField.Deployed, v)
+		changes = append(changes, FieldChange{
+			Key:    roleField.Deployed,
+			Before: "",
+			After:  renderValue(v),
+			Reason: "role field rename to deployed form",
+		})
+	}
+
 	// Step 5: Set the resolved tool fields produced by Module.Tools (or PlaceholderExpansion).
 	for _, field := range toolResult.Fields {
 		before := ""

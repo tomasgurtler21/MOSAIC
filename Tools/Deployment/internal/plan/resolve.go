@@ -16,6 +16,29 @@ type Selection struct {
 	InfrastructureAgentIDs []string
 	StandaloneAgentIDs     []string
 	HookIDs                []string
+
+	// ExcludeOrchestrator suppresses the otherwise-unconditional inclusion of
+	// catalog.Catalog.Orchestrator() in the resolved artifact set.
+	//
+	// The zero value (false) is "include the orchestrator", which is the behaviour every
+	// pre-existing caller relies on. Only a standalone-agent-only run sets it true, and it
+	// does so through OrchestratorExcludedFor rather than by writing the literal.
+	//
+	// Excluding the orchestrator also excludes any skill that no other included agent
+	// requires: skills are collected from the included agent set, so the skill set of an
+	// exclusion run is exactly the transitive skill closure of the selected agents.
+	ExcludeOrchestrator bool
+}
+
+// OrchestratorExcludedFor reports whether a run in the given mode resolves its artifact
+// set without the orchestrator. It is the single authority for that decision: every caller
+// that builds a Selection for a mode-driven run derives ExcludeOrchestrator from it, so
+// the probe set and the built plan can never disagree.
+//
+// Returns true for domain.ModeStandaloneOnly and false for every other mode, including
+// modes added in the future unless this function is changed.
+func OrchestratorExcludedFor(mode domain.RunMode) bool {
+	return mode == domain.ModeStandaloneOnly
 }
 
 // ResolveArtifactsFrom derives the complete artifact set from sel. It is the full-fidelity
@@ -41,10 +64,12 @@ func ResolveArtifactsFrom(c catalog.Catalog, sel Selection) (ArtifactSet, error)
 	agentsSeen := make(map[string]bool)
 	var agents []domain.Agent
 
-	// The orchestrator is always included.
-	orc := c.Orchestrator()
-	agentsSeen[orc.Key] = true
-	agents = append(agents, orc)
+	// The orchestrator is included unless the caller has explicitly excluded it.
+	if !sel.ExcludeOrchestrator {
+		orc := c.Orchestrator()
+		agentsSeen[orc.Key] = true
+		agents = append(agents, orc)
+	}
 
 	// Collect agents referenced by selected workflows.
 	for _, wfID := range sel.WorkflowIDs {

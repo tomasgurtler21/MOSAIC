@@ -437,6 +437,22 @@ func BuildRetargetedAgent(in RetargetInput) ([]byte, RetargetReport, error) {
 	removeKeys[bvField.Deployed] = true
 	removeKeys[bvField.Legacy] = true
 
+	// Read role before adding its names to removeKeys, so the value is captured before
+	// removal. The role is harness-independent and is carried through as mosaic_role in
+	// the target output, whichever key form the source used.
+	roleField, _ := agentfields.ByGeneric("role")
+	var roleValue string
+	for _, key := range agentfields.ReadOrder(roleField) {
+		if v, ok := fm.Get(key); ok && v.Kind == domain.KindScalar {
+			roleValue = v.Scalar
+			break
+		}
+	}
+	// Both prefixed and legacy role forms are removed; the value is re-written as
+	// mosaic_role after the forward leg, preserving the original value.
+	removeKeys[roleField.Deployed] = true
+	removeKeys[roleField.Legacy] = true
+
 	// All other MOSAIC stamp fields (both prefixed and legacy forms), except id.
 	// The id field is the agent's identity and is kept as-is.
 	for _, f := range agentfields.All() {
@@ -444,6 +460,9 @@ func BuildRetargetedAgent(in RetargetInput) ([]byte, RetargetReport, error) {
 			continue // id is kept; promote restores it as generic "id" but retarget keeps it
 		}
 		if f.Legacy == "bundle_version" {
+			continue // handled above
+		}
+		if f.Generic == "role" {
 			continue // handled above
 		}
 		if f.Deployed != "" {
@@ -543,6 +562,13 @@ func BuildRetargetedAgent(in RetargetInput) ([]byte, RetargetReport, error) {
 	// Carry bundle_version through as mosaic_bundle_version (harness-independent content).
 	if bundleVersion != "" {
 		fm.Set(bvField.Deployed, domain.ScalarValue(bundleVersion, domain.QuotePlain))
+	}
+
+	// Carry role through as mosaic_role (harness-independent field). The value was captured
+	// from either the prefixed or legacy form of the source; it is always re-written under
+	// the prefixed deployed key so the retargeted file uses the canonical deployed form.
+	if roleValue != "" {
+		fm.Set(roleField.Deployed, domain.ScalarValue(roleValue, domain.QuotePlain))
 	}
 
 	// Forward-map generic tools to target harness tool names.

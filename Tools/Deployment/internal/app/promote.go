@@ -299,6 +299,17 @@ func buildGenericAgent(in PromoteInput) ([]byte, error) {
 	for _, key := range agentfields.ReadOrder(idField) {
 		fm.Remove(key)
 	}
+
+	// For the role field: the deployed source may carry either the prefixed form (mosaic_role,
+	// from a migrated file) or the legacy form (role). Both are removed before setting the
+	// generic "role" so that exactly one form appears in the generic output. The
+	// promoteDroppedFrontmatterKeys set excludes the role entry (promote reconstructs it
+	// rather than dropping it), so the removal must be done explicitly here.
+	roleField, _ := agentfields.ByGeneric("role")
+	for _, key := range agentfields.ReadOrder(roleField) {
+		fm.Remove(key)
+	}
+
 	fm.Set("id", domain.ScalarValue(in.NumericID, domain.QuotePlain))
 	fm.Set("version", domain.ScalarValue(version, domain.QuotePlain))
 	fm.Set("name", domain.ScalarValue(name, domain.QuotePlain))

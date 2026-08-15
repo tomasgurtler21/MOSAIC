@@ -7,7 +7,7 @@ name: orchestrator
 description: Placeholder-expanding fixture for golden file tests — exercises {tool-permissions} placeholder expansion and RoleOrchestrator
 model: claude-sonnet-4-6
 tools: Read, Write, Edit, Bash, Glob, Grep, Task, TaskStop, AskUserQuestion
-role: orchestrator
+mosaic_role: orchestrator
 ---
 
 <Identity type="core">

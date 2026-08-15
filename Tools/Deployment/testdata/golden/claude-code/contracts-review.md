@@ -7,7 +7,7 @@ name: contracts-review
 description: Tool-light fixture for golden file tests — exercises skill-maps-to-empty and six harness tools emitted with no terminal
 model: claude-sonnet-4-6
 tools: Read, Write, Edit, Glob, Grep, AskUserQuestion
-role: subagent
+mosaic_role: subagent
 ---
 
 <Identity type="core">

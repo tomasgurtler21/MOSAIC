@@ -60,7 +60,11 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		if req.SkipAll[domain.QWorkflows] {
 			workflowIDs = []string{}
 		} else {
-			workflowIDs = s.askWorkflows(ctx)
+			ids, err := s.askWorkflows(ctx)
+			if err != nil {
+				return domain.RunSummary{}, err
+			}
+			workflowIDs = ids
 		}
 	}
 
@@ -69,7 +73,11 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		if req.SkipAll[domain.QUtilityAgents] {
 			utilityIDs = []string{}
 		} else if len(s.deps.Catalog.UtilityAgents()) > 0 {
-			utilityIDs = s.askUtilityAgents(ctx)
+			ids, err := s.askUtilityAgents(ctx)
+			if err != nil {
+				return domain.RunSummary{}, err
+			}
+			utilityIDs = ids
 		} else {
 			utilityIDs = []string{}
 		}
@@ -80,7 +88,11 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		if req.SkipAll[domain.QInfrastructureAgents] {
 			infraAgentIDs = []string{}
 		} else if len(s.deps.Catalog.InfrastructureAgents()) > 0 {
-			infraAgentIDs = s.askInfrastructureAgents(ctx)
+			ids, err := s.askInfrastructureAgents(ctx)
+			if err != nil {
+				return domain.RunSummary{}, err
+			}
+			infraAgentIDs = ids
 		} else {
 			infraAgentIDs = []string{}
 		}
@@ -91,7 +103,11 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		if req.SkipAll[domain.QHooks] {
 			hookIDs = []string{}
 		} else if len(s.deps.Catalog.Hooks()) > 0 {
-			hookIDs = s.askHooks(ctx)
+			ids, err := s.askHooks(ctx)
+			if err != nil {
+				return domain.RunSummary{}, err
+			}
+			hookIDs = ids
 		} else {
 			hookIDs = []string{}
 		}

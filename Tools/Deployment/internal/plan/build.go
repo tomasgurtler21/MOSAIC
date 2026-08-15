@@ -23,6 +23,7 @@ func (p *planner) Build(ctx context.Context, in Input) (domain.Plan, error) {
 		InfrastructureAgentIDs: in.InfrastructureAgentIDs,
 		StandaloneAgentIDs:     in.StandaloneAgentIDs,
 		HookIDs:                in.HookIDs,
+		ExcludeOrchestrator:    OrchestratorExcludedFor(in.Mode),
 	})
 	if err != nil {
 		return domain.Plan{}, err

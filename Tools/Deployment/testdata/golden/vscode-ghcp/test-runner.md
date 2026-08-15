@@ -8,7 +8,7 @@ description: Tool-heavy fixture for golden file tests — exercises all seven ge
 model: Claude Sonnet 4.6
 tools: ['read/readFile', 'edit/createFile', 'edit/editFiles', 'search/fileSearch', 'search/textSearch', 'search/listDirectory', 'execute/runInTerminal', 'vscode/askQuestions']
 disable-model-invocation: false
-role: subagent
+mosaic_role: subagent
 ---
 
 <Identity type="core">

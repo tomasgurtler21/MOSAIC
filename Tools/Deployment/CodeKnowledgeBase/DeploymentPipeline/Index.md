@@ -49,11 +49,16 @@ to make anything happen on disk.
    `map[string]domain.DeployedArtifactState` (`plan.Input.DeployedState`). The state carries
    presence, a content hash, and the version stamps read directly from the deployed file's
    frontmatter. `plan.Build` itself never touches the filesystem.
-2. `ResolveArtifacts` derives the full artifact set from the user's selections: the
-   orchestrator is always included; agents are pulled in transitively from every selected
-   workflow plus explicitly selected utility agents; skills are pulled in transitively from
-   every included agent's `RequiredSkills`; hook bundles come from the explicit hook
-   selection. Everything is deduplicated and sorted by key for determinism.
+2. `ResolveArtifactsFrom` derives the full artifact set from the user's selections: the
+   orchestrator is included unconditionally in every mode **except** standalone-only, where
+   `OrchestratorExcludedFor(mode)` returns true and `sel.ExcludeOrchestrator` is set.
+   `OrchestratorExcludedFor` is the single authority for that decision, so the probe path and
+   the build path cannot disagree. In a standalone-only run the skill set is the transitive
+   closure of the selected agents only, because skills are collected from the included agent
+   set. In every other mode: agents are pulled in transitively from every selected workflow
+   plus explicitly selected utility agents; skills are pulled in transitively from every
+   included agent's `RequiredSkills`; hook bundles come from the explicit hook selection.
+   Everything is deduplicated and sorted by key for determinism.
 3. For each artifact, `Build` asks the harness module (via `domain.HarnessModule.TargetPath`)
    where it would land in the target workspace, then classifies the item into one of four
    actions using `DeployedState` as the sole source of truth for version comparison and
@@ -92,7 +97,11 @@ Staleness is evaluated per-field, never as a single "is this stale" boolean:
   files produced before the prefix migration are not spuriously stale. The prefixed name wins
   when both forms are present. The complete pairing of deployed names to legacy aliases is
   defined in `Tools/Deployment/internal/agentfields` — no read or write site scatters literal
-  prefixed strings; all derive from that registry.
+  prefixed strings; all derive from that registry. The registry also covers the `role` field:
+  freshly deployed agent files carry `mosaic_role`; files deployed before the prefix migration
+  carry the bare `role` key, which is accepted as a legacy fallback at every read site. A file
+  carrying only the bare `role` key is **not** classified as stale on that basis alone —
+  key-name migration is not a staleness input, only version-stamp and content comparisons are.
 - **Skills** and **hook bundles** compare a single `version` field each.
 
 Each mismatching field produces a `VersionDelta` (field name, deployed value, source value);
@@ -197,7 +206,8 @@ recorded is a real, detectable local modification, not noise to be smoothed over
 | Concept | Meaning |
 |---------|---------|
 | Plan item action | One of Create / Update / Unchanged / Conflict — the single classification a plan item carries into execution. |
-| Version delta | An independent per-field staleness signal (`version`, `mosaic_transform_version`, `mosaic_injections_version` for agents; a single `version` for skills/hooks). Deployed field names carry the `mosaic_` prefix; legacy unprefixed names are accepted as fallback (prefixed wins when both present). |
+| Version delta | An independent per-field staleness signal (`version`, `mosaic_transform_version`, `mosaic_injections_version` for agents; a single `version` for skills/hooks). Deployed field names carry the `mosaic_` prefix; legacy unprefixed names are accepted as fallback (prefixed wins when both present). The `role` field follows the same pattern: deployed as `mosaic_role`, legacy bare `role` accepted as fallback; key-name difference alone is not a staleness signal. |
+| Orchestrator inclusion rule | The orchestrator is included unconditionally in every run mode except standalone-only. `OrchestratorExcludedFor(mode)` is the single authority for the mode → boolean decision; both the artifact-probe path and `plan.Build` derive `sel.ExcludeOrchestrator` from it, so the two paths cannot disagree. |
 | Injection class | Harness / Project / Workflow — determines whether region content is always refreshed, preserved-then-refreshed, or fully reassembled. |
 | Gap | A structured "this needed a human decision or couldn't be automated" signal, produced at any of the plan/transform/deploy stages and funneled into `todo`. |
 | Fallback tier | Workspace / MOSAIC-root / OS-temp — the three-tier writability chain resolved exactly once per run. |

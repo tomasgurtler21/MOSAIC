@@ -8,7 +8,7 @@ description: Tool-light fixture for golden file tests — exercises skill-maps-t
 model: claude-sonnet-4-6
 tools: ['read', 'edit', 'search', 'ask_user', 'skill']
 user-invocable: false
-role: subagent
+mosaic_role: subagent
 ---
 
 <Identity type="core">

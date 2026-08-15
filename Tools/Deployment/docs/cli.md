@@ -274,6 +274,8 @@ The JSON object always contains at least `Mode`, `Outcome`, and `WorkspacePath`.
 
 When a question cannot be answered from the provided flags or the selections file, the CLI **skips the item and records a TODO entry** rather than blocking or applying a silent default. The run completes with exit code 2 (`completed-with-skips`). The TODO file written to the workspace root lists every item that needs manual attention.
 
+This skip behavior is specific to the non-interactive CLI. The CLI never cancels a run mid-selection — it has no cancel keypress and never produces the abort-the-whole-run outcome that pressing Esc on a selection screen produces in the interactive TUI. A TUI user who wants to proceed with nothing selected for a given category presses Skip on that screen; a CLI user achieves the same outcome by omitting the selection from their `--selections` file. Both paths let the run continue with an empty selection and a TODO gap.
+
 ---
 
 ## Batch update example

@@ -20,9 +20,24 @@ var ErrRunReverted = errors.New("deployment run failed and the workspace was res
 // ErrModelSelectionCancelled is returned when the user cancels a tier-model or agent-model
 // question — Esc in the TUI, which arrives as domain.Cancelled. It aborts the whole run:
 // no config is persisted and no plan is executed. It is a distinguishable sentinel so a
-// frontend can tell a deliberate user abort from a genuine failure and render accordingly,
-// exactly as it already does for ErrPlanNotConfirmed.
+// frontend can tell a deliberate user abort from a genuine failure and render accordingly.
+// Both ErrModelSelectionCancelled and ErrSelectionCancelled are rendered by the TUI as
+// the cancelled outcome ("Deployment cancelled."), not the failure outcome.
 var ErrModelSelectionCancelled = errors.New("model selection was cancelled")
+
+// ErrSelectionCancelled is returned when the user cancels one of the five multi-select
+// selection questions — workflows, utility agents, infrastructure agents, standalone
+// agents, hook bundles. Esc in the TUI arrives as domain.Cancelled and produces this.
+// It aborts the whole run: no further question is asked, no config is persisted, and no
+// plan is executed. It is a distinguishable sentinel so a frontend can tell a deliberate
+// user abort from a genuine failure: the TUI renders it, and ErrModelSelectionCancelled,
+// as the cancelled outcome rather than the failure outcome.
+//
+// Cancellation is the ONLY status that produces it. domain.SkippedOne, domain.SkippedAll,
+// and a transport error from Interaction.SelectMany all keep their existing behaviour of
+// yielding an empty selection and letting the run continue, so non-interactive CLI runs
+// that supply no pre-answer for these questions are unaffected.
+var ErrSelectionCancelled = errors.New("selection was cancelled")
 
 // RevertedRunError is returned by a flow whose execution ran in atomic mode, failed, and was
 // reversed. It carries the original cause so the user sees why the run failed, and the paths

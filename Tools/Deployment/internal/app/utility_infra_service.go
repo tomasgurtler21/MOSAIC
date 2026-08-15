@@ -64,7 +64,11 @@ func deployUtilityInfrastructure(ctx context.Context, s *service, req UtilityInf
 		if req.SkipAll[domain.QUtilityAgents] {
 			utilityIDs = []string{}
 		} else if len(s.deps.Catalog.UtilityAgents()) > 0 {
-			utilityIDs = s.askUtilityAgents(ctx)
+			ids, err := s.askUtilityAgents(ctx)
+			if err != nil {
+				return domain.RunSummary{}, err
+			}
+			utilityIDs = ids
 		} else {
 			utilityIDs = []string{}
 		}
@@ -76,7 +80,11 @@ func deployUtilityInfrastructure(ctx context.Context, s *service, req UtilityInf
 		if req.SkipAll[domain.QInfrastructureAgents] {
 			infraAgentIDs = []string{}
 		} else if len(s.deps.Catalog.InfrastructureAgents()) > 0 {
-			infraAgentIDs = s.askInfrastructureAgents(ctx)
+			ids, err := s.askInfrastructureAgents(ctx)
+			if err != nil {
+				return domain.RunSummary{}, err
+			}
+			infraAgentIDs = ids
 		} else {
 			infraAgentIDs = []string{}
 		}

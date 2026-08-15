@@ -71,13 +71,16 @@ func TestAll_DeployedAndLegacyNamesAreDistinct(t *testing.T) {
 	}
 }
 
-// TestAll_ContainsSixPlusOneEntries verifies that All() returns exactly seven entries: the
-// six fields that are written into deployed files, plus mosaic_protocol_version which exists
-// in the registry for drop-set symmetry only (it is never written as frontmatter).
+// TestAll_ContainsSixPlusOneEntries verifies that All() returns exactly eight entries: the
+// six version stamp fields, plus the role field (Generic="role", Deployed="mosaic_role"),
+// plus mosaic_protocol_version which exists in the registry for drop-set symmetry only
+// (it is never written as frontmatter).
+//
+// This test FAILS until I3.1 adds the role entry to the registry.
 func TestAll_ContainsSixPlusOneEntries(t *testing.T) {
 	entries := agentfields.All()
-	if len(entries) != 7 {
-		t.Errorf("All() returned %d entries, want 7 (6 written fields + protocol_version for drop-set symmetry)",
+	if len(entries) != 8 {
+		t.Errorf("All() returned %d entries, want 8 (6 version stamp fields + role field + protocol_version for drop-set symmetry)",
 			len(entries))
 	}
 }
@@ -490,8 +493,14 @@ func TestIsKnownMosaicKey_UnknownField_False(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestPromoteDropKeys_ContainsBothNamesForNonIDEntries verifies that for every registry
-// entry that is not the id entry, PromoteDropKeys includes both the Deployed (prefixed) and
-// Legacy name. This ensures promote strips both name forms out of the generic output.
+// entry that is a deploy-only stamp (Generic == ""), PromoteDropKeys includes both the
+// Deployed (prefixed) and Legacy name. This ensures promote strips both name forms out of
+// the generic output for version stamp fields.
+//
+// Entries with a non-empty Generic (today: id and role) are excluded from the drop set
+// because promote does not drop them — it reconstructs them under their generic key. The
+// skip condition generalises from "Generic == id" to "Generic != "": both the id and role
+// entries are excluded from PromoteDropKeys. This test is updated to match I3.5's behaviour.
 func TestPromoteDropKeys_ContainsBothNamesForNonIDEntries(t *testing.T) {
 	keys := make(map[string]bool)
 	for _, k := range agentfields.PromoteDropKeys() {
@@ -499,8 +508,9 @@ func TestPromoteDropKeys_ContainsBothNamesForNonIDEntries(t *testing.T) {
 	}
 
 	for _, f := range agentfields.All() {
-		if f.Generic == "id" {
-			// id entry is deliberately excluded from PromoteDropKeys; promote restores it.
+		if f.Generic != "" {
+			// Entries with a generic counterpart (id, role) are excluded from PromoteDropKeys;
+			// promote reconstructs them under their generic key.
 			continue
 		}
 		if !keys[f.Deployed] {

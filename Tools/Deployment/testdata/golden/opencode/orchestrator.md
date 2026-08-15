@@ -22,7 +22,7 @@ permission:
   todowrite: deny
   todoread: deny
   skill: deny
-role: orchestrator
+mosaic_role: orchestrator
 ---
 
 <Identity type="core">

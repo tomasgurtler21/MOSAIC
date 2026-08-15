@@ -202,6 +202,10 @@ func TestClassify_LegacyMosaicDeployedKey_IsMosaic(t *testing.T) {
 
 // TestClassify_PrefixedMosaicDeployedKey_IsMosaic verifies that a MOSAIC-only deployed
 // field under its mosaic_-prefixed name classifies as ClassMosaic.
+// The list includes mosaic_role so that a regression in the classifier path for the role
+// field (e.g. wrong predicate called, or a lookup miss) is caught at this boundary:
+// a ClassUnknown result would cause the descriptor's unknown-field strip to silently remove
+// mosaic_role from every deployed file on read.
 func TestClassify_PrefixedMosaicDeployedKey_IsMosaic(t *testing.T) {
 	clf := buildClassifier(t, noDestFieldClassifierDescriptorYAML)
 
@@ -212,6 +216,7 @@ func TestClassify_PrefixedMosaicDeployedKey_IsMosaic(t *testing.T) {
 		"mosaic_bundle_version",
 		"mosaic_orchestrator_injections_version",
 		"mosaic_protocol_version",
+		"mosaic_role",
 	}
 	for _, key := range prefixedKeys {
 		got := clf.Classify(key)

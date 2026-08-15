@@ -8,7 +8,7 @@ description: Placeholder-expanding fixture for golden file tests — exercises {
 model: claude-sonnet-4-6
 tools: ['read', 'edit', 'search', 'execute', 'ask_user', 'agent']
 user-invocable: false
-role: orchestrator
+mosaic_role: orchestrator
 ---
 
 <Identity type="core">

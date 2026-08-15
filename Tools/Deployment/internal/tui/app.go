@@ -142,6 +142,13 @@ type rootModel struct {
 	// Status / error shown during screenRunning.
 	statusMsg string
 	errMsg    string
+
+	// runCancelled is true when the run ended because the user pressed Esc at one of the
+	// selection or model questions. It is set in the runErrorMsg handler when the error
+	// satisfies errors.Is(err, app.ErrSelectionCancelled) or
+	// errors.Is(err, app.ErrModelSelectionCancelled). When true, viewDone renders
+	// "Deployment cancelled." in RoleWarning rather than routing through the failure branch.
+	runCancelled bool
 }
 
 func newRootModel(ctx context.Context, svc app.Service, opts Options) *rootModel {
@@ -300,6 +307,13 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.screen = screenDone
+		if errors.Is(errMsg.err, app.ErrSelectionCancelled) || errors.Is(errMsg.err, app.ErrModelSelectionCancelled) {
+			// A deliberate user abort via Esc — show the cancelled outcome, not the
+			// failure outcome. The error is intentionally not assigned to m.errMsg so
+			// that viewDone's failure branch is not entered.
+			m.runCancelled = true
+			return m, nil
+		}
 		m.errMsg = errMsg.err.Error()
 		return m, nil
 	}
@@ -1016,6 +1030,10 @@ func (m *rootModel) viewDone() string {
 	}
 	if m.summaryScreen != nil {
 		return m.summaryScreen.View()
+	}
+	if m.runCancelled {
+		return m.theme.Style(RoleWarning).Width(m.width).Render("Deployment cancelled.") +
+			"\n" + m.theme.Style(RoleHelp).Width(m.width).Render("press q or enter to exit")
 	}
 	if m.errMsg != "" {
 		return m.theme.Style(RoleError).Width(m.width).Render(

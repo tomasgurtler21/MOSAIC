@@ -7,7 +7,7 @@ name: test-runner
 description: Tool-heavy fixture for golden file tests — exercises all seven generic tools including terminal
 model: claude-sonnet-4-6
 tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
-role: subagent
+mosaic_role: subagent
 ---
 
 <Identity type="core">

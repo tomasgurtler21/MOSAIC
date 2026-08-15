@@ -22,7 +22,7 @@ permission:
   todowrite: deny
   todoread: deny
   skill: deny
-role: subagent
+mosaic_role: subagent
 ---
 
 <Identity type="core">

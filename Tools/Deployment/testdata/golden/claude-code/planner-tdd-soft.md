@@ -7,7 +7,7 @@ name: planner-tdd-soft
 description: Skill-using fixture for golden file tests — exercises skill plus terminal alongside the full file-access tool set
 model: claude-sonnet-4-6
 tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
-role: subagent
+mosaic_role: subagent
 ---
 
 <Identity type="core">

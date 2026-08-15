@@ -23,6 +23,7 @@ type FieldName struct {
 // No literal "mosaic_" string may appear outside this package and its tests.
 var registry = []FieldName{
 	{Generic: "id", Deployed: "mosaic_id", Legacy: "id"},
+	{Generic: "role", Deployed: "mosaic_role", Legacy: "role"},
 	{Generic: "", Deployed: "mosaic_transform_version", Legacy: "transform_version"},
 	{Generic: "", Deployed: "mosaic_injections_version", Legacy: "injections_version"},
 	{Generic: "", Deployed: "mosaic_tool_mappings_version", Legacy: "tool_mappings_version"},
@@ -106,13 +107,18 @@ func IsKnownMosaicKey(key string) bool {
 }
 
 // PromoteDropKeys returns every key promote removes on MOSAIC's own account: the
-// Deployed and Legacy names of all All() entries except the id entry, plus "model".
-// The id entry is excluded because promote restores it as the generic "id".
+// Deployed and Legacy names of every All() entry that has NO generic counterpart, plus "model".
+//
+// Entries with a non-empty Generic (today: id and role) are excluded from the drop set
+// because promote does not drop them — it reconstructs them under their generic key. The
+// promote code removes both deployed forms of each such entry explicitly and then writes
+// the generic key, so exactly one form survives in the promoted file.
 func PromoteDropKeys() []string {
 	var keys []string
 	for _, f := range registry {
-		// Skip the id entry — promote restores it as the generic "id".
-		if f.Generic == "id" {
+		// Skip entries that have a generic counterpart — promote reconstructs them under
+		// their generic key rather than dropping them.
+		if f.Generic != "" {
 			continue
 		}
 		if f.Deployed != "" {
