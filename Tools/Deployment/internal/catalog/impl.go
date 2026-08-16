@@ -15,6 +15,8 @@ type catalogImpl struct {
 	catalogRoot  string
 	workers      []domain.Agent  // sorted by Key
 	orchestr     domain.Agent
+	orchScript   domain.Agent    // script orchestrator; zero value when absent
+	orchScriptOK bool            // true when orchestrator-script.md was loaded
 	utilities    []domain.Agent
 	standalones  []domain.Agent  // sorted by Key; populated by loadAgents standalone scan
 	agentIdx     map[string]domain.Agent  // all agents by key (workers + orchestrator + utilities + standalones)
@@ -48,6 +50,13 @@ func (c *catalogImpl) Agent(key string) (domain.Agent, bool) {
 
 // Orchestrator returns the single orchestrator agent.
 func (c *catalogImpl) Orchestrator() domain.Agent { return c.orchestr }
+
+// OrchestratorScript returns the script-mode orchestrator agent when present.
+// Returns (domain.Agent{}, false) when the catalog root has no orchestrator-script.md.
+// This is a stub that always returns false until I7.2 is implemented.
+func (c *catalogImpl) OrchestratorScript() (domain.Agent, bool) {
+	return c.orchScript, c.orchScriptOK
+}
 
 // UtilityAgents returns all utility agents.
 func (c *catalogImpl) UtilityAgents() []domain.Agent { return c.utilities }

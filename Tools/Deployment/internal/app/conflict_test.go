@@ -35,7 +35,7 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
-// threeConflictDeployPlan returns a ModeDeployNew plan with three ActionConflict items.
+// threeConflictDeployPlan returns a ModeDeployWorkspace plan with three ActionConflict items.
 func threeConflictDeployPlan(workspace string) domain.Plan {
 	mkConflict := func(key, path string) domain.PlanItem {
 		return domain.PlanItem{
@@ -49,7 +49,7 @@ func threeConflictDeployPlan(workspace string) domain.Plan {
 		}
 	}
 	return domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -62,10 +62,10 @@ func threeConflictDeployPlan(workspace string) domain.Plan {
 	}
 }
 
-// threeConflictUpdatePlan returns the same plan in ModeUpdate.
+// threeConflictUpdatePlan returns the same plan in ModeUpdateWorkspace.
 func threeConflictUpdatePlan(workspace string) domain.Plan {
 	p := threeConflictDeployPlan(workspace)
-	p.Mode = domain.ModeUpdate
+	p.Mode = domain.ModeUpdateWorkspace
 	return p
 }
 
@@ -490,7 +490,7 @@ func TestDeployNew_ConflictDefault_Skip_AddsGapSkippedFile(t *testing.T) {
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Todo = spy
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -574,7 +574,7 @@ func TestUpdate_ConflictDefault_Skip_AddsGapSkippedFile(t *testing.T) {
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Todo = spy
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

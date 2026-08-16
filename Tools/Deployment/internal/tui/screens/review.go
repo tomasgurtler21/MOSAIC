@@ -70,14 +70,8 @@ func buildReviewLines(p domain.Plan) []reviewLine {
 
 	// Summary header.
 	counts := p.Counts()
-	mode := "Deploy new"
-	if p.Mode == domain.ModeUpdate {
-		mode = "Update"
-	} else if p.Mode == domain.ModeWorkflowsOnly {
-		mode = "Update workflows only"
-	}
 	add(fmt.Sprintf("Mode: %s  Harness: %s  Workspace: %s",
-		mode, p.Harness.DisplayName, p.WorkspacePath), "muted")
+		modeDisplayName(p.Mode), p.Harness.DisplayName, p.WorkspacePath), "muted")
 	add("", "body")
 
 	// Count line.
@@ -141,8 +135,7 @@ func buildReviewLines(p domain.Plan) []reviewLine {
 
 			// For updates, list each version delta that drove the update.
 			for _, delta := range item.Stale {
-				add(fmt.Sprintf("               %s: %s → %s",
-					delta.Field, delta.Deployed, delta.Source), "muted")
+				add("               "+formatVersionDelta(delta), "muted")
 			}
 
 			// For conflicts, remind the user of the local modification.
@@ -168,6 +161,45 @@ func buildReviewLines(p domain.Plan) []reviewLine {
 	}
 
 	return lines
+}
+
+// modeDisplayName maps a RunMode to the label shown in the plan review's summary header.
+// It covers every declared mode. An unmapped mode returns string(mode) verbatim, so an
+// unhandled mode is visibly wrong rather than silently masquerading as a real one.
+func modeDisplayName(mode domain.RunMode) string {
+	switch mode {
+	case domain.ModeDeployWorkspace:
+		return "Deploy workspace"
+	case domain.ModeUpdateWorkspace:
+		return "Update workspace"
+	case domain.ModeUpdateWorkflows:
+		return "Update workflows"
+	case domain.ModeDeployAgents:
+		return "Deploy agents"
+	case domain.ModeDeployHooks:
+		return "Deploy hooks"
+	case domain.ModePromoteToGeneric:
+		return "Promote to generic"
+	case domain.ModeTransformHarness:
+		return "Transform harness"
+	default:
+		return string(mode)
+	}
+}
+
+// formatVersionDelta renders one staleness comparison for the plan review.
+//
+// An empty Source is the shared, documented representation of a removal. It renders as the
+// word "deleted" rather than a bare trailing arrow. Every other delta renders verbatim.
+//
+//	{Field}: {Deployed} → {Source}     when Source != ""
+//	{Field}: {Deployed} → deleted      when Source == ""
+func formatVersionDelta(delta domain.VersionDelta) string {
+	source := delta.Source
+	if source == "" {
+		source = "deleted"
+	}
+	return fmt.Sprintf("%s: %s → %s", delta.Field, delta.Deployed, source)
 }
 
 // shortHash abbreviates a "sha256:..." hash to "sha256:xxxxxxxx…" for display.

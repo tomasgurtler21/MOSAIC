@@ -3,17 +3,17 @@
 package app_test
 
 // infra_probe_test.go verifies that infrastructure agents present on disk are reflected in
-// the probe set passed to the planner, and that the wider probe set does not cause duplicate
-// model resolution for infrastructure agents.
+// the probe set passed to the planner for the deploy-new flow, and that the wider probe set
+// does not cause duplicate model resolution for infrastructure agents.
 //
-// T3.1 — Infrastructure agent presence in both deploy flows:
+// T3.1 — Infrastructure agent presence in deploy-new flow:
 //
 //   The defect: plan.ResolveArtifacts is called with nil for infrastructureAgentIDs at both
-//   call sites (deploy.go ~line 103 and utility_infra_service.go ~line 88), so the probe set
-//   never contains infrastructure agents. plan.EnumerateTargetPaths is never given their target
-//   paths, so probeDeployedStateWithIndex never probes them. plan.Input.DeployedState lacks
-//   entries for these paths, so the planner's map lookup yields a zero value (Present: false),
-//   and classifyAgentItem short-circuits to ActionCreate on every run after the first.
+//   call sites, so the probe set never contains infrastructure agents. plan.EnumerateTargetPaths
+//   is never given their target paths, so probeDeployedStateWithIndex never probes them.
+//   plan.Input.DeployedState lacks entries for these paths, so the planner's map lookup yields
+//   a zero value (Present: false), and classifyAgentItem short-circuits to ActionCreate on
+//   every run after the first.
 //
 //   After the fix (I3.1, I3.2), the probe set includes infrastructure agents, so:
 //     - Their target paths are enumerated
@@ -35,61 +35,20 @@ package app_test
 //
 // These tests will fail (DeployedState not containing infra agent entries) until I3.1 and I3.2
 // are implemented, which is the intended TDD RED state.
+//
+// NOTE: Shared fixtures (infraAgentForProbeTest, catalogWithInfraAgentForProbe,
+// writeInfraAgentFile, capturingPlannerWithPlan) and the deploy-agents counterpart tests live
+// in deployagents_infra_probe_test.go (no build tag) and are available to this file when
+// building with -tags stage3.
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"mosaic-deploy/internal/app"
 	"mosaic-deploy/internal/app/interactiontest"
 	"mosaic-deploy/internal/domain"
 )
-
-// ---------------------------------------------------------------------------
-// Shared fixtures
-// ---------------------------------------------------------------------------
-
-// infraAgentForProbeTest is a minimal infrastructure agent used to verify probe-set inclusion.
-var infraAgentForProbeTest = domain.Agent{
-	Key:             "security-scanner",
-	NumericID:       "42",
-	Version:         "1.0",
-	Name:            "Security Scanner",
-	Description:     "Scans for vulnerabilities",
-	Role:            domain.RoleWorker,
-	Infrastructure:  "security",
-	RecommendedTier: "HIGH",
-}
-
-// catalogWithInfraAgentForProbe returns a catalog with one infrastructure agent in addition
-// to the standard minimal catalog contents.
-func catalogWithInfraAgentForProbe() *stubCatalog {
-	cat := newMinimalCatalog()
-	cat.infraAgents = []domain.Agent{infraAgentForProbeTest}
-	return cat
-}
-
-// writeInfraAgentFile writes a minimal deployed infrastructure agent file to the workspace and
-// returns the file path relative to the workspace root (the target path).
-// The file content includes a version stamp so the planner can compare versions.
-func writeInfraAgentFile(t *testing.T, workspace string, agentKey string) string {
-	t.Helper()
-	// The stubHarnessModule.TargetPath returns req.Key + ".md".
-	relPath := agentKey + ".md"
-	content := []byte("---\nversion: \"1.0\"\n---\n\nInfrastructure agent deployed file.\n")
-	if err := os.WriteFile(filepath.Join(workspace, relPath), content, 0o644); err != nil {
-		t.Fatalf("writeInfraAgentFile: %v", err)
-	}
-	return relPath
-}
-
-// capturingPlannerWithPlan wraps capturingPlanner with a fixed plan result. It is used in
-// tests that need to inspect plan.Input without caring about the plan itself.
-func capturingPlannerWithPlan(result domain.Plan) *capturingPlanner {
-	return &capturingPlanner{result: result}
-}
 
 // ---------------------------------------------------------------------------
 // T3.1 — Deploy-new flow: infrastructure agent present on disk → DeployedState entry
@@ -192,113 +151,6 @@ func TestDeployNew_InfraAgentAbsentFromDisk_DeployedStateShowsAbsent(t *testing.
 	}
 }
 
-// TestDeployUtilityInfrastructure_InfraAgentAbsentFromDisk_DeployedStateShowsAbsent verifies
-// the symmetric baseline for the utility/infrastructure flow: when no infrastructure agent file
-// exists on disk, the DeployedState entry for that path has Present: false. This baseline must
-// remain correct after the probe-set inclusion fix (I3.2).
-func TestDeployUtilityInfrastructure_InfraAgentAbsentFromDisk_DeployedStateShowsAbsent(t *testing.T) {
-	// Arrange — workspace has no deployed infra agent file.
-	workspace := t.TempDir()
-
-	cat := catalogWithInfraAgentForProbe()
-	utilityInfraResult := domain.Plan{
-		Mode:          domain.ModeUtilityInfraOnly,
-		Harness:       minimalHarness,
-		WorkspacePath: workspace,
-		Scope:         domain.ScopeProject,
-	}
-	cp := capturingPlannerWithPlan(utilityInfraResult)
-	stub := interactiontest.NewBuilder().AnswerReview(true).Build()
-
-	deps, _ := newBaseDeps(t, stub)
-	deps.Catalog = cat
-	deps.Planner = cp
-
-	svc := app.New(deps)
-	req := app.UtilityInfraRequest{
-		HarnessID:              "stub-harness",
-		WorkspacePath:          workspace,
-		UtilityAgentIDs:        []string{},
-		InfrastructureAgentIDs: []string{infraAgentForProbeTest.Key},
-		AutoConfirmPlan:        true,
-	}
-
-	// Act
-	_, _ = svc.DeployUtilityInfrastructure(context.Background(), req)
-
-	// Assert
-	if cp.capturedInput == nil {
-		t.Fatal("planner Build was not called")
-	}
-
-	infraTargetPath := infraAgentForProbeTest.Key + ".md"
-	entry := cp.capturedInput.DeployedState[infraTargetPath]
-	if entry.Present {
-		t.Errorf("DeployedState[%q].Present = true for an absent file in utility/infrastructure flow; "+
-			"an infrastructure agent not yet deployed must appear absent in DeployedState",
-			infraTargetPath)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// T3.1 — Utility/infrastructure flow: infrastructure agent present on disk → DeployedState
-// ---------------------------------------------------------------------------
-
-// TestDeployUtilityInfrastructure_InfraAgentOnDisk_DeployedStateShowsPresent verifies the same
-// probe-set inclusion for the utility/infrastructure-only flow. Both flow functions have the
-// same defect (nil passed for infrastructureAgentIDs in plan.ResolveArtifacts) and both need
-// the same fix.
-func TestDeployUtilityInfrastructure_InfraAgentOnDisk_DeployedStateShowsPresent(t *testing.T) {
-	// Arrange
-	workspace := t.TempDir()
-	infraTargetPath := writeInfraAgentFile(t, workspace, infraAgentForProbeTest.Key)
-
-	cat := catalogWithInfraAgentForProbe()
-	utilityInfraResult := domain.Plan{
-		Mode:          domain.ModeUtilityInfraOnly,
-		Harness:       minimalHarness,
-		WorkspacePath: workspace,
-		Scope:         domain.ScopeProject,
-	}
-	cp := capturingPlannerWithPlan(utilityInfraResult)
-	stub := interactiontest.NewBuilder().AnswerReview(true).Build()
-
-	deps, _ := newBaseDeps(t, stub)
-	deps.Catalog = cat
-	deps.Planner = cp
-
-	svc := app.New(deps)
-	req := app.UtilityInfraRequest{
-		HarnessID:              "stub-harness",
-		WorkspacePath:          workspace,
-		UtilityAgentIDs:        []string{},
-		InfrastructureAgentIDs: []string{infraAgentForProbeTest.Key},
-		AutoConfirmPlan:        true,
-	}
-
-	// Act
-	_, _ = svc.DeployUtilityInfrastructure(context.Background(), req)
-
-	// Assert
-	if cp.capturedInput == nil {
-		t.Fatal("planner Build was not called; service may have returned early due to a different error")
-	}
-
-	entry, ok := cp.capturedInput.DeployedState[infraTargetPath]
-	if !ok {
-		t.Errorf("DeployedState does not contain an entry for infrastructure agent target path %q "+
-			"in the utility/infrastructure flow; the same probe-set inclusion fix must apply to both flows",
-			infraTargetPath)
-		return
-	}
-
-	if !entry.Present {
-		t.Errorf("DeployedState[%q].Present = false in utility/infrastructure flow, want true; "+
-			"the infrastructure agent file is on disk and must be probed correctly",
-			infraTargetPath)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // T3.4 — Regression: infrastructure selection not re-prompted
 // ---------------------------------------------------------------------------
@@ -383,76 +235,6 @@ func TestDeployNew_InfraAgentModelResolvedExactlyOnce(t *testing.T) {
 			"widening the probe set must not cause infrastructure agents to appear in both "+
 			"the first-batch and second-batch model resolution",
 			infraAgentForProbeTest.Key, count)
-	}
-}
-
-// TestDeployUtilityInfrastructure_InfraAgentModelResolvedExactlyOnce verifies the same
-// no-duplicate-model-resolution invariant for the utility/infrastructure-only flow.
-func TestDeployUtilityInfrastructure_InfraAgentModelResolvedExactlyOnce(t *testing.T) {
-	// Arrange
-	workspace := t.TempDir()
-	writeInfraAgentFile(t, workspace, infraAgentForProbeTest.Key)
-
-	cat := catalogWithInfraAgentForProbe()
-	stub := interactiontest.NewBuilder().
-		AnswerSelectOne(domain.QAgentModel, infraAgentForProbeTest.Key, "model-a").
-		AnswerReview(true).
-		Build()
-
-	deps, _ := newBaseDeps(t, stub)
-	deps.Catalog = cat
-
-	svc := app.New(deps)
-	req := app.UtilityInfraRequest{
-		HarnessID:              "stub-harness",
-		WorkspacePath:          workspace,
-		UtilityAgentIDs:        []string{},
-		InfrastructureAgentIDs: []string{infraAgentForProbeTest.Key},
-		AutoConfirmPlan:        true,
-	}
-
-	// Act
-	_, _ = svc.DeployUtilityInfrastructure(context.Background(), req)
-
-	// Assert
-	count := stub.CountAsked(domain.QAgentModel, infraAgentForProbeTest.Key)
-	if count > 1 {
-		t.Errorf("QAgentModel for infrastructure agent %q was asked %d times in "+
-			"DeployUtilityInfrastructure, want at most 1; the same duplicate-model-resolution "+
-			"protection must apply to the utility/infrastructure flow",
-			infraAgentForProbeTest.Key, count)
-	}
-}
-
-// TestDeployUtilityInfrastructure_InfraAgentIDsPreAnswered_QInfrastructureAgentsNeverAsked
-// verifies the selection non-re-prompting invariant for the utility/infrastructure flow.
-func TestDeployUtilityInfrastructure_InfraAgentIDsPreAnswered_QInfrastructureAgentsNeverAsked(t *testing.T) {
-	// Arrange
-	workspace := t.TempDir()
-	writeInfraAgentFile(t, workspace, infraAgentForProbeTest.Key)
-
-	cat := catalogWithInfraAgentForProbe()
-	stub := interactiontest.NewBuilder().AnswerReview(true).Build()
-
-	deps, _ := newBaseDeps(t, stub)
-	deps.Catalog = cat
-
-	svc := app.New(deps)
-	req := app.UtilityInfraRequest{
-		HarnessID:              "stub-harness",
-		WorkspacePath:          workspace,
-		UtilityAgentIDs:        []string{},
-		InfrastructureAgentIDs: []string{infraAgentForProbeTest.Key}, // pre-answered
-		AutoConfirmPlan:        true,
-	}
-
-	// Act
-	_, _ = svc.DeployUtilityInfrastructure(context.Background(), req)
-
-	// Assert
-	if stub.WasAsked(domain.QInfrastructureAgents, "") {
-		t.Error("QInfrastructureAgents was asked even though InfrastructureAgentIDs was pre-supplied " +
-			"in the utility/infrastructure flow; widening the probe set must not cause re-prompting")
 	}
 }
 

@@ -19,6 +19,7 @@ func (p *planner) Build(ctx context.Context, in Input) (domain.Plan, error) {
 	// Resolve the complete artifact set from all selections, including standalone agents.
 	set, err := ResolveArtifactsFrom(in.Catalog, Selection{
 		WorkflowIDs:            in.WorkflowIDs,
+		SubagentIDs:            in.SubagentIDs,
 		UtilityAgentIDs:        in.UtilityAgentIDs,
 		InfrastructureAgentIDs: in.InfrastructureAgentIDs,
 		StandaloneAgentIDs:     in.StandaloneAgentIDs,

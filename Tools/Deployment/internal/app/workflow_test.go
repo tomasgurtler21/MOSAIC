@@ -79,7 +79,7 @@ func TestUpdate_AddWorkflows_ExistingWorkflowsPreserved(t *testing.T) {
 	}
 	// The planner returns a plan with both workflows — this verifies the app passed both
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -153,7 +153,7 @@ func TestUpdate_AddWorkflows_PlannerReceivesBothWorkflowSets(t *testing.T) {
 	// Use a capturing planner so we can inspect what WorkflowIDs were passed
 	capPlanner := &capturingPlanner{
 		result: domain.Plan{
-			Mode:          domain.ModeUpdate,
+			Mode:          domain.ModeUpdateWorkspace,
 			Harness:       minimalHarness,
 			WorkspacePath: workspace,
 			Scope:         domain.ScopeProject,
@@ -219,7 +219,7 @@ func TestUpdate_AddWorkflows_NoDuplicates(t *testing.T) {
 
 	capPlanner := &capturingPlanner{
 		result: domain.Plan{
-			Mode:          domain.ModeUpdate,
+			Mode:          domain.ModeUpdateWorkspace,
 			Harness:       minimalHarness,
 			WorkspacePath: workspace,
 			Scope:         domain.ScopeProject,
@@ -547,7 +547,7 @@ func TestDeployNew_OrchestratorDeployedState_ContainsWorkflowData(t *testing.T) 
 	// Use a capturing planner to inspect what DeployedState was passed
 	capPlan := &capturingPlanner{
 		result: domain.Plan{
-			Mode:          domain.ModeDeployNew,
+			Mode:          domain.ModeDeployWorkspace,
 			Harness:       minimalHarness,
 			WorkspacePath: workspace,
 			Scope:         domain.ScopeProject,

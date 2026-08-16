@@ -1,8 +1,8 @@
 package app_test
 
-// todo_consistency_test.go verifies that each of the four deploy flows — deploy-new, update,
-// workflow-update, and utility-infra — wires ExecRequest.TodoItems as a live provider closure
-// over the todo collector, not as a pre-computed snapshot.
+// todo_consistency_test.go verifies that each of the four active deploy flows — deploy-new,
+// update, workflow-update, and deploy-agents — wires ExecRequest.TodoItems as a live provider
+// closure over the todo collector, not as a pre-computed snapshot.
 //
 // Background:
 //
@@ -181,7 +181,7 @@ func TestUpdate_TodoItemsProviderIsWiredFromLiveCollector(t *testing.T) {
 		},
 	}
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -235,7 +235,7 @@ func TestUpdateWorkflows_TodoItemsProviderIsWiredFromLiveCollector(t *testing.T)
 	// Provide an orchestrator-only plan: the workflow-update flow filters stale non-orchestrator
 	// agents, so a plan with only the orchestrator (ActionUpdate) is the minimal realistic shape.
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -273,20 +273,21 @@ func TestUpdateWorkflows_TodoItemsProviderIsWiredFromLiveCollector(t *testing.T)
 }
 
 // ---------------------------------------------------------------------------
-// T3.2 — utility-infra flow
+// T3.2 — deploy-agents flow
 // ---------------------------------------------------------------------------
 
-// TestDeployUtilityInfrastructure_TodoItemsProviderIsWiredFromLiveCollector verifies that
-// the utility-infra flow wires ExecRequest.TodoItems to a provider backed by the live todo
-// collector.
-func TestDeployUtilityInfrastructure_TodoItemsProviderIsWiredFromLiveCollector(t *testing.T) {
+// TestDeployAgents_TodoItemsProviderIsWiredFromLiveCollector verifies that the deploy-agents
+// flow wires ExecRequest.TodoItems to a provider backed by the live todo collector, so items
+// added during Execute (via Content callbacks) are visible when TodoItems() is called at write
+// time. This retargets the same invariant the retired utility-infra flow carried.
+func TestDeployAgents_TodoItemsProviderIsWiredFromLiveCollector(t *testing.T) {
 	// Arrange
 	stub := interactiontest.NewBuilder().AnswerReview(true).Build()
 	deps, workspace := newBaseDeps(t, stub)
 
-	// Supply a planner returning a utility-infra plan with no items (minimal valid shape).
+	// Supply a planner returning a deploy-agents plan with no items (minimal valid shape).
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUtilityInfraOnly,
+		Mode:          domain.ModeDeployAgents,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -301,18 +302,20 @@ func TestDeployUtilityInfrastructure_TodoItemsProviderIsWiredFromLiveCollector(t
 
 	svc := app.New(deps)
 
-	// Act — pre-answer UtilityAgentIDs and InfrastructureAgentIDs to empty slices so no
-	// interactive questions are asked for the agent selection steps.
-	_, err := svc.DeployUtilityInfrastructure(context.Background(), app.UtilityInfraRequest{
+	// Act — pre-answer all four per-class ID slices to empty so no interactive questions are
+	// asked for the agent selection steps (CD-6: any non-nil slice bypasses QDeployAgents).
+	_, err := svc.DeployAgents(context.Background(), app.DeployAgentsRequest{
 		HarnessID:              "stub-harness",
 		WorkspacePath:          workspace,
 		Scope:                  domain.ScopeProject,
+		SubagentIDs:            []string{},
 		UtilityAgentIDs:        []string{},
 		InfrastructureAgentIDs: []string{},
+		StandaloneAgentIDs:     []string{},
 		AutoConfirmPlan:        true,
 	})
 	if err != nil {
-		t.Fatalf("DeployUtilityInfrastructure: %v", err)
+		t.Fatalf("DeployAgents: %v", err)
 	}
 
 	// Assert

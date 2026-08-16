@@ -412,98 +412,6 @@ are not descended into.`,
 	transformCmd.Flags().StringVar(&transformOutput, "output", "", "Output format (json)")
 
 	// ------------------------------------------------------------------
-	// utility-infra subcommand
-	// ------------------------------------------------------------------
-	var (
-		utilityInfraHarness         string
-		utilityInfraWorkspace       string
-		utilityInfraUtility         string
-		utilityInfraInfrastructure  string
-		utilityInfraConflict        string
-		utilityInfraOutput          string
-		utilityInfraDryRun          bool
-		utilityInfraAutoConfirm     bool
-		utilityInfraUtilitySet      bool
-		utilityInfraInfraSet        bool
-	)
-
-	utilityInfraCmd := &cobra.Command{
-		Use:   "utility-infra",
-		Short: "Deploy only Utility and Infrastructure agents",
-		Long: `Deploy only Utility and Infrastructure agents and the skills they require.
-
-Asks only the Utility and Infrastructure agent selection questions. Workflow
-selection, hook configuration, and orchestrator rewriting are never performed.
-
-Directory enumeration is non-recursive when a folder path is supplied.`,
-		SilenceErrors: true,
-		SilenceUsage:  true,
-		PreRunE: func(cmd *cobra.Command, _ []string) error {
-			utilityInfraUtilitySet = cmd.Flags().Changed("utility")
-			utilityInfraInfraSet = cmd.Flags().Changed("infrastructure")
-			return nil
-		},
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if utilityInfraWorkspace == "" {
-				fmt.Fprintf(errOut, "error: --workspace is required for the utility-infra subcommand\n")
-				exitCode = ExitUsage
-				return nil
-			}
-			if utilityInfraHarness == "" {
-				fmt.Fprintf(errOut, "error: --harness is required for the utility-infra subcommand\n")
-				exitCode = ExitUsage
-				return nil
-			}
-
-			req := app.UtilityInfraRequest{
-				HarnessID:       utilityInfraHarness,
-				WorkspacePath:   pathinput.Unquote(strings.TrimSpace(utilityInfraWorkspace)),
-				Scope:           domain.ScopeProject,
-				DryRun:          utilityInfraDryRun,
-				AutoConfirmPlan: utilityInfraAutoConfirm,
-			}
-
-			// Apply --conflict when explicitly provided.
-			if utilityInfraConflict != "" {
-				switch strings.ToLower(utilityInfraConflict) {
-				case "skip":
-					req.ConflictDefault = domain.DecisionSkip
-				case "overwrite":
-					req.ConflictDefault = domain.DecisionOverwrite
-				case "backup":
-					req.ConflictDefault = domain.DecisionBackupThenOverwrite
-				default:
-					fmt.Fprintf(errOut, "invalid --conflict value %q; valid values: skip, overwrite, backup\n", utilityInfraConflict)
-					exitCode = ExitUsage
-					return nil
-				}
-			}
-
-			// Nil means "ask interactively" (CD-6 nil/empty convention).
-			// An explicitly provided flag (even empty string) produces a non-nil slice.
-			if utilityInfraUtilitySet {
-				req.UtilityAgentIDs = splitTrimmedParts(utilityInfraUtility)
-			}
-			if utilityInfraInfraSet {
-				req.InfrastructureAgentIDs = splitTrimmedParts(utilityInfraInfrastructure)
-			}
-
-			summary, svcErr := svc.DeployUtilityInfrastructure(ctx, req)
-			exitCode = renderUtilityInfraOutput(out, errOut, utilityInfraOutput, utilityInfraDryRun, summary, svcErr)
-			return nil
-		},
-	}
-
-	utilityInfraCmd.Flags().StringVar(&utilityInfraHarness, "harness", "", "Harness ID (required)")
-	utilityInfraCmd.Flags().StringVar(&utilityInfraWorkspace, "workspace", "", "Workspace directory (required)")
-	utilityInfraCmd.Flags().StringVar(&utilityInfraUtility, "utility", "", "Comma-separated utility agent ids (absent = ask; empty string = none)")
-	utilityInfraCmd.Flags().StringVar(&utilityInfraInfrastructure, "infrastructure", "", "Comma-separated infrastructure agent ids (absent = ask; empty string = none)")
-	utilityInfraCmd.Flags().StringVar(&utilityInfraConflict, "conflict", "", "Default decision for locally-modified files (skip|overwrite|backup)")
-	utilityInfraCmd.Flags().StringVar(&utilityInfraOutput, "output", "", "Output format (json)")
-	utilityInfraCmd.Flags().BoolVar(&utilityInfraDryRun, "dry-run", false, "Compute and report without writing any file")
-	utilityInfraCmd.Flags().BoolVar(&utilityInfraAutoConfirm, "auto-confirm", false, "Auto-confirm the deployment plan without prompting")
-
-	// ------------------------------------------------------------------
 	// render subcommand
 	// ------------------------------------------------------------------
 	var (
@@ -629,71 +537,208 @@ a prompt.`,
 	checkIndexCmd.Flags().StringVar(&checkIndexOutput, "output", "", "Output format (json)")
 
 	// ------------------------------------------------------------------
-	// standalone subcommand
+	// agents subcommand
 	// ------------------------------------------------------------------
 	var (
-		standaloneHarness       string
-		standaloneWorkspace     string
-		standaloneAgents        string
-		standaloneOutput        string
-		standaloneDryRun        bool
-		standaloneAutoConfirm   bool
-		standaloneAgentsSet     bool
+		agentsHarness       string
+		agentsWorkspace     string
+		agentsSubagents     string
+		agentsUtility       string
+		agentsInfra         string
+		agentsStandalone    string
+		agentsConflict      string
+		agentsOutput        string
+		agentsDryRun        bool
+		agentsAutoConfirm   bool
+		agentsSubagentsSet  bool
+		agentsUtilitySet    bool
+		agentsInfraSet      bool
+		agentsStandaloneSet bool
 	)
 
-	standaloneCmd := &cobra.Command{
-		Use:   "standalone",
-		Short: "Deploy only standalone agents",
-		Long: `Deploy only standalone agents and the skills they require.
+	agentsCmd := &cobra.Command{
+		Use:   "agents",
+		Short: "Deploy a chosen mix of subagents, utility agents, and standalone agents",
+		Long: `Deploy a chosen mix of subagents, utility agents, and standalone agents plus the skills they require.
 
-Asks only the standalone agent selection question. Workflow selection, hook
-configuration, and orchestrator rewriting are never performed.`,
+Presents a single browsable list spanning all subagents, utility agents, and standalone
+agents. No workflow, hook, or orchestrator work is performed.
+
+The four per-class flags (--subagents, --utility, --infra, --standalone) pre-answer the
+merged agent selection. If any per-class flag is given, the interactive question is skipped
+entirely and the unspecified classes are treated as explicitly empty.`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
-			standaloneAgentsSet = cmd.Flags().Changed("standalone")
+			agentsSubagentsSet = cmd.Flags().Changed("subagents")
+			agentsUtilitySet = cmd.Flags().Changed("utility")
+			agentsInfraSet = cmd.Flags().Changed("infra")
+			agentsStandaloneSet = cmd.Flags().Changed("standalone")
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if standaloneWorkspace == "" {
-				fmt.Fprintf(errOut, "error: --workspace is required for the standalone subcommand\n")
+			if agentsWorkspace == "" {
+				fmt.Fprintf(errOut, "error: --workspace is required for the agents subcommand\n")
 				exitCode = ExitUsage
 				return nil
 			}
-			if standaloneHarness == "" {
-				fmt.Fprintf(errOut, "error: --harness is required for the standalone subcommand\n")
+			if agentsHarness == "" {
+				fmt.Fprintf(errOut, "error: --harness is required for the agents subcommand\n")
 				exitCode = ExitUsage
 				return nil
 			}
 
-			req := app.StandaloneRequest{
-				HarnessID:       standaloneHarness,
-				WorkspacePath:   pathinput.Unquote(strings.TrimSpace(standaloneWorkspace)),
+			req := app.DeployAgentsRequest{
+				HarnessID:       agentsHarness,
+				WorkspacePath:   pathinput.Unquote(strings.TrimSpace(agentsWorkspace)),
 				Scope:           domain.ScopeProject,
-				DryRun:          standaloneDryRun,
-				AutoConfirmPlan: standaloneAutoConfirm,
+				DryRun:          agentsDryRun,
+				AutoConfirmPlan: agentsAutoConfirm,
 			}
 
-			// Nil means "ask interactively" (CD-6 nil/empty convention).
-			// An explicitly provided --standalone flag (even empty string) produces a non-nil slice.
-			if standaloneAgentsSet {
-				req.StandaloneAgentIDs = splitTrimmedParts(standaloneAgents)
+			// Apply --conflict when explicitly provided.
+			if agentsConflict != "" {
+				switch strings.ToLower(agentsConflict) {
+				case "skip":
+					req.ConflictDefault = domain.DecisionSkip
+				case "overwrite":
+					req.ConflictDefault = domain.DecisionOverwrite
+				case "backup":
+					req.ConflictDefault = domain.DecisionBackupThenOverwrite
+				default:
+					fmt.Fprintf(errOut, "invalid --conflict value %q; valid values: skip, overwrite, backup\n", agentsConflict)
+					exitCode = ExitUsage
+					return nil
+				}
 			}
 
-			summary, svcErr := svc.DeployStandalone(ctx, req)
-			exitCode = renderStandaloneOutput(out, errOut, standaloneOutput, standaloneDryRun, summary, svcErr)
+			// Per-class pre-answer semantics: if any per-class flag was supplied, the merged
+			// QDeployAgents question is skipped; all unspecified classes become non-nil empty.
+			anyPerClassSet := agentsSubagentsSet || agentsUtilitySet || agentsInfraSet || agentsStandaloneSet
+			if anyPerClassSet {
+				if agentsSubagentsSet {
+					req.SubagentIDs = splitTrimmedParts(agentsSubagents)
+				} else {
+					req.SubagentIDs = []string{}
+				}
+				if agentsUtilitySet {
+					req.UtilityAgentIDs = splitTrimmedParts(agentsUtility)
+				} else {
+					req.UtilityAgentIDs = []string{}
+				}
+				if agentsInfraSet {
+					req.InfrastructureAgentIDs = splitTrimmedParts(agentsInfra)
+				} else {
+					req.InfrastructureAgentIDs = []string{}
+				}
+				if agentsStandaloneSet {
+					req.StandaloneAgentIDs = splitTrimmedParts(agentsStandalone)
+				} else {
+					req.StandaloneAgentIDs = []string{}
+				}
+			}
+			// When no per-class flag is set, all four slices remain nil → QDeployAgents is asked.
+
+			summary, svcErr := svc.DeployAgents(ctx, req)
+			exitCode = renderAgentsOutput(out, errOut, agentsOutput, agentsDryRun, summary, svcErr)
 			return nil
 		},
 	}
 
-	standaloneCmd.Flags().StringVar(&standaloneHarness, "harness", "", "Harness ID (required)")
-	standaloneCmd.Flags().StringVar(&standaloneWorkspace, "workspace", "", "Workspace directory (required)")
-	standaloneCmd.Flags().StringVar(&standaloneAgents, "standalone", "", "Comma-separated standalone agent ids (absent = ask; empty string = none)")
-	standaloneCmd.Flags().StringVar(&standaloneOutput, "output", "", "Output format (json)")
-	standaloneCmd.Flags().BoolVar(&standaloneDryRun, "dry-run", false, "Compute and report without writing any file")
-	standaloneCmd.Flags().BoolVar(&standaloneAutoConfirm, "yes", false, "Auto-confirm the deployment plan without prompting")
+	agentsCmd.Flags().StringVar(&agentsHarness, "harness", "", "Harness ID (required)")
+	agentsCmd.Flags().StringVar(&agentsWorkspace, "workspace", "", "Workspace directory (required)")
+	agentsCmd.Flags().StringVar(&agentsSubagents, "subagents", "", "Comma-separated ordinary subagent ids (absent = ask; empty = none)")
+	agentsCmd.Flags().StringVar(&agentsUtility, "utility", "", "Comma-separated utility agent ids (absent = ask; empty = none)")
+	agentsCmd.Flags().StringVar(&agentsInfra, "infra", "", "Comma-separated infrastructure agent ids (absent = ask; empty = none)")
+	agentsCmd.Flags().StringVar(&agentsStandalone, "standalone", "", "Comma-separated standalone agent ids (absent = ask; empty = none)")
+	agentsCmd.Flags().StringVar(&agentsConflict, "conflict", "", "Default decision for locally-modified files (skip|overwrite|backup)")
+	agentsCmd.Flags().StringVar(&agentsOutput, "output", "", "Output format (json)")
+	agentsCmd.Flags().BoolVar(&agentsDryRun, "dry-run", false, "Compute and report without writing any file")
+	agentsCmd.Flags().BoolVar(&agentsAutoConfirm, "yes", false, "Auto-confirm the deployment plan without prompting")
 
-	root.AddCommand(deployCmd, updateCmd, workflowsCmd, promoteCmd, transformCmd, utilityInfraCmd, standaloneCmd, renderCmd, checkIndexCmd)
+	// ------------------------------------------------------------------
+	// hooks subcommand
+	// ------------------------------------------------------------------
+	var (
+		hooksHarness     string
+		hooksWorkspace   string
+		hooksHooks       string
+		hooksConflict    string
+		hooksOutput      string
+		hooksDryRun      bool
+		hooksAutoConfirm bool
+		hooksHooksSet    bool
+	)
+
+	hooksCmd := &cobra.Command{
+		Use:   "hooks",
+		Short: "Deploy hook bundles alone",
+		Long: `Deploy hook bundles alone, without any agent, model, or workflow changes.
+
+Asks only which hook bundles to deploy. No agent selection, model resolution, workflow
+configuration, or orchestrator rewriting is performed.`,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			hooksHooksSet = cmd.Flags().Changed("hooks")
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if hooksWorkspace == "" {
+				fmt.Fprintf(errOut, "error: --workspace is required for the hooks subcommand\n")
+				exitCode = ExitUsage
+				return nil
+			}
+			if hooksHarness == "" {
+				fmt.Fprintf(errOut, "error: --harness is required for the hooks subcommand\n")
+				exitCode = ExitUsage
+				return nil
+			}
+
+			req := app.DeployHooksRequest{
+				HarnessID:       hooksHarness,
+				WorkspacePath:   pathinput.Unquote(strings.TrimSpace(hooksWorkspace)),
+				Scope:           domain.ScopeProject,
+				DryRun:          hooksDryRun,
+				AutoConfirmPlan: hooksAutoConfirm,
+			}
+
+			// Apply --conflict when explicitly provided.
+			if hooksConflict != "" {
+				switch strings.ToLower(hooksConflict) {
+				case "skip":
+					req.ConflictDefault = domain.DecisionSkip
+				case "overwrite":
+					req.ConflictDefault = domain.DecisionOverwrite
+				case "backup":
+					req.ConflictDefault = domain.DecisionBackupThenOverwrite
+				default:
+					fmt.Fprintf(errOut, "invalid --conflict value %q; valid values: skip, overwrite, backup\n", hooksConflict)
+					exitCode = ExitUsage
+					return nil
+				}
+			}
+
+			// Nil means "ask interactively" (CD-6 nil/empty convention).
+			if hooksHooksSet {
+				req.HookIDs = splitTrimmedParts(hooksHooks)
+			}
+
+			summary, svcErr := svc.DeployHooks(ctx, req)
+			exitCode = renderHooksOutput(out, errOut, hooksOutput, hooksDryRun, summary, svcErr)
+			return nil
+		},
+	}
+
+	hooksCmd.Flags().StringVar(&hooksHarness, "harness", "", "Harness ID (required)")
+	hooksCmd.Flags().StringVar(&hooksWorkspace, "workspace", "", "Workspace directory (required)")
+	hooksCmd.Flags().StringVar(&hooksHooks, "hooks", "", "Comma-separated hook bundle ids (absent = ask; empty = none)")
+	hooksCmd.Flags().StringVar(&hooksConflict, "conflict", "", "Default decision for locally-modified files (skip|overwrite|backup)")
+	hooksCmd.Flags().StringVar(&hooksOutput, "output", "", "Output format (json)")
+	hooksCmd.Flags().BoolVar(&hooksDryRun, "dry-run", false, "Compute and report without writing any file")
+	hooksCmd.Flags().BoolVar(&hooksAutoConfirm, "yes", false, "Auto-confirm the deployment plan without prompting")
+
+	root.AddCommand(deployCmd, updateCmd, workflowsCmd, promoteCmd, transformCmd, agentsCmd, hooksCmd, renderCmd, checkIndexCmd)
 	root.SetArgs(args)
 
 	if err := root.Execute(); err != nil {

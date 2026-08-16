@@ -18,7 +18,7 @@ type screenID int
 
 const (
 	screenHarness       screenID = iota // harness selection (entry screen 1)
-	screenMode                          // deploy-new vs update (entry screen 2)
+	screenMode                          // Deploy workspace vs update (entry screen 2)
 	screenCatalogFolder                 // catalogue folder path entry (entry screen 3)
 	screenWorkspace                     // workspace path entry (entry screen 4)
 	screenQuestion                      // inline question overlay from the Interaction port
@@ -125,7 +125,7 @@ type rootModel struct {
 	workflowOverlay       *screens.WorkflowBrowserScreen     // QWorkflows multi-select
 	agentOverlay          *screens.UtilityAgentScreen        // QUtilityAgents multi-select
 	infraAgentOverlay     *screens.InfrastructureAgentScreen // QInfrastructureAgents multi-select
-	standaloneAgentOverlay *screens.StandaloneAgentScreen    // QStandaloneAgents multi-select
+	deployAgentOverlay    *screens.DeployAgentScreen         // QDeployAgents multi-select
 	hookOverlay           *screens.HookScreen                // QHooks multi-select
 
 	// Post-run summary screen (shown on screenDone after a successful or partial run).
@@ -395,8 +395,8 @@ func (m *rootModel) resizeQuestionOverlays(width, height int) {
 	if m.infraAgentOverlay != nil {
 		m.infraAgentOverlay.Resize(width, height)
 	}
-	if m.standaloneAgentOverlay != nil {
-		m.standaloneAgentOverlay.Resize(width, height)
+	if m.deployAgentOverlay != nil {
+		m.deployAgentOverlay.Resize(width, height)
 	}
 	if m.hookOverlay != nil {
 		m.hookOverlay.Resize(width, height)
@@ -433,7 +433,7 @@ func (m *rootModel) updateMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Set the path kind on every mode→path transition so that back-navigation
 		// followed by a different mode selection always applies the correct kind.
 		switch m.selections.mode {
-		case domain.ModePromote:
+		case domain.ModePromoteToGeneric:
 			m.wsScreen.SetPathKind(screens.PathKindFile)
 		case domain.ModeTransformHarness:
 			m.wsScreen.SetPathKind(screens.PathKindFileOrDirectory)
@@ -503,7 +503,7 @@ func (m *rootModel) updateWorkspace(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.wsScreen.Reset()
 		m.screen = screenRunning
 		switch m.selections.mode {
-		case domain.ModePromote:
+		case domain.ModePromoteToGeneric:
 			m.statusMsg = "Running promote…"
 		case domain.ModeTransformHarness:
 			m.statusMsg = "Running transform…"
@@ -618,17 +618,17 @@ func (m *rootModel) updateQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	// StandaloneAgentScreen overlay (QStandaloneAgents).
-	if m.standaloneAgentOverlay != nil {
-		cmd := m.standaloneAgentOverlay.Update(msg)
-		if m.standaloneAgentOverlay.Done() {
-			ids := m.standaloneAgentOverlay.SelectedIDs()
+	// DeployAgentScreen overlay (QDeployAgents).
+	if m.deployAgentOverlay != nil {
+		cmd := m.deployAgentOverlay.Update(msg)
+		if m.deployAgentOverlay.Done() {
+			ids := m.deployAgentOverlay.SelectedIDs()
 			m.dispatchMultiChoiceAnswer(ids)
-			m.standaloneAgentOverlay = nil
+			m.deployAgentOverlay = nil
 			m.screen = screenRunning
-		} else if m.standaloneAgentOverlay.Back() {
+		} else if m.deployAgentOverlay.Back() {
 			m.dispatchMultiChoiceCancelled()
-			m.standaloneAgentOverlay = nil
+			m.deployAgentOverlay = nil
 			m.screen = screenRunning
 		}
 		return m, cmd
@@ -799,9 +799,9 @@ func (m *rootModel) handleQuestionMsg(qMsg questionMsg) (tea.Model, tea.Cmd) {
 		case domain.QInfrastructureAgents:
 			agents := optionsToAgents(qMsg.choiceQ.Options)
 			m.infraAgentOverlay = screens.NewInfrastructureAgentScreen(agents, m.width, m.height, style)
-		case domain.QStandaloneAgents:
+		case domain.QDeployAgents:
 			cats := optionsToAgentCategories(qMsg.choiceQ.Options)
-			m.standaloneAgentOverlay = screens.NewStandaloneAgentScreen(cats, m.width, m.height, style, "")
+			m.deployAgentOverlay = screens.NewDeployAgentScreen(cats, m.width, m.height, style, "")
 		case domain.QHooks:
 			bundles, supported := optionsToHookBundles(qMsg.choiceQ.Options)
 			m.hookOverlay = screens.NewHookScreen(bundles, supported, m.width, m.height, style, "")
@@ -842,7 +842,7 @@ func (m *rootModel) startService() tea.Cmd {
 
 	return func() tea.Msg {
 		switch sel.mode {
-		case domain.ModeDeployNew:
+		case domain.ModeDeployWorkspace:
 			summary, err := svc.DeployNew(ctx, app.DeployRequest{
 				HarnessID:     sel.harnessID,
 				WorkspacePath: sel.workspacePath,
@@ -852,7 +852,7 @@ func (m *rootModel) startService() tea.Cmd {
 			}
 			return runDoneMsg{summary: summary}
 
-		case domain.ModeUpdate:
+		case domain.ModeUpdateWorkspace:
 			summary, err := svc.Update(ctx, app.UpdateRequest{
 				HarnessID:     sel.harnessID,
 				WorkspacePath: sel.workspacePath,
@@ -862,7 +862,7 @@ func (m *rootModel) startService() tea.Cmd {
 			}
 			return runDoneMsg{summary: summary}
 
-		case domain.ModeWorkflowsOnly:
+		case domain.ModeUpdateWorkflows:
 			// WorkflowIDs is left nil so the flow asks for workflow selection interactively.
 			summary, err := svc.UpdateWorkflows(ctx, app.WorkflowUpdateRequest{
 				HarnessID:     sel.harnessID,
@@ -873,7 +873,7 @@ func (m *rootModel) startService() tea.Cmd {
 			}
 			return runDoneMsg{summary: summary}
 
-		case domain.ModePromote:
+		case domain.ModePromoteToGeneric:
 			// Category is left empty so the interactive QPromoteCategory question is asked.
 			// workspacePath carries the agent file path collected by the file-kind path screen.
 			// harnessID comes from the harness screen selection — no additional harness question is asked.
@@ -899,11 +899,9 @@ func (m *rootModel) startService() tea.Cmd {
 			}
 			return transformDoneMsg{result: result}
 
-		case domain.ModeUtilityInfraOnly:
-			// UtilityAgentIDs and InfrastructureAgentIDs are left nil so the flow asks
-			// QUtilityAgents and QInfrastructureAgents interactively through the Interaction port.
-			// WorkspacePath comes from the workspace screen selection.
-			summary, err := svc.DeployUtilityInfrastructure(ctx, app.UtilityInfraRequest{
+		case domain.ModeDeployAgents:
+			// All per-class ID slices are left nil so the flow asks QDeployAgents interactively.
+			summary, err := svc.DeployAgents(ctx, app.DeployAgentsRequest{
 				HarnessID:     sel.harnessID,
 				WorkspacePath: sel.workspacePath,
 			})
@@ -912,10 +910,9 @@ func (m *rootModel) startService() tea.Cmd {
 			}
 			return runDoneMsg{summary: summary}
 
-		case domain.ModeStandaloneOnly:
-			// StandaloneAgentIDs is left nil so the flow asks QStandaloneAgents interactively
-			// through the Interaction port. WorkspacePath comes from the workspace screen selection.
-			summary, err := svc.DeployStandalone(ctx, app.StandaloneRequest{
+		case domain.ModeDeployHooks:
+			// HookIDs is left nil so the flow asks QHooks interactively.
+			summary, err := svc.DeployHooks(ctx, app.DeployHooksRequest{
 				HarnessID:     sel.harnessID,
 				WorkspacePath: sel.workspacePath,
 			})
@@ -997,8 +994,8 @@ func (m *rootModel) viewQuestion() string {
 	if m.infraAgentOverlay != nil {
 		return m.infraAgentOverlay.View()
 	}
-	if m.standaloneAgentOverlay != nil {
-		return m.standaloneAgentOverlay.View()
+	if m.deployAgentOverlay != nil {
+		return m.deployAgentOverlay.View()
 	}
 	if m.hookOverlay != nil {
 		return m.hookOverlay.View()

@@ -58,7 +58,7 @@ func TestUpdate_RevertedRun_ReturnsRevertedRunError(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -113,7 +113,7 @@ func TestUpdate_RevertedRun_ErrorMatchesErrRunReverted(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -151,7 +151,7 @@ func TestUpdate_RevertedRun_ErrorCarriesOriginalCause(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -197,7 +197,7 @@ func TestUpdate_RevertedRun_UnrestoredPathsPopulatedOnIncompleteReversal(t *test
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -246,7 +246,7 @@ func TestUpdate_SetsAtomicTrue_OnExecRequest(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -312,7 +312,7 @@ func TestUpdate_RevertedRunWithConflictBackup_ReturnsRevertedRunError(t *testing
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -377,7 +377,7 @@ func TestUpdate_FallbackRun_ReturnsSummaryNotError(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -420,7 +420,7 @@ func TestUpdate_FallbackRun_RevertedFalsePreservesPartialSemantics(t *testing.T)
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

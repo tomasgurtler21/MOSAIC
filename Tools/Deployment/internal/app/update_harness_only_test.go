@@ -1181,7 +1181,7 @@ func TestUpdate_NoCatalogPathChange_WhenNoHarnessOnlyAgentsPresent(t *testing.T)
 		Action:     domain.ActionUpdate,
 	}
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -1253,7 +1253,7 @@ func TestUpdate_CatalogBackedAndHarnessOnlyCoexist_BothPresentInPlan(t *testing.
 		Action:     domain.ActionUpdate,
 	}
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

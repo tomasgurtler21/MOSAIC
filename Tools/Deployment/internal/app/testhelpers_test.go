@@ -31,19 +31,21 @@ type stubCatalog struct {
 	// catalogRoot, when non-empty, is returned by CatalogRoot(). When empty, CatalogRoot()
 	// returns root. Separate from root so tests can model a session whose MOSAIC root and
 	// active catalogue root differ — the production state after Stage 4.
-	catalogRoot      string
-	agents           []domain.Agent
-	orchestrator     domain.Agent
-	utilityAgents    []domain.Agent
-	infraAgents      []domain.Agent // agents with non-empty Infrastructure field
-	standaloneAgents []domain.Agent // agents deployed only by the standalone mode
-	skills           []domain.Skill
-	hooks            []domain.HookBundle
-	workflows        []domain.Workflow
-	categories       []domain.WorkflowCategory
-	tiers            []domain.TierInfo
-	sections         map[string][]byte
-	sources          map[string][]byte
+	catalogRoot        string
+	agents             []domain.Agent
+	orchestrator       domain.Agent
+	orchestratorScript domain.Agent // script orchestrator; zero value when absent
+	orchestratorScriptOK bool       // true when OrchestratorScript should report present
+	utilityAgents      []domain.Agent
+	infraAgents        []domain.Agent // agents with non-empty Infrastructure field
+	standaloneAgents   []domain.Agent // agents deployed only by the standalone mode
+	skills             []domain.Skill
+	hooks              []domain.HookBundle
+	workflows          []domain.Workflow
+	categories         []domain.WorkflowCategory
+	tiers              []domain.TierInfo
+	sections           map[string][]byte
+	sources            map[string][]byte
 }
 
 func (c *stubCatalog) Root() string { return c.root }
@@ -56,6 +58,9 @@ func (c *stubCatalog) CatalogRoot() string {
 func (c *stubCatalog) Agents() []domain.Agent                             { return c.agents }
 func (c *stubCatalog) Agent(key string) (domain.Agent, bool) {
 	all := append(c.agents, append(c.utilityAgents, append(c.infraAgents, append(c.standaloneAgents, c.orchestrator)...)...)...)
+	if c.orchestratorScriptOK {
+		all = append(all, c.orchestratorScript)
+	}
 	for _, a := range all {
 		if a.Key == key {
 			return a, true
@@ -63,7 +68,10 @@ func (c *stubCatalog) Agent(key string) (domain.Agent, bool) {
 	}
 	return domain.Agent{}, false
 }
-func (c *stubCatalog) Orchestrator() domain.Agent                         { return c.orchestrator }
+func (c *stubCatalog) Orchestrator() domain.Agent { return c.orchestrator }
+func (c *stubCatalog) OrchestratorScript() (domain.Agent, bool) {
+	return c.orchestratorScript, c.orchestratorScriptOK
+}
 func (c *stubCatalog) UtilityAgents() []domain.Agent                      { return c.utilityAgents }
 func (c *stubCatalog) InfrastructureAgents() []domain.Agent               { return c.infraAgents }
 func (c *stubCatalog) StandaloneAgents() []domain.Agent                   { return c.standaloneAgents }
@@ -433,7 +441,7 @@ func newMinimalRegistry(mod *stubHarnessModule) *stubRegistry {
 // newMinimalPlan returns a domain.Plan for the minimal catalog scenario.
 func newMinimalPlan(workspace string) domain.Plan {
 	return domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

@@ -1,24 +1,20 @@
 package app_test
 
-// selectioncancel_test.go verifies that pressing Esc (domain.Cancelled) at any of the five
+// selectioncancel_test.go verifies that pressing Esc (domain.Cancelled) at any of the four
 // multi-select selection questions — workflows, utility agents, infrastructure agents,
-// standalone agents, hook bundles — aborts the entire run, matching the behaviour Esc
-// already has on model-selection questions.
-//
-// Today all five resolvers collapse Cancelled into "answered with nothing selected" and the
-// flow proceeds. These tests pin the intended behaviour so that the implementation can be
-// driven by them (TDD RED phase).
+// hook bundles — aborts the entire run, matching the behaviour Esc already has on
+// model-selection questions. It also covers the consolidated DeployAgents flow, where Esc
+// at QDeployAgents must abort with the same sentinel.
 //
 // Verified invariants:
 //
 // Abort on cancellation:
 //   - Esc at QWorkflows aborts DeployNew with an error matching
 //     errors.Is(err, app.ErrSelectionCancelled).
-//   - Esc at QUtilityAgents aborts DeployNew and DeployUtilityInfrastructure with the
-//     same sentinel.
-//   - Esc at QInfrastructureAgents aborts DeployNew and DeployUtilityInfrastructure.
-//   - Esc at QStandaloneAgents aborts DeployStandalone.
+//   - Esc at QUtilityAgents aborts DeployNew with the same sentinel.
+//   - Esc at QInfrastructureAgents aborts DeployNew.
 //   - Esc at QHooks aborts DeployNew.
+//   - Esc at QDeployAgents aborts DeployAgents.
 //   - A cancelled run asks no subsequent question and performs no write.
 //
 // Unchanged skip semantics (non-regression):
@@ -75,54 +71,6 @@ func catalogWithSelectionTestUtilityAgent() *stubCatalog {
 // so QInfrastructureAgents is asked when InfrastructureAgentIDs is nil.
 func catalogWithSelectionTestInfraAgent() *stubCatalog {
 	cat := newMinimalCatalog()
-	cat.infraAgents = []domain.Agent{
-		{
-			Key:             "monitor-agent",
-			NumericID:       "51",
-			Version:         "1.0",
-			Name:            "Monitor Agent",
-			Description:     "Monitors deployment health",
-			Role:            domain.RoleWorker,
-			Infrastructure:  "monitoring",
-			RecommendedTier: "HIGH",
-		},
-	}
-	return cat
-}
-
-// catalogWithStandaloneForCancelTest returns a minimal catalog extended with one
-// standalone agent so QStandaloneAgents is asked when StandaloneAgentIDs is nil.
-func catalogWithStandaloneForCancelTest() *stubCatalog {
-	cat := newMinimalCatalog()
-	cat.standaloneAgents = []domain.Agent{
-		{
-			Key:             "audit-logger",
-			NumericID:       "52",
-			Version:         "1.0",
-			Name:            "Audit Logger",
-			Description:     "Logs audit events",
-			Role:            domain.RoleStandalone,
-			RecommendedTier: "LOW",
-		},
-	}
-	return cat
-}
-
-// catalogWithUtilityAndInfraForCancelTest returns a catalog with both a utility agent and
-// an infrastructure agent, used for DeployUtilityInfrastructure cancellation tests.
-func catalogWithUtilityAndInfraForCancelTest() *stubCatalog {
-	cat := newMinimalCatalog()
-	cat.utilityAgents = []domain.Agent{
-		{
-			Key:             "lint-agent",
-			NumericID:       "50",
-			Version:         "1.0",
-			Name:            "Lint Agent",
-			Description:     "Runs linting checks",
-			Role:            domain.RoleWorker,
-			RecommendedTier: "LOW",
-		},
-	}
 	cat.infraAgents = []domain.Agent{
 		{
 			Key:             "monitor-agent",
@@ -437,174 +385,23 @@ func TestDeployNew_EscAtHooks_DoesNotReachExecutor(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// DeployUtilityInfrastructure — Esc at QUtilityAgents aborts the run
+// DeployAgents — Esc at QDeployAgents aborts the run
 // ---------------------------------------------------------------------------
 
-// TestDeployUtilityInfrastructure_EscAtUtilityAgents_ReturnsErrSelectionCancelled verifies
-// that pressing Esc at the utility-agent screen aborts DeployUtilityInfrastructure with
-// ErrSelectionCancelled.
-func TestDeployUtilityInfrastructure_EscAtUtilityAgents_ReturnsErrSelectionCancelled(t *testing.T) {
-	// Arrange — cancel QUtilityAgents.
+// TestDeployAgents_EscAtQDeployAgents_ReturnsErrSelectionCancelled verifies that pressing
+// Esc at the merged deploy-agents multi-select screen aborts DeployAgents with an error
+// matching errors.Is(err, app.ErrSelectionCancelled).
+func TestDeployAgents_EscAtQDeployAgents_ReturnsErrSelectionCancelled(t *testing.T) {
+	// Arrange — all ID slices nil so QDeployAgents is asked; cancel it.
 	stub := interactiontest.NewBuilder().
-		AnswerCancelledChoice(domain.QUtilityAgents, "").
+		AnswerCancelledChoice(domain.QDeployAgents, "").
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = catalogWithUtilityAndInfraForCancelTest()
+	deps.Catalog = catalogForDeployAgentQuestions()
 	svc := app.New(deps)
 
 	// Act
-	_, err := svc.DeployUtilityInfrastructure(context.Background(), app.UtilityInfraRequest{
-		HarnessID:              "stub-harness",
-		WorkspacePath:          workspace,
-		InfrastructureAgentIDs: []string{},
-		AutoConfirmPlan:        true,
-	})
-
-	// Assert
-	if err == nil {
-		t.Fatal("DeployUtilityInfrastructure returned nil error after Esc at QUtilityAgents; expected ErrSelectionCancelled")
-	}
-	if !errors.Is(err, app.ErrSelectionCancelled) {
-		t.Errorf("errors.Is(err, app.ErrSelectionCancelled) = false; "+
-			"Esc at QUtilityAgents must abort DeployUtilityInfrastructure with the distinguishable sentinel; got: %v", err)
-	}
-}
-
-// TestDeployUtilityInfrastructure_EscAtUtilityAgents_DoesNotAskInfraQuestion verifies that
-// once QUtilityAgents is cancelled, QInfrastructureAgents is not asked.
-func TestDeployUtilityInfrastructure_EscAtUtilityAgents_DoesNotAskInfraQuestion(t *testing.T) {
-	// Arrange — cancel QUtilityAgents; infra agents are in the catalog so the infra question
-	// would be presented if the flow continued past the utility-agent step.
-	stub := interactiontest.NewBuilder().
-		AnswerCancelledChoice(domain.QUtilityAgents, "").
-		Build()
-	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = catalogWithUtilityAndInfraForCancelTest()
-	svc := app.New(deps)
-
-	// Act
-	_, _ = svc.DeployUtilityInfrastructure(context.Background(), app.UtilityInfraRequest{
-		HarnessID:       "stub-harness",
-		WorkspacePath:   workspace,
-		AutoConfirmPlan: true,
-	})
-
-	// Assert
-	if stub.WasAsked(domain.QInfrastructureAgents, "") {
-		t.Error("QInfrastructureAgents was asked after QUtilityAgents was cancelled; " +
-			"a cancelled run must ask no subsequent question")
-	}
-}
-
-// TestDeployUtilityInfrastructure_EscAtUtilityAgents_DoesNotReachExecutor verifies that a
-// QUtilityAgents cancellation never reaches plan execution.
-func TestDeployUtilityInfrastructure_EscAtUtilityAgents_DoesNotReachExecutor(t *testing.T) {
-	// Arrange
-	stub := interactiontest.NewBuilder().
-		AnswerCancelledChoice(domain.QUtilityAgents, "").
-		Build()
-	spy := &deploySpyExecutor{}
-	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = catalogWithUtilityAndInfraForCancelTest()
-	deps.Executor = spy
-	svc := app.New(deps)
-
-	// Act
-	_, _ = svc.DeployUtilityInfrastructure(context.Background(), app.UtilityInfraRequest{
-		HarnessID:              "stub-harness",
-		WorkspacePath:          workspace,
-		InfrastructureAgentIDs: []string{},
-		AutoConfirmPlan:        true,
-	})
-
-	// Assert
-	if spy.called {
-		t.Error("Executor.Execute was called after Esc at QUtilityAgents in DeployUtilityInfrastructure; " +
-			"a cancelled run must never reach plan execution")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// DeployUtilityInfrastructure — Esc at QInfrastructureAgents aborts the run
-// ---------------------------------------------------------------------------
-
-// TestDeployUtilityInfrastructure_EscAtInfrastructureAgents_ReturnsErrSelectionCancelled
-// verifies that pressing Esc at the infrastructure-agent screen aborts
-// DeployUtilityInfrastructure with ErrSelectionCancelled.
-func TestDeployUtilityInfrastructure_EscAtInfrastructureAgents_ReturnsErrSelectionCancelled(t *testing.T) {
-	// Arrange — utility agents pre-answered; cancel infrastructure agents.
-	stub := interactiontest.NewBuilder().
-		AnswerCancelledChoice(domain.QInfrastructureAgents, "").
-		Build()
-	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = catalogWithUtilityAndInfraForCancelTest()
-	svc := app.New(deps)
-
-	// Act
-	_, err := svc.DeployUtilityInfrastructure(context.Background(), app.UtilityInfraRequest{
-		HarnessID:       "stub-harness",
-		WorkspacePath:   workspace,
-		UtilityAgentIDs: []string{},
-		AutoConfirmPlan: true,
-	})
-
-	// Assert
-	if err == nil {
-		t.Fatal("DeployUtilityInfrastructure returned nil error after Esc at QInfrastructureAgents; expected ErrSelectionCancelled")
-	}
-	if !errors.Is(err, app.ErrSelectionCancelled) {
-		t.Errorf("errors.Is(err, app.ErrSelectionCancelled) = false; "+
-			"Esc at QInfrastructureAgents must abort DeployUtilityInfrastructure with the distinguishable sentinel; got: %v", err)
-	}
-}
-
-// TestDeployUtilityInfrastructure_EscAtInfrastructureAgents_DoesNotReachExecutor verifies
-// that a QInfrastructureAgents cancellation in DeployUtilityInfrastructure never reaches
-// plan execution.
-func TestDeployUtilityInfrastructure_EscAtInfrastructureAgents_DoesNotReachExecutor(t *testing.T) {
-	// Arrange
-	stub := interactiontest.NewBuilder().
-		AnswerCancelledChoice(domain.QInfrastructureAgents, "").
-		Build()
-	spy := &deploySpyExecutor{}
-	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = catalogWithUtilityAndInfraForCancelTest()
-	deps.Executor = spy
-	svc := app.New(deps)
-
-	// Act
-	_, _ = svc.DeployUtilityInfrastructure(context.Background(), app.UtilityInfraRequest{
-		HarnessID:       "stub-harness",
-		WorkspacePath:   workspace,
-		UtilityAgentIDs: []string{},
-		AutoConfirmPlan: true,
-	})
-
-	// Assert
-	if spy.called {
-		t.Error("Executor.Execute was called after Esc at QInfrastructureAgents in DeployUtilityInfrastructure; " +
-			"a cancelled run must never reach plan execution")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// DeployStandalone — Esc at QStandaloneAgents aborts the run
-// ---------------------------------------------------------------------------
-
-// TestDeployStandalone_EscAtStandaloneAgents_ReturnsErrSelectionCancelled verifies that
-// pressing Esc at the standalone-agent multi-select screen aborts DeployStandalone with
-// an error matching errors.Is(err, app.ErrSelectionCancelled).
-func TestDeployStandalone_EscAtStandaloneAgents_ReturnsErrSelectionCancelled(t *testing.T) {
-	// Arrange — cancel QStandaloneAgents.
-	stub := interactiontest.NewBuilder().
-		AnswerCancelledChoice(domain.QStandaloneAgents, "").
-		Build()
-	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = catalogWithStandaloneForCancelTest()
-	svc := app.New(deps)
-
-	// Act
-	_, err := svc.DeployStandalone(context.Background(), app.StandaloneRequest{
+	_, err := svc.DeployAgents(context.Background(), app.DeployAgentsRequest{
 		HarnessID:     "stub-harness",
 		WorkspacePath: workspace,
 		AutoConfirmPlan: true,
@@ -612,29 +409,29 @@ func TestDeployStandalone_EscAtStandaloneAgents_ReturnsErrSelectionCancelled(t *
 
 	// Assert
 	if err == nil {
-		t.Fatal("DeployStandalone returned nil error after Esc at QStandaloneAgents; expected ErrSelectionCancelled")
+		t.Fatal("DeployAgents returned nil error after Esc at QDeployAgents; expected ErrSelectionCancelled")
 	}
 	if !errors.Is(err, app.ErrSelectionCancelled) {
 		t.Errorf("errors.Is(err, app.ErrSelectionCancelled) = false; "+
-			"Esc at QStandaloneAgents must abort the run with the distinguishable sentinel; got: %v", err)
+			"Esc at QDeployAgents must abort the run with the distinguishable sentinel; got: %v", err)
 	}
 }
 
-// TestDeployStandalone_EscAtStandaloneAgents_DoesNotReachExecutor verifies that a
-// QStandaloneAgents cancellation never causes the executor to be called.
-func TestDeployStandalone_EscAtStandaloneAgents_DoesNotReachExecutor(t *testing.T) {
+// TestDeployAgents_EscAtQDeployAgents_DoesNotReachExecutor verifies that a QDeployAgents
+// cancellation never causes the executor to be called — no plan is executed.
+func TestDeployAgents_EscAtQDeployAgents_DoesNotReachExecutor(t *testing.T) {
 	// Arrange
 	stub := interactiontest.NewBuilder().
-		AnswerCancelledChoice(domain.QStandaloneAgents, "").
+		AnswerCancelledChoice(domain.QDeployAgents, "").
 		Build()
 	spy := &deploySpyExecutor{}
 	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = catalogWithStandaloneForCancelTest()
+	deps.Catalog = catalogForDeployAgentQuestions()
 	deps.Executor = spy
 	svc := app.New(deps)
 
 	// Act
-	_, _ = svc.DeployStandalone(context.Background(), app.StandaloneRequest{
+	_, _ = svc.DeployAgents(context.Background(), app.DeployAgentsRequest{
 		HarnessID:     "stub-harness",
 		WorkspacePath: workspace,
 		AutoConfirmPlan: true,
@@ -642,36 +439,8 @@ func TestDeployStandalone_EscAtStandaloneAgents_DoesNotReachExecutor(t *testing.
 
 	// Assert
 	if spy.called {
-		t.Error("Executor.Execute was called after Esc at QStandaloneAgents; " +
+		t.Error("Executor.Execute was called after Esc at QDeployAgents; " +
 			"a cancelled run must never reach plan execution")
-	}
-}
-
-// TestDeployStandalone_EscAtStandaloneAgents_DoesNotCallUserConfigSave verifies that a
-// QStandaloneAgents cancellation never causes UserConfigStore.Save to be called — the run
-// persists nothing.
-func TestDeployStandalone_EscAtStandaloneAgents_DoesNotCallUserConfigSave(t *testing.T) {
-	// Arrange
-	stub := interactiontest.NewBuilder().
-		AnswerCancelledChoice(domain.QStandaloneAgents, "").
-		Build()
-	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = catalogWithStandaloneForCancelTest()
-	spy := &spyUserConfig{}
-	deps.UserConfig = spy
-	svc := app.New(deps)
-
-	// Act
-	_, _ = svc.DeployStandalone(context.Background(), app.StandaloneRequest{
-		HarnessID:     "stub-harness",
-		WorkspacePath: workspace,
-		AutoConfirmPlan: true,
-	})
-
-	// Assert
-	if len(spy.saved) != 0 {
-		t.Errorf("UserConfigStore.Save was called %d time(s) after Esc at QStandaloneAgents; "+
-			"a cancelled run must persist nothing", len(spy.saved))
 	}
 }
 
@@ -815,21 +584,23 @@ func TestDeployNew_HooksSkippedOne_RunProceeds(t *testing.T) {
 	}
 }
 
-// TestDeployStandalone_StandaloneAgentsSkippedOne_RunProceeds verifies that answering
-// SkippedOne for QStandaloneAgents lets DeployStandalone continue with an empty selection.
-func TestDeployStandalone_StandaloneAgentsSkippedOne_RunProceeds(t *testing.T) {
-	// Arrange — the default stub answer for QStandaloneAgents is SkippedOne.
+// TestDeployAgents_QDeployAgentsSkippedOne_RunProceeds verifies that answering SkippedOne
+// for QDeployAgents lets DeployAgents continue with an empty selection — the skip semantics
+// are unchanged.
+func TestDeployAgents_QDeployAgentsSkippedOne_RunProceeds(t *testing.T) {
+	// Arrange — the default stub answer for an unscripted question is SkippedOne.
 	stub := interactiontest.NewBuilder().
 		AnswerReview(true).
 		Build()
 	spy := &deploySpyExecutor{}
 	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = catalogWithStandaloneForCancelTest()
+	deps.Catalog = catalogForDeployAgentQuestions()
+	deps.Planner = &stubPlanner{plan: deployAgentsPlanNoOrchestrator(workspace)}
 	deps.Executor = spy
 	svc := app.New(deps)
 
 	// Act
-	_, err := svc.DeployStandalone(context.Background(), app.StandaloneRequest{
+	_, err := svc.DeployAgents(context.Background(), app.DeployAgentsRequest{
 		HarnessID:     "stub-harness",
 		WorkspacePath: workspace,
 		AutoConfirmPlan: true,
@@ -837,11 +608,11 @@ func TestDeployStandalone_StandaloneAgentsSkippedOne_RunProceeds(t *testing.T) {
 
 	// Assert
 	if err != nil {
-		t.Errorf("DeployStandalone returned an error after SkippedOne at QStandaloneAgents: %v; "+
+		t.Errorf("DeployAgents returned an error after SkippedOne at QDeployAgents: %v; "+
 			"SkippedOne must not become an abort (non-regression)", err)
 	}
 	if !spy.called {
-		t.Error("Executor.Execute was not called after a SkippedOne standalone-agents answer; " +
+		t.Error("Executor.Execute was not called after a SkippedOne QDeployAgents answer; " +
 			"a SkippedOne answer must still let the run proceed to execution")
 	}
 }
@@ -958,38 +729,6 @@ func TestDeployNew_UtilityAgentsAnsweredEmpty_RunProceeds(t *testing.T) {
 	}
 }
 
-// TestDeployStandalone_StandaloneAgentsAnsweredEmpty_RunProceeds verifies that an Answered
-// answer with zero standalone-agent IDs still proceeds.
-func TestDeployStandalone_StandaloneAgentsAnsweredEmpty_RunProceeds(t *testing.T) {
-	// Arrange — answer QStandaloneAgents with zero IDs.
-	stub := interactiontest.NewBuilder().
-		AnswerSelectMany(domain.QStandaloneAgents, "", []string{}).
-		AnswerReview(true).
-		Build()
-	spy := &deploySpyExecutor{}
-	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = catalogWithStandaloneForCancelTest()
-	deps.Executor = spy
-	svc := app.New(deps)
-
-	// Act
-	_, err := svc.DeployStandalone(context.Background(), app.StandaloneRequest{
-		HarnessID:     "stub-harness",
-		WorkspacePath: workspace,
-		AutoConfirmPlan: true,
-	})
-
-	// Assert
-	if err != nil {
-		t.Errorf("DeployStandalone returned an error after Answered(empty) at QStandaloneAgents: %v; "+
-			"an explicit empty selection must not become an abort (non-regression)", err)
-	}
-	if !spy.called {
-		t.Error("Executor.Execute was not called after an Answered(empty) standalone-agents answer; " +
-			"an explicit empty selection must still let the run proceed to execution")
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Plan review gate still reached on a non-cancelled run
 // ---------------------------------------------------------------------------
@@ -1032,22 +771,23 @@ func TestDeployNew_NoCancellation_PlanReviewIsReached(t *testing.T) {
 	}
 }
 
-// TestDeployStandalone_NoCancellation_PlanReviewIsReached verifies the same plan-review-gate
-// invariant for the standalone flow.
-func TestDeployStandalone_NoCancellation_PlanReviewIsReached(t *testing.T) {
-	// Arrange
+// TestDeployAgents_NoCancellation_PlanReviewIsReached verifies the plan-review-gate
+// invariant for the consolidated deploy-agents flow.
+func TestDeployAgents_NoCancellation_PlanReviewIsReached(t *testing.T) {
+	// Arrange — answer QDeployAgents with an empty selection; script the review gate.
 	stub := interactiontest.NewBuilder().
-		AnswerSelectMany(domain.QStandaloneAgents, "", []string{}).
+		AnswerSelectMany(domain.QDeployAgents, "", []string{}).
 		AnswerReview(true).
 		Build()
 	spy := &deploySpyExecutor{}
 	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = catalogWithStandaloneForCancelTest()
+	deps.Catalog = catalogForDeployAgentQuestions()
+	deps.Planner = &stubPlanner{plan: deployAgentsPlanNoOrchestrator(workspace)}
 	deps.Executor = spy
 	svc := app.New(deps)
 
 	// Act
-	_, err := svc.DeployStandalone(context.Background(), app.StandaloneRequest{
+	_, err := svc.DeployAgents(context.Background(), app.DeployAgentsRequest{
 		HarnessID:     "stub-harness",
 		WorkspacePath: workspace,
 		// AutoConfirmPlan is false so the Review call must be made through Interaction.
@@ -1056,43 +796,10 @@ func TestDeployStandalone_NoCancellation_PlanReviewIsReached(t *testing.T) {
 
 	// Assert
 	if err != nil {
-		t.Errorf("DeployStandalone returned an unexpected error on a non-cancelled run: %v", err)
+		t.Errorf("DeployAgents returned an unexpected error on a non-cancelled run: %v", err)
 	}
 	if !stub.WasAsked(domain.QPlanConfirm, "") {
-		t.Error("QPlanConfirm (plan review) was not asked on a non-cancelled standalone run; " +
-			"the plan review gate must still be presented when no selection was cancelled")
-	}
-}
-
-// TestDeployUtilityInfrastructure_NoCancellation_PlanReviewIsReached verifies the same
-// plan-review-gate invariant for the utility/infrastructure flow.
-func TestDeployUtilityInfrastructure_NoCancellation_PlanReviewIsReached(t *testing.T) {
-	// Arrange
-	stub := interactiontest.NewBuilder().
-		AnswerSelectMany(domain.QUtilityAgents, "", []string{}).
-		AnswerSelectMany(domain.QInfrastructureAgents, "", []string{}).
-		AnswerReview(true).
-		Build()
-	spy := &deploySpyExecutor{}
-	deps, workspace := newBaseDeps(t, stub)
-	deps.Catalog = catalogWithUtilityAndInfraForCancelTest()
-	deps.Executor = spy
-	svc := app.New(deps)
-
-	// Act
-	_, err := svc.DeployUtilityInfrastructure(context.Background(), app.UtilityInfraRequest{
-		HarnessID:     "stub-harness",
-		WorkspacePath: workspace,
-		// AutoConfirmPlan is false so the Review call must be made through Interaction.
-		AutoConfirmPlan: false,
-	})
-
-	// Assert
-	if err != nil {
-		t.Errorf("DeployUtilityInfrastructure returned an unexpected error on a non-cancelled run: %v", err)
-	}
-	if !stub.WasAsked(domain.QPlanConfirm, "") {
-		t.Error("QPlanConfirm (plan review) was not asked on a non-cancelled utility/infra run; " +
+		t.Error("QPlanConfirm (plan review) was not asked on a non-cancelled DeployAgents run; " +
 			"the plan review gate must still be presented when no selection was cancelled")
 	}
 }

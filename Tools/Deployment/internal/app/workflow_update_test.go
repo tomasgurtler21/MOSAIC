@@ -22,7 +22,7 @@ package app_test
 //
 // Orchestrator full refresh (T5.5):
 //   - The orchestrator item is present in the executed plan.
-//   - RunSummary.Mode is ModeWorkflowsOnly.
+//   - RunSummary.Mode is ModeUpdateWorkflows.
 //
 // Conflict handling (T5.6):
 //   - A locally-modified orchestrator triggers QLocalModification.
@@ -98,7 +98,7 @@ func newWorkflowUpdateRequest(workspace, harnessID string, workflowIDs []string)
 // Used when the stub planner is configured to simulate the post-filter plan shape.
 func orchestratorOnlyPlan(workspace string) domain.Plan {
 	return domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -117,7 +117,7 @@ func orchestratorOnlyPlan(workspace string) domain.Plan {
 // one skill item, and one hook item. Used to verify the orchestrator-only filter.
 func mixedArtifactPlan(workspace string) domain.Plan {
 	return domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -159,7 +159,7 @@ func mixedArtifactPlan(workspace string) domain.Plan {
 // orchestratorConflictPlan returns a plan with one ActionConflict orchestrator item.
 func orchestratorConflictPlan(workspace string) domain.Plan {
 	return domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -242,7 +242,7 @@ func TestUpdateWorkflows_ReplaceSemantics_PreviouslyDeployedWorkflowsDropped(t *
 	// Use a capturing planner to inspect what WorkflowIDs were passed.
 	capPlan := &capturingPlanner{
 		result: domain.Plan{
-			Mode:          domain.ModeWorkflowsOnly,
+			Mode:          domain.ModeUpdateWorkflows,
 			Harness:       minimalHarness,
 			WorkspacePath: workspace,
 			Scope:         domain.ScopeProject,
@@ -284,7 +284,7 @@ func TestUpdateWorkflows_ReplaceSemantics_SelectionIsExact(t *testing.T) {
 
 	capPlan := &capturingPlanner{
 		result: domain.Plan{
-			Mode:          domain.ModeWorkflowsOnly,
+			Mode:          domain.ModeUpdateWorkflows,
 			Harness:       minimalHarness,
 			WorkspacePath: workspace,
 			Scope:         domain.ScopeProject,
@@ -353,7 +353,7 @@ func TestUpdate_WorkflowAddition_IsAdditive_DoesNotReplace(t *testing.T) {
 
 	capPlan := &capturingPlanner{
 		result: domain.Plan{
-			Mode:          domain.ModeUpdate,
+			Mode:          domain.ModeUpdateWorkspace,
 			Harness:       minimalHarness,
 			WorkspacePath: workspace,
 			Scope:         domain.ScopeProject,
@@ -399,13 +399,13 @@ func TestUpdate_WorkflowAddition_IsAdditive_DoesNotReplace(t *testing.T) {
 }
 
 // TestUpdate_SummaryMode_IsNotWorkflowsOnly verifies that calling Update produces a summary
-// with ModeUpdate, not ModeWorkflowsOnly. This distinguishes the two flows in run records.
+// with ModeUpdateWorkspace, not ModeUpdateWorkflows. This distinguishes the two flows in run records.
 func TestUpdate_SummaryMode_IsNotWorkflowsOnly(t *testing.T) {
 	// Arrange
 	stub := interactiontest.NewBuilder().AnswerReview(true).Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -424,10 +424,10 @@ func TestUpdate_SummaryMode_IsNotWorkflowsOnly(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	// Assert — Update must produce ModeUpdate, never ModeWorkflowsOnly
-	if summary.Mode == domain.ModeWorkflowsOnly {
+	// Assert — Update must produce ModeUpdateWorkspace, never ModeUpdateWorkflows
+	if summary.Mode == domain.ModeUpdateWorkflows {
 		t.Errorf("Update flow produced Mode = %q; want %q; replace semantics must not leak into Update",
-			summary.Mode, domain.ModeUpdate)
+			summary.Mode, domain.ModeUpdateWorkspace)
 	}
 }
 
@@ -603,7 +603,7 @@ func TestUpdateWorkflows_Orchestrator_IncludedInExecutedPlan(t *testing.T) {
 }
 
 // TestUpdateWorkflows_RunSummaryMode_IsWorkflowsOnly verifies that the RunSummary produced
-// by UpdateWorkflows carries ModeWorkflowsOnly. This distinguishes the workflow-only flow
+// by UpdateWorkflows carries ModeUpdateWorkflows. This distinguishes the workflow-only flow
 // in run records, the todo file metadata, and the CLI output.
 func TestUpdateWorkflows_RunSummaryMode_IsWorkflowsOnly(t *testing.T) {
 	// Arrange
@@ -619,9 +619,9 @@ func TestUpdateWorkflows_RunSummaryMode_IsWorkflowsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateWorkflows: %v", err)
 	}
-	if summary.Mode != domain.ModeWorkflowsOnly {
+	if summary.Mode != domain.ModeUpdateWorkflows {
 		t.Errorf("RunSummary.Mode = %q, want %q; the workflow-only update flow must report its mode correctly",
-			summary.Mode, domain.ModeWorkflowsOnly)
+			summary.Mode, domain.ModeUpdateWorkflows)
 	}
 }
 
@@ -941,7 +941,7 @@ func TestUpdateWorkflows_WorkflowIDsEmptyNonNil_QWorkflowsNotAsked(t *testing.T)
 	stub := interactiontest.NewBuilder().AnswerReview(true).Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -991,7 +991,7 @@ func TestUpdateWorkflows_NonOrchestratorAgent_ActionConflict_IsFiltered(t *testi
 	writeTempFile(t, workspace, "test-runner.md", []byte("---\nversion: \"1.0\"\n---\nlocally modified content\n"))
 
 	planWithConflict := domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -1042,7 +1042,7 @@ func TestUpdateWorkflows_NonOrchestratorAgent_ActionUnchanged_IsFiltered(t *test
 	writeTempFile(t, workspace, "test-runner.md", []byte("---\nversion: \"1.0\"\n---\ncurrent content\n"))
 
 	planWithUnchanged := domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -1091,7 +1091,7 @@ func TestUpdateWorkflows_NonOrchestratorAgent_ActionUnchanged_IsFiltered(t *test
 // It is used by T1.1 tests that verify new-agent inclusion.
 func newAgentPlan(workspace string) domain.Plan {
 	return domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -1455,7 +1455,7 @@ func TestUpdateWorkflows_MultipleNewAgents_QuestionOrderMatchesWorkflowOrder(t *
 
 	// Neither coder.md nor reviewer.md is written — both agents are absent and must be new.
 	planWithTwoNewAgents := domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -1541,7 +1541,7 @@ func TestUpdateWorkflows_NewAgent_SkippedModelQuestion_RunCompletes(t *testing.T
 	// Planner returns a plan that includes a GapNoModel for test-runner, simulating what
 	// plan.Build produces when the agent has no resolved model.
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -1587,7 +1587,7 @@ func TestUpdateWorkflows_NewAgent_SkippedModelQuestion_ModelQuestionWasAsked(t *
 	stub := interactiontest.NewBuilder().AnswerReview(true).Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -1629,7 +1629,7 @@ func TestUpdateWorkflows_NewAgent_SkippedModelQuestion_GapNoModelForwarded(t *te
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Todo = spy
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -1707,7 +1707,7 @@ func newSkillEnabledCatalog() *stubCatalog {
 // the planner emits when both the agent and the skill are absent from the workspace.
 func newSkillDeployPlan(workspace string) domain.Plan {
 	return domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -1915,7 +1915,7 @@ func TestUpdateWorkflows_MissingSkillForDeployedAgent_NotAdmittedToExecutor(t *t
 	// Planner returns a plan with ActionCreate for the skill. The filter must reject it because
 	// lean-tdd is not in newSkillKeys (no new agent requires it in this run).
 	planWithAbsentSkill := domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

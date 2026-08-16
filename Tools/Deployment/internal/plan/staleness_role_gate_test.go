@@ -121,7 +121,7 @@ func buildRoleGateInput(agent domain.Agent) plan.Input {
 	return plan.Input{
 		Catalog:         cat,
 		Module:          newFakeModule(),
-		Mode:            domain.ModeUpdate,
+		Mode:            domain.ModeUpdateWorkspace,
 		WorkspacePath:   "/fake/workspace",
 		Scope:           domain.ScopeProject,
 		GOOS:            "linux",
@@ -181,7 +181,7 @@ func buildOrchestratorRoleGateInput() plan.Input {
 	return plan.Input{
 		Catalog:         cat,
 		Module:          newFakeModule(),
-		Mode:            domain.ModeUpdate,
+		Mode:            domain.ModeUpdateWorkspace,
 		WorkspacePath:   "/fake/workspace",
 		Scope:           domain.ScopeProject,
 		GOOS:            "linux",

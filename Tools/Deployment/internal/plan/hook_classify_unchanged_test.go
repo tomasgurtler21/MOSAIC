@@ -86,7 +86,7 @@ func buildInputWithHook(
 	return plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",

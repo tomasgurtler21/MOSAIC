@@ -180,7 +180,7 @@ func TestUpdate_SkippedConflictFile_SummaryContainsTakenSkipped(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -241,7 +241,7 @@ func TestUpdate_SkippedFile_ProducesGapSkippedFile(t *testing.T) {
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Todo = spy
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

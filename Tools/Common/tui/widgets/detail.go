@@ -100,22 +100,48 @@ func (d *DetailPane) ScrollUp() {
 	}
 }
 
+// totalLines returns the number of visual lines the pane's content occupies
+// after lipgloss rendering. When the pane has a positive width, lipgloss
+// word-wraps the text, so the visual line count can exceed the raw newline
+// count. Width-zero mode (no-wrap) counts raw newlines, matching the
+// historical behaviour.
 func (d *DetailPane) totalLines() int {
+	if d.width <= 0 {
+		count := 0
+		if d.title != "" {
+			count += len(strings.Split(d.title, "\n"))
+		}
+		if d.content != "" {
+			count += len(strings.Split(d.content, "\n"))
+		}
+		return count
+	}
+	// Positive width: count wrapped visual lines produced by the same render
+	// path View() uses, so scroll bounds are derived from the rendered output.
 	count := 0
 	if d.title != "" {
-		count += len(strings.Split(d.title, "\n"))
+		rendered := d.styles.Title.Width(d.width).Render(d.title)
+		count += len(strings.Split(rendered, "\n"))
 	}
 	if d.content != "" {
-		count += len(strings.Split(d.content, "\n"))
+		rendered := d.styles.Body.Width(d.width).Render(d.content)
+		count += len(strings.Split(rendered, "\n"))
 	}
 	return count
 }
 
-// Resize updates the visible height and render width.
+// Resize updates the visible height and render width. The scroll offset is
+// clamped to the last valid position for the new layout rather than being
+// reset to zero: content that was visible before a resize remains visible
+// when the new layout still has room for it.
 func (d *DetailPane) Resize(height, width int) {
 	d.height = height
 	d.width = width
-	if d.offset > 0 && d.offset >= d.totalLines()-height {
-		d.offset = 0
+	maxOffset := d.totalLines() - height
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if d.offset > maxOffset {
+		d.offset = maxOffset
 	}
 }

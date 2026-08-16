@@ -12,9 +12,9 @@ import (
 
 var modeItems = []widgets.ListItem{
 	{
-		ID:          string(domain.ModeDeployNew),
-		Label:       "Deploy new",
-		Description: "Deploy agents and skills to a new workspace for the first time.",
+		ID:          string(domain.ModeDeployWorkspace),
+		Label:       "Deploy workspace",
+		Description: "Deploy agents, skills, and hooks to a workspace for the first time.",
 		Detail: "Creates a fresh deployment in the workspace directory.\n" +
 			"Use this when setting up a new project or a clean install.\n\n" +
 			"The tool will ask you to select:\n" +
@@ -23,8 +23,8 @@ var modeItems = []widgets.ListItem{
 			"  • Any custom tools or hook bundles",
 	},
 	{
-		ID:          string(domain.ModeUpdate),
-		Label:       "Update existing",
+		ID:          string(domain.ModeUpdateWorkspace),
+		Label:       "Update workspace",
 		Description: "Update an existing workspace deployment to the latest source versions.",
 		Detail: "Compares the deployed files against the current source versions.\n" +
 			"Stale files are updated; locally-modified files prompt for a decision.\n\n" +
@@ -32,8 +32,8 @@ var modeItems = []widgets.ListItem{
 			"descriptor has changed.",
 	},
 	{
-		ID:          string(domain.ModeWorkflowsOnly),
-		Label:       "Update workflows only",
+		ID:          string(domain.ModeUpdateWorkflows),
+		Label:       "Update workflows",
 		Description: "Replace the workflow set in an already-deployed orchestrator.",
 		Detail: "Only the orchestrator file is rewritten — no agent, skill, or hook\n" +
 			"artifact is touched, even if stale.\n\n" +
@@ -43,8 +43,30 @@ var modeItems = []widgets.ListItem{
 			"of the deployment.",
 	},
 	{
-		ID:          string(domain.ModePromote),
-		Label:       "Promote harness-only agent",
+		ID:          string(domain.ModeDeployAgents),
+		Label:       "Deploy agents",
+		Description: "Deploy a chosen mix of subagents, utility agents, and standalone agents.",
+		Detail: "Presents a single browsable list spanning all subagents (including\n" +
+			"Infrastructure-category subagents), utility agents, and standalone agents.\n\n" +
+			"No workflow, hook, or orchestrator work is performed — only the selected\n" +
+			"agents and the skills they require are deployed.\n\n" +
+			"Use this to add or update individual agents across any catalog category\n" +
+			"without disturbing workflows, hooks, or the orchestrator.",
+	},
+	{
+		ID:          string(domain.ModeDeployHooks),
+		Label:       "Deploy hooks",
+		Description: "Deploy hook bundles alone, without any agent, model, or workflow changes.",
+		Detail: "Asks only which hook bundles to deploy.\n\n" +
+			"No agent selection, model resolution, workflow configuration, or\n" +
+			"orchestrator rewriting is performed — only the selected hook bundles\n" +
+			"and their registration steps are executed.\n\n" +
+			"Use this when you want to add or update hook bundles without touching\n" +
+			"agents or the orchestrator.",
+	},
+	{
+		ID:          string(domain.ModePromoteToGeneric),
+		Label:       "Promote to generic",
 		Description: "Generate a generic agent source file from an already-transformed harness-only agent.",
 		Detail: "Reads a harness-only agent file (one with transform_version and canonical\n" +
 			"boundary tags) and generates a generic source file under the catalog root.\n\n" +
@@ -67,38 +89,9 @@ var modeItems = []widgets.ListItem{
 			"Use this to migrate agents between harnesses without losing tool mappings\n" +
 			"or injected content.",
 	},
-	{
-		ID:          string(domain.ModeUtilityInfraOnly),
-		Label:       "Deploy utility/infrastructure only",
-		Description: "Deploy only Utility and Infrastructure agents, skipping workflows and hooks.",
-		Detail: "Asks only the Utility and Infrastructure agent selection questions.\n" +
-			"Workflow selection, hook configuration, and orchestrator rewriting are\n" +
-			"never performed in this mode.\n\n" +
-			"The run deploys the selected Utility and Infrastructure agents and the\n" +
-			"skills they require — nothing else.\n\n" +
-			"Infrastructure-agent model resolution works exactly as in the full deploy,\n" +
-			"including the skip path and the resulting gap behaviour.\n\n" +
-			"Use this when you want to add or update utility and infrastructure agents\n" +
-			"without touching the orchestrator or workflow configuration.",
-	},
-	{
-		ID:          string(domain.ModeStandaloneOnly),
-		Label:       "Deploy standalone agents only",
-		Description: "Deploy only standalone agents, skipping workflows, hooks, and utility/infrastructure agents.",
-		Detail: "Asks only the standalone agent selection question.\n" +
-			"Workflow selection, hook configuration, and orchestrator rewriting are\n" +
-			"never performed in this mode.\n\n" +
-			"The run deploys only the selected standalone agents and the\n" +
-			"skills they require — nothing else.\n\n" +
-			"Only deploy is supported for standalone agents — promote, update, and\n" +
-			"other modes do not apply to standalone agents.\n\n" +
-			"Use this when you want to deploy standalone agents without touching\n" +
-			"the orchestrator, workflows, hooks, or utility/infrastructure agents.",
-	},
 }
 
-// ModeScreen presents the available run modes: deploy-new, update-existing,
-// workflows-only, and promote.
+// ModeScreen presents the available run modes.
 //
 // Navigation contract:
 //   - Enter -> Done() == true, SelectedMode() returns the chosen RunMode.

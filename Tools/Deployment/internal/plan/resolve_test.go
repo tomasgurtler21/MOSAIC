@@ -55,17 +55,17 @@ func TestResolveArtifacts_SingleWorkflow_ContainsReferencedAgents(t *testing.T) 
 }
 
 // TestResolveArtifacts_SingleWorkflow_AgentCountMatchesWorkflowPlusOrchestrator verifies that
-// the resolved agent count equals the number of referenced agents plus the orchestrator (one).
-// quick-fix has 4 referenced agents + 1 orchestrator = 5 total.
+// the resolved agent count equals the number of referenced agents plus both orchestrator-role
+// files. quick-fix has 4 referenced agents + 1 main orchestrator + 1 orchestrator-script = 6 total.
 func TestResolveArtifacts_SingleWorkflow_AgentCountMatchesWorkflowPlusOrchestrator(t *testing.T) {
 	cat := loadRealCatalog(t)
 
 	set, err := plan.ResolveArtifacts(cat, []string{"quick-fix"}, nil, nil, nil)
 	must(t, err)
 
-	const wantCount = 5 // 4 referenced agents + 1 orchestrator
+	const wantCount = 6 // 4 referenced agents + 1 main orchestrator + 1 orchestrator-script
 	if len(set.Agents) != wantCount {
-		t.Errorf("ArtifactSet.Agents: got %d agents, want %d (4 referenced + 1 orchestrator)",
+		t.Errorf("ArtifactSet.Agents: got %d agents, want %d (4 referenced + 1 main orchestrator + 1 orchestrator-script)",
 			len(set.Agents), wantCount)
 	}
 }

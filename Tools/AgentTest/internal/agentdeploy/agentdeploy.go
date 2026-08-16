@@ -114,6 +114,15 @@ func (e *DeployError) Error() string {
 // to detect the class without knowing the concrete type.
 func (e *DeployError) Unwrap() error { return ErrDeployFailed }
 
+// FailureReason, FailureDetail, FailureToolMessage and FailureExitCode expose
+// the four structured-failure fields through the authoring.StructuredFailure
+// interface without importing the authoring package. The accessor set is
+// satisfied structurally: no import in either direction.
+func (e *DeployError) FailureReason() string      { return e.Reason }
+func (e *DeployError) FailureDetail() string      { return e.Detail }
+func (e *DeployError) FailureToolMessage() string { return e.ToolMessage }
+func (e *DeployError) FailureExitCode() int       { return e.ExitCode }
+
 func (e *RenderError) Error() string {
 	return fmt.Sprintf("render failed (exit %d, reason %q, detail %q): %s",
 		e.ExitCode, e.Reason, e.Detail, e.ToolMessage)
@@ -122,6 +131,15 @@ func (e *RenderError) Error() string {
 // Unwrap returns ErrRenderFailed so callers can use errors.Is(err, ErrRenderFailed)
 // to detect the class without knowing the concrete type.
 func (e *RenderError) Unwrap() error { return ErrRenderFailed }
+
+// FailureReason, FailureDetail, FailureToolMessage and FailureExitCode expose
+// the four structured-failure fields through the authoring.StructuredFailure
+// interface without importing the authoring package. The accessor set is
+// satisfied structurally: no import in either direction.
+func (e *RenderError) FailureReason() string      { return e.Reason }
+func (e *RenderError) FailureDetail() string      { return e.Detail }
+func (e *RenderError) FailureToolMessage() string { return e.ToolMessage }
+func (e *RenderError) FailureExitCode() int       { return e.ExitCode }
 
 // CommandRunner is the seam that makes the outcome mapping testable without
 // the real deployment tool present.

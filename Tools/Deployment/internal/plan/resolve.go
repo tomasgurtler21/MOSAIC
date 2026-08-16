@@ -12,6 +12,10 @@ import (
 // A nil or empty slice means "none selected" for that dimension.
 type Selection struct {
 	WorkflowIDs            []string
+	// SubagentIDs are ordinary (non-infrastructure) subagents named directly rather than
+	// reached through a workflow's ReferencedAgents. Populated only by ModeDeployAgents;
+	// nil in every other mode.
+	SubagentIDs            []string
 	UtilityAgentIDs        []string
 	InfrastructureAgentIDs []string
 	StandaloneAgentIDs     []string
@@ -21,8 +25,8 @@ type Selection struct {
 	// catalog.Catalog.Orchestrator() in the resolved artifact set.
 	//
 	// The zero value (false) is "include the orchestrator", which is the behaviour every
-	// pre-existing caller relies on. Only a standalone-agent-only run sets it true, and it
-	// does so through OrchestratorExcludedFor rather than by writing the literal.
+	// pre-existing caller relies on. Callers set it via OrchestratorExcludedFor rather than
+	// by writing the literal.
 	//
 	// Excluding the orchestrator also excludes any skill that no other included agent
 	// requires: skills are collected from the included agent set, so the skill set of an
@@ -31,14 +35,19 @@ type Selection struct {
 }
 
 // OrchestratorExcludedFor reports whether a run in the given mode resolves its artifact
-// set without the orchestrator. It is the single authority for that decision: every caller
-// that builds a Selection for a mode-driven run derives ExcludeOrchestrator from it, so
-// the probe set and the built plan can never disagree.
+// set without either orchestrator-role file. It is the single authority for that decision:
+// every caller that builds a Selection for a mode-driven run derives ExcludeOrchestrator
+// from it, so the probe set and the built plan can never disagree.
 //
-// Returns true for domain.ModeStandaloneOnly and false for every other mode, including
-// modes added in the future unless this function is changed.
+// Returns true for domain.ModeDeployAgents and domain.ModeDeployHooks. Returns false for
+// every other mode, including modes added in the future unless this function is changed.
 func OrchestratorExcludedFor(mode domain.RunMode) bool {
-	return mode == domain.ModeStandaloneOnly
+	switch mode {
+	case domain.ModeDeployAgents, domain.ModeDeployHooks:
+		return true
+	default:
+		return false
+	}
 }
 
 // ResolveArtifactsFrom derives the complete artifact set from sel. It is the full-fidelity
@@ -65,10 +74,17 @@ func ResolveArtifactsFrom(c catalog.Catalog, sel Selection) (ArtifactSet, error)
 	var agents []domain.Agent
 
 	// The orchestrator is included unless the caller has explicitly excluded it.
+	// Both orchestrator-role files are governed by the same flag so they can never disagree.
 	if !sel.ExcludeOrchestrator {
 		orc := c.Orchestrator()
 		agentsSeen[orc.Key] = true
 		agents = append(agents, orc)
+
+		// Include the script orchestrator when present; its absence is not an error.
+		if orchScript, ok := c.OrchestratorScript(); ok {
+			agentsSeen[orchScript.Key] = true
+			agents = append(agents, orchScript)
+		}
 	}
 
 	// Collect agents referenced by selected workflows.
@@ -87,6 +103,21 @@ func ResolveArtifactsFrom(c catalog.Catalog, sel Selection) (ArtifactSet, error)
 				agents = append(agents, agent)
 			}
 		}
+	}
+
+	// Collect explicitly selected ordinary (non-infrastructure) subagents. These are agents
+	// named directly by the caller rather than reached through a workflow's ReferencedAgents.
+	// Populated only by ModeDeployAgents; nil in every other mode.
+	for _, subagentKey := range sel.SubagentIDs {
+		if agentsSeen[subagentKey] {
+			continue
+		}
+		agent, ok := c.Agent(subagentKey)
+		if !ok {
+			return ArtifactSet{}, fmt.Errorf("%w: subagent %q not found in catalog", ErrUnknownAgent, subagentKey)
+		}
+		agentsSeen[agent.Key] = true
+		agents = append(agents, agent)
 	}
 
 	// Collect explicitly selected utility agents.

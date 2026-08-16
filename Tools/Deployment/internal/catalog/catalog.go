@@ -105,6 +105,15 @@ type Catalog interface {
 	// the file at Orchestrator/orchestrator.md.
 	Orchestrator() domain.Agent
 
+	// OrchestratorScript returns the script-mode orchestrator agent, loaded from
+	// Catalog/Orchestrator/orchestrator-script.md. The bool is false when the catalog root
+	// has no such file, which is not an error: a catalog lacking it loads and deploys normally.
+	//
+	// The returned agent has Role == domain.RoleOrchestrator and Key == "orchestrator-script",
+	// distinct from the main orchestrator's key, so both coexist in the agent index and both
+	// are reachable through Agent(key).
+	OrchestratorScript() (domain.Agent, bool)
+
 	// UtilityAgents returns all utility agents. They are excluded from Agents() and
 	// StandaloneAgents(). They are never deployed automatically.
 	UtilityAgents() []domain.Agent

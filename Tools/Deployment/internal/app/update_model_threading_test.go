@@ -90,7 +90,7 @@ func TestUpdate_AgentWithDeployedModel_PlanInputModelsIsNonNil(t *testing.T) {
 	mod := newModelKeyModule()
 
 	spy := &spyPlanner{response: domain.Plan{
-		Mode: domain.ModeUpdate, Harness: minimalHarness, WorkspacePath: ws,
+		Mode: domain.ModeUpdateWorkspace, Harness: minimalHarness, WorkspacePath: ws,
 	}}
 	stub := interactiontest.NewBuilder().Build()
 	deps, _ := newBaseDeps(t, stub)
@@ -126,7 +126,7 @@ func TestUpdate_AgentWithDeployedModel_PlanInputModelsHasResolvedEntry(t *testin
 
 	mod := newModelKeyModule()
 	spy := &spyPlanner{response: domain.Plan{
-		Mode: domain.ModeUpdate, Harness: minimalHarness, WorkspacePath: ws,
+		Mode: domain.ModeUpdateWorkspace, Harness: minimalHarness, WorkspacePath: ws,
 	}}
 	stub := interactiontest.NewBuilder().Build()
 	deps, _ := newBaseDeps(t, stub)
@@ -171,7 +171,7 @@ func TestUpdate_AgentWithDeployedModel_PlanInputModelsModelIDVerbatim(t *testing
 
 	mod := newModelKeyModule()
 	spy := &spyPlanner{response: domain.Plan{
-		Mode: domain.ModeUpdate, Harness: minimalHarness, WorkspacePath: ws,
+		Mode: domain.ModeUpdateWorkspace, Harness: minimalHarness, WorkspacePath: ws,
 	}}
 	stub := interactiontest.NewBuilder().Build()
 	deps, _ := newBaseDeps(t, stub)
@@ -215,7 +215,7 @@ func TestUpdate_AgentWithDeployedModel_PlanInputModelsOriginIsDeployed(t *testin
 
 	mod := newModelKeyModule()
 	spy := &spyPlanner{response: domain.Plan{
-		Mode: domain.ModeUpdate, Harness: minimalHarness, WorkspacePath: ws,
+		Mode: domain.ModeUpdateWorkspace, Harness: minimalHarness, WorkspacePath: ws,
 	}}
 	stub := interactiontest.NewBuilder().Build()
 	deps, _ := newBaseDeps(t, stub)
@@ -260,7 +260,7 @@ func TestUpdate_AgentWithNoDeployedModel_AbsentFromPlanInputModels(t *testing.T)
 
 	mod := newModelKeyModule()
 	spy := &spyPlanner{response: domain.Plan{
-		Mode: domain.ModeUpdate, Harness: minimalHarness, WorkspacePath: ws,
+		Mode: domain.ModeUpdateWorkspace, Harness: minimalHarness, WorkspacePath: ws,
 	}}
 	stub := interactiontest.NewBuilder().Build()
 	deps, _ := newBaseDeps(t, stub)
@@ -330,7 +330,7 @@ func TestUpdate_AgentWithDeployedModel_GeneratedContentPreservesModel(t *testing
 	deps, _ := newBaseDeps(t, stub)
 	deps.Registry = newMinimalRegistry(mod)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: ws,
 		Items:         []domain.PlanItem{updateItem},
@@ -394,7 +394,7 @@ func TestUpdate_AgentWithDeployedModel_PlanInputAndContentReceiveSameModelID(t *
 	}
 
 	spy := &spyPlanner{response: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: ws,
 		Items:         []domain.PlanItem{updateItem},
@@ -459,7 +459,7 @@ func TestUpdate_NoQTierModelAsked(t *testing.T) {
 	deps, _ := newBaseDeps(t, stub)
 	deps.Registry = newMinimalRegistry(mod)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode: domain.ModeUpdate, Harness: minimalHarness, WorkspacePath: ws,
+		Mode: domain.ModeUpdateWorkspace, Harness: minimalHarness, WorkspacePath: ws,
 	}}
 	svc := app.New(deps)
 
@@ -492,7 +492,7 @@ func TestUpdate_NoQAgentModelAsked(t *testing.T) {
 	deps, _ := newBaseDeps(t, stub)
 	deps.Registry = newMinimalRegistry(mod)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode: domain.ModeUpdate, Harness: minimalHarness, WorkspacePath: ws,
+		Mode: domain.ModeUpdateWorkspace, Harness: minimalHarness, WorkspacePath: ws,
 	}}
 	svc := app.New(deps)
 
@@ -527,7 +527,7 @@ func TestUpdate_NoModelQuestionsAsked_EvenWhenDeployedFileLacksModel(t *testing.
 	deps, _ := newBaseDeps(t, stub)
 	deps.Registry = newMinimalRegistry(mod)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode: domain.ModeUpdate, Harness: minimalHarness, WorkspacePath: ws,
+		Mode: domain.ModeUpdateWorkspace, Harness: minimalHarness, WorkspacePath: ws,
 	}}
 	svc := app.New(deps)
 
@@ -563,7 +563,7 @@ func TestUpdate_NoTierModelsPersisted_WhenDeployedModelExists(t *testing.T) {
 	deps.Registry = newMinimalRegistry(mod)
 	deps.UserConfig = spyConfig
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode: domain.ModeUpdate, Harness: minimalHarness, WorkspacePath: ws,
+		Mode: domain.ModeUpdateWorkspace, Harness: minimalHarness, WorkspacePath: ws,
 	}}
 	svc := app.New(deps)
 
@@ -599,7 +599,7 @@ func TestUpdate_NoTierModelsPersisted_WhenDeployedFileLacksModel(t *testing.T) {
 	deps.Registry = newMinimalRegistry(mod)
 	deps.UserConfig = spyConfig
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode: domain.ModeUpdate, Harness: minimalHarness, WorkspacePath: ws,
+		Mode: domain.ModeUpdateWorkspace, Harness: minimalHarness, WorkspacePath: ws,
 	}}
 	svc := app.New(deps)
 
@@ -650,7 +650,7 @@ func TestUpdate_PlanInputModelsAndContentShareConsistentModelID(t *testing.T) {
 
 	capExec := &contentCapturingExecutor{result: deploy.ExecResult{DeploymentRoot: ws}}
 	spy := &spyPlanner{response: domain.Plan{
-		Mode:    domain.ModeUpdate,
+		Mode:    domain.ModeUpdateWorkspace,
 		Harness: minimalHarness,
 		WorkspacePath: ws,
 		Items:   []domain.PlanItem{updateItem},

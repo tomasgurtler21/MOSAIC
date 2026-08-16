@@ -41,13 +41,13 @@ type spyService struct {
 	transformResp app.TransformHarnessResult
 	transformErr  error
 
-	utilityInfraReq  *app.UtilityInfraRequest
-	utilityInfraResp domain.RunSummary
-	utilityInfraErr  error
+	deployAgentsReq  *app.DeployAgentsRequest
+	deployAgentsResp domain.RunSummary
+	deployAgentsErr  error
 
-	standaloneReq  *app.StandaloneRequest
-	standaloneResp domain.RunSummary
-	standaloneErr  error
+	deployHooksReq  *app.DeployHooksRequest
+	deployHooksResp domain.RunSummary
+	deployHooksErr  error
 
 	renderAgentReq  *app.RenderAgentRequest
 	renderAgentResp app.RenderAgentResult
@@ -84,14 +84,14 @@ func (s *spyService) TransformHarness(ctx context.Context, req app.TransformHarn
 	return s.transformResp, s.transformErr
 }
 
-func (s *spyService) DeployUtilityInfrastructure(ctx context.Context, req app.UtilityInfraRequest) (domain.RunSummary, error) {
-	s.utilityInfraReq = &req
-	return s.utilityInfraResp, s.utilityInfraErr
+func (s *spyService) DeployAgents(_ context.Context, req app.DeployAgentsRequest) (domain.RunSummary, error) {
+	s.deployAgentsReq = &req
+	return s.deployAgentsResp, s.deployAgentsErr
 }
 
-func (s *spyService) DeployStandalone(_ context.Context, req app.StandaloneRequest) (domain.RunSummary, error) {
-	s.standaloneReq = &req
-	return s.standaloneResp, s.standaloneErr
+func (s *spyService) DeployHooks(_ context.Context, req app.DeployHooksRequest) (domain.RunSummary, error) {
+	s.deployHooksReq = &req
+	return s.deployHooksResp, s.deployHooksErr
 }
 
 func (s *spyService) RenderAgent(_ context.Context, req app.RenderAgentRequest) (app.RenderAgentResult, error) {
@@ -135,7 +135,7 @@ func (c *stubTodo) hasGapKind(kind domain.GapKind) bool {
 // successSummary returns a RunSummary for the given outcome that the spy will return.
 func successSummary(workspace string) domain.RunSummary {
 	return domain.RunSummary{
-		Mode:           domain.ModeDeployNew,
+		Mode:           domain.ModeDeployWorkspace,
 		WorkspacePath:  workspace,
 		DeploymentRoot: workspace,
 		Fallback:       domain.FallbackNone,

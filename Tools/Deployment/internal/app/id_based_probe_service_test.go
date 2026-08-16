@@ -147,7 +147,7 @@ func TestUpdate_RenamedAgent_FoundByIDViaServiceFlow(t *testing.T) {
 
 	// Spy planner captures the plan.Input so we can inspect DeployedState.
 	spy := &spyPlanner{response: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: ws,
 		Scope:         domain.ScopeProject,
@@ -219,7 +219,7 @@ func TestUpdate_AgentWithID_NotFoundByID_ReportsNotPresent(t *testing.T) {
 	writeAgentFileWithID(t, agentsDir, "test-runner.md", "999")
 
 	spy := &spyPlanner{response: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: ws,
 		Scope:         domain.ScopeProject,

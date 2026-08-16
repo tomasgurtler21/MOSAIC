@@ -66,7 +66,7 @@ func TestRun_UpdateSubcommand_CallsUpdate(t *testing.T) {
 	workspace := t.TempDir()
 	svc := &spyService{
 		updateResp: domain.RunSummary{
-			Mode: domain.ModeUpdate, WorkspacePath: workspace,
+			Mode: domain.ModeUpdateWorkspace, WorkspacePath: workspace,
 			Outcome: domain.OutcomeSuccess,
 		},
 	}
@@ -201,11 +201,11 @@ func (s *countingService) TransformHarness(ctx context.Context, req app.Transfor
 	return app.TransformHarnessResult{}, nil
 }
 
-func (s *countingService) DeployUtilityInfrastructure(ctx context.Context, req app.UtilityInfraRequest) (domain.RunSummary, error) {
+func (s *countingService) DeployAgents(_ context.Context, _ app.DeployAgentsRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{Outcome: domain.OutcomeSuccess}, nil
 }
 
-func (s *countingService) DeployStandalone(_ context.Context, _ app.StandaloneRequest) (domain.RunSummary, error) {
+func (s *countingService) DeployHooks(_ context.Context, _ app.DeployHooksRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{Outcome: domain.OutcomeSuccess}, nil
 }
 

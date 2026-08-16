@@ -27,7 +27,7 @@ package app_test
 //
 // Successful run produces a correct summary (T4.3):
 //   - A successful atomic run (Reverted:false) returns a non-error RunSummary.
-//   - The summary mode is ModeWorkflowsOnly.
+//   - The summary mode is ModeUpdateWorkflows.
 //   - The executor's plan contains exactly the orchestrator item, the ActionCreate item for a
 //     newly-required agent, and (when applicable) the ActionCreate item for a newly-required
 //     skill — no pre-existing agent or skill item appears in the executed plan.
@@ -329,7 +329,7 @@ func TestUpdateWorkflows_RevertedRun_IsDistinctFromPlanNotConfirmed(t *testing.T
 
 // TestUpdateWorkflows_SuccessfulAtomicRun_ReturnsSummaryNotError verifies that when
 // UpdateWorkflows executes successfully (executor returns Reverted:false, Partial:nil), the
-// flow returns a non-error RunSummary with Mode=ModeWorkflowsOnly. This is the positive case
+// flow returns a non-error RunSummary with Mode=ModeUpdateWorkflows. This is the positive case
 // that must hold alongside the reverted-run check.
 func TestUpdateWorkflows_SuccessfulAtomicRun_ReturnsSummaryNotError(t *testing.T) {
 	// Arrange — executor reports a successful run (no reversal)
@@ -358,9 +358,9 @@ func TestUpdateWorkflows_SuccessfulAtomicRun_ReturnsSummaryNotError(t *testing.T
 		t.Fatalf("UpdateWorkflows returned error for a successful run: %v; "+
 			"a successful atomic run must return a RunSummary, not an error", err)
 	}
-	if summary.Mode != domain.ModeWorkflowsOnly {
+	if summary.Mode != domain.ModeUpdateWorkflows {
 		t.Errorf("summary.Mode = %q, want %q; "+
-			"UpdateWorkflows must produce a summary with Mode=ModeWorkflowsOnly", summary.Mode, domain.ModeWorkflowsOnly)
+			"UpdateWorkflows must produce a summary with Mode=ModeUpdateWorkflows", summary.Mode, domain.ModeUpdateWorkflows)
 	}
 }
 

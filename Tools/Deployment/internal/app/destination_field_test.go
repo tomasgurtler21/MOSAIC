@@ -497,7 +497,7 @@ func TestUpdate_DestMappingInRegistry_ContentFunctionProducesDestinationField(t 
 	deps.Registry = reg
 	deps.Catalog = cat
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       domain.HarnessRef{ID: id, DisplayName: id, Tier: domain.TierBuiltin, Usable: true},
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

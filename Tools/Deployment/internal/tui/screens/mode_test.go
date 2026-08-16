@@ -75,9 +75,9 @@ func TestModeScreen_Enter_SetsDone(t *testing.T) {
 	}
 }
 
-// TestModeScreen_Enter_SelectsDeployNewAsFirstMode verifies that the first item in the list
-// is "deploy new" and that pressing Enter without navigating selects that mode.
-func TestModeScreen_Enter_SelectsDeployNewAsFirstMode(t *testing.T) {
+// TestModeScreen_Enter_SelectsDeployWorkspaceAsFirstMode verifies that the first item in the
+// list is "deploy workspace" and that pressing Enter without navigating selects that mode.
+func TestModeScreen_Enter_SelectsDeployWorkspaceAsFirstMode(t *testing.T) {
 	// Arrange
 	s := newModeScreen()
 
@@ -85,46 +85,48 @@ func TestModeScreen_Enter_SelectsDeployNewAsFirstMode(t *testing.T) {
 	s.Update(modeEnterKey())
 
 	// Assert
-	if s.SelectedMode() != domain.ModeDeployNew {
-		t.Errorf("SelectedMode() = %q after Enter without navigation; want %q", s.SelectedMode(), domain.ModeDeployNew)
+	if s.SelectedMode() != domain.ModeDeployWorkspace {
+		t.Errorf("SelectedMode() = %q after Enter without navigation; want %q (deploy-workspace must be first)",
+			s.SelectedMode(), domain.ModeDeployWorkspace)
 	}
 }
 
-// TestModeScreen_Down_Then_Enter_SelectsUpdateMode verifies that navigating down to the
-// second item and pressing Enter selects "update" mode, confirming that navigation changes
-// which mode is returned by SelectedMode().
-func TestModeScreen_Down_Then_Enter_SelectsUpdateMode(t *testing.T) {
+// TestModeScreen_Down_Then_Enter_SelectsUpdateWorkspaceMode verifies that navigating down to
+// the second item and pressing Enter selects "update-workspace" mode, confirming that
+// navigation changes which mode is returned by SelectedMode().
+func TestModeScreen_Down_Then_Enter_SelectsUpdateWorkspaceMode(t *testing.T) {
 	// Arrange
 	s := newModeScreen()
 
 	// Act
-	s.Update(modeDownKey()) // cursor on "update existing"
+	s.Update(modeDownKey()) // cursor on "update workspace"
 	s.Update(modeEnterKey())
 
 	// Assert
 	if !s.Done() {
 		t.Error("Done() = false after navigating and pressing Enter; want true")
 	}
-	if s.SelectedMode() != domain.ModeUpdate {
-		t.Errorf("SelectedMode() = %q after Down+Enter; want %q", s.SelectedMode(), domain.ModeUpdate)
+	if s.SelectedMode() != domain.ModeUpdateWorkspace {
+		t.Errorf("SelectedMode() = %q after Down+Enter; want %q (update-workspace must be the second entry)",
+			s.SelectedMode(), domain.ModeUpdateWorkspace)
 	}
 }
 
-// TestModeScreen_Up_AfterDown_ReselectsDeployNew verifies that pressing Up after Down returns
-// the cursor to the first item so DeployNew is selected on Enter.
-func TestModeScreen_Up_AfterDown_ReselectsDeployNew(t *testing.T) {
+// TestModeScreen_Up_AfterDown_ReselectsDeployWorkspace verifies that pressing Up after Down
+// returns the cursor to the first item so DeployWorkspace is selected on Enter.
+func TestModeScreen_Up_AfterDown_ReselectsDeployWorkspace(t *testing.T) {
 	// Arrange
 	s := newModeScreen()
-	s.Update(modeDownKey()) // move to update
+	s.Update(modeDownKey()) // move to update-workspace
 
 	// Act
-	s.Update(modeUpKey())    // move back to deploy-new
+	s.Update(modeUpKey())    // move back to deploy-workspace
 	s.Update(modeEnterKey())
 
 	// Assert
-	if s.SelectedMode() != domain.ModeDeployNew {
+	if s.SelectedMode() != domain.ModeDeployWorkspace {
 		t.Errorf("SelectedMode() = %q after Down+Up+Enter; want %q (Up must restore previous item)",
-			s.SelectedMode(), domain.ModeDeployNew)
+			s.SelectedMode(), domain.ModeDeployWorkspace)
 	}
 }
 
@@ -219,105 +221,111 @@ func TestModeScreen_Reset_ClearsBackFlag(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// View content
+// View content — renamed labels
 // ---------------------------------------------------------------------------
 
-// TestModeScreen_View_ShowsBothModes verifies that the rendered view presents both run modes
-// so the user can see and choose between them.
-func TestModeScreen_View_ShowsBothModes(t *testing.T) {
+// TestModeScreen_View_ShowsDeployWorkspaceAndUpdateWorkspaceLabels verifies that the
+// rendered view presents both the "Deploy workspace" and "Update workspace" mode labels
+// so that users can see and choose the primary deployment operations. The old labels
+// "Deploy new" and "Update existing" must not appear; the renamed labels replace them.
+func TestModeScreen_View_ShowsDeployWorkspaceAndUpdateWorkspaceLabels(t *testing.T) {
 	// Arrange
 	s := newModeScreen()
 
 	// Act
 	view := s.View()
 
-	// Assert — both modes must be visible; use collapseWhitespace to tolerate lipgloss wrapping.
+	// Assert — new labels must be visible; use collapseWhitespace to tolerate lipgloss wrapping.
 	collapsed := collapseWhitespace(view)
-	if !strings.Contains(collapsed, "Deploy new") {
-		t.Errorf("view does not mention 'Deploy new':\n%s", view)
+	if !strings.Contains(collapsed, "Deploy workspace") {
+		t.Errorf("view does not show 'Deploy workspace' label; the rename must update the label text:\n%s", view)
 	}
-	if !strings.Contains(collapsed, "Update existing") {
-		t.Errorf("view does not mention 'Update existing':\n%s", view)
+	if !strings.Contains(collapsed, "Update workspace") {
+		t.Errorf("view does not show 'Update workspace' label; the rename must update the label text:\n%s", view)
 	}
 }
 
-// TestModeScreen_View_ShowsAllThreeModes verifies that the rendered view presents all three
-// run modes including the workflows-only mode so every available operation is discoverable
+// TestModeScreen_View_ShowsAllFiveSurvivingModeLabels verifies that the rendered view
+// presents all five surviving mode labels so every available operation is discoverable
 // from the mode selection screen.
-func TestModeScreen_View_ShowsAllThreeModes(t *testing.T) {
+func TestModeScreen_View_ShowsAllFiveSurvivingModeLabels(t *testing.T) {
 	// Arrange
 	s := newModeScreen()
 
 	// Act
 	view := s.View()
 
-	// Assert — all three modes must be visible.
+	// Assert — all five surviving mode labels must be visible.
 	collapsed := collapseWhitespace(view)
-	if !strings.Contains(collapsed, "Deploy new") {
-		t.Errorf("view does not mention 'Deploy new':\n%s", view)
+	wantLabels := []string{
+		"Deploy workspace",
+		"Update workspace",
+		"Update workflows",
+		"Promote to generic",
+		"Transform harness",
 	}
-	if !strings.Contains(collapsed, "Update existing") {
-		t.Errorf("view does not mention 'Update existing':\n%s", view)
-	}
-	if !strings.Contains(collapsed, "workflows") && !strings.Contains(collapsed, "Workflows") {
-		t.Errorf("view does not mention 'workflows' for the third mode entry:\n%s", view)
+	for _, label := range wantLabels {
+		if !strings.Contains(collapsed, label) {
+			t.Errorf("view does not show label %q; the mode list must include all five surviving modes:\n%s",
+				label, view)
+		}
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Third mode — workflows-only
+// Third mode — update-workflows
 // ---------------------------------------------------------------------------
 
-// TestModeScreen_DownDown_Enter_SelectsWorkflowsOnlyMode verifies that pressing Down twice
-// and then Enter selects the workflows-only mode, which is the third entry in the mode list.
-func TestModeScreen_DownDown_Enter_SelectsWorkflowsOnlyMode(t *testing.T) {
+// TestModeScreen_DownDown_Enter_SelectsUpdateWorkflowsMode verifies that pressing Down twice
+// and then Enter selects the update-workflows mode, which is the third entry in the mode list.
+func TestModeScreen_DownDown_Enter_SelectsUpdateWorkflowsMode(t *testing.T) {
 	// Arrange
 	s := newModeScreen()
 
 	// Act — navigate to the third item and confirm.
-	s.Update(modeDownKey()) // deploy-new → update
-	s.Update(modeDownKey()) // update → workflows-only
+	s.Update(modeDownKey()) // deploy-workspace → update-workspace
+	s.Update(modeDownKey()) // update-workspace → update-workflows
 	s.Update(modeEnterKey())
 
 	// Assert
 	if !s.Done() {
 		t.Error("Done() = false after Down+Down+Enter; want true (third item must be selectable)")
 	}
-	if s.SelectedMode() != domain.ModeWorkflowsOnly {
-		t.Errorf("SelectedMode() = %q after Down+Down+Enter; want %q (workflows-only must be the third list entry)",
-			s.SelectedMode(), domain.ModeWorkflowsOnly)
+	if s.SelectedMode() != domain.ModeUpdateWorkflows {
+		t.Errorf("SelectedMode() = %q after Down+Down+Enter; want %q (update-workflows must be the third list entry)",
+			s.SelectedMode(), domain.ModeUpdateWorkflows)
 	}
 }
 
-// TestModeScreen_WorkflowsOnly_YieldsCorrectRunMode verifies that when the workflows-only
-// mode is selected, SelectedMode() returns exactly domain.ModeWorkflowsOnly. The string
+// TestModeScreen_UpdateWorkflows_YieldsCorrectRunMode verifies that when the update-workflows
+// mode is selected, SelectedMode() returns exactly domain.ModeUpdateWorkflows. The string
 // value must match the constant so both frontends produce the same mode value.
-func TestModeScreen_WorkflowsOnly_YieldsCorrectRunMode(t *testing.T) {
+func TestModeScreen_UpdateWorkflows_YieldsCorrectRunMode(t *testing.T) {
 	// Arrange
 	s := newModeScreen()
 
-	// Act — navigate to workflows-only (third item) and confirm.
+	// Act — navigate to update-workflows (third item) and confirm.
 	s.Update(modeDownKey())
 	s.Update(modeDownKey())
 	s.Update(modeEnterKey())
 
 	// Assert — the concrete string value must equal the domain constant, not just be non-empty.
 	got := s.SelectedMode()
-	want := domain.ModeWorkflowsOnly
+	want := domain.ModeUpdateWorkflows
 	if got != want {
 		t.Errorf("SelectedMode() = %q; want %q — the mode value must match the domain constant exactly", got, want)
 	}
 }
 
-// TestModeScreen_WorkflowsOnly_DetailMentionsOrchestratorAndRemoval verifies that after
-// navigating to the workflows-only entry, the detail text describes the key behaviour: only
+// TestModeScreen_UpdateWorkflows_DetailMentionsOrchestratorAndRemoval verifies that after
+// navigating to the update-workflows entry, the detail text describes the key behaviour: only
 // the orchestrator is rewritten, and unselected workflows are removed. Users must be able to
 // understand the destructive nature of the operation from the detail pane alone.
-func TestModeScreen_WorkflowsOnly_DetailMentionsOrchestratorAndRemoval(t *testing.T) {
+func TestModeScreen_UpdateWorkflows_DetailMentionsOrchestratorAndRemoval(t *testing.T) {
 	// Arrange — navigate to the third item so its detail text is shown.
 	s := newModeScreen()
-	s.Update(modeDownKey()) // deploy-new → update
-	s.Update(modeDownKey()) // update → workflows-only
+	s.Update(modeDownKey()) // deploy-workspace → update-workspace
+	s.Update(modeDownKey()) // update-workspace → update-workflows
 
 	// Act
 	view := s.View()
@@ -325,39 +333,18 @@ func TestModeScreen_WorkflowsOnly_DetailMentionsOrchestratorAndRemoval(t *testin
 	// Assert — the detail pane (shown in the right column) must mention both concepts.
 	collapsed := collapseWhitespace(view)
 	if !strings.Contains(collapsed, "orchestrator") {
-		t.Errorf("view after navigating to workflows-only does not mention 'orchestrator' in the detail text; "+
+		t.Errorf("view after navigating to update-workflows does not mention 'orchestrator' in the detail text; "+
 			"the user must understand that only the orchestrator file is affected:\n%s", view)
 	}
 	if !strings.Contains(collapsed, "removed") && !strings.Contains(collapsed, "remove") {
-		t.Errorf("view after navigating to workflows-only does not mention workflow removal in the detail text; "+
+		t.Errorf("view after navigating to update-workflows does not mention workflow removal in the detail text; "+
 			"the user must be warned that unselected workflows are removed:\n%s", view)
-	}
-}
-
-// TestModeScreen_KeyboardOnly_CanSelectWorkflowsOnly verifies that the workflows-only mode
-// is reachable using the keyboard alone: navigate down twice with arrow keys and confirm
-// with Enter. No mouse event is required.
-func TestModeScreen_KeyboardOnly_CanSelectWorkflowsOnly(t *testing.T) {
-	// Arrange
-	s := newModeScreen()
-
-	// Act — keyboard-only: Down+Down+Enter
-	s.Update(tea.KeyMsg{Type: tea.KeyDown})
-	s.Update(tea.KeyMsg{Type: tea.KeyDown})
-	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-	// Assert
-	if !s.Done() {
-		t.Error("Done() = false after keyboard Down+Down+Enter; workflows-only must be reachable by keyboard alone")
-	}
-	if s.SelectedMode() != domain.ModeWorkflowsOnly {
-		t.Errorf("SelectedMode() = %q; want %q", s.SelectedMode(), domain.ModeWorkflowsOnly)
 	}
 }
 
 // TestModeScreen_ThirdEntry_DoesNotConfirmOnSecondDown verifies that the second Down press
 // does not confirm the selection prematurely — it moves to the third item. Only Enter
-// confirms. This guards against a bug where a three-item list wraps or stops at index 1.
+// confirms. This guards against a bug where a list wraps or stops at index 1.
 func TestModeScreen_ThirdEntry_DoesNotConfirmOnSecondDown(t *testing.T) {
 	// Arrange
 	s := newModeScreen()
@@ -376,13 +363,71 @@ func TestModeScreen_ThirdEntry_DoesNotConfirmOnSecondDown(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// All mode items — ID / RunMode correspondence invariant
+// ---------------------------------------------------------------------------
+
+// TestModeScreen_AllItems_IDMatchesDeclaredRunMode navigates to each position in the
+// mode list and verifies that SelectedMode() returns exactly the expected domain.RunMode
+// constant. This invariant ensures every modeItems entry's ID equals the string value of
+// the matching RunMode constant, which ModeScreen.SelectedMode() relies on to map the
+// selected list item back to a well-typed RunMode.
+//
+// Expected list order:
+//   Position 0: ModeDeployWorkspace  ("deploy-workspace")
+//   Position 1: ModeUpdateWorkspace  ("update-workspace")
+//   Position 2: ModeUpdateWorkflows  ("update-workflows")
+//   Position 3: ModeDeployAgents     ("deploy-agents")
+//   Position 4: ModeDeployHooks      ("deploy-hooks")
+//   Position 5: ModePromoteToGeneric ("promote-to-generic")
+//   Position 6: ModeTransformHarness ("transform-harness")
+func TestModeScreen_AllItems_IDMatchesDeclaredRunMode(t *testing.T) {
+	positions := []struct {
+		name        string
+		downPresses int
+		wantMode    domain.RunMode
+	}{
+		{"position 0 (deploy-workspace)", 0, domain.ModeDeployWorkspace},
+		{"position 1 (update-workspace)", 1, domain.ModeUpdateWorkspace},
+		{"position 2 (update-workflows)", 2, domain.ModeUpdateWorkflows},
+		{"position 3 (deploy-agents)", 3, domain.ModeDeployAgents},
+		{"position 4 (deploy-hooks)", 4, domain.ModeDeployHooks},
+		{"position 5 (promote-to-generic)", 5, domain.ModePromoteToGeneric},
+		{"position 6 (transform-harness)", 6, domain.ModeTransformHarness},
+	}
+
+	for _, tc := range positions {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange — fresh screen for each position so prior navigation does not carry over.
+			s := newModeScreen()
+
+			// Act — navigate to the target position and confirm.
+			for i := 0; i < tc.downPresses; i++ {
+				s.Update(modeDownKey())
+			}
+			s.Update(modeEnterKey())
+
+			// Assert
+			if !s.Done() {
+				t.Fatalf("Done() = false after navigating to %s and pressing Enter", tc.name)
+			}
+			if got := s.SelectedMode(); got != tc.wantMode {
+				t.Errorf("SelectedMode() at %s = %q, want %q; "+
+					"every modeItems entry's ID must equal string(matching RunMode constant)",
+					tc.name, got, tc.wantMode)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Keyboard-only operability
 // ---------------------------------------------------------------------------
 
-// TestModeScreen_KeyboardOnly_CanSelectDeployNew verifies that the deploy-new mode is
-// reachable using the keyboard alone: press Enter without any navigation to select the
+// TestModeScreen_KeyboardOnly_CanSelectDeployWorkspace verifies that the deploy-workspace mode
+// is reachable using the keyboard alone: press Enter without any navigation to select the
 // default first item.
-func TestModeScreen_KeyboardOnly_CanSelectDeployNew(t *testing.T) {
+func TestModeScreen_KeyboardOnly_CanSelectDeployWorkspace(t *testing.T) {
 	// Arrange
 	s := newModeScreen()
 
@@ -391,17 +436,17 @@ func TestModeScreen_KeyboardOnly_CanSelectDeployNew(t *testing.T) {
 
 	// Assert
 	if !s.Done() {
-		t.Error("Done() = false after keyboard Enter; deploy-new must be selectable by keyboard alone")
+		t.Error("Done() = false after keyboard Enter; deploy-workspace must be selectable by keyboard alone")
 	}
-	if s.SelectedMode() != domain.ModeDeployNew {
-		t.Errorf("SelectedMode() = %q; want %q", s.SelectedMode(), domain.ModeDeployNew)
+	if s.SelectedMode() != domain.ModeDeployWorkspace {
+		t.Errorf("SelectedMode() = %q; want %q", s.SelectedMode(), domain.ModeDeployWorkspace)
 	}
 }
 
-// TestModeScreen_KeyboardOnly_CanSelectUpdate verifies that the update mode is reachable
-// using the keyboard alone: navigate down with the arrow key and confirm with Enter.
+// TestModeScreen_KeyboardOnly_CanSelectUpdateWorkspace verifies that the update-workspace mode
+// is reachable using the keyboard alone: navigate down with the arrow key and confirm with Enter.
 // No mouse event is needed.
-func TestModeScreen_KeyboardOnly_CanSelectUpdate(t *testing.T) {
+func TestModeScreen_KeyboardOnly_CanSelectUpdateWorkspace(t *testing.T) {
 	// Arrange
 	s := newModeScreen()
 
@@ -411,10 +456,31 @@ func TestModeScreen_KeyboardOnly_CanSelectUpdate(t *testing.T) {
 
 	// Assert
 	if !s.Done() {
-		t.Error("Done() = false after keyboard Down+Enter; update mode must be reachable by keyboard alone")
+		t.Error("Done() = false after keyboard Down+Enter; update-workspace mode must be reachable by keyboard alone")
 	}
-	if s.SelectedMode() != domain.ModeUpdate {
-		t.Errorf("SelectedMode() = %q; want %q", s.SelectedMode(), domain.ModeUpdate)
+	if s.SelectedMode() != domain.ModeUpdateWorkspace {
+		t.Errorf("SelectedMode() = %q; want %q", s.SelectedMode(), domain.ModeUpdateWorkspace)
+	}
+}
+
+// TestModeScreen_KeyboardOnly_CanSelectUpdateWorkflows verifies that the update-workflows mode
+// is reachable using the keyboard alone: navigate down twice with arrow keys and confirm
+// with Enter. No mouse event is required.
+func TestModeScreen_KeyboardOnly_CanSelectUpdateWorkflows(t *testing.T) {
+	// Arrange
+	s := newModeScreen()
+
+	// Act — keyboard-only: Down+Down+Enter
+	s.Update(tea.KeyMsg{Type: tea.KeyDown})
+	s.Update(tea.KeyMsg{Type: tea.KeyDown})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	// Assert
+	if !s.Done() {
+		t.Error("Done() = false after keyboard Down+Down+Enter; update-workflows must be reachable by keyboard alone")
+	}
+	if s.SelectedMode() != domain.ModeUpdateWorkflows {
+		t.Errorf("SelectedMode() = %q; want %q", s.SelectedMode(), domain.ModeUpdateWorkflows)
 	}
 }
 
@@ -432,8 +498,8 @@ func TestModeScreen_KeyboardOnly_VimKeysNavigate(t *testing.T) {
 	if !s.Done() {
 		t.Error("Done() = false after vim-key navigation; 'j'/'k' must work on the mode screen")
 	}
-	if s.SelectedMode() != domain.ModeUpdate {
-		t.Errorf("SelectedMode() = %q after 'j'+Enter; want %q", s.SelectedMode(), domain.ModeUpdate)
+	if s.SelectedMode() != domain.ModeUpdateWorkspace {
+		t.Errorf("SelectedMode() = %q after 'j'+Enter; want %q", s.SelectedMode(), domain.ModeUpdateWorkspace)
 	}
 }
 

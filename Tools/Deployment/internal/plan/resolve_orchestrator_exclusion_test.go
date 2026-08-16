@@ -1,23 +1,22 @@
 package plan_test
 
 // resolve_orchestrator_exclusion_test.go covers the orchestrator-exclusion mechanism
-// added to artifact resolution for the standalone-only deploy mode.
+// in artifact resolution. After Stage 6 retires ModeStandaloneOnly and ModeUtilityInfraOnly,
+// OrchestratorExcludedFor returns true only for ModeDeployAgents and ModeDeployHooks and
+// false for all workspace-oriented modes.
 //
-// These are TDD RED-phase tests. They specify the intended behaviour of contracts that do not
-// yet exist in the implementation. Every test here will fail to compile or will fail at
-// runtime until the corresponding implementation tasks (I1.1 through I1.3) are delivered.
+// OrchestratorExcludedFor (pure mode → bool predicate):
+//   - Returns true for ModeDeployAgents and ModeDeployHooks
+//   - Returns false for all workspace-oriented modes (deploy-workspace, update-workspace,
+//     update-workflows, promote-to-generic, transform-harness)
 //
-// OrchestratorExcludedFor (new pure function):
-//   - Returns true only for domain.ModeStandaloneOnly
-//   - Returns false for every other RunMode, so no pre-existing caller changes behaviour
-//
-// ResolveArtifactsFrom — ExcludeOrchestrator: true (standalone-only):
+// ResolveArtifactsFrom — ExcludeOrchestrator: true (deploy-agents / deploy-hooks path):
 //   - Result contains no orchestrator agent (AC1.2)
 //   - Result contains the selected standalone agent
-//   - Skill set equals exactly the transitive skills of the selected agents (no orchestrator-only bleed)
-//   - Holds even when StandaloneAgentIDs is an empty slice (no agents selected)
+//   - Skill set equals exactly the transitive skills of the selected agents
+//   - Holds even when StandaloneAgentIDs is an empty slice
 //
-// ResolveArtifactsFrom — ExcludeOrchestrator: false (zero value, every other mode):
+// ResolveArtifactsFrom — ExcludeOrchestrator: false (zero value, workspace modes):
 //   - Workflow selections keep including the orchestrator (AC1.4)
 //   - Utility-agent-only selections keep including the orchestrator (AC1.4)
 //   - Infrastructure-agent-only selections keep including the orchestrator (AC1.4)
@@ -27,10 +26,9 @@ package plan_test
 // ResolveArtifacts (positional legacy form):
 //   - ExcludeOrchestrator is implicitly false; orchestrator is always included
 //
-// plan.Build with ModeStandaloneOnly:
-//   - The built plan contains no plan item with Ref.Key == "orchestrator" (AC1.3)
-//   - The built plan does contain the selected standalone agent
-//   - plan.Build with ModeDeployNew still includes the orchestrator (AC1.4 at build level)
+// plan.Build with workspace modes:
+//   - ModeDeployWorkspace includes the orchestrator (AC1.4)
+//   - ModeUpdateWorkspace includes the orchestrator (AC1.4)
 
 import (
 	"context"
@@ -51,35 +49,24 @@ import (
 // OrchestratorExcludedFor — pure mode → bool predicate
 // ---------------------------------------------------------------------------
 
-// TestOrchestratorExcludedFor_StandaloneOnly_ReturnsTrue verifies that the function returns
-// true for domain.ModeStandaloneOnly. This is the only mode that must suppress the orchestrator
-// from the resolved artifact set; the function is the single authority so the probe path and
-// the plan-build path can never disagree.
-func TestOrchestratorExcludedFor_StandaloneOnly_ReturnsTrue(t *testing.T) {
-	if !plan.OrchestratorExcludedFor(domain.ModeStandaloneOnly) {
-		t.Error("OrchestratorExcludedFor(ModeStandaloneOnly) = false, want true; " +
-			"standalone-only runs must not resolve the orchestrator so that a locally-modified " +
-			"orchestrator file does not trigger a conflict question and does not appear in the plan")
-	}
-}
-
-// TestOrchestratorExcludedFor_OtherModes_ReturnsFalse verifies that every RunMode other than
-// ModeStandaloneOnly returns false, preserving the always-include behaviour every pre-existing
-// caller relies on. A default of false means the zero value is safe for existing call sites.
-func TestOrchestratorExcludedFor_OtherModes_ReturnsFalse(t *testing.T) {
-	otherModes := []domain.RunMode{
-		domain.ModeDeployNew,
-		domain.ModeUpdate,
-		domain.ModeWorkflowsOnly,
-		domain.ModePromote,
+// TestOrchestratorExcludedFor_WorkspaceModes_ReturnsFalse verifies that workspace-oriented
+// modes (deploy-workspace, update-workspace, update-workflows, promote-to-generic,
+// transform-harness) return false from OrchestratorExcludedFor, preserving the always-include
+// behaviour every pre-existing caller relies on. Only the agent-deploy modes (deploy-agents,
+// deploy-hooks) return true; the retired standalone-only mode is no longer in the set.
+func TestOrchestratorExcludedFor_WorkspaceModes_ReturnsFalse(t *testing.T) {
+	workspaceModes := []domain.RunMode{
+		domain.ModeDeployWorkspace,
+		domain.ModeUpdateWorkspace,
+		domain.ModeUpdateWorkflows,
+		domain.ModePromoteToGeneric,
 		domain.ModeTransformHarness,
-		domain.ModeUtilityInfraOnly,
 	}
-	for _, mode := range otherModes {
+	for _, mode := range workspaceModes {
 		if plan.OrchestratorExcludedFor(mode) {
 			t.Errorf("OrchestratorExcludedFor(%q) = true, want false; "+
-				"only ModeStandaloneOnly must exclude the orchestrator; "+
-				"all other modes must keep including it so no pre-existing behaviour changes (AC1.4)",
+				"workspace-mode runs must include the orchestrator in their artifact set; "+
+				"only deploy-agents and deploy-hooks must exclude it (AC1.4)",
 				mode)
 		}
 	}
@@ -355,103 +342,7 @@ func TestResolveArtifacts_LegacyForm_AlwaysIncludesOrchestrator(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// plan.Build with ModeStandaloneOnly — no orchestrator plan item (AC1.3)
-// ---------------------------------------------------------------------------
-
-// TestBuild_ModeStandaloneOnly_NoOrchestratorPlanItem verifies that when Build is called with
-// Mode = ModeStandaloneOnly, the resulting plan contains no plan item whose Ref.Key is
-// "orchestrator". This covers the plan-build half of the invariant: the probe path and the
-// build path both use OrchestratorExcludedFor so they cannot disagree. If Build does not
-// consult the exclusion predicate, it will call ResolveArtifactsFrom without
-// ExcludeOrchestrator=true and include the orchestrator in the plan.
-func TestBuild_ModeStandaloneOnly_NoOrchestratorPlanItem(t *testing.T) {
-	standalone := makeStandaloneAgent("session-logger")
-	cat := &fakeCatalog{
-		orchestrator:     makeOrchestrator(),
-		standaloneAgents: []domain.Agent{standalone},
-	}
-
-	module := newFakeModule()
-	p := plan.New()
-
-	in := plan.Input{
-		Catalog:            cat,
-		Module:             module,
-		Mode:               domain.ModeStandaloneOnly,
-		WorkspacePath:      "/fake/workspace",
-		Scope:              domain.ScopeProject,
-		GOOS:               "linux",
-		Manifest:           absentSnapshot(),
-		StandaloneAgentIDs: []string{"session-logger"},
-		Models: map[string]domain.ModelSelection{
-			"session-logger": {ModelID: "test-model", Origin: domain.OriginHarnessList},
-		},
-		DeployedState: nil,
-	}
-
-	built, err := p.Build(context.Background(), in)
-	if err != nil {
-		t.Fatalf("Build with ModeStandaloneOnly: %v", err)
-	}
-
-	for _, item := range built.Items {
-		if item.Ref.Kind == domain.ArtifactAgent && item.Ref.Key == "orchestrator" {
-			t.Errorf("plan item found for orchestrator (action=%v, target=%q) in a ModeStandaloneOnly plan; "+
-				"standalone-only plans must contain no orchestrator item (AC1.3); "+
-				"if OrchestratorExcludedFor is not wired into Build, ResolveArtifactsFrom is called without "+
-				"ExcludeOrchestrator=true and the orchestrator enters the artifact set unconditionally",
-				item.Action, item.TargetPath)
-		}
-	}
-}
-
-// TestBuild_ModeStandaloneOnly_StandaloneAgentIsPlanned verifies that the selected standalone
-// agent appears in the plan when Mode = ModeStandaloneOnly, confirming that the orchestrator
-// exclusion suppresses only the orchestrator and does not silently empty the plan.
-func TestBuild_ModeStandaloneOnly_StandaloneAgentIsPlanned(t *testing.T) {
-	standalone := makeStandaloneAgent("session-logger")
-	cat := &fakeCatalog{
-		orchestrator:     makeOrchestrator(),
-		standaloneAgents: []domain.Agent{standalone},
-	}
-
-	module := newFakeModule()
-	p := plan.New()
-
-	in := plan.Input{
-		Catalog:            cat,
-		Module:             module,
-		Mode:               domain.ModeStandaloneOnly,
-		WorkspacePath:      "/fake/workspace",
-		Scope:              domain.ScopeProject,
-		GOOS:               "linux",
-		Manifest:           absentSnapshot(),
-		StandaloneAgentIDs: []string{"session-logger"},
-		Models: map[string]domain.ModelSelection{
-			"session-logger": {ModelID: "test-model", Origin: domain.OriginHarnessList},
-		},
-		DeployedState: nil,
-	}
-
-	built, err := p.Build(context.Background(), in)
-	if err != nil {
-		t.Fatalf("Build with ModeStandaloneOnly: %v", err)
-	}
-
-	found := false
-	for _, item := range built.Items {
-		if item.Ref.Kind == domain.ArtifactAgent && item.Ref.Key == "session-logger" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("plan does not contain standalone agent \"session-logger\" in a ModeStandaloneOnly plan; " +
-			"orchestrator exclusion must suppress only the orchestrator, not the selected standalone agents")
-	}
-}
-
-// TestBuild_ModeDeployNew_OrchestratorPlanItemPresent verifies that Build with ModeDeployNew
+// TestBuild_ModeDeployNew_OrchestratorPlanItemPresent verifies that Build with ModeDeployWorkspace
 // still includes the orchestrator in the plan, confirming the exclusion is strictly mode-gated.
 // This is the negative case that pins AC1.4 at the plan-build level.
 func TestBuild_ModeDeployNew_OrchestratorPlanItemPresent(t *testing.T) {
@@ -468,7 +359,7 @@ func TestBuild_ModeDeployNew_OrchestratorPlanItemPresent(t *testing.T) {
 	in := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -483,7 +374,7 @@ func TestBuild_ModeDeployNew_OrchestratorPlanItemPresent(t *testing.T) {
 
 	built, err := p.Build(context.Background(), in)
 	if err != nil {
-		t.Fatalf("Build with ModeDeployNew: %v", err)
+		t.Fatalf("Build with ModeDeployWorkspace: %v", err)
 	}
 
 	found := false
@@ -493,44 +384,46 @@ func TestBuild_ModeDeployNew_OrchestratorPlanItemPresent(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("plan does not contain orchestrator for ModeDeployNew; " +
+		t.Error("plan does not contain orchestrator for ModeDeployWorkspace; " +
 			"the orchestrator must remain in the plan for all non-standalone-only modes (AC1.4); " +
-			"if OrchestratorExcludedFor is incorrectly returning true for ModeDeployNew, this will fail")
+			"if OrchestratorExcludedFor is incorrectly returning true for ModeDeployWorkspace, this will fail")
 	}
 }
 
-// TestBuild_ModeUtilityInfraOnly_OrchestratorPlanItemPresent verifies that Build with
-// ModeUtilityInfraOnly still includes the orchestrator, covering the utility/infrastructure
-// mode as a representative non-standalone mode (AC1.4).
-func TestBuild_ModeUtilityInfraOnly_OrchestratorPlanItemPresent(t *testing.T) {
-	infraAgent := makeInfrastructureAgent("checkpoint-manager-git", "checkpoint")
+// TestBuild_ModeUpdateWorkspace_OrchestratorPlanItemPresent verifies that Build with
+// ModeUpdateWorkspace still includes the orchestrator, confirming the exclusion is strictly
+// mode-gated to deploy-agents and deploy-hooks only. This covers a representative workspace
+// mode (AC1.4) and complements the ModeDeployWorkspace test above.
+func TestBuild_ModeUpdateWorkspace_OrchestratorPlanItemPresent(t *testing.T) {
+	worker := makeAgent("test-runner", "1.0")
 	cat := &fakeCatalog{
 		orchestrator: makeOrchestrator(),
-		infraAgents:  []domain.Agent{infraAgent},
+		workers:      []domain.Agent{worker},
+		workflows:    []domain.Workflow{makeWorkflow("quick-fix", "test-runner")},
 	}
 
 	module := newFakeModule()
 	p := plan.New()
 
 	in := plan.Input{
-		Catalog:                cat,
-		Module:                 module,
-		Mode:                   domain.ModeUtilityInfraOnly,
-		WorkspacePath:          "/fake/workspace",
-		Scope:                  domain.ScopeProject,
-		GOOS:                   "linux",
-		Manifest:               absentSnapshot(),
-		InfrastructureAgentIDs: []string{"checkpoint-manager-git"},
+		Catalog:       cat,
+		Module:        module,
+		Mode:          domain.ModeUpdateWorkspace,
+		WorkspacePath: "/fake/workspace",
+		Scope:         domain.ScopeProject,
+		GOOS:          "linux",
+		Manifest:      absentSnapshot(),
+		WorkflowIDs:   []string{"quick-fix"},
 		Models: map[string]domain.ModelSelection{
-			"checkpoint-manager-git": {ModelID: "test-model", Origin: domain.OriginHarnessList},
-			"orchestrator":           {ModelID: "test-model", Origin: domain.OriginHarnessList},
+			"test-runner":  {ModelID: "test-model", Origin: domain.OriginHarnessList},
+			"orchestrator": {ModelID: "test-model", Origin: domain.OriginHarnessList},
 		},
 		DeployedState: nil,
 	}
 
 	built, err := p.Build(context.Background(), in)
 	if err != nil {
-		t.Fatalf("Build with ModeUtilityInfraOnly: %v", err)
+		t.Fatalf("Build with ModeUpdateWorkspace: %v", err)
 	}
 
 	found := false
@@ -540,48 +433,9 @@ func TestBuild_ModeUtilityInfraOnly_OrchestratorPlanItemPresent(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("plan does not contain orchestrator for ModeUtilityInfraOnly; " +
-			"the orchestrator must remain in plans for all non-standalone-only modes (AC1.4)")
-	}
-}
-
-// TestBuild_ModeStandaloneOnly_PlanModeIsStandaloneOnly verifies that Build correctly
-// propagates the mode into the resulting plan even when the orchestrator exclusion is active.
-// This confirms that the mode field is not corrupted by the exclusion logic.
-func TestBuild_ModeStandaloneOnly_PlanModeIsStandaloneOnly(t *testing.T) {
-	standalone := makeStandaloneAgent("session-logger")
-	cat := &fakeCatalog{
-		orchestrator:     makeOrchestrator(),
-		standaloneAgents: []domain.Agent{standalone},
-	}
-
-	module := newFakeModule()
-	p := plan.New()
-
-	in := plan.Input{
-		Catalog:            cat,
-		Module:             module,
-		Mode:               domain.ModeStandaloneOnly,
-		WorkspacePath:      "/fake/workspace",
-		Scope:              domain.ScopeProject,
-		GOOS:               "linux",
-		Manifest:           absentSnapshot(),
-		StandaloneAgentIDs: []string{"session-logger"},
-		Models: map[string]domain.ModelSelection{
-			"session-logger": {ModelID: "test-model", Origin: domain.OriginHarnessList},
-		},
-		DeployedState: nil,
-	}
-
-	built, err := p.Build(context.Background(), in)
-	if err != nil {
-		t.Fatalf("Build with ModeStandaloneOnly: %v", err)
-	}
-
-	if built.Mode != domain.ModeStandaloneOnly {
-		t.Errorf("Plan.Mode = %q, want %q; "+
-			"Build must propagate the input Mode into the resulting plan unchanged",
-			built.Mode, domain.ModeStandaloneOnly)
+		t.Error("plan does not contain orchestrator for ModeUpdateWorkspace; " +
+			"the orchestrator must remain in plans for all workspace-oriented modes (AC1.4); " +
+			"only deploy-agents and deploy-hooks exclude the orchestrator")
 	}
 }
 

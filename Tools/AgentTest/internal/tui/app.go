@@ -18,6 +18,7 @@ import (
 
 	commonharness "mosaic-common/harness"
 	tuicommon "mosaic-common/tui"
+	"mosaic-common/tui/widgets"
 
 	"mosaic-agent-test/internal/authoring"
 	"mosaic-agent-test/internal/domain"
@@ -213,10 +214,34 @@ type Model struct {
 	resultErr           error
 
 	// Results/detail screen state.
-	resultsCursor int
+	resultsCursor      int
+	detailScrollOffset int // scroll position on the test-detail screen; reset on every drill-in
 
 	statusMsg   string
 	statusError bool
+
+	// detailPane renders failure detail (pre-flight diagnostics, run-failure
+	// and report-write-failure text) that will not fit the one-line status bar.
+	// It is a pointer for the same reason sinkBox is: Model is a value type
+	// whose Update and Fold return copies, and the pane owns mutable scroll
+	// state that must survive those copies.
+	detailPane *widgets.DetailPane
+
+	// showFailureDetail reports whether detailPane currently holds live failure
+	// detail that the active screen should render. It is a value field so that
+	// a Model copy which has not been given failure detail does not show a
+	// stale pane.
+	showFailureDetail bool
+
+	// failureTitle and failureBody hold the exact strings last handed to
+	// detailPane.SetContent. They are the Model's own record of that content,
+	// because widgets.DetailPane stores its title and body unexported and offers
+	// no getter — SetContent is write-only and View() is scroll-clamped, so the
+	// pane cannot be read back from another package. These fields are what
+	// FailureDetail() returns. They are value fields, so they copy with the Model
+	// exactly as showFailureDetail does.
+	failureTitle string
+	failureBody  string
 }
 
 // Compile-time assertion that Model satisfies tea.Model.
@@ -240,7 +265,60 @@ func NewModel(o Options) Model {
 	if len(o.Harnesses) > 0 {
 		m.screen = ScreenHarnessSelect
 	}
+	paneH, paneW := m.paneGeometry()
+	m.detailPane = widgets.NewDetailPane(paneH, paneW, widgets.DefaultDetailPaneStyles())
 	return m
+}
+
+// paneGeometry returns the height and width for the failure-detail pane,
+// derived from the model's current terminal dimensions. The pane is guaranteed
+// at least 3 lines. The width is set to the full content width so that lipgloss
+// word-wraps long diagnostic lines to fit the terminal rather than rendering
+// them as a single overflowing line.
+func (m Model) paneGeometry() (height, width int) {
+	h := m.height
+	if h <= 0 {
+		h = tuicommon.DefaultHeight
+	}
+	contentH := tuicommon.ContentHeight(h, false)
+	paneH := contentH / 2
+	if paneH < 3 {
+		paneH = 3
+	}
+	return paneH, m.contentWidth()
+}
+
+// withFailureDetail sets the failure-detail pane content and marks it live.
+// title is a short label naming the failing operation; body is the full
+// detail text, never truncated. It updates the pane and the Model's own
+// readable copies together — neither is updated without the other.
+func (m Model) withFailureDetail(title, body string) Model {
+	m.detailPane.SetContent(title, body)
+	m.failureTitle = title
+	m.failureBody = body
+	m.showFailureDetail = true
+	return m
+}
+
+// clearFailureDetail clears the failure-detail pane and marks it not live.
+// It updates the pane and the Model's own readable copies together.
+func (m Model) clearFailureDetail() Model {
+	m.detailPane.SetContent("", "")
+	m.failureTitle = ""
+	m.failureBody = ""
+	m.showFailureDetail = false
+	return m
+}
+
+// FailureDetail returns the failure detail currently held for display: a
+// short title naming the failing operation, the full untruncated body, and
+// whether any failure detail is live at all. When shown is false, title and
+// body are empty.
+func (m Model) FailureDetail() (title string, body string, shown bool) {
+	if !m.showFailureDetail {
+		return "", "", false
+	}
+	return m.failureTitle, m.failureBody, true
 }
 
 // Init is called once when the Bubble Tea program starts. Nothing needs to
@@ -260,6 +338,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		paneH, paneW := m.paneGeometry()
+		m.detailPane.Resize(paneH, paneW)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -507,6 +587,18 @@ func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.reportPathDraft = ""
 		return m, nil
 
+	case msg.Type == tea.KeyPgDown:
+		if m.showFailureDetail {
+			m.detailPane.ScrollDown()
+		}
+		return m, nil
+
+	case msg.Type == tea.KeyPgUp:
+		if m.showFailureDetail {
+			m.detailPane.ScrollUp()
+		}
+		return m, nil
+
 	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Select):
 		return m.startSelectedSuite()
 	}
@@ -589,11 +681,22 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 			},
 		})
 		if rpt.HasErrors() {
+			m = m.withFailureDetail("Pre-flight failed: "+suitePath, authoring.RenderReport(rpt))
 			m.statusMsg = "pre-flight failed for " + suitePath
 			m.statusError = true
 			return m, nil
 		}
+		if len(rpt.Diagnostics) > 0 {
+			// Warning-only report: surface the warnings but do not block the run.
+			m = m.withFailureDetail("Pre-flight warnings: "+suitePath, authoring.RenderReport(rpt))
+			m.statusMsg = fmt.Sprintf("pre-flight passed with %d warning(s)", len(rpt.Diagnostics))
+			m.statusError = false
+		} else {
+			m = m.clearFailureDetail()
+		}
 		plan = resolved
+	} else {
+		m = m.clearFailureDetail()
 	}
 
 	base := m.ctx
@@ -662,12 +765,20 @@ func (m Model) handleSuiteFinished(msg SuiteFinishedMsg) Model {
 		// Write the JSON report file if a path is configured.
 		if m.reportPath != "" {
 			if err := m.writeReportFile(msg.Result); err != nil {
-				m.statusMsg = fmt.Sprintf("cannot write report to %q: %v", m.reportPath, err)
+				writeErrText := fmt.Sprintf("cannot write report to %q: %v", m.reportPath, err)
+				writeBody := authoring.RenderReport(authoring.ReportWriteFailureReport(m.reportPath, err))
+				m = m.withFailureDetail("Cannot write report to "+m.reportPath, writeBody)
+				m.statusMsg = writeErrText
 				m.statusError = true
+				m.screen = ScreenResults
+				m.resultsCursor = 0
+				return m
 			}
 		}
-	}
-	if msg.Err != nil {
+		// Success: clear any failure detail from a previous operation.
+		m = m.clearFailureDetail()
+	} else {
+		m = m.withFailureDetail("Suite run failed", authoring.RenderReport(authoring.RunFailureReport("", msg.Err)))
 		m.statusMsg = msg.Err.Error()
 		m.statusError = true
 	}
@@ -680,7 +791,7 @@ func (m Model) handleSuiteFinished(msg SuiteFinishedMsg) Model {
 // opts.WriteFile to m.reportPath. A nil WriteFile is reported as an error.
 func (m Model) writeReportFile(result report.Result) error {
 	if m.opts.WriteFile == nil {
-		return fmt.Errorf("no write function configured")
+		return authoring.ErrReportWriterUnconfigured
 	}
 	var buf bytes.Buffer
 	if err := report.RenderJSON(&buf, result); err != nil {
@@ -734,17 +845,39 @@ func (m Model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Select):
 		// Drilling in is a navigation transition, independent of whether
 		// data has arrived yet; the detail screen itself renders a
-		// placeholder when there is nothing to show.
+		// placeholder when there is nothing to show. Reset the scroll
+		// position so the detail view always starts at the top on entry.
 		m.screen = ScreenDetail
+		m.detailScrollOffset = 0
+		return m, nil
+
+	case msg.Type == tea.KeyPgDown:
+		if m.showFailureDetail {
+			m.detailPane.ScrollDown()
+		}
+		return m, nil
+
+	case msg.Type == tea.KeyPgUp:
+		if m.showFailureDetail {
+			m.detailPane.ScrollUp()
+		}
 		return m, nil
 	}
 	return m, nil
 }
 
-// updateDetail handles returning to the results screen.
+// updateDetail handles key input on the test-detail screen. Back returns to
+// the results screen; PgDown and PgUp scroll the wrapped diagnostic content.
 func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Back) {
+	switch {
+	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Back):
 		m.screen = ScreenResults
+	case msg.Type == tea.KeyPgDown:
+		m.detailScrollOffset++
+	case msg.Type == tea.KeyPgUp:
+		if m.detailScrollOffset > 0 {
+			m.detailScrollOffset--
+		}
 	}
 	return m, nil
 }

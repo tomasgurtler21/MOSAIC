@@ -97,7 +97,7 @@ func integrationPlan(workspace string) domain.Plan {
 		}
 	}
 	return domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -420,7 +420,7 @@ func TestDeployNew_ApplyToAllConflict_DoesNotBlockInfraModelResolution(t *testin
 	deps.Catalog = cat
 	deps.Interaction = capture
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -576,7 +576,7 @@ func TestDeployNew_InfraAgent_NoUnknownAgentError_WithConflictsPresent(t *testin
 	deps.Executor = exec
 	deps.Interaction = capture
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

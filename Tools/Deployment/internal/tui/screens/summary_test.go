@@ -21,7 +21,7 @@ import (
 // cleanSummary returns a RunSummary representing a fully successful deployment.
 func cleanSummary() domain.RunSummary {
 	return domain.RunSummary{
-		Mode:           domain.ModeDeployNew,
+		Mode:           domain.ModeDeployWorkspace,
 		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/workspace/.ai",
@@ -38,7 +38,7 @@ func cleanSummary() domain.RunSummary {
 // summaryWithSkips returns a RunSummary where some items were skipped.
 func summaryWithSkips() domain.RunSummary {
 	return domain.RunSummary{
-		Mode:           domain.ModeUpdate,
+		Mode:           domain.ModeUpdateWorkspace,
 		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/workspace/.ai",
@@ -59,7 +59,7 @@ func summaryWithSkips() domain.RunSummary {
 // summaryWithFallback returns a RunSummary where a fallback deployment location was used.
 func summaryWithFallback() domain.RunSummary {
 	return domain.RunSummary{
-		Mode:           domain.ModeDeployNew,
+		Mode:           domain.ModeDeployWorkspace,
 		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/mosaic/fallback/workspace",
@@ -72,7 +72,7 @@ func summaryWithFallback() domain.RunSummary {
 // summaryWithExternalModule returns a RunSummary where an external module was active.
 func summaryWithExternalModule() domain.RunSummary {
 	return domain.RunSummary{
-		Mode:           domain.ModeDeployNew,
+		Mode:           domain.ModeDeployWorkspace,
 		Harness:        domain.HarnessRef{ID: "custom-harness", DisplayName: "Custom Harness"},
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/workspace/.ai",
@@ -327,12 +327,12 @@ func TestSummaryScreen_Scroll_DoesNotPanic(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestSummaryScreen_WorkflowsOnlyMode_ShowsModeLabel verifies that the SummaryScreen renders
-// the correct mode label "Update workflows only" when the RunSummary carries ModeWorkflowsOnly.
-// The summary must not fall through to the plain "Update" label used for ModeUpdate runs.
+// the correct mode label "Update workflows only" when the RunSummary carries ModeUpdateWorkflows.
+// The summary must not fall through to the plain "Update" label used for ModeUpdateWorkspace runs.
 func TestSummaryScreen_WorkflowsOnlyMode_ShowsModeLabel(t *testing.T) {
 	// Arrange: a RunSummary for a workflows-only run.
 	summary := domain.RunSummary{
-		Mode:           domain.ModeWorkflowsOnly,
+		Mode:           domain.ModeUpdateWorkflows,
 		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/workspace/.ai",
@@ -347,11 +347,11 @@ func TestSummaryScreen_WorkflowsOnlyMode_ShowsModeLabel(t *testing.T) {
 	// Act
 	view := collapseWhitespace(s.View())
 
-	// Assert: the mode line must reflect "workflows only", not the generic "Update" or "Deploy new".
-	if !strings.Contains(view, "workflows only") && !strings.Contains(view, "Workflows only") &&
-		!strings.Contains(view, "workflows-only") && !strings.Contains(view, "Update workflows") {
-		t.Errorf("summary view for ModeWorkflowsOnly does not show the workflows-only mode label; "+
-			"Mode: must identify the operation as workflows-only, not as a generic update:\n%s", s.View())
+	// Assert: the mode line must reflect "Update workflows", not the old "Update workflows only",
+	// "workflows only", or the generic "Update" or "Deploy new".
+	if !strings.Contains(view, "Update workflows") {
+		t.Errorf("summary view for ModeUpdateWorkflows does not show the correct mode label \"Update workflows\"; "+
+			"Mode: must identify the operation with the current vocabulary:\n%s", s.View())
 	}
 }
 
@@ -361,7 +361,7 @@ func TestSummaryScreen_WorkflowsOnlyMode_ShowsModeLabel(t *testing.T) {
 func TestSummaryScreen_WorkflowsOnlyMode_DoesNotShowDeployNewLabel(t *testing.T) {
 	// Arrange
 	summary := domain.RunSummary{
-		Mode:           domain.ModeWorkflowsOnly,
+		Mode:           domain.ModeUpdateWorkflows,
 		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/workspace/.ai",
@@ -375,7 +375,7 @@ func TestSummaryScreen_WorkflowsOnlyMode_DoesNotShowDeployNewLabel(t *testing.T)
 
 	// Assert: "Deploy new" must not appear in the mode label for a workflows-only run.
 	if strings.Contains(view, "Deploy new") {
-		t.Errorf("summary view for ModeWorkflowsOnly shows 'Deploy new' mode label; "+
+		t.Errorf("summary view for ModeUpdateWorkflows shows 'Deploy new' mode label; "+
 			"workflows-only runs must use a distinct mode label:\n%s", s.View())
 	}
 }
@@ -391,7 +391,7 @@ func TestSummaryScreen_AllThreeModes_ShowDistinctModeLabels(t *testing.T) {
 		}
 	}
 
-	modes := []domain.RunMode{domain.ModeDeployNew, domain.ModeUpdate, domain.ModeWorkflowsOnly}
+	modes := []domain.RunMode{domain.ModeDeployWorkspace, domain.ModeUpdateWorkspace, domain.ModeUpdateWorkflows}
 	views := make(map[domain.RunMode]string, len(modes))
 	for _, mode := range modes {
 		s := screens.NewSummaryScreen(baseSummary(mode), 80, 40, plainStyles())
@@ -422,7 +422,7 @@ func TestSummaryScreen_AllThreeModes_ShowDistinctModeLabels(t *testing.T) {
 func TestSummaryScreen_FollowUp_InjectionItemWithOwner_ShowsAttributionWhenDetailEmpty(t *testing.T) {
 	// Arrange
 	summary := domain.RunSummary{
-		Mode:           domain.ModeDeployNew,
+		Mode:           domain.ModeDeployWorkspace,
 		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/workspace/.ai",
@@ -457,7 +457,7 @@ func TestSummaryScreen_FollowUp_ItemDetailAlreadyNamesOwner_NoAgentNameDuplicate
 	// Arrange
 	const owner = "harness-bug-hunter"
 	summary := domain.RunSummary{
-		Mode:           domain.ModeDeployNew,
+		Mode:           domain.ModeDeployWorkspace,
 		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/workspace/.ai",
@@ -493,7 +493,7 @@ func TestSummaryScreen_FollowUp_ItemDetailAlreadyNamesOwner_NoAgentNameDuplicate
 func TestSummaryScreen_FollowUp_BlankOwner_NoAttributionSuffix(t *testing.T) {
 	// Arrange
 	summary := domain.RunSummary{
-		Mode:           domain.ModeDeployNew,
+		Mode:           domain.ModeDeployWorkspace,
 		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/workspace/.ai",

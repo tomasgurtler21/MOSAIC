@@ -518,7 +518,7 @@ func TestBuild_OrchestratorWorkflowOnly_Stale_SingleUpdateItem(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -591,7 +591,7 @@ func TestBuild_OrchestratorWorkflowStaleness_ComposesWithVersionDeltas(t *testin
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -683,7 +683,7 @@ func TestBuild_OrchestratorUnchangedWorkflows_StayUnchanged(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -755,7 +755,7 @@ func TestBuild_WorkflowVersionBump_OrchestratorStale(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -887,7 +887,7 @@ func TestBuild_OrchestratorWorkflowRemoved_Stale(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -959,7 +959,7 @@ func TestBuild_Orchestrator_PlanItemReason_NamesWorkflows(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",

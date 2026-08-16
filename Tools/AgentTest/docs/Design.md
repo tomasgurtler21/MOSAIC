@@ -311,3 +311,9 @@ AgentTest's `agentdeploy` port needs:
 3. The runner's setup phase must call `Deploy` (single call) for catalogue-based tests, falling back to per-agent `Render` for `stub_agents`-based tests.
 
 See `Requirements-agentTest.md` for the full requirement set.
+
+---
+
+## Related Documents
+
+- `Tools/AgentTest/docs/LaunchGuide.md` — where to run the binary from, what to stage beside it, the frontend selection rules, configuration overrides, and a worked example of the "wrong launch location" pre-flight failure

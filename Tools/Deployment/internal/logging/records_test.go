@@ -185,7 +185,7 @@ func TestRecord_MultipleConflictActionsAllRecorded(t *testing.T) {
 	log.StartRun(logging.RunContext{
 		RunID:     "run-multi-conflict",
 		StartedAt: time.Now(),
-		Mode:      domain.ModeUpdate,
+		Mode:      domain.ModeUpdateWorkspace,
 		Harness:   domain.HarnessRef{ID: "test-harness", Tier: domain.TierBuiltin},
 	})
 	log.Action(domain.ActionRecord{

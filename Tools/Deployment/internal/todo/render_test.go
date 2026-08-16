@@ -26,7 +26,7 @@ func sampleMeta() todo.Meta {
 		WorkspacePath:  "/workspace/my-project",
 		DeploymentRoot: "/workspace/my-project/.claude",
 		GeneratedAt:    time.Date(2024, 1, 15, 9, 0, 0, 0, time.UTC),
-		Mode:           domain.ModeDeployNew,
+		Mode:           domain.ModeDeployWorkspace,
 	}
 }
 

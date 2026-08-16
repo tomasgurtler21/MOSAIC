@@ -49,7 +49,7 @@ func TestTodoFile_TwoRunsProduceTwoDistinctFiles(t *testing.T) {
 		TodoMeta: todo.Meta{
 			Harness:       "test-harness",
 			WorkspacePath: workspace,
-			Mode:          domain.ModeDeployNew,
+			Mode:          domain.ModeDeployWorkspace,
 			GeneratedAt:   runA,
 		},
 	}
@@ -70,7 +70,7 @@ func TestTodoFile_TwoRunsProduceTwoDistinctFiles(t *testing.T) {
 		TodoMeta: todo.Meta{
 			Harness:       "test-harness",
 			WorkspacePath: workspace,
-			Mode:          domain.ModeDeployNew,
+			Mode:          domain.ModeDeployWorkspace,
 			GeneratedAt:   runB,
 		},
 	}
@@ -114,7 +114,7 @@ func TestTodoFile_TimestampedFileNameAppearsInWorkspace(t *testing.T) {
 		TodoMeta: todo.Meta{
 			Harness:       "test-harness",
 			WorkspacePath: workspace,
-			Mode:          domain.ModeDeployNew,
+			Mode:          domain.ModeDeployWorkspace,
 			GeneratedAt:   runTime,
 		},
 	}
@@ -164,7 +164,7 @@ func TestTodoFile_ResultPathMatchesFileNameAt(t *testing.T) {
 		TodoMeta: todo.Meta{
 			Harness:       "test-harness",
 			WorkspacePath: workspace,
-			Mode:          domain.ModeDeployNew,
+			Mode:          domain.ModeDeployWorkspace,
 			GeneratedAt:   runTime,
 		},
 	}
@@ -209,7 +209,7 @@ func TestTodoFile_ResultPathEndsWithTimestampedName(t *testing.T) {
 		TodoMeta: todo.Meta{
 			Harness:       "test-harness",
 			WorkspacePath: workspace,
-			Mode:          domain.ModeDeployNew,
+			Mode:          domain.ModeDeployWorkspace,
 			GeneratedAt:   runTime,
 		},
 	}

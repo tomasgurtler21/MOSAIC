@@ -109,6 +109,19 @@ func fixturePreflight(p preflight.Plan) PreflightFunc {
 	}
 }
 
+// scriptedPreflight returns a PreflightFunc that ignores its input and yields
+// the given report, so a test can drive the error-bearing and warning-only
+// pre-flight paths without depending on real authored files.
+//
+// It returns a minimal but usable preflight.Plan alongside the report, so
+// the warning-only case (where HasErrors() is false) can proceed to start the
+// suite rather than failing at plan construction.
+func scriptedPreflight(rpt authoring.Report) PreflightFunc {
+	return func(preflight.Input) (preflight.Plan, authoring.Report) {
+		return fixturePlan("suite-under-test"), rpt
+	}
+}
+
 // fixturePlan builds a minimal preflight.Plan naming one suite and no
 // tests, sufficient for driving suite selection without needing a real
 // authored suite on disk.

@@ -56,7 +56,7 @@ func buildInputFull(
 	return plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -107,7 +107,7 @@ func TestBuild_AgentTargetPath_SetFromHarnessModule(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -160,7 +160,7 @@ func TestBuild_SkillTargetPath_SetFromHarnessModule(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -477,7 +477,7 @@ func TestBuild_Items_AreOrderedByKindThenKey(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -624,7 +624,7 @@ func TestBuild_Plan_WorkflowsPreserveSelectionOrder(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -790,7 +790,7 @@ func TestBuild_AgentAbsentFromDeployedState_ClassifiesAsCreate_DespiteManifestEn
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -852,7 +852,7 @@ func TestBuild_SkillAbsentFromDeployedState_ClassifiesAsCreate_DespiteManifestEn
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -909,7 +909,7 @@ func TestBuild_AgentAbsent_DeployedState_MissingKey_TreatedAsAbsent(t *testing.T
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -995,7 +995,7 @@ func TestBuild_CrossHarness_FilesAbsentAtNewTargetPaths_AllAgentsAreCreate(t *te
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -1082,7 +1082,7 @@ func TestBuild_ManifestEntryAtDifferentTargetPath_FileExistsAtCurrentPath_Classi
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -1158,7 +1158,7 @@ func TestBuild_HashMismatch_TakesPrecedenceOverVersionStaleness(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -1220,7 +1220,7 @@ func TestBuild_HashMatch_ConflictNotFired_VersionStalenessClassifiedAsUpdate(t *
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -1291,7 +1291,7 @@ func TestBuild_UnversionedDeployedFile_ClassifiesAsUpdate(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -1357,7 +1357,7 @@ func TestBuild_HookAbsentFromDeployedState_ClassifiesAsCreate_DespiteManifestEnt
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -1440,7 +1440,7 @@ func TestBuild_CrossHarness_FilesAbsentAtNewTargetPaths_SkillIsCreate(t *testing
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -1521,7 +1521,7 @@ func TestBuild_CrossHarness_FilesAbsentAtNewTargetPaths_HookIsCreate(t *testing.
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -1608,7 +1608,7 @@ func TestBuild_ManifestEntryAtDifferentTargetPath_SkillFileExistsAtCurrentPath_C
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -1689,7 +1689,7 @@ func TestBuild_ManifestEntryAtDifferentTargetPath_HookFileExistsAtCurrentPath_Cl
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -1762,7 +1762,7 @@ func TestBuild_VersionDowngrade_StillClassifiesAsUpdate(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",

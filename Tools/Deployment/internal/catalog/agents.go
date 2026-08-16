@@ -39,6 +39,17 @@ func (c *catalogImpl) loadAgents(root string) []Issue {
 	}
 	// Missing orchestrator is not a hard error — loadCatalog still returns successfully.
 
+	// Orchestrator script: single file adjacent to orchestrator.md. A missing file is not
+	// an error; a catalog without it loads and deploys normally.
+	scriptPath := catalogpaths.OrchestratorScriptFile(root)
+	if script, scriptIssues, err := parseAgentFile(scriptPath, domain.RoleOrchestrator, ""); err == nil {
+		c.orchScript = script
+		c.orchScriptOK = true
+		c.agentIdx[script.Key] = script
+		c.sourcePaths[scriptPath] = true
+		issues = append(issues, scriptIssues...)
+	}
+
 	// Worker agents: scan new path first, then legacy path; first occurrence of a key wins.
 	agentDirCandidates := []string{
 		catalogpaths.SubagentsDir(root),

@@ -167,7 +167,7 @@ func TestUpdate_CorruptManifest_ClassifiesExistingFilesAsConflict(t *testing.T) 
 		},
 	}
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -209,7 +209,7 @@ func TestUpdate_CorruptManifest_DoesNotPanic(t *testing.T) {
 		},
 	}
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

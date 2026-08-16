@@ -80,9 +80,9 @@ func TestUpdate_AllAgentsUnchanged_ZeroNoModelGaps(t *testing.T) {
 
 	// Plan has one ActionUnchanged item for "test-runner" and no gaps, matching plan.Build's
 	// output when the agent is fully current and its deployed file carries a model. Setting
-	// Mode to ModeUpdate documents the test's intended flow.
+	// Mode to ModeUpdateWorkspace documents the test's intended flow.
 	plan := newMinimalPlan(workspace)
-	plan.Mode = domain.ModeUpdate
+	plan.Mode = domain.ModeUpdateWorkspace
 	plan.Items = []domain.PlanItem{
 		{
 			Ref:        domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "test-runner"},
@@ -147,7 +147,7 @@ func TestUpdate_StaleAgentEmbeddedModelPreserved_ZeroNoModelGaps(t *testing.T) {
 	// selection. Plan.Gaps carries no GapNoModel, matching plan.Build's output when the
 	// deployed file has a non-empty ModelID that regeneration will preserve.
 	plan := newMinimalPlan(workspace)
-	plan.Mode = domain.ModeUpdate
+	plan.Mode = domain.ModeUpdateWorkspace
 	plan.Items = []domain.PlanItem{
 		{
 			Ref:        domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "test-runner"},
@@ -208,7 +208,7 @@ func TestUpdate_AgentWithNoEmbeddedModel_ExactlyOneNoModelGap(t *testing.T) {
 	// agent is ActionUpdate, no model was resolved, and the deployed file has no embedded
 	// model (deployed.ModelID == "").
 	plan := newMinimalPlan(workspace)
-	plan.Mode = domain.ModeUpdate
+	plan.Mode = domain.ModeUpdateWorkspace
 	plan.Items = []domain.PlanItem{
 		{
 			Ref:        domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "test-runner"},
@@ -386,7 +386,7 @@ func TestUpdate_ConflictAgentEmbeddedModelPreserved_ZeroNoModelGaps(t *testing.T
 	// file's embedded model will be preserved. Plan.Gaps has no GapNoModel for "test-runner",
 	// matching plan.Build's output when deployed.ModelID != "".
 	plan := newMinimalPlan(workspace)
-	plan.Mode = domain.ModeUpdate
+	plan.Mode = domain.ModeUpdateWorkspace
 	plan.Items = []domain.PlanItem{
 		{
 			Ref:        domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "test-runner"},

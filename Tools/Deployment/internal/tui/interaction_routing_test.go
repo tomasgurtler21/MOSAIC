@@ -39,11 +39,11 @@ func (s *stubRoutingService) TransformHarness(_ context.Context, _ app.Transform
 	return app.TransformHarnessResult{}, nil
 }
 
-func (s *stubRoutingService) DeployUtilityInfrastructure(_ context.Context, _ app.UtilityInfraRequest) (domain.RunSummary, error) {
+func (s *stubRoutingService) DeployAgents(_ context.Context, _ app.DeployAgentsRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{}, nil
 }
 
-func (s *stubRoutingService) DeployStandalone(_ context.Context, _ app.StandaloneRequest) (domain.RunSummary, error) {
+func (s *stubRoutingService) DeployHooks(_ context.Context, _ app.DeployHooksRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{}, nil
 }
 
@@ -230,7 +230,7 @@ func TestInteractionRouting_AskText_ShowsTextPromptScreen(t *testing.T) {
 func TestInteractionRouting_Review_ShowsReviewScreen(t *testing.T) {
 	m := newRoutingModel()
 	plan := domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/ws",
 		Harness:       domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 		Items: []domain.PlanItem{
@@ -444,7 +444,7 @@ func TestInteractionRouting_TextPrompt_AnswerRoutedToReplyChannel(t *testing.T) 
 func TestInteractionRouting_ReviewScreen_ConfirmRoutedToReplyChannel(t *testing.T) {
 	m := newRoutingModel()
 	plan := domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/ws",
 		Harness:       domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 	}

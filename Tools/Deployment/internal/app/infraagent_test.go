@@ -523,7 +523,7 @@ func TestDeployNew_InfraAgent_ContentCallbackResolvesWithoutError(t *testing.T) 
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Catalog = cat
 	planWithInfra := domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -587,7 +587,7 @@ func TestDeployNew_InfraAgent_VersionStampsIncludesInfraItems(t *testing.T) {
 	deps, workspace := newBaseDeps(t, stub2)
 	deps.Catalog = cat
 	planWithInfra := domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

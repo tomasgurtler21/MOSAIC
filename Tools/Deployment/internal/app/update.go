@@ -219,7 +219,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	toolMappingsVersion := config.HashToolDestinations(toolCfg.ToolDestinations, userCfg.ToolDestinations)
 
 	planInput := plan.Input{
-		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeUpdate,
+		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeUpdateWorkspace,
 		WorkspacePath: workspace, Scope: scope, GOOS: s.deps.GOOS,
 		Manifest: snap, WorkflowIDs: workflowIDs,
 		DeployedState:       deployedState,
@@ -370,7 +370,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		TodoItems:     s.deps.Todo.Items,
 		TodoMeta: todo.Meta{
 			Harness: harnessRef.DisplayName, WorkspacePath: workspace, DeploymentRoot: workspace,
-			GeneratedAt: now, Mode: domain.ModeUpdate,
+			GeneratedAt: now, Mode: domain.ModeUpdateWorkspace,
 		},
 		DryRun: req.DryRun,
 		// Update opts into all-or-nothing execution so a failed run restores every overwritten
@@ -408,5 +408,5 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		s.notifyPersistFailure(ctx, err)
 	}
 
-	return s.buildSummary(domain.ModeUpdate, harnessRef, workspace, result), nil
+	return s.buildSummary(domain.ModeUpdateWorkspace, harnessRef, workspace, result), nil
 }

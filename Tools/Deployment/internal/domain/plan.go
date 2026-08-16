@@ -4,23 +4,27 @@ package domain
 type RunMode string
 
 const (
-	ModeDeployNew     RunMode = "deploy-new"
-	ModeUpdate        RunMode = "update"
-	ModeWorkflowsOnly RunMode = "workflows-only"
-	// ModePromote generates a generic agent source file from a harness-only agent.
+	// ModeDeployWorkspace deploys agents, skills, and hooks to a workspace for the first time.
+	ModeDeployWorkspace RunMode = "deploy-workspace"
+	// ModeUpdateWorkspace updates an existing workspace deployment to the latest source versions.
+	ModeUpdateWorkspace RunMode = "update-workspace"
+	// ModeUpdateWorkflows replaces the workflow set in an already-deployed orchestrator.
+	ModeUpdateWorkflows RunMode = "update-workflows"
+	// ModePromoteToGeneric generates a generic agent source file from a harness-only agent.
 	// It is never triggered by an Update run; it is always an explicit, opt-in command.
-	ModePromote RunMode = "promote"
+	ModePromoteToGeneric RunMode = "promote-to-generic"
 	// ModeTransformHarness converts already-deployed agents from one harness's form to
 	// another's, preserving injection content. Never triggered by an Update run.
 	ModeTransformHarness RunMode = "transform-harness"
 
-	// ModeUtilityInfraOnly deploys only Utility and Infrastructure agents, asking no
-	// workflow or hook questions.
-	ModeUtilityInfraOnly RunMode = "utility-infra-only"
+	// ModeDeployAgents deploys a user-chosen mix of subagents, utility agents, and
+	// standalone agents plus the skills they require. It asks no workflow or hook
+	// question and never rewrites the deployed orchestrator.
+	ModeDeployAgents RunMode = "deploy-agents"
 
-	// ModeStandaloneOnly deploys only standalone agents, asking no workflow, hook, utility,
-	// or infrastructure questions.
-	ModeStandaloneOnly RunMode = "standalone-only"
+	// ModeDeployHooks deploys hook bundles alone. It asks no agent, model, or workflow
+	// question and never rewrites the deployed orchestrator.
+	ModeDeployHooks RunMode = "deploy-hooks"
 )
 
 // PlanAction is the intended deployment action for one artifact.

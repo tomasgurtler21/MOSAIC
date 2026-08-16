@@ -43,6 +43,9 @@ const (
 // OrchestratorFileName is the orchestrator document's base name.
 const OrchestratorFileName = "orchestrator.md"
 
+// OrchestratorScriptFileName is the script orchestrator document's base name.
+const OrchestratorScriptFileName = "orchestrator-script.md"
+
 // AgentFileExt is the extension every catalog agent source file carries.
 const AgentFileExt = ".md"
 
@@ -104,6 +107,11 @@ func OrchestratorDir(catalogRoot string) string {
 // OrchestratorFile returns the path to the orchestrator document.
 func OrchestratorFile(catalogRoot string) string {
 	return filepath.Join(OrchestratorDir(catalogRoot), OrchestratorFileName)
+}
+
+// OrchestratorScriptFile returns the path to the script orchestrator document.
+func OrchestratorScriptFile(catalogRoot string) string {
+	return filepath.Join(OrchestratorDir(catalogRoot), OrchestratorScriptFileName)
 }
 
 // SubagentsDir returns the parent directory of the per-category subagent directories.

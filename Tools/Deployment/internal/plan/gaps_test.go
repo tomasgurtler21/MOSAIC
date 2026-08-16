@@ -53,7 +53,7 @@ func TestBuild_AgentWithNoModel_ProducesGapNoModel(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -94,7 +94,7 @@ func TestBuild_AgentWithUnresolvedModel_ProducesGapNoModel(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -133,7 +133,7 @@ func TestBuild_AllAgentsHaveResolvedModels_NoGapNoModel(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -193,7 +193,7 @@ func TestBuild_AgentWithUnmappedTool_ProducesGapUnmappedTool(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -284,7 +284,7 @@ func TestBuild_HookRegistrationTargetExists_ProducesGapHookRegistration(t *testi
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -343,7 +343,7 @@ func TestBuild_ActionUpdate_ReasonIsNonEmpty(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -400,7 +400,7 @@ func TestBuild_ActionUpdate_StaleFieldsMatchVersionDeltas(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -456,7 +456,7 @@ func TestBuild_ActionCreate_ReasonIsNonEmpty(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -507,7 +507,7 @@ func TestBuild_ActionConflict_ReasonIsNonEmpty(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -562,7 +562,7 @@ func TestBuild_ActionUnchanged_StaleIsEmpty(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -617,7 +617,7 @@ func TestBuild_ActionUnchanged_ConflictIsNil(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -679,7 +679,7 @@ func TestBuild_LoggingConsumer_ActionRecordFields(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",

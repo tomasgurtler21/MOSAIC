@@ -3,6 +3,9 @@ package screens_test
 // review_test.go verifies the ReviewScreen overlay: rendering of all four plan action
 // classifications (create, update, unchanged, locally-modified), version delta attribution
 // for updated items, the empty-plan message, scrolling, and the y/n/esc confirmation keys.
+// It also covers the mode-name mapping in the plan review header (modeDisplayName), which
+// must render a distinct, correct label for every declared RunMode and must fall back to
+// the raw mode string for any unmapped mode rather than defaulting to a real mode's name.
 
 import (
 	"strings"
@@ -38,7 +41,7 @@ func planWithItems(mode domain.RunMode, items []domain.PlanItem) domain.Plan {
 
 // emptyPlan returns a Plan with only unchanged items (no active work to do).
 func emptyPlan() domain.Plan {
-	return planWithItems(domain.ModeDeployNew, []domain.PlanItem{
+	return planWithItems(domain.ModeDeployWorkspace, []domain.PlanItem{
 		{
 			Ref:    agentRef("test-runner"),
 			Action: domain.ActionUnchanged,
@@ -49,7 +52,7 @@ func emptyPlan() domain.Plan {
 
 // fullPlan returns a Plan with one item of each action classification.
 func fullPlan() domain.Plan {
-	return planWithItems(domain.ModeUpdate, []domain.PlanItem{
+	return planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
 		{
 			Ref:        agentRef("new-agent"),
 			Action:     domain.ActionCreate,
@@ -87,7 +90,7 @@ func fullPlan() domain.Plan {
 // TestReviewScreen_View_ShowsCreateItems verifies that items with ActionCreate are labelled
 // with [CREATE] in the plan review so the user can see what will be written for the first time.
 func TestReviewScreen_View_ShowsCreateItems(t *testing.T) {
-	p := planWithItems(domain.ModeDeployNew, []domain.PlanItem{
+	p := planWithItems(domain.ModeDeployWorkspace, []domain.PlanItem{
 		{Ref: agentRef("new-agent"), Action: domain.ActionCreate, TargetPath: "Agents/new-agent.agent.md"},
 	})
 	s := screens.NewReviewScreen(p, 80, 40, plainStyles())
@@ -105,7 +108,7 @@ func TestReviewScreen_View_ShowsCreateItems(t *testing.T) {
 // TestReviewScreen_View_ShowsUpdateItems verifies that items with ActionUpdate are labelled
 // with [UPDATE] in the plan review.
 func TestReviewScreen_View_ShowsUpdateItems(t *testing.T) {
-	p := planWithItems(domain.ModeUpdate, []domain.PlanItem{
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
 		{Ref: agentRef("stale-agent"), Action: domain.ActionUpdate, TargetPath: "Agents/stale-agent.agent.md",
 			Stale: []domain.VersionDelta{{Field: "version", Deployed: "1.0", Source: "1.1"}}},
 	})
@@ -121,7 +124,7 @@ func TestReviewScreen_View_ShowsUpdateItems(t *testing.T) {
 // TestReviewScreen_View_ShowsVersionDelta verifies that for updated items, the review screen
 // shows which version field drove the update and the old/new values.
 func TestReviewScreen_View_ShowsVersionDelta(t *testing.T) {
-	p := planWithItems(domain.ModeUpdate, []domain.PlanItem{
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
 		{
 			Ref:    agentRef("stale-agent"),
 			Action: domain.ActionUpdate,
@@ -145,7 +148,7 @@ func TestReviewScreen_View_ShowsVersionDelta(t *testing.T) {
 // TestReviewScreen_View_ShowsConflictItems verifies that locally-modified items are labelled
 // with [CONFLICT] and mention the modification.
 func TestReviewScreen_View_ShowsConflictItems(t *testing.T) {
-	p := planWithItems(domain.ModeUpdate, []domain.PlanItem{
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
 		{
 			Ref:    agentRef("conflict-agent"),
 			Action: domain.ActionConflict,
@@ -167,7 +170,7 @@ func TestReviewScreen_View_ShowsConflictItems(t *testing.T) {
 // TestReviewScreen_View_ShowsUnchangedItems verifies that unchanged items are labelled with
 // [UNCHANGED] so the user can confirm which files are already up to date.
 func TestReviewScreen_View_ShowsUnchangedItems(t *testing.T) {
-	p := planWithItems(domain.ModeDeployNew, []domain.PlanItem{
+	p := planWithItems(domain.ModeDeployWorkspace, []domain.PlanItem{
 		{Ref: skillRef("lean-tdd"), Action: domain.ActionUnchanged},
 	})
 	s := screens.NewReviewScreen(p, 80, 40, plainStyles())
@@ -332,13 +335,13 @@ func TestReviewScreen_Reset_ClearsDone(t *testing.T) {
 // Workflows-only mode rendering
 // ---------------------------------------------------------------------------
 
-// TestReviewScreen_WorkflowsOnlyMode_ShowsModeHeader verifies that the ReviewScreen renders
-// the correct mode name "Update workflows only" in its header when given a plan whose mode
-// is ModeWorkflowsOnly. The header must not fall through to the update-mode text.
-func TestReviewScreen_WorkflowsOnlyMode_ShowsModeHeader(t *testing.T) {
-	// Arrange: a plan whose mode is ModeWorkflowsOnly, with one item to give the screen
+// TestReviewScreen_UpdateWorkflowsMode_ShowsModeHeader verifies that the ReviewScreen renders
+// the correct mode name "Update workflows" in its header when given a plan whose mode
+// is ModeUpdateWorkflows. The header must not fall through to the plain "Update workspace" text.
+func TestReviewScreen_UpdateWorkflowsMode_ShowsModeHeader(t *testing.T) {
+	// Arrange: a plan whose mode is ModeUpdateWorkflows, with one item to give the screen
 	// content to render.
-	p := planWithItems(domain.ModeWorkflowsOnly, []domain.PlanItem{
+	p := planWithItems(domain.ModeUpdateWorkflows, []domain.PlanItem{
 		{
 			Ref:        agentRef("orchestrator"),
 			Action:     domain.ActionUpdate,
@@ -351,23 +354,23 @@ func TestReviewScreen_WorkflowsOnlyMode_ShowsModeHeader(t *testing.T) {
 	// Act
 	view := collapseWhitespace(s.View())
 
-	// Assert: the mode header must say "workflows only", not the plain "Update" label.
-	if !strings.Contains(view, "workflows only") && !strings.Contains(view, "Workflows only") &&
-		!strings.Contains(view, "workflows-only") && !strings.Contains(view, "Update workflows") {
-		t.Errorf("review view for ModeWorkflowsOnly does not show the workflows-only mode name; "+
-			"the mode header must identify the operation clearly:\n%s", s.View())
+	// Assert: the mode header must say "Update workflows", not the plain "Update workspace" label.
+	if !strings.Contains(view, "Update workflows") {
+		t.Errorf("review view for ModeUpdateWorkflows does not show 'Update workflows' in the mode header; "+
+			"the header must identify the operation clearly:\n%s", s.View())
 	}
 }
 
-// TestReviewScreen_WorkflowsOnlyMode_DoesNotFallThroughToUpdateText verifies that the review
-// screen for ModeWorkflowsOnly does not show the plain "Update" mode label that is used for
-// ModeUpdate plans. The two modes must not be visually indistinguishable.
-func TestReviewScreen_WorkflowsOnlyMode_DoesNotFallThroughToUpdateText(t *testing.T) {
-	// Arrange: two plans — one workflows-only, one plain update — rendered side-by-side.
-	workflowsPlan := planWithItems(domain.ModeWorkflowsOnly, []domain.PlanItem{
+// TestReviewScreen_UpdateWorkflowsMode_DoesNotFallThroughToUpdateWorkspaceText verifies that
+// the review screen for ModeUpdateWorkflows does not show the "Update workspace" mode label
+// that is used for ModeUpdateWorkspace plans. The two modes must not be visually
+// indistinguishable in the review header.
+func TestReviewScreen_UpdateWorkflowsMode_DoesNotFallThroughToUpdateWorkspaceText(t *testing.T) {
+	// Arrange: two plans — one update-workflows, one update-workspace — rendered side-by-side.
+	workflowsPlan := planWithItems(domain.ModeUpdateWorkflows, []domain.PlanItem{
 		{Ref: agentRef("orchestrator"), Action: domain.ActionUpdate},
 	})
-	updatePlan := planWithItems(domain.ModeUpdate, []domain.PlanItem{
+	updatePlan := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
 		{Ref: agentRef("orchestrator"), Action: domain.ActionUpdate},
 	})
 
@@ -378,9 +381,8 @@ func TestReviewScreen_WorkflowsOnlyMode_DoesNotFallThroughToUpdateText(t *testin
 	upView := collapseWhitespace(upScreen.View())
 
 	// The mode portion of the header must differ between the two screens.
-	// If both say "Mode: Update" they are indistinguishable, which is wrong.
 	if wfView == upView {
-		t.Error("review screen for ModeWorkflowsOnly and ModeUpdate render identically; " +
+		t.Error("review screen for ModeUpdateWorkflows and ModeUpdateWorkspace render identically; " +
 			"the two modes must produce visually distinct mode headers so the user knows which operation is planned")
 	}
 }
@@ -416,7 +418,7 @@ func TestReviewScreen_View_BackupHint_FitsWithinConfiguredWidth(t *testing.T) {
 // list, including injection gaps whose Subject is the region name and whose Owner is set.
 func TestReviewScreen_GapList_InjectionGapWithOwner_ShowsAttributionInBullet(t *testing.T) {
 	// Arrange
-	p := planWithItems(domain.ModeDeployNew, []domain.PlanItem{
+	p := planWithItems(domain.ModeDeployWorkspace, []domain.PlanItem{
 		{Ref: agentRef("test-runner"), Action: domain.ActionCreate, TargetPath: "Agents/test-runner.agent.md"},
 	})
 	p.Gaps = []domain.Gap{
@@ -445,7 +447,7 @@ func TestReviewScreen_GapList_InjectionGapWithOwner_ShowsAttributionInBullet(t *
 func TestReviewScreen_GapList_GapSubjectAlreadyNamesOwner_NoAgentNameDuplicate(t *testing.T) {
 	// Arrange
 	const owner = "harness-bug-hunter"
-	p := planWithItems(domain.ModeDeployNew, []domain.PlanItem{
+	p := planWithItems(domain.ModeDeployWorkspace, []domain.PlanItem{
 		{Ref: agentRef("test-runner"), Action: domain.ActionCreate, TargetPath: "Agents/test-runner.agent.md"},
 	})
 	p.Gaps = []domain.Gap{
@@ -476,7 +478,7 @@ func TestReviewScreen_GapList_GapSubjectAlreadyNamesOwner_NoAgentNameDuplicate(t
 // empty renders its bullet line without any "(agent: …)" attribution suffix.
 func TestReviewScreen_GapList_BlankOwner_NoAttributionSuffix(t *testing.T) {
 	// Arrange
-	p := planWithItems(domain.ModeDeployNew, []domain.PlanItem{
+	p := planWithItems(domain.ModeDeployWorkspace, []domain.PlanItem{
 		{Ref: agentRef("test-runner"), Action: domain.ActionCreate, TargetPath: "Agents/test-runner.agent.md"},
 	})
 	p.Gaps = []domain.Gap{
@@ -509,7 +511,7 @@ func TestReviewScreen_GapList_BlankOwner_NoAttributionSuffix(t *testing.T) {
 // badge and agent key must continue to appear correctly even when gaps carry owners.
 func TestReviewScreen_GapList_Attribution_DoesNotAffectPlanActionSection(t *testing.T) {
 	// Arrange: a plan with one create action and one owned gap.
-	p := planWithItems(domain.ModeDeployNew, []domain.PlanItem{
+	p := planWithItems(domain.ModeDeployWorkspace, []domain.PlanItem{
 		{Ref: agentRef("new-agent"), Action: domain.ActionCreate, TargetPath: "Agents/new-agent.agent.md"},
 	})
 	p.Gaps = []domain.Gap{
@@ -531,5 +533,278 @@ func TestReviewScreen_GapList_Attribution_DoesNotAffectPlanActionSection(t *test
 	}
 	if !strings.Contains(view, "new-agent") {
 		t.Errorf("plan action section does not show agent key when gap list carries owners:\n%s", s.View())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Deleted-indicator delta rendering
+// ---------------------------------------------------------------------------
+
+// TestReviewScreen_DeletedDelta_EmptySource_ShowsDeletedText verifies that a VersionDelta
+// whose Source field is empty — the shared convention for a removed artifact — renders the
+// word "deleted" after the arrow in the plan review. A bare trailing arrow gives the user no
+// signal that the workflow has been removed, which is the user-visible bug this fixes.
+func TestReviewScreen_DeletedDelta_EmptySource_ShowsDeletedText(t *testing.T) {
+	// Arrange: one update item whose sole version delta has an empty Source, representing a
+	// removed workflow.
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:        agentRef("orchestrator"),
+			Action:     domain.ActionUpdate,
+			TargetPath: "Agents/orchestrator.agent.md",
+			Stale: []domain.VersionDelta{
+				{Field: "workflow:removed-flow", Deployed: "1.2.0", Source: ""},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+
+	// Act
+	view := s.View()
+
+	// Assert: "deleted" must appear in the rendered output so the user can see the removal.
+	if !strings.Contains(view, "deleted") {
+		t.Errorf("review screen does not render 'deleted' for an empty-Source VersionDelta;\n"+
+			"a removed workflow (Source == \"\") must show '→ deleted' so the user is informed:\n%s", view)
+	}
+}
+
+// TestReviewScreen_DeletedDelta_PopulatedSource_RendersExactlyAsToday verifies that a
+// VersionDelta whose Source is non-empty continues to render the source value verbatim after
+// the arrow, unchanged from the current behaviour. Only the empty-Source case changes.
+func TestReviewScreen_DeletedDelta_PopulatedSource_RendersExactlyAsToday(t *testing.T) {
+	// Arrange: an update item with a normal version bump (both Deployed and Source non-empty).
+	const field = "workflow:existing-flow"
+	const deployed = "1.0.0"
+	const source = "1.1.0"
+
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:        agentRef("orchestrator"),
+			Action:     domain.ActionUpdate,
+			TargetPath: "Agents/orchestrator.agent.md",
+			Stale: []domain.VersionDelta{
+				{Field: field, Deployed: deployed, Source: source},
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+
+	// Act
+	view := s.View()
+
+	// Assert: all three pieces of information must appear in the rendered output.
+	if !strings.Contains(view, field) {
+		t.Errorf("review screen does not show the version field name for a normal delta:\n%s", view)
+	}
+	if !strings.Contains(view, deployed) {
+		t.Errorf("review screen does not show the deployed version for a normal delta:\n%s", view)
+	}
+	if !strings.Contains(view, source) {
+		t.Errorf("review screen does not show the source version for a normal delta:\n%s", view)
+	}
+	// The word "deleted" must not appear for a non-empty Source.
+	if strings.Contains(collapseWhitespace(view), "deleted") {
+		t.Errorf("review screen shows 'deleted' for a non-empty Source delta; "+
+			"only empty-Source deltas may use that label:\n%s", view)
+	}
+}
+
+// TestReviewScreen_DeletedDelta_MixedDeltas_OnlyEmptySourceShowsDeleted verifies the mixed
+// case: a single plan item carries several VersionDeltas where some have an empty Source and
+// some have a populated Source. The word "deleted" must appear exactly for the empty-Source
+// entries, and the populated-Source entries must still render their source values.
+func TestReviewScreen_DeletedDelta_MixedDeltas_OnlyEmptySourceShowsDeleted(t *testing.T) {
+	// Arrange: three deltas on one item — one removal, two normal version bumps.
+	p := planWithItems(domain.ModeUpdateWorkspace, []domain.PlanItem{
+		{
+			Ref:        agentRef("orchestrator"),
+			Action:     domain.ActionUpdate,
+			TargetPath: "Agents/orchestrator.agent.md",
+			Stale: []domain.VersionDelta{
+				{Field: "workflow:removed-flow", Deployed: "2.0.0", Source: ""},    // removal
+				{Field: "workflow:updated-flow", Deployed: "1.0.0", Source: "1.1.0"}, // version bump
+				{Field: "workflow:another-bump", Deployed: "3.0.0", Source: "3.1.0"}, // version bump
+			},
+		},
+	})
+	s := screens.NewReviewScreen(p, 120, 80, plainStyles())
+
+	// Act
+	view := s.View()
+
+	// Assert: "deleted" appears for the removal.
+	if !strings.Contains(view, "deleted") {
+		t.Errorf("review screen does not show 'deleted' for the empty-Source delta in a mixed set:\n%s", view)
+	}
+
+	// Assert: source versions for the non-removal deltas are still visible.
+	if !strings.Contains(view, "1.1.0") {
+		t.Errorf("review screen does not show source version '1.1.0' for a non-empty-Source delta "+
+			"in the same item:\n%s", view)
+	}
+	if !strings.Contains(view, "3.1.0") {
+		t.Errorf("review screen does not show source version '3.1.0' for a non-empty-Source delta "+
+			"in the same item:\n%s", view)
+	}
+
+	// Assert: the removed workflow field name is visible alongside the "deleted" label.
+	if !strings.Contains(view, "removed-flow") {
+		t.Errorf("review screen does not show the field name for the removed workflow:\n%s", view)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Mode-name mapping — all declared modes and unmapped fallback (T2.3)
+// ---------------------------------------------------------------------------
+
+// planForMode is a helper that builds a minimal one-item plan using the given mode.
+// The single item is an unchanged agent so the plan is non-empty but does not exercise
+// create/update/conflict rendering — only the mode header matters in these tests.
+func planForMode(mode domain.RunMode) domain.Plan {
+	return planWithItems(mode, []domain.PlanItem{
+		{Ref: agentRef("test-agent"), Action: domain.ActionUnchanged},
+	})
+}
+
+// TestReviewScreen_DeployWorkspaceMode_ShowsModeHeader verifies that the plan review header
+// renders "Deploy workspace" when the plan's mode is ModeDeployWorkspace.
+func TestReviewScreen_DeployWorkspaceMode_ShowsModeHeader(t *testing.T) {
+	s := screens.NewReviewScreen(planForMode(domain.ModeDeployWorkspace), 80, 40, plainStyles())
+
+	view := collapseWhitespace(s.View())
+
+	if !strings.Contains(view, "Deploy workspace") {
+		t.Errorf("review header for ModeDeployWorkspace does not show 'Deploy workspace':\n%s", s.View())
+	}
+}
+
+// TestReviewScreen_UpdateWorkspaceMode_ShowsModeHeader verifies that the plan review header
+// renders "Update workspace" when the plan's mode is ModeUpdateWorkspace.
+func TestReviewScreen_UpdateWorkspaceMode_ShowsModeHeader(t *testing.T) {
+	s := screens.NewReviewScreen(planForMode(domain.ModeUpdateWorkspace), 80, 40, plainStyles())
+
+	view := collapseWhitespace(s.View())
+
+	if !strings.Contains(view, "Update workspace") {
+		t.Errorf("review header for ModeUpdateWorkspace does not show 'Update workspace':\n%s", s.View())
+	}
+}
+
+// TestReviewScreen_PromoteToGenericMode_ShowsModeHeader verifies that the plan review header
+// renders "Promote to generic" when the plan's mode is ModePromoteToGeneric.
+func TestReviewScreen_PromoteToGenericMode_ShowsModeHeader(t *testing.T) {
+	s := screens.NewReviewScreen(planForMode(domain.ModePromoteToGeneric), 80, 40, plainStyles())
+
+	view := collapseWhitespace(s.View())
+
+	if !strings.Contains(view, "Promote to generic") {
+		t.Errorf("review header for ModePromoteToGeneric does not show 'Promote to generic':\n%s", s.View())
+	}
+}
+
+// TestReviewScreen_TransformHarnessMode_ShowsModeHeader verifies that the plan review header
+// renders "Transform harness" when the plan's mode is ModeTransformHarness.
+func TestReviewScreen_TransformHarnessMode_ShowsModeHeader(t *testing.T) {
+	s := screens.NewReviewScreen(planForMode(domain.ModeTransformHarness), 80, 40, plainStyles())
+
+	view := collapseWhitespace(s.View())
+
+	if !strings.Contains(view, "Transform harness") {
+		t.Errorf("review header for ModeTransformHarness does not show 'Transform harness':\n%s", s.View())
+	}
+}
+
+// TestReviewScreen_DeployAgentsMode_ShowsModeHeader verifies that the plan review header
+// renders "Deploy agents" when the plan's mode is ModeDeployAgents.
+func TestReviewScreen_DeployAgentsMode_ShowsModeHeader(t *testing.T) {
+	s := screens.NewReviewScreen(planForMode(domain.ModeDeployAgents), 80, 40, plainStyles())
+
+	view := collapseWhitespace(s.View())
+
+	if !strings.Contains(view, "Deploy agents") {
+		t.Errorf("review header for ModeDeployAgents does not show 'Deploy agents':\n%s", s.View())
+	}
+}
+
+// TestReviewScreen_DeployHooksMode_ShowsModeHeader verifies that the plan review header
+// renders "Deploy hooks" when the plan's mode is ModeDeployHooks.
+func TestReviewScreen_DeployHooksMode_ShowsModeHeader(t *testing.T) {
+	s := screens.NewReviewScreen(planForMode(domain.ModeDeployHooks), 80, 40, plainStyles())
+
+	view := collapseWhitespace(s.View())
+
+	if !strings.Contains(view, "Deploy hooks") {
+		t.Errorf("review header for ModeDeployHooks does not show 'Deploy hooks':\n%s", s.View())
+	}
+}
+
+// TestReviewScreen_AllSurvivingModes_TableDriven runs each of the seven declared modes
+// through the review header and verifies the correct display name appears. A failure here
+// means either the constant value was not updated or modeDisplayName is missing an entry.
+func TestReviewScreen_AllSurvivingModes_TableDriven(t *testing.T) {
+	cases := []struct {
+		mode        domain.RunMode
+		wantLabel   string
+	}{
+		{domain.ModeDeployWorkspace, "Deploy workspace"},
+		{domain.ModeUpdateWorkspace, "Update workspace"},
+		{domain.ModeUpdateWorkflows, "Update workflows"},
+		{domain.ModeDeployAgents, "Deploy agents"},
+		{domain.ModeDeployHooks, "Deploy hooks"},
+		{domain.ModePromoteToGeneric, "Promote to generic"},
+		{domain.ModeTransformHarness, "Transform harness"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(string(tc.mode), func(t *testing.T) {
+			s := screens.NewReviewScreen(planForMode(tc.mode), 80, 40, plainStyles())
+			view := collapseWhitespace(s.View())
+			if !strings.Contains(view, tc.wantLabel) {
+				t.Errorf("review header for mode %q does not contain %q:\n%s",
+					tc.mode, tc.wantLabel, s.View())
+			}
+		})
+	}
+}
+
+// TestReviewScreen_UnmappedMode_ShowsRawModeStringNotAKnownModeName verifies that when a
+// plan carries a RunMode value that has no entry in the mode-name mapping, the review
+// header renders the raw mode string rather than silently falling back to a real mode's
+// display name (e.g., "Deploy workspace"). A raw-string fallback makes the problem
+// immediately visible; a real-name fallback would masquerade as a normal deployment.
+func TestReviewScreen_UnmappedMode_ShowsRawModeStringNotAKnownModeName(t *testing.T) {
+	// Arrange: a plan whose mode is not in any mapping table.
+	const unmappedMode = domain.RunMode("fictional-unknown-mode")
+	s := screens.NewReviewScreen(planForMode(unmappedMode), 80, 40, plainStyles())
+
+	// Act
+	view := collapseWhitespace(s.View())
+
+	// Assert: the raw mode string must be visible in the header.
+	if !strings.Contains(view, "fictional-unknown-mode") {
+		t.Errorf("review header for an unmapped mode does not show the raw mode string %q; "+
+			"an unhandled mode must be visibly wrong rather than defaulting to a known mode name:\n%s",
+			unmappedMode, s.View())
+	}
+
+	// Assert: the view must not show any known real mode name for an unmapped mode.
+	// The most dangerous false fallback is "Deploy workspace" (the old hardcoded default).
+	knownModeNames := []string{
+		"Deploy workspace",
+		"Update workspace",
+		"Update workflows",
+		"Deploy agents",
+		"Deploy hooks",
+		"Promote to generic",
+		"Transform harness",
+	}
+	for _, name := range knownModeNames {
+		if strings.Contains(view, name) {
+			t.Errorf("review header for an unmapped mode shows real mode name %q; "+
+				"an unmapped mode must not masquerade as a known operation:\n%s",
+				name, s.View())
+		}
 	}
 }

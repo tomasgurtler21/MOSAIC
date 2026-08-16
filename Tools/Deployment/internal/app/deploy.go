@@ -1,8 +1,8 @@
 package app
 
-// deploy.go implements the deploy-new use case (I18.3): encoding the flow documented in
-// Stage-18/Plan.md as a sequence of resolver calls, each of which either uses a pre-answered
-// request field or asks exactly one question through the Interaction port (CD-6).
+// deploy.go implements the deploy-workspace use case: encoding the flow as a sequence of resolver
+// calls, each of which either uses a pre-answered request field or asks exactly one question
+// through the Interaction port.
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 	"mosaic-deploy/internal/todo"
 )
 
-// DeployNew runs the full deploy-new flow. See Service.DeployNew for the contract.
+// DeployNew runs the full Deploy workspace flow. See Service.DeployNew for the contract.
 func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunSummary, error) {
 	harnessID := req.HarnessID
 	if harnessID == "" {
@@ -230,7 +230,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 	toolMappingsVersion := config.HashToolDestinations(toolCfg.ToolDestinations, userCfg.ToolDestinations)
 
 	planInput := plan.Input{
-		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeDeployNew,
+		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeDeployWorkspace,
 		WorkspacePath: workspace, Scope: scope, GOOS: s.deps.GOOS,
 		Manifest: snap, WorkflowIDs: workflowIDs, UtilityAgentIDs: utilityIDs,
 		InfrastructureAgentIDs: infraAgentIDs, HookIDs: hookIDs,
@@ -310,7 +310,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		TodoItems:     s.deps.Todo.Items,
 		TodoMeta: todo.Meta{
 			Harness: harnessRef.DisplayName, WorkspacePath: workspace, DeploymentRoot: workspace,
-			GeneratedAt: now, Mode: domain.ModeDeployNew,
+			GeneratedAt: now, Mode: domain.ModeDeployWorkspace,
 		},
 		DryRun: req.DryRun,
 	}
@@ -334,7 +334,7 @@ func (s *service) DeployNew(ctx context.Context, req DeployRequest) (domain.RunS
 		s.notifyPersistFailure(ctx, err)
 	}
 
-	return s.buildSummary(domain.ModeDeployNew, harnessRef, workspace, result), nil
+	return s.buildSummary(domain.ModeDeployWorkspace, harnessRef, workspace, result), nil
 }
 
 // orderedAgentsForModelResolution reorders agents into a processing sequence suitable for

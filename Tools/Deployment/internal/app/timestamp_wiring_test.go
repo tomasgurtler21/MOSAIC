@@ -153,7 +153,7 @@ func TestTimestampWiring_UpdateFlow_ParkingGapContainsRFC3339Timestamp(t *testin
 	deps, _ := newBaseDeps(t, stub)
 	deps.Catalog = cat
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: ws,
 		Items:         []domain.PlanItem{updateItem},

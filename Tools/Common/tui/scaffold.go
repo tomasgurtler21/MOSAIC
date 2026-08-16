@@ -81,3 +81,63 @@ func Truncate(s string, maxLen int) string {
 	}
 	return string(runes[:maxLen-1]) + "…"
 }
+
+// Wrap wraps s to at most maxLen runes per line, breaking at word boundaries
+// where possible. Any token longer than maxLen is hard-broken at exactly
+// maxLen runes so that no output line ever exceeds the limit. When maxLen is
+// not positive, s is returned unchanged without panicking.
+func Wrap(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return s
+	}
+
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return s
+	}
+
+	var lines []string
+	var current []rune
+
+	for _, word := range words {
+		wordRunes := []rune(word)
+
+		// Hard-break any token that is itself longer than maxLen.
+		for len(wordRunes) > maxLen {
+			if len(current) > 0 {
+				lines = append(lines, string(current))
+				current = nil
+			}
+			lines = append(lines, string(wordRunes[:maxLen]))
+			wordRunes = wordRunes[maxLen:]
+		}
+
+		if len(wordRunes) == 0 {
+			continue
+		}
+
+		switch {
+		case len(current) == 0:
+			// Start a new line with this word.
+			current = wordRunes
+		case len(current)+1+len(wordRunes) <= maxLen:
+			// Word fits on the current line with a separating space.
+			current = append(current, ' ')
+			current = append(current, wordRunes...)
+		default:
+			// Word does not fit: flush the current line and start a new one.
+			lines = append(lines, string(current))
+			current = wordRunes
+		}
+	}
+
+	if len(current) > 0 {
+		lines = append(lines, string(current))
+	}
+
+	if len(lines) == 0 {
+		return s
+	}
+
+	return strings.Join(lines, "\n")
+}

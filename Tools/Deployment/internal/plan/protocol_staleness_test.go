@@ -512,7 +512,7 @@ func TestBuild_ProtocolStaleness_AppliedToSubagentNotJustOrchestrator(t *testing
 	in := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -666,7 +666,7 @@ func TestBuild_ProtocolStaleness_OrchestratorComposesWithWorkflowDrift(t *testin
 	in := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",

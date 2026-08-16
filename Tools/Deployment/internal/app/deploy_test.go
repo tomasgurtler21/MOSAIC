@@ -205,8 +205,8 @@ func TestDeployNew_AllPreAnswered_RunsHeadlessly(t *testing.T) {
 	if err != nil {
 		t.Errorf("DeployNew returned unexpected error: %v", err)
 	}
-	if summary.Mode != domain.ModeDeployNew {
-		t.Errorf("summary.Mode = %q, want %q", summary.Mode, domain.ModeDeployNew)
+	if summary.Mode != domain.ModeDeployWorkspace {
+		t.Errorf("summary.Mode = %q, want %q", summary.Mode, domain.ModeDeployWorkspace)
 	}
 }
 
@@ -231,7 +231,7 @@ func TestDeployNew_AllPreAnswered_SummaryHarnessMatchesRequest(t *testing.T) {
 }
 
 // TestDeployNew_AllPreAnswered_SummaryModeIsDeployNew verifies that RunSummary.Mode is
-// ModeDeployNew for the deploy-new flow.
+// ModeDeployWorkspace for the deploy-new flow.
 func TestDeployNew_AllPreAnswered_SummaryModeIsDeployNew(t *testing.T) {
 	// Arrange
 	stub := interactiontest.NewBuilder().Build()
@@ -245,8 +245,8 @@ func TestDeployNew_AllPreAnswered_SummaryModeIsDeployNew(t *testing.T) {
 	}
 
 	// Assert
-	if summary.Mode != domain.ModeDeployNew {
-		t.Errorf("summary.Mode = %q, want %q", summary.Mode, domain.ModeDeployNew)
+	if summary.Mode != domain.ModeDeployWorkspace {
+		t.Errorf("summary.Mode = %q, want %q", summary.Mode, domain.ModeDeployWorkspace)
 	}
 }
 

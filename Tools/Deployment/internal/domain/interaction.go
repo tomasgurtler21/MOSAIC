@@ -101,6 +101,11 @@ const (
 	// QStandaloneAgents asks which standalone agents to deploy in the standalone-only mode.
 	// Every standalone agent in the catalog is offered. Skippable and skip-all-able.
 	QStandaloneAgents QuestionID = "standalone-agents"
+
+	// QDeployAgents is the merged, catalog-scanned agent selection asked only by
+	// ModeDeployAgents. It supersedes QUtilityAgents/QInfrastructureAgents/QStandaloneAgents
+	// for that mode only; those three questions remain in use by the Deploy workspace flow.
+	QDeployAgents QuestionID = "deploy-agents"
 )
 
 // PlanReviewer is the deployment-specific interface for plan review. The shared Interaction

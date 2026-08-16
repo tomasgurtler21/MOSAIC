@@ -216,7 +216,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 	toolMappingsVersion := config.HashToolDestinations(toolCfg.ToolDestinations, userCfg.ToolDestinations)
 
 	planInput := plan.Input{
-		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeWorkflowsOnly,
+		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeUpdateWorkflows,
 		WorkspacePath: workspace, Scope: scope, GOOS: s.deps.GOOS,
 		Manifest: snap, WorkflowIDs: workflowIDs,
 		DeployedState:       deployedState,
@@ -328,7 +328,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		TodoItems:     s.deps.Todo.Items,
 		TodoMeta: todo.Meta{
 			Harness: harnessRef.DisplayName, WorkspacePath: workspace, DeploymentRoot: workspace,
-			GeneratedAt: now, Mode: domain.ModeWorkflowsOnly,
+			GeneratedAt: now, Mode: domain.ModeUpdateWorkflows,
 		},
 		DryRun: req.DryRun,
 		// UpdateWorkflows opts into all-or-nothing execution so a failed run restores every
@@ -372,5 +372,5 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		}
 	}
 
-	return s.buildSummary(domain.ModeWorkflowsOnly, harnessRef, workspace, result), nil
+	return s.buildSummary(domain.ModeUpdateWorkflows, harnessRef, workspace, result), nil
 }

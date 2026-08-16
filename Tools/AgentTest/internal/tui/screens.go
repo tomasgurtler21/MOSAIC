@@ -130,15 +130,19 @@ func (m Model) viewModelSelect() string {
 // Suite selection
 // ---------------------------------------------------------------------------
 
-// suiteSelectHelp is EntryScreenHelp with the Space/toggle entry inserted,
-// so the retention affordance (Stage 7) is discoverable the same way every
-// other key binding on this screen is.
+// suiteSelectHelp is EntryScreenHelp with the Space/toggle entry and the
+// pane-scroll entry inserted, so both affordances are discoverable the same
+// way every other key binding on this screen is.
 func suiteSelectHelp() []tuicommon.HelpEntry {
-	entry := tuicommon.HelpEntry{
+	spaceEntry := tuicommon.HelpEntry{
 		Key:  tuicommon.GlobalKeys.Space.Help().Key,
 		Desc: tuicommon.GlobalKeys.Space.Help().Desc,
 	}
-	return append([]tuicommon.HelpEntry{entry}, tuicommon.EntryScreenHelp()...)
+	scrollEntry := tuicommon.HelpEntry{
+		Key:  "pgup/pgdn",
+		Desc: "scroll detail",
+	}
+	return append([]tuicommon.HelpEntry{spaceEntry, scrollEntry}, tuicommon.EntryScreenHelp()...)
 }
 
 func (m Model) viewSuiteSelect() string {
@@ -167,7 +171,12 @@ func (m Model) viewSuiteSelect() string {
 		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Report: %s", m.reportPath), width))
 	}
 
-	return m.renderScreen("Select a Suite", "", b.String(), suiteSelectHelp())
+	body := b.String()
+	if m.showFailureDetail && m.detailPane != nil {
+		body = body + "\n" + m.detailPane.View()
+	}
+
+	return m.renderScreen("Select a Suite", "", body, suiteSelectHelp())
 }
 
 // ---------------------------------------------------------------------------
@@ -187,12 +196,28 @@ func (m Model) viewProgress() string {
 	}
 	lines = append(lines, fmt.Sprintf("Finished: %d", len(m.finished)))
 
-	return m.renderScreen("Suite Progress", "", strings.Join(lines, "\n"), tuicommon.EntryScreenHelp())
+	body := strings.Join(lines, "\n")
+	if m.showFailureDetail && m.detailPane != nil {
+		body = body + "\n" + m.detailPane.View()
+	}
+
+	return m.renderScreen("Suite Progress", "", body, tuicommon.EntryScreenHelp())
 }
 
 // ---------------------------------------------------------------------------
 // Results
 // ---------------------------------------------------------------------------
+
+// resultsHelp is EntryScreenHelp augmented with the pane-scroll entry, so the
+// scroll affordance is discoverable on the results screen whenever the detail
+// pane may be live.
+func resultsHelp() []tuicommon.HelpEntry {
+	scrollEntry := tuicommon.HelpEntry{
+		Key:  "pgup/pgdn",
+		Desc: "scroll detail",
+	}
+	return append([]tuicommon.HelpEntry{scrollEntry}, tuicommon.EntryScreenHelp()...)
+}
 
 func (m Model) viewResults() string {
 	width := m.contentWidth()
@@ -217,23 +242,47 @@ func (m Model) viewResults() string {
 		b.WriteString(tuicommon.Truncate(fmt.Sprintf("%s%-8s %s", prefix, verdict, t.TestID), width))
 	}
 
-	return m.renderScreen("Results", "", b.String(), tuicommon.EntryScreenHelp())
+	body := b.String()
+	if m.showFailureDetail && m.detailPane != nil {
+		body = body + "\n" + m.detailPane.View()
+	}
+
+	return m.renderScreen("Results", "", body, resultsHelp())
 }
 
 // ---------------------------------------------------------------------------
 // Test detail
 // ---------------------------------------------------------------------------
 
+// detailHelp returns the key hints for the test-detail screen. It keeps only
+// the essential entries so the help bar stays on one line and does not consume
+// an extra line of screen height (which would push content off the bottom on
+// short terminals). The scroll affordance is included per the spec.
+func detailHelp() []tuicommon.HelpEntry {
+	return []tuicommon.HelpEntry{
+		{Key: "pgup/pgdn", Desc: "scroll"},
+		{Key: tuicommon.GlobalKeys.Back.Help().Key, Desc: tuicommon.GlobalKeys.Back.Help().Desc},
+		{Key: tuicommon.GlobalKeys.Cancel.Help().Key, Desc: tuicommon.GlobalKeys.Cancel.Help().Desc},
+	}
+}
+
 // viewDetail renders the drill-down for the selected finished test. The
 // outcome classes it names come from report.Classify — never re-derived
 // here — so an infrastructure fault cannot read like a subject regression
 // in this screen without also failing report.Classify's own contract
 // (AC16.3).
+//
+// Diagnostic-bearing lines (Test ID, Outcome, Failed assertions) are wrapped
+// to the terminal width so long values are shown in full across multiple lines
+// rather than being cut with an ellipsis. Navigational single-line fields
+// (Verdict, Duration, Cost) are left as-is because they are short by design.
+// The rendered body is clamped to the available content height and the scroll
+// offset (Model.detailScrollOffset) controls the visible window.
 func (m Model) viewDetail() string {
 	width := m.contentWidth()
 	tests := m.resultTests()
 	if len(tests) == 0 || m.resultsCursor >= len(tests) {
-		return m.renderScreen("Test Detail", "", "no detail available", tuicommon.EntryScreenHelp())
+		return m.renderScreen("Test Detail", "", "no detail available", detailHelp())
 	}
 
 	test := tests[m.resultsCursor]
@@ -248,18 +297,49 @@ func (m Model) viewDetail() string {
 		classNames[i] = string(c)
 	}
 
-	lines := []string{
-		tuicommon.Truncate("Test: "+test.TestID, width),
+	// Build logical content lines. Diagnostic-bearing fields use Wrap so that
+	// long values are presented in full. Navigational fields use plain
+	// formatting because they are short and one line per field keeps the layout
+	// readable.
+	logicalLines := []string{
+		tuicommon.Wrap("Test: "+test.TestID, width),
 		fmt.Sprintf("Verdict: %s", run.Verdict),
-		"Outcome: " + strings.Join(classNames, ", "),
+		tuicommon.Wrap("Outcome: "+strings.Join(classNames, ", "), width),
 		fmt.Sprintf("Duration: %s", run.Duration),
 		fmt.Sprintf("Cost: %.2f USD (%s)", run.Cost.TotalUSD, run.Cost.Attribution),
 	}
 	for _, a := range run.Assertions {
 		if a.Outcome == domain.AssertionFail {
-			lines = append(lines, tuicommon.Truncate("Failed assertion: "+a.Detail, width))
+			logicalLines = append(logicalLines, tuicommon.Wrap("Failed assertion: "+a.Detail, width))
 		}
 	}
 
-	return m.renderScreen("Test Detail", "", strings.Join(lines, "\n"), tuicommon.EntryScreenHelp())
+	// Expand logical lines into physical lines: Wrap may introduce embedded
+	// newlines when a logical line overflows the terminal width.
+	var allLines []string
+	for _, ll := range logicalLines {
+		allLines = append(allLines, strings.Split(ll, "\n")...)
+	}
+
+	// Compute the available body height and apply the scroll offset. The
+	// offset is supplied by the model and clamped here so the view is always
+	// self-consistent regardless of how large the offset field has grown.
+	contentH := tuicommon.ContentHeight(m.height, false)
+	maxOffset := len(allLines) - contentH
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	offset := m.detailScrollOffset
+	if offset > maxOffset {
+		offset = maxOffset
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	visible := allLines[offset:]
+	if len(visible) > contentH {
+		visible = visible[:contentH]
+	}
+
+	return m.renderScreen("Test Detail", "", strings.Join(visible, "\n"), detailHelp())
 }

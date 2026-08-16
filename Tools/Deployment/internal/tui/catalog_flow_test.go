@@ -57,9 +57,6 @@ func (s *catalogStubService) Promote(_ context.Context, _ app.PromoteRequest) (a
 func (s *catalogStubService) TransformHarness(_ context.Context, _ app.TransformHarnessRequest) (app.TransformHarnessResult, error) {
 	return app.TransformHarnessResult{}, nil
 }
-func (s *catalogStubService) DeployUtilityInfrastructure(_ context.Context, _ app.UtilityInfraRequest) (domain.RunSummary, error) {
-	return domain.RunSummary{}, nil
-}
 func (s *catalogStubService) RenderAgent(_ context.Context, _ app.RenderAgentRequest) (app.RenderAgentResult, error) {
 	return app.RenderAgentResult{}, nil
 }
@@ -67,7 +64,10 @@ func (s *catalogStubService) RenderAgent(_ context.Context, _ app.RenderAgentReq
 func (s *catalogStubService) CheckWorkflowIndex(_ context.Context) (app.IndexCheckResult, error) {
 	return app.IndexCheckResult{}, nil
 }
-func (s *catalogStubService) DeployStandalone(_ context.Context, _ app.StandaloneRequest) (domain.RunSummary, error) {
+func (s *catalogStubService) DeployAgents(_ context.Context, _ app.DeployAgentsRequest) (domain.RunSummary, error) {
+	return domain.RunSummary{}, nil
+}
+func (s *catalogStubService) DeployHooks(_ context.Context, _ app.DeployHooksRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{}, nil
 }
 

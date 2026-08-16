@@ -304,7 +304,7 @@ func TestUpdate_CustomModelIDs_PersistedAfterRun(t *testing.T) {
 	deps, workspace := newBaseDeps(t, stub)
 	deps.UserConfig = spy
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

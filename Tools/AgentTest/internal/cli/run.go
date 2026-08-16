@@ -449,12 +449,13 @@ func validateCommand(inv parsedInvocation, o Options) int {
 	return ExitSuccess
 }
 
-// renderPreflightReport writes every diagnostic in rep.Sorted() order, one
-// per line, to w — the single rendering both `run`'s pre-flight failure and
-// `validate` use, so they cannot report the same rejection differently.
+// renderPreflightReport writes the shared rendering of rep to w. Both
+// runCommand and validateCommand call it before returning ExitPreflight, so
+// the two subcommands cannot report the same rejection differently.
 func renderPreflightReport(w io.Writer, rep authoring.Report) {
-	for _, d := range rep.Sorted() {
-		fmt.Fprintf(w, "%s: %s: %s\n", d.Path, d.Code, d.Message)
+	rendered := authoring.RenderReport(rep)
+	if rendered != "" {
+		fmt.Fprintln(w, rendered)
 	}
 }
 

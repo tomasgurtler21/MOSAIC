@@ -116,7 +116,7 @@ func TestRunError_PlanNotConfirmed_ClearsSelections(t *testing.T) {
 	m := newRestartModel()
 	m.selections = entrySelections{
 		harnessID:     "some-harness",
-		mode:          domain.ModeDeployNew,
+		mode:          domain.ModeDeployWorkspace,
 		workspacePath: "/some/workspace",
 	}
 
@@ -139,7 +139,7 @@ func TestRunError_PlanNotConfirmed_ClearsAnyStaleReviewOverlay(t *testing.T) {
 	// Arrange: install a reviewOverlay to simulate a stale state.
 	m := newRestartModel()
 	qMsg := buildReviewMsg(domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/ws",
 		Harness:       domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 	})
@@ -162,7 +162,7 @@ func TestRunError_PlanNotConfirmed_ClearsAnyStaleActiveQuestion(t *testing.T) {
 	// Arrange: install a reviewOverlay (which also sets activeQuestion).
 	m := newRestartModel()
 	qMsg := buildReviewMsg(domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/ws",
 		Harness:       domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 	})

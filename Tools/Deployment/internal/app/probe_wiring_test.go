@@ -147,7 +147,7 @@ func TestUpdate_DeployedStatePopulated_ContainsEntryPerPlannedPath(t *testing.T)
 	ws := t.TempDir()
 
 	spy := &spyPlanner{response: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: ws,
 		Scope:         domain.ScopeProject,
@@ -205,7 +205,7 @@ func TestUpdate_WorkflowDiscovery_UsesDeployedOrchestratorContent(t *testing.T) 
 	writeProbeWiringFile(t, ws, "orchestrator.md", orchestratorContent)
 
 	spy := &spyPlanner{response: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: ws,
 		Scope:         domain.ScopeProject,
@@ -267,7 +267,7 @@ func TestUpdate_WorkflowDiscovery_NoSeparateOrchestratorRead(t *testing.T) {
 	writeProbeWiringFile(t, ws, "orchestrator.md", orchestratorContent)
 
 	spy := &spyPlanner{response: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: ws,
 		Scope:         domain.ScopeProject,

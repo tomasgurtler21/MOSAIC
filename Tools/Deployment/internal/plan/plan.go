@@ -40,10 +40,15 @@ type Input struct {
 	GOOS            string
 	Manifest        manifest.Snapshot
 	WorkflowIDs            []string                         // selection order is preserved into Plan.Workflows
+	// SubagentIDs are ordinary (non-infrastructure) subagents named directly, populated only by
+	// ModeDeployAgents. The planner forwards them into Selection.SubagentIDs; nil in every other
+	// mode.
+	SubagentIDs            []string
 	UtilityAgentIDs        []string                         // must already be filtered by the tool config allow-list
 	InfrastructureAgentIDs []string                         // explicitly selected infrastructure agents
-	// StandaloneAgentIDs are the explicitly selected standalone agents. Populated only by
-	// the standalone-only deploy mode; nil in every other mode.
+	// StandaloneAgentIDs are the explicitly selected standalone agents. Populated by
+	// ModeDeployAgents when standalone agents are included in the merged selection; nil in
+	// every other mode.
 	StandaloneAgentIDs     []string
 	HookIDs                []string
 	Models          map[string]domain.ModelSelection // agent key -> resolved model selection

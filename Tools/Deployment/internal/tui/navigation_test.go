@@ -52,11 +52,11 @@ func (s *stubNavService) TransformHarness(_ context.Context, _ app.TransformHarn
 	return app.TransformHarnessResult{}, nil
 }
 
-func (s *stubNavService) DeployUtilityInfrastructure(_ context.Context, _ app.UtilityInfraRequest) (domain.RunSummary, error) {
+func (s *stubNavService) DeployAgents(_ context.Context, _ app.DeployAgentsRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{}, nil
 }
 
-func (s *stubNavService) DeployStandalone(_ context.Context, _ app.StandaloneRequest) (domain.RunSummary, error) {
+func (s *stubNavService) DeployHooks(_ context.Context, _ app.DeployHooksRequest) (domain.RunSummary, error) {
 	return domain.RunSummary{}, nil
 }
 
@@ -208,8 +208,8 @@ func TestNavigation_ModeEnter_RecordsSelectedMode(t *testing.T) {
 	sendKey(m, tea.KeyEnter)
 
 	// Assert
-	if m.selections.mode != domain.ModeDeployNew {
-		t.Errorf("selections.mode = %q, want %q (deploy-new is the first mode item)", m.selections.mode, domain.ModeDeployNew)
+	if m.selections.mode != domain.ModeDeployWorkspace {
+		t.Errorf("selections.mode = %q, want %q (deploy-new is the first mode item)", m.selections.mode, domain.ModeDeployWorkspace)
 	}
 }
 

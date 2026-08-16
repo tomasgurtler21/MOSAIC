@@ -92,16 +92,18 @@ func newTransformFlowSvc(workspace string) *stubFlowService {
 // navigateToTransformMode drives the model from the harness screen to the workspace
 // screen with ModeTransformHarness selected. It performs:
 //  1. Enter to confirm the single harness.
-//  2. Down x4 to move the mode cursor from deploy-new to transform-harness (5th item).
+//  2. Down x6 to move the mode cursor from deploy-workspace to transform-harness (7th item).
 //  3. Enter to confirm the mode.
 //
 // Returns the model at screenWorkspace (or whatever screen the model ends up on).
 func navigateToTransformMode(m *rootModel) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) //nolint:errcheck — harness → mode
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})  //nolint:errcheck — deploy-new → update
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})  //nolint:errcheck — update → workflows-only
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})  //nolint:errcheck — workflows-only → promote
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})  //nolint:errcheck — promote → transform-harness
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})  //nolint:errcheck — deploy-workspace → update-workspace
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})  //nolint:errcheck — update-workspace → update-workflows
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})  //nolint:errcheck — update-workflows → deploy-agents
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})  //nolint:errcheck — deploy-agents → deploy-hooks
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})  //nolint:errcheck — deploy-hooks → promote-to-generic
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})  //nolint:errcheck — promote-to-generic → transform-harness
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) //nolint:errcheck — select transform → workspace
 }
 
@@ -123,10 +125,12 @@ func TestModeScreen_IncludesTransformHarnessEntry(t *testing.T) {
 		t.Fatalf("precondition: screen = %v, want screenMode", m.screen)
 	}
 
-	// Navigate Down x4 to the 5th item (transform-harness).
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → promote
+	// Navigate Down x6 to the 7th item (transform-harness).
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → promote-to-generic
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → transform-harness (only if it exists)
 
 	// Confirm whatever item the cursor is on.
@@ -134,15 +138,15 @@ func TestModeScreen_IncludesTransformHarnessEntry(t *testing.T) {
 
 	// Assert: the selected mode must be ModeTransformHarness.
 	if m.selections.mode != domain.ModeTransformHarness {
-		t.Errorf("selections.mode = %q after Down x4 + Enter; want ModeTransformHarness (%q); "+
-			"the mode screen must include a ModeTransformHarness entry as the fifth item",
+		t.Errorf("selections.mode = %q after Down x6 + Enter; want ModeTransformHarness (%q); "+
+			"the mode screen must include a ModeTransformHarness entry as the seventh item",
 			m.selections.mode, domain.ModeTransformHarness)
 	}
 }
 
-// TestModeScreen_HasFiveItems verifies that the mode screen has five items total.
-// Without I6.5 the screen has four items (deploy-new, update, workflows-only, promote).
-func TestModeScreen_HasFiveItems(t *testing.T) {
+// TestModeScreen_HasSevenItems verifies that the mode screen has at least seven items,
+// with transform-harness at position 6 (the seventh item).
+func TestModeScreen_HasSevenItems(t *testing.T) {
 	// Arrange
 	workspace := t.TempDir()
 	m := newFlowModel(newTransformFlowSvc(workspace), workspace)
@@ -153,18 +157,18 @@ func TestModeScreen_HasFiveItems(t *testing.T) {
 		t.Fatalf("precondition: screen = %v, want screenMode", m.screen)
 	}
 
-	// Press Down four times to walk through items 2-5 without committing.
-	for i := 0; i < 4; i++ {
+	// Press Down six times to walk through items 2-7 without committing.
+	for i := 0; i < 6; i++ {
 		_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 		if m.screen != screenMode {
 			t.Fatalf("Down %d left screenMode; mode screen must have at least %d items", i+1, i+2)
 		}
 	}
 
-	// Confirm the 5th item — must be ModeTransformHarness.
+	// Confirm the 7th item — must be ModeTransformHarness.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if m.selections.mode != domain.ModeTransformHarness {
-		t.Errorf("5th mode item selection = %q; want ModeTransformHarness", m.selections.mode)
+		t.Errorf("7th mode item selection = %q; want ModeTransformHarness", m.selections.mode)
 	}
 }
 
@@ -304,15 +308,17 @@ func TestFullKeyboardFlow_Transform_FileInput_FromLaunchToScreenDone(t *testing.
 		t.Fatalf("screen = %v after harness Enter; want screenMode", m.screen)
 	}
 
-	// Step 2: Mode screen — Down x4 reaches transform-harness (5th item).
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote
+	// Step 2: Mode screen — Down x6 reaches transform-harness (7th item).
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote-to-generic
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → transform-harness
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select → workspace
 
 	if m.screen != screenWorkspace {
-		t.Fatalf("screen = %v after mode Down x4 + Enter; want screenWorkspace", m.screen)
+		t.Fatalf("screen = %v after mode Down x6 + Enter; want screenWorkspace", m.screen)
 	}
 	if m.selections.mode != domain.ModeTransformHarness {
 		t.Fatalf("selections.mode = %q; want ModeTransformHarness", m.selections.mode)
@@ -377,12 +383,12 @@ func (s *capturingTransformService) TransformHarness(ctx context.Context, req ap
 	return s.inner.TransformHarness(ctx, req)
 }
 
-func (s *capturingTransformService) DeployUtilityInfrastructure(ctx context.Context, req app.UtilityInfraRequest) (domain.RunSummary, error) {
-	return s.inner.DeployUtilityInfrastructure(ctx, req)
+func (s *capturingTransformService) DeployAgents(ctx context.Context, req app.DeployAgentsRequest) (domain.RunSummary, error) {
+	return s.inner.DeployAgents(ctx, req)
 }
 
-func (s *capturingTransformService) DeployStandalone(ctx context.Context, req app.StandaloneRequest) (domain.RunSummary, error) {
-	return s.inner.DeployStandalone(ctx, req)
+func (s *capturingTransformService) DeployHooks(ctx context.Context, req app.DeployHooksRequest) (domain.RunSummary, error) {
+	return s.inner.DeployHooks(ctx, req)
 }
 
 func (s *capturingTransformService) RenderAgent(ctx context.Context, req app.RenderAgentRequest) (app.RenderAgentResult, error) {
@@ -413,7 +419,9 @@ func TestTransformMode_SuppliesSelectedHarnessIDInRequest(t *testing.T) {
 			m.selections.harnessID, flowTestHarness.ID)
 	}
 
-	// Step 2: Navigate to ModeTransformHarness (Down x4) and select it.
+	// Step 2: Navigate to ModeTransformHarness (Down x6) and select it.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -510,10 +518,12 @@ func TestTransformMode_AfterModeSelection_AdvancesToWorkspaceScreen(t *testing.T
 		t.Fatalf("precondition: screen = %v, want screenMode", m.screen)
 	}
 
-	// Navigate to ModeTransformHarness (Down x4) and confirm.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote
+	// Navigate to ModeTransformHarness (Down x6) and confirm.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote-to-generic
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → transform-harness
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // confirm mode
 
@@ -561,11 +571,13 @@ func TestDeployMode_AfterTransformSelection_StillAcceptsDirectory(t *testing.T) 
 		t.Fatalf("screen = %v after Esc from transform workspace; want screenMode", m.screen)
 	}
 
-	// Navigate to deploy-new (Up x4 from transform = index 0) and select it.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // transform → promote
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // promote → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // workflows-only → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // update → deploy-new
+	// Navigate to deploy-workspace (Up x6 from transform-harness index 6) and select it.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // transform-harness → promote-to-generic
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // promote-to-generic → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // deploy-hooks → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // deploy-agents → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // update-workflows → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // update-workspace → deploy-workspace
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if m.screen != screenWorkspace {

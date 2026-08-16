@@ -97,22 +97,39 @@ type Service interface {
 	// ErrTransformDestinationExists as its reason.
 	TransformHarness(ctx context.Context, req TransformHarnessRequest) (TransformHarnessResult, error)
 
-	// DeployUtilityInfrastructure deploys only Utility and Infrastructure agents plus the
-	// artifacts they require (their skills). It asks exactly the QUtilityAgents and
-	// QInfrastructureAgents questions and the model questions those agents imply. It never
-	// asks QWorkflows or QHooks, never plans a workflow-driven agent, and never rewrites
-	// the deployed orchestrator.
+	// DeployAgents deploys a user-chosen mix of ordinary subagents, Infrastructure-category
+	// subagents, utility agents, and standalone agents, plus the skills they require.
 	//
-	// Infrastructure-agent model resolution behaves exactly as in DeployNew, including the
-	// skip path and the resulting GapNoModel entries.
-	DeployUtilityInfrastructure(ctx context.Context, req UtilityInfraRequest) (domain.RunSummary, error)
+	// It asks exactly QHarness (when req.HarnessID is empty), QWorkspace (when
+	// req.WorkspacePath is empty), the merged QDeployAgents question, and the model and
+	// custom-tool questions the selected agents imply. It never asks QWorkflows or QHooks.
+	//
+	// The orchestrator is never offered as an option and never enters the artifact set;
+	// buildContent is invoked with nil workflow and infrastructure block maps, so no deployed
+	// orchestrator's managed regions are rewritten.
+	//
+	// Infrastructure-agent model resolution runs as a dedicated second batch threaded from the
+	// first, so no agent is prompted twice; an infrastructure agent left without a model
+	// produces a GapNoModel gap.
+	//
+	// Returns a RunSummary on success and partial success. A non-nil error is reserved for
+	// unrecoverable failures, including user cancellation (wrapping ErrSelectionCancelled).
+	DeployAgents(ctx context.Context, req DeployAgentsRequest) (domain.RunSummary, error)
 
-	// DeployStandalone deploys only standalone agents plus the artifacts they require
-	// (their skills). It asks exactly the QStandaloneAgents question and the model questions
-	// those agents imply. It never asks QWorkflows, QHooks, QUtilityAgents, or
-	// QInfrastructureAgents, and never rewrites the deployed orchestrator's workflow or
-	// infrastructure regions.
-	DeployStandalone(ctx context.Context, req StandaloneRequest) (domain.RunSummary, error)
+	// DeployHooks deploys hook bundles alone: it resolves each selected bundle's variant for
+	// the run's harness and executes its registration steps.
+	//
+	// It asks exactly QHarness (when req.HarnessID is empty), QWorkspace (when
+	// req.WorkspacePath is empty), and QHooks. It asks no agent-selection, model, or
+	// custom-tool question, because it generates no agent content. When the catalog has no
+	// hook bundles it asks nothing and produces an empty plan rather than an error.
+	//
+	// Neither orchestrator-role file enters the artifact set, and buildContent is invoked with
+	// nil workflow and infrastructure block maps.
+	//
+	// Returns a RunSummary on success and partial success. A non-nil error is reserved for
+	// unrecoverable failures, including user cancellation (wrapping ErrSelectionCancelled).
+	DeployHooks(ctx context.Context, req DeployHooksRequest) (domain.RunSummary, error)
 
 	// RenderAgent renders exactly one generic-form MOSAIC agent into one target harness's
 	// deployed form at a caller-chosen destination.

@@ -42,7 +42,7 @@ func TestSummaryScreen_CrossRenderer_SubjectsMatchMarkdownChecklist(t *testing.T
 	meta := todo.Meta{
 		Harness:       "claude-code",
 		WorkspacePath: "/workspace",
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		GeneratedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 	markdownBytes := todo.RenderMarkdown(groups, meta)
@@ -51,7 +51,7 @@ func TestSummaryScreen_CrossRenderer_SubjectsMatchMarkdownChecklist(t *testing.T
 	// Render the TUI summary screen. The RunSummary.Todos field is populated from the same
 	// collector (via Items()), mirroring how the app layer feeds the screen after a run.
 	summary := domain.RunSummary{
-		Mode:           domain.ModeDeployNew,
+		Mode:           domain.ModeDeployWorkspace,
 		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/workspace/.ai",
@@ -108,7 +108,7 @@ func TestSummaryScreen_CrossRenderer_OwnedInjectionAttributedConsistently(t *tes
 	meta := todo.Meta{
 		Harness:       "claude-code",
 		WorkspacePath: "/workspace",
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		GeneratedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 
@@ -117,7 +117,7 @@ func TestSummaryScreen_CrossRenderer_OwnedInjectionAttributedConsistently(t *tes
 	markdown := string(markdownBytes)
 
 	summary := domain.RunSummary{
-		Mode:           domain.ModeDeployNew,
+		Mode:           domain.ModeDeployWorkspace,
 		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/workspace/.ai",
@@ -158,7 +158,7 @@ func TestSummaryScreen_CrossRenderer_EmptyCollectorProducesConsistentOutputs(t *
 	meta := todo.Meta{
 		Harness:       "claude-code",
 		WorkspacePath: "/workspace",
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		GeneratedAt:   time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 	markdownBytes := todo.RenderMarkdown(groups, meta)
@@ -170,7 +170,7 @@ func TestSummaryScreen_CrossRenderer_EmptyCollectorProducesConsistentOutputs(t *
 
 	// Screen for an empty collector should not show a follow-up section.
 	summary := domain.RunSummary{
-		Mode:           domain.ModeDeployNew,
+		Mode:           domain.ModeDeployWorkspace,
 		Harness:        domain.HarnessRef{ID: "claude-code", DisplayName: "Claude Code"},
 		WorkspacePath:  "/workspace",
 		DeploymentRoot: "/workspace/.ai",

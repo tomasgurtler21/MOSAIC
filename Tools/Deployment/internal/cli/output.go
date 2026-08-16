@@ -151,12 +151,10 @@ func renderTransformHuman(out io.Writer, result app.TransformHarnessResult) {
 	}
 }
 
-// renderUtilityInfraOutput writes the utility-infra run summary and returns the exit code.
-// When format is "json", a domain.RunSummary JSON document is written to out. Otherwise a
-// human-readable summary is written. A dry-run run includes a "dry run" indicator in the
-// human-readable output. When svcErr is non-nil the error is written to errOut and
-// ExitFailure is returned.
-func renderUtilityInfraOutput(out, errOut io.Writer, format string, dryRun bool, summary domain.RunSummary, svcErr error) int {
+// renderAgentsOutput writes the deploy-agents run summary and returns the exit code.
+// The contract mirrors renderStandaloneOutput: svcErr → error on errOut + ExitFailure;
+// json → domain.RunSummary document; otherwise the human summary with optional dry-run prefix.
+func renderAgentsOutput(out, errOut io.Writer, format string, dryRun bool, summary domain.RunSummary, svcErr error) int {
 	if svcErr != nil {
 		fmt.Fprintf(errOut, "error: %v\n", svcErr)
 		return ExitFailure
@@ -164,35 +162,32 @@ func renderUtilityInfraOutput(out, errOut io.Writer, format string, dryRun bool,
 	if strings.EqualFold(format, "json") {
 		renderJSON(out, summary)
 	} else {
-		renderUtilityInfraHuman(out, dryRun, summary)
+		renderAgentsHuman(out, dryRun, summary)
 	}
 	return outcomeExitCode(summary.Outcome)
 }
 
-// renderUtilityInfraHuman writes a human-readable summary of a utility-infra run.
-// It mirrors renderHuman but adds a "dry run" prefix when the run was a dry-run.
-func renderUtilityInfraHuman(out io.Writer, dryRun bool, summary domain.RunSummary) {
+// renderAgentsHuman writes a human-readable summary of a deploy-agents run.
+func renderAgentsHuman(out io.Writer, dryRun bool, summary domain.RunSummary) {
 	prefix := ""
 	if dryRun {
 		prefix = "dry run: "
 	}
 	switch summary.Outcome {
 	case domain.OutcomeSuccess:
-		fmt.Fprintf(out, "%sdeployment complete\nworkspace: %s\n", prefix, summary.WorkspacePath)
+		fmt.Fprintf(out, "%sagents deployment complete\nworkspace: %s\n", prefix, summary.WorkspacePath)
 	case domain.OutcomeCompletedWithGaps:
 		fmt.Fprintf(out, "%scompleted with skips: some items were skipped and recorded in the TODO list\nworkspace: %s\n", prefix, summary.WorkspacePath)
 	case domain.OutcomeFailed:
-		fmt.Fprintf(out, "%sdeployment encountered errors\nworkspace: %s\n", prefix, summary.WorkspacePath)
+		fmt.Fprintf(out, "%sagents deployment encountered errors\nworkspace: %s\n", prefix, summary.WorkspacePath)
 	default:
 		fmt.Fprintf(out, "%soutcome: %s\nworkspace: %s\n", prefix, string(summary.Outcome), summary.WorkspacePath)
 	}
 }
 
-// renderStandaloneOutput writes the standalone run summary and returns the exit code.
-// Contract is identical to renderUtilityInfraOutput: svcErr → error line on errOut + ExitFailure;
-// json → domain.RunSummary document; otherwise the human summary with a "dry run: " prefix when
-// dryRun. Success maps through outcomeExitCode(summary.Outcome).
-func renderStandaloneOutput(out, errOut io.Writer, format string, dryRun bool, summary domain.RunSummary, svcErr error) int {
+// renderHooksOutput writes the deploy-hooks run summary and returns the exit code.
+// The contract mirrors renderAgentsOutput.
+func renderHooksOutput(out, errOut io.Writer, format string, dryRun bool, summary domain.RunSummary, svcErr error) int {
 	if svcErr != nil {
 		fmt.Fprintf(errOut, "error: %v\n", svcErr)
 		return ExitFailure
@@ -200,25 +195,24 @@ func renderStandaloneOutput(out, errOut io.Writer, format string, dryRun bool, s
 	if strings.EqualFold(format, "json") {
 		renderJSON(out, summary)
 	} else {
-		renderStandaloneHuman(out, dryRun, summary)
+		renderHooksHuman(out, dryRun, summary)
 	}
 	return outcomeExitCode(summary.Outcome)
 }
 
-// renderStandaloneHuman writes a human-readable summary of a standalone run.
-// It mirrors renderUtilityInfraHuman but prefixes with "dry run: " when the run was a dry-run.
-func renderStandaloneHuman(out io.Writer, dryRun bool, summary domain.RunSummary) {
+// renderHooksHuman writes a human-readable summary of a deploy-hooks run.
+func renderHooksHuman(out io.Writer, dryRun bool, summary domain.RunSummary) {
 	prefix := ""
 	if dryRun {
 		prefix = "dry run: "
 	}
 	switch summary.Outcome {
 	case domain.OutcomeSuccess:
-		fmt.Fprintf(out, "%sstandalone deployment complete\nworkspace: %s\n", prefix, summary.WorkspacePath)
+		fmt.Fprintf(out, "%shooks deployment complete\nworkspace: %s\n", prefix, summary.WorkspacePath)
 	case domain.OutcomeCompletedWithGaps:
 		fmt.Fprintf(out, "%scompleted with skips: some items were skipped and recorded in the TODO list\nworkspace: %s\n", prefix, summary.WorkspacePath)
 	case domain.OutcomeFailed:
-		fmt.Fprintf(out, "%sstandalone deployment encountered errors\nworkspace: %s\n", prefix, summary.WorkspacePath)
+		fmt.Fprintf(out, "%shooks deployment encountered errors\nworkspace: %s\n", prefix, summary.WorkspacePath)
 	default:
 		fmt.Fprintf(out, "%soutcome: %s\nworkspace: %s\n", prefix, string(summary.Outcome), summary.WorkspacePath)
 	}

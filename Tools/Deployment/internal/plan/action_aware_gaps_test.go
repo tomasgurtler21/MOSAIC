@@ -59,7 +59,7 @@ func TestBuild_ActionUnchanged_NoModel_NoGapNoModel(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -117,7 +117,7 @@ func TestBuild_ActionCreate_NoModel_EmitsGapNoModel(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -160,7 +160,7 @@ func TestBuild_ActionCreate_ResolvedModel_NoGapNoModel(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -222,7 +222,7 @@ func TestBuild_ActionUpdate_NoModel_NoDeployedModel_EmitsGapNoModel(t *testing.T
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -283,7 +283,7 @@ func TestBuild_ActionUpdate_NoModel_WithDeployedModel_SuppressesGapNoModel(t *te
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -343,7 +343,7 @@ func TestBuild_ActionUpdate_ResolvedModel_NoGapNoModel(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -407,7 +407,7 @@ func TestBuild_ActionConflict_NoModel_NoDeployedModel_EmitsGapNoModel(t *testing
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -471,7 +471,7 @@ func TestBuild_ActionConflict_NoModel_WithDeployedModel_SuppressesGapNoModel(t *
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -553,7 +553,7 @@ func TestBuild_ActionAwareGap_UnmappedToolGapsUnaffected(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        module,
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -628,7 +628,7 @@ func TestBuild_ActionAwareGap_ItemClassificationUnaffected(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",
@@ -687,7 +687,7 @@ func TestBuild_ActionAwareGap_ItemOrderingUnaffected(t *testing.T) {
 	input := plan.Input{
 		Catalog:       cat,
 		Module:        newFakeModule(),
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		WorkspacePath: "/fake/workspace",
 		Scope:         domain.ScopeProject,
 		GOOS:          "linux",

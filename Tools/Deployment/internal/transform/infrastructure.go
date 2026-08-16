@@ -13,6 +13,7 @@ import (
 // InfrastructureAgents injection region.
 type InfrastructureBlock struct {
 	Key         string                        // agent key (section identifier)
+	Name        string                        // agent display name; emitted when non-empty and distinct from Key
 	Version     string                        // agent version (for the version attribute on the section tag)
 	Class       string                        // infrastructure class
 	Description string                        // agent description (prose for the table)
@@ -57,6 +58,14 @@ func writeInfrastructureBlock(buf *bytes.Buffer, agent InfrastructureBlock) {
 	// names or kinds; both are controlled here, so the error is safely ignored.
 	openTag, _ := docformat.RenderOpenTagLine(docformat.NodeSection, "InfrastructureAgent:"+agent.Key, agent.Version)
 	buf.Write(openTag)
+
+	// Emit the display name when it differs from the key. When an agent uses a
+	// human-readable Name distinct from its key, this makes the section self-describing.
+	// When Name equals Key (which is the common case for real catalog agents), nothing
+	// is emitted, preserving the existing format.
+	if agent.Name != "" && agent.Name != agent.Key {
+		fmt.Fprintf(buf, "%s\n\n", agent.Name)
+	}
 
 	// Table header and separator.
 	buf.WriteString("| Class | Trigger | Param | On Failure | Description |\n")

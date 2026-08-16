@@ -6,9 +6,11 @@ package app
 // consults domain.Interaction exactly once per decision point.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -184,63 +186,19 @@ func (s *service) askInfrastructureAgents(ctx context.Context) ([]string, error)
 	}
 }
 
-// askStandaloneAgents prompts for standalone-agent selection. Every standalone agent in the
-// catalog is offered; unlike utility agents there is no allow-list gate.
-//
-// Each option carries Group = agent.Category, which is empty for an agent placed flat under
-// Catalog/StandaloneAgents/. Options are ordered by category (named categories ascending,
-// uncategorised last), then by agent key ascending, so the rendered list is deterministic.
+// askHooks prompts for hook bundle selection from every bundle the catalog knows about.
 //
 // Error contract: returns a non-nil error (wrapping ErrSelectionCancelled) only when the
 // answer status is domain.Cancelled. Transport errors and skip statuses return an empty
 // slice with a nil error, preserving pre-existing behaviour for non-interactive CLI runs.
-func (s *service) askStandaloneAgents(ctx context.Context) ([]string, error) {
-	agents := s.deps.Catalog.StandaloneAgents()
-
-	// Separate into categorised and uncategorised groups. The catalog already returns agents
-	// sorted by key, so within each category the key order is already correct. We then stable-
-	// sort the categorised slice by category name to get named categories in ascending order,
-	// with uncategorised agents appended last.
-	var categorised []domain.Agent
-	var uncategorised []domain.Agent
-	for _, a := range agents {
-		if a.Category != "" {
-			categorised = append(categorised, a)
-		} else {
-			uncategorised = append(uncategorised, a)
-		}
+func (s *service) askHooks(ctx context.Context) ([]string, error) {
+	opts := make([]domain.Option, 0)
+	for _, h := range s.deps.Catalog.Hooks() {
+		opts = append(opts, domain.Option{ID: h.Key, Label: h.Key, Description: h.Description})
 	}
-
-	// Stable insertion sort by Category to keep key order within each category.
-	for i := 1; i < len(categorised); i++ {
-		for j := i; j > 0 && categorised[j].Category < categorised[j-1].Category; j-- {
-			categorised[j], categorised[j-1] = categorised[j-1], categorised[j]
-		}
-	}
-
-	// Build options: categorised first (ascending by category, then key), uncategorised last.
-	opts := make([]domain.Option, 0, len(agents))
-	for _, a := range append(categorised, uncategorised...) {
-		label := a.Name
-		if label == "" {
-			label = a.Key
-		}
-		opts = append(opts, domain.Option{
-			ID:          a.Key,
-			Label:       label,
-			Description: a.Description,
-			Group:       a.Category,
-		})
-	}
-
 	q := domain.ChoiceQuestion{
-		Question: domain.Question{
-			ID:           domain.QStandaloneAgents,
-			Title:        "Select standalone agents",
-			AllowSkip:    true,
-			AllowSkipAll: true,
-		},
-		Options: opts,
+		Question: domain.Question{ID: domain.QHooks, Title: "Select hook bundles", AllowSkip: true, AllowSkipAll: true},
+		Options:  opts,
 	}
 	ans, err := s.deps.Interaction.SelectMany(ctx, q)
 	if err != nil {
@@ -256,19 +214,135 @@ func (s *service) askStandaloneAgents(ctx context.Context) ([]string, error) {
 	}
 }
 
-// askHooks prompts for hook bundle selection from every bundle the catalog knows about.
+// askDeployAgents prompts for the merged, catalog-scanned agent selection used by
+// ModeDeployAgents. Options span Catalog.Agents(), Catalog.UtilityAgents(), and
+// Catalog.StandaloneAgents(). Orchestrator accessors are never unioned in, satisfying the
+// requirement that the orchestrator is never offered for selection.
 //
-// Error contract: returns a non-nil error (wrapping ErrSelectionCancelled) only when the
-// answer status is domain.Cancelled. Transport errors and skip statuses return an empty
-// slice with a nil error, preserving pre-existing behaviour for non-interactive CLI runs.
-func (s *service) askHooks(ctx context.Context) ([]string, error) {
-	opts := make([]domain.Option, 0)
-	for _, h := range s.deps.Catalog.Hooks() {
-		opts = append(opts, domain.Option{ID: h.Key, Label: h.Key, Description: h.Description})
+// Grouping is derived entirely from catalog content. No category or subcategory name is
+// written into this code, so a category added to disk later appears automatically.
+//
+// The tool config's UtilityAgentAllowList is deliberately NOT applied here: this question
+// surfaces everything on disk. askUtilityAgents keeps its allow-list gate unchanged for
+// the Deploy workspace flow.
+//
+// Error contract, identical to askUtilityAgents/askStandaloneAgents/askHooks: a non-nil
+// error (wrapping ErrSelectionCancelled) only when the answer status is domain.Cancelled.
+// Transport errors and skip statuses return an empty slice with a nil error.
+func (s *service) askDeployAgents(ctx context.Context) ([]string, error) {
+	var opts []domain.Option
+
+	// --- Subagents from Catalog.Agents() ---
+	// Categorised agents first (ascending by category), uncategorised agents last.
+	// The catalog already returns agents sorted by key, so key order within each category
+	// is preserved by a stable sort on category.
+	subagents := s.deps.Catalog.Agents()
+	var catSubagents []domain.Agent
+	var uncatSubagents []domain.Agent
+	for _, a := range subagents {
+		if a.Category != "" {
+			catSubagents = append(catSubagents, a)
+		} else {
+			uncatSubagents = append(uncatSubagents, a)
+		}
 	}
+	sort.SliceStable(catSubagents, func(i, j int) bool {
+		return catSubagents[i].Category < catSubagents[j].Category
+	})
+	for _, a := range catSubagents {
+		label := a.Name
+		if label == "" {
+			label = a.Key
+		}
+		if a.Infrastructure != "" {
+			label += " [" + a.Infrastructure + "]"
+		}
+		opts = append(opts, domain.Option{
+			ID:          a.Key,
+			Label:       label,
+			Description: a.Description,
+			Group:       "Subagents/" + a.Category,
+		})
+	}
+	for _, a := range uncatSubagents {
+		label := a.Name
+		if label == "" {
+			label = a.Key
+		}
+		if a.Infrastructure != "" {
+			label += " [" + a.Infrastructure + "]"
+		}
+		opts = append(opts, domain.Option{
+			ID:          a.Key,
+			Label:       label,
+			Description: a.Description,
+			Group:       "Subagents",
+		})
+	}
+
+	// --- Utility agents from Catalog.UtilityAgents() ---
+	// All utility agents go to the "UtilityAgents" group. No allow-list applied.
+	for _, a := range s.deps.Catalog.UtilityAgents() {
+		label := a.Name
+		if label == "" {
+			label = a.Key
+		}
+		opts = append(opts, domain.Option{
+			ID:          a.Key,
+			Label:       label,
+			Description: a.Description,
+			Group:       "UtilityAgents",
+		})
+	}
+
+	// --- Standalone agents from Catalog.StandaloneAgents() ---
+	// Same grouping pattern as subagents but with "StandaloneAgents/" prefix.
+	standalone := s.deps.Catalog.StandaloneAgents()
+	var catStandalone []domain.Agent
+	var uncatStandalone []domain.Agent
+	for _, a := range standalone {
+		if a.Category != "" {
+			catStandalone = append(catStandalone, a)
+		} else {
+			uncatStandalone = append(uncatStandalone, a)
+		}
+	}
+	sort.SliceStable(catStandalone, func(i, j int) bool {
+		return catStandalone[i].Category < catStandalone[j].Category
+	})
+	for _, a := range catStandalone {
+		label := a.Name
+		if label == "" {
+			label = a.Key
+		}
+		opts = append(opts, domain.Option{
+			ID:          a.Key,
+			Label:       label,
+			Description: a.Description,
+			Group:       "StandaloneAgents/" + a.Category,
+		})
+	}
+	for _, a := range uncatStandalone {
+		label := a.Name
+		if label == "" {
+			label = a.Key
+		}
+		opts = append(opts, domain.Option{
+			ID:          a.Key,
+			Label:       label,
+			Description: a.Description,
+			Group:       "StandaloneAgents",
+		})
+	}
+
 	q := domain.ChoiceQuestion{
-		Question: domain.Question{ID: domain.QHooks, Title: "Select hook bundles", AllowSkip: true, AllowSkipAll: true},
-		Options:  opts,
+		Question: domain.Question{
+			ID:           domain.QDeployAgents,
+			Title:        "Select agents",
+			AllowSkip:    true,
+			AllowSkipAll: true,
+		},
+		Options: opts,
 	}
 	ans, err := s.deps.Interaction.SelectMany(ctx, q)
 	if err != nil {
@@ -729,12 +803,23 @@ func (s *service) askLocalModification(ctx context.Context, item domain.PlanItem
 
 // buildWorkflowBlocks assembles the WorkflowBlock list for the orchestrator's
 // AvailableWorkflows injection from the catalog's per-workflow section content.
+// If the workflow has a display name that does not already appear in the raw section
+// block (e.g. when the catalog is a stub), the name is prepended as a brief heading
+// so the injected region is self-identifying. Real catalog sections already carry
+// the name inside the block body, so the guard prevents duplication there.
 func (s *service) buildWorkflowBlocks(workflowIDs []string) []transform.WorkflowBlock {
 	blocks := make([]transform.WorkflowBlock, 0, len(workflowIDs))
 	for _, id := range workflowIDs {
 		b, err := s.deps.Catalog.WorkflowSection(id)
 		if err != nil {
 			continue
+		}
+		if wf, ok := s.deps.Catalog.Workflow(id); ok && wf.Name != "" && !bytes.Contains(b, []byte(wf.Name)) {
+			header := []byte(wf.Name + "\n\n")
+			combined := make([]byte, 0, len(header)+len(b))
+			combined = append(combined, header...)
+			combined = append(combined, b...)
+			b = combined
 		}
 		blocks = append(blocks, transform.WorkflowBlock{ID: id, Block: b})
 	}
@@ -744,6 +829,8 @@ func (s *service) buildWorkflowBlocks(workflowIDs []string) []transform.Workflow
 // buildInfrastructureBlocks assembles the InfrastructureBlock list for the orchestrator's
 // InfrastructureAgents injection from the catalog's infrastructure agent metadata. Agents
 // that are not found in the catalog (e.g. unknown keys) are silently skipped.
+// When an agent has no description, its display name is used as a fallback so that the
+// injected table always carries meaningful text in the Description column.
 func (s *service) buildInfrastructureBlocks(infraAgentIDs []string) []transform.InfrastructureBlock {
 	blocks := make([]transform.InfrastructureBlock, 0, len(infraAgentIDs))
 	for _, id := range infraAgentIDs {
@@ -751,13 +838,18 @@ func (s *service) buildInfrastructureBlocks(infraAgentIDs []string) []transform.
 		if !ok {
 			continue
 		}
+		description := a.Description
+		if description == "" {
+			description = a.Name
+		}
 		triggers := make([]domain.InfrastructureTrigger, len(a.Triggers))
 		copy(triggers, a.Triggers)
 		blocks = append(blocks, transform.InfrastructureBlock{
 			Key:         a.Key,
+			Name:        a.Name,
 			Version:     a.Version,
 			Class:       a.Infrastructure,
-			Description: a.Description,
+			Description: description,
 			OnFailure:   a.OnFailure,
 			Triggers:    triggers,
 		})

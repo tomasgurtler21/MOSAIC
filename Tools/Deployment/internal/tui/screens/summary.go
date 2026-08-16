@@ -82,13 +82,7 @@ func buildSummaryLines(s domain.RunSummary) []summaryLine {
 	add("", "body")
 
 	// Context.
-	mode := "Deploy new"
-	if s.Mode == domain.ModeUpdate {
-		mode = "Update"
-	} else if s.Mode == domain.ModeWorkflowsOnly {
-		mode = "Update workflows only"
-	}
-	add(fmt.Sprintf("Mode:             %s", mode), "muted")
+	add(fmt.Sprintf("Mode:             %s", modeDisplayName(s.Mode)), "muted")
 	add(fmt.Sprintf("Harness:          %s", s.Harness.DisplayName), "muted")
 	add(fmt.Sprintf("Workspace:        %s", s.WorkspacePath), "muted")
 	add(fmt.Sprintf("Deployment root:  %s", s.DeploymentRoot), "muted")

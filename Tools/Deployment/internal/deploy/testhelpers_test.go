@@ -98,7 +98,7 @@ func newConflictItem(key, targetPath string) domain.PlanItem {
 // newPlan builds a minimal Plan with the supplied items and workspace.
 func newPlan(workspace string, items ...domain.PlanItem) domain.Plan {
 	return domain.Plan{
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 		Harness:       domain.HarnessRef{ID: "test-harness"},
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

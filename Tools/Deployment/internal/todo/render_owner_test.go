@@ -35,7 +35,7 @@ func ownerMeta() todo.Meta {
 		Harness:       "claude-code",
 		WorkspacePath: "/workspace",
 		GeneratedAt:   time.Date(2026, 8, 14, 14, 24, 5, 0, time.UTC),
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 	}
 }
 

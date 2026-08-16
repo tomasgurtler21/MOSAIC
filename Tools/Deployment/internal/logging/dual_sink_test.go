@@ -41,7 +41,7 @@ func sampleRunContext(runID string) logging.RunContext {
 	return logging.RunContext{
 		RunID:          runID,
 		StartedAt:      time.Now(),
-		Mode:           domain.ModeDeployNew,
+		Mode:           domain.ModeDeployWorkspace,
 		Harness:        domain.HarnessRef{ID: "test-harness", Tier: domain.TierBuiltin},
 		WorkspacePath:  "/workspace/test",
 		DeploymentRoot: "/workspace/test/agents",

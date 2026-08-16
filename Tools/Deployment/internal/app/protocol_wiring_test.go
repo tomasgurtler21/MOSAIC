@@ -229,7 +229,7 @@ func TestUpdate_ProtocolVersion_ReachesPlannerInput(t *testing.T) {
 	deps, workspace := newBaseDeps(t, stub)
 
 	updatePlan := domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -284,7 +284,7 @@ func TestUpdateWorkflows_ProtocolVersion_ReachesPlannerInput(t *testing.T) {
 	deps, workspace := newBaseDeps(t, stub)
 
 	wfPlan := domain.Plan{
-		Mode:          domain.ModeWorkflowsOnly,
+		Mode:          domain.ModeUpdateWorkflows,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,

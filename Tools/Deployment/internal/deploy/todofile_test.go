@@ -168,7 +168,7 @@ func TestTodoFile_TodoMetaEmbeddedInFile(t *testing.T) {
 	meta := todo.Meta{
 		Harness:       "test-harness",
 		WorkspacePath: workspace,
-		Mode:          domain.ModeDeployNew,
+		Mode:          domain.ModeDeployWorkspace,
 	}
 
 	item := newAgentItem("runner", "agents/runner.md", domain.ActionCreate)

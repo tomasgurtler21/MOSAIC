@@ -24,7 +24,7 @@ package app_test
 //   - DecisionBackupThenOverwrite → ActionRecord.Taken == TakenBackedUp with a BackupPath
 //
 // Update flow mode:
-//   - RunSummary.Mode is ModeUpdate for the update flow
+//   - RunSummary.Mode is ModeUpdateWorkspace for the update flow
 
 import (
 	"context"
@@ -58,7 +58,7 @@ func TestUpdate_VersionFieldStale_PlanItemIsActionUpdate(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -89,8 +89,8 @@ func TestUpdate_VersionFieldStale_PlanItemIsActionUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if summary.Mode != domain.ModeUpdate {
-		t.Errorf("summary.Mode = %q, want %q", summary.Mode, domain.ModeUpdate)
+	if summary.Mode != domain.ModeUpdateWorkspace {
+		t.Errorf("summary.Mode = %q, want %q", summary.Mode, domain.ModeUpdateWorkspace)
 	}
 }
 
@@ -111,7 +111,7 @@ func TestUpdate_TransformVersionFieldStale_DeltaFieldIsTransformVersion(t *testi
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -165,7 +165,7 @@ func TestUpdate_UnchangedAgent_ActionIsUnchanged(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -216,7 +216,7 @@ func TestUpdate_LocallyModifiedFile_AsksQLocalModification(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -255,7 +255,7 @@ func TestUpdate_LocallyModifiedFile_SubjectIsTargetPath(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -298,7 +298,7 @@ func TestUpdate_DecisionOverwrite_ProducesTakenUpdated(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:      domain.ModeUpdate,
+		Mode:      domain.ModeUpdateWorkspace,
 		Harness:   minimalHarness,
 		WorkspacePath: workspace,
 		Scope:     domain.ScopeProject,
@@ -355,7 +355,7 @@ func TestUpdate_DecisionSkip_ProducesTakenSkipped(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:      domain.ModeUpdate,
+		Mode:      domain.ModeUpdateWorkspace,
 		Harness:   minimalHarness,
 		WorkspacePath: workspace,
 		Scope:     domain.ScopeProject,
@@ -406,7 +406,7 @@ func TestUpdate_InjectionsVersionFieldStale_PlanItemIsActionUpdate(t *testing.T)
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -463,7 +463,7 @@ func TestUpdate_SkillVersionFieldStale_PlanItemIsActionUpdate(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -488,9 +488,9 @@ func TestUpdate_SkillVersionFieldStale_PlanItemIsActionUpdate(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	// Assert — the update flow must produce ModeUpdate and a TakenUpdated action for the skill
-	if summary.Mode != domain.ModeUpdate {
-		t.Errorf("summary.Mode = %q, want %q", summary.Mode, domain.ModeUpdate)
+	// Assert — the update flow must produce ModeUpdateWorkspace and a TakenUpdated action for the skill
+	if summary.Mode != domain.ModeUpdateWorkspace {
+		t.Errorf("summary.Mode = %q, want %q", summary.Mode, domain.ModeUpdateWorkspace)
 	}
 	updated := false
 	for _, ar := range summary.Actions {
@@ -523,7 +523,7 @@ func TestUpdate_HookVersionFieldStale_PlanItemIsActionUpdate(t *testing.T) {
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:          domain.ModeUpdate,
+		Mode:          domain.ModeUpdateWorkspace,
 		Harness:       minimalHarness,
 		WorkspacePath: workspace,
 		Scope:         domain.ScopeProject,
@@ -548,9 +548,9 @@ func TestUpdate_HookVersionFieldStale_PlanItemIsActionUpdate(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	// Assert — the update flow must produce ModeUpdate and a TakenUpdated action for the hook bundle
-	if summary.Mode != domain.ModeUpdate {
-		t.Errorf("summary.Mode = %q, want %q", summary.Mode, domain.ModeUpdate)
+	// Assert — the update flow must produce ModeUpdateWorkspace and a TakenUpdated action for the hook bundle
+	if summary.Mode != domain.ModeUpdateWorkspace {
+		t.Errorf("summary.Mode = %q, want %q", summary.Mode, domain.ModeUpdateWorkspace)
 	}
 	updated := false
 	for _, ar := range summary.Actions {
@@ -581,7 +581,7 @@ func TestUpdate_DecisionBackupThenOverwrite_ProducesTakenBackedUp(t *testing.T) 
 		Build()
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Planner = &stubPlanner{plan: domain.Plan{
-		Mode:      domain.ModeUpdate,
+		Mode:      domain.ModeUpdateWorkspace,
 		Harness:   minimalHarness,
 		WorkspacePath: workspace,
 		Scope:     domain.ScopeProject,

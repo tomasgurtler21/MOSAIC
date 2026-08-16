@@ -198,7 +198,7 @@ func TestRun_UpdateSubcommand_HarnessFlag_PopulatesRequest(t *testing.T) {
 	workspace := t.TempDir()
 	svc := &spyService{
 		updateResp: domain.RunSummary{
-			Mode: domain.ModeUpdate, WorkspacePath: workspace,
+			Mode: domain.ModeUpdateWorkspace, WorkspacePath: workspace,
 			Outcome: domain.OutcomeSuccess,
 		},
 	}
@@ -227,7 +227,7 @@ func TestRun_UpdateSubcommand_WorkspaceFlag_PopulatesRequest(t *testing.T) {
 	workspace := t.TempDir()
 	svc := &spyService{
 		updateResp: domain.RunSummary{
-			Mode: domain.ModeUpdate, WorkspacePath: workspace,
+			Mode: domain.ModeUpdateWorkspace, WorkspacePath: workspace,
 			Outcome: domain.OutcomeSuccess,
 		},
 	}
@@ -637,7 +637,7 @@ func TestRun_WorkflowsSubcommand_CallsUpdateWorkflows(t *testing.T) {
 	workspace := t.TempDir()
 	svc := &spyService{
 		workflowsResp: domain.RunSummary{
-			Mode: domain.ModeWorkflowsOnly, WorkspacePath: workspace,
+			Mode: domain.ModeUpdateWorkflows, WorkspacePath: workspace,
 			Outcome: domain.OutcomeSuccess,
 		},
 	}

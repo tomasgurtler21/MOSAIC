@@ -6,7 +6,7 @@ package tui
 //
 // Existing tests (Stage 9.6 — now GREEN):
 //
-//   These tests verify the promote mode keyboard flow that was wired when ModePromote was
+//   These tests verify the promote mode keyboard flow that was wired when ModePromoteToGeneric was
 //   added to the mode screen (I9.5) and PromoteSummaryScreen was implemented (I9.6). They
 //   are GREEN after those deliveries.
 //
@@ -69,11 +69,11 @@ func newPromoteFlowSvc(workspace string) *stubFlowService {
 }
 
 // ---------------------------------------------------------------------------
-// Mode screen: ModePromote item presence
+// Mode screen: ModePromoteToGeneric item presence
 // ---------------------------------------------------------------------------
 
-// TestModeScreen_IncludesPromoteEntry verifies that the mode screen contains a ModePromote
-// entry as one of its items. After I9.5 adds ModePromote to modeItems, the total number of
+// TestModeScreen_IncludesPromoteEntry verifies that the mode screen contains a ModePromoteToGeneric
+// entry as one of its items. After I9.5 adds ModePromoteToGeneric to modeItems, the total number of
 // items should be four.
 func TestModeScreen_IncludesPromoteEntry(t *testing.T) {
 	// Arrange
@@ -86,19 +86,21 @@ func TestModeScreen_IncludesPromoteEntry(t *testing.T) {
 		t.Fatalf("precondition: screen = %v, want screenMode", m.screen)
 	}
 
-	// Navigate Down past all existing entries; if ModePromote exists it is the 4th item.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → update (item 2)
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → workflows-only (item 3)
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → promote (item 4, only if it exists)
+	// Navigate Down past all existing entries; ModePromoteToGeneric is the 6th item.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → update-workspace (item 2)
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → update-workflows (item 3)
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → deploy-agents (item 4)
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → deploy-hooks (item 5)
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // → promote-to-generic (item 6, only if it exists)
 
 	// Select whatever item the cursor is on now.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
-	// Assert: if ModePromote was in the list, the selection should be ModePromote.
-	if m.selections.mode != domain.ModePromote {
-		t.Errorf("selections.mode = %q after three Down presses + Enter; want ModePromote (%q); "+
-			"the mode screen must include a ModePromote entry as the fourth item",
-			m.selections.mode, domain.ModePromote)
+	// Assert: if ModePromoteToGeneric was in the list, the selection should be ModePromoteToGeneric.
+	if m.selections.mode != domain.ModePromoteToGeneric {
+		t.Errorf("selections.mode = %q after five Down presses + Enter; want ModePromoteToGeneric (%q); "+
+			"the mode screen must include a ModePromoteToGeneric entry as the sixth item",
+			m.selections.mode, domain.ModePromoteToGeneric)
 	}
 }
 
@@ -107,7 +109,7 @@ func TestModeScreen_IncludesPromoteEntry(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestFullKeyboardFlow_Promote_FromLaunchToExit verifies the end-to-end promote flow:
-// harness selection → mode selection (ModePromote) → file-path entry →
+// harness selection → mode selection (ModePromoteToGeneric) → file-path entry →
 // screenRunning → screenDone with promoteScreen → 'q' exits.
 func TestFullKeyboardFlow_Promote_FromLaunchToExit(t *testing.T) {
 	// Arrange
@@ -125,17 +127,19 @@ func TestFullKeyboardFlow_Promote_FromLaunchToExit(t *testing.T) {
 		t.Fatalf("screen = %v after harness Enter; want screenMode", m.screen)
 	}
 
-	// Step 2: Mode screen — navigate to ModePromote (4th item: Down x3) and select it.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: deploy-new → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: update → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: workflows-only → promote
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote → workspace
+	// Step 2: Mode screen — navigate to ModePromoteToGeneric (6th item: Down x5) and select it.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: deploy-workspace → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: update-workspace → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: update-workflows → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: deploy-agents → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: deploy-hooks → promote-to-generic
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote-to-generic → workspace
 
 	if m.screen != screenWorkspace {
-		t.Fatalf("screen = %v after mode Down x3 + Enter; want screenWorkspace", m.screen)
+		t.Fatalf("screen = %v after mode Down x5 + Enter; want screenWorkspace", m.screen)
 	}
-	if m.selections.mode != domain.ModePromote {
-		t.Fatalf("selections.mode = %q; want ModePromote", m.selections.mode)
+	if m.selections.mode != domain.ModePromoteToGeneric {
+		t.Fatalf("selections.mode = %q; want ModePromoteToGeneric", m.selections.mode)
 	}
 
 	// Step 3: Workspace screen — Enter confirms the pre-filled file path and starts the service.
@@ -180,9 +184,11 @@ func TestFullKeyboardFlow_Promote_EnterDismissesPromoteSummary(t *testing.T) {
 
 	// Navigate to screenDone with promote flow.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote-to-generic
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // → workspace
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // → running
 	_, _ = m.Update(runCmd(cmd))                        // → done
@@ -218,9 +224,11 @@ func TestFullKeyboardFlow_Promote_ScreenMutuallyExclusive(t *testing.T) {
 
 	// Navigate to screenDone via promote flow.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote-to-generic
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // → workspace
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // → running
 	_, _ = m.Update(runCmd(cmd))                        // → done
@@ -244,6 +252,8 @@ func TestFullKeyboardFlow_Promote_ViewIsNonEmpty(t *testing.T) {
 
 	// Navigate to screenDone via promote flow.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -281,11 +291,13 @@ func TestFullKeyboardFlow_Promote_ServiceError_IsKeyboardDismissible(t *testing.
 
 	m := newFlowModel(svc, agentFile)
 
-	// Navigate to screenRunning with ModePromote.
+	// Navigate to screenRunning with ModePromoteToGeneric.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote-to-generic
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // → workspace
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // → running
 
@@ -310,25 +322,27 @@ func TestFullKeyboardFlow_Promote_ServiceError_IsKeyboardDismissible(t *testing.
 }
 
 // TestFullKeyboardFlow_Promote_SelectionModeIsPromote verifies that after selecting
-// ModePromote on the mode screen, selections.mode is domain.ModePromote. This is the
-// minimal wiring check: the mode screen item ID must map correctly to domain.ModePromote.
+// ModePromoteToGeneric on the mode screen, selections.mode is domain.ModePromoteToGeneric. This is the
+// minimal wiring check: the mode screen item ID must map correctly to domain.ModePromoteToGeneric.
 func TestFullKeyboardFlow_Promote_SelectionModeIsPromote(t *testing.T) {
 	// Arrange
 	workspace := t.TempDir()
 	m := newFlowModel(newPromoteFlowSvc(workspace), workspace)
 
-	// Navigate to mode screen and select ModePromote (4th item).
+	// Navigate to mode screen and select ModePromoteToGeneric (6th item).
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote-to-generic
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // confirm
 
 	// Assert
-	if m.selections.mode != domain.ModePromote {
-		t.Errorf("selections.mode = %q; want domain.ModePromote (%q); "+
-			"the promote mode item must carry ID == string(domain.ModePromote)",
-			m.selections.mode, domain.ModePromote)
+	if m.selections.mode != domain.ModePromoteToGeneric {
+		t.Errorf("selections.mode = %q; want domain.ModePromoteToGeneric (%q); "+
+			"the promote mode item must carry ID == string(domain.ModePromoteToGeneric)",
+			m.selections.mode, domain.ModePromoteToGeneric)
 	}
 }
 
@@ -351,10 +365,12 @@ func TestPromoteMode_FileKind_AcceptsExistingFile(t *testing.T) {
 
 	// Navigate to promote workspace screen.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote → workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote-to-generic
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote-to-generic → workspace
 
 	if m.screen != screenWorkspace {
 		t.Fatalf("precondition: screen = %v, want screenWorkspace", m.screen)
@@ -387,10 +403,12 @@ func TestPromoteMode_FileKind_RejectsDirectory(t *testing.T) {
 
 	// Navigate to promote workspace screen.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote → workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote-to-generic
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote-to-generic → workspace
 
 	if m.screen != screenWorkspace {
 		t.Fatalf("precondition: screen = %v, want screenWorkspace", m.screen)
@@ -421,10 +439,12 @@ func TestPromoteMode_PathScreen_View_ContainsFileWording(t *testing.T) {
 
 	// Navigate to promote workspace screen.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote → workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote-to-generic
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote-to-generic → workspace
 
 	if m.screen != screenWorkspace {
 		t.Fatalf("precondition: screen = %v, want screenWorkspace", m.screen)
@@ -468,19 +488,23 @@ func TestBackNavigation_PromoteThenDeployNew_DirectoryAccepted(t *testing.T) {
 
 	// Navigate to promote workspace screen.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote → workspace (file kind)
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote-to-generic
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote-to-generic → workspace (file kind)
 
 	// Esc back to mode screen without confirming the path.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // back to mode (cursor at promote, index 3)
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // back to mode (cursor at promote-to-generic, index 5)
 
-	// Navigate to deploy-new (Up x3 from promote) and select it.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})    // promote → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})    // workflows-only → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})    // update → deploy-new
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select deploy-new → workspace
+	// Navigate to deploy-workspace (Up x5 from promote-to-generic) and select it.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})    // promote-to-generic → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})    // deploy-hooks → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})    // deploy-agents → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})    // update-workflows → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})    // update-workspace → deploy-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select deploy-workspace → workspace
 
 	if m.screen != screenWorkspace {
 		t.Fatalf("precondition: screen = %v, want screenWorkspace after selecting deploy-new", m.screen)
@@ -524,11 +548,13 @@ func TestBackNavigation_DeployNewToPromote_DirectoryRejected(t *testing.T) {
 	// Back to mode screen without confirming the path.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // back to mode (cursor at deploy-new, index 0)
 
-	// Navigate to promote (Down x3) and select it.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // deploy-new → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // update → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // workflows-only → promote
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote → workspace
+	// Navigate to promote-to-generic (Down x5) and select it.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // deploy-workspace → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // update-workspace → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // update-workflows → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // deploy-agents → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // deploy-hooks → promote-to-generic
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote-to-generic → workspace
 
 	if m.screen != screenWorkspace {
 		t.Fatalf("precondition: screen = %v, want screenWorkspace after re-selecting promote", m.screen)
@@ -567,10 +593,12 @@ func TestPromoteMode_RunningStatus_IsPromoteSpecific(t *testing.T) {
 
 	// Navigate to promote mode.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → mode
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote → workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // → promote-to-generic
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote-to-generic → workspace
 
 	// Act: confirm the file path to start the service.
 	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // → running
@@ -629,12 +657,12 @@ func (s *capturingPromoteService) TransformHarness(ctx context.Context, req app.
 	return s.inner.TransformHarness(ctx, req)
 }
 
-func (s *capturingPromoteService) DeployUtilityInfrastructure(ctx context.Context, req app.UtilityInfraRequest) (domain.RunSummary, error) {
-	return s.inner.DeployUtilityInfrastructure(ctx, req)
+func (s *capturingPromoteService) DeployAgents(ctx context.Context, req app.DeployAgentsRequest) (domain.RunSummary, error) {
+	return s.inner.DeployAgents(ctx, req)
 }
 
-func (s *capturingPromoteService) DeployStandalone(ctx context.Context, req app.StandaloneRequest) (domain.RunSummary, error) {
-	return s.inner.DeployStandalone(ctx, req)
+func (s *capturingPromoteService) DeployHooks(ctx context.Context, req app.DeployHooksRequest) (domain.RunSummary, error) {
+	return s.inner.DeployHooks(ctx, req)
 }
 
 func (s *capturingPromoteService) RenderAgent(ctx context.Context, req app.RenderAgentRequest) (app.RenderAgentResult, error) {
@@ -650,7 +678,7 @@ func (s *capturingPromoteService) CheckWorkflowIndex(ctx context.Context) (app.I
 // screen. The TUI must not present any additional harness question during the promote flow;
 // it supplies the already-collected selection directly (AC1.6).
 //
-// This test is RED until the ModePromote branch of startService sets HarnessID from
+// This test is RED until the ModePromoteToGeneric branch of startService sets HarnessID from
 // sel.harnessID. Currently startService omits HarnessID from the promote request, so
 // spy.lastPromoteReq.HarnessID is empty and the assertion fails.
 func TestPromoteMode_SuppliesSelectedHarnessIDInRequest(t *testing.T) {
@@ -668,14 +696,16 @@ func TestPromoteMode_SuppliesSelectedHarnessIDInRequest(t *testing.T) {
 		t.Fatalf("precondition: harnessID = %q after harness selection, want %q", m.selections.harnessID, flowTestHarness.ID)
 	}
 
-	// Navigate to ModePromote (4th item: Down x3) and select it.
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: deploy-new → update
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: update → workflows-only
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: workflows-only → promote
-	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote → workspace screen
+	// Navigate to ModePromoteToGeneric (6th item: Down x5) and select it.
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: deploy-workspace → update-workspace
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: update-workspace → update-workflows
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: update-workflows → deploy-agents
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: deploy-agents → deploy-hooks
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})  // cursor: deploy-hooks → promote-to-generic
+	_, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select promote-to-generic → workspace screen
 
-	if m.selections.mode != domain.ModePromote {
-		t.Fatalf("precondition: mode = %q, want ModePromote", m.selections.mode)
+	if m.selections.mode != domain.ModePromoteToGeneric {
+		t.Fatalf("precondition: mode = %q, want ModePromoteToGeneric", m.selections.mode)
 	}
 
 	// Confirm the file path to start the service.
