@@ -147,6 +147,41 @@ func reportRemovedSubjectDefinitionKeyIfPresent(src Source, root *ast.MappingNod
 	}
 }
 
+// checkUnknownSubjectFields reports an "unknown-field" diagnostic, with line
+// and structural pointer, for every key in the subject block not present in
+// known. subjectNode is the value of the root's "subject" key; if it is nil
+// or not a mapping (the subject block was absent or malformed), the check is
+// a no-op.
+func checkUnknownSubjectFields(src Source, root *ast.MappingNode, known map[string]bool, report *Report) {
+	subjectNode := mappingChild(root, "subject")
+	if subjectNode == nil {
+		return
+	}
+	subjectMapping, ok := subjectNode.(*ast.MappingNode)
+	if !ok {
+		return
+	}
+	for _, v := range subjectMapping.Values {
+		key := v.Key.String()
+		if known[key] {
+			continue
+		}
+		// "definition" is handled by reportRemovedSubjectDefinitionKeyIfPresent
+		// with a more specific diagnostic; skip it here to avoid a duplicate.
+		if key == "definition" {
+			continue
+		}
+		report.Add(Diagnostic{
+			Severity: SeverityError,
+			Code:     "unknown-field",
+			Path:     src.Path,
+			Line:     v.Key.GetToken().Position.Line,
+			Pointer:  "subject." + key,
+			Message:  fmt.Sprintf("unknown subject field %q", key),
+		})
+	}
+}
+
 // missingRequiredField builds the standard "missing-required-field"
 // diagnostic every authored format reports the same way.
 func missingRequiredField(src Source, field string) Diagnostic {

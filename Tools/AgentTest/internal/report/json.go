@@ -42,6 +42,7 @@ type wireAggregate struct {
 	Passed                int      `json:"passed"`
 	Excluded              int      `json:"excluded"`
 	PassRate              float64  `json:"pass_rate"`
+	RequiredPassRate      float64  `json:"required_pass_rate"`
 	InfrastructureFailure bool     `json:"infrastructure_failure"`
 	TotalCost             wireCost `json:"total_cost"`
 }
@@ -70,6 +71,11 @@ type wireRunReport struct {
 	// agent under test. Always present; the literal "unknown" when the
 	// subject's source declared no version.
 	SubjectVersion string `json:"subject_version"`
+
+	// SubjectModel and StubModel are the models this repetition actually ran
+	// on. Always present; the literal "unknown" when no model was recorded.
+	SubjectModel string `json:"subject_model"`
+	StubModel    string `json:"stub_model"`
 }
 
 // wireSubjectFailure is what a subject that exited non-zero told us.
@@ -160,6 +166,7 @@ func toWireAggregate(a domain.AggregateResult) wireAggregate {
 		Passed:                a.Passed,
 		Excluded:              a.Excluded,
 		PassRate:              a.PassRate,
+		RequiredPassRate:      a.RequiredPassRate,
 		InfrastructureFailure: a.InfrastructureFailure,
 		TotalCost:             toWireCost(a.TotalCost),
 	}
@@ -191,6 +198,8 @@ func toWireRunReport(r RunReport) wireRunReport {
 		RetainedSandboxPath: r.RetainedSandboxPath,
 		Subject:             subject,
 		SubjectVersion:      subjectVersionOrUnknown(r.SubjectVersion),
+		SubjectModel:        subjectVersionOrUnknown(r.SubjectModel),
+		StubModel:           subjectVersionOrUnknown(r.StubModel),
 	}
 }
 

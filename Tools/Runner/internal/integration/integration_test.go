@@ -48,7 +48,9 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,17 +76,16 @@ func (c fixedClock) Now() time.Time { return c.t }
 
 var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// ---- scripted DeviationResolver ----
+// ---- always-approved ApprovalReader ----
 
-type scriptedResolver struct {
-	instruction domain.RejoinInstruction
-	err         error
-	Called      bool
-}
+// alwaysApprovedReader approves every artifact unconditionally. Integration
+// tests exercise routing and harness dispatch, not HITL gate enforcement; this
+// reader prevents the HITL check from redispatching agents whose output files
+// do not exist on disk (which is the normal state in integration tests).
+type alwaysApprovedReader struct{}
 
-func (r *scriptedResolver) Resolve(_ context.Context, _ domain.DeviationInfo) (domain.RejoinInstruction, error) {
-	r.Called = true
-	return r.instruction, r.err
+func (alwaysApprovedReader) ReadApproval(_ context.Context, _ string) domain.HumanApproval {
+	return domain.ApprovalTrue
 }
 
 // ---- no-op Interaction ----
@@ -149,18 +150,19 @@ func writeOrchFile(t *testing.T, dir, name, content string) string {
 }
 
 // newSession builds a session with a file-based artifact store and scripted components.
+// Approvals is wired to alwaysApprovedReader so that HITL checks on workflows
+// with HITL=true rows do not redispatch agents for non-existent approval files.
 func newSession(
 	f *harness.FakeAdapter,
 	artifactPath string,
-	resolver *scriptedResolver,
 ) session.Session {
 	store := artifact.NewFileStore(artifactPath)
 	return session.New(session.Deps{
-		Harness:   f,
-		Store:     store,
-		Deviation: resolver,
-		Clock:     fixedClock{t: epoch},
-		Interact:  &noopInteraction{},
+		Harness:  f,
+		Store:    store,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		Approvals: alwaysApprovedReader{},
 	})
 }
 
@@ -215,13 +217,13 @@ func TestIntegration_LinearWorkflow_GoldenFileMatch(t *testing.T) {
 		StatusMessage:   "review done",
 	}})
 
-	sess := newSession(f, artifactPath, &scriptedResolver{})
+	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
@@ -307,13 +309,13 @@ func TestIntegration_StagedWorkflow_TwoStages_Completes(t *testing.T) {
 		StatusMessage:   "stage 2 reviewed",
 	}})
 
-	sess := newSession(f, artifactPath, &scriptedResolver{})
+	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "staged",
 		Task:                 "two-stage task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 		RunFolder:            dir, // Plan.md was written into dir; the session must resolve it here.
 	}
 
@@ -349,6 +351,7 @@ task: "old task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 1
+mode: auto
 checkpoints: disabled
 current_state:
   phase: PLANNING
@@ -395,7 +398,7 @@ func TestIntegration_VersionDrift_Refused(t *testing.T) {
 	}
 
 	f := harness.NewFakeAdapter()
-	sess := newSession(f, artifactPath, &scriptedResolver{})
+	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
@@ -437,7 +440,7 @@ func TestIntegration_VersionDrift_AllowOverride_Resumes(t *testing.T) {
 		StatusCode:      domain.StatusSUCCESS,
 		StatusMessage:   "done",
 	}})
-	sess := newSession(f, artifactPath, &scriptedResolver{})
+	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
@@ -485,14 +488,14 @@ func TestIntegration_StagedWorkflow_NoPlanMd_StopsCleanlyAtExecution(t *testing.
 	// seeded into it at all.
 
 	artifactPath := filepath.Join(dir, "Orchestration.md")
-	sess := newSession(harness.NewFakeAdapter(), artifactPath, &scriptedResolver{})
+	sess := newSession(harness.NewFakeAdapter(), artifactPath)
 
 	cfg := domain.RunConfig{
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "staged",
 		Task:                 "task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 		RunFolder:            dir, // no Plan.md ever appears here
 	}
 
@@ -549,12 +552,8 @@ func TestIntegration_OptionalRow_IsDispatchedAndContributesToDeviation(t *testin
 
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	f := harness.NewFakeAdapter()
-	resolver := &scriptedResolver{
-		instruction: domain.RejoinInstruction{
-			Stop: &domain.StopRun{Reason: "deviation from optional agent"},
-		},
-	}
-	sess := newSession(f, artifactPath, resolver)
+	// No routing consultant: deviation terminates with RunDeviationUnresolved.
+	sess := newSession(f, artifactPath)
 
 	// agent-a returns SUCCESS (normal).
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
@@ -564,7 +563,7 @@ func TestIntegration_OptionalRow_IsDispatchedAndContributesToDeviation(t *testin
 	}})
 
 	// optional-agent returns PARTIALLY_DONE (a non-SUCCESS response that triggers
-	// deviation, proving the optional row was dispatched AND contributes to a
+	// a deviation, proving the optional row was dispatched AND contributes to a
 	// deviation if it fails).
 	f.Queue("optional-agent", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "optional-agent#2",
@@ -577,7 +576,7 @@ func TestIntegration_OptionalRow_IsDispatchedAndContributesToDeviation(t *testin
 		WorkflowID:           "optional-row",
 		Task:                 "task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
@@ -587,15 +586,9 @@ func TestIntegration_OptionalRow_IsDispatchedAndContributesToDeviation(t *testin
 
 	// The run must stop with RunDeviationUnresolved because:
 	// 1. optional-agent was dispatched (not skipped).
-	// 2. optional-agent's non-SUCCESS response triggered the deviation resolver.
-	// 3. The resolver returned StopRun.
+	// 2. optional-agent's non-SUCCESS response triggered a deviation with no routing consultant.
 	if got.Status != domain.RunDeviationUnresolved {
 		t.Errorf("want RunDeviationUnresolved (optional row was dispatched and deviated), got %q", got.Status)
-	}
-
-	// The deviation resolver MUST have been called (confirming the row deviated).
-	if !resolver.Called {
-		t.Error("want deviation resolver called for optional-agent's non-SUCCESS, but it was not called")
 	}
 
 	// Verify that both agent-a and optional-agent were actually invoked.
@@ -644,8 +637,7 @@ func TestIntegration_BuildReview_OnFindings_LoopBack_NoDev(t *testing.T) {
 
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	f := harness.NewFakeAdapter()
-	resolver := &scriptedResolver{}
-	sess := newSession(f, artifactPath, resolver)
+	sess := newSession(f, artifactPath)
 
 	// test-writer-tdd → SUCCESS.
 	f.Queue("test-writer-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
@@ -684,17 +676,11 @@ func TestIntegration_BuildReview_OnFindings_LoopBack_NoDev(t *testing.T) {
 		WorkflowID:           "build-review-loop",
 		Task:                 "task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAutoReview},
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
 	requireRunStatus(t, got, err, domain.RunCompleted)
-
-	// Deviation resolver must NOT have been called: build-review's CNA with an
-	// unambiguous On Findings hint routes via Dispatch, not via Deviation.
-	if resolver.Called {
-		t.Error("want deviation resolver NOT called for build-review On Findings loop-back, but it was called")
-	}
 
 	// Verify 5 harness invocations in the expected order.
 	invs := f.Invocations()
@@ -823,13 +809,13 @@ func TestIntegration_AllFourApproaches_StagedWorkflow_GoldenFileMatch(t *testing
 	queueOK("build-review", "s4 test build ok")
 	queueOK("tests-review-tdd", "s4 tests reviewed")
 
-	sess := newSession(f, artifactPath, &scriptedResolver{})
+	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "four-approach-staged",
 		Task:                 "four-approach task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 		RunFolder:            dir, // Plan.md was written into dir; the session must resolve it here.
 	}
 
@@ -1170,13 +1156,13 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 				}})
 			}
 
-			sess := newSession(f, artifactPath, &scriptedResolver{})
+			sess := newSession(f, artifactPath)
 			cfg := domain.RunConfig{
 				OrchestratorFilePath: orchPath,
 				WorkflowID:           domain.WorkflowID(tc.workflowID),
 				Task:                 tc.name + " task",
 				IsNewRun:             true,
-				OnDeviation:          domain.DeviationDelegate,
+				RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 				RunFolder:            dir, // Plan.md was written into dir; the session must resolve it here.
 			}
 
@@ -1203,17 +1189,13 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 
 // ===== Deviation mid-run resolved and resumes (file store) =====
 
-// TestIntegration_Deviation_ResolvesAndResumes_FileStore verifies that when an
-// agent returns a non-SUCCESS status and the routing row has no On Findings
-// hint, the session invokes the deviation resolver and then resumes at the
-// rejoined row — exercising the full stack with the real file-based artifact
-// store so that the FR-23 re-read occurs against an actual file on disk.
-func TestIntegration_Deviation_ResolvesAndResumes_FileStore(t *testing.T) {
+// TestIntegration_Deviation_NoConsultant_ReturnsUnresolved verifies that when
+// an agent returns a non-SUCCESS status and no routing consultant is wired,
+// the session terminates with RunDeviationUnresolved — exercising the full
+// stack with the real file-based artifact store.
+func TestIntegration_Deviation_NoConsultant_ReturnsUnresolved(t *testing.T) {
 	dir := t.TempDir()
 
-	// Workflow where agent-a has no On Findings column. Any non-SUCCESS
-	// response from agent-a triggers a deviation because the engine cannot
-	// route it automatically.
 	const orchContent = `<Workflow type="core" name="deviation-resume" version="1.0">
 ## Deviation Resume Workflow
 
@@ -1229,32 +1211,13 @@ func TestIntegration_Deviation_ResolvesAndResumes_FileStore(t *testing.T) {
 
 	artifactPath := filepath.Join(dir, "Orchestration.md")
 	f := harness.NewFakeAdapter()
-	// Resolver directs rejoin at row 0 (re-run agent-a from the beginning).
-	resolver := &scriptedResolver{
-		instruction: domain.RejoinInstruction{
-			Rejoin: &domain.RejoinAtRow{RowIndex: 0},
-		},
-	}
-	sess := newSession(f, artifactPath, resolver)
+	// No routing consultant: deviation terminates with RunDeviationUnresolved.
+	sess := newSession(f, artifactPath)
 
-	// First agent-a call → PARTIALLY_DONE (triggers deviation; no On Findings
-	// column so the engine cannot route it automatically).
 	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
 		AgentInstanceID: "agent-a#1",
 		StatusCode:      domain.StatusPARTIALLY_DONE,
 		StatusMessage:   "only partially done",
-	}})
-	// Second agent-a call (after resolver rejects at row 0) → SUCCESS.
-	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-a#2",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "now done",
-	}})
-	// agent-b → SUCCESS → COMPLETE.
-	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
-		AgentInstanceID: "agent-b#3",
-		StatusCode:      domain.StatusSUCCESS,
-		StatusMessage:   "done",
 	}})
 
 	cfg := domain.RunConfig{
@@ -1262,31 +1225,18 @@ func TestIntegration_Deviation_ResolvesAndResumes_FileStore(t *testing.T) {
 		WorkflowID:           "deviation-resume",
 		Task:                 "task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
-	requireRunStatus(t, got, err, domain.RunCompleted)
-
-	// The deviation resolver must have been called when agent-a deviated.
-	if !resolver.Called {
-		t.Error("want deviation resolver called for agent-a PARTIALLY_DONE, but it was not called")
+	if err != nil {
+		t.Fatalf("want nil error, got %v", err)
+	}
+	if got.Status != domain.RunDeviationUnresolved {
+		t.Errorf("want RunDeviationUnresolved when no consultant is wired, got %q", got.Status)
 	}
 
-	// Three harness invocations: agent-a (deviates), agent-a (rejoin), agent-b.
-	invs := f.Invocations()
-	if len(invs) != 3 {
-		t.Errorf("want 3 harness invocations (agent-a deviation + rejoin + agent-b), got %d", len(invs))
-	}
-	wantDevOrder := []string{"agent-a", "agent-a", "agent-b"}
-	for i, want := range wantDevOrder {
-		if i < len(invs) && invs[i].Agent.Identifier != want {
-			t.Errorf("invocation[%d]: want %q, got %q", i, want, invs[i].Agent.Identifier)
-		}
-	}
-
-	// The real artifact file must exist: the session created it from scratch and
-	// updated it after each dispatched agent.
+	// The real artifact file must exist: the session created it.
 	if _, statErr := os.Stat(artifactPath); statErr != nil {
 		t.Errorf("want artifact file at %s after run, got %v", artifactPath, statErr)
 	}
@@ -1326,6 +1276,7 @@ task: "test task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 1
+mode: auto
 checkpoints: disabled
 current_state:
   phase: PLANNING
@@ -1370,13 +1321,13 @@ current_state:
 		StatusMessage:   "done",
 	}})
 
-	sess := newSession(f, artifactPath, &scriptedResolver{})
+	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             false, // resume: interrupted artifact already written
-		OnDeviation:          domain.DeviationDelegate,
+
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
@@ -1473,13 +1424,14 @@ func TestIntegration_IncompatibleWorkflow_RefusedFR18a(t *testing.T) {
 			// step 8 in the run-start sequence).
 			artifactPath := filepath.Join(dir, "Orchestration.md")
 			f := harness.NewFakeAdapter()
-			sess := newSession(f, artifactPath, &scriptedResolver{})
+			sess := newSession(f, artifactPath)
 
 			cfg := domain.RunConfig{
 				OrchestratorFilePath: orchPath,
 				WorkflowID:           domain.WorkflowID(tc.workflowID),
 				Task:                 "task",
 				IsNewRun:             true,
+				RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 			}
 
 			got, err := sess.Start(context.Background(), cfg)
@@ -1529,7 +1481,7 @@ It has no YAML frontmatter and no SECTION boundary tags.
 	}
 
 	f := harness.NewFakeAdapter()
-	sess := newSession(f, artifactPath, &scriptedResolver{})
+	sess := newSession(f, artifactPath)
 
 	cfg := domain.RunConfig{
 		OrchestratorFilePath: orchPath,
@@ -1628,13 +1580,13 @@ func TestIntegration_StageWildcardResolution_NonExecutionRow(t *testing.T) {
 		StatusMessage:   "plan reviewed",
 	}})
 
-	sess := newSession(f, artifactPath, &scriptedResolver{})
+	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "wildcard-resolve",
 		Task:                 "task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 		RunFolder:            dir, // Plan.md was written into dir; the session must resolve it here.
 	}
 
@@ -1747,7 +1699,6 @@ func TestIntegration_Seeding_SingleFile_PresentBeforeFirstDispatch(t *testing.T)
 	sess := session.New(session.Deps{
 		Harness:   cbH,
 		Store:     store,
-		Deviation: &scriptedResolver{},
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 	})
@@ -1757,7 +1708,7 @@ func TestIntegration_Seeding_SingleFile_PresentBeforeFirstDispatch(t *testing.T)
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 		RunFolder:            runDir,
 		SeedInputs:           []string{srcFile},
 	}
@@ -1831,7 +1782,6 @@ func TestIntegration_Seeding_DirectorySource_FilesAtCorrectRelativePaths(t *test
 	sess := session.New(session.Deps{
 		Harness:   f,
 		Store:     store,
-		Deviation: &scriptedResolver{},
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 	})
@@ -1841,7 +1791,7 @@ func TestIntegration_Seeding_DirectorySource_FilesAtCorrectRelativePaths(t *test
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 		RunFolder:            runDir,
 		SeedInputs:           []string{srcDir},
 	}
@@ -1925,7 +1875,6 @@ func TestIntegration_Seeding_MultipleSources_AllFilesPresent(t *testing.T) {
 	sess := session.New(session.Deps{
 		Harness:   f,
 		Store:     store,
-		Deviation: &scriptedResolver{},
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 	})
@@ -1935,7 +1884,7 @@ func TestIntegration_Seeding_MultipleSources_AllFilesPresent(t *testing.T) {
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 		RunFolder:            runDir,
 		SeedInputs:           []string{src1, src2, srcDir, src4},
 	}
@@ -1987,6 +1936,7 @@ task: "test task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 1
+mode: auto
 checkpoints: disabled
 current_state:
   phase: PLANNING
@@ -2043,7 +1993,6 @@ current_state:
 	sess := session.New(session.Deps{
 		Harness:   f,
 		Store:     store,
-		Deviation: &scriptedResolver{},
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 	})
@@ -2053,7 +2002,7 @@ current_state:
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             false,
-		OnDeviation:          domain.DeviationDelegate,
+
 		RunFolder:            runDir,
 		SeedInputs:           []string{srcFile}, // ignored on resume
 	}
@@ -2137,7 +2086,6 @@ func TestIntegration_Seeding_MidCopyFailure_RunFolderCompletelyRemoved(t *testin
 	sess := session.New(session.Deps{
 		Harness:   f,
 		Store:     store,
-		Deviation: &scriptedResolver{},
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 	})
@@ -2147,7 +2095,7 @@ func TestIntegration_Seeding_MidCopyFailure_RunFolderCompletelyRemoved(t *testin
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 		RunFolder:            runDir,
 		SeedInputs:           []string{srcDir},
 	}
@@ -2210,7 +2158,6 @@ func TestIntegration_Seeding_InvalidSeedSet_NoRunFolderLeftBehind(t *testing.T) 
 	sess := session.New(session.Deps{
 		Harness:   f,
 		Store:     store,
-		Deviation: &scriptedResolver{},
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 	})
@@ -2220,7 +2167,7 @@ func TestIntegration_Seeding_InvalidSeedSet_NoRunFolderLeftBehind(t *testing.T) 
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 		RunFolder:            runDir,
 		SeedInputs:           []string{nonExistent},
 	}
@@ -2308,7 +2255,6 @@ func TestIntegration_Seeding_StagedWorkflow_SeededStageTable_DispatchesFirstAtte
 	sess := session.New(session.Deps{
 		Harness:   f,
 		Store:     store,
-		Deviation: &scriptedResolver{},
 		Clock:     fixedClock{t: epoch},
 		Interact:  &noopInteraction{},
 	})
@@ -2318,7 +2264,7 @@ func TestIntegration_Seeding_StagedWorkflow_SeededStageTable_DispatchesFirstAtte
 		WorkflowID:           "staged",
 		Task:                 "task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
 		RunFolder:            runDir,
 		SeedInputs:           []string{planSrc, reqSrc},
 	}
@@ -2388,14 +2334,13 @@ func TestIntegration_InfrastructureAgent_MidWorkflow_RunsToCorrectEnd(t *testing
 	}})
 
 	artifactPath := filepath.Join(dir, "Orchestration.md")
-	sess := newSession(f, artifactPath, &scriptedResolver{})
+	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             true,
-		OnDeviation:          domain.DeviationDelegate,
-		Checkpoints:          true, // enable checkpoint class so its triggers are evaluated
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto, Checkpoints: true}, // enable checkpoint class so its triggers are evaluated
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
@@ -2452,6 +2397,7 @@ task: "test task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 2
+mode: auto
 checkpoints: disabled
 current_state:
   phase: PLANNING
@@ -2496,14 +2442,13 @@ current_state:
 		StatusMessage:   "checkpoint taken",
 	}})
 
-	sess := newSession(f, artifactPath, &scriptedResolver{})
+	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             false,
-		OnDeviation:          domain.DeviationDelegate,
-		Checkpoints:          true, // enable checkpoint class so its triggers are evaluated
+		RunSettings:          domain.RunSettings{Checkpoints: true}, // enable checkpoint class so its triggers are evaluated
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
@@ -2544,6 +2489,7 @@ task: "test task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 3
+mode: auto
 checkpoints: disabled
 current_state:
   phase: PLANNING
@@ -2591,14 +2537,13 @@ current_state:
 		StatusMessage:   "checkpoint taken",
 	}})
 
-	sess := newSession(f, artifactPath, &scriptedResolver{})
+	sess := newSession(f, artifactPath)
 	cfg := domain.RunConfig{
 		OrchestratorFilePath: orchPath,
 		WorkflowID:           "linear",
 		Task:                 "test task",
 		IsNewRun:             false,
-		OnDeviation:          domain.DeviationDelegate,
-		Checkpoints:          true, // enable checkpoint class so its triggers are evaluated
+		RunSettings:          domain.RunSettings{Checkpoints: true}, // enable checkpoint class so its triggers are evaluated
 	}
 
 	got, err := sess.Start(context.Background(), cfg)
@@ -2620,4 +2565,1167 @@ func containsArtifact(arts []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// ===== Stage 9: End-to-End Mode Coverage =====
+//
+// These tests verify assembled-run behaviours across execution modes, HITL
+// verification, consultant-driven routing, and run lifecycle management.
+// They exercise the full stack with the real file-based ArtifactStore so that
+// the orchestration artifact on disk can be inspected and resumed.
+//
+// Coverage:
+//
+//   Orchestrated mode (T9.1):
+//   - A run in orchestrated mode routes every step through the routing
+//     consultant; the engine never produces an auto-route.
+//
+//   Auto and auto-review all-SUCCESS / deviation (T9.2):
+//   - An all-SUCCESS run in auto and auto-review needs zero consultations.
+//   - A non-SUCCESS response triggers exactly one consultation per deviation.
+//
+//   COMPLETED_NEEDS_ACTION auto-route-back (T9.3):
+//   - In auto-review, a CNA with an unambiguous OnFindings target auto-routes
+//     back without invoking the routing consultant, and the review agent's
+//     output artifacts are injected into the target's inputs.
+//   - In auto mode the same CNA triggers a routing consultation instead.
+//
+//   HITL verification (T9.4):
+//   - A HITL-dispatched step whose output artifact records human_approved:false
+//     triggers exactly one same-agent redispatch; a second non-compliant result
+//     becomes a deviation, and the run never advances past the unverified step.
+//
+//   Stop and orchestrator failure (T9.5):
+//   - A consultant stop leaves a resumable artifact on disk.
+//   - A consultant failure (transport error) leaves a resumable artifact.
+//
+//   Commit setup (T9.6):
+//   - A commits-enabled run records the branch name in the artifact frontmatter
+//     and adds the commit setup dispatch as the first execution log row.
+//   - A failed commit setup refuses the run and leaves no artifact.
+//
+//   Resume (T9.7):
+//   - A resumed run reads its mode and all other settings from the artifact
+//     frontmatter; the caller-supplied RunConfig values are overwritten.
+//   - An interrupted step is re-dispatched; nothing is re-asked.
+
+// ---- Stage 9 test doubles ----
+
+// intScriptedRoutingConsultant is a scripted routing consultant for integration
+// tests. It returns RoutingInstructions from its queue in FIFO order and
+// records every ConsultRouting call so tests can assert call counts.
+type intScriptedRoutingConsultant struct {
+	instructions []domain.RoutingInstruction
+	errors       []error
+	idx          int
+	CallCount    int
+	Requests     []domain.ConsultationRequest
+}
+
+func (s *intScriptedRoutingConsultant) ConsultRouting(_ context.Context, req domain.ConsultationRequest) (domain.RoutingInstruction, error) {
+	s.CallCount++
+	s.Requests = append(s.Requests, req)
+	if s.idx >= len(s.instructions) {
+		return domain.RoutingInstruction{}, &domain.ConsultationError{
+			Failure: domain.ConsultFailTransport,
+			Detail:  fmt.Sprintf("intScriptedRoutingConsultant: queue exhausted (call #%d)", s.CallCount),
+		}
+	}
+	instr := s.instructions[s.idx]
+	var err error
+	if s.idx < len(s.errors) {
+		err = s.errors[s.idx]
+	}
+	s.idx++
+	return instr, err
+}
+
+func (s *intScriptedRoutingConsultant) queueDispatch(agent, taskDesc string, rowIndex int) {
+	s.instructions = append(s.instructions, domain.RoutingInstruction{
+		Dispatch: &domain.DispatchInstruction{
+			Agent:           agent,
+			RowIndex:        rowIndex,
+			TaskDescription: taskDesc,
+		},
+	})
+	s.errors = append(s.errors, nil)
+}
+
+func (s *intScriptedRoutingConsultant) queueStop(reason string) {
+	s.instructions = append(s.instructions, domain.RoutingInstruction{
+		Stop: &domain.StopInstruction{Reason: reason},
+	})
+	s.errors = append(s.errors, nil)
+}
+
+func (s *intScriptedRoutingConsultant) queueError(failure domain.ConsultationFailure) {
+	s.instructions = append(s.instructions, domain.RoutingInstruction{})
+	s.errors = append(s.errors, &domain.ConsultationError{
+		Failure: failure,
+		Detail:  "scripted consultation error",
+	})
+}
+
+// intFixedApprovalReader implements domain.ApprovalReader, always returning the
+// same HumanApproval value for every artifact path.
+type intFixedApprovalReader struct {
+	approval domain.HumanApproval
+}
+
+func (r intFixedApprovalReader) ReadApproval(_ context.Context, _ string) domain.HumanApproval {
+	return r.approval
+}
+
+// ---- Stage 9 session constructors ----
+
+// newSessionWithRouting builds a session with the real file-based artifact
+// store and a routing consultant wired into session.Deps.
+func newSessionWithRouting(
+	f *harness.FakeAdapter,
+	artifactPath string,
+	routing domain.RoutingConsultant,
+) session.Session {
+	store := artifact.NewFileStore(artifactPath)
+	return session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+		Approvals: alwaysApprovedReader{},
+		Routing:   routing,
+	})
+}
+
+// newSessionWithApprovals builds a session with the real file-based artifact
+// store and a custom ApprovalReader (no routing consultant wired).
+func newSessionWithApprovals(
+	f *harness.FakeAdapter,
+	artifactPath string,
+	approvals domain.ApprovalReader,
+) session.Session {
+	store := artifact.NewFileStore(artifactPath)
+	return session.New(session.Deps{
+		Harness:   f,
+		Store:     store,
+		Clock:     fixedClock{t: epoch},
+		Interact:  &noopInteraction{},
+		Approvals: approvals,
+	})
+}
+
+// ===== T9.1: Orchestrated mode — every routing decision from consultant =====
+
+// TestIntegration_OrchestratedMode_AllRoutingFromConsultant verifies that a
+// run in orchestrated mode routes every step through the routing consultant
+// and never auto-routes via the engine.
+//
+// In orchestrated mode the engine never produces a routing decision: the
+// consultant is invoked before every dispatch (including the very first step)
+// and again after every completion to get the next instruction. A two-agent
+// linear workflow therefore results in three consultant calls: initial,
+// after agent-a, and after agent-b (which returns the final stop). Every call
+// proves routing was consultant-driven.
+func TestIntegration_OrchestratedMode_AllRoutingFromConsultant(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "planning done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	consultant := &intScriptedRoutingConsultant{}
+	// linear-orch.md: row 0 = agent-a, row 1 = agent-b.
+	// The consultant directs all three routing decisions:
+	//   call 1 (initial): dispatch agent-a
+	//   call 2 (after agent-a): dispatch agent-b
+	//   call 3 (after agent-b): stop — the orchestrator signals all work is done
+	consultant.queueDispatch("agent-a", "Proceed.", 0)
+	consultant.queueDispatch("agent-b", "Proceed.", 1)
+	consultant.queueStop("all workflow steps completed")
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSessionWithRouting(f, artifactPath, consultant)
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "orchestrated task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+
+	// In orchestrated mode the consultant signals termination via a stop
+	// instruction; the terminal status is RunStoppedByConsultant.
+	requireRunStatus(t, got, err, domain.RunStoppedByConsultant)
+
+	// Every routing decision — including the initial one and the final stop —
+	// must have come from the consultant: three calls for two workflow steps.
+	if consultant.CallCount != 3 {
+		t.Errorf("want 3 consultant calls (initial + after agent-a + after agent-b), got %d",
+			consultant.CallCount)
+	}
+
+	// AC9.2: The orchestrated-mode run records a consultation for every routing
+	// decision. Read back the produced artifact and confirm the execution log
+	// contains entries beyond the two workflow agents, proving the consultant
+	// stop (and any consultation rows the session writes per decision) are
+	// durably recorded — not just counted in memory.
+	artifactData, readErr := os.ReadFile(artifactPath)
+	if readErr != nil {
+		t.Fatalf("read produced artifact: %v", readErr)
+	}
+	state, parseErr := artifact.Parse(artifactData)
+	if parseErr != nil {
+		t.Fatalf("parse produced artifact: %v", parseErr)
+	}
+
+	// The execution log must contain at least the two workflow agents.
+	if len(state.ExecutionLog) < 2 {
+		t.Fatalf("want at least 2 execution log entries (workflow agents), got %d", len(state.ExecutionLog))
+	}
+
+	// Verify both workflow agent entries appear in the log.
+	agentSeen := map[string]bool{}
+	for _, entry := range state.ExecutionLog {
+		if strings.Contains(entry.Agent, "agent-a") || strings.Contains(entry.Agent, "agent-b") {
+			agentSeen[entry.Agent] = true
+		}
+	}
+	if !agentSeen["agent-a#1"] {
+		t.Errorf("want agent-a#1 in execution log; log = %v", state.ExecutionLog)
+	}
+	if !agentSeen["agent-b#2"] {
+		t.Errorf("want agent-b#2 in execution log; log = %v", state.ExecutionLog)
+	}
+
+	// There must be at least one execution log entry that is not one of the two
+	// workflow agents. This entry is the consultation row the session records for
+	// the consultant's stop instruction, fulfilling AC9.2's "records a consultation
+	// for every routing decision" requirement at the artifact level.
+	nonWorkflowEntries := 0
+	for _, entry := range state.ExecutionLog {
+		if !strings.Contains(entry.Agent, "agent-a") && !strings.Contains(entry.Agent, "agent-b") {
+			nonWorkflowEntries++
+		}
+	}
+	if nonWorkflowEntries == 0 {
+		t.Errorf("want at least one consultation row in execution log beyond the two workflow agents, got none (total entries: %d)", len(state.ExecutionLog))
+	}
+
+	// Both workflow agents must have been dispatched, in order.
+	invs := f.Invocations()
+	if len(invs) != 2 {
+		t.Fatalf("want 2 harness invocations (agent-a + agent-b), got %d", len(invs))
+	}
+	if invs[0].Agent.Identifier != "agent-a" {
+		t.Errorf("want first dispatch to agent-a, got %q", invs[0].Agent.Identifier)
+	}
+	if invs[1].Agent.Identifier != "agent-b" {
+		t.Errorf("want second dispatch to agent-b, got %q", invs[1].Agent.Identifier)
+	}
+}
+
+// ===== T9.2: Auto and auto-review — zero consultations on SUCCESS, consult on deviation =====
+
+// TestIntegration_AutoMode_AllSuccess_ZeroConsultations verifies that in auto
+// and auto-review modes an all-SUCCESS run never invokes the routing consultant.
+// The absence of a wired consultant means any consultation would end the run
+// with RunDeviationUnresolved; RunCompleted proves none occurred.
+func TestIntegration_AutoMode_AllSuccess_ZeroConsultations(t *testing.T) {
+	for _, mode := range []domain.ExecutionMode{
+		domain.ExecutionModeAuto,
+		domain.ExecutionModeAutoReview,
+	} {
+		mode := mode
+		t.Run(string(mode), func(t *testing.T) {
+			dir := t.TempDir()
+			orchPath := copyFile(t, dir, "orchestrator.md",
+				filepath.Join(sessionTestdataDir, "linear-orch.md"))
+			writeAgentFile(t, dir, "agent-a")
+			writeAgentFile(t, dir, "agent-b")
+
+			f := harness.NewFakeAdapter()
+			f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+				AgentInstanceID: "agent-a#1",
+				StatusCode:      domain.StatusSUCCESS,
+				StatusMessage:   "done",
+			}})
+			f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+				AgentInstanceID: "agent-b#2",
+				StatusCode:      domain.StatusSUCCESS,
+				StatusMessage:   "done",
+			}})
+
+			// No routing consultant: any deviation would produce
+			// RunDeviationUnresolved. RunCompleted proves zero consultations.
+			artifactPath := filepath.Join(dir, "Orchestration.md")
+			sess := newSession(f, artifactPath)
+			cfg := domain.RunConfig{
+				OrchestratorFilePath: orchPath,
+				WorkflowID:           "linear",
+				Task:                 "all-success task",
+				IsNewRun:             true,
+				RunSettings:          domain.RunSettings{Mode: mode},
+			}
+
+			got, err := sess.Start(context.Background(), cfg)
+			requireRunStatus(t, got, err, domain.RunCompleted)
+		})
+	}
+}
+
+// TestIntegration_AutoMode_Deviation_ConsultCalledOnce verifies that in auto
+// and auto-review modes a non-SUCCESS response triggers exactly one routing
+// consultation. The scripted consultant returns stop; the run ends with a
+// resumable artifact.
+func TestIntegration_AutoMode_Deviation_ConsultCalledOnce(t *testing.T) {
+	for _, mode := range []domain.ExecutionMode{
+		domain.ExecutionModeAuto,
+		domain.ExecutionModeAutoReview,
+	} {
+		mode := mode
+		t.Run(string(mode), func(t *testing.T) {
+			dir := t.TempDir()
+			orchPath := copyFile(t, dir, "orchestrator.md",
+				filepath.Join(sessionTestdataDir, "linear-orch.md"))
+			writeAgentFile(t, dir, "agent-a")
+			writeAgentFile(t, dir, "agent-b")
+
+			f := harness.NewFakeAdapter()
+			// agent-a returns a non-SUCCESS, triggering a deviation.
+			f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+				AgentInstanceID: "agent-a#1",
+				StatusCode:      domain.StatusPARTIALLY_DONE,
+				StatusMessage:   "only partially done",
+			}})
+
+			consultant := &intScriptedRoutingConsultant{}
+			consultant.queueStop("operator requested stop after deviation")
+
+			artifactPath := filepath.Join(dir, "Orchestration.md")
+			sess := newSessionWithRouting(f, artifactPath, consultant)
+			cfg := domain.RunConfig{
+				OrchestratorFilePath: orchPath,
+				WorkflowID:           "linear",
+				Task:                 "deviation task",
+				IsNewRun:             true,
+				RunSettings:          domain.RunSettings{Mode: mode},
+			}
+
+			got, err := sess.Start(context.Background(), cfg)
+			requireRunStatus(t, got, err, domain.RunStoppedByConsultant)
+
+			// The deviation must trigger exactly one consultation.
+			if consultant.CallCount != 1 {
+				t.Errorf("want exactly 1 consultation for the deviation, got %d",
+					consultant.CallCount)
+			}
+		})
+	}
+}
+
+// ===== T9.3: COMPLETED_NEEDS_ACTION — auto-review auto-routes, auto consults =====
+
+// TestIntegration_AutoReview_CNA_AutoRouteBack_NoConsultAndArtifactInjected
+// verifies that in auto-review mode a COMPLETED_NEEDS_ACTION response from a
+// review agent with an unambiguous OnFindings target causes the engine to route
+// back to that agent automatically, without invoking the routing consultant,
+// and that the review agent's output artifacts are injected into the target's
+// InputArtifacts.
+func TestIntegration_AutoReview_CNA_AutoRouteBack_NoConsultAndArtifactInjected(t *testing.T) {
+	dir := t.TempDir()
+
+	// Workflow: test-writer-tdd → build-review (OnFindings=test-writer-tdd) → impl-tdd.
+	// build-review's output is "build.md" — the artifact injected on loop-back.
+	const orchContent = `<Workflow type="core" name="cna-review" version="1.0">
+## CNA Review Workflow
+
+| Phase | Subagent          | HITL | On Success  | On Findings      | Input    | Output   |
+|-------|-------------------|:----:|-------------|------------------|----------|----------|
+| PLANNING | test-writer-tdd | ❌ | build-review | -               | -        | tests.md |
+| PLANNING | build-review    | ❌ | impl-tdd    | test-writer-tdd  | tests.md | build.md |
+| PLANNING | impl-tdd        | ❌ | COMPLETE    | -                | tests.md | impl.md  |
+</Workflow>
+`
+	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
+	writeAgentFile(t, dir, "test-writer-tdd")
+	writeAgentFile(t, dir, "build-review")
+	writeAgentFile(t, dir, "impl-tdd")
+
+	f := harness.NewFakeAdapter()
+	// test-writer-tdd initial dispatch → SUCCESS.
+	f.Queue("test-writer-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "test-writer-tdd#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "tests written",
+	}})
+	// build-review → COMPLETED_NEEDS_ACTION with unambiguous OnFindings.
+	// In auto-review the engine auto-routes back to test-writer-tdd.
+	f.Queue("build-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "build-review#2",
+		StatusCode:      domain.StatusCOMPLETED_NEEDS_ACTION,
+		StatusMessage:   "build failed",
+	}})
+	// test-writer-tdd loop-back → SUCCESS.
+	f.Queue("test-writer-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "test-writer-tdd#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "tests fixed",
+	}})
+	// build-review second attempt → SUCCESS.
+	f.Queue("build-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "build-review#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "build ok",
+	}})
+	// impl-tdd → SUCCESS → COMPLETE.
+	f.Queue("impl-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "impl-tdd#5",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "implemented",
+	}})
+
+	// A routing consultant is wired but must NOT be called: the OnFindings
+	// auto-route-back is engine-owned in auto-review mode.
+	consultant := &intScriptedRoutingConsultant{}
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSessionWithRouting(f, artifactPath, consultant)
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "cna-review",
+		Task:                 "cna auto-review task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAutoReview},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// The routing consultant must not have been invoked: the CNA auto-route-back
+	// is the engine's decision in auto-review mode.
+	if consultant.CallCount != 0 {
+		t.Errorf("want 0 consultant calls for auto-review OnFindings auto-route, got %d",
+			consultant.CallCount)
+	}
+
+	invs := f.Invocations()
+	wantOrder := []string{
+		"test-writer-tdd", // initial dispatch
+		"build-review",    // first attempt → CNA
+		"test-writer-tdd", // loop-back via OnFindings
+		"build-review",    // second attempt → SUCCESS
+		"impl-tdd",        // continues normally
+	}
+	if len(invs) != len(wantOrder) {
+		t.Fatalf("want %d harness invocations, got %d", len(wantOrder), len(invs))
+	}
+	for i, want := range wantOrder {
+		if invs[i].Agent.Identifier != want {
+			t.Errorf("invocation[%d]: want %q, got %q", i, want, invs[i].Agent.Identifier)
+		}
+	}
+
+	// The test-writer-tdd loop-back (invs[2]) must have build-review's output
+	// artifact ("build.md") injected into its InputArtifacts.
+	if !containsArtifact(invs[2].Request.InputArtifacts, "build.md") {
+		t.Errorf("test-writer-tdd loop-back must have build.md injected (review artifact injection); got InputArtifacts=%v",
+			invs[2].Request.InputArtifacts)
+	}
+}
+
+// TestIntegration_Auto_CNA_ConsultsForDeviation verifies that in auto mode a
+// COMPLETED_NEEDS_ACTION response triggers a routing consultation, not an
+// engine auto-route-back. The OnFindings auto-route is exclusive to auto-review.
+func TestIntegration_Auto_CNA_ConsultsForDeviation(t *testing.T) {
+	dir := t.TempDir()
+
+	const orchContent = `<Workflow type="core" name="cna-auto" version="1.0">
+## CNA Auto Workflow
+
+| Phase | Subagent          | HITL | On Success  | On Findings      | Input    | Output   |
+|-------|-------------------|:----:|-------------|------------------|----------|----------|
+| PLANNING | test-writer-tdd | ❌ | build-review | -               | -        | tests.md |
+| PLANNING | build-review    | ❌ | impl-tdd    | test-writer-tdd  | tests.md | build.md |
+| PLANNING | impl-tdd        | ❌ | COMPLETE    | -                | tests.md | impl.md  |
+</Workflow>
+`
+	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
+	writeAgentFile(t, dir, "test-writer-tdd")
+	writeAgentFile(t, dir, "build-review")
+	writeAgentFile(t, dir, "impl-tdd")
+
+	f := harness.NewFakeAdapter()
+	f.Queue("test-writer-tdd", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "test-writer-tdd#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "tests written",
+	}})
+	// build-review returns CNA — in auto mode this is a deviation requiring consultation.
+	f.Queue("build-review", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "build-review#2",
+		StatusCode:      domain.StatusCOMPLETED_NEEDS_ACTION,
+		StatusMessage:   "build failed",
+	}})
+
+	// Consultant is called once for the CNA deviation and returns stop.
+	consultant := &intScriptedRoutingConsultant{}
+	consultant.queueStop("build-review returned CNA in auto mode — stopping")
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSessionWithRouting(f, artifactPath, consultant)
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "cna-auto",
+		Task:                 "cna auto task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunStoppedByConsultant)
+
+	// In auto mode CNA is a deviation and must route through the consultant.
+	if consultant.CallCount != 1 {
+		t.Errorf("want 1 consultant call when CNA deviates in auto mode, got %d",
+			consultant.CallCount)
+	}
+}
+
+// ===== T9.4: HITL — non-compliant produces one redispatch then escalates =====
+
+// TestIntegration_HITL_NonCompliant_OneRedispatchThenDeviation verifies that
+// when an agent dispatched with HITL=true returns SUCCESS but its output
+// artifact is not human-approved, the session re-dispatches the agent exactly
+// once. A second non-compliant result escalates to a deviation; the run never
+// advances past the unverified step and agent-b is never dispatched.
+func TestIntegration_HITL_NonCompliant_OneRedispatchThenDeviation(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "hitl-linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f := harness.NewFakeAdapter()
+	// agent-a is queued twice: initial dispatch and one HITL redispatch.
+	// Both return SUCCESS, but the approval reader always reports ApprovalFalse.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done — awaiting human review",
+	}})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "redispatched — still awaiting review",
+	}})
+
+	// ApprovalReader always reports ApprovalFalse: the human gate is never closed.
+	approvals := intFixedApprovalReader{approval: domain.ApprovalFalse}
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSessionWithApprovals(f, artifactPath, approvals)
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "hitl task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+
+	// After the single allowed redispatch the escalation produces a deviation.
+	// With no routing consultant wired, the run ends with RunDeviationUnresolved.
+	if err != nil {
+		t.Fatalf("want nil error, got %v", err)
+	}
+	if got.Status != domain.RunDeviationUnresolved {
+		t.Errorf("want RunDeviationUnresolved after HITL redispatch exhausted, got %q (msg: %q)",
+			got.Status, got.Message)
+	}
+
+	// agent-a must be dispatched exactly twice: once initially, once on redispatch.
+	// agent-b must never be dispatched: the run must not advance past the
+	// unverified step.
+	invs := f.Invocations()
+	agentACount, agentBCount := 0, 0
+	for _, inv := range invs {
+		switch inv.Agent.Identifier {
+		case "agent-a":
+			agentACount++
+		case "agent-b":
+			agentBCount++
+		}
+	}
+	if agentACount != 2 {
+		t.Errorf("want agent-a dispatched exactly twice (initial + one redispatch), got %d",
+			agentACount)
+	}
+	if agentBCount != 0 {
+		t.Errorf("want agent-b never dispatched (run must not advance past unverified step), got %d",
+			agentBCount)
+	}
+}
+
+// ===== T9.5: Stop and orchestrator failure — artifact left resumable =====
+
+// TestIntegration_ConsultantStop_ArtifactResumable verifies that when the
+// routing consultant returns a stop instruction, the run ends with
+// RunStoppedByConsultant and the orchestration artifact remains on disk in a
+// state from which it can be resumed. A stop is never silent data loss.
+func TestIntegration_ConsultantStop_ArtifactResumable(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "planning done",
+	}})
+
+	// Consultant dispatches agent-a then stops after it completes.
+	consultant := &intScriptedRoutingConsultant{}
+	consultant.queueDispatch("agent-a", "Proceed.", 0)
+	consultant.queueStop("workflow paused by operator")
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSessionWithRouting(f, artifactPath, consultant)
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "stop task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunStoppedByConsultant)
+
+	// The stop reason must surface in the run outcome.
+	if !strings.Contains(got.StopReason, "paused") {
+		t.Errorf("want StopReason to contain the consultant's reason; got %q", got.StopReason)
+	}
+
+	// The artifact must exist on disk: a stop is never silent data loss.
+	if _, statErr := os.Stat(artifactPath); statErr != nil {
+		t.Errorf("want artifact file to exist after consultant stop (resumable state), got %v",
+			statErr)
+	}
+}
+
+// TestIntegration_ConsultantFailure_ArtifactResumable verifies that when the
+// routing consultant returns a transport error (simulating an orchestrator
+// failure), the run ends with RunStoppedByConsultant and the artifact remains
+// on disk, parseable and ready to resume.
+func TestIntegration_ConsultantFailure_ArtifactResumable(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f := harness.NewFakeAdapter()
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "planning done",
+	}})
+
+	// Consultant dispatches agent-a, then fails with a transport error on the
+	// next call — simulating an orchestrator crash.
+	consultant := &intScriptedRoutingConsultant{}
+	consultant.queueDispatch("agent-a", "Proceed.", 0)
+	consultant.queueError(domain.ConsultFailTransport)
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSessionWithRouting(f, artifactPath, consultant)
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "failure task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunStoppedByConsultant)
+
+	// The artifact must exist and be parseable: the run can be resumed after
+	// the orchestrator failure is resolved.
+	data, readErr := os.ReadFile(artifactPath)
+	if readErr != nil {
+		t.Fatalf("want artifact to exist after orchestrator failure (resumable state), got %v",
+			readErr)
+	}
+	if _, parseErr := artifact.Parse(data); parseErr != nil {
+		t.Errorf("want artifact parseable after orchestrator failure, got %v", parseErr)
+	}
+}
+
+// ===== T9.6: Commit setup — branch recorded, failed setup leaves no artifact =====
+
+// TestIntegration_CommitSetup_BranchRecordedInArtifact verifies that when a
+// commits-enabled run starts and the commit-class agent reports a
+// [branch:{name}] marker, the branch name is stored in the artifact frontmatter
+// and the commit setup dispatch appears as the first execution log row.
+func TestIntegration_CommitSetup_BranchRecordedInArtifact(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "commit-agent-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "commit-manager-git")
+
+	const wantBranch = "mosaic/run/test-branch-001"
+
+	f := harness.NewFakeAdapter()
+	// commit setup dispatch — must carry the [branch:{name}] marker.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit setup complete [branch:" + wantBranch + "]",
+	}})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSession(f, artifactPath)
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "commit task",
+		IsNewRun:             true,
+		RunSettings: domain.RunSettings{
+			Mode:                domain.ExecutionModeAuto,
+			Commits:             true,
+			CommitBranchVariant: domain.CommitBranchMOSAICOwned,
+		},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// Read and parse the produced artifact to verify frontmatter and log.
+	data, readErr := os.ReadFile(artifactPath)
+	if readErr != nil {
+		t.Fatalf("read artifact: %v", readErr)
+	}
+	state, parseErr := artifact.Parse(data)
+	if parseErr != nil {
+		t.Fatalf("parse artifact: %v", parseErr)
+	}
+
+	if state.CommitBranch != wantBranch {
+		t.Errorf("want CommitBranch=%q in artifact frontmatter, got %q",
+			wantBranch, state.CommitBranch)
+	}
+
+	// The commit setup dispatch must be the first execution log row (Seq=1) and
+	// its agent identifier must name the commit-class agent.
+	if len(state.ExecutionLog) == 0 {
+		t.Fatal("want at least one execution log entry (commit setup row), got none")
+	}
+	first := state.ExecutionLog[0]
+	if first.Seq != 1 {
+		t.Errorf("want commit setup row Seq=1, got Seq=%d", first.Seq)
+	}
+	if !strings.Contains(first.Agent, "commit-manager-git") {
+		t.Errorf("want commit setup row agent to contain commit-manager-git, got %q",
+			first.Agent)
+	}
+}
+
+// TestIntegration_CommitSetup_FailedSetup_NoArtifactCreated verifies that when
+// the commit setup dispatch fails (harness-level error), the run is refused and
+// no orchestration artifact is left behind. A failed setup is terminal and
+// leaves no trace.
+func TestIntegration_CommitSetup_FailedSetup_NoArtifactCreated(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "commit-agent-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "commit-manager-git")
+
+	f := harness.NewFakeAdapter()
+	// commit-manager-git fails at the harness level (e.g. agent process crashed).
+	f.Queue("commit-manager-git", harness.ScriptedEntry{
+		Err: errors.New("harness: commit setup agent crashed"),
+	})
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSession(f, artifactPath)
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "commit-fail task",
+		IsNewRun:             true,
+		RunSettings: domain.RunSettings{
+			Mode:                domain.ExecutionModeAuto,
+			Commits:             true,
+			CommitBranchVariant: domain.CommitBranchMOSAICOwned,
+		},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRefused(t, got, err)
+
+	// No artifact must be created: a failed commit setup leaves no trace.
+	if _, statErr := os.Stat(artifactPath); statErr == nil {
+		t.Errorf("want no artifact file after failed commit setup, but file exists at %s",
+			artifactPath)
+	}
+
+	// Only commit-manager-git may have been invoked; no workflow agents.
+	invs := f.Invocations()
+	for _, inv := range invs {
+		if inv.Agent.Identifier != "commit-manager-git" {
+			t.Errorf("want no workflow agent dispatched after failed commit setup, got %q",
+				inv.Agent.Identifier)
+		}
+	}
+}
+
+// TestIntegration_CommitSetup_MarkerMissing_Refused verifies that when the
+// commit-class agent returns StatusSUCCESS but its status_message contains no
+// [branch:{name}] marker, the run is refused and no orchestration artifact is
+// left behind. This exercises the marker-parsing failure path (path (b)),
+// distinct from the harness-level crash covered by
+// TestIntegration_CommitSetup_FailedSetup_NoArtifactCreated.
+func TestIntegration_CommitSetup_MarkerMissing_Refused(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "commit-agent-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "commit-manager-git")
+
+	f := harness.NewFakeAdapter()
+	// Commit agent returns SUCCESS but omits the [branch:{name}] marker entirely.
+	// An absent marker must refuse the run.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit setup complete — no branch marker here",
+	}})
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSession(f, artifactPath)
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "marker-missing task",
+		IsNewRun:             true,
+		RunSettings: domain.RunSettings{
+			Mode:                domain.ExecutionModeAuto,
+			Commits:             true,
+			CommitBranchVariant: domain.CommitBranchMOSAICOwned,
+		},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRefused(t, got, err)
+
+	// No artifact must be created: an absent branch marker refuses the run terminally.
+	if _, statErr := os.Stat(artifactPath); statErr == nil {
+		t.Errorf("want no artifact file when [branch:{name}] marker is absent, but file exists at %s",
+			artifactPath)
+	}
+
+	// No workflow agents must have been dispatched; only the commit setup agent.
+	invs := f.Invocations()
+	for _, inv := range invs {
+		if inv.Agent.Identifier != "commit-manager-git" {
+			t.Errorf("want no workflow agent dispatched after marker-missing refusal, got %q",
+				inv.Agent.Identifier)
+		}
+	}
+}
+
+// TestIntegration_CommitSetup_EmptyBranchName_Refused verifies that when the
+// commit-class agent returns StatusSUCCESS with a [branch:] marker whose branch
+// name is empty, the run is refused and no orchestration artifact is left behind.
+// An empty branch name is equivalent to an absent marker per the design contract:
+// "An absent marker or an empty name refuses the run."
+func TestIntegration_CommitSetup_EmptyBranchName_Refused(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "commit-agent-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+	writeAgentFile(t, dir, "commit-manager-git")
+
+	f := harness.NewFakeAdapter()
+	// Commit agent returns SUCCESS with a [branch:] marker but no branch name.
+	// An empty name must refuse the run.
+	f.Queue("commit-manager-git", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "commit-manager-git#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "commit setup complete [branch:]",
+	}})
+
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	sess := newSession(f, artifactPath)
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "empty-branch task",
+		IsNewRun:             true,
+		RunSettings: domain.RunSettings{
+			Mode:                domain.ExecutionModeAuto,
+			Commits:             true,
+			CommitBranchVariant: domain.CommitBranchMOSAICOwned,
+		},
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRefused(t, got, err)
+
+	// No artifact must be created: an empty branch name refuses the run terminally.
+	if _, statErr := os.Stat(artifactPath); statErr == nil {
+		t.Errorf("want no artifact file when [branch:] has empty name, but file exists at %s",
+			artifactPath)
+	}
+
+	// No workflow agents must have been dispatched; only the commit setup agent.
+	invs := f.Invocations()
+	for _, inv := range invs {
+		if inv.Agent.Identifier != "commit-manager-git" {
+			t.Errorf("want no workflow agent dispatched after empty-branch-name refusal, got %q",
+				inv.Agent.Identifier)
+		}
+	}
+}
+
+// ===== T9.7: Resume — configuration from frontmatter, interrupted step re-dispatched =====
+
+// TestIntegration_Resume_ConfigFromFrontmatterNothingReAsked verifies that a
+// resumed run reads its execution mode and all other RunSettings from the
+// artifact frontmatter, not from the caller-supplied RunConfig. It also verifies
+// that no step already completed in the artifact is re-dispatched.
+//
+// The artifact records mode=auto. The caller supplies an empty RunSettings
+// (Mode unset, which for a new run would be a refusal). The session must apply
+// auto semantics from the artifact; RunCompleted — without a routing consultant —
+// proves auto mode was in effect.
+func TestIntegration_Resume_ConfigFromFrontmatterNothingReAsked(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	// Artifact: agent-a already completed, mode=auto in frontmatter.
+	const resumeArtifact = `---
+type: orchestration-artifact
+workflow: linear
+workflow_version: "1.0"
+task: "resume task"
+started: 2026-01-01T00:00:00Z
+last_updated: 2026-01-01T00:00:00Z
+global_sequence: 1
+mode: auto
+checkpoints: disabled
+commits: disabled
+pre_consultation: disabled
+manual_resolution: disabled
+current_state:
+  phase: PLANNING
+  stage: null
+  last_status: SUCCESS
+  last_agent: "agent-a#1"
+  error_code: null
+---
+
+<ExecutionLog type="core">
+| Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary       | Checkpoint |
+| --- | --------- | -------- | ----- | ------- | -------------------- | ------------- | ---------- |
+| 1   | agent-a#1 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | planning done | -          |
+</ExecutionLog>
+
+<Artifacts type="core">
+| Artifact | Created In | Created By |
+| -------- | ---------- | ---------- |
+| plan.md  | PLANNING   | agent-a#1  |
+</Artifacts>
+
+<WorkflowNotes type="core">
+| Seq | Note |
+| --- | ---- |
+</WorkflowNotes>
+`
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	if err := os.WriteFile(artifactPath, []byte(resumeArtifact), 0600); err != nil {
+		t.Fatalf("write resume artifact: %v", err)
+	}
+
+	f := harness.NewFakeAdapter()
+	// Only agent-b needs dispatching: agent-a is already recorded in the artifact.
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	// No routing consultant: if the session ignored the frontmatter and treated
+	// the run as orchestrated (requiring a consultant), it would return
+	// RunStoppedByConsultant. RunCompleted proves auto mode was applied from
+	// the artifact frontmatter.
+	sess := newSession(f, artifactPath)
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "resume task",
+		IsNewRun:             false, // resume: artifact already on disk
+		// RunSettings intentionally empty: frontmatter value must take precedence.
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	// Only agent-b must have been dispatched.
+	invs := f.Invocations()
+	if len(invs) != 1 {
+		t.Errorf("want 1 harness invocation (agent-b only, agent-a is already completed), got %d",
+			len(invs))
+	}
+	if len(invs) == 1 && invs[0].Agent.Identifier != "agent-b" {
+		t.Errorf("want agent-b dispatched on resume, got %q", invs[0].Agent.Identifier)
+	}
+}
+
+// TestIntegration_Resume_InterruptedStep_ReDispatched verifies that a run
+// resumed from an artifact recording a mid-invocation interruption re-dispatches
+// the interrupted step before continuing, using settings read from the artifact
+// frontmatter, without re-asking the user for any configuration.
+//
+// The interruption signature: the execution log ends at agent-a#1 but
+// current_state.last_agent is already agent-b#2, meaning agent-b was dispatched
+// but the runner was interrupted before recording its result. ResumePoint
+// detects this as RerunLast=true and the session re-dispatches agent-a.
+func TestIntegration_Resume_InterruptedStep_ReDispatched(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyFile(t, dir, "orchestrator.md",
+		filepath.Join(sessionTestdataDir, "linear-orch.md"))
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	const interruptedArtifact = `---
+type: orchestration-artifact
+workflow: linear
+workflow_version: "1.0"
+task: "interrupted task"
+started: 2026-01-01T00:00:00Z
+last_updated: 2026-01-01T00:00:00Z
+global_sequence: 1
+mode: auto
+checkpoints: disabled
+commits: disabled
+pre_consultation: disabled
+manual_resolution: disabled
+current_state:
+  phase: PLANNING
+  stage: null
+  last_status: SUCCESS
+  last_agent: "agent-b#2"
+  error_code: null
+---
+
+<ExecutionLog type="core">
+| Seq | Agent     | Phase    | Stage | Status  | Timestamp            | Summary       | Checkpoint |
+| --- | --------- | -------- | ----- | ------- | -------------------- | ------------- | ---------- |
+| 1   | agent-a#1 | PLANNING | -     | SUCCESS | 2026-01-01T00:00:00Z | planning done | -          |
+</ExecutionLog>
+
+<Artifacts type="core">
+| Artifact | Created In | Created By |
+| -------- | ---------- | ---------- |
+| plan.md  | PLANNING   | agent-a#1  |
+</Artifacts>
+
+<WorkflowNotes type="core">
+| Seq | Note |
+| --- | ---- |
+</WorkflowNotes>
+`
+	artifactPath := filepath.Join(dir, "Orchestration.md")
+	if err := os.WriteFile(artifactPath, []byte(interruptedArtifact), 0600); err != nil {
+		t.Fatalf("write interrupted artifact: %v", err)
+	}
+
+	f := harness.NewFakeAdapter()
+	// agent-a is re-dispatched (RerunLast for the interrupted row), then
+	// agent-b completes the run.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "re-done after interruption",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#3",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	// No routing consultant: mode=auto (read from frontmatter) routes autonomously.
+	// RunConfig carries no RunSettings — the session reads them from the artifact.
+	sess := newSession(f, artifactPath)
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "interrupted task",
+		IsNewRun:             false, // resume: interrupted artifact on disk
+	}
+
+	got, err := sess.Start(context.Background(), cfg)
+	requireRunStatus(t, got, err, domain.RunCompleted)
+
+	invs := f.Invocations()
+	if len(invs) != 2 {
+		t.Errorf("want 2 harness invocations (agent-a re-run + agent-b), got %d", len(invs))
+	}
+	if len(invs) >= 1 && invs[0].Agent.Identifier != "agent-a" {
+		t.Errorf("want first invocation to re-run agent-a (interrupted row), got %q",
+			invs[0].Agent.Identifier)
+	}
+	if len(invs) >= 2 && invs[1].Agent.Identifier != "agent-b" {
+		t.Errorf("want second invocation to be agent-b, got %q", invs[1].Agent.Identifier)
+	}
 }

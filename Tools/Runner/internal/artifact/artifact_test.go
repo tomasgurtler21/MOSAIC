@@ -107,6 +107,56 @@ package artifact_test
 //   - Render unconditionally emits "commits: disabled" regardless of state.
 //   - commits: is positioned after checkpoints: and before current_state:.
 //   - Parse accepts a frontmatter carrying a commits: line without refusing.
+//
+//   Stage 1 — run configuration frontmatter round-trip (T1.2):
+//
+//   Parse — defaults when configuration keys are absent:
+//   - Absent mode key: Mode is ExecutionModeUnset (no error).
+//   - Absent commits key: Commits is false (no error).
+//   - Absent commit_branch_variant key: CommitBranchVariant is CommitBranchMOSAICOwned.
+//   - Absent commit_branch key: CommitBranch is "" (no error).
+//   - Absent pre_consultation key: PreConsultation is false (no error).
+//   - Absent manual_resolution key: ManualResolution is false (no error).
+//
+//   Parse — explicit configuration key values:
+//   - "mode: auto" parses to ExecutionModeAuto.
+//   - "mode: orchestrated" parses to ExecutionModeOrchestrated.
+//   - "mode: auto-review" parses to ExecutionModeAutoReview.
+//   - "commits: enabled" parses to Commits = true.
+//   - "commit_branch_variant: user-own" parses to CommitBranchUserOwn.
+//   - "commit_branch: mosaic/run/testrun" parses to CommitBranch = "mosaic/run/testrun".
+//   - "pre_consultation: enabled" parses to PreConsultation = true.
+//   - "manual_resolution: enabled" parses to ManualResolution = true.
+//
+//   Parse — refusals on bad configuration values:
+//   - Unknown mode value (not "orchestrated", "auto", or "auto-review") → *RefusalError.
+//   - Unknown commit_branch_variant value → *RefusalError.
+//   - Malformed checkpoints value (not "enabled" or "disabled") → *RefusalError
+//     (deliberate tightening from the prior silent-false behaviour).
+//
+//   Render — new configuration keys:
+//   - mode key is emitted when Mode is non-empty.
+//   - commits key reflects the actual Commits value (not hardcoded "disabled").
+//   - commit_branch_variant key is emitted.
+//   - commit_branch key is emitted when CommitBranch is non-empty.
+//   - commit_branch key is NOT emitted when CommitBranch is empty.
+//   - pre_consultation key is emitted.
+//   - manual_resolution key is emitted.
+//
+//   Round-trip (Render → Parse):
+//   - All six configuration values round-trip identically.
+//   - CommitBranch survives round-trip as empty when originally empty.
+//
+//   Create — RunSettings persisted to disk:
+//   - After Create and a subsequent Read, all six RunSettings fields are preserved.
+//
+//   Apply — RunSettings persisted through disk:
+//   - After Apply and a subsequent Read, Mode is preserved on disk.
+//   - After Apply and a subsequent Read, Commits is preserved on disk.
+//   - After Apply and a subsequent Read, CommitBranchVariant is preserved on disk.
+//   - After Apply and a subsequent Read, CommitBranch is preserved on disk.
+//   - After Apply and a subsequent Read, PreConsultation is preserved on disk.
+//   - After Apply and a subsequent Read, ManualResolution is preserved on disk.
 
 import (
 	"bytes"
@@ -583,7 +633,7 @@ func TestCreate_WorkflowID_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "some task", false, time.Now(), "")
+	state, err := store.Create(ctx, info, "some task", domain.RunSettings{}, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -599,7 +649,7 @@ func TestCreate_WorkflowVersion_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "some task", false, time.Now(), "")
+	state, err := store.Create(ctx, info, "some task", domain.RunSettings{}, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -615,7 +665,7 @@ func TestCreate_Task_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "My important task", false, time.Now(), "")
+	state, err := store.Create(ctx, info, "My important task", domain.RunSettings{}, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -631,7 +681,7 @@ func TestCreate_CheckpointsEnabled_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", true, time.Now(), "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{Checkpoints: true}, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -647,7 +697,7 @@ func TestCreate_CheckpointsDisabled_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", false, time.Now(), "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -666,7 +716,7 @@ func TestCreate_Type_SetInState(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", false, time.Now(), "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -685,7 +735,7 @@ func TestCreate_Started_SetFromNowParameter(t *testing.T) {
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 	now := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
 
-	state, err := store.Create(ctx, info, "task", false, now, "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, now, "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -703,7 +753,7 @@ func TestCreate_GlobalSequence_InitiallyZero(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", false, time.Now(), "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -719,7 +769,7 @@ func TestCreate_ExecutionLog_Empty(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", false, time.Now(), "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -735,7 +785,7 @@ func TestCreate_ArtifactRegistry_Empty(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	state, err := store.Create(ctx, info, "task", false, time.Now(), "")
+	state, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -753,12 +803,12 @@ func TestCreate_FailsIfFileAlreadyExists(t *testing.T) {
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
 	// Create the file once.
-	if _, err := store.Create(ctx, info, "first", false, time.Now(), ""); err != nil {
+	if _, err := store.Create(ctx, info, "first", domain.RunSettings{}, time.Now(), ""); err != nil {
 		t.Fatalf("first Create: unexpected error: %v", err)
 	}
 
 	// A second Create on the same path must fail.
-	_, err := store.Create(ctx, info, "second", false, time.Now(), "")
+	_, err := store.Create(ctx, info, "second", domain.RunSettings{}, time.Now(), "")
 	if err == nil {
 		t.Fatal("second Create: want error because file already exists, got nil")
 	}
@@ -773,7 +823,7 @@ func TestCreate_FileReadableAfterCreate(t *testing.T) {
 	now := time.Date(2026, 1, 29, 9, 0, 0, 0, time.UTC)
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
 
-	created, err := store.Create(ctx, info, "Fix something", false, now, "")
+	created, err := store.Create(ctx, info, "Fix something", domain.RunSettings{}, now, "")
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -812,7 +862,7 @@ func mustCreateStore(t *testing.T) (domain.ArtifactStore, domain.ArtifactState) 
 	store := artifact.NewFileStore(filepath.Join(dir, "Orchestration.md"))
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
-	state, err := store.Create(ctx, info, "test task", false, time.Now(), "")
+	state, err := store.Create(ctx, info, "test task", domain.RunSettings{}, time.Now(), "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -1139,7 +1189,7 @@ func TestApply_WorkflowNotes_PreservedUnchanged(t *testing.T) {
 
 	// Seed the temp file.
 	info := domain.WorkflowInfo{ID: state.Workflow, Version: state.WorkflowVersion}
-	seedState, err := tempStore.Create(ctx, info, state.Task, state.Checkpoints, state.Started, "")
+	seedState, err := tempStore.Create(ctx, info, state.Task, domain.RunSettings{Checkpoints: state.Checkpoints}, state.Started, "")
 	if err != nil {
 		t.Fatalf("Create temp: %v", err)
 	}
@@ -1631,9 +1681,10 @@ func TestRoundTrip_WithRunID_PreservesRunID(t *testing.T) {
 // ---- Render / Parse: commits frontmatter field ----
 
 func TestRender_ContainsCommitsDisabled(t *testing.T) {
-	// Render must unconditionally emit "commits: disabled" in the frontmatter,
-	// regardless of the ArtifactState's field values. The field is a fixed
-	// literal, not derived from any state field.
+	// Render must emit "commits: disabled" in the frontmatter when Commits is
+	// false (the zero value). The commits: field reflects the actual
+	// RunSettings.Commits value; a separate test (TestRender_CommitsEnabled_EmitsEnabled)
+	// covers the enabled case.
 	state := domain.ArtifactState{
 		Type:     "orchestration-artifact",
 		Workflow: "test",
@@ -1656,7 +1707,7 @@ func TestRender_CommitsPosition_AfterCheckpointsBeforeCurrentState(t *testing.T)
 	state := domain.ArtifactState{
 		Type:        "orchestration-artifact",
 		Workflow:    "test",
-		Checkpoints: true,
+		RunSettings: domain.RunSettings{Checkpoints: true},
 	}
 
 	got, err := artifact.Render(state)
@@ -1737,7 +1788,7 @@ func setPhaseFixture(t *testing.T) (domain.ArtifactStore, domain.ArtifactState) 
 	store := artifact.NewFileStore(filepath.Join(dir, "Orchestration.md"))
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
-	state, err := store.Create(ctx, info, "test task", false, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), "")
+	state, err := store.Create(ctx, info, "test task", domain.RunSettings{}, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), "")
 	if err != nil {
 		t.Fatalf("setPhaseFixture: Create: %v", err)
 	}
@@ -1937,7 +1988,7 @@ func createFixtureWithRunID(t *testing.T, runID string) (domain.ArtifactStore, d
 	store := artifact.NewFileStore(filepath.Join(dir, "Orchestration.md"))
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
-	state, err := store.Create(ctx, info, "test task", false, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), runID)
+	state, err := store.Create(ctx, info, "test task", domain.RunSettings{}, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), runID)
 	if err != nil {
 		t.Fatalf("createFixtureWithRunID: Create: %v", err)
 	}
@@ -2009,7 +2060,7 @@ func TestCreate_RunID_RoundTrip_PreservesAllOtherFields(t *testing.T) {
 	info := domain.WorkflowInfo{ID: "my-workflow", Version: "2.0"}
 	now := time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
 
-	created, err := store.Create(ctx, info, "important task", true, now, runID)
+	created, err := store.Create(ctx, info, "important task", domain.RunSettings{Checkpoints: true}, now, runID)
 	if err != nil {
 		t.Fatalf("Create: unexpected error: %v", err)
 	}
@@ -2513,7 +2564,7 @@ func TestCreate_RelativePath_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "1.0"}
 
-	_, err := store.Create(ctx, info, "task", false, time.Now(), "")
+	_, err := store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "")
 
 	// Defensive cleanup: in the RED phase Create may succeed and write the file.
 	// Remove it so subsequent test runs are not affected by a leftover artifact.
@@ -2549,7 +2600,7 @@ func TestCreate_RelativePath_WritesNoFile(t *testing.T) {
 		t.Fatalf("os.Getwd: %v", err)
 	}
 
-	_, _ = store.Create(ctx, info, "task", false, time.Now(), "") // error expected; ignore
+	_, _ = store.Create(ctx, info, "task", domain.RunSettings{}, time.Now(), "") // error expected; ignore
 
 	// Verify no file was written at the relative path (resolved against the test's CWD).
 	candidate := filepath.Join(wd, relativePath)
@@ -2649,9 +2700,744 @@ func TestCreate_AbsoluteNonRunScopedPath_Succeeds(t *testing.T) {
 	ctx := context.Background()
 	info := domain.WorkflowInfo{ID: "quick-fix", Version: "1.0"}
 
-	_, err := store.Create(ctx, info, "regression guard task", false, time.Now(), "")
+	_, err := store.Create(ctx, info, "regression guard task", domain.RunSettings{}, time.Now(), "")
 
 	if err != nil {
 		t.Errorf("Create with absolute non-run-scoped path: unexpected error: %v", err)
+	}
+}
+
+// ============================================================
+// Stage 1: Frontmatter round-trip for run configuration fields (T1.2)
+// ============================================================
+//
+// Tests in this section are in the RED phase unless otherwise noted.
+// They compile against the Stage 1 contract files (execution_mode.go,
+// commit_branch.go, and the new ArtifactState fields in domain/artifact.go)
+// but fail because artifact.Parse and artifact.Render do not yet handle the
+// new keys, and because Parse does not yet enforce the refusal-on-bad-value
+// rule for checkpoints.
+//
+// Note on "defaults" tests: tests that check a zero-value default (false, "")
+// may pass in the RED phase since those defaults match the current unimplemented
+// zero values. The CommitBranchVariant default test and the round-trip test
+// are the definitive RED canaries for Parse. The malformed-checkpoints refusal
+// test is the definitive RED canary for the checkpoints tightening.
+
+// minimalArtifactWithConfigBytes builds a canonical artifact document with
+// configLines inserted after global_sequence and before current_state. Callers
+// must supply any checkpoints, commits, mode, or other frontmatter lines they
+// need; this function does not inject defaults.
+func minimalArtifactWithConfigBytes(configLines string) []byte {
+	return []byte("---\n" +
+		"type: orchestration-artifact\n" +
+		"workflow: test\n" +
+		"workflow_version: \"1.0\"\n" +
+		"task: \"test task\"\n" +
+		"started: 2026-01-01T00:00:00Z\n" +
+		"last_updated: 2026-01-01T00:00:00Z\n" +
+		"global_sequence: 0\n" +
+		configLines +
+		"current_state:\n" +
+		"  phase: null\n" +
+		"  stage: null\n" +
+		"  last_status: null\n" +
+		"  last_agent: null\n" +
+		"  error_code: null\n" +
+		"---\n" +
+		"\n" +
+		"<ExecutionLog type=\"core\">\n" +
+		"</ExecutionLog>\n" +
+		"\n" +
+		"<Artifacts type=\"core\">\n" +
+		"</Artifacts>\n" +
+		"\n" +
+		"<WorkflowNotes type=\"core\">\n" +
+		"</WorkflowNotes>\n")
+}
+
+// standardConfigLines is the baseline set of config lines that represent a
+// known-good (non-malformed) minimal configuration, used as the starting
+// point for tests that override only the field under test.
+const standardConfigLines = "checkpoints: disabled\ncommits: disabled\n"
+
+// ---- Parse: defaults when configuration keys are absent ----
+
+func TestParse_AbsentModeKey_DefaultsToUnset(t *testing.T) {
+	// When the mode key is absent, the parsed Mode must equal ExecutionModeUnset.
+	// This is not a refusal — absence is a valid state that the caller resolves.
+	data := minimalArtifactWithConfigBytes(standardConfigLines)
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if state.Mode != domain.ExecutionModeUnset {
+		t.Errorf("Mode: want %q (unset), got %q", domain.ExecutionModeUnset, state.Mode)
+	}
+}
+
+func TestParse_AbsentCommitsKey_DefaultsToFalse(t *testing.T) {
+	// When the commits key is absent, Commits defaults to false.
+	data := minimalArtifactWithConfigBytes("checkpoints: disabled\n")
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if state.Commits {
+		t.Error("Commits: want false (default when key absent), got true")
+	}
+}
+
+func TestParse_AbsentCommitBranchVariantKey_DefaultsToMOSAICOwned(t *testing.T) {
+	// When the commit_branch_variant key is absent, CommitBranchVariant defaults
+	// to CommitBranchMOSAICOwned — the documented recommended variant.
+	// RED canary: zero value is "" but default must be "mosaic-owned".
+	data := minimalArtifactWithConfigBytes(standardConfigLines)
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if state.CommitBranchVariant != domain.CommitBranchMOSAICOwned {
+		t.Errorf("CommitBranchVariant: want %q (default when key absent), got %q",
+			domain.CommitBranchMOSAICOwned, state.CommitBranchVariant)
+	}
+}
+
+func TestParse_AbsentCommitBranchKey_DefaultsToEmpty(t *testing.T) {
+	// When the commit_branch key is absent, CommitBranch is "".
+	data := minimalArtifactWithConfigBytes(standardConfigLines)
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if state.CommitBranch != "" {
+		t.Errorf("CommitBranch: want %q (default when key absent), got %q", "", state.CommitBranch)
+	}
+}
+
+func TestParse_AbsentPreConsultationKey_DefaultsToFalse(t *testing.T) {
+	// When the pre_consultation key is absent, PreConsultation defaults to false.
+	data := minimalArtifactWithConfigBytes(standardConfigLines)
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if state.PreConsultation {
+		t.Error("PreConsultation: want false (default when key absent), got true")
+	}
+}
+
+func TestParse_AbsentManualResolutionKey_DefaultsToFalse(t *testing.T) {
+	// When the manual_resolution key is absent, ManualResolution defaults to false.
+	data := minimalArtifactWithConfigBytes(standardConfigLines)
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if state.ManualResolution {
+		t.Error("ManualResolution: want false (default when key absent), got true")
+	}
+}
+
+// ---- Parse: explicit configuration key values ----
+
+func TestParse_ModeAuto_ParsedCorrectly(t *testing.T) {
+	data := minimalArtifactWithConfigBytes(
+		"mode: auto\n" +
+			standardConfigLines)
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if state.Mode != domain.ExecutionModeAuto {
+		t.Errorf("Mode: want %q, got %q", domain.ExecutionModeAuto, state.Mode)
+	}
+}
+
+func TestParse_ModeOrchestrated_ParsedCorrectly(t *testing.T) {
+	data := minimalArtifactWithConfigBytes(
+		"mode: orchestrated\n" +
+			standardConfigLines)
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if state.Mode != domain.ExecutionModeOrchestrated {
+		t.Errorf("Mode: want %q, got %q", domain.ExecutionModeOrchestrated, state.Mode)
+	}
+}
+
+func TestParse_ModeAutoReview_ParsedCorrectly(t *testing.T) {
+	data := minimalArtifactWithConfigBytes(
+		"mode: auto-review\n" +
+			standardConfigLines)
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if state.Mode != domain.ExecutionModeAutoReview {
+		t.Errorf("Mode: want %q, got %q", domain.ExecutionModeAutoReview, state.Mode)
+	}
+}
+
+func TestParse_CommitsEnabled_ParsedCorrectly(t *testing.T) {
+	data := minimalArtifactWithConfigBytes(
+		"checkpoints: disabled\n" +
+			"commits: enabled\n")
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if !state.Commits {
+		t.Error("Commits: want true (commits: enabled), got false")
+	}
+}
+
+func TestParse_CommitBranchVariantUserOwn_ParsedCorrectly(t *testing.T) {
+	data := minimalArtifactWithConfigBytes(
+		standardConfigLines +
+			"commit_branch_variant: user-own\n")
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if state.CommitBranchVariant != domain.CommitBranchUserOwn {
+		t.Errorf("CommitBranchVariant: want %q, got %q", domain.CommitBranchUserOwn, state.CommitBranchVariant)
+	}
+}
+
+func TestParse_CommitBranch_ParsedCorrectly(t *testing.T) {
+	data := minimalArtifactWithConfigBytes(
+		standardConfigLines +
+			"commit_branch: mosaic/run/testrun\n")
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if state.CommitBranch != "mosaic/run/testrun" {
+		t.Errorf("CommitBranch: want %q, got %q", "mosaic/run/testrun", state.CommitBranch)
+	}
+}
+
+func TestParse_PreConsultationEnabled_ParsedCorrectly(t *testing.T) {
+	data := minimalArtifactWithConfigBytes(
+		standardConfigLines +
+			"pre_consultation: enabled\n")
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if !state.PreConsultation {
+		t.Error("PreConsultation: want true (pre_consultation: enabled), got false")
+	}
+}
+
+func TestParse_ManualResolutionEnabled_ParsedCorrectly(t *testing.T) {
+	data := minimalArtifactWithConfigBytes(
+		standardConfigLines +
+			"manual_resolution: enabled\n")
+
+	state, err := artifact.Parse(data)
+
+	if err != nil {
+		t.Fatalf("Parse: unexpected error: %v", err)
+	}
+	if !state.ManualResolution {
+		t.Error("ManualResolution: want true (manual_resolution: enabled), got false")
+	}
+}
+
+// ---- Parse: refusals on bad configuration values ----
+
+func TestParse_UnknownModeValue_ReturnsRefusalError(t *testing.T) {
+	// A mode value that is not one of the three valid modes is a refusal.
+	// The user supplied a bad value; silence is worse than rejection.
+	data := minimalArtifactWithConfigBytes(
+		"mode: quick\n" +
+			standardConfigLines)
+
+	_, err := artifact.Parse(data)
+
+	if err == nil {
+		t.Fatal("Parse with unknown mode value: want error, got nil")
+	}
+	asRefusalError(t, err)
+}
+
+func TestParse_UnknownModeValue_RefusalErrorNamesOffendingValue(t *testing.T) {
+	data := minimalArtifactWithConfigBytes(
+		"mode: quick\n" +
+			standardConfigLines)
+
+	_, err := artifact.Parse(data)
+
+	if err == nil {
+		t.Fatal("Parse with unknown mode value: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "quick") {
+		t.Errorf("error message must name the offending value %q, got: %q", "quick", err.Error())
+	}
+}
+
+func TestParse_UnknownCommitBranchVariantValue_ReturnsRefusalError(t *testing.T) {
+	// A commit_branch_variant value that is not "mosaic-owned" or "user-own"
+	// is a refusal.
+	data := minimalArtifactWithConfigBytes(
+		standardConfigLines +
+			"commit_branch_variant: weekly\n")
+
+	_, err := artifact.Parse(data)
+
+	if err == nil {
+		t.Fatal("Parse with unknown commit_branch_variant value: want error, got nil")
+	}
+	asRefusalError(t, err)
+}
+
+func TestParse_MalformedCheckpointsValue_ReturnsRefusalError(t *testing.T) {
+	// A checkpoints value that is neither "enabled" nor "disabled" must now be
+	// refused. Previously it was silently treated as false; this tightening
+	// ensures typos like "enbaled" are caught rather than silently disabling
+	// checkpoints.
+	//
+	// This test uses the malformed-checkpoints.md fixture which has
+	// "checkpoints: enbaled" (deliberate typo).
+	data, err := os.ReadFile(fixturePath("malformed-checkpoints.md"))
+	if err != nil {
+		t.Fatalf("reading fixture: %v", err)
+	}
+
+	_, err = artifact.Parse(data)
+
+	if err == nil {
+		t.Fatal("Parse with malformed checkpoints value: want error, got nil")
+	}
+	asRefusalError(t, err)
+}
+
+// ---- Render: new configuration keys ----
+
+func TestRender_ModeKey_Emitted(t *testing.T) {
+	// When Mode is non-empty, Render must emit a "mode:" key with the correct value.
+	state := domain.ArtifactState{
+		Type:        "orchestration-artifact",
+		Workflow:    "test",
+		RunSettings: domain.RunSettings{Mode: domain.ExecutionModeAutoReview},
+	}
+
+	got, err := artifact.Render(state)
+
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+	if !strings.Contains(string(got), "mode: auto-review") {
+		t.Errorf("Render: want frontmatter to contain %q, got:\n%s", "mode: auto-review", got)
+	}
+}
+
+func TestRender_CommitsEnabled_EmitsEnabled(t *testing.T) {
+	// When Commits is true, Render must emit "commits: enabled" (not the
+	// former hardcoded "commits: disabled").
+	state := domain.ArtifactState{
+		Type:        "orchestration-artifact",
+		Workflow:    "test",
+		RunSettings: domain.RunSettings{Commits: true},
+	}
+
+	got, err := artifact.Render(state)
+
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+	if !strings.Contains(string(got), "commits: enabled") {
+		t.Errorf("Render: want frontmatter to contain %q when Commits=true, got:\n%s", "commits: enabled", got)
+	}
+}
+
+func TestRender_CommitBranchVariantKey_Emitted(t *testing.T) {
+	// commit_branch_variant must appear in the rendered output.
+	state := domain.ArtifactState{
+		Type:        "orchestration-artifact",
+		Workflow:    "test",
+		RunSettings: domain.RunSettings{CommitBranchVariant: domain.CommitBranchUserOwn},
+	}
+
+	got, err := artifact.Render(state)
+
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+	if !strings.Contains(string(got), "commit_branch_variant: user-own") {
+		t.Errorf("Render: want frontmatter to contain %q, got:\n%s",
+			"commit_branch_variant: user-own", got)
+	}
+}
+
+func TestRender_CommitBranchKey_EmittedWhenNonEmpty(t *testing.T) {
+	// commit_branch must appear in the rendered output when non-empty.
+	state := domain.ArtifactState{
+		Type:        "orchestration-artifact",
+		Workflow:    "test",
+		RunSettings: domain.RunSettings{CommitBranch: "mosaic/run/20260816T000724Z-3b68"},
+	}
+
+	got, err := artifact.Render(state)
+
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+	if !strings.Contains(string(got), "commit_branch: mosaic/run/20260816T000724Z-3b68") {
+		t.Errorf("Render: want frontmatter to contain %q when CommitBranch non-empty, got:\n%s",
+			"commit_branch: mosaic/run/20260816T000724Z-3b68", got)
+	}
+}
+
+func TestRender_CommitBranchKey_OmittedWhenEmpty(t *testing.T) {
+	// commit_branch must be omitted entirely when empty (not emitted as "commit_branch: ").
+	state := domain.ArtifactState{
+		Type:        "orchestration-artifact",
+		Workflow:    "test",
+		RunSettings: domain.RunSettings{CommitBranch: ""},
+	}
+
+	got, err := artifact.Render(state)
+
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+	if strings.Contains(string(got), "commit_branch:") {
+		t.Errorf("Render: want frontmatter to NOT contain %q when CommitBranch empty, got:\n%s",
+			"commit_branch:", got)
+	}
+}
+
+func TestRender_PreConsultationKey_Emitted(t *testing.T) {
+	state := domain.ArtifactState{
+		Type:        "orchestration-artifact",
+		Workflow:    "test",
+		RunSettings: domain.RunSettings{PreConsultation: true},
+	}
+
+	got, err := artifact.Render(state)
+
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+	if !strings.Contains(string(got), "pre_consultation: enabled") {
+		t.Errorf("Render: want frontmatter to contain %q when PreConsultation=true, got:\n%s",
+			"pre_consultation: enabled", got)
+	}
+}
+
+func TestRender_ManualResolutionKey_Emitted(t *testing.T) {
+	state := domain.ArtifactState{
+		Type:        "orchestration-artifact",
+		Workflow:    "test",
+		RunSettings: domain.RunSettings{ManualResolution: true},
+	}
+
+	got, err := artifact.Render(state)
+
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+	if !strings.Contains(string(got), "manual_resolution: enabled") {
+		t.Errorf("Render: want frontmatter to contain %q when ManualResolution=true, got:\n%s",
+			"manual_resolution: enabled", got)
+	}
+}
+
+// ---- Round-trip (Render → Parse) ----
+
+func TestRoundTrip_AllConfigFields_ParsedBack(t *testing.T) {
+	// All six configuration fields must survive a Render → Parse round-trip
+	// and be read back with their original values.
+	original := domain.ArtifactState{
+		Type:            "orchestration-artifact",
+		Workflow:        "test",
+		WorkflowVersion: "1.0",
+		Task:            "round-trip task",
+		Started:         time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		LastUpdated:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		RunSettings: domain.RunSettings{
+			Mode:                domain.ExecutionModeAutoReview,
+			Checkpoints:         true,
+			Commits:             true,
+			CommitBranchVariant: domain.CommitBranchUserOwn,
+			CommitBranch:        "mosaic/run/20260816T000724Z-3b68",
+			PreConsultation:     true,
+			ManualResolution:    true,
+		},
+	}
+
+	rendered, err := artifact.Render(original)
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+
+	parsed, err := artifact.Parse(rendered)
+	if err != nil {
+		t.Fatalf("Parse rendered bytes: unexpected error: %v", err)
+	}
+
+	if parsed.Mode != original.Mode {
+		t.Errorf("Mode: want %q, got %q", original.Mode, parsed.Mode)
+	}
+	if parsed.Commits != original.Commits {
+		t.Errorf("Commits: want %v, got %v", original.Commits, parsed.Commits)
+	}
+	if parsed.CommitBranchVariant != original.CommitBranchVariant {
+		t.Errorf("CommitBranchVariant: want %q, got %q",
+			original.CommitBranchVariant, parsed.CommitBranchVariant)
+	}
+	if parsed.CommitBranch != original.CommitBranch {
+		t.Errorf("CommitBranch: want %q, got %q", original.CommitBranch, parsed.CommitBranch)
+	}
+	if parsed.PreConsultation != original.PreConsultation {
+		t.Errorf("PreConsultation: want %v, got %v", original.PreConsultation, parsed.PreConsultation)
+	}
+	if parsed.ManualResolution != original.ManualResolution {
+		t.Errorf("ManualResolution: want %v, got %v", original.ManualResolution, parsed.ManualResolution)
+	}
+}
+
+func TestRoundTrip_CommitBranch_Empty_SurvivesRoundTrip(t *testing.T) {
+	// commit_branch is omitted when empty; re-parsing must yield "" not an error.
+	original := domain.ArtifactState{
+		Type:        "orchestration-artifact",
+		Workflow:    "test",
+		RunSettings: domain.RunSettings{CommitBranch: ""},
+	}
+
+	rendered, err := artifact.Render(original)
+	if err != nil {
+		t.Fatalf("Render: unexpected error: %v", err)
+	}
+
+	parsed, err := artifact.Parse(rendered)
+	if err != nil {
+		t.Fatalf("Parse rendered bytes: unexpected error: %v", err)
+	}
+
+	if parsed.CommitBranch != "" {
+		t.Errorf("CommitBranch: want %q (empty) after round-trip, got %q", "", parsed.CommitBranch)
+	}
+}
+
+// ---- Apply: RunSettings persisted through disk ----
+
+func TestApply_RunSettings_ModePersistsOnDisk(t *testing.T) {
+	// After Apply and a subsequent Read, Mode must equal the value that was in
+	// the state passed to Apply.
+	store, state := mustCreateStore(t)
+	ctx := context.Background()
+	state.Mode = domain.ExecutionModeAuto
+	step := makeStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+
+	if _, err := store.Apply(ctx, state, step); err != nil {
+		t.Fatalf("Apply: unexpected error: %v", err)
+	}
+
+	onDisk, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after Apply: unexpected error: %v", err)
+	}
+
+	if onDisk.Mode != domain.ExecutionModeAuto {
+		t.Errorf("on-disk Mode: want %q (persisted through Apply), got %q",
+			domain.ExecutionModeAuto, onDisk.Mode)
+	}
+}
+
+func TestApply_RunSettings_CommitsPersistsOnDisk(t *testing.T) {
+	// After Apply and a subsequent Read, Commits must equal the value that was
+	// in the state passed to Apply.
+	store, state := mustCreateStore(t)
+	ctx := context.Background()
+	state.Commits = true
+	step := makeStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+
+	if _, err := store.Apply(ctx, state, step); err != nil {
+		t.Fatalf("Apply: unexpected error: %v", err)
+	}
+
+	onDisk, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after Apply: unexpected error: %v", err)
+	}
+
+	if !onDisk.Commits {
+		t.Error("on-disk Commits: want true (persisted through Apply), got false")
+	}
+}
+
+func TestApply_RunSettings_CommitBranchVariantPersistsOnDisk(t *testing.T) {
+	// After Apply and a subsequent Read, CommitBranchVariant must equal the
+	// value that was in the state passed to Apply.
+	store, state := mustCreateStore(t)
+	ctx := context.Background()
+	state.CommitBranchVariant = domain.CommitBranchUserOwn
+	step := makeStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+
+	if _, err := store.Apply(ctx, state, step); err != nil {
+		t.Fatalf("Apply: unexpected error: %v", err)
+	}
+
+	onDisk, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after Apply: unexpected error: %v", err)
+	}
+
+	if onDisk.CommitBranchVariant != domain.CommitBranchUserOwn {
+		t.Errorf("on-disk CommitBranchVariant: want %q (persisted through Apply), got %q",
+			domain.CommitBranchUserOwn, onDisk.CommitBranchVariant)
+	}
+}
+
+func TestApply_RunSettings_CommitBranchPersistsOnDisk(t *testing.T) {
+	// After Apply and a subsequent Read, CommitBranch must equal the value that
+	// was in the state passed to Apply.
+	store, state := mustCreateStore(t)
+	ctx := context.Background()
+	state.CommitBranch = "mosaic/run/testrun"
+	step := makeStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+
+	if _, err := store.Apply(ctx, state, step); err != nil {
+		t.Fatalf("Apply: unexpected error: %v", err)
+	}
+
+	onDisk, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after Apply: unexpected error: %v", err)
+	}
+
+	if onDisk.CommitBranch != "mosaic/run/testrun" {
+		t.Errorf("on-disk CommitBranch: want %q (persisted through Apply), got %q",
+			"mosaic/run/testrun", onDisk.CommitBranch)
+	}
+}
+
+func TestApply_RunSettings_PreConsultationPersistsOnDisk(t *testing.T) {
+	// After Apply and a subsequent Read, PreConsultation must equal the value
+	// that was in the state passed to Apply.
+	store, state := mustCreateStore(t)
+	ctx := context.Background()
+	state.PreConsultation = true
+	step := makeStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+
+	if _, err := store.Apply(ctx, state, step); err != nil {
+		t.Fatalf("Apply: unexpected error: %v", err)
+	}
+
+	onDisk, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after Apply: unexpected error: %v", err)
+	}
+
+	if !onDisk.PreConsultation {
+		t.Error("on-disk PreConsultation: want true (persisted through Apply), got false")
+	}
+}
+
+func TestApply_RunSettings_ManualResolutionPersistsOnDisk(t *testing.T) {
+	// After Apply and a subsequent Read, ManualResolution must equal the value
+	// that was in the state passed to Apply.
+	store, state := mustCreateStore(t)
+	ctx := context.Background()
+	state.ManualResolution = true
+	step := makeStep(1, "planner#1", "PLANNING", "", domain.StatusSUCCESS, time.Now(), nil)
+
+	if _, err := store.Apply(ctx, state, step); err != nil {
+		t.Fatalf("Apply: unexpected error: %v", err)
+	}
+
+	onDisk, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after Apply: unexpected error: %v", err)
+	}
+
+	if !onDisk.ManualResolution {
+		t.Error("on-disk ManualResolution: want true (persisted through Apply), got false")
+	}
+}
+
+// ---- Create: RunSettings persisted to disk ----
+
+func TestCreate_AllRunSettings_PersistedToFile(t *testing.T) {
+	// Create is called with an explicit RunSettings carrying non-zero values for
+	// all six configuration fields. A subsequent Read must return a state whose
+	// fields match those values exactly.
+	dir := t.TempDir()
+	store := artifact.NewFileStore(filepath.Join(dir, "Orchestration.md"))
+	ctx := context.Background()
+	info := domain.WorkflowInfo{ID: "quick-fix", Version: "3.0"}
+	settings := domain.RunSettings{
+		Mode:                domain.ExecutionModeAuto,
+		Checkpoints:         true,
+		Commits:             true,
+		CommitBranchVariant: domain.CommitBranchUserOwn,
+		CommitBranch:        "mosaic/run/testrun",
+		PreConsultation:     true,
+		ManualResolution:    true,
+	}
+
+	if _, err := store.Create(ctx, info, "persisted settings task", settings, time.Now(), ""); err != nil {
+		t.Fatalf("Create: unexpected error: %v", err)
+	}
+
+	onDisk, err := store.Read(ctx)
+	if err != nil {
+		t.Fatalf("Read after Create: unexpected error: %v", err)
+	}
+
+	if onDisk.Mode != domain.ExecutionModeAuto {
+		t.Errorf("on-disk Mode: want %q (persisted by Create), got %q",
+			domain.ExecutionModeAuto, onDisk.Mode)
+	}
+	if !onDisk.Checkpoints {
+		t.Error("on-disk Checkpoints: want true (persisted by Create), got false")
+	}
+	if !onDisk.Commits {
+		t.Error("on-disk Commits: want true (persisted by Create), got false")
+	}
+	if onDisk.CommitBranchVariant != domain.CommitBranchUserOwn {
+		t.Errorf("on-disk CommitBranchVariant: want %q (persisted by Create), got %q",
+			domain.CommitBranchUserOwn, onDisk.CommitBranchVariant)
+	}
+	if onDisk.CommitBranch != "mosaic/run/testrun" {
+		t.Errorf("on-disk CommitBranch: want %q (persisted by Create), got %q",
+			"mosaic/run/testrun", onDisk.CommitBranch)
+	}
+	if !onDisk.PreConsultation {
+		t.Error("on-disk PreConsultation: want true (persisted by Create), got false")
+	}
+	if !onDisk.ManualResolution {
+		t.Error("on-disk ManualResolution: want true (persisted by Create), got false")
 	}
 }

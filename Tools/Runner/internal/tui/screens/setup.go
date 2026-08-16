@@ -447,9 +447,12 @@ func (s *TaskScreen) Resize(width, height int) {
 
 // ConfigSelection holds the user's choices from the configuration screen.
 type ConfigSelection struct {
-	DeviationMode     domain.DeviationMode
+	// Settings holds the run configuration collected by the wizard. It is the
+	// same type the CLI produces from its flags, which is what makes surface
+	// parity a single struct comparison rather than a field-by-field audit.
+	Settings domain.RunSettings
+
 	AllowVersionDrift bool
-	Checkpoints       bool
 
 	// Harness names the harness adapter. The TUI produces any CLI-backed
 	// harness identity from harness.CLISelections() (the selection the user's
@@ -472,11 +475,30 @@ type ConfigSelection struct {
 type configStep int
 
 const (
-	configStepDeviation      configStep = iota
-	configStepHarness                   // harness adapter selection
-	configStepHarnessTimeout            // timeout entry (shown for any CLI-backed harness)
+	// configStepMode is the first step: the user selects the execution mode.
+	// No option is preselected; the step cannot advance without an explicit choice.
+	configStepMode configStep = iota
+
+	configStepHarness        // harness adapter selection
+	configStepHarnessTimeout // timeout entry (shown for any CLI-backed harness)
 	configStepVersionDrift
 	configStepCheckpoints
+
+	// configStepCommits is shown only when a Class=commit agent is declared.
+	// Default: disabled.
+	configStepCommits
+
+	// configStepCommitBranch is shown only when commits are enabled at configStepCommits.
+	// Default: mosaic-owned (presented as recommended).
+	configStepCommitBranch
+
+	// configStepPreConsult is shown only when mode is auto or auto-review.
+	// Default: disabled.
+	configStepPreConsult
+
+	// configStepManualResolution is shown always. Default: disabled.
+	configStepManualResolution
+
 	configStepInfraClass // agent-per-class selection (only when multiple same-class gated agents)
 	configStepDone
 )
@@ -492,11 +514,13 @@ type infraClassEntry struct {
 //
 // Navigation contract:
 //   - After all prompts are answered -> Done() == true, Selection() returns the choices.
-//   - Esc on first prompt -> Back() == true.
+//   - Esc on first prompt (mode step) -> Back() == true.
 //   - Esc on subsequent prompts -> goes back to the previous prompt.
 //   - The harness timeout step is shown for any CLI-backed harness selection,
 //     since every CLI harness spawns a timed subprocess.
 //   - The infra-class step is only shown for gated classes with multiple declared agents.
+//   - Conditional steps (commits, commit-branch, pre-consult) are skipped in both
+//     navigation directions when their conditions are not met.
 type ConfigScreen struct {
 	step           configStep
 	back           bool
@@ -544,8 +568,13 @@ func NewConfigScreen(width, height int, styles Styles) *ConfigScreen {
 		return nil
 	})
 	return &ConfigScreen{
-		step:         configStepDeviation,
-		sel:          ConfigSelection{DeviationMode: domain.DeviationDelegate},
+		step:   configStepMode,
+		cursor: -1, // mode step starts with no option preselected
+		sel: ConfigSelection{
+			Settings: domain.RunSettings{
+				CommitBranchVariant: domain.CommitBranchMOSAICOwned,
+			},
+		},
 		width:        width,
 		height:       height,
 		styles:       styles,
@@ -591,7 +620,13 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 		}
 	case "down", "j":
 		switch s.step {
-		case configStepDeviation, configStepVersionDrift, configStepCheckpoints:
+		case configStepMode:
+			if s.cursor < 2 {
+				s.cursor++
+			}
+		case configStepVersionDrift, configStepCheckpoints,
+			configStepCommits, configStepCommitBranch,
+			configStepPreConsult, configStepManualResolution:
 			if s.cursor < 1 {
 				s.cursor++
 			}
@@ -610,11 +645,15 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 	case "enter":
 		return s.advance()
 	case "esc":
-		if s.step == configStepDeviation {
+		if s.step == configStepMode {
 			s.back = true
 		} else {
-			s.step--
-			s.cursor = 0
+			prev, prevCursor := s.prevStepAndCursor()
+			s.step = prev
+			s.cursor = prevCursor
+			if prev == configStepHarnessTimeout {
+				return s.timeoutInput.Init()
+			}
 		}
 	}
 	return nil
@@ -624,11 +663,14 @@ func (s *ConfigScreen) Update(msg tea.Msg) tea.Cmd {
 // It returns a tea.Cmd when the harness timeout text input needs to start blinking.
 func (s *ConfigScreen) advance() tea.Cmd {
 	switch s.step {
-	case configStepDeviation:
-		if s.cursor == 0 {
-			s.sel.DeviationMode = domain.DeviationDelegate
-		} else {
-			s.sel.DeviationMode = domain.DeviationStop
+	case configStepMode:
+		// Require an explicit cursor movement before Enter is accepted.
+		if s.cursor < 0 {
+			return nil
+		}
+		modes := domain.ExecutionModes()
+		if s.cursor < len(modes) {
+			s.sel.Settings.Mode = modes[s.cursor]
 		}
 		s.step = configStepHarness
 		s.cursor = 0
@@ -646,9 +688,32 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		s.step = configStepCheckpoints
 		s.cursor = 0
 	case configStepCheckpoints:
-		s.sel.Checkpoints = s.cursor == 0
+		s.sel.Settings.Checkpoints = s.cursor == 1
 		s.infraClassQueue = s.buildInfraClassQueue()
 		s.infraClassIdx = 0
+		s.cursor = 0
+		s.step = s.nextStepAfterCheckpoints()
+	case configStepCommits:
+		s.sel.Settings.Commits = s.cursor == 1
+		s.cursor = 0
+		if s.sel.Settings.Commits {
+			s.step = configStepCommitBranch
+		} else {
+			s.step = s.nextAfterCommitSection()
+		}
+	case configStepCommitBranch:
+		variants := domain.CommitBranchVariants()
+		if s.cursor < len(variants) {
+			s.sel.Settings.CommitBranchVariant = variants[s.cursor]
+		}
+		s.cursor = 0
+		s.step = s.nextAfterCommitSection()
+	case configStepPreConsult:
+		s.sel.Settings.PreConsultation = s.cursor == 1
+		s.step = configStepManualResolution
+		s.cursor = 0
+	case configStepManualResolution:
+		s.sel.Settings.ManualResolution = s.cursor == 1
 		s.cursor = 0
 		if len(s.infraClassQueue) > 0 {
 			s.step = configStepInfraClass
@@ -669,6 +734,94 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// hasCommitAgent reports whether any declared infrastructure agent has Class == "commit".
+func (s *ConfigScreen) hasCommitAgent() bool {
+	for _, a := range s.declaredAgents {
+		if a.Class == "commit" {
+			return true
+		}
+	}
+	return false
+}
+
+// nextStepAfterCheckpoints returns the next applicable step after checkpoints.
+func (s *ConfigScreen) nextStepAfterCheckpoints() configStep {
+	if s.hasCommitAgent() {
+		return configStepCommits
+	}
+	return s.nextAfterCommitSection()
+}
+
+// nextAfterCommitSection returns the first applicable step after the commits/commit-branch
+// section. For non-orchestrated modes it is pre-consultation; otherwise manual resolution.
+func (s *ConfigScreen) nextAfterCommitSection() configStep {
+	mode := s.sel.Settings.Mode
+	if mode == domain.ExecutionModeAuto || mode == domain.ExecutionModeAutoReview {
+		return configStepPreConsult
+	}
+	return configStepManualResolution
+}
+
+// modeIndex returns the cursor index corresponding to the currently selected mode,
+// or -1 if no mode has been selected yet.
+func (s *ConfigScreen) modeIndex() int {
+	modes := domain.ExecutionModes()
+	for i, m := range modes {
+		if m == s.sel.Settings.Mode {
+			return i
+		}
+	}
+	return -1
+}
+
+// prevStepAndCursor returns the previous applicable step and its cursor position,
+// skipping conditional steps that would not be shown in the forward direction.
+func (s *ConfigScreen) prevStepAndCursor() (configStep, int) {
+	switch s.step {
+	case configStepHarness:
+		return configStepMode, s.modeIndex()
+	case configStepVersionDrift:
+		// configStepHarnessTimeout is handled by the text input widget's Back(),
+		// but if we reach here via Esc on version-drift, go to timeout.
+		return configStepHarnessTimeout, 0
+	case configStepCheckpoints:
+		return configStepVersionDrift, 0
+	case configStepCommits:
+		return configStepCheckpoints, 0
+	case configStepCommitBranch:
+		return configStepCommits, 0
+	case configStepPreConsult:
+		// If commits were enabled, go back to commit-branch.
+		if s.sel.Settings.Commits {
+			return configStepCommitBranch, 0
+		}
+		// If a commit agent is declared (but commits were disabled), go back to commits.
+		if s.hasCommitAgent() {
+			return configStepCommits, 0
+		}
+		return configStepCheckpoints, 0
+	case configStepManualResolution:
+		mode := s.sel.Settings.Mode
+		if mode == domain.ExecutionModeAuto || mode == domain.ExecutionModeAutoReview {
+			return configStepPreConsult, 0
+		}
+		if s.sel.Settings.Commits {
+			return configStepCommitBranch, 0
+		}
+		if s.hasCommitAgent() {
+			return configStepCommits, 0
+		}
+		return configStepCheckpoints, 0
+	case configStepInfraClass:
+		if s.infraClassIdx > 0 {
+			s.infraClassIdx--
+			return configStepInfraClass, 0
+		}
+		return configStepManualResolution, 0
+	}
+	return configStepMode, -1
 }
 
 // buildInfraClassQueue returns one infraClassEntry per gated class that has
@@ -718,10 +871,11 @@ func (s *ConfigScreen) View() string {
 
 	var body strings.Builder
 	switch s.step {
-	case configStepDeviation:
-		body.WriteString(s.styles.Body.Width(s.width).Render("Deviation handling:") + "\n")
-		body.WriteString(s.renderOption(0, "Delegate to orchestrator (default)"))
-		body.WriteString(s.renderOption(1, "Stop the run"))
+	case configStepMode:
+		body.WriteString(s.styles.Body.Width(s.width).Render("Execution mode:") + "\n")
+		for i, mode := range domain.ExecutionModes() {
+			body.WriteString(s.renderOptionCursor(i, string(mode)))
+		}
 	case configStepHarness:
 		body.WriteString(s.styles.Body.Width(s.width).Render("Harness adapter:") + "\n")
 		for i, sel := range harness.CLISelections() {
@@ -735,8 +889,28 @@ func (s *ConfigScreen) View() string {
 		body.WriteString(s.renderOption(1, "No (default)"))
 	case configStepCheckpoints:
 		body.WriteString(s.styles.Body.Width(s.width).Render("Checkpoints:") + "\n")
-		body.WriteString(s.renderOption(0, "Enabled"))
-		body.WriteString(s.renderOption(1, "Disabled (default)"))
+		body.WriteString(s.renderOption(0, "Disabled (default)"))
+		body.WriteString(s.renderOption(1, "Enabled"))
+	case configStepCommits:
+		body.WriteString(s.styles.Body.Width(s.width).Render("Commits:") + "\n")
+		body.WriteString(s.renderOption(0, "Disabled (default)"))
+		body.WriteString(s.renderOption(1, "Enabled"))
+	case configStepCommitBranch:
+		body.WriteString(s.styles.Body.Width(s.width).Render("Commit branch variant:") + "\n")
+		body.WriteString(s.renderOption(0,
+			"Create branch mosaic/run/{run_id} for this run; an abandoned attempt is discarded by deleting the branch. (Recommended)",
+		))
+		body.WriteString(s.renderOption(1,
+			"Commit to the branch you are already on; a failed attempt and its undo both stay in history permanently.",
+		))
+	case configStepPreConsult:
+		body.WriteString(s.styles.Body.Width(s.width).Render("Pre-consultation (one-shot run-start consultation):") + "\n")
+		body.WriteString(s.renderOption(0, "Disabled (default)"))
+		body.WriteString(s.renderOption(1, "Enabled"))
+	case configStepManualResolution:
+		body.WriteString(s.styles.Body.Width(s.width).Render("Manual resolution (user resolves routing decisions):") + "\n")
+		body.WriteString(s.renderOption(0, "Disabled (default)"))
+		body.WriteString(s.renderOption(1, "Enabled"))
 	case configStepInfraClass:
 		if s.infraClassIdx < len(s.infraClassQueue) {
 			entry := s.infraClassQueue[s.infraClassIdx]
@@ -761,6 +935,15 @@ func (s *ConfigScreen) renderOption(idx int, label string) string {
 	return prefix + s.styles.Body.Render(label) + "\n"
 }
 
+// renderOptionCursor renders one selectable option, treating cursor == -1 as "no selection"
+// (no option is highlighted). Used for the mode step which starts with no preselection.
+func (s *ConfigScreen) renderOptionCursor(idx int, label string) string {
+	if s.cursor >= 0 && idx == s.cursor {
+		return "▶ " + s.styles.Selected.Render(label) + "\n"
+	}
+	return "  " + s.styles.Body.Render(label) + "\n"
+}
+
 // Done reports whether all configuration prompts have been answered.
 func (s *ConfigScreen) Done() bool { return s.step == configStepDone }
 
@@ -772,10 +955,14 @@ func (s *ConfigScreen) Selection() ConfigSelection { return s.sel }
 
 // Reset clears the done, back flags and returns to the first step.
 func (s *ConfigScreen) Reset() {
-	s.step = configStepDeviation
+	s.step = configStepMode
 	s.back = false
-	s.cursor = 0
-	s.sel = ConfigSelection{DeviationMode: domain.DeviationDelegate}
+	s.cursor = -1 // mode step starts with no option preselected
+	s.sel = ConfigSelection{
+		Settings: domain.RunSettings{
+			CommitBranchVariant: domain.CommitBranchMOSAICOwned,
+		},
+	}
 	s.timeoutInput.Reset()
 	s.infraClassQueue = nil
 	s.infraClassIdx = 0

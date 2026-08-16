@@ -319,9 +319,12 @@ func TestSetupSequence_NewRun_ForwardNavigation_ReachesProgressScreen(t *testing
 		t.Fatalf("after seed entry: screen = %v, want screenSetupConfig", m.screen)
 	}
 
-	// Accept all five configuration prompts.  The timeout step is always present
-	// now that the fake harness has been removed.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation mode
+	// Accept all configuration prompts. Mode is now the first step and requires an
+	// explicit cursor movement before Enter (no preselection per AC8.3). The timeout
+	// step is always present now that the fake harness has been removed. The always-shown
+	// manual-resolution step follows checkpoints.
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})  // move cursor to first mode option (orchestrated)
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // confirm mode
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → must advance to timeout
 
 	// Verify we are at the timeout step (not version drift) before supplying the value.
@@ -339,7 +342,8 @@ func TestSetupSequence_NewRun_ForwardNavigation_ReachesProgressScreen(t *testing
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // timeout → version drift
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → transitions to screenProgress
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // manual-resolution (always shown; accept default disabled)
 
 	if m.screen != screenProgress {
 		t.Errorf("after config completion (new run): screen = %v, want screenProgress", m.screen)
@@ -533,15 +537,19 @@ func TestRunIdentity_NewRun_SelectionsUnchangedByConfigReconstruction(t *testing
 	m.selections.runFolder = wantRunFolder
 	m.screen = screenSetupConfig
 
-	// Drive the config screen to completion: deviation, harness, timeout, version drift, checkpoints.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation
+	// Drive the config screen to completion: mode (Down+Enter), harness, timeout,
+	// version drift, checkpoints, manual-resolution (always shown). Mode is now the
+	// first step and requires an explicit cursor movement before Enter (no preselection).
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})  // move cursor to first mode option (orchestrated)
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // confirm mode
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → timeout
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // timeout → version drift
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → progress
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // manual-resolution (always shown; accept default disabled)
 
 	if m.screen != screenProgress {
 		t.Fatalf("precondition: screen = %v after config, want screenProgress", m.screen)

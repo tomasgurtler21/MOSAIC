@@ -95,6 +95,7 @@ func TestDefaultFlagValues(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "my-workflow",
 		"--task", "do the work",
+		"--mode", "auto",
 		"--new-run",
 	}, &spyStore{}, sess)
 
@@ -115,9 +116,6 @@ func TestDefaultFlagValues(t *testing.T) {
 	if cfg.Task != "do the work" {
 		t.Errorf("Task = %q, want %q", cfg.Task, "do the work")
 	}
-	if cfg.OnDeviation != domain.DeviationDelegate {
-		t.Errorf("OnDeviation = %q, want %q (default)", cfg.OnDeviation, domain.DeviationDelegate)
-	}
 	if cfg.AllowVersionDrift {
 		t.Error("AllowVersionDrift should default to false")
 	}
@@ -135,9 +133,9 @@ func TestAllFlagsExplicitlySet(t *testing.T) {
 		"--orchestrator-file", "/path/to/orch.md",
 		"--workflow", "greenfield-tdd",
 		"--task", "build the feature",
-		"--on-deviation", "stop",
 		"--allow-version-drift",
 		"--checkpoints", "enabled",
+		"--mode", "auto",
 		"--new-run",
 	}, sess)
 
@@ -155,9 +153,6 @@ func TestAllFlagsExplicitlySet(t *testing.T) {
 	if cfg.Task != "build the feature" {
 		t.Errorf("Task = %q, want %q", cfg.Task, "build the feature")
 	}
-	if cfg.OnDeviation != domain.DeviationStop {
-		t.Errorf("OnDeviation = %q, want %q", cfg.OnDeviation, domain.DeviationStop)
-	}
 	if !cfg.AllowVersionDrift {
 		t.Error("AllowVersionDrift should be true when --allow-version-drift is set")
 	}
@@ -174,6 +169,7 @@ func TestExitCodeMapping(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "t1",
+		"--mode", "auto",
 		"--new-run",
 	}
 
@@ -186,6 +182,7 @@ func TestExitCodeMapping(t *testing.T) {
 		{domain.RunDeviationUnresolved, cli.ExitDeviationUnresolved},
 		{domain.RunRefused, cli.ExitRefused},
 		{domain.RunFailed, cli.ExitFailure},
+		{domain.RunStoppedByConsultant, cli.ExitStoppedByConsultant},
 	}
 
 	for _, tt := range tests {
@@ -266,7 +263,7 @@ func TestInvalidFlagValues(t *testing.T) {
 		extraArg string
 		extraVal string
 	}{
-		{"invalid --on-deviation", "--on-deviation", "invalid-value"},
+		{"unknown --on-deviation flag", "--on-deviation", "invalid-value"},
 		{"invalid --checkpoints", "--checkpoints", "invalid-value"},
 	}
 
@@ -350,6 +347,7 @@ func TestSessionError(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "t1",
+		"--mode", "auto",
 		"--new-run",
 	}, sess)
 
@@ -376,6 +374,7 @@ func TestExitCodeConstants(t *testing.T) {
 		"ExitUsage":               cli.ExitUsage,
 		"ExitRefused":             cli.ExitRefused,
 		"ExitDeviationUnresolved": cli.ExitDeviationUnresolved,
+		"ExitStoppedByConsultant": cli.ExitStoppedByConsultant,
 	}
 
 	seen := make(map[int]string)
@@ -417,7 +416,7 @@ func (s *spyStore) Read(_ context.Context) (domain.ArtifactState, error) {
 	panic("spyStore.Read: unexpected call in CLI tests")
 }
 
-func (s *spyStore) Create(_ context.Context, _ domain.WorkflowInfo, _ string, _ bool, _ time.Time, _ string) (domain.ArtifactState, error) {
+func (s *spyStore) Create(_ context.Context, _ domain.WorkflowInfo, _ string, _ domain.RunSettings, _ time.Time, _ string) (domain.ArtifactState, error) {
 	panic("spyStore.Create: unexpected call in CLI tests")
 }
 
@@ -549,6 +548,7 @@ func TestNewRunFlag_SetsIsNewRunTrue(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--new-run",
 	}, sess)
 
@@ -584,6 +584,7 @@ func TestRunFlag_SetsRunID(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--run", testRunID,
 	}, sess)
 
@@ -616,6 +617,7 @@ func TestRunFlag_SetsIsNewRunFalse(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--run", testRunID,
 	}, sess)
 
@@ -648,6 +650,7 @@ func TestRunFlag_SetsRunFolder(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--run", testRunID,
 	}, sess)
 
@@ -1050,6 +1053,7 @@ func TestCOMPLETEDMarker_WrittenWhenRunCompleted(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--new-run",
 	}, spy, sess)
 
@@ -1136,17 +1140,44 @@ func TestCOMPLETEDMarker_NotWrittenWhenRunFailed(t *testing.T) {
 	}
 }
 
+func TestCOMPLETEDMarker_NotWrittenWhenRunStoppedByConsultant(t *testing.T) {
+	// When session.Start returns RunStoppedByConsultant, the CLI must NOT call
+	// SetPhase (the run must remain resumable — AC7.5). This test guards against
+	// an implementation that inadvertently writes the COMPLETED marker for the
+	// new stop outcome, which would silently break resumability.
+	spy := &spyStore{}
+	sess := &scriptedSession{
+		outcome: domain.RunOutcome{
+			Status:     domain.RunStoppedByConsultant,
+			StopReason: "consultant decided to halt the run",
+		},
+	}
+	runCLIWithStore(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+	}, spy, sess)
+
+	if len(spy.setCalls) != 0 {
+		t.Errorf("store.SetPhase called %d time(s), want 0 when status is RunStoppedByConsultant", len(spy.setCalls))
+	}
+}
+
 // ============================================================
 // T3.1: CLI harness flag tests
 // ============================================================
 
 // baseHarnessArgs returns the minimum required flags for the run subcommand.
+// --mode auto is included because mode is required; tests that exercise mode
+// behaviour specifically should not use this helper.
 func baseHarnessArgs() []string {
 	return []string{
 		"run",
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--new-run",
 	}
 }
@@ -1462,6 +1493,7 @@ func TestInputFlag_ZeroOccurrences_SeedInputsIsNil(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--new-run",
 	}, &spyStore{}, sess)
 
@@ -1486,6 +1518,7 @@ func TestInputFlag_OneOccurrence_SingleValueReachesSeedInputs(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--new-run",
 		"--input", "/path/to/seed.md",
 	}, &spyStore{}, sess)
@@ -1513,6 +1546,7 @@ func TestInputFlag_MultipleOccurrences_AllValuesReachSeedInputsInOrder(t *testin
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--new-run",
 		"--input", "/alpha/first.md",
 		"--input", "/beta/second.md",
@@ -1547,6 +1581,7 @@ func TestInputFlag_PathWithSpaces_PreservedVerbatim(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--new-run",
 		"--input", pathWithSpaces,
 	}, &spyStore{}, sess)
@@ -1575,6 +1610,7 @@ func TestInputFlag_PathWithComma_PreservedVerbatim(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--new-run",
 		"--input", pathWithComma,
 	}, &spyStore{}, sess)
@@ -1712,6 +1748,7 @@ func TestAnnouncement_NewRun_StatedBeforeDispatch(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--new-run",
 	}, &spyStore{}, sess)
 
@@ -1753,6 +1790,7 @@ func TestAnnouncement_ResumedRun_ContainsPosition(t *testing.T) {
 		"--orchestrator-file", "orch.md",
 		"--workflow", "w1",
 		"--task", "do work",
+		"--mode", "auto",
 		"--run", testRunID,
 	}, &spyStore{}, sess)
 
@@ -1771,5 +1809,523 @@ func TestAnnouncement_ResumedRun_ContainsPosition(t *testing.T) {
 	// writeResumableRunArtifact records current_state.phase: EXECUTION.
 	if !strings.Contains(stdout, "EXECUTION") {
 		t.Errorf("stdout %q does not contain the recorded phase %q", stdout, "EXECUTION")
+	}
+}
+
+// ============================================================
+// T7.1: Flag parsing and validation for the Stage 7 CLI surface
+// ============================================================
+//
+// Tests for the new --mode, --commits, --commit-branch, --pre-consult, and
+// --manual-resolution flags, and for the removal of --on-deviation.
+//
+// All tests in this section are in the TDD RED phase: they compile but fail
+// because the implementation (I7.1) has not been completed yet.
+
+// newStage7BaseArgs returns the minimum required flags for a successful run
+// command invocation, explicitly including --mode. Callers that test mode
+// behaviour directly should not use this helper.
+func newStage7BaseArgs() []string {
+	return []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "auto",
+		"--new-run",
+	}
+}
+
+// --- T7.1: --mode flag ---
+
+// TestModeFlag_Absent_ProducesRefusal verifies that omitting --mode produces an
+// error that names the flag and lists the valid values (AC7.3). The session must
+// not be started.
+func TestModeFlag_Absent_ProducesRefusal(t *testing.T) {
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--new-run",
+	}, sess)
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage when --mode is absent", code)
+	}
+	if sess.called {
+		t.Error("session.Start must not be called when --mode is absent")
+	}
+	if !strings.Contains(errOut, "mode") {
+		t.Errorf("stderr %q does not mention \"mode\"", errOut)
+	}
+	// Valid values must be listed so the error is actionable.
+	for _, m := range domain.ExecutionModes() {
+		if !strings.Contains(errOut, string(m)) {
+			t.Errorf("stderr %q does not list valid mode value %q", errOut, m)
+		}
+	}
+}
+
+// TestModeFlag_ValidValues_AreAccepted verifies that each of the three valid
+// mode strings is accepted without error and causes the session to start.
+func TestModeFlag_ValidValues_AreAccepted(t *testing.T) {
+	validModes := []string{"orchestrated", "auto", "auto-review"}
+	for _, mode := range validModes {
+		t.Run(mode, func(t *testing.T) {
+			sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+			args := []string{
+				"run",
+				"--orchestrator-file", "orch.md",
+				"--workflow", "w1",
+				"--task", "do work",
+				"--mode", mode,
+				"--new-run",
+			}
+			code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+			if code != cli.ExitSuccess {
+				t.Errorf("mode=%q: exit code = %d, want ExitSuccess; stderr: %q", mode, code, errOut)
+			}
+			if !sess.called {
+				t.Errorf("mode=%q: session.Start was not called", mode)
+			}
+		})
+	}
+}
+
+// TestModeFlag_UnrecognisedValue_ProducesRefusal verifies that an unrecognised
+// --mode value produces an error that names both the offending value and the
+// valid alternatives. The session must not be started.
+func TestModeFlag_UnrecognisedValue_ProducesRefusal(t *testing.T) {
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "quick",
+		"--new-run",
+	}, sess)
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage for unrecognised --mode value", code)
+	}
+	if sess.called {
+		t.Error("session.Start must not be called for an unrecognised --mode value")
+	}
+	if !strings.Contains(errOut, "quick") {
+		t.Errorf("stderr %q does not name the offending value %q", errOut, "quick")
+	}
+	// All valid values must be listed.
+	for _, m := range domain.ExecutionModes() {
+		if !strings.Contains(errOut, string(m)) {
+			t.Errorf("stderr %q does not list valid mode value %q", errOut, m)
+		}
+	}
+}
+
+// --- T7.1: --commits flag ---
+
+// TestCommitsFlag_ValidValues_AreAccepted verifies that "disabled" and "enabled"
+// are both accepted without error and cause the session to start.
+func TestCommitsFlag_ValidValues_AreAccepted(t *testing.T) {
+	for _, v := range []string{"disabled", "enabled"} {
+		t.Run(v, func(t *testing.T) {
+			sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+			args := append(newStage7BaseArgs(), "--commits", v)
+			code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+			if code != cli.ExitSuccess {
+				t.Errorf("--commits=%q: exit code = %d, want ExitSuccess; stderr: %q", v, code, errOut)
+			}
+			if !sess.called {
+				t.Errorf("--commits=%q: session.Start was not called", v)
+			}
+		})
+	}
+}
+
+// TestCommitsFlag_InvalidValue_ProducesRefusal verifies that an unrecognised
+// --commits value produces an error naming both the offending value and the
+// valid alternatives. The session must not be started.
+func TestCommitsFlag_InvalidValue_ProducesRefusal(t *testing.T) {
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, append(newStage7BaseArgs(), "--commits", "yes"), sess)
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage for invalid --commits value", code)
+	}
+	if sess.called {
+		t.Error("session.Start must not be called for invalid --commits value")
+	}
+	if !strings.Contains(errOut, "commits") {
+		t.Errorf("stderr %q does not name the --commits flag", errOut)
+	}
+	// The offending value must be named in the error.
+	if !strings.Contains(errOut, "yes") {
+		t.Errorf("stderr %q does not name the offending value %q", errOut, "yes")
+	}
+	// All valid values must be listed so the user knows what to pass.
+	for _, v := range []string{"enabled", "disabled"} {
+		if !strings.Contains(errOut, v) {
+			t.Errorf("stderr %q does not list valid --commits value %q", errOut, v)
+		}
+	}
+}
+
+// --- T7.1: --commit-branch flag ---
+
+// TestCommitBranchFlag_ValidValues_AreAccepted verifies that "mosaic-owned" and
+// "user-own" are both accepted without error and cause the session to start.
+func TestCommitBranchFlag_ValidValues_AreAccepted(t *testing.T) {
+	for _, v := range []string{"mosaic-owned", "user-own"} {
+		t.Run(v, func(t *testing.T) {
+			sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+			args := append(newStage7BaseArgs(), "--commit-branch", v)
+			code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+			if code != cli.ExitSuccess {
+				t.Errorf("--commit-branch=%q: exit code = %d, want ExitSuccess; stderr: %q", v, code, errOut)
+			}
+			if !sess.called {
+				t.Errorf("--commit-branch=%q: session.Start was not called", v)
+			}
+		})
+	}
+}
+
+// TestCommitBranchFlag_InvalidValue_ProducesRefusal verifies that an unrecognised
+// --commit-branch value produces an error naming the flag, the offending value,
+// and all valid alternatives. The session must not be started.
+func TestCommitBranchFlag_InvalidValue_ProducesRefusal(t *testing.T) {
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, append(newStage7BaseArgs(), "--commit-branch", "main"), sess)
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage for invalid --commit-branch value", code)
+	}
+	if sess.called {
+		t.Error("session.Start must not be called for invalid --commit-branch value")
+	}
+	if !strings.Contains(errOut, "commit-branch") {
+		t.Errorf("stderr %q does not name the --commit-branch flag", errOut)
+	}
+	if !strings.Contains(errOut, "main") {
+		t.Errorf("stderr %q does not name the offending value %q", errOut, "main")
+	}
+	// All valid values must be listed, matching the --mode error message shape.
+	for _, v := range domain.CommitBranchVariants() {
+		if !strings.Contains(errOut, string(v)) {
+			t.Errorf("stderr %q does not list valid --commit-branch value %q", errOut, v)
+		}
+	}
+}
+
+// --- T7.1: --pre-consult flag ---
+
+// TestPreConsultFlag_IsAccepted verifies that --pre-consult is recognised as a
+// boolean flag and does not cause a usage error.
+func TestPreConsultFlag_IsAccepted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	args := append(newStage7BaseArgs(), "--pre-consult")
+	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+	if code != cli.ExitSuccess {
+		t.Errorf("exit code = %d, want ExitSuccess when --pre-consult is present; stderr: %q", code, errOut)
+	}
+	if !sess.called {
+		t.Error("session.Start was not called when --pre-consult is present")
+	}
+}
+
+// --- T7.1: --manual-resolution flag ---
+
+// TestManualResolutionFlag_IsAccepted verifies that --manual-resolution is
+// recognised as a boolean flag and does not cause a usage error.
+func TestManualResolutionFlag_IsAccepted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	args := append(newStage7BaseArgs(), "--manual-resolution")
+	code, _, errOut := runCLIWithStore(t, args, &spyStore{}, sess)
+	if code != cli.ExitSuccess {
+		t.Errorf("exit code = %d, want ExitSuccess when --manual-resolution is present; stderr: %q", code, errOut)
+	}
+	if !sess.called {
+		t.Error("session.Start was not called when --manual-resolution is present")
+	}
+}
+
+// --- T7.1: help text ---
+
+// TestHelpText_ContainsModeFlag verifies that --mode appears in the run
+// subcommand's help text after implementation.
+func TestHelpText_ContainsModeFlag(t *testing.T) {
+	sess := &scriptedSession{}
+	_, _, errOut := runCLI(t, []string{"run", "--help"}, sess)
+	if !strings.Contains(errOut, "--mode") {
+		t.Errorf("help text does not mention --mode; got:\n%s", errOut)
+	}
+}
+
+// TestHelpText_DoesNotContainOnDeviationFlag verifies that --on-deviation does
+// not appear in the help text (AC7.4 — it is removed).
+func TestHelpText_DoesNotContainOnDeviationFlag(t *testing.T) {
+	sess := &scriptedSession{}
+	_, _, errOut := runCLI(t, []string{"run", "--help"}, sess)
+	if strings.Contains(errOut, "on-deviation") {
+		t.Errorf("help text still contains 'on-deviation' (must be removed); got:\n%s", errOut)
+	}
+}
+
+// ============================================================
+// T7.2: Parsed flags reach the session run configuration
+// ============================================================
+
+// TestModeFlag_Orchestrated_ReachesRunSettings verifies that --mode orchestrated
+// sets RunSettings.Mode to ExecutionModeOrchestrated.
+func TestModeFlag_Orchestrated_ReachesRunSettings(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	args := []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "orchestrated",
+		"--new-run",
+	}
+	_, _, _ = runCLI(t, args, sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.Mode != domain.ExecutionModeOrchestrated {
+		t.Errorf("Mode = %q, want %q", sess.config.Mode, domain.ExecutionModeOrchestrated)
+	}
+}
+
+// TestModeFlag_Auto_ReachesRunSettings verifies that --mode auto sets
+// RunSettings.Mode to ExecutionModeAuto.
+func TestModeFlag_Auto_ReachesRunSettings(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	args := []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "auto",
+		"--new-run",
+	}
+	_, _, _ = runCLI(t, args, sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.Mode != domain.ExecutionModeAuto {
+		t.Errorf("Mode = %q, want %q", sess.config.Mode, domain.ExecutionModeAuto)
+	}
+}
+
+// TestModeFlag_AutoReview_ReachesRunSettings verifies that --mode auto-review
+// sets RunSettings.Mode to ExecutionModeAutoReview.
+func TestModeFlag_AutoReview_ReachesRunSettings(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	args := []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "auto-review",
+		"--new-run",
+	}
+	_, _, _ = runCLI(t, args, sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.Mode != domain.ExecutionModeAutoReview {
+		t.Errorf("Mode = %q, want %q", sess.config.Mode, domain.ExecutionModeAutoReview)
+	}
+}
+
+// TestCommitsFlag_Enabled_ReachesRunSettings verifies that --commits enabled
+// sets RunSettings.Commits to true.
+func TestCommitsFlag_Enabled_ReachesRunSettings(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, append(newStage7BaseArgs(), "--commits", "enabled"), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if !sess.config.Commits {
+		t.Error("Commits = false, want true when --commits=enabled")
+	}
+}
+
+// TestCommitsFlag_Disabled_ReachesRunSettings verifies that --commits disabled
+// (or omitted, since disabled is the default) sets RunSettings.Commits to false.
+func TestCommitsFlag_Disabled_ReachesRunSettings(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, append(newStage7BaseArgs(), "--commits", "disabled"), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.Commits {
+		t.Error("Commits = true, want false when --commits=disabled")
+	}
+}
+
+// TestCommitBranchFlag_MOSAICOwned_ReachesRunSettings verifies that
+// --commit-branch mosaic-owned sets RunSettings.CommitBranchVariant to
+// CommitBranchMOSAICOwned.
+func TestCommitBranchFlag_MOSAICOwned_ReachesRunSettings(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, append(newStage7BaseArgs(), "--commit-branch", "mosaic-owned"), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.CommitBranchVariant != domain.CommitBranchMOSAICOwned {
+		t.Errorf("CommitBranchVariant = %q, want %q",
+			sess.config.CommitBranchVariant, domain.CommitBranchMOSAICOwned)
+	}
+}
+
+// TestCommitBranchFlag_UserOwn_ReachesRunSettings verifies that
+// --commit-branch user-own sets RunSettings.CommitBranchVariant to
+// CommitBranchUserOwn.
+func TestCommitBranchFlag_UserOwn_ReachesRunSettings(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, append(newStage7BaseArgs(), "--commit-branch", "user-own"), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.CommitBranchVariant != domain.CommitBranchUserOwn {
+		t.Errorf("CommitBranchVariant = %q, want %q",
+			sess.config.CommitBranchVariant, domain.CommitBranchUserOwn)
+	}
+}
+
+// TestCommitBranchFlag_DefaultIsMOSAICOwned_WhenOmitted verifies that omitting
+// --commit-branch leaves CommitBranchVariant at CommitBranchMOSAICOwned, the
+// documented default.
+func TestCommitBranchFlag_DefaultIsMOSAICOwned_WhenOmitted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, newStage7BaseArgs(), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.CommitBranchVariant != domain.CommitBranchMOSAICOwned {
+		t.Errorf("CommitBranchVariant = %q, want default %q",
+			sess.config.CommitBranchVariant, domain.CommitBranchMOSAICOwned)
+	}
+}
+
+// TestPreConsultFlag_ReachesRunSettings verifies that --pre-consult sets
+// RunSettings.PreConsultation to true.
+func TestPreConsultFlag_ReachesRunSettings(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, append(newStage7BaseArgs(), "--pre-consult"), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if !sess.config.PreConsultation {
+		t.Error("PreConsultation = false, want true when --pre-consult is present")
+	}
+}
+
+// TestPreConsultFlag_DefaultIsFalse_WhenOmitted verifies that omitting
+// --pre-consult leaves RunSettings.PreConsultation as false.
+func TestPreConsultFlag_DefaultIsFalse_WhenOmitted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, newStage7BaseArgs(), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.PreConsultation {
+		t.Error("PreConsultation = true, want false when --pre-consult is omitted")
+	}
+}
+
+// TestManualResolutionFlag_ReachesRunSettings verifies that --manual-resolution
+// sets RunSettings.ManualResolution to true.
+func TestManualResolutionFlag_ReachesRunSettings(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, append(newStage7BaseArgs(), "--manual-resolution"), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if !sess.config.ManualResolution {
+		t.Error("ManualResolution = false, want true when --manual-resolution is present")
+	}
+}
+
+// TestManualResolutionFlag_DefaultIsFalse_WhenOmitted verifies that omitting
+// --manual-resolution leaves RunSettings.ManualResolution as false.
+func TestManualResolutionFlag_DefaultIsFalse_WhenOmitted(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, newStage7BaseArgs(), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if sess.config.ManualResolution {
+		t.Error("ManualResolution = true, want false when --manual-resolution is omitted")
+	}
+}
+
+// TestOnDeviationFlag_IsRejectedAsUnknown verifies that --on-deviation is
+// rejected as an unknown flag (AC7.4). The flag was removed in Stage 7; cobra
+// must surface it as an error and the session must not start.
+func TestOnDeviationFlag_IsRejectedAsUnknown(t *testing.T) {
+	sess := &scriptedSession{}
+	code, _, errOut := runCLI(t, []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "auto",
+		"--new-run",
+		"--on-deviation", "stop",
+	}, sess)
+	if code != cli.ExitUsage {
+		t.Errorf("exit code = %d, want ExitUsage for removed --on-deviation flag", code)
+	}
+	if sess.called {
+		t.Error("session.Start must not be called when --on-deviation is present")
+	}
+	// The error must indicate the flag is unknown or not recognised.
+	if !strings.Contains(errOut, "on-deviation") {
+		t.Errorf("stderr %q does not mention \"on-deviation\"", errOut)
+	}
+}
+
+// ============================================================
+// T7.3: Stop outcome exits non-zero with reason printed
+// ============================================================
+
+// TestRunStoppedByConsultant_ExitsWithDistinctNonZeroCode verifies that a
+// RunStoppedByConsultant outcome maps to ExitStoppedByConsultant, which is a
+// distinct non-zero exit code (AC7.5).
+func TestRunStoppedByConsultant_ExitsWithDistinctNonZeroCode(t *testing.T) {
+	const stopReason = "orchestrator decided to stop the run"
+	sess := &scriptedSession{
+		outcome: domain.RunOutcome{
+			Status:     domain.RunStoppedByConsultant,
+			Message:    "run stopped by consultant",
+			StopReason: stopReason,
+		},
+	}
+	code, _, _ := runCLI(t, newStage7BaseArgs(), sess)
+	if code == cli.ExitSuccess {
+		t.Error("exit code = 0 (ExitSuccess), want non-zero for RunStoppedByConsultant")
+	}
+	if code != cli.ExitStoppedByConsultant {
+		t.Errorf("exit code = %d, want ExitStoppedByConsultant (%d)",
+			code, cli.ExitStoppedByConsultant)
+	}
+}
+
+// TestRunStoppedByConsultant_StopReasonPrintedToStderr verifies that the
+// consultant's stop reason is printed to stderr when the run is stopped
+// (AC7.5). The artifact is left resumable; stderr is the operator's signal.
+func TestRunStoppedByConsultant_StopReasonPrintedToStderr(t *testing.T) {
+	const stopReason = "workflow prerequisites not met: missing artifact X"
+	sess := &scriptedSession{
+		outcome: domain.RunOutcome{
+			Status:     domain.RunStoppedByConsultant,
+			Message:    stopReason,
+			StopReason: stopReason,
+		},
+	}
+	_, _, errOut := runCLI(t, newStage7BaseArgs(), sess)
+	if !strings.Contains(errOut, stopReason) {
+		t.Errorf("stderr %q does not contain stop reason %q", errOut, stopReason)
 	}
 }

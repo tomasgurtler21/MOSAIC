@@ -57,7 +57,7 @@ func TestRun_SetupWritesActiveRegistryAndParallelGroupsDocuments(t *testing.T) {
 		return domain.SubjectResult{Disposition: domain.DispositionCompleted}, nil
 	}
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 }
@@ -82,7 +82,7 @@ func TestRun_SetupSeedsDeclaredFilesBeforeSpawningTheSubject(t *testing.T) {
 		return domain.SubjectResult{Disposition: domain.DispositionCompleted}, nil
 	}
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 }
@@ -118,7 +118,7 @@ func TestRun_SetupInitializesRunStateWithTheDeclaredLimits(t *testing.T) {
 		return domain.SubjectResult{Disposition: domain.DispositionCompleted}, nil
 	}
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 }
@@ -133,7 +133,7 @@ func TestRun_SetupProvisionRequestCarriesTheInterceptorSubcommand(t *testing.T) 
 	h := newHarness(t)
 	req := newRequest("provision-interceptor-subcommand")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestRun_SetupProvisionRequestCarriesTheResolvedInterpreter(t *testing.T) {
 	h.Deps.InterpreterCmd = "py"
 	req := newRequest("provision-interpreter-cmd")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -176,7 +176,7 @@ func TestRun_SetupProvisionRequestLeavesInterpreterCmdEmptyWhenUnresolved(t *tes
 	// h.Deps.InterpreterCmd left unset (zero value) deliberately.
 	req := newRequest("provision-interpreter-cmd-unset")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -201,7 +201,7 @@ func TestRun_RunIdentityIsAuthoredBeforeTheSubjectIsSpawned(t *testing.T) {
 		return domain.SubjectResult{Disposition: domain.DispositionCompleted}, nil
 	}
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 }

@@ -6,8 +6,43 @@ type EngineDecision struct {
 	Dispatch  *DispatchDecision
 	Complete  *CompleteDecision
 	Deviation *DeviationDecision
+	Consult   *ConsultDecision
 	Stop      *StopDecision
 }
+
+// ConsultDecision signals that this decision belongs to the routing consultant,
+// not to the engine. It is the only decision the engine produces in
+// ExecutionModeOrchestrated.
+//
+// It differs from DeviationDecision in cause, not in handling: a Deviation
+// means "the engine tried and could not decide"; a Consult means "the engine
+// was never entitled to decide". Both are resolved by the same session routine
+// and both produce a ConsultationRequest.
+type ConsultDecision struct {
+	// Trigger states why the consultant is being asked.
+	Trigger ConsultTrigger
+
+	// CurrentRow, CurrentPhase and CurrentStage describe the position the run
+	// is at. CurrentRow is -1 on the first decision of a new run.
+	CurrentRow   int
+	CurrentPhase string
+	CurrentStage string
+
+	// ArtifactState is the state at the time of the decision.
+	ArtifactState ArtifactState
+}
+
+// ConsultTrigger classifies why a consultation is being made.
+type ConsultTrigger string
+
+const (
+	// ConsultTriggerOrchestratedMode: the run is in ExecutionModeOrchestrated,
+	// where every routing decision is the consultant's.
+	ConsultTriggerOrchestratedMode ConsultTrigger = "orchestrated-mode"
+
+	// ConsultTriggerDeviation: the engine produced a DeviationDecision.
+	ConsultTriggerDeviation ConsultTrigger = "deviation"
+)
 
 // DispatchDecision carries the steps to execute.
 // The Steps slice contains exactly one element in this version, but carries
@@ -50,36 +85,6 @@ type DeviationInfo struct {
 	CurrentStage        string
 	PlannedContinuation *DispatchStep // where the happy path would have gone (nil if unknown)
 	ArtifactState       ArtifactState // current state at time of deviation
-}
-
-// RejoinInstruction is the deviation resolver's answer: how to proceed after a deviation.
-// Exactly one of the fields is non-nil.
-type RejoinInstruction struct {
-	Rejoin *RejoinAtRow
-	Custom *CustomDispatch
-	Stop   *StopRun
-}
-
-// RejoinAtRow directs the runner to continue at the specified routing table row.
-// RowIndex may differ from DeviationInfo.PlannedContinuation -- the resolver is
-// free to redirect to any valid row, including rows before or after the happy path's
-// intended continuation point.
-type RejoinAtRow struct {
-	RowIndex     int   // row index to continue from (any valid row in the routing table)
-	HITLOverride *bool // if non-nil, overrides the effective HITL for the next invocation only
-}
-
-// CustomDispatch directs the runner to execute a custom invocation not in the routing table.
-type CustomDispatch struct {
-	Request      ProtocolRequest
-	Agent        AgentReference
-	HITLOverride *bool
-	RejoinRow    int // row to continue from after this custom invocation completes
-}
-
-// StopRun directs the runner to stop the run with state saved.
-type StopRun struct {
-	Reason string
 }
 
 // ResumeInfo is the output of engine resume-point derivation: where to continue

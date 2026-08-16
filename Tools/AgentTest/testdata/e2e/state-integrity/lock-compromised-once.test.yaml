@@ -16,7 +16,6 @@ subject:
   opening_message: |
     Greet the one collaborator.
   invocation_kind: subagent
-  model: default
   allowed_tools: [Task]
 
 stub_registry: lock-compromised-once.stubs.json

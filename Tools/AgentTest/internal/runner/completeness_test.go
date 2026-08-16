@@ -81,7 +81,7 @@ func TestProvisionRequestCompletenessGuard(t *testing.T) {
 	h.Deps.InterpreterCmd = "py"
 	req := newRequest("provision-request-completeness-guard")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 

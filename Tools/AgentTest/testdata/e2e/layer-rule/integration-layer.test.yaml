@@ -14,7 +14,6 @@ subject:
   opening_message: |
     Dispatch the helper, then finish.
   invocation_kind: subagent
-  model: default
   allowed_tools: [Task]
 
 stub_registry: integration-layer.stubs.json

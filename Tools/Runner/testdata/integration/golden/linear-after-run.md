@@ -6,8 +6,12 @@ task: "test task"
 started: 2026-01-01T00:00:00Z
 last_updated: 2026-01-01T00:00:00Z
 global_sequence: 2
+mode: auto
 checkpoints: disabled
 commits: disabled
+commit_branch_variant: mosaic-owned
+pre_consultation: disabled
+manual_resolution: disabled
 current_state:
   phase: PLANNING
   stage: null

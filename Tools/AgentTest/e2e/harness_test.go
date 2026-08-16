@@ -355,8 +355,13 @@ func (r scenarioSuiteRunner) Run(ctx context.Context, p preflight.Plan, sink dom
 
 type scenarioTestRunner struct{ deps runner.Deps }
 
-func (a scenarioTestRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest) (domain.RunEvidence, error) {
-	return runner.Run(ctx, a.deps, runner.Request{Key: key, Test: t, Settings: t.Settings})
+func (a scenarioTestRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+	// Retention is intentionally omitted here: the e2e suite drives the full
+	// suite through scenarioRunSuite, which constructs a composedSuiteRunner
+	// whose retention is passed in at run time. This fake is the runner-level
+	// seam used only for scenario-level tests where retention is not under
+	// test; the effective policy is domain.RetainNever (the zero value).
+	return runner.Run(ctx, a.deps, runner.Request{Key: key, Test: t, Settings: t.Settings}, eval)
 }
 
 // zeroCostProvider reports an attributed zero cost, standing in for

@@ -29,7 +29,7 @@ func TestRun_RerunAgainstARetainedSandbox_FailsClearly_NeverAdopts(t *testing.T)
 	req := newRequest("retain-and-rerun")
 	req.Retention = domain.RetainAlways
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("first Run returned unexpected error: %v", err)
 	}
 
@@ -47,7 +47,7 @@ func TestRun_RerunAgainstARetainedSandbox_FailsClearly_NeverAdopts(t *testing.T)
 	d2 := h.Deps
 	d2.Workspaces = freshWs
 
-	_, err := runner.Run(context.Background(), d2, req)
+	_, err := runner.Run(context.Background(), d2, req, nil)
 	if err == nil {
 		t.Fatal("second Run against a retained sandbox's run key returned no error, want a clear refusal rather than silent adoption")
 	}

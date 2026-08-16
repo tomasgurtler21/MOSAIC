@@ -59,8 +59,10 @@ type ArtifactStore interface {
 
 	// Create writes a new Orchestration.md with the initial frontmatter.
 	// The runID is stored in the frontmatter's run_id field, set once and never modified.
+	// settings carries every run-configuration value the artifact must persist, so a
+	// resumed run reads them back instead of re-asking the user.
 	// Returns an error if a file already exists at the location.
-	Create(ctx context.Context, info WorkflowInfo, task string, checkpoints bool, now time.Time, runID string) (ArtifactState, error)
+	Create(ctx context.Context, info WorkflowInfo, task string, settings RunSettings, now time.Time, runID string) (ArtifactState, error)
 
 	// Apply records a completed step: appends an execution log entry, upserts
 	// artifact registry entries for each output artifact, and bumps
@@ -90,18 +92,64 @@ type ArtifactStore interface {
 	SetPhase(ctx context.Context, state ArtifactState, phase string, now time.Time) (ArtifactState, error)
 }
 
-// DeviationResolver handles situations where the engine cannot decide the next step.
-// Implementations: orchestrator delegate, manual (user-driven).
-type DeviationResolver interface {
-	// Resolve presents the deviation to whoever can decide (orchestrator agent or user)
-	// and returns an instruction for how to proceed.
+// RoutingConsultant answers "what happens next" when the Runner cannot or
+// must not decide for itself. Implementations: OrchestratorConsultant
+// (script-mode orchestrator agent over the raw transport) and ManualResolver
+// (the user, via the Interaction port).
+//
+// Exactly one routing decision is produced per call. The consultant is
+// re-invoked for the next decision; no state carries between calls.
+type RoutingConsultant interface {
+	// ConsultRouting returns either a dispatch instruction or a stop instruction.
+	// req.Context is always ConsultContextRouting.
 	//
-	// The deviating response, the artifact state at the time, and the planned
-	// continuation point (where the happy path would have gone) are provided.
+	// Returns a non-nil error for every failure class named in ConsultationFailure:
+	// malformed payload, missing required field, unknown action, an agent absent from
+	// the routing table, and a transport-level error. The error is always a
+	// *ConsultationError so callers can classify without matching on message text.
+	ConsultRouting(ctx context.Context, req ConsultationRequest) (RoutingInstruction, error)
+}
+
+// PreConsultant performs the opt-in, one-shot pre-consultation at run start
+// (auto and auto-review only). Implemented by OrchestratorConsultant.
+type PreConsultant interface {
+	// PreConsult invokes the orchestrator with ConsultContextPreConsultation
+	// and returns environment-level strings the Runner appends to auto-routed
+	// dispatches only. Both returned fields may be empty; that is success, not failure.
 	//
-	// The instruction may direct the runner to rejoin the happy path at a specific row,
-	// to dispatch a custom invocation, or to stop the run.
-	Resolve(ctx context.Context, info DeviationInfo) (RejoinInstruction, error)
+	// Returns a *ConsultationError on transport failure or a payload that is
+	// not a JSON object. A pre-consultation failure refuses the run.
+	PreConsult(ctx context.Context, req ConsultationRequest) (PreConsultationAdvice, error)
+}
+
+// RawInvoker is the transport seam for payloads that are NOT Communication
+// Protocol messages. The Runner-to-orchestrator consultation contract has its
+// own request and response schemas, so HarnessAdapter.Invoke — which marshals a
+// ProtocolRequest and unmarshals a ProtocolResponse — cannot carry it.
+//
+// Implementations live in leaf packages (internal/harness). The production
+// adapters implement both HarnessAdapter and RawInvoker over the same spawner.
+type RawInvoker interface {
+	// InvokeRaw sends payload verbatim as the agent's prompt and returns the
+	// agent's reply bytes verbatim, with no schema interpretation of either.
+	//
+	// agent.InvocationKind must be InvocationOrchestrator for orchestrator
+	// consultations, so the agent retains native subagent-spawning capability.
+	//
+	// Returns a non-nil error on harness-level failure (timeout, crash, empty
+	// output, non-zero exit). The returned bytes are the raw reply on success
+	// and are never nil on a nil error.
+	InvokeRaw(ctx context.Context, agent AgentReference, payload []byte) ([]byte, error)
+}
+
+// ApprovalReader reads the human_approved frontmatter field of an artifact
+// file. Implemented in internal/artifact over the existing frontmatter parser.
+//
+// It never returns an error: every failure mode (missing file, no frontmatter
+// block, malformed frontmatter, absent field, unparseable value) maps to a
+// distinct HumanApproval value. A logging or read failure must not fail a run.
+type ApprovalReader interface {
+	ReadApproval(ctx context.Context, artifactPath string) HumanApproval
 }
 
 // Clock provides the current time. Injected so the engine and artifact
@@ -174,4 +222,16 @@ const (
 	EventSessionApplyFailed         = "session.apply.failed"
 	EventArtifactPathRejected       = "artifact.path.rejected"
 	EventArtifactPathNonRunScoped   = "artifact.path.non_run_scoped"
+
+	// Consultation event names.
+	EventSessionConsultStart    = "session.consult.start"
+	EventSessionConsultDispatch = "session.consult.dispatch"
+	EventSessionConsultStop     = "session.consult.stop"
+	EventSessionConsultFailed   = "session.consult.failed"
+	EventSessionPreConsult      = "session.preconsult"
+	EventSessionCommitSetup     = "session.commit.setup"
+	EventSessionHITLVerify      = "session.hitl.verify"
+	EventSessionHITLRedispatch  = "session.hitl.redispatch"
+	EventSessionHITLEscalate    = "session.hitl.escalate"
+	EventSessionManualResolve   = "session.manual.resolve"
 )

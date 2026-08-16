@@ -69,6 +69,12 @@ type RunReport struct {
 	// source declared no version; both renderings show it as unknown rather
 	// than blank, so a reader never mistakes an absent version for a real one.
 	SubjectVersion string
+
+	// SubjectModel and StubModel are the models this repetition actually ran
+	// on, carried from RunEvidence through TestResult. Empty means none was
+	// recorded; both renderings show that as unknown, never as blank.
+	SubjectModel string
+	StubModel    string
 }
 
 // SubjectFailure is what a subject that exited non-zero told us. Zero-valued

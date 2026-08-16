@@ -38,7 +38,7 @@ func TestRun_SubjectPromptCarriesTheRunIDPreludeBeforeTheOriginalOpeningMessage(
 	const originalMessage = "start"
 	req.Test.Definition.Subject.OpeningMessage = originalMessage
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -81,7 +81,7 @@ func TestRun_RunIDPreludeInjectionPreservesEverySubjectFieldExceptOpeningMessage
 		AllowedTools:   []string{"dispatch"},
 	}
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -115,7 +115,7 @@ func TestRun_RunIDPreludeInjectionDoesNotMutateTheCallersRequest(t *testing.T) {
 	const originalMessage = "start"
 	req.Test.Definition.Subject.OpeningMessage = originalMessage
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestRun_RunIDIsConsistentAcrossTheCostQueryAndTheCapturedLogRoot(t *testing
 		return domain.SubjectResult{Disposition: domain.DispositionCompleted}, nil
 	}
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -180,7 +180,7 @@ func TestRun_RunIDExpandsTheSeedFilePlaceholder(t *testing.T) {
 		return domain.SubjectResult{Disposition: domain.DispositionCompleted}, nil
 	}
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 }
@@ -229,13 +229,18 @@ func TestRun_EvidenceReportsLogsProducedTrueWhenTheLogRootActuallyHoldsLogs(t *t
 		return domain.SubjectResult{Disposition: domain.DispositionCompleted}, nil
 	}
 
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
-	if err != nil {
+	var capturedEvidence domain.RunEvidence
+	eval := func(ev domain.RunEvidence) domain.TestResult {
+		capturedEvidence = ev
+		return domain.TestResult{}
+	}
+
+	if _, err := runner.Run(context.Background(), h.Deps, req, eval); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
-	if !evidence.LogsProduced {
-		t.Error("evidence.LogsProduced = false, want true — a file was written into the queried log root before teardown")
+	if !capturedEvidence.LogsProduced {
+		t.Error("capturedEvidence.LogsProduced = false, want true — a file was written into the queried log root before teardown")
 	}
 }
 
@@ -248,15 +253,20 @@ func TestRun_EvidenceReportsLogsProducedFalseWhenTheLogRootStaysEmpty(t *testing
 	req := newRequest("logs-produced-false")
 	req.Key.RunID = loggerBundleShapedRunID
 
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
-	if err != nil {
+	var capturedEvidence domain.RunEvidence
+	eval := func(ev domain.RunEvidence) domain.TestResult {
+		capturedEvidence = ev
+		return domain.TestResult{}
+	}
+
+	if _, err := runner.Run(context.Background(), h.Deps, req, eval); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
-	if evidence.LogsProduced {
-		t.Error("evidence.LogsProduced = true, want false — nothing was ever written into the queried log root")
+	if capturedEvidence.LogsProduced {
+		t.Error("capturedEvidence.LogsProduced = true, want false — nothing was ever written into the queried log root")
 	}
-	if evidence.LogRoot == "" {
-		t.Error("evidence.LogRoot is empty, want the queried log root to be named even when it held nothing")
+	if capturedEvidence.LogRoot == "" {
+		t.Error("capturedEvidence.LogRoot is empty, want the queried log root to be named even when it held nothing")
 	}
 }

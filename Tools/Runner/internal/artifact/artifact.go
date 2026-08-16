@@ -94,10 +94,18 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 	}
 
 	// Check for required sections in raw bytes (before full parse).
-	execLogOpenTag, _ := docformat.RenderOpenTagLine(docformat.NodeSection, "ExecutionLog", "")
-	execLogCloseTag, _ := docformat.RenderCloseTagLine("ExecutionLog")
-	artifactsOpenTag, _ := docformat.RenderOpenTagLine(docformat.NodeSection, "Artifacts", "")
-	artifactsCloseTag, _ := docformat.RenderCloseTagLine("Artifacts")
+	// Trim the trailing newline from tag bytes before searching: files checked out
+	// on Windows may have CRLF line endings, so searching for a tag with a bare LF
+	// suffix would fail to match. The tag content itself (without the newline) is
+	// sufficient to confirm the section is present.
+	execLogOpenTagRaw, _ := docformat.RenderOpenTagLine(docformat.NodeSection, "ExecutionLog", "")
+	execLogCloseTagRaw, _ := docformat.RenderCloseTagLine("ExecutionLog")
+	artifactsOpenTagRaw, _ := docformat.RenderOpenTagLine(docformat.NodeSection, "Artifacts", "")
+	artifactsCloseTagRaw, _ := docformat.RenderCloseTagLine("Artifacts")
+	execLogOpenTag := bytes.TrimSuffix(execLogOpenTagRaw, []byte("\n"))
+	execLogCloseTag := bytes.TrimSuffix(execLogCloseTagRaw, []byte("\n"))
+	artifactsOpenTag := bytes.TrimSuffix(artifactsOpenTagRaw, []byte("\n"))
+	artifactsCloseTag := bytes.TrimSuffix(artifactsCloseTagRaw, []byte("\n"))
 	if !bytes.Contains(data, execLogOpenTag) {
 		return refuse(`missing <ExecutionLog type="core"> section`)
 	}
@@ -150,8 +158,65 @@ func Parse(data []byte) (domain.ArtifactState, error) {
 		}
 		state.GlobalSequence = n
 	}
+	if v, ok := topLevel["mode"]; ok {
+		mode, err := domain.ParseExecutionMode(v)
+		if err != nil {
+			return refuse("invalid 'mode' value: " + err.Error())
+		}
+		state.Mode = mode
+	}
 	if v, ok := topLevel["checkpoints"]; ok {
-		state.Checkpoints = (v == "enabled")
+		switch v {
+		case "enabled":
+			state.Checkpoints = true
+		case "disabled":
+			state.Checkpoints = false
+		default:
+			return refuse("invalid 'checkpoints' value " + `"` + v + `"` + "; valid values: enabled, disabled")
+		}
+	}
+	if v, ok := topLevel["commits"]; ok {
+		switch v {
+		case "enabled":
+			state.Commits = true
+		case "disabled":
+			state.Commits = false
+		default:
+			return refuse("invalid 'commits' value " + `"` + v + `"` + "; valid values: enabled, disabled")
+		}
+	}
+	if v, ok := topLevel["commit_branch_variant"]; ok {
+		variant, err := domain.ParseCommitBranchVariant(v)
+		if err != nil {
+			return refuse("invalid 'commit_branch_variant' value: " + err.Error())
+		}
+		state.CommitBranchVariant = variant
+	} else {
+		// Absent key defaults to mosaic-owned (the recommended variant).
+		state.CommitBranchVariant = domain.CommitBranchMOSAICOwned
+	}
+	if v, ok := topLevel["commit_branch"]; ok {
+		state.CommitBranch = v
+	}
+	if v, ok := topLevel["pre_consultation"]; ok {
+		switch v {
+		case "enabled":
+			state.PreConsultation = true
+		case "disabled":
+			state.PreConsultation = false
+		default:
+			return refuse("invalid 'pre_consultation' value " + `"` + v + `"` + "; valid values: enabled, disabled")
+		}
+	}
+	if v, ok := topLevel["manual_resolution"]; ok {
+		switch v {
+		case "enabled":
+			state.ManualResolution = true
+		case "disabled":
+			state.ManualResolution = false
+		default:
+			return refuse("invalid 'manual_resolution' value " + `"` + v + `"` + "; valid values: enabled, disabled")
+		}
 	}
 
 	// Parse infrastructure_overrides block (optional; nil when absent).
@@ -237,12 +302,37 @@ func Render(state domain.ArtifactState) ([]byte, error) {
 	buf.WriteString("started: " + state.Started.UTC().Format(time.RFC3339) + "\n")
 	buf.WriteString("last_updated: " + state.LastUpdated.UTC().Format(time.RFC3339) + "\n")
 	buf.WriteString("global_sequence: " + strconv.Itoa(state.GlobalSequence) + "\n")
+	if state.Mode != "" {
+		buf.WriteString("mode: " + string(state.Mode) + "\n")
+	}
 	if state.Checkpoints {
 		buf.WriteString("checkpoints: enabled\n")
 	} else {
 		buf.WriteString("checkpoints: disabled\n")
 	}
-	buf.WriteString("commits: disabled\n")
+	if state.Commits {
+		buf.WriteString("commits: enabled\n")
+	} else {
+		buf.WriteString("commits: disabled\n")
+	}
+	commitVariant := state.CommitBranchVariant
+	if commitVariant == "" {
+		commitVariant = domain.CommitBranchMOSAICOwned
+	}
+	buf.WriteString("commit_branch_variant: " + string(commitVariant) + "\n")
+	if state.CommitBranch != "" {
+		buf.WriteString("commit_branch: " + state.CommitBranch + "\n")
+	}
+	if state.PreConsultation {
+		buf.WriteString("pre_consultation: enabled\n")
+	} else {
+		buf.WriteString("pre_consultation: disabled\n")
+	}
+	if state.ManualResolution {
+		buf.WriteString("manual_resolution: enabled\n")
+	} else {
+		buf.WriteString("manual_resolution: disabled\n")
+	}
 	if len(state.InfrastructureOverrides) > 0 {
 		buf.WriteString("infrastructure_overrides:\n")
 		for _, ov := range state.InfrastructureOverrides {
@@ -363,7 +453,7 @@ func (f *fileStore) Read(ctx context.Context) (domain.ArtifactState, error) {
 	return state, nil
 }
 
-func (f *fileStore) Create(ctx context.Context, info domain.WorkflowInfo, task string, checkpoints bool, now time.Time, runID string) (domain.ArtifactState, error) {
+func (f *fileStore) Create(ctx context.Context, info domain.WorkflowInfo, task string, settings domain.RunSettings, now time.Time, runID string) (domain.ArtifactState, error) {
 	// Reject a non-absolute store path before any filesystem side effects.
 	// A relative path would land in the process CWD, never in the intended
 	// run-scoped folder. Absolute non-run-scoped paths are permitted (many
@@ -386,7 +476,7 @@ func (f *fileStore) Create(ctx context.Context, info domain.WorkflowInfo, task s
 		Started:         now.UTC(),
 		LastUpdated:     now.UTC(),
 		GlobalSequence:  0,
-		Checkpoints:     checkpoints,
+		RunSettings:     settings,
 	}
 
 	data, err := Render(state)

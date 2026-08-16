@@ -13,3 +13,4 @@ defaults:
   pass_rate: 1.0
 tests:
   - path: one-dispatch.test.yaml
+  - path: research-routing.test.yaml

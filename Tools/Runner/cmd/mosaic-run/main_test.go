@@ -318,142 +318,6 @@ func TestBuildAdapter_CatalogCoverage_EveryEntryResolvesToARealAdapter(t *testin
 }
 
 // ---------------------------------------------------------------------------
-// buildTUIDelegate
-//
-// buildTUIDelegate is the extracted TUI delegate-wiring function that sessFactory
-// delegates to. These tests verify the wiring conditions that were previously
-// inline in the sessFactory closure and untestable without a real terminal.
-// ---------------------------------------------------------------------------
-
-// TestBuildTUIDelegate_ClaudeCodeWithOrchFile_ReturnsOrchestratorDelegate verifies
-// that selecting "claude-code" with a known orchestrator file produces a non-nil
-// OrchestratorDelegate wired with the provided harness. This closes AC3.6 (TUI
-// delegation wiring with real adapter).
-func TestBuildTUIDelegate_ClaudeCodeWithOrchFile_ReturnsOrchestratorDelegate(t *testing.T) {
-	h := harness.NewFakeAdapter()
-	delegate := buildTUIDelegate(h, "claude-code", "/orch/dir/orch.md", "/run/folder")
-	if delegate == nil {
-		t.Fatal("buildTUIDelegate returned nil, want *deviation.OrchestratorDelegate")
-	}
-	if delegate.Harness != h {
-		t.Error("delegate.Harness is not the expected harness instance; same adapter must be shared between session dispatch and deviation resolution")
-	}
-}
-
-// TestBuildTUIDelegate_ClaudeCodeWithOrchFile_WiresOrchestratorIdentifier verifies
-// that the returned delegate has the correct orchestrator agent identifier set.
-func TestBuildTUIDelegate_ClaudeCodeWithOrchFile_WiresOrchestratorIdentifier(t *testing.T) {
-	h := harness.NewFakeAdapter()
-	delegate := buildTUIDelegate(h, "claude-code", "/orch/dir/orch.md", "/run/folder")
-	if delegate == nil {
-		t.Fatal("buildTUIDelegate returned nil")
-	}
-	if delegate.Orchestrator.Identifier != "orchestrator-script" {
-		t.Errorf("delegate.Orchestrator.Identifier = %q, want %q", delegate.Orchestrator.Identifier, "orchestrator-script")
-	}
-}
-
-// TestBuildTUIDelegate_ClaudeCodeWithOrchFile_WiresOrchestratorInvocationKind
-// verifies that the orchestrator AgentReference uses InvocationOrchestrator,
-// which causes ClaudeCodeAdapter to use the --agent flag for the invocation.
-func TestBuildTUIDelegate_ClaudeCodeWithOrchFile_WiresOrchestratorInvocationKind(t *testing.T) {
-	h := harness.NewFakeAdapter()
-	delegate := buildTUIDelegate(h, "claude-code", "/orch/dir/orch.md", "/run/folder")
-	if delegate == nil {
-		t.Fatal("buildTUIDelegate returned nil")
-	}
-	if delegate.Orchestrator.InvocationKind != "orchestrator" {
-		t.Errorf("delegate.Orchestrator.InvocationKind = %q, want %q", delegate.Orchestrator.InvocationKind, "orchestrator")
-	}
-}
-
-// TestBuildTUIDelegate_Fake_ReturnsNil verifies that using the "fake" harness
-// returns nil — no delegate is wired, and TUIDeviationResolver falls back to
-// stop mode. This closes AC3.6 negative path.
-func TestBuildTUIDelegate_Fake_ReturnsNil(t *testing.T) {
-	h := harness.NewFakeAdapter()
-	delegate := buildTUIDelegate(h, "fake", "/orch/dir/orch.md", "/run/folder")
-	if delegate != nil {
-		t.Errorf("buildTUIDelegate(fake) returned non-nil %T, want nil", delegate)
-	}
-}
-
-// TestBuildTUIDelegate_ClaudeCodeWithoutOrchFile_ReturnsNil verifies that when
-// the orchestrator file is not yet known (empty string), buildTUIDelegate returns
-// nil even for "claude-code". This is the initial state before the file screen
-// completes in the TUI setup flow.
-func TestBuildTUIDelegate_ClaudeCodeWithoutOrchFile_ReturnsNil(t *testing.T) {
-	h := harness.NewFakeAdapter()
-	delegate := buildTUIDelegate(h, "claude-code", "", "/run/folder")
-	if delegate != nil {
-		t.Errorf("buildTUIDelegate(claude-code, no orchFile) returned non-nil %T, want nil", delegate)
-	}
-}
-
-// TestBuildTUIDelegate_OpenCodeWithOrchFile_ReturnsOrchestratorDelegate
-// verifies that selecting "opencode" with a known orchestrator file also
-// produces a non-nil OrchestratorDelegate (AC4.4): the generalized condition
-// admits every CLI-backed harness, not just "claude-code".
-func TestBuildTUIDelegate_OpenCodeWithOrchFile_ReturnsOrchestratorDelegate(t *testing.T) {
-	h := harness.NewFakeAdapter()
-	delegate := buildTUIDelegate(h, "opencode", "/orch/dir/orch.md", "/run/folder")
-	if delegate == nil {
-		t.Fatal("buildTUIDelegate(opencode) returned nil, want *deviation.OrchestratorDelegate")
-	}
-	if delegate.Harness != h {
-		t.Error("delegate.Harness is not the expected harness instance")
-	}
-}
-
-// TestBuildTUIDelegate_OpenCodeWithoutOrchFile_ReturnsNil verifies that,
-// mirroring the claude-code case, an unknown orchestrator file still yields
-// nil for "opencode".
-func TestBuildTUIDelegate_OpenCodeWithoutOrchFile_ReturnsNil(t *testing.T) {
-	h := harness.NewFakeAdapter()
-	delegate := buildTUIDelegate(h, "opencode", "", "/run/folder")
-	if delegate != nil {
-		t.Errorf("buildTUIDelegate(opencode, no orchFile) returned non-nil %T, want nil", delegate)
-	}
-}
-
-// TestBuildTUIDelegate_Fake_StillReturnsNil_AfterOpenCodeAdmitted re-verifies
-// the negative half of AC4.4 now that a second CLI-backed harness is
-// admitted: the tool-local test double must still be excluded by the
-// generalized condition.
-func TestBuildTUIDelegate_Fake_StillReturnsNil_AfterOpenCodeAdmitted(t *testing.T) {
-	h := harness.NewFakeAdapter()
-	delegate := buildTUIDelegate(h, "fake", "/orch/dir/orch.md", "/run/folder")
-	if delegate != nil {
-		t.Errorf("buildTUIDelegate(fake) returned non-nil %T, want nil", delegate)
-	}
-}
-
-// TestBuildTUIDelegate_UnrecognisedHarness_ReturnsNil verifies that an
-// unrecognised harness value is excluded by the generalized
-// IsCLIHarness-based condition, mirroring the unknown-value fallback
-// elsewhere in composition.
-func TestBuildTUIDelegate_UnrecognisedHarness_ReturnsNil(t *testing.T) {
-	h := harness.NewFakeAdapter()
-	delegate := buildTUIDelegate(h, "not-a-real-harness", "/orch/dir/orch.md", "/run/folder")
-	if delegate != nil {
-		t.Errorf("buildTUIDelegate(not-a-real-harness) returned non-nil %T, want nil", delegate)
-	}
-}
-
-// TestBuildTUIDelegate_TypeAssert verifies that the returned value is a
-// *deviation.OrchestratorDelegate (not just a non-nil interface).
-func TestBuildTUIDelegate_TypeAssert(t *testing.T) {
-	h := harness.NewFakeAdapter()
-	result := buildTUIDelegate(h, "claude-code", "/orch/dir/orch.md", "")
-	if result == nil {
-		t.Fatal("buildTUIDelegate returned nil, want *deviation.OrchestratorDelegate")
-	}
-	// Type is already *deviation.OrchestratorDelegate by the function signature;
-	// this compile-time assertion confirms the import resolves correctly.
-	var _ *deviation.OrchestratorDelegate = result
-}
-
-// ---------------------------------------------------------------------------
 // hasFlag
 //
 // hasFlag is the new pre-scan helper that reports whether a named flag appears
@@ -1185,5 +1049,163 @@ func TestNewLoggedArtifactStore_NopLoggerDoesNotPanic(t *testing.T) {
 		if store == nil {
 			t.Errorf("path %q: newLoggedArtifactStore with NopDebugLogger returned nil store", path)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T7.3: Process-startup pre-scan tests for --mode and --manual-resolution
+//
+// These tests verify that scanFlag and scanBoolFlag correctly extract the new
+// Stage 7 flags from the argument list, confirming the pre-scan mechanism that
+// main() uses to wire consultants before cobra parses flags.
+// ---------------------------------------------------------------------------
+
+// TestScanFlag_ModeFlag_SpaceSeparated verifies that --mode in the common
+// "--flag value" form is extracted correctly by scanFlag.
+func TestScanFlag_ModeFlag_SpaceSeparated(t *testing.T) {
+	got := scanFlag([]string{"run", "--mode", "orchestrated"}, "--mode")
+	if got != "orchestrated" {
+		t.Errorf("scanFlag(--mode orchestrated) = %q, want %q", got, "orchestrated")
+	}
+}
+
+// TestScanFlag_ModeFlag_EqualsSeparated verifies that --mode in the
+// "--flag=value" form is extracted correctly by scanFlag.
+func TestScanFlag_ModeFlag_EqualsSeparated(t *testing.T) {
+	got := scanFlag([]string{"run", "--mode=auto-review"}, "--mode")
+	if got != "auto-review" {
+		t.Errorf("scanFlag(--mode=auto-review) = %q, want %q", got, "auto-review")
+	}
+}
+
+// TestScanFlag_ModeFlag_Absent_ReturnsEmpty verifies that when --mode is not
+// present, scanFlag returns "" so main() can detect the absent-mode condition.
+func TestScanFlag_ModeFlag_Absent_ReturnsEmpty(t *testing.T) {
+	got := scanFlag([]string{"run", "--orchestrator-file", "orch.md"}, "--mode")
+	if got != "" {
+		t.Errorf("scanFlag absent --mode = %q, want empty string", got)
+	}
+}
+
+// TestScanBoolFlag_ManualResolutionFlag_Present verifies that --manual-resolution
+// is detected correctly by scanBoolFlag.
+func TestScanBoolFlag_ManualResolutionFlag_Present(t *testing.T) {
+	args := []string{"run", "--mode", "orchestrated", "--manual-resolution"}
+	if !scanBoolFlag(args, "--manual-resolution") {
+		t.Error("scanBoolFlag should return true when --manual-resolution is present")
+	}
+}
+
+// TestScanBoolFlag_ManualResolutionFlag_Absent verifies that scanBoolFlag returns
+// false when --manual-resolution is not in the argument list.
+func TestScanBoolFlag_ManualResolutionFlag_Absent(t *testing.T) {
+	args := []string{"run", "--mode", "auto", "--orchestrator-file", "orch.md"}
+	if scanBoolFlag(args, "--manual-resolution") {
+		t.Error("scanBoolFlag should return false when --manual-resolution is absent")
+	}
+}
+
+// TestScanFlag_ModeFlag_AmongMixedArgs verifies that scanFlag correctly finds
+// --mode among other flags and values — mirroring the real invocation shape
+// where --mode appears after several other flags.
+func TestScanFlag_ModeFlag_AmongMixedArgs(t *testing.T) {
+	args := []string{
+		"run",
+		"--orchestrator-file", "orch.md",
+		"--workflow", "w1",
+		"--task", "do work",
+		"--mode", "auto",
+		"--harness", "claude-code",
+	}
+	got := scanFlag(args, "--mode")
+	if got != "auto" {
+		t.Errorf("scanFlag(--mode) among mixed args = %q, want %q", got, "auto")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// buildDeps: consultant wiring selection (T7.3)
+//
+// buildDeps is the extracted wiring constructor that main() delegates to after
+// pre-scanning --mode and --manual-resolution. These tests verify that the
+// correct consultant types are selected for each mode/flag combination, which
+// is the gap the pre-scan tests above did not close: they verified that
+// scanFlag extracts flag values correctly but not that those values drive the
+// correct session.Deps wiring.
+//
+// All positive assertions (non-nil Routing, Manual, PreConsult) are RED until
+// buildDeps's real implementation is written in I7.3. Absence assertions
+// (nil Manual when --manual-resolution is absent, nil PreConsult when
+// --pre-consult is absent) are correct from the stub and serve as regression
+// guards against inadvertent wiring.
+// ---------------------------------------------------------------------------
+
+// TestBuildDeps_OrchestratedMode_WiresOrchestratorConsultantAsRouting verifies
+// that --mode orchestrated causes buildDeps to wire *deviation.OrchestratorConsultant
+// as Deps.Routing. OrchestratorConsultant is the script-mode routing agent.
+func TestBuildDeps_OrchestratedMode_WiresOrchestratorConsultantAsRouting(t *testing.T) {
+	deps := buildDeps("orchestrated", false, false, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); !ok {
+		t.Errorf("buildDeps(orchestrated).Routing = %T, want *deviation.OrchestratorConsultant", deps.Routing)
+	}
+}
+
+// TestBuildDeps_AutoMode_WiresOrchestratorConsultantAsRouting verifies that
+// --mode auto wires *deviation.OrchestratorConsultant as Deps.Routing. The
+// consultant handles EngineDecision.Consult returns regardless of mode.
+func TestBuildDeps_AutoMode_WiresOrchestratorConsultantAsRouting(t *testing.T) {
+	deps := buildDeps("auto", false, false, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); !ok {
+		t.Errorf("buildDeps(auto).Routing = %T, want *deviation.OrchestratorConsultant", deps.Routing)
+	}
+}
+
+// TestBuildDeps_AutoReviewMode_WiresOrchestratorConsultantAsRouting verifies
+// that --mode auto-review wires *deviation.OrchestratorConsultant as Deps.Routing.
+func TestBuildDeps_AutoReviewMode_WiresOrchestratorConsultantAsRouting(t *testing.T) {
+	deps := buildDeps("auto-review", false, false, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); !ok {
+		t.Errorf("buildDeps(auto-review).Routing = %T, want *deviation.OrchestratorConsultant", deps.Routing)
+	}
+}
+
+// TestBuildDeps_ManualResolutionEnabled_WiresManualResolverAsManual verifies
+// that --manual-resolution wires *deviation.ManualResolver as Deps.Manual.
+// ManualResolver drives the Interaction port to obtain a routing instruction
+// from the user when the OrchestratorConsultant fails.
+func TestBuildDeps_ManualResolutionEnabled_WiresManualResolverAsManual(t *testing.T) {
+	deps := buildDeps("auto", true, false, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	if _, ok := deps.Manual.(*deviation.ManualResolver); !ok {
+		t.Errorf("buildDeps(manualResolution=true).Manual = %T, want *deviation.ManualResolver", deps.Manual)
+	}
+}
+
+// TestBuildDeps_ManualResolutionDisabled_LeavesManualNil verifies that omitting
+// --manual-resolution leaves Deps.Manual nil. When Manual is nil, the session
+// will not offer a manual fallback on consultation failure.
+func TestBuildDeps_ManualResolutionDisabled_LeavesManualNil(t *testing.T) {
+	deps := buildDeps("auto", false, false, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	if deps.Manual != nil {
+		t.Errorf("buildDeps(manualResolution=false).Manual = %T, want nil", deps.Manual)
+	}
+}
+
+// TestBuildDeps_PreConsultEnabled_WiresPreConsultant verifies that --pre-consult
+// wires a non-nil Deps.PreConsult. The OrchestratorConsultant implements
+// PreConsultant, so the same consultant instance can serve both roles.
+func TestBuildDeps_PreConsultEnabled_WiresPreConsultant(t *testing.T) {
+	deps := buildDeps("auto", false, true, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	if deps.PreConsult == nil {
+		t.Error("buildDeps(preConsult=true).PreConsult = nil, want non-nil PreConsultant")
+	}
+}
+
+// TestBuildDeps_PreConsultDisabled_LeavesPreConsultNil verifies that omitting
+// --pre-consult leaves Deps.PreConsult nil. The session guards on this field
+// before invoking it, so nil is the correct sentinel for "pre-consultation off".
+func TestBuildDeps_PreConsultDisabled_LeavesPreConsultNil(t *testing.T) {
+	deps := buildDeps("auto", false, false, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	if deps.PreConsult != nil {
+		t.Errorf("buildDeps(preConsult=false).PreConsult = %T, want nil", deps.PreConsult)
 	}
 }

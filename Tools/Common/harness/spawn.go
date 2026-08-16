@@ -137,7 +137,7 @@ func BuildArgs(req SpawnRequest) (args []string, stdin []byte, err error) {
 
 	switch req.Agent.Kind {
 	case InvocationOrchestrator:
-		stdinContent = EnvBlock("") + "\n" + stdinContent
+		stdinContent = EnvBlock(req.WorkingDir) + "\n" + stdinContent
 		args = []string{
 			"--agent", req.Agent.Identifier,
 			"-p",

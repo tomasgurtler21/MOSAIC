@@ -45,21 +45,41 @@ type SubjectUnderTest struct {
 
 	OpeningMessage string // the first message the subject receives
 	InvocationKind string // maps to mosaic-common/harness InvocationKind
-	Model          string
 
-	// StubModel is the model identifier every stub agent deployed alongside
-	// the subject runs on. Optional: empty means "use Model".
+	// Model and StubModel were previously authored in the test-definition
+	// subject block. Model selection is now a runtime concern: frontends
+	// supply models through preflight.Overrides, which carries them to
+	// domain.ModelSelection on each ResolvedTest. The authoring layer no
+	// longer accepts either field, so nothing in the normal path populates
+	// these fields from a parsed test definition any more.
 	//
-	// It exists because one Deploy call provisions both the subject and every
-	// stub its workflows reference, and the two want different models — the
-	// subject makes real judgement calls, while every stub dispatch is caught
-	// by interception before it reaches a model at all.
-	//
-	// Like Model, it is an opaque harness-specific string authored by the test
-	// author and passed through verbatim. This module never derives, defaults
-	// to a named model, or validates a model identifier.
-	StubModel    string
+	// These fields remain on the struct so the runtime precedence chain in
+	// buildTierModelMap degrades gracefully (returning empty strings rather
+	// than a broken invariant) without a flag day on every call site, and so
+	// the transition is complete before any callers that still set them
+	// directly (in tests) are updated.
+	Model     string
+	StubModel string
+
 	AllowedTools []string
+}
+
+// ModelSelection is the pair of models a run was asked to use, chosen at run
+// time by a frontend rather than authored in a test file.
+//
+// Both are opaque, harness-specific strings this tool does not interpret. The
+// frontend that collected them has already validated them against the
+// selected harness's catalog; nothing below the frontend re-validates, and
+// nothing below the frontend invents a value.
+type ModelSelection struct {
+	// Subject is the model the agent under test runs on. Empty means no
+	// run-time choice was made.
+	Subject string
+
+	// Stub is the model every stub collaborator runs on. Empty means "the
+	// same as Subject" — the documented, deliberate fallback that keeps an
+	// unspecified stub model producing a working run rather than a broken one.
+	Stub string
 }
 
 // DispatchToolName is the normalized, harness-neutral name of the tool that

@@ -16,6 +16,7 @@
         "passed": 1,
         "excluded": 0,
         "pass_rate": 1,
+        "required_pass_rate": 0,
         "infrastructure_failure": false,
         "total_cost": { "total_usd": 0.05, "attribution": "attributed", "detail": "" }
       },
@@ -29,7 +30,9 @@
           "duration_ms": 2000,
           "cost": { "total_usd": 0.05, "attribution": "attributed", "detail": "" },
           "negative_applied": false,
-          "subject_version": "unknown"
+          "subject_version": "unknown",
+          "subject_model": "unknown",
+          "stub_model": "unknown"
         }
       ]
     },
@@ -45,6 +48,7 @@
         "passed": 0,
         "excluded": 0,
         "pass_rate": 0,
+        "required_pass_rate": 0,
         "infrastructure_failure": false,
         "total_cost": { "total_usd": 0.02, "attribution": "attributed", "detail": "" }
       },
@@ -67,7 +71,9 @@
           "duration_ms": 1500,
           "cost": { "total_usd": 0.02, "attribution": "attributed", "detail": "" },
           "negative_applied": false,
-          "subject_version": "unknown"
+          "subject_version": "unknown",
+          "subject_model": "unknown",
+          "stub_model": "unknown"
         }
       ]
     },
@@ -83,6 +89,7 @@
         "passed": 0,
         "excluded": 0,
         "pass_rate": 0,
+        "required_pass_rate": 0,
         "infrastructure_failure": false,
         "total_cost": { "total_usd": 0.10, "attribution": "attributed", "detail": "" }
       },
@@ -96,7 +103,9 @@
           "duration_ms": 30000,
           "cost": { "total_usd": 0.10, "attribution": "attributed", "detail": "" },
           "negative_applied": false,
-          "subject_version": "unknown"
+          "subject_version": "unknown",
+          "subject_model": "unknown",
+          "stub_model": "unknown"
         }
       ]
     },
@@ -112,6 +121,7 @@
         "passed": 0,
         "excluded": 1,
         "pass_rate": 0,
+        "required_pass_rate": 0,
         "infrastructure_failure": true,
         "total_cost": { "total_usd": 0, "attribution": "attributed", "detail": "" }
       },
@@ -125,7 +135,9 @@
           "duration_ms": 5000,
           "cost": { "total_usd": 0.03, "attribution": "attributed", "detail": "" },
           "negative_applied": false,
-          "subject_version": "unknown"
+          "subject_version": "unknown",
+          "subject_model": "unknown",
+          "stub_model": "unknown"
         }
       ]
     },
@@ -141,6 +153,7 @@
         "passed": 1,
         "excluded": 0,
         "pass_rate": 1,
+        "required_pass_rate": 0,
         "infrastructure_failure": false,
         "total_cost": { "total_usd": 0, "attribution": "unavailable", "detail": "log root missing" }
       },
@@ -156,7 +169,9 @@
           "duration_ms": 1000,
           "cost": { "total_usd": 0, "attribution": "unavailable", "detail": "log root missing" },
           "negative_applied": false,
-          "subject_version": "unknown"
+          "subject_version": "unknown",
+          "subject_model": "unknown",
+          "stub_model": "unknown"
         }
       ]
     }

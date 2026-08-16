@@ -57,15 +57,21 @@ type infraAgentSet struct {
 }
 
 // NewInfraAgentSet builds an InfraAgentSet from the run's declared
-// infrastructure agents. An empty or nil slice yields a set that reports
-// false for every agent.
-func NewInfraAgentSet(declared []DeclaredInfraAgent) InfraAgentSet {
-	if len(declared) == 0 {
+// infrastructure agents. extraNames registers additional agent identifiers
+// (e.g. "orchestrator-script") so that consultation rows recorded under
+// those identifiers are classified as infrastructure steps on resume.
+// An empty or nil declared slice with no extraNames yields a set that
+// reports false for every agent.
+func NewInfraAgentSet(declared []DeclaredInfraAgent, extraNames ...string) InfraAgentSet {
+	if len(declared) == 0 && len(extraNames) == 0 {
 		return (*infraAgentSet)(nil)
 	}
-	names := make(map[string]struct{}, len(declared))
+	names := make(map[string]struct{}, len(declared)+len(extraNames))
 	for _, d := range declared {
 		names[d.Name] = struct{}{}
+	}
+	for _, n := range extraNames {
+		names[n] = struct{}{}
 	}
 	return &infraAgentSet{names: names}
 }
@@ -83,6 +89,21 @@ func (s *infraAgentSet) IsInfrastructureAgent(agentInstance string) bool {
 	}
 	_, ok := s.names[name]
 	return ok
+}
+
+// InfraAgentsOfClass returns the subset of declared infrastructure agents whose
+// Class field equals the given class string. The order of elements in the
+// returned slice matches their order in the declared slice. Returns nil when no
+// agents match (not an empty non-nil slice), so callers can distinguish "none
+// declared" from an allocated slice with len zero.
+func InfraAgentsOfClass(declared []DeclaredInfraAgent, class string) []DeclaredInfraAgent {
+	var result []DeclaredInfraAgent
+	for _, a := range declared {
+		if a.Class == class {
+			result = append(result, a)
+		}
+	}
+	return result
 }
 
 // NopDebugLogger is the named no-op DebugLogger. It is the default whenever no

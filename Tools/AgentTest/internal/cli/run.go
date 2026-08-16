@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -29,12 +30,26 @@ var valueFlags = map[string]bool{
 	"timeout":        true,
 	"repetitions":    true,
 
-	// logger-bundle and cost-tool are recognised-and-ignored here, the same
-	// way tui is: both are pre-scanned by the composition root ahead of
-	// this parser (see cmd/mosaic-agent-test's resolveWiringConfig), so
-	// this package owes them nothing beyond not rejecting them as unknown.
-	"logger-bundle": true,
-	"cost-tool":     true,
+	// logger-bundle, cost-tool, suites, deploy-tool, mosaic-root and
+	// catalog-folder are recognised-and-ignored here, the same way tui is:
+	// all are pre-scanned by the composition root ahead of this parser (see
+	// cmd/mosaic-agent-test's resolveWiringConfig and runTUIMode), so this
+	// package owes them nothing beyond not rejecting them as unknown.
+	"logger-bundle":  true,
+	"cost-tool":      true,
+	"suites":         true,
+	"deploy-tool":    true,
+	"mosaic-root":    true,
+	"catalog-folder": true,
+
+	// report-path overrides the JSON report file location; --no-report is the
+	// bool companion that suppresses the write entirely.
+	"report-path": true,
+
+	// subject-model and stub-model are the run-time model selections validated
+	// against the selected harness's catalog before pre-flight runs.
+	"subject-model": true,
+	"stub-model":    true,
 }
 
 // boolFlags are the flags this package's command surface accepts that take
@@ -43,6 +58,7 @@ var valueFlags = map[string]bool{
 var boolFlags = map[string]bool{
 	"keep-sandbox":            true,
 	"keep-sandbox-on-failure": true,
+	"no-report":               true,
 }
 
 // parsedInvocation is the result of tokenising the command line: the
@@ -218,7 +234,44 @@ func resolveInput(inv parsedInvocation, o Options) (preflight.Input, error) {
 		return in, usageError{fmt.Sprintf("unrecognised --harness value %q", in.HarnessID)}
 	}
 
+	if v, ok := inv.flags["subject-model"]; ok {
+		if v == "" {
+			return in, usageError{"--subject-model requires a non-empty value"}
+		}
+		if err := validateModelID("--subject-model", v, in.HarnessID, o.Models); err != nil {
+			return in, err
+		}
+		in.Overrides.SubjectModel = v
+	}
+	if v, ok := inv.flags["stub-model"]; ok {
+		if v == "" {
+			return in, usageError{"--stub-model requires a non-empty value"}
+		}
+		if err := validateModelID("--stub-model", v, in.HarnessID, o.Models); err != nil {
+			return in, err
+		}
+		in.Overrides.StubModel = v
+	}
+
 	return in, nil
+}
+
+// validateModelID checks that modelID is valid for harnessID in the supplied
+// catalog. When the catalog is nil or has no entry for harnessID, validation
+// is skipped: an unwired context must never reject every value.
+func validateModelID(flag, modelID, harnessID string, catalog []commonharness.ModelCatalog) error {
+	for _, mc := range catalog {
+		if mc.HarnessID == harnessID {
+			for _, id := range mc.IDs {
+				if id == modelID {
+					return nil
+				}
+			}
+			return usageError{fmt.Sprintf("unrecognised %s value %q for harness %q", flag, modelID, harnessID)}
+		}
+	}
+	// No catalog entry for this harness: skip validation.
+	return nil
 }
 
 // harnessRecognised reports whether id names an entry in catalog. Validation
@@ -274,6 +327,41 @@ func resolveWorkspaceRoot(inv parsedInvocation, o Options) string {
 	return o.WorkspaceRoot
 }
 
+// resolveReportPath determines the JSON report file path for this invocation.
+// --no-report suppresses the write (returns ""). --report-path overrides the
+// default. A --report-path value that is empty (i.e. --report-path=) is a
+// usage error: present-and-empty is not equivalent to absent.
+func resolveReportPath(inv parsedInvocation, o Options) (string, error) {
+	if inv.boolFlags["no-report"] {
+		return "", nil
+	}
+	if v, ok := inv.flags["report-path"]; ok {
+		if v == "" {
+			return "", usageError{"--report-path requires a non-empty value"}
+		}
+		return v, nil
+	}
+	return o.DefaultReportPath, nil
+}
+
+// writeReportFile renders result to JSON and writes the bytes through
+// o.WriteFile to path. A nil WriteFile or a write error is reported to
+// o.Stderr. Neither failure alters the run's own exit code.
+func writeReportFile(o Options, path string, result report.Result) {
+	if o.WriteFile == nil {
+		fmt.Fprintf(o.Stderr, "error: cannot write report to %q: no write function configured\n", path)
+		return
+	}
+	var buf bytes.Buffer
+	if err := report.RenderJSON(&buf, result); err != nil {
+		fmt.Fprintf(o.Stderr, "error: cannot write report to %q: %v\n", path, err)
+		return
+	}
+	if err := o.WriteFile(path, buf.Bytes()); err != nil {
+		fmt.Fprintf(o.Stderr, "error: cannot write report to %q: %v\n", path, err)
+	}
+}
+
 // runCommand implements `run <suite>`: pre-flight, then — only on a clean
 // report — execute the suite.
 func runCommand(ctx context.Context, inv parsedInvocation, o Options) int {
@@ -284,6 +372,12 @@ func runCommand(ctx context.Context, inv parsedInvocation, o Options) int {
 	}
 
 	format, err := resolveFormat(inv)
+	if err != nil {
+		fmt.Fprintf(o.Stderr, "error: %v\n", err)
+		return ExitUsage
+	}
+
+	reportPath, err := resolveReportPath(inv, o)
 	if err != nil {
 		fmt.Fprintf(o.Stderr, "error: %v\n", err)
 		return ExitUsage
@@ -320,6 +414,10 @@ func runCommand(ctx context.Context, inv parsedInvocation, o Options) int {
 	if err := renderResult(o.Stdout, format, result); err != nil {
 		fmt.Fprintf(o.Stderr, "error: rendering the report: %v\n", err)
 		return ExitFailure
+	}
+
+	if reportPath != "" {
+		writeReportFile(o, reportPath, result)
 	}
 
 	return exitCodeForResult(result)

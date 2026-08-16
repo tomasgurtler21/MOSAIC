@@ -4,19 +4,6 @@ display_name: "Claude Code"
 transform_version: "3.0.0"
 injections_version: "1.1.0"
 
-models:
-  ids:
-    - "claude-opus-4-6"
-    - "claude-sonnet-4-6"
-    - "claude-haiku-4-5"
-    - "claude-fable-5"
-    - "claude-opus-5"
-    - "claude-sonnet-5"
-    - "claude-sonnet-4-5"
-    - "claude-opus-4-8"
-    - "claude-opus-4-7"
-  format_hint: "claude-<model>-<version>"
-
 tools:
   shape: list
   universe:

@@ -170,7 +170,7 @@ func TestRun_ClaudeCodeRegisteredHookArgvBeginsWithInterceptorSubcommand(t *test
 		return domain.SubjectResult{Disposition: domain.DispositionCompleted}, nil
 	}}
 
-	if _, err := runner.Run(context.Background(), deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), deps, req, nil); err != nil {
 		t.Fatalf("runner.Run returned unexpected error: %v", err)
 	}
 }
@@ -205,7 +205,7 @@ func TestRun_OpenCodeRegisteredHookArgvBeginsWithInterceptorSubcommand(t *testin
 		return domain.SubjectResult{Disposition: domain.DispositionCompleted}, nil
 	}}
 
-	if _, err := runner.Run(context.Background(), deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), deps, req, nil); err != nil {
 		t.Fatalf("runner.Run returned unexpected error: %v", err)
 	}
 }
@@ -251,7 +251,7 @@ func TestRun_ClaudeCodeProvisionedSettingsUseTheResolvedInterpreterNotThePublish
 		return domain.SubjectResult{Disposition: domain.DispositionCompleted}, nil
 	}}
 
-	if _, err := runner.Run(context.Background(), deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), deps, req, nil); err != nil {
 		t.Fatalf("runner.Run returned unexpected error: %v", err)
 	}
 }

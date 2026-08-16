@@ -16,6 +16,11 @@ import (
 // detail. It performs no I/O: durations, file listings and cost arrive as
 // evidence, gathered by the caller.
 func Evaluate(ev domain.RunEvidence) domain.TestResult {
+	// Expand {run_id} placeholders in a local copy of the assertions before
+	// comparing declared paths against observed paths. ev is already a copy
+	// (value receiver), so the caller's original evidence is not modified.
+	ev.Definition.Assertions = ev.Definition.Assertions.ExpandRunID(ev.Key.RunID)
+
 	assertions := evaluateAssertions(ev)
 	conditions := evaluateConditions(ev)
 
@@ -40,6 +45,8 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 			RetainedSandboxPath: ev.RetainedSandboxPath,
 			SubjectResult:       ev.SubjectResult,
 			SubjectVersion:      ev.SubjectVersion,
+			SubjectModel:        ev.SubjectModel,
+			StubModel:           ev.StubModel,
 		}
 	}
 
@@ -110,6 +117,8 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 		RetainedSandboxPath: ev.RetainedSandboxPath,
 		SubjectResult:       ev.SubjectResult,
 		SubjectVersion:      ev.SubjectVersion,
+		SubjectModel:        ev.SubjectModel,
+		StubModel:           ev.StubModel,
 	}
 }
 

@@ -62,6 +62,17 @@ type Overrides struct {
 	TurnLimit   *int
 	Repetitions *int
 	TestIDs     []string // when non-empty, restrict the plan to these tests
+
+	// SubjectModel and StubModel are the models chosen at run time by
+	// whichever frontend is driving. Plain strings rather than pointers: the
+	// empty string is unambiguously "not chosen", because no harness accepts
+	// an empty model identifier. Validation against the harness's catalog is
+	// the frontend's job and has already happened by the time these arrive.
+	//
+	// An empty StubModel with a non-empty SubjectModel is the ordinary case,
+	// and means the stubs run on the subject's model.
+	SubjectModel string
+	StubModel    string
 }
 
 // Plan is a fully resolved, cross-validated set of tests ready to run. It is
@@ -77,6 +88,13 @@ type ResolvedTest struct {
 	Definition domain.TestDefinition
 	Registry   domain.StubRegistry
 	Settings   domain.RunSettings
+
+	// Models are the run-time model selections in force for this run. They are
+	// run-level rather than per-test, and are therefore identical across every
+	// ResolvedTest in one Plan; they live here so the value reaches the runner
+	// through the existing per-attempt argument rather than through a second
+	// channel the two frontends would have to keep in step separately.
+	Models domain.ModelSelection
 }
 
 // Validate parses and cross-validates everything an execution needs and
@@ -210,6 +228,10 @@ func Validate(in Input) (Plan, authoring.Report) {
 			Definition: def,
 			Registry:   registry,
 			Settings:   effective,
+			Models: domain.ModelSelection{
+				Subject: in.Overrides.SubjectModel,
+				Stub:    in.Overrides.StubModel,
+			},
 		})
 	}
 

@@ -76,7 +76,7 @@ func TestSetup_RendersStubAgentThroughDeployPort(t *testing.T) {
 	h := newHarness(t)
 	req := stubAgentsRenderRequest("render-stub")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -114,7 +114,7 @@ func TestSetup_PassesSubjectWorkflowsThroughToDeployPort(t *testing.T) {
 		req := catalogueRequest("deploy-workflows-declared")
 		req.Test.Definition.Subject.Workflows = []string{"tdd-soft", "tdd-hard"}
 
-		if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 			t.Fatalf("Run returned unexpected error: %v", err)
 		}
 
@@ -133,7 +133,7 @@ func TestSetup_PassesSubjectWorkflowsThroughToDeployPort(t *testing.T) {
 		req := catalogueRequest("deploy-workflows-nil")
 		req.Test.Definition.Subject.Workflows = nil
 
-		if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 			t.Fatalf("Run returned unexpected error: %v", err)
 		}
 
@@ -165,7 +165,7 @@ func TestSetup_RendersEachDeclaredStubThroughDeployPort(t *testing.T) {
 		},
 	}
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -216,7 +216,7 @@ func TestSetup_SubjectRenderedBeforeStubs(t *testing.T) {
 		},
 	}
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -252,7 +252,7 @@ func TestSetup_SubjectDefinitionPathComesFromDeployPortReport(t *testing.T) {
 
 	req := renderingRequest("definition-path-from-port")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -294,7 +294,7 @@ func TestSetup_RenderedStubPathRecordedInProvisioningLedger(t *testing.T) {
 
 	req := stubAgentsRenderRequest("ledger-stub-path")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -332,7 +332,7 @@ func TestSetup_RenderedCreatedDirectoriesRecordedInProvisioningLedger(t *testing
 
 	req := stubAgentsRenderRequest("ledger-created-dirs")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -377,7 +377,7 @@ func TestSetup_AdapterProvisioningMergedNotReplacedInLedger(t *testing.T) {
 
 	req := stubAgentsRenderRequest("ledger-merge")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -432,7 +432,7 @@ func TestSetup_StubAgentRenderFailureAbortsSetupWithDiagnosableError(t *testing.
 
 	req := stubAgentsRenderRequest("stub-render-fail")
 
-	_, err := runner.Run(context.Background(), h.Deps, req)
+	_, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err == nil {
 		t.Fatal("Run returned nil error when a stub render failed; want a non-nil error")
 	}
@@ -472,7 +472,7 @@ func TestSetup_StubRenderFailureAbortsSetupWithDiagnosableError(t *testing.T) {
 		},
 	}
 
-	_, err := runner.Run(context.Background(), h.Deps, req)
+	_, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err == nil {
 		t.Fatal("Run returned nil error when a stub render failed; want a non-nil error")
 	}
@@ -514,7 +514,7 @@ func TestSetup_RenderFailureTearsDownWhatWasRecordedBeforeFailure(t *testing.T) 
 		},
 	}
 
-	_, err := runner.Run(context.Background(), h.Deps, req)
+	_, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err == nil {
 		t.Fatal("Run returned nil error after a partial render failure; want non-nil")
 	}
@@ -576,7 +576,7 @@ func TestSetup_SecondStubRenderFailureTearsDownFirstStubAndSubject(t *testing.T)
 		},
 	}
 
-	_, err := runner.Run(context.Background(), h.Deps, req)
+	_, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err == nil {
 		t.Fatal("Run returned nil error after the second stub render failed; want non-nil")
 	}
@@ -617,7 +617,7 @@ func TestSetup_AdapterProvisionCalledAfterDeployRenders(t *testing.T) {
 	h := newHarness(t)
 	req := renderingRequest("adapter-provision-after-render")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -648,7 +648,7 @@ func TestSetup_AdapterProvisionFailureStillAbortsSetup(t *testing.T) {
 
 	req := renderingRequest("adapter-provision-fail")
 
-	_, err := runner.Run(context.Background(), h.Deps, req)
+	_, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err == nil {
 		t.Fatal("Run returned nil error when adapter.Provision failed; " +
 			"the adapter's configuration checks must still govern setup " +

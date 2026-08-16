@@ -312,7 +312,7 @@ func TestCost_DelegatesToInvokeWithTheQueriedRunAndLogRoot(t *testing.T) {
 
 	provider := cost.New(cost.Options{
 		ExecutablePath: "mosaic-log-analyzer",
-		Invoke: func(ctx context.Context, path string, args []string) ([]byte, int, error) {
+		Invoke: func(ctx context.Context, path string, args []string, workingDir string) ([]byte, int, error) {
 			gotPath = path
 			gotArgs = append([]string(nil), args...)
 			return []byte(`{"schema_version":"1","run_id":"run-1","currency":"USD","money":{"state":"known","amount":"2.00"},"complete":true}`), 0, nil
@@ -342,7 +342,7 @@ func TestCost_FallbackBucketDetectedViaStatDir_SurfacesAsUnknownBucket(t *testin
 
 	provider := cost.New(cost.Options{
 		ExecutablePath: "mosaic-log-analyzer",
-		Invoke: func(ctx context.Context, path string, args []string) ([]byte, int, error) {
+		Invoke: func(ctx context.Context, path string, args []string, workingDir string) ([]byte, int, error) {
 			// No data for the queried run.
 			return []byte(`{"schema_version":"1","run_id":"run-1","currency":"USD","money":{"state":"no_data"},"complete":true}`), exitNoData, nil
 		},
@@ -367,7 +367,7 @@ func TestCost_FallbackBucketDetectedViaStatDir_SurfacesAsUnknownBucket(t *testin
 func TestCost_ToolAbsent_ReportsUnavailableRatherThanAnError(t *testing.T) {
 	provider := cost.New(cost.Options{
 		ExecutablePath: "mosaic-log-analyzer",
-		Invoke: func(ctx context.Context, path string, args []string) ([]byte, int, error) {
+		Invoke: func(ctx context.Context, path string, args []string, workingDir string) ([]byte, int, error) {
 			return nil, 0, errors.New("executable not found")
 		},
 	})
@@ -384,7 +384,7 @@ func TestCost_ToolAbsent_ReportsUnavailableRatherThanAnError(t *testing.T) {
 func TestCost_MalformedOutput_ReportsUnavailableRatherThanAnError(t *testing.T) {
 	provider := cost.New(cost.Options{
 		ExecutablePath: "mosaic-log-analyzer",
-		Invoke: func(ctx context.Context, path string, args []string) ([]byte, int, error) {
+		Invoke: func(ctx context.Context, path string, args []string, workingDir string) ([]byte, int, error) {
 			return []byte("not json"), 0, nil
 		},
 	})
@@ -406,7 +406,7 @@ func TestCost_MalformedOutput_ReportsUnavailableRatherThanAnError(t *testing.T) 
 func TestCost_NonZeroExit_MalformedOutput_ReportsUnparseableOutputNotAnInvocationFailure(t *testing.T) {
 	provider := cost.New(cost.Options{
 		ExecutablePath: "mosaic-log-analyzer",
-		Invoke: func(ctx context.Context, path string, args []string) ([]byte, int, error) {
+		Invoke: func(ctx context.Context, path string, args []string, workingDir string) ([]byte, int, error) {
 			return []byte(""), exitUsage, nil // log root does not exist: empty stdout, non-zero exit
 		},
 	})

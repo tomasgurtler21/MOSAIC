@@ -15,7 +15,6 @@ subject:
   opening_message: |
     Ask the effecter to do its one thing, then finish.
   invocation_kind: subagent
-  model: default
   allowed_tools: [Task]
 
 stub_registry: cost-check.stubs.json

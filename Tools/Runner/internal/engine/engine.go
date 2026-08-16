@@ -16,44 +16,84 @@ import (
 	"mosaic-run/internal/domain"
 )
 
-// Next determines what should happen next given the current state.
-// Pure function -- no I/O, no side effects.
+// Next is the routing decision. It is pure: no I/O, no clock read, no
+// filesystem access, no randomness. Every mode-conditional input arrives in
+// NextInput.
 //
-// Parameters:
-//   - workflow: the admitted workflow with resolved execution groups.
-//   - stages: the stage set (nil for non-staged workflows).
-//   - state: the current artifact state (parsed Orchestration.md).
-//   - lastResponse: the full protocol response from the most recent invocation
-//     (nil on first call or after resume). When nil, Next derives routing
-//     from state.CurrentState alone.
-//   - agents: resolved agent references keyed by agent identifier.
-//   - seq: current global sequence number. Next increments it by one and
-//     uses the result as the dispatch sequence number.
-//   - now: current timestamp, passed in for deterministic test output.
-//   - refreshedStages: optional refreshed stage set for Stage-* input
-//     resolution on non-EXECUTION rows (nil when not applicable).
-//   - stageSource: optional and at most one may be supplied. It describes
-//     where the stage table was looked for, and is used only to build the
-//     stop message when a staged row is reached with stages == nil. The
-//     zero value (or omission) yields the generic message. Passing more
-//     than one is a programming error and the first is used.
+// Behaviour by in.Mode:
 //
-// Returns an EngineDecision: Dispatch, Complete, Deviation, or Stop.
-func Next(
-	workflow domain.AdmittedWorkflow,
-	stages *domain.StageSet,
-	state domain.ArtifactState,
-	lastResponse *domain.ProtocolResponse,
-	agents map[string]domain.AgentReference,
-	seq int,
-	now time.Time,
-	refreshedStages *domain.StageSet,
-	stageSource ...domain.StageSource,
-) domain.EngineDecision {
+//	ExecutionModeOrchestrated — Next never produces a routing decision.
+//	  It returns EngineDecision{Consult: &ConsultDecision{Trigger:
+//	  ConsultTriggerOrchestratedMode, ...}} for every call, including the
+//	  first call of a new run.
+//
+//	ExecutionModeAuto — On StatusSUCCESS, routes to the On Success target or
+//	  the next EXECUTION row exactly as before. On ANY non-SUCCESS status,
+//	  including StatusCOMPLETED_NEEDS_ACTION, returns a DeviationDecision.
+//	  The On-Findings auto-route never fires.
+//
+//	ExecutionModeAutoReview — As ExecutionModeAuto, plus: on
+//	  StatusCOMPLETED_NEEDS_ACTION where the row's OnFindings hint is
+//	  unambiguous, returns a DispatchDecision targeting that agent's row,
+//	  with in.LastOutputArtifacts injected into the dispatched step's
+//	  Request.InputArtifacts (see review artifact injection below).
+//
+// An unambiguous OnFindings hint is one where ColumnPresent is true, Value is
+// non-empty, and Value contains no space and no parenthesis.
+//
+// Review artifact injection applies to the auto-review COMPLETED_NEEDS_ACTION
+// auto-route-back and to nothing else. A SUCCESS-routed dispatch never carries
+// injected artifacts. The dispatched step's InputArtifacts are the table row's
+// entries in table order, followed by the entries of in.LastOutputArtifacts
+// that are not already present, in their given order. Comparison is on the
+// exact path string as dispatched.
+//
+// DispatchDecision.Steps continues to hold exactly one element.
+func Next(in NextInput) domain.EngineDecision {
+	// Unpack for readability.
+	workflow := in.Workflow
+	stages := in.Stages
+	state := in.State
+	lastResponse := in.LastResponse
+	agents := in.Agents
+	seq := in.Seq
+	now := in.Now
+	refreshedStages := in.RefreshedStages
+	src := in.StageSource
 
-	var src domain.StageSource
-	if len(stageSource) > 0 {
-		src = stageSource[0]
+	// ExecutionModeUnset is a programming error: surface it as an ambiguous-route
+	// deviation rather than silently picking a mode or panicking.
+	if in.Mode == domain.ExecutionModeUnset {
+		return domain.EngineDecision{Deviation: &domain.DeviationDecision{
+			Info: domain.DeviationInfo{
+				Kind:          domain.DeviationAmbiguousRoute,
+				ArtifactState: state,
+			},
+		}}
+	}
+
+	// ExecutionModeOrchestrated: the engine never produces a routing decision.
+	// Return a ConsultDecision for every call, including the first.
+	if in.Mode == domain.ExecutionModeOrchestrated {
+		if state.CurrentState.LastAgent == "" {
+			// First decision of a new run: no row has been dispatched yet.
+			return domain.EngineDecision{Consult: &domain.ConsultDecision{
+				Trigger:       domain.ConsultTriggerOrchestratedMode,
+				CurrentRow:    -1,
+				ArtifactState: state,
+			}}
+		}
+		// Subsequent call: derive position from state. Ignore findCurrentRowIndex
+		// errors — the orchestrator reads the artifact directly and does not depend
+		// on the engine's row resolution.
+		currentRowIdx, _ := findCurrentRowIndex(workflow, stages, state)
+		return domain.EngineDecision{Consult: &domain.ConsultDecision{
+			Trigger:       domain.ConsultTriggerOrchestratedMode,
+			CurrentRow:    currentRowIdx,
+			CurrentPhase:  state.CurrentState.Phase,
+			CurrentStage:  state.CurrentState.Stage,
+			ArtifactState: state,
+		}}
 	}
 
 	// No prior invocations: initial dispatch.
@@ -89,7 +129,10 @@ func Next(
 	// Handle non-SUCCESS responses.
 	if status != domain.StatusSUCCESS {
 		// COMPLETED_NEEDS_ACTION with an unambiguous On Findings hint → loop-back dispatch.
-		if status == domain.StatusCOMPLETED_NEEDS_ACTION && isUnambiguousHint(currentRow.OnFindings) {
+		// This auto-route fires only in auto-review mode; in auto mode it deviates.
+		if in.Mode == domain.ExecutionModeAutoReview &&
+			status == domain.StatusCOMPLETED_NEEDS_ACTION &&
+			isUnambiguousHint(currentRow.OnFindings) {
 			targetAgent := currentRow.OnFindings.Value
 			targetRowIdx := findFirstRowForAgent(workflow, targetAgent)
 			if targetRowIdx >= 0 {
@@ -104,6 +147,11 @@ func Next(
 				if err != nil {
 					return domain.EngineDecision{Stop: &domain.StopDecision{Reason: err.Error()}}
 				}
+				// Inject the reviewing agent's output artifacts into the dispatched
+				// step's InputArtifacts. Entries already present in the table row's
+				// resolved list are not duplicated.
+				step.Request.InputArtifacts = injectReviewArtifacts(
+					step.Request.InputArtifacts, in.LastOutputArtifacts)
 				return domain.EngineDecision{Dispatch: &domain.DispatchDecision{
 					Steps: []domain.DispatchStep{step},
 				}}
@@ -1090,4 +1138,26 @@ func firstRowPhase(workflow domain.AdmittedWorkflow) string {
 		return ""
 	}
 	return workflow.Table.Rows[0].Phase
+}
+
+// injectReviewArtifacts appends entries from lastOutputArtifacts to tableArts,
+// skipping any path already present in tableArts. The result is the table
+// row's entries in their original order, followed by the unique new entries in
+// the order they appear in lastOutputArtifacts.
+func injectReviewArtifacts(tableArts, lastOutputArtifacts []string) []string {
+	if len(lastOutputArtifacts) == 0 {
+		return tableArts
+	}
+	existing := make(map[string]bool, len(tableArts))
+	for _, a := range tableArts {
+		existing[a] = true
+	}
+	result := make([]string, len(tableArts))
+	copy(result, tableArts)
+	for _, a := range lastOutputArtifacts {
+		if !existing[a] {
+			result = append(result, a)
+		}
+	}
+	return result
 }

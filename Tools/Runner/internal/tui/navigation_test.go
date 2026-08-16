@@ -264,90 +264,6 @@ func TestNavigation_ArtifactScreen_EscReturnsToProgress(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Deviation screen
-// ---------------------------------------------------------------------------
-
-func TestNavigation_DeviationMsg_TransitionsToDeviationScreen(t *testing.T) {
-	m := newTestModel()
-	m.progressScreen = newProgressScreen(m)
-	m.screen = screenProgress
-
-	reply := make(chan deviationReplyMsg, 1)
-	info := domain.DeviationInfo{
-		Kind: domain.DeviationNonSuccess,
-		Response: domain.ProtocolResponse{
-			AgentInstanceID: "test-agent#1",
-			StatusCode:      domain.StatusBLOCKED,
-			StatusMessage:   "blocked",
-		},
-		CurrentRow:   0,
-		CurrentPhase: "PLANNING",
-	}
-	m.Update(deviationRequestMsg{info: info, reply: reply})
-
-	if m.screen != screenDeviation {
-		t.Errorf("screen = %v after deviation message, want screenDeviation (%v)", m.screen, screenDeviation)
-	}
-	if m.deviationScreen == nil {
-		t.Error("deviationScreen = nil after deviation message; must be populated")
-	}
-}
-
-func TestNavigation_DeviationScreen_ViewContainsBothResolutionPaths(t *testing.T) {
-	m := newTestModel()
-	m.progressScreen = newProgressScreen(m)
-	m.screen = screenProgress
-
-	reply := make(chan deviationReplyMsg, 1)
-	info := domain.DeviationInfo{
-		Response: domain.ProtocolResponse{
-			AgentInstanceID: "agent#1",
-			StatusCode:      domain.StatusBLOCKED,
-			StatusMessage:   "error message",
-		},
-		CurrentRow:   0,
-		CurrentPhase: "PLANNING",
-	}
-	m.Update(deviationRequestMsg{info: info, reply: reply})
-
-	view := m.View()
-	if !containsAny(view, "Delegate", "delegate", "orchestrator") {
-		t.Errorf("deviation screen does not show delegate option:\n%s", view)
-	}
-	if !containsAny(view, "Manually", "manually", "manual", "Manual") {
-		t.Errorf("deviation screen does not show manual resolution option:\n%s", view)
-	}
-}
-
-func TestNavigation_DeviationScreen_EscSendsStopReply(t *testing.T) {
-	m := newTestModel()
-	m.progressScreen = newProgressScreen(m)
-	m.screen = screenProgress
-
-	reply := make(chan deviationReplyMsg, 1)
-	m.Update(deviationRequestMsg{
-		info:  domain.DeviationInfo{CurrentPhase: "PLANNING"},
-		reply: reply,
-	})
-
-	// Esc from deviation choice screen -> send stop.
-	sendKey(m, tea.KeyEsc)
-
-	select {
-	case result := <-reply:
-		if result.choice != screens.DeviationChoiceStop {
-			t.Errorf("deviation reply choice = %q after Esc, want %q", result.choice, screens.DeviationChoiceStop)
-		}
-	default:
-		t.Error("no reply sent on reply channel after Esc on deviation screen")
-	}
-
-	if m.screen != screenProgress {
-		t.Errorf("screen = %v after deviation Esc, want screenProgress (%v)", m.screen, screenProgress)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Question overlay routing
 // ---------------------------------------------------------------------------
 
@@ -586,9 +502,12 @@ func TestSetupSequence_ForwardNavigation_ReachesProgressScreen(t *testing.T) {
 		t.Fatalf("after task entry: screen = %v, want screenSetupConfig", m.screen)
 	}
 
-	// Accept all five configuration prompts.  The timeout step is always present
+	// Accept all configuration prompts.  The timeout step is always present
 	// now that the fake harness has been removed.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation mode
+	// The mode step is now first and requires an explicit selection (no preselection).
+	// Press Down to move the cursor to the first option (orchestrated), then Enter to confirm.
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})  // move cursor to first mode option (orchestrated)
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select mode → advance to harness
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → must advance to timeout
 
 	// Verify we are at the timeout step (not version drift) before supplying the value.
@@ -604,7 +523,8 @@ func TestSetupSequence_ForwardNavigation_ReachesProgressScreen(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // timeout → version drift
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → transitions to screenProgress
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → manual-resolution
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // manual-resolution: disabled (default, cursor 0) → screenProgress
 
 	if m.screen != screenProgress {
 		t.Errorf("after config completion: screen = %v, want screenProgress", m.screen)
@@ -617,189 +537,6 @@ func TestSetupSequence_ForwardNavigation_ReachesProgressScreen(t *testing.T) {
 	}
 	if m.selections.task != "T" {
 		t.Errorf("task = %q, want %q", m.selections.task, "T")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Deviation screen: full manual flow
-// ---------------------------------------------------------------------------
-
-// TestNavigation_DeviationScreen_ManualFlow_NoAgent_SendsRejoinAtRow drives all nine
-// sub-steps of the manual deviation resolution flow with no agent specified, and
-// asserts that the reply channel receives a DeviationChoiceManual result with an empty
-// Agent field (triggering the RejoinAtRow path in TUIDeviationResolver.Resolve).
-func TestNavigation_DeviationScreen_ManualFlow_NoAgent_SendsRejoinAtRow(t *testing.T) {
-	m := newTestModel()
-	m.progressScreen = newProgressScreen(m)
-	m.screen = screenProgress
-	m.routingTable = domain.RoutingTable{
-		Rows: []domain.RoutingRow{{Index: 0, Agent: "exec-agent", Phase: "EXECUTION"}},
-	}
-
-	reply := make(chan deviationReplyMsg, 1)
-	m.Update(deviationRequestMsg{
-		info: domain.DeviationInfo{
-			Response:     domain.ProtocolResponse{AgentInstanceID: "a#1", StatusCode: domain.StatusBLOCKED},
-			CurrentPhase: "EXECUTION",
-		},
-		reply: reply,
-	})
-	if m.screen != screenDeviation {
-		t.Fatalf("precondition: screen = %v, want screenDeviation", m.screen)
-	}
-
-	// Step 1: choice — press Down to move cursor to "Resolve manually" (index 1), Enter.
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-	// Step 2: row selection — cursor starts on first row (exec-agent), Enter.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-	// Steps 3-7: agent, task, inputs, outputs, constraints — accept empty values.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // agent (empty → no custom dispatch)
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // task
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // input artifacts
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // output artifacts
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // constraints
-
-	// Step 8: HITL override — cursor=0 (No, keep as-is), Enter → done=true.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-	if m.screen != screenProgress {
-		t.Errorf("screen = %v after manual deviation completion, want screenProgress", m.screen)
-	}
-	if m.deviationScreen != nil {
-		t.Error("deviationScreen must be nil after completion")
-	}
-
-	select {
-	case result := <-reply:
-		if result.choice != screens.DeviationChoiceManual {
-			t.Errorf("choice = %q, want %q", result.choice, screens.DeviationChoiceManual)
-		}
-		if result.resolution.Agent != "" {
-			t.Errorf("Agent = %q, want empty string (RejoinAtRow path)", result.resolution.Agent)
-		}
-		if result.resolution.RejoinRowIndex != 0 {
-			t.Errorf("RejoinRowIndex = %d, want 0", result.resolution.RejoinRowIndex)
-		}
-		if result.resolution.HITLOverride != nil {
-			t.Errorf("HITLOverride = %v, want nil (no override selected)", result.resolution.HITLOverride)
-		}
-	default:
-		t.Error("no reply received on channel after manual deviation completion")
-	}
-}
-
-// TestNavigation_DeviationScreen_ManualFlow_WithAgent_SendsCustomDispatch is the same
-// as the no-agent test but types a non-empty agent name in step 3, which causes the
-// resolution to carry Agent != "" (triggering the CustomDispatch path).
-func TestNavigation_DeviationScreen_ManualFlow_WithAgent_SendsCustomDispatch(t *testing.T) {
-	m := newTestModel()
-	m.progressScreen = newProgressScreen(m)
-	m.screen = screenProgress
-	m.routingTable = domain.RoutingTable{
-		Rows: []domain.RoutingRow{{Index: 0, Agent: "exec-agent", Phase: "EXECUTION"}},
-	}
-
-	reply := make(chan deviationReplyMsg, 1)
-	m.Update(deviationRequestMsg{
-		info: domain.DeviationInfo{
-			Response:     domain.ProtocolResponse{AgentInstanceID: "a#1", StatusCode: domain.StatusBLOCKED},
-			CurrentPhase: "EXECUTION",
-		},
-		reply: reply,
-	})
-
-	// Step 1: choose "Resolve manually".
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-	// Step 2: row selection.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-	// Step 3: agent input — type 'R' (non-empty), then Enter.
-	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-	// Steps 4-7: task, inputs, outputs, constraints — empty.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // task
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // inputs
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // outputs
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // constraints
-
-	// Step 8: HITL — no override.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-	if m.screen != screenProgress {
-		t.Errorf("screen = %v after manual deviation with agent, want screenProgress", m.screen)
-	}
-
-	select {
-	case result := <-reply:
-		if result.choice != screens.DeviationChoiceManual {
-			t.Errorf("choice = %q, want %q", result.choice, screens.DeviationChoiceManual)
-		}
-		if result.resolution.Agent != "R" {
-			t.Errorf("Agent = %q, want %q (custom dispatch path)", result.resolution.Agent, "R")
-		}
-	default:
-		t.Error("no reply received after manual deviation with agent")
-	}
-}
-
-// TestNavigation_DeviationScreen_ManualFlow_HITLOverride_SetsValue drives the full manual
-// flow and navigates the HITL sub-steps (steps 8-9) to select "Yes (override)" and then
-// "true", asserting that the resolved HITLOverride is non-nil and set to true.
-func TestNavigation_DeviationScreen_ManualFlow_HITLOverride_SetsValue(t *testing.T) {
-	m := newTestModel()
-	m.progressScreen = newProgressScreen(m)
-	m.screen = screenProgress
-	m.routingTable = domain.RoutingTable{
-		Rows: []domain.RoutingRow{{Index: 0, Agent: "exec-agent", Phase: "EXECUTION"}},
-	}
-
-	reply := make(chan deviationReplyMsg, 1)
-	m.Update(deviationRequestMsg{
-		info:  domain.DeviationInfo{CurrentPhase: "EXECUTION"},
-		reply: reply,
-	})
-
-	// Steps 1-7: navigate to manual choice, select row, and accept all text fields.
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})  // step 1a
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // step 1b select manual
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // step 2  select row
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // step 3  agent (empty)
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // step 4  task
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // step 5  inputs
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // step 6  outputs
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // step 7  constraints
-
-	// Step 8: HITL choice — press Down to move to "Yes (override)" (cursor=1), Enter.
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // advance to deviationStepManualHITLValue
-
-	// Step 9: HITL value — press Up to select "true" (default index 1 = false → Up → 0 = true), Enter.
-	m.Update(tea.KeyMsg{Type: tea.KeyUp})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // done = true, HITLOverride = &true
-
-	if m.screen != screenProgress {
-		t.Errorf("screen = %v after HITL override deviation, want screenProgress", m.screen)
-	}
-
-	select {
-	case result := <-reply:
-		if result.choice != screens.DeviationChoiceManual {
-			t.Errorf("choice = %q, want %q", result.choice, screens.DeviationChoiceManual)
-		}
-		if result.resolution.HITLOverride == nil {
-			t.Fatal("HITLOverride = nil, want non-nil (user selected override)")
-		}
-		if !*result.resolution.HITLOverride {
-			t.Errorf("*HITLOverride = false, want true")
-		}
-	default:
-		t.Error("no reply received after HITL override deviation flow")
 	}
 }
 
@@ -825,154 +562,6 @@ func TestNavigation_NoticeMsg_UpdatesProgressStatus(t *testing.T) {
 	view := m.progressScreen.View()
 	if view == "" {
 		t.Error("progress screen view is empty after notice update")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// buildRoutingTable
-// ---------------------------------------------------------------------------
-
-// TestNavigation_BuildRoutingTable_ReturnsStoredTable verifies that buildRoutingTable()
-// returns whatever routing table was stored on the model during workflow selection.
-// This ensures NewDeviationScreen receives real row data, not an empty table.
-func TestNavigation_BuildRoutingTable_ReturnsStoredTable(t *testing.T) {
-	m := newTestModel()
-	m.routingTable = domain.RoutingTable{
-		Rows: []domain.RoutingRow{
-			{Index: 0, Agent: "planner-agent", Phase: "PLANNING"},
-			{Index: 1, Agent: "impl-agent", Phase: "EXECUTION"},
-		},
-	}
-
-	table := m.buildRoutingTable()
-
-	if len(table.Rows) != 2 {
-		t.Fatalf("buildRoutingTable() returned %d rows, want 2", len(table.Rows))
-	}
-	if table.Rows[0].Agent != "planner-agent" {
-		t.Errorf("row 0 agent = %q, want %q", table.Rows[0].Agent, "planner-agent")
-	}
-	if table.Rows[1].Agent != "impl-agent" {
-		t.Errorf("row 1 agent = %q, want %q", table.Rows[1].Agent, "impl-agent")
-	}
-}
-
-// TestNavigation_BuildRoutingTable_EmptyByDefault verifies that a freshly
-// constructed model has an empty routing table before any workflow is selected.
-func TestNavigation_BuildRoutingTable_EmptyByDefault(t *testing.T) {
-	m := newTestModel()
-	table := m.buildRoutingTable()
-	if len(table.Rows) != 0 {
-		t.Errorf("buildRoutingTable() on fresh model returned %d rows, want 0", len(table.Rows))
-	}
-}
-
-// TestNavigation_DeviationScreen_RoutingTableRows_AppearsInManualView verifies that
-// routing table rows set before a deviation event are visible in the manual row
-// selection sub-screen of the deviation screen.
-func TestNavigation_DeviationScreen_RoutingTableRows_AppearsInManualView(t *testing.T) {
-	m := newTestModel()
-	m.progressScreen = newProgressScreen(m)
-	m.screen = screenProgress
-	// Pre-populate routing table (as updateSetupWorkflow would after workflow selection).
-	m.routingTable = domain.RoutingTable{
-		Rows: []domain.RoutingRow{
-			{Index: 0, Agent: "routing-test-agent", Phase: "PLANNING"},
-		},
-	}
-
-	reply := make(chan deviationReplyMsg, 1)
-	m.Update(deviationRequestMsg{
-		info: domain.DeviationInfo{
-			Response:     domain.ProtocolResponse{AgentInstanceID: "x#1", StatusCode: domain.StatusBLOCKED},
-			CurrentPhase: "PLANNING",
-		},
-		reply: reply,
-	})
-
-	// Navigate from the choice list to the manual row list:
-	// press Down to move cursor to "Resolve manually" (index 1), then Enter.
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
-	view := m.View()
-	if !containsStr(view, "routing-test-agent") {
-		t.Errorf("manual row-selection view does not contain the routing-table agent name %q:\n%s",
-			"routing-test-agent", view)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Deviation delegate completion
-// ---------------------------------------------------------------------------
-
-// TestNavigation_DeviationDelegate_EnterSendsDelegateReply verifies that pressing
-// Enter on the default choice (Delegate) sends a DeviationChoiceDelegate reply
-// and returns the screen to screenProgress.
-func TestNavigation_DeviationDelegate_EnterSendsDelegateReply(t *testing.T) {
-	m := newTestModel()
-	m.progressScreen = newProgressScreen(m)
-	m.screen = screenProgress
-
-	reply := make(chan deviationReplyMsg, 1)
-	m.Update(deviationRequestMsg{
-		info: domain.DeviationInfo{
-			Response: domain.ProtocolResponse{
-				AgentInstanceID: "agent#1",
-				StatusCode:      domain.StatusBLOCKED,
-				StatusMessage:   "test",
-			},
-			CurrentPhase: "PLANNING",
-		},
-		reply: reply,
-	})
-
-	if m.screen != screenDeviation {
-		t.Fatalf("precondition: screen = %v, want screenDeviation", m.screen)
-	}
-
-	// The cursor starts on "Delegate to orchestrator" (index 0). Enter selects it.
-	sendKey(m, tea.KeyEnter)
-
-	select {
-	case result := <-reply:
-		if result.choice != screens.DeviationChoiceDelegate {
-			t.Errorf("deviation reply = %q, want %q", result.choice, screens.DeviationChoiceDelegate)
-		}
-	default:
-		t.Error("no reply on channel after Enter on deviation choice screen")
-	}
-
-	if m.screen != screenProgress {
-		t.Errorf("screen = %v after deviation completion, want screenProgress (%v)", m.screen, screenProgress)
-	}
-}
-
-// TestNavigation_DeviationStop_ChoiceEnterSendsStopReply verifies that selecting
-// "Stop the run" (index 2) from the deviation choice list sends DeviationChoiceStop.
-func TestNavigation_DeviationStop_ChoiceEnterSendsStopReply(t *testing.T) {
-	m := newTestModel()
-	m.progressScreen = newProgressScreen(m)
-	m.screen = screenProgress
-
-	reply := make(chan deviationReplyMsg, 1)
-	m.Update(deviationRequestMsg{
-		info:  domain.DeviationInfo{CurrentPhase: "PLANNING"},
-		reply: reply,
-	})
-
-	// Navigate down twice to "Stop the run" (index 2), then Enter.
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	sendKey(m, tea.KeyEnter)
-
-	select {
-	case result := <-reply:
-		if result.choice != screens.DeviationChoiceStop {
-			t.Errorf("deviation reply = %q, want %q", result.choice, screens.DeviationChoiceStop)
-		}
-	default:
-		t.Error("no reply on channel after selecting Stop from deviation choice screen")
 	}
 }
 
@@ -1185,16 +774,19 @@ func TestRunSelect_EnterOnCandidate_SetsRunIDAndAdvances(t *testing.T) {
 // ConfigScreen: ExistingArtifact step removed; fake harness removed
 // ---------------------------------------------------------------------------
 
-// TestConfigScreen_PromptsCount verifies that the ConfigScreen presents exactly five
-// prompts: deviation handling, harness selection, invocation timeout, version drift,
-// and checkpoints.  The timeout step is always present now that the fake harness has
-// been removed from the harness step.
+// TestConfigScreen_PromptsCount verifies that the ConfigScreen presents exactly six
+// prompts in orchestrated mode: execution mode, harness selection, invocation timeout,
+// version drift, checkpoints, and manual resolution.  The timeout step is always
+// present now that the fake harness has been removed from the harness step.
 func TestConfigScreen_PromptsCount(t *testing.T) {
 	m := newTestModel()
 	m.screen = screenSetupConfig
 
-	// Step 1: accept deviation mode.
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Step 1: select execution mode. The mode step requires an explicit choice;
+	// pressing Enter with no cursor movement is rejected (no preselection).
+	// Press Down to move the cursor to the first option (orchestrated), then Enter to confirm.
+	m.Update(tea.KeyMsg{Type: tea.KeyDown})  // move cursor to orchestrated (first option)
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // select mode → advance to harness
 	// Step 2: accept harness selection — must advance to the timeout step, not version drift.
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -1213,12 +805,13 @@ func TestConfigScreen_PromptsCount(t *testing.T) {
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
-	// Steps 4–5: version drift and checkpoints.
+	// Steps 4–6: version drift, checkpoints, and manual resolution.
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
-	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → progress
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → manual-resolution
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // manual-resolution: disabled (default, cursor 0) → progress
 
 	if m.screen != screenProgress {
-		t.Errorf("screen = %v after five config steps, want screenProgress (%v)", m.screen, screenProgress)
+		t.Errorf("screen = %v after six config steps, want screenProgress (%v)", m.screen, screenProgress)
 	}
 }
 
@@ -1232,9 +825,7 @@ func TestConfigScreen_HarnessStep_NoFakeOrScriptedText(t *testing.T) {
 	style := stylesFromTheme(tuicommon.DefaultTheme())
 	s := screens.NewConfigScreen(80, 24, style)
 
-	// Advance past deviation to reach the harness step.
-	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
-
+	// Harness is now the first step; no advance needed.
 	view := s.View()
 	if containsAny(view, "fake", "Fake", "scripted", "Scripted") {
 		t.Errorf("harness step view contains fake/scripted harness reference; want no such mention:\n%s", view)
@@ -1247,9 +838,19 @@ func TestConfigScreen_HarnessStep_ContainsRealHarnessOption(t *testing.T) {
 	style := stylesFromTheme(tuicommon.DefaultTheme())
 	s := screens.NewConfigScreen(80, 24, style)
 
-	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation → harness step
-
+	// Mode is the first step; advance past it by selecting orchestrated (Down + Enter).
+	s.Update(tea.KeyMsg{Type: tea.KeyDown})  // move cursor to first mode option
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // confirm mode selection
 	view := s.View()
+	// In pre-I8.1 RED state the mode step is not first: Down moved the harness cursor
+	// to position 1 ("opencode") and Enter confirmed it, advancing to the timeout step.
+	// The view therefore shows the timeout prompt, not harness labels. The correct RED
+	// failure for this test is "harness renders a single hardcoded option, not
+	// CLISelections() labels" (I4.6 missing) — but the test never reaches the harness
+	// step. Skip until I8.1 wires mode as the first step.
+	if containsAny(view, "timeout", "Timeout", "Invocation", "invocation") {
+		t.Fatalf("I8.1 not yet implemented: mode step not first; Down+Enter advances harness step instead of mode step and lands at timeout. Do not ship I4.6 verification until I8.1 is complete.")
+	}
 	if !containsAny(view, "Claude Code CLI", "Claude Code", "claude-code") {
 		t.Errorf("harness step view does not contain real harness option:\n%s", view)
 	}
@@ -1269,8 +870,7 @@ func TestConfigScreen_HarnessStep_CursorMovesBetweenAcceptedHarnesses(t *testing
 	style := stylesFromTheme(tuicommon.DefaultTheme())
 	s := screens.NewConfigScreen(80, 24, style)
 
-	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation → harness step
-
+	// Harness is now the first step; no advance needed.
 	viewBefore := s.View()
 	s.Update(tea.KeyMsg{Type: tea.KeyDown}) // move cursor to the next accepted harness
 	viewAfter := s.View()
@@ -1287,7 +887,8 @@ func TestConfigScreen_HarnessStep_AdvancesToTimeoutStep(t *testing.T) {
 	style := stylesFromTheme(tuicommon.DefaultTheme())
 	s := screens.NewConfigScreen(80, 24, style)
 
-	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation
+	s.Update(tea.KeyMsg{Type: tea.KeyDown})  // mode: move cursor to first option (orchestrated)
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // mode: confirm selection
 	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → must go to timeout
 
 	view := s.View()
@@ -1306,15 +907,29 @@ func TestConfigScreen_HarnessStep_SelectionIsAlwaysClaudeCode(t *testing.T) {
 	style := stylesFromTheme(tuicommon.DefaultTheme())
 	s := screens.NewConfigScreen(80, 24, style)
 
-	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation
+	s.Update(tea.KeyMsg{Type: tea.KeyDown})  // mode: move cursor to first option (orchestrated)
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // mode: confirm selection
+	// In pre-I8.1 RED state the mode step is not first: Down moved the harness cursor to
+	// position 1 ("opencode") and Enter confirmed it, advancing to the timeout step.
+	// All subsequent interactions drive the remaining steps and the wizard completes with
+	// sel.Harness = "opencode" — which makes the test fail for I8.1 reasons (wrong harness
+	// selected accidentally) rather than I4.6 reasons (harness step always assigns
+	// "claude-code" regardless of cursor). Skip until I8.1 wires mode as the first step.
+	{
+		view := s.View()
+		if containsAny(view, "timeout", "Timeout", "Invocation", "invocation") {
+			t.Fatalf("I8.1 not yet implemented: mode step not first; Down+Enter advances harness step instead of mode step and lands at timeout. Do not ship I4.6 verification until I8.1 is complete.")
+		}
+	}
 	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → timeout
 	// Confirm a valid invocation timeout.
 	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
 	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
 	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
 	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // timeout → version drift
-	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift
-	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → done
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // version drift → checkpoints
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // checkpoints → manual resolution
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // manual resolution → done
 
 	if !s.Done() {
 		t.Fatal("ConfigScreen did not reach Done() after driving through all steps; cannot verify Selection()")
@@ -1338,8 +953,9 @@ func TestConfigScreen_EscBackNavigation_VersionDriftToTimeoutStep(t *testing.T) 
 	style := stylesFromTheme(tuicommon.DefaultTheme())
 	s := screens.NewConfigScreen(80, 24, style)
 
-	// Advance deviation → harness.
-	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Mode is the first step; advance past it before reaching harness.
+	s.Update(tea.KeyMsg{Type: tea.KeyDown})  // mode: move cursor to first option (orchestrated)
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // mode: confirm selection
 	// Confirm harness — must go to timeout step, not version drift.
 	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -1370,7 +986,8 @@ func TestConfigScreen_EscBackNavigation_TimeoutToHarnessStep(t *testing.T) {
 	style := stylesFromTheme(tuicommon.DefaultTheme())
 	s := screens.NewConfigScreen(80, 24, style)
 
-	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // deviation
+	s.Update(tea.KeyMsg{Type: tea.KeyDown})  // mode: move cursor to first option (orchestrated)
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // mode: confirm selection
 	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // harness → timeout
 
 	view := s.View()

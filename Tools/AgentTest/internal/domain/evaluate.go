@@ -2,6 +2,16 @@ package domain
 
 import "time"
 
+// AttemptEvaluator turns one attempt's evidence into its result. It is
+// declared here, below both the runner and the suite, so the port, its three
+// implementations and the runner all name one type rather than four
+// structurally identical ones.
+//
+// An implementation must be pure with respect to the sandbox: it is invoked
+// while the sandbox is still on disk, before teardown, and it must not depend
+// on that fact. internal/evaluate.Evaluate satisfies this by construction.
+type AttemptEvaluator func(RunEvidence) TestResult
+
 // ViolationClassKey mirrors protocolcheck.ViolationClass as a domain-level
 // string, so domain does not import a pure core to name a violation class.
 type ViolationClassKey string
@@ -71,6 +81,17 @@ type RunEvidence struct {
 	// renderings show as unknown, never as a blank that reads like a real
 	// value.
 	SubjectVersion string
+
+	// SubjectModel and StubModel are the models this run actually used, taken
+	// from the same tier-model map the deployment port was given — not from a
+	// parallel source, and not from the test definition, which no longer
+	// carries one.
+	//
+	// Empty means no model was recorded for this run, a legal state the
+	// renderings show as unknown rather than as a blank that reads like a
+	// real value. This mirrors SubjectVersion's treatment exactly.
+	SubjectModel string
+	StubModel    string
 }
 
 // TestResult is the outcome of evaluating one run's evidence: a verdict with
@@ -110,6 +131,12 @@ type TestResult struct {
 	// declared no version; the renderings show it as unknown rather than
 	// blank.
 	SubjectVersion string
+
+	// SubjectModel and StubModel are carried through from RunEvidence
+	// unchanged, exactly as RetainedSandboxPath and SubjectVersion are, so a
+	// report can attribute a regression to a model change.
+	SubjectModel string
+	StubModel    string
 }
 
 // AssertionOutcome is the per-assertion result of evaluating one class.
@@ -212,6 +239,15 @@ type AggregateResult struct {
 	Passed   int
 	Excluded int
 	PassRate float64
+
+	// RequiredPassRate is the threshold this test was judged against, as a
+	// fraction 0..1, recorded at aggregation time from the repetition policy.
+	//
+	// It exists because PassRate alone is not a verdict a reader can check:
+	// "60%" means nothing without "required 80%". Zero is a legal value
+	// meaning every outcome passes, and is not a stand-in for "no threshold".
+	RequiredPassRate float64
+
 	// InfrastructureFailure is set when a state-integrity run recurred
 	// after its single retry.
 	InfrastructureFailure bool

@@ -28,9 +28,7 @@ subject:
     Constraints: none. Do not ask me any further questions - proceed with the
     workflow immediately and autonomously using the information above.
   invocation_kind: orchestrator
-  model: sonnet
-  stub_model: haiku
-  allowed_tools: [Task]
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
 
 stub_registry: one-dispatch.stubs.json
 

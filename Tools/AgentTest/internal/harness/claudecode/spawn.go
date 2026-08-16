@@ -41,6 +41,7 @@ func (a *Adapter) SpawnPlan(ctx context.Context, subject domain.SubjectUnderTest
 		Model:        subject.Model,
 		AllowedTools: subject.AllowedTools,
 		OutputFormat: "json",
+		WorkingDir:   p.Sandbox.SubjectDir,
 	}
 
 	args, stdin, err := commonharness.BuildArgs(spawnReq)

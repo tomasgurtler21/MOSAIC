@@ -54,7 +54,7 @@ func TestSetup_CataloguePathIssuesOneDeployCallAndNoRenderCalls(t *testing.T) {
 	h := newHarness(t)
 	req := catalogueRequest("catalogue-path-deploy-only")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestSetup_CataloguePathDeployCallCarriesSubjectWorkflows(t *testing.T) {
 		req := catalogueRequest("catalogue-workflows-declared")
 		req.Test.Definition.Subject.Workflows = []string{"brownfield-tdd"}
 
-		if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 			t.Fatalf("Run returned unexpected error: %v", err)
 		}
 
@@ -105,7 +105,7 @@ func TestSetup_CataloguePathDeployCallCarriesSubjectWorkflows(t *testing.T) {
 		req := catalogueRequest("catalogue-workflows-nil")
 		req.Test.Definition.Subject.Workflows = nil
 
-		if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 			t.Fatalf("Run returned unexpected error: %v", err)
 		}
 
@@ -141,7 +141,7 @@ func TestSetup_StubAgentsPathIssuesRenderCallsAndNoDeployCall(t *testing.T) {
 		},
 	}
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -176,7 +176,7 @@ func TestSetup_CataloguePathLedger_AgentsRecordedBeforeSubsequentSteps(t *testin
 
 	req := catalogueRequest("catalogue-ledger-agents")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -217,7 +217,7 @@ func TestSetup_CataloguePathLedger_CreatedDirectoriesRecorded(t *testing.T) {
 
 	req := catalogueRequest("catalogue-ledger-dirs")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -255,7 +255,7 @@ func TestSetup_CataloguePathLedger_RecordedBeforeProvisionFailure(t *testing.T) 
 
 	req := catalogueRequest("catalogue-ledger-before-provision-fail")
 
-	_, err := runner.Run(context.Background(), h.Deps, req)
+	_, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err == nil {
 		t.Fatal("Run returned nil error when Provision failed; want non-nil error")
 	}
@@ -293,7 +293,7 @@ func TestSetup_CataloguePathDeployCarriesTierModelMap(t *testing.T) {
 	req.Test.Definition.Subject.Model = "claude-opus-4-5"
 	req.Test.Definition.Subject.StubModel = "claude-haiku-3-5"
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -342,7 +342,7 @@ func TestSetup_CataloguePathDeploy_AbsentStubModelFallsBackToSubjectModel(t *tes
 	req.Test.Definition.Subject.Model = "claude-opus-4-5"
 	req.Test.Definition.Subject.StubModel = "" // absent — fallback case
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -380,7 +380,7 @@ func TestSetup_CataloguePathDeploy_TierMapHasExactlyTwoEntries(t *testing.T) {
 	req.Test.Definition.Subject.Model = "claude-opus-4-5"
 	req.Test.Definition.Subject.StubModel = "claude-haiku-3-5"
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -411,7 +411,7 @@ func TestSetup_CataloguePathRecordsSubjectVersionAsEmpty(t *testing.T) {
 	// Default deployFn returns a result with no version — by contract, deploy
 	// never reports a source version. No extra configuration needed.
 
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
+	result, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
@@ -429,12 +429,12 @@ func TestSetup_CataloguePathRecordsSubjectVersionAsEmpty(t *testing.T) {
 			len(h.Deployer.allDeployCalls()))
 	}
 
-	if evidence.SubjectVersion != "" {
-		t.Errorf("evidence.SubjectVersion = %q, want empty string; "+
+	if result.SubjectVersion != "" {
+		t.Errorf("result.SubjectVersion = %q, want empty string; "+
 			"the catalogue path records no source version because Deploy reports none — "+
 			"the report layer renders empty as 'unknown'. "+
 			"The runner must NOT reconstruct the version by parsing the deployed file.",
-			evidence.SubjectVersion)
+			result.SubjectVersion)
 	}
 }
 
@@ -464,7 +464,7 @@ func TestSetup_CataloguePathDerivesDefinitionPathFromDeployReport(t *testing.T) 
 
 	req := catalogueRequest("catalogue-definition-path")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -524,7 +524,7 @@ func TestSetup_CataloguePathMatchesAgentByKey(t *testing.T) {
 
 	req := catalogueRequest("catalogue-key-based-match")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -580,7 +580,7 @@ func TestSetup_CataloguePathDeployResult_SubjectKeyNotFound_ReturnsError(t *test
 
 	req := catalogueRequest("catalogue-key-not-found")
 
-	_, err := runner.Run(context.Background(), h.Deps, req)
+	_, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err == nil {
 		t.Error("Run returned nil error when the Deploy result contains no entry matching the " +
 			"declared CatalogAgentKey; want a non-nil error surfacing the misconfiguration — " +
@@ -602,7 +602,7 @@ func TestSetup_CataloguePathNilDeploy_SkipsDeployGracefully(t *testing.T) {
 
 	req := catalogueRequest("catalogue-nil-deploy")
 
-	_, err := runner.Run(context.Background(), h.Deps, req)
+	_, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err != nil {
 		t.Errorf("Run returned unexpected error when Deps.Deploy is nil: %v; "+
 			"nil Deploy must be treated as 'not supplied means not checked' — "+

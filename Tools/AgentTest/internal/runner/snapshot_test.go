@@ -22,20 +22,28 @@ func TestRun_SnapshotFilesSurviveIntoEvidenceEvenThoughTheSandboxIsGone(t *testi
 		{Path: "notes/plan.md", Content: "seeded plan content"},
 	}
 
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
-	if err != nil {
+	// Capture the evidence via an evaluator so the test can inspect
+	// RunEvidence-specific fields (SnapshotFiles) after Run returns and
+	// teardown has already removed the sandbox.
+	var capturedEvidence domain.RunEvidence
+	eval := func(ev domain.RunEvidence) domain.TestResult {
+		capturedEvidence = ev
+		return domain.TestResult{}
+	}
+
+	if _, err := runner.Run(context.Background(), h.Deps, req, eval); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
 	found := false
-	for _, f := range evidence.SnapshotFiles {
+	for _, f := range capturedEvidence.SnapshotFiles {
 		if f == "notes/plan.md" || f == `notes\plan.md` {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("evidence.SnapshotFiles = %v, want it to include the seeded file captured before teardown removed the sandbox", evidence.SnapshotFiles)
+		t.Errorf("capturedEvidence.SnapshotFiles = %v, want it to include the seeded file captured before teardown removed the sandbox", capturedEvidence.SnapshotFiles)
 	}
 }
 
@@ -50,16 +58,16 @@ func TestRun_SubjectResultIsPartOfTheCapturedEvidence(t *testing.T) {
 	}
 	req := newRequest("subject-result-evidence")
 
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
+	result, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
-	if evidence.SubjectResult.ProtocolMessage == "" {
-		t.Error("evidence.SubjectResult.ProtocolMessage is empty, want the subject's own final protocol message")
+	if result.SubjectResult.ProtocolMessage == "" {
+		t.Error("result.SubjectResult.ProtocolMessage is empty, want the subject's own final protocol message")
 	}
-	if evidence.SubjectResult.Disposition != domain.DispositionCompleted {
-		t.Errorf("evidence.SubjectResult.Disposition = %q, want %q", evidence.SubjectResult.Disposition, domain.DispositionCompleted)
+	if result.SubjectResult.Disposition != domain.DispositionCompleted {
+		t.Errorf("result.SubjectResult.Disposition = %q, want %q", result.SubjectResult.Disposition, domain.DispositionCompleted)
 	}
 }
 
@@ -67,7 +75,7 @@ func TestRun_CostIsReadAfterExecutionAndBeforeTeardown(t *testing.T) {
 	h := newHarness(t)
 	req := newRequest("cost-ordering")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -105,7 +113,7 @@ func TestRun_CostQueryNamesTheSnapshotsLogRoot(t *testing.T) {
 	h := newHarness(t)
 	req := newRequest("cost-log-root")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 

@@ -7,10 +7,15 @@ type RunConfig struct {
 	Task                 string        // task description
 	RunID                string        // resolved run_id (minted or from scan); empty triggers minting
 	RunFolder            string        // resolved run-scoped folder path (absolute, e.g. "/workspace/Orchestration-20260727T170000Z-a3f9")
-	OnDeviation          DeviationMode // how to handle deviations in non-interactive mode
 	AllowVersionDrift    bool          // override version check
-	Checkpoints          bool          // checkpoint support
 	IsNewRun             bool          // true = create new artifact; false = resume existing
+
+	// RunSettings holds every run-configuration decision that is settled at run
+	// start, immutable for the run, and persisted in the artifact frontmatter so
+	// a resumed run reads it back instead of re-asking. Embedding promotes all
+	// seven fields (Mode, Checkpoints, Commits, CommitBranchVariant, CommitBranch,
+	// PreConsultation, ManualResolution) directly onto RunConfig.
+	RunSettings
 
 	// InfraClassSelections maps gated infrastructure class names to the selected
 	// agent name for this run. Only populated when multiple agents of the same
@@ -37,15 +42,47 @@ type RunConfig struct {
 	// The CLI --input flag populates this. It is nil for TUI-started runs,
 	// which therefore seed nothing.
 	SeedInputs []string
+
+	// ManualDispatch signals to the session layer that the user chose Manual
+	// Dispatch from the stop recovery screen. When true, the session must use
+	// ManualResolver for the first routing decision of this restart and then
+	// return to the configured RoutingConsultant for subsequent decisions. When
+	// false (the default and for normal Retry), the configured consultant handles
+	// all routing decisions from the start.
+	ManualDispatch bool
 }
 
-// DeviationMode controls non-interactive deviation handling.
-type DeviationMode string
+// RunSettings carries every run-configuration decision that is settled at run
+// start, immutable for the run, and persisted in the artifact frontmatter so a
+// resumed run reads it back instead of re-asking.
+//
+// It is passed to ArtifactStore.Create so all six decisions are recorded in
+// the Orchestration.md frontmatter on run creation.
+type RunSettings struct {
+	// Mode is required. ExecutionModeUnset is a refusal at run start, both for
+	// a new run and on resume.
+	Mode ExecutionMode
 
-const (
-	DeviationDelegate DeviationMode = "delegate" // default: delegate to orchestrator
-	DeviationStop     DeviationMode = "stop"      // stop the run
-)
+	// Checkpoints enables checkpoint-class infrastructure dispatch.
+	Checkpoints bool
+
+	// Commits enables commit-class infrastructure dispatch.
+	Commits bool
+
+	// CommitBranchVariant selects which branch a commits-enabled run commits to.
+	// Defaults to CommitBranchMOSAICOwned.
+	CommitBranchVariant CommitBranchVariant
+
+	// CommitBranch is the branch name the commit setup dispatch reported.
+	// Empty when Commits is false.
+	CommitBranch string
+
+	// PreConsultation enables the one-shot run-start pre-consultation.
+	PreConsultation bool
+
+	// ManualResolution puts the user in the resolver's place.
+	ManualResolution bool
+}
 
 // RunOutcome is the result of a session run.
 type RunOutcome struct {
@@ -53,15 +90,26 @@ type RunOutcome struct {
 	Message      string        // human-readable description
 	ArtifactPath string        // path to the final Orchestration.md
 	LastState    *CurrentState // nil if no invocation was made (e.g. refusal)
+
+	// StopReason carries the consultant's verbatim reason when Status is
+	// RunStoppedByConsultant. Empty for every other status. It is what the CLI
+	// prints and what the TUI stop screen presents above its recovery options.
+	StopReason string
 }
 
 // RunStatus classifies the run's outcome for exit code mapping.
 type RunStatus string
 
 const (
-	RunCompleted           RunStatus = "completed"           // run finished successfully
-	RunStopped             RunStatus = "stopped"             // graceful stop, resumable
+	RunCompleted           RunStatus = "completed"            // run finished successfully
+	RunStopped             RunStatus = "stopped"              // graceful stop, resumable
 	RunDeviationUnresolved RunStatus = "deviation-unresolved" // deviation could not be resolved
-	RunRefused             RunStatus = "refused"             // workflow or artifact refused before any invocation
-	RunFailed              RunStatus = "failed"              // unexpected error
+	RunRefused             RunStatus = "refused"              // workflow or artifact refused before any invocation
+	RunFailed              RunStatus = "failed"               // unexpected error
+
+	// RunStoppedByConsultant: the routing consultant returned a stop instruction,
+	// or an orchestrator failure ended the run. The artifact is left resumable.
+	// The CLI prints StopReason and exits non-zero; the TUI presents StopReason
+	// with retry and manual-dispatch recovery.
+	RunStoppedByConsultant RunStatus = "stopped-by-consultant"
 )

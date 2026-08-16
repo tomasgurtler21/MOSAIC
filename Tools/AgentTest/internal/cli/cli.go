@@ -46,6 +46,16 @@ type RunConfig struct {
 	Retention domain.RetentionPolicy
 }
 
+// WriteFileFunc writes data to path, creating the file or truncating an
+// existing one, and creating any missing parent directories. Supplied by the
+// composition root; this package constructs nothing and touches no real
+// filesystem of its own, so a test observes report writing without one.
+//
+// A nil WriteFileFunc means "no report file can be written": the frontend
+// reports that as a report-write failure rather than silently skipping the
+// write, so a wiring omission is visible.
+type WriteFileFunc func(path string, data []byte) error
+
 // SuiteFactory binds an invocation's resolved configuration to a fully
 // wired suite. It is supplied by the composition root and is the only
 // thing that constructs anything; Execute calls it and constructs nothing
@@ -87,6 +97,25 @@ type Options struct {
 	// silent default. The CLI restates no harness identity of its own, so
 	// flag validation cannot drift from the catalog.
 	Harnesses []commonharness.CLIHarness
+
+	// Models is the per-harness model catalog, supplied by the composition
+	// root from mosaic-common/harness. --subject-model and --stub-model are
+	// validated against the entry matching the resolved harness id. The CLI
+	// restates no model identity of its own, so flag validation cannot drift
+	// from the catalog.
+	//
+	// An empty Models, or a Models with no entry for the resolved harness,
+	// rejects nothing — the same convention Harnesses already follows, so an
+	// unwired context does not reject every value.
+	Models []commonharness.ModelCatalog
+
+	// DefaultReportPath is the JSON report file location used when
+	// --report-path is absent. Resolved by the composition root so both
+	// frontends default to the same place.
+	DefaultReportPath string
+
+	// WriteFile writes the JSON report file. See WriteFileFunc.
+	WriteFile WriteFileFunc
 }
 
 // Execute runs the command line and returns the process exit code. It
@@ -100,13 +129,14 @@ type Options struct {
 // `validate <suite>` pre-flights only and neither creates a sandbox nor
 // spawns an agent. Both accept, in space-separated and equals-separated
 // forms: --tests (comma-separated subset), --harness, --format (text|json),
-// --fixtures, --workspace-root, --timeout, --repetitions, --logger-bundle
-// and --cost-tool (both pre-scanned and consumed by the composition root;
-// this package only recognises them so it does not reject them as
-// unknown). --tui is recognised and ignored — it too is consumed by the
-// composition root. --help/-h and a bare invocation (no arguments) both
-// write the usage surface (see help.go) rather than only an error. An
-// unknown flag or a flag missing its value is a usage error (ExitUsage).
+// --fixtures, --workspace-root, --timeout, --repetitions, --logger-bundle,
+// --cost-tool, --subject-model, --stub-model, --report-path, --no-report
+// and --suites (all pre-scanned and consumed by the composition root; this
+// package only recognises them so it does not reject them as unknown).
+// --tui is recognised and ignored — it too is consumed by the composition
+// root. --help/-h and a bare invocation (no arguments) both write the usage
+// surface (see help.go) rather than only an error. An unknown flag or a
+// flag missing its value is a usage error (ExitUsage).
 //
 // See run.go for the implementation: flag parsing, pre-flight dispatch, the
 // deferred suite-factory call, progress streaming and output-format

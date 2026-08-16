@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -159,6 +160,24 @@ func isSupportedHarness(id string) bool {
 	default:
 		return false
 	}
+}
+
+// supportedModelCatalogs returns the model catalog entries for harnesses this
+// tool supports, in the same stable order commonharness.ModelCatalogs uses.
+//
+// Filtering to the supported set keeps the frontend consistent with
+// supportedHarnesses: a model identifier valid only for an unsupported harness
+// is rejected at the CLI rather than surfacing later as an unrecognised harness
+// inside the composition root.
+func supportedModelCatalogs() []commonharness.ModelCatalog {
+	all := commonharness.ModelCatalogs()
+	out := make([]commonharness.ModelCatalog, 0, len(all))
+	for _, e := range all {
+		if isSupportedHarness(e.HarnessID) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // adapterOptions configures newAdapter's construction of a concrete harness
@@ -345,6 +364,7 @@ func buildDeps(cfg WiringConfig) (Deps, error) {
 	costProvider := cost.New(cost.Options{
 		ExecutablePath: cfg.CostToolPath,
 		Timeout:        cfg.CostTimeout,
+		WorkingDir:     cfg.MosaicRoot,
 	})
 
 	// The environment check runs once, here, before either frontend does
@@ -497,8 +517,8 @@ type testRunnerAdapter struct {
 	retention domain.RetentionPolicy
 }
 
-func (a testRunnerAdapter) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest) (domain.RunEvidence, error) {
-	return runner.Run(ctx, a.deps, runner.Request{Key: key, Test: t, Settings: t.Settings, Retention: a.retention})
+func (a testRunnerAdapter) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
+	return runner.Run(ctx, a.deps, runner.Request{Key: key, Test: t, Settings: t.Settings, Retention: a.retention}, eval)
 }
 
 // tuiSuiteRunner adapts a Deps and a workspace.Manager, both bound at
@@ -582,6 +602,27 @@ func (d Deps) RunnerDeps(ws workspace.Manager, progress domain.ProgressSink) run
 // receives a runner already bound over d.WorkspaceRoot. Both go through
 // newSuiteRunner, so the asymmetry is when construction happens and never
 // what is constructed.
+// osWriteFile is the real WriteFileFunc supplied to both frontends by the
+// composition root. It creates any missing parent directories before writing,
+// so a report path like "reports/run.json" works without a prior mkdir.
+func osWriteFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o644)
+}
+
+// defaultReportPath returns the JSON report file location used when neither
+// --report-path nor --no-report is supplied. Both frontends default to the
+// same value, resolved once here so they cannot drift apart.
+func defaultReportPath() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
+	return filepath.Join(cwd, "report.json")
+}
+
 func cliOptions(d Deps, stdout, stderr io.Writer) cli.Options {
 	return cli.Options{
 		Preflight: d.Preflight,
@@ -600,6 +641,13 @@ func cliOptions(d Deps, stdout, stderr io.Writer) cli.Options {
 		// set newAdapter/decoderFor switch on, so the CLI's flag validation
 		// cannot drift from what the composition root can actually wire.
 		Harnesses: supportedHarnesses(),
+
+		// Filtered to the same supported set as Harnesses, so the frontend
+		// cannot accept a model identifier for a harness the binary cannot wire.
+		Models: supportedModelCatalogs(),
+
+		DefaultReportPath: defaultReportPath(),
+		WriteFile:         osWriteFile,
 	}
 }
 
@@ -630,5 +678,13 @@ func tuiOptions(d Deps, suites []string) (tui.Options, error) {
 		// identical selectable set, so neither can drift from the other or
 		// from what the composition root can actually wire.
 		Harnesses: supportedHarnesses(),
+
+		// Filtered to the same supported set as Harnesses for the same reason
+		// as cliOptions.Models: a model identifier for an unsupported harness
+		// must not be selectable here either.
+		Models: supportedModelCatalogs(),
+
+		ReportPath: defaultReportPath(),
+		WriteFile:  osWriteFile,
 	}, nil
 }

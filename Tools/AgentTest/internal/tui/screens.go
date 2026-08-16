@@ -74,6 +74,59 @@ func (m Model) viewHarnessSelect() string {
 }
 
 // ---------------------------------------------------------------------------
+// Model selection
+// ---------------------------------------------------------------------------
+
+// viewModelSelect renders the model-selection screen's two sequential phases:
+// subject phase (choosing which model the agent under test runs on) and stub
+// phase (choosing which model every stub runs on, with "same as subject" as the
+// leading default option).
+func (m Model) viewModelSelect() string {
+	width := m.contentWidth()
+	ids := m.currentModelIDs()
+
+	var b strings.Builder
+
+	switch m.modelPhase {
+	case modelPhaseSubject:
+		if len(ids) == 0 {
+			b.WriteString(tuicommon.Truncate("no models available for this harness", width))
+		}
+		for i, id := range ids {
+			prefix := "  "
+			if i == m.modelCursor {
+				prefix = "> "
+			}
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(tuicommon.Truncate(prefix+id, width))
+		}
+		return m.renderScreen("Select Subject Model", "Model the agent under test runs on", b.String(), tuicommon.EntryScreenHelp())
+
+	case modelPhaseStub:
+		// Stub list: "same as subject" at position 0, then the catalog models.
+		const sameAsSubject = "same as subject"
+		stubList := make([]string, 0, 1+len(ids))
+		stubList = append(stubList, sameAsSubject)
+		stubList = append(stubList, ids...)
+		for i, entry := range stubList {
+			prefix := "  "
+			if i == m.modelCursor {
+				prefix = "> "
+			}
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(tuicommon.Truncate(prefix+entry, width))
+		}
+		return m.renderScreen("Select Stub Model", "Model every stub collaborator runs on", b.String(), tuicommon.EntryScreenHelp())
+	}
+
+	return ""
+}
+
+// ---------------------------------------------------------------------------
 // Suite selection
 // ---------------------------------------------------------------------------
 
@@ -107,6 +160,12 @@ func (m Model) viewSuiteSelect() string {
 	}
 	b.WriteString("\n")
 	b.WriteString(tuicommon.Truncate(fmt.Sprintf("Retain sandbox: %s", m.retention), width))
+	b.WriteString("\n")
+	if m.editingReportPath {
+		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Report [editing]: %s", m.reportPathDraft), width))
+	} else {
+		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Report: %s", m.reportPath), width))
+	}
 
 	return m.renderScreen("Select a Suite", "", b.String(), suiteSelectHelp())
 }

@@ -46,7 +46,14 @@ func writeHeader(w io.Writer, r Result) error {
 }
 
 func writeTestLine(w io.Writer, t TestReport) error {
-	line := fmt.Sprintf("%s: %s", t.TestID, t.Aggregate.Verdict)
+	achievedPct := "n/a"
+	if t.Aggregate.Counted > 0 {
+		achievedPct = fmt.Sprintf("%.0f%%", t.Aggregate.PassRate*100)
+	}
+	requiredPct := fmt.Sprintf("%.0f%%", t.Aggregate.RequiredPassRate*100)
+	stats := fmt.Sprintf("%d/%d passed (%s, required %s)",
+		t.Aggregate.Passed, t.Aggregate.Counted, achievedPct, requiredPct)
+	line := fmt.Sprintf("%s: %s %s", t.TestID, t.Aggregate.Verdict, stats)
 	if classes := testClasses(t); len(classes) > 0 {
 		names := make([]string, len(classes))
 		for i, c := range classes {
@@ -98,6 +105,12 @@ func writeTestLine(w io.Writer, t TestReport) error {
 			}
 		}
 		if _, err := fmt.Fprintf(w, "  subject version: %s\n", subjectVersionOrUnknown(run.SubjectVersion)); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "  subject model: %s\n", subjectVersionOrUnknown(run.SubjectModel)); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "  stub model: %s\n", subjectVersionOrUnknown(run.StubModel)); err != nil {
 			return err
 		}
 	}

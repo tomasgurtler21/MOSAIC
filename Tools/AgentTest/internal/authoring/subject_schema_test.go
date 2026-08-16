@@ -37,7 +37,6 @@ subject:
   agent: orchestrator
   opening_message: "Build the thing."
   invocation_kind: orchestrator
-  model: default
 stub_registry: stubs/d.stubs.json
 `),
 	}

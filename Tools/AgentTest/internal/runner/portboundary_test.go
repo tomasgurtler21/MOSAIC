@@ -36,7 +36,7 @@ func TestRun_PlanTheAdapterReturnedReachesTheLauncherUnmodified(t *testing.T) {
 	}
 	req := newRequest("plan-unmodified")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -49,7 +49,7 @@ func TestRun_SequenceIsAdapterProvisionThenSpawnPlanThenLauncherLaunch(t *testin
 	h := newHarness(t)
 	req := newRequest("sequence")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -85,7 +85,7 @@ func TestRun_NeverInvokesTheLauncherBeforeTheAdapterProducesAPlan(t *testing.T) 
 	h.Adapter.planErr = errNotUsedByRunnerTests
 	req := newRequest("plan-failure")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err == nil {
 		t.Error("Run returned no error, want the adapter's SpawnPlan failure to be reported")
 	}
 

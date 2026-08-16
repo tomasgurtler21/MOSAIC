@@ -81,11 +81,6 @@ func main() {
 	// then resolve run identity (run_id, run folder, is-new-run) before constructing
 	// the session. Resolving run identity here ensures the session's ArtifactStore is
 	// wired to the correct run-scoped Orchestration.md path from the start.
-	orchFile := scanFlag(args, "--orchestrator-file")
-	onDeviationStr := scanFlag(args, "--on-deviation")
-	if onDeviationStr == "" {
-		onDeviationStr = "delegate" // matches the flag default
-	}
 	harnessStr := scanFlag(args, "--harness")
 	if harnessStr == "" {
 		harnessStr = "fake" // matches the flag default
@@ -98,6 +93,15 @@ func main() {
 	if claudePathStr == "" {
 		claudePathStr = "claude" // matches the flag default
 	}
+
+	// Pre-scan the flags that select which consultants are wired before the session
+	// is constructed. These mirror the cobra flag defaults: --mode has no default
+	// (the session will refuse an absent mode), --manual-resolution and --pre-consult
+	// default to false. The pre-scan happens here so that buildDeps can wire the
+	// correct consultant types into session.Deps before session.New is called.
+	modeStr := scanFlag(args, "--mode")
+	manualResolution := scanBoolFlag(args, "--manual-resolution")
+	preConsult := scanBoolFlag(args, "--pre-consult")
 
 	// Parse the timeout duration; fall back to 30 minutes on invalid input
 	// (cli.Run will surface the parse error to the user with ExitUsage).
@@ -131,45 +135,37 @@ func main() {
 	// so that invocation I/O is captured in the debug log.
 	h := buildAdapter(harnessStr, claudePathStr, invocationTimeout, logger)
 
-	// Build the deviation resolver based on the --on-deviation flag.
-	artifactPath := filepath.Join(runIdentity.RunFolder, "Orchestration.md")
-	var dev domain.DeviationResolver
-	switch onDeviationStr {
-	case "stop":
-		dev = &stopDeviationResolver{}
-	default: // "delegate"
-		if orchFile != "" {
-			// Use the OrchestratorDelegate when an orchestrator file is provided.
-			// The same harness instance (h) is used for both the session dispatch
-			// and the orchestrator deviation resolution.
-			orchDir := orchFileDir(orchFile)
-			var orchSeq int
-			dev = &deviation.OrchestratorDelegate{
-				Harness: h,
-				Orchestrator: domain.AgentReference{
-					Identifier:     "orchestrator-script",
-					DefinitionPath: orchDir + "/orchestrator-script.md",
-					InvocationKind: domain.InvocationOrchestrator,
-				},
-				ArtifactPath: artifactPath,
-				NextSeq:      func() int { orchSeq++; return orchSeq },
-			}
-		} else {
-			// No orchestrator file known at startup: fall back to stop mode.
-			dev = &stopDeviationResolver{}
-		}
+	// Extract the raw-JSON transport if the selected harness adapter implements it.
+	// Production adapters implement both HarnessAdapter and RawInvoker over the same
+	// spawner; adapters that do not yet implement RawInvoker yield nil here, so the
+	// consultation system degrades gracefully until the adapter is extended.
+	var rawInvoker domain.RawInvoker
+	if ri, ok := h.(domain.RawInvoker); ok {
+		rawInvoker = ri
 	}
+
+	// Build the consultation routing deps from the pre-scanned flags. The orchestrator
+	// AgentReference and RoutingTable are not known at process startup (they are loaded
+	// from the workflow file inside the session); zero values are passed here and the
+	// OrchestratorConsultant's fields would need to be populated by a subsequent stage
+	// that makes them available before consultation. For now this wires the correct
+	// consultant types so that session.Deps.Routing is non-nil in the correct modes.
+	routingDeps := buildDeps(modeStr, manualResolution, preConsult,
+		rawInvoker, domain.AgentReference{}, domain.RoutingTable{}, interact)
 
 	// Wire the session with the resolved run-scoped store and all port dependencies.
 	// The store path matches runIdentity.RunFolder, so session I/O and the COMPLETED
 	// marker write both target the same Orchestration-{run_id}/Orchestration.md file.
 	sess := session.New(session.Deps{
-		Harness:   h,
-		Store:     store,
-		Deviation: dev,
-		Clock:     &realClock{},
-		Interact:  interact,
-		Debug:     logger,
+		Harness:    h,
+		Store:      store,
+		Clock:      &realClock{},
+		Interact:   interact,
+		Debug:      logger,
+		Routing:    routingDeps.Routing,
+		Manual:     routingDeps.Manual,
+		PreConsult: routingDeps.PreConsult,
+		Approvals:  artifact.NewApprovalReader(),
 	})
 
 	// Pass the pre-resolved store and identity so that cli.Run skips its own
@@ -202,14 +198,6 @@ func runTUIMode(args []string) {
 
 	programRef := tui.NewProgramRef()
 
-	// TUIDeviationResolver routes deviation decisions through the TUI's deviation
-	// screen. Delegate starts nil (orchestrator file and harness are not known until
-	// setup completes). The sessFactory wires Delegate when the user picks
-	// "Claude Code CLI" in the config screen and an orchestrator file is known.
-	tuiDev := &tui.TUIDeviationResolver{
-		Program: programRef,
-	}
-
 	// minter mints run identity for new runs created from inside the TUI (run-select
 	// screen's "new run" choice). It is also used as the defensive fallback inside
 	// sessFactory when an unresolved run folder is encountered.
@@ -217,7 +205,8 @@ func runTUIMode(args []string) {
 
 	// SessionFactory builds the session with the run-scoped artifact store and the
 	// harness adapter selected in the config screen. orchFile is the path to the
-	// orchestrator agent file (empty when called before the file screen completes).
+	// orchestrator agent file (empty when called before the file screen completes);
+	// it is accepted for interface compatibility but not currently used within this factory.
 	// cfg carries the harness selection and timeout from the config screen.
 	//
 	// The process logger (defined above) is closed over and shared across all calls.
@@ -229,13 +218,6 @@ func runTUIMode(args []string) {
 		// so that invocation I/O is captured in the debug log. buildAdapter
 		// handles the timeout default and the logger injection internally.
 		h := buildAdapter(cfg.Harness, claudePathTUI, cfg.Timeout, logger)
-
-		// Wire OrchestratorDelegate into tuiDev when using the real adapter and
-		// the orchestrator file path is known (entered in the file screen).
-		// This enables deviation resolution through the real Claude Code CLI.
-		// The same harness instance (h) is used for both session dispatch and
-		// orchestrator invocation.
-		tuiDev.Delegate = buildTUIDelegate(h, cfg.Harness, orchFile, runFolder)
 
 		artifactPath, err := resolveTUIArtifactPath(runFolder)
 		if errors.Is(err, errUnresolvedRunFolder) {
@@ -249,13 +231,25 @@ func runTUIMode(args []string) {
 			artifactPath = filepath.Join(mintedFolder, "Orchestration.md")
 		}
 		store := newLoggedArtifactStore(artifactPath, logger)
+		// NOTE: Routing, PreConsult, and Approvals are not yet wired for the TUI
+		// path. The TUI equivalent of buildDeps will be called here in the stage
+		// that adds TUI consultation support. Until then the session's nil checks
+		// for these deps apply, and an orchestrated-mode run from the TUI will
+		// fail with a controlled RunFailed outcome rather than silently advancing.
+		//
+		// Manual IS wired so that the stop-screen Manual Dispatch action can invoke
+		// the ManualResolver for its one routing decision. The routing table is not
+		// known at session-factory time (it is loaded from the workflow file inside
+		// the session), so an empty RoutingTable is provided; the ManualResolver will
+		// offer only the Stop option if the table has no rows, which is consistent
+		// with the CLI path's current behavior.
 		return session.New(session.Deps{
-			Harness:   h,
-			Store:     store,
-			Deviation: tuiDev,
-			Clock:     &realClock{},
-			Interact:  programRef,
-			Debug:     logger,
+			Harness:  h,
+			Store:    store,
+			Clock:    &realClock{},
+			Interact: programRef,
+			Debug:    logger,
+			Manual:   &deviation.ManualResolver{Interact: programRef},
 		})
 	}
 
@@ -301,7 +295,7 @@ func runTUIMode(args []string) {
 
 // resolveRunIdentityForCLI pre-scans --run / --new-run and the working directory
 // to determine the run folder before the session is constructed. It mirrors the
-// pre-scan pattern used for --orchestrator-file and --on-deviation.
+// pre-scan pattern used for --mode and --manual-resolution.
 //
 // When --run <run_id> is present, the folder is Orchestration-{run_id} under the
 // working directory. When --new-run is present, a new run_id is minted here so
@@ -569,42 +563,6 @@ func buildAdapter(harnessStr, claudePathStr string, timeout time.Duration, logge
 	}
 }
 
-// buildTUIDelegate constructs the OrchestratorDelegate for TUI deviation
-// resolution. Returns a non-nil delegate only when harnessStr names a
-// CLI-backed harness (per the shared catalog) and orchFile is non-empty;
-// otherwise returns nil (falling back to stop mode). This admits every
-// CLI-backed harness, not just Claude Code, and excludes both the tool-local
-// "fake" harness and unrecognised values.
-//
-// The same harness instance h must be the one used for both session dispatch
-// and orchestrator invocation, ensuring deviation resolution uses the same
-// adapter as the primary session.
-func buildTUIDelegate(h domain.HarnessAdapter, harnessStr, orchFile, runFolder string) *deviation.OrchestratorDelegate {
-	if !commonharness.IsCLIHarness(harnessStr) || orchFile == "" {
-		return nil
-	}
-	orchDir := orchFileDir(orchFile)
-	artifactPath, err := resolveTUIArtifactPath(runFolder)
-	if err != nil {
-		// runFolder is empty; fall back to a path relative to the orchestrator
-		// file's directory. This branch is defensive: by the time buildTUIDelegate
-		// is called, sessFactory has already minted a run folder, so runFolder
-		// should always be non-empty in production.
-		artifactPath = filepath.Join(orchDir, "Orchestration.md")
-	}
-	var orchSeq int
-	return &deviation.OrchestratorDelegate{
-		Harness: h,
-		Orchestrator: domain.AgentReference{
-			Identifier:     "orchestrator-script",
-			DefinitionPath: orchDir + "/orchestrator-script.md",
-			InvocationKind: domain.InvocationOrchestrator,
-		},
-		ArtifactPath: artifactPath,
-		NextSeq:      func() int { orchSeq++; return orchSeq },
-	}
-}
-
 // mainMinter returns a runselect.Minter that mints a new run_id rooted at workDir.
 func mainMinter(workDir string) runselect.Minter {
 	return func() (string, string) {
@@ -652,13 +610,3 @@ type realClock struct{}
 
 func (c *realClock) Now() time.Time { return time.Now().UTC() }
 
-// stopDeviationResolver is a DeviationResolver that always stops the run.
-// Used for --on-deviation=stop and as a fallback when the orchestrator delegate
-// cannot be wired (no orchestrator file provided at startup).
-type stopDeviationResolver struct{}
-
-func (r *stopDeviationResolver) Resolve(_ context.Context, info domain.DeviationInfo) (domain.RejoinInstruction, error) {
-	reason := fmt.Sprintf("deviation from %s (status %s): run stopped per --on-deviation setting",
-		info.Response.AgentInstanceID, info.Response.StatusCode)
-	return domain.RejoinInstruction{Stop: &domain.StopRun{Reason: reason}}, nil
-}

@@ -14,13 +14,19 @@ package tui
 // sibling frontend.
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
+	"mosaic-agent-test/internal/authoring"
 	"mosaic-agent-test/internal/cli"
 	"mosaic-agent-test/internal/domain"
+	"mosaic-agent-test/internal/preflight"
 )
 
 // TestEquivalence_SameEventSequence_SameVerdictsCountsAndTotals drives the
@@ -91,4 +97,119 @@ func TestEquivalence_SameEventSequence_SameVerdictsCountsAndTotals(t *testing.T)
 func TestEquivalence_BothConsumeIdenticalProgressSinkInterface(t *testing.T) {
 	var _ domain.ProgressSink = cli.NewLineSink(nil)
 	var _ domain.ProgressSink = NewProgramSink(nil)
+}
+
+// ---------------------------------------------------------------------------
+// Model selection equivalence: CLI-TUI cross-frontend pinning
+// ---------------------------------------------------------------------------
+
+// TestEquivalence_ModelSelection_SubjectModel_CLIAndTUIArriveAtSameValue drives
+// the CLI with --subject-model X and the TUI to select X on the subject phase,
+// and asserts both arrive at identical preflight.Input.Overrides.SubjectModel
+// values. This is the cross-frontend pinning the design calls out: "the existing
+// frontend-equivalence tests are the place that is pinned" for
+// preflight.Input.Overrides.SubjectModel, preventing frontend drift.
+func TestEquivalence_ModelSelection_SubjectModel_CLIAndTUIArriveAtSameValue(t *testing.T) {
+	catalog := twoModelCatalog()
+	const harnessID = "claude-code"
+	// Second model in the catalog ("claude-sonnet-4-5"), reached on the TUI via
+	// a single Down key on the subject phase (cursor starts at position 0).
+	wantModel := catalog[0].IDs[1]
+
+	// CLI path: validate with --harness harnessID --subject-model wantModel and
+	// capture whatever preflight.Input.Overrides.SubjectModel the flag parser
+	// produced. "validate" is used so no SuiteFactory is needed.
+	var cliCaptured preflight.Input
+	cliOptions := cli.Options{
+		Preflight: func(in preflight.Input) (preflight.Plan, authoring.Report) {
+			cliCaptured = in
+			return preflight.Plan{}, authoring.Report{}
+		},
+		Harnesses:      twoHarnessCatalog(),
+		Models:         twoModelCatalog(),
+		DefaultHarness: harnessID,
+		Stdout:         io.Discard,
+		Stderr:         io.Discard,
+	}
+	cli.Execute(context.Background(),
+		[]string{"validate", "suite.yaml", "--harness", harnessID, "--subject-model", wantModel},
+		cliOptions)
+
+	// TUI path: select wantModel on the subject phase and capture the preflight
+	// input produced when the suite starts.
+	var tuiCaptured preflight.Input
+	runner := newFakeSuiteRunner()
+	tuiOptions := newModelSelectOptions([]string{"suite-a.yaml"}, runner)
+	tuiOptions.Preflight = func(in preflight.Input) (preflight.Plan, authoring.Report) {
+		tuiCaptured = in
+		return fixturePlan("suite-under-test"), authoring.Report{}
+	}
+	m := NewModel(tuiOptions)
+	m = advanceToModelSelect(t, m)                  // harness-select → model-select (subject phase)
+	m, _ = safeUpdate(t, m, keyType(tea.KeyDown))   // move cursor to second model (wantModel)
+	m, _ = safeUpdate(t, m, keyMsg("\r"))            // confirm subject model → stub phase
+	m, _ = safeUpdate(t, m, keyMsg("\r"))            // stub phase: accept "same as subject" → suite-select
+	m, cmd := safeUpdate(t, m, keyMsg("\r"))         // suite-select: start the suite
+	if cmd != nil {
+		_ = runCmd(t, cmd)
+	}
+
+	if cliCaptured.Overrides.SubjectModel != tuiCaptured.Overrides.SubjectModel {
+		t.Errorf("SubjectModel diverged between frontends: CLI=%q TUI=%q (both must arrive at %q — the same choice must reach the same field regardless of which frontend collected it)",
+			cliCaptured.Overrides.SubjectModel, tuiCaptured.Overrides.SubjectModel, wantModel)
+	}
+}
+
+// TestEquivalence_ModelSelection_StubModel_CLIAndTUIArriveAtSameValue drives
+// the CLI with --stub-model Y and the TUI to select Y on the stub phase, and
+// asserts both arrive at identical preflight.Input.Overrides.StubModel values.
+// Companion to TestEquivalence_ModelSelection_SubjectModel_CLIAndTUIArriveAtSameValue:
+// covers the second field in the pair the design requires to be equivalent across
+// both frontends.
+func TestEquivalence_ModelSelection_StubModel_CLIAndTUIArriveAtSameValue(t *testing.T) {
+	catalog := twoModelCatalog()
+	const harnessID = "claude-code"
+	// First catalog model ("claude-opus-4-5"), reached on the TUI stub phase
+	// by pressing Down once (past the "same as subject" entry at position 0).
+	wantStub := catalog[0].IDs[0]
+
+	// CLI path: validate with --harness harnessID --stub-model wantStub.
+	var cliCaptured preflight.Input
+	cliOptions := cli.Options{
+		Preflight: func(in preflight.Input) (preflight.Plan, authoring.Report) {
+			cliCaptured = in
+			return preflight.Plan{}, authoring.Report{}
+		},
+		Harnesses:      twoHarnessCatalog(),
+		Models:         twoModelCatalog(),
+		DefaultHarness: harnessID,
+		Stdout:         io.Discard,
+		Stderr:         io.Discard,
+	}
+	cli.Execute(context.Background(),
+		[]string{"validate", "suite.yaml", "--harness", harnessID, "--stub-model", wantStub},
+		cliOptions)
+
+	// TUI path: accept the default subject, then select wantStub on the stub phase.
+	var tuiCaptured preflight.Input
+	runner := newFakeSuiteRunner()
+	tuiOptions := newModelSelectOptions([]string{"suite-a.yaml"}, runner)
+	tuiOptions.Preflight = func(in preflight.Input) (preflight.Plan, authoring.Report) {
+		tuiCaptured = in
+		return fixturePlan("suite-under-test"), authoring.Report{}
+	}
+	m := NewModel(tuiOptions)
+	m = advanceToModelSelect(t, m)                  // harness-select → model-select (subject phase)
+	m, _ = safeUpdate(t, m, keyMsg("\r"))            // subject phase: accept default (first model, cursor 0)
+	m, _ = safeUpdate(t, m, keyType(tea.KeyDown))   // stub phase: move past "same as subject" to wantStub
+	m, _ = safeUpdate(t, m, keyMsg("\r"))            // confirm stub model → suite-select
+	m, cmd := safeUpdate(t, m, keyMsg("\r"))         // suite-select: start the suite
+	if cmd != nil {
+		_ = runCmd(t, cmd)
+	}
+
+	if cliCaptured.Overrides.StubModel != tuiCaptured.Overrides.StubModel {
+		t.Errorf("StubModel diverged between frontends: CLI=%q TUI=%q (both must arrive at %q — the same choice must reach the same field regardless of which frontend collected it)",
+			cliCaptured.Overrides.StubModel, tuiCaptured.Overrides.StubModel, wantStub)
+	}
 }

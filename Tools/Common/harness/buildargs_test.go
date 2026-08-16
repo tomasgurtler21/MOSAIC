@@ -14,6 +14,7 @@ package harness_test
 //   - an empty ordinary-invocation prompt yields nil stdin (no error)
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -344,6 +345,54 @@ func TestBuildArgs_Ordinary_PromptDeliveredViaStdin(t *testing.T) {
 	// The prompt must be present in the stdin payload.
 	if !strings.Contains(string(stdin), prompt) {
 		t.Errorf("want prompt %q in stdin payload, got %q", prompt, stdin)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Orchestrator working directory in env block
+// ---------------------------------------------------------------------------
+
+// TestBuildArgs_Orchestrator_WorkingDirNamedInEnvBlock verifies that when a
+// SpawnRequest for an orchestrator invocation carries a non-empty WorkingDir,
+// the synthesized <env> block in the stdin payload names that directory.
+// Without the fix, BuildArgs passes "" to EnvBlock, which falls back to the
+// process's own working directory — not the request's working directory.
+func TestBuildArgs_Orchestrator_WorkingDirNamedInEnvBlock(t *testing.T) {
+	const wantDir = "/the/sandbox/subject/dir"
+	_, stdin, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        orchestratorAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		WorkingDir:   wantDir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(string(stdin), wantDir) {
+		t.Errorf("want orchestrator env block to name the request's working directory %q, got stdin %q", wantDir, stdin)
+	}
+}
+
+// TestBuildArgs_Orchestrator_EmptyWorkingDirFallsBackToProcessCwd verifies
+// that when a SpawnRequest carries no working directory, the synthesized <env>
+// block falls back to the process's own current working directory — preserving
+// the behaviour every existing caller that passes no working directory relies on.
+func TestBuildArgs_Orchestrator_EmptyWorkingDirFallsBackToProcessCwd(t *testing.T) {
+	processCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd: %v", err)
+	}
+	_, stdin, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:        orchestratorAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+		// WorkingDir intentionally absent — exercises the fallback path.
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(string(stdin), processCwd) {
+		t.Errorf("want orchestrator env block to fall back to process cwd %q when request WorkingDir is empty, got stdin %q", processCwd, stdin)
 	}
 }
 

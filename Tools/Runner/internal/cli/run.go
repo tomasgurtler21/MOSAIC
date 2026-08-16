@@ -82,19 +82,23 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 	// run subcommand: non-interactive orchestration execution
 	// ------------------------------------------------------------------
 	var (
-		orchestratorFile  string
-		workflowID        string
-		task              string
-		onDeviation       string
-		allowVersionDrift bool
-		checkpoints       string
-		runIDFlag         string // --run: resume a specific run by run_id
-		isNewRunFlag      bool   // --new-run: force creation of a new run
-		harnessFlag       string // --harness: adapter selection, from harness.Selections()
-		timeoutFlag       string // --timeout: invocation timeout duration string
-		claudePathFlag    string // --claude-path: Claude Code CLI executable path
-		infraClassFlag    string   // --infra-class: comma-separated class=agent mappings
-		inputFlags        []string // --input: seed source paths (repeatable)
+		orchestratorFile    string
+		workflowID          string
+		task                string
+		allowVersionDrift   bool
+		checkpoints         string
+		modeFlag            string // --mode: execution mode (required)
+		commitsFlag         string // --commits: commit-class infrastructure dispatch
+		commitBranchFlag    string // --commit-branch: commit branch variant
+		preConsultFlag      bool   // --pre-consult: enable one-shot pre-consultation
+		manualResolutionFlag bool  // --manual-resolution: put user in resolver's place
+		runIDFlag            string // --run: resume a specific run by run_id
+		isNewRunFlag         bool   // --new-run: force creation of a new run
+		harnessFlag          string // --harness: adapter selection, from harness.Selections()
+		timeoutFlag          string // --timeout: invocation timeout duration string
+		claudePathFlag       string // --claude-path: Claude Code CLI executable path
+		infraClassFlag       string   // --infra-class: comma-separated class=agent mappings
+		inputFlags           []string // --input: seed source paths (repeatable)
 	)
 
 	runCmd := &cobra.Command{
@@ -132,19 +136,6 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 			// user believe inputs were seeded when they were not.
 			if len(inputFlags) > 0 && runIDFlag != "" {
 				fmt.Fprintf(errOut, "error: --input and --run are mutually exclusive\n")
-				exitCode = ExitUsage
-				return nil
-			}
-
-			// Parse --on-deviation.
-			var devMode domain.DeviationMode
-			switch onDeviation {
-			case "delegate":
-				devMode = domain.DeviationDelegate
-			case "stop":
-				devMode = domain.DeviationStop
-			default:
-				fmt.Fprintf(errOut, "error: invalid --on-deviation value %q; valid values: delegate, stop\n", onDeviation)
 				exitCode = ExitUsage
 				return nil
 			}
@@ -291,6 +282,53 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 			// new or resumed, and for a resumed run its recorded position.
 			fmt.Fprintln(out, runselect.Announce(announceIdentity(resolvedRunID, resolvedRunFolder, resolvedIsNewRun, resolvedPosition)))
 
+			// Validate and parse --mode (required). Validated after run identity
+			// resolution so that run-not-found and scanner errors appear first.
+			if modeFlag == "" {
+				validModes := make([]string, 0, len(domain.ExecutionModes()))
+				for _, m := range domain.ExecutionModes() {
+					validModes = append(validModes, string(m))
+				}
+				fmt.Fprintf(errOut, "error: --mode is required; valid values: %s\n", strings.Join(validModes, ", "))
+				exitCode = ExitUsage
+				return nil
+			}
+			parsedMode, modeErr := domain.ParseExecutionMode(modeFlag)
+			if modeErr != nil {
+				validModes := make([]string, 0, len(domain.ExecutionModes()))
+				for _, m := range domain.ExecutionModes() {
+					validModes = append(validModes, string(m))
+				}
+				fmt.Fprintf(errOut, "error: invalid --mode value %q; valid values: %s\n", modeFlag, strings.Join(validModes, ", "))
+				exitCode = ExitUsage
+				return nil
+			}
+
+			// Parse --commits.
+			var commitsEnabled bool
+			switch commitsFlag {
+			case "disabled":
+				commitsEnabled = false
+			case "enabled":
+				commitsEnabled = true
+			default:
+				fmt.Fprintf(errOut, "error: invalid --commits value %q; valid values: disabled, enabled\n", commitsFlag)
+				exitCode = ExitUsage
+				return nil
+			}
+
+			// Parse --commit-branch.
+			parsedCommitBranch, commitBranchErr := domain.ParseCommitBranchVariant(commitBranchFlag)
+			if commitBranchErr != nil {
+				validVariants := make([]string, 0, len(domain.CommitBranchVariants()))
+				for _, v := range domain.CommitBranchVariants() {
+					validVariants = append(validVariants, string(v))
+				}
+				fmt.Fprintf(errOut, "error: invalid --commit-branch value %q; valid values: %s\n", commitBranchFlag, strings.Join(validVariants, ", "))
+				exitCode = ExitUsage
+				return nil
+			}
+
 			// Parse --infra-class into a class-to-agent map.
 			var infraClassSelections map[string]string
 			if infraClassFlag != "" {
@@ -320,12 +358,18 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				OrchestratorFilePath: orchestratorFile,
 				WorkflowID:           domain.WorkflowID(workflowID),
 				Task:                 task,
-				OnDeviation:          devMode,
 				AllowVersionDrift:    allowVersionDrift,
-				Checkpoints:          checkpointsEnabled,
 				RunID:                resolvedRunID,
 				RunFolder:            resolvedRunFolder,
 				IsNewRun:             resolvedIsNewRun,
+				RunSettings: domain.RunSettings{
+					Mode:                parsedMode,
+					Checkpoints:         checkpointsEnabled,
+					Commits:             commitsEnabled,
+					CommitBranchVariant: parsedCommitBranch,
+					PreConsultation:     preConsultFlag,
+					ManualResolution:    manualResolutionFlag,
+				},
 				InfraClassSelections: infraClassSelections,
 				SeedInputs:           inputFlags,
 			}
@@ -354,8 +398,12 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 			}
 
 			exitCode = outcomeToExitCode(outcome)
-			// Print non-success messages to stderr so stdout stays machine-readable.
-			if exitCode != ExitSuccess {
+			// Print the stop reason to stderr when the consultant halted the run.
+			// The artifact is left resumable; stderr is the operator's signal.
+			if outcome.Status == domain.RunStoppedByConsultant && outcome.StopReason != "" {
+				fmt.Fprintf(errOut, "%s\n", outcome.StopReason)
+			} else if exitCode != ExitSuccess {
+				// Print non-success messages to stderr so stdout stays machine-readable.
 				fmt.Fprintf(errOut, "%s\n", outcome.Message)
 			}
 			return nil
@@ -366,9 +414,13 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 	runCmd.Flags().StringVar(&orchestratorFile, "orchestrator-file", "", "Path to the orchestrator agent file (required)")
 	runCmd.Flags().StringVar(&workflowID, "workflow", "", "Workflow identifier (required)")
 	runCmd.Flags().StringVar(&task, "task", "", "Task description (required)")
-	runCmd.Flags().StringVar(&onDeviation, "on-deviation", "delegate", "How to handle deviations (delegate|stop)")
 	runCmd.Flags().BoolVar(&allowVersionDrift, "allow-version-drift", false, "Allow workflow version mismatch when resuming")
+	runCmd.Flags().StringVar(&modeFlag, "mode", "", "Execution mode (orchestrated|auto|auto-review) — required")
 	runCmd.Flags().StringVar(&checkpoints, "checkpoints", "disabled", "Checkpoint support (disabled|enabled)")
+	runCmd.Flags().StringVar(&commitsFlag, "commits", "disabled", "Commit-class infrastructure dispatch (disabled|enabled)")
+	runCmd.Flags().StringVar(&commitBranchFlag, "commit-branch", "", "Commit branch variant (mosaic-owned|user-own); default mosaic-owned")
+	runCmd.Flags().BoolVar(&preConsultFlag, "pre-consult", false, "Enable one-shot run-start pre-consultation (auto and auto-review only)")
+	runCmd.Flags().BoolVar(&manualResolutionFlag, "manual-resolution", false, "Put the user in the resolver's place on consultation failure")
 	runCmd.Flags().StringVar(&runIDFlag, "run", "", "Resume a specific run by run_id")
 	runCmd.Flags().BoolVar(&isNewRunFlag, "new-run", false, "Force creation of a new run")
 	runCmd.Flags().StringVar(&harnessFlag, "harness", harness.FakeHarnessID, fmt.Sprintf("Harness adapter to use (%s)", harness.FlagValues()))
@@ -403,6 +455,8 @@ func outcomeToExitCode(outcome domain.RunOutcome) int {
 		return ExitRefused
 	case domain.RunFailed:
 		return ExitFailure
+	case domain.RunStoppedByConsultant:
+		return ExitStoppedByConsultant
 	default:
 		return ExitFailure
 	}

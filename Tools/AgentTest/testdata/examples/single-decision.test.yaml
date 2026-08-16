@@ -13,7 +13,6 @@ subject:
   opening_message: |
     Continue the workflow using the seeded orchestration state.
   invocation_kind: subagent
-  model: default
   allowed_tools: [Read, Write]
 
 stub_registry: single-decision.stubs.json

@@ -14,7 +14,6 @@ subject:
   opening_message: |
     Dispatch the helper, then finish.
   invocation_kind: orchestrator
-  model: default
   allowed_tools: [Task]
 
 stub_registry: orchestrator-layer.stubs.json

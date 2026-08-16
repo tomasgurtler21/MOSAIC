@@ -53,16 +53,36 @@ package engine_test
 //   - plan-review row with Stage-*/Plan.md input + refreshedStages(3 stages) → 3 expanded paths.
 //   - Nil refreshedStages on non-EXECUTION row → uses run-start StageSet for expansion.
 //
-//   On Findings hint-based auto-routing for COMPLETED_NEEDS_ACTION (AC7.10):
-//   - CNA + unambiguous On Findings → DispatchDecision (loop-back to named agent).
-//   - CNA + On Findings column absent → DeviationDecision.
-//   - CNA + On Findings value is "" (dash/empty) → DeviationDecision.
-//   - CNA + free-form On Findings (e.g. "agent (or other based on issue)") → DeviationDecision.
-//   - CNA inside EXECUTION + unambiguous On Findings → DispatchDecision (loop-back).
+//   On Findings hint-based auto-routing for COMPLETED_NEEDS_ACTION, mode-gated:
+//   - auto-review + CNA + unambiguous On Findings → DispatchDecision (loop-back to named agent).
+//   - auto + CNA + unambiguous On Findings → DeviationDecision (On-Findings route gated to auto-review).
+//   - CNA + On Findings column absent → DeviationDecision in all modes.
+//   - CNA + On Findings value is "" (dash/empty) → DeviationDecision in all modes.
+//   - CNA + free-form On Findings (e.g. "agent (or other based on issue)") → DeviationDecision in all modes.
+//   - auto-review + CNA inside EXECUTION + unambiguous On Findings → DispatchDecision (loop-back).
+//   - auto + CNA inside EXECUTION + unambiguous On Findings → DeviationDecision.
 //   - Non-CNA non-SUCCESS (e.g. PARTIALLY_DONE) → DeviationDecision regardless of On Findings.
 //
 //   Routing hint interpretation for non-SUCCESS responses:
 //   - BLOCKED response + unambiguous On Findings → DeviationDecision (On Findings only for CNA).
+//
+//   Mode-gated routing (Stage 2):
+//   - auto mode SUCCESS → routes to On Success target (same as auto-review).
+//   - auto-review mode SUCCESS → routes to On Success target (same as auto).
+//   - orchestrated mode, first call → ConsultDecision with ConsultTriggerOrchestratedMode.
+//   - orchestrated mode, after SUCCESS → ConsultDecision (engine never routes).
+//   - orchestrated mode, after CNA (even with unambiguous OnFindings) → ConsultDecision.
+//   - auto + CNA + ambiguous OnFindings → DeviationDecision.
+//   - auto-review + CNA + ambiguous OnFindings → DeviationDecision.
+//   - auto + non-CNA non-SUCCESS → DeviationDecision.
+//   - auto-review + non-CNA non-SUCCESS → DeviationDecision.
+//
+//   Review artifact injection (Stage 2, auto-review only):
+//   - auto-review CNA auto-route-back: LastOutputArtifacts injected into dispatched InputArtifacts.
+//   - Injected artifacts appear after table-row entries, not before.
+//   - Paths already in table InputArtifacts are not duplicated by injection.
+//   - SUCCESS-routed dispatches never carry injected artifacts.
+//   - auto mode CNA deviates; no injection occurs on deviation decisions.
 //
 //   Resume point derivation (AC7.7):
 //   - No execution log entries → RowIndex=0, RerunLast=false.
@@ -395,7 +415,16 @@ func TestNext_FirstCall_DispatchesFirstPreExecutionRow(t *testing.T) {
 	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	// First row (index 0) is planner-tdd-soft in PLANNING phase.
@@ -415,7 +444,16 @@ func TestNext_FirstCall_StagedOnly_DispatchesFirstExecutionRow(t *testing.T) {
 	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
 
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	// implementation-only has no pre-execution rows; row 0 is EXECUTION.[StageNumber].
@@ -448,7 +486,16 @@ func TestNext_NoStageSet_Omitted_StillProducesNonEmptyStopReason(t *testing.T) {
 	aw := mustParseAndAdmit(t, implOnlyContent, "implementation-only", "3.1")
 	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
 
-	dec := engine.Next(aw, nil, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          nil,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	stop := requireStop(t, dec)
 	if stop.Reason == "" {
@@ -465,7 +512,17 @@ func TestNext_NoStageSet_InitialDispatch_NeverSeeded_NamesPathLookedFor(t *testi
 	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
 	src := domain.StageSource{Path: "/runs/example/Plan.md", Seeded: false}
 
-	dec := engine.Next(aw, nil, emptyState(), nil, agents, 0, fixedNow, nil, src)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          nil,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		StageSource:     src,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	stop := requireStop(t, dec)
 	if !strings.Contains(stop.Reason, src.Path) {
@@ -482,7 +539,17 @@ func TestNext_NoStageSet_InitialDispatch_SeededButMissing_NamesPathLookedFor(t *
 	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
 	src := domain.StageSource{Path: "/runs/example/Plan.md", Seeded: true}
 
-	dec := engine.Next(aw, nil, emptyState(), nil, agents, 0, fixedNow, nil, src)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          nil,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		StageSource:     src,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	stop := requireStop(t, dec)
 	if !strings.Contains(stop.Reason, src.Path) {
@@ -500,10 +567,28 @@ func TestNext_NoStageSet_InitialDispatch_SeededVsNeverSeeded_DistinctMessages(t 
 	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
 	path := "/runs/example/Plan.md"
 
-	neverSeeded := requireStop(t, engine.Next(aw, nil, emptyState(), nil, agents, 0, fixedNow, nil,
-		domain.StageSource{Path: path, Seeded: false}))
-	seededMissing := requireStop(t, engine.Next(aw, nil, emptyState(), nil, agents, 0, fixedNow, nil,
-		domain.StageSource{Path: path, Seeded: true}))
+	neverSeeded := requireStop(t, engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          nil,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		StageSource:     domain.StageSource{Path: path, Seeded: false},
+		Mode:            domain.ExecutionModeAutoReview,
+	}))
+	seededMissing := requireStop(t, engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          nil,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		StageSource:     domain.StageSource{Path: path, Seeded: true},
+		Mode:            domain.ExecutionModeAutoReview,
+	}))
 
 	if neverSeeded.Reason == seededMissing.Reason {
 		t.Errorf("want distinct stop reasons for Seeded=false vs Seeded=true (same Path); got identical reason %q for both",
@@ -523,7 +608,17 @@ func TestNext_NoStageSet_EnteringExecution_NeverSeeded_NamesPathLookedFor(t *tes
 	state := stateAfter("PLANNING", "", "plan-review#2", domain.StatusSUCCESS, 2)
 	src := domain.StageSource{Path: "/runs/example/Plan.md", Seeded: false}
 
-	dec := engine.Next(aw, nil, state, successResponse("plan-review#2"), agents, 2, fixedNow, nil, src)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          nil,
+		State:           state,
+		LastResponse:    successResponse("plan-review#2"),
+		Agents:          agents,
+		Seq:             2,
+		Now:             fixedNow,
+		StageSource:     src,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	stop := requireStop(t, dec)
 	if !strings.Contains(stop.Reason, src.Path) {
@@ -542,7 +637,16 @@ func TestNext_PreExecution_OnSuccess_AdvancesToNamedAgent(t *testing.T) {
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, stages, state, successResponse("planner-tdd-soft#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("planner-tdd-soft#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	// On Success of row 0 = "plan-review" → dispatch row 1.
@@ -564,7 +668,16 @@ func TestNext_PostExecution_CompleteTarget_ReturnsComplete(t *testing.T) {
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("REVIEW", "", "test-runner#4", domain.StatusSUCCESS, 4)
 
-	dec := engine.Next(aw, stages, state, successResponse("test-runner#4"), agents, 4, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("test-runner#4"),
+		Agents:          agents,
+		Seq:             4,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	requireComplete(t, dec)
 }
@@ -596,7 +709,16 @@ func TestNext_PreExecution_AbsentOnSuccess_ReturnsDeviation(t *testing.T) {
 	agents := makeAgents("agent-a", "agent-b")
 	state := stateAfter("PLANNING", "", "agent-a#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, nil, state, successResponse("agent-a#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          nil,
+		State:           state,
+		LastResponse:    successResponse("agent-a#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	requireDeviation(t, dec)
 }
@@ -611,7 +733,16 @@ func TestNext_AgentInstanceID_SeqIncrementedBeforeDispatch(t *testing.T) {
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
 	// seq=5: the next dispatch should be #6.
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 5, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             5,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	wantID := "planner-tdd-soft#6"
@@ -627,7 +758,16 @@ func TestNext_AgentInstanceID_ZeroSeqProducesOne(t *testing.T) {
 	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	wantID := "planner-tdd-soft#1"
@@ -646,7 +786,16 @@ func TestNext_HITL_RowTrue_EffectiveTrue(t *testing.T) {
 	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if !step.EffectiveHITL {
@@ -665,7 +814,16 @@ func TestNext_HITL_BothFalse_EffectiveFalse(t *testing.T) {
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, stagesNoHITL, state, successResponse("planner-tdd-soft#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stagesNoHITL,
+		State:           state,
+		LastResponse:    successResponse("planner-tdd-soft#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if step.EffectiveHITL {
@@ -686,7 +844,16 @@ func TestNext_HITL_StageTrue_InsideExecution_EffectiveTrue(t *testing.T) {
 	// State: plan-review (row 1) just succeeded; next is EXECUTION row.
 	state := stateAfter("PLANNING", "", "plan-review#2", domain.StatusSUCCESS, 2)
 
-	dec := engine.Next(aw, stagesHITL, state, successResponse("plan-review#2"), agents, 2, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stagesHITL,
+		State:           state,
+		LastResponse:    successResponse("plan-review#2"),
+		Agents:          agents,
+		Seq:             2,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if !step.EffectiveHITL {
@@ -707,7 +874,16 @@ func TestNext_HITL_StageTrue_OutsideExecution_EffectiveFalse(t *testing.T) {
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, stagesHITL, state, successResponse("planner-tdd-soft#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stagesHITL,
+		State:           state,
+		LastResponse:    successResponse("planner-tdd-soft#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if step.EffectiveHITL {
@@ -732,7 +908,16 @@ func TestNext_Approach_TDD_DispatchesTestGroupFirst(t *testing.T) {
 	)
 	state := stateAfter("DESIGN", "", "contracts-review#7", domain.StatusSUCCESS, 7)
 
-	dec := engine.Next(aw, stages, state, successResponse("contracts-review#7"), agents, 7, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("contracts-review#7"),
+		Agents:          agents,
+		Seq:             7,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "test-writer-tdd" {
@@ -757,7 +942,16 @@ func TestNext_Approach_ImplementationFirst_DispatchesImplGroupFirst(t *testing.T
 	)
 	state := stateAfter("DESIGN", "", "contracts-review#7", domain.StatusSUCCESS, 7)
 
-	dec := engine.Next(aw, stages, state, successResponse("contracts-review#7"), agents, 7, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("contracts-review#7"),
+		Agents:          agents,
+		Seq:             7,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "implementation-tdd" {
@@ -780,7 +974,16 @@ func TestNext_Approach_ImplementationOnly_SkipsTestGroup(t *testing.T) {
 	)
 	state := stateAfter("DESIGN", "", "contracts-review#7", domain.StatusSUCCESS, 7)
 
-	dec := engine.Next(aw, stages, state, successResponse("contracts-review#7"), agents, 7, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("contracts-review#7"),
+		Agents:          agents,
+		Seq:             7,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	name := agentName(step.Request.AgentInstanceID)
@@ -806,7 +1009,16 @@ func TestNext_Approach_TestsOnly_SkipsImplGroup(t *testing.T) {
 	)
 	state := stateAfter("DESIGN", "", "contracts-review#7", domain.StatusSUCCESS, 7)
 
-	dec := engine.Next(aw, stages, state, successResponse("contracts-review#7"), agents, 7, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("contracts-review#7"),
+		Agents:          agents,
+		Seq:             7,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	name := agentName(step.Request.AgentInstanceID)
@@ -837,7 +1049,16 @@ func TestNext_Staged_TDD_AfterTestGroup_DispatchesImplGroup(t *testing.T) {
 	)
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#9", domain.StatusSUCCESS, 9)
 
-	dec := engine.Next(aw, stages, state, successResponse("tests-review-tdd#9"), agents, 9, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("tests-review-tdd#9"),
+		Agents:          agents,
+		Seq:             9,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "implementation-tdd" {
@@ -862,7 +1083,16 @@ func TestNext_Staged_TDD_AfterImplGroupLastStage_AdvancesToNextStage(t *testing.
 	)
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-review#11", domain.StatusSUCCESS, 11)
 
-	dec := engine.Next(aw, stages, state, successResponse("implementation-review#11"), agents, 11, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("implementation-review#11"),
+		Agents:          agents,
+		Seq:             11,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	// Should start Stage-2, test group first (TDD) → test-writer-tdd.
@@ -892,7 +1122,16 @@ func TestNext_Staged_AfterLastStage_DispatchesPostExecutionRow(t *testing.T) {
 	)
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-review#11", domain.StatusSUCCESS, 11)
 
-	dec := engine.Next(aw, stages, state, successResponse("implementation-review#11"), agents, 11, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("implementation-review#11"),
+		Agents:          agents,
+		Seq:             11,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "test-runner" {
@@ -921,7 +1160,16 @@ func TestNext_Staged_AfterLastStage_NoPostExecution_ReturnsComplete(t *testing.T
 	// implementation-review is row 12, the last EXECUTION row (and last row overall).
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-review#13", domain.StatusSUCCESS, 13)
 
-	dec := engine.Next(aw, stages, state, successResponse("implementation-review#13"), agents, 13, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("implementation-review#13"),
+		Agents:          agents,
+		Seq:             13,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	requireComplete(t, dec)
 }
@@ -944,7 +1192,16 @@ func TestNext_Staged_OnSuccessIgnoredInsideExecution(t *testing.T) {
 	// test-writer-tdd is row 0; after it succeeds in Stage-1 (seq=1).
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "test-writer-tdd#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, stages, state, successResponse("test-writer-tdd#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("test-writer-tdd#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	// Group-order logic (On Success ignored): within the test group, next is tests-review-tdd.
@@ -970,7 +1227,16 @@ func TestNext_Paths_StageNumber_SubstitutedInInput(t *testing.T) {
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "plan-review#2", domain.StatusSUCCESS, 2)
 
-	dec := engine.Next(aw, stages, state, successResponse("plan-review#2"), agents, 2, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("plan-review#2"),
+		Agents:          agents,
+		Seq:             2,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	// Should have resolved Stage-{StageNumber}/Plan.md → Stage-1/Plan.md.
@@ -997,7 +1263,16 @@ func TestNext_Paths_StageNumber_SubstitutedInOutput(t *testing.T) {
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "plan-review#2", domain.StatusSUCCESS, 2)
 
-	dec := engine.Next(aw, stages, state, successResponse("plan-review#2"), agents, 2, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("plan-review#2"),
+		Agents:          agents,
+		Seq:             2,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	found := false
@@ -1028,7 +1303,16 @@ func TestNext_Paths_StageStar_InputExpanded(t *testing.T) {
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, threeStages, state, successResponse("planner-tdd-soft#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          threeStages,
+		State:           state,
+		LastResponse:    successResponse("planner-tdd-soft#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 
@@ -1063,7 +1347,16 @@ func TestNext_Paths_StageStar_OutputPassedThrough(t *testing.T) {
 	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	found := false
@@ -1096,7 +1389,17 @@ func TestNext_Paths_NonExecution_StageStar_UsesRefreshedStages(t *testing.T) {
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, runStartStages, state, successResponse("planner-tdd-soft#1"), agents, 1, fixedNow, refreshed)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          runStartStages,
+		State:           state,
+		LastResponse:    successResponse("planner-tdd-soft#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		RefreshedStages: refreshed,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	// With refreshedStages(3), Stage-*/Plan.md must expand to 3 paths.
@@ -1124,7 +1427,16 @@ func TestNext_Paths_NonExecution_StageStar_NilRefreshed_UsesRunStartStages(t *te
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, runStartStages, state, successResponse("planner-tdd-soft#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          runStartStages,
+		State:           state,
+		LastResponse:    successResponse("planner-tdd-soft#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	count := 0
@@ -1141,13 +1453,13 @@ func TestNext_Paths_NonExecution_StageStar_NilRefreshed_UsesRunStartStages(t *te
 
 // ===== On Findings hint-based auto-routing (AC7.10) =====
 
-// TestNext_OnFindings_UnambiguousHint_CNA_ReturnsDispatch verifies that a
-// COMPLETED_NEEDS_ACTION response from a row with an unambiguous On Findings
-// hint causes the engine to return a DispatchDecision targeting that agent
-// (loop-back within the current group), not a Deviation.
-func TestNext_OnFindings_UnambiguousHint_CNA_ReturnsDispatch(t *testing.T) {
+// TestNext_OnFindings_AutoReview_UnambiguousHint_CNA_ReturnsDispatch verifies
+// that in auto-review mode a COMPLETED_NEEDS_ACTION response from a row with
+// an unambiguous On Findings hint causes the engine to return a DispatchDecision
+// targeting that agent (loop-back), not a Deviation.
+func TestNext_OnFindings_AutoReview_UnambiguousHint_CNA_ReturnsDispatch(t *testing.T) {
 	// brownfield-tdd-build-verified row 8: build-review (in test group), OnFindings="test-writer-tdd".
-	// When build-review returns CNA, engine must dispatch test-writer-tdd (loop-back).
+	// When build-review returns CNA in auto-review mode, engine dispatches test-writer-tdd.
 	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
 	stages := singleStageSet("TDD")
 	agents := makeAgents(
@@ -1159,21 +1471,60 @@ func TestNext_OnFindings_UnambiguousHint_CNA_ReturnsDispatch(t *testing.T) {
 	// build-review is at row 8 (0-indexed) in the test group of brownfield-tdd-build-verified.
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
 
-	dec := engine.Next(aw, stages, state, cnaResponse("build-review#9"), agents, 9, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: cnaResponse("build-review#9"),
+		Agents:       agents,
+		Seq:          9,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "test-writer-tdd" {
-		t.Errorf("CNA with unambiguous OnFindings=test-writer-tdd: want loop-back Dispatch to test-writer-tdd, got %s",
+		t.Errorf("auto-review+CNA+unambiguous OnFindings: want loop-back Dispatch to test-writer-tdd, got %s",
 			step.Request.AgentInstanceID)
 	}
 }
 
-// TestNext_OnFindings_UnambiguousHint_CNA_InsideExecution_ReturnsDispatch
-// verifies that the On Findings auto-routing still works inside EXECUTION even
-// though On Success is ignored there (FR-12b applies to On Success, not On Findings).
-func TestNext_OnFindings_UnambiguousHint_CNA_InsideExecution_ReturnsDispatch(t *testing.T) {
+// TestNext_OnFindings_Auto_UnambiguousHint_CNA_ReturnsDeviation verifies that
+// in auto mode a COMPLETED_NEEDS_ACTION response from a row with an unambiguous
+// On Findings hint returns a DeviationDecision, not a Dispatch. The On-Findings
+// auto-route fires only in auto-review mode.
+func TestNext_OnFindings_Auto_UnambiguousHint_CNA_ReturnsDeviation(t *testing.T) {
+	// Same setup as the auto-review variant above; only the mode differs.
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: cnaResponse("build-review#9"),
+		Agents:       agents,
+		Seq:          9,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAuto,
+	})
+
+	requireDeviation(t, dec)
+}
+
+// TestNext_OnFindings_AutoReview_UnambiguousHint_CNA_InsideExecution_ReturnsDispatch
+// verifies that in auto-review mode the On Findings auto-routing works inside
+// EXECUTION even though On Success is ignored there.
+func TestNext_OnFindings_AutoReview_UnambiguousHint_CNA_InsideExecution_ReturnsDispatch(t *testing.T) {
 	// brownfield-tdd-build-verified row 11: second build-review (in impl group), OnFindings="implementation-tdd".
-	// When it returns CNA, engine must dispatch implementation-tdd (loop-back), not Deviation.
+	// When it returns CNA in auto-review mode, engine dispatches implementation-tdd.
 	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
 	stages := singleStageSet("TDD")
 	agents := makeAgents(
@@ -1185,13 +1536,50 @@ func TestNext_OnFindings_UnambiguousHint_CNA_InsideExecution_ReturnsDispatch(t *
 	// row 11 is build-review in the impl group; OnFindings="implementation-tdd".
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#12", domain.StatusCOMPLETED_NEEDS_ACTION, 12)
 
-	dec := engine.Next(aw, stages, state, cnaResponse("build-review#12"), agents, 12, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: cnaResponse("build-review#12"),
+		Agents:       agents,
+		Seq:          12,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "implementation-tdd" {
-		t.Errorf("CNA+OnFindings inside EXECUTION: want loop-back to implementation-tdd, got %s",
+		t.Errorf("auto-review+CNA+OnFindings inside EXECUTION: want loop-back to implementation-tdd, got %s",
 			step.Request.AgentInstanceID)
 	}
+}
+
+// TestNext_OnFindings_Auto_UnambiguousHint_CNA_InsideExecution_ReturnsDeviation
+// verifies that in auto mode a CNA response with an unambiguous On Findings hint
+// inside EXECUTION also returns Deviation, not Dispatch.
+func TestNext_OnFindings_Auto_UnambiguousHint_CNA_InsideExecution_ReturnsDeviation(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#12", domain.StatusCOMPLETED_NEEDS_ACTION, 12)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: cnaResponse("build-review#12"),
+		Agents:       agents,
+		Seq:          12,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAuto,
+	})
+
+	requireDeviation(t, dec)
 }
 
 // TestNext_OnFindings_AbsentColumn_CNA_ReturnsDeviation verifies that when the
@@ -1217,7 +1605,16 @@ func TestNext_OnFindings_AbsentColumn_CNA_ReturnsDeviation(t *testing.T) {
 	agents := makeAgents("agent-a")
 	state := stateAfter("PLANNING", "", "agent-a#1", domain.StatusCOMPLETED_NEEDS_ACTION, 1)
 
-	dec := engine.Next(aw, nil, state, cnaResponse("agent-a#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          nil,
+		State:           state,
+		LastResponse:    cnaResponse("agent-a#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	requireDeviation(t, dec)
 }
@@ -1237,7 +1634,16 @@ func TestNext_OnFindings_EmptyValue_CNA_ReturnsDeviation(t *testing.T) {
 	)
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "test-writer-tdd#8", domain.StatusCOMPLETED_NEEDS_ACTION, 8)
 
-	dec := engine.Next(aw, stages, state, cnaResponse("test-writer-tdd#8"), agents, 8, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    cnaResponse("test-writer-tdd#8"),
+		Agents:          agents,
+		Seq:             8,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	requireDeviation(t, dec)
 }
@@ -1259,7 +1665,16 @@ func TestNext_OnFindings_FreeFormHint_CNA_ReturnsDeviation(t *testing.T) {
 	// implementation-review is row 10 (0-indexed) in brownfield-tdd.
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-review#11", domain.StatusCOMPLETED_NEEDS_ACTION, 11)
 
-	dec := engine.Next(aw, stages, state, cnaResponse("implementation-review#11"), agents, 11, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    cnaResponse("implementation-review#11"),
+		Agents:          agents,
+		Seq:             11,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	requireDeviation(t, dec)
 }
@@ -1281,7 +1696,16 @@ func TestNext_OnFindings_NonCNA_NonSuccess_ReturnsDeviation(t *testing.T) {
 	)
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#9", domain.StatusPARTIALLY_DONE, 9)
 
-	dec := engine.Next(aw, stages, state, nonSuccessResponse("tests-review-tdd#9", domain.StatusPARTIALLY_DONE), agents, 9, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    nonSuccessResponse("tests-review-tdd#9", domain.StatusPARTIALLY_DONE),
+		Agents:          agents,
+		Seq:             9,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	requireDeviation(t, dec)
 }
@@ -1299,7 +1723,16 @@ func TestNext_Deviation_Kind_IsNonSuccess(t *testing.T) {
 	)
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#9", domain.StatusBLOCKED, 9)
 
-	dec := engine.Next(aw, stages, state, nonSuccessResponse("tests-review-tdd#9", domain.StatusBLOCKED), agents, 9, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    nonSuccessResponse("tests-review-tdd#9", domain.StatusBLOCKED),
+		Agents:          agents,
+		Seq:             9,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	dev := requireDeviation(t, dec)
 	if dev.Info.Kind != domain.DeviationNonSuccess {
@@ -1322,7 +1755,16 @@ func TestNext_Deviation_IncludesCurrentRowAndPhase(t *testing.T) {
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#9", domain.StatusBLOCKED, 9)
 	resp := nonSuccessResponse("tests-review-tdd#9", domain.StatusBLOCKED)
 
-	dec := engine.Next(aw, stages, state, resp, agents, 9, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    resp,
+		Agents:          agents,
+		Seq:             9,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	dev := requireDeviation(t, dec)
 	if dev.Info.CurrentRow != 8 {
@@ -1355,7 +1797,16 @@ func TestNext_Approach_ImplementationFirst_AfterImplGroup_DispatchesTestGroup(t 
 	)
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-review#11", domain.StatusSUCCESS, 11)
 
-	dec := engine.Next(aw, stages, state, successResponse("implementation-review#11"), agents, 11, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("implementation-review#11"),
+		Agents:          agents,
+		Seq:             11,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "test-writer-tdd" {
@@ -1381,7 +1832,16 @@ func TestNext_Approach_TestsOnly_AfterTestGroup_AdvancesToNextStage(t *testing.T
 	)
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#9", domain.StatusSUCCESS, 9)
 
-	dec := engine.Next(aw, stages, state, successResponse("tests-review-tdd#9"), agents, 9, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("tests-review-tdd#9"),
+		Agents:          agents,
+		Seq:             9,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "test-writer-tdd" {
@@ -1440,7 +1900,16 @@ func TestNext_BuildVerified_TDD_TestGroupSequence(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dec := engine.Next(aw, stages, tc.state, tc.response, agents, tc.seq, fixedNow, nil)
+			dec := engine.Next(engine.NextInput{
+				Workflow:        aw,
+				Stages:          stages,
+				State:           tc.state,
+				LastResponse:    tc.response,
+				Agents:          agents,
+				Seq:             tc.seq,
+				Now:             fixedNow,
+				Mode:            domain.ExecutionModeAutoReview,
+			})
 			step := requireDispatch(t, dec)
 			if agentName(step.Request.AgentInstanceID) != tc.wantAgent {
 				t.Errorf("want %s, got %s", tc.wantAgent, step.Request.AgentInstanceID)
@@ -1494,7 +1963,16 @@ func TestNext_BuildVerified_TDD_ImplGroupSequence(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dec := engine.Next(aw, stages, tc.state, tc.response, agents, tc.seq, fixedNow, nil)
+			dec := engine.Next(engine.NextInput{
+				Workflow:        aw,
+				Stages:          stages,
+				State:           tc.state,
+				LastResponse:    tc.response,
+				Agents:          agents,
+				Seq:             tc.seq,
+				Now:             fixedNow,
+				Mode:            domain.ExecutionModeAutoReview,
+			})
 			step := requireDispatch(t, dec)
 			if agentName(step.Request.AgentInstanceID) != tc.wantAgent {
 				t.Errorf("want %s, got %s", tc.wantAgent, step.Request.AgentInstanceID)
@@ -1514,7 +1992,16 @@ func TestNext_DispatchStep_PhaseAndStageSet(t *testing.T) {
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "plan-review#2", domain.StatusSUCCESS, 2)
 
-	dec := engine.Next(aw, stages, state, successResponse("plan-review#2"), agents, 2, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("plan-review#2"),
+		Agents:          agents,
+		Seq:             2,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	// The bare phase name and the plain stage number are recorded, not the
@@ -1534,7 +2021,16 @@ func TestNext_DispatchStep_RowIndex(t *testing.T) {
 	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if step.RowIndex != 0 {
@@ -1549,7 +2045,16 @@ func TestNext_DispatchStep_AgentIdentifier(t *testing.T) {
 	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if step.Agent.Identifier != "planner-tdd-soft" {
@@ -1742,7 +2247,16 @@ func TestNext_Artifacts_PreExecutionRow_NoTemplateExpansion(t *testing.T) {
 	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	found := false
@@ -1766,7 +2280,16 @@ func TestNext_Artifacts_InputArtifactsMatchRow(t *testing.T) {
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, stages, state, successResponse("planner-tdd-soft#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("planner-tdd-soft#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if len(step.Request.InputArtifacts) == 0 {
@@ -1811,7 +2334,16 @@ func TestNext_Paths_UnresolvableStageNumber_ReturnsStop(t *testing.T) {
 	}
 	agents := makeAgents("agent-a")
 
-	dec := engine.Next(aw, nil, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          nil,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	stop := requireStop(t, dec)
 	if stop.Reason == "" {
@@ -1848,7 +2380,16 @@ func TestNext_PreExecution_FreeFormOnSuccess_ReturnsDeviation(t *testing.T) {
 	agents := makeAgents("agent-a", "agent-b")
 	state := stateAfter("PLANNING", "", "agent-a#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, nil, state, successResponse("agent-a#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          nil,
+		State:           state,
+		LastResponse:    successResponse("agent-a#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	requireDeviation(t, dec)
 }
@@ -1874,7 +2415,16 @@ func TestNext_GreenfieldTDD_ArchitecturePhaseRouting(t *testing.T) {
 	// system-design-review is row 3 (0-indexed) in greenfield-tdd; On Success = "planner-tdd-soft".
 	state := stateAfter("ARCHITECTURE", "", "system-design-review#4", domain.StatusSUCCESS, 4)
 
-	dec := engine.Next(aw, stages, state, successResponse("system-design-review#4"), agents, 4, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("system-design-review#4"),
+		Agents:          agents,
+		Seq:             4,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "planner-tdd-soft" {
@@ -1909,7 +2459,16 @@ func TestNext_Approach_TestsOnly_LastStage_AdvancesToPostExecution(t *testing.T)
 	)
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#9", domain.StatusSUCCESS, 9)
 
-	dec := engine.Next(aw, stages, state, successResponse("tests-review-tdd#9"), agents, 9, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("tests-review-tdd#9"),
+		Agents:          agents,
+		Seq:             9,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "test-runner" {
@@ -1943,7 +2502,16 @@ func TestNext_Approach_ImplementationFirst_LastStageTestGroupComplete_AdvancesTo
 	)
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#9", domain.StatusSUCCESS, 9)
 
-	dec := engine.Next(aw, stages, state, successResponse("tests-review-tdd#9"), agents, 9, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("tests-review-tdd#9"),
+		Agents:          agents,
+		Seq:             9,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "test-runner" {
@@ -1986,7 +2554,16 @@ func TestNext_HITL_RowTrue_StageTrue_EffectiveTrue(t *testing.T) {
 	agents := makeAgents("agent-a", "agent-b")
 
 	// Initial dispatch: no prior log, dispatch agent-a (row 0, HITL=true) in Stage-1 (HITL=true).
-	dec := engine.Next(aw, stagesHITL, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stagesHITL,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "agent-a" {
@@ -2047,7 +2624,16 @@ func TestNext_ThreeGroups_BetaFirst_FirstDispatchIsBeta(t *testing.T) {
 	})
 	agents := makeAgents("agent-alpha", "agent-beta", "agent-gamma")
 
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "agent-beta" {
@@ -2071,7 +2657,16 @@ func TestNext_ThreeGroups_GammaOnly_SkipsAlphaAndBeta(t *testing.T) {
 	})
 	agents := makeAgents("agent-alpha", "agent-beta", "agent-gamma")
 
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "agent-gamma" {
@@ -2100,7 +2695,16 @@ func TestNext_ThreeGroups_GammaOnly_AfterGamma_NextStageStartsWithGamma(t *testi
 	// agent-gamma is the only dispatched row (seq=1) under GammaOnly.
 	state := stateAfter("EXECUTION.Gamma.[StageNumber]", "Stage-1", "agent-gamma#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, stages, state, successResponse("agent-gamma#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("agent-gamma#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if step.Stage != "Gamma.2" {
@@ -2130,7 +2734,16 @@ func TestNext_ThreeGroups_AlphaBeta_SkipsGamma(t *testing.T) {
 	// Gamma (which is skipped by AlphaBeta).
 	state := stateAfter("EXECUTION.Beta.[StageNumber]", "Stage-1", "agent-beta#2", domain.StatusSUCCESS, 2)
 
-	dec := engine.Next(aw, stages, state, successResponse("agent-beta#2"), agents, 2, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("agent-beta#2"),
+		Agents:          agents,
+		Seq:             2,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	// Should advance to stage 2, starting with Alpha (first group in AlphaBeta order).
@@ -2173,7 +2786,16 @@ func TestNext_ThreeGroups_BetaFirst_FullSequence(t *testing.T) {
 	}
 
 	for i, want := range wantSequence {
-		dec := engine.Next(aw, stages, states[i], responses[i], agents, i, fixedNow, nil)
+		dec := engine.Next(engine.NextInput{
+			Workflow:        aw,
+			Stages:          stages,
+			State:           states[i],
+			LastResponse:    responses[i],
+			Agents:          agents,
+			Seq:             i,
+			Now:             fixedNow,
+			Mode:            domain.ExecutionModeAutoReview,
+		})
 		step := requireDispatch(t, dec)
 		if agentName(step.Request.AgentInstanceID) != want {
 			t.Errorf("BetaFirst step %d: want %s, got %s", i+1, want, step.Request.AgentInstanceID)
@@ -2205,7 +2827,16 @@ func TestNext_ThreeGroups_GroupInEveryApproachRow_RunsInEveryStage(t *testing.T)
 	// engine advances to stage 2 and must dispatch Beta first.
 	state := stateAfter("EXECUTION.Gamma.[StageNumber]", "Stage-1", "agent-gamma#3", domain.StatusSUCCESS, 3)
 
-	dec := engine.Next(aw, stages, state, successResponse("agent-gamma#3"), agents, 3, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("agent-gamma#3"),
+		Agents:          agents,
+		Seq:             3,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if step.Stage != "Beta.2" {
@@ -2245,7 +2876,16 @@ func TestNext_UnresolvableApproach_InitialDispatch_ReturnsStop(t *testing.T) {
 	// Simulate being at contracts-review (row 6, last pre-execution row) → entering EXECUTION.
 	state := stateAfter("DESIGN", "", "contracts-review#7", domain.StatusSUCCESS, 7)
 
-	dec := engine.Next(aw, stages, state, successResponse("contracts-review#7"), agents, 7, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("contracts-review#7"),
+		Agents:          agents,
+		Seq:             7,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	stop := requireStop(t, dec)
 	if stop.Reason == "" {
@@ -2271,7 +2911,16 @@ func TestNext_UnresolvableApproach_StopReason_NamesApproachValue(t *testing.T) {
 	)
 	state := stateAfter("DESIGN", "", "contracts-review#7", domain.StatusSUCCESS, 7)
 
-	dec := engine.Next(aw, stages, state, successResponse("contracts-review#7"), agents, 7, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("contracts-review#7"),
+		Agents:          agents,
+		Seq:             7,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	stop := requireStop(t, dec)
 	if !strings.Contains(stop.Reason, "UnknownApproach") {
@@ -2302,7 +2951,16 @@ func TestNext_UnresolvableApproach_InterStageAdvance_ReturnsStop(t *testing.T) {
 	// After it completes, the engine should try to advance to stage 2 but find "UnknownApproach" → stop.
 	state := stateAfter("EXECUTION.Implementation.[StageNumber]", "Stage-1", "implementation-review#11", domain.StatusSUCCESS, 11)
 
-	dec := engine.Next(aw, stages, state, successResponse("implementation-review#11"), agents, 11, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("implementation-review#11"),
+		Agents:          agents,
+		Seq:             11,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	stop := requireStop(t, dec)
 	if !strings.Contains(stop.Reason, "UnknownApproach") {
@@ -2328,7 +2986,16 @@ func TestNext_UnresolvableApproach_NoFallbackDispatch(t *testing.T) {
 	)
 	state := stateAfter("DESIGN", "", "contracts-review#7", domain.StatusSUCCESS, 7)
 
-	dec := engine.Next(aw, stages, state, successResponse("contracts-review#7"), agents, 7, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("contracts-review#7"),
+		Agents:          agents,
+		Seq:             7,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	// Must be Stop, not Dispatch.
 	if dec.Dispatch != nil {
@@ -2439,7 +3106,16 @@ func TestNext_UnresolvableApproach_InitialDispatch_StagedOnly_ReturnsStop(t *tes
 	agents := makeAgents("agent-alpha", "agent-beta", "agent-gamma")
 
 	// Initial dispatch (no prior log) → engine enters EXECUTION immediately.
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	stop := requireStop(t, dec)
 	if !strings.Contains(stop.Reason, "NoSuchApproach") {
@@ -2495,7 +3171,16 @@ func TestNext_UnresolvableApproach_WinsOverGenericRowStop(t *testing.T) {
 		},
 	}
 
-	dec := engine.Next(aw, stages, state, successResponse("build-review#9"), agents, 9, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("build-review#9"),
+		Agents:          agents,
+		Seq:             9,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	stop := requireStop(t, dec)
 	// The stop reason must name the unresolvable approach value. The generic
@@ -2526,7 +3211,16 @@ func TestNext_NoGroups_UnknownApproachValue_DoesNotStop(t *testing.T) {
 	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
 
 	// Fresh start: initial dispatch.
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	// Must be a dispatch (rows run in order), not a Stop.
 	step := requireDispatch(t, dec)
@@ -2550,7 +3244,16 @@ func TestNext_NoGroups_AllExecutionRowsDispatchedInOrder(t *testing.T) {
 	// After implementation-tdd (row 0, seq 1) completes, next must be implementation-review (row 1).
 	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-tdd#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, stages, state, successResponse("implementation-tdd#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("implementation-tdd#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "implementation-review" {
@@ -2691,7 +3394,16 @@ func TestNext_Interleaved_Infrastructure_SequenceDisambiguation_RepeatedAgent(t 
 		},
 	}
 
-	dec := engine.Next(aw, stages, state, successResponse("build-review#10"), agents, 10, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("build-review#10"),
+		Agents:          agents,
+		Seq:             10,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	got := agentName(step.Request.AgentInstanceID)
@@ -2724,7 +3436,16 @@ func TestNext_Interleaved_Infrastructure_SequenceDisambiguation_SingleAgentPerRo
 		},
 	}
 
-	dec := engine.Next(aw, stages, state, successResponse("plan-review#3"), agents, 3, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("plan-review#3"),
+		Agents:          agents,
+		Seq:             3,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	got := agentName(step.Request.AgentInstanceID)
@@ -2752,7 +3473,16 @@ func TestNext_UnresolvedPosition_AgentNotInWorkflow_StopNamesCause(t *testing.T)
 		},
 	}
 
-	dec := engine.Next(aw, stages, state, successResponse("mystery-agent#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("mystery-agent#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	stop := requireStop(t, dec)
 	if !strings.Contains(stop.Reason, "mystery-agent") {
@@ -2792,7 +3522,16 @@ func TestNext_StagedExecution_GroupedRow_RecordsBarePhaseAndGroupQualifiedStage(
 	)
 	state := stateAfter("DESIGN", "", "contracts-review#7", domain.StatusSUCCESS, 7)
 
-	dec := engine.Next(aw, stages, state, successResponse("contracts-review#7"), agents, 7, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("contracts-review#7"),
+		Agents:          agents,
+		Seq:             7,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if step.Phase != "EXECUTION" {
@@ -2812,7 +3551,16 @@ func TestNext_StagedExecution_UngroupedRow_RecordsBarePhaseAndPlainStageNumber(t
 	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("implementation-tdd", "implementation-review", "test-runner")
 
-	dec := engine.Next(aw, stages, emptyState(), nil, agents, 0, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           emptyState(),
+		LastResponse:    nil,
+		Agents:          agents,
+		Seq:             0,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if step.Phase != "EXECUTION" {
@@ -2831,7 +3579,16 @@ func TestNext_NonStagedRow_RecordsEmptyStage(t *testing.T) {
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
 	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
 
-	dec := engine.Next(aw, stages, state, successResponse("planner-tdd-soft#1"), agents, 1, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("planner-tdd-soft#1"),
+		Agents:          agents,
+		Seq:             1,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if step.Phase != "PLANNING" {
@@ -2863,7 +3620,16 @@ func TestNext_TargetFormatState_RepeatedAgent_Test_ResolvesToTestGroupRow(t *tes
 	)
 	state := stateAfter("EXECUTION", "Test.1", "build-review#9", domain.StatusSUCCESS, 9)
 
-	dec := engine.Next(aw, stages, state, successResponse("build-review#9"), agents, 9, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("build-review#9"),
+		Agents:          agents,
+		Seq:             9,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "tests-review-tdd" {
@@ -2891,7 +3657,16 @@ func TestNext_TargetFormatState_RepeatedAgent_Implementation_ResolvesToImplement
 	)
 	state := stateAfter("EXECUTION", "Implementation.1", "build-review#12", domain.StatusSUCCESS, 12)
 
-	dec := engine.Next(aw, stages, state, successResponse("build-review#12"), agents, 12, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("build-review#12"),
+		Agents:          agents,
+		Seq:             12,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "implementation-review" {
@@ -3015,11 +3790,759 @@ func TestNext_LegacyArtifact_QualifiedPhaseAndStageN_ResolvesAndDispatches(t *te
 	)
 	state := stateAfter("EXECUTION.Test.[StageNumber]", "Stage-1", "test-writer-tdd#8", domain.StatusSUCCESS, 8)
 
-	dec := engine.Next(aw, stages, state, successResponse("test-writer-tdd#8"), agents, 8, fixedNow, nil)
+	dec := engine.Next(engine.NextInput{
+		Workflow:        aw,
+		Stages:          stages,
+		State:           state,
+		LastResponse:    successResponse("test-writer-tdd#8"),
+		Agents:          agents,
+		Seq:             8,
+		Now:             fixedNow,
+		Mode:            domain.ExecutionModeAutoReview,
+	})
 
 	step := requireDispatch(t, dec)
 	if agentName(step.Request.AgentInstanceID) != "tests-review-tdd" {
 		t.Errorf("legacy artifact must still resolve position correctly: want next dispatch tests-review-tdd, got %s",
 			step.Request.AgentInstanceID)
+	}
+}
+
+// requireConsult asserts that the decision is a ConsultDecision.
+func requireConsult(t *testing.T, dec domain.EngineDecision) domain.ConsultDecision {
+	t.Helper()
+	if dec.Consult == nil {
+		var which string
+		switch {
+		case dec.Dispatch != nil:
+			which = "DispatchDecision"
+		case dec.Complete != nil:
+			which = "CompleteDecision"
+		case dec.Deviation != nil:
+			which = fmt.Sprintf("DeviationDecision(kind=%q)", dec.Deviation.Info.Kind)
+		case dec.Stop != nil:
+			which = fmt.Sprintf("StopDecision(%q)", dec.Stop.Reason)
+		default:
+			which = "nil decision (all fields nil)"
+		}
+		t.Fatalf("want ConsultDecision, got %s", which)
+	}
+	return *dec.Consult
+}
+
+// ===== Mode-gated routing (Stage 2) =====
+
+// TestNext_Mode_Auto_Success_RoutesNormally verifies that in auto mode a SUCCESS
+// response routes to the On Success target exactly as before.
+func TestNext_Mode_Auto_Success_RoutesNormally(t *testing.T) {
+	// quick-fix row 0: planner-tdd-soft, OnSuccess="plan-review"
+	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
+	stages := singleStageSet("Implementation-Only")
+	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
+	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: successResponse("planner-tdd-soft#1"),
+		Agents:       agents,
+		Seq:          1,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAuto,
+	})
+
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "plan-review" {
+		t.Errorf("auto mode SUCCESS: want On Success route to plan-review, got %s",
+			step.Request.AgentInstanceID)
+	}
+}
+
+// TestNext_Mode_AutoReview_Success_RoutesNormally verifies that in auto-review
+// mode SUCCESS routing is identical to auto — the auto-review extension applies
+// only to CNA with an unambiguous On Findings hint.
+func TestNext_Mode_AutoReview_Success_RoutesNormally(t *testing.T) {
+	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
+	stages := singleStageSet("Implementation-Only")
+	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
+	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: successResponse("planner-tdd-soft#1"),
+		Agents:       agents,
+		Seq:          1,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
+
+	step := requireDispatch(t, dec)
+	if agentName(step.Request.AgentInstanceID) != "plan-review" {
+		t.Errorf("auto-review mode SUCCESS: want On Success route to plan-review, got %s",
+			step.Request.AgentInstanceID)
+	}
+}
+
+// TestNext_Mode_Orchestrated_FirstCall_ReturnsConsultDecision verifies that in
+// orchestrated mode the engine returns a ConsultDecision on the very first call
+// (before any agent has run), with trigger ConsultTriggerOrchestratedMode.
+func TestNext_Mode_Orchestrated_FirstCall_ReturnsConsultDecision(t *testing.T) {
+	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
+	stages := singleStageSet("Implementation-Only")
+	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        emptyState(),
+		LastResponse: nil,
+		Agents:       agents,
+		Seq:          0,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeOrchestrated,
+	})
+
+	consult := requireConsult(t, dec)
+	if consult.Trigger != domain.ConsultTriggerOrchestratedMode {
+		t.Errorf("orchestrated mode first call: want trigger ConsultTriggerOrchestratedMode, got %q",
+			consult.Trigger)
+	}
+	// First call: CurrentRow must be -1 (no row dispatched yet).
+	if consult.CurrentRow != -1 {
+		t.Errorf("orchestrated mode first call: want CurrentRow=-1 (no row yet), got %d",
+			consult.CurrentRow)
+	}
+}
+
+// TestNext_Mode_Orchestrated_AfterSuccess_ReturnsConsultDecision verifies that
+// in orchestrated mode every call returns a ConsultDecision, not just the first.
+// Even a SUCCESS response does not produce a routing decision from the engine.
+func TestNext_Mode_Orchestrated_AfterSuccess_ReturnsConsultDecision(t *testing.T) {
+	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
+	stages := singleStageSet("Implementation-Only")
+	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
+	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: successResponse("planner-tdd-soft#1"),
+		Agents:       agents,
+		Seq:          1,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeOrchestrated,
+	})
+
+	consult := requireConsult(t, dec)
+	if consult.Trigger != domain.ConsultTriggerOrchestratedMode {
+		t.Errorf("orchestrated mode after SUCCESS: want trigger ConsultTriggerOrchestratedMode, got %q",
+			consult.Trigger)
+	}
+	// After a PLANNING-phase SUCCESS the current phase is "PLANNING" and stage is "".
+	if consult.CurrentPhase != "PLANNING" {
+		t.Errorf("orchestrated mode after SUCCESS: want CurrentPhase=%q, got %q",
+			"PLANNING", consult.CurrentPhase)
+	}
+	if consult.CurrentStage != "" {
+		t.Errorf("orchestrated mode after SUCCESS: want CurrentStage=%q (empty for PLANNING phase), got %q",
+			"", consult.CurrentStage)
+	}
+}
+
+// TestNext_Mode_Orchestrated_AfterCNA_ReturnsConsultDecision verifies that
+// in orchestrated mode even a CNA response does not produce a DeviationDecision
+// or a DispatchDecision — it always produces ConsultDecision.
+func TestNext_Mode_Orchestrated_AfterCNA_ReturnsConsultDecision(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	// build-review has an unambiguous OnFindings hint. In auto-review this dispatches;
+	// in orchestrated it must still consult.
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: cnaResponse("build-review#9"),
+		Agents:       agents,
+		Seq:          9,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeOrchestrated,
+	})
+
+	consult := requireConsult(t, dec)
+	if consult.Trigger != domain.ConsultTriggerOrchestratedMode {
+		t.Errorf("orchestrated mode after CNA: want ConsultTriggerOrchestratedMode, got %q",
+			consult.Trigger)
+	}
+	// After a CNA in EXECUTION the current phase and stage come from the state.
+	if consult.CurrentPhase != "EXECUTION.[StageNumber]" {
+		t.Errorf("orchestrated mode after CNA: want CurrentPhase=%q, got %q",
+			"EXECUTION.[StageNumber]", consult.CurrentPhase)
+	}
+	if consult.CurrentStage != "Stage-1" {
+		t.Errorf("orchestrated mode after CNA: want CurrentStage=%q, got %q",
+			"Stage-1", consult.CurrentStage)
+	}
+}
+
+// TestNext_Mode_Auto_CNA_AmbiguousOnFindings_ReturnsDeviation verifies that in
+// auto mode CNA with an ambiguous On Findings hint still yields Deviation (not
+// Dispatch). Ambiguous OnFindings must deviate in every mode.
+func TestNext_Mode_Auto_CNA_AmbiguousOnFindings_ReturnsDeviation(t *testing.T) {
+	// brownfield-tdd row 10: implementation-review has
+	// OnFindings="implementation-tdd (or other based on issue)" — ambiguous.
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review",
+		"test-runner",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-review#11", domain.StatusCOMPLETED_NEEDS_ACTION, 11)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: cnaResponse("implementation-review#11"),
+		Agents:       agents,
+		Seq:          11,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAuto,
+	})
+
+	requireDeviation(t, dec)
+}
+
+// TestNext_Mode_AutoReview_CNA_AmbiguousOnFindings_ReturnsDeviation verifies
+// that in auto-review mode CNA with an ambiguous On Findings hint also yields
+// Deviation. The auto-review extension only fires on unambiguous hints.
+func TestNext_Mode_AutoReview_CNA_AmbiguousOnFindings_ReturnsDeviation(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review",
+		"test-runner",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "implementation-review#11", domain.StatusCOMPLETED_NEEDS_ACTION, 11)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: cnaResponse("implementation-review#11"),
+		Agents:       agents,
+		Seq:          11,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
+
+	requireDeviation(t, dec)
+}
+
+// TestNext_Mode_Auto_NonCNA_NonSuccess_ReturnsDeviation verifies that in auto
+// mode non-CNA non-SUCCESS statuses always yield Deviation regardless of On Findings.
+func TestNext_Mode_Auto_NonCNA_NonSuccess_ReturnsDeviation(t *testing.T) {
+	// tests-review-tdd has OnFindings="test-writer-tdd" — unambiguous — but the
+	// status is PARTIALLY_DONE (not CNA), so it must deviate.
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review",
+		"test-runner",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#9", domain.StatusPARTIALLY_DONE, 9)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: nonSuccessResponse("tests-review-tdd#9", domain.StatusPARTIALLY_DONE),
+		Agents:       agents,
+		Seq:          9,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAuto,
+	})
+
+	requireDeviation(t, dec)
+}
+
+// TestNext_Mode_AutoReview_NonCNA_NonSuccess_ReturnsDeviation verifies that in
+// auto-review mode non-CNA non-SUCCESS statuses also yield Deviation, not Dispatch.
+func TestNext_Mode_AutoReview_NonCNA_NonSuccess_ReturnsDeviation(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldTDDContent, "brownfield-tdd", "3.4")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "tests-review-tdd", "implementation-tdd", "implementation-review",
+		"test-runner",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "tests-review-tdd#9", domain.StatusBLOCKED, 9)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        state,
+		LastResponse: nonSuccessResponse("tests-review-tdd#9", domain.StatusBLOCKED),
+		Agents:       agents,
+		Seq:          9,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeAutoReview,
+	})
+
+	requireDeviation(t, dec)
+}
+
+// ===== Review artifact injection (Stage 2) =====
+//
+// On the auto-review auto-route-back (CNA + unambiguous On Findings), the
+// reviewing agent's output artifacts (in.LastOutputArtifacts) are appended to
+// the dispatched step's Request.InputArtifacts, after the table row's entries,
+// without duplicating any path already present.
+//
+// No injection occurs on SUCCESS-routed dispatches or Deviation decisions.
+
+// TestNext_ArtifactInjection_AutoReview_CNA_InjectsLastOutputArtifacts verifies
+// that on the auto-review auto-route-back the reviewing agent's output artifacts
+// are present in the dispatched step's InputArtifacts, after the table row's
+// own entries.
+func TestNext_ArtifactInjection_AutoReview_CNA_InjectsLastOutputArtifacts(t *testing.T) {
+	// brownfield-tdd-build-verified row 8: build-review, OnFindings="test-writer-tdd".
+	// build-review's own output artifact (LastOutputArtifacts) must be appended
+	// to the dispatched test-writer-tdd step's InputArtifacts.
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	// These are the output artifacts of the build-review step that just ran.
+	reviewOutputs := []string{"Stage-1/build-review-tests.md"}
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:            aw,
+		Stages:              stages,
+		State:               state,
+		LastResponse:        cnaResponse("build-review#9"),
+		LastOutputArtifacts: reviewOutputs,
+		Agents:              agents,
+		Seq:                 9,
+		Now:                 fixedNow,
+		Mode:                domain.ExecutionModeAutoReview,
+	})
+
+	step := requireDispatch(t, dec)
+	// The dispatched step is test-writer-tdd. Its InputArtifacts must include
+	// the build-review output artifact appended after the table row's own entries.
+	found := false
+	for _, a := range step.Request.InputArtifacts {
+		if a == "Stage-1/build-review-tests.md" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("auto-review CNA auto-route-back: want review output artifact %q in dispatched step InputArtifacts, got %v",
+			"Stage-1/build-review-tests.md", step.Request.InputArtifacts)
+	}
+}
+
+// TestNext_ArtifactInjection_AutoReview_CNA_NoDeduplication_WhenUnique verifies
+// that when LastOutputArtifacts contains paths not already in the table row's
+// InputArtifacts, all of them are appended.
+func TestNext_ArtifactInjection_AutoReview_CNA_NoDeduplication_WhenUnique(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	// Two unique review outputs not in the table row's inputs.
+	reviewOutputs := []string{"Stage-1/build-review-tests.md", "Stage-1/extra-finding.md"}
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:            aw,
+		Stages:              stages,
+		State:               state,
+		LastResponse:        cnaResponse("build-review#9"),
+		LastOutputArtifacts: reviewOutputs,
+		Agents:              agents,
+		Seq:                 9,
+		Now:                 fixedNow,
+		Mode:                domain.ExecutionModeAutoReview,
+	})
+
+	step := requireDispatch(t, dec)
+	inputSet := make(map[string]bool)
+	for _, a := range step.Request.InputArtifacts {
+		inputSet[a] = true
+	}
+	for _, expected := range reviewOutputs {
+		if !inputSet[expected] {
+			t.Errorf("auto-review CNA: want review output %q in dispatched InputArtifacts, got %v",
+				expected, step.Request.InputArtifacts)
+		}
+	}
+}
+
+// TestNext_ArtifactInjection_AutoReview_CNA_DeduplicatesExisting verifies that
+// paths already present in the table row's InputArtifacts are not duplicated
+// when LastOutputArtifacts contains them too, and that a new unique path from
+// LastOutputArtifacts IS injected (proving injection occurred at all).
+func TestNext_ArtifactInjection_AutoReview_CNA_DeduplicatesExisting(t *testing.T) {
+	// We use the build-review row (row 8) dispatching back to test-writer-tdd.
+	// test-writer-tdd's table InputArtifacts are:
+	//   Stage-1/Plan.md, ContractsDesign.md, Stage-1/PlanProgress.md
+	// LastOutputArtifacts contains two entries:
+	//   - "Stage-1/Plan.md": already in the table row — must NOT appear twice.
+	//   - "Stage-1/build-review-findings.md": NOT in the table row — must appear
+	//     exactly once, proving injection actually ran.
+	// This combination tests both dedup (existing path) and injection (unique path)
+	// in a single call, so a missing-injection bug would cause the unique path to
+	// be absent and the test would fail.
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	// Stage-1/Plan.md is already in test-writer-tdd's table InputArtifacts;
+	// Stage-1/build-review-findings.md is not.
+	reviewOutputs := []string{"Stage-1/Plan.md", "Stage-1/build-review-findings.md"}
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:            aw,
+		Stages:              stages,
+		State:               state,
+		LastResponse:        cnaResponse("build-review#9"),
+		LastOutputArtifacts: reviewOutputs,
+		Agents:              agents,
+		Seq:                 9,
+		Now:                 fixedNow,
+		Mode:                domain.ExecutionModeAutoReview,
+	})
+
+	step := requireDispatch(t, dec)
+
+	// The duplicate path must appear exactly once (dedup contract).
+	dupCount := 0
+	for _, a := range step.Request.InputArtifacts {
+		if a == "Stage-1/Plan.md" {
+			dupCount++
+		}
+	}
+	if dupCount != 1 {
+		t.Errorf("auto-review CNA dedup: want Stage-1/Plan.md exactly once in InputArtifacts, got %d occurrences in %v",
+			dupCount, step.Request.InputArtifacts)
+	}
+
+	// The unique path must be present (injection contract — without this, a
+	// completely missing injection implementation would still pass the dedup check).
+	foundUnique := false
+	for _, a := range step.Request.InputArtifacts {
+		if a == "Stage-1/build-review-findings.md" {
+			foundUnique = true
+			break
+		}
+	}
+	if !foundUnique {
+		t.Errorf("auto-review CNA injection: want unique review output %q present in InputArtifacts (proves injection ran), got %v",
+			"Stage-1/build-review-findings.md", step.Request.InputArtifacts)
+	}
+}
+
+// TestNext_ArtifactInjection_AutoReview_Success_NoInjection verifies that a
+// SUCCESS-routed dispatch never carries injected artifacts, even when
+// LastOutputArtifacts is non-empty.
+func TestNext_ArtifactInjection_AutoReview_Success_NoInjection(t *testing.T) {
+	// planner-tdd-soft returns SUCCESS; routes to plan-review.
+	// plan-review's table InputArtifacts do not include any "review-output.md".
+	// Even with LastOutputArtifacts = ["review-output.md"], it must not appear.
+	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
+	stages := singleStageSet("Implementation-Only")
+	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
+	state := stateAfter("PLANNING", "", "planner-tdd-soft#1", domain.StatusSUCCESS, 1)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:            aw,
+		Stages:              stages,
+		State:               state,
+		LastResponse:        successResponse("planner-tdd-soft#1"),
+		LastOutputArtifacts: []string{"review-output.md"},
+		Agents:              agents,
+		Seq:                 1,
+		Now:                 fixedNow,
+		Mode:                domain.ExecutionModeAutoReview,
+	})
+
+	step := requireDispatch(t, dec)
+	for _, a := range step.Request.InputArtifacts {
+		if a == "review-output.md" {
+			t.Errorf("SUCCESS-routed dispatch must not carry injected artifact %q, but found it in InputArtifacts %v",
+				"review-output.md", step.Request.InputArtifacts)
+		}
+	}
+}
+
+// TestNext_ArtifactInjection_Auto_CNA_NoInjection verifies that in auto mode
+// a CNA response does not inject artifacts — it deviates, and Deviation carries
+// no injected InputArtifacts.
+func TestNext_ArtifactInjection_Auto_CNA_NoInjection(t *testing.T) {
+	// In auto mode CNA deviates, so injection is irrelevant. This test also
+	// confirms that the deviation decision itself is returned (not a dispatch).
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:            aw,
+		Stages:              stages,
+		State:               state,
+		LastResponse:        cnaResponse("build-review#9"),
+		LastOutputArtifacts: []string{"Stage-1/build-review-tests.md"},
+		Agents:              agents,
+		Seq:                 9,
+		Now:                 fixedNow,
+		Mode:                domain.ExecutionModeAuto,
+	})
+
+	// auto mode CNA deviates — injection never happens on a non-Dispatch decision.
+	requireDeviation(t, dec)
+}
+
+// TestNext_ArtifactInjection_AutoReview_CNA_InjectsAfterTableEntries verifies
+// that injected artifacts are appended AFTER the table row's existing entries,
+// not prepended or interleaved.
+func TestNext_ArtifactInjection_AutoReview_CNA_InjectsAfterTableEntries(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+	injectedArtifact := "Stage-1/build-review-tests.md"
+	reviewOutputs := []string{injectedArtifact}
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:            aw,
+		Stages:              stages,
+		State:               state,
+		LastResponse:        cnaResponse("build-review#9"),
+		LastOutputArtifacts: reviewOutputs,
+		Agents:              agents,
+		Seq:                 9,
+		Now:                 fixedNow,
+		Mode:                domain.ExecutionModeAutoReview,
+	})
+
+	step := requireDispatch(t, dec)
+	arts := step.Request.InputArtifacts
+
+	// The injected artifact must appear after at least one table-provided artifact.
+	injectedIdx := -1
+	for i, a := range arts {
+		if a == injectedArtifact {
+			injectedIdx = i
+			break
+		}
+	}
+	if injectedIdx < 0 {
+		t.Fatalf("injected artifact %q not found in InputArtifacts %v", injectedArtifact, arts)
+	}
+	if injectedIdx == 0 && len(arts) > 1 {
+		// Injected is first and there are others — check if it's really a table entry
+		// by seeing if a known table entry (e.g. Stage-1/Plan.md) comes after it.
+		// For test-writer-tdd, table entries are: Stage-1/Plan.md, ContractsDesign.md, Stage-1/PlanProgress.md
+		for _, tableEntry := range []string{"Stage-1/Plan.md", "ContractsDesign.md", "Stage-1/PlanProgress.md"} {
+			for i, a := range arts {
+				if a == tableEntry && i > injectedIdx {
+					t.Errorf("injected artifact %q (index %d) appears before table entry %q (index %d); injected must come after table entries",
+						injectedArtifact, injectedIdx, tableEntry, i)
+				}
+			}
+		}
+	}
+	// Also verify: all known table entries appear before the injected artifact.
+	for _, tableEntry := range []string{"Stage-1/Plan.md", "ContractsDesign.md", "Stage-1/PlanProgress.md"} {
+		tableIdx := -1
+		for i, a := range arts {
+			if a == tableEntry {
+				tableIdx = i
+				break
+			}
+		}
+		if tableIdx >= 0 && tableIdx > injectedIdx {
+			t.Errorf("table entry %q (index %d) appears after injected artifact %q (index %d); injected must come last",
+				tableEntry, tableIdx, injectedArtifact, injectedIdx)
+		}
+	}
+}
+
+// ===== ExecutionModeUnset edge case (Stage 2) =====
+
+// TestNext_Mode_Unset_ReturnsDeviationAmbiguousRoute verifies that when the
+// execution mode is the zero value (ExecutionModeUnset), Next returns a
+// DeviationDecision with Kind DeviationAmbiguousRoute rather than silently
+// picking a mode or panicking.
+func TestNext_Mode_Unset_ReturnsDeviationAmbiguousRoute(t *testing.T) {
+	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
+	stages := singleStageSet("Implementation-Only")
+	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:     aw,
+		Stages:       stages,
+		State:        emptyState(),
+		LastResponse: nil,
+		Agents:       agents,
+		Seq:          0,
+		Now:          fixedNow,
+		Mode:         domain.ExecutionModeUnset,
+	})
+
+	dev := requireDeviation(t, dec)
+	if dev.Info.Kind != domain.DeviationAmbiguousRoute {
+		t.Errorf("ExecutionModeUnset: want DeviationKind=%q, got %q",
+			domain.DeviationAmbiguousRoute, dev.Info.Kind)
+	}
+}
+
+// ===== Nil / empty LastOutputArtifacts on auto-review CNA path (Stage 2) =====
+
+// TestNext_ArtifactInjection_AutoReview_CNA_NilLastOutputArtifacts verifies that
+// when LastOutputArtifacts is nil the dispatched step's InputArtifacts match the
+// table row exactly — no injection, no panic.
+func TestNext_ArtifactInjection_AutoReview_CNA_NilLastOutputArtifacts(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:            aw,
+		Stages:              stages,
+		State:               state,
+		LastResponse:        cnaResponse("build-review#9"),
+		LastOutputArtifacts: nil,
+		Agents:              agents,
+		Seq:                 9,
+		Now:                 fixedNow,
+		Mode:                domain.ExecutionModeAutoReview,
+	})
+
+	step := requireDispatch(t, dec)
+	// With nil LastOutputArtifacts the table row's InputArtifacts must appear
+	// and no extra entries should be present beyond what the table supplies.
+	tableEntries := []string{"Stage-1/Plan.md", "ContractsDesign.md", "Stage-1/PlanProgress.md"}
+	inputSet := make(map[string]bool)
+	for _, a := range step.Request.InputArtifacts {
+		inputSet[a] = true
+	}
+	for _, expected := range tableEntries {
+		if !inputSet[expected] {
+			t.Errorf("nil LastOutputArtifacts: table entry %q missing from InputArtifacts %v",
+				expected, step.Request.InputArtifacts)
+		}
+	}
+	// No artifact beyond the table entries should be present.
+	tableSet := make(map[string]bool)
+	for _, e := range tableEntries {
+		tableSet[e] = true
+	}
+	for _, a := range step.Request.InputArtifacts {
+		if !tableSet[a] {
+			t.Errorf("nil LastOutputArtifacts: unexpected extra artifact %q in InputArtifacts %v (should match table row only)",
+				a, step.Request.InputArtifacts)
+		}
+	}
+}
+
+// TestNext_ArtifactInjection_AutoReview_CNA_EmptyLastOutputArtifacts verifies that
+// when LastOutputArtifacts is an empty slice the dispatched step's InputArtifacts
+// match the table row exactly — same expectation as nil.
+func TestNext_ArtifactInjection_AutoReview_CNA_EmptyLastOutputArtifacts(t *testing.T) {
+	aw := mustParseAndAdmit(t, brownfieldBuildVerifiedContent, "brownfield-tdd-build-verified", "2.0")
+	stages := singleStageSet("TDD")
+	agents := makeAgents(
+		"codebase-research", "requirements-refinement", "requirements-review",
+		"planner-tdd-soft", "plan-review", "contracts-designer", "contracts-review",
+		"test-writer-tdd", "build-review", "tests-review-tdd",
+		"implementation-tdd", "implementation-review",
+	)
+	state := stateAfter("EXECUTION.[StageNumber]", "Stage-1", "build-review#9", domain.StatusCOMPLETED_NEEDS_ACTION, 9)
+
+	dec := engine.Next(engine.NextInput{
+		Workflow:            aw,
+		Stages:              stages,
+		State:               state,
+		LastResponse:        cnaResponse("build-review#9"),
+		LastOutputArtifacts: []string{},
+		Agents:              agents,
+		Seq:                 9,
+		Now:                 fixedNow,
+		Mode:                domain.ExecutionModeAutoReview,
+	})
+
+	step := requireDispatch(t, dec)
+	tableEntries := []string{"Stage-1/Plan.md", "ContractsDesign.md", "Stage-1/PlanProgress.md"}
+	inputSet := make(map[string]bool)
+	for _, a := range step.Request.InputArtifacts {
+		inputSet[a] = true
+	}
+	for _, expected := range tableEntries {
+		if !inputSet[expected] {
+			t.Errorf("empty LastOutputArtifacts: table entry %q missing from InputArtifacts %v",
+				expected, step.Request.InputArtifacts)
+		}
+	}
+	tableSet := make(map[string]bool)
+	for _, e := range tableEntries {
+		tableSet[e] = true
+	}
+	for _, a := range step.Request.InputArtifacts {
+		if !tableSet[a] {
+			t.Errorf("empty LastOutputArtifacts: unexpected extra artifact %q in InputArtifacts %v (should match table row only)",
+				a, step.Request.InputArtifacts)
+		}
 	}
 }

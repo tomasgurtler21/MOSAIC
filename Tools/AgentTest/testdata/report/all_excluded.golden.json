@@ -16,6 +16,7 @@
         "passed": 0,
         "excluded": 2,
         "pass_rate": 0,
+        "required_pass_rate": 0,
         "infrastructure_failure": true,
         "total_cost": { "total_usd": 0, "attribution": "attributed", "detail": "" }
       },
@@ -29,7 +30,9 @@
           "duration_ms": 500,
           "cost": { "total_usd": 0, "attribution": "attributed", "detail": "" },
           "negative_applied": false,
-          "subject_version": "unknown"
+          "subject_version": "unknown",
+          "subject_model": "unknown",
+          "stub_model": "unknown"
         },
         {
           "run": { "run_id": "run-001", "test_id": "always-loses-its-lock", "run_number": 2 },
@@ -40,7 +43,9 @@
           "duration_ms": 500,
           "cost": { "total_usd": 0, "attribution": "attributed", "detail": "" },
           "negative_applied": false,
-          "subject_version": "unknown"
+          "subject_version": "unknown",
+          "subject_model": "unknown",
+          "stub_model": "unknown"
         }
       ]
     }

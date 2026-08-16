@@ -1,53 +1,65 @@
 package deviation_test
 
-// Tests for the deviation package.
+// Tests for the deviation package — two-action orchestrator contract and client.
 //
 // Coverage:
 //
-//   OrchestratorDelegate — request assembly:
-//   - Assembles a protocol request with the correct task_description format
-//     ("Resolve deviation: {agent} returned {status} at row {index} in
-//     phase {phase}"), input_artifacts=["Orchestration.md"],
-//     output_artifacts=["Orchestration.md"], include_result_summary=true,
-//     human_in_the_loop=false.
+//   OrchestratorConsultant — routing request construction (T3.1):
+//   - Sends a wire request with all three required fields: orchestration_artifact,
+//     context, and last_status_message.
+//   - Encodes last_status_message as JSON null (not absent) when the
+//     ConsultationRequest carries a nil pointer (first step of a new run).
+//   - Uses exactly the orchestration_artifact path from the ConsultationRequest.
 //
-//   OrchestratorDelegate — action parsing:
-//   - Parses "rejoin" action from orchestrator result_data → RejoinAtRow.
-//   - Parses "stop" action from orchestrator result_data → StopRun.
-//   - Parses "custom" action with well-formed custom_request → Custom field.
-//   - "custom" without custom_request field → error.
+//   OrchestratorConsultant — routing response parsing (T3.2):
+//   - Parses a dispatch response with every optional field present; all pointer
+//     fields are non-nil and carry the given values.
+//   - Parses a dispatch response with optional fields set to JSON null; pointer
+//     fields are nil (fall back to table row).
+//   - Parses a dispatch response with optional fields absent; pointer fields are
+//     nil (same fallback behaviour as null).
+//   - Parses a dispatch response with input_artifacts as an explicit empty array;
+//     InputArtifacts is a non-nil pointer to an empty slice — distinct from nil
+//     (AC3.2: "dispatch with no input artifacts" is different from "fall back").
+//   - Parses a stop response; returns a StopInstruction with the given reason.
+//   - Malformed JSON reply → *ConsultationError with ConsultFailMalformedJSON.
+//   - action="dispatch" with agent field absent or empty → *ConsultationError
+//     with ConsultFailMissingField naming the "agent" field.
+//   - action="dispatch" with task_description absent or empty → *ConsultationError
+//     with ConsultFailMissingField naming the "task_description" field.
+//   - Unknown action value → *ConsultationError with ConsultFailUnknownAction.
+//   - agent identifier not in routing table → *ConsultationError with
+//     ConsultFailUnknownAgent; the error lists the available routing table agents.
+//   - Unknown extra fields in an otherwise valid response are ignored (AC3.4).
 //
-//   OrchestratorDelegate — HITL override (never originates, only carries):
-//   - Carries explicit hitl_override=false from orchestrator instruction →
-//     HITLOverride=&false in RejoinAtRow (E503 re-invocation path).
-//   - Carries explicit hitl_override=true from orchestrator instruction →
-//     HITLOverride=&true in RejoinAtRow (distinct JSON nullable-bool path).
-//   - Does NOT set HITLOverride when orchestrator instruction omits hitl_override.
+//   OrchestratorConsultant — pre-consultation (T3.3):
+//   - Sends context=pre_consultation and last_status_message=null on the wire.
+//   - Parses a response with both task_description and constraints present.
+//   - Parses a response with only task_description; constraints is empty.
+//   - Parses a response with only constraints; task_description is empty.
+//   - Parses a response with both fields absent; success with empty advice.
+//   - Malformed response (not valid JSON) → *ConsultationError.
 //
-//   OrchestratorDelegate — error cases:
-//   - Orchestrator returns non-SUCCESS status → error.
-//   - Orchestrator result_data missing → error.
-//   - Orchestrator result_data is malformed JSON → error.
-//   - rejoin_agent names an identifier not in the routing table → error.
-//
-//   ManualResolver:
-//   - Calls Interaction.SelectOne to offer the user a row to rejoin at.
-//   - Returns RejoinAtRow with the user-selected row index.
-//   - Carries HITLOverride when the user explicitly confirms a HITL change.
-//   - Does NOT set HITLOverride when the user does not choose to change HITL.
-//   - Stop option ID is "stop" (convention enforced by the test); when user
-//     chooses it, returns StopRun.
+//   ManualResolver — two-action instruction shape (T3.4):
+//   - Calls Interaction.SelectOne with one option per routing table row plus a
+//     stop option whose ID is "stop".
+//   - When the user selects an agent row and supplies a task description, returns
+//     a RoutingInstruction with a non-nil Dispatch carrying the agent identifier
+//     and the supplied task description.
+//   - When the user selects the stop option, returns a RoutingInstruction with a
+//     non-nil Stop (and nil Dispatch).
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"mosaic-common/interaction"
 	"mosaic-run/internal/deviation"
 	"mosaic-run/internal/domain"
-	"mosaic-run/internal/harness"
 	"mosaic-run/internal/workflow"
 )
 
@@ -73,18 +85,39 @@ func mustParseTable(t *testing.T) domain.RoutingTable {
 	return table
 }
 
-// ---- scripted Interaction ----
+// ---- fakeRawInvoker ----
+
+// fakeRawInvoker is a test double for domain.RawInvoker. It captures the
+// payload sent to InvokeRaw and returns a configured reply or error.
+type fakeRawInvoker struct {
+	reply []byte
+	err   error
+	// sent is populated with the payload from the last InvokeRaw call.
+	sent []byte
+}
+
+func (f *fakeRawInvoker) InvokeRaw(_ context.Context, _ domain.AgentReference, payload []byte) ([]byte, error) {
+	f.sent = payload
+	if f.err != nil {
+		return nil, f.err
+	}
+	if len(f.reply) == 0 {
+		return nil, errors.New("fakeRawInvoker: no reply configured")
+	}
+	return f.reply, nil
+}
+
+// ---- scriptedInteraction ----
 
 // scriptedInteraction is a test double for the Interaction port.
-// SelectOne always returns the first option unless overridden via SelectOneResult.
 type scriptedInteraction struct {
 	SelectOneResult  func(q interaction.ChoiceQuestion) (interaction.ChoiceAnswer, error)
+	AskTextResult    func(q interaction.TextQuestion) (interaction.TextAnswer, error)
 	ConfirmResult    func(q interaction.Question) (interaction.ConfirmAnswer, error)
 	SelectManyResult func(q interaction.ChoiceQuestion) (interaction.MultiChoiceAnswer, error)
-	AskTextResult    func(q interaction.TextQuestion) (interaction.TextAnswer, error)
 
 	SelectOneCalls []interaction.ChoiceQuestion
-	ConfirmCalls   []interaction.Question
+	AskTextCalls   []interaction.TextQuestion
 }
 
 func (s *scriptedInteraction) SelectOne(_ context.Context, q interaction.ChoiceQuestion) (interaction.ChoiceAnswer, error) {
@@ -106,6 +139,7 @@ func (s *scriptedInteraction) SelectMany(_ context.Context, q interaction.Choice
 }
 
 func (s *scriptedInteraction) AskText(_ context.Context, q interaction.TextQuestion) (interaction.TextAnswer, error) {
+	s.AskTextCalls = append(s.AskTextCalls, q)
 	if s.AskTextResult != nil {
 		return s.AskTextResult(q)
 	}
@@ -113,463 +147,693 @@ func (s *scriptedInteraction) AskText(_ context.Context, q interaction.TextQuest
 }
 
 func (s *scriptedInteraction) Confirm(_ context.Context, q interaction.Question) (interaction.ConfirmAnswer, error) {
-	s.ConfirmCalls = append(s.ConfirmCalls, q)
 	if s.ConfirmResult != nil {
 		return s.ConfirmResult(q)
 	}
 	return interaction.ConfirmAnswer{Status: interaction.Answered, Confirm: false}, nil
 }
 
-func (s *scriptedInteraction) Notify(_ context.Context, _ interaction.Notice)             {}
-func (s *scriptedInteraction) Progress(_ context.Context, _ interaction.ProgressEvent)    {}
+func (s *scriptedInteraction) Notify(_ context.Context, _ interaction.Notice)          {}
+func (s *scriptedInteraction) Progress(_ context.Context, _ interaction.ProgressEvent) {}
 
-// ---- deviation fixtures ----
-
-func makeDeviationInfo(table domain.RoutingTable) domain.DeviationInfo {
-	return domain.DeviationInfo{
-		Kind: domain.DeviationNonSuccess,
-		Response: domain.ProtocolResponse{
-			AgentInstanceID: "agent-a#1",
-			StatusCode:      domain.StatusBLOCKED,
-			StatusMessage:   "blocked on missing input",
-			ErrorCode:       domain.ErrorINPUT_NOT_FOUND,
-		},
-		CurrentRow:   0,
-		CurrentPhase: "PLANNING",
-		CurrentStage: "",
-		PlannedContinuation: &domain.DispatchStep{
-			RowIndex: 1,
-			Agent:    domain.AgentReference{Identifier: "agent-b", InvocationKind: domain.InvocationOrdinary},
-		},
-		ArtifactState: domain.ArtifactState{},
-	}
-}
+// ---- helpers ----
 
 func orchestratorRef() domain.AgentReference {
 	return domain.AgentReference{
 		Identifier:     "orchestrator-script",
 		DefinitionPath: "/agents/orchestrator-script.md",
-		InvocationKind: domain.InvocationOrdinary,
+		InvocationKind: domain.InvocationOrchestrator,
 	}
 }
 
-func makeOrchestrator(t *testing.T, f *harness.FakeAdapter, table domain.RoutingTable) *deviation.OrchestratorDelegate {
-	t.Helper()
-	seq := 0
-	return &deviation.OrchestratorDelegate{
-		Harness:      f,
+func makeOrchestratorConsultant(invoker domain.RawInvoker, table domain.RoutingTable) *deviation.OrchestratorConsultant {
+	return &deviation.OrchestratorConsultant{
+		Invoker:      invoker,
 		Orchestrator: orchestratorRef(),
 		Table:        table,
-		ArtifactPath: "Orchestration.md",
-		NextSeq: func() int {
-			seq++
-			return seq
-		},
 	}
 }
 
-// orchestratorSuccess queues a successful orchestrator response with the given
-// result_data JSON.
-func orchestratorSuccess(f *harness.FakeAdapter, resultData string) {
-	f.Queue("orchestrator-script", harness.ScriptedEntry{
-		Response: &domain.ProtocolResponse{
-			AgentInstanceID: "orchestrator-script#1",
-			StatusCode:      domain.StatusSUCCESS,
-			StatusMessage:   "deviation resolved",
-			ResultData:      resultData,
-		},
-	})
+func strptr(s string) *string { return &s }
+
+// routingReply returns a JSON routing response with the given action and extra fields.
+func routingStopReply(reason string) []byte {
+	return []byte(fmt.Sprintf(`{"action":"stop","reason":%q}`, reason))
 }
 
-// ===== OrchestratorDelegate: protocol request assembly =====
+func validRoutingRequest(artifact string) domain.ConsultationRequest {
+	msg := "agent returned BLOCKED"
+	return domain.ConsultationRequest{
+		OrchestrationArtifact: artifact,
+		Context:               domain.ConsultContextRouting,
+		LastStatusMessage:     &msg,
+	}
+}
 
-// TestOrchestratorDelegate_AssemblesCorrectRequest verifies that the delegate
-// invokes the orchestrator agent with a protocol request that names the
-// deviating agent, status, row, and phase in the task_description, and sets
-// input_artifacts and output_artifacts to the artifact path with
-// include_result_summary=true and human_in_the_loop=false.
-func TestOrchestratorDelegate_AssemblesCorrectRequest(t *testing.T) {
+// wireRequest mirrors the expected wire shape for assertion purposes.
+type wireRequest struct {
+	OrchestrationArtifact string  `json:"orchestration_artifact"`
+	Context               string  `json:"context"`
+	LastStatusMessage     *string `json:"last_status_message"`
+}
+
+// mustUnmarshalWireRequest parses a captured payload into wireRequest.
+func mustUnmarshalWireRequest(t *testing.T, data []byte) wireRequest {
+	t.Helper()
+	var w wireRequest
+	if err := json.Unmarshal(data, &w); err != nil {
+		t.Fatalf("want valid JSON wire request, got unmarshal error: %v", err)
+	}
+	return w
+}
+
+// assertConsultationError checks that err is a *ConsultationError with the
+// expected failure classification. Returns the error for further assertions.
+func assertConsultationError(t *testing.T, err error, want domain.ConsultationFailure) *domain.ConsultationError {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("want *ConsultationError with failure=%q, got nil error", want)
+	}
+	var ce *domain.ConsultationError
+	if !errors.As(err, &ce) {
+		t.Fatalf("want *ConsultationError, got %T: %v", err, err)
+	}
+	if ce.Failure != want {
+		t.Errorf("want ConsultationError.Failure=%q, got %q", want, ce.Failure)
+	}
+	return ce
+}
+
+// ===== T3.1: Routing consultation request construction =====
+
+// TestOrchestratorConsultant_RequestContainsAllThreeFields verifies that
+// ConsultRouting sends the orchestrator a wire request with all three required
+// fields: orchestration_artifact, context, and last_status_message.
+func TestOrchestratorConsultant_RequestContainsAllThreeFields(t *testing.T) {
 	table := mustParseTable(t)
-	f := harness.NewFakeAdapter()
-	orchestratorSuccess(f, `{"action":"stop","reason":"test"}`)
+	fake := &fakeRawInvoker{reply: routingStopReply("done")}
+	c := makeOrchestratorConsultant(fake, table)
 
-	d := makeOrchestrator(t, f, table)
-	info := makeDeviationInfo(table)
+	msg := "agent-a#1 returned BLOCKED"
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-20260816T000724Z-3b68/Orchestration.md",
+		Context:               domain.ConsultContextRouting,
+		LastStatusMessage:     &msg,
+	}
 
-	d.Resolve(context.Background(), info) //nolint:errcheck
+	c.ConsultRouting(context.Background(), req) //nolint:errcheck
 
-	invs := f.Invocations()
-	if len(invs) == 0 {
-		t.Fatal("want orchestrator invoked, got zero invocations")
+	if len(fake.sent) == 0 {
+		t.Fatal("want OrchestratorConsultant to call RawInvoker.InvokeRaw with a payload, got no payload sent")
 	}
-	req := invs[0].Request
 
-	wantDesc := fmt.Sprintf("Resolve deviation: %s returned %s at row %d in phase %s",
-		info.Response.AgentInstanceID, info.Response.StatusCode, info.CurrentRow, info.CurrentPhase)
-	if req.TaskDescription != wantDesc {
-		t.Errorf("want TaskDescription=%q\ngot %q", wantDesc, req.TaskDescription)
+	w := mustUnmarshalWireRequest(t, fake.sent)
+
+	if w.OrchestrationArtifact == "" {
+		t.Error("want orchestration_artifact non-empty in wire request")
 	}
-	if len(req.InputArtifacts) != 1 || req.InputArtifacts[0] != "Orchestration.md" {
-		t.Errorf("want InputArtifacts=[Orchestration.md], got %v", req.InputArtifacts)
+	if w.Context != "routing" {
+		t.Errorf("want context=%q in routing wire request, got %q", "routing", w.Context)
 	}
-	if len(req.OutputArtifacts) != 1 || req.OutputArtifacts[0] != "Orchestration.md" {
-		t.Errorf("want OutputArtifacts=[Orchestration.md], got %v", req.OutputArtifacts)
-	}
-	if !req.IncludeResultSummary {
-		t.Error("want IncludeResultSummary=true")
-	}
-	if req.HumanInTheLoop {
-		t.Error("want HumanInTheLoop=false for orchestrator invocation")
+	// last_status_message must be present; we check null-vs-string separately.
+	// Here we just verify the field was sent (non-nil pointer decoded means it was present).
+	if w.LastStatusMessage == nil {
+		t.Error("want last_status_message present in wire request when ConsultationRequest has a non-nil pointer")
 	}
 }
 
-// ===== OrchestratorDelegate: rejoin action parsing =====
-
-// TestOrchestratorDelegate_ParsesRejoinAction verifies that a "rejoin"
-// instruction in the orchestrator result_data returns a RejoinAtRow with the
-// row index that corresponds to the named agent.
-func TestOrchestratorDelegate_ParsesRejoinAction(t *testing.T) {
+// TestOrchestratorConsultant_LastStatusMessageIsNullWhenNil verifies that when
+// ConsultationRequest.LastStatusMessage is nil (first step of a new run),
+// ConsultRouting encodes it as JSON null — not as an absent field — in the wire
+// request. The orchestrator contract requires the field to always be present.
+func TestOrchestratorConsultant_LastStatusMessageIsNullWhenNil(t *testing.T) {
 	table := mustParseTable(t)
-	f := harness.NewFakeAdapter()
-	// agent-b is row 1 in the simple linear table.
-	orchestratorSuccess(f, `{"action":"rejoin","rejoin_agent":"agent-b"}`)
+	fake := &fakeRawInvoker{reply: routingStopReply("done")}
+	c := makeOrchestratorConsultant(fake, table)
 
-	d := makeOrchestrator(t, f, table)
-	info := makeDeviationInfo(table)
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-abc/Orchestration.md",
+		Context:               domain.ConsultContextRouting,
+		LastStatusMessage:     nil, // first step — no prior agent message
+	}
 
-	instr, err := d.Resolve(context.Background(), info)
+	c.ConsultRouting(context.Background(), req) //nolint:errcheck
+
+	if len(fake.sent) == 0 {
+		t.Fatal("want OrchestratorConsultant to call RawInvoker.InvokeRaw, got no payload")
+	}
+
+	// Unmarshal into a map so we can distinguish absent from null.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(fake.sent, &raw); err != nil {
+		t.Fatalf("want valid JSON wire payload, got %v", err)
+	}
+
+	rawLSM, present := raw["last_status_message"]
+	if !present {
+		t.Fatal("want last_status_message field present in wire request (as null), got absent")
+	}
+
+	// "null" must be the encoded value — the field exists but its value is JSON null.
+	if string(rawLSM) != "null" {
+		t.Errorf("want last_status_message=null in wire request, got %s", rawLSM)
+	}
+}
+
+// TestOrchestratorConsultant_ArtifactPathMatchesRequest verifies that the
+// orchestration_artifact in the wire request is exactly the path supplied in
+// the ConsultationRequest, without modification.
+func TestOrchestratorConsultant_ArtifactPathMatchesRequest(t *testing.T) {
+	table := mustParseTable(t)
+	fake := &fakeRawInvoker{reply: routingStopReply("done")}
+	c := makeOrchestratorConsultant(fake, table)
+
+	wantArtifact := "Orchestration-20260816T000724Z-3b68/Orchestration.md"
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: wantArtifact,
+		Context:               domain.ConsultContextRouting,
+		LastStatusMessage:     strptr("some message"),
+	}
+
+	c.ConsultRouting(context.Background(), req) //nolint:errcheck
+
+	if len(fake.sent) == 0 {
+		t.Fatal("want OrchestratorConsultant to call RawInvoker.InvokeRaw, got no payload")
+	}
+
+	w := mustUnmarshalWireRequest(t, fake.sent)
+	if w.OrchestrationArtifact != wantArtifact {
+		t.Errorf("want orchestration_artifact=%q, got %q", wantArtifact, w.OrchestrationArtifact)
+	}
+}
+
+// ===== T3.2: Routing response parsing =====
+
+// TestOrchestratorConsultant_DispatchAllOptionalFieldsPresent verifies that
+// when the routing response carries all optional fields with non-null values,
+// ConsultRouting returns a DispatchInstruction with all pointer fields non-nil
+// and set to the given values.
+func TestOrchestratorConsultant_DispatchAllOptionalFieldsPresent(t *testing.T) {
+	table := mustParseTable(t)
+	constraintVal := "run fast"
+	reply := []byte(`{
+		"action": "dispatch",
+		"agent": "agent-a",
+		"task_description": "do the thing",
+		"constraints": "run fast",
+		"input_artifacts": ["in.md"],
+		"output_artifacts": ["out.md"],
+		"hitl_override": true
+	}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
+
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
 
 	if err != nil {
-		t.Fatalf("want no error, got %v", err)
+		t.Fatalf("want no error for valid dispatch response, got %v", err)
 	}
-	if instr.Rejoin == nil {
-		t.Fatal("want RejoinAtRow instruction, got nil")
+	if instr.Dispatch == nil {
+		t.Fatal("want Dispatch instruction, got nil Dispatch")
 	}
-	// agent-b is row index 1.
-	if instr.Rejoin.RowIndex != 1 {
-		t.Errorf("want RowIndex=1 (agent-b), got %d", instr.Rejoin.RowIndex)
+	d := instr.Dispatch
+	if d.Agent != "agent-a" {
+		t.Errorf("want Agent=%q, got %q", "agent-a", d.Agent)
+	}
+	if d.TaskDescription != "do the thing" {
+		t.Errorf("want TaskDescription=%q, got %q", "do the thing", d.TaskDescription)
+	}
+	if d.Constraints == nil {
+		t.Fatal("want non-nil Constraints pointer, got nil")
+	}
+	if *d.Constraints != constraintVal {
+		t.Errorf("want *Constraints=%q, got %q", constraintVal, *d.Constraints)
+	}
+	if d.InputArtifacts == nil {
+		t.Fatal("want non-nil InputArtifacts pointer, got nil")
+	}
+	if len(*d.InputArtifacts) != 1 || (*d.InputArtifacts)[0] != "in.md" {
+		t.Errorf("want *InputArtifacts=[in.md], got %v", *d.InputArtifacts)
+	}
+	if d.OutputArtifacts == nil {
+		t.Fatal("want non-nil OutputArtifacts pointer, got nil")
+	}
+	if len(*d.OutputArtifacts) != 1 || (*d.OutputArtifacts)[0] != "out.md" {
+		t.Errorf("want *OutputArtifacts=[out.md], got %v", *d.OutputArtifacts)
+	}
+	if d.HITLOverride == nil {
+		t.Fatal("want non-nil HITLOverride pointer, got nil")
+	}
+	if !*d.HITLOverride {
+		t.Error("want *HITLOverride=true, got false")
+	}
+	// agent-a is row 0 in the two-row fixture.
+	if d.RowIndex != 0 {
+		t.Errorf("want RowIndex=0 for agent-a (row 0 in fixture), got %d", d.RowIndex)
 	}
 }
 
-// TestOrchestratorDelegate_ParsesStopAction verifies that a "stop"
-// instruction in the orchestrator result_data returns a StopRun with the
-// reason from the instruction.
-func TestOrchestratorDelegate_ParsesStopAction(t *testing.T) {
+// TestOrchestratorConsultant_DispatchNullOptionalFields verifies that when
+// optional fields are explicitly set to JSON null, the corresponding pointer
+// fields in DispatchInstruction are nil (fall back to the table row).
+func TestOrchestratorConsultant_DispatchNullOptionalFields(t *testing.T) {
 	table := mustParseTable(t)
-	f := harness.NewFakeAdapter()
-	orchestratorSuccess(f, `{"action":"stop","reason":"cannot recover"}`)
+	reply := []byte(`{
+		"action": "dispatch",
+		"agent": "agent-a",
+		"task_description": "do the thing",
+		"constraints": null,
+		"input_artifacts": null,
+		"output_artifacts": null,
+		"hitl_override": null
+	}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
 
-	d := makeOrchestrator(t, f, table)
-	info := makeDeviationInfo(table)
-
-	instr, err := d.Resolve(context.Background(), info)
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
 
 	if err != nil {
-		t.Fatalf("want no error, got %v", err)
+		t.Fatalf("want no error for dispatch with null optional fields, got %v", err)
+	}
+	if instr.Dispatch == nil {
+		t.Fatal("want Dispatch instruction, got nil")
+	}
+	d := instr.Dispatch
+	if d.Constraints != nil {
+		t.Errorf("want Constraints=nil (JSON null → fall back to table row), got non-nil: %q", *d.Constraints)
+	}
+	if d.InputArtifacts != nil {
+		t.Errorf("want InputArtifacts=nil (JSON null → fall back to table row), got non-nil")
+	}
+	if d.OutputArtifacts != nil {
+		t.Errorf("want OutputArtifacts=nil (JSON null → fall back to table row), got non-nil")
+	}
+	if d.HITLOverride != nil {
+		t.Errorf("want HITLOverride=nil (JSON null → fall back to table row), got non-nil: %v", *d.HITLOverride)
+	}
+}
+
+// TestOrchestratorConsultant_DispatchAbsentOptionalFields verifies that when
+// optional fields are absent from the JSON response, the corresponding pointer
+// fields in DispatchInstruction are nil (same fallback behaviour as JSON null).
+func TestOrchestratorConsultant_DispatchAbsentOptionalFields(t *testing.T) {
+	table := mustParseTable(t)
+	// Only the required fields; all optional fields absent.
+	reply := []byte(`{"action":"dispatch","agent":"agent-a","task_description":"do the thing"}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
+
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	if err != nil {
+		t.Fatalf("want no error for dispatch with absent optional fields, got %v", err)
+	}
+	if instr.Dispatch == nil {
+		t.Fatal("want Dispatch instruction, got nil")
+	}
+	d := instr.Dispatch
+	if d.Constraints != nil {
+		t.Errorf("want Constraints=nil (absent → fall back to table row), got non-nil")
+	}
+	if d.InputArtifacts != nil {
+		t.Errorf("want InputArtifacts=nil (absent → fall back to table row), got non-nil")
+	}
+	if d.OutputArtifacts != nil {
+		t.Errorf("want OutputArtifacts=nil (absent → fall back to table row), got non-nil")
+	}
+	if d.HITLOverride != nil {
+		t.Errorf("want HITLOverride=nil (absent → fall back to table row), got non-nil")
+	}
+}
+
+// TestOrchestratorConsultant_DispatchExplicitlyEmptyInputArtifacts verifies the
+// AC3.2 distinction: an explicit empty array [] decodes to a non-nil pointer to
+// an empty slice — "dispatch with no input artifacts" — which is distinct from nil
+// (which means "fall back to the table row's Input column").
+func TestOrchestratorConsultant_DispatchExplicitlyEmptyInputArtifacts(t *testing.T) {
+	table := mustParseTable(t)
+	reply := []byte(`{"action":"dispatch","agent":"agent-a","task_description":"do the thing","input_artifacts":[]}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
+
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	if err != nil {
+		t.Fatalf("want no error for dispatch with explicit empty input_artifacts, got %v", err)
+	}
+	if instr.Dispatch == nil {
+		t.Fatal("want Dispatch instruction, got nil")
+	}
+	d := instr.Dispatch
+	if d.InputArtifacts == nil {
+		t.Fatal("want non-nil InputArtifacts pointer for explicit [] (distinct from absent/null), got nil — AC3.2 violated")
+	}
+	if len(*d.InputArtifacts) != 0 {
+		t.Errorf("want empty InputArtifacts slice, got %v", *d.InputArtifacts)
+	}
+}
+
+// TestOrchestratorConsultant_StopResponseParsed verifies that a stop routing
+// response returns a RoutingInstruction with a non-nil Stop field carrying the
+// reason verbatim.
+func TestOrchestratorConsultant_StopResponseParsed(t *testing.T) {
+	table := mustParseTable(t)
+	wantReason := "orchestrator decided the run is complete"
+	fake := &fakeRawInvoker{reply: routingStopReply(wantReason)}
+	c := makeOrchestratorConsultant(fake, table)
+
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	if err != nil {
+		t.Fatalf("want no error for valid stop response, got %v", err)
 	}
 	if instr.Stop == nil {
-		t.Fatal("want StopRun instruction, got nil")
+		t.Fatal("want Stop instruction, got nil Stop")
 	}
-	if instr.Stop.Reason != "cannot recover" {
-		t.Errorf("want Reason=%q, got %q", "cannot recover", instr.Stop.Reason)
+	if instr.Dispatch != nil {
+		t.Error("want Dispatch=nil for stop response, got non-nil")
 	}
-}
-
-// ===== OrchestratorDelegate: HITL override (AC8.2) =====
-
-// TestOrchestratorDelegate_CarriesExplicitHITLOverrideFalse verifies that
-// when the orchestrator instruction includes hitl_override=false (the E503
-// resolution path: re-invoke with HITL lowered), the delegate carries it
-// through to the RejoinInstruction.HITLOverride = &false.
-// This is the ONLY way the resolver can produce a HITL-lowering instruction:
-// it carries an explicit instruction, it does not originate one.
-func TestOrchestratorDelegate_CarriesExplicitHITLOverrideFalse(t *testing.T) {
-	table := mustParseTable(t)
-	f := harness.NewFakeAdapter()
-	// hitl_override=false: orchestrator explicitly instructs HITL lowering.
-	orchestratorSuccess(f, `{"action":"rejoin","rejoin_agent":"agent-b","hitl_override":false}`)
-
-	d := makeOrchestrator(t, f, table)
-	info := makeDeviationInfo(table)
-
-	instr, err := d.Resolve(context.Background(), info)
-
-	if err != nil {
-		t.Fatalf("want no error, got %v", err)
-	}
-	if instr.Rejoin == nil {
-		t.Fatal("want RejoinAtRow, got nil")
-	}
-	if instr.Rejoin.HITLOverride == nil {
-		t.Fatal("want HITLOverride set, got nil (explicit instruction not carried through)")
-	}
-	if *instr.Rejoin.HITLOverride != false {
-		t.Errorf("want HITLOverride=false, got %v", *instr.Rejoin.HITLOverride)
+	if instr.Stop.Reason != wantReason {
+		t.Errorf("want Stop.Reason=%q, got %q", wantReason, instr.Stop.Reason)
 	}
 }
 
-// TestOrchestratorDelegate_CarriesExplicitHITLOverrideTrue verifies that when
-// the orchestrator instruction includes hitl_override=true (raising HITL for
-// the re-invocation), the delegate carries it through to
-// RejoinInstruction.HITLOverride = &true.
-// This exercises the nullable-boolean JSON parsing path for the true case,
-// which is a distinct code path from the false case.
-func TestOrchestratorDelegate_CarriesExplicitHITLOverrideTrue(t *testing.T) {
+// TestOrchestratorConsultant_MalformedJSONResponse verifies that a malformed
+// (non-parseable) JSON reply produces a *ConsultationError with
+// ConsultFailMalformedJSON, naming the condition.
+func TestOrchestratorConsultant_MalformedJSONResponse(t *testing.T) {
 	table := mustParseTable(t)
-	f := harness.NewFakeAdapter()
-	// hitl_override=true: orchestrator explicitly instructs HITL raising.
-	orchestratorSuccess(f, `{"action":"rejoin","rejoin_agent":"agent-b","hitl_override":true}`)
+	fake := &fakeRawInvoker{reply: []byte(`{not valid json at all`)}
+	c := makeOrchestratorConsultant(fake, table)
 
-	d := makeOrchestrator(t, f, table)
-	info := makeDeviationInfo(table)
+	_, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
 
-	instr, err := d.Resolve(context.Background(), info)
+	assertConsultationError(t, err, domain.ConsultFailMalformedJSON)
+}
 
-	if err != nil {
-		t.Fatalf("want no error, got %v", err)
-	}
-	if instr.Rejoin == nil {
-		t.Fatal("want RejoinAtRow, got nil")
-	}
-	if instr.Rejoin.HITLOverride == nil {
-		t.Fatal("want HITLOverride set, got nil (explicit hitl_override=true not carried through)")
-	}
-	if *instr.Rejoin.HITLOverride != true {
-		t.Errorf("want HITLOverride=true, got %v", *instr.Rejoin.HITLOverride)
+// TestOrchestratorConsultant_MissingAgentField verifies that a dispatch response
+// with an absent or empty agent field produces a *ConsultationError with
+// ConsultFailMissingField. The error must name "agent" as the missing field.
+func TestOrchestratorConsultant_MissingAgentField(t *testing.T) {
+	table := mustParseTable(t)
+	// agent is absent
+	reply := []byte(`{"action":"dispatch","task_description":"do the thing"}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
+
+	_, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	ce := assertConsultationError(t, err, domain.ConsultFailMissingField)
+	// The error detail must name the missing field so the operator can diagnose it.
+	if !strings.Contains(ce.Detail, "agent") {
+		t.Errorf("want ConsultationError.Detail to contain %q (field name), got %q", "agent", ce.Detail)
 	}
 }
 
-// TestOrchestratorDelegate_DoesNotOriginateHITLLowering verifies that when
-// the orchestrator instruction omits hitl_override (null / absent), the
-// delegate does NOT set HITLOverride in the RejoinInstruction.
-// This is the AC8.2 invariant: the resolver never originates HITL lowering;
-// it only carries an explicit instruction.
-func TestOrchestratorDelegate_DoesNotOriginateHITLLowering(t *testing.T) {
+// TestOrchestratorConsultant_MissingTaskDescriptionField verifies that a dispatch
+// response with an absent or empty task_description produces a *ConsultationError
+// with ConsultFailMissingField, naming "task_description".
+func TestOrchestratorConsultant_MissingTaskDescriptionField(t *testing.T) {
 	table := mustParseTable(t)
-	f := harness.NewFakeAdapter()
-	// hitl_override absent: orchestrator does not instruct any HITL change.
-	orchestratorSuccess(f, `{"action":"rejoin","rejoin_agent":"agent-b"}`)
+	// task_description is absent
+	reply := []byte(`{"action":"dispatch","agent":"agent-a"}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
 
-	d := makeOrchestrator(t, f, table)
-	info := makeDeviationInfo(table)
+	_, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
 
-	instr, err := d.Resolve(context.Background(), info)
-
-	if err != nil {
-		t.Fatalf("want no error, got %v", err)
-	}
-	if instr.Rejoin == nil {
-		t.Fatal("want RejoinAtRow, got nil")
-	}
-	if instr.Rejoin.HITLOverride != nil {
-		t.Errorf("want HITLOverride=nil when not in instruction, got %v", *instr.Rejoin.HITLOverride)
+	ce := assertConsultationError(t, err, domain.ConsultFailMissingField)
+	if !strings.Contains(ce.Detail, "task_description") {
+		t.Errorf("want ConsultationError.Detail to contain %q (field name), got %q", "task_description", ce.Detail)
 	}
 }
 
-// ===== OrchestratorDelegate: error cases =====
-
-// TestOrchestratorDelegate_NonSuccessResponse_ReturnsError verifies that when
-// the orchestrator returns a non-SUCCESS status code, the delegate returns an
-// error (the deviation is unresolvable; the run should stop cleanly).
-func TestOrchestratorDelegate_NonSuccessResponse_ReturnsError(t *testing.T) {
-	table := mustParseTable(t)
-	f := harness.NewFakeAdapter()
-	f.Queue("orchestrator-script", harness.ScriptedEntry{
-		Response: &domain.ProtocolResponse{
-			AgentInstanceID: "orchestrator-script#1",
-			StatusCode:      domain.StatusBLOCKED,
-			StatusMessage:   "orchestrator also blocked",
-		},
-	})
-
-	d := makeOrchestrator(t, f, table)
-	info := makeDeviationInfo(table)
-
-	_, err := d.Resolve(context.Background(), info)
-
-	if err == nil {
-		t.Fatal("want error for non-SUCCESS orchestrator response, got nil")
+// TestOrchestratorConsultant_UnknownActionValue verifies that an unrecognised
+// action value (anything other than "dispatch" or "stop") produces a
+// *ConsultationError with ConsultFailUnknownAction. Comparison must be exact and
+// case-sensitive (e.g. "Dispatch" is unknown).
+func TestOrchestratorConsultant_UnknownActionValue(t *testing.T) {
+	cases := []struct {
+		name   string
+		action string
+	}{
+		{"rejoin (retired)", "rejoin"},
+		{"custom (retired)", "custom"},
+		{"capitalised", "Dispatch"},
+		{"empty", ""},
+		{"unknown", "proceed"},
 	}
-	// Verify the orchestrator was actually invoked; if it wasn't, the error
-	// is from the stub ("not implemented") rather than from parsing the response.
-	invs := f.Invocations()
-	if len(invs) == 0 {
-		t.Error("want orchestrator invoked before error, but zero invocations recorded")
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			table := mustParseTable(t)
+			reply := []byte(fmt.Sprintf(`{"action":%q}`, tc.action))
+			fake := &fakeRawInvoker{reply: reply}
+			c := makeOrchestratorConsultant(fake, table)
+
+			_, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+			assertConsultationError(t, err, domain.ConsultFailUnknownAction)
+		})
 	}
 }
 
-// TestOrchestratorDelegate_MissingResultData_ReturnsError verifies that when
-// the orchestrator returns SUCCESS but result_data is empty or missing, the
-// delegate returns an error (cannot parse a RejoinInstruction).
-func TestOrchestratorDelegate_MissingResultData_ReturnsError(t *testing.T) {
+// TestOrchestratorConsultant_AgentNotInRoutingTable verifies that when a dispatch
+// response names an agent not present in the routing table, ConsultRouting returns
+// a *ConsultationError with ConsultFailUnknownAgent. The error must list the
+// available routing table agents so the operator knows what is valid (AC3.3).
+func TestOrchestratorConsultant_AgentNotInRoutingTable(t *testing.T) {
 	table := mustParseTable(t)
-	f := harness.NewFakeAdapter()
-	f.Queue("orchestrator-script", harness.ScriptedEntry{
-		Response: &domain.ProtocolResponse{
-			AgentInstanceID: "orchestrator-script#1",
-			StatusCode:      domain.StatusSUCCESS,
-			StatusMessage:   "done",
-			ResultData:      "", // empty
-		},
-	})
+	reply := []byte(`{"action":"dispatch","agent":"nonexistent-agent","task_description":"do the thing"}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
 
-	d := makeOrchestrator(t, f, table)
-	info := makeDeviationInfo(table)
+	_, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
 
-	_, err := d.Resolve(context.Background(), info)
-
-	if err == nil {
-		t.Fatal("want error when result_data is empty, got nil")
-	}
-	// Verify the orchestrator was actually invoked; if it wasn't, the error
-	// is from the stub ("not implemented") rather than from parsing the response.
-	invs := f.Invocations()
-	if len(invs) == 0 {
-		t.Error("want orchestrator invoked before error, but zero invocations recorded")
+	ce := assertConsultationError(t, err, domain.ConsultFailUnknownAgent)
+	if len(ce.Agents) == 0 {
+		t.Error("want ConsultationError.Agents non-empty (lists available routing table agents), got empty — AC3.3 violated")
 	}
 }
 
-// TestOrchestratorDelegate_MalformedResultData_ReturnsError verifies that
-// malformed JSON in result_data returns an error rather than panicking.
-func TestOrchestratorDelegate_MalformedResultData_ReturnsError(t *testing.T) {
+// TestOrchestratorConsultant_UnknownExtraFieldsIgnored verifies that a routing
+// response with extra unknown fields is still parsed successfully (AC3.4: forward
+// compatibility). An unknown field must not cause a failure.
+func TestOrchestratorConsultant_UnknownExtraFieldsIgnored(t *testing.T) {
 	table := mustParseTable(t)
-	f := harness.NewFakeAdapter()
-	orchestratorSuccess(f, `{not valid json}`)
-
-	d := makeOrchestrator(t, f, table)
-	info := makeDeviationInfo(table)
-
-	_, err := d.Resolve(context.Background(), info)
-
-	if err == nil {
-		t.Fatal("want error for malformed result_data JSON, got nil")
-	}
-	// Verify the orchestrator was actually invoked; if it wasn't, the error
-	// is from the stub ("not implemented") rather than from the JSON parse failure.
-	invs := f.Invocations()
-	if len(invs) == 0 {
-		t.Error("want orchestrator invoked before error, but zero invocations recorded")
-	}
-}
-
-// ===== OrchestratorDelegate: action="custom" =====
-
-// TestOrchestratorDelegate_CustomDispatch_PopulatesCustomField verifies that
-// when the orchestrator instruction has action="custom" with a well-formed
-// custom_request and rejoin_after_custom, the delegate returns a
-// RejoinInstruction with the Custom field populated correctly.
-//
-// The custom_request is embedded as-is in the instruction. rejoin_after_custom
-// names the agent to rejoin after the custom invocation completes; the delegate
-// must resolve this name to a row index in the routing table.
-func TestOrchestratorDelegate_CustomDispatch_PopulatesCustomField(t *testing.T) {
-	table := mustParseTable(t)
-	f := harness.NewFakeAdapter()
-	// action="custom" with a minimal custom request; rejoin at agent-b (row 1).
-	orchestratorSuccess(f, `{
-		"action": "custom",
-		"custom_request": {
-			"agent_instance_id": "infra#99",
-			"task_description": "run infrastructure check",
-			"input_artifacts": ["Orchestration.md"],
-			"output_artifacts": [],
-			"include_result_summary": false,
-			"human_in_the_loop": false
-		},
-		"rejoin_after_custom": "agent-b"
+	reply := []byte(`{
+		"action": "stop",
+		"reason": "done",
+		"unknown_future_field": "ignored",
+		"another_unknown": 42
 	}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
 
-	d := makeOrchestrator(t, f, table)
-	info := makeDeviationInfo(table)
-
-	instr, err := d.Resolve(context.Background(), info)
+	instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
 
 	if err != nil {
-		t.Fatalf("want no error for well-formed custom dispatch, got %v", err)
+		t.Fatalf("want no error when response has extra unknown fields, got %v — AC3.4 violated", err)
 	}
-	if instr.Custom == nil {
-		t.Fatal("want RejoinInstruction.Custom populated, got nil (action=custom not handled)")
-	}
-	// The custom request's task_description must be carried through unchanged.
-	if instr.Custom.Request.TaskDescription != "run infrastructure check" {
-		t.Errorf("want Custom.Request.TaskDescription=%q, got %q",
-			"run infrastructure check", instr.Custom.Request.TaskDescription)
-	}
-	// rejoin_after_custom="agent-b" resolves to row index 1 in the simple linear table.
-	if instr.Custom.RejoinRow != 1 {
-		t.Errorf("want Custom.RejoinRow=1 (agent-b), got %d", instr.Custom.RejoinRow)
+	if instr.Stop == nil {
+		t.Fatal("want Stop instruction from response with extra fields, got nil")
 	}
 }
 
-// TestOrchestratorDelegate_CustomDispatch_MissingCustomRequest_ReturnsError
-// verifies that action="custom" without a custom_request field returns an
-// error rather than producing a zero-valued Custom dispatch instruction.
-// The custom_request is the payload of the custom invocation; without it
-// the instruction is malformed and the deviation is unresolvable.
-func TestOrchestratorDelegate_CustomDispatch_MissingCustomRequest_ReturnsError(t *testing.T) {
+// TestOrchestratorConsultant_TransportError verifies that when RawInvoker returns
+// an error (harness failure), ConsultRouting returns a *ConsultationError with
+// ConsultFailTransport and that ConsultationError.Err wraps the original invoker
+// error so callers can errors.Is/errors.As against the underlying cause.
+func TestOrchestratorConsultant_TransportError(t *testing.T) {
 	table := mustParseTable(t)
-	f := harness.NewFakeAdapter()
-	// action="custom" but custom_request is absent (null / missing field).
-	orchestratorSuccess(f, `{"action":"custom","rejoin_after_custom":"agent-b"}`)
+	invokerErr := errors.New("harness: timeout after 30s")
+	fake := &fakeRawInvoker{err: invokerErr}
+	c := makeOrchestratorConsultant(fake, table)
 
-	d := makeOrchestrator(t, f, table)
-	info := makeDeviationInfo(table)
+	_, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
 
-	_, err := d.Resolve(context.Background(), info)
-
-	if err == nil {
-		t.Fatal("want error for action=custom with missing custom_request, got nil")
-	}
-	// Verify the orchestrator was actually invoked; if it wasn't, the error
-	// is from the stub ("not implemented") rather than from the missing field.
-	invs := f.Invocations()
-	if len(invs) == 0 {
-		t.Error("want orchestrator invoked before error, but zero invocations recorded")
+	ce := assertConsultationError(t, err, domain.ConsultFailTransport)
+	// ce.Err must wrap the original invoker error so callers can unwrap to the cause.
+	if !errors.Is(ce.Err, invokerErr) {
+		t.Errorf("want ce.Err to wrap the original invoker error via errors.Is, got ce.Err=%v", ce.Err)
 	}
 }
 
-// ===== OrchestratorDelegate: rejoin_agent not found =====
+// ===== T3.3: Pre-consultation request and response parsing =====
 
-// TestOrchestratorDelegate_RejoinAgentNotFound_ReturnsError verifies that
-// when the orchestrator instruction names a rejoin_agent that is not present
-// in the routing table, the delegate returns an error rather than silently
-// producing a zero row index or undefined row index.
-//
-// An unrecognized agent identifier indicates the orchestrator produced an
-// instruction that does not match the current workflow. The delegate must
-// detect this and surface it as an unresolvable deviation.
-func TestOrchestratorDelegate_RejoinAgentNotFound_ReturnsError(t *testing.T) {
+// TestOrchestratorConsultant_PreConsultSendsCorrectContext verifies that
+// PreConsult sends context=pre_consultation and last_status_message=null on
+// the wire (pre-consultation always carries null, regardless of the request).
+func TestOrchestratorConsultant_PreConsultSendsCorrectContext(t *testing.T) {
 	table := mustParseTable(t)
-	f := harness.NewFakeAdapter()
-	// rejoin_agent names an agent that does not appear in the routing table.
-	orchestratorSuccess(f, `{"action":"rejoin","rejoin_agent":"nonexistent-agent"}`)
+	fake := &fakeRawInvoker{reply: []byte(`{}`)} // empty object = valid empty advice
+	c := makeOrchestratorConsultant(fake, table)
 
-	d := makeOrchestrator(t, f, table)
-	info := makeDeviationInfo(table)
-
-	_, err := d.Resolve(context.Background(), info)
-
-	if err == nil {
-		t.Fatal("want error when rejoin_agent is not found in routing table, got nil")
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-abc/Orchestration.md",
+		Context:               domain.ConsultContextPreConsultation,
+		LastStatusMessage:     nil,
 	}
-	// Verify the orchestrator was actually invoked; if it wasn't, the error
-	// is from the stub ("not implemented") rather than from the lookup failure.
-	invs := f.Invocations()
-	if len(invs) == 0 {
-		t.Error("want orchestrator invoked before error, but zero invocations recorded")
+
+	c.PreConsult(context.Background(), req) //nolint:errcheck
+
+	if len(fake.sent) == 0 {
+		t.Fatal("want OrchestratorConsultant to call RawInvoker.InvokeRaw for pre-consultation, got no payload")
+	}
+
+	w := mustUnmarshalWireRequest(t, fake.sent)
+	if w.Context != "pre_consultation" {
+		t.Errorf("want context=%q in pre-consultation wire request, got %q", "pre_consultation", w.Context)
+	}
+
+	// last_status_message must be JSON null for pre-consultation.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(fake.sent, &raw); err != nil {
+		t.Fatalf("want valid JSON payload, got %v", err)
+	}
+	rawLSM, present := raw["last_status_message"]
+	if !present {
+		t.Fatal("want last_status_message field present in pre-consultation wire request (as null), got absent")
+	}
+	if string(rawLSM) != "null" {
+		t.Errorf("want last_status_message=null for pre-consultation, got %s", rawLSM)
 	}
 }
 
-// ===== ManualResolver =====
+// TestOrchestratorConsultant_PreConsultBothFieldsPresent verifies that when the
+// orchestrator returns both task_description and constraints, PreConsult parses
+// them into a PreConsultationAdvice with both fields set.
+func TestOrchestratorConsultant_PreConsultBothFieldsPresent(t *testing.T) {
+	table := mustParseTable(t)
+	fake := &fakeRawInvoker{reply: []byte(`{
+		"task_description": "run stage 1 first",
+		"constraints": "use python only"
+	}`)}
+	c := makeOrchestratorConsultant(fake, table)
 
-// TestManualResolver_CallsSelectOne verifies that ManualResolver.Resolve
-// consults the Interaction port (at minimum, SelectOne) to obtain a row
-// selection from the user.
-func TestManualResolver_CallsSelectOne(t *testing.T) {
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-abc/Orchestration.md",
+		Context:               domain.ConsultContextPreConsultation,
+	}
+	advice, err := c.PreConsult(context.Background(), req)
+
+	if err != nil {
+		t.Fatalf("want no error for valid pre-consultation response, got %v", err)
+	}
+	if advice.TaskDescription != "run stage 1 first" {
+		t.Errorf("want TaskDescription=%q, got %q", "run stage 1 first", advice.TaskDescription)
+	}
+	if advice.Constraints != "use python only" {
+		t.Errorf("want Constraints=%q, got %q", "use python only", advice.Constraints)
+	}
+}
+
+// TestOrchestratorConsultant_PreConsultOnlyTaskDescription verifies that when
+// only task_description is present, PreConsult returns advice with TaskDescription
+// set and Constraints empty.
+func TestOrchestratorConsultant_PreConsultOnlyTaskDescription(t *testing.T) {
+	table := mustParseTable(t)
+	fake := &fakeRawInvoker{reply: []byte(`{"task_description":"run stage 1 first"}`)}
+	c := makeOrchestratorConsultant(fake, table)
+
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-abc/Orchestration.md",
+		Context:               domain.ConsultContextPreConsultation,
+	}
+	advice, err := c.PreConsult(context.Background(), req)
+
+	if err != nil {
+		t.Fatalf("want no error, got %v", err)
+	}
+	if advice.TaskDescription != "run stage 1 first" {
+		t.Errorf("want TaskDescription=%q, got %q", "run stage 1 first", advice.TaskDescription)
+	}
+	if advice.Constraints != "" {
+		t.Errorf("want Constraints empty, got %q", advice.Constraints)
+	}
+}
+
+// TestOrchestratorConsultant_PreConsultOnlyConstraints verifies that when only
+// constraints is present, PreConsult returns advice with Constraints set and
+// TaskDescription empty.
+func TestOrchestratorConsultant_PreConsultOnlyConstraints(t *testing.T) {
+	table := mustParseTable(t)
+	fake := &fakeRawInvoker{reply: []byte(`{"constraints":"use python only"}`)}
+	c := makeOrchestratorConsultant(fake, table)
+
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-abc/Orchestration.md",
+		Context:               domain.ConsultContextPreConsultation,
+	}
+	advice, err := c.PreConsult(context.Background(), req)
+
+	if err != nil {
+		t.Fatalf("want no error, got %v", err)
+	}
+	if advice.TaskDescription != "" {
+		t.Errorf("want TaskDescription empty, got %q", advice.TaskDescription)
+	}
+	if advice.Constraints != "use python only" {
+		t.Errorf("want Constraints=%q, got %q", "use python only", advice.Constraints)
+	}
+}
+
+// TestOrchestratorConsultant_PreConsultBothFieldsAbsent verifies that an empty
+// JSON object {} — both fields absent — is a valid, successful pre-consultation
+// returning a zero-valued PreConsultationAdvice. Absence of advice is not an
+// error; the orchestrator simply has nothing to add.
+func TestOrchestratorConsultant_PreConsultBothFieldsAbsent(t *testing.T) {
+	table := mustParseTable(t)
+	fake := &fakeRawInvoker{reply: []byte(`{}`)}
+	c := makeOrchestratorConsultant(fake, table)
+
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-abc/Orchestration.md",
+		Context:               domain.ConsultContextPreConsultation,
+	}
+	advice, err := c.PreConsult(context.Background(), req)
+
+	if err != nil {
+		t.Fatalf("want no error for empty pre-consultation response, got %v", err)
+	}
+	if advice.TaskDescription != "" || advice.Constraints != "" {
+		t.Errorf("want empty PreConsultationAdvice, got TaskDescription=%q Constraints=%q",
+			advice.TaskDescription, advice.Constraints)
+	}
+}
+
+// TestOrchestratorConsultant_PreConsultMalformedResponse verifies that a
+// malformed response (not valid JSON) produces a *ConsultationError.
+func TestOrchestratorConsultant_PreConsultMalformedResponse(t *testing.T) {
+	table := mustParseTable(t)
+	fake := &fakeRawInvoker{reply: []byte(`not json at all`)}
+	c := makeOrchestratorConsultant(fake, table)
+
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-abc/Orchestration.md",
+		Context:               domain.ConsultContextPreConsultation,
+	}
+	_, err := c.PreConsult(context.Background(), req)
+
+	assertConsultationError(t, err, domain.ConsultFailMalformedJSON)
+}
+
+// ===== T3.4: Manual resolver — two-action instruction shape =====
+
+// TestManualResolver_PresentsBothRowOptionsAndStopOption verifies that
+// ConsultRouting calls Interaction.SelectOne with one option per routing table
+// row and a mandatory stop option whose ID is "stop".
+func TestManualResolver_PresentsBothRowOptionsAndStopOption(t *testing.T) {
 	table := mustParseTable(t)
 	interact := &scriptedInteraction{
 		SelectOneResult: func(q interaction.ChoiceQuestion) (interaction.ChoiceAnswer, error) {
-			// Select the first option (agent-a, row 0) and no stop.
+			// Find the stop option to exercise that path.
+			for _, opt := range q.Options {
+				if opt.ID == "stop" {
+					return interaction.ChoiceAnswer{Status: interaction.Answered, OptionID: opt.ID}, nil
+				}
+			}
+			// Fall back to the first option if stop was not found (the assertion below will catch it).
 			if len(q.Options) > 0 {
 				return interaction.ChoiceAnswer{Status: interaction.Answered, OptionID: q.Options[0].ID}, nil
 			}
@@ -577,184 +841,311 @@ func TestManualResolver_CallsSelectOne(t *testing.T) {
 		},
 	}
 
-	r := &deviation.ManualResolver{
+	m := &deviation.ManualResolver{
 		Interact: interact,
 		Table:    table,
 	}
-	info := makeDeviationInfo(table)
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-abc/Orchestration.md",
+		Context:               domain.ConsultContextRouting,
+	}
 
-	r.Resolve(context.Background(), info) //nolint:errcheck
+	m.ConsultRouting(context.Background(), req) //nolint:errcheck
 
 	if len(interact.SelectOneCalls) == 0 {
-		t.Error("want Interaction.SelectOne called at least once, got zero calls")
+		t.Fatal("want ManualResolver to call Interaction.SelectOne, got zero calls")
+	}
+
+	q := interact.SelectOneCalls[0]
+
+	// Expect one option per routing table row, plus the stop option.
+	wantMinOptions := len(table.Rows) + 1
+	if len(q.Options) < wantMinOptions {
+		t.Errorf("want at least %d options (rows + stop), got %d", wantMinOptions, len(q.Options))
+	}
+
+	// The stop option must have ID "stop".
+	hasStop := false
+	for _, opt := range q.Options {
+		if opt.ID == "stop" {
+			hasStop = true
+			break
+		}
+	}
+	if !hasStop {
+		t.Errorf("want stop option with ID=%q in SelectOne options, got none — options: %v", "stop", q.Options)
 	}
 }
 
-// TestManualResolver_ReturnsRejoinAtRow verifies that when the user selects a
-// row to rejoin at, ManualResolver returns a RejoinInstruction with RejoinAtRow
-// pointing to the selected row index.
-func TestManualResolver_ReturnsRejoinAtRow(t *testing.T) {
+// TestManualResolver_ConsultRoutingReturnsDispatchForSelectedAgent verifies that
+// when the user selects an agent row and provides a task description, ConsultRouting
+// returns a RoutingInstruction with a non-nil Dispatch carrying the agent identifier
+// and the user-supplied task description.
+func TestManualResolver_ConsultRoutingReturnsDispatchForSelectedAgent(t *testing.T) {
 	table := mustParseTable(t)
-	// User selects agent-b (row 1) -- we fake this by returning its ID.
+	wantTaskDesc := "implement the planned feature"
+	// User selects the first non-stop option.
 	interact := &scriptedInteraction{
 		SelectOneResult: func(q interaction.ChoiceQuestion) (interaction.ChoiceAnswer, error) {
-			// Look for the option whose ID corresponds to agent-b (row 1).
 			for _, opt := range q.Options {
-				if opt.ID == "1" {
+				if opt.ID != "stop" {
 					return interaction.ChoiceAnswer{Status: interaction.Answered, OptionID: opt.ID}, nil
 				}
 			}
-			return interaction.ChoiceAnswer{Status: interaction.Answered, OptionID: "0"}, nil
-		},
-		ConfirmResult: func(_ interaction.Question) (interaction.ConfirmAnswer, error) {
-			// No HITL override.
-			return interaction.ConfirmAnswer{Status: interaction.Answered, Confirm: false}, nil
-		},
-	}
-
-	r := &deviation.ManualResolver{
-		Interact: interact,
-		Table:    table,
-	}
-	info := makeDeviationInfo(table)
-
-	instr, err := r.Resolve(context.Background(), info)
-
-	if err != nil {
-		t.Fatalf("want no error, got %v", err)
-	}
-	if instr.Rejoin == nil {
-		t.Fatal("want RejoinAtRow instruction, got nil")
-	}
-	if instr.Rejoin.RowIndex != 1 {
-		t.Errorf("want RowIndex=1 (agent-b), got %d", instr.Rejoin.RowIndex)
-	}
-}
-
-// TestManualResolver_CarriesHITLOverrideWhenUserRequests verifies that when
-// the user explicitly confirms they want to override HITL, the ManualResolver
-// carries the override in the RejoinInstruction (and does not originate it
-// silently).
-func TestManualResolver_CarriesHITLOverrideWhenUserRequests(t *testing.T) {
-	table := mustParseTable(t)
-	hitlOverrideValue := false // user wants HITL lowered
-	interact := &scriptedInteraction{
-		SelectOneResult: func(q interaction.ChoiceQuestion) (interaction.ChoiceAnswer, error) {
-			return interaction.ChoiceAnswer{Status: interaction.Answered, OptionID: "0"}, nil
-		},
-		ConfirmResult: func(_ interaction.Question) (interaction.ConfirmAnswer, error) {
-			// User explicitly confirms they want to change HITL.
-			return interaction.ConfirmAnswer{Status: interaction.Answered, Confirm: true}, nil
+			return interaction.ChoiceAnswer{Status: interaction.Answered}, nil
 		},
 		AskTextResult: func(_ interaction.TextQuestion) (interaction.TextAnswer, error) {
-			// When asked the new HITL value, user says "false" (lower it).
-			_ = hitlOverrideValue
-			return interaction.TextAnswer{Status: interaction.Answered, Text: "false"}, nil
+			return interaction.TextAnswer{Status: interaction.Answered, Text: wantTaskDesc}, nil
 		},
 	}
 
-	r := &deviation.ManualResolver{
+	m := &deviation.ManualResolver{
 		Interact: interact,
 		Table:    table,
 	}
-	info := makeDeviationInfo(table)
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-abc/Orchestration.md",
+		Context:               domain.ConsultContextRouting,
+	}
 
-	instr, err := r.Resolve(context.Background(), info)
+	instr, err := m.ConsultRouting(context.Background(), req)
 
 	if err != nil {
 		t.Fatalf("want no error, got %v", err)
 	}
-	if instr.Rejoin == nil {
-		t.Fatal("want RejoinAtRow, got nil")
+	if instr.Dispatch == nil {
+		t.Fatal("want Dispatch instruction when user selects an agent, got nil Dispatch")
 	}
-	if instr.Rejoin.HITLOverride == nil {
-		t.Fatal("want HITLOverride set when user explicitly requested it, got nil")
+	if instr.Stop != nil {
+		t.Error("want Stop=nil when user selects an agent, got non-nil Stop")
 	}
-	if *instr.Rejoin.HITLOverride != hitlOverrideValue {
-		t.Errorf("want HITLOverride=%v, got %v", hitlOverrideValue, *instr.Rejoin.HITLOverride)
+	if instr.Dispatch.Agent == "" {
+		t.Error("want non-empty Dispatch.Agent")
 	}
-}
-
-// TestManualResolver_DoesNotOriginateHITLLowering verifies that when the user
-// does not explicitly request a HITL change, ManualResolver sets HITLOverride=nil.
-// This is the AC8.2 invariant: HITL lowering is never originated by the resolver.
-func TestManualResolver_DoesNotOriginateHITLLowering(t *testing.T) {
-	table := mustParseTable(t)
-	interact := &scriptedInteraction{
-		SelectOneResult: func(q interaction.ChoiceQuestion) (interaction.ChoiceAnswer, error) {
-			return interaction.ChoiceAnswer{Status: interaction.Answered, OptionID: "0"}, nil
-		},
-		ConfirmResult: func(_ interaction.Question) (interaction.ConfirmAnswer, error) {
-			// User does NOT confirm HITL change.
-			return interaction.ConfirmAnswer{Status: interaction.Answered, Confirm: false}, nil
-		},
+	if instr.Dispatch.TaskDescription != wantTaskDesc {
+		t.Errorf("want TaskDescription=%q, got %q", wantTaskDesc, instr.Dispatch.TaskDescription)
 	}
-
-	r := &deviation.ManualResolver{
-		Interact: interact,
-		Table:    table,
+	// The first non-stop option is agent-a at row 0 in the two-row fixture.
+	if instr.Dispatch.RowIndex != 0 {
+		t.Errorf("want RowIndex=0 for first agent (agent-a, row 0 in fixture), got %d", instr.Dispatch.RowIndex)
 	}
-	info := makeDeviationInfo(table)
-
-	instr, err := r.Resolve(context.Background(), info)
-
-	if err != nil {
-		t.Fatalf("want no error, got %v", err)
-	}
-	if instr.Rejoin == nil {
-		// May return Stop if user chose stop option; that's fine for this test.
-		if instr.Stop != nil {
-			return
-		}
-		t.Fatal("want RejoinAtRow or StopRun, got nil instruction")
-	}
-	if instr.Rejoin.HITLOverride != nil {
-		t.Errorf("want HITLOverride=nil when user did not request change, got %v", *instr.Rejoin.HITLOverride)
+	// ManualResolver never originates a HITL override; HITLOverride is set only
+	// when the user explicitly asks for one. The resolver itself must leave it nil.
+	if instr.Dispatch.HITLOverride != nil {
+		t.Errorf("want HITLOverride=nil (ManualResolver never originates a HITL override), got non-nil: %v", *instr.Dispatch.HITLOverride)
 	}
 }
 
-// TestManualResolver_UserChoosesStop_ReturnsStopRun verifies that when the
-// user selects the stop option, ManualResolver returns a StopRun instruction.
-//
-// Convention: the ManualResolver must include a stop option with ID "stop"
-// in the SelectOne question. The test enforces this convention by failing
-// with a clear message if no option with ID "stop" is found, rather than
-// falling back to a different option (which would produce a false positive).
-func TestManualResolver_UserChoosesStop_ReturnsStopRun(t *testing.T) {
+// TestManualResolver_ConsultRoutingReturnsStopWhenUserChoosesStop verifies that
+// when the user selects the stop option, ConsultRouting returns a RoutingInstruction
+// with a non-nil Stop and nil Dispatch.
+func TestManualResolver_ConsultRoutingReturnsStopWhenUserChoosesStop(t *testing.T) {
 	table := mustParseTable(t)
 	interact := &scriptedInteraction{
 		SelectOneResult: func(q interaction.ChoiceQuestion) (interaction.ChoiceAnswer, error) {
-			// Look for the stop option; its ID must be "stop" by convention.
-			// No fallback: if the convention is broken the test fails clearly,
-			// not silently via an unintended option selection.
 			for _, opt := range q.Options {
 				if opt.ID == "stop" {
 					return interaction.ChoiceAnswer{Status: interaction.Answered, OptionID: opt.ID}, nil
 				}
 			}
-			t.Errorf("want a stop option with ID='stop' in SelectOne question options, got %v (implementation must include a stop option with this ID)", q.Options)
+			// stop option not found — the assertion will surface this.
+			t.Errorf("want stop option with ID=%q in SelectOne options, got none — options: %v", "stop", q.Options)
 			return interaction.ChoiceAnswer{Status: interaction.Answered}, nil
 		},
 	}
 
-	r := &deviation.ManualResolver{
+	m := &deviation.ManualResolver{
 		Interact: interact,
 		Table:    table,
 	}
-	info := makeDeviationInfo(table)
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-abc/Orchestration.md",
+		Context:               domain.ConsultContextRouting,
+	}
 
-	instr, err := r.Resolve(context.Background(), info)
+	instr, err := m.ConsultRouting(context.Background(), req)
+
+	if err != nil {
+		t.Fatalf("want no error when user chooses stop, got %v", err)
+	}
+	if instr.Stop == nil {
+		t.Fatal("want Stop instruction when user selects stop, got nil Stop")
+	}
+	if instr.Dispatch != nil {
+		t.Error("want Dispatch=nil when user selects stop, got non-nil Dispatch")
+	}
+	if instr.Stop.Reason == "" {
+		t.Error("want non-empty Stop.Reason (human-readable and non-empty per design), got empty string")
+	}
+}
+
+// ===== Additional tests addressing review findings =====
+
+// TestOrchestratorConsultant_DispatchRowIndexResolved verifies that
+// ConsultRouting resolves the agent name to its routing table index and records
+// it in DispatchInstruction.RowIndex. agent-a is row 0 and agent-b is row 1 in
+// the two-row fixture.
+func TestOrchestratorConsultant_DispatchRowIndexResolved(t *testing.T) {
+	cases := []struct {
+		agent    string
+		wantRow  int
+	}{
+		{"agent-a", 0},
+		{"agent-b", 1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.agent, func(t *testing.T) {
+			table := mustParseTable(t)
+			reply := []byte(fmt.Sprintf(`{"action":"dispatch","agent":%q,"task_description":"do the thing"}`, tc.agent))
+			fake := &fakeRawInvoker{reply: reply}
+			c := makeOrchestratorConsultant(fake, table)
+
+			instr, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+			if err != nil {
+				t.Fatalf("want no error for valid dispatch response, got %v", err)
+			}
+			if instr.Dispatch == nil {
+				t.Fatal("want Dispatch instruction, got nil")
+			}
+			if instr.Dispatch.RowIndex != tc.wantRow {
+				t.Errorf("want RowIndex=%d for agent %q, got %d", tc.wantRow, tc.agent, instr.Dispatch.RowIndex)
+			}
+		})
+	}
+}
+
+// TestManualResolver_ConsultRoutingRowIndexSet verifies that when the user
+// selects a routing table row by agent, the returned DispatchInstruction carries
+// the correct RowIndex matching the row's position in the table. Row 1 (agent-b)
+// is selected by choosing the second non-stop option.
+func TestManualResolver_ConsultRoutingRowIndexSet(t *testing.T) {
+	table := mustParseTable(t)
+	// Select the second non-stop option (agent-b, row 1) by skipping the first.
+	firstNonStopSeen := false
+	interact := &scriptedInteraction{
+		SelectOneResult: func(q interaction.ChoiceQuestion) (interaction.ChoiceAnswer, error) {
+			for _, opt := range q.Options {
+				if opt.ID == "stop" {
+					continue
+				}
+				if !firstNonStopSeen {
+					firstNonStopSeen = true
+					continue
+				}
+				// Second non-stop option found.
+				return interaction.ChoiceAnswer{Status: interaction.Answered, OptionID: opt.ID}, nil
+			}
+			// Fall back to any non-stop option if fewer than two agent rows.
+			for _, opt := range q.Options {
+				if opt.ID != "stop" {
+					return interaction.ChoiceAnswer{Status: interaction.Answered, OptionID: opt.ID}, nil
+				}
+			}
+			return interaction.ChoiceAnswer{Status: interaction.Answered}, nil
+		},
+		AskTextResult: func(_ interaction.TextQuestion) (interaction.TextAnswer, error) {
+			return interaction.TextAnswer{Status: interaction.Answered, Text: "implement feature"}, nil
+		},
+	}
+
+	m := &deviation.ManualResolver{
+		Interact: interact,
+		Table:    table,
+	}
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-abc/Orchestration.md",
+		Context:               domain.ConsultContextRouting,
+	}
+
+	instr, err := m.ConsultRouting(context.Background(), req)
 
 	if err != nil {
 		t.Fatalf("want no error, got %v", err)
 	}
-	if instr.Stop == nil {
-		t.Fatal("want StopRun when user chooses stop, got nil Stop")
+	if instr.Dispatch == nil {
+		t.Fatal("want Dispatch instruction, got nil")
+	}
+	// The two-row fixture has agent-a at row 0 and agent-b at row 1.
+	// The selected agent must match its actual row index.
+	wantRow := -1
+	for _, row := range table.Rows {
+		if row.Agent == instr.Dispatch.Agent {
+			wantRow = row.Index
+			break
+		}
+	}
+	if wantRow == -1 {
+		t.Fatalf("selected agent %q not found in routing table", instr.Dispatch.Agent)
+	}
+	if instr.Dispatch.RowIndex != wantRow {
+		t.Errorf("want RowIndex=%d for agent %q, got %d", wantRow, instr.Dispatch.Agent, instr.Dispatch.RowIndex)
+	}
+}
+
+// TestOrchestratorConsultant_MissingAgentField_EmptyString verifies that a
+// dispatch response with agent present but set to "" produces a *ConsultationError
+// with ConsultFailMissingField. A field that is present-but-empty must be treated
+// the same as absent.
+func TestOrchestratorConsultant_MissingAgentField_EmptyString(t *testing.T) {
+	table := mustParseTable(t)
+	reply := []byte(`{"action":"dispatch","agent":"","task_description":"do the thing"}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
+
+	_, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	ce := assertConsultationError(t, err, domain.ConsultFailMissingField)
+	if !strings.Contains(ce.Detail, "agent") {
+		t.Errorf("want ConsultationError.Detail to contain %q (field name), got %q", "agent", ce.Detail)
+	}
+}
+
+// TestOrchestratorConsultant_MissingTaskDescriptionField_EmptyString verifies
+// that a dispatch response with task_description present but set to "" produces
+// a *ConsultationError with ConsultFailMissingField. A field that is present-but-empty
+// must be treated the same as absent.
+func TestOrchestratorConsultant_MissingTaskDescriptionField_EmptyString(t *testing.T) {
+	table := mustParseTable(t)
+	reply := []byte(`{"action":"dispatch","agent":"agent-a","task_description":""}`)
+	fake := &fakeRawInvoker{reply: reply}
+	c := makeOrchestratorConsultant(fake, table)
+
+	_, err := c.ConsultRouting(context.Background(), validRoutingRequest("Orchestration-abc/Orchestration.md"))
+
+	ce := assertConsultationError(t, err, domain.ConsultFailMissingField)
+	if !strings.Contains(ce.Detail, "task_description") {
+		t.Errorf("want ConsultationError.Detail to contain %q (field name), got %q", "task_description", ce.Detail)
+	}
+}
+
+// TestOrchestratorConsultant_PreConsultTransportError verifies that when
+// RawInvoker returns an error during a pre-consultation call, PreConsult returns
+// a *ConsultationError with ConsultFailTransport and that ConsultationError.Err
+// wraps the original invoker error so callers can errors.Is/errors.As against the
+// underlying cause. Mirrors the equivalent ConsultRouting transport error test.
+func TestOrchestratorConsultant_PreConsultTransportError(t *testing.T) {
+	table := mustParseTable(t)
+	invokerErr := errors.New("harness: timeout after 30s")
+	fake := &fakeRawInvoker{err: invokerErr}
+	c := makeOrchestratorConsultant(fake, table)
+
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: "Orchestration-abc/Orchestration.md",
+		Context:               domain.ConsultContextPreConsultation,
+		LastStatusMessage:     nil,
+	}
+	_, err := c.PreConsult(context.Background(), req)
+
+	ce := assertConsultationError(t, err, domain.ConsultFailTransport)
+	// ce.Err must wrap the original invoker error so callers can unwrap to the cause.
+	if !errors.Is(ce.Err, invokerErr) {
+		t.Errorf("want ce.Err to wrap the original invoker error via errors.Is, got ce.Err=%v", ce.Err)
 	}
 }
 
 // ---- small utilities ----
 
-// Ensure json is imported (used in orchestratorInstruction struct tags
-// referenced by the test's conceptual coverage).
+// Ensure json is imported (used in wireRequest struct tags and assertions above).
 var _ = json.Marshal

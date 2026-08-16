@@ -42,18 +42,18 @@ func TestRun_StubRenderVersionDoesNotFlowIntoSubjectVersionEvidence(t *testing.T
 	}
 
 	// Act
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
+	result, err := runner.Run(context.Background(), h.Deps, req, nil)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
-	if evidence.SubjectVersion != "" {
-		t.Errorf("evidence.SubjectVersion = %q, want empty string; "+
+	if result.SubjectVersion != "" {
+		t.Errorf("result.SubjectVersion = %q, want empty string; "+
 			"a stub agent's SourceVersion must not flow into SubjectVersion — "+
 			"the subject is not rendered on the stub-agents path and its version "+
 			"is not available from stub renders",
-			evidence.SubjectVersion)
+			result.SubjectVersion)
 	}
 }
 
@@ -76,17 +76,17 @@ func TestRun_AbsentSubjectVersionCarriedAsEmptyInEvidence(t *testing.T) {
 	}
 
 	// Act
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
+	result, err := runner.Run(context.Background(), h.Deps, req, nil)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
-	if evidence.SubjectVersion != "" {
-		t.Errorf("evidence.SubjectVersion = %q, want empty string; "+
+	if result.SubjectVersion != "" {
+		t.Errorf("result.SubjectVersion = %q, want empty string; "+
 			"an absent source version must be carried as empty in RunEvidence — "+
 			"the report layer renders empty as 'unknown', not the runner",
-			evidence.SubjectVersion)
+			result.SubjectVersion)
 	}
 }
 
@@ -110,17 +110,17 @@ func TestRun_StubAgentsPathSubjectVersionIsAlwaysEmpty(t *testing.T) {
 	}
 
 	// Act
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
+	result, err := runner.Run(context.Background(), h.Deps, req, nil)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
-	if evidence.SubjectVersion != "" {
-		t.Errorf("evidence.SubjectVersion = %q, want empty string; "+
+	if result.SubjectVersion != "" {
+		t.Errorf("result.SubjectVersion = %q, want empty string; "+
 			"on the stub-agents path the subject is not rendered and its version "+
 			"is not available — SubjectVersion must be empty (reported as 'unknown' "+
 			"by the report layer), never populated from a stub render result",
-			evidence.SubjectVersion)
+			result.SubjectVersion)
 	}
 }

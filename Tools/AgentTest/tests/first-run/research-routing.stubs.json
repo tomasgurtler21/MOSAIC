@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "test_id": "research-routing",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "codebase-research", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "codebase-research#1",
+        "run_id": "research-routing-run",
+        "status_code": "SUCCESS",
+        "status_message": "Codebase research complete. Identified CLI entry point at src/cmd/widgets/main.go, existing flag parsing with pflag, stderr diagnostic pattern in src/internal/diagnostics/."
+      },
+      "side_effects": {
+        "create_files": [
+          {
+            "path": "Orchestration-{run_id}/Research.md",
+            "content": "---\nrun_id: research-routing-run\ncreated_by: codebase-research#1\nhuman_approved: false\n---\n# Research\n\n## Codebase Analysis\n\n- CLI entry point: src/cmd/widgets/main.go\n- Flag parsing: pflag library\n- Existing diagnostic pattern: src/internal/diagnostics/\n- stderr output helper: diagnostics.Fprintf\n"
+          }
+        ]
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "requirements-refinement", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "requirements-refinement#2",
+        "run_id": "research-routing-run",
+        "status_code": "SUCCESS",
+        "status_message": "Requirements refined with verbose flag specifics."
+      },
+      "side_effects": {
+        "create_files": [
+          {
+            "path": "Orchestration-{run_id}/Requirements.md",
+            "content": "---\nrun_id: research-routing-run\ncreated_by: requirements-refinement#2\nhuman_approved: true\n---\n# Requirements\n\n## Verbose Flag\n\n- Add --verbose / -v flag to widgets CLI\n- When enabled, print per-item diagnostics to stderr\n- Use existing diagnostics.Fprintf pattern\n"
+          }
+        ]
+      }
+    }
+  ]
+}

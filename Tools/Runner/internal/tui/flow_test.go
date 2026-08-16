@@ -340,11 +340,14 @@ func TestFlow_ConfigScreen_InfraClassStep_PopulatesInfraClassSelections(t *testi
 		{Name: "checkpoint-manager-alt", Class: "checkpoint"},
 	})
 
-	// Drive through: deviation (enter), harness (enter → claude-code, always goes to timeout),
-	// timeout (type+enter), versionDrift (enter), checkpoints (enter).
-	// After checkpoints, the infra-class step should appear for the checkpoint class.
-	driveConfigStepEnter(s) // deviation
-	driveConfigStepEnter(s) // harness → must advance to timeout step (not version drift)
+	// Drive through: mode (Down+Enter to select first option, orchestrated), harness
+	// (enter → claude-code, always goes to timeout), timeout (type+enter), versionDrift
+	// (enter), checkpoints (enter). Mode is now the first step and requires an explicit
+	// cursor movement before Enter (no preselection per AC8.3).
+	// After checkpoints: manual-resolution (always shown), then the infra-class step.
+	s.Update(tea.KeyMsg{Type: tea.KeyDown})  // move cursor to first mode option
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // confirm mode (orchestrated)
+	driveConfigStepEnter(s)                  // harness → must advance to timeout step (not version drift)
 
 	// After harness Enter the screen must show the invocation-timeout entry step.
 	// This assertion fails until the fake-harness option is removed so that
@@ -358,10 +361,16 @@ func TestFlow_ConfigScreen_InfraClassStep_PopulatesInfraClassSelections(t *testi
 	driveConfigStepEnter(s)   // version drift
 	driveConfigStepEnter(s)   // checkpoints
 
-	// If the infra-class step is shown, drive it by selecting option 0
-	// (checkpoint-manager-git) and confirming.
+	// The always-shown manual-resolution step follows checkpoints. Drive it with
+	// the default selection (disabled = cursor 0, per ContractsDesign.md).
 	if !s.Done() {
-		driveConfigStepEnter(s)
+		driveConfigStepEnter(s) // manual-resolution: accept default (disabled)
+	}
+
+	// If the infra-class step is shown (two checkpoint agents declared), drive it
+	// by selecting option 0 (checkpoint-manager-git) and confirming.
+	if !s.Done() {
+		driveConfigStepEnter(s) // infra-class: select first option
 	}
 
 	if !s.Done() {
@@ -399,11 +408,13 @@ func TestFlow_ConfigScreen_InfraClassStep_SkippedWhenSingleAgentPerClass(t *test
 		{Name: "checkpoint-manager-git", Class: "checkpoint"},
 	})
 
-	// Drive through: deviation, harness (→ claude-code, timeout step always present),
-	// timeout (type+enter), versionDrift, checkpoints.
-	// Done() should be true immediately after — no infra-class step.
-	driveConfigStepEnter(s) // deviation
-	driveConfigStepEnter(s) // harness → must advance to timeout step (not version drift)
+	// Drive through: mode (Down+Enter to select first option, orchestrated), harness
+	// (→ claude-code, timeout step always present), timeout (type+enter), versionDrift,
+	// checkpoints, manual-resolution (always shown). Done() should be true after
+	// manual-resolution — no infra-class step for single-agent classes.
+	s.Update(tea.KeyMsg{Type: tea.KeyDown})  // move cursor to first mode option
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter}) // confirm mode (orchestrated)
+	driveConfigStepEnter(s)                  // harness → must advance to timeout step (not version drift)
 
 	// After harness Enter the screen must show the invocation-timeout entry step.
 	// This assertion fails until the fake-harness option is removed so that
@@ -416,6 +427,7 @@ func TestFlow_ConfigScreen_InfraClassStep_SkippedWhenSingleAgentPerClass(t *test
 	driveConfigStepTimeout(s) // timeout → version drift
 	driveConfigStepEnter(s)   // version drift
 	driveConfigStepEnter(s)   // checkpoints
+	driveConfigStepEnter(s)   // manual-resolution (always shown; accept default disabled)
 
 	if !s.Done() {
 		t.Error("ConfigScreen did not reach Done() after the standard steps; configStepInfraClass must be skipped when only one agent per gated class is declared")

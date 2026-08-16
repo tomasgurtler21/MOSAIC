@@ -26,12 +26,12 @@ func TestRun_EarlyExitSentinel_YieldsEarlyExitDisposition(t *testing.T) {
 	}
 	req := newRequest("early-exit")
 
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
+	result, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
-	if evidence.SubjectResult.Disposition != domain.DispositionEarlyExit {
-		t.Errorf("Disposition = %q, want %q", evidence.SubjectResult.Disposition, domain.DispositionEarlyExit)
+	if result.SubjectResult.Disposition != domain.DispositionEarlyExit {
+		t.Errorf("Disposition = %q, want %q", result.SubjectResult.Disposition, domain.DispositionEarlyExit)
 	}
 }
 
@@ -45,7 +45,7 @@ func TestRun_DeclaredTimeoutElapses_YieldsTimedOutDisposition(t *testing.T) {
 	timeout := 10 * time.Millisecond
 	req.Settings.Timeout = &timeout
 
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
+	result, err := runner.Run(context.Background(), h.Deps, req, nil)
 	// A timeout is a disposition, not a startup fault: Run's error return is
 	// documented as reserved for a fault that prevented the attempt from
 	// starting at all, and a declared timeout elapsing is not that.
@@ -53,10 +53,10 @@ func TestRun_DeclaredTimeoutElapses_YieldsTimedOutDisposition(t *testing.T) {
 		t.Errorf("Run returned unexpected error for a timeout disposition: %v — a timeout is not a startup fault", err)
 	}
 
-	if evidence.SubjectResult.Disposition != domain.DispositionTimedOut {
-		t.Errorf("Disposition = %q, want %q", evidence.SubjectResult.Disposition, domain.DispositionTimedOut)
+	if result.SubjectResult.Disposition != domain.DispositionTimedOut {
+		t.Errorf("Disposition = %q, want %q", result.SubjectResult.Disposition, domain.DispositionTimedOut)
 	}
-	if evidence.SubjectResult.Disposition == domain.DispositionEarlyExit {
+	if result.SubjectResult.Disposition == domain.DispositionEarlyExit {
 		t.Error("a real timeout must never be reported as an early exit")
 	}
 }
@@ -71,12 +71,12 @@ func TestRun_LauncherReportsTurnLimit_YieldsTurnLimitDisposition(t *testing.T) {
 	}
 	req := newRequest("turn-limit")
 
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
+	result, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
-	if evidence.SubjectResult.Disposition != domain.DispositionTurnLimit {
-		t.Errorf("Disposition = %q, want %q", evidence.SubjectResult.Disposition, domain.DispositionTurnLimit)
+	if result.SubjectResult.Disposition != domain.DispositionTurnLimit {
+		t.Errorf("Disposition = %q, want %q", result.SubjectResult.Disposition, domain.DispositionTurnLimit)
 	}
 }
 
@@ -108,12 +108,12 @@ func TestRun_SentinelCancelledRun_WinsOverLauncherDecodingItAsTimeout(t *testing
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	evidence, err := runner.Run(ctx, h.Deps, req)
+	result, err := runner.Run(ctx, h.Deps, req, nil)
 	if err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
-	if evidence.SubjectResult.Disposition != domain.DispositionEarlyExit {
-		t.Errorf("Disposition = %q, want %q — the supervisor's decision must win over the launcher's decoded timeout", evidence.SubjectResult.Disposition, domain.DispositionEarlyExit)
+	if result.SubjectResult.Disposition != domain.DispositionEarlyExit {
+		t.Errorf("Disposition = %q, want %q — the supervisor's decision must win over the launcher's decoded timeout", result.SubjectResult.Disposition, domain.DispositionEarlyExit)
 	}
 }

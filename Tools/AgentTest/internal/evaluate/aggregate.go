@@ -11,8 +11,9 @@ import "mosaic-agent-test/internal/domain"
 // infrastructure failure rather than as a subject regression.
 func Aggregate(results []domain.TestResult, policy domain.RepetitionPolicy) domain.AggregateResult {
 	out := domain.AggregateResult{
-		Runs:      results,
-		TotalCost: domain.CostReport{Attribution: domain.AttributionAttributed},
+		Runs:             results,
+		RequiredPassRate: policy.PassRate,
+		TotalCost:        domain.CostReport{Attribution: domain.AttributionAttributed},
 	}
 
 	stateIntegrityCount := 0

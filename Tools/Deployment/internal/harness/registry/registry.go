@@ -57,6 +57,24 @@ type Options struct {
 	// config package; the composition point supplies a closure over the loaded project-level
 	// and user-local configuration.
 	ToolMappings func(harnessID string, declared []domain.ToolMapping) []domain.ToolMapping
+
+	// ModelCatalog, when non-nil, is invoked once per successfully constructed module during
+	// Discover. It receives the harness id and the descriptor's own declared model catalog, and
+	// returns the effective catalog for that module.
+	//
+	// Returning a catalog with an empty IDs list means "no shared entry for this harness; keep
+	// the descriptor's own declared catalog unchanged" — which is what keeps a non-CLI-backed
+	// builtin, a descriptor-tier harness and an external harness on their own model data rather
+	// than emptying them.
+	//
+	// A non-nil return with a non-empty IDs list installs that catalog on the module's
+	// Descriptor(), through the same shallow-copy shim the ToolMappings hook uses: the inner
+	// module's own descriptor is never permanently mutated.
+	//
+	// The hook is a function rather than a direct dependency for the same reason ToolMappings
+	// is: it keeps the registry independent of where the data comes from, and lets a test drive
+	// the fallback path with a catalog of its own.
+	ModelCatalog func(harnessID string, declared domain.ModelCatalog) domain.ModelCatalog
 }
 
 // Registry is the resolved set of harnesses available in a run. It is produced by Discover
@@ -127,6 +145,64 @@ func (m *toolMappingsModule) Injection(req domain.InjectionRequest) (string, boo
 }
 func (m *toolMappingsModule) HookPlan(req domain.HookPlanRequest) (domain.HookPlan, error) {
 	return m.inner.HookPlan(req)
+}
+
+// modelCatalogModule wraps a HarnessModule so that Descriptor() returns a shallow copy of
+// the inner descriptor with the effective model catalog installed. The inner module's own
+// descriptor is never permanently mutated, so the same factory-produced module can be
+// discovered multiple times without bleeding one Discover's catalog override into the next.
+type modelCatalogModule struct {
+	inner domain.HarnessModule
+	desc  *domain.HarnessDescriptor // shallow copy with effective models, for Descriptor()
+}
+
+func (m *modelCatalogModule) Ref() domain.HarnessRef                   { return m.inner.Ref() }
+func (m *modelCatalogModule) Descriptor() *domain.HarnessDescriptor     { return m.desc }
+func (m *modelCatalogModule) Close() error                              { return m.inner.Close() }
+func (m *modelCatalogModule) Tools(req domain.ToolRequest) (domain.ToolResult, error) {
+	return m.inner.Tools(req)
+}
+func (m *modelCatalogModule) Frontmatter(req domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
+	return m.inner.Frontmatter(req)
+}
+func (m *modelCatalogModule) TargetPath(req domain.TargetPathRequest) (string, error) {
+	return m.inner.TargetPath(req)
+}
+func (m *modelCatalogModule) Injection(req domain.InjectionRequest) (string, bool) {
+	return m.inner.Injection(req)
+}
+func (m *modelCatalogModule) HookPlan(req domain.HookPlanRequest) (domain.HookPlan, error) {
+	return m.inner.HookPlan(req)
+}
+
+// applyModelCatalogHook calls the ModelCatalog hook (if set) for the given harness module
+// and returns a module whose Descriptor().Models reflects the effective catalog.
+//
+// When the hook is nil or returns a catalog with an empty IDs list, the module is returned
+// unchanged and its descriptor is not mutated — an empty IDs return means "no shared entry
+// for this harness; use the descriptor's own declared catalog unchanged."
+//
+// When the hook returns a catalog with a non-empty IDs list, applyModelCatalogHook wraps
+// the module in a modelCatalogModule that presents the effective catalog without permanently
+// mutating the inner's descriptor.
+func applyModelCatalogHook(id string, mod domain.HarnessModule, hook func(string, domain.ModelCatalog) domain.ModelCatalog) domain.HarnessModule {
+	if hook == nil {
+		return mod
+	}
+	declared := mod.Descriptor().Models
+	effective := hook(id, declared)
+	if len(effective.IDs) == 0 {
+		// Empty IDs return means "no shared entry for this harness" — return the module
+		// unchanged so its descriptor-sourced catalog remains intact.
+		return mod
+	}
+	// Build a shallow copy of the descriptor with the effective model catalog installed.
+	descCopy := *mod.Descriptor()
+	descCopy.Models = effective
+	return &modelCatalogModule{
+		inner: mod,
+		desc:  &descCopy,
+	}
 }
 
 // applyToolMappingsHook calls the ToolMappings hook (if set) for the given harness module
@@ -278,9 +354,11 @@ func Discover(opts Options) (Registry, error) {
 			}
 			continue
 		}
-		// Apply the ToolMappings hook to each successfully constructed built-in module,
-		// wrapping it with a descriptor copy so the original descriptor is not mutated.
+		// Apply the ToolMappings hook then the ModelCatalog hook to each successfully
+		// constructed built-in module, wrapping it with descriptor copies so the original
+		// descriptor is not mutated.
 		wrapped := applyToolMappingsHook(id, mod, opts.ToolMappings)
+		wrapped = applyModelCatalogHook(id, wrapped, opts.ModelCatalog)
 		candidates[id] = entryWithTier{
 			entry: harnessEntry{ref: wrapped.Ref(), mod: wrapped},
 			tier:  domain.TierBuiltin,
@@ -389,9 +467,10 @@ func Discover(opts Options) (Registry, error) {
 				Usable:      true,
 			}
 			mod := newRuntimeModule(ref, h.desc, injections, orchInjections)
-			// Apply the ToolMappings hook and wrap the descriptor-only module with a copy
-			// carrying the effective mappings.
+			// Apply the ToolMappings hook then the ModelCatalog hook, wrapping the
+			// descriptor-only module with descriptor copies carrying the effective values.
 			wrapped := applyToolMappingsHook(id, mod, opts.ToolMappings)
+			wrapped = applyModelCatalogHook(id, wrapped, opts.ModelCatalog)
 			newEntry = harnessEntry{ref: ref, mod: wrapped}
 		}
 

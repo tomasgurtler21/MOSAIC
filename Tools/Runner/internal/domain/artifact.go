@@ -27,7 +27,14 @@ type ArtifactState struct {
 	Started         time.Time
 	LastUpdated     time.Time
 	GlobalSequence  int
-	Checkpoints     bool         // true = enabled
+
+	// RunSettings holds every run-configuration decision that is settled at run
+	// start, immutable for the run, and persisted in the artifact frontmatter so
+	// a resumed run reads it back instead of re-asking. Embedding promotes all
+	// seven fields (Mode, Checkpoints, Commits, CommitBranchVariant, CommitBranch,
+	// PreConsultation, ManualResolution) directly onto ArtifactState.
+	RunSettings
+
 	// InfrastructureOverrides carries the optional infrastructure_overrides
 	// frontmatter block. Nil when the block is absent (the common case).
 	// Each entry replaces the named agent's declared trigger list at run start.

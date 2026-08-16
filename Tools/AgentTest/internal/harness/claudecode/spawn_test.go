@@ -246,6 +246,37 @@ func TestSpawnPlan_BuildingItStartsNoProcessAndTouchesNoFiles(t *testing.T) {
 	}
 }
 
+// TestSpawnPlan_StdinEnvBlockNamesSubjectDir verifies that the stdin payload
+// of the spawn plan names the sandbox subject directory in its synthesized
+// <env> block. plan.WorkingDir (the OS-level working directory for the
+// subprocess) was already set to the subject directory; this test pins the
+// complementary requirement that the text the spawned orchestrator agent is
+// told about its working directory also names the subject directory — not
+// AgentTest's own tool directory, which is what the process CWD fallback
+// would produce when no working directory is passed to the spawn request.
+//
+// Without the fix, SpawnPlan does not set WorkingDir on the commonharness
+// SpawnRequest, so BuildArgs falls through to EnvBlock(""), which reads the
+// process's own working directory. The spawned agent is therefore told the
+// wrong directory in its <env> block. This test will fail until the fix
+// populates SpawnRequest.WorkingDir from the sandbox.
+func TestSpawnPlan_StdinEnvBlockNamesSubjectDir(t *testing.T) {
+	a, sb, prov := provisionedAdapter(t)
+	subject := spawnTestSubject()
+
+	plan, err := a.SpawnPlan(testContext(), subject, prov)
+	if err != nil {
+		t.Fatalf("SpawnPlan: %v", err)
+	}
+
+	if plan.Stdin == nil {
+		t.Fatalf("SpawnPlan: Stdin is nil; want a stdin payload containing the env block for orchestrator invocations")
+	}
+	if !strings.Contains(string(plan.Stdin), sb.SubjectDir) {
+		t.Errorf("SpawnPlan: stdin env block = %q, want the sandbox subject directory %q named in the env block so the spawned agent is told the correct working directory", plan.Stdin, sb.SubjectDir)
+	}
+}
+
 // TestSpawnPlan_RepeatedCallsAreEquivalent asserts SpawnPlan is a pure
 // description over its inputs — calling it twice with the same provisioning
 // produces an equivalent plan, not one that accumulates state from the

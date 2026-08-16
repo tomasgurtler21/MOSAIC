@@ -81,10 +81,15 @@ type Request struct {
 // Run executes one attempt end to end and tears down on every exit path,
 // including a panic inside execution and a setup that failed partway.
 //
-// It returns evidence on every path on which an attempt began. The error
-// return is reserved for a fault that prevented the attempt from starting at
-// all; teardown has still run when it is returned.
-func Run(ctx context.Context, d Deps, req Request) (evidence domain.RunEvidence, runErr error) {
+// eval is invoked with the gathered evidence after cost attribution and before
+// teardown, so the retention decision can see the verdict. See
+// domain.AttemptEvaluator for the nil case.
+//
+// The returned TestResult is eval's own return value with RetainedSandboxPath
+// resolved after teardown. The error return is reserved for a fault that
+// prevented the attempt from starting at all; teardown has still run when it
+// is returned, and the result reflects what eval produced for that attempt.
+func Run(ctx context.Context, d Deps, req Request, eval domain.AttemptEvaluator) (result domain.TestResult, runErr error) {
 	start := d.Clock.Now()
 
 	var (
@@ -98,7 +103,7 @@ func Run(ctx context.Context, d Deps, req Request) (evidence domain.RunEvidence,
 			if sandboxKnown {
 				_, _ = Teardown(d, ledger, AttemptOutcome{Policy: req.Retention, Failed: true})
 			}
-			evidence = domain.RunEvidence{}
+			result = domain.TestResult{}
 			runErr = fmt.Errorf("runner: recovered panic: %v", r)
 		}
 	}()
@@ -112,7 +117,7 @@ func Run(ctx context.Context, d Deps, req Request) (evidence domain.RunEvidence,
 		if sandboxKnown {
 			_, _ = Teardown(d, ledger, AttemptOutcome{Policy: req.Retention, Failed: true})
 		}
-		return domain.RunEvidence{}, setupErr
+		return domain.TestResult{}, setupErr
 	}
 
 	subject := subjectWithRunIDPrelude(req.Test.Definition.Subject, req.Key.RunID)
@@ -120,7 +125,7 @@ func Run(ctx context.Context, d Deps, req Request) (evidence domain.RunEvidence,
 	plan, planErr := d.Adapter.SpawnPlan(ctx, subject, ledger.Provisioning)
 	if planErr != nil {
 		_, _ = Teardown(d, ledger, AttemptOutcome{Policy: req.Retention, Failed: true})
-		return domain.RunEvidence{}, fmt.Errorf("runner: obtaining spawn plan: %w", planErr)
+		return domain.TestResult{}, fmt.Errorf("runner: obtaining spawn plan: %w", planErr)
 	}
 
 	res, launchErr := superviseExecution(ctx, d, sb, plan, req.Settings)
@@ -131,6 +136,19 @@ func Run(ctx context.Context, d Deps, req Request) (evidence domain.RunEvidence,
 	// the ledger, so the copy happens here where both are in scope.
 	snap.SubjectVersion = ledger.SubjectVersion
 
+	// Resolve the runtime model pair: subject tier is taken directly from the
+	// runtime selection; stub tier falls back to the subject tier when absent,
+	// mirroring the stub-tier fallback in buildTierModelMap. Only the runtime
+	// values are recorded — not the authored subject.Model / subject.StubModel
+	// fields, which are legacy scaffolding and inert in normal operation —
+	// so the evidence reflects the model the frontend chose, not a definition
+	// artifact that does not appear in the run-time tier-model map sent to Deploy.
+	snap.SubjectModel = req.Test.Models.Subject
+	snap.StubModel = req.Test.Models.Stub
+	if snap.StubModel == "" {
+		snap.StubModel = snap.SubjectModel
+	}
+
 	costReport, costErr := d.Cost.Cost(ctx, domain.CostQuery{LogRoot: snap.LogRoot, RunID: req.Key.RunID})
 	if costErr != nil {
 		costReport = domain.CostReport{
@@ -139,18 +157,33 @@ func Run(ctx context.Context, d Deps, req Request) (evidence domain.RunEvidence,
 		}
 	}
 
-	retention, _ := Teardown(d, ledger, AttemptOutcome{Policy: req.Retention, Failed: launchErr != nil})
-
 	dur := d.Clock.Now().Sub(start)
-	evidence = BuildEvidence(req, snap, costReport, dur)
+	evidence := BuildEvidence(req, snap, costReport, dur)
+
+	// Call eval before teardown so the retention decision can see the verdict.
+	failed := launchErr != nil
+	if eval != nil {
+		result = eval(evidence)
+		failed = failed || result.Verdict == domain.VerdictFail
+	} else {
+		// No evaluator: carry diagnostic fields so callers can still surface
+		// the subject's exit status without needing to inject an evaluator.
+		result.SubjectResult = evidence.SubjectResult
+		result.SubjectVersion = evidence.SubjectVersion
+		result.SubjectModel = evidence.SubjectModel
+		result.StubModel = evidence.StubModel
+	}
+
+	retention, _ := Teardown(d, ledger, AttemptOutcome{Policy: req.Retention, Failed: failed})
+
 	if retention.Retained {
-		evidence.RetainedSandboxPath = retention.Path
+		result.RetainedSandboxPath = retention.Path
 	}
 
 	if launchErr != nil {
-		return evidence, launchErr
+		return result, launchErr
 	}
-	return evidence, nil
+	return result, nil
 }
 
 // setup creates the sandbox and populates it, appending to the ledger before
@@ -190,7 +223,7 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 			HarnessID:     d.Adapter.ID(),
 			WorkspaceRoot: sb.SubjectDir,
 			Workflows:     req.Test.Definition.Subject.Workflows,
-			TierModels:    buildTierModelMap(req.Test.Definition.Subject),
+			TierModels:    buildTierModelMap(req.Test.Definition.Subject, req.Test.Models),
 		})
 		if deployErr != nil {
 			return sb, ledger, fmt.Errorf("runner: deploying catalogue path: %w", deployErr)
@@ -350,23 +383,35 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 
 // buildTierModelMap constructs the two-entry tier-model map the catalogue path
 // sends on both the setup Deploy and the preflight dry-run Deploy. Both entries
-// are always present:
+// are always present.
 //
-//   - TierTestSubject → Subject.Model
-//   - TierTestStub    → Subject.StubModel, falling back to Subject.Model when
-//     StubModel is empty
+// Precedence, per tier, highest first:
 //
-// The fallback is deliberate: an absent StubModel yields a working run that
-// costs more (the expensive subject model is used for every stub too), rather
-// than a broken run. An empty Subject.Model propagates as empty for both tiers.
-func buildTierModelMap(subject domain.SubjectUnderTest) map[string]string {
-	stubModel := subject.StubModel
-	if stubModel == "" {
-		stubModel = subject.Model
+//	subject tier: sel.Subject, then subject.Model
+//	stub tier:    sel.Stub, then subject.StubModel, then the resolved
+//	              subject-tier value above
+//
+// The final fallback is deliberate: an absent stub model yields a working run
+// that costs more (the subject's model is used for every stub too) rather than
+// a broken one. Once the authoring fields are retired the chain collapses to
+// sel.Stub, then sel.Subject.
+func buildTierModelMap(subject domain.SubjectUnderTest, sel domain.ModelSelection) map[string]string {
+	subjectTier := sel.Subject
+	if subjectTier == "" {
+		subjectTier = subject.Model
 	}
+
+	stubTier := sel.Stub
+	if stubTier == "" {
+		stubTier = subject.StubModel
+	}
+	if stubTier == "" {
+		stubTier = subjectTier
+	}
+
 	return map[string]string{
-		domain.TierTestSubject: subject.Model,
-		domain.TierTestStub:    stubModel,
+		domain.TierTestSubject: subjectTier,
+		domain.TierTestStub:    stubTier,
 	}
 }
 
@@ -508,10 +553,22 @@ type AttemptOutcome struct {
 	// never reads a policy from the environment or from disk.
 	Policy domain.RetentionPolicy
 
-	// Failed is true exactly when the attempt failed or never started: the
-	// panic-recovery exit, the setup-failure exit, the spawn-plan-failure
-	// exit, and a normal exit whose supervision returned an error. It is
-	// false only on a normal exit that produced evidence without error.
+	// Failed is true when the attempt failed in any way a diagnosis would
+	// want the sandbox for:
+	//
+	//   - it never started: the panic-recovery, setup-failure and
+	//     spawn-plan-failure exits;
+	//   - it started and its subject failed to launch or was not supervised
+	//     to completion;
+	//   - it ran cleanly and its assertions failed — the evaluated verdict
+	//     is domain.VerdictFail.
+	//
+	// The last of these is why teardown happens after evaluation. A launch
+	// failure and an assertion failure both set it.
+	//
+	// It is false only on a normal exit that produced evidence, launched
+	// without error, and evaluated to a passing verdict — or where no
+	// evaluator was supplied and the launch succeeded.
 	Failed bool
 }
 
@@ -726,6 +783,14 @@ type Snapshot struct {
 	// SetupLedger so BuildEvidence can carry it into RunEvidence without
 	// re-deriving it. Empty when the source declared no version.
 	SubjectVersion string
+
+	// SubjectModel and StubModel are the resolved tier-model map values that
+	// were passed to the deployment port. They are populated in Run from
+	// buildTierModelMap so BuildEvidence reads the same values the deployer
+	// received — not the raw ModelSelection fields, which do not include the
+	// stub-tier fallback to the subject model when no stub model was selected.
+	SubjectModel string
+	StubModel    string
 }
 
 // TakeSnapshot captures everything the verdict engine will need, before
@@ -830,6 +895,15 @@ func BuildEvidence(req Request, snap Snapshot, cost domain.CostReport, dur time.
 		LogsProduced: snap.LogsProduced,
 
 		SubjectVersion: snap.SubjectVersion,
+
+		// Record the resolved tier-model map values — the same values the
+		// deployment port received — so the report reflects what was actually
+		// deployed. When no stub model was selected, buildTierModelMap falls back
+		// to the subject tier, so snap.StubModel matches what ran rather than
+		// reporting an empty string. The "" → "unknown" display mapping is the
+		// report layer's responsibility; the runner carries the resolved string.
+		SubjectModel: snap.SubjectModel,
+		StubModel:    snap.StubModel,
 	}
 }
 

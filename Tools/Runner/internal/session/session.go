@@ -10,22 +10,34 @@
 //     f. Read stage set if a staged phase is present (planstages)
 //     g. Settle checkpoint value (FR-9 refusal if no provider)
 //     h. Create or resume the artifact
+//     i. Pre-consultation (auto and auto-review modes, when enabled)
 //
 //  2. Dispatch loop: ask engine → dispatch via harness → apply to artifact → repeat.
 //
 //  3. Special cases in the dispatch loop:
+//     - Mode-driven routing: in ExecutionModeOrchestrated, every routing choice
+//       is delegated to the RoutingConsultant (engine returns Consult). In auto
+//       and auto-review modes, the engine decides; the consultant is only invoked
+//       on Deviation decisions or HITL escalations.
 //     - On Findings auto-routing: engine returns Dispatch for COMPLETED_NEEDS_ACTION
-//       with an unambiguous hint; session treats it identically to any other
-//       Dispatch (harness → artifact update). No deviation resolver is invoked.
+//       with an unambiguous OnFindings hint; session treats it identically to any
+//       other Dispatch (harness → artifact update). No consultation is needed.
 //     - Stage-* output re-derivation: after a completed row's output artifacts
 //       include a Stage-* pattern, session re-reads the plan artifact via
 //       planstages to obtain a refreshed stage set for the engine's next call.
-//     - Deviation: engine returns Deviation; session invokes the deviation
-//       resolver, re-reads the artifact from disk (FR-23), then resumes.
-//     - Harness error: a harness-level failure is treated as a deviation with
-//       kind DeviationHarnessError rather than a run failure ("never a crash"
-//       per port contract). The deviation resolver decides whether to rejoin,
-//       dispatch a custom agent, or stop.
+//     - Deviation: engine returns Deviation; session routes through the
+//       RoutingConsultant (consultRoute). If no consultant is wired, the run
+//       terminates with RunDeviationUnresolved.
+//     - Harness error: a harness-level failure is treated as a Deviation with
+//       kind DeviationHarnessError ("never a crash" per port contract). Routed
+//       through the RoutingConsultant the same way as engine-originated deviations.
+//     - HITL verification: after each auto-routed SUCCESS, output artifacts are
+//       checked for human_approved. A non-compliant result triggers one HITL
+//       redispatch; if the redispatch is also non-compliant, the deviation is
+//       escalated to the RoutingConsultant.
+//     - Consultation recording: every RoutingConsultant invocation is recorded
+//       as an infrastructure-flagged CompletedStep under "orchestrator-script#{seq}",
+//       consuming global_sequence without moving current_state.
 //     - Graceful stop: session records current state and returns RunStopped.
 //     - Infrastructure-agent trigger: a named no-op hook is called after each
 //       harness invocation (FR-40).
@@ -42,6 +54,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"mosaic-common/interaction"
 	"mosaic-run/internal/agentresolve"
@@ -77,12 +90,14 @@ type Deps struct {
 	Harness domain.HarnessAdapter
 	// Store reads and writes the Orchestration.md artifact.
 	Store domain.ArtifactStore
-	// Deviation resolves situations where the engine cannot decide.
-	Deviation domain.DeviationResolver
 	// Clock provides deterministic timestamps.
 	Clock domain.Clock
 	// Interact provides the user-interaction channel (progress events, etc.).
 	Interact domain.Interaction
+	// PreConsult performs the one-shot run-start pre-consultation (auto and
+	// auto-review modes only). Nil is permitted only when the run's
+	// PreConsultation setting is disabled; calling it when nil panics.
+	PreConsult domain.PreConsultant
 	// OnInfrastructureTrigger is an optional hook called after each harness
 	// invocation (FR-40). If nil, no action is taken. In production this is the
 	// named no-op; tests inject a counter function to verify the hook is invoked
@@ -96,6 +111,26 @@ type Deps struct {
 	// Optional: nil is normalised to domain.NopDebugLogger in New. Behaviour is
 	// otherwise identical with and without a logger.
 	Debug domain.DebugLogger
+
+	// Routing is the configured routing decision-maker consulted whenever the
+	// engine yields a Consult or Deviation decision. In production this is the
+	// OrchestratorConsultant; a run started with manual resolution still uses
+	// it first and falls back to Manual on a consultation failure.
+	//
+	// Nil is permitted only when the run's mode does not require routing
+	// consultations (i.e. auto/auto-review with no expected deviations in
+	// tests). The session must not call it when nil.
+	Routing domain.RoutingConsultant
+
+	// Manual is the fallback resolver used when a consultation fails and the
+	// run's ManualResolution setting is enabled. Nil when manual resolution is
+	// disabled; the session must not call it in that case.
+	Manual domain.RoutingConsultant
+
+	// Approvals reads human_approved from dispatched output artifacts for HITL
+	// compliance verification. Nil is normalised in New to a reader that
+	// reports ApprovalUnreadable, so the session never nil-checks it.
+	Approvals domain.ApprovalReader
 }
 
 // New creates a new Session with the given port dependencies.
@@ -111,12 +146,30 @@ func New(deps Deps) Session {
 	if deps.Debug == nil {
 		deps.Debug = domain.NopDebugLogger{}
 	}
+	if deps.Approvals == nil {
+		deps.Approvals = unreadableApprovalReader{}
+	}
 	return &sessionImpl{deps: deps}
+}
+
+// unreadableApprovalReader is the zero-value ApprovalReader used when
+// Deps.Approvals is nil. It reports every artifact as ApprovalUnreadable, so
+// the session never nil-checks the reader and a missing reader never silently
+// passes the HITL gate.
+type unreadableApprovalReader struct{}
+
+func (unreadableApprovalReader) ReadApproval(_ context.Context, _ string) domain.HumanApproval {
+	return domain.ApprovalUnreadable
 }
 
 // sessionImpl is the concrete implementation of Session.
 type sessionImpl struct {
 	deps Deps
+	// manualDispatchPending tracks the one-shot ManualDispatch signal from the
+	// stop-screen recovery action. Set to true at the start of each Start call
+	// when config.ManualDispatch is true; cleared after the first consultRoute
+	// call so that subsequent routing decisions use the configured consultant.
+	manualDispatchPending bool
 }
 
 // Start implements Session.
@@ -239,10 +292,35 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		return s.refusal(err.Error()), nil
 	}
 
+	// Step 6d: On resume, read all RunSettings from the existing artifact before
+	// any validation that depends on those settings. This ensures that a resumed
+	// run is governed by exactly the settings that were recorded when the run was
+	// created, regardless of what the caller supplied in RunConfig.
+	if !config.IsNewRun {
+		config.RunSettings = existingState.RunSettings
+	}
+
 	// Step 7: Settle checkpoints (FR-9). Refuse only when checkpoints are enabled
 	// AND no checkpoint-class infrastructure agent is declared for this run.
 	if config.Checkpoints && !hasCheckpointClassAgent(declaredInfraAgents) {
 		return s.refusal("checkpoints requested but no checkpoint provider is available"), nil
+	}
+
+	// Step 7.5a: Mode is required. The caller must supply a valid mode; the
+	// runner has no default and refuses rather than guessing.
+	if config.Mode == domain.ExecutionModeUnset {
+		return s.refusal("mode is required; valid values: orchestrated, auto, auto-review"), nil
+	}
+
+	// Step 7.5b: Commits validation. If commits are enabled but no commit-class
+	// infrastructure agent is declared, refuse. If commits are enabled and a
+	// commit-class agent exists, proceed. If no commit-class agent is declared
+	// at all, silently disable commits (the caller may have set Commits=true
+	// speculatively, e.g. from a flag that applies to all runs).
+	if config.Commits {
+		if !hasCommitClassAgent(declaredInfraAgents) {
+			return s.refusal("commits enabled but no commit-class infrastructure agent is declared"), nil
+		}
 	}
 
 	// Step 7a: Build and validate the seed plan. New runs only: a resumed run
@@ -262,9 +340,26 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	var seq int
 	var lastResponse *domain.ProtocolResponse
 
+	// Step 7.9: Commit setup dispatch (new runs only, when commits are enabled).
+	// This occurs before Store.Create so that a failed setup leaves no artifact
+	// trace. On success, the branch name is recorded in RunSettings so it flows
+	// into the artifact via Store.Create. The dispatch record is held in memory
+	// and applied retroactively as the first Execution Log row (Seq=1) after the
+	// artifact exists.
+	var commitSetup *commitSetupRecord
+	if config.IsNewRun && config.Commits {
+		cs, refusalMsg := s.doCommitSetupDispatch(ctx, declaredInfraAgents, config, orchDir)
+		if refusalMsg != "" {
+			return s.refusal(refusalMsg), nil
+		}
+		config.RunSettings.CommitBranch = cs.branchName
+		commitSetup = cs
+	}
+
 	if config.IsNewRun {
 		// New run: create a fresh artifact.
-		state, err = s.deps.Store.Create(ctx, region.Info, config.Task, false, s.deps.Clock.Now(), config.RunID)
+		settings := config.RunSettings
+		state, err = s.deps.Store.Create(ctx, region.Info, config.Task, settings, s.deps.Clock.Now(), config.RunID)
 		if err != nil {
 			return domain.RunOutcome{Status: domain.RunFailed, Message: err.Error()}, err
 		}
@@ -300,10 +395,31 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		}
 
 		seq = 0
+
+		// Apply the commit setup row as the first Execution Log entry (Seq=1).
+		// This must happen after Store.Create (so the artifact exists) and after
+		// seed.Apply (so the plan context is in place), but before the dispatch
+		// loop. If the Apply fails, remove the run folder so no trace remains.
+		if commitSetup != nil {
+			commitStep := domain.CompletedStep{
+				Seq:              state.GlobalSequence + 1, // always 1 on a fresh artifact
+				AgentInstance:    commitSetup.agentInstance,
+				Status:           commitSetup.status,
+				Summary:          commitSetup.summary,
+				Timestamp:        commitSetup.completedAt,
+				IsInfrastructure: true,
+			}
+			state, err = s.deps.Store.Apply(ctx, state, commitStep)
+			if err != nil {
+				_ = os.RemoveAll(config.RunFolder)
+				return s.refusal("commit setup row apply failed: " + err.Error()), nil
+			}
+			seq = 1
+		}
 	} else {
 		// Resume: use the existing artifact (already validated above).
 		state = existingState
-		resume, resumeErr := engine.ResumePoint(admitted, stages, state, domain.NewInfraAgentSet(declaredInfraAgents))
+		resume, resumeErr := engine.ResumePoint(admitted, stages, state, domain.NewInfraAgentSet(declaredInfraAgents, "orchestrator-script"))
 		if resumeErr != nil {
 			return domain.RunOutcome{Status: domain.RunFailed, Message: resumeErr.Error()}, resumeErr
 		}
@@ -312,7 +428,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		// FR-33: if the last step was interrupted, rewind CurrentState so that
 		// engine.Next re-dispatches the interrupted row.
 		if resume.RerunLast {
-			state = rewindStateForRerun(admitted.Table, domain.NewInfraAgentSet(declaredInfraAgents), state)
+			state = rewindStateForRerun(admitted.Table, domain.NewInfraAgentSet(declaredInfraAgents, "orchestrator-script"), state)
 		}
 	}
 
@@ -323,6 +439,27 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	declaredInfraAgents, err = validateAndApplyOverrides(state.InfrastructureOverrides, declaredInfraAgents)
 	if err != nil {
 		return s.refusal(err.Error()), nil
+	}
+
+	// Step 8c: Pre-consultation (auto and auto-review modes only, when enabled).
+	// The advice strings are retained for the entire dispatch loop; the runner
+	// appends them mechanically to every auto-routed dispatch task description.
+	// On failure, the run folder is removed so no trace of the failed attempt
+	// remains (matching the seed-apply and plan-parse failure contracts above).
+	var preConsultAdvice domain.PreConsultationAdvice
+	if config.PreConsultation &&
+		(config.Mode == domain.ExecutionModeAuto || config.Mode == domain.ExecutionModeAutoReview) {
+		advice, pcErr := s.deps.PreConsult.PreConsult(ctx, domain.ConsultationRequest{
+			Context:               domain.ConsultContextPreConsultation,
+			OrchestrationArtifact: filepath.Join(config.RunFolder, "Orchestration.md"),
+		})
+		if pcErr != nil {
+			if config.RunFolder != "" {
+				_ = os.RemoveAll(config.RunFolder)
+			}
+			return s.refusal("pre-consultation failed: " + pcErr.Error()), nil
+		}
+		preConsultAdvice = advice
 	}
 
 	// stageSource describes where the stage table was looked for, so the
@@ -339,11 +476,17 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	// =========================================================================
 	// Dispatch loop
 	// =========================================================================
+
+	// Arm the one-shot ManualDispatch signal so the first consultRoute call
+	// uses the ManualResolver instead of the configured RoutingConsultant.
+	// The flag is cleared inside consultRoute after the first use.
+	s.manualDispatchPending = config.ManualDispatch
+
 	var refreshedStages *domain.StageSet
-	// hitlOverride carries an explicit HITL value from a deviation rejoin
-	// instruction to the next harness invocation (FR-20 / FR-24). The override
-	// is applied once and then cleared; it is never originated by the session.
-	var hitlOverride *bool
+	// lastOutputArtifacts holds the output artifacts of the most recently
+	// dispatched step. Passed to engine.Next so that COMPLETED_NEEDS_ACTION
+	// auto-review artifact injection receives the correct input artifact list.
+	var lastOutputArtifacts []string
 	// prevWorkflowStep tracks the most recently completed workflow step for
 	// retrospective STAGE_END / PHASE_END trigger evaluation. Nil until the
 	// first workflow step completes. Updated only for workflow steps, not for
@@ -351,17 +494,19 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	var prevWorkflowStep *domain.CompletedStep
 
 	for {
-		decision := engine.Next(
-			admitted,
-			stages,
-			state,
-			lastResponse,
-			agents,
-			seq,
-			s.deps.Clock.Now(),
-			refreshedStages,
-			stageSource,
-		)
+		decision := engine.Next(engine.NextInput{
+			Workflow:             admitted,
+			Stages:               stages,
+			State:                state,
+			LastResponse:         lastResponse,
+			Agents:               agents,
+			Seq:                  seq,
+			Now:                  s.deps.Clock.Now(),
+			RefreshedStages:      refreshedStages,
+			StageSource:          stageSource,
+			Mode:                 state.Mode,
+			LastOutputArtifacts:  lastOutputArtifacts,
+		})
 		// Consume the refreshed stages once (they are only for one engine.Next call).
 		refreshedStages = nil
 
@@ -370,6 +515,24 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 				return domain.RunOutcome{Status: domain.RunFailed, Message: "engine returned empty dispatch"}, nil
 			}
 			step := decision.Dispatch.Steps[0]
+
+			// Auto-routed dispatch: the engine never sets a task description;
+			// the session assigns the generic baseline so agents always receive
+			// a non-empty task description. Pre-consultation advice is appended
+			// only to auto-routed dispatches, never to consultant-routed ones.
+			if step.Request.TaskDescription == "" {
+				step.Request.TaskDescription = domain.GenericTaskDescription
+			}
+			if preConsultAdvice.TaskDescription != "" {
+				step.Request.TaskDescription += "\n\n" + preConsultAdvice.TaskDescription
+			}
+			if preConsultAdvice.Constraints != "" {
+				if step.Request.Constraints != "" {
+					step.Request.Constraints += "\n\n" + preConsultAdvice.Constraints
+				} else {
+					step.Request.Constraints = preConsultAdvice.Constraints
+				}
+			}
 
 			// Populate RunID from the artifact state and resolve artifact paths to
 			// run-scoped form. The session derives RunID from state (not from
@@ -381,13 +544,6 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 				step.Request.OutputArtifacts = resolveToRunScoped(step.Request.OutputArtifacts, folder)
 			}
 
-			// Apply the HITL override from a prior deviation rejoin instruction
-			// (FR-24 / FR-20). The override is for this one invocation only.
-			if hitlOverride != nil {
-				step.Request.HumanInTheLoop = *hitlOverride
-				hitlOverride = nil
-			}
-
 			// Log dispatch start so every invocation has a trace, including
 			// steps that fail or end unresolved and never reach Store.Apply.
 			s.deps.Debug.Log(domain.EventSessionDispatchStart, "dispatching step",
@@ -397,8 +553,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 				domain.F("row", strconv.Itoa(step.RowIndex)),
 			)
 
-			// Notify the interaction port that a step is starting. The TUI frontend
-			// uses this to append a new progress row before the invocation blocks.
+			// Notify the interaction port that a step is starting.
 			s.deps.Interact.Notify(ctx, interaction.Notice{
 				Level:   interaction.NoticeInfo,
 				Title:   step.Request.AgentInstanceID,
@@ -408,22 +563,12 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 			// Invoke the harness.
 			response, invokeErr := s.deps.Harness.Invoke(ctx, step.Agent, step.Request)
 			if invokeErr != nil {
-				// Context cancellation: graceful stop.
 				if ctx.Err() != nil {
-					return domain.RunOutcome{
-						Status:  domain.RunStopped,
-						Message: "run stopped: context cancelled",
-					}, nil
+					return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
 				}
-				// Harness error: treat as a deviation rather than a run failure
-				// ("the caller treats this as a deviation, never a crash" per the
-				// HarnessAdapter port contract). Log it so that this path — which
-				// never reaches Store.Apply — leaves a trace in the debug log.
 				s.deps.Debug.Log(domain.EventSessionHarnessError, invokeErr.Error(),
 					domain.F("agent", step.Request.AgentInstanceID),
 				)
-				// Invoke the deviation resolver to decide whether to rejoin,
-				// dispatch a custom agent, or stop.
 				deviationInfo := domain.DeviationInfo{
 					Kind: domain.DeviationHarnessError,
 					Response: domain.ProtocolResponse{
@@ -436,32 +581,149 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 					CurrentStage:  step.Stage,
 					ArtifactState: state,
 				}
-				instr, resolveErr := s.deps.Deviation.Resolve(ctx, deviationInfo)
-				if resolveErr != nil {
-					s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, resolveErr.Error())
-					return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: resolveErr.Error()}, nil
+				if s.deps.Routing == nil {
+					msg := fmt.Sprintf("harness error: no routing consultant configured: %s", invokeErr.Error())
+					s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, msg)
+					return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: msg}, nil
 				}
-				s.deps.Debug.Log(domain.EventSessionDeviation, "resolver returned instruction")
-				done, outcome, outErr := s.applyRejoinInstruction(ctx, instr, &state, &hitlOverride, &lastResponse, table)
+				done, outcome, outErr := s.consultRoute(ctx, &deviationInfo, &state, &seq,
+					&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
+					table, agents, config, declaredInfraAgents, admitted)
 				if done {
 					return outcome, outErr
 				}
 				continue
 			}
 
-			// Apply the completed step to the artifact.
-			completedSeq := seq + 1
+			// HITL compliance verification for auto-routed dispatches. The loop
+			// runs before Store.Apply so that a non-compliant SUCCESS is never
+			// written to the execution log as a completed step, and a resume
+			// after an interrupted run sees the step as not-yet-started rather
+			// than done. Only the HITL-accepted response is recorded, in a
+			// single Store.Apply call after the loop.
+			//
+			// hitlAttemptSeq tracks the sequence number assigned to each attempt.
+			// It starts at seq+1 (the slot the engine reserved for this step)
+			// and increments for each automatic redispatch.
+			hitlAttemptSeq := seq + 1
+			hitlRedispatchUsed := false
+			hitlStep := step
+			hitlResponse := response
+			hitlAccepted := false
+		hitlCheckLoop:
+			for {
+				var approvals []domain.ArtifactApproval
+				for _, path := range hitlStep.Request.OutputArtifacts {
+					approvals = append(approvals, domain.ArtifactApproval{
+						Path:     path,
+						Approval: s.deps.Approvals.ReadApproval(ctx, path),
+					})
+				}
+				hitlDec := domain.DecideHITLCompliance(domain.HITLComplianceInput{
+					EffectiveHITL:  hitlStep.EffectiveHITL,
+					Status:         hitlResponse.StatusCode,
+					Approvals:      approvals,
+					RedispatchUsed: hitlRedispatchUsed,
+				})
+				switch hitlDec.Outcome {
+				case domain.HITLAccept:
+					hitlAccepted = true
+					break hitlCheckLoop
+
+				case domain.HITLRedispatch:
+					hitlRedispatchUsed = true
+					hitlAttemptSeq++
+					s.deps.Debug.Log(domain.EventSessionHITLRedispatch, "HITL non-compliant; redispatching same agent",
+						domain.F("agent", hitlStep.Agent.Identifier),
+					)
+					rdReq := hitlStep.Request
+					rdReq.AgentInstanceID = fmt.Sprintf("%s#%d", hitlStep.Agent.Identifier, hitlAttemptSeq)
+					hitlStep.Request = rdReq
+					rdResp, rdErr := s.deps.Harness.Invoke(ctx, hitlStep.Agent, hitlStep.Request)
+					if rdErr != nil {
+						if ctx.Err() != nil {
+							return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
+						}
+						s.deps.Debug.Log(domain.EventSessionHarnessError, rdErr.Error(),
+							domain.F("agent", hitlStep.Request.AgentInstanceID),
+						)
+						rdDevInfo := domain.DeviationInfo{
+							Kind: domain.DeviationHarnessError,
+							Response: domain.ProtocolResponse{
+								AgentInstanceID: hitlStep.Request.AgentInstanceID,
+								StatusCode:      domain.StatusBLOCKED,
+								StatusMessage:   rdErr.Error(),
+							},
+							CurrentRow:    hitlStep.RowIndex,
+							CurrentPhase:  hitlStep.Phase,
+							CurrentStage:  hitlStep.Stage,
+							ArtifactState: state,
+						}
+						if s.deps.Routing == nil {
+							rdMsg := fmt.Sprintf("HITL redispatch harness error: no routing consultant configured: %s", rdErr.Error())
+							s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, rdMsg)
+							return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: rdMsg}, nil
+						}
+						rdDone, rdOutcome, rdOutErr := s.consultRoute(ctx, &rdDevInfo, &state, &seq,
+							&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
+							table, agents, config, declaredInfraAgents, admitted)
+						if rdDone {
+							return rdOutcome, rdOutErr
+						}
+						break hitlCheckLoop
+					}
+					hitlResponse = rdResp
+					// Loop to re-check HITL with RedispatchUsed=true.
+
+				case domain.HITLEscalate:
+					s.deps.Debug.Log(domain.EventSessionHITLEscalate, "HITL redispatch exhausted; escalating to deviation",
+						domain.F("agent", hitlStep.Agent.Identifier),
+					)
+					escDevInfo := domain.DeviationInfo{
+						Kind:          domain.DeviationNonSuccess,
+						Response:      hitlResponse,
+						CurrentRow:    hitlStep.RowIndex,
+						CurrentPhase:  hitlStep.Phase,
+						CurrentStage:  hitlStep.Stage,
+						ArtifactState: state,
+					}
+					if s.deps.Routing == nil {
+						escMsg := "HITL escalation: no routing consultant configured"
+						s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, escMsg)
+						return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: escMsg}, nil
+					}
+					escDone, escOutcome, escErr := s.consultRoute(ctx, &escDevInfo, &state, &seq,
+						&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
+						table, agents, config, declaredInfraAgents, admitted)
+					if escDone {
+						return escOutcome, escErr
+					}
+					break hitlCheckLoop
+				}
+			}
+
+			// If the HITL loop ended via consultRoute (harness error or escalation),
+			// that path has already applied its own steps to the store; skip the
+			// Apply/trigger/stage-refresh block and continue the engine loop.
+			if !hitlAccepted {
+				continue
+			}
+
+			// Apply the HITL-accepted response to the artifact. A single
+			// Store.Apply call here ensures that no non-compliant SUCCESS is
+			// ever persisted, and a resume after an interrupted run correctly
+			// sees the step as not-yet-completed.
 			completedStep := domain.CompletedStep{
-				Seq:             completedSeq,
-				AgentInstance:   step.Request.AgentInstanceID,
-				Phase:           step.Phase,
-				Stage:           step.Stage,
-				Status:          response.StatusCode,
-				ErrorCode:       response.ErrorCode,
-				Summary:         response.StatusMessage,
+				Seq:             hitlAttemptSeq,
+				AgentInstance:   hitlStep.Request.AgentInstanceID,
+				Phase:           hitlStep.Phase,
+				Stage:           hitlStep.Stage,
+				Status:          hitlResponse.StatusCode,
+				ErrorCode:       hitlResponse.ErrorCode,
+				Summary:         hitlResponse.StatusMessage,
 				Timestamp:       s.deps.Clock.Now(),
-				Inputs:          formatInputs(step.Request.InputArtifacts),
-				OutputArtifacts: step.Request.OutputArtifacts,
+				Inputs:          formatInputs(hitlStep.Request.InputArtifacts),
+				OutputArtifacts: hitlStep.Request.OutputArtifacts,
 			}
 			state, err = s.deps.Store.Apply(ctx, state, completedStep)
 			if err != nil {
@@ -473,13 +735,10 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 				domain.F("status", string(completedStep.Status)),
 				domain.F("error_code", string(completedStep.ErrorCode)),
 			)
-			seq = completedSeq
-			lastResponse = &response
+			seq = hitlAttemptSeq
+			lastResponse = &hitlResponse
+			lastOutputArtifacts = hitlStep.Request.OutputArtifacts
 
-			// Report per-step completion via the Interaction port (FR-5).
-			// The CLI frontend writes this as a machine-readable line; the TUI
-			// frontend can render it differently. Both use the same notice format:
-			// Title = agent instance ID, Message = structured key=value pairs.
 			s.deps.Interact.Notify(ctx, interaction.Notice{
 				Level:   interaction.NoticeInfo,
 				Title:   completedStep.AgentInstance,
@@ -487,24 +746,13 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 			})
 
 			// Infrastructure-agent trigger evaluation (FR-40).
-			// Only workflow steps (IsInfrastructure=false) trigger evaluation;
-			// infrastructure step completions skip this block entirely (no-cascades
-			// rule). The named no-op and injected test hook are called once per
-			// workflow step dispatch cycle, matching the pre-existing contract.
 			if !completedStep.IsInfrastructure {
-				// Store.Apply no longer lets an infrastructure step's completion
-				// move current_state (it always names the last WORKFLOW step,
-				// on disk and in the returned state), so engine.Next's row-lookup
-				// stays correct across any infra dispatches triggered below
-				// without a save/restore here. That durable fix is now the sole
-				// owner of this behaviour.
 				halt, trigErr := s.evaluateTriggers(
 					ctx, &state, &seq, completedStep, prevWorkflowStep,
 					declaredInfraAgents, config,
 					buildActiveAgentsFilter(declaredInfraAgents, config.InfraClassSelections),
 					orchDir,
 				)
-
 				if trigErr != nil {
 					if ctx.Err() != nil {
 						return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
@@ -514,23 +762,16 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 				if halt {
 					return domain.RunOutcome{Status: domain.RunStopped, Message: "infrastructure agent halted the run"}, nil
 				}
-
-				// Update prevWorkflowStep after all infra agents have been
-				// evaluated for this workflow step completion.
 				cp := completedStep
 				prevWorkflowStep = &cp
-
-				// Named no-op anchor point (FR-40) plus injected test hook.
 				onInfrastructureAgentTrigger()
 				if s.deps.OnInfrastructureTrigger != nil {
 					s.deps.OnInfrastructureTrigger()
 				}
 			}
 
-			// Stage-* output re-derivation: re-read Plan.md after any row whose
-			// output artifacts contain Stage-* so the engine can expand wildcards
-			// on the next row.
-			if hasStageStarArtifact(step.Request.OutputArtifacts) {
+			// Stage-* output re-derivation.
+			if hasStageStarArtifact(hitlStep.Request.OutputArtifacts) {
 				rederivePlanPath := filepath.Join(config.RunFolder, "Plan.md")
 				ss, ssErr := planstages.ReadStages(rederivePlanPath, admitted.GroupsDeclared)
 				if ssErr != nil {
@@ -554,15 +795,37 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 			}, nil
 		}
 
-		if decision.Deviation != nil {
-			// Invoke the deviation resolver.
-			instr, resolveErr := s.deps.Deviation.Resolve(ctx, decision.Deviation.Info)
-			if resolveErr != nil {
-				s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, resolveErr.Error())
-				return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: resolveErr.Error()}, nil
+		// Consult decision: the engine defers every routing choice to the
+		// consultant (ExecutionModeOrchestrated). ConsultRoute handles the full
+		// consultation-record-reread-dispatch cycle and updates all loop state.
+		if decision.Consult != nil {
+			if s.deps.Routing == nil && !(s.manualDispatchPending && s.deps.Manual != nil) {
+				return domain.RunOutcome{
+					Status:  domain.RunFailed,
+					Message: "orchestrated mode requires a RoutingConsultant but none was wired",
+				}, nil
 			}
-			s.deps.Debug.Log(domain.EventSessionDeviation, "resolver returned instruction")
-			done, outcome, outErr := s.applyRejoinInstruction(ctx, instr, &state, &hitlOverride, &lastResponse, table)
+			done, outcome, outErr := s.consultRoute(ctx, nil, &state, &seq,
+				&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
+				table, agents, config, declaredInfraAgents, admitted)
+			if done {
+				return outcome, outErr
+			}
+			continue
+		}
+
+		if decision.Deviation != nil {
+			s.deps.Debug.Log(domain.EventSessionDeviation, "engine returned deviation",
+				domain.F("kind", string(decision.Deviation.Info.Kind)),
+			)
+			if s.deps.Routing == nil && !(s.manualDispatchPending && s.deps.Manual != nil) {
+				msg := fmt.Sprintf("deviation: no routing consultant configured (kind=%s)", decision.Deviation.Info.Kind)
+				s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, msg)
+				return domain.RunOutcome{Status: domain.RunDeviationUnresolved, Message: msg}, nil
+			}
+			done, outcome, outErr := s.consultRoute(ctx, &decision.Deviation.Info, &state, &seq,
+				&lastResponse, &prevWorkflowStep, &refreshedStages, &stages,
+				table, agents, config, declaredInfraAgents, admitted)
 			if done {
 				return outcome, outErr
 			}
@@ -578,136 +841,6 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 
 		return domain.RunOutcome{Status: domain.RunFailed, Message: "engine returned nil decision"}, nil
 	}
-}
-
-// applyRejoinInstruction applies a RejoinInstruction after deviation resolution.
-// It re-reads the artifact from disk (FR-23), then either:
-//   - Stops the run (Stop field set).
-//   - Adjusts state to re-enter at the specified row (Rejoin field set), carrying
-//     any HITL override for the next invocation (FR-20 / FR-24).
-//   - Executes a custom harness invocation then adjusts state (Custom field set).
-//
-// Returns done=true with an outcome when the run should terminate, or done=false
-// when the dispatch loop should continue.
-func (s *sessionImpl) applyRejoinInstruction(
-	ctx context.Context,
-	instr domain.RejoinInstruction,
-	state *domain.ArtifactState,
-	hitlOverride **bool,
-	lastResponse **domain.ProtocolResponse,
-	table domain.RoutingTable,
-) (done bool, outcome domain.RunOutcome, outErr error) {
-	// FR-23: re-read the artifact from disk. The orchestrator delegate may
-	// have updated it out-of-band during resolution.
-	if freshState, freshReadErr := s.deps.Store.Read(ctx); freshReadErr == nil {
-		*state = freshState
-	}
-
-	if instr.Stop != nil {
-		msg := "deviation resolver returned stop: " + instr.Stop.Reason
-		s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, msg)
-		return true, domain.RunOutcome{
-			Status:  domain.RunDeviationUnresolved,
-			Message: msg,
-		}, nil
-	}
-
-	if instr.Rejoin != nil {
-		// Carry the HITL override to the next dispatch cycle (FR-24 / FR-20).
-		// It is never originated here — only carried from an explicit instruction.
-		*hitlOverride = instr.Rejoin.HITLOverride
-		*state = applyRejoinAtRow(instr.Rejoin.RowIndex, *state, table)
-		*lastResponse = nil
-		return false, domain.RunOutcome{}, nil
-	}
-
-	if instr.Custom != nil {
-		// Custom dispatch: execute a harness invocation that is not in the routing
-		// table, then rejoin at the specified row. If Agent is unset (schema gap),
-		// the custom invocation cannot be performed and the run stops.
-		if instr.Custom.Agent.Identifier == "" {
-			return true, domain.RunOutcome{
-				Status:  domain.RunDeviationUnresolved,
-				Message: "custom dispatch: agent not specified (custom_agent missing from orchestrator instruction)",
-			}, nil
-		}
-		req := instr.Custom.Request
-		if instr.Custom.HITLOverride != nil {
-			req.HumanInTheLoop = *instr.Custom.HITLOverride
-		}
-		_, invokeErr := s.deps.Harness.Invoke(ctx, instr.Custom.Agent, req)
-		if invokeErr != nil {
-			if ctx.Err() != nil {
-				return true, domain.RunOutcome{
-					Status:  domain.RunStopped,
-					Message: "run stopped: context cancelled during custom dispatch",
-				}, nil
-			}
-			return true, domain.RunOutcome{
-				Status:  domain.RunFailed,
-				Message: "custom dispatch harness error: " + invokeErr.Error(),
-			}, invokeErr
-		}
-		*state = applyRejoinAtRow(instr.Custom.RejoinRow, *state, table)
-		*lastResponse = nil
-		return false, domain.RunOutcome{}, nil
-	}
-
-	s.deps.Debug.Log(domain.EventSessionDeviationUnresolved, "deviation resolver returned empty instruction")
-	return true, domain.RunOutcome{
-		Status:  domain.RunDeviationUnresolved,
-		Message: "deviation resolver returned empty instruction",
-	}, nil
-}
-
-// applyRejoinAtRow adjusts the artifact CurrentState so that engine.Next
-// dispatches from the specified routing table row on the next call.
-//
-// For row 0 (first row), CurrentState is cleared to trigger initial dispatch.
-// For row N > 0, the function searches the execution log for the last completed
-// step whose agent matches the routing table row at index N-1. If found, that
-// entry becomes CurrentState so the engine routes forward to row N. If no such
-// entry exists (e.g. the target precedes any recorded step), CurrentState is
-// cleared to restart from row 0.
-//
-// This supports arbitrary row jumps from the deviation resolver — not just
-// re-running the most recently deviating row.
-func applyRejoinAtRow(targetRowIdx int, state domain.ArtifactState, table domain.RoutingTable) domain.ArtifactState {
-	if targetRowIdx == 0 {
-		state.CurrentState = domain.CurrentState{}
-		return state
-	}
-
-	// Find the agent identifier for the row that precedes targetRowIdx.
-	prevRow, found := rowAtIndex(table, targetRowIdx-1)
-	if !found {
-		// Unknown preceding row: cannot determine correct CurrentState.
-		state.CurrentState = domain.CurrentState{}
-		return state
-	}
-	prevAgentID := prevRow.Agent
-
-	// Search the execution log from the end for the last entry produced by
-	// the preceding row. Entry agents are stored as instance IDs ("{id}#{seq}");
-	// we match by extracting the identifier prefix.
-	for i := len(state.ExecutionLog) - 1; i >= 0; i-- {
-		entry := state.ExecutionLog[i]
-		if extractAgentIdentifier(entry.Agent) == prevAgentID {
-			state.CurrentState = domain.CurrentState{
-				Phase:      entry.Phase,
-				Stage:      entry.Stage,
-				LastStatus: domain.StatusSUCCESS,
-				LastAgent:  entry.Agent,
-			}
-			return state
-		}
-	}
-
-	// No matching log entry: clear CurrentState so the engine starts from the
-	// beginning (the deviation resolver is directing a rejoin earlier than any
-	// recorded step).
-	state.CurrentState = domain.CurrentState{}
-	return state
 }
 
 // rowAtIndex returns the routing table row at the given zero-based index, or
@@ -798,6 +931,366 @@ func (s *sessionImpl) refusal(message string) domain.RunOutcome {
 	}
 }
 
+// consultRoute handles the full consultation-record-reread-dispatch cycle for
+// one routing decision. It is called whenever the session must defer a routing
+// choice to the RoutingConsultant — both for orchestrated-mode normal flow
+// (Consult decision) and for deviations (Deviation decision, harness errors,
+// HITL escalations) when Routing is wired.
+//
+// All mutable loop state is passed as pointers so that consultRoute's writes
+// are immediately visible to the caller on return.
+//
+// Returns done=true with a final outcome when the run should terminate.
+// Returns done=false when the dispatch loop should continue.
+func (s *sessionImpl) consultRoute(
+	ctx context.Context,
+	deviation *domain.DeviationInfo,
+	state *domain.ArtifactState,
+	seq *int,
+	lastResponse **domain.ProtocolResponse,
+	prevWorkflowStep **domain.CompletedStep,
+	refreshedStages **domain.StageSet,
+	stages **domain.StageSet,
+	table domain.RoutingTable,
+	agents map[string]domain.AgentReference,
+	config domain.RunConfig,
+	declaredInfraAgents []domain.DeclaredInfraAgent,
+	admitted domain.AdmittedWorkflow,
+) (done bool, outcome domain.RunOutcome, outErr error) {
+	// Build the consultation request. LastStatusMessage is nil on the first
+	// step of a new run and for every consultation where no prior agent result
+	// exists.
+	req := domain.ConsultationRequest{
+		OrchestrationArtifact: filepath.Join(config.RunFolder, "Orchestration.md"),
+		Context:               domain.ConsultContextRouting,
+		Deviation:             deviation,
+	}
+	if *lastResponse != nil {
+		msg := (*lastResponse).StatusMessage
+		req.LastStatusMessage = &msg
+	}
+
+	// Route the consultation request to the appropriate resolver.
+	//
+	// When the ManualDispatch one-shot signal is armed (set by config.ManualDispatch
+	// at the start of Start), the ManualResolver handles this single decision so the
+	// user can name the target agent and task description. The flag is cleared
+	// immediately so all subsequent decisions route through the configured consultant.
+	//
+	// Otherwise, call the primary routing consultant with a fallback to the manual
+	// resolver when the primary fails and ManualResolution is enabled.
+	var instr domain.RoutingInstruction
+	var consultErr error
+	if s.manualDispatchPending && s.deps.Manual != nil {
+		s.manualDispatchPending = false
+		instr, consultErr = s.deps.Manual.ConsultRouting(ctx, req)
+	} else {
+		instr, consultErr = s.deps.Routing.ConsultRouting(ctx, req)
+		if consultErr != nil && config.ManualResolution && s.deps.Manual != nil {
+			s.deps.Debug.Log(domain.EventSessionManualResolve, "primary consultation failed; trying manual resolver",
+				domain.F("error", consultErr.Error()),
+			)
+			instr, consultErr = s.deps.Manual.ConsultRouting(ctx, req)
+		}
+	}
+	if consultErr != nil {
+		s.deps.Debug.Log(domain.EventSessionConsultFailed, consultErr.Error())
+		return true, domain.RunOutcome{
+			Status:  domain.RunStoppedByConsultant,
+			Message: "consultation failed: " + consultErr.Error(),
+		}, nil
+	}
+
+	// Stop instruction: the consultant wants to end the run here.
+	if instr.Stop != nil {
+		s.deps.Debug.Log(domain.EventSessionConsultStop, "consultant stop instruction",
+			domain.F("reason", instr.Stop.Reason),
+		)
+		return true, domain.RunOutcome{
+			Status:     domain.RunStoppedByConsultant,
+			Message:    "consultant stop: " + instr.Stop.Reason,
+			StopReason: instr.Stop.Reason,
+		}, nil
+	}
+
+	if instr.Dispatch == nil {
+		// Neither Stop nor Dispatch — treat as a malformed instruction.
+		s.deps.Debug.Log(domain.EventSessionConsultFailed, "instruction has neither stop nor dispatch")
+		return true, domain.RunOutcome{
+			Status:  domain.RunStoppedByConsultant,
+			Message: "consultation failed: instruction has neither stop nor dispatch",
+		}, nil
+	}
+	dispInstr := instr.Dispatch
+
+	// Record the consultation as an infrastructure-flagged Execution Log row.
+	// The row consumes a global_sequence slot so the log has no duplicate
+	// positions; Store.Apply's IsInfrastructure path leaves current_state alone.
+	consultSeq := state.GlobalSequence + 1
+	consultStep := domain.CompletedStep{
+		Seq:              consultSeq,
+		AgentInstance:    "orchestrator-script#" + strconv.Itoa(consultSeq),
+		Status:           domain.StatusSUCCESS,
+		Summary:          dispInstr.TaskDescription,
+		Timestamp:        s.deps.Clock.Now(),
+		IsInfrastructure: true,
+	}
+	newState, applyErr := s.deps.Store.Apply(ctx, *state, consultStep)
+	if applyErr != nil {
+		return true, domain.RunOutcome{Status: domain.RunFailed, Message: applyErr.Error()}, applyErr
+	}
+	*state = newState
+
+	// Re-read the artifact so any Workflow Notes the orchestrator appended
+	// during its deliberation are visible to the session.
+	if freshState, readErr := s.deps.Store.Read(ctx); readErr == nil {
+		*state = freshState
+	}
+
+	// Resolve the dispatched agent.
+	agentRef, agentFound := agents[dispInstr.Agent]
+	if !agentFound {
+		return true, domain.RunOutcome{
+			Status:  domain.RunFailed,
+			Message: "consultant dispatched unknown agent: " + dispInstr.Agent,
+		}, nil
+	}
+
+	// Look up the routing table row at the consultant-specified index to supply
+	// fallback values for fields the consultant omitted.
+	row, _ := rowAtIndex(table, dispInstr.RowIndex)
+
+	// Resolve each field using the priority table: non-nil pointer overrides;
+	// nil pointer falls back to the routing table row.
+	var constraints string
+	if dispInstr.Constraints != nil {
+		constraints = *dispInstr.Constraints
+	}
+
+	var inputArts []string
+	if dispInstr.InputArtifacts != nil {
+		inputArts = *dispInstr.InputArtifacts
+	} else {
+		inputArts = row.InputArtifacts
+	}
+
+	var outputArts []string
+	if dispInstr.OutputArtifacts != nil {
+		outputArts = *dispInstr.OutputArtifacts
+	} else {
+		outputArts = row.OutputArtifacts
+	}
+
+	effectiveHITL := row.HITL
+	if dispInstr.HITLOverride != nil {
+		effectiveHITL = *dispInstr.HITLOverride
+	}
+
+	// AgentInstanceID is always Runner-assigned using the workflow-step sequence
+	// counter (*seq+1). The consultant's identifier naming preference is ignored.
+	dispSeq := *seq + 1
+	agentReq := domain.ProtocolRequest{
+		AgentInstanceID: fmt.Sprintf("%s#%d", agentRef.Identifier, dispSeq),
+		RunID:           state.RunID,
+		TaskDescription: dispInstr.TaskDescription,
+		Constraints:     constraints,
+		InputArtifacts:  inputArts,
+		OutputArtifacts: outputArts,
+		HumanInTheLoop:  effectiveHITL,
+	}
+	if state.RunID != "" {
+		folder := domain.RunScopedFolder(state.RunID) + "/"
+		agentReq.InputArtifacts = resolveToRunScoped(agentReq.InputArtifacts, folder)
+		agentReq.OutputArtifacts = resolveToRunScoped(agentReq.OutputArtifacts, folder)
+	}
+
+	phase := row.PhaseParsed.Name
+	s.deps.Debug.Log(domain.EventSessionDispatchStart, "dispatching consultant-routed step",
+		domain.F("agent", agentReq.AgentInstanceID),
+		domain.F("phase", phase),
+		domain.F("row", strconv.Itoa(dispInstr.RowIndex)),
+	)
+	s.deps.Interact.Notify(ctx, interaction.Notice{
+		Level:   interaction.NoticeInfo,
+		Title:   agentReq.AgentInstanceID,
+		Message: fmt.Sprintf("phase=%s stage=%q status=running", phase, ""),
+	})
+
+	// Invoke the harness. A harness error is a deviation, not a crash.
+	response, invokeErr := s.deps.Harness.Invoke(ctx, agentRef, agentReq)
+	if invokeErr != nil {
+		if ctx.Err() != nil {
+			return true, domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
+		}
+		s.deps.Debug.Log(domain.EventSessionHarnessError, invokeErr.Error(),
+			domain.F("agent", agentReq.AgentInstanceID),
+		)
+		devInfo := domain.DeviationInfo{
+			Kind: domain.DeviationHarnessError,
+			Response: domain.ProtocolResponse{
+				AgentInstanceID: agentReq.AgentInstanceID,
+				StatusCode:      domain.StatusBLOCKED,
+				StatusMessage:   invokeErr.Error(),
+			},
+			CurrentRow:    dispInstr.RowIndex,
+			CurrentPhase:  phase,
+			ArtifactState: *state,
+		}
+		return s.consultRoute(ctx, &devInfo, state, seq, lastResponse, prevWorkflowStep,
+			refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted)
+	}
+
+	// HITL compliance verification. Runs before Store.Apply so that a
+	// non-compliant SUCCESS result never enters the execution log as a final step.
+	// The redispatch allowance (one redispatch per step) is scoped here; it
+	// resets on every consultRoute call.
+	finalResponse := response
+	currentAttemptSeq := dispSeq
+	currentOutputArts := agentReq.OutputArtifacts
+	hitlRedispatchUsed := false
+
+hitlLoop:
+	for {
+		var approvals []domain.ArtifactApproval
+		for _, path := range currentOutputArts {
+			approvals = append(approvals, domain.ArtifactApproval{
+				Path:     path,
+				Approval: s.deps.Approvals.ReadApproval(ctx, path),
+			})
+		}
+		hitlDec := domain.DecideHITLCompliance(domain.HITLComplianceInput{
+			EffectiveHITL:  effectiveHITL,
+			Status:         finalResponse.StatusCode,
+			Approvals:      approvals,
+			RedispatchUsed: hitlRedispatchUsed,
+		})
+		switch hitlDec.Outcome {
+		case domain.HITLAccept:
+			break hitlLoop
+
+		case domain.HITLRedispatch:
+			hitlRedispatchUsed = true
+			s.deps.Debug.Log(domain.EventSessionHITLRedispatch, "HITL non-compliant; redispatching same agent",
+				domain.F("agent", agentRef.Identifier),
+			)
+			currentAttemptSeq++
+			rdReq := agentReq
+			rdReq.AgentInstanceID = fmt.Sprintf("%s#%d", agentRef.Identifier, currentAttemptSeq)
+			rdResp, rdErr := s.deps.Harness.Invoke(ctx, agentRef, rdReq)
+			if rdErr != nil {
+				if ctx.Err() != nil {
+					return true, domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
+				}
+				s.deps.Debug.Log(domain.EventSessionHarnessError, rdErr.Error(),
+					domain.F("agent", rdReq.AgentInstanceID),
+				)
+				rdDevInfo := domain.DeviationInfo{
+					Kind: domain.DeviationHarnessError,
+					Response: domain.ProtocolResponse{
+						AgentInstanceID: rdReq.AgentInstanceID,
+						StatusCode:      domain.StatusBLOCKED,
+						StatusMessage:   rdErr.Error(),
+					},
+					CurrentRow:    dispInstr.RowIndex,
+					CurrentPhase:  phase,
+					ArtifactState: *state,
+				}
+				return s.consultRoute(ctx, &rdDevInfo, state, seq, lastResponse, prevWorkflowStep,
+					refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted)
+			}
+			finalResponse = rdResp
+			// Loop to re-check with RedispatchUsed=true.
+
+		case domain.HITLEscalate:
+			s.deps.Debug.Log(domain.EventSessionHITLEscalate, "HITL redispatch exhausted; escalating to deviation",
+				domain.F("agent", agentRef.Identifier),
+			)
+			escDevInfo := domain.DeviationInfo{
+				Kind:          domain.DeviationNonSuccess,
+				Response:      finalResponse,
+				CurrentRow:    dispInstr.RowIndex,
+				CurrentPhase:  phase,
+				ArtifactState: *state,
+			}
+			return s.consultRoute(ctx, &escDevInfo, state, seq, lastResponse, prevWorkflowStep,
+				refreshedStages, stages, table, agents, config, declaredInfraAgents, admitted)
+		}
+	}
+
+	// Apply the HITL-compliant response to the artifact.
+	workflowSeq := state.GlobalSequence + 1
+	finalAgentInstanceID := fmt.Sprintf("%s#%d", agentRef.Identifier, currentAttemptSeq)
+	completedStep := domain.CompletedStep{
+		Seq:             workflowSeq,
+		AgentInstance:   finalAgentInstanceID,
+		Phase:           phase,
+		Status:          finalResponse.StatusCode,
+		ErrorCode:       finalResponse.ErrorCode,
+		Summary:         finalResponse.StatusMessage,
+		Timestamp:       s.deps.Clock.Now(),
+		Inputs:          formatInputs(agentReq.InputArtifacts),
+		OutputArtifacts: currentOutputArts,
+	}
+	*state, applyErr = s.deps.Store.Apply(ctx, *state, completedStep)
+	if applyErr != nil {
+		return true, domain.RunOutcome{Status: domain.RunFailed, Message: applyErr.Error()}, applyErr
+	}
+	s.deps.Debug.Log(domain.EventSessionStepDone, "step applied to artifact",
+		domain.F("agent", finalAgentInstanceID),
+		domain.F("status", string(completedStep.Status)),
+	)
+	*seq = currentAttemptSeq
+	*lastResponse = &finalResponse
+	s.deps.Interact.Notify(ctx, interaction.Notice{
+		Level:   interaction.NoticeInfo,
+		Title:   finalAgentInstanceID,
+		Message: fmt.Sprintf("phase=%s stage=%q status=%s", phase, "", string(finalResponse.StatusCode)),
+	})
+
+	// Infrastructure-agent trigger evaluation.
+	orchDir := filepath.Dir(config.OrchestratorFilePath)
+	if !completedStep.IsInfrastructure {
+		halt, trigErr := s.evaluateTriggers(
+			ctx, state, seq, completedStep, *prevWorkflowStep,
+			declaredInfraAgents, config,
+			buildActiveAgentsFilter(declaredInfraAgents, config.InfraClassSelections),
+			orchDir,
+		)
+		if trigErr != nil {
+			if ctx.Err() != nil {
+				return true, domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
+			}
+			return true, domain.RunOutcome{Status: domain.RunFailed, Message: trigErr.Error()}, trigErr
+		}
+		if halt {
+			return true, domain.RunOutcome{Status: domain.RunStopped, Message: "infrastructure agent halted the run"}, nil
+		}
+		cp := completedStep
+		*prevWorkflowStep = &cp
+		onInfrastructureAgentTrigger()
+		if s.deps.OnInfrastructureTrigger != nil {
+			s.deps.OnInfrastructureTrigger()
+		}
+	}
+
+	// Stage-* output re-derivation.
+	if hasStageStarArtifact(currentOutputArts) {
+		rederivePlanPath := filepath.Join(config.RunFolder, "Plan.md")
+		ss, ssErr := planstages.ReadStages(rederivePlanPath, admitted.GroupsDeclared)
+		if ssErr != nil {
+			s.deps.Interact.Notify(ctx, interaction.Notice{
+				Level:   interaction.NoticeWarning,
+				Message: fmt.Sprintf("failed to re-read stage set after Stage-* output: %v", ssErr),
+			})
+		} else {
+			*refreshedStages = &ss
+			*stages = &ss
+		}
+	}
+
+	return false, domain.RunOutcome{}, nil
+}
+
 // uniqueAgentIdentifiers returns the unique agent identifiers from the routing
 // table in first-occurrence order.
 func uniqueAgentIdentifiers(table domain.RoutingTable) []string {
@@ -866,6 +1359,96 @@ func hasCheckpointClassAgent(agents []domain.DeclaredInfraAgent) bool {
 		}
 	}
 	return false
+}
+
+// hasCommitClassAgent reports whether any declared infrastructure agent
+// has Class == "commit".
+func hasCommitClassAgent(agents []domain.DeclaredInfraAgent) bool {
+	for _, a := range agents {
+		if a.Class == "commit" {
+			return true
+		}
+	}
+	return false
+}
+
+// firstCommitClassAgent returns the first declared infrastructure agent with
+// Class == "commit", or nil if none is declared.
+func firstCommitClassAgent(agents []domain.DeclaredInfraAgent) *domain.DeclaredInfraAgent {
+	for i := range agents {
+		if agents[i].Class == "commit" {
+			return &agents[i]
+		}
+	}
+	return nil
+}
+
+// branchMarkerRe matches the [branch:{name}] marker pattern in a status_message.
+// The branch name is captured in group 1.
+var branchMarkerRe = regexp.MustCompile(`\[branch:([^\]]+)\]`)
+
+// extractBranchRef scans statusMessage for a [branch:{name}] marker and
+// returns the branch name, trimmed of surrounding whitespace. Returns "" when
+// no marker is found.
+func extractBranchRef(statusMessage string) string {
+	m := branchMarkerRe.FindStringSubmatch(statusMessage)
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
+}
+
+// commitSetupRecord holds the result of a successful commit setup dispatch,
+// kept in memory until the artifact exists so it can be recorded retroactively
+// as the first Execution Log row.
+type commitSetupRecord struct {
+	agentInstance string
+	branchName    string
+	status        domain.StatusCode
+	summary       string
+	completedAt   time.Time
+}
+
+// doCommitSetupDispatch dispatches the commit-class infrastructure agent to
+// establish the target branch for this run. It returns a populated
+// commitSetupRecord on success, or a non-empty refusal message on failure.
+// A failed dispatch, missing branch marker, or nil commit agent all result in
+// a refusal; no artifact is created before this call.
+func (s *sessionImpl) doCommitSetupDispatch(
+	ctx context.Context,
+	declared []domain.DeclaredInfraAgent,
+	config domain.RunConfig,
+	orchDir string,
+) (*commitSetupRecord, string) {
+	commitAgent := firstCommitClassAgent(declared)
+	if commitAgent == nil {
+		return nil, "commits enabled but no commit-class agent found"
+	}
+	agentRef := domain.AgentReference{
+		Identifier:     commitAgent.Name,
+		DefinitionPath: filepath.Join(orchDir, commitAgent.Name+".md"),
+	}
+	req := domain.ProtocolRequest{
+		AgentInstanceID: fmt.Sprintf("%s#1", commitAgent.Name),
+		RunID:           config.RunID,
+		TaskDescription: "commit setup: establish the target branch for this run",
+	}
+	response, invokeErr := s.deps.Harness.Invoke(ctx, agentRef, req)
+	completedAt := s.deps.Clock.Now()
+	if invokeErr != nil {
+		return nil, "commit setup dispatch failed: " + invokeErr.Error()
+	}
+	branchName := extractBranchRef(response.StatusMessage)
+	if branchName == "" {
+		return nil, "commit setup: no [branch:{name}] marker in status_message"
+	}
+	return &commitSetupRecord{
+		agentInstance: req.AgentInstanceID,
+		branchName:    branchName,
+		status:        response.StatusCode,
+		summary:       response.StatusMessage,
+		completedAt:   completedAt,
+	}, ""
 }
 
 // allowedTriggersForClass returns the set of trigger names that are permitted

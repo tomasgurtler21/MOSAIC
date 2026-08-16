@@ -18,11 +18,37 @@ import (
 	"mosaic-agent-test/internal/report"
 )
 
-// TestRunner is the per-attempt use case, behind an interface so the
-// suite's scheduling, repetition and retry rules are testable without a
-// sandbox. Implemented by internal/runner.
+// TestRunner is the per-attempt use case, behind an interface so the suite's
+// scheduling, repetition and retry rules are testable without a sandbox.
+// Implemented by internal/runner.
+//
+// Run owns the whole life of one attempt's sandbox: it creates it, runs the
+// subject in it, calls eval with the gathered evidence while the sandbox is
+// still on disk, and only then tears down — so the retention decision can
+// account for the verdict eval produced. The caller never triggers teardown
+// and therefore cannot forget to.
+//
+// eval is called at most once, and exactly once on every path where evidence
+// was gathered. It is called synchronously, on Run's own goroutine, so a
+// caller may emit progress from inside it and observe its side effects
+// afterwards without synchronisation.
+//
+// A nil eval means "no verdict is wanted": the attempt still runs and still
+// tears down, the retention decision falls back to the launch-failure signal
+// alone, and the returned TestResult is zero-valued. Only test doubles that
+// do not exercise evaluation pass nil; the composition root never does.
+//
+// The returned TestResult is eval's own return value with one field resolved
+// by Run after teardown: RetainedSandboxPath, which is only knowable once the
+// retention decision has been carried out. Run is the single place that value
+// is resolved onto the result.
+//
+// The error return is reserved for a fault that prevented the attempt from
+// starting at all — a setup failure, a spawn-plan failure or a recovered
+// panic. Teardown has still run when it is returned, and eval has not been
+// called: no evidence exists to evaluate.
 type TestRunner interface {
-	Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest) (domain.RunEvidence, error)
+	Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error)
 }
 
 // Options are the collaborators and knobs one suite run needs.
@@ -55,8 +81,7 @@ type Options struct {
 	// Retention is the run-level sandbox retention policy, decided by the
 	// frontend. The concrete TestRunner this Suite is bound to (see
 	// internal/runner and the composition root's wiring) is the one that
-	// actually carries it into each attempt's runner.Request.Retention: the
-	// TestRunner interface's own signature stays (ctx, key, t), so a
+	// actually carries it into each attempt's runner.Request.Retention: a
 	// TestRunner implementation binds Retention at construction alongside
 	// its other per-invocation configuration, the same way it already binds
 	// SelfPath and LoggerBundleDir. Recorded here so the value the suite was
@@ -194,6 +219,8 @@ func (s *Suite) runTest(ctx context.Context, rt preflight.ResolvedTest, sink dom
 			NegativeApplied:     final.NegativeApplied,
 			RetainedSandboxPath: final.RetainedSandboxPath,
 			SubjectVersion:      final.SubjectVersion,
+			SubjectModel:        final.SubjectModel,
+			StubModel:           final.StubModel,
 			Subject: report.SubjectFailure{
 				ExitCode:  final.SubjectResult.ExitCode,
 				Stderr:    final.SubjectResult.Stderr,
@@ -240,7 +267,29 @@ func (s *Suite) runRepetition(ctx context.Context, rt preflight.ResolvedTest, re
 	for attempt := 0; attempt <= StateIntegrityRetries; attempt++ {
 		key := domain.RunKey{RunID: s.runID(rt.Definition.ID, rep, attempt), TestID: rt.Definition.ID, RunNumber: rep}
 
-		ev, err := s.opts.Runner.Run(ctx, key, rt)
+		// The evaluator closes over key and sink so it stamps the run key
+		// and emits invocation progress events from inside the runner, while
+		// the sandbox is still on disk. The runner calls it synchronously
+		// before teardown, so all side effects are visible to the caller by
+		// the time Run returns.
+		eval := func(ev domain.RunEvidence) domain.TestResult {
+			ev.Key = key
+			for _, rec := range ev.Records {
+				if rec.Kind != domain.RecordStart {
+					continue
+				}
+				emitSafe(sink, domain.ProgressEvent{
+					Kind:     domain.ProgressInvocation,
+					At:       clock.Now(),
+					Seq:      rec.Seq,
+					Identity: rec.Identity,
+					Outcome:  rec.Outcome,
+				})
+			}
+			return evaluate.Evaluate(ev)
+		}
+
+		result, err := s.opts.Runner.Run(ctx, key, rt, eval)
 		if err != nil {
 			// Nothing ran: no evidence exists to evaluate, so none is
 			// evaluated. The runner's error is the only evidence there is,
@@ -249,7 +298,7 @@ func (s *Suite) runRepetition(ctx context.Context, rt preflight.ResolvedTest, re
 			// this attempt — retrying against the same unstarted-run fault
 			// would not help, unlike the state-integrity retry rule, which
 			// only fires when a run actually happened.
-			result := domain.TestResult{
+			result = domain.TestResult{
 				Key:     key,
 				Verdict: domain.VerdictFail,
 				Reasons: []domain.FailureReason{domain.ReasonInfrastructure},
@@ -262,22 +311,6 @@ func (s *Suite) runRepetition(ctx context.Context, rt preflight.ResolvedTest, re
 			final = result
 			break
 		}
-		ev.Key = key
-
-		for _, rec := range ev.Records {
-			if rec.Kind != domain.RecordStart {
-				continue
-			}
-			emitSafe(sink, domain.ProgressEvent{
-				Kind:     domain.ProgressInvocation,
-				At:       clock.Now(),
-				Seq:      rec.Seq,
-				Identity: rec.Identity,
-				Outcome:  rec.Outcome,
-			})
-		}
-
-		result := evaluate.Evaluate(ev)
 		attempts = append(attempts, result)
 		final = result
 

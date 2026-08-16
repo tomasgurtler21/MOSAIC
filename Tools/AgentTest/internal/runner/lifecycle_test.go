@@ -21,12 +21,12 @@ func TestRun_NormalCompletion_TearsDownTheSandboxAfterward(t *testing.T) {
 	h := newHarness(t)
 	req := newRequest("happy-path")
 
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
+	result, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
-	if evidence.SubjectResult.Disposition != domain.DispositionCompleted {
-		t.Errorf("evidence.SubjectResult.Disposition = %q, want %q", evidence.SubjectResult.Disposition, domain.DispositionCompleted)
+	if result.SubjectResult.Disposition != domain.DispositionCompleted {
+		t.Errorf("result.SubjectResult.Disposition = %q, want %q", result.SubjectResult.Disposition, domain.DispositionCompleted)
 	}
 
 	if _, err := h.Deps.Workspaces.Locate(req.Key); !errors.Is(err, workspace.ErrSandboxNotFound) {
@@ -41,7 +41,7 @@ func TestRun_LauncherReturnsAnError_StillTearsDownTheSandbox(t *testing.T) {
 	}
 	req := newRequest("launch-error")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err == nil {
 		t.Error("Run returned no error, want the spawn failure to be reported")
 	}
 
@@ -53,7 +53,11 @@ func TestRun_ProvisionFails_StillTearsDownWhatSetupAlreadyCreated(t *testing.T) 
 	h.Adapter.provisionErr = errors.New("provisioning failed")
 	req := newRequest("provision-error")
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+	// Provisioning fails before the subject is launched and before evidence is
+	// gathered, so no evaluation should occur on this path. nil eval makes that
+	// structurally uncallable: if the implementation accidentally called a nil
+	// evaluator, the run would panic — a louder failure than a missed assertion.
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err == nil {
 		t.Error("Run returned no error, want the provisioning failure to be reported")
 	}
 
@@ -77,7 +81,12 @@ func TestRun_SeedFileResolutionFails_StillTearsDownWhatSetupAlreadyCreated(t *te
 		{Path: "notes/plan.md", Ref: "does-not-exist.json"},
 	}
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+	// Seed-file resolution fails before the subject is launched and before
+	// evidence is gathered, so no evaluation should occur on this path. nil
+	// eval makes that structurally uncallable: if the implementation
+	// accidentally called a nil evaluator, the run would panic — a louder
+	// failure than a missed assertion.
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err == nil {
 		t.Error("Run returned no error, want the seed-file resolution failure to be reported")
 	}
 
@@ -105,7 +114,12 @@ func TestRun_PanicDuringExecution_RecoversAndStillTearsDownTheSandbox(t *testing
 				t.Fatalf("Run let a panic escape rather than recovering and tearing down: %v", r)
 			}
 		}()
-		if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+		// A panic during execution leaves no usable evidence, so no evaluation
+		// should occur on this path. nil eval makes that structurally uncallable:
+		// if the implementation accidentally called a nil evaluator during panic
+		// recovery, the run would panic again — a louder failure than a missed
+		// assertion.
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err == nil {
 			t.Error("Run returned no error for a panicking execution, want the fault to be reported")
 		}
 	}()
@@ -276,7 +290,7 @@ func TestRun_RetainAlways_KeepsTheSandboxOnDisk_AfterNormalCompletion(t *testing
 	req := newRequest("retain-always-normal")
 	req.Retention = domain.RetainAlways
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -296,7 +310,7 @@ func TestRun_RetainAlways_KeepsTheSandboxOnDisk_OnSpawnPlanFailure(t *testing.T)
 	req := newRequest("retain-always-spawn-fail")
 	req.Retention = domain.RetainAlways
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err == nil {
 		t.Fatal("Run returned no error for a spawn-plan failure")
 	}
 
@@ -311,7 +325,7 @@ func TestRun_RetainAlways_KeepsTheSandboxOnDisk_OnProvisionFailure(t *testing.T)
 	req := newRequest("retain-always-provision-fail")
 	req.Retention = domain.RetainAlways
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err == nil {
 		t.Fatal("Run returned no error for a provisioning failure")
 	}
 
@@ -334,7 +348,7 @@ func TestRun_RetainAlways_KeepsTheSandboxOnDisk_OnPanicRecovery(t *testing.T) {
 				t.Fatalf("Run let a panic escape rather than recovering and tearing down: %v", r)
 			}
 		}()
-		if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err == nil {
 			t.Error("Run returned no error for a panicking execution")
 		}
 	}()
@@ -349,7 +363,7 @@ func TestRun_RetainOnFailure_TearsDownTheSandbox_WhenTheAttemptSucceeds(t *testi
 	req := newRequest("retain-on-failure-success")
 	req.Retention = domain.RetainOnFailure
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err != nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
@@ -364,7 +378,7 @@ func TestRun_RetainOnFailure_RetainsTheSandbox_WhenTheAttemptFails(t *testing.T)
 	req := newRequest("retain-on-failure-spawn-fail")
 	req.Retention = domain.RetainOnFailure
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err == nil {
 		t.Fatal("Run returned no error for a spawn-plan failure")
 	}
 
@@ -385,7 +399,7 @@ func TestRun_RetainOnFailure_RetainsTheSandbox_OnProvisionFailure(t *testing.T) 
 	req := newRequest("retain-on-failure-provision-fail")
 	req.Retention = domain.RetainOnFailure
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err == nil {
 		t.Fatal("Run returned no error for a provisioning failure")
 	}
 
@@ -406,7 +420,7 @@ func TestRun_RetainOnFailure_RetainsTheSandbox_OnSeedFileResolutionFailure(t *te
 		{Path: "notes/plan.md", Ref: "does-not-exist.json"},
 	}
 
-	if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err == nil {
 		t.Fatal("Run returned no error for a seed-file resolution failure")
 	}
 
@@ -433,7 +447,7 @@ func TestRun_RetainOnFailure_RetainsTheSandbox_OnPanicRecovery(t *testing.T) {
 				t.Fatalf("Run let a panic escape rather than recovering and tearing down: %v", r)
 			}
 		}()
-		if _, err := runner.Run(context.Background(), h.Deps, req); err == nil {
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err == nil {
 			t.Error("Run returned no error for a panicking execution")
 		}
 	}()
@@ -450,7 +464,7 @@ func TestRun_RetainAlways_EvidenceCarriesTheRetainedSandboxPath(t *testing.T) {
 	req := newRequest("retain-always-evidence-path")
 	req.Retention = domain.RetainAlways
 
-	evidence, err := runner.Run(context.Background(), h.Deps, req)
+	result, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err != nil {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
@@ -460,8 +474,8 @@ func TestRun_RetainAlways_EvidenceCarriesTheRetainedSandboxPath(t *testing.T) {
 		t.Fatalf("sandbox was not retained (Locate returned %v); the path assertion below is meaningless without it", locateErr)
 	}
 
-	if evidence.RetainedSandboxPath != sb.Root {
-		t.Errorf("evidence.RetainedSandboxPath = %q, want %q — a retention feature whose path the report cannot show is not a feature", evidence.RetainedSandboxPath, sb.Root)
+	if result.RetainedSandboxPath != sb.Root {
+		t.Errorf("result.RetainedSandboxPath = %q, want %q — a retention feature whose path the report cannot show is not a feature", result.RetainedSandboxPath, sb.Root)
 	}
 }
 

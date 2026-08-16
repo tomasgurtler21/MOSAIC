@@ -54,7 +54,6 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
-  model: claude-opus-4-5
 stub_registry: subject.stubs.json
 `
 
@@ -67,7 +66,6 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
-  model: claude-opus-4-5
 stub_registry: subject.stubs.json
 stub_agents:
   - identity:

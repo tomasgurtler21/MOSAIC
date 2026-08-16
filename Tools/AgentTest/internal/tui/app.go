@@ -10,7 +10,9 @@
 package tui
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -27,6 +29,16 @@ import (
 // the CLI's, so a scripted preflight can be handed to either frontend
 // interchangeably in the equivalence test.
 type PreflightFunc func(preflight.Input) (preflight.Plan, authoring.Report)
+
+// WriteFileFunc writes data to path, creating the file or truncating an
+// existing one, and creating any missing parent directories. Supplied by the
+// composition root; this package constructs nothing and touches no real
+// filesystem of its own, so a test observes report writing without one.
+//
+// A nil WriteFileFunc means "no report file can be written": the frontend
+// reports that as a report-write failure rather than silently skipping the
+// write, so a wiring omission is visible.
+type WriteFileFunc func(path string, data []byte) error
 
 // SuiteRunner is the interface the TUI drives the suite through. Unlike
 // cli.SuiteRunner (which the CLI's factory rebuilds per invocation, already
@@ -57,10 +69,23 @@ type Options struct {
 	// restates no harness identity of its own.
 	Harnesses []commonharness.CLIHarness
 
+	// Models is the per-harness model catalog, supplied by the composition
+	// root from the same mosaic-common/harness source the CLI uses. The TUI
+	// restates no model identity of its own.
+	Models []commonharness.ModelCatalog
+
 	// Retention is the initial retention policy; the suite-select screen's
 	// toggle affordance may change it. Both frontends resolve to the same
 	// domain.RetentionPolicy value reaching the same runner field.
 	Retention domain.RetentionPolicy
+
+	// ReportPath is the initial JSON report file location, shown on the
+	// suite-select screen and editable there before a run starts. The
+	// composition root resolves the same default the CLI uses.
+	ReportPath string
+
+	// WriteFile writes the JSON report file. See WriteFileFunc.
+	WriteFile WriteFileFunc
 }
 
 // Screen names one of the screens this frontend presents.
@@ -72,10 +97,27 @@ const (
 	// same cursor-and-select pattern as ScreenSuiteSelect, sourced from
 	// Options.Harnesses.
 	ScreenHarnessSelect Screen = "harness_select"
-	ScreenSuiteSelect   Screen = "suite_select"
-	ScreenProgress      Screen = "progress"
-	ScreenResults       Screen = "results"
-	ScreenDetail        Screen = "detail"
+
+	// ScreenModelSelect offers subject-model then stub-model selection from
+	// Options.Models, keyed on the currently selected harness. It is one
+	// screen with two phases rather than two screens, because the two
+	// selections share a list, a cursor convention and an escape route, and
+	// because the stub phase's list is the subject phase's list plus one
+	// entry.
+	ScreenModelSelect Screen = "model_select"
+
+	ScreenSuiteSelect Screen = "suite_select"
+	ScreenProgress    Screen = "progress"
+	ScreenResults     Screen = "results"
+	ScreenDetail      Screen = "detail"
+)
+
+// modelSelectPhase tracks which phase of the model-selection screen is active.
+type modelSelectPhase int
+
+const (
+	modelPhaseSubject modelSelectPhase = iota
+	modelPhaseStub
 )
 
 // ProgressMsg carries one folded progress event into the Bubble Tea message
@@ -121,6 +163,19 @@ type Model struct {
 	harnessCursor   int
 	selectedHarness string
 
+	// Model-select screen state (Stage 12). The screen has two sequential
+	// phases: subject then stub. modelPhase tracks which phase is active.
+	// modelCursor is the cursor position within the current phase's list.
+	// pendingSubjectModel holds the model confirmed on the subject phase
+	// before the stub phase completes; both are committed to
+	// selectedSubjectModel / selectedStubModel when the stub phase is
+	// accepted and control moves to suite-select.
+	modelPhase           modelSelectPhase
+	modelCursor          int
+	pendingSubjectModel  string
+	selectedSubjectModel string
+	selectedStubModel    string
+
 	// Suite-select screen state.
 	suiteCursor int
 	running     bool
@@ -128,6 +183,20 @@ type Model struct {
 	// retention starts as Options.Retention and is updated by the
 	// suite-select screen's toggle affordance (Stage 7).
 	retention domain.RetentionPolicy
+
+	// reportPath is the JSON report file path currently in force. Starts as
+	// Options.ReportPath; the suite-select screen's inline-edit affordance may
+	// change it before a run starts. The value at run-start is what WriteFile
+	// receives. An empty value suppresses the write.
+	reportPath string
+
+	// editingReportPath is true while the suite-select screen's inline edit
+	// mode is active. While true, list navigation keys are text input rather
+	// than navigation.
+	editingReportPath bool
+
+	// reportPathDraft accumulates the typed value during inline edit mode.
+	reportPathDraft string
 
 	// Folded progress state (AC16.2, AC16.8): every field here is set only
 	// by Fold, from an event or the terminal result model, and nothing in
@@ -166,6 +235,7 @@ func NewModel(o Options) Model {
 		sinkBox:         newSinkBox(),
 		selectedHarness: o.Harness,
 		retention:       o.Retention,
+		reportPath:      o.ReportPath,
 	}
 	if len(o.Harnesses) > 0 {
 		m.screen = ScreenHarnessSelect
@@ -235,6 +305,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.screen {
 	case ScreenHarnessSelect:
 		return m.updateHarnessSelect(msg)
+	case ScreenModelSelect:
+		return m.updateModelSelect(msg)
 	case ScreenSuiteSelect:
 		return m.updateSuiteSelect(msg)
 	case ScreenResults:
@@ -273,15 +345,146 @@ func (m Model) updateHarnessSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.selectedHarness = m.opts.Harnesses[m.harnessCursor].ID
-		m.screen = ScreenSuiteSelect
+		// Reset model-select state so a new harness starts clean: any selection
+		// made for the previous harness cannot survive into this one.
+		m.modelPhase = modelPhaseSubject
+		m.modelCursor = 0
+		m.pendingSubjectModel = ""
+		m.selectedSubjectModel = ""
+		m.selectedStubModel = ""
+		m.screen = ScreenModelSelect
 		return m, nil
 	}
 	return m, nil
 }
 
-// updateSuiteSelect handles suite-cursor movement, the retention toggle
-// (Stage 7) and starting the chosen suite.
+// currentModelIDs returns the model identifiers available for the currently
+// selected harness, from Options.Models. Returns nil when no catalog entry
+// exists for the selected harness — an unwired catalog must not block the
+// frontend, so callers treat nil and empty the same way.
+func (m Model) currentModelIDs() []string {
+	for _, mc := range m.opts.Models {
+		if mc.HarnessID == m.selectedHarness {
+			return mc.IDs
+		}
+	}
+	return nil
+}
+
+// updateModelSelect handles the model-selection screen's two sequential phases.
+//
+// Subject phase: the user selects which model the agent under test runs on,
+// from the harness's catalog. Enter advances to the stub phase; Escape returns
+// to harness-select.
+//
+// Stub phase: the user selects which model every stub collaborator runs on.
+// The list is "same as subject" (position 0, resolves to empty StubModel
+// override) followed by the harness's catalog. Enter accepts the selection and
+// advances to suite-select; Escape returns to the subject phase.
+func (m Model) updateModelSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	ids := m.currentModelIDs()
+
+	switch m.modelPhase {
+	case modelPhaseSubject:
+		switch {
+		case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Down):
+			if m.modelCursor < len(ids)-1 {
+				m.modelCursor++
+			}
+			return m, nil
+
+		case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Up):
+			if m.modelCursor > 0 {
+				m.modelCursor--
+			}
+			return m, nil
+
+		case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Select):
+			// Confirm the subject model at the current cursor position.
+			if m.modelCursor < len(ids) {
+				m.pendingSubjectModel = ids[m.modelCursor]
+			} else {
+				m.pendingSubjectModel = ""
+			}
+			// Advance to stub phase with cursor reset to position 0 ("same as subject").
+			m.modelPhase = modelPhaseStub
+			m.modelCursor = 0
+			return m, nil
+
+		case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Back):
+			// Escape: return to harness-select.
+			m.modelPhase = modelPhaseSubject
+			m.modelCursor = 0
+			m.pendingSubjectModel = ""
+			m.screen = ScreenHarnessSelect
+			return m, nil
+		}
+
+	case modelPhaseStub:
+		// Stub list: ["same as subject"] + ids.
+		stubLen := 1 + len(ids)
+		switch {
+		case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Down):
+			if m.modelCursor < stubLen-1 {
+				m.modelCursor++
+			}
+			return m, nil
+
+		case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Up):
+			if m.modelCursor > 0 {
+				m.modelCursor--
+			}
+			return m, nil
+
+		case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Select):
+			// Commit selections from both phases.
+			m.selectedSubjectModel = m.pendingSubjectModel
+			if m.modelCursor == 0 {
+				// "Same as subject" resolves to empty StubModel, matching
+				// the CLI's "omit --stub-model" case.
+				m.selectedStubModel = ""
+			} else {
+				stubIdx := m.modelCursor - 1
+				if stubIdx < len(ids) {
+					m.selectedStubModel = ids[stubIdx]
+				} else {
+					m.selectedStubModel = ""
+				}
+			}
+			m.pendingSubjectModel = ""
+			m.modelPhase = modelPhaseSubject
+			m.modelCursor = 0
+			m.screen = ScreenSuiteSelect
+			return m, nil
+
+		case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Back):
+			// Escape: return to subject phase with cursor reset.
+			m.modelPhase = modelPhaseSubject
+			m.modelCursor = 0
+			// Clear the pending subject model since the user may re-select.
+			m.pendingSubjectModel = ""
+			return m, nil
+		}
+	}
+
+	return m, nil
+}
+
+// isEditKey reports whether msg is the report-path inline-edit activation key.
+// 'e' is chosen so it does not conflict with any existing navigation binding.
+func isEditKey(msg tea.KeyMsg) bool {
+	return msg.Type == tea.KeyRunes && string(msg.Runes) == "e"
+}
+
+// updateSuiteSelect handles suite-cursor movement, the retention toggle,
+// the report-path inline editor activation, and starting the chosen suite.
 func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// While the report-path inline editor is active, route all keys to it so
+	// navigation keys become text input rather than cursor movement.
+	if m.editingReportPath {
+		return m.updateReportPathEdit(msg)
+	}
+
 	switch {
 	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Down):
 		if m.suiteCursor < len(m.opts.Suites)-1 {
@@ -299,9 +502,49 @@ func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.retention = nextRetention(m.retention)
 		return m, nil
 
+	case isEditKey(msg):
+		m.editingReportPath = true
+		m.reportPathDraft = ""
+		return m, nil
+
 	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Select):
 		return m.startSelectedSuite()
 	}
+	return m, nil
+}
+
+// updateReportPathEdit handles key input while the report-path inline editor
+// is active. Enter commits the draft, Escape cancels and restores the
+// previous value, Backspace removes the last character, and any rune
+// appends to the draft. Other special keys (Down, Up, etc.) are consumed
+// without effect so they cannot drive navigation behind the editor.
+func (m Model) updateReportPathEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEnter:
+		m.reportPath = m.reportPathDraft
+		m.editingReportPath = false
+		m.reportPathDraft = ""
+		return m, nil
+
+	case tea.KeyEsc:
+		// Cancel: reportPath is left unchanged; only the draft is discarded.
+		m.editingReportPath = false
+		m.reportPathDraft = ""
+		return m, nil
+
+	case tea.KeyBackspace:
+		if len(m.reportPathDraft) > 0 {
+			m.reportPathDraft = m.reportPathDraft[:len(m.reportPathDraft)-1]
+		}
+		return m, nil
+
+	case tea.KeyRunes:
+		m.reportPathDraft += string(msg.Runes)
+		return m, nil
+	}
+
+	// Other special keys (Down, Up, Space, etc.) are consumed but do not
+	// produce text and do not drive navigation.
 	return m, nil
 }
 
@@ -340,6 +583,10 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 		resolved, rpt := m.opts.Preflight(preflight.Input{
 			SuitePath: suitePath,
 			HarnessID: m.selectedHarness,
+			Overrides: preflight.Overrides{
+				SubjectModel: m.selectedSubjectModel,
+				StubModel:    m.selectedStubModel,
+			},
 		})
 		if rpt.HasErrors() {
 			m.statusMsg = "pre-flight failed for " + suitePath
@@ -401,12 +648,24 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 // where the richer per-test detail (assertions, reasons, conditions) the
 // detail screen needs arrives; the live folded state Fold produces from the
 // event stream is what the progress screen showed while the suite ran.
+//
+// When a report path is in force and the run succeeded, the JSON report is
+// written through opts.WriteFile. A write failure is surfaced via statusMsg
+// so the user can see why the report file is missing; it never masks the
+// run's own result.
 func (m Model) handleSuiteFinished(msg SuiteFinishedMsg) Model {
 	m.running = false
 	m.resultErr = msg.Err
 	if msg.Err == nil {
 		r := msg.Result
 		m.result = &r
+		// Write the JSON report file if a path is configured.
+		if m.reportPath != "" {
+			if err := m.writeReportFile(msg.Result); err != nil {
+				m.statusMsg = fmt.Sprintf("cannot write report to %q: %v", m.reportPath, err)
+				m.statusError = true
+			}
+		}
 	}
 	if msg.Err != nil {
 		m.statusMsg = msg.Err.Error()
@@ -415,6 +674,19 @@ func (m Model) handleSuiteFinished(msg SuiteFinishedMsg) Model {
 	m.screen = ScreenResults
 	m.resultsCursor = 0
 	return m
+}
+
+// writeReportFile renders result to JSON and writes the bytes through
+// opts.WriteFile to m.reportPath. A nil WriteFile is reported as an error.
+func (m Model) writeReportFile(result report.Result) error {
+	if m.opts.WriteFile == nil {
+		return fmt.Errorf("no write function configured")
+	}
+	var buf bytes.Buffer
+	if err := report.RenderJSON(&buf, result); err != nil {
+		return err
+	}
+	return m.opts.WriteFile(m.reportPath, buf.Bytes())
 }
 
 // resultTests returns the tests the results and detail screens list. The
@@ -484,6 +756,8 @@ func (m Model) View() string {
 	switch m.screen {
 	case ScreenHarnessSelect:
 		return m.viewHarnessSelect()
+	case ScreenModelSelect:
+		return m.viewModelSelect()
 	case ScreenSuiteSelect:
 		return m.viewSuiteSelect()
 	case ScreenProgress:
@@ -555,6 +829,19 @@ func (m Model) SelectedHarness() string {
 // changes it (Stage 7).
 func (m Model) Retention() domain.RetentionPolicy {
 	return m.retention
+}
+
+// ReportPath reports the JSON report file path currently in force —
+// Options.ReportPath until the suite-select screen's inline-edit affordance
+// changes it. An empty string means "suppressed: no file will be written".
+func (m Model) ReportPath() string {
+	return m.reportPath
+}
+
+// EditingReportPath reports whether the suite-select screen's inline report-
+// path editor is currently active.
+func (m Model) EditingReportPath() bool {
+	return m.editingReportPath
 }
 
 // TotalTests reports the suite's declared total, learned from

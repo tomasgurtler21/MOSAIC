@@ -34,14 +34,26 @@ var definitionKnownFields = map[string]bool{
 	"harness": true,
 }
 
+// subjectKnownFields is the set of keys the subject block accepts. Any key
+// not in this set is rejected with an "unknown-field" diagnostic. The model
+// and stub_model keys were removed from this set when model selection became a
+// runtime-only concern; a definition declaring either will now be rejected by
+// the unknown-field check below.
+var subjectKnownFields = map[string]bool{
+	"identity":       true,
+	"agent":          true,
+	"workflows":      true,
+	"opening_message": true,
+	"invocation_kind": true,
+	"allowed_tools":  true,
+}
+
 type wireSubject struct {
 	Identity       string   `yaml:"identity"`
 	Agent          string   `yaml:"agent"`
 	Workflows      []string `yaml:"workflows"`
 	OpeningMessage string   `yaml:"opening_message"`
 	InvocationKind string   `yaml:"invocation_kind"`
-	Model          string   `yaml:"model"`
-	StubModel      string   `yaml:"stub_model"`
 	AllowedTools   []string `yaml:"allowed_tools"`
 }
 
@@ -210,6 +222,7 @@ func ParseTestDefinition(src Source) (domain.TestDefinition, Report) {
 		return domain.TestDefinition{}, report
 	}
 	checkUnknownTopLevelFields(src, root, definitionKnownFields, &report)
+	checkUnknownSubjectFields(src, root, subjectKnownFields, &report)
 	reportRemovedHarnessKeyIfPresent(src, root, "harness", &report)
 	reportRemovedSubjectDefinitionKeyIfPresent(src, root, &report)
 
@@ -240,8 +253,6 @@ func ParseTestDefinition(src Source) (domain.TestDefinition, Report) {
 			Workflows:       wire.Subject.Workflows,
 			OpeningMessage:  wire.Subject.OpeningMessage,
 			InvocationKind:  wire.Subject.InvocationKind,
-			Model:           wire.Subject.Model,
-			StubModel:       wire.Subject.StubModel,
 			AllowedTools:    wire.Subject.AllowedTools,
 		},
 		StubRegistryPath: wire.StubRegistry,

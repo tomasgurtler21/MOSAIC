@@ -4,8 +4,8 @@
 // Entry point: Run(). The caller supplies the workflow regions (enumerated from the
 // orchestrator file), a started session, and Options. Run() collects the run setup
 // inputs interactively, starts the session in a background goroutine, shows live
-// progress, handles deviation resolution, and optionally lets the user inspect the
-// artifact. When the run ends, it shows the outcome and waits for the user to quit.
+// progress, and optionally lets the user inspect the artifact. When the run ends,
+// it shows the outcome and waits for the user to quit.
 package tui
 
 import (
@@ -21,14 +21,12 @@ import (
 	"mosaic-common/interaction"
 	tuicommon "mosaic-common/tui"
 	"mosaic-run/internal/artifact"
-	"mosaic-run/internal/deviation"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/orchfile"
 	"mosaic-run/internal/runscan"
 	"mosaic-run/internal/runselect"
 	"mosaic-run/internal/session"
 	"mosaic-run/internal/tui/screens"
-	"mosaic-run/internal/workflow"
 )
 
 // ArtifactNotYetCreatedMessage is shown in the artifact view when the run's
@@ -50,9 +48,9 @@ const (
 	screenSetupSeedInput                 // seed-input path entry (new runs only)
 	screenSetupConfig                    // run configuration prompts
 	screenProgress                       // live execution progress
-	screenDeviation                      // deviation resolution
 	screenArtifact                       // read-only artifact inspection
 	screenQuestion                       // generic overlay from Interaction port
+	screenStop                           // stop recovery (retry / manual dispatch) — shown on RunStoppedByConsultant
 	screenDone                           // completion/error summary
 )
 
@@ -134,6 +132,12 @@ type runSetupSelections struct {
 	runID     string // resolved run_id; empty if not yet resolved
 	runFolder string // resolved run-scoped folder path (absolute)
 	isNewRun  bool   // true = create new artifact; false = resume existing
+
+	// manualDispatch is set to true when the user chooses Manual Dispatch on
+	// the stop recovery screen. It is carried into the next RunConfig so the
+	// session layer can use ManualResolver for the first routing decision.
+	// Cleared to false for a Retry choice.
+	manualDispatch bool
 }
 
 // runDoneMsg is sent by the session goroutine when the run completes.
@@ -155,18 +159,6 @@ type stepCompleteMsg struct {
 // gracefulStopRequestMsg is sent by the progress screen when the user presses 's'.
 type gracefulStopRequestMsg struct{}
 
-// deviationRequestMsg is sent by the TUIDeviationResolver to present a deviation to the user.
-type deviationRequestMsg struct {
-	info  domain.DeviationInfo
-	reply chan deviationReplyMsg
-}
-
-// deviationReplyMsg carries the user's deviation resolution back to the resolver.
-type deviationReplyMsg struct {
-	choice     screens.DeviationChoice
-	resolution screens.ManualResolution
-}
-
 // artifactContentMsg carries the current artifact file content to the artifact screen.
 type artifactContentMsg struct{ content string }
 
@@ -187,10 +179,6 @@ type rootModel struct {
 
 	// Enumerated workflow regions (populated after orchestrator file is loaded).
 	workflows []domain.WorkflowRegion
-
-	// Routing table for the selected workflow (populated after workflow selection).
-	// Passed to NewDeviationScreen so the manual deviation row list is populated.
-	routingTable domain.RoutingTable
 
 	// Run selection screen (shown when multiple resumable candidates exist).
 	runSelectScreen *screens.RunSelectScreen
@@ -215,10 +203,6 @@ type rootModel struct {
 	// Progress screen (constructed when execution starts).
 	progressScreen *screens.ProgressScreen
 
-	// Deviation screen (constructed when a deviation occurs).
-	deviationScreen  *screens.DeviationScreen
-	pendingDeviation *deviationRequestMsg
-
 	// Artifact inspection screen.
 	artifactScreen *screens.ArtifactScreen
 	prevScreen     screenID // screen to return to after artifact inspection
@@ -228,6 +212,9 @@ type rootModel struct {
 	selectOverlay  *inlineSelectOne
 	textOverlay    *inlineText
 	confirmOverlay *inlineConfirm
+
+	// Stop recovery screen (shown when RunStoppedByConsultant).
+	stopScreen *screens.StopScreen
 
 	// Done screen.
 	doneScreen *screens.DoneScreen
@@ -415,14 +402,14 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleQuestionMsg(qMsg)
 	}
 
-	// Deviation from the TUIDeviationResolver.
-	if devMsg, ok := msg.(deviationRequestMsg); ok {
-		return m.handleDeviationMsg(devMsg)
-	}
-
 	// Session completed.
 	if doneMsg, ok := msg.(runDoneMsg); ok {
 		style := stylesFromTheme(m.theme)
+		if doneMsg.outcome.Status == domain.RunStoppedByConsultant {
+			m.stopScreen = screens.NewStopScreen(doneMsg.outcome.StopReason, m.width, m.height, style)
+			m.screen = screenStop
+			return m, nil
+		}
 		m.doneScreen = screens.NewDoneScreen(doneMsg.outcome, "", m.width, m.height, style)
 		m.screen = screenDone
 		return m, nil
@@ -458,12 +445,12 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSetupConfig(msg)
 	case screenProgress:
 		return m.updateProgress(msg)
-	case screenDeviation:
-		return m.updateDeviation(msg)
 	case screenArtifact:
 		return m.updateArtifact(msg)
 	case screenQuestion:
 		return m.updateQuestion(msg)
+	case screenStop:
+		return m.updateStop(msg)
 	case screenDone:
 		return m.updateDone(msg)
 	}
@@ -492,11 +479,11 @@ func (m *rootModel) resizeScreens() {
 	if m.progressScreen != nil {
 		m.progressScreen.Resize(m.width, m.height)
 	}
-	if m.deviationScreen != nil {
-		m.deviationScreen.Resize(m.width, m.height)
-	}
 	if m.artifactScreen != nil {
 		m.artifactScreen.Resize(m.width, m.height)
+	}
+	if m.stopScreen != nil {
+		m.stopScreen.Resize(m.width, m.height)
 	}
 	if m.doneScreen != nil {
 		m.doneScreen.Resize(m.width, m.height)
@@ -622,14 +609,6 @@ func (m *rootModel) updateSetupWorkflow(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.workflowScreen.Done() {
 		selectedID := m.workflowScreen.SelectedID()
 		m.selections.workflowID = domain.WorkflowID(selectedID)
-
-		// Parse the routing table so the deviation screen can show meaningful row
-		// choices if a deviation occurs later during execution.
-		if region, err := orchfile.GetWorkflow(m.selections.orchestratorFile, selectedID); err == nil {
-			if table, err := workflow.Parse(region.Content, region.Info); err == nil {
-				m.routingTable = table
-			}
-		}
 
 		m.workflowScreen.Reset()
 		m.screen = screenSetupTask
@@ -808,54 +787,6 @@ func (m *rootModel) readArtifactContent() string {
 }
 
 // ---------------------------------------------------------------------------
-// Deviation screen handler
-// ---------------------------------------------------------------------------
-
-func (m *rootModel) handleDeviationMsg(devMsg deviationRequestMsg) (tea.Model, tea.Cmd) {
-	m.pendingDeviation = &devMsg
-	style := stylesFromTheme(m.theme)
-	m.deviationScreen = screens.NewDeviationScreen(devMsg.info, m.buildRoutingTable(), m.width, m.height, style)
-	m.screen = screenDeviation
-	return m, nil
-}
-
-// buildRoutingTable returns the routing table parsed during workflow selection.
-// This ensures the deviation screen's manual row list is populated with the
-// actual workflow rows.
-func (m *rootModel) buildRoutingTable() domain.RoutingTable {
-	return m.routingTable
-}
-
-func (m *rootModel) updateDeviation(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.deviationScreen == nil {
-		return m, nil
-	}
-	cmd := m.deviationScreen.Update(msg)
-	if m.deviationScreen.Back() {
-		// User pressed Esc on the first choice screen — treat as "stop".
-		if m.pendingDeviation != nil {
-			m.pendingDeviation.reply <- deviationReplyMsg{choice: screens.DeviationChoiceStop}
-			m.pendingDeviation = nil
-		}
-		m.deviationScreen = nil
-		m.screen = screenProgress
-		return m, nil
-	}
-	if m.deviationScreen.Done() {
-		choice := m.deviationScreen.Choice()
-		res := m.deviationScreen.Resolution()
-		if m.pendingDeviation != nil {
-			m.pendingDeviation.reply <- deviationReplyMsg{choice: choice, resolution: res}
-			m.pendingDeviation = nil
-		}
-		m.deviationScreen = nil
-		m.screen = screenProgress
-		return m, nil
-	}
-	return m, cmd
-}
-
-// ---------------------------------------------------------------------------
 // Artifact inspection screen handler
 // ---------------------------------------------------------------------------
 
@@ -980,6 +911,42 @@ func (m *rootModel) replyToPendingQuestion(ans answerMsg) {
 }
 
 // ---------------------------------------------------------------------------
+// Stop recovery screen handler
+// ---------------------------------------------------------------------------
+
+// updateStop handles input for the stop recovery screen. When the user chooses
+// Retry, the session is re-started from the progress screen. When the user
+// chooses Manual dispatch, the progress screen is shown so the session goroutine
+// can present the ManualResolver question overlay.
+func (m *rootModel) updateStop(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.stopScreen == nil {
+		return m, nil
+	}
+	m.stopScreen.Update(msg)
+	if m.stopScreen.Back() {
+		// Treat Esc on the stop screen as a terminal quit.
+		return m, tea.Quit
+	}
+	if m.stopScreen.Done() {
+		// Record which recovery action the user chose before clearing the screen,
+		// so startSession() can include ManualDispatch in the RunConfig.
+		if m.stopScreen.Choice() == screens.StopChoiceManualDispatch {
+			m.selections.manualDispatch = true
+		} else {
+			m.selections.manualDispatch = false
+		}
+		style := stylesFromTheme(m.theme)
+		if m.progressScreen == nil {
+			m.progressScreen = screens.NewProgressScreen(m.width, m.height, style)
+		}
+		m.stopScreen = nil
+		m.screen = screenProgress
+		return m, tea.Batch(m.progressScreen.Init(), m.startSession())
+	}
+	return m, nil
+}
+
+// ---------------------------------------------------------------------------
 // Done screen handler
 // ---------------------------------------------------------------------------
 
@@ -1016,11 +983,11 @@ func (m *rootModel) startSession() tea.Cmd {
 			RunID:                sel.runID,
 			RunFolder:            sel.runFolder,
 			IsNewRun:             sel.isNewRun,
-			OnDeviation:          sel.config.DeviationMode,
 			AllowVersionDrift:    sel.config.AllowVersionDrift,
-			Checkpoints:          sel.config.Checkpoints,
+			RunSettings:          sel.config.Settings,
 			InfraClassSelections: sel.config.InfraClassSelections,
 			SeedInputs:           seedInputs,
+			ManualDispatch:       sel.manualDispatch,
 		}
 		outcome, err := sess.Start(ctx, config)
 		if err != nil {
@@ -1057,16 +1024,16 @@ func (m *rootModel) View() string {
 		if m.progressScreen != nil {
 			return m.progressScreen.View()
 		}
-	case screenDeviation:
-		if m.deviationScreen != nil {
-			return m.deviationScreen.View()
-		}
 	case screenArtifact:
 		if m.artifactScreen != nil {
 			return m.artifactScreen.View()
 		}
 	case screenQuestion:
 		return m.viewQuestion()
+	case screenStop:
+		if m.stopScreen != nil {
+			return m.stopScreen.View()
+		}
 	case screenDone:
 		if m.doneScreen != nil {
 			return m.doneScreen.View()
@@ -1088,94 +1055,3 @@ func (m *rootModel) viewQuestion() string {
 	return m.theme.Style(tuicommon.RoleMuted).Render("Waiting for question…")
 }
 
-// ---------------------------------------------------------------------------
-// TUIDeviationResolver
-// ---------------------------------------------------------------------------
-
-// TUIDeviationResolver implements domain.DeviationResolver by routing the deviation
-// choice through the TUI's deviation screen. For "delegate" choices, it falls back
-// to the orchestrator delegate. For "manual" choices, it collects the rejoin row and
-// HITL override from the TUI.
-type TUIDeviationResolver struct {
-	// Delegate is the orchestrator-delegate resolver used when the user chooses "delegate".
-	Delegate *deviation.OrchestratorDelegate
-	// Program is the TUI program ref, used to send deviation messages.
-	Program *ProgramRef
-	// Table is the workflow's routing table, for the row-selection prompt.
-	Table domain.RoutingTable
-}
-
-// Resolve implements domain.DeviationResolver.
-func (r *TUIDeviationResolver) Resolve(ctx context.Context, info domain.DeviationInfo) (domain.RejoinInstruction, error) {
-	p := r.Program.program()
-	if p == nil {
-		// No program running — fall back to stop.
-		return domain.RejoinInstruction{Stop: &domain.StopRun{Reason: "TUI not running"}}, nil
-	}
-
-	reply := make(chan deviationReplyMsg, 1)
-	p.Send(deviationRequestMsg{info: info, reply: reply})
-
-	var result deviationReplyMsg
-	select {
-	case result = <-reply:
-	case <-ctx.Done():
-		return domain.RejoinInstruction{Stop: &domain.StopRun{Reason: "context cancelled during deviation resolution"}}, nil
-	}
-
-	switch result.choice {
-	case screens.DeviationChoiceStop:
-		return domain.RejoinInstruction{Stop: &domain.StopRun{Reason: "user requested stop"}}, nil
-
-	case screens.DeviationChoiceManual:
-		res := result.resolution
-		if res.Agent != "" {
-			// Compose a full custom dispatch invocation with the collected protocol fields.
-			var inputArtifacts, outputArtifacts []string
-			for _, a := range strings.Split(res.InputArtifacts, ",") {
-				if a = strings.TrimSpace(a); a != "" {
-					inputArtifacts = append(inputArtifacts, a)
-				}
-			}
-			for _, a := range strings.Split(res.OutputArtifacts, ",") {
-				if a = strings.TrimSpace(a); a != "" {
-					outputArtifacts = append(outputArtifacts, a)
-				}
-			}
-			req := domain.ProtocolRequest{
-				AgentInstanceID: res.Agent + "#1",
-				TaskDescription: res.Task,
-				InputArtifacts:  inputArtifacts,
-				OutputArtifacts: outputArtifacts,
-				Constraints:     res.Constraints,
-			}
-			if res.HITLOverride != nil {
-				req.HumanInTheLoop = *res.HITLOverride
-			}
-			return domain.RejoinInstruction{
-				Custom: &domain.CustomDispatch{
-					Agent:        domain.AgentReference{Identifier: res.Agent, InvocationKind: domain.InvocationOrdinary},
-					Request:      req,
-					HITLOverride: res.HITLOverride,
-					RejoinRow:    res.RejoinRowIndex,
-				},
-			}, nil
-		}
-		// No custom agent specified — simple rejoin at the selected row.
-		return domain.RejoinInstruction{
-			Rejoin: &domain.RejoinAtRow{
-				RowIndex:     res.RejoinRowIndex,
-				HITLOverride: res.HITLOverride,
-			},
-		}, nil
-
-	case screens.DeviationChoiceDelegate:
-		if r.Delegate != nil {
-			return r.Delegate.Resolve(ctx, info)
-		}
-		return domain.RejoinInstruction{Stop: &domain.StopRun{Reason: "no orchestrator delegate configured"}}, nil
-
-	default:
-		return domain.RejoinInstruction{Stop: &domain.StopRun{Reason: "unknown deviation choice"}}, nil
-	}
-}

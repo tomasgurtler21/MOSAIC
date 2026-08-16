@@ -1,5 +1,7 @@
 package domain
 
+import "strings"
+
 // Assertions is the full assertion vocabulary a test definition can declare.
 // Every class the evaluator supports is expressible here; a nil pointer or
 // nil slice means the class is not evaluated for this test, which is
@@ -60,6 +62,63 @@ type TaskMessageAssertion struct {
 
 	HumanInTheLoop          *bool
 	TaskDescriptionContains []string
+}
+
+// ExpandRunID returns a deep copy of a in which every path-bearing field has
+// each occurrence of RunIDPlaceholder replaced by runID. The receiver and
+// every slice it points at are left untouched, so evidence can be
+// re-evaluated repeatedly and in any order and still yield the same verdict.
+//
+// Path-bearing fields, and the complete set this method covers:
+//   - ArtifactCreated
+//   - ArtifactNotCreated
+//   - each TaskMessages entry's RequiredInputArtifacts, OptionalInputArtifacts,
+//     RequiredOutputArtifacts and OptionalOutputArtifacts
+//
+// Every other field is copied through unchanged: a non-path field containing
+// the placeholder text is not a path and is not rewritten.
+//
+// An empty runID returns the deep copy with no substitution performed, so a
+// caller with no run identity degrades to today's verbatim comparison rather
+// than to an empty-string substitution.
+//
+// Nil-versus-empty is preserved exactly: a nil slice copies as nil and an
+// empty non-nil slice copies as empty non-nil, because Assertions documents
+// that distinction as the difference between "not evaluated" and "assert the
+// empty set".
+func (a Assertions) ExpandRunID(runID string) Assertions {
+	expandSlice := func(paths []string) []string {
+		if paths == nil {
+			return nil
+		}
+		out := make([]string, len(paths))
+		for i, p := range paths {
+			if runID != "" {
+				out[i] = strings.ReplaceAll(p, RunIDPlaceholder, runID)
+			} else {
+				out[i] = p
+			}
+		}
+		return out
+	}
+
+	result := a
+	result.ArtifactCreated = expandSlice(a.ArtifactCreated)
+	result.ArtifactNotCreated = expandSlice(a.ArtifactNotCreated)
+
+	if a.TaskMessages != nil {
+		tms := make([]TaskMessageAssertion, len(a.TaskMessages))
+		for i, tm := range a.TaskMessages {
+			tms[i] = tm
+			tms[i].RequiredInputArtifacts = expandSlice(tm.RequiredInputArtifacts)
+			tms[i].OptionalInputArtifacts = expandSlice(tm.OptionalInputArtifacts)
+			tms[i].RequiredOutputArtifacts = expandSlice(tm.RequiredOutputArtifacts)
+			tms[i].OptionalOutputArtifacts = expandSlice(tm.OptionalOutputArtifacts)
+		}
+		result.TaskMessages = tms
+	}
+
+	return result
 }
 
 // AssertionClass names one class of assertion the evaluator supports.

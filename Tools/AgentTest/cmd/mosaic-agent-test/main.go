@@ -35,9 +35,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -211,7 +213,16 @@ func runTUIMode(args []string) int {
 		return wiringFailureExitCode(err)
 	}
 
-	opts, err := tuiOptions(d, discoverSuites())
+	suitesRoot := scanFlag(args, "--suites", "")
+	if suitesRoot == "" {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			cwd = "."
+		}
+		suitesRoot = cwd
+	}
+
+	opts, err := tuiOptions(d, discoverSuites(suitesRoot))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mosaic-agent-test: %v\n", err)
 		return cli.ExitFailure
@@ -225,12 +236,51 @@ func runTUIMode(args []string) int {
 }
 
 // discoverSuites lists the authored suite files offered on the interactive
-// frontend's suite-select screen. It looks in the invocation's own working
-// directory, which is where a suite is authored and run from.
-func discoverSuites() []string {
-	matches, err := filepath.Glob("*.suite.yaml")
+// frontend's suite-select screen.
+//
+// root is resolved by the composition root: the --suites value when present,
+// the process working directory otherwise. It may name either a directory or
+// a single suite file.
+//
+// A directory is searched recursively for files named *.suite.yaml. A
+// directory entry whose name begins with "." is not descended into, so a
+// repository root does not drag version-control and tooling directories into
+// the scan.
+//
+// A root naming an existing file is returned as a one-element list, whatever
+// its name — a user who points the tool at a suite gets that suite.
+//
+// A root that does not exist, is unreadable, or contains no suite yields an
+// empty list and no error: "no suites here" is a legitimate answer the
+// frontend already renders, not a startup failure.
+//
+// Results are sorted so the selection list is stable across invocations.
+func discoverSuites(root string) []string {
+	info, err := os.Stat(root)
 	if err != nil {
 		return nil
 	}
-	return matches
+	if !info.IsDir() {
+		return []string{root}
+	}
+
+	var results []string
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if path != root && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), ".suite.yaml") {
+			results = append(results, path)
+		}
+		return nil
+	})
+
+	sort.Strings(results)
+	return results
 }

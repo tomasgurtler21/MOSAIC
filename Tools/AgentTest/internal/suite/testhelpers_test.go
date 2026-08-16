@@ -83,7 +83,7 @@ func (r *scriptedRunner) scriptFor(testID string, outcomes ...scriptedOutcome) {
 	r.script[testID] = outcomes
 }
 
-func (r *scriptedRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest) (domain.RunEvidence, error) {
+func (r *scriptedRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
 	r.mu.Lock()
 	r.calls = append(r.calls, key)
 	q := r.script[t.Definition.ID]
@@ -95,15 +95,29 @@ func (r *scriptedRunner) Run(ctx context.Context, key domain.RunKey, t preflight
 	}
 	r.mu.Unlock()
 
-	if !haveScripted {
-		return domain.RunEvidence{
-			Key:           key,
-			SubjectResult: domain.SubjectResult{Disposition: domain.DispositionCompleted},
-		}, nil
+	if next.err != nil {
+		// A scripted error means the attempt never started: eval is not called,
+		// matching the TestRunner contract that says eval is not called when an
+		// error is returned.
+		return domain.TestResult{}, next.err
 	}
-	ev := next.evidence
+
+	var ev domain.RunEvidence
+	if haveScripted {
+		ev = next.evidence
+	} else {
+		ev = domain.RunEvidence{
+			SubjectResult: domain.SubjectResult{Disposition: domain.DispositionCompleted},
+		}
+	}
 	ev.Key = key
-	return ev, next.err
+
+	if eval != nil {
+		return eval(ev), nil
+	}
+	// nil eval: the contract allows this from test doubles that do not exercise
+	// evaluation. Return a zero-valued TestResult with the key stamped.
+	return domain.TestResult{Key: key}, nil
 }
 
 // allCalls returns every RunKey Run was invoked with, in call order.

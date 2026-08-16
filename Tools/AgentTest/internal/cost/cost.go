@@ -38,13 +38,28 @@ const (
 
 // CommandRunner is the seam that makes the outcome mapping testable without
 // the real log-analysis tool present.
-type CommandRunner func(ctx context.Context, path string, args []string) (stdout []byte, exitCode int, err error)
+//
+// workingDir is the directory the command runs in. An empty workingDir means
+// "inherit the parent process's working directory", which is exactly the
+// behaviour every caller had before this parameter existed.
+type CommandRunner func(ctx context.Context, path string, args []string, workingDir string) (stdout []byte, exitCode int, err error)
 
 // Options configures the delegating cost provider.
 type Options struct {
 	// ExecutablePath is the log-analysis tool's binary.
 	ExecutablePath string
 	Timeout        time.Duration
+
+	// WorkingDir is the directory the log-analysis subprocess is executed in.
+	// The log analyzer resolves MosaicLogAnalyzer/config/pricing.yaml relative
+	// to its own working directory and exposes no root-override flag, so this
+	// is the only way to make it find a priced model. The composition root
+	// supplies its already-resolved MOSAIC root here.
+	//
+	// Empty leaves the subprocess inheriting this process's working directory —
+	// the previous behaviour, kept so an unwired context degrades rather than
+	// executing against an empty directory.
+	WorkingDir string
 
 	// Invoke is the seam that makes the outcome mapping testable without the
 	// real tool present. nil selects real process execution.
@@ -85,7 +100,7 @@ func (p *provider) Cost(ctx context.Context, q domain.CostQuery) (domain.CostRep
 	}
 
 	args := []string{"total", "--run", q.RunID, "--path", q.LogRoot, "--format", "json"}
-	stdout, exitCode, invokeErr := invoke(runCtx, p.opts.ExecutablePath, args)
+	stdout, exitCode, invokeErr := invoke(runCtx, p.opts.ExecutablePath, args, p.opts.WorkingDir)
 	if invokeErr != nil {
 		return Map(MapInput{
 			ExecutablePath: p.opts.ExecutablePath,
@@ -288,9 +303,11 @@ func defaultStatDir(path string) bool {
 }
 
 // execCommandRunner is the real process-execution implementation of
-// CommandRunner.
-func execCommandRunner(ctx context.Context, path string, args []string) ([]byte, int, error) {
+// CommandRunner. workingDir sets exec.Cmd.Dir; an empty string leaves the
+// subprocess inheriting this process's working directory.
+func execCommandRunner(ctx context.Context, path string, args []string, workingDir string) ([]byte, int, error) {
 	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Dir = workingDir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = io.Discard
