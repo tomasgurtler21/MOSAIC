@@ -1,10 +1,32 @@
 package app
 
-// refresh_scope.go declares the RefreshScope type and its two recognised values.
+// refresh_scope.go declares the RefreshScope type, its two recognised values, and the
+// RefreshDecision type that carries the full outcome of the harness-only refresh-scope prompt.
 // The Regions() method maps each scope to the set of managed region names it covers,
 // reading from docformat.CanonicalDeployed rather than duplicating the list here.
 
 import "mosaic-common/docformat"
+
+// RefreshDecision is the outcome of the harness-only refresh-scope prompt for one agent.
+// It is the tool's record of user consent: a harness-only agent is refreshed only when the
+// user explicitly said so.
+type RefreshDecision struct {
+	// Refresh reports whether the user authorised a refresh of this agent. False means the
+	// user declined (skip, skip-all, cancel) or the prompt could not be delivered. When
+	// false, the caller must emit no plan item and no content-plan entry for the agent.
+	Refresh bool
+
+	// Scope is the breadth the user chose. It is meaningful only when Refresh is true, and
+	// is the zero value otherwise. Callers must not read it when Refresh is false, and must
+	// not log it as though a refresh occurred.
+	Scope RefreshScope
+
+	// ApplyToAll latches this decision — including a declined one — onto every remaining
+	// harness-only agent in the run, so the prompt is not re-asked. Set by both the "apply
+	// to all" answer variants (with Refresh true) and by a SkippedAll outcome (with Refresh
+	// false).
+	ApplyToAll bool
+}
 
 // RefreshScope selects how much of a harness-only agent the Update flow regenerates.
 // Because there is no generic source to align against, the tool can only rewrite regions
@@ -13,7 +35,9 @@ type RefreshScope string
 
 const (
 	// RefreshProtocolOnly refreshes only the <CommunicationProtocol type="managed"> region.
-	// It is the narrow scope and the safe default for every non-answered prompt outcome.
+	// It is the narrow scope chosen when the user explicitly selects it. A non-answered prompt
+	// outcome (skip, cancel, error) is represented as RefreshDecision{Refresh: false}, not as
+	// this value; callers must check Refresh before consulting Scope.
 	RefreshProtocolOnly RefreshScope = "protocol-only"
 	// RefreshAllDeployed refreshes every canonical tool-managed managed region.
 	RefreshAllDeployed RefreshScope = "all-deployed"

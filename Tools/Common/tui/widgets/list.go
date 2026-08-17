@@ -202,6 +202,15 @@ func (l *List) SelectedItem() (ListItem, bool) {
 // CursorIndex returns the current cursor position (0-based).
 func (l *List) CursorIndex() int { return l.cursor }
 
+// SetCursorIndex moves the cursor to the given 0-based index. If idx is out of range,
+// the cursor is unchanged.
+func (l *List) SetCursorIndex(idx int) {
+	if idx >= 0 && idx < len(l.items) {
+		l.cursor = idx
+		l.adjustViewport()
+	}
+}
+
 // SetCursor moves the cursor to the item with the given ID. If no item matches, the cursor
 // is unchanged.
 func (l *List) SetCursor(id string) {

@@ -97,49 +97,6 @@ type openCodeSpawner struct {
 	cfg *spawnerConfig
 }
 
-// SpawnText implements TextSpawner.
-//
-// It performs the same steps as Spawn — ResolveExecutable, BuildOpenCodeArgs,
-// Run, ParseOpenCodeEnvelope — and stops before ExtractProtocolJSON. The
-// returned Response has Text populated and Protocol nil.
-func (s *openCodeSpawner) SpawnText(ctx context.Context, req SpawnRequest) (Response, error) {
-	cmd, err := ResolveExecutable(s.cfg.executablePath)
-	if err != nil {
-		return Response{}, err
-	}
-
-	args, err := BuildOpenCodeArgs(req)
-	if err != nil {
-		return Response{}, err
-	}
-
-	timeout := req.Timeout
-	if timeout <= 0 {
-		timeout = s.cfg.timeout
-	}
-	if timeout <= 0 {
-		timeout = defaultTimeout
-	}
-
-	resp, err := Run(ctx, cmd, args, RunOptions{
-		WorkingDir: req.WorkingDir,
-		Env:        req.Env,
-		Timeout:    timeout,
-		Sink:       s.cfg.sink,
-	})
-	if err != nil {
-		return Response{}, err
-	}
-
-	text, err := ParseOpenCodeEnvelope(resp.Stdout)
-	if err != nil {
-		return resp, err
-	}
-
-	resp.Text = text
-	return resp, nil
-}
-
 // Spawn implements Spawner.
 //
 // Unlike the Claude Code spawner, a zero exit code from Run says nothing

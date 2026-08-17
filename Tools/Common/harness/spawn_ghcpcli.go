@@ -122,58 +122,6 @@ type ghcpCLISpawner struct {
 	cfg *spawnerConfig
 }
 
-// SpawnText implements TextSpawner.
-//
-// It performs the same steps as Spawn — ResolveExecutable, BuildGHCPCLIArgs,
-// Run, ParseGHCPCLIEnvelope — and stops before ExtractProtocolJSON. The
-// returned Response has Text populated and Protocol nil.
-//
-// Like Spawn, ErrNonZeroExit from Run does not cause an immediate return:
-// the stream's own verdict from ParseGHCPCLIEnvelope decides. Every other
-// Run error (ErrExecutableNotFound, ErrTimeout, ErrCancelled) returns
-// immediately.
-func (s *ghcpCLISpawner) SpawnText(ctx context.Context, req SpawnRequest) (Response, error) {
-	cmd, err := ResolveExecutable(s.cfg.executablePath)
-	if err != nil {
-		return Response{}, err
-	}
-
-	args, err := BuildGHCPCLIArgs(req)
-	if err != nil {
-		return Response{}, err
-	}
-
-	timeout := req.Timeout
-	if timeout <= 0 {
-		timeout = s.cfg.timeout
-	}
-	if timeout <= 0 {
-		timeout = defaultTimeout
-	}
-
-	resp, err := Run(ctx, cmd, args, RunOptions{
-		WorkingDir: req.WorkingDir,
-		Env:        req.Env,
-		Timeout:    timeout,
-		Sink:       s.cfg.sink,
-	})
-	if err != nil {
-		if !errors.Is(err, ErrNonZeroExit) {
-			return Response{}, err
-		}
-		// ErrNonZeroExit: continue to the envelope parser — the stream's own
-		// terminal result event is the authoritative verdict, exactly as Spawn does.
-	}
-
-	text, parseErr := ParseGHCPCLIEnvelope(resp.Stdout, []byte(resp.Stderr), resp.ExitCode)
-	if parseErr != nil {
-		return resp, parseErr
-	}
-
-	resp.Text = text
-	return resp, nil
-}
-
 // Spawn implements Spawner.
 //
 // Unlike both neighbouring spawners (Claude Code and OpenCode), a non-zero

@@ -8,6 +8,8 @@ package tui
 // without a running tea.Program.
 
 import (
+	"strings"
+
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/tui/screens"
 )
@@ -72,54 +74,72 @@ func optionsToAgents(opts []domain.Option) []domain.Agent {
 	return agents
 }
 
-// optionsToAgentCategories reconstructs ordered agent categories from the flat option slice
-// produced by askStandaloneAgents. Categories are ordered by first appearance of each Group
-// value, except that the empty-Group category is always placed last. Each option maps to a
-// domain.Agent: ID→Key, Label→Name, Description→Description, Group→Category.
-func optionsToAgentCategories(opts []domain.Option) []screens.AgentCategory {
+// optionsToAgentTree reconstructs the agent folder tree from the flat option slice
+// produced by askDeployAgents. Each option's Group is a slash-joined path of on-disk
+// folder names ("Subagents/Audit", "UtilityAgents", ""); the adapter splits it on "/"
+// and files the agent under the deepest segment's folder, creating folders on first
+// appearance.
+//
+// Returns the synthetic root node whose Children are the top-level folders and whose
+// Agents are the options with no path segments. Returns nil for an empty option slice.
+//
+// Field mapping per option: ID→Key, Label→Name, Description→Description,
+// Category→the deepest non-empty path segment ("" for root-held agents).
+func optionsToAgentTree(opts []domain.Option) *screens.AgentTreeNode {
 	if len(opts) == 0 {
 		return nil
 	}
 
-	// Preserve first-appearance order of category groups, keeping empty-Group entries separate
-	// so they can be placed last regardless of where they appear in the input.
-	namedOrder := []string{}
-	namedMap := map[string][]domain.Agent{}
-	var uncategorised []domain.Agent
+	root := &screens.AgentTreeNode{}
 
 	for _, opt := range opts {
+		// Split the group path on "/" and drop empty segments (handles leading/trailing/double slashes).
+		rawSegments := strings.Split(opt.Group, "/")
+		var segments []string
+		for _, s := range rawSegments {
+			if s != "" {
+				segments = append(segments, s)
+			}
+		}
+
 		agent := domain.Agent{
 			Key:         opt.ID,
 			Name:        opt.Label,
 			Description: opt.Description,
-			Category:    opt.Group,
 		}
-		if opt.Group == "" {
-			uncategorised = append(uncategorised, agent)
-		} else {
-			if _, exists := namedMap[opt.Group]; !exists {
-				namedOrder = append(namedOrder, opt.Group)
-				namedMap[opt.Group] = []domain.Agent{}
+		if len(segments) > 0 {
+			// Category is the deepest non-empty path segment, per the design contract.
+			agent.Category = segments[len(segments)-1]
+		}
+
+		if len(segments) == 0 {
+			// No path segments — agent belongs directly at root.
+			root.Agents = append(root.Agents, agent)
+			continue
+		}
+
+		// Walk (or create) the folder chain, reusing existing nodes on first-appearance ordering.
+		current := root
+		for _, seg := range segments {
+			var found *screens.AgentTreeNode
+			for _, child := range current.Children {
+				if child.Name == seg {
+					found = child
+					break
+				}
 			}
-			namedMap[opt.Group] = append(namedMap[opt.Group], agent)
+			if found == nil {
+				found = &screens.AgentTreeNode{Name: seg}
+				current.Children = append(current.Children, found)
+			}
+			current = found
 		}
+
+		// Append the agent to the deepest folder in its path.
+		current.Agents = append(current.Agents, agent)
 	}
 
-	// Build result: named categories first (in first-appearance order), then uncategorised.
-	var categories []screens.AgentCategory
-	for _, name := range namedOrder {
-		categories = append(categories, screens.AgentCategory{
-			Name:   name,
-			Agents: namedMap[name],
-		})
-	}
-	if len(uncategorised) > 0 {
-		categories = append(categories, screens.AgentCategory{
-			Name:   "",
-			Agents: uncategorised,
-		})
-	}
-	return categories
+	return root
 }
 
 // optionsToHookBundles converts the flat option slice from askHooks into a slice

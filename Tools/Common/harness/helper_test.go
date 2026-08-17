@@ -154,33 +154,6 @@ func runHelperProcess() {
 		os.Stderr.WriteString(`Error: Model "definitely-not-a-real-model" from --model flag is not available.`)                                                                          //nolint:errcheck
 		os.Exit(1)
 
-	case "text-only-claude":
-		// A valid Claude Code --output-format json envelope whose "result" field
-		// contains plain text rather than a Communication Protocol message. Used
-		// to assert that SpawnText returns the text without rejecting it, while
-		// Spawn returns ErrProtocolNotExtractable on the same output.
-		type resultEntry struct {
-			Type   string `json:"type"`
-			Result string `json:"result"`
-		}
-		envelope := []resultEntry{{Type: "result", Result: "The orchestrator says: route to agent-b"}}
-		data, _ := json.Marshal(envelope)
-		os.Stdout.Write(data) //nolint:errcheck
-
-	case "text-only-opencode":
-		// A valid opencode event stream whose text event carries plain text rather
-		// than a Communication Protocol message. Used to assert that SpawnText
-		// returns the text while Spawn returns an error.
-		os.Stdout.WriteString(`{"type":"step_start"}` + "\n")                                                                            //nolint:errcheck
-		os.Stdout.WriteString(`{"type":"text","part":{"type":"text","text":` + jsonQuote("The orchestrator says: route to agent-b") + `}}` + "\n") //nolint:errcheck
-		os.Stdout.WriteString(`{"type":"step_finish","part":{"reason":"stop"}}` + "\n")                                                  //nolint:errcheck
-
-	case "text-only-ghcpcli":
-		// A valid GHCP CLI event stream whose content field carries plain text
-		// rather than a Communication Protocol message. Process exits 0.
-		os.Stdout.WriteString(`{"type":"assistant.message","data":{"content":` + jsonQuote("The orchestrator says: route to agent-b") + `}}` + "\n") //nolint:errcheck
-		os.Stdout.WriteString(`{"type":"result","timestamp":"2026-08-12T21:00:01Z","sessionId":"s1","exitCode":0,"usage":{}}` + "\n")                //nolint:errcheck
-
 	case "hang":
 		// Block indefinitely so the test can exercise timeout and context
 		// cancellation. time.Sleep avoids the goroutine-deadlock panic that

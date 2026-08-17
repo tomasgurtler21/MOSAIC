@@ -203,17 +203,23 @@ func TestProbeDeployedArtifact_TargetIsDirectory_PresentIsFalse(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestProbeDeployedArtifact_OrchestratorWithWorkflows_WorkflowsPopulated verifies that when
-// the deployed file contains workflow section blocks with version attributes, the
+// the deployed file contains managed-form workflow blocks with version attributes, the
 // Workflows field carries each workflow's ID and version in first-occurrence order.
+// The production deployed shape is <Workflow type="managed"> nested inside a managed
+// <AvailableWorkflows> region inside a core <Identity> section.
 func TestProbeDeployedArtifact_OrchestratorWithWorkflows_WorkflowsPopulated(t *testing.T) {
 	ws := t.TempDir()
 	content := []byte("---\nversion: \"1.0\"\n---\n\n" +
-		"<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
+		"<Identity type=\"core\">\n" +
+		"<AvailableWorkflows type=\"managed\">\n" +
+		"<Workflow type=\"managed\" name=\"quick-fix\" version=\"3.0\">\n" +
 		"Quick fix workflow body.\n" +
-		"</Workflow>\n\n" +
-		"<Workflow type=\"core\" name=\"code-review\" version=\"2.1\">\n" +
+		"</Workflow>\n" +
+		"<Workflow type=\"managed\" name=\"code-review\" version=\"2.1\">\n" +
 		"Code review workflow body.\n" +
-		"</Workflow>\n")
+		"</Workflow>\n" +
+		"</AvailableWorkflows>\n" +
+		"</Identity>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
 	state := probeDeployedArtifact(ws, "orchestrator.md", "")
@@ -243,12 +249,16 @@ func TestProbeDeployedArtifact_OrchestratorWithWorkflows_WorkflowsPopulated(t *t
 // only the first occurrence is retained in the Workflows list.
 func TestProbeDeployedArtifact_OrchestratorWithDuplicateWorkflowBlock_Deduplicates(t *testing.T) {
 	ws := t.TempDir()
-	content := []byte("<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
+	content := []byte("<Identity type=\"core\">\n" +
+		"<AvailableWorkflows type=\"managed\">\n" +
+		"<Workflow type=\"managed\" name=\"quick-fix\" version=\"3.0\">\n" +
 		"First occurrence.\n" +
-		"</Workflow>\n\n" +
-		"<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
+		"</Workflow>\n" +
+		"<Workflow type=\"managed\" name=\"quick-fix\" version=\"3.0\">\n" +
 		"Second occurrence (duplicate).\n" +
-		"</Workflow>\n")
+		"</Workflow>\n" +
+		"</AvailableWorkflows>\n" +
+		"</Identity>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
 	state := probeDeployedArtifact(ws, "orchestrator.md", "")
@@ -263,9 +273,13 @@ func TestProbeDeployedArtifact_OrchestratorWithDuplicateWorkflowBlock_Deduplicat
 // or a default value.
 func TestProbeDeployedArtifact_WorkflowBlockWithNoVersionAttribute_VersionIsEmpty(t *testing.T) {
 	ws := t.TempDir()
-	content := []byte("<Workflow type=\"core\" name=\"old-workflow\">\n" +
+	content := []byte("<Identity type=\"core\">\n" +
+		"<AvailableWorkflows type=\"managed\">\n" +
+		"<Workflow type=\"managed\" name=\"old-workflow\">\n" +
 		"This block has no version attribute.\n" +
-		"</Workflow>\n")
+		"</Workflow>\n" +
+		"</AvailableWorkflows>\n" +
+		"</Identity>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
 	state := probeDeployedArtifact(ws, "orchestrator.md", "")
@@ -441,9 +455,13 @@ func TestProbeDeployedArtifact_ModelIDDoesNotAffectVersionFields(t *testing.T) {
 func TestProbeDeployedArtifact_ModelIDDoesNotAffectWorkflows(t *testing.T) {
 	ws := t.TempDir()
 	content := []byte("---\nversion: \"1.0\"\nmodel: \"claude-opus-4-5\"\n---\n\n" +
-		"<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
+		"<Identity type=\"core\">\n" +
+		"<AvailableWorkflows type=\"managed\">\n" +
+		"<Workflow type=\"managed\" name=\"quick-fix\" version=\"3.0\">\n" +
 		"Quick fix workflow body.\n" +
-		"</Workflow>\n")
+		"</Workflow>\n" +
+		"</AvailableWorkflows>\n" +
+		"</Identity>\n")
 	writeFile(t, ws, "orchestrator.md", content)
 
 	state := probeDeployedArtifact(ws, "orchestrator.md", "model")
@@ -545,16 +563,22 @@ func TestProbeDeployedArtifact_ModelIDWithLeadingTrailingSpaces_PreservedVerbati
 // ---------------------------------------------------------------------------
 
 // TestExtractDeployedWorkflows_MultipleBlocksWithVersionAttributes_ReturnsAllInOrder verifies
-// that each workflow section block is paired with the version from its version attribute
-// in first-occurrence order.
+// that each managed workflow block is paired with the version from its version attribute
+// in first-occurrence (document) order. The production deployed shape is
+// <Workflow type="managed"> blocks nested inside <AvailableWorkflows type="managed"> inside
+// a core <Identity> section.
 func TestExtractDeployedWorkflows_MultipleBlocksWithVersionAttributes_ReturnsAllInOrder(t *testing.T) {
 	data := []byte(
-		"<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
+		"<Identity type=\"core\">\n" +
+			"<AvailableWorkflows type=\"managed\">\n" +
+			"<Workflow type=\"managed\" name=\"quick-fix\" version=\"3.0\">\n" +
 			"Content.\n" +
-			"</Workflow>\n\n" +
-			"<Workflow type=\"core\" name=\"code-review\" version=\"2.1\">\n" +
+			"</Workflow>\n" +
+			"<Workflow type=\"managed\" name=\"code-review\" version=\"2.1\">\n" +
 			"Content.\n" +
-			"</Workflow>\n")
+			"</Workflow>\n" +
+			"</AvailableWorkflows>\n" +
+			"</Identity>\n")
 
 	wfs := extractDeployedWorkflows(data)
 
@@ -570,15 +594,19 @@ func TestExtractDeployedWorkflows_MultipleBlocksWithVersionAttributes_ReturnsAll
 }
 
 // TestExtractDeployedWorkflows_DuplicateBlock_OnlyFirstOccurrenceKept verifies that when the
-// same workflow ID appears more than once, only the first occurrence is included.
+// same workflow ID appears more than once in managed form, only the first occurrence is included.
 func TestExtractDeployedWorkflows_DuplicateBlock_OnlyFirstOccurrenceKept(t *testing.T) {
 	data := []byte(
-		"<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
+		"<Identity type=\"core\">\n" +
+			"<AvailableWorkflows type=\"managed\">\n" +
+			"<Workflow type=\"managed\" name=\"quick-fix\" version=\"3.0\">\n" +
 			"First occurrence.\n" +
-			"</Workflow>\n\n" +
-			"<Workflow type=\"core\" name=\"quick-fix\" version=\"3.0\">\n" +
+			"</Workflow>\n" +
+			"<Workflow type=\"managed\" name=\"quick-fix\" version=\"3.0\">\n" +
 			"Duplicate — must be ignored.\n" +
-			"</Workflow>\n")
+			"</Workflow>\n" +
+			"</AvailableWorkflows>\n" +
+			"</Identity>\n")
 
 	wfs := extractDeployedWorkflows(data)
 
@@ -587,13 +615,17 @@ func TestExtractDeployedWorkflows_DuplicateBlock_OnlyFirstOccurrenceKept(t *test
 	}
 }
 
-// TestExtractDeployedWorkflows_BlockWithNoVersionAttribute_VersionIsEmpty verifies that a block
-// without a version attribute yields an entry with an empty Version.
+// TestExtractDeployedWorkflows_BlockWithNoVersionAttribute_VersionIsEmpty verifies that a
+// managed-form block without a version attribute yields an entry with an empty Version.
 func TestExtractDeployedWorkflows_BlockWithNoVersionAttribute_VersionIsEmpty(t *testing.T) {
 	data := []byte(
-		"<Workflow type=\"core\" name=\"legacy\">\n" +
+		"<Identity type=\"core\">\n" +
+			"<AvailableWorkflows type=\"managed\">\n" +
+			"<Workflow type=\"managed\" name=\"legacy\">\n" +
 			"Content without a version attribute.\n" +
-			"</Workflow>\n")
+			"</Workflow>\n" +
+			"</AvailableWorkflows>\n" +
+			"</Identity>\n")
 
 	wfs := extractDeployedWorkflows(data)
 
@@ -618,12 +650,17 @@ func TestExtractDeployedWorkflows_NoWorkflowBlocks_ReturnsNil(t *testing.T) {
 }
 
 // TestExtractDeployedWorkflows_VersionAttributeWithExtraWhitespace_VersionTrimmed verifies
-// that leading and trailing whitespace around the version attribute value is stripped.
+// that leading and trailing whitespace around the version attribute value is stripped for
+// a managed-form workflow block.
 func TestExtractDeployedWorkflows_VersionAttributeWithExtraWhitespace_VersionTrimmed(t *testing.T) {
 	data := []byte(
-		"<Workflow type=\"core\" name=\"padded\" version=\"  4.2  \">\n" +
+		"<Identity type=\"core\">\n" +
+			"<AvailableWorkflows type=\"managed\">\n" +
+			"<Workflow type=\"managed\" name=\"padded\" version=\"  4.2  \">\n" +
 			"Content.\n" +
-			"</Workflow>\n")
+			"</Workflow>\n" +
+			"</AvailableWorkflows>\n" +
+			"</Identity>\n")
 
 	wfs := extractDeployedWorkflows(data)
 
@@ -636,13 +673,15 @@ func TestExtractDeployedWorkflows_VersionAttributeWithExtraWhitespace_VersionTri
 }
 
 // TestExtractDeployedWorkflows_UnclosedBlock_WorkflowCapturedWithVersion verifies that a
-// workflow section block that has an opening tag but no closing tag (e.g. a truncated
+// managed-form workflow block with an opening tag but no closing tag (e.g. a truncated
 // deployed file) is still captured: the ID and version come from the opening tag's attributes.
 // Absent closing tags must not silently discard discovered workflow IDs.
 func TestExtractDeployedWorkflows_UnclosedBlock_WorkflowCapturedWithVersion(t *testing.T) {
-	// No </Workflow> closing tag.
+	// No </Workflow>, </AvailableWorkflows>, or </Identity> closing tags — simulates truncation.
 	data := []byte(
-		"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
+		"<Identity type=\"core\">\n" +
+			"<AvailableWorkflows type=\"managed\">\n" +
+			"<Workflow type=\"managed\" name=\"quick-fix\" version=\"1.0\">\n" +
 			"Content that is never closed.\n")
 
 	wfs := extractDeployedWorkflows(data)
@@ -660,16 +699,21 @@ func TestExtractDeployedWorkflows_UnclosedBlock_WorkflowCapturedWithVersion(t *t
 }
 
 // TestExtractDeployedWorkflows_TwoBlocksWithAttributes_BothVersionsIndependent
-// verifies that two closed workflow blocks each carry their own version independently from
-// their opening tag attributes. Each block's version comes only from its own opening tag.
+// verifies that two closed managed-form workflow blocks each carry their own version
+// independently from their opening tag attributes. Each block's version comes only from
+// its own opening tag.
 func TestExtractDeployedWorkflows_TwoBlocksWithAttributes_BothVersionsIndependent(t *testing.T) {
 	data := []byte(
-		"<Workflow type=\"core\" name=\"wf1\" version=\"1.0\">\n" +
+		"<Identity type=\"core\">\n" +
+			"<AvailableWorkflows type=\"managed\">\n" +
+			"<Workflow type=\"managed\" name=\"wf1\" version=\"1.0\">\n" +
 			"Content of wf1.\n" +
 			"</Workflow>\n" +
-			"<Workflow type=\"core\" name=\"wf2\" version=\"2.0\">\n" +
+			"<Workflow type=\"managed\" name=\"wf2\" version=\"2.0\">\n" +
 			"Content of wf2.\n" +
-			"</Workflow>\n")
+			"</Workflow>\n" +
+			"</AvailableWorkflows>\n" +
+			"</Identity>\n")
 
 	wfs := extractDeployedWorkflows(data)
 
@@ -689,6 +733,123 @@ func TestExtractDeployedWorkflows_TwoBlocksWithAttributes_BothVersionsIndependen
 	if wfs[1].Version != "2.0" {
 		t.Errorf("wfs[1].Version = %q, want %q; orphan comment between blocks must not affect wf2's version",
 			wfs[1].Version, "2.0")
+	}
+}
+
+// TestExtractDeployedWorkflows_CoreFormWorkflowBlock_NotRecognisedInDeployedFile verifies
+// that a <Workflow type="core"> block in a deployed file yields no discovered workflow.
+// Deployed workflow blocks are always managed regions (type="managed"): the deploy transform
+// retypes every workflow block on write. Accepting the core form would let fixtures drift back
+// to a shape no deployed file can produce and hide the extractor bug this stage fixes.
+func TestExtractDeployedWorkflows_CoreFormWorkflowBlock_NotRecognisedInDeployedFile(t *testing.T) {
+	// A core-form workflow block is the catalog-side shape, never written to a deployed file.
+	data := []byte(
+		"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
+			"Catalog-side content.\n" +
+			"</Workflow>\n")
+
+	wfs := extractDeployedWorkflows(data)
+
+	if wfs != nil {
+		t.Errorf("extractDeployedWorkflows: got %v, want nil; "+
+			"a <Workflow type=\"core\"> block must not be recognised in a deployed file — "+
+			"only <Workflow type=\"managed\"> regions (the production deployed shape) are valid",
+			wfs)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// extractDeployedWorkflows → WorkflowStaleness (end-to-end drift path)
+// ---------------------------------------------------------------------------
+
+// TestDeployedWorkflowDrift_IdenticalSets_NoDriftReported verifies that when the deployed
+// orchestrator contains managed-form workflow blocks and the desired workflow set is identical,
+// WorkflowStaleness reports no drift. This pins the end-to-end path: if extractDeployedWorkflows
+// returns nil (broken extractor), WorkflowStaleness incorrectly treats all selected workflows
+// as Added and reports false drift even when the sets are identical.
+func TestDeployedWorkflowDrift_IdenticalSets_NoDriftReported(t *testing.T) {
+	data := []byte(
+		"---\nversion: \"1.0\"\n---\n\n" +
+			"<Identity type=\"core\">\n" +
+			"<AvailableWorkflows type=\"managed\">\n" +
+			"<Workflow type=\"managed\" name=\"quick-fix\" version=\"1.0\">\n" +
+			"Content.\n" +
+			"</Workflow>\n" +
+			"</AvailableWorkflows>\n" +
+			"</Identity>\n")
+
+	deployed := extractDeployedWorkflows(data)
+
+	// Desired set is identical to the deployed set.
+	selected := []domain.Workflow{
+		{ID: "quick-fix", Version: "1.0"},
+	}
+
+	drift := plan.WorkflowStaleness(deployed, selected)
+
+	if drift.Stale() {
+		t.Errorf("WorkflowStaleness: Stale() = true, want false when deployed and desired sets are identical; "+
+			"Added=%v Removed=%v Changed=%v; "+
+			"a broken extractDeployedWorkflows (returning nil) causes WorkflowStaleness to treat all "+
+			"selected workflows as Added, falsely reporting drift",
+			drift.Added, drift.Removed, drift.Changed)
+	}
+}
+
+// TestDeployedWorkflowDrift_DifferingSets_DriftReportedWithBothSidesPopulated verifies that
+// when the deployed orchestrator has one workflow set and the desired set differs, drift is
+// correctly reported with both Added and Removed populated. Specifically, a workflow present
+// only in the deployed set must appear in Removed — which requires extractDeployedWorkflows
+// to return the actual deployed set, not nil.
+func TestDeployedWorkflowDrift_DifferingSets_DriftReportedWithBothSidesPopulated(t *testing.T) {
+	// Deployed orchestrator carries quick-fix only.
+	data := []byte(
+		"---\nversion: \"1.0\"\n---\n\n" +
+			"<Identity type=\"core\">\n" +
+			"<AvailableWorkflows type=\"managed\">\n" +
+			"<Workflow type=\"managed\" name=\"quick-fix\" version=\"1.0\">\n" +
+			"Content.\n" +
+			"</Workflow>\n" +
+			"</AvailableWorkflows>\n" +
+			"</Identity>\n")
+
+	deployed := extractDeployedWorkflows(data)
+
+	// Desired set has code-review only: quick-fix must be Removed, code-review must be Added.
+	selected := []domain.Workflow{
+		{ID: "code-review", Version: "2.0"},
+	}
+
+	drift := plan.WorkflowStaleness(deployed, selected)
+
+	if !drift.Stale() {
+		t.Error("WorkflowStaleness: Stale() = false, want true when deployed and desired sets differ")
+	}
+
+	// code-review must be Added (in selected but not in deployed).
+	foundAdded := false
+	for _, id := range drift.Added {
+		if id == "code-review" {
+			foundAdded = true
+		}
+	}
+	if !foundAdded {
+		t.Errorf("WorkflowDrift.Added = %v; want to contain \"code-review\"", drift.Added)
+	}
+
+	// quick-fix must be Removed (in deployed but not in selected).
+	// If extractDeployedWorkflows returns nil (broken), Removed is always empty and this fails.
+	foundRemoved := false
+	for _, id := range drift.Removed {
+		if id == "quick-fix" {
+			foundRemoved = true
+		}
+	}
+	if !foundRemoved {
+		t.Errorf("WorkflowDrift.Removed = %v; want to contain \"quick-fix\"; "+
+			"a broken extractDeployedWorkflows (returning nil) leaves the deployed set empty, "+
+			"so Removed is never populated even when quick-fix is only in the deployed file",
+			drift.Removed)
 	}
 }
 

@@ -124,19 +124,26 @@ func eligibleAgentWithRoleBytes(role string) []byte {
 }
 
 // miniCatalog is a minimal catalog.Catalog stub used only by catalogAgentKeys tests.
-// Only Agents(), Orchestrator(), and UtilityAgents() are implemented; every other method
-// panics to make misuse of the stub visible immediately during test development.
+// Only Agents(), Orchestrator(), OrchestratorScript(), and UtilityAgents() are implemented;
+// every other method panics to make misuse of the stub visible immediately.
+//
+// Set scriptOrchestratorOK to true and populate scriptOrchestrator to simulate a catalog
+// that exposes a script orchestrator via OrchestratorScript(). When scriptOrchestratorOK
+// is false (the zero value), OrchestratorScript() returns (Agent{}, false), modelling
+// a catalog whose script orchestrator is legitimately absent.
 type miniCatalog struct {
-	workers      []domain.Agent
-	orchestrator domain.Agent
-	utilities    []domain.Agent
+	workers              []domain.Agent
+	orchestrator         domain.Agent
+	utilities            []domain.Agent
+	scriptOrchestrator   domain.Agent
+	scriptOrchestratorOK bool
 }
 
 func (c *miniCatalog) Root() string                                  { return "" }
 func (c *miniCatalog) CatalogRoot() string                           { return "" }
 func (c *miniCatalog) Agents() []domain.Agent                        { return c.workers }
 func (c *miniCatalog) Orchestrator() domain.Agent                    { return c.orchestrator }
-func (c *miniCatalog) OrchestratorScript() (domain.Agent, bool)      { return domain.Agent{}, false }
+func (c *miniCatalog) OrchestratorScript() (domain.Agent, bool)      { return c.scriptOrchestrator, c.scriptOrchestratorOK }
 func (c *miniCatalog) UtilityAgents() []domain.Agent                 { return c.utilities }
 func (c *miniCatalog) StandaloneAgents() []domain.Agent              { return nil }
 func (c *miniCatalog) Agent(key string) (domain.Agent, bool)         { panic("miniCatalog: Agent not used") }
@@ -1317,5 +1324,278 @@ func TestEligibleHarnessOnly_StandaloneRole_UnbalancedTagStillBlocks(t *testing.
 	if verdict.Reason == "" {
 		t.Error("eligibleHarnessOnly returned empty Reason for an ineligible verdict; " +
 			"a negative verdict must carry a human-readable Reason")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// catalogAgentKeys — script orchestrator key derivation
+// ---------------------------------------------------------------------------
+//
+// Verified behaviours:
+//   - A catalog that exposes a script orchestrator via OrchestratorScript() contributes
+//     its key to the returned set.
+//   - A catalog where OrchestratorScript() returns ok=false contributes no key and
+//     does not panic (absence is legitimate, not an error).
+//   - A script orchestrator with an empty Key does not insert an empty-string entry
+//     (the empty-key guard applies to every accessor, including OrchestratorScript).
+
+// TestCatalogAgentKeys_WithScriptOrchestrator_IncludesKey verifies that when the catalog
+// exposes a script orchestrator through OrchestratorScript(), its key is included in the
+// returned set. A deployed orchestrator-script.md then has a generic counterpart and must
+// not be classified as harness-only.
+func TestCatalogAgentKeys_WithScriptOrchestrator_IncludesKey(t *testing.T) {
+	// Arrange — catalog that exposes a script orchestrator.
+	cat := &miniCatalog{
+		workers:              []domain.Agent{{Key: "worker-agent"}},
+		orchestrator:         domain.Agent{Key: "orchestrator"},
+		scriptOrchestrator:   domain.Agent{Key: "orchestrator-script"},
+		scriptOrchestratorOK: true,
+	}
+
+	// Act
+	keys := catalogAgentKeys(cat)
+
+	// Assert — the script orchestrator's key must be present.
+	if !keys["orchestrator-script"] {
+		t.Error("catalogAgentKeys returned a map missing key \"orchestrator-script\"; " +
+			"when OrchestratorScript() returns ok=true, its key must be included so a " +
+			"deployed orchestrator-script.md is not classified as harness-only")
+	}
+	// Verify the existing keys are still present — the script orchestrator is additive.
+	if !keys["worker-agent"] {
+		t.Error("catalogAgentKeys missing \"worker-agent\" after adding script orchestrator; " +
+			"existing worker agent keys must still be included")
+	}
+	if !keys["orchestrator"] {
+		t.Error("catalogAgentKeys missing \"orchestrator\" after adding script orchestrator; " +
+			"orchestrator key must still be included")
+	}
+}
+
+// TestCatalogAgentKeys_WithoutScriptOrchestrator_NoKeyAdded verifies that when the catalog
+// has no script orchestrator (OrchestratorScript returns ok=false), no key is contributed
+// and the function neither panics nor inserts a spurious entry. The absence of a script
+// orchestrator is a legitimate and expected catalog state, not an error.
+func TestCatalogAgentKeys_WithoutScriptOrchestrator_NoKeyAdded(t *testing.T) {
+	// Arrange — catalog with no script orchestrator; scriptOrchestratorOK is false (zero value).
+	cat := &miniCatalog{
+		workers:      []domain.Agent{{Key: "worker-agent"}},
+		orchestrator: domain.Agent{Key: "orchestrator"},
+	}
+	wantLen := 2 // "worker-agent" + "orchestrator" only
+
+	// Act — must not panic.
+	keys := catalogAgentKeys(cat)
+
+	// Assert — no "orchestrator-script" entry, and no extra entries of any kind.
+	if keys["orchestrator-script"] {
+		t.Error("catalogAgentKeys added key \"orchestrator-script\" when OrchestratorScript " +
+			"returned ok=false; an absent script orchestrator must contribute no key")
+	}
+	if len(keys) != wantLen {
+		t.Errorf("catalogAgentKeys returned %d entries for a catalog with no script orchestrator, "+
+			"want %d; entries: %v", len(keys), wantLen, keys)
+	}
+}
+
+// TestCatalogAgentKeys_ScriptOrchestratorEmptyKey_NotInserted verifies that when
+// OrchestratorScript returns ok=true but the agent's Key is the empty string, no
+// empty-string key is inserted. The empty-key guard must apply to the script orchestrator
+// branch exactly as it does for worker agents, utility agents, and the plain orchestrator.
+func TestCatalogAgentKeys_ScriptOrchestratorEmptyKey_NotInserted(t *testing.T) {
+	// Arrange — script orchestrator present but its Key is empty.
+	cat := &miniCatalog{
+		scriptOrchestrator:   domain.Agent{Key: ""},
+		scriptOrchestratorOK: true,
+	}
+
+	// Act
+	keys := catalogAgentKeys(cat)
+
+	// Assert — the empty string must not appear as a key.
+	if keys[""] {
+		t.Error("catalogAgentKeys inserted an empty key when the script orchestrator's Key " +
+			"field is \"\"; empty keys must never be inserted for any accessor")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// isOrchestratorFileName — script orchestrator filename forms
+// ---------------------------------------------------------------------------
+//
+// Verified behaviours (complement the existing orchestrator.md / orchestrator.agent.md
+// tests already in the file):
+//   - "orchestrator-script.md" → true
+//   - "orchestrator-script.agent.md" → true
+//   - "ORCHESTRATOR-SCRIPT.MD" (upper-case) → true (case-insensitive)
+//   - "ORCHESTRATOR-SCRIPT.AGENT.MD" (upper-case) → true
+//   - "orchestrator-script-custom.md" (prefix match only) → false
+
+// TestIsOrchestratorFileName_OrchestratorScriptMd_ReturnsTrue verifies that
+// "orchestrator-script.md" is classified as an orchestrator-role file name.
+func TestIsOrchestratorFileName_OrchestratorScriptMd_ReturnsTrue(t *testing.T) {
+	if !isOrchestratorFileName("orchestrator-script.md") {
+		t.Error("isOrchestratorFileName(\"orchestrator-script.md\") returned false; want true")
+	}
+}
+
+// TestIsOrchestratorFileName_OrchestratorScriptAgentMd_ReturnsTrue verifies that the
+// alternate form "orchestrator-script.agent.md" is also classified as an orchestrator-role
+// file name. Both suffix forms must be accepted, matching the existing orchestrator contract.
+func TestIsOrchestratorFileName_OrchestratorScriptAgentMd_ReturnsTrue(t *testing.T) {
+	if !isOrchestratorFileName("orchestrator-script.agent.md") {
+		t.Error("isOrchestratorFileName(\"orchestrator-script.agent.md\") returned false; want true")
+	}
+}
+
+// TestIsOrchestratorFileName_OrchestratorScriptMdUpperCase_ReturnsTrue verifies that the
+// comparison is case-insensitive for the script orchestrator form: "ORCHESTRATOR-SCRIPT.MD"
+// must return true.
+func TestIsOrchestratorFileName_OrchestratorScriptMdUpperCase_ReturnsTrue(t *testing.T) {
+	if !isOrchestratorFileName("ORCHESTRATOR-SCRIPT.MD") {
+		t.Error("isOrchestratorFileName(\"ORCHESTRATOR-SCRIPT.MD\") returned false; " +
+			"want true — classification must be case-insensitive")
+	}
+}
+
+// TestIsOrchestratorFileName_OrchestratorScriptAgentMdUpperCase_ReturnsTrue verifies
+// case-insensitivity for the "orchestrator-script.agent.md" form.
+func TestIsOrchestratorFileName_OrchestratorScriptAgentMdUpperCase_ReturnsTrue(t *testing.T) {
+	if !isOrchestratorFileName("ORCHESTRATOR-SCRIPT.AGENT.MD") {
+		t.Error("isOrchestratorFileName(\"ORCHESTRATOR-SCRIPT.AGENT.MD\") returned false; " +
+			"want true — classification must be case-insensitive")
+	}
+}
+
+// TestIsOrchestratorFileName_OrchestratorScriptCustomSuffix_ReturnsFalse verifies that a
+// file whose name begins with "orchestrator-script" but is not one of the exact two accepted
+// forms returns false. Matching is whole-name equality, never a prefix or substring test.
+func TestIsOrchestratorFileName_OrchestratorScriptCustomSuffix_ReturnsFalse(t *testing.T) {
+	if isOrchestratorFileName("orchestrator-script-custom.md") {
+		t.Error("isOrchestratorFileName(\"orchestrator-script-custom.md\") returned true; " +
+			"want false — only exact whole-name matches are recognised, " +
+			"a file named \"orchestrator-script-custom.md\" is not an orchestrator file")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// scanHarnessOnlyAgents — script orchestrator scan-level exclusion
+// ---------------------------------------------------------------------------
+//
+// Verified behaviours:
+//   - A deployed orchestrator-script.md whose catalog exposes the script orchestrator is
+//     NOT returned as harness-only (catalog-key exclusion channel).
+//   - A deployed orchestrator-script.md is NOT returned even with empty catalogKeys
+//     (filename exclusion channel via isOrchestratorFileName).
+//   - When orchestrator-script.md is excluded, a co-located genuine harness-only file
+//     with no catalog counterpart is still returned (the two-signal rule is unchanged).
+
+// TestScanHarnessOnlyAgents_OrchestratorScriptInCatalog_NotHarnessOnly verifies that a
+// deployed orchestrator-script.md file whose catalog exposes the script orchestrator is NOT
+// returned by the harness-only scan. The catalog-key exclusion is the primary channel tested
+// here: catalogAgentKeys must include "orchestrator-script" so the scan's catalog-key check
+// excludes the file.
+func TestScanHarnessOnlyAgents_OrchestratorScriptInCatalog_NotHarnessOnly(t *testing.T) {
+	// Arrange — catalog that exposes a script orchestrator.
+	cat := &miniCatalog{
+		workers:              []domain.Agent{{Key: "worker-agent"}},
+		orchestrator:         domain.Agent{Key: "orchestrator"},
+		scriptOrchestrator:   domain.Agent{Key: "orchestrator-script"},
+		scriptOrchestratorOK: true,
+	}
+
+	workspace := t.TempDir()
+	agentsDir := ".claude/agents"
+	fullDir := filepath.Join(workspace, agentsDir)
+
+	// Write an eligible orchestrator-script.md — it passes both eligibility signals.
+	writeHarnessOnlyAgentFile(t, fullDir, "orchestrator-script.md", minimalEligibleAgentBytes())
+
+	// Derive catalog keys through the production path so both exclusion channels are
+	// exercised together: catalogAgentKeys must include "orchestrator-script".
+	catalogKeys := catalogAgentKeys(cat)
+
+	// Act
+	result := scanHarnessOnlyAgents(workspace, agentsDir, catalogKeys)
+
+	// Assert — the orchestrator-script.md must not appear in the harness-only set.
+	if len(result) != 0 {
+		t.Errorf("scanHarnessOnlyAgents returned %d result(s) for an orchestrator-script.md "+
+			"whose catalog exposes the script orchestrator; want 0 — a file with a generic "+
+			"catalog counterpart must not be classified as harness-only",
+			len(result))
+		for _, r := range result {
+			t.Logf("  unexpected result: TargetPath=%q Key=%q", r.TargetPath, r.Key)
+		}
+	}
+}
+
+// TestScanHarnessOnlyAgents_OrchestratorScriptFileName_ExcludedByFilename verifies that a
+// deployed orchestrator-script.md is excluded from the harness-only result even when the
+// catalog key is not present in the supplied catalogKeys map — the filename exclusion via
+// isOrchestratorFileName is an independent second channel. This test isolates that channel
+// by passing an empty catalogKeys.
+func TestScanHarnessOnlyAgents_OrchestratorScriptFileName_ExcludedByFilename(t *testing.T) {
+	// Arrange — no catalog keys at all; the exclusion must come from isOrchestratorFileName.
+	workspace := t.TempDir()
+	agentsDir := ".claude/agents"
+	fullDir := filepath.Join(workspace, agentsDir)
+
+	writeHarnessOnlyAgentFile(t, fullDir, "orchestrator-script.md", minimalEligibleAgentBytes())
+
+	// Act — empty catalogKeys: only the filename exclusion channel can exclude this file.
+	result := scanHarnessOnlyAgents(workspace, agentsDir, map[string]bool{})
+
+	// Assert — excluded by isOrchestratorFileName before the catalog-key check is reached.
+	if len(result) != 0 {
+		t.Errorf("scanHarnessOnlyAgents returned %d result(s) for \"orchestrator-script.md\" "+
+			"with empty catalogKeys; want 0 — isOrchestratorFileName must recognise the "+
+			"script-orchestrator filename and exclude it from harness-only detection",
+			len(result))
+	}
+}
+
+// TestScanHarnessOnlyAgents_OrchestratorScriptExcluded_GenuineHarnessOnlyStillDetected
+// verifies the negative counterpart: when orchestrator-script.md is present alongside a
+// genuine hand-authored harness-only agent with no catalog counterpart, the scan still
+// returns the genuine harness-only file. The two-signal eligibility rule is unchanged in
+// purpose and behaviour; only the orchestrator-script.md is excluded.
+func TestScanHarnessOnlyAgents_OrchestratorScriptExcluded_GenuineHarnessOnlyStillDetected(t *testing.T) {
+	// Arrange — catalog exposes the script orchestrator; one separate genuine harness-only file.
+	cat := &miniCatalog{
+		workers:              []domain.Agent{{Key: "worker-agent"}},
+		orchestrator:         domain.Agent{Key: "orchestrator"},
+		scriptOrchestrator:   domain.Agent{Key: "orchestrator-script"},
+		scriptOrchestratorOK: true,
+	}
+
+	workspace := t.TempDir()
+	agentsDir := ".claude/agents"
+	fullDir := filepath.Join(workspace, agentsDir)
+
+	// The script orchestrator deployed file — must be excluded.
+	writeHarnessOnlyAgentFile(t, fullDir, "orchestrator-script.md", minimalEligibleAgentBytes())
+	// A genuine harness-only file with no catalog counterpart — must still be returned.
+	writeHarnessOnlyAgentFile(t, fullDir, "hand-authored-agent.md", minimalEligibleAgentBytes())
+
+	catalogKeys := catalogAgentKeys(cat)
+
+	// Act
+	result := scanHarnessOnlyAgents(workspace, agentsDir, catalogKeys)
+
+	// Assert — exactly one result: the genuine harness-only file, not the script orchestrator.
+	if len(result) != 1 {
+		t.Errorf("scanHarnessOnlyAgents returned %d result(s), want 1 — the genuine "+
+			"harness-only file must be detected and the script orchestrator must not be",
+			len(result))
+		for _, r := range result {
+			t.Logf("  result: TargetPath=%q Key=%q", r.TargetPath, r.Key)
+		}
+		return
+	}
+	if result[0].Key != "hand-authored-agent" {
+		t.Errorf("result[0].Key = %q, want \"hand-authored-agent\"; "+
+			"the genuine harness-only file must be the only result",
+			result[0].Key)
 	}
 }

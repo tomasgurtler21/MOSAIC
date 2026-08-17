@@ -212,11 +212,24 @@ func probeDeployedStateWithIndex(
 	return result, nil
 }
 
-// extractDeployedWorkflows parses deployed content for Workflow:<id> section nodes and
-// returns each distinct workflow in first-occurrence (document) order, paired with the
-// version attribute found on that section's opening tag. A section with no version
-// attribute yields an entry with an empty Version field. Returns nil when no workflow
-// sections are found or when the file cannot be parsed.
+// extractDeployedWorkflows parses a DEPLOYED agent file for `Workflow:<id>` managed regions
+// and returns each distinct workflow in first-occurrence (document) order, paired with the
+// version attribute on that region's opening tag.
+//
+// Deployed workflow blocks are managed regions, never core sections. The deploy transform
+// retypes every workflow block to type="managed" before writing (transform.assembleWorkflowBlocks
+// via docformat.RetypeOpenTagLine), and the Stage 4 managed-block vocabulary makes
+// <Workflow type="managed"> nested in <AvailableWorkflows type="managed"> the canonical
+// deployed shape. This function therefore enumerates Body().DeployedRegions() and NOT
+// Body().SectionsDeep().
+//
+// The core form is deliberately NOT recognised in a deployed file: a <Workflow type="core">
+// block yields no discovered workflow. Production cannot write that shape, and accepting it
+// would let a fixture drift back to a shape no deployed file has. Catalog-side parsing of
+// <Workflow type="core"> is a separate concern in internal/catalog and is unaffected.
+//
+// A region with no version attribute yields an entry with an empty Version. Returns nil when
+// no workflow regions are found, when the input is empty, or when the file cannot be parsed.
 func extractDeployedWorkflows(data []byte) domain.DeployedWorkflows {
 	if len(data) == 0 {
 		return nil
@@ -229,7 +242,7 @@ func extractDeployedWorkflows(data []byte) domain.DeployedWorkflows {
 	var result domain.DeployedWorkflows
 	seen := make(map[string]bool)
 
-	for _, node := range doc.Body().SectionsDeep() {
+	for _, node := range doc.Body().DeployedRegions() {
 		name := node.Name()
 		if !strings.HasPrefix(name, "Workflow:") {
 			continue

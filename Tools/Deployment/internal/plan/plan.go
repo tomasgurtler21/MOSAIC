@@ -81,6 +81,15 @@ type Input struct {
 	// The planner compares it against each deployed artifact's BundleVersion to detect
 	// bundle staleness.
 	BundleVersion string
+
+	// ScannedAgentKeys are the catalog keys of agents the app layer's workspace scan found
+	// deployed. The planner forwards them into Selection.ScannedAgentKeys; nil in every mode
+	// other than ModeUpdateWorkspace.
+	//
+	// Contract with the caller: the app layer must pass the identical slice it used for its
+	// own ResolveArtifactsFrom call. If the two diverge, the probe map and the built plan
+	// describe different artifact sets and the plan is wrong.
+	ScannedAgentKeys []string
 }
 
 // ArtifactSet is the derived deployment set: the union of referenced agents across all

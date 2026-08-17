@@ -130,12 +130,16 @@ func TestUpdate_RenamedAgent_FoundByIDViaServiceFlow(t *testing.T) {
 		t.Fatalf("MkdirAll agents dir: %v", err)
 	}
 
-	// Write the orchestrator at its harness-computed name with a quick-fix workflow section
+	// Write the orchestrator in production managed form with a quick-fix workflow section
 	// so that the update flow discovers the workflow and includes test-runner in the plan.
 	orchContent := []byte("---\nversion: \"1.0.0\"\n---\n" +
-		"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
+		"<Identity type=\"core\">\n" +
+		"<AvailableWorkflows type=\"managed\">\n" +
+		"<Workflow type=\"managed\" name=\"quick-fix\" version=\"1.0\">\n" +
 		"Quick fix content.\n" +
-		"</Workflow>\n")
+		"</Workflow>\n" +
+		"</AvailableWorkflows>\n" +
+		"</Identity>\n")
 	if err := os.WriteFile(filepath.Join(agentsDir, "orchestrator.md"), orchContent, 0o644); err != nil {
 		t.Fatalf("write orchestrator: %v", err)
 	}
@@ -204,11 +208,15 @@ func TestUpdate_AgentWithID_NotFoundByID_ReportsNotPresent(t *testing.T) {
 		t.Fatalf("MkdirAll agents dir: %v", err)
 	}
 
-	// Write the orchestrator with a quick-fix workflow section so test-runner enters the plan.
+	// Write the orchestrator in production managed form with a quick-fix workflow section so test-runner enters the plan.
 	orchContent := []byte("---\nversion: \"1.0.0\"\n---\n" +
-		"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
+		"<Identity type=\"core\">\n" +
+		"<AvailableWorkflows type=\"managed\">\n" +
+		"<Workflow type=\"managed\" name=\"quick-fix\" version=\"1.0\">\n" +
 		"Quick fix content.\n" +
-		"</Workflow>\n")
+		"</Workflow>\n" +
+		"</AvailableWorkflows>\n" +
+		"</Identity>\n")
 	if err := os.WriteFile(filepath.Join(agentsDir, "orchestrator.md"), orchContent, 0o644); err != nil {
 		t.Fatalf("write orchestrator: %v", err)
 	}

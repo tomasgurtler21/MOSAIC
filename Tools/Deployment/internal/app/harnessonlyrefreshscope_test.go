@@ -141,7 +141,7 @@ func TestAskHarnessOnlyRefreshScope_PresentsProtocolOnlyOption(t *testing.T) {
 	capture := &scopePromptCapture{answer: domain.ChoiceAnswer{Status: domain.SkippedOne}}
 	svc := newScopePromptService(capture)
 
-	_, _ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	_ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
 	assertSelectOneCalled(t, capture)
 	opts := capture.calls[0].Question.Options
@@ -166,7 +166,7 @@ func TestAskHarnessOnlyRefreshScope_PresentsAllDeployedOption(t *testing.T) {
 	capture := &scopePromptCapture{answer: domain.ChoiceAnswer{Status: domain.SkippedOne}}
 	svc := newScopePromptService(capture)
 
-	_, _ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	_ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
 	assertSelectOneCalled(t, capture)
 	opts := capture.calls[0].Question.Options
@@ -191,7 +191,7 @@ func TestAskHarnessOnlyRefreshScope_PresentsApplyToAllProtocolOnlyOption(t *test
 	capture := &scopePromptCapture{answer: domain.ChoiceAnswer{Status: domain.SkippedOne}}
 	svc := newScopePromptService(capture)
 
-	_, _ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	_ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
 	assertSelectOneCalled(t, capture)
 	opts := capture.calls[0].Question.Options
@@ -218,7 +218,7 @@ func TestAskHarnessOnlyRefreshScope_PresentsApplyToAllAllDeployedOption(t *testi
 	capture := &scopePromptCapture{answer: domain.ChoiceAnswer{Status: domain.SkippedOne}}
 	svc := newScopePromptService(capture)
 
-	_, _ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	_ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
 	assertSelectOneCalled(t, capture)
 	opts := capture.calls[0].Question.Options
@@ -243,7 +243,7 @@ func TestAskHarnessOnlyRefreshScope_ExactlyFourOptions(t *testing.T) {
 	capture := &scopePromptCapture{answer: domain.ChoiceAnswer{Status: domain.SkippedOne}}
 	svc := newScopePromptService(capture)
 
-	_, _ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	_ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
 	assertSelectOneCalled(t, capture)
 	opts := capture.calls[0].Question.Options
@@ -263,7 +263,7 @@ func TestAskHarnessOnlyRefreshScope_UsesQHarnessOnlyRefreshScopeID(t *testing.T)
 	capture := &scopePromptCapture{answer: domain.ChoiceAnswer{Status: domain.SkippedOne}}
 	svc := newScopePromptService(capture)
 
-	_, _ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	_ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
 	assertSelectOneCalled(t, capture)
 	gotID := capture.calls[0].Question.ID
@@ -282,7 +282,7 @@ func TestAskHarnessOnlyRefreshScope_SubjectIsAgentTargetPath(t *testing.T) {
 	capture := &scopePromptCapture{answer: domain.ChoiceAnswer{Status: domain.SkippedOne}}
 	svc := newScopePromptService(capture)
 
-	_, _ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent(targetPath))
+	_ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent(targetPath))
 
 	assertSelectOneCalled(t, capture)
 	gotSubject := capture.calls[0].Question.Subject
@@ -307,7 +307,7 @@ func TestAskHarnessOnlyRefreshScope_NoUnexpectedOptionIDs(t *testing.T) {
 	capture := &scopePromptCapture{answer: domain.ChoiceAnswer{Status: domain.SkippedOne}}
 	svc := newScopePromptService(capture)
 
-	_, _ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	_ = svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
 	assertSelectOneCalled(t, capture)
 	opts := capture.calls[0].Question.Options
@@ -326,8 +326,8 @@ func TestAskHarnessOnlyRefreshScope_NoUnexpectedOptionIDs(t *testing.T) {
 
 // TestAskHarnessOnlyRefreshScope_PerAgentProtocolOnly_ReturnsScopeWithApplyToAllFalse
 // verifies that when the user selects the bare "protocol-only" option, the function returns
-// RefreshProtocolOnly and applyToAll = false. The "all:" prefix is absent, so this is a
-// per-agent decision that does not latch for remaining agents.
+// a decision with Refresh=true, Scope=RefreshProtocolOnly, and ApplyToAll=false. The "all:"
+// prefix is absent, so this is a per-agent decision that does not latch for remaining agents.
 func TestAskHarnessOnlyRefreshScope_PerAgentProtocolOnly_ReturnsScopeWithApplyToAllFalse(t *testing.T) {
 	capture := &scopePromptCapture{
 		answer: domain.ChoiceAnswer{
@@ -337,22 +337,23 @@ func TestAskHarnessOnlyRefreshScope_PerAgentProtocolOnly_ReturnsScopeWithApplyTo
 	}
 	svc := newScopePromptService(capture)
 
-	scope, applyToAll := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	decision := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
-	if scope != RefreshProtocolOnly {
-		t.Errorf("scope = %q, want %q; a per-agent answer with the bare scope ID must return "+
+	if decision.Scope != RefreshProtocolOnly {
+		t.Errorf("decision.Scope = %q, want %q; a per-agent answer with the bare scope ID must return "+
 			"the corresponding RefreshScope value",
-			scope, RefreshProtocolOnly)
+			decision.Scope, RefreshProtocolOnly)
 	}
-	if applyToAll {
-		t.Error("applyToAll = true, want false; a per-agent answer (no \"all:\" prefix) must " +
-			"return applyToAll false — only the caller's explicit apply-to-all selection latches " +
+	if decision.ApplyToAll {
+		t.Error("decision.ApplyToAll = true, want false; a per-agent answer (no \"all:\" prefix) must " +
+			"return ApplyToAll false — only the caller's explicit apply-to-all selection latches " +
 			"the decision for remaining agents")
 	}
 }
 
 // TestAskHarnessOnlyRefreshScope_PerAgentAllDeployed_ReturnsScopeWithApplyToAllFalse
-// verifies that a bare "all-deployed" answer returns RefreshAllDeployed with applyToAll = false.
+// verifies that a bare "all-deployed" answer returns a decision with Refresh=true,
+// Scope=RefreshAllDeployed, and ApplyToAll=false.
 func TestAskHarnessOnlyRefreshScope_PerAgentAllDeployed_ReturnsScopeWithApplyToAllFalse(t *testing.T) {
 	capture := &scopePromptCapture{
 		answer: domain.ChoiceAnswer{
@@ -362,20 +363,20 @@ func TestAskHarnessOnlyRefreshScope_PerAgentAllDeployed_ReturnsScopeWithApplyToA
 	}
 	svc := newScopePromptService(capture)
 
-	scope, applyToAll := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	decision := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
-	if scope != RefreshAllDeployed {
-		t.Errorf("scope = %q, want %q; a per-agent \"all-deployed\" answer must return RefreshAllDeployed",
-			scope, RefreshAllDeployed)
+	if decision.Scope != RefreshAllDeployed {
+		t.Errorf("decision.Scope = %q, want %q; a per-agent \"all-deployed\" answer must return RefreshAllDeployed",
+			decision.Scope, RefreshAllDeployed)
 	}
-	if applyToAll {
-		t.Error("applyToAll = true, want false; a per-agent answer must return applyToAll false")
+	if decision.ApplyToAll {
+		t.Error("decision.ApplyToAll = true, want false; a per-agent answer must return ApplyToAll false")
 	}
 }
 
 // TestAskHarnessOnlyRefreshScope_ApplyToAllProtocolOnly_ReturnsTrueFlag verifies that
-// the "all:protocol-only" compound option strips the prefix, returns RefreshProtocolOnly,
-// and returns applyToAll = true so the caller can latch this decision for remaining agents.
+// the "all:protocol-only" compound option strips the prefix, returns Scope=RefreshProtocolOnly,
+// and sets ApplyToAll=true so the caller can latch this decision for remaining agents.
 func TestAskHarnessOnlyRefreshScope_ApplyToAllProtocolOnly_ReturnsTrueFlag(t *testing.T) {
 	capture := &scopePromptCapture{
 		answer: domain.ChoiceAnswer{
@@ -385,21 +386,21 @@ func TestAskHarnessOnlyRefreshScope_ApplyToAllProtocolOnly_ReturnsTrueFlag(t *te
 	}
 	svc := newScopePromptService(capture)
 
-	scope, applyToAll := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	decision := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
-	if scope != RefreshProtocolOnly {
-		t.Errorf("scope = %q, want %q; the \"all:\" prefix must be stripped to recover the "+
+	if decision.Scope != RefreshProtocolOnly {
+		t.Errorf("decision.Scope = %q, want %q; the \"all:\" prefix must be stripped to recover the "+
 			"underlying RefreshScope value",
-			scope, RefreshProtocolOnly)
+			decision.Scope, RefreshProtocolOnly)
 	}
-	if !applyToAll {
-		t.Error("applyToAll = false, want true; an answer with the \"all:\" prefix must return " +
-			"applyToAll true so the caller can latch this decision for all remaining harness-only agents")
+	if !decision.ApplyToAll {
+		t.Error("decision.ApplyToAll = false, want true; an answer with the \"all:\" prefix must return " +
+			"ApplyToAll true so the caller can latch this decision for all remaining harness-only agents")
 	}
 }
 
 // TestAskHarnessOnlyRefreshScope_ApplyToAllAllDeployed_ReturnsTrueFlag verifies that the
-// "all:all-deployed" compound option returns RefreshAllDeployed with applyToAll = true.
+// "all:all-deployed" compound option returns Scope=RefreshAllDeployed with ApplyToAll=true.
 func TestAskHarnessOnlyRefreshScope_ApplyToAllAllDeployed_ReturnsTrueFlag(t *testing.T) {
 	capture := &scopePromptCapture{
 		answer: domain.ChoiceAnswer{
@@ -409,14 +410,14 @@ func TestAskHarnessOnlyRefreshScope_ApplyToAllAllDeployed_ReturnsTrueFlag(t *tes
 	}
 	svc := newScopePromptService(capture)
 
-	scope, applyToAll := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	decision := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
-	if scope != RefreshAllDeployed {
-		t.Errorf("scope = %q, want %q; \"all:all-deployed\" must recover RefreshAllDeployed",
-			scope, RefreshAllDeployed)
+	if decision.Scope != RefreshAllDeployed {
+		t.Errorf("decision.Scope = %q, want %q; \"all:all-deployed\" must recover RefreshAllDeployed",
+			decision.Scope, RefreshAllDeployed)
 	}
-	if !applyToAll {
-		t.Error("applyToAll = false, want true; \"all:all-deployed\" must return applyToAll true")
+	if !decision.ApplyToAll {
+		t.Error("decision.ApplyToAll = false, want true; \"all:all-deployed\" must return ApplyToAll true")
 	}
 }
 
@@ -424,88 +425,89 @@ func TestAskHarnessOnlyRefreshScope_ApplyToAllAllDeployed_ReturnsTrueFlag(t *tes
 // T5.3 — Non-answered outcomes
 // ---------------------------------------------------------------------------
 
-// TestAskHarnessOnlyRefreshScope_SkippedOne_ReturnsProtocolOnlyDefault verifies that a
-// SkippedOne outcome — the user skipped this particular question — returns the narrow
-// default (RefreshProtocolOnly, false). The broader scope must never be selected without
-// an explicit answer.
-func TestAskHarnessOnlyRefreshScope_SkippedOne_ReturnsProtocolOnlyDefault(t *testing.T) {
+// TestAskHarnessOnlyRefreshScope_SkippedOne_ReturnsDeclined verifies that a SkippedOne
+// outcome — the user skipped this particular question — returns a declined decision
+// (Refresh=false, ApplyToAll=false). Skip is a true opt-out, not a fallback to the narrow
+// scope: the caller must produce no plan item for this file.
+func TestAskHarnessOnlyRefreshScope_SkippedOne_ReturnsDeclined(t *testing.T) {
 	capture := &scopePromptCapture{
 		answer: domain.ChoiceAnswer{Status: domain.SkippedOne},
 	}
 	svc := newScopePromptService(capture)
 
-	scope, applyToAll := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	decision := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
-	if scope != RefreshProtocolOnly {
-		t.Errorf("scope = %q on SkippedOne, want %q; "+
-			"a skipped prompt must return the narrow default, never the broader scope",
-			scope, RefreshProtocolOnly)
+	if decision.Refresh {
+		t.Error("decision.Refresh = true on SkippedOne, want false; " +
+			"a skipped prompt is a true opt-out — the caller must produce no plan item for this file")
 	}
-	if applyToAll {
-		t.Error("applyToAll = true on SkippedOne, want false; " +
-			"a skipped prompt must not latch the apply-to-all flag for remaining agents")
+	if decision.ApplyToAll {
+		t.Error("decision.ApplyToAll = true on SkippedOne, want false; " +
+			"SkippedOne declines only this file — it must not latch for remaining agents")
 	}
 }
 
-// TestAskHarnessOnlyRefreshScope_SkippedAll_ReturnsProtocolOnlyDefault verifies that a
-// SkippedAll outcome also defaults to the narrow scope without escalating.
-func TestAskHarnessOnlyRefreshScope_SkippedAll_ReturnsProtocolOnlyDefault(t *testing.T) {
+// TestAskHarnessOnlyRefreshScope_SkippedAll_ReturnsDeclinedWithApplyToAll verifies that a
+// SkippedAll outcome returns a declined decision with ApplyToAll=true, latching the decline
+// for every remaining harness-only agent.
+func TestAskHarnessOnlyRefreshScope_SkippedAll_ReturnsDeclinedWithApplyToAll(t *testing.T) {
 	capture := &scopePromptCapture{
 		answer: domain.ChoiceAnswer{Status: domain.SkippedAll},
 	}
 	svc := newScopePromptService(capture)
 
-	scope, applyToAll := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	decision := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
-	if scope != RefreshProtocolOnly {
-		t.Errorf("scope = %q on SkippedAll, want %q; "+
-			"a SkippedAll outcome must also default to the narrow scope",
-			scope, RefreshProtocolOnly)
+	if decision.Refresh {
+		t.Error("decision.Refresh = true on SkippedAll, want false; " +
+			"SkippedAll is a true opt-out for this and all remaining files")
 	}
-	if applyToAll {
-		t.Error("applyToAll = true on SkippedAll, want false")
+	if !decision.ApplyToAll {
+		t.Error("decision.ApplyToAll = false on SkippedAll, want true; " +
+			"SkippedAll must latch the decline for all remaining harness-only agents")
 	}
 }
 
-// TestAskHarnessOnlyRefreshScope_Cancelled_ReturnsProtocolOnlyDefault verifies that a
-// Cancelled outcome returns the narrow default. Cancellation is a non-answer and must
-// never be interpreted as consent to the broader scope.
-func TestAskHarnessOnlyRefreshScope_Cancelled_ReturnsProtocolOnlyDefault(t *testing.T) {
+// TestAskHarnessOnlyRefreshScope_Cancelled_ReturnsDeclined verifies that a Cancelled outcome
+// returns a declined decision (Refresh=false, ApplyToAll=false). Cancellation is not consent;
+// the caller must produce no plan item and must not latch for remaining agents.
+func TestAskHarnessOnlyRefreshScope_Cancelled_ReturnsDeclined(t *testing.T) {
 	capture := &scopePromptCapture{
 		answer: domain.ChoiceAnswer{Status: domain.Cancelled},
 	}
 	svc := newScopePromptService(capture)
 
-	scope, applyToAll := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	decision := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
-	if scope != RefreshProtocolOnly {
-		t.Errorf("scope = %q on Cancelled, want %q; "+
-			"a Cancelled outcome must default to the narrow scope, not the broader one",
-			scope, RefreshProtocolOnly)
+	if decision.Refresh {
+		t.Error("decision.Refresh = true on Cancelled, want false; " +
+			"a cancelled prompt is absence of answer, not consent to any refresh scope")
 	}
-	if applyToAll {
-		t.Error("applyToAll = true on Cancelled, want false")
+	if decision.ApplyToAll {
+		t.Error("decision.ApplyToAll = true on Cancelled, want false; " +
+			"a single cancellation must not latch for remaining agents")
 	}
 }
 
-// TestAskHarnessOnlyRefreshScope_TransportError_ReturnsProtocolOnlyDefault verifies that
-// when SelectOne returns a non-nil transport error, the function returns the narrow default.
-// A transport failure must never silently escalate scope.
-func TestAskHarnessOnlyRefreshScope_TransportError_ReturnsProtocolOnlyDefault(t *testing.T) {
+// TestAskHarnessOnlyRefreshScope_TransportError_ReturnsDeclined verifies that when SelectOne
+// returns a non-nil transport error, the function returns a declined decision (Refresh=false).
+// A transport failure must not be silently treated as consent to any scope.
+func TestAskHarnessOnlyRefreshScope_TransportError_ReturnsDeclined(t *testing.T) {
 	capture := &scopePromptCapture{
 		err: errors.New("transport failure: connection reset by peer"),
 	}
 	svc := newScopePromptService(capture)
 
-	scope, applyToAll := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
+	decision := svc.askHarnessOnlyRefreshScope(context.Background(), scopePromptAgent("some/agent.md"))
 
-	if scope != RefreshProtocolOnly {
-		t.Errorf("scope = %q on transport error, want %q; "+
-			"a SelectOne transport error must return the narrow default scope",
-			scope, RefreshProtocolOnly)
+	if decision.Refresh {
+		t.Error("decision.Refresh = true on transport error, want false; " +
+			"a SelectOne transport error must yield a declined decision — " +
+			"the caller must not silently produce a plan item")
 	}
-	if applyToAll {
-		t.Error("applyToAll = true on transport error, want false")
+	if decision.ApplyToAll {
+		t.Error("decision.ApplyToAll = true on transport error, want false; " +
+			"a transport error on a single file must not latch the decline for remaining agents")
 	}
 }
 

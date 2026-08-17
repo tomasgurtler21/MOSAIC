@@ -21,6 +21,22 @@ type Selection struct {
 	StandaloneAgentIDs     []string
 	HookIDs                []string
 
+	// ScannedAgentKeys are agents brought into the artifact set because a workspace scan found
+	// them actually deployed. Populated only by ModeUpdateWorkspace; nil in every other mode.
+	//
+	// It is deliberately a field of its own rather than a reuse of SubagentIDs: the scanned
+	// set crosses every agent class (worker, utility, infrastructure, standalone, and both
+	// orchestrator-role files), whereas SubagentIDs is documented as ordinary
+	// non-infrastructure subagents named by ModeDeployAgents. Keeping them separate lets each
+	// field keep an honest doc comment and keeps ModeDeployAgents's behaviour provably
+	// untouched by this change.
+	//
+	// Keys are resolved through catalog.Agent, exactly as SubagentIDs, UtilityAgentIDs,
+	// InfrastructureAgentIDs and StandaloneAgentIDs are. An unknown key returns ErrUnknownAgent
+	// wrapped with the key — the classifier only emits keys it read back out of the catalog, so
+	// this error indicates a programming fault, not a workspace condition.
+	ScannedAgentKeys []string
+
 	// ExcludeOrchestrator suppresses the otherwise-unconditional inclusion of
 	// catalog.Catalog.Orchestrator() in the resolved artifact set.
 	//
@@ -160,6 +176,23 @@ func ResolveArtifactsFrom(c catalog.Catalog, sel Selection) (ArtifactSet, error)
 		agent, ok := c.Agent(standaloneKey)
 		if !ok {
 			return ArtifactSet{}, fmt.Errorf("%w: standalone agent %q not found in catalog", ErrUnknownAgent, standaloneKey)
+		}
+		agentsSeen[agent.Key] = true
+		agents = append(agents, agent)
+	}
+
+	// Collect agents found deployed by the workspace scan. These cross every agent class
+	// (worker, utility, infrastructure, standalone, and both orchestrator-role files).
+	// Populated only by ModeUpdateWorkspace; nil in every other mode.
+	// An unknown key is a programming fault — the classifier only emits keys it read from
+	// the catalog, so this must not be softened to a silent skip.
+	for _, scannedKey := range sel.ScannedAgentKeys {
+		if agentsSeen[scannedKey] {
+			continue
+		}
+		agent, ok := c.Agent(scannedKey)
+		if !ok {
+			return ArtifactSet{}, fmt.Errorf("%w: scanned agent %q not found in catalog", ErrUnknownAgent, scannedKey)
 		}
 		agentsSeen[agent.Key] = true
 		agents = append(agents, agent)

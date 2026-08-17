@@ -1,8 +1,22 @@
 package app
 
-// update.go implements the update use case (I18.4): staleness-driven redeployment against
-// an existing workspace, per-file conflict prompting, and optional in-run workflow addition
-// (AC18.6).
+// update.go implements the update use case: staleness-driven redeployment against an
+// existing workspace, per-file conflict prompting, and optional in-run workflow addition.
+//
+// Agent-set membership rule: which deployed agents to staleness-check is determined by a
+// workspace scan of the harness's deployed-agents directory, not by workflow discovery.
+// Every .md file found in that directory is classified in one pass (see scanWorkspaceAgents):
+// catalog-matched files enter the artifact set and run the full staleness pipeline;
+// unmatched but eligible files enter the harness-only consent path; all others are left
+// byte-identical with no plan item and no warning.
+//
+// Workflow discovery's role is narrower: it feeds plan.Input.WorkflowIDs for orchestrator
+// workflow-set drift reporting and the workflow_update "currently deployed" hint. It no
+// longer gates which non-orchestrator agents are checked.
+//
+// The manifest is a complementary per-item lookup (content hashes, recorded versions) and
+// is not consulted for set membership. An agent present in the workspace but absent from
+// the manifest is still staleness-checked.
 
 import (
 	"context"
@@ -101,15 +115,16 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		deployedAgentIndex = buildDeployedAgentIndex(workspace, agentsDir)
 	}
 
-	// Scan for harness-only agents — those present in the deployed-agents directory with no
-	// counterpart in the generic catalog. Guarded on the harness declaring a supported
-	// agents directory; a harness with no agents directory has nothing to scan.
-	// Discovery guard: a harness with no deployed-agents directory has nothing to scan.
-	var harnessOnlyAgents []HarnessOnlyAgent
+	// Scan the deployed-agents directory in one pass to classify every file found there.
+	// Matched files enter Update's artifact set; unmatched but eligible files enter the
+	// harness-only consent path; neither-classified files are left byte-identical.
+	// Guarded on the harness declaring a supported agents directory.
+	scan := WorkspaceAgentScan{}
 	if module.Descriptor().Paths.Agents.Supported && agentsDir != "" {
-		catalogKeys := catalogAgentKeys(s.deps.Catalog)
-		harnessOnlyAgents = scanHarnessOnlyAgents(workspace, agentsDir, catalogKeys)
+		scan = scanWorkspaceAgents(workspace, agentsDir, s.deps.Catalog)
 	}
+	harnessOnlyAgents := scan.HarnessOnly
+	scannedAgentKeys := scan.MatchedKeys()
 
 	snap, _ := s.deps.Manifest.Load(workspace)
 
@@ -133,10 +148,15 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	existing := discoverExistingWorkflows(orchState)
 	workflowIDs := unionPreserveOrder(existing, req.AddWorkflowIDs)
 
-	// Resolve the artifact set from the discovered workflow IDs so we can enumerate target
-	// paths for the full probe. Plan.Build will also resolve internally; this call is the
-	// app layer's own probe-preparation step, not a duplicate plan build.
-	set, err := plan.ResolveArtifacts(s.deps.Catalog, workflowIDs, nil, nil, nil)
+	// Resolve the artifact set from both the discovered workflow IDs and the workspace-scan
+	// matched keys. Both sources union into the same set; this call is the app layer's own
+	// probe-preparation step. plan.Build's internal resolution receives the identical values
+	// via plan.Input.ScannedAgentKeys to ensure the probe map and the built plan agree.
+	set, err := plan.ResolveArtifactsFrom(s.deps.Catalog, plan.Selection{
+		WorkflowIDs:         workflowIDs,
+		ScannedAgentKeys:    scannedAgentKeys,
+		ExcludeOrchestrator: plan.OrchestratorExcludedFor(domain.ModeUpdateWorkspace),
+	})
 	if err != nil {
 		return domain.RunSummary{}, err
 	}
@@ -222,6 +242,9 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		Catalog: s.deps.Catalog, Module: module, Mode: domain.ModeUpdateWorkspace,
 		WorkspacePath: workspace, Scope: scope, GOOS: s.deps.GOOS,
 		Manifest: snap, WorkflowIDs: workflowIDs,
+		// ScannedAgentKeys carries the same slice used for the app layer's ResolveArtifactsFrom
+		// call above, ensuring the probe map and the built plan resolve the identical artifact set.
+		ScannedAgentKeys:    scannedAgentKeys,
 		DeployedState:       deployedState,
 		Models:              allModels,
 		ToolMappingsVersion: toolMappingsVersion,
@@ -268,14 +291,20 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	// Build the harness-only refresh plan. Each eligible agent is asked once for its scope,
 	// with apply-to-all latching mirroring the conflict loop's applyToAllLatch pattern.
 	//
+	// Consent contract: the refresh-scope prompt is the sole consent mechanism for
+	// harness-only agents (they bypass the local-modification conflict prompt by design).
+	// Only an explicit answer (Answered status) authorises a refresh. A declined outcome
+	// — SkippedOne, SkippedAll, Cancelled, or transport error — produces no plan item and
+	// no content-plan entry; the file is left byte-identical on disk.
+	//
 	// Prompt guard: the scope question is suppressed entirely when no eligible agent exists.
 	// Never prompt for an empty set.
 	//
 	// Conflict-loop interaction: harness-only agents never enter the conflict loop above.
-	// They are appended here with ActionUpdate because a harness-only agent is user-authored
-	// by definition, so it would trip the local-modification prompt on every run. The
-	// refresh-scope prompt is the sole consent mechanism; asking both for the same file
-	// would be redundant noise.
+	// They are appended here with ActionUpdate only when the user explicitly answered the
+	// scope prompt. A harness-only agent is user-authored by definition, so it would trip
+	// the local-modification prompt on every run; the refresh-scope prompt replaces that
+	// mechanism entirely with explicit consent.
 	//
 	// Version-stamping decision: no entry is added to versionStamps for harness-only agents.
 	// Stamping implies a source version to stamp from; there is none for a harness-only
@@ -288,23 +317,31 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	// written because DryRun is forwarded to the executor via ExecRequest.DryRun.
 	harnessOnlyPlan := make(map[string]harnessOnlyContentPlan, len(harnessOnlyAgents))
 	if len(harnessOnlyAgents) > 0 {
-		var latchedHarnessScope RefreshScope
+		var latchedDecision RefreshDecision
 		harnessApplyToAllLatch := false
 		for _, agent := range harnessOnlyAgents {
-			var scope RefreshScope
+			var decision RefreshDecision
 			if harnessApplyToAllLatch {
-				scope = latchedHarnessScope
+				decision = latchedDecision
 			} else {
-				var setLatch bool
-				scope, setLatch = s.askHarnessOnlyRefreshScope(ctx, agent)
-				if setLatch {
+				decision = s.askHarnessOnlyRefreshScope(ctx, agent)
+				if decision.ApplyToAll {
 					harnessApplyToAllLatch = true
-					latchedHarnessScope = scope
+					latchedDecision = decision
 				}
 			}
-			harnessOnlyPlan[agent.TargetPath] = harnessOnlyContentPlan{Agent: agent, Scope: scope}
+
+			// Consent gate: a declined outcome means no plan item and no content-plan entry.
+			// The file is left byte-identical on disk.
+			if !decision.Refresh {
+				continue
+			}
+
+			harnessOnlyPlan[agent.TargetPath] = harnessOnlyContentPlan{Agent: agent, Scope: decision.Scope}
 
 			// Emit an observability event identifying this agent as harness-only and its scope.
+			// Only emitted when the user explicitly authorised a refresh; declined agents must
+			// not be reported with a scope that was never applied.
 			// The harness_only and scope fields are the contract a caller or a test reads to
 			// determine which agents received degraded-quality treatment and at what breadth.
 			s.deps.Logger.Event(logging.Event{
@@ -313,8 +350,8 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 				Message: "harness-only agent refreshed (degraded: no generic counterpart)",
 				Fields: map[string]string{
 					"harness_only": "true",
-					"scope":        string(scope),
-					"regions":      strings.Join(scope.Regions(), ","),
+					"scope":        string(decision.Scope),
+					"regions":      strings.Join(decision.Scope.Regions(), ","),
 				},
 			})
 
@@ -326,7 +363,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 				SourcePath: "",
 				TargetPath: agent.TargetPath,
 				Action:     domain.ActionUpdate,
-				Reason:     "harness-only agent (no generic counterpart): refreshing " + string(scope),
+				Reason:     "harness-only agent (no generic counterpart): refreshing " + string(decision.Scope),
 			})
 		}
 	}

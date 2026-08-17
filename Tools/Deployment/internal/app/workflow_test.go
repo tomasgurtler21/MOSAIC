@@ -145,9 +145,13 @@ func TestUpdate_AddWorkflows_PlannerReceivesBothWorkflowSets(t *testing.T) {
 	// probe-based workflow discovery can find it. Without this file the probe returns no
 	// workflow IDs for the orchestrator path and "quick-fix" would be silently dropped.
 	orchestratorContent := []byte("---\nversion: \"1.0\"\n---\n\n" +
-		"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
+		"<Identity type=\"core\">\n" +
+		"<AvailableWorkflows type=\"managed\">\n" +
+		"<Workflow type=\"managed\" name=\"quick-fix\" version=\"1.0\">\n" +
 		"Quick fix content.\n" +
-		"</Workflow>\n")
+		"</Workflow>\n" +
+		"</AvailableWorkflows>\n" +
+		"</Identity>\n")
 	writeTempFile(t, workspace, "orchestrator.md", orchestratorContent)
 
 	// Use a capturing planner so we can inspect what WorkflowIDs were passed
@@ -284,12 +288,16 @@ func TestDeployNew_OrchestratorWorkflowExpanded_YieldsUpdateItem(t *testing.T) {
 
 	// Write a deployed orchestrator at the stub module's target path for "orchestrator":
 	// stubHarnessModule.TargetPath returns req.Key + ".md", so the file is "orchestrator.md".
-	// It carries a quick-fix workflow block with a version comment so the probe can detect it.
+	// It carries a quick-fix workflow block in production managed form so the probe can detect it.
 	orchContent := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
+			"<Identity type=\"core\">\n" +
+			"<AvailableWorkflows type=\"managed\">\n" +
+			"<Workflow type=\"managed\" name=\"quick-fix\" version=\"1.0\">\n" +
 			"Quick fix content.\n" +
-			"</Workflow>\n",
+			"</Workflow>\n" +
+			"</AvailableWorkflows>\n" +
+			"</Identity>\n",
 	)
 	writeTempFile(t, workspace, "orchestrator.md", orchContent)
 	orchHash := manifest.Hash(orchContent)
@@ -372,12 +380,16 @@ func TestUpdate_OrchestratorWorkflowExpanded_YieldsUpdateItem(t *testing.T) {
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Catalog = cat
 
-	// Write the deployed orchestrator at "orchestrator.md" with the quick-fix workflow block.
+	// Write the deployed orchestrator in production managed form.
 	orchContent := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
+			"<Identity type=\"core\">\n" +
+			"<AvailableWorkflows type=\"managed\">\n" +
+			"<Workflow type=\"managed\" name=\"quick-fix\" version=\"1.0\">\n" +
 			"Quick fix content.\n" +
-			"</Workflow>\n",
+			"</Workflow>\n" +
+			"</AvailableWorkflows>\n" +
+			"</Identity>\n",
 	)
 	writeTempFile(t, workspace, "orchestrator.md", orchContent)
 	orchHash := manifest.Hash(orchContent)
@@ -458,14 +470,18 @@ func TestDeployNew_OrchestratorWorkflowVersionBumped_YieldsUpdateItem(t *testing
 	deps, workspace := newBaseDeps(t, stub)
 	deps.Catalog = cat
 
-	// Write a deployed orchestrator at "orchestrator.md" carrying quick-fix at version "1.0".
-	// The deployed workflow-version comment is "1.0" but the catalog now has "2.0" — this
+	// Write a deployed orchestrator carrying quick-fix at version "1.0" in managed form.
+	// The deployed workflow version is "1.0" but the catalog now has "2.0" — this
 	// mismatch must be detected by WorkflowStaleness even though the selection is unchanged.
 	orchContent := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
+			"<Identity type=\"core\">\n" +
+			"<AvailableWorkflows type=\"managed\">\n" +
+			"<Workflow type=\"managed\" name=\"quick-fix\" version=\"1.0\">\n" +
 			"Quick fix content.\n" +
-			"</Workflow>\n",
+			"</Workflow>\n" +
+			"</AvailableWorkflows>\n" +
+			"</Identity>\n",
 	)
 	writeTempFile(t, workspace, "orchestrator.md", orchContent)
 	orchHash := manifest.Hash(orchContent)
@@ -529,12 +545,16 @@ func TestDeployNew_OrchestratorWorkflowVersionBumped_YieldsUpdateItem(t *testing
 // read from the deployed file. This is the app layer's responsibility: supplying the planner
 // with the right DeployedState so workflow staleness comparisons are possible.
 func TestDeployNew_OrchestratorDeployedState_ContainsWorkflowData(t *testing.T) {
-	// Arrange — deployed orchestrator carries a quick-fix workflow block with version 1.0
+	// Arrange — deployed orchestrator carries a quick-fix workflow block in managed form, version 1.0
 	orchContent := []byte(
 		"---\nversion: \"1.0\"\n---\n\n" +
-			"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
+			"<Identity type=\"core\">\n" +
+			"<AvailableWorkflows type=\"managed\">\n" +
+			"<Workflow type=\"managed\" name=\"quick-fix\" version=\"1.0\">\n" +
 			"Quick fix content.\n" +
-			"</Workflow>\n",
+			"</Workflow>\n" +
+			"</AvailableWorkflows>\n" +
+			"</Identity>\n",
 	)
 
 	cat := newMinimalCatalog()

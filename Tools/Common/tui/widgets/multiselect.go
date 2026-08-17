@@ -230,3 +230,12 @@ func (m *MultiSelect) Resize(height, width int) {
 
 // CursorIndex returns the current cursor position.
 func (m *MultiSelect) CursorIndex() int { return m.cursor }
+
+// SetCursorIndex moves the cursor to the given 0-based index. If idx is out of range,
+// the cursor is unchanged.
+func (m *MultiSelect) SetCursorIndex(idx int) {
+	if idx >= 0 && idx < len(m.items) {
+		m.cursor = idx
+		m.adjustViewport()
+	}
+}

@@ -193,14 +193,18 @@ func TestUpdate_DeployedStatePopulated_ContainsEntryPerPlannedPath(t *testing.T)
 func TestUpdate_WorkflowDiscovery_UsesDeployedOrchestratorContent(t *testing.T) {
 	ws := t.TempDir()
 
-	// Write a deployed orchestrator containing two workflow sections.
+	// Write a deployed orchestrator containing two workflow sections in production managed form.
 	orchestratorContent := []byte("---\nversion: \"1.0\"\n---\n\n" +
-		"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
+		"<Identity type=\"core\">\n" +
+		"<AvailableWorkflows type=\"managed\">\n" +
+		"<Workflow type=\"managed\" name=\"quick-fix\" version=\"1.0\">\n" +
 		"Quick fix content.\n" +
-		"</Workflow>\n\n" +
-		"<Workflow type=\"core\" name=\"code-review\" version=\"1.0\">\n" +
+		"</Workflow>\n" +
+		"<Workflow type=\"managed\" name=\"code-review\" version=\"1.0\">\n" +
 		"Code review content.\n" +
-		"</Workflow>\n")
+		"</Workflow>\n" +
+		"</AvailableWorkflows>\n" +
+		"</Identity>\n")
 	// The stubHarnessModule maps orchestrator key -> "orchestrator.md"
 	writeProbeWiringFile(t, ws, "orchestrator.md", orchestratorContent)
 
@@ -261,9 +265,13 @@ func TestUpdate_WorkflowDiscovery_UsesDeployedOrchestratorContent(t *testing.T) 
 func TestUpdate_WorkflowDiscovery_NoSeparateOrchestratorRead(t *testing.T) {
 	ws := t.TempDir()
 	orchestratorContent := []byte("---\nversion: \"1.0\"\n---\n\n" +
-		"<Workflow type=\"core\" name=\"quick-fix\" version=\"1.0\">\n" +
+		"<Identity type=\"core\">\n" +
+		"<AvailableWorkflows type=\"managed\">\n" +
+		"<Workflow type=\"managed\" name=\"quick-fix\" version=\"1.0\">\n" +
 		"Content.\n" +
-		"</Workflow>\n")
+		"</Workflow>\n" +
+		"</AvailableWorkflows>\n" +
+		"</Identity>\n")
 	writeProbeWiringFile(t, ws, "orchestrator.md", orchestratorContent)
 
 	spy := &spyPlanner{response: domain.Plan{

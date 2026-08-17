@@ -864,7 +864,9 @@ func (s *service) buildInfrastructureBlocks(infraAgentIDs []string) []transform.
 // Conflict-loop decision: harness-only agents never enter the conflict loop. They are
 // appended to the plan with ActionUpdate after the loop, because a harness-only agent is
 // user-authored by definition and would trip the local-modification prompt on every run.
-// The refresh-scope prompt (askHarnessOnlyRefreshScope) is the sole consent mechanism.
+// The refresh-scope prompt (askHarnessOnlyRefreshScope) is the sole consent mechanism:
+// only an explicit answer authorises a refresh; a declined outcome (skip, cancel, error)
+// produces no plan item and no content-plan entry for that file.
 //
 // Version-stamping decision: no entry is added to ExecRequest.VersionStamps for a
 // harness-only agent's TargetPath. Stamping implies a source version to stamp from; there

@@ -800,8 +800,8 @@ func (m *rootModel) handleQuestionMsg(qMsg questionMsg) (tea.Model, tea.Cmd) {
 			agents := optionsToAgents(qMsg.choiceQ.Options)
 			m.infraAgentOverlay = screens.NewInfrastructureAgentScreen(agents, m.width, m.height, style)
 		case domain.QDeployAgents:
-			cats := optionsToAgentCategories(qMsg.choiceQ.Options)
-			m.deployAgentOverlay = screens.NewDeployAgentScreen(cats, m.width, m.height, style, "")
+			tree := optionsToAgentTree(qMsg.choiceQ.Options)
+			m.deployAgentOverlay = screens.NewDeployAgentScreen(tree, m.width, m.height, style, "")
 		case domain.QHooks:
 			bundles, supported := optionsToHookBundles(qMsg.choiceQ.Options)
 			m.hookOverlay = screens.NewHookScreen(bundles, supported, m.width, m.height, style, "")

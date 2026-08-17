@@ -11,21 +11,26 @@ import (
 	"mosaic-deploy/internal/domain"
 )
 
-// askHarnessOnlyRefreshScope prompts for how much of one harness-only agent to refresh.
-// When applyToAll is true in the returned values, the caller must use the returned scope
-// for every remaining harness-only agent without asking again.
+// askHarnessOnlyRefreshScope prompts for how much of one harness-only agent to refresh, and
+// returns the user's decision.
+//
+// Consent contract: only an explicit answer authorises a refresh. Every non-Answered outcome
+// — SkippedOne, SkippedAll, Cancelled, or a transport error from the Interaction port —
+// yields a declined decision, meaning the caller must produce no plan item, no content-plan
+// entry, and no refresh for that file. Skip is a true opt-out, not a fall back to the narrow
+// scope.
 //
 // The option shape mirrors askLocalModification exactly: per-agent options carry the bare
-// scope value as their Option.ID, and the apply-to-all variants carry the same value under
-// an "all:" prefix with Group "Apply to all". An answer whose OptionID carries the prefix
-// has it stripped to recover the scope and returns applyToAll true.
+// scope value as their Option.ID, and the apply-to-all variants carry the same value under an
+// "all:" prefix with Group "Apply to all". An answer whose OptionID carries the prefix has it
+// stripped to recover the scope and sets ApplyToAll.
 //
-// Any non-Answered outcome — SkippedOne, SkippedAll, Cancelled, or a transport error —
-// returns (RefreshProtocolOnly, false). The narrow scope is never escalated without an
-// explicit answer.
+// A SkippedAll outcome yields Refresh=false with ApplyToAll=true: decline latched for every
+// remaining harness-only agent. SkippedOne, Cancelled and transport errors yield
+// Refresh=false with ApplyToAll=false: this file only.
 func (s *service) askHarnessOnlyRefreshScope(
 	ctx context.Context, agent HarnessOnlyAgent,
-) (scope RefreshScope, applyToAll bool) {
+) RefreshDecision {
 	opts := []domain.Option{
 		{ID: string(RefreshProtocolOnly), Label: "Refresh CommunicationProtocol only"},
 		{ID: string(RefreshAllDeployed), Label: "Refresh all tool-managed DEPLOYED regions"},
@@ -43,7 +48,13 @@ func (s *service) askHarnessOnlyRefreshScope(
 	}
 	ans, err := s.deps.Interaction.SelectOne(ctx, q)
 	if err != nil || ans.Status != domain.Answered {
-		return RefreshProtocolOnly, false
+		// A SkippedAll outcome latches the decline for all remaining agents.
+		if err == nil && ans.Status == domain.SkippedAll {
+			return RefreshDecision{Refresh: false, ApplyToAll: true}
+		}
+		// Every other non-answered outcome (SkippedOne, Cancelled, transport error) declines
+		// this file only without latching.
+		return RefreshDecision{}
 	}
 	optID := ans.OptionID
 	if strings.HasPrefix(optID, "all:") {
@@ -52,10 +63,11 @@ func (s *service) askHarnessOnlyRefreshScope(
 		if sc == "" {
 			sc = RefreshProtocolOnly
 		}
-		return sc, true
+		return RefreshDecision{Refresh: true, Scope: sc, ApplyToAll: true}
 	}
 	if sc := RefreshScope(optID); sc != "" {
-		return sc, false
+		return RefreshDecision{Refresh: true, Scope: sc}
 	}
-	return RefreshProtocolOnly, false
+	// An Answered status with an unrecognised option ID is treated as a decline.
+	return RefreshDecision{}
 }

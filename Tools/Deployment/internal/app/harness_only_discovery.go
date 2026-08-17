@@ -170,13 +170,21 @@ func eligibleHarnessOnly(src []byte) EligibilityVerdict {
 	}
 }
 
-// isOrchestratorFileName reports whether name is the orchestrator agent's file name.
-// True if and only if name equals "orchestrator.md" or "orchestrator.agent.md",
-// compared case-insensitively. Frontmatter is never consulted: a `role: orchestrator`
-// value in a differently-named file does not make it an orchestrator for this purpose.
+// isOrchestratorFileName reports whether name is one of the two orchestrator-role agent file
+// names. True if and only if name equals, case-insensitively, one of:
+//
+//	"orchestrator.md", "orchestrator.agent.md",
+//	"orchestrator-script.md", "orchestrator-script.agent.md"
+//
+// Frontmatter is never consulted: a `role: orchestrator` value in a differently-named file
+// does not make it an orchestrator for this purpose. Matching is whole-name equality, never a
+// prefix or substring test — a file named "orchestrator-script-custom.md" is not excluded.
 func isOrchestratorFileName(name string) bool {
 	lower := strings.ToLower(name)
-	return lower == "orchestrator.md" || lower == "orchestrator.agent.md"
+	return lower == "orchestrator.md" ||
+		lower == "orchestrator.agent.md" ||
+		lower == "orchestrator-script.md" ||
+		lower == "orchestrator-script.agent.md"
 }
 
 // agentKeyFromFileName derives an agent key from a deployed file name by stripping the
@@ -189,10 +197,14 @@ func agentKeyFromFileName(name string) string {
 	return strings.TrimSuffix(name, ".md")
 }
 
-// catalogAgentKeys returns the set of every agent key the generic catalog knows about —
-// worker agents, utility agents, and the orchestrator. A deployed file whose derived key
-// is in this set has a generic counterpart and is therefore NOT harness-only; it is
-// handled by the existing catalog-driven path with no behaviour change.
+// catalogAgentKeys returns the set of every agent key the generic catalog knows about:
+// worker agents (Agents), utility agents (UtilityAgents), the orchestrator (Orchestrator),
+// and the script orchestrator (OrchestratorScript). A deployed file whose derived key is in
+// this set has a generic counterpart and is therefore NOT harness-only.
+//
+// OrchestratorScript's absence from a catalog is legitimate, not an error: the (agent, ok)
+// pair is consulted and a false ok contributes no key, exactly as an empty Orchestrator key
+// contributes none.
 func catalogAgentKeys(c catalog.Catalog) map[string]bool {
 	keys := make(map[string]bool)
 	for _, a := range c.Agents() {
@@ -207,6 +219,9 @@ func catalogAgentKeys(c catalog.Catalog) map[string]bool {
 	}
 	if orch := c.Orchestrator(); orch.Key != "" {
 		keys[orch.Key] = true
+	}
+	if scriptOrch, ok := c.OrchestratorScript(); ok && scriptOrch.Key != "" {
+		keys[scriptOrch.Key] = true
 	}
 	return keys
 }

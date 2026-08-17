@@ -78,35 +78,6 @@ type Spawner interface {
 	Spawn(ctx context.Context, req SpawnRequest) (Response, error)
 }
 
-// TextSpawner runs one agent turn and returns the assistant text from the
-// CLI's output envelope, without requiring — or attempting to locate — a
-// Communication Protocol message in it.
-//
-// It is the transport for payloads that are not protocol messages: the
-// Runner-to-orchestrator consultation contract has its own request and
-// response schemas, and a routing instruction is never a protocol envelope.
-//
-// SpawnText performs exactly the same steps as Spawn — ResolveExecutable,
-// the per-harness argument builder, Run, the per-harness envelope parser —
-// and stops before ExtractProtocolJSON.
-//
-// On success the returned Response has Text populated and Protocol nil.
-// Text is never empty on a nil error: an empty or whitespace-only CLI output
-// is reported by the envelope parser as ErrEmptyResponse, exactly as on the
-// protocol path.
-//
-// On failure it returns an error wrapping one of the package sentinels, with
-// the same classification the protocol path produces for the same condition:
-// ErrExecutableNotFound, ErrNonZeroExit, ErrTimeout, ErrCancelled,
-// ErrEmptyResponse, ErrMalformedJSON. ErrProtocolNotExtractable is never
-// returned by this path.
-//
-// Timeout, context cancellation and subprocess termination behave identically
-// to Spawn, because both reach the same Run.
-type TextSpawner interface {
-	SpawnText(ctx context.Context, req SpawnRequest) (Response, error)
-}
-
 // Sink is the diagnostic seam. Consumers adapt their own event vocabulary to
 // it. Contract: Log never returns an error, never panics, never blocks.
 type Sink interface {
