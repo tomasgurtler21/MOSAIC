@@ -122,6 +122,21 @@ type PreConsultant interface {
 	PreConsult(ctx context.Context, req ConsultationRequest) (PreConsultationAdvice, error)
 }
 
+// ExecutableRevealer is an optional capability a HarnessAdapter may implement
+// to report the executable path it was constructed with. It exists so that
+// executable resolution can be asserted behaviorally at the composition root
+// without reaching into concrete adapter types, and so that a launch failure
+// can name the path that was tried.
+//
+// The fake adapter does not implement it: it spawns no process and has no
+// executable path.
+type ExecutableRevealer interface {
+	// ExecutablePath returns the resolved executable path or command name the
+	// adapter will spawn. It is never empty for a CLI-backed adapter that was
+	// constructed with a per-harness default applied.
+	ExecutablePath() string
+}
+
 // RawInvoker is the transport seam for payloads that are NOT Communication
 // Protocol messages. The Runner-to-orchestrator consultation contract has its
 // own request and response schemas, so HarnessAdapter.Invoke — which marshals a

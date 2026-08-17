@@ -469,6 +469,17 @@ type ConfigSelection struct {
 	// declared. Nil when no filtering is needed (single agent per class or no gated
 	// class agents declared).
 	InfraClassSelections map[string]string
+
+	// ExecutablePath is the executable-path override for the selected harness,
+	// or "" when no override applies. It is not collected by the configuration
+	// wizard; it is set by the executable-override recovery screen and persists
+	// for the remaining lifetime of the TUI process, including runs started
+	// after the one that failed.
+	//
+	// The composition root prefers a non-empty value here over its own
+	// command-line pre-scan result, and passes "" onward when both are empty
+	// so that buildAdapter's per-harness default applies.
+	ExecutablePath string
 }
 
 // configStep identifies which configuration prompt is currently active.
@@ -493,7 +504,7 @@ const (
 	configStepCommitBranch
 
 	// configStepPreConsult is shown only when mode is auto or auto-review.
-	// Default: disabled.
+	// Default: enabled.
 	configStepPreConsult
 
 	// configStepManualResolution is shown always. Default: disabled.
@@ -693,6 +704,9 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		s.infraClassIdx = 0
 		s.cursor = 0
 		s.step = s.nextStepAfterCheckpoints()
+		if s.step == configStepPreConsult {
+			s.cursor = 1
+		}
 	case configStepCommits:
 		s.sel.Settings.Commits = s.cursor == 1
 		s.cursor = 0
@@ -700,6 +714,9 @@ func (s *ConfigScreen) advance() tea.Cmd {
 			s.step = configStepCommitBranch
 		} else {
 			s.step = s.nextAfterCommitSection()
+			if s.step == configStepPreConsult {
+				s.cursor = 1
+			}
 		}
 	case configStepCommitBranch:
 		variants := domain.CommitBranchVariants()
@@ -708,6 +725,9 @@ func (s *ConfigScreen) advance() tea.Cmd {
 		}
 		s.cursor = 0
 		s.step = s.nextAfterCommitSection()
+		if s.step == configStepPreConsult {
+			s.cursor = 1
+		}
 	case configStepPreConsult:
 		s.sel.Settings.PreConsultation = s.cursor == 1
 		s.step = configStepManualResolution
@@ -805,7 +825,7 @@ func (s *ConfigScreen) prevStepAndCursor() (configStep, int) {
 	case configStepManualResolution:
 		mode := s.sel.Settings.Mode
 		if mode == domain.ExecutionModeAuto || mode == domain.ExecutionModeAutoReview {
-			return configStepPreConsult, 0
+			return configStepPreConsult, 1
 		}
 		if s.sel.Settings.Commits {
 			return configStepCommitBranch, 0
@@ -905,8 +925,8 @@ func (s *ConfigScreen) View() string {
 		))
 	case configStepPreConsult:
 		body.WriteString(s.styles.Body.Width(s.width).Render("Pre-consultation (one-shot run-start consultation):") + "\n")
-		body.WriteString(s.renderOption(0, "Disabled (default)"))
-		body.WriteString(s.renderOption(1, "Enabled"))
+		body.WriteString(s.renderOption(0, "Disabled"))
+		body.WriteString(s.renderOption(1, "Enabled (default)"))
 	case configStepManualResolution:
 		body.WriteString(s.styles.Body.Width(s.width).Render("Manual resolution (user resolves routing decisions):") + "\n")
 		body.WriteString(s.renderOption(0, "Disabled (default)"))

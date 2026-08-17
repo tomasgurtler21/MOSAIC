@@ -503,10 +503,15 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 			OrchestrationArtifact: filepath.Join(config.RunFolder, "Orchestration.md"),
 		})
 		if pcErr != nil {
-			if config.RunFolder != "" {
+			// Remove the run folder only on a new run — the "no trace remains"
+			// contract. On a resumed run the folder predates this attempt and
+			// contains existing run history; removing it would silently destroy
+			// the user's artifact and break the override-restart's preservation
+			// guarantee.
+			if config.IsNewRun && config.RunFolder != "" {
 				_ = os.RemoveAll(config.RunFolder)
 			}
-			return s.refusal("pre-consultation failed: " + pcErr.Error()), nil
+			return s.refusalCaused("pre-consultation failed: "+pcErr.Error(), pcErr), nil
 		}
 		preConsultAdvice = advice
 	}
@@ -992,6 +997,19 @@ func (s *sessionImpl) refusal(message string) domain.RunOutcome {
 	}
 }
 
+// refusalCaused is like refusal but also carries an error cause in the
+// outcome's Cause field. It is used when the refusal is attributable to a
+// structured error whose identity must survive to the frontend (e.g. a
+// *domain.HarnessLaunchError that the TUI needs to detect via errors.As).
+func (s *sessionImpl) refusalCaused(message string, cause error) domain.RunOutcome {
+	s.deps.Debug.Log(domain.EventSessionRefusal, message)
+	return domain.RunOutcome{
+		Status:  domain.RunRefused,
+		Message: message,
+		Cause:   cause,
+	}
+}
+
 // consultRoute handles the full consultation-record-reread-dispatch cycle for
 // one routing decision. It is called whenever the session must defer a routing
 // choice to the RoutingConsultant — both for orchestrated-mode normal flow
@@ -1059,6 +1077,7 @@ func (s *sessionImpl) consultRoute(
 		return true, domain.RunOutcome{
 			Status:  domain.RunStoppedByConsultant,
 			Message: "consultation failed: " + consultErr.Error(),
+			Cause:   consultErr,
 		}, nil
 	}
 

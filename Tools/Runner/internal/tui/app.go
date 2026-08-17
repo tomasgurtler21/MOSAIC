@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -51,6 +52,7 @@ const (
 	screenArtifact                       // read-only artifact inspection
 	screenQuestion                       // generic overlay from Interaction port
 	screenStop                           // stop recovery (retry / manual dispatch) — shown on RunStoppedByConsultant
+	screenExecOverride                   // executable-override recovery — shown on harness launch failure
 	screenDone                           // completion/error summary
 )
 
@@ -113,6 +115,24 @@ type Options struct {
 	// is left empty and the session factory is called with an empty run folder.
 	// Production callers always supply it; tests may omit it.
 	MintRunIdentity RunIdentityMinter
+
+	// ArtifactStoreFactory, when non-nil, builds the artifact store used for the
+	// terminal COMPLETED phase-marker write, given the run's resolved run-scoped
+	// folder. It is called at most once per terminal outcome, only when the
+	// outcome status is domain.RunCompleted and the resolved folder is non-empty.
+	//
+	// The folder is not known at Options-construction time for a multi-candidate
+	// run (it is settled on the run-select screen), which is why this is a
+	// factory over a folder rather than a store.
+	//
+	// When nil, the TUI resolves the store itself as
+	// artifact.NewFileStore(filepath.Join(runFolder, "Orchestration.md")),
+	// mirroring the CLI's nil-store fallback in internal/cli/run.go.
+	ArtifactStoreFactory func(runFolder string) domain.ArtifactStore
+
+	// Clock supplies the timestamp handed to ArtifactStore.SetPhase for the
+	// completion-marker write. When nil, a real UTC clock is used.
+	Clock domain.Clock
 }
 
 // runSetupSelections holds all inputs collected during the setup phase.
@@ -177,6 +197,12 @@ type rootModel struct {
 	mintRunIdentity RunIdentityMinter
 	interact        *ProgramRef
 
+	// Completion-marker write seam. When artifactStoreFactory is nil the TUI
+	// constructs the store itself from the resolved run folder. When clock is
+	// nil a real UTC clock is used.
+	artifactStoreFactory func(runFolder string) domain.ArtifactStore
+	clock                domain.Clock
+
 	// Enumerated workflow regions (populated after orchestrator file is loaded).
 	workflows []domain.WorkflowRegion
 
@@ -215,6 +241,22 @@ type rootModel struct {
 
 	// Stop recovery screen (shown when RunStoppedByConsultant).
 	stopScreen *screens.StopScreen
+
+	// Executable-override recovery screen (shown on harness launch failure).
+	execOverrideScreen *screens.ExecOverrideScreen
+
+	// launchFailureAttempt counts consecutive launch failures in this process.
+	// Incremented each time a launch failure is detected; reset to zero when
+	// any invocation completes without a launch failure. Passed to
+	// NewExecOverrideScreen as the attempt number so repeated failures can be
+	// displayed as such rather than looking like the first.
+	launchFailureAttempt int
+
+	// lastLaunchFailure holds the terminal outcome or error from the most
+	// recent launch failure so that ExecOverrideChoiceAbandon can build the
+	// done screen from it rather than showing a blank outcome.
+	lastLaunchFailureOutcome *domain.RunOutcome
+	lastLaunchFailureErr     error
 
 	// Done screen.
 	doneScreen *screens.DoneScreen
@@ -291,30 +333,32 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 	// Zero candidates (or pre-resolved): skip run select, go straight to setup.
 
 	m := &rootModel{
-		ctx:               ctx,
-		ctxCancel:         cancel,
-		theme:             opts.Theme,
-		screen:            initialScreen,
-		width:             w,
-		height:            h,
-		sess:              sess,
-		sessionFactory:    opts.SessionFactory,
-		mintRunIdentity:   opts.MintRunIdentity,
-		interact:          interact,
-		runSelectScreen:   runSelectScreen,
-		runSelectQuestion: runSelectQuestion,
-		fileScreen:        fileScreen,
-		taskScreen:        taskScreen,
-		seedInputScreen:   seedInputScreen,
-		configScreen:      configScreen,
+		ctx:                  ctx,
+		ctxCancel:            cancel,
+		theme:                opts.Theme,
+		screen:               initialScreen,
+		width:                w,
+		height:               h,
+		sess:                 sess,
+		sessionFactory:       opts.SessionFactory,
+		mintRunIdentity:      opts.MintRunIdentity,
+		interact:             interact,
+		runSelectScreen:      runSelectScreen,
+		runSelectQuestion:    runSelectQuestion,
+		fileScreen:           fileScreen,
+		taskScreen:           taskScreen,
+		seedInputScreen:      seedInputScreen,
+		configScreen:         configScreen,
+		artifactStoreFactory: opts.ArtifactStoreFactory,
+		clock:                opts.Clock,
 	}
 
+	// Always propagate InitialRunFolder so readArtifactContent and the COMPLETED-marker
+	// write target the correct path regardless of whether other identity fields are set.
+	m.selections.runFolder = opts.InitialRunFolder
 	// Pre-populate run identity when already resolved (--run / --new-run / single candidate).
-	// InitialRunFolder carries the resolved run-scoped folder so that readArtifactContent
-	// and any later COMPLETED-marker write target the correct path immediately.
 	if preRunID != "" || preIsNewRun {
 		m.selections.runID = preRunID
-		m.selections.runFolder = opts.InitialRunFolder
 		m.selections.isNewRun = preIsNewRun
 	}
 
@@ -405,17 +449,63 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Session completed.
 	if doneMsg, ok := msg.(runDoneMsg); ok {
 		style := stylesFromTheme(m.theme)
+		// Check for a launch-failure cause before any status-based branching.
+		// A RunRefused or RunStoppedByConsultant outcome caused by a harness
+		// launch failure routes to the override screen instead of the normal
+		// done or stop screens, because the user may be able to fix it by
+		// supplying a working executable path.
+		var launchErr *domain.HarnessLaunchError
+		if errors.As(doneMsg.outcome.Cause, &launchErr) {
+			m.launchFailureAttempt++
+			m.lastLaunchFailureOutcome = &doneMsg.outcome
+			m.lastLaunchFailureErr = nil
+			m.execOverrideScreen = screens.NewExecOverrideScreen(
+				launchErr.Harness, launchErr.Executable,
+				m.launchFailureAttempt, m.width, m.height, style,
+			)
+			m.screen = screenExecOverride
+			return m, m.execOverrideScreen.InputInit()
+		}
+		// Non-launch-failure terminal outcome: reset the consecutive-failure counter.
+		m.launchFailureAttempt = 0
 		if doneMsg.outcome.Status == domain.RunStoppedByConsultant {
 			m.stopScreen = screens.NewStopScreen(doneMsg.outcome.StopReason, m.width, m.height, style)
 			m.screen = screenStop
 			return m, nil
 		}
-		m.doneScreen = screens.NewDoneScreen(doneMsg.outcome, "", m.width, m.height, style)
+		// Write the COMPLETED phase marker when the run finished successfully.
+		// A non-empty run folder is required; a failed write is non-fatal — the
+		// TUI proceeds to the done screen and surfaces the error as a warning.
+		markerErrMsg := ""
+		if doneMsg.outcome.Status == domain.RunCompleted && m.selections.runFolder != "" {
+			store := m.resolveArtifactStore(m.selections.runFolder)
+			now := m.resolveClockTime()
+			if _, err := store.SetPhase(m.ctx, domain.ArtifactState{}, "COMPLETED", now); err != nil {
+				markerErrMsg = err.Error()
+			}
+		}
+		m.doneScreen = screens.NewDoneScreen(doneMsg.outcome, markerErrMsg, m.width, m.height, style)
 		m.screen = screenDone
 		return m, nil
 	}
 	if errMsg, ok := msg.(runErrorMsg); ok {
 		style := stylesFromTheme(m.theme)
+		// Route launch failures to the override screen; all other errors continue
+		// to the existing done screen, because a path override cannot fix them.
+		var launchErr *domain.HarnessLaunchError
+		if errors.As(errMsg.err, &launchErr) {
+			m.launchFailureAttempt++
+			m.lastLaunchFailureErr = errMsg.err
+			m.lastLaunchFailureOutcome = nil
+			m.execOverrideScreen = screens.NewExecOverrideScreen(
+				launchErr.Harness, launchErr.Executable,
+				m.launchFailureAttempt, m.width, m.height, style,
+			)
+			m.screen = screenExecOverride
+			return m, m.execOverrideScreen.InputInit()
+		}
+		// Non-launch-failure error: reset the consecutive-failure counter.
+		m.launchFailureAttempt = 0
 		m.doneScreen = screens.NewDoneScreen(domain.RunOutcome{}, errMsg.err.Error(), m.width, m.height, style)
 		m.screen = screenDone
 		return m, nil
@@ -451,6 +541,8 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateQuestion(msg)
 	case screenStop:
 		return m.updateStop(msg)
+	case screenExecOverride:
+		return m.updateExecOverride(msg)
 	case screenDone:
 		return m.updateDone(msg)
 	}
@@ -484,6 +576,9 @@ func (m *rootModel) resizeScreens() {
 	}
 	if m.stopScreen != nil {
 		m.stopScreen.Resize(m.width, m.height)
+	}
+	if m.execOverrideScreen != nil {
+		m.execOverrideScreen.Resize(m.width, m.height)
 	}
 	if m.doneScreen != nil {
 		m.doneScreen.Resize(m.width, m.height)
@@ -947,6 +1042,55 @@ func (m *rootModel) updateStop(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // ---------------------------------------------------------------------------
+// Executable-override screen handler
+// ---------------------------------------------------------------------------
+
+// updateExecOverride handles input for the executable-override recovery screen.
+// When the user confirms a non-empty path (Choice() == ExecOverrideChoiceRetry),
+// the session is rebuilt with the override path and restarted against the same
+// run folder. When the user abandons (Choice() == ExecOverrideChoiceAbandon via Esc),
+// the TUI transitions to the done screen with the original failure.
+//
+// Routing to this handler is performed in the runDoneMsg and runErrorMsg handlers,
+// which check errors.As(outcome.Cause, &launchErr) / errors.As(err, &launchErr) and
+// transition to screenExecOverride on a *domain.HarnessLaunchError.
+func (m *rootModel) updateExecOverride(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.execOverrideScreen == nil {
+		return m, nil
+	}
+	m.execOverrideScreen.Update(msg)
+	if m.execOverrideScreen.Back() {
+		// Abandon: show the done screen with the original failure.
+		style := stylesFromTheme(m.theme)
+		if m.lastLaunchFailureOutcome != nil {
+			m.doneScreen = screens.NewDoneScreen(*m.lastLaunchFailureOutcome, "", m.width, m.height, style)
+		} else if m.lastLaunchFailureErr != nil {
+			m.doneScreen = screens.NewDoneScreen(domain.RunOutcome{}, m.lastLaunchFailureErr.Error(), m.width, m.height, style)
+		} else {
+			m.doneScreen = screens.NewDoneScreen(domain.RunOutcome{}, "launch failed", m.width, m.height, style)
+		}
+		m.execOverrideScreen = nil
+		m.screen = screenDone
+		return m, nil
+	}
+	if m.execOverrideScreen.Done() {
+		// Retry: hold the override path, rebuild the session, restart.
+		m.selections.config.ExecutablePath = m.execOverrideScreen.Path()
+		if m.sessionFactory != nil {
+			m.sess = m.sessionFactory(m.selections.runFolder, m.selections.isNewRun, m.selections.orchestratorFile, m.selections.config)
+		}
+		m.execOverrideScreen = nil
+		style := stylesFromTheme(m.theme)
+		if m.progressScreen == nil {
+			m.progressScreen = screens.NewProgressScreen(m.width, m.height, style)
+		}
+		m.screen = screenProgress
+		return m, tea.Batch(m.progressScreen.Init(), m.startSession())
+	}
+	return m, nil
+}
+
+// ---------------------------------------------------------------------------
 // Done screen handler
 // ---------------------------------------------------------------------------
 
@@ -958,6 +1102,30 @@ func (m *rootModel) updateDone(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// ---------------------------------------------------------------------------
+// Completion-marker helpers
+// ---------------------------------------------------------------------------
+
+// resolveArtifactStore returns the artifact store to use for the COMPLETED
+// marker write. When an ArtifactStoreFactory was injected it is called with
+// the run folder; otherwise the default file-based store is used.
+func (m *rootModel) resolveArtifactStore(runFolder string) domain.ArtifactStore {
+	if m.artifactStoreFactory != nil {
+		return m.artifactStoreFactory(runFolder)
+	}
+	return artifact.NewFileStore(filepath.Join(runFolder, "Orchestration.md"))
+}
+
+// resolveClockTime returns the current timestamp for the COMPLETED marker
+// write. When a Clock was injected it is used; otherwise a real UTC clock
+// is used.
+func (m *rootModel) resolveClockTime() time.Time {
+	if m.clock != nil {
+		return m.clock.Now()
+	}
+	return time.Now().UTC()
 }
 
 // ---------------------------------------------------------------------------
@@ -1033,6 +1201,10 @@ func (m *rootModel) View() string {
 	case screenStop:
 		if m.stopScreen != nil {
 			return m.stopScreen.View()
+		}
+	case screenExecOverride:
+		if m.execOverrideScreen != nil {
+			return m.execOverrideScreen.View()
 		}
 	case screenDone:
 		if m.doneScreen != nil {

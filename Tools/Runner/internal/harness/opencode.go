@@ -39,10 +39,16 @@ var (
 // event-stream parsing. See claudecode.go's ClaudeCodeAdapter for the
 // mapping shape this implementation mirrors.
 type OpenCodeAdapter struct {
-	spawner     commonharness.Spawner
-	textSpawner commonharness.TextSpawner
-	logger      domain.DebugLogger
+	executablePath string
+	timeout        time.Duration
+	spawner        commonharness.Spawner
+	sink           commonharness.Sink
+	logger         domain.DebugLogger
 }
+
+// ExecutablePath implements domain.ExecutableRevealer. It returns the
+// executable path or command name this adapter was constructed with.
+func (a *OpenCodeAdapter) ExecutablePath() string { return a.executablePath }
 
 // NewOpenCodeAdapter creates an OpenCodeAdapter with debug logging disabled.
 // Zero timeout means 30 minutes, matching the existing adapter.
@@ -65,8 +71,7 @@ func NewOpenCodeAdapterWithLogger(executablePath string, timeout time.Duration, 
 		commonharness.WithTimeout(timeout),
 		commonharness.WithSink(sink),
 	)
-	ts, _ := spawner.(commonharness.TextSpawner)
-	return &OpenCodeAdapter{spawner: spawner, textSpawner: ts, logger: logger}
+	return &OpenCodeAdapter{executablePath: executablePath, timeout: timeout, spawner: spawner, sink: sink, logger: logger}
 }
 
 // Invoke implements domain.HarnessAdapter.
@@ -121,6 +126,20 @@ func (a *OpenCodeAdapter) Invoke(ctx context.Context, agent domain.AgentReferenc
 				domain.F("agent", request.AgentInstanceID),
 			)
 		}
+		// A missing or non-executable binary is recoverable via the override
+		// screen. Wrap it in a domain.HarnessLaunchError so the TUI can
+		// distinguish it from every other failure class by error identity.
+		if errors.Is(err, commonharness.ErrExecutableNotFound) {
+			launchErr := &domain.HarnessLaunchError{
+				Harness:    commonharness.HarnessIDOpenCode,
+				Executable: a.executablePath,
+				Err:        err,
+			}
+			a.logger.Log(domain.EventHarnessInvokeError, launchErr.Error(),
+				domain.F("agent", request.AgentInstanceID),
+			)
+			return domain.ProtocolResponse{}, launchErr
+		}
 		// The shared package distinguishes parent-context cancellation from
 		// adapter timeout via ErrCancelled. Runner's existing call sites and
 		// tests expect ctx.Err() on cancellation, so translate it back here.
@@ -157,9 +176,9 @@ func (a *OpenCodeAdapter) Invoke(ctx context.Context, agent domain.AgentReferenc
 
 // InvokeRaw implements domain.RawInvoker.
 //
-// It delegates to the spawner's TextSpawner path, which stops after envelope
-// parsing and before ExtractProtocolJSON. The payload is sent verbatim and
-// the reply text is returned verbatim as bytes.
+// It performs the same steps as Invoke up through envelope parsing but stops
+// before ExtractProtocolJSON, so non-protocol replies (consultation responses,
+// routing instructions) are returned as plain text without being rejected.
 //
 // On context cancellation, returns ctx.Err().
 func (a *OpenCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentReference, payload []byte) ([]byte, error) {
@@ -179,8 +198,43 @@ func (a *OpenCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRefer
 		SystemPrompt: commonharness.EnvBlock(""),
 	}
 
-	resp, err := a.textSpawner.SpawnText(ctx, spawnReq)
+	cmd, err := commonharness.ResolveExecutable(a.executablePath)
 	if err != nil {
+		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+			domain.F("agent", agent.Identifier),
+		)
+		return nil, err
+	}
+
+	args, err := commonharness.BuildOpenCodeArgs(spawnReq)
+	if err != nil {
+		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+			domain.F("agent", agent.Identifier),
+		)
+		return nil, err
+	}
+
+	resp, err := commonharness.Run(ctx, cmd, args, commonharness.RunOptions{
+		WorkingDir: spawnReq.WorkingDir,
+		Env:        spawnReq.Env,
+		Timeout:    a.timeout,
+		Sink:       a.sink,
+	})
+	if err != nil {
+		// A missing or non-executable binary is recoverable via the override
+		// screen. Wrap it in a domain.HarnessLaunchError so the TUI can
+		// distinguish it from every other failure class by error identity.
+		if errors.Is(err, commonharness.ErrExecutableNotFound) {
+			launchErr := &domain.HarnessLaunchError{
+				Harness:    commonharness.HarnessIDOpenCode,
+				Executable: a.executablePath,
+				Err:        err,
+			}
+			a.logger.Log(domain.EventHarnessInvokeError, launchErr.Error(),
+				domain.F("agent", agent.Identifier),
+			)
+			return nil, launchErr
+		}
 		if ctx.Err() != nil {
 			a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
 				domain.F("agent", agent.Identifier),
@@ -193,11 +247,19 @@ func (a *OpenCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRefer
 		return nil, err
 	}
 
-	a.logger.Log(domain.EventHarnessStdout, resp.Text,
+	text, err := commonharness.ParseOpenCodeEnvelope(resp.Stdout)
+	if err != nil {
+		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+			domain.F("agent", agent.Identifier),
+		)
+		return nil, err
+	}
+
+	a.logger.Log(domain.EventHarnessStdout, text,
 		domain.F("agent", agent.Identifier),
 	)
 	a.logger.Log(domain.EventHarnessInvokeOK, "raw invocation succeeded",
 		domain.F("agent", agent.Identifier),
 	)
-	return []byte(resp.Text), nil
+	return []byte(text), nil
 }

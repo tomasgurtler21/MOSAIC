@@ -1,9 +1,48 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// ErrHarnessLaunchFailed is the class sentinel for the failure in which the
+// harness subprocess could not be started at all. It is deliberately distinct
+// from every failure of a process that did start (non-zero exit, timeout,
+// cancellation, malformed output), because only a launch failure can be fixed
+// by supplying a different executable path.
+var ErrHarnessLaunchFailed = errors.New("harness: launch failed")
+
+// HarnessLaunchError attributes a launch failure to a specific harness and
+// the executable path that was tried. It is constructable in tests from any
+// underlying error, including a synthetic one, so error-identity assertions
+// need no subprocess.
+//
+// It reports true for errors.Is against ErrHarnessLaunchFailed and against
+// every sentinel in the Err chain (notably
+// mosaic-common/harness.ErrExecutableNotFound).
+type HarnessLaunchError struct {
+	// Harness is the harness identifier that failed (e.g. "ghcp-cli").
+	Harness string
+
+	// Executable is the path or command name that could not be launched.
+	Executable string
+
+	// Err is the underlying error from the spawner, preserved for identity
+	// checks. Never nil.
+	Err error
+}
+
+// Error returns a human-readable message naming the harness and the
+// executable that could not be started.
+func (e *HarnessLaunchError) Error() string {
+	return fmt.Sprintf("harness %q: could not launch %q: %v", e.Harness, e.Executable, e.Err)
+}
+
+// Unwrap returns both the class sentinel and the underlying cause so that
+// errors.Is matches ErrHarnessLaunchFailed and the spawner's own sentinel
+// (e.g. mosaic-common/harness.ErrExecutableNotFound).
+func (e *HarnessLaunchError) Unwrap() []error { return []error{ErrHarnessLaunchFailed, e.Err} }
 
 // RefusalError is a structured error for pre-invocation refusals.
 // Every refusal names the specific condition and the resource involved.

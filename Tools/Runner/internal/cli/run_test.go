@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/pflag"
+
 	commonharness "mosaic-common/harness"
 	"mosaic-common/interaction"
 	"mosaic-run/internal/cli"
@@ -2221,16 +2223,63 @@ func TestPreConsultFlag_ReachesRunSettings(t *testing.T) {
 	}
 }
 
-// TestPreConsultFlag_DefaultIsFalse_WhenOmitted verifies that omitting
-// --pre-consult leaves RunSettings.PreConsultation as false.
-func TestPreConsultFlag_DefaultIsFalse_WhenOmitted(t *testing.T) {
+// TestPreConsultFlag_DefaultIsTrue_WhenOmitted verifies that omitting --pre-consult
+// leaves RunSettings.PreConsultation enabled — pre-consultation is on by default
+// so that automated runs are safe without explicit opt-in.
+func TestPreConsultFlag_DefaultIsTrue_WhenOmitted(t *testing.T) {
 	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
 	_, _, _ = runCLI(t, newStage7BaseArgs(), sess)
 	if !sess.called {
 		t.Fatal("session.Start was not called")
 	}
+	if !sess.config.PreConsultation {
+		t.Error("PreConsultation = false, want true when --pre-consult is omitted; " +
+			"pre-consultation must be enabled by default")
+	}
+}
+
+// TestPreConsultFlag_ExplicitFalse_DisablesPreConsultation verifies that passing
+// --pre-consult=false explicitly disables pre-consultation even though the flag
+// defaults to enabled. The =false form is the only way users can opt out of the
+// default, so it must be honoured by the cobra flag machinery.
+//
+// NOTE — conditional RED phase: with the current cobra default of false for
+// --pre-consult, passing --pre-consult=false already produces PreConsultation =
+// false, so this test passes before implementation. It only enters RED once I2.1
+// flips the cobra default to true. The RED phase for this test must be
+// re-verified after I2.1 lands, not before.
+func TestPreConsultFlag_ExplicitFalse_DisablesPreConsultation(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, append(newStage7BaseArgs(), "--pre-consult=false"), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
 	if sess.config.PreConsultation {
-		t.Error("PreConsultation = true, want false when --pre-consult is omitted")
+		t.Error("PreConsultation = true, want false when --pre-consult=false is passed; " +
+			"the explicit-false form must override the default")
+	}
+}
+
+// TestPreConsultFlag_ExplicitTrue_EnablesPreConsultation verifies that passing
+// --pre-consult=true explicitly enables pre-consultation. The design behavioral
+// contract table lists this invocation form as required to produce
+// PreConsultation == true. Cobra handles this correctly for bool flags; this
+// test closes the gap against the contract table for the =true form through the
+// full CLI path into RunSettings.PreConsultation.
+//
+// REGRESSION GUARD — this test passes before I2.1 lands because --pre-consult=true
+// produces PreConsultation = true regardless of the cobra default. It is not a
+// TDD RED-phase driver; it pins the =true form's behavior so a future refactor
+// cannot silently break explicit enabling.
+func TestPreConsultFlag_ExplicitTrue_EnablesPreConsultation(t *testing.T) {
+	sess := &scriptedSession{outcome: domain.RunOutcome{Status: domain.RunCompleted}}
+	_, _, _ = runCLI(t, append(newStage7BaseArgs(), "--pre-consult=true"), sess)
+	if !sess.called {
+		t.Fatal("session.Start was not called")
+	}
+	if !sess.config.PreConsultation {
+		t.Error("PreConsultation = false, want true when --pre-consult=true is passed; " +
+			"the explicit-true form must set PreConsultation enabled")
 	}
 }
 
@@ -2327,5 +2376,321 @@ func TestRunStoppedByConsultant_StopReasonPrintedToStderr(t *testing.T) {
 	_, _, errOut := runCLI(t, newStage7BaseArgs(), sess)
 	if !strings.Contains(errOut, stopReason) {
 		t.Errorf("stderr %q does not contain stop reason %q", errOut, stopReason)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stage 5: RunFlagSpecs and ValueBearingFlagNames (T5.1 — arity introspection)
+//
+// cli.RunFlagSpecs() is the authoritative arity declaration for every flag
+// mosaic-run accepts. It must derive from the same single declaration that
+// cli.Run() uses to register flags onto the run subcommand, so that adding a
+// flag requires editing exactly one place rather than maintaining two lists.
+//
+// cli.ValueBearingFlagNames() is a convenience derived from RunFlagSpecs that
+// returns only the names of value-consuming flags; this is the set that
+// hasPositionalArg must skip when scanning os.Args.
+//
+// All tests in this section are RED until Stage 5's I5.1 refactor implements
+// these functions. The stubs in flagspecs.go panic to keep every caller RED.
+//
+// The drift test (TestRunFlagSpecs_DriftFromActualRegistration) uses
+// cli.RegisterRunFlags to populate a fresh FlagSet and then walks it with
+// VisitAll, comparing the registration against RunFlagSpecs(). This structural
+// test is what prevents a regression to two hand-maintained lists: it cannot
+// be satisfied by updating a literal list in the test, only by keeping
+// RunFlagSpecs and the registration in sync through a shared declaration.
+// ---------------------------------------------------------------------------
+
+// TestRunFlagSpecs_IsNonEmpty verifies that RunFlagSpecs returns at least one
+// entry. An empty slice means the arity map is empty, which would cause
+// hasPositionalArg to treat every flag value as positional.
+//
+// RED: RunFlagSpecs currently panics.
+func TestRunFlagSpecs_IsNonEmpty(t *testing.T) {
+	specs := cli.RunFlagSpecs()
+	if len(specs) == 0 {
+		t.Fatal("RunFlagSpecs() returned empty slice; want at least one FlagSpec entry")
+	}
+}
+
+// TestRunFlagSpecs_ContainsTUIFlag verifies that RunFlagSpecs includes an entry
+// for "--tui" with TakesValue: false. The --tui flag is the one entry-point-only
+// flag (not registered on the run subcommand) that RunFlagSpecs must append
+// explicitly.
+//
+// RED: RunFlagSpecs currently panics.
+func TestRunFlagSpecs_ContainsTUIFlag(t *testing.T) {
+	specs := cli.RunFlagSpecs()
+	for _, s := range specs {
+		if s.Name == "--tui" {
+			if s.TakesValue {
+				t.Error("RunFlagSpecs()[--tui].TakesValue = true, want false; --tui is a boolean flag")
+			}
+			return
+		}
+	}
+	t.Error("RunFlagSpecs() does not contain an entry for \"--tui\"; " +
+		"it is the entry-point-only flag that RunFlagSpecs must append explicitly")
+}
+
+// TestRunFlagSpecs_ClaudePathIsValueBearing verifies that "--claude-path" appears
+// in RunFlagSpecs with TakesValue: true. This flag is the one directly involved
+// in the mode-detection bug and must be in the value-bearing set so hasPositionalArg
+// skips its value token.
+//
+// RED: RunFlagSpecs currently panics.
+func TestRunFlagSpecs_ClaudePathIsValueBearing(t *testing.T) {
+	specs := cli.RunFlagSpecs()
+	for _, s := range specs {
+		if s.Name == "--claude-path" {
+			if !s.TakesValue {
+				t.Error("RunFlagSpecs()[--claude-path].TakesValue = false, want true; " +
+					"--claude-path consumes a following argument and must be value-bearing")
+			}
+			return
+		}
+	}
+	t.Error("RunFlagSpecs() does not contain an entry for \"--claude-path\"; " +
+		"it is a value-bearing flag and must be declared in the arity map")
+}
+
+// TestRunFlagSpecs_PreConsultIsBoolean verifies that "--pre-consult" appears in
+// RunFlagSpecs with TakesValue: false. If it were mistakenly marked as
+// value-bearing, the token following --pre-consult would be skipped, and a
+// genuine positional argument after it would be invisible to hasPositionalArg.
+//
+// RED: RunFlagSpecs currently panics.
+func TestRunFlagSpecs_PreConsultIsBoolean(t *testing.T) {
+	specs := cli.RunFlagSpecs()
+	for _, s := range specs {
+		if s.Name == "--pre-consult" {
+			if s.TakesValue {
+				t.Error("RunFlagSpecs()[--pre-consult].TakesValue = true, want false; " +
+					"--pre-consult is a boolean flag and must not be value-bearing (AC5.5)")
+			}
+			return
+		}
+	}
+	t.Error("RunFlagSpecs() does not contain an entry for \"--pre-consult\"")
+}
+
+// TestRunFlagSpecs_KnownArities verifies that a representative set of flags
+// from both the value-bearing and boolean categories carry the correct arity.
+// This is a table-driven spot-check that catches systematic errors
+// (e.g. all flags marked value-bearing by mistake).
+//
+// RED: RunFlagSpecs currently panics.
+func TestRunFlagSpecs_KnownArities(t *testing.T) {
+	wantValueBearing := []string{
+		"--orchestrator-file",
+		"--workflow",
+		"--task",
+		"--mode",
+		"--checkpoints",
+		"--commits",
+		"--commit-branch",
+		"--run",
+		"--harness",
+		"--timeout",
+		"--claude-path",
+		"--infra-class",
+		"--input",
+	}
+	wantBoolean := []string{
+		"--allow-version-drift",
+		"--pre-consult",
+		"--manual-resolution",
+		"--new-run",
+		"--tui",
+	}
+
+	specs := cli.RunFlagSpecs()
+	specsMap := make(map[string]cli.FlagSpec, len(specs))
+	for _, s := range specs {
+		specsMap[s.Name] = s
+	}
+
+	for _, name := range wantValueBearing {
+		spec, ok := specsMap[name]
+		if !ok {
+			t.Errorf("flag %q is absent from RunFlagSpecs(); it is value-bearing and must be declared", name)
+			continue
+		}
+		if !spec.TakesValue {
+			t.Errorf("RunFlagSpecs()[%q].TakesValue = false, want true", name)
+		}
+	}
+
+	for _, name := range wantBoolean {
+		spec, ok := specsMap[name]
+		if !ok {
+			t.Errorf("flag %q is absent from RunFlagSpecs(); it is boolean and must be declared", name)
+			continue
+		}
+		if spec.TakesValue {
+			t.Errorf("RunFlagSpecs()[%q].TakesValue = true, want false; boolean flags must not be value-bearing", name)
+		}
+	}
+}
+
+// TestValueBearingFlagNames_ContainsExpectedFlags verifies that
+// ValueBearingFlagNames returns every flag known to be value-bearing. A missing
+// entry means hasPositionalArg would not skip that flag's value and would
+// falsely classify the value token as a positional argument.
+//
+// RED: ValueBearingFlagNames currently panics.
+func TestValueBearingFlagNames_ContainsExpectedFlags(t *testing.T) {
+	wantPresent := []string{
+		"--orchestrator-file",
+		"--workflow",
+		"--task",
+		"--mode",
+		"--checkpoints",
+		"--commits",
+		"--commit-branch",
+		"--run",
+		"--harness",
+		"--timeout",
+		"--claude-path",
+		"--infra-class",
+		"--input",
+	}
+
+	names := cli.ValueBearingFlagNames()
+	nameSet := make(map[string]bool, len(names))
+	for _, n := range names {
+		nameSet[n] = true
+	}
+
+	for _, want := range wantPresent {
+		if !nameSet[want] {
+			t.Errorf("ValueBearingFlagNames() does not contain %q; "+
+				"hasPositionalArg will treat its value token as a positional argument", want)
+		}
+	}
+}
+
+// TestValueBearingFlagNames_DoesNotContainBooleanFlags verifies that
+// ValueBearingFlagNames excludes every boolean flag. Including a boolean flag
+// would cause hasPositionalArg to skip the token following it, hiding genuine
+// positional arguments and inverting the bug (AC5.5).
+//
+// RED: ValueBearingFlagNames currently panics.
+func TestValueBearingFlagNames_DoesNotContainBooleanFlags(t *testing.T) {
+	boolFlags := []string{
+		"--allow-version-drift",
+		"--pre-consult",
+		"--manual-resolution",
+		"--new-run",
+		"--tui",
+	}
+
+	names := cli.ValueBearingFlagNames()
+	nameSet := make(map[string]bool, len(names))
+	for _, n := range names {
+		nameSet[n] = true
+	}
+
+	for _, flag := range boolFlags {
+		if nameSet[flag] {
+			t.Errorf("ValueBearingFlagNames() contains %q; "+
+				"boolean flags must not be in the value-bearing set — "+
+				"including one would cause hasPositionalArg to skip the following token (AC5.5)", flag)
+		}
+	}
+}
+
+// TestValueBearingFlagNames_ConsistentWithRunFlagSpecs verifies that
+// ValueBearingFlagNames() returns exactly the names from RunFlagSpecs() where
+// TakesValue is true. If the two functions disagree, a pre-scan consumer using
+// ValueBearingFlagNames and a consumer iterating RunFlagSpecs directly would
+// make different decisions for the same args.
+//
+// RED: both functions currently panic.
+func TestValueBearingFlagNames_ConsistentWithRunFlagSpecs(t *testing.T) {
+	specs := cli.RunFlagSpecs()
+	names := cli.ValueBearingFlagNames()
+
+	wantNames := make(map[string]bool)
+	for _, s := range specs {
+		if s.TakesValue {
+			wantNames[s.Name] = true
+		}
+	}
+
+	gotNames := make(map[string]bool, len(names))
+	for _, n := range names {
+		gotNames[n] = true
+	}
+
+	for name := range wantNames {
+		if !gotNames[name] {
+			t.Errorf("ValueBearingFlagNames() is missing %q, which RunFlagSpecs() declares as TakesValue=true", name)
+		}
+	}
+	for name := range gotNames {
+		if !wantNames[name] {
+			t.Errorf("ValueBearingFlagNames() contains %q, which RunFlagSpecs() does not declare as TakesValue=true", name)
+		}
+	}
+}
+
+// TestRunFlagSpecs_DriftFromActualRegistration is the structural drift test.
+// It uses cli.RegisterRunFlags to populate a fresh pflag.FlagSet — the same
+// function that cli.Run() calls internally — and then walks the registered flags
+// via VisitAll, comparing each flag's actual arity (bool vs non-bool) against
+// what RunFlagSpecs() declares.
+//
+// This test cannot be satisfied by updating a literal list in the test file:
+// it passes only when RunFlagSpecs derives from the same declaration as the
+// registration, ensuring both are automatically in sync when a flag is added
+// or removed. That is the single-source-of-truth property Stage 5 requires.
+//
+// Expected asymmetries (not drift):
+//   - "--tui" appears in RunFlagSpecs but not in the run subcommand registration;
+//     it is the one entry-point-only flag, documented in the design.
+//
+// RED: cli.RegisterRunFlags and cli.RunFlagSpecs both currently panic.
+func TestRunFlagSpecs_DriftFromActualRegistration(t *testing.T) {
+	// Populate a fresh FlagSet using the same registration function that
+	// cli.Run() calls. After the Stage 5 refactor, RegisterRunFlags is the
+	// single place all run flags are declared.
+	fs := pflag.NewFlagSet("run", pflag.ContinueOnError)
+	cli.RegisterRunFlags(fs)
+
+	specs := cli.RunFlagSpecs()
+	specsMap := make(map[string]cli.FlagSpec, len(specs))
+	for _, s := range specs {
+		specsMap[s.Name] = s
+	}
+
+	// Every flag registered on the run subcommand must appear in RunFlagSpecs
+	// with the correct arity (bool vs non-bool).
+	fs.VisitAll(func(f *pflag.Flag) {
+		name := "--" + f.Name
+		spec, ok := specsMap[name]
+		if !ok {
+			t.Errorf("flag %q is registered on the run subcommand but absent from RunFlagSpecs(); "+
+				"adding a flag without updating RunFlagSpecs restores the two-list drift this stage eliminates", name)
+			return
+		}
+		takesValue := f.Value.Type() != "bool"
+		if spec.TakesValue != takesValue {
+			t.Errorf("flag %q: RunFlagSpecs().TakesValue = %v, registration says %v (type=%q); "+
+				"arity mismatch between the declared spec and the actual cobra registration",
+				name, spec.TakesValue, takesValue, f.Value.Type())
+		}
+	})
+
+	// "--tui" is the one expected specs-only flag. Verify it is present in specs
+	// with the correct arity and is genuinely absent from the run subcommand registration.
+	if _, ok := specsMap["--tui"]; !ok {
+		t.Error("RunFlagSpecs() does not contain \"--tui\"; " +
+			"it is the entry-point-only boolean flag that RunFlagSpecs must append explicitly")
+	}
+	if fs.Lookup("tui") != nil {
+		t.Error("\"--tui\" is registered on the run subcommand FlagSet; " +
+			"it must be entry-point-only and absent from the run subcommand registration")
 	}
 }

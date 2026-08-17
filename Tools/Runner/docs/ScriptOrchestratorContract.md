@@ -56,7 +56,7 @@ The orchestrator does not need to know whether it is being consulted for routine
 
 ### 2.2 Pre-Consultation
 
-An opt-in, one-shot invocation at run start (before the dispatch loop) for Modes 2 and 3. The orchestrator reads its own deployed instructions — which carry all environment context (project conventions, tool configurations, harness quirks) — and returns generic strings the Runner appends to every subsequent auto-routed dispatch.
+A one-shot invocation at run start (before the dispatch loop) for Modes 2 and 3, enabled by default. The orchestrator reads its own deployed instructions — which carry all environment context (project conventions, tool configurations, harness quirks) — and returns generic strings the Runner appends to every subsequent auto-routed dispatch. Pre-consultation can be disabled with `--pre-consult=false`.
 
 Pre-consultation has a different response schema from routing consultation (§5 vs §4).
 

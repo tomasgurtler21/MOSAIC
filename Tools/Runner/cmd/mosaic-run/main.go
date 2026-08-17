@@ -89,18 +89,15 @@ func main() {
 		timeoutStr = "30m" // matches the flag default
 	}
 	claudePathStr := scanFlag(args, "--claude-path")
-	if claudePathStr == "" {
-		claudePathStr = "claude" // matches the flag default
-	}
 
 	// Pre-scan the flags that select which consultants are wired before the session
 	// is constructed. These mirror the cobra flag defaults: --mode has no default
-	// (the session will refuse an absent mode), --manual-resolution and --pre-consult
-	// default to false. The pre-scan happens here so that buildDeps can wire the
-	// correct consultant types into session.Deps before session.New is called.
+	// (the session will refuse an absent mode), --manual-resolution defaults to false,
+	// and --pre-consult defaults to true. The pre-scan happens here so that buildDeps
+	// can wire the correct consultant types into session.Deps before session.New is called.
 	modeStr := scanFlag(args, "--mode")
 	manualResolution := scanBoolFlag(args, "--manual-resolution")
-	preConsult := scanBoolFlag(args, "--pre-consult")
+	preConsult := preConsultFromArgs(args)
 
 	// Parse the timeout duration; fall back to 30 minutes on invalid input
 	// (cli.Run will surface the parse error to the user with ExitUsage).
@@ -192,9 +189,6 @@ func runTUIMode(args []string) {
 
 	// Pre-scan --claude-path so it is available to the session factory.
 	claudePathTUI := scanFlag(args, "--claude-path")
-	if claudePathTUI == "" {
-		claudePathTUI = "claude"
-	}
 
 	programRef := tui.NewProgramRef()
 
@@ -217,7 +211,14 @@ func runTUIMode(args []string) {
 		// Build the harness adapter via buildAdapter, passing the process logger
 		// so that invocation I/O is captured in the debug log. buildAdapter
 		// handles the timeout default and the logger injection internally.
-		h := buildAdapter(cfg.Harness, claudePathTUI, cfg.Timeout, logger)
+		// cfg.ExecutablePath is set when the user confirms an override on the
+		// exec-override screen. It wins over the pre-scanned claudePathTUI so
+		// that retrying with a different path actually takes effect.
+		execPath := cfg.ExecutablePath
+		if execPath == "" {
+			execPath = claudePathTUI
+		}
+		h := buildAdapter(cfg.Harness, execPath, cfg.Timeout, logger)
 
 		artifactPath, err := resolveTUIArtifactPath(runFolder)
 		if errors.Is(err, errUnresolvedRunFolder) {
@@ -293,6 +294,10 @@ func runTUIMode(args []string) {
 		InitialRunFolder: identity.RunFolder,
 		SessionFactory:   sessFactory,
 		MintRunIdentity:  minter,
+		ArtifactStoreFactory: func(runFolder string) domain.ArtifactStore {
+			return newLoggedArtifactStore(filepath.Join(runFolder, "Orchestration.md"), logger)
+		},
+		Clock: &realClock{},
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "tui: %v\n", err)
 		os.Exit(1)
@@ -443,6 +448,63 @@ func scanBoolFlag(args []string, flag string) bool {
 	return false
 }
 
+// boolFlagState is the tri-state outcome of pre-scanning a boolean flag, needed
+// because a flag whose cobra default is true cannot be pre-scanned with a
+// two-state helper: "absent" and "explicitly false" must be distinguishable.
+type boolFlagState int
+
+const (
+	boolFlagAbsent boolFlagState = iota // flag not present in args
+	boolFlagTrue                        // "--flag" or "--flag=true"
+	boolFlagFalse                       // "--flag=false"
+)
+
+// scanBoolFlagState classifies a boolean flag's presence in args, understanding
+// the bare "--flag" form and the "--flag=true"/"--flag=false" forms. It mirrors
+// cobra's boolean flag parsing for pre-scan purposes only.
+func scanBoolFlagState(args []string, flag string) boolFlagState {
+	prefix := flag + "="
+	for _, arg := range args {
+		if arg == flag {
+			return boolFlagTrue
+		}
+		if strings.HasPrefix(arg, prefix) {
+			val := strings.ToLower(strings.TrimPrefix(arg, prefix))
+			if val == "false" {
+				return boolFlagFalse
+			}
+			return boolFlagTrue
+		}
+	}
+	return boolFlagAbsent
+}
+
+// scanBoolFlagDefault is the default-aware version of scanBoolFlag. It returns
+// def when the flag is absent, true for the bare flag form, and honours
+// --flag=true / --flag=false forms explicitly.
+//
+// Every boolean pre-scan in this file must pass the same def as the cobra flag
+// declaration's default, so the pre-scan and the parsed flag cannot disagree.
+func scanBoolFlagDefault(args []string, flag string, def bool) bool {
+	switch scanBoolFlagState(args, flag) {
+	case boolFlagTrue:
+		return true
+	case boolFlagFalse:
+		return false
+	default: // boolFlagAbsent
+		return def
+	}
+}
+
+// preConsultFromArgs resolves the effective pre-consultation setting from args,
+// applying the same default (true) that the --pre-consult cobra flag declaration
+// uses. This is the call site whose default literal pins agreement: any change
+// to the cobra default that does not also update this call is caught by the
+// TestPreConsultFromArgs_* tests.
+func preConsultFromArgs(args []string) bool {
+	return scanBoolFlagDefault(args, "--pre-consult", true)
+}
+
 // hasFlag reports whether args contains the named flag in either the
 // "--flag value" or "--flag=value" form. Unlike scanFlag it returns no value,
 // and unlike scanBoolFlag it matches the "--flag=value" form; it exists for
@@ -460,12 +522,38 @@ func hasFlag(args []string, flag string) bool {
 	return false
 }
 
-// hasPositionalArg reports whether args contains at least one non-flag argument.
-// Non-flag arguments are those that do not start with "-".
+// hasPositionalArg reports whether args contains at least one genuine positional
+// argument — a token that is neither a flag nor the value of a preceding
+// value-bearing flag. The value-bearing set comes from cli.ValueBearingFlagNames().
+//
+// Scan rules (left to right):
+//   - A token that starts with "-" and is in the value-bearing set consumes the
+//     following token as its value; that value is not positional.
+//   - A token that starts with "-" and contains "=" has its value embedded; no
+//     following token is consumed.
+//   - A token that starts with "-" otherwise (boolean flag or unknown flag)
+//     consumes nothing.
+//   - A token that does not start with "-" and was not consumed as a value is a
+//     genuine positional argument.
 func hasPositionalArg(args []string) bool {
+	valueBearing := make(map[string]bool)
+	for _, name := range cli.ValueBearingFlagNames() {
+		valueBearing[name] = true
+	}
+
+	skipNext := false
 	for _, arg := range args {
+		if skipNext {
+			skipNext = false
+			continue // consumed as the value of the preceding value-bearing flag
+		}
 		if !strings.HasPrefix(arg, "-") {
-			return true
+			return true // not a flag and not consumed as a value: genuine positional
+		}
+		// It is a flag token. If it contains "=" the value is embedded; if not
+		// and it names a value-bearing flag, the next token is its value.
+		if !strings.Contains(arg, "=") && valueBearing[arg] {
+			skipNext = true
 		}
 	}
 	return false
@@ -541,11 +629,15 @@ func buildAdapter(harnessStr, claudePathStr string, timeout time.Duration, logge
 		logger = loggers[0]
 	}
 	switch harnessStr {
-	case "claude-code":
+	case commonharness.HarnessIDClaudeCode:
+		exe := claudePathStr
+		if exe == "" {
+			exe = "claude"
+		}
 		if timeout <= 0 {
 			timeout = 30 * time.Minute
 		}
-		return harness.NewClaudeCodeAdapterWithLogger(claudePathStr, timeout, logger)
+		return harness.NewClaudeCodeAdapterWithLogger(exe, timeout, logger)
 	case commonharness.HarnessIDOpenCode:
 		exe := claudePathStr
 		if exe == "" {

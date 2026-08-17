@@ -45,7 +45,7 @@ The human orchestrator synthesizes both layers for every dispatch because it hol
 
 Mode 1 fully closes this gap: the orchestrator crafts every dispatch message with both layers. Modes 2/3 lose both layers on auto-routed dispatches. The per-dispatch context gap is the fundamental trade-off of those modes — subagents must derive their focus from instructions and input artifacts alone, without orchestrator guidance on what matters this time. This is the primary reason Mode 1 exists.
 
-The environment context gap is a smaller but more annoying problem: a subagent that can't find its skills or uses the wrong Python command fails for plumbing reasons unrelated to its task. Pre-Consultation (§2.8) addresses this narrow layer with a one-shot orchestrator invocation at run start, but it is a minor quality-of-life fix, not a mitigation for the core dispatch intelligence gap.
+The environment context gap is a different class of problem: a subagent that cannot find its skills or uses the wrong Python command fails for plumbing reasons unrelated to its task, and those failures are harder to attribute than task-logic failures. Pre-Consultation (§2.8) addresses this narrow layer with a one-shot orchestrator invocation at run start. It does not close the core dispatch intelligence gap — that remains the fundamental trade-off of Modes 2/3 — but it prevents a category of failure that is difficult to diagnose and easy to avoid.
 
 ### 1.3 What the Runner Is Not
 
@@ -146,16 +146,16 @@ Skills are at .claude/skills/ — read the relevant skill by name. Use `py`
 not `python`.
 ```
 
-**Mode 2/3 dispatch WITHOUT pre-consultation (generic, no environment):**
-```
-Proceed with your task.
-```
-
-**Mode 2/3 dispatch WITH pre-consultation (generic + environment):**
+**Mode 2/3 dispatch WITH pre-consultation (generic + environment, default):**
 ```
 Proceed with your task.
 Skills are at .claude/skills/ — read the relevant skill by name. Use `py`
 not `python`.
+```
+
+**Mode 2/3 dispatch WITHOUT pre-consultation (--pre-consult=false):**
+```
+Proceed with your task.
 ```
 
 The generic message is deliberately minimal. The subagent already has its instructions (which define its role and scope), its `input_artifacts` list (which tells it what to read), and its `output_artifacts` list (which tells it what to produce) — the Runner has no domain understanding to add. The per-dispatch intelligence gap — the orchestrator's ability to direct focus based on run context ("re-address the naming issues in §3.2") — is the accepted cost of Modes 2/3.
@@ -193,7 +193,7 @@ The mode is selected at run start. Both interaction surfaces — the CLI (non-in
 
 ### 2.8 Pre-Consultation
 
-Pre-consultation is an opt-in, minor quality-of-life mechanism for Modes 2 and 3. At run start, before the dispatch loop, the Runner invokes the orchestrator agent once and receives generic environment-level strings to append to every subsequent dispatch.
+Pre-consultation is enabled by default for Modes 2 and 3. At run start, before the dispatch loop, the Runner invokes the orchestrator agent once and receives generic environment-level strings to append to every subsequent dispatch. The default is on because a subagent in Modes 2/3 that lacks the orchestrator's environment context can fail for plumbing reasons unrelated to its task — skills not found, wrong interpreter command, harness quirks not accounted for — and those failures are difficult to attribute without the missing context. The cost of the single extra orchestrator invocation at run start is small relative to a full run with stale or absent guidance. Pre-consultation can be disabled with `--pre-consult=false`.
 
 **Invocation context:** Pre-consultation is a distinct invocation context from routing consultation (§2.9). The orchestrator returns field-keyed strings (§2.8's response shape), not a routing instruction (`dispatch`/`stop`). The contract document defines both response schemas under their respective invocation contexts.
 
@@ -222,7 +222,7 @@ constraints: |
 
 - **Uses the real orchestrator, not a dedicated advisor agent.** The orchestrator already has all the context through deployment. A separate agent would need the same context assembled and passed explicitly — duplicated context with drift risk.
 - **Generic, not per-agent.** The orchestrator doesn't know agent internals. It knows environment facts (paths, command aliases, harness quirks) that apply equally to all subagents. The output is flat strings, not a per-agent map.
-- **Opt-in with hard failure.** If enabled and the orchestrator invocation fails, the run refuses to start. Silent degradation (proceeding without environment guidance the user explicitly requested) is worse than stopping.
+- **On by default, hard failure on error.** If pre-consultation fails, the run refuses to start. Silent degradation — proceeding without environment guidance — is worse than stopping, whether the feature was explicitly requested or merely defaulted on. Pre-consultation can be disabled with `--pre-consult=false`.
 - **Not cached across runs.** Project context, CLAUDE.md, and harness injections can change between runs. One extra LLM invocation at startup is cheap relative to a full run with stale guidance.
 
 **Mode interaction:**
@@ -230,8 +230,8 @@ constraints: |
 | Mode | Pre-consultation value |
 |------|----------------------|
 | 1 — Orchestrated | Unnecessary — orchestrator already includes environment context in every crafted dispatch |
-| 2 — Auto | Adds environment plumbing to auto-routed SUCCESS dispatches (minor fix) |
-| 3 — Auto-review | Adds environment plumbing to all auto-routed dispatches (minor fix) |
+| 2 — Auto | Provides environment context for auto-routed dispatches; does not close the per-dispatch intelligence gap |
+| 3 — Auto-review | Provides environment context for all auto-routed dispatches; does not close the per-dispatch intelligence gap |
 
 ### 2.9 Orchestrator Consultation
 

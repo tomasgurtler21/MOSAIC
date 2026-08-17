@@ -69,6 +69,7 @@ const harnessPackage = modulePrefix + "internal/harness"
 // other file that starts constructing adapters directly.
 var harnessSelectionConsumers = map[string]bool{
 	"cli/run.go":           true,
+	"cli/flagspecs.go":     true, // uses FakeHarnessID and FlagValues() for flag registration
 	"tui/screens/setup.go": true,
 }
 

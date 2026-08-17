@@ -62,6 +62,224 @@ func TestScanBoolFlag_PartialMatch_ReturnsFalse(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// scanBoolFlagState
+//
+// scanBoolFlagState is the tri-state classifier underlying scanBoolFlagDefault.
+// It distinguishes "flag absent" from "flag explicitly false" — a distinction
+// that a two-state helper cannot make for flags whose cobra default is true.
+// The design's testability notes name it as "table-testable across the four
+// invocation forms"; these tests provide that direct coverage.
+//
+// All four tests are in RED until scanBoolFlagState is implemented: the panic
+// stub ensures no coincidental pass is possible.
+// ---------------------------------------------------------------------------
+
+// TestScanBoolFlagState_FlagAbsent_ReturnsBoolFlagAbsent verifies that when the
+// named flag does not appear in args, scanBoolFlagState returns boolFlagAbsent.
+func TestScanBoolFlagState_FlagAbsent_ReturnsBoolFlagAbsent(t *testing.T) {
+	args := []string{"run", "--orchestrator-file", "orch.md", "--mode", "auto"}
+	got := scanBoolFlagState(args, "--pre-consult")
+	if got != boolFlagAbsent {
+		t.Errorf("scanBoolFlagState(flag absent) = %d, want boolFlagAbsent (%d)", got, boolFlagAbsent)
+	}
+}
+
+// TestScanBoolFlagState_BareFlagPresent_ReturnsBoolFlagTrue verifies that the
+// bare flag form ("--pre-consult" with no =value) is classified as boolFlagTrue.
+// A bare boolean flag always means "enable" regardless of the cobra default.
+func TestScanBoolFlagState_BareFlagPresent_ReturnsBoolFlagTrue(t *testing.T) {
+	args := []string{"run", "--pre-consult", "--mode", "auto"}
+	got := scanBoolFlagState(args, "--pre-consult")
+	if got != boolFlagTrue {
+		t.Errorf("scanBoolFlagState(bare --pre-consult) = %d, want boolFlagTrue (%d)", got, boolFlagTrue)
+	}
+}
+
+// TestScanBoolFlagState_ExplicitTrue_ReturnsBoolFlagTrue verifies that the
+// --flag=true form is classified as boolFlagTrue.
+func TestScanBoolFlagState_ExplicitTrue_ReturnsBoolFlagTrue(t *testing.T) {
+	args := []string{"run", "--pre-consult=true", "--mode", "auto"}
+	got := scanBoolFlagState(args, "--pre-consult")
+	if got != boolFlagTrue {
+		t.Errorf("scanBoolFlagState(--pre-consult=true) = %d, want boolFlagTrue (%d)", got, boolFlagTrue)
+	}
+}
+
+// TestScanBoolFlagState_ExplicitFalse_ReturnsBoolFlagFalse verifies that the
+// --flag=false form is classified as boolFlagFalse, not as boolFlagAbsent.
+// This distinction is the entire reason for the tri-state: without boolFlagFalse,
+// a pre-scan for a true-default flag cannot distinguish "not supplied" (use the
+// default of true) from "explicitly disabled" (use false).
+func TestScanBoolFlagState_ExplicitFalse_ReturnsBoolFlagFalse(t *testing.T) {
+	args := []string{"run", "--pre-consult=false", "--mode", "auto"}
+	got := scanBoolFlagState(args, "--pre-consult")
+	if got != boolFlagFalse {
+		t.Errorf("scanBoolFlagState(--pre-consult=false) = %d, want boolFlagFalse (%d)", got, boolFlagFalse)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// preConsultFromArgs (call-site agreement test)
+//
+// preConsultFromArgs is the thin wrapper in main.go that encapsulates the
+// scanBoolFlagDefault(args, "--pre-consult", true) call. Testing this function
+// rather than scanBoolFlagDefault directly pins the CALL SITE'S DEFAULT LITERAL:
+// if the implementer writes scanBoolFlagDefault(args, "--pre-consult", false),
+// the flag-omitted case below will fail even though all scanBoolFlagDefault unit
+// tests pass. This is the AC2.4 coverage that the original T2.2 tests could not
+// provide — they verified the helper's behavior for any caller who passes true,
+// but not that main.go will call it with true.
+// ---------------------------------------------------------------------------
+
+// TestPreConsultFromArgs_FlagOmitted_ReturnsTrue verifies that when --pre-consult
+// is absent from args, preConsultFromArgs returns true — the new cobra default.
+// This is the primary agreement case: both the pre-scan and the cobra flag must
+// agree on enabled when the flag is omitted.
+func TestPreConsultFromArgs_FlagOmitted_ReturnsTrue(t *testing.T) {
+	args := []string{"run", "--orchestrator-file", "orch.md", "--workflow", "w1",
+		"--task", "do work", "--mode", "auto", "--new-run"}
+	if !preConsultFromArgs(args) {
+		t.Error("preConsultFromArgs(flag absent) = false, want true; " +
+			"the call site in main.go must pass true as the default to scanBoolFlagDefault, " +
+			"matching the cobra flag declaration's default")
+	}
+}
+
+// TestPreConsultFromArgs_BareFlagPresent_ReturnsTrue verifies that the bare
+// --pre-consult form yields true from the call site in main.go.
+func TestPreConsultFromArgs_BareFlagPresent_ReturnsTrue(t *testing.T) {
+	args := []string{"run", "--orchestrator-file", "orch.md", "--workflow", "w1",
+		"--task", "do work", "--mode", "auto", "--new-run", "--pre-consult"}
+	if !preConsultFromArgs(args) {
+		t.Error("preConsultFromArgs(bare --pre-consult) = false, want true")
+	}
+}
+
+// TestPreConsultFromArgs_ExplicitFalse_ReturnsFalse verifies that --pre-consult=false
+// yields false from the call site in main.go. The =false form is the only way
+// users can disable pre-consultation now that it defaults to true; if the call
+// site did not pass the correct default, this form would still return false and
+// the test would pass coincidentally — but the flag-omitted case would fail,
+// catching the bug.
+func TestPreConsultFromArgs_ExplicitFalse_ReturnsFalse(t *testing.T) {
+	args := []string{"run", "--orchestrator-file", "orch.md", "--workflow", "w1",
+		"--task", "do work", "--mode", "auto", "--new-run", "--pre-consult=false"}
+	if preConsultFromArgs(args) {
+		t.Error("preConsultFromArgs(--pre-consult=false) = true, want false; " +
+			"the explicit-false form must override the default")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// scanBoolFlagDefault
+//
+// scanBoolFlagDefault is the default-aware successor to scanBoolFlag. Unlike
+// scanBoolFlag (which can only detect presence and implicitly defaults to
+// false), scanBoolFlagDefault accepts an explicit default value and
+// recognises the --flag=false and --flag=true forms in addition to the bare
+// --flag form. This is required for --pre-consult, whose cobra default changes
+// to true: the pre-scan in main() must mirror that default so that the
+// pre-scan result and the cobra-parsed result always agree across all three
+// invocation forms (omitted, bare, explicit-false).
+//
+// The three agreement cases must hold:
+//   - Flag omitted: pre-scan returns true (the new default), cobra also returns true
+//   - Bare flag (--pre-consult): pre-scan returns true, cobra also returns true
+//   - Explicit false (--pre-consult=false): pre-scan returns false, cobra also returns false
+// ---------------------------------------------------------------------------
+
+// TestScanBoolFlagDefault_FlagAbsent_ReturnsGivenDefault_True verifies that when
+// the flag is absent and the default is true, scanBoolFlagDefault returns true.
+// This is the critical behaviour for --pre-consult: omitting it must yield enabled.
+func TestScanBoolFlagDefault_FlagAbsent_ReturnsGivenDefault_True(t *testing.T) {
+	args := []string{"run", "--orchestrator-file", "orch.md", "--mode", "auto"}
+	if !scanBoolFlagDefault(args, "--pre-consult", true) {
+		t.Error("scanBoolFlagDefault(flag absent, default=true) = false, want true; " +
+			"when the flag is absent the default must be returned")
+	}
+}
+
+// TestScanBoolFlagDefault_FlagAbsent_ReturnsGivenDefault_False verifies that when
+// the flag is absent and the default is false, scanBoolFlagDefault returns false.
+// Mirrors the above case for other boolean flags whose default remains false.
+func TestScanBoolFlagDefault_FlagAbsent_ReturnsGivenDefault_False(t *testing.T) {
+	args := []string{"run", "--orchestrator-file", "orch.md"}
+	if scanBoolFlagDefault(args, "--manual-resolution", false) {
+		t.Error("scanBoolFlagDefault(flag absent, default=false) = true, want false")
+	}
+}
+
+// TestScanBoolFlagDefault_BareFlagPresent_ReturnsTrue verifies that the bare
+// flag form (--pre-consult with no =value) is recognised as true regardless of
+// the default value. A bare boolean flag always means "enable".
+func TestScanBoolFlagDefault_BareFlagPresent_ReturnsTrue(t *testing.T) {
+	args := []string{"run", "--pre-consult", "--mode", "auto"}
+	if !scanBoolFlagDefault(args, "--pre-consult", true) {
+		t.Error("scanBoolFlagDefault(bare --pre-consult, default=true) = false, want true")
+	}
+}
+
+// TestScanBoolFlagDefault_ExplicitTrue_ReturnsTrue verifies that the --flag=true
+// form returns true.
+func TestScanBoolFlagDefault_ExplicitTrue_ReturnsTrue(t *testing.T) {
+	args := []string{"run", "--pre-consult=true", "--mode", "auto"}
+	if !scanBoolFlagDefault(args, "--pre-consult", true) {
+		t.Error("scanBoolFlagDefault(--pre-consult=true) = false, want true")
+	}
+}
+
+// TestScanBoolFlagDefault_ExplicitFalse_ReturnsFalse verifies that passing
+// --flag=false returns false even when the caller-supplied default is true.
+// This is the opt-out path for flags that default to enabled: the =false form
+// is the only way to override a true default.
+func TestScanBoolFlagDefault_ExplicitFalse_ReturnsFalse(t *testing.T) {
+	args := []string{"run", "--pre-consult=false", "--mode", "auto"}
+	if scanBoolFlagDefault(args, "--pre-consult", true) {
+		t.Error("scanBoolFlagDefault(--pre-consult=false, default=true) = true, want false; " +
+			"the explicit-false form must override the default")
+	}
+}
+
+// TestScanBoolFlagDefault_PreConsultAgreement_FlagOmitted verifies the first
+// agreement case: when --pre-consult is absent, both the pre-scan and cobra
+// must agree on the enabled default. The pre-scan side is checked here;
+// the CLI flag side is covered by TestPreConsultFlag_DefaultIsTrue_WhenOmitted.
+func TestScanBoolFlagDefault_PreConsultAgreement_FlagOmitted(t *testing.T) {
+	// Simulate a real invocation without --pre-consult.
+	args := []string{"run", "--orchestrator-file", "orch.md", "--workflow", "w1",
+		"--task", "do work", "--mode", "auto", "--new-run"}
+	if !scanBoolFlagDefault(args, "--pre-consult", true) {
+		t.Error("pre-scan: --pre-consult absent → scanBoolFlagDefault should return true (new default); " +
+			"pre-scan and cobra default must agree: both enabled when flag is omitted")
+	}
+}
+
+// TestScanBoolFlagDefault_PreConsultAgreement_BareFlagPresent verifies the second
+// agreement case: a bare --pre-consult flag must produce true in both the pre-scan
+// and cobra parsing paths.
+func TestScanBoolFlagDefault_PreConsultAgreement_BareFlagPresent(t *testing.T) {
+	args := []string{"run", "--orchestrator-file", "orch.md", "--workflow", "w1",
+		"--task", "do work", "--mode", "auto", "--new-run", "--pre-consult"}
+	if !scanBoolFlagDefault(args, "--pre-consult", true) {
+		t.Error("pre-scan: bare --pre-consult → scanBoolFlagDefault should return true; " +
+			"pre-scan and cobra must agree: both enabled for bare flag")
+	}
+}
+
+// TestScanBoolFlagDefault_PreConsultAgreement_ExplicitFalse verifies the third
+// agreement case: --pre-consult=false must produce false in both the pre-scan
+// and cobra parsing paths. Without this, the pre-scan would wire a consultant
+// while cobra disables pre-consultation, causing a silent mismatch.
+func TestScanBoolFlagDefault_PreConsultAgreement_ExplicitFalse(t *testing.T) {
+	args := []string{"run", "--orchestrator-file", "orch.md", "--workflow", "w1",
+		"--task", "do work", "--mode", "auto", "--new-run", "--pre-consult=false"}
+	if scanBoolFlagDefault(args, "--pre-consult", true) {
+		t.Error("pre-scan: --pre-consult=false → scanBoolFlagDefault should return false; " +
+			"pre-scan and cobra must agree: both disabled for explicit-false form")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // hasPositionalArg
 // ---------------------------------------------------------------------------
 
@@ -1674,5 +1892,690 @@ func writeAgentFileForMain(t *testing.T, dir, agentID string) {
 	path := filepath.Join(dir, agentID+".md")
 	if err := os.WriteFile(path, []byte("# Agent: "+agentID+"\n"), 0600); err != nil {
 		t.Fatalf("writeAgentFileForMain(%q): %v", agentID, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.1: Per-harness executable resolution — no override supplied
+//
+// buildAdapter is the sole owner of per-harness executable defaulting. When
+// the caller supplies "" as the executable override (i.e. the user did not
+// pass --claude-path), each harness must resolve its own default:
+//
+//   claude-code → "claude"
+//   opencode    → "opencode"
+//   ghcp-cli    → "copilot"
+//
+// The resolution is asserted through domain.ExecutableRevealer, so a future
+// re-hoisting of a shared default upstream of buildAdapter breaks the test
+// behaviorally rather than structurally.
+//
+// RED state:
+//   TestBuildAdapter_ClaudeCode_NoOverride_ResolvesDefaultClaude — fails
+//   because the claude-code case in buildAdapter currently passes the
+//   executableOverride directly without an "if override == ''" guard, so
+//   ExecutablePath() returns "" rather than "claude".
+//
+// The opencode and ghcp-cli tests start GREEN (those cases already have the
+// guard) and serve as regression pins against the cross-harness default being
+// reintroduced.
+// ---------------------------------------------------------------------------
+
+// requireExecutableRevealer type-asserts h to domain.ExecutableRevealer and
+// returns the accessor. If the assertion fails the test is marked fatal.
+func requireExecutableRevealer(t *testing.T, h domain.HarnessAdapter) domain.ExecutableRevealer {
+	t.Helper()
+	rev, ok := h.(domain.ExecutableRevealer)
+	if !ok {
+		t.Fatalf("adapter %T does not implement domain.ExecutableRevealer; "+
+			"all CLI-backed adapters must implement it so executable resolution is observable", h)
+	}
+	return rev
+}
+
+// TestBuildAdapter_ClaudeCode_NoOverride_ResolvesDefaultClaude verifies that
+// when no executable override is supplied (empty string), buildAdapter resolves
+// the claude-code harness to its per-harness default executable "claude".
+//
+// RED: the claude-code case currently passes the override directly without an
+// empty-string guard, so ExecutablePath() returns "" not "claude".
+func TestBuildAdapter_ClaudeCode_NoOverride_ResolvesDefaultClaude(t *testing.T) {
+	h := buildAdapter(commonharness.HarnessIDClaudeCode, "", 30*time.Minute)
+	rev := requireExecutableRevealer(t, h)
+
+	got := rev.ExecutablePath()
+	if got != "claude" {
+		t.Errorf("buildAdapter(claude-code, override='') ExecutablePath() = %q, want %q; "+
+			"the claude-code case must apply its per-harness default when no override is supplied",
+			got, "claude")
+	}
+}
+
+// TestBuildAdapter_OpenCode_NoOverride_ResolvesDefaultOpenCode verifies that
+// when no executable override is supplied, buildAdapter resolves the opencode
+// harness to its per-harness default executable "opencode".
+func TestBuildAdapter_OpenCode_NoOverride_ResolvesDefaultOpenCode(t *testing.T) {
+	h := buildAdapter(commonharness.HarnessIDOpenCode, "", 30*time.Minute)
+	rev := requireExecutableRevealer(t, h)
+
+	got := rev.ExecutablePath()
+	if got != "opencode" {
+		t.Errorf("buildAdapter(opencode, override='') ExecutablePath() = %q, want %q",
+			got, "opencode")
+	}
+}
+
+// TestBuildAdapter_GHCPCli_NoOverride_ResolvesDefaultCopilot verifies that
+// when no executable override is supplied, buildAdapter resolves the ghcp-cli
+// harness to its per-harness default executable "copilot".
+func TestBuildAdapter_GHCPCli_NoOverride_ResolvesDefaultCopilot(t *testing.T) {
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "", 30*time.Minute)
+	rev := requireExecutableRevealer(t, h)
+
+	got := rev.ExecutablePath()
+	if got != "copilot" {
+		t.Errorf("buildAdapter(ghcp-cli, override='') ExecutablePath() = %q, want %q",
+			got, "copilot")
+	}
+}
+
+// TestBuildAdapter_GHCPCli_NoOverride_DoesNotResolveClaude verifies the
+// cross-harness property: with no override, the ghcp-cli harness must not
+// resolve to "claude" (another harness's executable). This pins the root cause
+// of the reported failure: the GHCP CLI harness was spawning "claude" because
+// the pre-scan injected "claude" as a fallback before buildAdapter was called.
+func TestBuildAdapter_GHCPCli_NoOverride_DoesNotResolveClaude(t *testing.T) {
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, "", 30*time.Minute)
+	rev := requireExecutableRevealer(t, h)
+
+	if got := rev.ExecutablePath(); got == "claude" {
+		t.Errorf("buildAdapter(ghcp-cli, override='') ExecutablePath() = %q; "+
+			"ghcp-cli must not resolve to claude — each harness must resolve its own default",
+			got)
+	}
+}
+
+// TestBuildAdapter_OpenCode_NoOverride_DoesNotResolveClaude verifies the
+// cross-harness property for the opencode harness: with no override, it must
+// not resolve to "claude".
+func TestBuildAdapter_OpenCode_NoOverride_DoesNotResolveClaude(t *testing.T) {
+	h := buildAdapter(commonharness.HarnessIDOpenCode, "", 30*time.Minute)
+	rev := requireExecutableRevealer(t, h)
+
+	if got := rev.ExecutablePath(); got == "claude" {
+		t.Errorf("buildAdapter(opencode, override='') ExecutablePath() = %q; "+
+			"opencode must not resolve to claude — each harness must resolve its own default",
+			got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.2: Explicit --claude-path override applies to every non-fake harness
+//
+// When the user supplies --claude-path, that value must be passed through as
+// the executable path for whichever harness --harness selected, overriding the
+// per-harness default. These tests verify the override takes effect for all
+// three real harnesses.
+//
+// All tests start GREEN (each case already propagates a non-empty override).
+// They serve as regression pins: if an implementation change accidentally drops
+// the override, these tests catch it.
+// ---------------------------------------------------------------------------
+
+// TestBuildAdapter_ClaudeCode_WithOverride_UsesOverride verifies that an
+// explicit executable override is passed through to the claude-code adapter
+// regardless of the per-harness default.
+func TestBuildAdapter_ClaudeCode_WithOverride_UsesOverride(t *testing.T) {
+	const override = "/opt/custom/claude"
+	h := buildAdapter(commonharness.HarnessIDClaudeCode, override, 30*time.Minute)
+	rev := requireExecutableRevealer(t, h)
+
+	if got := rev.ExecutablePath(); got != override {
+		t.Errorf("buildAdapter(claude-code, override=%q) ExecutablePath() = %q, want %q",
+			override, got, override)
+	}
+}
+
+// TestBuildAdapter_OpenCode_WithOverride_UsesOverride verifies that an explicit
+// executable override is passed through to the opencode adapter, replacing its
+// per-harness default of "opencode".
+func TestBuildAdapter_OpenCode_WithOverride_UsesOverride(t *testing.T) {
+	const override = "/opt/custom/opencode"
+	h := buildAdapter(commonharness.HarnessIDOpenCode, override, 30*time.Minute)
+	rev := requireExecutableRevealer(t, h)
+
+	if got := rev.ExecutablePath(); got != override {
+		t.Errorf("buildAdapter(opencode, override=%q) ExecutablePath() = %q, want %q",
+			override, got, override)
+	}
+}
+
+// TestBuildAdapter_GHCPCli_WithOverride_UsesOverride verifies that an explicit
+// executable override is passed through to the ghcp-cli adapter, replacing its
+// per-harness default of "copilot".
+func TestBuildAdapter_GHCPCli_WithOverride_UsesOverride(t *testing.T) {
+	const override = "/opt/custom/copilot"
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, override, 30*time.Minute)
+	rev := requireExecutableRevealer(t, h)
+
+	if got := rev.ExecutablePath(); got != override {
+		t.Errorf("buildAdapter(ghcp-cli, override=%q) ExecutablePath() = %q, want %q",
+			override, got, override)
+	}
+}
+
+// TestBuildAdapter_AllRealHarnesses_OverrideWinsOverDefault is a table-driven
+// regression across all three real harnesses: supplying a non-empty override
+// must always win over the per-harness default, for every harness.
+func TestBuildAdapter_AllRealHarnesses_OverrideWinsOverDefault(t *testing.T) {
+	const override = "custom-binary"
+	cases := []struct {
+		harnessID string
+	}{
+		{commonharness.HarnessIDClaudeCode},
+		{commonharness.HarnessIDOpenCode},
+		{commonharness.HarnessIDGHCPCLI},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.harnessID, func(t *testing.T) {
+			h := buildAdapter(tc.harnessID, override, 30*time.Minute)
+			rev := requireExecutableRevealer(t, h)
+			if got := rev.ExecutablePath(); got != override {
+				t.Errorf("buildAdapter(%q, override=%q) ExecutablePath() = %q, want %q; "+
+					"explicit override must win over per-harness default",
+					tc.harnessID, override, got, override)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.3: Regression — both CLI and TUI entry-path pre-scans
+//
+// The CLI entry path (runCLIMode) and the TUI entry path (runTUIMode) both
+// pre-scan --claude-path via scanFlag before calling buildAdapter. After the
+// fix, neither pre-scan may substitute a literal "claude" fallback; an absent
+// --claude-path must arrive at buildAdapter as "" so the per-harness default
+// applies.
+//
+// These tests pin the seam between scanFlag and buildAdapter: they simulate
+// the composition the entry paths perform and assert the expected per-harness
+// executable. Since both frontends use the same scanFlag helper, a single set
+// of composition tests covers both paths.
+//
+// The cobra --claude-path flag default must also agree: if cobra defaults to
+// "" and scanFlag returns "" for an absent flag, the two sources agree on
+// "not supplied" meaning empty string. The cobra flag default is changed in
+// I4.3 (run.go); its correctness is pinned here through the composition tests
+// whose assertions would fail if a literal "claude" were injected anywhere
+// before buildAdapter.
+// ---------------------------------------------------------------------------
+
+// TestPreScanComposition_GHCPCli_AbsentClaudePath_ResolvesCopilot simulates
+// the post-fix CLI/TUI entry-path composition: scanFlag finds no --claude-path
+// in args and returns "", which is passed directly to buildAdapter (no fallback
+// injection). The ghcp-cli adapter must resolve to "copilot".
+//
+// Regression: if the pre-scan re-introduces `if claudePath == "" { claudePath
+// = "claude" }`, then buildAdapter("ghcp-cli", "claude", ...) would return
+// "claude" (overriding the per-harness default), and this test would fail.
+func TestPreScanComposition_GHCPCli_AbsentClaudePath_ResolvesCopilot(t *testing.T) {
+	args := []string{"run", "--harness", commonharness.HarnessIDGHCPCLI}
+
+	// Simulate the post-fix entry-path composition: scanFlag returns "" for an
+	// absent flag, which must be passed as-is to buildAdapter (no substitution).
+	claudePath := scanFlag(args, "--claude-path")
+	if claudePath != "" {
+		// scanFlag itself is not the regression risk; the fallback injection is.
+		// Document the invariant explicitly.
+		t.Fatalf("scanFlag returned %q for absent --claude-path; want empty string — "+
+			"scanFlag must not inject a default, only the entry-path fallback code does", claudePath)
+	}
+
+	h := buildAdapter(commonharness.HarnessIDGHCPCLI, claudePath, 30*time.Minute)
+	rev := requireExecutableRevealer(t, h)
+
+	if got := rev.ExecutablePath(); got != "copilot" {
+		t.Errorf("CLI/TUI composition: absent --claude-path + buildAdapter(ghcp-cli) ExecutablePath() = %q, want %q; "+
+			"neither entry path may inject a cross-harness literal before calling buildAdapter",
+			got, "copilot")
+	}
+}
+
+// TestPreScanComposition_OpenCode_AbsentClaudePath_ResolvesOpenCode simulates
+// the post-fix entry-path composition for the opencode harness.
+func TestPreScanComposition_OpenCode_AbsentClaudePath_ResolvesOpenCode(t *testing.T) {
+	args := []string{"run", "--harness", commonharness.HarnessIDOpenCode}
+	claudePath := scanFlag(args, "--claude-path")
+
+	h := buildAdapter(commonharness.HarnessIDOpenCode, claudePath, 30*time.Minute)
+	rev := requireExecutableRevealer(t, h)
+
+	if got := rev.ExecutablePath(); got != "opencode" {
+		t.Errorf("CLI/TUI composition: absent --claude-path + buildAdapter(opencode) ExecutablePath() = %q, want %q",
+			got, "opencode")
+	}
+}
+
+// TestPreScanComposition_ClaudeCode_AbsentClaudePath_ResolvesDefaultClaude
+// simulates the post-fix entry-path composition for the claude-code harness.
+//
+// RED: once no literal fallback injection exists and buildAdapter gains the
+// "if override == ''" guard for claude-code (I4.1, I4.2, I4.4), this becomes
+// GREEN. Until then it fails because buildAdapter passes "" directly.
+func TestPreScanComposition_ClaudeCode_AbsentClaudePath_ResolvesDefaultClaude(t *testing.T) {
+	args := []string{"run", "--harness", commonharness.HarnessIDClaudeCode}
+	claudePath := scanFlag(args, "--claude-path")
+
+	h := buildAdapter(commonharness.HarnessIDClaudeCode, claudePath, 30*time.Minute)
+	rev := requireExecutableRevealer(t, h)
+
+	if got := rev.ExecutablePath(); got != "claude" {
+		t.Errorf("CLI/TUI composition: absent --claude-path + buildAdapter(claude-code) ExecutablePath() = %q, want %q",
+			got, "claude")
+	}
+}
+
+// TestPreScanComposition_CLIAndTUI_ProduceSameResolution verifies that the
+// CLI and TUI entry-path compositions are identical: both use scanFlag for
+// the pre-scan, so the same args produce the same executable for each harness.
+// This is the table-driven form of the individual composition tests above.
+func TestPreScanComposition_CLIAndTUI_ProduceSameResolution(t *testing.T) {
+	cases := []struct {
+		harnessID   string
+		wantExe     string
+	}{
+		// claude-code is intentionally omitted from the "already correct" cases:
+		// its expected behavior (resolving "claude") is RED until I4.4 adds
+		// the empty-string guard. The opencode and ghcp-cli cases are GREEN pins.
+		{commonharness.HarnessIDOpenCode, "opencode"},
+		{commonharness.HarnessIDGHCPCLI, "copilot"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.harnessID, func(t *testing.T) {
+			args := []string{"run", "--harness", tc.harnessID}
+			claudePath := scanFlag(args, "--claude-path")
+
+			cliH := buildAdapter(tc.harnessID, claudePath, 30*time.Minute)
+			tuiH := buildAdapter(tc.harnessID, claudePath, 30*time.Minute)
+
+			cliRev := requireExecutableRevealer(t, cliH)
+			tuiRev := requireExecutableRevealer(t, tuiH)
+
+			cliGot := cliRev.ExecutablePath()
+			tuiGot := tuiRev.ExecutablePath()
+
+			if cliGot != tc.wantExe {
+				t.Errorf("CLI entry path: buildAdapter(%q, '') ExecutablePath() = %q, want %q",
+					tc.harnessID, cliGot, tc.wantExe)
+			}
+			if tuiGot != tc.wantExe {
+				t.Errorf("TUI entry path: buildAdapter(%q, '') ExecutablePath() = %q, want %q",
+					tc.harnessID, tuiGot, tc.wantExe)
+			}
+			if cliGot != tuiGot {
+				t.Errorf("CLI (%q) and TUI (%q) entry paths resolved different executables for %q; "+
+					"both paths must use the same per-harness default",
+					cliGot, tuiGot, tc.harnessID)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.4: fake harness remains selectable and is the --harness default
+//
+// The fake harness is a test double and must not be affected by any Stage 4
+// change. It must remain constructible via buildAdapter and must ignore the
+// executable override entirely (it spawns no process). The FakeHarnessID
+// constant must remain "fake", matching the cobra flag default in run.go.
+// ---------------------------------------------------------------------------
+
+// TestFakeHarness_RemainsSelectable verifies that buildAdapter("fake", ...) still
+// returns a *harness.FakeAdapter after Stage 4 changes. This complements the
+// existing TestBuildAdapter_Fake_ReturnsFakeAdapter by asserting that Stage 4's
+// changes to buildAdapter have not removed or broken the fake case.
+func TestFakeHarness_RemainsSelectable(t *testing.T) {
+	h := buildAdapter(harness.FakeHarnessID, "", 30*time.Minute)
+	if _, ok := h.(*harness.FakeAdapter); !ok {
+		t.Errorf("buildAdapter(%q) returned %T, want *harness.FakeAdapter; "+
+			"the fake harness must remain constructible after Stage 4 changes",
+			harness.FakeHarnessID, h)
+	}
+}
+
+// TestFakeHarness_DoesNotImplementExecutableRevealer verifies that the fake
+// adapter does not implement domain.ExecutableRevealer. The fake spawns no
+// process and has no executable path; exposing one would misrepresent it.
+func TestFakeHarness_DoesNotImplementExecutableRevealer(t *testing.T) {
+	h := buildAdapter(harness.FakeHarnessID, "some-path", 30*time.Minute)
+	if _, ok := h.(domain.ExecutableRevealer); ok {
+		t.Errorf("buildAdapter(%q) implements domain.ExecutableRevealer; "+
+			"the fake adapter spawns no process and must not expose an executable path",
+			harness.FakeHarnessID)
+	}
+}
+
+// TestFakeHarness_IgnoresExecutableOverride verifies that providing a non-empty
+// executable override to buildAdapter("fake", ...) is silently ignored: the
+// result is still a FakeAdapter, not some other type, and the fake's behavior
+// is unaffected. This pins the design constraint that buildAdapter's fake case
+// never inspects or stores the override.
+func TestFakeHarness_IgnoresExecutableOverride(t *testing.T) {
+	h := buildAdapter(harness.FakeHarnessID, "should-be-ignored", 30*time.Minute)
+	if _, ok := h.(*harness.FakeAdapter); !ok {
+		t.Errorf("buildAdapter(%q, override='should-be-ignored') returned %T, want *harness.FakeAdapter; "+
+			"the fake harness must ignore the executable override",
+			harness.FakeHarnessID, h)
+	}
+}
+
+// TestFakeHarnessID_IsTheCobraFlagDefault verifies that harness.FakeHarnessID
+// equals "fake", which is the --harness cobra flag default declared in run.go.
+// If FakeHarnessID were renamed, the default would silently become an unknown
+// harness name, causing buildAdapter to fall through to the fake case for the
+// wrong reason. Pinning the constant value here ensures the flag default and
+// the constant stay in sync.
+func TestFakeHarnessID_IsTheCobraFlagDefault(t *testing.T) {
+	const wantDefault = "fake"
+	if harness.FakeHarnessID != wantDefault {
+		t.Errorf("harness.FakeHarnessID = %q, want %q; "+
+			"this constant is the --harness cobra flag default declared in run.go and must not be renamed",
+			harness.FakeHarnessID, wantDefault)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stage 5: hasPositionalArg — value-bearing flag detection (T5.1, T5.2, T5.3, T5.4)
+//
+// hasPositionalArg must distinguish genuine positional arguments from the value
+// tokens of value-bearing flags. After the Stage 5 refactor, hasPositionalArg
+// obtains the value-bearing set from cli.ValueBearingFlagNames(), which is
+// derived from the same single declaration that cli.Run() uses for flag
+// registration.
+//
+// Value-bearing flags (TakesValue: true) declared in internal/cli/run.go:
+//   --orchestrator-file, --workflow, --task, --mode, --checkpoints, --commits,
+//   --commit-branch, --run, --harness, --timeout, --claude-path, --infra-class,
+//   --input
+//
+// Boolean flags (TakesValue: false):
+//   --allow-version-drift, --pre-consult, --manual-resolution, --new-run, --tui
+//
+// T5.1 tests are RED until I5.1 teaches hasPositionalArg to skip value tokens.
+// T5.2 and T5.4 regression-pin tests are currently GREEN (boolean flags never
+// had a value token to skip, and --tui is checked before hasPositionalArg).
+// ---------------------------------------------------------------------------
+
+// T5.1 — Value-bearing flag values are not positional arguments.
+
+// TestHasPositionalArg_ValueBearing_SpaceSeparated_ValueNotPositional verifies
+// that the value following a value-bearing flag in "--flag value" form is not
+// counted as a positional argument.
+//
+// RED: the current hasPositionalArg sees any non-flag token as positional, so
+// it returns true for "/usr/local/bin/claude" even though it is a flag value.
+func TestHasPositionalArg_ValueBearing_SpaceSeparated_ValueNotPositional(t *testing.T) {
+	if hasPositionalArg([]string{"--claude-path", "/usr/local/bin/claude"}) {
+		t.Error("hasPositionalArg([--claude-path /usr/local/bin/claude]) = true, want false; " +
+			"the value of a value-bearing flag is not a positional argument")
+	}
+}
+
+// TestHasPositionalArg_ValueBearing_WindowsPath_ValueNotPositional verifies
+// the exact scenario from the reported bug: a Windows-style path value
+// (containing backslashes and a colon) following --claude-path must not be
+// treated as a positional argument.
+//
+// RED: the current implementation returns true for the Windows path token.
+func TestHasPositionalArg_ValueBearing_WindowsPath_ValueNotPositional(t *testing.T) {
+	args := []string{"--claude-path", `C:\Users\tgurt\AppData\Roaming\npm\copilot.cmd`}
+	if hasPositionalArg(args) {
+		t.Error(`hasPositionalArg([--claude-path C:\...\copilot.cmd]) = true, want false; ` +
+			"a Windows-style executable path following a value-bearing flag is a flag value, not a positional argument")
+	}
+}
+
+// TestHasPositionalArg_ValueBearing_EqualsSeparated_NoValueToken verifies
+// that the "--flag=value" form does not introduce a separate value token.
+// The entire token starts with "--" so there is nothing to skip; it is
+// already correctly classified as a flag.
+//
+// Currently GREEN: the existing implementation treats this correctly because
+// the whole token starts with "-". Serves as a regression pin.
+func TestHasPositionalArg_ValueBearing_EqualsSeparated_NoValueToken(t *testing.T) {
+	if hasPositionalArg([]string{`--claude-path=C:\Users\tgurt\AppData\Roaming\npm\copilot.cmd`}) {
+		t.Error("hasPositionalArg([--claude-path=...]) = true, want false; " +
+			"the = form embeds the value in the flag token and must never be counted as positional")
+	}
+}
+
+// TestHasPositionalArg_MultipleValueBearingFlags_SpaceSeparated_NoPositional
+// is a table-driven test verifying that realistic combinations of value-bearing
+// flags in space-separated form produce no spurious positional detection.
+//
+// RED: the current implementation treats every value token as positional.
+func TestHasPositionalArg_MultipleValueBearingFlags_SpaceSeparated_NoPositional(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{
+			"harness and timeout",
+			[]string{"--harness", "claude-code", "--timeout", "45m"},
+		},
+		{
+			"harness and claude-path",
+			[]string{"--harness", "claude-code", "--claude-path", "/opt/bin/claude"},
+		},
+		{
+			"mode and orchestrator-file",
+			[]string{"--mode", "auto", "--orchestrator-file", "/work/orch.md"},
+		},
+		{
+			"workflow and task",
+			[]string{"--workflow", "w1", "--task", "do the work"},
+		},
+		{
+			"full realistic TUI invocation without positional",
+			[]string{
+				"--harness", "claude-code",
+				"--claude-path", `C:\Users\tgurt\AppData\Roaming\npm\claude.cmd`,
+				"--timeout", "30m",
+				"--mode", "auto",
+				"--new-run",
+				"--orchestrator-file", "orch.md",
+			},
+		},
+		{
+			"input flag with path value",
+			[]string{"--input", "/seed/file.md", "--new-run"},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if hasPositionalArg(tc.args) {
+				t.Errorf("hasPositionalArg(%v) = true, want false; "+
+					"all non-flag tokens are flag values, not positional arguments", tc.args)
+			}
+		})
+	}
+}
+
+// TestHasPositionalArg_EqualsSeparatedAndSpaceSeparated_ProduceIdenticalResult
+// verifies that "--flag=value" and "--flag value" are treated identically for
+// mode detection: neither contains a positional argument when the flag is
+// value-bearing (AC5.3).
+//
+// RED (space-separated case): the current implementation treats the space-
+// separated value token as positional, returning different results for the
+// two forms.
+func TestHasPositionalArg_EqualsSeparatedAndSpaceSeparated_ProduceIdenticalResult(t *testing.T) {
+	spaceSep := []string{"--claude-path", "/some/claude"}
+	equalsSep := []string{"--claude-path=/some/claude"}
+
+	gotSpace := hasPositionalArg(spaceSep)
+	gotEquals := hasPositionalArg(equalsSep)
+
+	if gotSpace != gotEquals {
+		t.Errorf("space-separated hasPositionalArg=%v, equals-separated hasPositionalArg=%v; "+
+			"both forms must produce identical mode-detection results (AC5.3): "+
+			"only the space-separated form should be false after the fix",
+			gotSpace, gotEquals)
+	}
+	if gotSpace {
+		t.Error("hasPositionalArg([--claude-path /some/claude]) = true, want false; " +
+			"the value token of a value-bearing flag is not a positional argument")
+	}
+}
+
+// T5.2 — Boolean flags do not consume a following token.
+
+// TestHasPositionalArg_BoolFlag_FollowedByPositional_PositionalDetected verifies
+// that a boolean flag (which takes no value) does not swallow the following
+// positional argument. This is the critical regression-prevention case: treating
+// --pre-consult as value-consuming would cause "run" to be silently skipped,
+// inverting the bug into the opposite failure mode.
+//
+// Currently GREEN (boolean flags have no separate value token to skip). Serves
+// as a regression pin so the fix cannot introduce over-skipping.
+func TestHasPositionalArg_BoolFlag_FollowedByPositional_PositionalDetected(t *testing.T) {
+	args := []string{"--pre-consult", "run"}
+	if !hasPositionalArg(args) {
+		t.Error("hasPositionalArg([--pre-consult run]) = false, want true; " +
+			"--pre-consult is a boolean flag and must not consume the following token; " +
+			"\"run\" must be detected as a genuine positional argument (AC5.5)")
+	}
+}
+
+// TestHasPositionalArg_BoolFlag_NewRun_FollowedByPositional verifies that
+// --new-run (boolean) does not consume the following positional argument.
+//
+// Currently GREEN; regression pin.
+func TestHasPositionalArg_BoolFlag_NewRun_FollowedByPositional(t *testing.T) {
+	args := []string{"--new-run", "run"}
+	if !hasPositionalArg(args) {
+		t.Error("hasPositionalArg([--new-run run]) = false, want true; " +
+			"--new-run is boolean and must not swallow the following positional argument")
+	}
+}
+
+// TestHasPositionalArg_BoolFlag_AllowVersionDrift_FollowedByPositional verifies
+// that --allow-version-drift (boolean) does not consume the following positional.
+//
+// Currently GREEN; regression pin.
+func TestHasPositionalArg_BoolFlag_AllowVersionDrift_FollowedByPositional(t *testing.T) {
+	args := []string{"--allow-version-drift", "run"}
+	if !hasPositionalArg(args) {
+		t.Error("hasPositionalArg([--allow-version-drift run]) = false, want true; " +
+			"--allow-version-drift is boolean and must not swallow \"run\"")
+	}
+}
+
+// TestHasPositionalArg_BoolFlagFollowedByValueBearingFlag_NoPositional verifies
+// that a boolean flag followed by a value-bearing flag (not a positional) is
+// correctly classified as no-positional. This exercises both the no-skip
+// (boolean) and skip (value-bearing) paths in the same scan.
+//
+// RED: the current implementation treats "claude-code" (value of --harness) as
+// positional, even though it is correctly preceded by a value-bearing flag.
+func TestHasPositionalArg_BoolFlagFollowedByValueBearingFlag_NoPositional(t *testing.T) {
+	args := []string{"--new-run", "--harness", "claude-code"}
+	if hasPositionalArg(args) {
+		t.Error("hasPositionalArg([--new-run --harness claude-code]) = true, want false; " +
+			"--new-run is boolean (no skip), --harness is value-bearing (skip \"claude-code\"); " +
+			"no genuine positional is present")
+	}
+}
+
+// T5.3 — Genuine positional arguments are still detected; flag-only invocations route to TUI.
+
+// TestHasPositionalArg_GenuinePositionalAfterValueBearingFlag_Detected verifies
+// that a genuine positional argument appearing after a value-bearing flag and
+// its value is still detected. The fix must not over-skip.
+//
+// After the fix: "--claude-path /some/claude" skips the path value, but "run"
+// following that pair is a genuine positional and must still be detected (AC5.4).
+func TestHasPositionalArg_GenuinePositionalAfterValueBearingFlag_Detected(t *testing.T) {
+	args := []string{"--claude-path", "/some/claude", "run"}
+	if !hasPositionalArg(args) {
+		t.Error("hasPositionalArg([--claude-path /some/claude run]) = false, want true; " +
+			"\"run\" is a genuine positional argument and must be detected even after a value-bearing flag pair (AC5.4)")
+	}
+}
+
+// TestHasPositionalArg_FlagOnlyInvocationNoPositional_ReturnsFalse verifies that
+// a realistic invocation consisting only of value-bearing flags and boolean flags
+// returns false, confirming that without a genuine positional argument the decision
+// falls through to the isatty check rather than short-circuiting to CLI mode (AC5.2).
+//
+// RED: the current implementation treats value tokens as positional, returning
+// true for any invocation with space-separated value-bearing flags.
+func TestHasPositionalArg_FlagOnlyInvocationNoPositional_ReturnsFalse(t *testing.T) {
+	args := []string{
+		"--harness", "claude-code",
+		"--mode", "auto",
+		"--new-run",
+		"--pre-consult",
+		"--orchestrator-file", "/work/orch.md",
+	}
+	if hasPositionalArg(args) {
+		t.Errorf("hasPositionalArg(%v) = true, want false; "+
+			"this invocation has no genuine positional argument — "+
+			"treating flag values as positional falsely routes TUI users to CLI mode (AC5.2)", args)
+	}
+}
+
+// T5.4 — Regression: executable-path override reaches the TUI rather than
+// producing "error: unknown flag: --claude-path".
+
+// TestHasPositionalArg_ClaudePathWithWindowsValue_IsNotPositional is the direct
+// regression pin for the reported failure: passing --claude-path with a
+// Windows-style executable path must not be treated as a positional argument.
+// The root cause is that hasPositionalArg counted the path value as positional,
+// silently switching to CLI mode where the root cobra command does not define
+// --claude-path, producing "error: unknown flag: --claude-path".
+//
+// RED: the current hasPositionalArg returns true for the Windows path token.
+func TestHasPositionalArg_ClaudePathWithWindowsValue_IsNotPositional(t *testing.T) {
+	args := []string{"--claude-path", `C:\Users\tgurt\AppData\Roaming\npm\copilot.cmd`}
+	if hasPositionalArg(args) {
+		t.Error(`hasPositionalArg([--claude-path C:\...\copilot.cmd]) = true, want false; ` +
+			"this is the regression: the Windows path value is not a positional argument; " +
+			"treating it as one routes the invocation to CLI mode, producing \"unknown flag: --claude-path\" (AC5.6)")
+	}
+}
+
+// TestWantsTUI_TUIFlagWithClaudePathOverride_AlwaysChoosesTUI verifies that
+// an explicit --tui flag forces TUI mode regardless of other arguments, including
+// a --claude-path value. This test is currently GREEN (--tui is checked before
+// hasPositionalArg). It serves as a regression pin for the --tui short-circuit.
+func TestWantsTUI_TUIFlagWithClaudePathOverride_AlwaysChoosesTUI(t *testing.T) {
+	args := []string{"--tui", "--claude-path", `C:\Users\tgurt\AppData\Roaming\npm\copilot.cmd`}
+	if !wantsTUI(args) {
+		t.Error("wantsTUI([--tui --claude-path ...]) = false, want true; " +
+			"--tui must force TUI mode regardless of other arguments including a --claude-path value")
+	}
+}
+
+// TestWantsTUI_FlagOnlyInvocation_DoesNotShortCircuitToCLI verifies that an
+// invocation with only value-bearing flags does not trigger the CLI short-circuit
+// inside wantsTUI via a spurious positional detection.
+//
+// In test environments stdin/stdout are not terminals, so wantsTUI returns false
+// after the fix too — but for the correct reason (no terminal), not the wrong
+// reason (spurious positional). The test asserts the root cause directly.
+//
+// RED: the current hasPositionalArg treats value tokens as positional, causing
+// wantsTUI to return false before even reaching the isatty check.
+func TestWantsTUI_FlagOnlyInvocation_DoesNotShortCircuitToCLI(t *testing.T) {
+	args := []string{"--harness", "claude-code", "--timeout", "30m"}
+	if hasPositionalArg(args) {
+		t.Error("hasPositionalArg([--harness claude-code --timeout 30m]) = true; " +
+			"flag values are being counted as positional arguments, " +
+			"causing wantsTUI to falsely short-circuit to CLI mode for any space-separated value-bearing flag")
 	}
 }

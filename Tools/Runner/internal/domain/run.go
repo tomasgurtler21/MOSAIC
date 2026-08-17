@@ -95,6 +95,20 @@ type RunOutcome struct {
 	// RunStoppedByConsultant. Empty for every other status. It is what the CLI
 	// prints and what the TUI stop screen presents above its recovery options.
 	StopReason string
+
+	// Cause is the error that ended the run, with its wrapping intact, for
+	// terminal outcomes that are produced with a nil error return and would
+	// otherwise flatten the cause into Message or StopReason — RunRefused and
+	// RunStoppedByConsultant in particular.
+	//
+	// Nil when the run ended for a reason that is not an error (RunCompleted,
+	// RunStopped) or when no underlying error exists. Frontends must treat a
+	// nil Cause as "no further identity available", never as a distinct
+	// condition.
+	//
+	// Message remains the human-readable text; Cause is for identity checks
+	// (errors.Is / errors.As) only. Neither is derived from the other.
+	Cause error
 }
 
 // RunStatus classifies the run's outcome for exit code mapping.

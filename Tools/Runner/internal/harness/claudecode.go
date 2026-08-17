@@ -61,10 +61,16 @@ var (
 // Both invocation kinds use --permission-mode auto and --output-format json.
 // --dangerously-skip-permissions is never used.
 type ClaudeCodeAdapter struct {
-	spawner    commonharness.Spawner
-	textSpawner commonharness.TextSpawner
-	logger     domain.DebugLogger
+	executablePath string
+	timeout        time.Duration
+	spawner        commonharness.Spawner
+	sink           commonharness.Sink
+	logger         domain.DebugLogger
 }
+
+// ExecutablePath implements domain.ExecutableRevealer. It returns the
+// executable path or command name this adapter was constructed with.
+func (a *ClaudeCodeAdapter) ExecutablePath() string { return a.executablePath }
 
 // NewClaudeCodeAdapter creates a ClaudeCodeAdapter with debug logging disabled.
 // UNCHANGED SIGNATURE — existing call sites and tests keep compiling.
@@ -93,10 +99,7 @@ func NewClaudeCodeAdapterWithLogger(executablePath string, timeout time.Duration
 		commonharness.WithTimeout(timeout),
 		commonharness.WithSink(sink),
 	)
-	// All three shipped spawners implement TextSpawner. Assert once at
-	// construction so InvokeRaw does not need to handle the missing case.
-	ts, _ := spawner.(commonharness.TextSpawner)
-	return &ClaudeCodeAdapter{spawner: spawner, textSpawner: ts, logger: logger}
+	return &ClaudeCodeAdapter{executablePath: executablePath, timeout: timeout, spawner: spawner, sink: sink, logger: logger}
 }
 
 // Invoke implements domain.HarnessAdapter.
@@ -156,6 +159,20 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 				domain.F("agent", request.AgentInstanceID),
 			)
 		}
+		// A missing or non-executable binary is recoverable via the override
+		// screen. Wrap it in a domain.HarnessLaunchError so the TUI can
+		// distinguish it from every other failure class by error identity.
+		if errors.Is(err, commonharness.ErrExecutableNotFound) {
+			launchErr := &domain.HarnessLaunchError{
+				Harness:    commonharness.HarnessIDClaudeCode,
+				Executable: a.executablePath,
+				Err:        err,
+			}
+			a.logger.Log(domain.EventHarnessInvokeError, launchErr.Error(),
+				domain.F("agent", request.AgentInstanceID),
+			)
+			return domain.ProtocolResponse{}, launchErr
+		}
 		// The shared package distinguishes parent-context cancellation from
 		// adapter timeout via ErrCancelled. Runner's existing call sites and
 		// tests expect ctx.Err() on cancellation, so translate it back here.
@@ -202,9 +219,9 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 
 // InvokeRaw implements domain.RawInvoker.
 //
-// It delegates to the spawner's TextSpawner path, which stops after envelope
-// parsing and before ExtractProtocolJSON. The payload is sent verbatim as the
-// agent's prompt and the reply text is returned verbatim as bytes.
+// It performs the same steps as Invoke up through envelope parsing but stops
+// before ExtractProtocolJSON, so non-protocol replies (consultation responses,
+// routing instructions) are returned as plain text without being rejected.
 //
 // Error returns follow the same sentinel taxonomy as Invoke. On context
 // cancellation, returns ctx.Err().
@@ -224,8 +241,44 @@ func (a *ClaudeCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRef
 		OutputFormat: "json",
 	}
 
-	resp, err := a.textSpawner.SpawnText(ctx, spawnReq)
+	cmd, err := commonharness.ResolveExecutable(a.executablePath)
 	if err != nil {
+		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+			domain.F("agent", agent.Identifier),
+		)
+		return nil, err
+	}
+
+	args, stdin, err := commonharness.BuildArgs(spawnReq)
+	if err != nil {
+		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+			domain.F("agent", agent.Identifier),
+		)
+		return nil, err
+	}
+
+	resp, err := commonharness.Run(ctx, cmd, args, commonharness.RunOptions{
+		WorkingDir: spawnReq.WorkingDir,
+		Env:        spawnReq.Env,
+		Stdin:      stdin,
+		Timeout:    a.timeout,
+		Sink:       a.sink,
+	})
+	if err != nil {
+		// A missing or non-executable binary is recoverable via the override
+		// screen. Wrap it in a domain.HarnessLaunchError so the TUI can
+		// distinguish it from every other failure class by error identity.
+		if errors.Is(err, commonharness.ErrExecutableNotFound) {
+			launchErr := &domain.HarnessLaunchError{
+				Harness:    commonharness.HarnessIDClaudeCode,
+				Executable: a.executablePath,
+				Err:        err,
+			}
+			a.logger.Log(domain.EventHarnessInvokeError, launchErr.Error(),
+				domain.F("agent", agent.Identifier),
+			)
+			return nil, launchErr
+		}
 		if ctx.Err() != nil {
 			a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
 				domain.F("agent", agent.Identifier),
@@ -238,13 +291,21 @@ func (a *ClaudeCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRef
 		return nil, err
 	}
 
-	a.logger.Log(domain.EventHarnessStdout, resp.Text,
+	text, err := commonharness.ParseClaudeCodeEnvelope(resp.Stdout)
+	if err != nil {
+		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+			domain.F("agent", agent.Identifier),
+		)
+		return nil, err
+	}
+
+	a.logger.Log(domain.EventHarnessStdout, text,
 		domain.F("agent", agent.Identifier),
 	)
 	a.logger.Log(domain.EventHarnessInvokeOK, "raw invocation succeeded",
 		domain.F("agent", agent.Identifier),
 	)
-	return []byte(resp.Text), nil
+	return []byte(text), nil
 }
 
 // isNormalEnvelope reports whether data is shaped like one of the CLI's

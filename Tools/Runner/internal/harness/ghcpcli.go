@@ -49,10 +49,16 @@ var (
 // mosaic-common/harness for spawning, argument construction and
 // event-stream parsing.
 type GHCPCLIAdapter struct {
-	spawner     commonharness.Spawner
-	textSpawner commonharness.TextSpawner
-	logger      domain.DebugLogger
+	executablePath string
+	timeout        time.Duration
+	spawner        commonharness.Spawner
+	sink           commonharness.Sink
+	logger         domain.DebugLogger
 }
+
+// ExecutablePath implements domain.ExecutableRevealer. It returns the
+// executable path or command name this adapter was constructed with.
+func (a *GHCPCLIAdapter) ExecutablePath() string { return a.executablePath }
 
 // NewGHCPCLIAdapter creates an adapter with debug logging disabled.
 // A zero timeout means 30 minutes.
@@ -75,8 +81,7 @@ func NewGHCPCLIAdapterWithLogger(executablePath string, timeout time.Duration, l
 		commonharness.WithTimeout(timeout),
 		commonharness.WithSink(sink),
 	)
-	ts, _ := spawner.(commonharness.TextSpawner)
-	return &GHCPCLIAdapter{spawner: spawner, textSpawner: ts, logger: logger}
+	return &GHCPCLIAdapter{executablePath: executablePath, timeout: timeout, spawner: spawner, sink: sink, logger: logger}
 }
 
 // Invoke implements domain.HarnessAdapter.
@@ -126,6 +131,20 @@ func (a *GHCPCLIAdapter) Invoke(ctx context.Context, agent domain.AgentReference
 				domain.F("agent", request.AgentInstanceID),
 			)
 		}
+		// A missing or non-executable binary is recoverable via the override
+		// screen. Wrap it in a domain.HarnessLaunchError so the TUI can
+		// distinguish it from every other failure class by error identity.
+		if errors.Is(err, commonharness.ErrExecutableNotFound) {
+			launchErr := &domain.HarnessLaunchError{
+				Harness:    commonharness.HarnessIDGHCPCLI,
+				Executable: a.executablePath,
+				Err:        err,
+			}
+			a.logger.Log(domain.EventHarnessInvokeError, launchErr.Error(),
+				domain.F("agent", request.AgentInstanceID),
+			)
+			return domain.ProtocolResponse{}, launchErr
+		}
 		// The shared package distinguishes parent-context cancellation from
 		// adapter timeout via ErrCancelled. Runner's existing call sites and
 		// tests expect ctx.Err() on cancellation, so translate it back here.
@@ -162,12 +181,15 @@ func (a *GHCPCLIAdapter) Invoke(ctx context.Context, agent domain.AgentReference
 
 // InvokeRaw implements domain.RawInvoker.
 //
-// It delegates to the spawner's TextSpawner path, which stops after envelope
-// parsing and before ExtractProtocolJSON. The payload is sent verbatim and
-// the reply text is returned verbatim as bytes.
+// It performs the same steps as Invoke up through envelope parsing but stops
+// before ExtractProtocolJSON, so non-protocol replies (consultation responses,
+// routing instructions) are returned as plain text without being rejected.
 //
 // SystemPrompt is deliberately left unset, matching Invoke's behaviour for
 // this harness: GHCP CLI layers instructions from files it discovers itself.
+//
+// Like Spawn, ErrNonZeroExit from Run does not terminate the call early:
+// the envelope parser's verdict from the stream is authoritative.
 //
 // On context cancellation, returns ctx.Err().
 func (a *GHCPCLIAdapter) InvokeRaw(ctx context.Context, agent domain.AgentReference, payload []byte) ([]byte, error) {
@@ -186,25 +208,72 @@ func (a *GHCPCLIAdapter) InvokeRaw(ctx context.Context, agent domain.AgentRefere
 		OutputFormat: "json",
 	}
 
-	resp, err := a.textSpawner.SpawnText(ctx, spawnReq)
+	cmd, err := commonharness.ResolveExecutable(a.executablePath)
 	if err != nil {
-		if ctx.Err() != nil {
-			a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
-				domain.F("agent", agent.Identifier),
-			)
-			return nil, ctx.Err()
-		}
 		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
 			domain.F("agent", agent.Identifier),
 		)
 		return nil, err
 	}
 
-	a.logger.Log(domain.EventHarnessStdout, resp.Text,
+	args, err := commonharness.BuildGHCPCLIArgs(spawnReq)
+	if err != nil {
+		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+			domain.F("agent", agent.Identifier),
+		)
+		return nil, err
+	}
+
+	resp, err := commonharness.Run(ctx, cmd, args, commonharness.RunOptions{
+		WorkingDir: spawnReq.WorkingDir,
+		Env:        spawnReq.Env,
+		Timeout:    a.timeout,
+		Sink:       a.sink,
+	})
+	if err != nil {
+		if !errors.Is(err, commonharness.ErrNonZeroExit) {
+			// ErrNonZeroExit is not a conclusive failure for this harness: the
+			// envelope parser's own verdict decides. Any other error (launch
+			// failure, timeout, cancellation) is conclusive.
+			if errors.Is(err, commonharness.ErrExecutableNotFound) {
+				launchErr := &domain.HarnessLaunchError{
+					Harness:    commonharness.HarnessIDGHCPCLI,
+					Executable: a.executablePath,
+					Err:        err,
+				}
+				a.logger.Log(domain.EventHarnessInvokeError, launchErr.Error(),
+					domain.F("agent", agent.Identifier),
+				)
+				return nil, launchErr
+			}
+			if ctx.Err() != nil {
+				a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+					domain.F("agent", agent.Identifier),
+				)
+				return nil, ctx.Err()
+			}
+			a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+				domain.F("agent", agent.Identifier),
+			)
+			return nil, err
+		}
+		// ErrNonZeroExit: continue to the envelope parser. The stream's own
+		// terminal result event is the authoritative verdict.
+	}
+
+	text, parseErr := commonharness.ParseGHCPCLIEnvelope(resp.Stdout, []byte(resp.Stderr), resp.ExitCode)
+	if parseErr != nil {
+		a.logger.Log(domain.EventHarnessInvokeError, parseErr.Error(),
+			domain.F("agent", agent.Identifier),
+		)
+		return nil, parseErr
+	}
+
+	a.logger.Log(domain.EventHarnessStdout, text,
 		domain.F("agent", agent.Identifier),
 	)
 	a.logger.Log(domain.EventHarnessInvokeOK, "raw invocation succeeded",
 		domain.F("agent", agent.Identifier),
 	)
-	return []byte(resp.Text), nil
+	return []byte(text), nil
 }

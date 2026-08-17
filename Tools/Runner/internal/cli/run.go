@@ -81,25 +81,6 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 	// ------------------------------------------------------------------
 	// run subcommand: non-interactive orchestration execution
 	// ------------------------------------------------------------------
-	var (
-		orchestratorFile    string
-		workflowID          string
-		task                string
-		allowVersionDrift   bool
-		checkpoints         string
-		modeFlag            string // --mode: execution mode (required)
-		commitsFlag         string // --commits: commit-class infrastructure dispatch
-		commitBranchFlag    string // --commit-branch: commit branch variant
-		preConsultFlag      bool   // --pre-consult: enable one-shot pre-consultation
-		manualResolutionFlag bool  // --manual-resolution: put user in resolver's place
-		runIDFlag            string // --run: resume a specific run by run_id
-		isNewRunFlag         bool   // --new-run: force creation of a new run
-		harnessFlag          string // --harness: adapter selection, from harness.Selections()
-		timeoutFlag          string // --timeout: invocation timeout duration string
-		claudePathFlag       string // --claude-path: Claude Code CLI executable path
-		infraClassFlag       string   // --infra-class: comma-separated class=agent mappings
-		inputFlags           []string // --input: seed source paths (repeatable)
-	)
 
 	runCmd := &cobra.Command{
 		Use:           "run",
@@ -107,6 +88,37 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Read all flag values from the parsed FlagSet. RegisterRunFlags
+			// registered every flag onto runCmd.Flags(), so cobra has already
+			// populated them before RunE is called. GetString/GetBool/GetStringArray
+			// errors are impossible here: every flag was registered with the correct
+			// type, so the only possible error is "flag does not exist", which would
+			// be a programming error caught immediately in testing.
+			orchestratorFile, _ := cmd.Flags().GetString("orchestrator-file")
+			workflowID, _ := cmd.Flags().GetString("workflow")
+			task, _ := cmd.Flags().GetString("task")
+			allowVersionDrift, _ := cmd.Flags().GetBool("allow-version-drift")
+			checkpoints, _ := cmd.Flags().GetString("checkpoints")
+			modeFlag, _ := cmd.Flags().GetString("mode")
+			commitsFlag, _ := cmd.Flags().GetString("commits")
+			commitBranchFlag, _ := cmd.Flags().GetString("commit-branch")
+			preConsultFlag, _ := cmd.Flags().GetBool("pre-consult")
+			manualResolutionFlag, _ := cmd.Flags().GetBool("manual-resolution")
+			runIDFlag, _ := cmd.Flags().GetString("run")
+			isNewRunFlag, _ := cmd.Flags().GetBool("new-run")
+			harnessFlag, _ := cmd.Flags().GetString("harness")
+			timeoutFlag, _ := cmd.Flags().GetString("timeout")
+			infraClassFlag, _ := cmd.Flags().GetString("infra-class")
+			inputFlagsRaw, _ := cmd.Flags().GetStringArray("input")
+			// Preserve nil semantics: when --input is not supplied, SeedInputs must be
+			// nil (not an empty slice) so callers can distinguish "not set" from "set to
+			// zero paths". pflag's GetStringArray returns []string{} for an unset flag
+			// whose default is nil; convert that back to nil here.
+			var inputFlags []string
+			if len(inputFlagsRaw) > 0 {
+				inputFlags = inputFlagsRaw
+			}
+
 			// Validate required flags.
 			if orchestratorFile == "" {
 				fmt.Fprintf(errOut, "error: --orchestrator-file is required\n")
@@ -169,8 +181,8 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 				return nil
 			}
 
-			// --claude-path is accepted as-is (any non-empty string is valid).
-			_ = claudePathFlag
+			// --claude-path is accepted as-is; it is pre-scanned in main.go and
+			// passed directly to buildAdapter. No validation is needed here.
 
 			// Resolve run identity from flags or scanner.
 			// When a pre-resolved identity is provided (production path via main.go),
@@ -410,25 +422,11 @@ func Run(ctx context.Context, args []string, store domain.ArtifactStore, identit
 		},
 	}
 
-	// FR-3 flags with stated defaults.
-	runCmd.Flags().StringVar(&orchestratorFile, "orchestrator-file", "", "Path to the orchestrator agent file (required)")
-	runCmd.Flags().StringVar(&workflowID, "workflow", "", "Workflow identifier (required)")
-	runCmd.Flags().StringVar(&task, "task", "", "Task description (required)")
-	runCmd.Flags().BoolVar(&allowVersionDrift, "allow-version-drift", false, "Allow workflow version mismatch when resuming")
-	runCmd.Flags().StringVar(&modeFlag, "mode", "", "Execution mode (orchestrated|auto|auto-review) — required")
-	runCmd.Flags().StringVar(&checkpoints, "checkpoints", "disabled", "Checkpoint support (disabled|enabled)")
-	runCmd.Flags().StringVar(&commitsFlag, "commits", "disabled", "Commit-class infrastructure dispatch (disabled|enabled)")
-	runCmd.Flags().StringVar(&commitBranchFlag, "commit-branch", "", "Commit branch variant (mosaic-owned|user-own); default mosaic-owned")
-	runCmd.Flags().BoolVar(&preConsultFlag, "pre-consult", false, "Enable one-shot run-start pre-consultation (auto and auto-review only)")
-	runCmd.Flags().BoolVar(&manualResolutionFlag, "manual-resolution", false, "Put the user in the resolver's place on consultation failure")
-	runCmd.Flags().StringVar(&runIDFlag, "run", "", "Resume a specific run by run_id")
-	runCmd.Flags().BoolVar(&isNewRunFlag, "new-run", false, "Force creation of a new run")
-	runCmd.Flags().StringVar(&harnessFlag, "harness", harness.FakeHarnessID, fmt.Sprintf("Harness adapter to use (%s)", harness.FlagValues()))
-	runCmd.Flags().StringVar(&timeoutFlag, "timeout", "30m", "Invocation timeout for the harness adapter (e.g. 30m, 1h)")
-	runCmd.Flags().StringVar(&claudePathFlag, "claude-path", "claude", "Path to the Claude Code CLI binary")
-	runCmd.Flags().StringVar(&infraClassFlag, "infra-class", "", "Comma-separated class=agent mappings for non-interactive agent-per-class selection (e.g. checkpoint=checkpoint-manager-git,commit=commit-manager-git)")
-	runCmd.Flags().StringArrayVar(&inputFlags, "input", nil,
-		"Path to a file or directory to copy into a new run's folder before the first dispatch; repeatable. Not permitted with --run.")
+	// Register all run subcommand flags via the shared declaration in flagspecs.go.
+	// This single call keeps flag registration and arity-publication (RunFlagSpecs)
+	// derived from one source: adding a flag here requires editing RegisterRunFlags,
+	// which RunFlagSpecs introspects, so both stay automatically in sync.
+	RegisterRunFlags(runCmd.Flags())
 
 	root.AddCommand(runCmd)
 	root.SetArgs(args)
