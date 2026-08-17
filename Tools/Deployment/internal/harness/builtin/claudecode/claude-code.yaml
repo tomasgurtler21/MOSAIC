@@ -78,6 +78,10 @@ tools:
             - "AskUserQuestion"
     - generic: "skill"
       destinations: []
+  custom_tool_destination:
+    - to: field
+      field: mcpServers
+      format: list-block
   placeholder_expansion:
     - "Read"
     - "Write"

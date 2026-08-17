@@ -94,6 +94,50 @@ func (s *claudeCodeSpawner) Spawn(ctx context.Context, req SpawnRequest) (Respon
 	return resp, nil
 }
 
+// SpawnText implements TextSpawner.
+//
+// It performs the same steps as Spawn — ResolveExecutable, BuildArgs, Run,
+// ParseClaudeCodeEnvelope — and stops before ExtractProtocolJSON. The returned
+// Response has Text populated and Protocol nil.
+func (s *claudeCodeSpawner) SpawnText(ctx context.Context, req SpawnRequest) (Response, error) {
+	cmd, err := ResolveExecutable(s.cfg.executablePath)
+	if err != nil {
+		return Response{}, err
+	}
+
+	args, stdin, err := BuildArgs(req)
+	if err != nil {
+		return Response{}, err
+	}
+
+	timeout := req.Timeout
+	if timeout <= 0 {
+		timeout = s.cfg.timeout
+	}
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+
+	resp, err := Run(ctx, cmd, args, RunOptions{
+		WorkingDir: req.WorkingDir,
+		Env:        req.Env,
+		Stdin:      stdin,
+		Timeout:    timeout,
+		Sink:       s.cfg.sink,
+	})
+	if err != nil {
+		return resp, err
+	}
+
+	text, err := ParseClaudeCodeEnvelope(resp.Stdout)
+	if err != nil {
+		return resp, err
+	}
+
+	resp.Text = text
+	return resp, nil
+}
+
 // ResolveExecutable resolves the configured path, handling the Windows
 // .cmd/.bat shim case by returning a command that wraps it with "cmd /c" —
 // the shape npm-installed CLI shims require on Windows.

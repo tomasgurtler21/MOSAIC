@@ -85,6 +85,22 @@ models:
 # custom_tool_template: format string for user-supplied MCP server names.
 #   "%s" is replaced with the user's server name. Empty = name used as-is.
 #
+# custom_tool_destination: optional harness-level default output targets for
+#   custom (MCP-style) tools. When a user supplies a name for an unmapped
+#   generic tool and no tool_destinations entry in any config file overrides
+#   it for that generic tool, the resolved name is written to each declared
+#   destination instead of the main tools field.
+#
+#   The value is a list of destination specs identical in shape to a
+#   tool_destinations entry's destinations list, except that "names:" is NOT
+#   permitted — it will be rejected at parse time. An empty list ([]) means
+#   the same as omitting the field entirely: the custom tool goes to the main
+#   tools field. This field is independent of custom_tool_template; both may
+#   be set on the same descriptor.
+#
+#   Only Claude Code's descriptor currently declares this field. All other
+#   built-in descriptors omit it.
+#
 # placeholder_expansion: the harness tool names that the generic
 #   {tool-permissions} placeholder resolves to. Empty = the whole Universe.
 # --------------------------------------------------------------------------
@@ -289,6 +305,53 @@ Maps generic tool names (from the MOSAIC generic vocabulary) to harness tool nam
 
 **Supported generic tool names:** `file_read`, `file_write`, `file_edit`, `file_search`,
 `content_search`, `terminal`, `user_interaction`, `skill`, `subagent`.
+
+#### `tools.custom_tool_template`
+
+Optional format string for user-supplied MCP server names. `%s` is replaced with
+the user's server name at resolution time. When empty, the name is used as-is.
+
+This field is independent of `custom_tool_destination`. Both may be set on the same
+descriptor. When both are set, `custom_tool_template` formats the name and
+`custom_tool_destination` controls where that formatted name is written.
+
+#### `tools.custom_tool_destination`
+
+Optional harness-level default output targets for custom (MCP-style) tools.
+
+When a user supplies a name for a generic tool that has no mapping in the descriptor
+and no `tool_destinations` entry in any config file overrides it for that specific
+generic tool, the resolved name is written to each declared destination instead of
+the main tools field. A config-declared `tool_destinations` entry for a specific
+generic tool always takes precedence over this harness-level default.
+
+The value is a list of destination specs. Each entry uses the same fields as a
+`tool_destinations` destination, with one exception: **`names:` is not permitted
+and is rejected at parse time**. The resolved custom tool name is injected
+automatically — there is no need to name it here.
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `to` | yes | `main` or `field`. |
+| `field` | when `to: field` | Frontmatter key to write. Forbidden with `to: main`. |
+| `format` | no | `list-block` (default), `list-flow`, or `scalar`. Forbidden with `to: main`. |
+| `separator` | no | Defaults to `", "`. Meaningful only with `format: scalar`. |
+| `names` | — | **Not permitted.** Rejected at parse time. |
+
+Rules and constraints:
+
+- **Optional.** Omitting the field and declaring it as `[]` are equivalent: the
+  custom tool goes to the harness's main tools field, the historical behaviour.
+- **Independent of `custom_tool_template`.** Both may be set; `custom_tool_template`
+  formats the name, `custom_tool_destination` controls where it is written.
+- **No `names:` key.** Presence of `names:` (including `names: []`) in any entry
+  is a parse-time error.
+- **Validation rules** mirror those for `tool_destinations` destinations (rules 3–9
+  from the configuration reference), except that rule 10 (non-empty names) does not
+  apply — names are always empty as declared and are filled in at resolution time.
+- **Claude Code** is the only built-in harness that currently declares this field,
+  routing every custom tool to the `mcpServers` frontmatter key as a block list.
+  No other built-in descriptor declares the field.
 
 #### Tool mapping outcomes
 

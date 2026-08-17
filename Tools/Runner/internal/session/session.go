@@ -36,8 +36,9 @@
 //       redispatch; if the redispatch is also non-compliant, the deviation is
 //       escalated to the RoutingConsultant.
 //     - Consultation recording: every RoutingConsultant invocation is recorded
-//       as an infrastructure-flagged CompletedStep under "orchestrator-script#{seq}",
-//       consuming global_sequence without moving current_state.
+//       as an infrastructure-flagged CompletedStep under "{orchestrator-stem}#{seq}"
+//       (where orchestrator-stem is the file stem of the orchestrator file supplied
+//       to the run), consuming global_sequence without moving current_state.
 //     - Graceful stop: session records current state and returns RunStopped.
 //     - Infrastructure-agent trigger: a named no-op hook is called after each
 //       harness invocation (FR-40).
@@ -156,15 +157,25 @@ func New(deps Deps) Session {
 // Deps.Approvals is nil. It reports every artifact as ApprovalUnreadable, so
 // the session never nil-checks the reader and a missing reader never silently
 // passes the HITL gate.
+//
+// It also implements domain.ApprovalCapability, returning false, so the
+// run-start refusal check can distinguish this stand-in from a real reader.
 type unreadableApprovalReader struct{}
 
 func (unreadableApprovalReader) ReadApproval(_ context.Context, _ string) domain.HumanApproval {
 	return domain.ApprovalUnreadable
 }
 
+func (unreadableApprovalReader) ApprovalsReadable() bool { return false }
+
 // sessionImpl is the concrete implementation of Session.
 type sessionImpl struct {
 	deps Deps
+	// orchRef is the resolved orchestrator agent reference. It is assigned at
+	// step 2a of Start and used when recording each consultation log row so
+	// that the row's AgentInstance carries the real orchestrator identifier
+	// (derived from the orchestrator file stem) rather than any hardcoded value.
+	orchRef domain.AgentReference
 	// manualDispatchPending tracks the one-shot ManualDispatch signal from the
 	// stop-screen recovery action. Set to true at the start of each Start call
 	// when config.ManualDispatch is true; cleared after the first consultRoute
@@ -188,6 +199,44 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	table, err := workflow.Parse(region.Content, region.Info)
 	if err != nil {
 		return s.refusal(err.Error()), nil
+	}
+
+	// Step 2a: Resolve the orchestrator agent reference. This must happen before
+	// artifact creation so an unresolvable orchestrator refuses the run without
+	// leaving a run folder behind. The returned reference carries
+	// InvocationOrchestrator so every consultation retains native subagent-spawning.
+	orchRef, err := agentresolve.ResolveOrchestrator(config.OrchestratorFilePath)
+	if err != nil {
+		return s.refusal(err.Error()), nil
+	}
+	s.orchRef = orchRef
+
+	// Step 2b: Bind the resolved orchestrator reference and routing table to every
+	// consultant that accepts them. The binding happens before artifact creation and
+	// before the first consultation, so no consultant is ever consulted with an empty
+	// table. Binding is idempotent and protected by a type assertion and nil check
+	// on each dep, so consultants that do not implement RunContextBinder are skipped.
+	rc := domain.RunContext{Orchestrator: orchRef, Table: table}
+	bindRunContext(s.deps.Routing, rc)
+	bindRunContext(s.deps.Manual, rc)
+	bindRunContext(s.deps.PreConsult, rc)
+
+	// Step 2c: Refuse the run if the approval reader cannot read approvals and
+	// the workflow declares at least one human-review row. Detecting this at
+	// run start avoids spending a re-dispatch on every HITL row only to have
+	// it fail closed, and surfaces a clear diagnosis rather than a
+	// per-row deviation.
+	if ac, ok := s.deps.Approvals.(domain.ApprovalCapability); ok && !ac.ApprovalsReadable() {
+		for _, row := range table.Rows {
+			if row.HITL {
+				return s.refusal(fmt.Sprintf(
+					"cannot start run: this surface cannot read approvals "+
+						"but workflow %q declares human-review rows; "+
+						"supply an approval reader to run a HITL workflow",
+					config.WorkflowID,
+				)), nil
+			}
+		}
 	}
 
 	// Step 3: Read existing artifact (FR-7a: refuse non-canonical; ErrNotExist = no artifact).
@@ -419,7 +468,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 	} else {
 		// Resume: use the existing artifact (already validated above).
 		state = existingState
-		resume, resumeErr := engine.ResumePoint(admitted, stages, state, domain.NewInfraAgentSet(declaredInfraAgents, "orchestrator-script"))
+		resume, resumeErr := engine.ResumePoint(admitted, stages, state, domain.NewInfraAgentSet(declaredInfraAgents, s.orchRef.Identifier))
 		if resumeErr != nil {
 			return domain.RunOutcome{Status: domain.RunFailed, Message: resumeErr.Error()}, resumeErr
 		}
@@ -428,7 +477,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 		// FR-33: if the last step was interrupted, rewind CurrentState so that
 		// engine.Next re-dispatches the interrupted row.
 		if resume.RerunLast {
-			state = rewindStateForRerun(admitted.Table, domain.NewInfraAgentSet(declaredInfraAgents, "orchestrator-script"), state)
+			state = rewindStateForRerun(admitted.Table, domain.NewInfraAgentSet(declaredInfraAgents, s.orchRef.Identifier), state)
 		}
 	}
 
@@ -920,6 +969,18 @@ func isRoutingTableAgent(table domain.RoutingTable, agentID string) bool {
 	return false
 }
 
+// bindRunContext calls BindRunContext on v if v is non-nil and implements
+// domain.RunContextBinder. Consultants that do not implement the interface are
+// silently skipped, so callers need not check before calling.
+func bindRunContext(v any, rc domain.RunContext) {
+	if v == nil {
+		return
+	}
+	if binder, ok := v.(domain.RunContextBinder); ok {
+		binder.BindRunContext(rc)
+	}
+}
+
 // refusal logs the refusal reason and constructs a RunOutcome with RunRefused
 // status. Every run-start refusal (pre-Store.Create) passes through here so
 // that paths which never reach Store.Apply still leave a debug-log trace.
@@ -1029,7 +1090,7 @@ func (s *sessionImpl) consultRoute(
 	consultSeq := state.GlobalSequence + 1
 	consultStep := domain.CompletedStep{
 		Seq:              consultSeq,
-		AgentInstance:    "orchestrator-script#" + strconv.Itoa(consultSeq),
+		AgentInstance:    s.orchRef.Identifier + "#" + strconv.Itoa(consultSeq),
 		Status:           domain.StatusSUCCESS,
 		Summary:          dispInstr.TaskDescription,
 		Timestamp:        s.deps.Clock.Now(),

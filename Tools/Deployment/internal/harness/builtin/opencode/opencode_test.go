@@ -1516,3 +1516,63 @@ func TestContract_OpenCode(t *testing.T) {
 		},
 	})
 }
+
+// ---------------------------------------------------------------------------
+// T3.3 — Regression: OpenCode routes custom tools to main tools field (unchanged)
+// ---------------------------------------------------------------------------
+
+// TestOpenCode_CustomToolDestinations_DescriptorDeclaresNone verifies that the OpenCode
+// descriptor does not declare a custom_tool_destination field. Only Claude Code declares
+// that field; all other built-in harnesses must leave it unset so their custom tool
+// routing remains unchanged.
+func TestOpenCode_CustomToolDestinations_DescriptorDeclaresNone(t *testing.T) {
+	mod := newModule(t)
+	desc := mod.Descriptor()
+
+	if len(desc.Tools.CustomToolDestinations) != 0 {
+		t.Errorf("OpenCode descriptor declares CustomToolDestinations (count=%d); "+
+			"only claude-code.yaml declares custom_tool_destination; "+
+			"all other built-in descriptors must leave the field unset; "+
+			"dests: %v", len(desc.Tools.CustomToolDestinations), desc.Tools.CustomToolDestinations)
+	}
+}
+
+// TestOpenCode_CustomTool_RoutesToMainToolsNotMcpServers verifies that when an agent
+// declares a custom (MCP-style) tool and the OpenCode descriptor has no
+// custom_tool_destination, the tool resolves to a DestMain destination and no mcpServers
+// field appears in the output. This is the regression guard ensuring OpenCode's custom
+// tool handling is byte-identical to pre-Stage-3 behaviour.
+func TestOpenCode_CustomTool_RoutesToMainToolsNotMcpServers(t *testing.T) {
+	mod := newModule(t)
+
+	result, err := mod.Tools(domain.ToolRequest{
+		AgentKey: "test-agent",
+		Generic:  []string{"user_feedback"},
+		CustomNames: map[string]string{
+			"user_feedback": "human-in-the-loop",
+		},
+	})
+	if err != nil {
+		t.Fatalf("mod.Tools: %v", err)
+	}
+
+	// No mcpServers field must appear: OpenCode has no custom_tool_destination declaration.
+	for _, f := range result.Fields {
+		if f.Key == "mcpServers" {
+			t.Errorf("mcpServers field present in OpenCode Tools() output; "+
+				"OpenCode must not route custom tools to a separate mcpServers field — "+
+				"only Claude Code declares custom_tool_destination; "+
+				"fields: %v", result.Fields)
+		}
+	}
+
+	// The ToolCustom resolution must use DestMain (the historical fallback).
+	if len(result.Resolutions) == 1 && result.Resolutions[0].Outcome == domain.ToolCustom {
+		dests := result.Resolutions[0].Destinations
+		if len(dests) != 1 || dests[0].Kind != domain.DestMain {
+			t.Errorf("custom tool resolution destinations: want single DestMain, got %v; "+
+				"without custom_tool_destination, custom tools must route to the main tools field (DestMain)",
+				dests)
+		}
+	}
+}

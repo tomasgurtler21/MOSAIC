@@ -239,6 +239,49 @@ The `resolutions` array must always have one entry per entry in `request.generic
 
 ---
 
+## Harness-Level Custom Tool Destination
+
+Harness descriptors may declare a `custom_tool_destination` field under `tools:` to specify
+where custom (MCP-style) tools are written by default. When a user supplies a name for an
+unmapped generic tool and no config-level `tool_destinations` entry overrides it for that
+specific generic tool, the resolved name is written to each declared destination.
+
+```yaml
+tools:
+  # ... shape, universe, mappings ...
+  custom_tool_destination:
+    - to: field
+      field: mcpServers
+      format: list-block
+```
+
+This is an **opt-in, optional** field. Omitting it (or declaring it as `[]`) preserves the
+historical behaviour: custom tools go to the harness's main tools field.
+
+Key rules for harness authors:
+
+- **`names:` is not permitted** in any entry and is rejected at parse time. The custom tool
+  name is injected automatically by the resolution algorithm.
+- An **empty list** (`custom_tool_destination: []`) is identical to omitting the field.
+- **Independent of `custom_tool_template`.** Both may be set. `custom_tool_template` formats
+  the resolved name; `custom_tool_destination` controls where that name is written.
+- A **`tool_destinations` entry** in any config file for a specific generic tool always takes
+  precedence over this harness-level default for that tool. The full precedence chain is:
+  `user-config > tool-config > descriptor mappings > descriptor custom_tool_destination`.
+- **No harness identifier appears in the algorithm.** The `custom_tool_destination` field is
+  read generically by `descriptor.MapTools`, which serves all provision tiers (built-in,
+  descriptor-only, external) without any harness-specific branching.
+
+Only **Claude Code** among the current built-in harnesses declares this field. All other
+built-in descriptors omit it, and their custom tools continue to go to the main tools field.
+New descriptor-only and external harnesses may declare it freely if routing custom tools to a
+separate frontmatter key is appropriate for their platform.
+
+See [descriptor-schema.md](descriptor-schema.md) for the full field reference, including
+validation rules.
+
+---
+
 ## Common Mistakes
 
 **Omitting `list` style on list values**: MOSAIC requires an explicit `"list"` field (`"block"` or `"flow"`). Omitting it produces non-deterministic YAML output. Always set it.

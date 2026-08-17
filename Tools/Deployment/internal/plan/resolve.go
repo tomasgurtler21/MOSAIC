@@ -77,6 +77,9 @@ func ResolveArtifactsFrom(c catalog.Catalog, sel Selection) (ArtifactSet, error)
 	// Both orchestrator-role files are governed by the same flag so they can never disagree.
 	if !sel.ExcludeOrchestrator {
 		orc := c.Orchestrator()
+		if orc.Key == "" {
+			return ArtifactSet{}, fmt.Errorf("%w: sought in catalogue %q", ErrMissingOrchestrator, c.CatalogRoot())
+		}
 		agentsSeen[orc.Key] = true
 		agents = append(agents, orc)
 

@@ -26,6 +26,18 @@ import (
 //     with an empty HarnessTools slice, which means "explicitly unsupported by this harness").
 //   - ToolUnmapped: no mapping entry exists and no custom name was supplied.
 //
+// For ToolCustom, the resolution's Destinations are determined as follows:
+//   - When d.Tools.CustomToolDestinations is non-empty and no entry in d.Tools.Mappings exists
+//     for the generic tool (i.e. no config-declared tool_destinations entry was merged in for it),
+//     Destinations is a deep copy of the declared list with the formatted custom-tool name
+//     injected into each destination's Names. Kind, Field, Format, and Separator are preserved
+//     verbatim from the declaration.
+//   - Otherwise, Destinations contains a single DestMain destination carrying the formatted
+//     custom-tool name — the historical behaviour.
+//
+// HarnessTools for a ToolCustom resolution is always the single formatted name, regardless of
+// how many destinations the tool fans out to.
+//
 // When multiple generic tools share the same harness tool (many-to-one), each produces its own
 // ToolResolution; deduplication of the rendered Fields output is the caller's responsibility.
 // When one generic tool maps to several harness tools (one-to-many), all are listed in the
@@ -60,9 +72,27 @@ func MapTools(d *domain.HarnessDescriptor, req domain.ToolRequest) (domain.ToolR
 			}
 			res.Outcome = domain.ToolCustom
 			res.HarnessTools = []string{name}
-			// Custom tools go to the main tools destination.
-			res.Destinations = []domain.ToolDestination{
-				{Kind: domain.DestMain, Names: []string{name}},
+			// When the descriptor declares a non-empty default custom-tool destination list and
+			// no explicit mapping entry exists for this generic tool, use that list. Config-declared
+			// tool_destinations entries are merged into d.Tools.Mappings before MapTools runs, so a
+			// mapping entry means an explicit config entry takes precedence over the harness default.
+			_, hasMappingEntry := mappingByGeneric[genericTool]
+			if len(d.Tools.CustomToolDestinations) > 0 && !hasMappingEntry {
+				dests := make([]domain.ToolDestination, len(d.Tools.CustomToolDestinations))
+				for i, decl := range d.Tools.CustomToolDestinations {
+					dests[i] = domain.ToolDestination{
+						Kind:      decl.Kind,
+						Field:     decl.Field,
+						Format:    decl.Format,
+						Separator: decl.Separator,
+						Names:     []string{name},
+					}
+				}
+				res.Destinations = dests
+			} else {
+				res.Destinations = []domain.ToolDestination{
+					{Kind: domain.DestMain, Names: []string{name}},
+				}
 			}
 
 		default:

@@ -39,8 +39,9 @@ var (
 // event-stream parsing. See claudecode.go's ClaudeCodeAdapter for the
 // mapping shape this implementation mirrors.
 type OpenCodeAdapter struct {
-	spawner commonharness.Spawner
-	logger  domain.DebugLogger
+	spawner     commonharness.Spawner
+	textSpawner commonharness.TextSpawner
+	logger      domain.DebugLogger
 }
 
 // NewOpenCodeAdapter creates an OpenCodeAdapter with debug logging disabled.
@@ -64,7 +65,8 @@ func NewOpenCodeAdapterWithLogger(executablePath string, timeout time.Duration, 
 		commonharness.WithTimeout(timeout),
 		commonharness.WithSink(sink),
 	)
-	return &OpenCodeAdapter{spawner: spawner, logger: logger}
+	ts, _ := spawner.(commonharness.TextSpawner)
+	return &OpenCodeAdapter{spawner: spawner, textSpawner: ts, logger: logger}
 }
 
 // Invoke implements domain.HarnessAdapter.
@@ -151,4 +153,51 @@ func (a *OpenCodeAdapter) Invoke(ctx context.Context, agent domain.AgentReferenc
 		domain.F("status", string(protoResp.StatusCode)),
 	)
 	return protoResp, nil
+}
+
+// InvokeRaw implements domain.RawInvoker.
+//
+// It delegates to the spawner's TextSpawner path, which stops after envelope
+// parsing and before ExtractProtocolJSON. The payload is sent verbatim and
+// the reply text is returned verbatim as bytes.
+//
+// On context cancellation, returns ctx.Err().
+func (a *OpenCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentReference, payload []byte) ([]byte, error) {
+	a.logger.Log(domain.EventHarnessInvokeStart, "dispatching raw invocation",
+		domain.F("agent", agent.Identifier),
+		domain.F("kind", string(agent.InvocationKind)),
+	)
+
+	spawnReq := commonharness.SpawnRequest{
+		Agent: commonharness.AgentRef{
+			Identifier:     agent.Identifier,
+			DefinitionPath: agent.DefinitionPath,
+			Kind:           commonharness.InvocationKind(agent.InvocationKind),
+		},
+		Prompt:       string(payload),
+		OutputFormat: "json",
+		SystemPrompt: commonharness.EnvBlock(""),
+	}
+
+	resp, err := a.textSpawner.SpawnText(ctx, spawnReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+				domain.F("agent", agent.Identifier),
+			)
+			return nil, ctx.Err()
+		}
+		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+			domain.F("agent", agent.Identifier),
+		)
+		return nil, err
+	}
+
+	a.logger.Log(domain.EventHarnessStdout, resp.Text,
+		domain.F("agent", agent.Identifier),
+	)
+	a.logger.Log(domain.EventHarnessInvokeOK, "raw invocation succeeded",
+		domain.F("agent", agent.Identifier),
+	)
+	return []byte(resp.Text), nil
 }

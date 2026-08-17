@@ -61,8 +61,9 @@ var (
 // Both invocation kinds use --permission-mode auto and --output-format json.
 // --dangerously-skip-permissions is never used.
 type ClaudeCodeAdapter struct {
-	spawner commonharness.Spawner
-	logger  domain.DebugLogger
+	spawner    commonharness.Spawner
+	textSpawner commonharness.TextSpawner
+	logger     domain.DebugLogger
 }
 
 // NewClaudeCodeAdapter creates a ClaudeCodeAdapter with debug logging disabled.
@@ -92,7 +93,10 @@ func NewClaudeCodeAdapterWithLogger(executablePath string, timeout time.Duration
 		commonharness.WithTimeout(timeout),
 		commonharness.WithSink(sink),
 	)
-	return &ClaudeCodeAdapter{spawner: spawner, logger: logger}
+	// All three shipped spawners implement TextSpawner. Assert once at
+	// construction so InvokeRaw does not need to handle the missing case.
+	ts, _ := spawner.(commonharness.TextSpawner)
+	return &ClaudeCodeAdapter{spawner: spawner, textSpawner: ts, logger: logger}
 }
 
 // Invoke implements domain.HarnessAdapter.
@@ -194,6 +198,53 @@ func (a *ClaudeCodeAdapter) Invoke(ctx context.Context, agent domain.AgentRefere
 		domain.F("status", string(protoResp.StatusCode)),
 	)
 	return protoResp, nil
+}
+
+// InvokeRaw implements domain.RawInvoker.
+//
+// It delegates to the spawner's TextSpawner path, which stops after envelope
+// parsing and before ExtractProtocolJSON. The payload is sent verbatim as the
+// agent's prompt and the reply text is returned verbatim as bytes.
+//
+// Error returns follow the same sentinel taxonomy as Invoke. On context
+// cancellation, returns ctx.Err().
+func (a *ClaudeCodeAdapter) InvokeRaw(ctx context.Context, agent domain.AgentReference, payload []byte) ([]byte, error) {
+	a.logger.Log(domain.EventHarnessInvokeStart, "dispatching raw invocation",
+		domain.F("agent", agent.Identifier),
+		domain.F("kind", string(agent.InvocationKind)),
+	)
+
+	spawnReq := commonharness.SpawnRequest{
+		Agent: commonharness.AgentRef{
+			Identifier:     agent.Identifier,
+			DefinitionPath: agent.DefinitionPath,
+			Kind:           commonharness.InvocationKind(agent.InvocationKind),
+		},
+		Prompt:       string(payload),
+		OutputFormat: "json",
+	}
+
+	resp, err := a.textSpawner.SpawnText(ctx, spawnReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+				domain.F("agent", agent.Identifier),
+			)
+			return nil, ctx.Err()
+		}
+		a.logger.Log(domain.EventHarnessInvokeError, err.Error(),
+			domain.F("agent", agent.Identifier),
+		)
+		return nil, err
+	}
+
+	a.logger.Log(domain.EventHarnessStdout, resp.Text,
+		domain.F("agent", agent.Identifier),
+	)
+	a.logger.Log(domain.EventHarnessInvokeOK, "raw invocation succeeded",
+		domain.F("agent", agent.Identifier),
+	)
+	return []byte(resp.Text), nil
 }
 
 // isNormalEnvelope reports whether data is shaped like one of the CLI's

@@ -185,5 +185,84 @@ func Validate(d *domain.HarnessDescriptor) []ValidationError {
 	// Validate tool mappings (R1–R10 including duplicate generic name check).
 	errs = append(errs, ValidateToolMappings(d.Tools.Mappings, "tools.mappings")...)
 
+	// Validate custom_tool_destination entries (mirrors R3–R9, omits R10).
+	errs = append(errs, validateCustomToolDestinations(d.Tools.CustomToolDestinations, "tools.custom_tool_destination")...)
+
+	return errs
+}
+
+// validateCustomToolDestinations checks the harness-level default custom-tool
+// destination list against the structural destination rules. It mirrors the
+// destination rules of ValidateToolMappings (R3–R9) and deliberately omits the
+// non-empty-names rule (R10), which is meaningless for this field.
+//
+// It is pure: no I/O, no mutation of the argument. It never sets File or Line —
+// the caller owns those. A nil or empty return means the list is valid. Errors are
+// returned in declaration order.
+func validateCustomToolDestinations(dests []domain.ToolDestination, fieldPrefix string) []ValidationError {
+	var errs []ValidationError
+	seen := make(map[string]int) // (kind:field) → first-occurrence index
+
+	for i, d := range dests {
+		// Unknown destination kind. Skip remaining checks for this entry.
+		if d.Kind != domain.DestMain && d.Kind != domain.DestField {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("%s[%d].to", fieldPrefix, i),
+				Message: fmt.Sprintf("unknown destination kind %q; valid values: main, field", d.Kind),
+			})
+			continue
+		}
+
+		// to:field requires a non-empty field name.
+		if d.Kind == domain.DestField && d.Field == "" {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("%s[%d].field", fieldPrefix, i),
+				Message: `destination of kind "field" requires a non-empty field name`,
+			})
+		}
+
+		// to:main must not declare a field name.
+		if d.Kind == domain.DestMain && d.Field != "" {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("%s[%d].field", fieldPrefix, i),
+				Message: `destination of kind "main" must not declare a field name`,
+			})
+		}
+
+		// Unknown value format.
+		if d.Format != "" && d.Format != domain.FormatListBlock && d.Format != domain.FormatListFlow && d.Format != domain.FormatScalar {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("%s[%d].format", fieldPrefix, i),
+				Message: fmt.Sprintf("unknown value format %q; valid values: list-block, list-flow, scalar", d.Format),
+			})
+		}
+
+		// to:main must not declare a value format.
+		if d.Kind == domain.DestMain && d.Format != "" {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("%s[%d].format", fieldPrefix, i),
+				Message: `destination of kind "main" must not declare a value format; the harness's own tools format applies`,
+			})
+		}
+
+		// Separator only meaningful with format:scalar.
+		if d.Separator != "" && d.Format != domain.FormatScalar {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("%s[%d].separator", fieldPrefix, i),
+				Message: `separator is only meaningful for the "scalar" value format`,
+			})
+		}
+
+		// Duplicate (kind, field) pair.
+		kindField := string(d.Kind) + ":" + d.Field
+		if prevI, dup := seen[kindField]; dup {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("%s[%d]", fieldPrefix, i),
+				Message: fmt.Sprintf("duplicate destination %q (first seen at [%d])", kindField, prevI),
+			})
+		} else {
+			seen[kindField] = i
+		}
+	}
 	return errs
 }

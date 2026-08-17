@@ -6,7 +6,9 @@ package main
 // tests, which inject a pre-built session and never enter main's wiring path.
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,10 +17,12 @@ import (
 	"time"
 
 	commonharness "mosaic-common/harness"
+	"mosaic-common/interaction"
 
 	"mosaic-run/internal/deviation"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
+	"mosaic-run/internal/session"
 )
 
 // ---------------------------------------------------------------------------
@@ -1124,88 +1128,551 @@ func TestScanFlag_ModeFlag_AmongMixedArgs(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// buildDeps: consultant wiring selection (T7.3)
+// buildDeps: consultant wiring selection
 //
-// buildDeps is the extracted wiring constructor that main() delegates to after
-// pre-scanning --mode and --manual-resolution. These tests verify that the
-// correct consultant types are selected for each mode/flag combination, which
-// is the gap the pre-scan tests above did not close: they verified that
-// scanFlag extracts flag values correctly but not that those values drive the
-// correct session.Deps wiring.
+// buildDeps is the shared wiring constructor that both frontends delegate to.
+// These tests verify that the correct consultant types are selected for each
+// RunSettings combination, and that the Approvals field is passed through.
 //
-// All positive assertions (non-nil Routing, Manual, PreConsult) are RED until
-// buildDeps's real implementation is written in I7.3. Absence assertions
-// (nil Manual when --manual-resolution is absent, nil PreConsult when
-// --pre-consult is absent) are correct from the stub and serve as regression
-// guards against inadvertent wiring.
+// Wiring assertions (non-nil Routing, Manual, PreConsult, non-nil Approvals)
+// are RED until buildDeps is updated to wire all deps from RunSettings rather
+// than individual string/bool parameters.
 // ---------------------------------------------------------------------------
 
 // TestBuildDeps_OrchestratedMode_WiresOrchestratorConsultantAsRouting verifies
-// that --mode orchestrated causes buildDeps to wire *deviation.OrchestratorConsultant
-// as Deps.Routing. OrchestratorConsultant is the script-mode routing agent.
+// that Mode=orchestrated causes buildDeps to wire *deviation.OrchestratorConsultant
+// as Deps.Routing.
 func TestBuildDeps_OrchestratedMode_WiresOrchestratorConsultantAsRouting(t *testing.T) {
-	deps := buildDeps("orchestrated", false, false, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	settings := domain.RunSettings{Mode: domain.ExecutionModeOrchestrated}
+	deps := buildDeps(settings, nil, nil, nil)
 	if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); !ok {
 		t.Errorf("buildDeps(orchestrated).Routing = %T, want *deviation.OrchestratorConsultant", deps.Routing)
 	}
 }
 
 // TestBuildDeps_AutoMode_WiresOrchestratorConsultantAsRouting verifies that
-// --mode auto wires *deviation.OrchestratorConsultant as Deps.Routing. The
-// consultant handles EngineDecision.Consult returns regardless of mode.
+// Mode=auto wires *deviation.OrchestratorConsultant as Deps.Routing.
 func TestBuildDeps_AutoMode_WiresOrchestratorConsultantAsRouting(t *testing.T) {
-	deps := buildDeps("auto", false, false, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto}
+	deps := buildDeps(settings, nil, nil, nil)
 	if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); !ok {
 		t.Errorf("buildDeps(auto).Routing = %T, want *deviation.OrchestratorConsultant", deps.Routing)
 	}
 }
 
 // TestBuildDeps_AutoReviewMode_WiresOrchestratorConsultantAsRouting verifies
-// that --mode auto-review wires *deviation.OrchestratorConsultant as Deps.Routing.
+// that Mode=auto-review wires *deviation.OrchestratorConsultant as Deps.Routing.
 func TestBuildDeps_AutoReviewMode_WiresOrchestratorConsultantAsRouting(t *testing.T) {
-	deps := buildDeps("auto-review", false, false, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	settings := domain.RunSettings{Mode: domain.ExecutionModeAutoReview}
+	deps := buildDeps(settings, nil, nil, nil)
 	if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); !ok {
 		t.Errorf("buildDeps(auto-review).Routing = %T, want *deviation.OrchestratorConsultant", deps.Routing)
 	}
 }
 
 // TestBuildDeps_ManualResolutionEnabled_WiresManualResolverAsManual verifies
-// that --manual-resolution wires *deviation.ManualResolver as Deps.Manual.
-// ManualResolver drives the Interaction port to obtain a routing instruction
-// from the user when the OrchestratorConsultant fails.
+// that ManualResolution=true wires *deviation.ManualResolver as Deps.Manual.
 func TestBuildDeps_ManualResolutionEnabled_WiresManualResolverAsManual(t *testing.T) {
-	deps := buildDeps("auto", true, false, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto, ManualResolution: true}
+	deps := buildDeps(settings, nil, nil, nil)
 	if _, ok := deps.Manual.(*deviation.ManualResolver); !ok {
 		t.Errorf("buildDeps(manualResolution=true).Manual = %T, want *deviation.ManualResolver", deps.Manual)
 	}
 }
 
-// TestBuildDeps_ManualResolutionDisabled_LeavesManualNil verifies that omitting
-// --manual-resolution leaves Deps.Manual nil. When Manual is nil, the session
-// will not offer a manual fallback on consultation failure.
+// TestBuildDeps_ManualResolutionDisabled_LeavesManualNil verifies that
+// ManualResolution=false leaves Deps.Manual nil.
 func TestBuildDeps_ManualResolutionDisabled_LeavesManualNil(t *testing.T) {
-	deps := buildDeps("auto", false, false, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto, ManualResolution: false}
+	deps := buildDeps(settings, nil, nil, nil)
 	if deps.Manual != nil {
 		t.Errorf("buildDeps(manualResolution=false).Manual = %T, want nil", deps.Manual)
 	}
 }
 
-// TestBuildDeps_PreConsultEnabled_WiresPreConsultant verifies that --pre-consult
-// wires a non-nil Deps.PreConsult. The OrchestratorConsultant implements
-// PreConsultant, so the same consultant instance can serve both roles.
+// TestBuildDeps_PreConsultEnabled_WiresPreConsultant verifies that
+// PreConsultation=true wires a non-nil Deps.PreConsult of the concrete type
+// *deviation.OrchestratorConsultant. The type check matches the pattern used
+// for Routing assertions: a future refactor that wires a different type will
+// fail this test, not silently pass.
 func TestBuildDeps_PreConsultEnabled_WiresPreConsultant(t *testing.T) {
-	deps := buildDeps("auto", false, true, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto, PreConsultation: true}
+	deps := buildDeps(settings, nil, nil, nil)
 	if deps.PreConsult == nil {
-		t.Error("buildDeps(preConsult=true).PreConsult = nil, want non-nil PreConsultant")
+		t.Fatal("buildDeps(preConsult=true).PreConsult = nil, want *deviation.OrchestratorConsultant")
+	}
+	if _, ok := deps.PreConsult.(*deviation.OrchestratorConsultant); !ok {
+		t.Errorf("buildDeps(preConsult=true).PreConsult = %T, want *deviation.OrchestratorConsultant", deps.PreConsult)
 	}
 }
 
-// TestBuildDeps_PreConsultDisabled_LeavesPreConsultNil verifies that omitting
-// --pre-consult leaves Deps.PreConsult nil. The session guards on this field
-// before invoking it, so nil is the correct sentinel for "pre-consultation off".
+// TestBuildDeps_PreConsultDisabled_LeavesPreConsultNil verifies that
+// PreConsultation=false leaves Deps.PreConsult nil.
 func TestBuildDeps_PreConsultDisabled_LeavesPreConsultNil(t *testing.T) {
-	deps := buildDeps("auto", false, false, nil, domain.AgentReference{}, domain.RoutingTable{}, nil)
+	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto, PreConsultation: false}
+	deps := buildDeps(settings, nil, nil, nil)
 	if deps.PreConsult != nil {
 		t.Errorf("buildDeps(preConsult=false).PreConsult = %T, want nil", deps.PreConsult)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T7.1: buildDeps wires each execution mode identically for both frontends.
+//
+// The shared buildDeps function is the mechanism that prevents the TUI and CLI
+// from diverging. These tests assert that the same RunSettings — the struct
+// both frontends already produce — yields the same session.Deps wiring from
+// buildDeps, regardless of which frontend called it. They also assert that no
+// consultant is left with an empty routing table at construction time (the
+// table is delivered later, through RunContextBinder).
+// ---------------------------------------------------------------------------
+
+// TestBuildDeps_AllModes_RoutingIsNeverNil verifies that for every mode in
+// domain.ExecutionModes(), buildDeps wires a non-nil Deps.Routing. A nil
+// Routing causes a nil-pointer panic on any consultation attempt.
+func TestBuildDeps_AllModes_RoutingIsNeverNil(t *testing.T) {
+	for _, mode := range domain.ExecutionModes() {
+		mode := mode
+		t.Run(string(mode), func(t *testing.T) {
+			settings := domain.RunSettings{Mode: mode}
+			deps := buildDeps(settings, nil, nil, nil)
+			if deps.Routing == nil {
+				t.Errorf("buildDeps(mode=%s).Routing = nil, want non-nil routing consultant", mode)
+			}
+		})
+	}
+}
+
+// TestBuildDeps_AllModes_RoutingIsOrchestratorConsultant verifies that for
+// every mode in domain.ExecutionModes(), the wired Deps.Routing is specifically
+// *deviation.OrchestratorConsultant. Both auto and orchestrated modes must use
+// the same consultant type; only the session's routing logic differs by mode.
+func TestBuildDeps_AllModes_RoutingIsOrchestratorConsultant(t *testing.T) {
+	for _, mode := range domain.ExecutionModes() {
+		mode := mode
+		t.Run(string(mode), func(t *testing.T) {
+			settings := domain.RunSettings{Mode: mode}
+			deps := buildDeps(settings, nil, nil, nil)
+			if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); !ok {
+				t.Errorf("buildDeps(mode=%s).Routing = %T, want *deviation.OrchestratorConsultant", mode, deps.Routing)
+			}
+		})
+	}
+}
+
+// TestBuildDeps_ApprovalsPassedThrough verifies that the approvals parameter
+// is propagated to Deps.Approvals. Both frontends pass the real approval
+// reader; buildDeps must not substitute or discard it.
+func TestBuildDeps_ApprovalsPassedThrough(t *testing.T) {
+	sentinelReader := &sentinelApprovalReader{}
+	settings := domain.RunSettings{Mode: domain.ExecutionModeAuto}
+	deps := buildDeps(settings, nil, nil, sentinelReader)
+	if deps.Approvals != sentinelReader {
+		t.Errorf("buildDeps.Approvals = %T (%p), want the exact sentinelApprovalReader (%p) passed in",
+			deps.Approvals, deps.Approvals, sentinelReader)
+	}
+}
+
+// sentinelApprovalReader is a test-only ApprovalReader used to verify that
+// the approvals parameter is passed through buildDeps without substitution.
+type sentinelApprovalReader struct{}
+
+func (r *sentinelApprovalReader) ReadApproval(_ context.Context, _ string) domain.HumanApproval {
+	return domain.ApprovalUnreadable
+}
+
+// TestBuildDeps_SameSettingsYieldSameWiring verifies the parity contract
+// directly: calling buildDeps with the same RunSettings from the CLI path and
+// the TUI path (which both produce a domain.RunSettings) yields structurally
+// identical Deps — same consultant types, same Manual/PreConsult presence.
+// This is the single assertion that prevents the two frontends from diverging.
+func TestBuildDeps_SameSettingsYieldSameWiring(t *testing.T) {
+	// Settings that exercise every wiring branch.
+	settings := domain.RunSettings{
+		Mode:             domain.ExecutionModeOrchestrated,
+		ManualResolution: true,
+		PreConsultation:  true,
+	}
+
+	cliDeps := buildDeps(settings, nil, nil, nil)
+	tuiDeps := buildDeps(settings, nil, nil, nil)
+
+	// Routing: both must be *deviation.OrchestratorConsultant.
+	_, cliRoutingOK := cliDeps.Routing.(*deviation.OrchestratorConsultant)
+	_, tuiRoutingOK := tuiDeps.Routing.(*deviation.OrchestratorConsultant)
+	if !cliRoutingOK || !tuiRoutingOK {
+		t.Errorf("Routing type mismatch: CLI=%T TUI=%T, both want *deviation.OrchestratorConsultant",
+			cliDeps.Routing, tuiDeps.Routing)
+	}
+
+	// Manual: both must be *deviation.ManualResolver.
+	_, cliManualOK := cliDeps.Manual.(*deviation.ManualResolver)
+	_, tuiManualOK := tuiDeps.Manual.(*deviation.ManualResolver)
+	if !cliManualOK || !tuiManualOK {
+		t.Errorf("Manual type mismatch: CLI=%T TUI=%T, both want *deviation.ManualResolver",
+			cliDeps.Manual, tuiDeps.Manual)
+	}
+
+	// PreConsult: both must be non-nil.
+	if cliDeps.PreConsult == nil || tuiDeps.PreConsult == nil {
+		t.Errorf("PreConsult: CLI=%v TUI=%v, both want non-nil (PreConsultation=true)",
+			cliDeps.PreConsult == nil, tuiDeps.PreConsult == nil)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T7.4: Both frontends offer the same set of execution modes.
+//
+// The TUI mode-selection step populates its list from domain.ExecutionModes().
+// The CLI validates the --mode flag against domain.ExecutionModes(). The test
+// asserts that the canonical list is non-empty and that buildDeps accepts every
+// mode in it — confirming that neither frontend offers a mode it cannot execute
+// (a mode absent from ExecutionModes() would not reach buildDeps from either frontend).
+// ---------------------------------------------------------------------------
+
+// TestBuildDeps_EveryExecutionMode_IsAccepted verifies that buildDeps produces
+// a structurally consistent Deps (non-nil Routing) for every mode in
+// domain.ExecutionModes(). If a mode is in the list but buildDeps cannot handle
+// it, this test fails — catching a frontend that presents modes it cannot execute.
+func TestBuildDeps_EveryExecutionMode_IsAccepted(t *testing.T) {
+	modes := domain.ExecutionModes()
+	if len(modes) == 0 {
+		t.Fatal("domain.ExecutionModes() returned an empty slice; at least one mode must be defined")
+	}
+	for _, mode := range modes {
+		mode := mode
+		t.Run(string(mode), func(t *testing.T) {
+			settings := domain.RunSettings{Mode: mode}
+			deps := buildDeps(settings, nil, nil, nil)
+			if deps.Routing == nil {
+				t.Errorf("buildDeps(mode=%s) produced nil Routing; all ExecutionModes entries must be executable", mode)
+			}
+		})
+	}
+}
+
+// TestExecutionModes_AreAllHandledByBuildDeps verifies that the count of modes
+// in domain.ExecutionModes() equals the number of modes for which buildDeps
+// wires an OrchestratorConsultant. If ExecutionModes() adds a new mode without
+// a corresponding branch in buildDeps, the unhandled mode would silently fall
+// through to the fake adapter, making the frontend appear to offer it while
+// actually failing every run started with it.
+func TestExecutionModes_AreAllHandledByBuildDeps(t *testing.T) {
+	modes := domain.ExecutionModes()
+	handled := 0
+	for _, mode := range modes {
+		settings := domain.RunSettings{Mode: mode}
+		deps := buildDeps(settings, nil, nil, nil)
+		if _, ok := deps.Routing.(*deviation.OrchestratorConsultant); ok {
+			handled++
+		}
+	}
+	if handled != len(modes) {
+		t.Errorf("buildDeps handles %d of %d ExecutionModes() entries with OrchestratorConsultant; "+
+			"all modes must be handled so neither frontend offers an unexecutable mode",
+			handled, len(modes))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Behavioral session tests driven via buildDeps
+//
+// These tests verify that a session constructed from buildDeps output behaves
+// correctly end-to-end. They exercise the wiring path that both frontends use,
+// establishing that the interactive path produces a session that consults the
+// OrchestratorConsultant for routing and pre-consultation.
+//
+// Infrastructure shared by these tests lives below the test functions:
+// fakeRawInvoker, mainTestMemStore, mainTestClock, mainTestNoopInteraction,
+// and the file-helper functions.
+// ---------------------------------------------------------------------------
+
+// mainTestOrchestratorDir is the session testdata directory relative to the
+// cmd/mosaic-run package. It contains the orchestrator fixture files shared
+// with internal/session tests.
+const mainTestOrchestratorDir = "../../testdata/session"
+
+// TestBuildDeps_PreConsultation_AdviceAppliedToDispatch_ViaBuildDeps verifies
+// that when buildDeps is called with PreConsultation=true, the resulting session
+// invokes its PreConsult field (the OrchestratorConsultant wired by buildDeps)
+// and that the pre-consultation advice is applied to the first auto-routed
+// dispatch's task description.
+//
+// This mirrors TestSession_Start_PreConsultation_AdviceAppliedToDispatch in the
+// session package but is driven through buildDeps, establishing that the
+// interactive wiring path (which calls buildDeps with the completed configuration)
+// produces a session that actually uses pre-consultation advice.
+func TestBuildDeps_PreConsultation_AdviceAppliedToDispatch_ViaBuildDeps(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFileForMain(t, dir, "linear-orch.md")
+	writeAgentFileForMain(t, dir, "agent-a")
+	writeAgentFileForMain(t, dir, "agent-b")
+
+	// Sentinel text that must appear in the first dispatch's TaskDescription
+	// when pre-consultation advice is correctly applied.
+	const adviceText = "pre-consultation-advice-buildDeps-sentinel-r7q"
+
+	// In auto mode, PreConsult is called once at run start (one InvokeRaw call).
+	// Routing is handled automatically; the fakeRawInvoker serves only the
+	// pre-consultation request.
+	fakeInvoker := &fakeRawInvoker{
+		responses: [][]byte{
+			[]byte(`{"task_description":"` + adviceText + `","constraints":""}`),
+		},
+	}
+
+	settings := domain.RunSettings{
+		Mode:            domain.ExecutionModeAuto,
+		PreConsultation: true,
+	}
+
+	// Build session deps through the shared builder (same path both frontends use).
+	deps := buildDeps(settings, fakeInvoker, &mainTestNoopInteraction{}, nil)
+
+	// Supply the infrastructure deps that buildDeps deliberately leaves empty
+	// (Harness, Store, Clock, Interact are frontend-supplied, not part of the
+	// routing/consultation wiring that buildDeps owns).
+	f := harness.NewFakeAdapter()
+	deps.Harness = f
+	deps.Store = &mainTestMemStore{}
+	deps.Clock = mainTestClock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	deps.Interact = &mainTestNoopInteraction{}
+
+	ses := session.New(deps)
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		RunSettings:          settings,
+	}
+
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	invs := f.Invocations()
+	if len(invs) < 1 {
+		t.Fatal("want at least one harness invocation after the session run, got none")
+	}
+
+	// The pre-consultation advice text must appear in the first dispatch's
+	// TaskDescription, confirming that the OrchestratorConsultant wired by
+	// buildDeps was invoked and its advice was applied.
+	if !strings.Contains(invs[0].Request.TaskDescription, adviceText) {
+		t.Errorf("want first dispatch TaskDescription to contain pre-consultation advice %q, got %q",
+			adviceText, invs[0].Request.TaskDescription)
+	}
+}
+
+// TestBuildDeps_OrchestratedMode_RoutingConsultantIsInvoked verifies that a
+// session built from buildDeps(Mode=orchestrated) routes every dispatch
+// decision through the OrchestratorConsultant. The fakeRawInvoker scripted
+// into buildDeps records every InvokeRaw call, so a non-zero call count
+// confirms that routing decisions flowed through the consultant wired by
+// buildDeps rather than being resolved internally.
+//
+// This is the integration-style behavioral test for the wiring that both
+// frontends rely on: establishing that the interactive path, which calls
+// buildDeps with the completed configuration, produces a session that actually
+// consults the orchestrator for each routing decision.
+func TestBuildDeps_OrchestratedMode_RoutingConsultantIsInvoked(t *testing.T) {
+	dir := t.TempDir()
+	orchPath := copyOrchestratorFileForMain(t, dir, "linear-orch.md")
+	writeAgentFileForMain(t, dir, "agent-a")
+	writeAgentFileForMain(t, dir, "agent-b")
+
+	// Three routing consultations for the linear 2-agent workflow in
+	// orchestrated mode: dispatch agent-a, dispatch agent-b, then stop.
+	fakeInvoker := &fakeRawInvoker{
+		responses: [][]byte{
+			[]byte(`{"action":"dispatch","agent":"agent-a","task_description":"orchestrated task for agent-a"}`),
+			[]byte(`{"action":"dispatch","agent":"agent-b","task_description":"orchestrated task for agent-b"}`),
+			[]byte(`{"action":"stop","reason":"workflow complete"}`),
+		},
+	}
+
+	settings := domain.RunSettings{
+		Mode: domain.ExecutionModeOrchestrated,
+	}
+
+	deps := buildDeps(settings, fakeInvoker, nil, nil)
+
+	f := harness.NewFakeAdapter()
+	deps.Harness = f
+	deps.Store = &mainTestMemStore{}
+	deps.Clock = mainTestClock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+	deps.Interact = &mainTestNoopInteraction{}
+
+	ses := session.New(deps)
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		RunSettings:          settings,
+	}
+
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	// A non-zero InvokeRaw call count proves that routing decisions flowed
+	// through the OrchestratorConsultant that buildDeps wired. If the session
+	// had dispatched without consulting the orchestrator, callCount would be 0.
+	fakeInvoker.mu.Lock()
+	callCount := fakeInvoker.callCount
+	fakeInvoker.mu.Unlock()
+	if callCount == 0 {
+		t.Error("buildDeps(orchestrated) routing consultant was never invoked; " +
+			"want InvokeRaw called at least once for routing decisions")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Shared test infrastructure for behavioural session tests in cmd/mosaic-run
+// ---------------------------------------------------------------------------
+
+// fakeRawInvoker is a scripted domain.RawInvoker for use in session integration
+// tests. It returns pre-configured byte slices in FIFO order, enabling tests to
+// script orchestrator consultation responses without spawning a real agent.
+type fakeRawInvoker struct {
+	mu        sync.Mutex
+	responses [][]byte
+	callCount int
+}
+
+func (f *fakeRawInvoker) InvokeRaw(_ context.Context, _ domain.AgentReference, _ []byte) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.callCount >= len(f.responses) {
+		return nil, fmt.Errorf("fakeRawInvoker: no more scripted responses (call index %d, have %d)",
+			f.callCount, len(f.responses))
+	}
+	resp := f.responses[f.callCount]
+	f.callCount++
+	return resp, nil
+}
+
+// mainTestMemStore is a minimal in-memory ArtifactStore for use in behavioural
+// session tests in the cmd/mosaic-run package. It follows the same contract as
+// the memStore in internal/session/session_test.go.
+type mainTestMemStore struct {
+	state  domain.ArtifactState
+	exists bool
+}
+
+func (m *mainTestMemStore) Read(_ context.Context) (domain.ArtifactState, error) {
+	if !m.exists {
+		return domain.ArtifactState{}, os.ErrNotExist
+	}
+	return m.state, nil
+}
+
+func (m *mainTestMemStore) Create(_ context.Context, info domain.WorkflowInfo, task string, settings domain.RunSettings, now time.Time, runID string) (domain.ArtifactState, error) {
+	m.state = domain.ArtifactState{
+		Type:            "orchestration-artifact",
+		RunID:           runID,
+		Workflow:        info.ID,
+		WorkflowVersion: info.Version,
+		Task:            task,
+		Started:         now,
+		LastUpdated:     now,
+		GlobalSequence:  0,
+		RunSettings:     settings,
+	}
+	m.exists = true
+	return m.state, nil
+}
+
+func (m *mainTestMemStore) Apply(_ context.Context, state domain.ArtifactState, step domain.CompletedStep) (domain.ArtifactState, error) {
+	state.GlobalSequence = step.Seq
+	if !step.IsInfrastructure {
+		state.CurrentState = domain.CurrentState{
+			Phase:      step.Phase,
+			Stage:      step.Stage,
+			LastStatus: step.Status,
+			LastAgent:  step.AgentInstance,
+		}
+	}
+	m.state = state
+	return state, nil
+}
+
+func (m *mainTestMemStore) SetPhase(_ context.Context, _ domain.ArtifactState, _ string, _ time.Time) (domain.ArtifactState, error) {
+	return domain.ArtifactState{}, fmt.Errorf("mainTestMemStore.SetPhase: not implemented in cmd/mosaic-run session tests")
+}
+
+// mainTestClock is a fixed-time domain.Clock for use in cmd/mosaic-run
+// behavioural session tests.
+type mainTestClock struct{ t time.Time }
+
+func (c mainTestClock) Now() time.Time { return c.t }
+
+// mainTestNoopInteraction is a no-op implementation of interaction.Interaction
+// for use in cmd/mosaic-run behavioural session tests. All question methods
+// return Answered status; Notify and Progress are silent.
+type mainTestNoopInteraction struct{}
+
+func (n *mainTestNoopInteraction) SelectOne(_ context.Context, _ interaction.ChoiceQuestion) (interaction.ChoiceAnswer, error) {
+	return interaction.ChoiceAnswer{Status: interaction.Answered}, nil
+}
+func (n *mainTestNoopInteraction) SelectMany(_ context.Context, _ interaction.ChoiceQuestion) (interaction.MultiChoiceAnswer, error) {
+	return interaction.MultiChoiceAnswer{Status: interaction.Answered}, nil
+}
+func (n *mainTestNoopInteraction) AskText(_ context.Context, _ interaction.TextQuestion) (interaction.TextAnswer, error) {
+	return interaction.TextAnswer{Status: interaction.Answered}, nil
+}
+func (n *mainTestNoopInteraction) Confirm(_ context.Context, _ interaction.Question) (interaction.ConfirmAnswer, error) {
+	return interaction.ConfirmAnswer{Status: interaction.Answered}, nil
+}
+func (n *mainTestNoopInteraction) Notify(_ context.Context, _ interaction.Notice)          {}
+func (n *mainTestNoopInteraction) Progress(_ context.Context, _ interaction.ProgressEvent) {}
+
+// copyOrchestratorFileForMain copies the named session fixture file into the
+// given directory and returns the destination path. Fixtures are loaded from
+// the shared testdata/session directory within Tools/Runner.
+func copyOrchestratorFileForMain(t *testing.T, dir, fixtureName string) string {
+	t.Helper()
+	src := filepath.Join(mainTestOrchestratorDir, fixtureName)
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("copyOrchestratorFileForMain: read %q: %v", src, err)
+	}
+	dst := filepath.Join(dir, "orchestrator.md")
+	if err := os.WriteFile(dst, data, 0600); err != nil {
+		t.Fatalf("copyOrchestratorFileForMain: write %q: %v", dst, err)
+	}
+	return dst
+}
+
+// writeAgentFileForMain creates a minimal agent definition file in dir with the
+// given agent identifier as the filename stem, matching the format expected by
+// the agentresolve package.
+func writeAgentFileForMain(t *testing.T, dir, agentID string) {
+	t.Helper()
+	path := filepath.Join(dir, agentID+".md")
+	if err := os.WriteFile(path, []byte("# Agent: "+agentID+"\n"), 0600); err != nil {
+		t.Fatalf("writeAgentFileForMain(%q): %v", agentID, err)
 	}
 }

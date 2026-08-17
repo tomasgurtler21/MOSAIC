@@ -595,10 +595,10 @@ func TestMapTools_Custom_HarnessToolsContainsCustomName(t *testing.T) {
 }
 
 func TestMapTools_Custom_DestinationsContainsSingleDestMain(t *testing.T) {
-	// For a ToolCustom outcome (no mapping, CustomNames supplies a name), the design contract
-	// requires MapTools to produce a single destination of kind DestMain carrying the templated
-	// name — preserving the pre-Destinations behaviour of putting the name into the main tools
-	// field. This test is RED until MapTools populates Destinations for the ToolCustom path.
+	// For a ToolCustom outcome (no mapping, CustomNames supplies a name) on a descriptor that
+	// declares no CustomToolDestinations, the design contract requires MapTools to produce a
+	// single destination of kind DestMain carrying the templated name — preserving the
+	// pre-Destinations behaviour of putting the name into the main tools field.
 	d := loadMappingDescriptor(t)
 	req := domain.ToolRequest{
 		AgentKey:    "test-agent",
@@ -1083,8 +1083,8 @@ func loadByConventionDescriptor(t *testing.T) *domain.HarnessDescriptor {
 // emitted; the harness uses them for tools that must appear in every agent output (e.g.
 // "search/listDirectory" in the VS Code GHCP harness).
 //
-// This test will be RED until buildListToolFields is updated to include by_convention tools
-// unconditionally alongside the tools resolved from the generic tool list.
+// GREEN — by-convention support is already live; this is a regression guard ensuring
+// by-convention tools continue to appear unconditionally in the field output.
 func TestMapTools_ByConvention_AppearsInFieldsWithNoMatchingGenericTool(t *testing.T) {
 	d := loadByConventionDescriptor(t)
 	// file_read maps to "read/readFile" only; no generic tool maps to "search/listDirectory".
@@ -1819,5 +1819,836 @@ func TestReverseMapTools_NoMappingData_AllOutcomesAreToolUnmapped(t *testing.T) 
 			t.Errorf("ReverseMapTools no-mapping-data: got[%d] (%q) Generic must be empty, got %q",
 				i, inputs[i], res.Generic)
 		}
+	}
+}
+
+// =============================================================================
+// Custom tool default destinations
+//
+// Coverage for the harness-level default custom-tool destination feature
+// in descriptor.MapTools:
+//
+//   - When a descriptor declares a non-empty CustomToolDestinations list and no mapping
+//     entry exists for the generic tool, a ToolCustom resolution's Destinations slice
+//     must mirror that declared list, with the formatted custom-tool name injected into
+//     each destination's Kind, Field, Format, and Separator preserved verbatim from the
+//     declaration and Names set to a freshly allocated []string{name}.
+//   - When CustomToolDestinations is unset (nil) or declared as an empty list, the
+//     resolution falls through to the pre-change behaviour: a single DestMain destination
+//     carrying the formatted name — unchanged from before the feature was added.
+//   - HarnessTools for a ToolCustom resolution remains the deduplicated, single formatted
+//     name regardless of how many destinations the declared list fans out to.
+//   - When a mapping entry exists for the generic tool (representing a config-declared
+//     tool_destinations entry folded in by EffectiveToolMappings), the harness-level
+//     default is suppressed; the resolution falls through to a single DestMain carrying
+//     the formatted name exactly as before the change.
+//   - The returned Destinations slice and each element's Names are freshly allocated so
+//     that mutating them does not corrupt shared descriptor state.
+// =============================================================================
+
+// customDestDescriptorYAML declares a list-shape descriptor with:
+//   - file_read → DestMain ["read-file"]  (has a mapping entry for config-precedence tests)
+//   - custom_tool_destination: [{to: field, field: mcpServers, format: list-block}]
+//
+// "terminal" is absent from mappings, so a custom name for it exercises the new
+// CustomToolDestinations path. "file_read" with a custom name exercises the
+// mapping-entry-suppresses-default path.
+const customDestDescriptorYAML = `schema_version: "1"
+id: "custom-dest-harness"
+display_name: "Custom Dest Harness"
+tools:
+  shape: list
+  universe:
+    - name: "read-file"
+      unused: deny
+      by_convention: false
+  mappings:
+    - generic: "file_read"
+      destinations:
+        - to: main
+          names:
+            - "read-file"
+  custom_tool_destination:
+    - to: field
+      field: mcpServers
+      format: list-block
+frontmatter:
+  tools_key: "tools"
+`
+
+func loadCustomDestDescriptor(t *testing.T) *domain.HarnessDescriptor {
+	t.Helper()
+	d, err := descriptor.Parse([]byte(customDestDescriptorYAML), "inline:custom-dest-harness")
+	if err != nil {
+		t.Fatalf("Parse custom-dest descriptor: %v", err)
+	}
+	if d == nil {
+		t.Fatal("Parse returned nil descriptor without error")
+	}
+	return d
+}
+
+// --- Destinations mirror the declared CustomToolDestinations list ---
+
+func TestMapTools_CustomDest_DestinationsKindMatchesDeclared(t *testing.T) {
+	// When CustomToolDestinations declares [{to:field, field:mcpServers}], a ToolCustom
+	// resolution must carry a DestField destination, not a hardcoded DestMain.
+	// This test is RED until MapTools reads CustomToolDestinations.
+	d := loadCustomDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if res.Outcome != domain.ToolCustom {
+		t.Fatalf("outcome: want %q, got %q", domain.ToolCustom, res.Outcome)
+	}
+	if len(res.Destinations) == 0 {
+		t.Fatal("Destinations must not be empty for ToolCustom with CustomToolDestinations declared")
+	}
+	if res.Destinations[0].Kind != domain.DestField {
+		t.Errorf("Destinations[0].Kind: want %q (from declared custom_tool_destination), got %q; "+
+			"MapTools must use the descriptor's declared destinations, not a hardcoded DestMain",
+			domain.DestField, res.Destinations[0].Kind)
+	}
+}
+
+func TestMapTools_CustomDest_DestinationsFieldMatchesDeclared(t *testing.T) {
+	// The declared custom_tool_destination has field:mcpServers. The resolution's first
+	// destination must carry that field name verbatim.
+	// This test is RED until MapTools reads CustomToolDestinations.
+	d := loadCustomDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if len(res.Destinations) == 0 {
+		t.Fatal("Destinations must not be empty")
+	}
+	if res.Destinations[0].Field != "mcpServers" {
+		t.Errorf("Destinations[0].Field: want %q (from declared field name), got %q",
+			"mcpServers", res.Destinations[0].Field)
+	}
+}
+
+func TestMapTools_CustomDest_DestinationsCarryFormattedName(t *testing.T) {
+	// Each declared destination must carry the formatted custom-tool name in its Names slice.
+	// This test is RED until MapTools reads CustomToolDestinations.
+	d := loadCustomDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if len(res.Destinations) == 0 {
+		t.Fatal("Destinations must not be empty")
+	}
+	if res.Destinations[0].Kind != domain.DestField {
+		t.Errorf("Destinations[0].Kind: want %q (declared as to:field), got %q; "+
+			"MapTools must route the custom tool to the declared DestField destination, not DestMain",
+			domain.DestField, res.Destinations[0].Kind)
+	}
+	dest := res.Destinations[0]
+	if len(dest.Names) == 0 {
+		t.Fatal("Destinations[0].Names must not be empty; the custom-tool name must be injected")
+	}
+	if dest.Names[0] != "my-server" {
+		t.Errorf("Destinations[0].Names[0]: want %q, got %q", "my-server", dest.Names[0])
+	}
+}
+
+func TestMapTools_CustomDest_CountMatchesDeclaredList(t *testing.T) {
+	// The number of Destinations in a ToolCustom resolution must equal the number of declared
+	// CustomToolDestinations entries. The descriptor declares exactly one entry.
+	// This test is RED until MapTools reads CustomToolDestinations.
+	d := loadCustomDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	// The descriptor declares one CustomToolDestination; the resolution must have exactly one.
+	if len(result.Resolutions[0].Destinations) != 1 {
+		t.Errorf("Destinations count: want 1 (matching declared CustomToolDestinations count), got %d; "+
+			"MapTools must produce one destination per declared entry",
+			len(result.Resolutions[0].Destinations))
+	}
+}
+
+func TestMapTools_CustomDest_FormatPreservedFromDeclaration(t *testing.T) {
+	// The declared format (list-block) must appear verbatim on the destination.
+	// This test is RED until MapTools reads CustomToolDestinations.
+	d := loadCustomDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if len(res.Destinations) == 0 {
+		t.Fatal("Destinations must not be empty")
+	}
+	if res.Destinations[0].Format != domain.FormatListBlock {
+		t.Errorf("Destinations[0].Format: want %q (from declared format), got %q",
+			domain.FormatListBlock, res.Destinations[0].Format)
+	}
+}
+
+func TestMapTools_CustomDest_SeparatorPreservedFromDeclaration(t *testing.T) {
+	// The declared separator must appear verbatim on the destination.
+	// When custom_tool_destination declares {format: scalar, separator: " | "}, the resolved
+	// Destinations[0].Separator must equal " | ". An implementation that copies Format but
+	// silently drops Separator would not be caught by FormatPreservedFromDeclaration alone.
+	// This test is RED until MapTools reads CustomToolDestinations.
+	d := &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            "separator-custdest-harness",
+		DisplayName:   "Separator CustomDest Harness",
+		Tools: domain.ToolSpec{
+			Shape: domain.ShapeList,
+			CustomToolDestinations: []domain.ToolDestination{
+				{Kind: domain.DestField, Field: "f", Format: domain.FormatScalar, Separator: " | ", Names: []string{}},
+			},
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+	}
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if res.Outcome != domain.ToolCustom {
+		t.Fatalf("outcome: want %q, got %q", domain.ToolCustom, res.Outcome)
+	}
+	if len(res.Destinations) == 0 {
+		t.Fatal("Destinations must not be empty for ToolCustom with CustomToolDestinations declared")
+	}
+	const wantSeparator = " | "
+	if res.Destinations[0].Separator != wantSeparator {
+		t.Errorf("Destinations[0].Separator: want %q (verbatim from declaration), got %q; "+
+			"MapTools must copy Separator from the declared CustomToolDestinations entry",
+			wantSeparator, res.Destinations[0].Separator)
+	}
+}
+
+func TestMapTools_CustomDest_MultipleDestinations_AllPresentInResolution(t *testing.T) {
+	// When CustomToolDestinations declares two entries, a ToolCustom resolution must carry
+	// both in its Destinations slice, in declaration order.
+	// This test is RED until MapTools reads CustomToolDestinations.
+	d := &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            "multi-custdest-harness",
+		DisplayName:   "Multi CustomDest Harness",
+		Tools: domain.ToolSpec{
+			Shape: domain.ShapeList,
+			CustomToolDestinations: []domain.ToolDestination{
+				{Kind: domain.DestMain, Names: []string{}},
+				{Kind: domain.DestField, Field: "mcpServers", Format: domain.FormatListBlock, Names: []string{}},
+			},
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+	}
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	// Two declared entries → two Destinations in the resolution.
+	if len(result.Resolutions[0].Destinations) != 2 {
+		t.Errorf("Destinations count: want 2 (matching two declared CustomToolDestinations entries), got %d; "+
+			"MapTools must produce one destination per declared entry",
+			len(result.Resolutions[0].Destinations))
+	}
+}
+
+func TestMapTools_CustomDest_MultipleDestinations_EachCarriesFormattedName(t *testing.T) {
+	// When multiple destinations are declared, each must carry the formatted custom-tool
+	// name in its own Names slice.
+	// This test is RED until MapTools reads CustomToolDestinations.
+	d := &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            "multi-custdest-harness",
+		DisplayName:   "Multi CustomDest Harness",
+		Tools: domain.ToolSpec{
+			Shape: domain.ShapeList,
+			CustomToolDestinations: []domain.ToolDestination{
+				{Kind: domain.DestMain, Names: []string{}},
+				{Kind: domain.DestField, Field: "mcpServers", Format: domain.FormatListBlock, Names: []string{}},
+			},
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+	}
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if len(res.Destinations) < 2 {
+		t.Fatalf("Destinations count: want at least 2, got %d", len(res.Destinations))
+	}
+	for i, dest := range res.Destinations {
+		if len(dest.Names) == 0 {
+			t.Errorf("Destinations[%d].Names must not be empty; each declared destination must carry the custom-tool name", i)
+			continue
+		}
+		if dest.Names[0] != "my-server" {
+			t.Errorf("Destinations[%d].Names[0]: want %q, got %q", i, "my-server", dest.Names[0])
+		}
+	}
+}
+
+// --- Fall-through when CustomToolDestinations is unset or empty ---
+
+func TestMapTools_CustomDest_UnsetField_FallsThroughToDestMain(t *testing.T) {
+	// When CustomToolDestinations is nil (the zero value — the field is not declared),
+	// the resolution must produce the pre-change fall-through: a single DestMain destination
+	// carrying the custom name. This covers every harness that omits custom_tool_destination.
+	d := &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            "no-custdest-harness",
+		DisplayName:   "No CustomDest Harness",
+		Tools: domain.ToolSpec{
+			Shape: domain.ShapeList,
+			// CustomToolDestinations is nil — not declared.
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+	}
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if len(res.Destinations) != 1 {
+		t.Fatalf("Destinations count: want 1 (single DestMain fall-through), got %d", len(res.Destinations))
+	}
+	if res.Destinations[0].Kind != domain.DestMain {
+		t.Errorf("Destinations[0].Kind: want %q (fall-through with nil CustomToolDestinations), got %q",
+			domain.DestMain, res.Destinations[0].Kind)
+	}
+	if len(res.Destinations[0].Names) != 1 || res.Destinations[0].Names[0] != "my-server" {
+		t.Errorf("Destinations[0].Names: want [%q], got %v", "my-server", res.Destinations[0].Names)
+	}
+}
+
+func TestMapTools_CustomDest_EmptyList_FallsThroughToDestMain(t *testing.T) {
+	// When CustomToolDestinations is an explicit empty slice (custom_tool_destination: []),
+	// the behaviour must be identical to the nil case: a single DestMain destination.
+	// An empty list is not a distinct "suppress custom tool output" mode.
+	d := &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            "empty-custdest-harness",
+		DisplayName:   "Empty CustomDest Harness",
+		Tools: domain.ToolSpec{
+			Shape:                  domain.ShapeList,
+			CustomToolDestinations: []domain.ToolDestination{}, // explicit empty slice
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+	}
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if len(res.Destinations) != 1 {
+		t.Fatalf("Destinations count: want 1 (single DestMain; empty list is identical to unset), got %d", len(res.Destinations))
+	}
+	if res.Destinations[0].Kind != domain.DestMain {
+		t.Errorf("Destinations[0].Kind: want %q (empty CustomToolDestinations falls through to DestMain), got %q",
+			domain.DestMain, res.Destinations[0].Kind)
+	}
+	if len(res.Destinations[0].Names) != 1 || res.Destinations[0].Names[0] != "my-server" {
+		t.Errorf("Destinations[0].Names: want [%q], got %v", "my-server", res.Destinations[0].Names)
+	}
+}
+
+func TestMapTools_CustomDest_EmptyList_ParsedFromYAML_FallsThroughToDestMain(t *testing.T) {
+	// Confirm that custom_tool_destination: [] in YAML is accepted by the loader and
+	// produces the same fall-through behaviour as an omitted field.
+	const yamlSrc = `schema_version: "1"
+id: "empty-custdest-yaml-harness"
+display_name: "Empty CustomDest YAML Harness"
+tools:
+  shape: list
+  universe: []
+  custom_tool_destination: []
+frontmatter:
+  tools_key: "tools"
+`
+	d, err := descriptor.Parse([]byte(yamlSrc), "inline:empty-custdest-yaml-harness")
+	if err != nil {
+		t.Fatalf("Parse empty custom_tool_destination: %v", err)
+	}
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if len(res.Destinations) != 1 {
+		t.Fatalf("Destinations count: want 1 (DestMain fall-through for empty YAML list), got %d", len(res.Destinations))
+	}
+	if res.Destinations[0].Kind != domain.DestMain {
+		t.Errorf("Destinations[0].Kind: want %q, got %q", domain.DestMain, res.Destinations[0].Kind)
+	}
+}
+
+// --- HarnessTools remains the single formatted name regardless of destination count ---
+
+func TestMapTools_CustomDest_HarnessTools_SingleNameWithMultipleDests(t *testing.T) {
+	// Even when CustomToolDestinations fans out to two destinations (DestMain + DestField),
+	// HarnessTools must remain the deduplicated single formatted name. It must not repeat
+	// the name once per destination.
+	d := &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            "multi-custdest-harness",
+		DisplayName:   "Multi CustomDest Harness",
+		Tools: domain.ToolSpec{
+			Shape: domain.ShapeList,
+			CustomToolDestinations: []domain.ToolDestination{
+				{Kind: domain.DestMain, Names: []string{}},
+				{Kind: domain.DestField, Field: "mcpServers", Format: domain.FormatListBlock, Names: []string{}},
+			},
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+	}
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	// HarnessTools must be the single formatted name, deduplicated across all destinations.
+	if len(res.HarnessTools) != 1 {
+		t.Errorf("HarnessTools count: want 1 (single formatted name, deduplicated), got %d: %v; "+
+			"HarnessTools must not repeat the name once per destination",
+			len(res.HarnessTools), res.HarnessTools)
+	}
+	if len(res.HarnessTools) == 1 && res.HarnessTools[0] != "my-server" {
+		t.Errorf("HarnessTools[0]: want %q, got %q", "my-server", res.HarnessTools[0])
+	}
+}
+
+// --- Mapping entry for the generic tool suppresses the harness-level default ---
+
+func TestMapTools_CustomDest_MappingEntryExisting_OutputIsDestMain(t *testing.T) {
+	// When a mapping entry exists for the generic tool (representing a config-declared
+	// tool_destinations entry, folded in by EffectiveToolMappings) AND CustomToolDestinations
+	// is non-empty AND a custom name is supplied, the harness-level default must be suppressed.
+	// The resolution must fall through to a single DestMain carrying the formatted name —
+	// the pre-change behaviour — rather than applying the harness default.
+	d := &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            "custdest-with-mapping-harness",
+		DisplayName:   "CustomDest With Mapping Harness",
+		Tools: domain.ToolSpec{
+			Shape: domain.ShapeList,
+			Mappings: []domain.ToolMapping{
+				// "terminal" has a mapping entry — simulates a config tool_destinations entry.
+				{
+					Generic: "terminal",
+					Destinations: []domain.ToolDestination{
+						{Kind: domain.DestMain, Names: []string{"term"}},
+					},
+				},
+			},
+			CustomToolDestinations: []domain.ToolDestination{
+				{Kind: domain.DestField, Field: "mcpServers", Format: domain.FormatListBlock, Names: []string{}},
+			},
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+	}
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	// Outcome is still ToolCustom (custom name takes precedence over mapping for the outcome field).
+	if res.Outcome != domain.ToolCustom {
+		t.Errorf("outcome: want %q, got %q", domain.ToolCustom, res.Outcome)
+	}
+	// The mapping entry's existence suppresses the harness default; Destinations = single DestMain.
+	if len(res.Destinations) != 1 {
+		t.Fatalf("Destinations count: want 1 (mapping entry suppresses harness default), got %d: %+v",
+			len(res.Destinations), res.Destinations)
+	}
+	if res.Destinations[0].Kind != domain.DestMain {
+		t.Errorf("Destinations[0].Kind: want %q (mapping entry suppresses harness-level default), got %q; "+
+			"when a mapping entry exists, CustomToolDestinations must not be applied",
+			domain.DestMain, res.Destinations[0].Kind)
+	}
+	if len(res.Destinations[0].Names) == 0 || res.Destinations[0].Names[0] != "my-server" {
+		t.Errorf("Destinations[0].Names: want [%q] (formatted custom name), got %v",
+			"my-server", res.Destinations[0].Names)
+	}
+}
+
+func TestMapTools_CustomDest_MappingEntryExisting_HarnessToolsIsFormattedName(t *testing.T) {
+	// With a mapping entry present (suppressing the harness default), HarnessTools must
+	// still be the formatted custom-tool name, same as the pre-change behaviour.
+	d := &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            "custdest-with-mapping-harness",
+		DisplayName:   "CustomDest With Mapping Harness",
+		Tools: domain.ToolSpec{
+			Shape: domain.ShapeList,
+			Mappings: []domain.ToolMapping{
+				{
+					Generic: "terminal",
+					Destinations: []domain.ToolDestination{
+						{Kind: domain.DestMain, Names: []string{"term"}},
+					},
+				},
+			},
+			CustomToolDestinations: []domain.ToolDestination{
+				{Kind: domain.DestField, Field: "mcpServers", Format: domain.FormatListBlock, Names: []string{}},
+			},
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+	}
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	if len(result.Resolutions[0].HarnessTools) != 1 || result.Resolutions[0].HarnessTools[0] != "my-server" {
+		t.Errorf("HarnessTools: want [%q], got %v", "my-server", result.Resolutions[0].HarnessTools)
+	}
+}
+
+func TestMapTools_CustomDest_NoMappingEntry_DifferentTool_DefaultApplied(t *testing.T) {
+	// Sanity check for the mapping-entry gate: when two generic tools are in the request,
+	// one with a mapping entry and one without, the harness default applies only to the
+	// unmapped one. The mapped one keeps its DestMain even though a custom name is supplied.
+	d := loadCustomDestDescriptor(t) // file_read has a mapping; terminal does not
+	req := domain.ToolRequest{
+		AgentKey: "test-agent",
+		Generic:  []string{"file_read", "terminal"},
+		CustomNames: map[string]string{
+			"file_read": "custom-read-server",
+			"terminal":  "my-terminal",
+		},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 2 {
+		t.Fatalf("expected 2 resolutions, got %d", len(result.Resolutions))
+	}
+	// file_read has a mapping entry → harness default suppressed → DestMain.
+	fileReadRes := result.Resolutions[0]
+	if fileReadRes.Generic != "file_read" {
+		t.Fatalf("Resolutions[0].Generic: want %q, got %q", "file_read", fileReadRes.Generic)
+	}
+	if len(fileReadRes.Destinations) != 1 || fileReadRes.Destinations[0].Kind != domain.DestMain {
+		t.Errorf("file_read: want single DestMain (mapping entry suppresses harness default), "+
+			"got %d destinations: %+v", len(fileReadRes.Destinations), fileReadRes.Destinations)
+	}
+	// terminal has no mapping entry → harness default applied → DestField.
+	terminalRes := result.Resolutions[1]
+	if terminalRes.Generic != "terminal" {
+		t.Fatalf("Resolutions[1].Generic: want %q, got %q", "terminal", terminalRes.Generic)
+	}
+	if len(terminalRes.Destinations) != 1 || terminalRes.Destinations[0].Kind != domain.DestField {
+		t.Errorf("terminal: want single DestField (harness default applied), "+
+			"got %d destinations: %+v", len(terminalRes.Destinations), terminalRes.Destinations)
+	}
+}
+
+// --- Deep-copy discipline ---
+
+func TestMapTools_CustomDest_DeepCopy_MutatingReturnedNamesDoesNotAffectDescriptor(t *testing.T) {
+	// Mutating the Names slice of a returned destination must not affect the descriptor's
+	// state. A subsequent resolve from the same descriptor must produce the original names.
+	// This enforces the same deep-copy discipline as the ToolMapped branch.
+	d := loadCustomDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result1, err := descriptor.MapTools(d, req)
+	if err != nil {
+		t.Fatalf("MapTools (first call): %v", err)
+	}
+	if len(result1.Resolutions) != 1 || len(result1.Resolutions[0].Destinations) == 0 {
+		t.Fatal("first resolve: expected 1 resolution with non-empty Destinations")
+	}
+	// Mutate the returned destination's Names slice.
+	result1.Resolutions[0].Destinations[0].Names = []string{"mutated"}
+
+	// Second resolve from the same descriptor must not be affected by the mutation.
+	result2, err := descriptor.MapTools(d, req)
+	if err != nil {
+		t.Fatalf("MapTools (second call): %v", err)
+	}
+	if len(result2.Resolutions) != 1 || len(result2.Resolutions[0].Destinations) == 0 {
+		t.Fatal("second resolve: expected 1 resolution with non-empty Destinations")
+	}
+	names := result2.Resolutions[0].Destinations[0].Names
+	if len(names) != 1 || names[0] != "my-server" {
+		t.Errorf("second resolve: Destinations[0].Names: want [%q] (mutation of first result must not affect descriptor state), got %v",
+			"my-server", names)
+	}
+}
+
+// --- Regression: ToolMapped output unchanged for descriptors with or without CustomToolDestinations ---
+
+func TestMapTools_Regression_MappedResolution_UnchangedWhenCustomDestDeclared(t *testing.T) {
+	// The descriptor declares CustomToolDestinations, but file_read uses the standard
+	// ToolMapped path. Its Destinations must be identical to pre-change output:
+	// a single DestMain destination carrying "read-file".
+	d := loadCustomDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey: "test-agent",
+		Generic:  []string{"file_read"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if res.Outcome != domain.ToolMapped {
+		t.Fatalf("outcome: want %q, got %q", domain.ToolMapped, res.Outcome)
+	}
+	if len(res.Destinations) != 1 {
+		t.Errorf("Destinations count: want 1 (ToolMapped is unaffected by CustomToolDestinations), got %d",
+			len(res.Destinations))
+	}
+	if len(res.Destinations) >= 1 {
+		if res.Destinations[0].Kind != domain.DestMain {
+			t.Errorf("Destinations[0].Kind: want %q (ToolMapped uses its own mapping destinations), got %q",
+				domain.DestMain, res.Destinations[0].Kind)
+		}
+		if len(res.Destinations[0].Names) != 1 || res.Destinations[0].Names[0] != "read-file" {
+			t.Errorf("Destinations[0].Names: want [%q], got %v", "read-file", res.Destinations[0].Names)
+		}
+	}
+}
+
+func TestMapTools_Regression_SkippedResolution_UnchangedWhenCustomDestDeclared(t *testing.T) {
+	// A skipped tool must produce an empty Destinations slice regardless of whether
+	// CustomToolDestinations is declared on the descriptor.
+	d := loadCustomDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:     "test-agent",
+		Generic:      []string{"terminal"},
+		SkippedTools: map[string]bool{"terminal": true},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if res.Outcome != domain.ToolSkipped {
+		t.Fatalf("outcome: want %q, got %q", domain.ToolSkipped, res.Outcome)
+	}
+	if len(res.Destinations) != 0 {
+		t.Errorf("ToolSkipped Destinations: want empty (unchanged), got %d: %+v; "+
+			"CustomToolDestinations must not affect skipped tools",
+			len(res.Destinations), res.Destinations)
+	}
+}
+
+func TestMapTools_Regression_UnmappedResolution_UnchangedWhenCustomDestDeclared(t *testing.T) {
+	// An unmapped tool (no custom name supplied) must produce an empty Destinations slice
+	// regardless of whether CustomToolDestinations is declared. CustomToolDestinations applies
+	// only to the ToolCustom branch (custom name supplied), not to ToolUnmapped.
+	d := loadCustomDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey: "test-agent",
+		Generic:  []string{"terminal"},
+		// No CustomNames entry → ToolUnmapped, not ToolCustom.
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if res.Outcome != domain.ToolUnmapped {
+		t.Fatalf("outcome: want %q, got %q", domain.ToolUnmapped, res.Outcome)
+	}
+	if len(res.Destinations) != 0 {
+		t.Errorf("ToolUnmapped Destinations: want empty (unchanged), got %d: %+v; "+
+			"CustomToolDestinations must not affect unmapped tools",
+			len(res.Destinations), res.Destinations)
+	}
+}
+
+func TestMapTools_Regression_PlaceholderExpansion_UnchangedWhenCustomDestDeclared(t *testing.T) {
+	// When MapTools handles a placeholder request, it must return the same placeholder
+	// expansion regardless of whether CustomToolDestinations is declared, since the
+	// placeholder path does not touch the tool-resolution loop at all.
+	d := loadCustomDestDescriptor(t) // declares CustomToolDestinations
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Placeholder: "{tool-permissions}",
+		Generic:     []string{}, // empty when placeholder is set
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools with placeholder: %v", err)
+	}
+	// Placeholder expansion returns empty Resolutions and a non-empty Fields slice.
+	if len(result.Resolutions) != 0 {
+		t.Errorf("placeholder: Resolutions must be empty, got %d", len(result.Resolutions))
+	}
+	if len(result.Fields) == 0 {
+		t.Error("placeholder: Fields must be non-empty (the expanded list)")
 	}
 }

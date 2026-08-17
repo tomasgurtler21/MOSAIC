@@ -125,6 +125,13 @@ const (
 
 	// ConsultFailUserAbandoned covers the manual resolver when the user exits without choosing.
 	ConsultFailUserAbandoned ConsultationFailure = "user-abandoned"
+
+	// ConsultFailNoInstruction covers a reply that contains no JSON object at
+	// all — the orchestrator answered with prose only, an empty fenced block, or
+	// text carrying nothing that parses as an object. It is distinct from
+	// ConsultFailMalformedJSON, which means an object was located but its content
+	// does not unmarshal into the expected schema.
+	ConsultFailNoInstruction ConsultationFailure = "no-instruction"
 )
 
 // ConsultationError names the failing condition. Its message always states the

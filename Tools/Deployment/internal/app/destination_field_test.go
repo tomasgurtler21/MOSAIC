@@ -648,6 +648,201 @@ func TestUpdate_UserConfigDestMappingRemoved_DestFieldAbsentFromNextApply(t *tes
 	}
 }
 
+// ---------------------------------------------------------------------------
+// T3.2 — Config-declared tool_destinations entry overrides descriptor default
+// ---------------------------------------------------------------------------
+
+// TestMapTools_ConfigMappingBeatsDescriptorCustomToolDefault verifies that when a descriptor
+// declares CustomToolDestinations (a harness-level default routing custom tools to a separate
+// field) and the descriptor's Mappings also carries an entry for the same generic tool
+// (representing a config-declared tool_destinations override merged in by
+// config.EffectiveToolMappings before MapTools runs), the mapping entry's routing wins.
+//
+// The custom tool routes to the mapping's destination (DestMain → main tools field), not to
+// the descriptor's default destination. The separate mcpServers field must not appear.
+//
+// This test exercises descriptor.MapTools directly with a hand-built descriptor. The
+// precedence gate is already implemented; the test documents and locks it in as a
+// specification so that future refactors do not break the precedence chain:
+//   user config > project config > descriptor mappings > descriptor custom_tool_destination > DestMain
+func TestMapTools_ConfigMappingBeatsDescriptorCustomToolDefault(t *testing.T) {
+	// Build a descriptor with a non-empty CustomToolDestinations (routing custom tools to
+	// mcpServers) AND a Mappings entry for the same generic tool (simulating a config-declared
+	// tool_destinations override merged into Mappings by config.EffectiveToolMappings).
+	desc := &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            "precedence-test",
+		DisplayName:   "Precedence Test",
+		Tools: domain.ToolSpec{
+			Shape: domain.ShapeList,
+			Universe: []domain.HarnessTool{
+				{Name: "ConfigTool", Unused: domain.Deny},
+			},
+			// The descriptor's harness-level default: routes custom tools to mcpServers.
+			CustomToolDestinations: []domain.ToolDestination{
+				{Kind: domain.DestField, Field: "mcpServers", Format: domain.FormatListBlock, Names: []string{}},
+			},
+			// A Mappings entry for "my_mcp_tool" representing a config-declared override.
+			// config.EffectiveToolMappings merges config tool_destinations into Mappings
+			// before MapTools runs; a Mappings entry for the generic tool means the config
+			// entry takes precedence over the descriptor's CustomToolDestinations.
+			Mappings: []domain.ToolMapping{
+				{
+					Generic: "my_mcp_tool",
+					Destinations: []domain.ToolDestination{
+						{Kind: domain.DestMain, Names: []string{"ConfigTool"}},
+					},
+				},
+			},
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+	}
+
+	result, err := descriptor.MapTools(desc, domain.ToolRequest{
+		AgentKey: "test-agent",
+		Generic:  []string{"my_mcp_tool"},
+		CustomNames: map[string]string{
+			"my_mcp_tool": "my-mcp-server",
+		},
+	})
+	if err != nil {
+		t.Fatalf("descriptor.MapTools: %v", err)
+	}
+
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("want 1 resolution, got %d: %v", len(result.Resolutions), result.Resolutions)
+	}
+	res := result.Resolutions[0]
+	if res.Outcome != domain.ToolCustom {
+		t.Errorf("resolution outcome: want ToolCustom, got %v; "+
+			"CustomNames entry triggers ToolCustom even when a Mappings entry exists",
+			res.Outcome)
+	}
+
+	// The config mapping entry (Mappings) must win: destination must be DestMain, not DestField.
+	if len(res.Destinations) != 1 {
+		t.Fatalf("want 1 destination, got %d: %v", len(res.Destinations), res.Destinations)
+	}
+	if res.Destinations[0].Kind != domain.DestMain {
+		t.Errorf("destination kind: want DestMain (config mapping wins over descriptor default), got %v; "+
+			"a Mappings entry for the generic tool must prevent the descriptor's CustomToolDestinations "+
+			"from applying — the precedence chain is: config mapping > descriptor custom_tool_destination",
+			res.Destinations[0].Kind)
+	}
+
+	// mcpServers must NOT appear as a separate frontmatter field.
+	for _, f := range result.Fields {
+		if f.Key == "mcpServers" {
+			t.Errorf("mcpServers field present in result; "+
+				"when a Mappings entry exists for the generic tool, "+
+				"the descriptor's CustomToolDestinations must not apply; "+
+				"the config mapping entry must route the tool to DestMain instead")
+		}
+	}
+}
+
+// TestMapTools_AppLevel_ConfigMappingBeatsDescriptorCustomToolDefault verifies the same
+// precedence property as TestMapTools_ConfigMappingBeatsDescriptorCustomToolDefault, but
+// exercises the real composition path through config.EffectiveToolMappings and
+// registry.Discover's ToolMappings hook. This proves that the two paths
+// (direct Mappings injection and hook-based EffectiveToolMappings) are genuinely equivalent.
+func TestMapTools_AppLevel_ConfigMappingBeatsDescriptorCustomToolDefault(t *testing.T) {
+	id := appTestHarnessID(t)
+
+	// Build a descriptor with CustomToolDestinations (descriptor default → mcpServers)
+	// but no Mappings entry for the generic tool. The ToolMappings hook supplies the
+	// config-declared mapping and is the sole source of the Mappings entry at resolve time.
+	desc := &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            id,
+		DisplayName:   id,
+		Tools: domain.ToolSpec{
+			Shape: domain.ShapeList,
+			Universe: []domain.HarnessTool{
+				{Name: "ConfigTool", Unused: domain.Deny},
+			},
+			// Descriptor default: routes custom tools to mcpServers.
+			CustomToolDestinations: []domain.ToolDestination{
+				{Kind: domain.DestField, Field: "mcpServers", Format: domain.FormatListBlock, Names: []string{}},
+			},
+			// No Mappings for "my_mcp_tool" — the hook provides one.
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+	}
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "MosaicDeploy", "harnesses"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	mod := &appTestModule{desc: desc}
+	registry.Register(id, func(_ registry.BuiltinOptions) (domain.HarnessModule, error) { return mod, nil })
+
+	// Config tool_destinations for my_mcp_tool: route to ConfigTool via DestMain.
+	userDest := config.ToolDestinationsByHarness{
+		id: []domain.ToolMapping{
+			{
+				Generic: "my_mcp_tool",
+				Destinations: []domain.ToolDestination{
+					{Kind: domain.DestMain, Names: []string{"ConfigTool"}},
+				},
+			},
+		},
+	}
+
+	reg, err := registry.Discover(registry.Options{
+		MosaicRoot: root,
+		ToolMappings: func(hid string, declared []domain.ToolMapping) []domain.ToolMapping {
+			return config.EffectiveToolMappings(hid, declared, nil, userDest)
+		},
+	})
+	if err != nil {
+		t.Fatalf("registry.Discover: %v", err)
+	}
+
+	// Apply through the registry. Pass a custom name for the generic tool to trigger the
+	// ToolCustom branch; the hook-installed Mappings entry makes hasMappingEntry true,
+	// so the descriptor's CustomToolDestinations default must not apply.
+	m, err := reg.Resolve(id)
+	if err != nil {
+		t.Fatalf("Resolve(%q): %v", id, err)
+	}
+	result, err := transform.Apply(transform.Request{
+		Source: []byte(`---
+id: 998
+version: 1.0.0
+description: Precedence test agent
+tools: [my_mcp_tool]
+---
+Body.
+`),
+		Kind:  domain.ArtifactAgent,
+		Key:   "precedence-test-agent",
+		Module: m,
+		Model: domain.ModelSelection{Origin: domain.OriginUnresolved},
+		Scope: domain.ScopeProject,
+		CustomTools: map[string]string{
+			"my_mcp_tool": "my-mcp-server",
+		},
+	})
+	if err != nil {
+		t.Fatalf("transform.Apply: %v", err)
+	}
+	doc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("docformat.Parse: %v", err)
+	}
+
+	// The config mapping (ToolMappings hook) must win over the descriptor default.
+	// mcpServers must be absent: the config mapping routes to DestMain, not DestField.
+	if _, ok := doc.Frontmatter().Get("mcpServers"); ok {
+		t.Errorf("mcpServers field present in output; "+
+			"the config-declared tool_destinations entry (supplied via ToolMappings hook) "+
+			"must override the descriptor's custom_tool_destination default; "+
+			"keys: %v", doc.Frontmatter().Keys())
+	}
+}
+
 // TestUpdate_UserConfigDestMappingRemoved_MainToolFieldAlsoAbsent verifies that when the
 // mapping is fully removed (both DestMain and DestField), the harness tool name no longer
 // appears in the main tools field either. The user_interaction generic tool resolves as

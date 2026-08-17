@@ -6,47 +6,49 @@ import (
 	"mosaic-run/internal/session"
 )
 
-// buildDeps selects and constructs the session's routing consultant and manual
-// resolver from the pre-scanned CLI flags. It follows the same composition-root
-// pattern as buildAdapter: the flag strings and booleans have already been
-// extracted from os.Args before cobra runs, so the correct consultant types
-// are in place before the session is constructed.
+// buildDeps constructs the session's routing consultant, manual resolver,
+// pre-consultation capability and approval reader from the run's settings.
+// It is the single dependency builder for both frontends: the non-interactive
+// path calls it with settings derived from the pre-scanned CLI flags, the
+// interactive path with the settings carried by the completed configuration
+// selection. Neither frontend constructs a consultant of its own.
 //
-//   - modeStr selects which RoutingConsultant is wired as Deps.Routing.
-//   - manualResolution controls whether ManualResolver is wired as Deps.Manual.
-//   - preConsult controls whether the OrchestratorConsultant is also wired as
-//     Deps.PreConsult (it implements both RoutingConsultant and PreConsultant).
-//   - invoker is the raw-JSON transport used by OrchestratorConsultant.
-//   - orchestrator is the resolved orchestrator AgentReference.
-//   - table is the workflow's routing table.
+// The orchestrator reference and the routing table are deliberately absent:
+// neither is known at this point on either frontend. Both reach the
+// consultants later, through domain.RunContextBinder, on the session's
+// run-start path.
+//
+//   - settings.Mode selects which consultant is wired as Deps.Routing.
+//   - settings.ManualResolution controls whether a ManualResolver is wired
+//     as Deps.Manual.
+//   - settings.PreConsultation controls whether the OrchestratorConsultant is
+//     also wired as Deps.PreConsult (it implements both ports).
+//   - invoker is the consultation transport used by OrchestratorConsultant.
 //   - interact is the Interaction port used by ManualResolver.
+//   - approvals is the HITL approval reader. Both frontends pass the real
+//     reader; a nil value is normalised by session.New as it is today.
 func buildDeps(
-	modeStr string,
-	manualResolution bool,
-	preConsult bool,
+	settings domain.RunSettings,
 	invoker domain.RawInvoker,
-	orchestrator domain.AgentReference,
-	table domain.RoutingTable,
 	interact domain.Interaction,
+	approvals domain.ApprovalReader,
 ) session.Deps {
 	consultant := &deviation.OrchestratorConsultant{
-		Invoker:      invoker,
-		Orchestrator: orchestrator,
-		Table:        table,
+		Invoker: invoker,
 	}
 
 	deps := session.Deps{
-		Routing: consultant,
+		Routing:   consultant,
+		Approvals: approvals,
 	}
 
-	if manualResolution {
+	if settings.ManualResolution {
 		deps.Manual = &deviation.ManualResolver{
 			Interact: interact,
-			Table:    table,
 		}
 	}
 
-	if preConsult {
+	if settings.PreConsultation {
 		deps.PreConsult = consultant
 	}
 

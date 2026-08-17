@@ -152,6 +152,25 @@ type ApprovalReader interface {
 	ReadApproval(ctx context.Context, artifactPath string) HumanApproval
 }
 
+// ApprovalCapability is an optional companion to ApprovalReader by which a
+// reader declares that it cannot read approvals at all — as opposed to
+// reading them and finding a gate undischarged.
+//
+// A reader that does not implement this interface is treated as capable.
+// Every production reader therefore needs no change.
+//
+// The session consults it once, at run start. When the reader reports false
+// and the selected workflow declares at least one human-review row, the run
+// is refused before any artifact is created, rather than each such row
+// failing closed at execution time after spending its re-dispatch.
+//
+// This interface does not weaken the ApprovalReader contract: an incapable
+// reader still returns ApprovalUnreadable from ReadApproval and still never
+// returns an error.
+type ApprovalCapability interface {
+	ApprovalsReadable() bool
+}
+
 // Clock provides the current time. Injected so the engine and artifact
 // writes produce deterministic output in tests.
 type Clock interface {

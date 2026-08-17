@@ -102,8 +102,12 @@ func (c *OrchestratorConsultant) ConsultRouting(ctx context.Context, req domain.
 		}
 	}
 
+	extracted, err := ExtractJSONObject(reply)
+	if err != nil {
+		return domain.RoutingInstruction{}, err
+	}
 	var resp wireRoutingResponse
-	if err := json.Unmarshal(reply, &resp); err != nil {
+	if err := json.Unmarshal(extracted, &resp); err != nil {
 		return domain.RoutingInstruction{}, &domain.ConsultationError{
 			Failure: domain.ConsultFailMalformedJSON,
 			Detail:  fmt.Sprintf("malformed routing response JSON: %v", err),
@@ -199,8 +203,12 @@ func (c *OrchestratorConsultant) PreConsult(ctx context.Context, req domain.Cons
 		}
 	}
 
+	extracted, err := ExtractJSONObject(reply)
+	if err != nil {
+		return domain.PreConsultationAdvice{}, err
+	}
 	var resp wirePreConsultResponse
-	if err := json.Unmarshal(reply, &resp); err != nil {
+	if err := json.Unmarshal(extracted, &resp); err != nil {
 		return domain.PreConsultationAdvice{}, &domain.ConsultationError{
 			Failure: domain.ConsultFailMalformedJSON,
 			Detail:  fmt.Sprintf("malformed pre-consultation response JSON: %v", err),

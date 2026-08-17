@@ -102,4 +102,15 @@ var (
 	// that does not exist in the catalog. The error is not silent: the caller must handle
 	// it rather than deploying a subtly incomplete artifact set.
 	ErrUnknownAgent = errors.New("workflow references an agent that does not exist")
+
+	// ErrMissingOrchestrator is returned by ResolveArtifactsFrom when the catalogue carries
+	// no orchestrator agent definition and the run's mode requires one. The catalogue loader
+	// remains deliberately tolerant of an absent orchestrator; refusal happens at
+	// artifact-resolution time, which is before any workspace file is written.
+	//
+	// The returned error wraps this sentinel and names both what is missing and where it was
+	// sought:
+	//
+	//	fmt.Errorf("%w: sought in catalogue %q", ErrMissingOrchestrator, c.CatalogRoot())
+	ErrMissingOrchestrator = errors.New("catalogue has no orchestrator agent definition")
 )

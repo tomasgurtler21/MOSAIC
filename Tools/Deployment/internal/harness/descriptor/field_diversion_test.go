@@ -12,8 +12,9 @@ package descriptor_test
 // in HarnessTools. The formatted name must appear in the Fields output for list-shape
 // harnesses; the raw unformatted name must not.
 //
-// These tests use the multi-destination destinations: schema. They are RED until the
-// descriptor loader (I2.2) and field builder (I2.3) are updated.
+// The field-diversion and custom-tool-template tests use the multi-destination destinations:
+// schema and are GREEN (they pass with the current implementation). The CustomToolDestinations
+// tests near the bottom of this file are RED until MapTools is updated to read that field.
 
 import (
 	"testing"
@@ -377,5 +378,319 @@ func TestMapTools_CustomTool_AppearsInToolsField(t *testing.T) {
 			scalars[i] = item.Scalar
 		}
 		t.Errorf("formatted custom tool name %q not found in tools field; ToolCustom resolutions must appear in the list output; got: %v", wantName, scalars)
+	}
+}
+
+// =============================================================================
+// Custom tool template × CustomToolDestinations interaction
+//
+// Coverage:
+//   - When both custom_tool_template and custom_tool_destination are declared, each
+//     destination carries the FORMATTED name (template applied) and never the raw
+//     user-supplied name.
+//   - The template and the destination are independent: the template controls what the
+//     name looks like; the destination controls where it is written.
+//   - A descriptor declaring only a template (no custom_tool_destination) falls through
+//     to the pre-change behaviour: a single DestMain destination carrying the formatted name.
+//   - A descriptor declaring only a custom_tool_destination (no template) uses the raw
+//     user-supplied name in the destinations.
+// =============================================================================
+
+// customTemplateAndDestDescriptorYAML declares a harness with both custom_tool_template
+// and custom_tool_destination. The template wraps custom names with the "mcp:" prefix;
+// the destination routes the result to a separate "mcpServers" field.
+const customTemplateAndDestDescriptorYAML = `schema_version: "1"
+id: "template-and-dest-harness"
+display_name: "Template And Dest Harness"
+tools:
+  shape: list
+  universe:
+    - name: "read-file"
+      unused: deny
+      by_convention: false
+  mappings:
+    - generic: "file_read"
+      destinations:
+        - to: main
+          names:
+            - "read-file"
+  custom_tool_template: "mcp:%s"
+  custom_tool_destination:
+    - to: field
+      field: mcpServers
+      format: list-block
+frontmatter:
+  tools_key: "tools"
+`
+
+func loadCustomTemplateAndDestDescriptor(t *testing.T) *domain.HarnessDescriptor {
+	t.Helper()
+	d, err := descriptor.Parse([]byte(customTemplateAndDestDescriptorYAML), "inline:template-and-dest-harness")
+	if err != nil {
+		t.Fatalf("Parse template-and-dest descriptor: %v", err)
+	}
+	if d == nil {
+		t.Fatal("Parse returned nil descriptor without error")
+	}
+	return d
+}
+
+// customDestNoTemplateDescriptorYAML declares a harness with custom_tool_destination but
+// no custom_tool_template. Custom names are used as-is (no formatting applied).
+const customDestNoTemplateDescriptorYAML = `schema_version: "1"
+id: "dest-no-template-harness"
+display_name: "Dest No Template Harness"
+tools:
+  shape: list
+  universe: []
+  custom_tool_destination:
+    - to: field
+      field: mcpServers
+      format: list-block
+frontmatter:
+  tools_key: "tools"
+`
+
+func loadCustomDestNoTemplateDescriptor(t *testing.T) *domain.HarnessDescriptor {
+	t.Helper()
+	d, err := descriptor.Parse([]byte(customDestNoTemplateDescriptorYAML), "inline:dest-no-template-harness")
+	if err != nil {
+		t.Fatalf("Parse dest-no-template descriptor: %v", err)
+	}
+	if d == nil {
+		t.Fatal("Parse returned nil descriptor without error")
+	}
+	return d
+}
+
+// TestMapTools_CustomTemplateAndDest_DestinationsCarryFormattedName asserts that when
+// both custom_tool_template and custom_tool_destination are declared, the name injected
+// into each destination is the FORMATTED name (template applied), not the raw user
+// input. The template and the destination settings are independent and both take effect.
+// This test is RED until MapTools reads CustomToolDestinations.
+func TestMapTools_CustomTemplateAndDest_DestinationsCarryFormattedName(t *testing.T) {
+	d := loadCustomTemplateAndDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if res.Outcome != domain.ToolCustom {
+		t.Fatalf("outcome: want %q, got %q", domain.ToolCustom, res.Outcome)
+	}
+	if len(res.Destinations) == 0 {
+		t.Fatal("Destinations must not be empty with CustomToolDestinations declared")
+	}
+	if res.Destinations[0].Kind != domain.DestField {
+		t.Errorf("Destinations[0].Kind: want %q (declared as to:field), got %q; "+
+			"the destination kind must reflect the declared destination, not DestMain",
+			domain.DestField, res.Destinations[0].Kind)
+	}
+	// Template formats "my-server" → "mcp:my-server". Each destination carries the formatted name.
+	const wantName = "mcp:my-server"
+	for i, dest := range res.Destinations {
+		if len(dest.Names) == 0 {
+			t.Errorf("Destinations[%d].Names must not be empty", i)
+			continue
+		}
+		if dest.Names[0] != wantName {
+			t.Errorf("Destinations[%d].Names[0]: want %q (formatted by template), got %q; "+
+				"the template must be applied before injecting the name into destinations",
+				i, wantName, dest.Names[0])
+		}
+	}
+}
+
+// TestMapTools_CustomTemplateAndDest_RawNameAbsentFromDestinations asserts that the
+// raw user-supplied name does not appear in any destination when a template is applied.
+func TestMapTools_CustomTemplateAndDest_RawNameAbsentFromDestinations(t *testing.T) {
+	d := loadCustomTemplateAndDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	for i, dest := range result.Resolutions[0].Destinations {
+		for _, name := range dest.Names {
+			if name == "my-server" {
+				t.Errorf("Destinations[%d]: raw user-supplied name %q found; "+
+					"only the formatted name %q must appear when a template is declared",
+					i, "my-server", "mcp:my-server")
+			}
+		}
+	}
+}
+
+// TestMapTools_CustomTemplateAndDest_DestinationUsesFieldKind asserts that with
+// {to:field, field:mcpServers} declared, the resolution carries a DestField destination
+// even when a template is also applied. The template affects the name, not the routing.
+// This test is RED until MapTools reads CustomToolDestinations.
+func TestMapTools_CustomTemplateAndDest_DestinationUsesFieldKind(t *testing.T) {
+	d := loadCustomTemplateAndDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if len(res.Destinations) == 0 {
+		t.Fatal("Destinations must not be empty")
+	}
+	if res.Destinations[0].Kind != domain.DestField {
+		t.Errorf("Destinations[0].Kind: want %q (declared as to:field), got %q; "+
+			"the template does not affect the destination kind; both template and "+
+			"custom_tool_destination are applied independently",
+			domain.DestField, res.Destinations[0].Kind)
+	}
+	if res.Destinations[0].Field != "mcpServers" {
+		t.Errorf("Destinations[0].Field: want %q, got %q",
+			"mcpServers", res.Destinations[0].Field)
+	}
+}
+
+// TestMapTools_TemplateWithoutCustomDest_FallsThroughToDestMainWithFormattedName asserts
+// that a template-only descriptor (no custom_tool_destination) produces the pre-change
+// fall-through: a single DestMain destination carrying the formatted name. The template
+// applies regardless of whether CustomToolDestinations is set.
+func TestMapTools_TemplateWithoutCustomDest_FallsThroughToDestMainWithFormattedName(t *testing.T) {
+	// customTemplateDescriptorYAML (defined earlier in this file) has template "mcp:%s"
+	// but no custom_tool_destination.
+	d := loadCustomTemplateDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if res.Outcome != domain.ToolCustom {
+		t.Fatalf("outcome: want %q, got %q", domain.ToolCustom, res.Outcome)
+	}
+	// Fall-through: single DestMain with the formatted name.
+	if len(res.Destinations) != 1 {
+		t.Fatalf("Destinations count: want 1 (DestMain fall-through with template-only descriptor), got %d",
+			len(res.Destinations))
+	}
+	if res.Destinations[0].Kind != domain.DestMain {
+		t.Errorf("Destinations[0].Kind: want %q (template without custom_tool_destination falls through to DestMain), got %q",
+			domain.DestMain, res.Destinations[0].Kind)
+	}
+	const wantName = "mcp:my-server"
+	if len(res.Destinations[0].Names) != 1 || res.Destinations[0].Names[0] != wantName {
+		t.Errorf("Destinations[0].Names: want [%q] (formatted by template), got %v",
+			wantName, res.Destinations[0].Names)
+	}
+}
+
+// TestMapTools_CustomDestWithoutTemplate_DestinationsCarryRawName asserts that when
+// custom_tool_destination is set but custom_tool_template is empty, the destination
+// carries the raw user-supplied name unchanged.
+// This test is RED until MapTools reads CustomToolDestinations.
+func TestMapTools_CustomDestWithoutTemplate_DestinationsCarryRawName(t *testing.T) {
+	d := loadCustomDestNoTemplateDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	if len(res.Destinations) == 0 {
+		t.Fatal("Destinations must not be empty with CustomToolDestinations declared")
+	}
+	if res.Destinations[0].Kind != domain.DestField {
+		t.Errorf("Destinations[0].Kind: want %q (declared as to:field), got %q; "+
+			"MapTools must route the custom tool to the declared DestField destination, not DestMain",
+			domain.DestField, res.Destinations[0].Kind)
+	}
+	if len(res.Destinations[0].Names) == 0 {
+		t.Fatal("Destinations[0].Names must not be empty")
+	}
+	// No template → raw name used as-is.
+	if res.Destinations[0].Names[0] != "my-server" {
+		t.Errorf("Destinations[0].Names[0]: want %q (raw name, no template), got %q",
+			"my-server", res.Destinations[0].Names[0])
+	}
+}
+
+// TestMapTools_CustomTemplateAndDest_HarnessToolsCarriesFormattedName asserts that
+// HarnessTools carries the formatted name when both template and destination are declared.
+// HarnessTools is the deduplicated union of all destination names, so it must contain
+// the formatted name ("mcp:my-server"), not the raw name ("my-server").
+func TestMapTools_CustomTemplateAndDest_HarnessToolsCarriesFormattedName(t *testing.T) {
+	d := loadCustomTemplateAndDestDescriptor(t)
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if len(result.Resolutions) != 1 {
+		t.Fatalf("expected 1 resolution, got %d", len(result.Resolutions))
+	}
+	res := result.Resolutions[0]
+	const wantName = "mcp:my-server"
+	if len(res.HarnessTools) == 0 {
+		t.Fatal("HarnessTools must not be empty")
+	}
+	if res.HarnessTools[0] != wantName {
+		t.Errorf("HarnessTools[0]: want %q (formatted by template), got %q",
+			wantName, res.HarnessTools[0])
+	}
+	// Raw name must not appear.
+	for _, ht := range res.HarnessTools {
+		if ht == "my-server" {
+			t.Errorf("raw name %q found in HarnessTools; only the formatted name %q must appear",
+				"my-server", wantName)
+		}
 	}
 }

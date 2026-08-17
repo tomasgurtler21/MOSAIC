@@ -553,3 +553,262 @@ func fieldItemNames(f *domain.FrontmatterField) []string {
 	}
 	return names
 }
+
+// =============================================================================
+// Custom tool default destinations: list-shape rendering
+//
+// When a descriptor declares a non-empty CustomToolDestinations list with a DestField
+// entry and a custom name is supplied for an unmapped generic tool, buildListToolFields
+// must route the name through the same DestField rendering path used for ToolMapped
+// resolutions with DestField destinations. Specifically:
+//   - The custom name must appear in the separate FrontmatterField declared by the
+//     destination's field name.
+//   - The custom name must NOT appear in the main tools field when the declared list
+//     contains no DestMain destination.
+//   - When a DestMain destination is also declared, the custom name appears in the
+//     main tools field as well as in any DestField fields.
+// =============================================================================
+
+// makeListCustomDestDescriptor builds a list-shape descriptor with:
+//   - file_read → DestMain ["read/readFile"]
+//   - CustomToolDestinations: [{DestField, "mcpServers", FormatListBlock}]
+//
+// "terminal" has no mapping entry. A custom name for it should exercise the
+// DestField custom-destination rendering path.
+func makeListCustomDestDescriptor() *domain.HarnessDescriptor {
+	return &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            "list-custdest-harness",
+		DisplayName:   "List CustomDest Harness",
+		Tools: domain.ToolSpec{
+			Shape: domain.ShapeList,
+			Universe: []domain.HarnessTool{
+				{Name: "read/readFile", Unused: domain.Deny, ByConvention: false},
+			},
+			Mappings: []domain.ToolMapping{
+				{
+					Generic: "file_read",
+					Destinations: []domain.ToolDestination{
+						{Kind: domain.DestMain, Names: []string{"read/readFile"}},
+					},
+				},
+			},
+			CustomToolDestinations: []domain.ToolDestination{
+				{Kind: domain.DestField, Field: "mcpServers", Format: domain.FormatListBlock, Names: []string{}},
+			},
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+	}
+}
+
+// makeListCustomDestMainAndFieldDescriptor builds a list-shape descriptor with
+// CustomToolDestinations declaring both DestMain and DestField destinations.
+// Used to verify that a custom name fans out to both the main field and the separate field.
+func makeListCustomDestMainAndFieldDescriptor() *domain.HarnessDescriptor {
+	return &domain.HarnessDescriptor{
+		SchemaVersion: "1",
+		ID:            "list-custdest-main-and-field-harness",
+		DisplayName:   "List CustomDest Main And Field Harness",
+		Tools: domain.ToolSpec{
+			Shape: domain.ShapeList,
+			Universe: []domain.HarnessTool{
+				{Name: "read/readFile", Unused: domain.Deny, ByConvention: false},
+			},
+			CustomToolDestinations: []domain.ToolDestination{
+				{Kind: domain.DestMain, Names: []string{}},
+				{Kind: domain.DestField, Field: "mcpServers", Format: domain.FormatListBlock, Names: []string{}},
+			},
+		},
+		Frontmatter: domain.FrontmatterSpec{ToolsKey: "tools"},
+	}
+}
+
+// TestMultiDestList_CustomDest_FieldDestAppearsInFieldsOutput asserts that when
+// CustomToolDestinations declares a DestField destination, a ToolCustom resolution
+// produces a FrontmatterField with the declared key in the Fields output.
+// Without this field the custom name is lost from the rendered frontmatter.
+// This test is RED until MapTools reads CustomToolDestinations in the ToolCustom branch.
+func TestMultiDestList_CustomDest_FieldDestAppearsInFieldsOutput(t *testing.T) {
+	d := makeListCustomDestDescriptor()
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	if findField(t, result.Fields, "mcpServers") == nil {
+		keys := make([]string, len(result.Fields))
+		for i, f := range result.Fields {
+			keys[i] = f.Key
+		}
+		t.Errorf("mcpServers field absent from Fields; custom_tool_destination must route the "+
+			"custom name to a separate FrontmatterField when to:field is declared; got keys: %v", keys)
+	}
+}
+
+// TestMultiDestList_CustomDest_FieldContainsCustomName asserts that the separate field
+// produced for the DestField custom destination contains the formatted custom-tool name.
+// This test is RED until MapTools reads CustomToolDestinations.
+func TestMultiDestList_CustomDest_FieldContainsCustomName(t *testing.T) {
+	d := makeListCustomDestDescriptor()
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	mcpField := findField(t, result.Fields, "mcpServers")
+	if mcpField == nil {
+		t.Fatal("mcpServers field absent from Fields")
+	}
+	if !fieldContainsName(mcpField, "my-server") {
+		t.Errorf("mcpServers field does not contain %q; DestField custom destination must "+
+			"route the custom name to the declared field; got: %v",
+			"my-server", fieldItemNames(mcpField))
+	}
+}
+
+// TestMultiDestList_CustomDest_FieldOnlyDest_CustomNameAbsentFromMainToolsField asserts
+// that when CustomToolDestinations declares only DestField destinations (no DestMain),
+// the custom name must NOT appear in the main tools field.
+// The pre-change behaviour always puts the custom name in the main tools field via a
+// hardcoded DestMain, so this test is RED until MapTools reads CustomToolDestinations.
+func TestMultiDestList_CustomDest_FieldOnlyDest_CustomNameAbsentFromMainToolsField(t *testing.T) {
+	d := makeListCustomDestDescriptor()
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	toolsField := findField(t, result.Fields, "tools")
+	if toolsField == nil {
+		return // no main tools field → custom name cannot be in it
+	}
+	if fieldContainsName(toolsField, "my-server") {
+		t.Errorf("custom name %q must not appear in the main tools field when "+
+			"CustomToolDestinations declares only DestField destinations; "+
+			"the name belongs in the declared separate field (mcpServers) only",
+			"my-server")
+	}
+}
+
+// TestMultiDestList_CustomDest_MainAndFieldDest_CustomNameAppearsInBothFields asserts
+// that when CustomToolDestinations declares both DestMain and DestField destinations,
+// the custom name fans out to both: it appears in the main tools field AND in the
+// separate DestField field.
+// This test is RED until MapTools reads CustomToolDestinations.
+func TestMultiDestList_CustomDest_MainAndFieldDest_CustomNameAppearsInBothFields(t *testing.T) {
+	d := makeListCustomDestMainAndFieldDescriptor()
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	// Custom name must appear in the main tools field (via DestMain).
+	toolsField := findField(t, result.Fields, "tools")
+	if toolsField == nil {
+		t.Error("main tools field absent from Fields; DestMain destination must produce a main tools entry")
+	} else if !fieldContainsName(toolsField, "my-server") {
+		t.Errorf("main tools field does not contain %q; DestMain destination must route the "+
+			"custom name to the main tools field; got: %v",
+			"my-server", fieldItemNames(toolsField))
+	}
+	// Custom name must also appear in the separate mcpServers field (via DestField).
+	mcpField := findField(t, result.Fields, "mcpServers")
+	if mcpField == nil {
+		keys := make([]string, len(result.Fields))
+		for i, f := range result.Fields {
+			keys[i] = f.Key
+		}
+		t.Errorf("mcpServers field absent from Fields; DestField destination must produce a "+
+			"separate FrontmatterField; got keys: %v", keys)
+	} else if !fieldContainsName(mcpField, "my-server") {
+		t.Errorf("mcpServers field does not contain %q; DestField destination must route the "+
+			"custom name to the declared field; got: %v",
+			"my-server", fieldItemNames(mcpField))
+	}
+}
+
+// TestMultiDestList_CustomDest_FieldFormat_ListBlockApplied asserts that the Format
+// declared in the CustomToolDestinations entry is applied to the resulting FrontmatterField.
+// A format:list-block entry must produce a KindList field with ListBlock style.
+// This test is RED until MapTools reads CustomToolDestinations.
+func TestMultiDestList_CustomDest_FieldFormat_ListBlockApplied(t *testing.T) {
+	d := makeListCustomDestDescriptor() // declares format: list-block
+	req := domain.ToolRequest{
+		AgentKey:    "test-agent",
+		Generic:     []string{"terminal"},
+		CustomNames: map[string]string{"terminal": "my-server"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	mcpField := findField(t, result.Fields, "mcpServers")
+	if mcpField == nil {
+		t.Fatal("mcpServers field absent from Fields")
+	}
+	if mcpField.Value.Kind != domain.KindList {
+		t.Errorf("mcpServers field value kind: want %q (format:list-block), got %q",
+			domain.KindList, mcpField.Value.Kind)
+	}
+	if mcpField.Value.Kind == domain.KindList && mcpField.Value.List != domain.ListBlock {
+		t.Errorf("mcpServers list style: want %q (format:list-block), got %q",
+			domain.ListBlock, mcpField.Value.List)
+	}
+}
+
+// TestMultiDestList_CustomDest_NormalMappedToolUnchanged asserts that the standard
+// ToolMapped path (file_read → DestMain) is not affected by CustomToolDestinations
+// being declared on the same descriptor.
+func TestMultiDestList_CustomDest_NormalMappedToolUnchanged(t *testing.T) {
+	d := makeListCustomDestDescriptor()
+	req := domain.ToolRequest{
+		AgentKey: "test-agent",
+		Generic:  []string{"file_read"},
+	}
+
+	result, err := descriptor.MapTools(d, req)
+
+	if err != nil {
+		t.Fatalf("MapTools: %v", err)
+	}
+	// file_read must appear in the main tools field as before.
+	toolsField := findField(t, result.Fields, "tools")
+	if toolsField == nil {
+		t.Fatal("main tools field absent from Fields")
+	}
+	if !fieldContainsName(toolsField, "read/readFile") {
+		t.Errorf("main tools field does not contain %q; ToolMapped path must be unaffected by CustomToolDestinations; got: %v",
+			"read/readFile", fieldItemNames(toolsField))
+	}
+	// mcpServers must not be emitted when no custom tool is in the request.
+	if mcpField := findField(t, result.Fields, "mcpServers"); mcpField != nil {
+		t.Errorf("mcpServers field must not appear when no ToolCustom resolution is in the request; "+
+			"CustomToolDestinations only applies to custom-tool resolutions")
+	}
+}

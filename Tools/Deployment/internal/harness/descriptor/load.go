@@ -31,11 +31,24 @@ type wireModelCatalog struct {
 }
 
 type wireToolSpec struct {
-	Shape                string            `yaml:"shape"`
-	Universe             []wireHarnessTool `yaml:"universe"`
-	Mappings             []wireToolMapping `yaml:"mappings"`
-	CustomToolTemplate   string            `yaml:"custom_tool_template"`
-	PlaceholderExpansion []string          `yaml:"placeholder_expansion"`
+	Shape                  string                      `yaml:"shape"`
+	Universe               []wireHarnessTool           `yaml:"universe"`
+	Mappings               []wireToolMapping           `yaml:"mappings"`
+	CustomToolTemplate     string                      `yaml:"custom_tool_template"`
+	CustomToolDestinations []wireCustomToolDestination `yaml:"custom_tool_destination"`
+	PlaceholderExpansion   []string                    `yaml:"placeholder_expansion"`
+}
+
+// wireCustomToolDestination is the wire form of one harness-level default custom-tool
+// destination. It deliberately omits a Names member: names identify already-known tool
+// names, which is meaningless for a default applying to every not-yet-resolved custom
+// tool. Because Parse decodes with yaml.DisallowUnknownField(), the absence of the
+// member is itself the rejection mechanism for a "names:" key.
+type wireCustomToolDestination struct {
+	To        string `yaml:"to"`
+	Field     string `yaml:"field"`
+	Format    string `yaml:"format"`
+	Separator string `yaml:"separator"`
 }
 
 type wireHarnessTool struct {
@@ -208,12 +221,24 @@ func mapWireToolSpec(w *wireToolSpec) domain.ToolSpec {
 		}
 	}
 
+	customDests := make([]domain.ToolDestination, len(w.CustomToolDestinations))
+	for i, d := range w.CustomToolDestinations {
+		customDests[i] = domain.ToolDestination{
+			Kind:      domain.ToolDestinationKind(d.To),
+			Field:     d.Field,
+			Format:    domain.ToolValueFormat(d.Format),
+			Separator: d.Separator,
+			Names:     []string{},
+		}
+	}
+
 	return domain.ToolSpec{
-		Shape:                domain.ToolShape(w.Shape),
-		Universe:             universe,
-		Mappings:             mappings,
-		CustomToolTemplate:   w.CustomToolTemplate,
-		PlaceholderExpansion: w.PlaceholderExpansion,
+		Shape:                  domain.ToolShape(w.Shape),
+		Universe:               universe,
+		Mappings:               mappings,
+		CustomToolTemplate:     w.CustomToolTemplate,
+		CustomToolDestinations: customDests,
+		PlaceholderExpansion:   w.PlaceholderExpansion,
 	}
 }
 

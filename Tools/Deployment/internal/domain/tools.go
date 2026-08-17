@@ -72,6 +72,18 @@ type ToolSpec struct {
 	// CustomToolTemplate is the minimal form a user-supplied MCP server name takes in this
 	// harness's output. "%s" is replaced by the supplied name. Empty = the name is used as-is.
 	CustomToolTemplate string
+	// CustomToolDestinations is the harness-level default set of output targets for custom
+	// (MCP-style) tools — the destinations a ToolCustom resolution produces when the harness
+	// declares no mapping entry for that generic tool. Each destination's Names is empty as
+	// declared; the resolved custom tool name is injected at resolution time.
+	//
+	// Empty (unset or declared as an empty list) means the custom tool goes to the harness's
+	// main tools field, the historical behaviour. An empty list is not a distinct "suppress
+	// custom tool output" mode.
+	//
+	// A tool_destinations entry in user or project config for a specific generic tool takes
+	// precedence over this default.
+	CustomToolDestinations []ToolDestination
 	// PlaceholderExpansion names the tools the orchestrator's {tool-permissions} placeholder
 	// resolves to. Empty means "the whole Universe".
 	PlaceholderExpansion []string

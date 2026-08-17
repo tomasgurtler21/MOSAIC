@@ -25,7 +25,6 @@ import (
 	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/cli"
 	"mosaic-run/internal/debuglog"
-	"mosaic-run/internal/deviation"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/runscan"
@@ -145,13 +144,14 @@ func main() {
 	}
 
 	// Build the consultation routing deps from the pre-scanned flags. The orchestrator
-	// AgentReference and RoutingTable are not known at process startup (they are loaded
-	// from the workflow file inside the session); zero values are passed here and the
-	// OrchestratorConsultant's fields would need to be populated by a subsequent stage
-	// that makes them available before consultation. For now this wires the correct
-	// consultant types so that session.Deps.Routing is non-nil in the correct modes.
-	routingDeps := buildDeps(modeStr, manualResolution, preConsult,
-		rawInvoker, domain.AgentReference{}, domain.RoutingTable{}, interact)
+	// reference and routing table are not known at process startup; the session hands
+	// them to every consultant that implements domain.RunContextBinder at run start.
+	cliSettings := domain.RunSettings{
+		Mode:             domain.ExecutionMode(modeStr),
+		ManualResolution: manualResolution,
+		PreConsultation:  preConsult,
+	}
+	routingDeps := buildDeps(cliSettings, rawInvoker, interact, artifact.NewApprovalReader())
 
 	// Wire the session with the resolved run-scoped store and all port dependencies.
 	// The store path matches runIdentity.RunFolder, so session I/O and the COMPLETED
@@ -165,7 +165,7 @@ func main() {
 		Routing:    routingDeps.Routing,
 		Manual:     routingDeps.Manual,
 		PreConsult: routingDeps.PreConsult,
-		Approvals:  artifact.NewApprovalReader(),
+		Approvals:  routingDeps.Approvals,
 	})
 
 	// Pass the pre-resolved store and identity so that cli.Run skips its own
@@ -231,25 +231,31 @@ func runTUIMode(args []string) {
 			artifactPath = filepath.Join(mintedFolder, "Orchestration.md")
 		}
 		store := newLoggedArtifactStore(artifactPath, logger)
-		// NOTE: Routing, PreConsult, and Approvals are not yet wired for the TUI
-		// path. The TUI equivalent of buildDeps will be called here in the stage
-		// that adds TUI consultation support. Until then the session's nil checks
-		// for these deps apply, and an orchestrated-mode run from the TUI will
-		// fail with a controlled RunFailed outcome rather than silently advancing.
-		//
-		// Manual IS wired so that the stop-screen Manual Dispatch action can invoke
-		// the ManualResolver for its one routing decision. The routing table is not
-		// known at session-factory time (it is loaded from the workflow file inside
-		// the session), so an empty RoutingTable is provided; the ManualResolver will
-		// offer only the Stop option if the table has no rows, which is consistent
-		// with the CLI path's current behavior.
+
+		// Extract the raw-JSON transport if the selected harness adapter implements it.
+		var rawInvoker domain.RawInvoker
+		if ri, ok := h.(domain.RawInvoker); ok {
+			rawInvoker = ri
+		}
+
+		// Build the session's routing consultant, manual resolver, pre-consultation
+		// capability and approval reader from the completed configuration selection.
+		// This is the same builder the non-interactive path uses, so both frontends
+		// share one place where consultant selection is expressed. The orchestrator
+		// reference and routing table are not known here; they reach every consultant
+		// that implements domain.RunContextBinder later, on the session's run-start path.
+		routingDeps := buildDeps(cfg.Settings, rawInvoker, programRef, artifact.NewApprovalReader())
+
 		return session.New(session.Deps{
-			Harness:  h,
-			Store:    store,
-			Clock:    &realClock{},
-			Interact: programRef,
-			Debug:    logger,
-			Manual:   &deviation.ManualResolver{Interact: programRef},
+			Harness:    h,
+			Store:      store,
+			Clock:      &realClock{},
+			Interact:   programRef,
+			Debug:      logger,
+			Routing:    routingDeps.Routing,
+			Manual:     routingDeps.Manual,
+			PreConsult: routingDeps.PreConsult,
+			Approvals:  routingDeps.Approvals,
 		})
 	}
 

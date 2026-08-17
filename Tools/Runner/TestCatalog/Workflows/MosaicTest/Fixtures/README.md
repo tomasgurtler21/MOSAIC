@@ -6,11 +6,17 @@ Fixture data for the `mosaic-run` harness conformance suite. Nothing here is cod
 
 Each workflow has exactly one seed root. Seed that directory and nothing else.
 
-| Workflow | Seed path |
-|----------|-----------|
-| `smoke-single` | `C:\AI\MOSAIC\MOSAIC\Workflows\MosaicTest\Fixtures\smoke-single` |
-| `payload-stress` | `C:\AI\MOSAIC\MOSAIC\Workflows\MosaicTest\Fixtures\payload-stress` |
-| `staged-preplaced-plan` | `C:\AI\MOSAIC\MOSAIC\Workflows\MosaicTest\Fixtures\staged-preplaced-plan` |
+| Workflow | Mode | Seed path |
+|----------|------|-----------|
+| `smoke-single` | any | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\smoke-single` |
+| `payload-stress` | any | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\payload-stress` |
+| `staged-preplaced-plan` | any | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\staged-preplaced-plan` |
+| `orchestrated-linear` | **orchestrated only** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\orchestrated-linear` |
+| `orchestrated-backjump` | **orchestrated only** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\orchestrated-backjump` |
+| `findings-loop` | **auto** and **auto-review** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\findings-loop` |
+| `deviation-blocked` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\deviation-blocked` |
+| `deviation-ambiguous` | **auto-review** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\deviation-ambiguous` |
+| `deviation-stop` | **auto** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\deviation-stop` |
 
 In the TUI, paste the path at the seed-input screen. On the command line it is `--input <path>`.
 
@@ -45,6 +51,7 @@ Three constraints force this layout, and each one is a way a hand-assembled seed
 |------|----------|
 | `{workflow-id}/Requirements.md` | Seed-rule placeholder. Never read. |
 | `{workflow-id}/Plan.md` | Pre-placed stage table, for workflows that need one. |
+| `{workflow-id}/MosaicTestRouting.md` | Routing fixture for the stub orchestrator, for workflows run in a mode that consults it. Fixed filename — a consultation carries no artifact paths, so there is no per-invocation channel to bind a fixture through. |
 | `{workflow-id}/MosaicTestScript/` | Behaviour scripts for that workflow. Named for behaviour, never for row number. |
 
 Scripts live under the workflow that uses them and are not shared. No two workflows currently need identical behaviour, so sharing would buy nothing while forcing a layout that trips the prefix rule above. Two workflows that genuinely need one script should hold identical copies — a fixture is a specimen, and drift between two copies is a signal worth seeing rather than a duplication worth removing.

@@ -902,3 +902,82 @@ func TestContract_GHCP(t *testing.T) {
 		},
 	})
 }
+
+// ---------------------------------------------------------------------------
+// T3.3 — Regression: ghcp-cli routes custom tools to main tools field (unchanged)
+// ---------------------------------------------------------------------------
+
+// TestGhcpCli_CustomToolDestinations_DescriptorDeclaresNone verifies that the ghcp-cli
+// descriptor does not declare a custom_tool_destination field. Only Claude Code declares
+// that field; all other built-in harnesses must leave it unset so their custom tool
+// routing remains unchanged.
+func TestGhcpCli_CustomToolDestinations_DescriptorDeclaresNone(t *testing.T) {
+	mod := newModule(t)
+	desc := mod.Descriptor()
+
+	if len(desc.Tools.CustomToolDestinations) != 0 {
+		t.Errorf("ghcp-cli descriptor declares CustomToolDestinations (count=%d); "+
+			"only claude-code.yaml declares custom_tool_destination; "+
+			"all other built-in descriptors must leave the field unset; "+
+			"dests: %v", len(desc.Tools.CustomToolDestinations), desc.Tools.CustomToolDestinations)
+	}
+}
+
+// TestGhcpCli_CustomTool_RoutesToMainToolsNotMcpServers verifies that when an agent
+// declares a custom (MCP-style) tool and the ghcp-cli descriptor has no
+// custom_tool_destination, the tool resolves to a DestMain destination and no mcpServers
+// field appears in the output. This is the regression guard ensuring ghcp-cli's custom
+// tool handling is byte-identical to pre-Stage-3 behaviour.
+func TestGhcpCli_CustomTool_RoutesToMainToolsNotMcpServers(t *testing.T) {
+	mod := newModule(t)
+	desc := mod.Descriptor()
+
+	result, err := mod.Tools(domain.ToolRequest{
+		AgentKey: "test-agent",
+		Generic:  []string{"user_feedback"},
+		CustomNames: map[string]string{
+			"user_feedback": "human-in-the-loop",
+		},
+	})
+	if err != nil {
+		t.Fatalf("mod.Tools: %v", err)
+	}
+
+	// No mcpServers field must appear: ghcp-cli has no custom_tool_destination declaration.
+	for _, f := range result.Fields {
+		if f.Key == "mcpServers" {
+			t.Errorf("mcpServers field present in ghcp-cli Tools() output; "+
+				"ghcp-cli must not route custom tools to a separate mcpServers field — "+
+				"only Claude Code declares custom_tool_destination; "+
+				"fields: %v", result.Fields)
+		}
+	}
+
+	// The ToolCustom resolution must use DestMain (the historical fallback).
+	if len(result.Resolutions) == 1 && result.Resolutions[0].Outcome == domain.ToolCustom {
+		dests := result.Resolutions[0].Destinations
+		if len(dests) != 1 || dests[0].Kind != domain.DestMain {
+			t.Errorf("custom tool resolution destinations: want single DestMain, got %v; "+
+				"without custom_tool_destination, custom tools must route to the main tools field (DestMain)",
+				dests)
+		}
+	}
+
+	// The custom tool name must appear in the main tools list field.
+	toolsKey := desc.Frontmatter.ToolsKey
+	var foundInMainTools bool
+	for _, f := range result.Fields {
+		if f.Key == toolsKey && f.Value.Kind == domain.KindList {
+			for _, item := range f.Value.Items {
+				if item.Scalar == "human-in-the-loop" {
+					foundInMainTools = true
+				}
+			}
+		}
+	}
+	if !foundInMainTools {
+		t.Errorf("custom tool human-in-the-loop not found in main tools list field %q; "+
+			"without custom_tool_destination, custom tools must appear in the main tools list",
+			toolsKey)
+	}
+}

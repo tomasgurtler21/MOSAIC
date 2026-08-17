@@ -105,6 +105,7 @@ import (
 	"time"
 
 	"mosaic-common/interaction"
+	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/session"
@@ -6140,6 +6141,16 @@ func TestSession_Start_Resume_AllSettingsPreservedFromArtifact(t *testing.T) {
 //   - A consultation produces an infrastructure-flagged Execution Log row.
 //   - The consultation row consumes global_sequence.
 //   - current_state continues to name the last workflow step.
+//   - The consultation row's agent instance names the orchestrator that was
+//     invoked (derived from the file stem), not a hardcoded identifier.
+//   - A non-default orchestrator file stem produces the correct row identity.
+//
+//   Consultation log attribution — resume and rewind (Stage 6):
+//   - Resuming a run whose log ends with a consultation row correctly skips
+//     that row and advances to the next workflow step (position recovery).
+//   - Resuming an interrupted run (FR-33 rewind path) whose log contains
+//     consultation rows correctly identifies the last completed workflow step
+//     and routes to the step that was interrupted.
 //
 //   Failure handling:
 //   - Consultation failure is terminal by default (RunStoppedByConsultant).
@@ -7320,14 +7331,16 @@ func TestSession_Consultation_RecordedAsInfrastructureRow(t *testing.T) {
 		t.Error("want at least one infrastructure-flagged row for consultation, got 0")
 	}
 
-	// The Agent column of each infrastructure row must follow the
-	// "orchestrator-script#N" shape (the orchestrator's own instance identifier).
+	// The Agent column of each infrastructure row must carry the resolved
+	// orchestrator identifier (the file stem of the orchestrator file) followed
+	// by "#N". The fixture writes the file as "orchestrator.md", so the stem is
+	// "orchestrator".
 	for _, step := range store.Applied {
 		if !step.IsInfrastructure {
 			continue
 		}
-		if !strings.HasPrefix(step.AgentInstance, "orchestrator-script#") {
-			t.Errorf("want consultation row AgentInstance to match orchestrator-script#N, got %q",
+		if !strings.HasPrefix(step.AgentInstance, "orchestrator#") {
+			t.Errorf("want consultation row AgentInstance to match orchestrator#N, got %q",
 				step.AgentInstance)
 		}
 	}
@@ -7359,10 +7372,11 @@ func TestSession_Consultation_ConsumesGlobalSequence(t *testing.T) {
 	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
 
 	// With one consultation (first step) and one workflow step, the final
-	// GlobalSequence must be at least 2 (consultation=1 + agent-a=2).
-	// In auto mode with the same workflow it would be 1 (only agent-a).
-	if store.state.GlobalSequence < 2 {
-		t.Errorf("want GlobalSequence >= 2 after one consultation + one workflow step, got %d",
+	// GlobalSequence is exactly 2 (consultation=1 + agent-a=2). The sequence is
+	// fully deterministic in this setup, so an exact assertion catches off-by-one
+	// errors (e.g. double-counting the consultation would produce 3).
+	if store.state.GlobalSequence != 2 {
+		t.Errorf("want GlobalSequence == 2 after one consultation + one workflow step, got %d",
 			store.state.GlobalSequence)
 	}
 }
@@ -7933,5 +7947,660 @@ func TestSession_ConsultationFailureClasses_AllTerminal(t *testing.T) {
 					failClass, got.Status, got.Message)
 			}
 		})
+	}
+}
+
+// ===== Consultation log attribution (Stage 6) =====
+
+// TestSession_Consultation_NonDefaultOrchestrator_RowNamesInvokedOrchestrator
+// verifies that a consultation row's agent instance uses the file stem of the
+// orchestrator supplied to the run, not any hardcoded identifier. With an
+// orchestrator file named "custom-orch.md" every infrastructure row must carry
+// the prefix "custom-orch", not "orchestrator-script" or any other literal.
+func TestSession_Consultation_NonDefaultOrchestrator_RowNamesInvokedOrchestrator(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	consultant.queueDispatch("agent-a", "do work", 0)
+	consultant.queueStop("done")
+
+	dir := t.TempDir()
+	// Write the orchestrator under a non-default filename stem so that the
+	// resolved Identifier ("custom-orch") differs from every hardcoded string
+	// that could exist in the implementation.
+	data, err := os.ReadFile(orchFilePath("linear-orch.md"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	orchPath := filepath.Join(dir, "custom-orch.md")
+	if err := os.WriteFile(orchPath, data, 0600); err != nil {
+		t.Fatalf("write orchestrator: %v", err)
+	}
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Routing:  consultant,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	// The consultation at seq=1 is followed by agent-a at seq=2.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+	}
+	ses.Start(context.Background(), cfg) //nolint:errcheck
+
+	// Every infrastructure row must carry "custom-orch#N". Any other prefix
+	// indicates the implementation used a hardcoded identifier instead of
+	// deriving the identity from the resolved orchestrator file.
+	infraRows := 0
+	for _, step := range store.Applied {
+		if !step.IsInfrastructure {
+			continue
+		}
+		infraRows++
+		if !strings.HasPrefix(step.AgentInstance, "custom-orch#") {
+			t.Errorf("want consultation row AgentInstance to start with custom-orch#, got %q",
+				step.AgentInstance)
+		}
+	}
+	if infraRows == 0 {
+		t.Error("want at least one infrastructure-flagged consultation row, got 0")
+	}
+}
+
+// TestSession_Resume_WithTrailingConsultationRow_PositionRecovery verifies that
+// when a run is resumed and the execution log ends with a consultation row after
+// the last workflow step, the session correctly identifies the last workflow
+// step and advances to the step that follows it.
+//
+// Log layout: [agent-a#1 (workflow), orchestrator#2 (consultation/infra)]
+// current_state: agent-a#1 (matching — no interruption)
+// Expected: session dispatches agent-b (the step following agent-a in the
+// linear workflow), proving it skipped the trailing consultation row.
+func TestSession_Resume_WithTrailingConsultationRow_PositionRecovery(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	// Consulted once to decide the next step (agent-b) after the resume.
+	consultant.queueDispatch("agent-b", "step 2", 1)
+	consultant.queueStop("done")
+
+	ses, f, store, orchPath := newOrchestratedSession(t, consultant)
+
+	// Pre-populate: agent-a completed (seq=1) then a consultation row (seq=2).
+	// The consultation row's Agent is "orchestrator#2" — the stem of
+	// "orchestrator.md", which newOrchestratedSession writes for the fixture.
+	// current_state records agent-a#1, matching the last workflow log entry
+	// (no interruption).
+	store.state = domain.ArtifactState{
+		Workflow:        "linear",
+		WorkflowVersion: "1.0",
+		Task:            "test task",
+		GlobalSequence:  2,
+		RunSettings:     domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+		CurrentState: domain.CurrentState{
+			Phase:      "PLANNING",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "agent-a#1",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 1, Agent: "agent-a#1", Phase: "PLANNING", Status: domain.StatusSUCCESS},
+			{Seq: 2, Agent: "orchestrator#2", Phase: "", Status: domain.StatusSUCCESS},
+		},
+	}
+	store.exists = true
+
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := baseOrchestratedConfig(orchPath)
+	cfg.IsNewRun = false
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	if err != nil {
+		t.Fatalf("want nil error on resume (consultation row must not cause PositionUnresolvedError), got %v", err)
+	}
+	if got.Status != domain.RunStoppedByConsultant {
+		t.Errorf("want RunStoppedByConsultant after stop instruction, got %q (message: %q)",
+			got.Status, got.Message)
+	}
+	// agent-b must have been dispatched: if the resume had not correctly
+	// recognised the consultation row as infrastructure and skipped it, it
+	// would have returned RunFailed with PositionUnresolvedError instead.
+	invs := f.Invocations()
+	if len(invs) == 0 {
+		t.Fatal("want at least one harness invocation (agent-b) on resume, got 0")
+	}
+	if invs[0].Agent.Identifier != "agent-b" {
+		t.Errorf("want resumed session to dispatch agent-b (step following agent-a), got %q",
+			invs[0].Agent.Identifier)
+	}
+}
+
+// TestSession_Resume_Rewind_WithConsultationRowsInLog_CorrectlyIdentifiesLastWorkflowStep
+// verifies the re-run rewind path (FR-33): when a run is resumed after a
+// mid-invocation interruption and the execution log contains consultation rows,
+// the rewind correctly identifies the last completed workflow step by skipping
+// the consultation rows, then routes to the step that was interrupted.
+//
+// Log layout:
+//   - seq=1: orchestrator#1 (consultation/infra — first routing decision)
+//   - seq=2: agent-a#2      (workflow step — completed)
+//   - seq=3: orchestrator#3 (consultation/infra — next routing decision)
+//
+// current_state.LastAgent = "agent-b#4" (premature: set before agent-b's
+// Apply completed, then the session crashed).
+//
+// The rewind must skip orchestrator#3, find agent-a#2 as the last completed
+// workflow step, and route to agent-b (the step that was being dispatched when
+// the crash occurred).
+func TestSession_Resume_Rewind_WithConsultationRowsInLog_CorrectlyIdentifiesLastWorkflowStep(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	// After the rewind the session consults for the next step and dispatches agent-b.
+	consultant.queueDispatch("agent-b", "step 2 (retry after interruption)", 1)
+	consultant.queueStop("done")
+
+	ses, f, store, orchPath := newOrchestratedSession(t, consultant)
+
+	// Pre-populate: consultation (seq=1), agent-a completed (seq=2), another
+	// consultation (seq=3). current_state was advanced to "agent-b#4" before
+	// the session crashed without recording agent-b's Apply, so agent-b is absent
+	// from the log. This is the mid-invocation interruption scenario.
+	store.state = domain.ArtifactState{
+		Workflow:        "linear",
+		WorkflowVersion: "1.0",
+		Task:            "test task",
+		GlobalSequence:  3,
+		RunSettings:     domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+		CurrentState: domain.CurrentState{
+			Phase:      "PLANNING",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "agent-b#4", // premature: agent-b was never logged
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 1, Agent: "orchestrator#1", Phase: "", Status: domain.StatusSUCCESS},
+			{Seq: 2, Agent: "agent-a#2", Phase: "PLANNING", Status: domain.StatusSUCCESS},
+			{Seq: 3, Agent: "orchestrator#3", Phase: "", Status: domain.StatusSUCCESS},
+		},
+	}
+	store.exists = true
+
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#5",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := baseOrchestratedConfig(orchPath)
+	cfg.IsNewRun = false
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	if err != nil {
+		t.Fatalf("want nil error on resume (consultation rows must not prevent rewind), got %v", err)
+	}
+	if got.Status != domain.RunStoppedByConsultant {
+		t.Errorf("want RunStoppedByConsultant after stop instruction, got %q (message: %q)",
+			got.Status, got.Message)
+	}
+	// agent-b must have been dispatched: a correct rewind sets CurrentState to
+	// agent-a#2 (the last completed workflow step), which routes the engine to
+	// agent-b. If the rewind had failed to skip the consultation rows it would
+	// have returned RunFailed with PositionUnresolvedError, or re-dispatched
+	// agent-a unnecessarily.
+	invs := f.Invocations()
+	if len(invs) == 0 {
+		t.Fatal("want at least one harness invocation (agent-b) on resume, got 0")
+	}
+	if invs[0].Agent.Identifier != "agent-b" {
+		t.Errorf("want rewind to route to agent-b (the interrupted step), got %q",
+			invs[0].Agent.Identifier)
+	}
+}
+
+// TestSession_Resume_WithTrailingConsultationRow_NonDefaultOrchestrator_PositionRecovery
+// is the non-default-orchestrator complement to
+// TestSession_Resume_WithTrailingConsultationRow_PositionRecovery.
+//
+// Where that test relies on the default "orchestrator.md" stem (identifier
+// "orchestrator"), this test names the orchestrator file "custom-orch.md" so the
+// resolved identifier is "custom-orch". The pre-populated log carries
+// "custom-orch#N" for the consultation entry. If position recovery hardcodes any
+// string other than reading s.orchRef.Identifier, the consultation row will not be
+// recognised as infrastructure and the test will fail with a PositionUnresolvedError
+// or a wrong first dispatch.
+//
+// Log layout: [agent-a#1 (workflow), custom-orch#2 (consultation/infra)]
+// current_state: agent-a#1 (matching — no interruption)
+// Expected: session dispatches agent-b (the step after agent-a), then
+// RunStoppedByConsultant when the consultant issues a stop.
+func TestSession_Resume_WithTrailingConsultationRow_NonDefaultOrchestrator_PositionRecovery(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	consultant.queueDispatch("agent-b", "step 2", 1)
+	consultant.queueStop("done")
+
+	dir := t.TempDir()
+	data, err := os.ReadFile(orchFilePath("linear-orch.md"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	orchPath := filepath.Join(dir, "custom-orch.md")
+	if err := os.WriteFile(orchPath, data, 0600); err != nil {
+		t.Fatalf("write orchestrator: %v", err)
+	}
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Routing:  consultant,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	// Pre-populate: agent-a completed (seq=1) then a consultation row (seq=2).
+	// The consultation row uses "custom-orch#2" — the stem of "custom-orch.md".
+	// current_state records agent-a#1, matching the last workflow log entry
+	// (no interruption).
+	store.state = domain.ArtifactState{
+		Workflow:        "linear",
+		WorkflowVersion: "1.0",
+		Task:            "test task",
+		GlobalSequence:  2,
+		RunSettings:     domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+		CurrentState: domain.CurrentState{
+			Phase:      "PLANNING",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "agent-a#1",
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 1, Agent: "agent-a#1", Phase: "PLANNING", Status: domain.StatusSUCCESS},
+			{Seq: 2, Agent: "custom-orch#2", Phase: "", Status: domain.StatusSUCCESS},
+		},
+	}
+	store.exists = true
+
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#4",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             false,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+	}
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	if err != nil {
+		t.Fatalf("want nil error on resume (consultation row with non-default orchestrator must not cause PositionUnresolvedError), got %v", err)
+	}
+	if got.Status != domain.RunStoppedByConsultant {
+		t.Errorf("want RunStoppedByConsultant after stop instruction, got %q (message: %q)",
+			got.Status, got.Message)
+	}
+	// agent-b must have been dispatched: if position recovery failed to recognise
+	// "custom-orch#2" as an infrastructure row it would have returned RunFailed
+	// with PositionUnresolvedError instead.
+	invs := f.Invocations()
+	if len(invs) == 0 {
+		t.Fatal("want at least one harness invocation (agent-b) on resume, got 0")
+	}
+	if invs[0].Agent.Identifier != "agent-b" {
+		t.Errorf("want resumed session to dispatch agent-b (step following agent-a), got %q",
+			invs[0].Agent.Identifier)
+	}
+}
+
+// TestSession_Resume_Rewind_WithConsultationRowsInLog_NonDefaultOrchestrator_CorrectlyIdentifiesLastWorkflowStep
+// is the non-default-orchestrator complement to
+// TestSession_Resume_Rewind_WithConsultationRowsInLog_CorrectlyIdentifiesLastWorkflowStep.
+//
+// The orchestrator file is named "custom-orch.md" so the resolved identifier is
+// "custom-orch". Pre-populated consultation log entries carry "custom-orch#N".
+// If the FR-33 rewind path hardcodes any specific string the consultation rows will
+// not be recognised as infrastructure, the rewind will mis-identify the last
+// completed workflow step, and the test will fail.
+//
+// Log layout:
+//   - seq=1: custom-orch#1 (consultation/infra — first routing decision)
+//   - seq=2: agent-a#2      (workflow step — completed)
+//   - seq=3: custom-orch#3  (consultation/infra — next routing decision)
+//
+// current_state.LastAgent = "agent-b#4" (premature: set before agent-b's Apply
+// completed, then the session crashed).
+//
+// The rewind must skip custom-orch#3, find agent-a#2 as the last completed
+// workflow step, and route to agent-b (the step that was being dispatched when
+// the crash occurred). Expected result: RunStoppedByConsultant.
+func TestSession_Resume_Rewind_WithConsultationRowsInLog_NonDefaultOrchestrator_CorrectlyIdentifiesLastWorkflowStep(t *testing.T) {
+	consultant := &scriptedRoutingConsultant{}
+	consultant.queueDispatch("agent-b", "step 2 (retry after interruption)", 1)
+	consultant.queueStop("done")
+
+	dir := t.TempDir()
+	data, err := os.ReadFile(orchFilePath("linear-orch.md"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	orchPath := filepath.Join(dir, "custom-orch.md")
+	if err := os.WriteFile(orchPath, data, 0600); err != nil {
+		t.Fatalf("write orchestrator: %v", err)
+	}
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Routing:  consultant,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+	})
+
+	// Pre-populate: consultation (seq=1), agent-a completed (seq=2), another
+	// consultation (seq=3). current_state was advanced to "agent-b#4" before the
+	// session crashed without recording agent-b's Apply — the mid-invocation
+	// interruption scenario. All consultation entries use "custom-orch#N".
+	store.state = domain.ArtifactState{
+		Workflow:        "linear",
+		WorkflowVersion: "1.0",
+		Task:            "test task",
+		GlobalSequence:  3,
+		RunSettings:     domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+		CurrentState: domain.CurrentState{
+			Phase:      "PLANNING",
+			LastStatus: domain.StatusSUCCESS,
+			LastAgent:  "agent-b#4", // premature: agent-b was never logged
+		},
+		ExecutionLog: []domain.ExecutionLogEntry{
+			{Seq: 1, Agent: "custom-orch#1", Phase: "", Status: domain.StatusSUCCESS},
+			{Seq: 2, Agent: "agent-a#2", Phase: "PLANNING", Status: domain.StatusSUCCESS},
+			{Seq: 3, Agent: "custom-orch#3", Phase: "", Status: domain.StatusSUCCESS},
+		},
+	}
+	store.exists = true
+
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#5",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             false,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeOrchestrated},
+	}
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	if err != nil {
+		t.Fatalf("want nil error on resume (consultation rows with non-default orchestrator must not prevent rewind), got %v", err)
+	}
+	if got.Status != domain.RunStoppedByConsultant {
+		t.Errorf("want RunStoppedByConsultant after stop instruction, got %q (message: %q)",
+			got.Status, got.Message)
+	}
+	// agent-b must have been dispatched: a correct rewind sets CurrentState to
+	// agent-a#2 (the last completed workflow step), which routes the engine to
+	// agent-b. If the rewind failed to skip "custom-orch#N" entries it would have
+	// returned RunFailed with PositionUnresolvedError, or re-dispatched agent-a.
+	invs := f.Invocations()
+	if len(invs) == 0 {
+		t.Fatal("want at least one harness invocation (agent-b) on resume, got 0")
+	}
+	if invs[0].Agent.Identifier != "agent-b" {
+		t.Errorf("want rewind to route to agent-b (the interrupted step), got %q",
+			invs[0].Agent.Identifier)
+	}
+}
+
+// ===== Stage 7: ApprovalCapability and disk-based approval reading =====
+
+// TestSession_HITL_FilesystemApprovalReader_Approved_PassesWithoutRedispatch
+// verifies that when the real file-based approval reader is wired and the
+// dispatched output artifact carries human_approved: true in its YAML
+// frontmatter, the human-review row passes verification without any re-dispatch.
+//
+// This test uses artifact.NewApprovalReader() — the same reader the CLI already
+// wires and that the interactive frontend must wire after I7.3. It writes a
+// real file on disk and asserts that the session reads it correctly.
+func TestSession_HITL_FilesystemApprovalReader_Approved_PassesWithoutRedispatch(t *testing.T) {
+	// Write an approved artifact file at an absolute path in a temp directory.
+	// The consultant will override the table row output artifacts to point here,
+	// giving the approval reader a deterministic, absolute path to check.
+	tmpDir := t.TempDir()
+	approvedPath := filepath.Join(tmpDir, "plan.md")
+	approvedContent := "---\nhuman_approved: true\n---\n# Plan\n"
+	if err := os.WriteFile(approvedPath, []byte(approvedContent), 0600); err != nil {
+		t.Fatalf("write approved artifact: %v", err)
+	}
+
+	consultant := &scriptedRoutingConsultant{}
+	approvedPaths := []string{approvedPath}
+	consultant.queueDispatchWithOutputs("agent-a", "do the work", 0, &approvedPaths)
+	consultant.queueDispatch("agent-b", "continue", 1)
+	consultant.queueStop("done")
+
+	// Use the real filesystem-based approval reader.
+	ses, f, _, orchPath := newHITLLinearSession(t, consultant, artifact.NewApprovalReader())
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
+
+	// An approved artifact must not trigger a redispatch.
+	agentACalls := 0
+	for _, inv := range f.Invocations() {
+		if inv.Agent.Identifier == "agent-a" {
+			agentACalls++
+		}
+	}
+	if agentACalls != 1 {
+		t.Errorf("want agent-a dispatched exactly once (human_approved: true -> no redispatch), got %d invocations", agentACalls)
+	}
+}
+
+// TestSession_HITL_FilesystemApprovalReader_Unapproved_RedispatchesThenEscalates
+// verifies that when the real file-based approval reader is wired and the
+// dispatched output artifact carries human_approved: false, the human-review
+// row is redispatched once, still fails approval, and then escalates to a
+// deviation — the same re-dispatch-then-escalate path as the non-interactive
+// frontend.
+func TestSession_HITL_FilesystemApprovalReader_Unapproved_RedispatchesThenEscalates(t *testing.T) {
+	tmpDir := t.TempDir()
+	unapprovedPath := filepath.Join(tmpDir, "plan.md")
+	unapprovedContent := "---\nhuman_approved: false\n---\n# Plan\n"
+	if err := os.WriteFile(unapprovedPath, []byte(unapprovedContent), 0600); err != nil {
+		t.Fatalf("write unapproved artifact: %v", err)
+	}
+
+	consultant := &scriptedRoutingConsultant{}
+	unapprovedPaths := []string{unapprovedPath}
+	// First dispatch: agent-a with the unapproved artifact.
+	consultant.queueDispatchWithOutputs("agent-a", "do the work", 0, &unapprovedPaths)
+	// After HITL escalation the consultant is invoked to resolve the deviation.
+	consultant.queueStop("HITL escalation: unapproved after redispatch")
+
+	ses, f, _, orchPath := newHITLLinearSession(t, consultant, artifact.NewApprovalReader())
+
+	// Queue two responses for agent-a: original dispatch + redispatch.
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done (redispatch)",
+	}})
+
+	ses.Start(context.Background(), baseOrchestratedConfig(orchPath)) //nolint:errcheck
+
+	// An unapproved artifact must trigger a redispatch: agent-a must be
+	// dispatched at least twice (original + redispatch before escalation).
+	agentACalls := 0
+	for _, inv := range f.Invocations() {
+		if inv.Agent.Identifier == "agent-a" {
+			agentACalls++
+		}
+	}
+	if agentACalls < 2 {
+		t.Errorf("want agent-a dispatched at least twice (human_approved: false -> redispatch), got %d invocations", agentACalls)
+	}
+}
+
+// TestSession_RunStart_IncapableApprovalReader_HITLWorkflow_Refuses verifies
+// that when the session is configured with no approval reader (Deps.Approvals
+// nil, normalised to the session internal unreadable stand-in) and the
+// selected workflow declares at least one human-review row, Start refuses the
+// run at run start before any artifact is created.
+//
+// This test is in the RED phase: without the ApprovalCapability run-start
+// check (domain.ApprovalCapability.ApprovalsReadable() returning false), the
+// session proceeds, HITL rows fail their approval checks one by one after
+// spending a redispatch each, and the run terminates with a non-refusal status
+// (RunDeviationUnresolved or RunStoppedByConsultant) rather than RunRefused.
+func TestSession_RunStart_IncapableApprovalReader_HITLWorkflow_Refuses(t *testing.T) {
+	dir := t.TempDir()
+	// hitl-linear-orch.md has HITL=true for both agent-a and agent-b.
+	orchPath := copyOrchestratorFile(t, dir, "hitl-linear-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+
+	// Deps.Approvals deliberately nil: session.New normalises it to
+	// unreadableApprovalReader{}, which must implement
+	// domain.ApprovalCapability.ApprovalsReadable() = false. The session must
+	// detect this at run start and refuse before dispatching any agent.
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		// Approvals: nil — deliberately omitted
+	})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+	}
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	if err != nil {
+		t.Fatalf("want nil error (refusal must be encoded in RunOutcome, not returned as error), got %v", err)
+	}
+	if got.Status != domain.RunRefused {
+		t.Errorf("want RunRefused when approval reader is incapable and workflow declares human-review rows, "+
+			"got %q (message: %q)", got.Status, got.Message)
+	}
+
+	// The refusal must happen before any artifact is created: Store.Create
+	// and Store.Apply must not have been called.
+	if store.CreatedRunID != "" {
+		t.Errorf("want no artifact created before run-start refusal, but Store.Create was called with runID=%q",
+			store.CreatedRunID)
+	}
+	if len(store.Applied) != 0 {
+		t.Errorf("want 0 Store.Apply calls before run-start refusal, got %d", len(store.Applied))
+	}
+}
+
+// TestSession_RunStart_IncapableApprovalReader_NoHITLWorkflow_Proceeds verifies
+// the negative case of the ApprovalCapability check: when the approval reader
+// is incapable but the selected workflow declares no human-review rows, the run
+// is not refused at run start. An incapable reader only blocks workflows that
+// would actually require approval reads.
+func TestSession_RunStart_IncapableApprovalReader_NoHITLWorkflow_Proceeds(t *testing.T) {
+	dir := t.TempDir()
+	// linear-orch.md has HITL=false for both agents — no approval reads needed.
+	orchPath := copyOrchestratorFile(t, dir, "linear-orch.md")
+	writeAgentFile(t, dir, "agent-a")
+	writeAgentFile(t, dir, "agent-b")
+
+	f := harness.NewFakeAdapter()
+	store := &memStore{}
+
+	// Approvals deliberately nil -> unreadableApprovalReader{}.
+	// The run must NOT be refused because the workflow has no HITL rows.
+	ses := session.New(session.Deps{
+		Harness:  f,
+		Store:    store,
+		Clock:    fixedClock{t: epoch},
+		Interact: &noopInteraction{},
+		// Approvals: nil
+	})
+
+	f.Queue("agent-a", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-a#1",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+	f.Queue("agent-b", harness.ScriptedEntry{Response: &domain.ProtocolResponse{
+		AgentInstanceID: "agent-b#2",
+		StatusCode:      domain.StatusSUCCESS,
+		StatusMessage:   "done",
+	}})
+
+	cfg := domain.RunConfig{
+		OrchestratorFilePath: orchPath,
+		WorkflowID:           "linear",
+		Task:                 "test task",
+		IsNewRun:             true,
+		RunSettings:          domain.RunSettings{Mode: domain.ExecutionModeAuto},
+	}
+
+	got, err := ses.Start(context.Background(), cfg)
+
+	if err != nil {
+		t.Fatalf("want nil error, got %v", err)
+	}
+	if got.Status == domain.RunRefused {
+		t.Errorf("want run NOT refused when workflow has no human-review rows, "+
+			"even with an incapable approval reader; got RunRefused (message: %q)", got.Message)
 	}
 }

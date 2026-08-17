@@ -267,12 +267,43 @@ mappings, the **first** contributor establishes that key's `format` and
 Per generic tool, highest first:
 
 ```
-user-config.yaml  >  tool-config.yaml  >  harness descriptor
+user-config.yaml  >  tool-config.yaml  >  harness descriptor mappings  >  harness descriptor custom_tool_destination
 ```
 
 Precedence applies to a generic tool as a **whole unit**. A higher-precedence
 declaration replaces the entire destination set beneath it; destination lists
 are never merged across layers.
+
+The **harness descriptor's `custom_tool_destination` field** is a new fourth level in
+this chain. It is a harness-level default that routes custom (MCP-style) tools — those
+for which the user supplies a name but the harness has no built-in mapping — to a
+specific frontmatter field rather than the main tools value. A `tool_destinations`
+entry in either config file for a specific generic tool always wins over this default.
+
+**Claude Code's new default:** As of this release the Claude Code harness declares
+`custom_tool_destination` routing every custom tool to the `mcpServers` frontmatter
+key as a block list. This is why a custom MCP server now appears under `mcpServers`
+in Claude Code agent frontmatter with no `tool_destinations` entry required:
+
+```yaml
+# Without any tool_destinations entry, a custom tool resolves like this for Claude Code:
+mcpServers:
+  - human-in-the-loop
+```
+
+If you want a specific custom tool to go somewhere else — or back to the main tools
+value — declare a `tool_destinations` entry for it. That entry outranks the harness
+default regardless of which config file declares it:
+
+```yaml
+# user-config.yaml or tool-config.yaml — overrides the Claude Code default for this tool
+tool_destinations:
+  claude-code:
+    - generic: my_tool
+      destinations:
+        - to: main
+          names: ["my-harness-tool-name"]
+```
 
 To *extend* a built-in mapping rather than replace it, restate the built-in
 destinations alongside your new ones:

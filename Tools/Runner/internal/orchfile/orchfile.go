@@ -1,9 +1,10 @@
 // Package orchfile reads an orchestrator agent file and enumerates its workflow
-// regions. It uses docformat's depth-first section lookup to find
-// <Workflow type="core" name="{id}"> nodes at any nesting depth, making it
-// independent of the structural depth at which workflows are embedded (bare
-// top-level files as well as deployed agents with nested injection slots both
-// work).
+// regions. It uses a kind-agnostic depth-first traversal to find nodes whose
+// name starts with "Workflow:" at any nesting depth, so both authored workflow
+// regions (<Workflow type="core" name="{id}">) and deploy-managed workflow
+// regions (<Workflow type="managed" name="{id}">) are discovered. The two
+// shapes are interleaved in document order and each region is returned exactly
+// once.
 //
 // Each workflow region carries its identifier (from the region's name attribute),
 // version (from the region's version attribute via the parser), and raw content
@@ -24,9 +25,25 @@ import (
 	"mosaic-run/internal/domain"
 )
 
+// collectWorkflowNodes performs a depth-first, document-order traversal of
+// nodes and appends any node whose name starts with "Workflow:" to dst.
+// Every kind of node (section, deployed, injection, custom) is visited so that
+// both authored workflow regions (type="core") and deploy-managed workflow
+// regions (type="managed") are found exactly once.
+func collectWorkflowNodes(nodes []*docformat.Node, dst *[]*docformat.Node) {
+	for _, n := range nodes {
+		if strings.HasPrefix(n.Name(), "Workflow:") {
+			*dst = append(*dst, n)
+		}
+		collectWorkflowNodes(n.Children(), dst)
+	}
+}
+
 // EnumerateWorkflows reads the file at the given path and returns all workflow
-// regions found at any nesting depth, identified by their
-// <Workflow type="core" name="{id}"> boundary tags.
+// regions found at any nesting depth, identified by a boundary tag whose name
+// starts with "Workflow:". Both authored regions (<Workflow type="core"
+// name="{id}">) and deploy-managed regions (<Workflow type="managed"
+// name="{id}">) are found, interleaved in document order, each exactly once.
 //
 // Returns a *domain.RefusalError with a specific message naming the file and
 // region if:
@@ -54,14 +71,11 @@ func EnumerateWorkflows(path string) ([]domain.WorkflowRegion, error) {
 		}
 	}
 
-	// Collect all sections named "Workflow:{id}" at any nesting depth.
-	allSections := doc.Body().SectionsDeep()
+	// Collect all nodes named "Workflow:{id}" at any nesting depth, regardless
+	// of node kind, so both authored (type="core") and deploy-managed
+	// (type="managed") workflow regions are found in document order.
 	var workflowNodes []*docformat.Node
-	for _, s := range allSections {
-		if strings.HasPrefix(s.Name(), "Workflow:") {
-			workflowNodes = append(workflowNodes, s)
-		}
-	}
+	collectWorkflowNodes(doc.Body().TopLevelNodes(), &workflowNodes)
 
 	if len(workflowNodes) == 0 {
 		return nil, &domain.RefusalError{

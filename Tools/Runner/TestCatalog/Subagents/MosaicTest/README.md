@@ -14,9 +14,15 @@ Measuring it requires real end-to-end runs, which requires agents. These are tho
 
 | ID | Agent | Version | Kind | Tier | Description |
 |----|-------|---------|------|:----:|-------------|
-| 40 | [mosaictest-scripted](./mosaictest-scripted.md) | 1.0.0 | Routed | LOW | Reads the script fixture bound to its row and returns exactly the response it specifies |
-| 41 | [mosaictest-checkpoint](./mosaictest-checkpoint.md) | 1.0.0 | Infrastructure, `checkpoint` | LOW | Returns SUCCESS with a fake `[checkpoint:{sha}]` marker; performs no git operations |
-| 42 | [mosaictest-review](./mosaictest-review.md) | 1.0.0 | Infrastructure, `review` | LOW | Returns SUCCESS with a self-describing message; inspects nothing |
+| 40 | [mosaictest-scripted](./mosaictest-scripted.md) | 2.2.0 | Routed | LOW | Reads the script fixture bound to its row and returns exactly the response it specifies |
+| 41 | [mosaictest-checkpoint](./mosaictest-checkpoint.md) | 2.1.0 | Infrastructure, `checkpoint` | LOW | Returns SUCCESS with a fake `[checkpoint:{sha}]` marker; performs no git operations |
+| 42 | [mosaictest-review](./mosaictest-review.md) | 2.1.0 | Infrastructure, `review` | LOW | Returns SUCCESS with a self-describing message; inspects nothing |
+
+### The stub orchestrator is not in this folder
+
+A catalogue's orchestrator is loaded from a fixed filename, so this catalogue's stub orchestrator lives at [`../../Orchestrator/orchestrator-script.md`](../../Orchestrator/orchestrator-script.md) and carries no `id` — the schema gives orchestrators none.
+
+It is what `mosaic-run` is pointed at, and it is the reason this catalogue can be run in Orchestrated mode at all. Its fixture format is specified inside its own file. A placeholder `orchestrator.md` sits beside it, never invoked, present only because the deployment tool includes a catalogue's conversational orchestrator unconditionally.
 
 ## Behaviour Lives in Fixtures, Not in Agent Files
 
@@ -49,7 +55,8 @@ The script format is specified inside [mosaictest-scripted.md](./mosaictest-scri
 
 ## Design Reference
 
-- [MosaicTestHarnessSuiteBrainstorm.md](../../../../MosaicTestHarnessSuiteBrainstorm.md) — the suite, the runner constraints it is built around, and the decisions behind the stub design
-- [CommunicationProtocol.md](../../../../Development/Designs/CommunicationProtocol.md) — the request and response envelopes these agents conform to
-- [InfrastructureAgentConcept.md](../../../../Development/Designs/InfrastructureAgentConcept.md) — classes, triggers, evaluation, failure policy
-- [ExecutionGroups.md](../../../../Workflows/ExecutionGroups.md) — group notation for the staged MosaicTest workflows
+- [TestCatalogDesign.md](../../../docs/TestCatalogDesign.md) — the suite: what it tests, the stub cast, the fixture formats, the workflow set, and how a run is checked
+- [CommunicationProtocol.md](../../../../../Development/Designs/CommunicationProtocol.md) — the request and response envelopes these agents conform to
+- [InfrastructureAgentConcept.md](../../../../../Development/Designs/InfrastructureAgentConcept.md) — classes, triggers, evaluation, failure policy
+
+Execution group notation is not referenced here: the staged MosaicTest workflows use bare rows and declare no groups, which is itself one of their assertions.
