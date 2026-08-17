@@ -2,7 +2,7 @@
 version: 0.5
 name: HW Schema Knowledge Base Generation Workflow
 description: Generate knowledge base documentation for a hardware schematic design. Researches each sheet individually, then synthesizes domain-oriented KB documentation with tiered abstraction — from project overview down to complex circuit subsystems.
-hint: Generate tiered KB documentation from hardware schematic sheets
+hint: "Tested and polished a few times, output verified — not production-proven but solid. Hard prerequisite before deploying: the research step requires a working hw_schema_read tool wired up for your specific schematic format/tooling — this is not a standard tool available out of the box, and the workflow cannot function without it. Verify that tool is provided before selecting this workflow."
 author: MOSAIC
 id: hw-schema-kb-generation
 referenced_agents:
@@ -52,7 +52,9 @@ artifacts:
 
 ## Design Rationale
 
-Explain why this workflow is structured the way it is. What trade-offs were made? Why are stages ordered as they are? What alternatives were considered and rejected? This section helps future maintainers understand the thinking behind the workflow rather than just reading what it does.
+Tested a handful of times with output manually verified and the workflow polished as a result — not yet production-proven, but past the purely theoretical stage.
+
+**This workflow has an unusually explicit external dependency, worth calling out at the workflow level rather than leaving it buried in an agent's tool list.** The research stage requires the ability to actually read hardware schematic sheets, which happens through a dedicated tool the research agent depends on. Unlike the file/terminal tools every other workflow in the catalog assumes are simply available, this one is not generic — it has to be provided by whoever deploys the workflow, wired to their specific schematic format and tooling. Every other workflow in the catalog gets by on generic file/terminal access; this is the one case where the workflow cannot run at all without a project-specific tool being present first. Users select workflows, not agents, so this dependency needs to be visible here, not only inside the research agent's own instructions.
 
 ---
 
@@ -60,7 +62,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | | Initial version |
+| 0.5 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 
 ---
 

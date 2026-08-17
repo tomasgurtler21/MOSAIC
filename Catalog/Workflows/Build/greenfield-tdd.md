@@ -2,7 +2,7 @@
 version: "3.4"
 name: "Greenfield TDD Workflow"
 description: "Building a new project from scratch requiring system architecture, test-first development, and full design."
-hint: "Full greenfield with architecture, TDD, and design phases"
+hint: "Proven and powerful, but early phases can be overwhelmed on large scopes — quality degrades gradually, not a hard failure. Size the build accordingly."
 author: MOSAIC
 id: greenfield-tdd
 referenced_agents:
@@ -79,7 +79,9 @@ artifacts:
 
 ## Design Rationale
 
-Explain why this workflow is structured the way it is. What trade-offs were made? Why are stages ordered as they are? What alternatives were considered and rejected? This section helps future maintainers understand the thinking behind the workflow rather than just reading what it does.
+Close sibling of `brownfield-tdd`, differing mainly in the added ARCHITECTURE phase (system-designer / system-design-review) needed because there is no existing codebase to anchor design decisions in.
+
+Proven and heavily used in practice, with consistently good results. Quality is sensitive to the size of the thing being built: the early phases (requirements, architecture, planning) must hold a large amount of context, and on larger greenfield scopes they can become overwhelmed. This does not cause a hard failure — no collapse — but produces a gradual quality dropoff, the same pattern seen under context overload generally.
 
 ---
 
@@ -87,7 +89,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | | Initial version |
+| 3.4 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 
 ---
 
@@ -96,7 +98,8 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 Capture ideas that were explored but not adopted, and future improvements worth considering. This prevents the same dead ends from being revisited unknowingly.
 
 **Ideas under consideration:**
-- (none yet)
+- **Third dimension: `{Domain}` alongside `{Phase}`.** For large greenfield scopes, partition planning/execution artifacts by domain as well as phase — e.g. `Plan.{Domain}.md`, `Stage-{N}/Plan.{Domain}.md` — instead of one flat phase sequence trying to hold the whole system. This workflow is the first candidate to receive it. Not started; gated on achieving solid test coverage of the orchestrator first, since this is a structural change to how artifacts are addressed.
+- **Move HITL off the creator rows onto a convergence-gated `approval-presenter`.** `requirements-refinement`, `system-designer`, `planner-tdd-soft`, and `contracts-designer` are all gated `✅` directly, so a human reviews every draft they produce — including rounds their paired reviewer would flag anyway — instead of only the version that already converged. `requirements-to-test-cases` proved the fix (a dedicated presenter row reachable only via the reviewer's `On Success`). Revisit this workflow once that pattern has enough real use to trust.
 
 **Dead ends (tried and rejected):**
 - (none yet)

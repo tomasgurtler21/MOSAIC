@@ -2,7 +2,7 @@
 version: "3.1"
 name: "Implementation Only Workflow"
 description: "Research, planning, and design already complete. Direct implementation from existing artifacts."
-hint: "Direct implementation from existing plan and contracts"
+hint: "Likely obsolete — this is the EXECUTION/REVIEW tail of brownfield-tdd/greenfield-tdd, split out to manually resume a long workflow past RESEARCH/PLANNING/DESIGN. Native mid-execution run persistence and continuation now covers that need directly; prefer continuing the original run over starting this one."
 author: MOSAIC
 id: implementation-only
 referenced_agents:
@@ -38,7 +38,9 @@ artifacts:
 
 ## Design Rationale
 
-Explain why this workflow is structured the way it is. What trade-offs were made? Why are stages ordered as they are? What alternatives were considered and rejected? This section helps future maintainers understand the thinking behind the workflow rather than just reading what it does.
+Created by splitting the tail (EXECUTION + REVIEW) off `brownfield-tdd`/`greenfield-tdd`, so a run with Plan.md and ContractsDesign.md already produced elsewhere could jump straight to implementation without repeating RESEARCH/PLANNING/DESIGN. That was the only way to "continue" a long workflow at the time: hand-carry the prerequisite artifacts into a fresh run of a shorter workflow.
+
+Mid-execution run persistence and continuation now solves the same problem natively — resuming the actual run that produced those artifacts, rather than starting a new, differently-scoped workflow against artifacts it never produced itself. That makes this workflow's original justification largely obsolete; it survives mainly as a fallback for cases where the artifacts genuinely originate outside any MOSAIC run (e.g. hand-written Plan/ContractsDesign) rather than as a continuation mechanism.
 
 ---
 
@@ -46,7 +48,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | | Initial version |
+| 3.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 
 ---
 
@@ -58,4 +60,4 @@ Capture ideas that were explored but not adopted, and future improvements worth 
 - (none yet)
 
 **Dead ends (tried and rejected):**
-- (none yet)
+- **Splitting workflows to enable manual continuation:** the underlying pattern this workflow represents. Superseded by native mid-execution run persistence/continuation. Worth remembering if the temptation to split another long workflow into a "resume from phase X" variant comes up again — the run-continuation mechanism is very likely the better answer now.

@@ -2,7 +2,7 @@
 version: "1.0"
 name: "Brownfield System Audit Workflow"
 description: "High-level quality assessment of an existing codebase or major subsystem — architecture and contracts audit without file-level analysis."
-hint: "High-level system audit — architecture and contracts only, no file-level analysis"
+hint: "Theoretical, at most field-tested once — treat as unproven. Essentially the fixed architecture/contracts tracks trimmed out of brownfield-pr-audit, with the expensive staged per-file audits and PR comment integration removed. Use to scope out problem areas cheaply before committing to a deeper, per-file audit."
 author: MOSAIC
 id: brownfield-system-audit
 referenced_agents:
@@ -51,7 +51,9 @@ artifacts:
 
 ## Design Rationale
 
-Explain why this workflow is structured the way it is. What trade-offs were made? Why are stages ordered as they are? What alternatives were considered and rejected? This section helps future maintainers understand the thinking behind the workflow rather than just reading what it does.
+An essential trim of `brownfield-pr-audit`: keeps its fixed architecture and contracts audit tracks (the high-level, whole-codebase passes) but drops the staged per-file audit tracks (tests-audit, implementation-audit) and the entire PR comment integration layer (audit-to-pull-request, audit-response-merger, pull-request-comment-interface). What's left is a cheap, high-level pass meant to identify problem areas before paying for expensive per-file analysis — its own notes call this out explicitly (output can guide follow-up per-component PR audits).
+
+Theoretical in practice — tested at most once. Treat any claims about its real-world output quality as unverified until it accumulates more actual use.
 
 ---
 
@@ -59,7 +61,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | | Initial version |
+| 1.0 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 
 ---
 

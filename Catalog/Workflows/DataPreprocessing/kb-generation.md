@@ -1,8 +1,8 @@
 ---
-version: 0.5
+version: 1.0
 name: Knowledge Base Generation Workflow
 description: Generate N-tier knowledge base documentation for a codebase, producing hierarchical documentation optimized for AI agent navigation — tiered from project overview down to complex subsystem specs.
-hint: Generate tiered KB documentation for a codebase with flag-based correction loop
+hint: "Recommended first step before any other workflow on a codebase — research agents downstream actively look for an existing KB and perform noticeably better when one is present. The KB is deliberately abstract (no concrete file/class/method names), which makes it resistant to going stale — in practice, feature planners can often fold doc updates into a normal feature plan without much quality loss, so a dedicated re-run of this workflow isn't required after every change."
 author: MOSAIC
 id: kb-generation
 referenced_agents:
@@ -16,7 +16,7 @@ artifacts:
   - KBFlagReport.md
 ---
 
-<Workflow type="core" name="kb-generation" version="0.5">
+<Workflow type="core" name="kb-generation" version="1.0">
 ## Knowledge Base Generation Workflow
 
 **Use when:** Generate N-tier knowledge base documentation for a codebase. Produces hierarchical documentation optimized for AI agent navigation — tiered from project overview down to complex subsystem specs.
@@ -46,7 +46,9 @@ artifacts:
 
 ## Design Rationale
 
-Explain why this workflow is structured the way it is. What trade-offs were made? Why are stages ordered as they are? What alternatives were considered and rejected? This section helps future maintainers understand the thinking behind the workflow rather than just reading what it does.
+Excellent, recommended workflow — run this first on a codebase before starting any other workflow against it. The research-phase agents used across the Build/Audit/Design workflows actively look for an existing KB when they run, and their performance improves noticeably when one is present.
+
+The KB's tiered structure is deliberately kept abstract — general subsystem descriptions rather than concrete file, class, or method names — which trades a little specificity for resistance to going stale as the codebase changes underneath it. This pays off in practice: planning agents elsewhere in the catalog can often fold documentation updates for a change directly into a normal feature plan without much quality loss, precisely because the abstraction level means most code-level changes don't invalidate what the KB actually says. That means `kb-correction` is not required after every change — it's there for drift that accumulates past what in-line plan updates catch, not as a mandatory step in every feature's lifecycle.
 
 ---
 
@@ -54,7 +56,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | | Initial version |
+| 1.0 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 
 ---
 

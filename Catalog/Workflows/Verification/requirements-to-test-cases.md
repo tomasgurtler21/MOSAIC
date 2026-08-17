@@ -1,8 +1,8 @@
 ---
-version: "1.2"
+version: "0.3"
 name: "Requirements to Test Cases Workflow"
 description: "Derive abstract test cases from a requirement held in large external specification documents. Resolves the requirement to closure via runtime retrieval, models the test scenario space, authors test cases in a project-defined format, and exports them to the target system."
-hint: "Generate abstract test cases from specification documents via runtime retrieval — no implementation"
+hint: "Fresh and untested — theoretical only, no real-world runs yet. Open experiments already planned for first real use, e.g. dropping test-scenario-review once the full path is proven — check the workflow file's Design Rationale before running it for real."
 author: MOSAIC
 id: requirements-to-test-cases
 referenced_agents:
@@ -27,10 +27,10 @@ artifacts:
   - ExportReport.md
 ---
 
-<Workflow type="core" name="requirements-to-test-cases" version="1.2">
+<Workflow type="core" name="requirements-to-test-cases" version="0.3">
 ## Requirements to Test Cases Workflow
 
-> **Version:** 1.1
+> **Version:** 0.3
 
 **Use when:** Deriving abstract test cases from requirements that live in **large external specification documents** the agents never ingest wholesale — accessed instead through retrieval tooling at runtime. Resolves one requirement (or a small set) to dependency closure, models the test scenario space, authors test cases in a project-defined format, and exports them to the target test management system. No implementation, no test code.
 
@@ -122,9 +122,9 @@ The split is expected to be challenged during real use, and dropping `test-scena
 
 The protocol defines HITL as an approval gate on finished output. The library's existing convention of marking *creators* `✅` inverts that: the human does first-pass review of work no agent has checked, and the review agent then audits the human's judgement. This workflow never adopted that inversion.
 
-Version 1.0 moved the gate to the reviewers instead, which fixed the ordering but left two problems. The reviewer's gate fires on *every* invocation, including rounds whose findings guarantee rework and where there is nothing yet to approve. And more seriously, at a reviewer's gate the human is approving the **creator's** artifact — `TestScenarios.md`, `TestCases.md` — which is not among the reviewer's output artifacts. Per the protocol an agent stamps `human_approved` only on its own outputs, so the approved artifact would stay `human_approved: false` permanently and the orchestrator's stamp check could never see that a human had signed it off.
+Version 0.1 moved the gate to the reviewers instead, which fixed the ordering but left two problems. The reviewer's gate fires on *every* invocation, including rounds whose findings guarantee rework and where there is nothing yet to approve. And more seriously, at a reviewer's gate the human is approving the **creator's** artifact — `TestScenarios.md`, `TestCases.md` — which is not among the reviewer's output artifacts. Per the protocol an agent stamps `human_approved` only on its own outputs, so the approved artifact would stay `human_approved: false` permanently and the orchestrator's stamp check could never see that a human had signed it off.
 
-Version 1.1 uses a dedicated `approval-presenter` row per convergence loop, per the architect's decision in `OnSuccessHITL.md` §6/§7. Three properties make it the right mechanism rather than a workaround:
+Version 0.2 uses a dedicated `approval-presenter` row per convergence loop, per the architect's decision in `OnSuccessHITL.md` §6/§7. Three properties make it the right mechanism rather than a workaround:
 
 **Convergence is expressed by table position.** The presenter row is reachable only via `On Success` from its reviewer. Routing already encodes "the agents agree" — so "fire the gate only at convergence" needs no new HITL value, no policy field, no change to the additive `row.hitl OR stage_hitl` merge, and no engine change.
 
@@ -150,9 +150,9 @@ In a safety context an agent's plausible guess is the most dangerous possible ou
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | 2026-08-05 | MOSAIC | Initial version |
-| 1.1 | 2026-08-06 | MOSAIC | Human approval moved from the review rows to dedicated `approval-presenter` rows, per the architect decision in `OnSuccessHITL.md` §7. Reviews now converge automatically (`❌`); the presenter is reachable only on convergence and stamps `human_approved` on the artifact the human actually approved, closing the §4.5 provenance gap. `requirements-review` gate becomes `❌` with no presenter. |
-| 1.2 | 2026-08-06 | MOSAIC | Terminology only, no routing or gate change. The provenance stamp field named throughout this document was renamed `hitl_confirmed` → `human_approved` in Communication Protocol v1.10; every reference here follows, including the two historical entries below, so the document carries one spelling of one field. |
+| 0.1 | 2026-08-05 | MOSAIC | Initial version |
+| 0.2 | 2026-08-06 | MOSAIC | Human approval moved from the review rows to dedicated `approval-presenter` rows, per the architect decision in `OnSuccessHITL.md` §7. Reviews now converge automatically (`❌`); the presenter is reachable only on convergence and stamps `human_approved` on the artifact the human actually approved, closing the §4.5 provenance gap. `requirements-review` gate becomes `❌` with no presenter. |
+| 0.3 | 2026-08-06 | MOSAIC | Terminology only, no routing or gate change. The provenance stamp field named throughout this document was renamed `hitl_confirmed` → `human_approved` in Communication Protocol v1.10; every reference here follows, including the two historical entries below, so the document carries one spelling of one field. |
 
 ---
 
@@ -162,13 +162,14 @@ In a safety context an agent's plausible guess is the most dangerous possible ou
 - **Staged scale-up.** Planner after `requirements-review` splitting a requirement set into stages; DESIGN/EXECUTION/REVIEW rows become staged with `Stage-{StageNumber}/` artifacts. Deliberately deferred until the single-requirement path is proven.
 - **Shared domain model.** At multi-requirement scale the scenario taxonomy (module variants, channel semantics, fault classes) is cross-cutting rather than per-requirement, and rebuilding it per stage is both wasteful and a consistency risk. Either a run-once phase producing a shared taxonomy artifact, or freeze it into the scenario designer's injection.
 - **Dropping `test-scenario-review`.** The first simplification to test once the full path works.
-- **A third `approval-presenter` row after `requirements-review`**, if running the workflow shows that retrieval gaps need catching before scenario design rather than surfacing as missing dimensions afterwards. Omitted in 1.1 because the dossier is large and dense and a human reading it is unlikely to spot what is absent.
+- **A third `approval-presenter` row after `requirements-review`**, if running the workflow shows that retrieval gaps need catching before scenario design rather than surfacing as missing dimensions afterwards. Omitted in 0.2 because the dossier is large and dense and a human reading it is unlikely to spot what is absent.
 - **Watch the row cost.** One presenter row per convergence loop is cheap here at two rows; across the library it may not be. `OnSuccessHITL.md` §5.3 — a separate `Gate` column with a `gate_on` invocation field — is the parked alternative if it becomes noisy.
 - **Coverage counter-check.** An agent that queries retrieval for what *should* have been found and compares against `TestScenarios.md` — defends against a retrieval miss that every downstream agent then inherits silently. Currently mitigated only by `requirements-review`.
+- **Backport `approval-presenter` to the older creator-gated workflows once this pattern is proven.** This workflow is the first place the presenter-on-convergence pattern was used for real, and it fixes a real inefficiency present across most of the older Build/Design workflows: those mark the *creator* row `✅` directly (the library's older convention), so a human reviews every draft the creator produces — including drafts an automated reviewer would have flagged anyway — instead of only the version that already converged. Once this workflow has enough real use to trust the pattern, that's the trigger to revisit `brownfield-tdd`, `greenfield-tdd`, `brownfield-design`, `brownfield-tdd-build-verified`, and `quick-fix`, all of which currently spend human attention this way.
 
 **Dead ends (tried and rejected):**
 - **KB ingestion of the specification** — rejected; see Design Rationale.
 - **A `TestProfile.md` input artifact** carrying the output format, glossary and gold examples. Rejected: the agent template architecture already solves this with `<OutputArtifactTemplate type="project">` and `<CodebaseContext type="project">`, which bind at deploy rather than per run. Format is stable; making it a per-run artifact would be paying run-time cost for deploy-time data.
 - **A third HITL column value (`✅ˢ`, on-success)** firing the gate only on the converging pass, implemented by re-dispatching the reviewer. Rejected by architect review — see `OnSuccessHITL.md` §4. It encodes a *policy* into a flag that carries an *amount*, which breaks the additive `row.hitl OR stage_hitl` merge that stage HITL depends on; it needs `already_presented` state the orchestration artifact has nowhere to store; and the re-dispatched reviewer would re-review and could contradict its own prior `SUCCESS`. Superseded by the presenter row in 1.1.
-- **Reviewer-held approval gates (workflow v1.0).** Correct in ordering, but the human approved the *creator's* artifact while only the reviewer could stamp provenance — so the approved artifact stayed `human_approved: false` permanently. Superseded by the presenter row in 1.1.
+- **Reviewer-held approval gates (workflow v0.1).** Correct in ordering, but the human approved the *creator's* artifact while only the reviewer could stamp provenance — so the approved artifact stayed `human_approved: false` permanently. Superseded by the presenter row in 0.2.
 - **Specialising `document-research` per retrieval flavour** (vector / graph / hybrid). Rejected: would produce one agent per stack for a process that is identical across all of them.

@@ -2,7 +2,7 @@
 version: "3.1"
 name: "Brownfield PR Audit Workflow"
 description: "Audit quality of existing code for PR review — multi-pass research, plan-driven staged audits with 4 types, per-audit PR comment transform with cross-audit deduplication, and post."
-hint: "PR audit with multi-pass research, parallel audit tracks, and PR comment integration"
+hint: "Proven, not just theoretical — run a handful of times against real PRs with sufficient quality. Its purpose is straightforward (let AI participate as a reviewer on a live pull request) but the machinery underneath is the most elaborate in the catalog — 4 parallel audit tracks, per-track PR comment transforms, cross-audit dedup. Requirements.md must be user-authored with PR ID, branches, and scope before starting."
 author: MOSAIC
 id: brownfield-pr-audit
 referenced_agents:
@@ -97,7 +97,24 @@ artifacts:
 
 ## Design Rationale
 
-Explain why this workflow is structured the way it is. What trade-offs were made? Why are stages ordered as they are? What alternatives were considered and rejected? This section helps future maintainers understand the thinking behind the workflow rather than just reading what it does.
+Purpose is simple: let AI participate as a reviewer on a live pull request, posting real PR comments. Everything else in the workflow's complexity exists in service of that one integration point — pulling existing PR comments in, and posting audit findings back out as comments, without losing track of which finding came from which audit track.
+
+Field-used only a couple of times so far, but with sufficient quality to call it proven rather than theoretical — worth trusting for real PR review work, not just a design exercise.
+
+### Pattern: script-mediated context scaling via schema-conformant JSON artifacts
+
+This workflow is the clearest demonstration in the catalog of a pattern worth naming explicitly, visible in how `audit-to-pull-request` and `audit-response-merger` interact.
+
+The problem: `audit-response-merger` consolidates the partial PR-response-queue and transform-report artifacts written by every parallel `audit-to-pull-request` instance. With many parallel audit tracks across many stages, that can mean 30+ partial files with hundreds of entries — reading them into context manually (find, open, extract, merge by hand) is not just expensive, it's not reliably possible; the agent runs out of context or loops.
+
+The fix has two parts, and both matter:
+
+1. **Producers write structured JSON embedded in markdown, conforming to a schema they read from a template artifact** — `audit-to-pull-request` doesn't invent its own output shape; it reads the response-queue schema from a template and writes to it exactly.
+2. **The consumer discovers the schema from one sample, then writes scripts to process the rest.** `audit-response-merger` reads exactly one partial file of each type with `file_read` to learn the field names and structure, then authors and runs scripts that parse, extract, group, and merge every remaining file. LLM reasoning is reserved for the one step that's genuinely semantic — judging whether two candidate findings describe the same underlying issue — everything mechanical (parsing, grouping by overlapping line ranges, counting, assembling output) is scripted.
+
+The critical dependency this creates: **both the artifact's producer and its consumer must be aware of its format up front**, so the consumer's scripts can run immediately against real data instead of needing a discovery phase against every file. That's why the schema lives in a template artifact both sides read, rather than being implicit in whatever the producer happens to write. Skipping this — letting producers freelance their output shape — would force the consumer back into per-file manual reading, defeating the entire pattern.
+
+This is a reusable pattern beyond this workflow specifically: whenever a workflow fans out to many parallel instances that need to be reconsolidated, and the volume of partial output would overwhelm a merging agent's context if read manually, the answer is the same — schema-conformant JSON-in-markdown artifacts plus a script-driven consumer that only spends LLM reasoning on genuinely semantic judgment calls.
 
 ---
 
@@ -105,7 +122,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | | Initial version |
+| 3.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 
 ---
 

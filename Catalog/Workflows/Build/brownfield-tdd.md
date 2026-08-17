@@ -2,7 +2,7 @@
 version: "3.7"
 name: "Brownfield TDD Workflow"
 description: "New features or significant changes to an existing codebase requiring test-first development with full research and design."
-hint: "Brownfield with research, TDD, and design phases"
+hint: "The main workhorse — best on shell-buildable codebases. Works best at a certain feature size, discovered through use rather than designed in. The two size-mismatch directions fail differently: too small wastes cost on overspecified Requirements/Plan and triggers unnecessary correction round-trips; too big genuinely starves execution agents of context, making them more error-prone and pushing you toward needing stronger models."
 author: MOSAIC
 id: brownfield-tdd
 referenced_agents:
@@ -77,7 +77,13 @@ artifacts:
 
 ## Design Rationale
 
-Explain why this workflow is structured the way it is. What trade-offs were made? Why are stages ordered as they are? What alternatives were considered and rejected? This section helps future maintainers understand the thinking behind the workflow rather than just reading what it does.
+The king of workflows — the main workhorse. Works very well for software development where the environment is open to shell commands (`dotnet build`, `dotnet test`, etc. — build/test feedback loops the review and test-runner steps can act on). All of MOSAIC's own tooling was built using this workflow.
+
+Quality tracks feature sizing more than it tracks raw context budget. This was never designed in — it's a pattern noticed through use: the workflow simply works well at a certain feature granularity, and the two directions of mismatch fail for different underlying reasons, not just "quality suffers" symmetrically.
+
+**Too small:** Requirements and Plan tend to over-engineer — producing more specificity than the change actually needs. The concrete cost is not a quality defect in the output so much as waste and friction: unnecessary correction round-trips through requirements-review/plan-review, spent on a feature that didn't need that level of scrutiny in the first place.
+
+**Too big:** Plan and Design tend to stay too vague to pin down the real scope, because the non-execution phases genuinely cannot hold enough context to spec a large feature precisely. This one is a real quality risk, not just wasted cost — the execution agents inherit under-specified direction, downstream errors become more likely, and the practical mitigation is reaching for stronger models to compensate, not just accepting slower convergence. Same underlying sensitivity as `greenfield-tdd`'s context-overload behavior, showing up here as an oversized-feature failure mode specifically rather than a general one.
 
 ---
 
@@ -95,7 +101,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 Capture ideas that were explored but not adopted, and future improvements worth considering. This prevents the same dead ends from being revisited unknowingly.
 
 **Ideas under consideration:**
-- (none yet)
+- **Move HITL off the creator rows onto a convergence-gated `approval-presenter`.** `requirements-refinement`, `planner-tdd-soft`, and `contracts-designer` are all gated `✅` directly, so a human reviews every draft they produce — including rounds their paired reviewer (`requirements-review`, `plan-review`, `contracts-review`) would flag anyway — instead of only the version that already converged. `requirements-to-test-cases` proved the fix (a dedicated presenter row reachable only via the reviewer's `On Success`, so it fires once per convergence, not once per round). Revisit this workflow once that pattern has enough real use to trust.
 
 **Dead ends (tried and rejected):**
 - (none yet)

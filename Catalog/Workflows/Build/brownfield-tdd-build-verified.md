@@ -2,7 +2,7 @@
 version: "2.1"
 name: "Brownfield TDD Build-Verified Workflow"
 description: "New features or significant changes to an existing codebase requiring test-first development where compilation/build cannot be verified via standard terminal tools (e.g., PLC/SCL with proprietary toolchains, embedded systems, cross-compilation environments)."
-hint: "Brownfield TDD with build verification for proprietary toolchains"
+hint: "Field-verified (used for real PLC programming), not just theoretical. Use over standard brownfield-tdd whenever building/running tests requires a non-trivial toolchain — offloading that complexity onto a dedicated build-review agent keeps it out of the execution agents' context instead of overloading them with build/deploy mechanics."
 author: MOSAIC
 id: brownfield-tdd-build-verified
 referenced_agents:
@@ -82,7 +82,11 @@ artifacts:
 
 ## Design Rationale
 
-Explain why this workflow is structured the way it is. What trade-offs were made? Why are stages ordered as they are? What alternatives were considered and rejected? This section helps future maintainers understand the thinking behind the workflow rather than just reading what it does.
+Identical to `brownfield-tdd` except for how build/test execution is handled. In standard `brownfield-tdd`, the execution agents (test-writer-tdd, implementation-tdd, and their reviewers) are expected to build and run tests themselves via simple terminal commands. This workflow exists for cases where that path doesn't work — the build/test toolchain is complex enough (proprietary IDEs, COM automation, MCP servers, cross-compilation, target deployment) that making every execution agent competent at it would overload their context with mechanics unrelated to their actual job.
+
+The fix is a dedicated `build-review` agent that owns build/deploy/test-execution exclusively, inserted between each writer and its reviewer. This keeps the complex toolchain knowledge in one place instead of duplicating it across test-writer-tdd, implementation-tdd, tests-review-tdd, and implementation-review — each of those agents stays focused on its own concern and receives build results as an artifact rather than having to invoke the toolchain itself.
+
+Field-verified on real PLC/SCL programming work, not just a theoretical variant.
 
 ---
 
@@ -90,7 +94,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | | Initial version |
+| 2.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 
 ---
 
@@ -99,7 +103,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 Capture ideas that were explored but not adopted, and future improvements worth considering. This prevents the same dead ends from being revisited unknowingly.
 
 **Ideas under consideration:**
-- (none yet)
+- **Move HITL off the creator rows onto a convergence-gated `approval-presenter`.** Same shape as `brownfield-tdd`: `requirements-refinement`, `planner-tdd-soft`, and `contracts-designer` are gated `✅` directly, so a human reviews every draft they produce — including rounds their paired reviewer would flag anyway — instead of only the version that already converged. `requirements-to-test-cases` proved the fix. Revisit this workflow once that pattern has enough real use to trust.
 
 **Dead ends (tried and rejected):**
 - (none yet)

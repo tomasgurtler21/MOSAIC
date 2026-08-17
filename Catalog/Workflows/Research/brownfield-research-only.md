@@ -1,8 +1,8 @@
 ---
-version: "2.1"
+version: "0.1"
 name: "Brownfield Research Only Workflow"
 description: "Exploration, feasibility studies, or codebase analysis for an existing codebase without implementation."
-hint: "Research-only for existing codebase — no planning, design, or implementation"
+hint: "Never used for real research work as far as known — its practical value has been as the simplest possible real workflow (one phase, one subagent, one HITL gate) to smoke-test that the orchestrator itself works end-to-end, distinct from the MosaicTest harness-conformance fixtures."
 author: MOSAIC
 id: brownfield-research-only
 referenced_agents:
@@ -11,10 +11,10 @@ artifacts:
   - Research.md
 ---
 
-<Workflow type="core" name="brownfield-research-only" version="2.1">
+<Workflow type="core" name="brownfield-research-only" version="0.1">
 ## Brownfield Research Only Workflow
 
-> **Version:** 2.1
+> **Version:** 0.1
 
 **Use when:** Exploration, feasibility studies, or codebase analysis for an **existing codebase** without implementation.
 
@@ -31,7 +31,7 @@ artifacts:
 
 ## Design Rationale
 
-Explain why this workflow is structured the way it is. What trade-offs were made? Why are stages ordered as they are? What alternatives were considered and rejected? This section helps future maintainers understand the thinking behind the workflow rather than just reading what it does.
+Structurally trivial by design: one phase, one subagent (`codebase-research`), one HITL gate, straight to COMPLETE. As a research deliverable this has seen little to no real use. Its actual value has been as a minimal real-workflow smoke test — proving the orchestrator can drive a standalone subagent through a complete run, as distinct from the `MosaicTest` category's dedicated harness-conformance fixtures (which test the harness, not the orchestrator's workflow-following behavior against a real, productive workflow).
 
 ---
 
@@ -39,7 +39,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | | Initial version |
+| 0.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 
 ---
 

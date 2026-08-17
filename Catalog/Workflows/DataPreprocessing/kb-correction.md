@@ -2,7 +2,7 @@
 version: 0.1
 name: Knowledge Base Correction Workflow
 description: Apply known corrections to an existing knowledge base. Input is user-provided correction instructions in Requirements.md — could be pasted verification findings, direct feedback, or change descriptions.
-hint: Apply targeted corrections to an existing knowledge base
+hint: "Theoretical — no confirmed real use. Its niche may be narrower than it looks: kb-generation already refreshes an existing KB and flags drift on re-run, and in practice a planner can often fold small doc corrections into a normal feature plan without a dedicated pass. Consider whether generation's own refresh path already covers your case before reaching for this."
 author: MOSAIC
 id: kb-correction
 referenced_agents:
@@ -36,7 +36,9 @@ artifacts:
 
 ## Design Rationale
 
-Explain why this workflow is structured the way it is. What trade-offs were made? Why are stages ordered as they are? What alternatives were considered and rejected? This section helps future maintainers understand the thinking behind the workflow rather than just reading what it does.
+Intended as the targeted-correction counterpart to `kb-generation`: apply known, user-specified corrections (verification findings, direct feedback, change descriptions) rather than doing a full generation/refresh pass. No confirmed real use so far — theoretical.
+
+Its actual necessity is unclear. `kb-generation` already handles refreshing an existing KB and flagging drift when re-run on a changed codebase, and separately, planners running normal feature work have shown they can often fold small KB corrections into their own plan without a dedicated correction pass. Between those two, the scope this workflow is meant to fill — corrections that are neither a full drift-driven refresh nor small enough to ride along in a feature plan — may be narrow enough that this workflow is overkill. Worth revisiting once (or if) a real case shows up that neither of the other two paths covers.
 
 ---
 
@@ -44,7 +46,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | | Initial version |
+| 0.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 
 ---
 
@@ -53,7 +55,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 Capture ideas that were explored but not adopted, and future improvements worth considering. This prevents the same dead ends from being revisited unknowingly.
 
 **Ideas under consideration:**
-- (none yet)
+- **Possible redundancy with kb-generation's refresh path and planner-folded corrections.** Never confirmed in real use. Before investing further in this workflow, check whether a real correction case actually falls outside what kb-generation's refresh/drift-flagging and normal feature-plan doc updates already handle.
 
 **Dead ends (tried and rejected):**
 - (none yet)

@@ -1,8 +1,8 @@
 ---
-version: "3.0"
+version: "0.1"
 name: "Quick Fix Workflow"
 description: "Small changes, bug fixes, or well-understood modifications. Skips research and design."
-hint: "Small fixes and bug fixes without research or design"
+hint: "Reference anti-pattern, not a recommendation — kept to show what 'fast' costs. Skipping test-writer means bug fixes ship with no regression test; skipping requirements means 'well-understood' is never actually verified. Never used in practice. Prefer brownfield-tdd sized down for real small fixes."
 author: MOSAIC
 id: quick-fix
 referenced_agents:
@@ -20,7 +20,7 @@ artifacts:
   - TestResults.md
 ---
 
-<Workflow type="core" name="quick-fix" version="3.0">
+<Workflow type="core" name="quick-fix" version="0.1">
 ## Quick Fix Workflow
 
 **Use when:** Small changes, bug fixes, or well-understood modifications. Skips research and design.
@@ -41,7 +41,9 @@ artifacts:
 
 ## Design Rationale
 
-Explain why this workflow is structured the way it is. What trade-offs were made? Why are stages ordered as they are? What alternatives were considered and rejected? This section helps future maintainers understand the thinking behind the workflow rather than just reading what it does.
+Put together quickly as a theoretical fast path for small, well-understood changes — skip RESEARCH and DESIGN, go straight from planning to implementation. It was never actually exercised on real work, and is retained deliberately as a documented anti-pattern rather than as something to route real work through.
+
+The structural gap it demonstrates: EXECUTION goes straight to `implementation-tdd` with no `test-writer-tdd`/`tests-review-tdd` step ahead of it, so a bug fix under this workflow ships without a regression test proving the bug is fixed and stays fixed. Compounding that, there's no RESEARCH phase and `Requirements.md` isn't even in the artifact list — the workflow has no gate ensuring the "well-understood modification" is actually well understood before planning starts. Both gaps together show why the two things a small-fix workflow is tempted to cut — requirements clarity and regression coverage — are exactly the two things that catch the failure modes small fixes are most prone to. Worth keeping as the negative example for anyone designing a lighter-weight workflow in the future: this is what "lighter" looks like when it cuts the wrong things.
 
 ---
 
@@ -49,7 +51,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | | Initial version |
+| 0.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 
 ---
 
@@ -58,7 +60,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 Capture ideas that were explored but not adopted, and future improvements worth considering. This prevents the same dead ends from being revisited unknowingly.
 
 **Ideas under consideration:**
-- (none yet)
+- **Move HITL off the creator row onto a convergence-gated `approval-presenter`.** `planner-tdd-soft` is gated `✅` directly, so a human reviews every draft plan it produces — including rounds `plan-review` would flag anyway — instead of only the version that already converged. `requirements-to-test-cases` proved the fix. Lower priority here than in the proven workflows, given this workflow's own unresolved status above.
 
 **Dead ends (tried and rejected):**
-- (none yet)
+- **quick-fix as a workflow you'd actually route real work through:** theoretical fast path, never used in practice. Kept in the catalog on purpose as a documented anti-pattern (missing test-writer step, missing requirements phase) rather than deleted — if a genuinely lighter-weight small-fix workflow is designed later, it should explicitly avoid these two cuts. Note it's also used as the example/fixture workflow ID across a large portion of the Deployment/Runner Go test suites and docs, independent of its catalog role — if its structure is ever revised as an anti-pattern demo, that dependency should be checked first.

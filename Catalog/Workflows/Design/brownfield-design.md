@@ -2,7 +2,7 @@
 version: "3.2"
 name: "Brownfield Design Workflow"
 description: "Architecture review, design proposals, or planning large features for an existing codebase without implementation."
-hint: "Full design workflow for existing codebase — research, requirements, planning, and design"
+hint: "The RESEARCH/PLANNING/DESIGN head of brownfield-tdd, ending before EXECUTION — the mirror image of implementation-only's EXECUTION/REVIEW tail. Unlike implementation-only, this one has a genuine standalone reason to exist beyond resuming a split run: 'produce a design without implementing it' is a real, distinct request, not just a workaround for something native run-continuation now covers."
 author: MOSAIC
 id: brownfield-design
 referenced_agents:
@@ -53,7 +53,9 @@ artifacts:
 
 ## Design Rationale
 
-Explain why this workflow is structured the way it is. What trade-offs were made? Why are stages ordered as they are? What alternatives were considered and rejected? This section helps future maintainers understand the thinking behind the workflow rather than just reading what it does.
+Structurally the complement of `implementation-only`: together, RESEARCH → PLANNING → DESIGN (this workflow) plus EXECUTION → REVIEW (`implementation-only`) reconstitute `brownfield-tdd`. Both came from the same split.
+
+The difference is in why each half is still worth keeping. `implementation-only` existed mainly to let a run resume past DESIGN by hand-carrying Plan.md/ContractsDesign.md into a fresh run — a workaround now largely superseded by native mid-execution run persistence and continuation. This half doesn't have that problem: "produce architecture review, a design proposal, or a plan for a large feature, but stop before writing any code" is a legitimate, distinct request in its own right — not a workaround for anything. A user asking for a design review genuinely does not want implementation to happen next, run-continuation or not. That makes this workflow's standalone existence better justified than its sibling's.
 
 ---
 
@@ -61,7 +63,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 1.0 | YYYY-MM-DD | | Initial version |
+| 3.2 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
 
 ---
 
@@ -70,7 +72,7 @@ Explain why this workflow is structured the way it is. What trade-offs were made
 Capture ideas that were explored but not adopted, and future improvements worth considering. This prevents the same dead ends from being revisited unknowingly.
 
 **Ideas under consideration:**
-- (none yet)
+- **Move HITL off the creator rows onto a convergence-gated `approval-presenter`.** `requirements-refinement`, `planner-tdd-soft`, and `contracts-designer` are all gated `✅` directly, so a human reviews every draft they produce — including rounds their paired reviewer would flag anyway — instead of only the version that already converged. `requirements-to-test-cases` proved the fix (a dedicated presenter row reachable only via the reviewer's `On Success`). Revisit this workflow once that pattern has enough real use to trust.
 
 **Dead ends (tried and rejected):**
 - (none yet)
