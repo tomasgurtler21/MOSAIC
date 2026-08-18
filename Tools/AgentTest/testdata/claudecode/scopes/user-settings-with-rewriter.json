@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          { "type": "command", "command": "some-other-tool --rewrite", "async": false }
+        ]
+      }
+    ]
+  }
+}

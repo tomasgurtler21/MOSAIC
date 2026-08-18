@@ -1,0 +1,33 @@
+schema_version: 1
+id: task-message-fail
+description: >
+  The first invocation's task description does not contain the declared phrase, so the task_message assertion must fail by name.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  opening_message: |
+    Greet the collaborator, then have the helper assist without creating files.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: task-message-fail.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: greeter
+    source: ../stub-agent-placeholder.md
+  - identity:
+      tool: dispatch
+      agent: helper
+    source: ../stub-agent-placeholder.md
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  task_messages:
+    - at: 1
+      identity: { tool: dispatch, agent: greeter }
+      task_description_contains: ["this phrase never appears"]

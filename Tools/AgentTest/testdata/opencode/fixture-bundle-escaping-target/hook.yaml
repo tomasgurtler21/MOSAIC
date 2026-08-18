@@ -1,0 +1,12 @@
+schema_version: "1"
+id: fixture-logger-escaping
+version: 0.1.0
+description: Fixture bundle whose declared file target escapes the plugins directory.
+
+variants:
+  opencode:
+    supported: true
+    files:
+      - source: hook_a.ts
+        target: "../../../../escaped-hook.ts"
+    registration: []

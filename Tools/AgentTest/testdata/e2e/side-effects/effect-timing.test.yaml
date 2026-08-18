@@ -1,0 +1,29 @@
+schema_version: 1
+id: effect-timing
+description: >
+  The one collaborator's declared side effect (effect.txt) exists by the
+  time the run finishes; the accompanying end-to-end test also probes for it
+  mid-run, before the collaborator's reply is delivered.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  opening_message: |
+    Ask the effecter to do its one thing, then finish.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: effect-timing.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: effecter
+    source: ../stub-agent-placeholder.md
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  artifact_created:
+    - effect.txt

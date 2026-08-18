@@ -1,0 +1,11 @@
+schema_version: "1"
+id: cycle-bundle
+version: 1.0.0
+description: A bundle with a variant reuse cycle, for testing cycle detection.
+variants:
+  a:
+    supported: true
+    reuses: b
+  b:
+    supported: true
+    reuses: a

@@ -1,0 +1,14 @@
+schema_version: 1
+id: negative-inversion-fails-e2e
+description: >
+  End-to-end inversion scenario (T18.5): a negative test whose declared
+  artifact is never created. The underlying artifact_created assertion
+  fails, which is what the negative test expects, so the overall verdict
+  must be a pass.
+defaults:
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: underlying-fails.test.yaml

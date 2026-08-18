@@ -1,0 +1,19 @@
+schema_version: "1"
+id: fixture-logger-nonempty-registration
+version: 0.1.0
+description: Fixture bundle whose opencode variant declares a non-empty registration list, which Provision must refuse (opencode plugins are auto-discovered by directory presence, never registered).
+
+variants:
+  opencode:
+    supported: true
+    files:
+      - source: hook_a.ts
+        target: hook_a.ts
+    registration:
+      - id: settings-fragment
+        target_path: opencode.json
+        performable: true
+        instruction: >-
+          This variant should never declare a registration step; opencode
+          plugins are auto-discovered by directory presence.
+        fragment: "{}"

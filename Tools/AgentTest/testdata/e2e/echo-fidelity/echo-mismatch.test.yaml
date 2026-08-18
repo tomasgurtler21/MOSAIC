@@ -1,0 +1,31 @@
+schema_version: 1
+id: echo-mismatch
+description: >
+  The scripted subject dispatches one collaborator on the rewrite-prompt
+  path (no direct substitution). The collaborator's scripted reply differs
+  from what the stub registry declared, so echo fidelity must fail the run
+  even though the declared artifact_created assertion is satisfied — no
+  other assertion outcome can suppress an echo mismatch.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  opening_message: |
+    Greet the collaborator and finish.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: echo-mismatch.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: greeter
+    source: ../stub-agent-placeholder.md
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  artifact_created:
+    - greeting.txt

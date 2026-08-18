@@ -1,0 +1,79 @@
+schema_version: 1
+id: full-workflow
+description: >
+  Reference example of a full-workflow orchestrator-layer test: it exercises
+  every declared concept a test definition carries — a parallel-invocation
+  group, an exact invocation-sequence assertion, and every assertion class
+  the evaluator supports.
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  opening_message: |
+    Build the thing described in Requirements.md.
+  invocation_kind: orchestrator
+  allowed_tools: [Task, Read, Write, Edit]
+
+stub_registry: full-workflow.stubs.json
+stub_agents:
+  - identity:
+      tool: Task
+      agent: requirements-refinement
+    source: ../../agents/requirements-refinement.md
+  - identity:
+      tool: Task
+      agent: researcher
+    source: ../../agents/researcher.md
+  - identity:
+      tool: Task
+      agent: library-researcher
+    source: ../../agents/library-researcher.md
+  - identity:
+      tool: Task
+      agent: planner
+    source: ../../agents/planner.md
+timeout: 15m
+turn_limit: 60
+
+parallel_groups:
+  - name: research-fanout
+    members:
+      - { tool: Task, agent: researcher }
+      - { tool: Task, agent: library-researcher }
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: Task, agent: requirements-refinement }
+      - group: research-fanout
+        members:
+          - { tool: Task, agent: researcher }
+          - { tool: Task, agent: library-researcher }
+      - { tool: Task, agent: planner }
+  final_state:
+    phase: COMPLETED
+    last_status: SUCCESS
+  execution_log:
+    agent_ids: ["requirements-refinement#1", "researcher#2", "library-researcher#3", "planner#4"]
+    all_status: SUCCESS
+  protocol_violations: 0
+  artifact_created:
+    - Orchestration-{run_id}/Research.md
+  artifact_not_created:
+    - Orchestration-{run_id}/Design.md
+  min_concurrency:
+    research-fanout: 2
+  task_messages:
+    - at: 4
+      identity: { tool: Task, agent: planner }
+      required_input_artifacts:
+        - Orchestration-{run_id}/Research.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/LibraryResearch.md
+      required_output_artifacts:
+        - Orchestration-{run_id}/Plan.md
+      human_in_the_loop: true
+      task_description_contains: ["plan"]

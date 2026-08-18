@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "test_id": "full-workflow",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "requirements-refinement", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "requirements-refinement#1",
+        "run_id": "full-workflow-run",
+        "status_code": "SUCCESS",
+        "status_message": "Requirements captured."
+      },
+      "side_effects": {
+        "create_files": [
+          { "path": "Requirements.md", "content": "# Requirements\n" }
+        ]
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "researcher", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "researcher#2",
+        "run_id": "full-workflow-run",
+        "status_code": "SUCCESS",
+        "status_message": "Research complete."
+      },
+      "side_effects": {
+        "create_files": [
+          { "path": "Research.md", "content": "# Research\n" }
+        ]
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "library-researcher", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "library-researcher#3",
+        "run_id": "full-workflow-run",
+        "status_code": "SUCCESS",
+        "status_message": "No relevant libraries found."
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "planner", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "planner#4",
+        "run_id": "full-workflow-run",
+        "status_code": "SUCCESS",
+        "status_message": "Plan written."
+      }
+    }
+  ]
+}

@@ -1,0 +1,130 @@
+schema_version: "1"
+id: "claude-code"
+display_name: "Claude Code"
+transform_version: "3.0.0"
+injections_version: "1.1.0"
+
+tools:
+  shape: list
+  universe:
+    - name: "Read"
+      unused: deny
+      by_convention: false
+    - name: "Write"
+      unused: deny
+      by_convention: false
+    - name: "Edit"
+      unused: deny
+      by_convention: false
+    - name: "Bash"
+      unused: deny
+      by_convention: false
+    - name: "Glob"
+      unused: deny
+      by_convention: false
+    - name: "Grep"
+      unused: deny
+      by_convention: false
+    - name: "Task"
+      unused: deny
+      by_convention: false
+    - name: "TaskStop"
+      unused: deny
+      by_convention: false
+    - name: "AskUserQuestion"
+      unused: deny
+      by_convention: false
+  mappings:
+    - generic: "file_read"
+      destinations:
+        - to: main
+          names:
+            - "Read"
+    - generic: "file_write"
+      destinations:
+        - to: main
+          names:
+            - "Write"
+    - generic: "file_edit"
+      destinations:
+        - to: main
+          names:
+            - "Edit"
+    - generic: "terminal"
+      destinations:
+        - to: main
+          names:
+            - "Bash"
+    - generic: "file_search"
+      destinations:
+        - to: main
+          names:
+            - "Glob"
+    - generic: "content_search"
+      destinations:
+        - to: main
+          names:
+            - "Grep"
+    - generic: "subagent"
+      destinations:
+        - to: main
+          names:
+            - "Task"
+            - "TaskStop"
+    - generic: "user_interaction"
+      destinations:
+        - to: main
+          names:
+            - "AskUserQuestion"
+    - generic: "skill"
+      destinations: []
+  custom_tool_destination:
+    - to: field
+      field: mcpServers
+      format: list-block
+  placeholder_expansion:
+    - "Read"
+    - "Write"
+    - "Edit"
+    - "Bash"
+    - "Glob"
+    - "Grep"
+    - "Task"
+    - "TaskStop"
+    - "AskUserQuestion"
+
+paths:
+  agents:
+    supported: true
+    project: ".claude/agents"
+  skills:
+    supported: true
+    project: ".claude/skills"
+  hooks:
+    supported: true
+    project: ".claude/hooks"
+
+extensions:
+  agent: ".md"
+
+frontmatter:
+  model_key: "model"
+  tools_key: "tools"
+  drop:
+    - "recommended_tier"
+    - "tier_rationale"
+    - "required_skills"
+  key_order:
+    - "mosaic_id"
+    - "version"
+    - "mosaic_transform_version"
+    - "mosaic_injections_version"
+    - "mosaic_orchestrator_injections_version"
+    - "name"
+    - "description"
+    - "model"
+    - "tools"
+
+hooks:
+  supported: true
+  variant_key: "claude-code"

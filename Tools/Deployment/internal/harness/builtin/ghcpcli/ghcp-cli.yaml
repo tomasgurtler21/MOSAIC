@@ -1,0 +1,123 @@
+schema_version: "1"
+id: "ghcp-cli"
+display_name: "GitHub Copilot CLI"
+transform_version: "3.0.0"
+injections_version: "1.2.0"
+
+tools:
+  shape: list
+  universe:
+    - name: "read"
+      unused: deny
+      by_convention: false
+    - name: "edit"
+      unused: deny
+      by_convention: false
+    - name: "search"
+      unused: deny
+      by_convention: false
+    - name: "execute"
+      unused: deny
+      by_convention: false
+    - name: "ask_user"
+      unused: deny
+      by_convention: false
+    - name: "agent"
+      unused: deny
+      by_convention: false
+    - name: "skill"
+      unused: deny
+      by_convention: false
+  mappings:
+    - generic: "file_read"
+      destinations:
+        - to: main
+          names:
+            - "read"
+    - generic: "file_write"
+      destinations:
+        - to: main
+          names:
+            - "edit"
+    - generic: "file_edit"
+      destinations:
+        - to: main
+          names:
+            - "edit"
+    - generic: "file_search"
+      destinations:
+        - to: main
+          names:
+            - "search"
+    - generic: "content_search"
+      destinations:
+        - to: main
+          names:
+            - "search"
+    - generic: "terminal"
+      destinations:
+        - to: main
+          names:
+            - "execute"
+    - generic: "user_interaction"
+      destinations:
+        - to: main
+          names:
+            - "ask_user"
+    - generic: "subagent"
+      destinations:
+        - to: main
+          names:
+            - "agent"
+    - generic: "skill"
+      destinations:
+        - to: main
+          names:
+            - "skill"
+  placeholder_expansion:
+    - "read"
+    - "edit"
+    - "search"
+    - "execute"
+    - "ask_user"
+    - "agent"
+
+paths:
+  agents:
+    supported: true
+    project: ".github/agents"
+  skills:
+    supported: true
+    project: ".github/skills"
+  hooks:
+    supported: true
+    project: ".github/hooks"
+
+extensions:
+  agent: ".agent.md"
+
+frontmatter:
+  model_key: "model"
+  tools_key: "tools"
+  add:
+    - key: "user-invocable"
+      value: false
+  drop:
+    - "recommended_tier"
+    - "tier_rationale"
+    - "required_skills"
+  key_order:
+    - "mosaic_id"
+    - "version"
+    - "mosaic_transform_version"
+    - "mosaic_injections_version"
+    - "mosaic_orchestrator_injections_version"
+    - "name"
+    - "description"
+    - "model"
+    - "tools"
+    - "user-invocable"
+
+hooks:
+  supported: true
+  variant_key: "ghcp-cli"

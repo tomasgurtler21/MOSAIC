@@ -1,0 +1,32 @@
+schema_version: 1
+id: single-decision
+description: >
+  Documentation-grade example of a single-decision subagent-layer test: it
+  starts mid-workflow by seeding a pre-run orchestration document via a
+  $ref resolved into the fixture root, instead of letting the subject build
+  that state itself, and asserts only on what the subject's single decision
+  left behind.
+
+layer: subagent
+negative: false
+
+subject:
+  identity: planner
+  agent: planner
+  opening_message: |
+    Continue the workflow using the seeded orchestration state.
+  invocation_kind: subagent
+  allowed_tools: [Read, Write]
+
+stub_registry: single-decision.stubs.json
+timeout: 5m
+turn_limit: 10
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: orchestration-single-decision.md
+
+assertions:
+  final_state:
+    phase: COMPLETED
+    last_status: SUCCESS

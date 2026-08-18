@@ -1,0 +1,28 @@
+schema_version: "1"
+id: fixture-logger
+version: 0.1.0
+description: Minimal fixture bundle for claude-code adapter provisioning tests.
+
+variants:
+  claude-code:
+    supported: true
+    files:
+      - source: hook_a.py
+        target: hook_a.py
+      - source: hook_b.py
+        target: renamed_hook_b.py
+      - source: ../shared.py
+        target: shared.py
+    registration:
+      - id: settings-fragment
+        target_path: .claude/settings.json
+        performable: true
+        instruction: Merge the hooks fragment into .claude/settings.json.
+        fragment: |
+          {
+            "hooks": {
+              "PreToolUse": [
+                { "hooks": [ { "type": "command", "command": "python3", "args": ["hook_a.py"], "async": true, "timeout": 30 } ] }
+              ]
+            }
+          }

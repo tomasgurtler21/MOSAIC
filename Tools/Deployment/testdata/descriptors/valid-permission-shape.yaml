@@ -1,0 +1,31 @@
+# Minimal descriptor using the permission tool shape.
+# Used to verify that shape: permission loads correctly and that MapTools produces a
+# KindMapping Fields value (not a KindList) with per-tool allow/deny dispositions.
+schema_version: "1"
+id: "permission-harness"
+display_name: "Permission Shape Harness"
+tools:
+  shape: permission
+  universe:
+    - name: "read"
+      unused: deny
+      by_convention: false
+    - name: "write"
+      unused: deny
+      by_convention: false
+    - name: "execute"
+      unused: deny
+      by_convention: false
+  mappings:
+    - generic: "file_read"
+      destinations:
+        - to: main
+          names:
+            - "read"
+    - generic: "file_write"
+      destinations:
+        - to: main
+          names:
+            - "write"
+frontmatter:
+  tools_key: "permission"

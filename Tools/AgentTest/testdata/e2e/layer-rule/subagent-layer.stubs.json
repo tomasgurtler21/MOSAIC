@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "test_id": "subagent-layer",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "helper", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "helper#1",
+        "run_id": "layer-run",
+        "status_code": "MAYBE",
+        "status_message": "Helped."
+      }
+    }
+  ]
+}

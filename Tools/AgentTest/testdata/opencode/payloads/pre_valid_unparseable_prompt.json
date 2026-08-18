@@ -1,0 +1,11 @@
+{
+  "hook_event_name": "tool.execute.before",
+  "sessionID": "session-1",
+  "callID": "call-1",
+  "tool": "task",
+  "args": {
+    "subagent_type": "Worker",
+    "description": "do the work",
+    "prompt": "an ordinary prompt, not a Communication Protocol invocation"
+  }
+}

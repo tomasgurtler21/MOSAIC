@@ -1,0 +1,20 @@
+# Invalid descriptor: destination sets separator on a non-scalar (list-block) format.
+# Separator is only meaningful when format == scalar.
+# ValidateToolMappings must reject this with a ValidationError for rule R8.
+schema_version: "1"
+id: "dest-sep-nonscalar"
+display_name: "Dest Separator NonScalar"
+tools:
+  shape: list
+  universe: []
+  mappings:
+    - generic: "some_tool"
+      destinations:
+        - to: field
+          field: myField
+          format: list-block
+          separator: ", "
+          names:
+            - "toolA"
+frontmatter:
+  tools_key: "tools"

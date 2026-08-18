@@ -1,0 +1,35 @@
+# Valid descriptor using the multi-destination mapping format (destinations: key).
+# Used by T2.5 loader tests to verify that the new schema is accepted and that
+# Destinations are populated on the loaded ToolMapping.
+schema_version: "1"
+id: "multidest-list-harness"
+display_name: "Multi-Dest List Harness"
+tools:
+  shape: list
+  universe:
+    - name: "read/readFile"
+      unused: deny
+      by_convention: false
+    - name: "AskUserQuestion"
+      unused: deny
+      by_convention: false
+  mappings:
+    - generic: "file_read"
+      destinations:
+        - to: main
+          names:
+            - "read/readFile"
+    - generic: "user_interaction"
+      destinations:
+        - to: main
+          names:
+            - "AskUserQuestion"
+        - to: field
+          field: mcpServers
+          format: list-block
+          names:
+            - "user-feedback"
+    - generic: "unsupported_tool"
+      destinations: []
+frontmatter:
+  tools_key: "tools"

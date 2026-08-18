@@ -1,0 +1,13 @@
+schema_version: "1"
+id: escaping-bundle
+version: 1.0.0
+description: A bundle whose file source escapes the variant directory, as the real mosaic-logger bundle does with ../hook.yaml.
+variants:
+  alpha:
+    supported: true
+    files:
+      - source: alpha.py
+        target: alpha.py
+      - source: ../hook.yaml
+        target: hook.yaml
+    registration: []

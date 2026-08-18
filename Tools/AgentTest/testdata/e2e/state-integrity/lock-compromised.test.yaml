@@ -1,0 +1,31 @@
+schema_version: 1
+id: lock-compromised
+description: >
+  The scripted subject dispatches one collaborator that would otherwise
+  complete normally, but the sandbox's run-state lock is compromised before
+  the first interception runs. The compromised lock must be reclaimed and
+  reported as a state-integrity fault rather than as a silent success or an
+  assertion failure.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  opening_message: |
+    Greet the one collaborator.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: lock-compromised.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: greeter
+    source: ../stub-agent-placeholder.md
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  artifact_created:
+    - greeting.txt

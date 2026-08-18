@@ -1,0 +1,56 @@
+{
+  "schema_version": "1",
+  "suite_id": "all-excluded-suite",
+  "started_at": "2026-08-07T12:00:00Z",
+  "finished_at": "2026-08-07T12:05:00Z",
+  "tests": [
+    {
+      "test_id": "always-loses-its-lock",
+      "description": "every repetition is excluded for state integrity",
+      "layer": "subagent",
+      "aggregate": {
+        "test_id": "always-loses-its-lock",
+        "verdict": "FAIL",
+        "reasons": ["INFRASTRUCTURE"],
+        "counted": 0,
+        "passed": 0,
+        "excluded": 2,
+        "pass_rate": 0,
+        "required_pass_rate": 0,
+        "infrastructure_failure": true,
+        "total_cost": { "total_usd": 0, "attribution": "attributed", "detail": "" }
+      },
+      "runs": [
+        {
+          "run": { "run_id": "run-001", "test_id": "always-loses-its-lock", "run_number": 1 },
+          "verdict": "FAIL",
+          "reasons": ["STATE_INTEGRITY"],
+          "assertions": [],
+          "conditions": [],
+          "duration_ms": 500,
+          "cost": { "total_usd": 0, "attribution": "attributed", "detail": "" },
+          "negative_applied": false,
+          "subject_version": "unknown",
+          "subject_model": "unknown",
+          "stub_model": "unknown"
+        },
+        {
+          "run": { "run_id": "run-001", "test_id": "always-loses-its-lock", "run_number": 2 },
+          "verdict": "FAIL",
+          "reasons": ["STATE_INTEGRITY"],
+          "assertions": [],
+          "conditions": [],
+          "duration_ms": 500,
+          "cost": { "total_usd": 0, "attribution": "attributed", "detail": "" },
+          "negative_applied": false,
+          "subject_version": "unknown",
+          "subject_model": "unknown",
+          "stub_model": "unknown"
+        }
+      ]
+    }
+  ],
+  "counts": { "FAIL": 1 },
+  "total_cost": { "total_usd": 0, "attribution": "attributed", "detail": "" },
+  "infrastructure_failures": 1
+}

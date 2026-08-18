@@ -1,0 +1,37 @@
+schema_version: "1"
+id: fixture-logger
+version: 0.2.0
+description: >-
+  Same fixture bundle as fixture-bundle/, plus one extra deployed file and
+  one extra event registration, added with no change to any adapter source.
+  Provisioning against this bundle must deploy the extra file and honour the
+  extra event with no adapter code edit.
+
+variants:
+  claude-code:
+    supported: true
+    files:
+      - source: hook_a.py
+        target: hook_a.py
+      - source: hook_b.py
+        target: renamed_hook_b.py
+      - source: hook_c.py
+        target: hook_c.py
+      - source: ../shared.py
+        target: shared.py
+    registration:
+      - id: settings-fragment
+        target_path: .claude/settings.json
+        performable: true
+        instruction: Merge the hooks fragment into .claude/settings.json.
+        fragment: |
+          {
+            "hooks": {
+              "PreToolUse": [
+                { "hooks": [ { "type": "command", "command": "python3", "args": ["hook_a.py"], "async": true, "timeout": 30 } ] }
+              ],
+              "SessionStart": [
+                { "hooks": [ { "type": "command", "command": "python3", "args": ["hook_c.py"], "async": true, "timeout": 30 } ] }
+              ]
+            }
+          }

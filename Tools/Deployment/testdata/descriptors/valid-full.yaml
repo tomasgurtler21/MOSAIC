@@ -1,0 +1,100 @@
+# Full harness descriptor exercising all seven field groups described in the schema.
+# Used by load tests to verify that every field is exposed after loading.
+schema_version: "1"
+id: "test-harness"
+display_name: "Test Harness"
+transform_version: "2.0.0"
+injections_version: "1.1.0"
+
+# Field group 2: model catalog
+models:
+  ids:
+    - "provider/model-fast"
+    - "provider/model-smart"
+  format_hint: "provider/model-id"
+
+# Field group 3: tool mappings using the multi-destination destinations: schema
+tools:
+  shape: list
+  universe:
+    - name: "read/readFile"
+      unused: deny
+      by_convention: false
+    - name: "write/createFile"
+      unused: deny
+      by_convention: false
+    - name: "write/editFile"
+      unused: deny
+      by_convention: false
+    - name: "search/textSearch"
+      unused: deny
+      by_convention: false
+    - name: "search/listDirectory"
+      unused: allow
+      by_convention: true
+  mappings:
+    - generic: "file_read"
+      destinations:
+        - to: main
+          names:
+            - "read/readFile"
+    - generic: "file_write"
+      destinations:
+        - to: main
+          names:
+            - "write/createFile"
+            - "write/editFile"
+    - generic: "content_search"
+      destinations:
+        - to: main
+          names:
+            - "search/textSearch"
+    - generic: "file_search"
+      destinations: []
+  custom_tool_template: "mcp/%s"
+  placeholder_expansion:
+    - "read/readFile"
+    - "write/createFile"
+
+# Field group 4: deployment paths for all three artifact kinds
+paths:
+  agents:
+    supported: true
+    project: ".test/agents"
+  skills:
+    supported: true
+    project: ".test/skills"
+  hooks:
+    supported: false
+
+# Field group 5: file extension rules
+extensions:
+  agent: ".test.md"
+  skill: ".md"
+
+# Field group 6: frontmatter shaping rules
+frontmatter:
+  model_key: "model"
+  tools_key: "tools"
+  add:
+    - key: "custom-field"
+      value: "always-present"
+  drop:
+    - "recommended_tier"
+    - "tier_rationale"
+  key_order:
+    - "id"
+    - "version"
+    - "name"
+    - "model"
+    - "tools"
+    - "custom-field"
+
+# Field group 7: harness-level injection content
+injections:
+  - name: "HarnessConstraints"
+    content: "This is the harness-level constraint text.\nUse only approved tools."
+
+hooks:
+  supported: false
+  variant_key: ""

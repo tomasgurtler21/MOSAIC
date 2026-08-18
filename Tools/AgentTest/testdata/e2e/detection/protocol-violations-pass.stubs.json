@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "test_id": "protocol-violations-pass",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "greeter", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "greeter#1",
+        "run_id": "detect-run",
+        "status_code": "SUCCESS",
+        "status_message": "Greeted."
+      },
+      "side_effects": {
+        "create_files": [
+          { "path": "greeting.txt", "content": "hello\n" }
+        ]
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "helper", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "helper#2",
+        "run_id": "detect-run",
+        "status_code": "MAYBE",
+        "status_message": "Helped."
+      }
+    }
+  ]
+}

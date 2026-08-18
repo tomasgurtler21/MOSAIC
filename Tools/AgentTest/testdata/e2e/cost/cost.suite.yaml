@@ -1,0 +1,14 @@
+schema_version: 1
+id: cost-e2e
+description: >
+  End-to-end cost scenario (T18.9): one collaborator dispatched, then
+  finish. The scenario's own domain.CostProvider double (not this suite's
+  cost) is what varies between a well-formed and an unattributable cost
+  report; this test definition is identical for both.
+defaults:
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: cost-check.test.yaml

@@ -1,0 +1,6 @@
+# Minimal valid descriptor containing only the required identity fields.
+# All optional field groups are absent; the loader must produce a valid descriptor
+# with zero values for optional fields.
+schema_version: "1"
+id: "minimal-harness"
+display_name: "Minimal Harness"

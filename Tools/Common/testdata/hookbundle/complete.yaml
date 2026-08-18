@@ -1,0 +1,27 @@
+schema_version: "1"
+id: sample-bundle
+version: 2.0.0
+description: A complete sample bundle with every field populated.
+placeholder: true
+content_hash: "sha256:deadbeef"
+variants:
+  alpha:
+    supported: true
+    files:
+      - source: alpha.py
+        target: alpha.py
+    registration:
+      - id: settings-fragment
+        target_path: .alpha/settings.json
+        performable: true
+        instruction: Register alpha.
+        fragment: |
+          {
+            "hooks": {}
+          }
+  beta:
+    supported: true
+    files:
+      - source: beta.py
+        target: beta.py
+    registration: []

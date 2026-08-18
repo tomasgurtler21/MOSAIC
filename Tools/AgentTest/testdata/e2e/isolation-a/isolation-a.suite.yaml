@@ -1,0 +1,15 @@
+schema_version: 1
+id: isolation-a-e2e
+description: >
+  End-to-end run-isolation scenario (T18.7), first of two independent runs:
+  its own collaborator creates artifact-a.txt only. Paired with
+  testdata/e2e/isolation-b, which creates a differently named artifact —
+  together these two independent RunScenario invocations demonstrate that
+  one run's sandbox, log and state never carry the other's artifacts.
+defaults:
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: isolation-a-test.test.yaml

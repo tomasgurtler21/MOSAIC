@@ -1,0 +1,13 @@
+schema_version: "1"
+id: partial-bundle
+version: 1.0.0
+description: A bundle where one variant is not supported by this harness.
+variants:
+  alpha:
+    supported: true
+    files:
+      - source: alpha.py
+        target: alpha.py
+    registration: []
+  gamma:
+    supported: false

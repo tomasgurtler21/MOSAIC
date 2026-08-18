@@ -1,0 +1,11 @@
+schema_version: "1"
+id: dropdir-bundle
+version: 1.0.0
+description: A bundle whose variant registers purely by directory drop, with no registration steps.
+variants:
+  dropvariant:
+    supported: true
+    files:
+      - source: plugin.ts
+        target: plugin.ts
+    registration: []

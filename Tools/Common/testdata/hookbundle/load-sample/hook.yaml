@@ -1,0 +1,11 @@
+schema_version: "1"
+id: load-sample-bundle
+version: 1.0.0
+description: A bundle directory used to exercise Load, which reads hook.yaml from a bundle directory.
+variants:
+  alpha:
+    supported: true
+    files:
+      - source: alpha.py
+        target: alpha.py
+    registration: []

@@ -1,0 +1,16 @@
+# Invalid descriptor: destination declares to: field but omits the required field name.
+# ValidateToolMappings must reject this with a ValidationError for rule R4.
+schema_version: "1"
+id: "dest-field-no-name"
+display_name: "Dest Field No Name"
+tools:
+  shape: list
+  universe: []
+  mappings:
+    - generic: "some_tool"
+      destinations:
+        - to: field
+          names:
+            - "toolA"
+frontmatter:
+  tools_key: "tools"

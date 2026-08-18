@@ -1,0 +1,8 @@
+# Invalid descriptor: tools.universe is given a scalar string instead of a sequence.
+# Parse must reject this with a located type error.
+schema_version: "1"
+id: "wrong-type-harness"
+display_name: "Wrong Type Harness"
+tools:
+  shape: list
+  universe: "not-a-sequence"

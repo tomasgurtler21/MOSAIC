@@ -1,0 +1,35 @@
+schema_version: 1
+id: execution-log-all-status-fail
+description: >
+  Every seeded execution-log row's status is SUCCESS, not the declared FAILURE, so execution_log.all_status must fail by name. agent_ids is left undeclared so this test isolates all_status as the only evaluated subfield.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  opening_message: |
+    Greet the collaborator, then have the helper assist without creating files.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: execution-log-all-status-fail.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: greeter
+    source: ../stub-agent-placeholder.md
+  - identity:
+      tool: dispatch
+      agent: helper
+    source: ../stub-agent-placeholder.md
+timeout: 30s
+turn_limit: 5
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: orchestration.md
+
+assertions:
+  execution_log:
+    all_status: FAILURE

@@ -1,0 +1,192 @@
+# mosaic-deploy tool configuration
+#
+# This file is the project-level configuration for the MOSAIC deployment tool.
+# It is typically committed to the MOSAIC repository and shared across the team.
+#
+# Location after install: MosaicDeploy/config/tool-config.yaml (at MOSAIC root)
+# Source template:        Tools/Deployment/config/tool-config.yaml
+#
+# Per-user settings (tier-to-model mappings, remembered custom model IDs, and
+# personal tool-destination overrides) live in user-config.yaml, which should
+# NOT be committed to the repository.
+#
+# Every key this file supports is listed below. A key you omit falls back to the
+# default shown in its comment; an unknown key is ignored. Full reference with
+# worked examples: Tools/Deployment/docs/configuration.md
+#
+# Keys in this file:
+#   schema_version            (string)
+#   utility_agent_allow_list  (list of strings)
+#   allow_external_modules    (bool)
+#   log_retention_runs        (int)
+#   tool_destinations         (map: harness-id -> list of tool mappings)
+
+schema_version: "1"
+
+# ---------------------------------------------------------------------------
+# utility_agent_allow_list
+# ---------------------------------------------------------------------------
+# Controls which utility agents appear in the selection UI during deployment.
+# Only agents whose key (file base name, without extension) appears in this
+# list are offered to the user.
+#
+# An empty list means no utility agents are selectable.
+#
+# NOTE ON DEFAULTS: omitting this key entirely is NOT the same as an empty list.
+# When the whole tool-config.yaml file is absent, the tool applies a built-in
+# default that enables all six shipped utility agents. Once this file exists,
+# the value written here is authoritative — so `[]` really does mean "none".
+#
+# The six shipped utility agent keys:
+#   anthropic-subagent-creator
+#   harness-bug-hunter
+#   orchestration-architect
+#   system-prompt-capturer
+#   transformation
+#   workflow-creator
+#
+# Example:
+#   utility_agent_allow_list:
+#     - orchestration-architect
+#     - workflow-creator
+utility_agent_allow_list:
+  - workflow-creator
+  - anthropic-subagent-creator
+  - injections-helper
+
+# ---------------------------------------------------------------------------
+# allow_external_modules
+# ---------------------------------------------------------------------------
+# Controls whether external harness modules discovered under
+# MosaicDeploy/harnesses/ may be used. Defaults to false so that external
+# module execution is always an explicit operator decision.
+#
+# An external module is a subdirectory containing a `harness-exec` executable
+# alongside its `harness.yaml`. Enabling this runs that binary as a subprocess.
+#
+# Set to true only if you have verified the module binary and trust its source.
+# The --allow-external command-line flag enables it for a single run without
+# changing this file. See docs/external-protocol.md for the security model.
+#
+# Descriptor-only harnesses (a `harness.yaml` with NO executable beside it) are
+# always available and are not gated by this setting.
+allow_external_modules: false
+
+# ---------------------------------------------------------------------------
+# log_retention_runs
+# ---------------------------------------------------------------------------
+# The maximum number of run entries to keep in MosaicDeploy/logs/history.log.
+# 0 means keep all history (unbounded). Oldest entries are dropped first.
+# MosaicDeploy/logs/latest.log always holds the most recent run in full and is
+# unaffected by this setting.
+#
+# Example:
+#   log_retention_runs: 50
+log_retention_runs: 0
+
+# ---------------------------------------------------------------------------
+# tool_destinations
+# ---------------------------------------------------------------------------
+# Declares how a generic tool name maps to harness-specific tool names, without
+# rebuilding the tool.
+#
+# WHY YOU WANT THIS: during deployment, any generic tool an agent declares that
+# the target harness has no mapping for triggers a "custom tool" prompt asking
+# you to type a harness-side name. Those answers are NOT remembered between
+# runs, so you get asked again on every deploy and every update. Declaring the
+# mapping here answers the question permanently. It also answers the mirror-
+# image prompt during `promote` (harness tool -> which generic tool?), because
+# both directions read this same table.
+#
+# STRUCTURE: harness-id -> ordered list of mappings.
+# Built-in harness ids: claude-code, opencode, ghcp-cli, vscode-ghcp
+# (a descriptor-only or external harness uses the `id:` in its harness.yaml).
+#
+# The syntax is intentionally IDENTICAL to the `tools.mappings:` block of a
+# harness descriptor, so an entry can be copy-pasted between a harness.yaml and
+# this file unchanged. See docs/descriptor-schema.md for the descriptor side.
+#
+# PRECEDENCE, per generic tool, highest first:
+#   user-config.yaml  >  tool-config.yaml  >  harness descriptor
+# Precedence applies to a generic tool as a WHOLE UNIT: a higher-precedence
+# declaration replaces the entire destination set below it. Destinations are
+# never merged across layers. To extend a built-in mapping rather than replace
+# it, restate the built-in destinations alongside your new ones.
+#
+# Changing this file changes the deployed agents' tool_mappings_version stamp,
+# so already-deployed agents are correctly detected as stale on the next update.
+# See "The tool_mappings_version stamp" in docs/configuration.md for details —
+# it is tool-managed bookkeeping; do not hand-edit the stamped value.
+#
+# ---- Mapping fields ----
+#   generic       (required) the generic tool name used in catalog source files.
+#                 Must be unique within one harness's list.
+#   destinations  (required) ordered list of output targets. An EMPTY list
+#                 (`destinations: []`) is legal and means "this harness
+#                 explicitly does not support this tool" — it silences the
+#                 prompt and emits nothing.
+#
+# ---- Destination fields ----
+#   to         (required) `main` or `field`.
+#              main  = append names to the harness's own tools key, rendered in
+#                      the harness's own tools format.
+#              field = write names to a SEPARATE frontmatter key of your choice.
+#   field      (required when to: field / forbidden when to: main)
+#              the frontmatter key to emit.
+#   format     (only when to: field) `list-block` (default), `list-flow`, or
+#              `scalar`. Forbidden when to: main — the harness's own format wins.
+#   separator  (only when format: scalar) string joining the names.
+#              Defaults to ", ".
+#   names      (required, non-empty) the harness-side tool or MCP server names
+#              this destination contributes. Different destinations of the same
+#              mapping may contribute different names.
+#
+# A mapping may declare several destinations; each is rendered independently.
+# Two destinations in one mapping may not share the same (to, field) pair.
+#
+# Generic tool names all four built-in harnesses already map (you only need an
+# entry here to OVERRIDE one of these):
+#   file_read, file_write, file_edit, file_search, content_search,
+#   terminal, subagent, user_interaction, skill
+#
+# ---- Example ----
+#   tool_destinations:
+#     claude-code:
+#       # 1. Give an otherwise-unmapped generic tool a concrete harness name.
+#       #    This is the entry that stops the repeated prompt.
+#       - generic: knowledge_base
+#         destinations:
+#           - to: main
+#             names: ["mcp__mosaic-kb__search"]
+#
+#       # 2. Override a built-in mapping and fan it out to two destinations:
+#       #    the normal tools key plus a separate `mcp_servers:` key.
+#       - generic: user_interaction
+#         destinations:
+#           - to: main
+#             names: ["AskUserQuestion"]
+#           - to: field
+#             field: mcpServers
+#             format: list-block
+#             names: ["human-in-the-loop"]
+#
+#       # 3. A field destination rendered as one comma-separated scalar.
+#       - generic: browser
+#         destinations:
+#           - to: field
+#             field: extra_tools
+#             format: scalar
+#             separator: ", "
+#             names: ["playwright", "fetch"]
+#
+#     opencode:
+#       # 4. Declare a tool unsupported on this harness: no output, no prompt.
+#       - generic: knowledge_base
+#         destinations: []
+#
+# A malformed entry is a fatal startup error naming the exact path, e.g.
+#   tool_destinations.claude-code[1].destinations[0].field
+# so you can locate it without guesswork.
+#
+# Uncomment and edit to use. The key may be omitted entirely.
+#tool_destinations: {}

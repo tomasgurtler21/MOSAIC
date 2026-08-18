@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "test_id": "min-concurrency-pass",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "researcher", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "researcher#1",
+        "run_id": "concurrency-run",
+        "status_code": "SUCCESS",
+        "status_message": "Researched."
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "library-researcher", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "library-researcher#2",
+        "run_id": "concurrency-run",
+        "status_code": "SUCCESS",
+        "status_message": "Library research done."
+      }
+    }
+  ]
+}

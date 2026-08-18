@@ -1,0 +1,450 @@
+schema_version: "1"
+id: mosaic-logger
+version: 1.3.0
+description: >-
+  Captures hook events across four harnesses — Claude Code (12 events), GHCP
+  CLI (14 events), VS Code Chat Extension (8 events), and OpenCode (5 hooks:
+  event, tool.execute.before, tool.execute.after, permission.ask,
+  experimental.session.compacting) — for full MOSAIC orchestration log capture:
+  session lifecycle, user turns, assistant turns, tool calls, subagent
+  invocations, usage records, notifications, and compaction events.
+  Produces structured JSONL event streams, per-invocation markdown artifacts,
+  and byte-identical transcript exports under OrchestrationLogs/.
+
+# placeholder is absent: all four variants — claude-code, vscode-ghcp, ghcp-cli, and
+# opencode — carry real, deployable adapters. The schema has no per-variant placeholder
+# flag, so the whole-bundle key is omitted rather than mislabelling any deployable
+# adapter as unauthored.
+
+# content_hash is absent: the claude-code variant lists ../hook.yaml in its file
+# set so the deployed adapter can read its own version at runtime (adapter_version
+# in run_start events). Listing hook.yaml in the hash input makes the hash
+# unstable by construction (the hash value changes the file, changing the hash).
+# validateContentHash performs no check when this field is empty.
+
+variants:
+  claude-code:
+    supported: true
+    files:
+      - source: mosaic_logger.py
+        target: mosaic_logger.py
+      - source: mosaic_logger_core.py
+        target: mosaic_logger_core.py
+      - source: mosaic_logger_runstate.py
+        target: mosaic_logger_runstate.py
+      - source: mosaic_logger_export.py
+        target: mosaic_logger_export.py
+      - source: mosaic_logger_transcript.py
+        target: mosaic_logger_transcript.py
+      - source: mosaic_logger_handlers_session.py
+        target: mosaic_logger_handlers_session.py
+      - source: mosaic_logger_handlers_invocation.py
+        target: mosaic_logger_handlers_invocation.py
+      - source: mosaic_logger_handlers_tools.py
+        target: mosaic_logger_handlers_tools.py
+      - source: mosaic_logger_artifacts.py
+        target: mosaic_logger_artifacts.py
+      - source: mosaic_logger_usage.py
+        target: mosaic_logger_usage.py
+      - source: ../hook.yaml
+        target: hook.yaml
+    registration:
+      - id: settings-fragment
+        target_path: .claude/settings.json
+        performable: true
+        instruction: >-
+          Merge the hooks fragment into .claude/settings.json to register the
+          mosaic-logger dispatcher as a handler for all 12 Claude Code hook
+          events. SubagentStart is synchronous so that the agent_id mapping is
+          written before the subagent's first tool call. All other events are
+          asynchronous so the adapter cannot block or deny operations.
+        fragment: |
+          {
+            "hooks": {
+              "SessionStart": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "SessionEnd": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "UserPromptSubmit": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "Stop": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "PreToolUse": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "PostToolUse": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "PostToolUseFailure": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "SubagentStart": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": false,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "SubagentStop": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "Notification": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "PreCompact": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ],
+              "PostCompact": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "command": "python3",
+                      "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/mosaic_logger.py"],
+                      "async": true,
+                      "timeout": 30
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+
+  opencode:
+    supported: true
+    files:
+      - source: plugin.ts
+        target: mosaic-logger.ts
+      - source: lib/core.ts
+        target: lib/core.ts
+      - source: lib/runstate.ts
+        target: lib/runstate.ts
+      - source: lib/correlation.ts
+        target: lib/correlation.ts
+      - source: lib/artifacts.ts
+        target: lib/artifacts.ts
+      - source: lib/export.ts
+        target: lib/export.ts
+      - source: lib/handlers_session.ts
+        target: lib/handlers_session.ts
+      - source: lib/handlers_invocation.ts
+        target: lib/handlers_invocation.ts
+      - source: lib/handlers_tools.ts
+        target: lib/handlers_tools.ts
+      - source: lib/handlers_messages.ts
+        target: lib/handlers_messages.ts
+      - source: lib/handlers_notifications.ts
+        target: lib/handlers_notifications.ts
+      - source: ../hook.yaml
+        target: hook.yaml
+    registration: []
+
+  vscode-ghcp:
+    supported: true
+    files:
+      - source: mosaic_logger.py
+        target: mosaic_logger.py
+      - source: mosaic_logger_core.py
+        target: mosaic_logger_core.py
+      - source: mosaic_logger_runstate.py
+        target: mosaic_logger_runstate.py
+      - source: mosaic_logger_export.py
+        target: mosaic_logger_export.py
+      - source: mosaic_logger_transcript.py
+        target: mosaic_logger_transcript.py
+      - source: mosaic_logger_handlers_session.py
+        target: mosaic_logger_handlers_session.py
+      - source: mosaic_logger_handlers_invocation.py
+        target: mosaic_logger_handlers_invocation.py
+      - source: mosaic_logger_handlers_tools.py
+        target: mosaic_logger_handlers_tools.py
+      - source: mosaic_logger_artifacts.py
+        target: mosaic_logger_artifacts.py
+      - source: ../hook.yaml
+        target: hook.yaml
+    registration:
+      - id: settings-fragment
+        target_path: .github/hooks/mosaic-logger.json
+        performable: true
+        instruction: >-
+          Write the hooks configuration to .github/hooks/mosaic-logger.json to
+          register the mosaic-logger dispatcher for the 8 supported VS Code Chat
+          Extension hook events. VS Code hooks are enabled by default; no
+          user-level setting controls this. If hooks do not fire, the enterprise
+          ChatHooks policy (surfacing as chat.useHooks) may have been disabled
+          by an administrator — this is an organization-wide setting that
+          per-project deployment tooling cannot modify.
+        fragment: |
+          {
+            "hooks": {
+              "SessionStart":     [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "UserPromptSubmit": [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "PreToolUse":       [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "PostToolUse":      [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "PreCompact":       [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "SubagentStart":    [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "SubagentStop":     [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ],
+              "Stop":             [ { "type": "command", "command": "python3 mosaic_logger.py", "windows": "py mosaic_logger.py", "cwd": ".github/hooks" } ]
+            }
+          }
+
+  ghcp-cli:
+    supported: true
+    files:
+      - source: mosaic_logger.py
+        target: mosaic_logger.py
+      - source: mosaic_logger_core.py
+        target: mosaic_logger_core.py
+      - source: mosaic_logger_runstate.py
+        target: mosaic_logger_runstate.py
+      - source: mosaic_logger_export.py
+        target: mosaic_logger_export.py
+      - source: mosaic_logger_transcript.py
+        target: mosaic_logger_transcript.py
+      - source: mosaic_logger_handlers_session.py
+        target: mosaic_logger_handlers_session.py
+      - source: mosaic_logger_handlers_invocation.py
+        target: mosaic_logger_handlers_invocation.py
+      - source: mosaic_logger_handlers_tools.py
+        target: mosaic_logger_handlers_tools.py
+      - source: mosaic_logger_artifacts.py
+        target: mosaic_logger_artifacts.py
+      - source: ../hook.yaml
+        target: hook.yaml
+    registration:
+      - id: settings-fragment
+        target_path: .github/hooks/mosaic-logger.json
+        performable: true
+        instruction: >-
+          Write the hooks configuration to .github/hooks/mosaic-logger.json to
+          register the mosaic-logger dispatcher as a handler for all 14 GHCP CLI
+          hook events. subagentStart is synchronous so that the agent_id mapping
+          is written before the subagent's first tool call. All other events are
+          asynchronous so the adapter cannot block or deny operations.
+        fragment: |
+          {
+            "hooks": {
+              "sessionStart": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py sessionStart",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "sessionEnd": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py sessionEnd",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "userPromptSubmitted": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py userPromptSubmitted",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "userPromptTransformed": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py userPromptTransformed",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "preToolUse": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py preToolUse",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "postToolUse": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py postToolUse",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "postToolUseFailure": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py postToolUseFailure",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "preCompact": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py preCompact",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "agentStop": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py agentStop",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "subagentStart": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py subagentStart",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "subagentStop": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py subagentStop",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "permissionRequest": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py permissionRequest",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "errorOccurred": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py errorOccurred",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ],
+              "notification": [
+                {
+                  "type": "command",
+                  "command": "python mosaic_logger.py notification",
+                  "cwd": ".github/hooks",
+                  "timeout": 30
+                }
+              ]
+            }
+          }

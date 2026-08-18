@@ -1,0 +1,22 @@
+schema_version: 1
+id: never-finishes
+description: >
+  The scripted subject never reaches a Result turn: this suite's own stand-in
+  sleeps well past the declared timeout before it would otherwise process
+  anything, so the parent process's context cancellation kills it — the same
+  way a genuinely hung real subject would be ended. The run must be reported
+  as a timeout, not as a spawn failure or an ordinary assertion failure.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  opening_message: |
+    Do something that never finishes.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: never-finishes.stubs.json
+timeout: 200ms
+turn_limit: 5

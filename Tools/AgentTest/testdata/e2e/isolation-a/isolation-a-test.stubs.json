@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "test_id": "isolation-a-test",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "worker-a", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "worker-a#1",
+        "run_id": "isolation-a-run",
+        "status_code": "SUCCESS",
+        "status_message": "Done."
+      },
+      "side_effects": {
+        "create_files": [
+          { "path": "artifact-a.txt", "content": "a\n" }
+        ]
+      }
+    }
+  ]
+}

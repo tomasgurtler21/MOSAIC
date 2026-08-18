@@ -1,0 +1,21 @@
+schema_version: "1"
+id: test-bundle
+version: 1.0.0
+description: Test bundle for hook integrity validation — valid-hash fixture.
+placeholder: false
+
+# content_hash covers all listed variant files. The stored hash here is the correct
+# SHA-256 of test-harness/test-hook.sh (140 bytes, LF line endings). The catalog must
+# verify this hash and report no hook-hash-mismatch issue for this bundle.
+#
+# If the hash algorithm covers multiple files, this fixture uses a single-file variant
+# so any per-file or combined-file approach yields the same result.
+content_hash: "sha256:1b30980a2aaf3e12da7efa86d67b6005209ece0e80abb23415a2a906a95dab5e"
+
+variants:
+  test-harness:
+    supported: true
+    files:
+      - source: test-hook.sh
+        target: test-hook.sh
+    registration: []

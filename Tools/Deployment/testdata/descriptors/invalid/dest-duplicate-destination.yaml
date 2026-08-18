@@ -1,0 +1,21 @@
+# Invalid descriptor: two destinations within the same mapping share the same (to, field) pair.
+# ValidateToolMappings must reject this with a ValidationError for rule R9.
+schema_version: "1"
+id: "dest-dup-destination"
+display_name: "Dest Duplicate Destination"
+tools:
+  shape: list
+  universe: []
+  mappings:
+    - generic: "some_tool"
+      destinations:
+        - to: field
+          field: myField
+          names:
+            - "toolA"
+        - to: field
+          field: myField
+          names:
+            - "toolB"
+frontmatter:
+  tools_key: "tools"

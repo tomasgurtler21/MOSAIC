@@ -1,0 +1,40 @@
+schema_version: 1
+id: min-concurrency-pass
+description: >
+  Two collaborators are dispatched as one parallel group whose pre-invocation
+  interceptions both fire before either's post-invocation interception, so
+  the reconstructed peak for the group is 2. The declared minimum (2) is
+  what actually happened, so min_concurrency passes.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  opening_message: |
+    Dispatch the researcher and the library researcher together, then finish.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: min-concurrency-pass.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: researcher
+    source: ../stub-agent-placeholder.md
+  - identity:
+      tool: dispatch
+      agent: library-researcher
+    source: ../stub-agent-placeholder.md
+timeout: 30s
+turn_limit: 5
+
+parallel_groups:
+  - name: fanout
+    members:
+      - { tool: dispatch, agent: researcher }
+      - { tool: dispatch, agent: library-researcher }
+
+assertions:
+  min_concurrency:
+    fanout: 2

@@ -1,0 +1,14 @@
+schema_version: 1
+id: reference-examples
+description: >
+  Reference examples of the three authored formats — test suite, test
+  definition, stub registry — doubling as this format's documentation and as
+  pre-flight's happy-path fixture.
+defaults:
+  timeout: 15m
+  turn_limit: 60
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: full-workflow.test.yaml
+  - path: single-decision.test.yaml

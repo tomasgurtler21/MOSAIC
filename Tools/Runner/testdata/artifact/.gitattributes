@@ -1,0 +1,5 @@
+# Keep test fixture files with LF line endings.
+# The artifact round-trip test (TestRoundTrip_CanonicalFile_IdenticalBytes)
+# compares Parse→Render output byte-for-byte against canonical.md.
+# The renderer always produces LF, so the fixture must not be converted.
+*.md text eol=lf

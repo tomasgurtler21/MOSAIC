@@ -1,0 +1,33 @@
+schema_version: 1
+id: detection-e2e
+description: >
+  End-to-end detection scenario (T18.2): one shared subject/collaborator
+  script produces a fixed set of facts (an ordered two-collaborator
+  invocation sequence, one created artifact, one never-created artifact, one
+  collaborator response that violates the Communication Protocol, and a
+  seeded orchestration document), and each test below declares a different
+  assertion against those same facts — some correctly, some deliberately
+  wrong — so every reachable assertion class is shown both passing and
+  failing, with the failing assertion named in the result.
+defaults:
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: sequence-pass.test.yaml
+  - path: sequence-fail.test.yaml
+  - path: artifact-created-pass.test.yaml
+  - path: artifact-created-fail.test.yaml
+  - path: artifact-not-created-pass.test.yaml
+  - path: artifact-not-created-fail.test.yaml
+  - path: final-state-pass.test.yaml
+  - path: final-state-fail.test.yaml
+  - path: final-state-last-status-fail.test.yaml
+  - path: execution-log-pass.test.yaml
+  - path: execution-log-fail.test.yaml
+  - path: execution-log-all-status-fail.test.yaml
+  - path: task-message-pass.test.yaml
+  - path: task-message-fail.test.yaml
+  - path: protocol-violations-pass.test.yaml
+  - path: protocol-violations-fail.test.yaml

@@ -1,0 +1,31 @@
+schema_version: 1
+id: aggregation-below-threshold
+description: >
+  The same fixed 1-of-2 mixed outcome as aggregation-meets-threshold, but
+  this test declares a pass rate (1.0) the mixed outcome does not reach, so
+  the aggregate verdict is a fail.
+layer: subagent
+negative: false
+repetitions: 2
+pass_rate: 1.0
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  opening_message: |
+    Ask the effecter to do its one thing, then finish.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: aggregation-below-threshold.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: effecter
+    source: ../stub-agent-placeholder.md
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  artifact_created:
+    - effect.txt

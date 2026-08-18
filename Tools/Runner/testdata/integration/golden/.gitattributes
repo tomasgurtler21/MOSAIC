@@ -1,0 +1,5 @@
+# Keep golden test fixture files with LF line endings.
+# The integration golden file tests (TestIntegration_*_GoldenFileMatch) compare
+# the artifact renderer's output byte-for-byte against these files.
+# The renderer always produces LF, so the fixtures must not be converted to CRLF.
+*.md text eol=lf

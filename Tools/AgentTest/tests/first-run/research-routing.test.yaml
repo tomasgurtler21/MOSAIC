@@ -1,0 +1,58 @@
+schema_version: 1
+id: research-routing
+description: >
+  Brownfield-tdd RESEARCH phase: codebase-research dispatched first, returns
+  SUCCESS, orchestrator advances to requirements-refinement. Asserts the exact
+  invocation sequence, the task message content (artifact paths, HITL flags,
+  task description keywords), and that the orchestration document is created.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  opening_message: |
+    Task: Add a --verbose flag to the widgets CLI so it prints per-item
+    diagnostics to stderr.
+
+    Workflow type: brownfield-tdd
+
+    Checkpoints: disabled
+
+    Constraints: none. Do not ask me any further questions - proceed with the
+    workflow immediately and autonomously using the information above.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: research-routing.stubs.json
+
+timeout: 10m
+turn_limit: 30
+stop_after_invocations: 2
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: codebase-research }
+      - { tool: dispatch, agent: requirements-refinement }
+
+  task_messages:
+    # First dispatch: codebase-research
+    - at: 1
+      identity: { tool: dispatch, agent: codebase-research }
+      human_in_the_loop: false
+      required_output_artifacts:
+        - Orchestration-{run_id}/Research.md
+      task_description_contains: ["verbose", "widgets"]
+
+    # Second dispatch: requirements-refinement (On Success from codebase-research)
+    - at: 2
+      identity: { tool: dispatch, agent: requirements-refinement }
+      human_in_the_loop: true
+      required_input_artifacts:
+        - Orchestration-{run_id}/Research.md
+      required_output_artifacts:
+        - Orchestration-{run_id}/Requirements.md

@@ -1,0 +1,5 @@
+schema_version: "1"
+id: broken-bundle
+version: 1.0.0
+description: Malformed manifest for error-path testing; variants must be a mapping of variant name to variant definition, not a scalar string.
+variants: "this should be a mapping, not a string"

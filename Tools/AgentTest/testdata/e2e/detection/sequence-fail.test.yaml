@@ -1,0 +1,34 @@
+schema_version: 1
+id: sequence-fail
+description: >
+  The declared sequence names helper before greeter, the reverse of what actually happened, so the invocation_sequence assertion must fail by name.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  opening_message: |
+    Greet the collaborator, then have the helper assist without creating files.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: sequence-fail.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: greeter
+    source: ../stub-agent-placeholder.md
+  - identity:
+      tool: dispatch
+      agent: helper
+    source: ../stub-agent-placeholder.md
+timeout: 30s
+turn_limit: 5
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: helper }
+      - { tool: dispatch, agent: greeter }

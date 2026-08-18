@@ -1,0 +1,19 @@
+schema_version: "1"
+id: test-bundle
+version: 1.0.0
+description: Test bundle for hook integrity validation — tampered fixture.
+placeholder: false
+
+# content_hash covers all listed variant files. The stored hash here is intentionally
+# wrong (all zeroes) — it does not match the actual content of test-harness/test-hook.sh.
+# This simulates a developer editing a hook file without bumping the bundle version.
+# The catalog must detect this mismatch and report a hook-hash-mismatch issue.
+content_hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+variants:
+  test-harness:
+    supported: true
+    files:
+      - source: test-hook.sh
+        target: test-hook.sh
+    registration: []

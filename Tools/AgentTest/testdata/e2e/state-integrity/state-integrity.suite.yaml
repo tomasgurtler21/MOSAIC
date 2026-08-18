@@ -1,0 +1,17 @@
+schema_version: 1
+id: state-integrity-e2e
+description: >
+  End-to-end disposition scenario (T18.6): the run-state lock this run's
+  sandbox starts with is compromised (its holder cannot be alive) before the
+  subject makes its first call. Reclaiming it must be reported distinctly as
+  a state-integrity fault, retried once, and — because this scenario
+  reproduces the fault on every attempt — end as an infrastructure failure,
+  excluded from the test's pass-rate aggregation rather than counted as a
+  subject regression.
+defaults:
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: lock-compromised.test.yaml

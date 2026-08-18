@@ -1,0 +1,20 @@
+schema_version: 1
+id: repetition-e2e
+description: >
+  End-to-end repetition-and-aggregation scenario (T18.8): both tests declare
+  two repetitions of the same one-collaborator script. The stand-in skips
+  dispatching the collaborator on the second repetition of every test (see
+  standin_test.go's SkipInvokeOnRuns), so each test's own artifact_created
+  assertion passes on run 1 and fails on run 2 — a fixed 1-of-2 mixed
+  outcome. The two tests differ only in their declared pass_rate: one names
+  a threshold the mixed outcome meets, the other names one it does not,
+  proving repetitions are aggregated against the declared rate rather than
+  reported as a raw pass/fail count.
+defaults:
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: aggregation-meets-threshold.test.yaml
+  - path: aggregation-below-threshold.test.yaml

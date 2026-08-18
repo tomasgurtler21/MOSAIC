@@ -1,0 +1,41 @@
+package tui
+
+import tuicommon "mosaic-common/tui"
+
+// helpEntry is a single key + description pair shown in the help bar.
+type helpEntry = tuicommon.HelpEntry
+
+const (
+	defaultWidth  = tuicommon.DefaultWidth
+	defaultHeight = tuicommon.DefaultHeight
+
+	titleHeight  = tuicommon.TitleHeight
+	statusHeight = tuicommon.StatusHeight
+	helpHeight   = tuicommon.HelpHeight
+	borderHeight = tuicommon.BorderHeight
+)
+
+// renderTitle forwards to the shared scaffold.
+func renderTitle(title, subtitle string, width int, styles tuicommon.Theme) string {
+	return tuicommon.RenderTitle(title, subtitle, width, styles)
+}
+
+// renderHelp forwards to the shared scaffold.
+func renderHelp(entries []helpEntry, width int, styles tuicommon.Theme) string {
+	return tuicommon.RenderHelp(entries, width, styles)
+}
+
+// renderStatus forwards to the shared scaffold.
+func renderStatus(msg string, isError bool, width int, styles tuicommon.Theme) string {
+	return tuicommon.RenderStatus(msg, isError, width, styles)
+}
+
+// contentHeight forwards to the shared scaffold.
+func contentHeight(totalHeight int, hasSubtitle bool) int {
+	return tuicommon.ContentHeight(totalHeight, hasSubtitle)
+}
+
+// truncate forwards to the shared scaffold.
+func truncate(s string, maxLen int) string {
+	return tuicommon.Truncate(s, maxLen)
+}

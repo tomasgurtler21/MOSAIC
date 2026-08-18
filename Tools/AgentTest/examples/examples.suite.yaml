@@ -1,0 +1,20 @@
+schema_version: 1
+id: documentation-examples
+description: >
+  Documentation-grade sample suite (T18.11): one full-workflow
+  orchestrator-layer test and one single-decision subagent-layer test,
+  written the way a test author would write them and readable as the
+  format's own documentation. A suite is harness-agnostic: it declares no
+  harness of its own, and runs against whichever harness the invocation
+  selects. This suite is actually exercised end to end by this stage's own
+  test suite — see Tools/AgentTest/e2e/examples_test.go — so an example that
+  stops matching the implementation breaks the build rather than misleading
+  its next reader.
+defaults:
+  timeout: 15m
+  turn_limit: 60
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: full-workflow.test.yaml
+  - path: single-decision.test.yaml

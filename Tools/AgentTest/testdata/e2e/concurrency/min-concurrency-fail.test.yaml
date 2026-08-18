@@ -1,0 +1,39 @@
+schema_version: 1
+id: min-concurrency-fail
+description: >
+  The same two collaborators are dispatched as one parallel group, whose
+  reconstructed peak is 2 — but this test declares a minimum of 3, which the
+  run never reached, so min_concurrency must fail by name.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  opening_message: |
+    Dispatch the researcher and the library researcher together, then finish.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: min-concurrency-fail.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: researcher
+    source: ../stub-agent-placeholder.md
+  - identity:
+      tool: dispatch
+      agent: library-researcher
+    source: ../stub-agent-placeholder.md
+timeout: 30s
+turn_limit: 5
+
+parallel_groups:
+  - name: fanout
+    members:
+      - { tool: dispatch, agent: researcher }
+      - { tool: dispatch, agent: library-researcher }
+
+assertions:
+  min_concurrency:
+    fanout: 3

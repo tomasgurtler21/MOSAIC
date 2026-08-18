@@ -1,0 +1,47 @@
+schema_version: 1
+id: one-dispatch
+description: >
+  First real-harness AgentTest run. The real production orchestrator is
+  deployed from the test catalogue and driven by the real brownfield-tdd
+  workflow. Its first routing decision is a dispatch to codebase-research,
+  which is answered by a stub; the run then early-exits after that single
+  invocation. Asserts only the first dispatch on purpose - its job is to
+  prove the tool's own plumbing (sandbox, provisioning, hook registration,
+  interception, correlation, reply recovery, evidence capture, evaluation)
+  works against a live harness, not to exercise the whole workflow.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  opening_message: |
+    Task: Add a --verbose flag to the widgets CLI so it prints per-item
+    diagnostics to stderr.
+
+    Workflow type: brownfield-tdd
+
+    Checkpoints: disabled
+
+    Constraints: none. Do not ask me any further questions - proceed with the
+    workflow immediately and autonomously using the information above.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: one-dispatch.stubs.json
+
+timeout: 10m
+turn_limit: 20
+stop_after_invocations: 1
+
+assertions:
+  # Not exact: stop_after_invocations halts the run at the *second* dispatch,
+  # and that halted dispatch is still recorded as an observed invocation. The
+  # assertion is about the first routing decision the real brownfield-tdd
+  # workflow makes, which is codebase-research.
+  invocation_sequence:
+    exact: false
+    steps:
+      - { tool: dispatch, agent: codebase-research }

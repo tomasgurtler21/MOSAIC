@@ -1,0 +1,181 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+#
+# mosaic-agent-test build, test, and check tasks.
+#
+# Prerequisites:
+#   - Go 1.26 or later
+#   - Task (https://taskfile.dev) installed and on PATH
+#
+# Run all tasks from this directory (Tools/AgentTest/).
+
+version: "3"
+
+vars:
+  BINARY_NAME: mosaic-agent-test
+  CMD_PKG: ./cmd/mosaic-agent-test
+  LDFLAGS: -s -w
+  DIST_DIR: ./dist
+
+  # Source material for the staged runtime dependencies: the logger bundle's
+  # source lives at the repo root, the cost tool's build output is another
+  # tool's dist/, and the deploy tool's build output is the Deployment tool's
+  # dist/. All three are staged into this tool's own dist/ so a freshly built
+  # binary resolves its binary-relative defaults (see
+  # cmd/mosaic-agent-test's resolveWiringConfig) with no flag or environment
+  # variable set.
+  HOOKS_SRC_DIR: ../../.claude/hooks
+  LOGANALYZER_DIST_DIR: ../LogAnalyzer/dist
+  DEPLOYMENT_DIST_DIR: ../Deployment/dist
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Build tasks
+  # ---------------------------------------------------------------------------
+
+  build:windows:
+    desc: "Cross-compile for Windows (amd64). Output: dist/mosaic-agent-test.exe"
+    env:
+      GOOS: windows
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    cmds:
+      - mkdir -p {{.DIST_DIR}}
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}}.exe {{.CMD_PKG}}
+    generates:
+      - "{{.DIST_DIR}}/{{.BINARY_NAME}}.exe"
+
+  build:linux:
+    desc: "Cross-compile for Linux (amd64). Output: dist/mosaic-agent-test-linux-amd64"
+    env:
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: "0"
+    cmds:
+      - mkdir -p {{.DIST_DIR}}
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64 {{.CMD_PKG}}
+    generates:
+      - "{{.DIST_DIR}}/{{.BINARY_NAME}}-linux-amd64"
+
+  build:all:
+    desc: Cross-compile for all supported platforms (Windows and Linux amd64)
+    deps: [build:windows, build:linux]
+
+  build:native:
+    desc: Build a binary for the current platform
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - go build -ldflags="{{.LDFLAGS}}" -o {{.DIST_DIR}}/{{.BINARY_NAME}}{{exeExt}} {{.CMD_PKG}}
+
+  # ---------------------------------------------------------------------------
+  # Staging the logger bundle and the cost tool into dist/ (AC6.5)
+  #
+  # The layout staged here is the expected logger-bundle layout the
+  # composition root's binary-relative default and the preflight bundle
+  # check both describe: dist/logger-bundle/hook.yaml (the manifest) plus
+  # dist/logger-bundle/claude-code/ (one directory per harness variant, this
+  # tool's only bundle-consuming adapter today). Only the claude-code
+  # variant's files are staged: opencode declares no logger bundle option
+  # (see buildDeps in cmd/mosaic-agent-test/dispatch.go).
+  # ---------------------------------------------------------------------------
+
+  stage:bundle:
+    desc: "Stage the logger bundle's claude-code variant into dist/logger-bundle/"
+    cmds:
+      - mkdir -p {{.DIST_DIR}}/logger-bundle/claude-code
+      - cp {{.HOOKS_SRC_DIR}}/hook.yaml {{.DIST_DIR}}/logger-bundle/hook.yaml
+      - cp {{.HOOKS_SRC_DIR}}/mosaic_logger*.py {{.DIST_DIR}}/logger-bundle/claude-code/
+    generates:
+      - "{{.DIST_DIR}}/logger-bundle/hook.yaml"
+
+  stage:cost-tool:windows:
+    desc: "Stage the Windows cost-analysis tool into dist/mosaic-log-analyzer.exe"
+    cmds:
+      - cp {{.LOGANALYZER_DIST_DIR}}/mosaic-log-analyzer.exe {{.DIST_DIR}}/mosaic-log-analyzer.exe
+    generates:
+      - "{{.DIST_DIR}}/mosaic-log-analyzer.exe"
+
+  stage:cost-tool:linux:
+    desc: "Stage the Linux cost-analysis tool into dist/mosaic-log-analyzer"
+    cmds:
+      - cp {{.LOGANALYZER_DIST_DIR}}/mosaic-log-analyzer-linux-amd64 {{.DIST_DIR}}/mosaic-log-analyzer
+    generates:
+      - "{{.DIST_DIR}}/mosaic-log-analyzer"
+
+  stage:deploy-tool:windows:
+    desc: "Stage the Windows deployment tool into dist/mosaic-deploy.exe"
+    cmds:
+      - cp {{.DEPLOYMENT_DIST_DIR}}/mosaic-deploy.exe {{.DIST_DIR}}/mosaic-deploy.exe
+    generates:
+      - "{{.DIST_DIR}}/mosaic-deploy.exe"
+
+  stage:deploy-tool:linux:
+    desc: "Stage the Linux deployment tool into dist/mosaic-deploy"
+    cmds:
+      - cp {{.DEPLOYMENT_DIST_DIR}}/mosaic-deploy-linux-amd64 {{.DIST_DIR}}/mosaic-deploy
+    generates:
+      - "{{.DIST_DIR}}/mosaic-deploy"
+
+  # ---------------------------------------------------------------------------
+  # Full dist/: cross-compile plus staging, so the resulting binary works out
+  # of the box with no --logger-bundle, --cost-tool or environment override.
+  # ---------------------------------------------------------------------------
+
+  dist:windows:
+    desc: "Build the Windows binary and stage the logger bundle, cost tool, and deploy tool beside it"
+    deps: [build:windows]
+    cmds:
+      - task: stage:bundle
+      - task: stage:cost-tool:windows
+      - task: stage:deploy-tool:windows
+
+  dist:linux:
+    desc: "Build the Linux binary and stage the logger bundle, cost tool, and deploy tool beside it"
+    deps: [build:linux]
+    cmds:
+      - task: stage:bundle
+      - task: stage:cost-tool:linux
+      - task: stage:deploy-tool:linux
+
+  dist:all:
+    desc: "Build and stage for every supported platform (Windows and Linux amd64)"
+    deps: [dist:windows, dist:linux]
+
+  # ---------------------------------------------------------------------------
+  # Import-boundary check
+  # ---------------------------------------------------------------------------
+
+  check:imports:
+    desc: Verify import-boundary rules (dependency direction, pure-core purity, harness isolation)
+    cmds:
+      - go run ./tools/importcheck
+
+  # ---------------------------------------------------------------------------
+  # Full checked build (import check + cross-compilation)
+  # ---------------------------------------------------------------------------
+
+  build-checked:
+    desc: Run import-boundary check then cross-compile for all platforms
+    cmds:
+      - task: check:imports
+      - task: build:all
+
+  # ---------------------------------------------------------------------------
+  # Test
+  # ---------------------------------------------------------------------------
+
+  test:
+    desc: Run the full test suite
+    cmds:
+      - go test ./...
+
+  test:short:
+    desc: Run tests excluding slow integration tests (faster iteration)
+    cmds:
+      - go test -short ./...
+
+  test:e2e:
+    desc: Run the end-to-end self-validation suite (no LLM, no network)
+    cmds:
+      - go test ./e2e/...

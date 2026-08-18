@@ -1,0 +1,5 @@
+# Descriptor with a schema_version not in SupportedSchemaVersions.
+# Load and Parse must return ErrUnsupportedSchemaVersion.
+schema_version: "99"
+id: "future-harness"
+display_name: "Future Harness"
