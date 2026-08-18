@@ -49,25 +49,25 @@ func NewOrchestratorFileScreen(width, height int, styles Styles) *OrchestratorFi
 	}
 }
 
-// normalizeOrchestratorPath applies the standard normalisation rules to a raw
-// orchestrator file path:
+// normalizePath applies the standard normalisation rules to a raw filesystem
+// path entered in the TUI:
 //  1. Trim surrounding whitespace (including trailing newlines from paste).
 //  2. If the result is at least two characters long and begins and ends with
-//     the same quote character (" or '), remove that matched pair.
-//  3. No further processing — interior quotes, separators, etc. are left intact.
-func normalizeOrchestratorPath(raw string) string {
+//     a double-quote character ("), remove that matched pair.
+//  3. No further processing -- interior quotes, separators, etc. are left intact.
+//
+// Single-quote stripping is deliberately omitted to align with Deployment's
+// pathinput.Unquote convention (double-quote-only).
+func normalizePath(raw string) string {
 	s := strings.TrimSpace(raw)
-	if len(s) >= 2 {
-		first, last := s[0], s[len(s)-1]
-		if (first == '"' || first == '\'') && first == last {
-			s = s[1 : len(s)-1]
-		}
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		s = s[1 : len(s)-1]
 	}
 	return s
 }
 
 func validateOrchestratorFile(path string) error {
-	path = normalizeOrchestratorPath(path)
+	path = normalizePath(path)
 	if path == "" {
 		return errors.New("path cannot be empty")
 	}
@@ -104,7 +104,7 @@ func (s *OrchestratorFileScreen) Back() bool { return s.input.Back() }
 
 // FilePath returns the entered file path. Only valid when Done() is true.
 func (s *OrchestratorFileScreen) FilePath() string {
-	return normalizeOrchestratorPath(s.input.Value())
+	return normalizePath(s.input.Value())
 }
 
 // Reset clears the done and back flags.

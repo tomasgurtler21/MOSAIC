@@ -419,14 +419,41 @@ func buildPermissionToolFields(d *domain.HarnessDescriptor, resolutions []domain
 	return fields
 }
 
+// ResolveRoleConditionalFields resolves role-conditional frontmatter entries for a
+// given agent role. Each entry whose ValueByRole map contains a match for the role
+// produces one FrontmatterField with the matched value. Entries with no match for
+// the role (including when role is the zero value) are omitted.
+//
+// The returned slice preserves the input order of entries and is suitable for
+// appending to a FrontmatterPlan.Set list after static adds.
+func ResolveRoleConditionalFields(entries []domain.RoleConditionalField, role domain.AgentRole) []domain.FrontmatterField {
+	if len(entries) == 0 {
+		return nil
+	}
+	var result []domain.FrontmatterField
+	for _, entry := range entries {
+		if val, ok := entry.ValueByRole[role]; ok {
+			result = append(result, domain.FrontmatterField{
+				Key:   entry.Key,
+				Value: val,
+			})
+		}
+	}
+	return result
+}
+
 // ApplyFrontmatterSpec derives the FrontmatterPlan that expresses the harness's field shaping
 // rules (add, drop, reorder) for a single artifact. It is the shared algorithm used by the
 // descriptor-only adapter and every built-in module.
 func ApplyFrontmatterSpec(d *domain.HarnessDescriptor, req domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
-	_ = req // reserved for future per-kind or per-agent shaping rules
+	// Resolve role-conditional entries and append to static adds.
+	resolved := ResolveRoleConditionalFields(d.Frontmatter.RoleConditionalAdd, req.Role)
+	set := make([]domain.FrontmatterField, 0, len(d.Frontmatter.Add)+len(resolved))
+	set = append(set, d.Frontmatter.Add...)
+	set = append(set, resolved...)
 
 	return domain.FrontmatterPlan{
-		Set:      d.Frontmatter.Add,
+		Set:      set,
 		Remove:   d.Frontmatter.Drop,
 		KeyOrder: d.Frontmatter.KeyOrder,
 	}, nil

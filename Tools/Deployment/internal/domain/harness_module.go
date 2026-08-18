@@ -62,6 +62,7 @@ type FrontmatterRequest struct {
 	Model      ModelSelection
 	ToolFields []FrontmatterField // output of Tools
 	Versions   VersionStamps
+	Role       AgentRole // deploying agent's role; zero value triggers fallback (omit role-conditional fields)
 }
 
 // VersionStamps carries the version fields stamped into every deployed agent.

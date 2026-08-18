@@ -208,6 +208,102 @@ func TestSeedInputScreen_Resize_DoesNotPanic(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// SeedInput() — double-quote stripping
+//
+// These tests verify that SeedInput() strips a surrounding pair of double-quote
+// characters after whitespace trimming, matching the normalizePath convention.
+// Single quotes must NOT be stripped.
+//
+// TDD RED: SeedInput() currently returns strings.TrimSpace(s.input.Value()) with
+// no quote stripping. All assertions below will fail until I3.2 applies normalizePath.
+// ---------------------------------------------------------------------------
+
+// TestSeedInputScreen_SeedInput_DoubleQuoteStripped verifies that SeedInput() strips
+// a surrounding pair of double-quote characters from the entered path.
+func TestSeedInputScreen_SeedInput_DoubleQuoteStripped(t *testing.T) {
+	s := newSeedScreen()
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(`"/seed/data"`)})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !s.Done() {
+		t.Fatal("precondition: Done() = false; cannot check SeedInput() quote stripping")
+	}
+	got := s.SeedInput()
+	want := "/seed/data"
+	if got != want {
+		t.Errorf("SeedInput() = %q, want %q; surrounding double quotes must be stripped", got, want)
+	}
+}
+
+// TestSeedInputScreen_SeedInput_WhitespacePaddedDoubleQuote_TrimmedAndStripped verifies
+// that SeedInput() trims whitespace first and then strips the surrounding double-quote
+// pair, matching the normalizePath ordering (trim whitespace, then strip outer quotes).
+func TestSeedInputScreen_SeedInput_WhitespacePaddedDoubleQuote_TrimmedAndStripped(t *testing.T) {
+	s := newSeedScreen()
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(`  "/seed/data"  `)})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !s.Done() {
+		t.Fatal("precondition: Done() = false; cannot check SeedInput() whitespace+quote normalisation")
+	}
+	got := s.SeedInput()
+	want := "/seed/data"
+	if got != want {
+		t.Errorf("SeedInput() = %q, want %q; whitespace must be trimmed and outer double quotes stripped", got, want)
+	}
+}
+
+// TestSeedInputScreen_SeedInput_SingleQuote_NotStripped verifies that SeedInput() does
+// NOT strip surrounding single quotes. Single-quote stripping is not part of the
+// normalization convention.
+func TestSeedInputScreen_SeedInput_SingleQuote_NotStripped(t *testing.T) {
+	const entered = `'/seed/data'`
+	s := newSeedScreen()
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(entered)})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !s.Done() {
+		t.Fatal("precondition: Done() = false; cannot check SeedInput() single-quote preservation")
+	}
+	got := s.SeedInput()
+	want := entered
+	if got != want {
+		t.Errorf("SeedInput() = %q, want %q; single quotes must NOT be stripped", got, want)
+	}
+}
+
+// TestSeedInputScreen_SeedInput_MismatchedQuotes_NotStripped verifies that SeedInput()
+// does not strip a mismatched quote pair (leading double, trailing single).
+func TestSeedInputScreen_SeedInput_MismatchedQuotes_NotStripped(t *testing.T) {
+	const entered = `"/seed/data'`
+	s := newSeedScreen()
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(entered)})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !s.Done() {
+		t.Fatal("precondition: Done() = false; cannot check SeedInput() mismatched-quote handling")
+	}
+	got := s.SeedInput()
+	want := entered
+	if got != want {
+		t.Errorf("SeedInput() = %q, want %q; mismatched quotes must not be stripped", got, want)
+	}
+}
+
+// TestSeedInputScreen_SeedInput_OneSidedLeadingDoubleQuote_NotStripped verifies that
+// SeedInput() does not strip an unmatched leading double quote.
+func TestSeedInputScreen_SeedInput_OneSidedLeadingDoubleQuote_NotStripped(t *testing.T) {
+	const entered = `"/seed/data`
+	s := newSeedScreen()
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(entered)})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !s.Done() {
+		t.Fatal("precondition: Done() = false; cannot check SeedInput() one-sided quote handling")
+	}
+	got := s.SeedInput()
+	want := entered
+	if got != want {
+		t.Errorf("SeedInput() = %q, want %q; an unmatched leading double quote must not be stripped", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

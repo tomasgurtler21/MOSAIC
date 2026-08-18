@@ -171,11 +171,15 @@ func TestUpdate_DeployedStatePopulated_ContainsEntryPerPlannedPath(t *testing.T)
 		t.Fatal("plan.Input.DeployedState is nil; the update flow must populate it before calling Build")
 	}
 
-	// Per-path invariant: at minimum, the orchestrator path must appear in DeployedState.
-	// With no deployed orchestrator and no workflow IDs discovered, the plan includes only the
-	// orchestrator. The stub harness maps "orchestrator" -> "orchestrator.md".
-	if _, ok := captured.DeployedState["orchestrator.md"]; !ok {
-		t.Error("orchestrator.md not found in plan.Input.DeployedState; the update flow must probe every planned path including the orchestrator")
+	// After the Stage 1 behavioral change, ModeUpdateWorkspace excludes orchestrators from
+	// force-inclusion. With no orchestrator file deployed in this workspace, the early probe
+	// finds it absent (Present: false) and does not add it to scannedAgentKeys. Consequently
+	// the orchestrator is correctly absent from both the artifact set and DeployedState.
+	if _, ok := captured.DeployedState["orchestrator.md"]; ok {
+		t.Error("orchestrator.md found in plan.Input.DeployedState; the update flow must not include " +
+			"the orchestrator in DeployedState when no orchestrator file is present on disk " +
+			"(ModeUpdateWorkspace excludes the orchestrator from force-inclusion; it enters only via " +
+			"the orchestrator probe when found present on disk)")
 	}
 }
 

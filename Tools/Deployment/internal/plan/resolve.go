@@ -55,11 +55,17 @@ type Selection struct {
 // every caller that builds a Selection for a mode-driven run derives ExcludeOrchestrator
 // from it, so the probe set and the built plan can never disagree.
 //
-// Returns true for domain.ModeDeployAgents and domain.ModeDeployHooks. Returns false for
-// every other mode, including modes added in the future unless this function is changed.
+// Returns true for domain.ModeDeployAgents, domain.ModeDeployHooks, and
+// domain.ModeUpdateWorkspace. Returns false for every other mode, including modes added
+// in the future unless this function is changed.
+//
+// For ModeUpdateWorkspace, returning true means the orchestrator is not force-included in
+// the artifact set. When the orchestrator is present on disk, the workspace scan discovers
+// it and supplies its key via Selection.ScannedAgentKeys — the same path every other
+// deployed agent uses. When absent, it simply does not appear in the artifact set.
 func OrchestratorExcludedFor(mode domain.RunMode) bool {
 	switch mode {
-	case domain.ModeDeployAgents, domain.ModeDeployHooks:
+	case domain.ModeDeployAgents, domain.ModeDeployHooks, domain.ModeUpdateWorkspace:
 		return true
 	default:
 		return false

@@ -186,7 +186,7 @@ func (m *module) convertFieldsToFlowList(result domain.ToolResult) domain.ToolRe
 }
 
 // Frontmatter builds the FrontmatterPlan for GHCP CLI agents. It returns the
-// descriptor's static Add fields (containing user-invocable: false), remove list,
+// descriptor's static Add fields, resolved role-conditional fields, remove list,
 // and key order. Model and version stamps are applied exclusively by the transform
 // pipeline and must not appear here; including them would produce duplicate FieldChange
 // entries in transform.Report.Fields.
@@ -195,9 +195,15 @@ func (m *module) convertFieldsToFlowList(result domain.ToolResult) domain.ToolRe
 // non-empty, and filtered from the key_order for non-orchestrator agents and orchestrator agents
 // with an empty version (where the field is not emitted).
 func (m *module) Frontmatter(req domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
-	set := make([]domain.FrontmatterField, len(m.desc.Frontmatter.Add))
-	copy(set, m.desc.Frontmatter.Add)
+	// Copy static add fields from descriptor.
+	resolved := descriptor.ResolveRoleConditionalFields(m.desc.Frontmatter.RoleConditionalAdd, req.Role)
+	set := make([]domain.FrontmatterField, 0, len(m.desc.Frontmatter.Add)+len(resolved)+1)
+	set = append(set, m.desc.Frontmatter.Add...)
 
+	// Append resolved role-conditional fields (e.g. user-invocable for the agent's role).
+	set = append(set, resolved...)
+
+	// Conditionally append orchestrator_injections_version (existing logic, unchanged).
 	keyOrder := m.desc.Frontmatter.KeyOrder
 	orchField, _ := agentfields.ByDeployedName("orchestrator_injections_version")
 	if req.AgentKey == "orchestrator" && req.Versions.OrchestratorInjectionsVersion != "" {

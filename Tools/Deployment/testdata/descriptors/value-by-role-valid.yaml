@@ -1,0 +1,15 @@
+# Minimal descriptor with a valid value_by_role entry in frontmatter.add.
+# Used by load tests to verify that value_by_role entries are parsed into
+# FrontmatterSpec.RoleConditionalAdd (not into the static Add list).
+schema_version: "1"
+id: "value-by-role-harness"
+display_name: "Value By Role Harness"
+
+frontmatter:
+  add:
+    - key: "user-invocable"
+      value_by_role:
+        subagent: false
+        orchestrator: true
+        utility: true
+        standalone: true

@@ -7,7 +7,7 @@ name: orchestrator
 description: Placeholder-expanding fixture for golden file tests — exercises {tool-permissions} placeholder expansion and RoleOrchestrator
 model: claude-sonnet-4-6
 tools: ['read', 'edit', 'search', 'execute', 'ask_user', 'agent']
-user-invocable: false
+user-invocable: true
 mosaic_role: orchestrator
 ---
 

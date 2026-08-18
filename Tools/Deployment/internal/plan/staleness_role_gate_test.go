@@ -179,15 +179,16 @@ func buildOrchestratorRoleGateInput() plan.Input {
 	}
 
 	return plan.Input{
-		Catalog:         cat,
-		Module:          newFakeModule(),
-		Mode:            domain.ModeUpdateWorkspace,
-		WorkspacePath:   "/fake/workspace",
-		Scope:           domain.ScopeProject,
-		GOOS:            "linux",
-		Manifest:        snap,
-		ProtocolVersion: "1.9",
-		BundleVersion:   "2.0",
+		Catalog:          cat,
+		Module:           newFakeModule(),
+		Mode:             domain.ModeUpdateWorkspace,
+		WorkspacePath:    "/fake/workspace",
+		Scope:            domain.ScopeProject,
+		GOOS:             "linux",
+		Manifest:         snap,
+		ProtocolVersion:  "1.9",
+		BundleVersion:    "2.0",
+		ScannedAgentKeys: []string{orc.Key},
 		Models: map[string]domain.ModelSelection{
 			orc.Key: {ModelID: "test-model", Origin: domain.OriginHarnessList},
 		},

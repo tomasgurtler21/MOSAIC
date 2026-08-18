@@ -53,6 +53,7 @@ func Apply(req Request) (Result, error) {
 			InjectionsVersion:             desc.InjectionsVersion,
 			OrchestratorInjectionsVersion: desc.OrchestratorInjectionsVersion,
 		},
+		Role: req.Role,
 	}
 	fmPlan, err := req.Module.Frontmatter(fmReq)
 	if err != nil {

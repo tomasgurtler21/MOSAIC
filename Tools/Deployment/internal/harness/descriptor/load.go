@@ -89,10 +89,14 @@ type wireFrontmatterSpec struct {
 	KeyOrder []string               `yaml:"key_order"`
 }
 
-// wireFrontmatterField holds an add-field entry: a key and an arbitrary YAML value.
+// wireFrontmatterField holds an add-field entry: a key and either a static value
+// or a role-conditional value map. Exactly one of Value or ValueByRole must be
+// non-nil; the loader validates this and returns an error for entries with both
+// or neither.
 type wireFrontmatterField struct {
-	Key   string      `yaml:"key"`
-	Value interface{} `yaml:"value"`
+	Key         string                 `yaml:"key"`
+	Value       interface{}            `yaml:"value"`
+	ValueByRole map[string]interface{} `yaml:"value_by_role"`
 }
 
 type wireInjection struct {
@@ -142,9 +146,10 @@ func Parse(src []byte, origin string) (*domain.HarnessDescriptor, error) {
 		}
 	}
 
-	d := mapWireToDomain(&w)
+	d, mapErrs := mapWireToDomain(&w)
 
-	errs := Validate(d)
+	valErrs := Validate(d)
+	errs := append(mapErrs, valErrs...)
 	if len(errs) > 0 {
 		// Enrich each error with the origin file path, then return the first.
 		// When there are multiple problems, the first error's message notes the total
@@ -163,7 +168,11 @@ func Parse(src []byte, origin string) (*domain.HarnessDescriptor, error) {
 }
 
 // mapWireToDomain converts the YAML wire representation to the domain type.
-func mapWireToDomain(w *wireDescriptor) *domain.HarnessDescriptor {
+// Returns mapping-phase validation errors (mutual-exclusivity violations and
+// unrecognized role keys in frontmatter add entries). These are merged with
+// Validate's errors in Parse.
+func mapWireToDomain(w *wireDescriptor) (*domain.HarnessDescriptor, []ValidationError) {
+	fm, fmErrs := mapWireFrontmatterSpec(&w.Frontmatter)
 	return &domain.HarnessDescriptor{
 		SchemaVersion:     w.SchemaVersion,
 		ID:                w.ID,
@@ -174,13 +183,13 @@ func mapWireToDomain(w *wireDescriptor) *domain.HarnessDescriptor {
 		Tools:             mapWireToolSpec(&w.Tools),
 		Paths:             mapWirePathSpec(&w.Paths),
 		Extensions:        mapExtensions(w.Extensions),
-		Frontmatter:       mapWireFrontmatterSpec(&w.Frontmatter),
+		Frontmatter:       fm,
 		Injections:        mapWireInjections(w.Injections),
 		Hooks: domain.HookSupport{
 			Supported:  w.Hooks.Supported,
 			VariantKey: w.Hooks.VariantKey,
 		},
-	}
+	}, fmErrs
 }
 
 func mapWireModelCatalog(w *wireModelCatalog) domain.ModelCatalog {
@@ -268,21 +277,75 @@ func mapExtensions(m map[string]string) map[domain.ArtifactKind]string {
 	return result
 }
 
-func mapWireFrontmatterSpec(w *wireFrontmatterSpec) domain.FrontmatterSpec {
-	add := make([]domain.FrontmatterField, len(w.Add))
+// mapWireFrontmatterSpec converts wire frontmatter entries to domain types,
+// routing static entries to Add and role-conditional entries to RoleConditionalAdd.
+// Entries that violate the mutual-exclusivity rule (both value and value_by_role
+// set, or neither set) are excluded from the returned FrontmatterSpec and reported
+// as ValidationErrors. Entries with unrecognized role keys are also excluded and
+// reported as ValidationErrors.
+func mapWireFrontmatterSpec(w *wireFrontmatterSpec) (domain.FrontmatterSpec, []ValidationError) {
+	var errs []ValidationError
+	var add []domain.FrontmatterField
+	var roleConditionalAdd []domain.RoleConditionalField
+
 	for i, f := range w.Add {
-		add[i] = domain.FrontmatterField{
-			Key:   f.Key,
-			Value: mapWireFieldValue(f.Value),
+		bothSet := f.Value != nil && f.ValueByRole != nil
+		neitherSet := f.Value == nil && f.ValueByRole == nil
+
+		if bothSet {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("frontmatter.add[%d]", i),
+				Message: fmt.Sprintf("entry %q must have exactly one of \"value\" or \"value_by_role\", not both", f.Key),
+			})
+			continue
+		}
+		if neitherSet {
+			errs = append(errs, ValidationError{
+				Field:   fmt.Sprintf("frontmatter.add[%d]", i),
+				Message: fmt.Sprintf("entry %q must have exactly one of \"value\" or \"value_by_role\"; neither is set", f.Key),
+			})
+			continue
+		}
+
+		if f.ValueByRole != nil {
+			// Role-conditional entry: each role key is validated against ParseAgentRole.
+			valueByRole := make(map[domain.AgentRole]domain.FieldValue, len(f.ValueByRole))
+			var roleErrs []ValidationError
+			for roleStr, val := range f.ValueByRole {
+				if _, ok := domain.ParseAgentRole(roleStr); !ok {
+					roleErrs = append(roleErrs, ValidationError{
+						Field:   fmt.Sprintf("frontmatter.add[%d].value_by_role", i),
+						Message: fmt.Sprintf("unrecognized role %q for entry %q; accepted roles: subagent, orchestrator, utility, standalone", roleStr, f.Key),
+					})
+					continue
+				}
+				valueByRole[domain.AgentRole(roleStr)] = mapWireFieldValue(val)
+			}
+			if len(roleErrs) > 0 {
+				errs = append(errs, roleErrs...)
+				continue // exclude entry with invalid role keys
+			}
+			roleConditionalAdd = append(roleConditionalAdd, domain.RoleConditionalField{
+				Key:         f.Key,
+				ValueByRole: valueByRole,
+			})
+		} else {
+			// Static entry: Value is non-nil.
+			add = append(add, domain.FrontmatterField{
+				Key:   f.Key,
+				Value: mapWireFieldValue(f.Value),
+			})
 		}
 	}
+
 	return domain.FrontmatterSpec{
-		ModelKey: w.ModelKey,
-		ToolsKey: w.ToolsKey,
-		Add:      add,
-		Drop:     w.Drop,
-		KeyOrder: w.KeyOrder,
-	}
+		ModelKey:           w.ModelKey,
+		ToolsKey:           w.ToolsKey,
+		Add:                add,
+		RoleConditionalAdd: roleConditionalAdd,
+		Drop:               w.Drop,
+		KeyOrder:           w.KeyOrder,
+	}, errs
 }
 
 // mapWireFieldValue converts an arbitrary YAML value (unmarshalled into interface{}) to

@@ -101,7 +101,11 @@ frontmatter:
   tools_key: "tools"
   add:
     - key: "user-invocable"
-      value: false
+      value_by_role:
+        subagent: false
+        orchestrator: true
+        utility: true
+        standalone: true
   drop:
     - "recommended_tier"
     - "tier_rationale"

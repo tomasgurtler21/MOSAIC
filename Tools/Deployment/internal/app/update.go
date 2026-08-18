@@ -145,6 +145,39 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		orchTargetPath = orchPath
 		orchState = probeDeployedArtifact(workspace, orchTargetPath, module.Descriptor().Frontmatter.ModelKey)
 	}
+
+	// When this mode excludes orchestrators from force-inclusion, the orchestrator enters the
+	// artifact set only when found present on disk — the same path every other deployed agent
+	// uses via scannedAgentKeys. The guard ensures this is a no-op for any future mode that
+	// already force-includes the orchestrator (OrchestratorExcludedFor returns false for it).
+	if plan.OrchestratorExcludedFor(domain.ModeUpdateWorkspace) && orchState.Present {
+		scannedAgentKeys = append(scannedAgentKeys, orchestrator.Key)
+	}
+
+	// Probe the orchestrator-script when the catalog has one. The script is subject to the
+	// same exclusion rule as the main orchestrator: OrchestratorExcludedFor governs both. When
+	// excluded from force-inclusion, the script enters the artifact set via scannedAgentKeys
+	// if found present on disk.
+	var orchScriptState domain.DeployedArtifactState
+	var orchScriptTargetPath string
+	if plan.OrchestratorExcludedFor(domain.ModeUpdateWorkspace) {
+		if script, ok := s.deps.Catalog.OrchestratorScript(); ok {
+			if scriptPath, pathErr := module.TargetPath(domain.TargetPathRequest{
+				Kind:     domain.ArtifactAgent,
+				Key:      script.Key,
+				FileName: filepath.Base(script.SourcePath),
+				Scope:    scope,
+				GOOS:     s.deps.GOOS,
+			}); pathErr == nil {
+				orchScriptTargetPath = scriptPath
+				orchScriptState = probeDeployedArtifact(workspace, orchScriptTargetPath, module.Descriptor().Frontmatter.ModelKey)
+				if orchScriptState.Present {
+					scannedAgentKeys = append(scannedAgentKeys, script.Key)
+				}
+			}
+		}
+	}
+
 	existing := discoverExistingWorkflows(orchState)
 	workflowIDs := unionPreserveOrder(existing, req.AddWorkflowIDs)
 
@@ -166,11 +199,17 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		return domain.RunSummary{}, err
 	}
 
-	// Seed the full probe with the orchestrator state already probed above, so the
-	// orchestrator file is read exactly once per run.
+	// Seed the full probe with the orchestrator and orchestrator-script states already probed
+	// above, so each file is read at most once per run.
 	var seed map[string]domain.DeployedArtifactState
-	if orchTargetPath != "" {
-		seed = map[string]domain.DeployedArtifactState{orchTargetPath: orchState}
+	if orchTargetPath != "" || orchScriptTargetPath != "" {
+		seed = make(map[string]domain.DeployedArtifactState)
+		if orchTargetPath != "" {
+			seed[orchTargetPath] = orchState
+		}
+		if orchScriptTargetPath != "" {
+			seed[orchScriptTargetPath] = orchScriptState
+		}
 	}
 
 	// Build the agent-by-key map for id-based probe resolution.

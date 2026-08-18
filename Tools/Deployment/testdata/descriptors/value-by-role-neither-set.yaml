@@ -1,0 +1,10 @@
+# Descriptor with an entry that has NEITHER value nor value_by_role set.
+# Used by load tests to verify that the loader rejects this as a validation error.
+# The entry specifies only a key with no associated value declaration.
+schema_version: "1"
+id: "value-by-role-neither-harness"
+display_name: "Neither Set Harness"
+
+frontmatter:
+  add:
+    - key: "user-invocable"
