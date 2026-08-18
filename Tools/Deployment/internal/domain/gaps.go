@@ -46,6 +46,15 @@ const (
 	// subsequent update. The user should review and adapt it to their project's needs.
 	// Distinct from GapEmptyInjection, which signals a region that still needs user input.
 	GapDefaultContentDeployed GapKind = "default-content-deployed"
+
+	// GapEnclosingSectionChanged reports that the core section directly enclosing
+	// one or more custom regions changed its own content between the previously-
+	// deployed file and the freshly-generated output. The user must review their
+	// custom content against the updated section text for contradictions.
+	// One gap is produced per affected section, listing all enclosed custom region
+	// names in sorted order. Distinct from GapDeployedRegionContentChanged, which
+	// covers the managed-region parent case.
+	GapEnclosingSectionChanged GapKind = "enclosing-section-changed"
 )
 
 // Gap is produced by transform, plan, and deploy when a decision could not be made automatically.

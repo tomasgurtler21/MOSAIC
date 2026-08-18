@@ -18,6 +18,42 @@ import (
 //
 // A node with no user-owned children yields its content trimmed. A nil node yields nil.
 // Pure; no I/O, no clock.
+
+// SectionOwnContent returns the section-own portion of a section node's
+// content: the node's content bytes with the full marker block of every direct
+// child region removed (custom, injection, and managed/deployed children),
+// then leading and trailing whitespace trimmed.
+//
+// This is broader than CanonicalContent, which excises only custom and
+// injection children. SectionOwnContent additionally excises managed
+// (NodeDeployed) children so that a regenerated managed sub-region does not
+// register as a core-prose change.
+//
+// Use case: comparing the deployed and output versions of a core section to
+// detect whether the section's own text changed, ignoring all nested region
+// content that has its own change-detection path.
+//
+// A node with no children yields its content trimmed. A nil node yields nil.
+// Pure; no I/O, no clock.
+func SectionOwnContent(n *docformat.Node) []byte {
+	if n == nil {
+		return nil
+	}
+	content := n.Content()
+	// Excise the full marker block of every direct child region: custom, injection,
+	// and managed (NodeDeployed). This ensures that regenerated managed sub-regions
+	// do not masquerade as changes to the section's own core prose.
+	for _, child := range n.Children() {
+		if child.Kind() == docformat.NodeCustom ||
+			child.Kind() == docformat.NodeInjection ||
+			child.Kind() == docformat.NodeDeployed {
+			childBytes := child.Bytes()
+			content = bytes.Replace(content, childBytes, nil, 1)
+		}
+	}
+	return bytes.TrimSpace(content)
+}
+
 func CanonicalContent(n *docformat.Node) []byte {
 	if n == nil {
 		return nil

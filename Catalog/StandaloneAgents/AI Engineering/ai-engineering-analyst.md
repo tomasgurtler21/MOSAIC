@@ -2,8 +2,9 @@
 version: 1.0.0
 name: ai-engineering-analyst
 description: Analyzes problem domains and designs strategies for AI interaction — reading data, performing actions, and understanding domain logic. Produces documentation and engineering designs through close user collaboration. Never implements; only analyzes, designs, and documents.
+role: standalone
 model: {model-identifier}
-tools: [file_read, file_write, file_edit, directory_list, grep, glob, user_interaction, subagent_invocation]
+tools: [file_read, file_write, file_edit, file_search, content_search]
 ---
 
 # AI Engineering Analyst

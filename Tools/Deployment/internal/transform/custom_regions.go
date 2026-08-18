@@ -20,28 +20,26 @@ type nestedRegionRecord struct {
 	Order int // emission order; deployed-file-origin regions first, then source-only regions
 }
 
-// customRegionRecord is a custom region found in the deployed file along with the
-// anchor pair that determines where it goes in the output document.
+// customRegionRecord is a custom region found in the deployed file along with
+// the parent identity that determines where it goes in the output document.
 //
-// The anchor pair (ParentName + PrevSibling) matches the placement rule in ContractsDesign.md
-// AD-1: position is expressed as the name of the enclosing parent and the name of the nearest
-// preceding sibling within that parent. Both are recomputed from the deployed file on every
-// run (the tool is stateless), and placement is attempted in the output document by name.
+// Placement rule: the custom region is always appended at the end of the
+// resolved parent's content. No sibling-relative positioning is attempted.
 type customRegionRecord struct {
-	Name        string             // the tag name; the region map key
-	Content     []byte             // inner bytes, byte-identical to the deployed file
-	ParentKind  docformat.NodeKind // NodeSection, NodeDeployed, or "" when top level
-	ParentName  string             // name of nearest enclosing SECTION or DEPLOYED ancestor; "" when top level
-	PrevSibling string             // name of the nearest preceding sibling node; "" when first in parent
-	Order       int                // index in deployed-document order, for deterministic ordering
+	Name       string             // the tag name; the region map key
+	Content    []byte             // inner bytes, byte-identical to the deployed file
+	ParentKind docformat.NodeKind // NodeSection, NodeDeployed, or "" when top level
+	ParentName string             // name of nearest enclosing SECTION or DEPLOYED ancestor; "" when top level
+	Order      int                // index in deployed-document order, for deterministic ordering
 }
 
-// collectDeployedCustomRegions walks the deployed document and returns one record for every
-// custom region in deployed-document order. Each record carries the full anchor pair
-// (ParentName + PrevSibling) that determines where the region is placed in the output.
+// collectDeployedCustomRegions walks the deployed document and returns one
+// record for every custom region in deployed-document order. Each record
+// carries the parent identity (ParentKind + ParentName) that determines where
+// the region is placed in the output.
 //
-// The anchor pair is derived from the deployed file only and is recomputed on every run;
-// the tool persists no placement state.
+// No sibling information is collected; placement is always at the end of the
+// resolved parent.
 func collectDeployedCustomRegions(depDoc *docformat.Document) []customRegionRecord {
 	body := depDoc.Body()
 	customs := body.CustomRegions() // all custom regions at any depth, document order
@@ -50,112 +48,52 @@ func collectDeployedCustomRegions(depDoc *docformat.Document) []customRegionReco
 	for i, node := range customs {
 		var parentKind docformat.NodeKind
 		var parentName string
-		var prevSibling string
 
 		if parent := node.Parent(); parent != nil {
 			parentKind = parent.Kind()
 			parentName = parent.Name()
-			// Find the preceding sibling node within the parent's children.
-			siblings := parent.Children()
-			for j, sib := range siblings {
-				if sib == node && j > 0 {
-					prevSibling = siblings[j-1].Name()
-					break
-				}
-			}
-		} else {
-			// Top-level node: find the nearest preceding top-level sibling.
-			topLevel := body.TopLevelNodes()
-			for j, n := range topLevel {
-				if n == node && j > 0 {
-					prevSibling = topLevel[j-1].Name()
-					break
-				}
-			}
 		}
 
 		records = append(records, customRegionRecord{
-			Name:        node.Name(),
-			Content:     node.Content(),
-			ParentKind:  parentKind,
-			ParentName:  parentName,
-			PrevSibling: prevSibling,
-			Order:       i,
+			Name:       node.Name(),
+			Content:    node.Content(),
+			ParentKind: parentKind,
+			ParentName: parentName,
+			Order:      i,
 		})
 	}
 	return records
 }
 
-// placeCustomRegion inserts rec into the output document using the AD-1 anchor rule:
+// placeCustomRegion appends rec into the output document at the end of its
+// resolved parent's content:
 //
-//  1. Resolve the parent. If rec.ParentName is non-empty, find the named section or
-//     managed region node in the output body (by name, any depth). If rec.ParentName is empty,
-//     the parent is the body.
-//  2. Within the resolved parent, find a node named rec.PrevSibling. If found, insert the
-//     custom region immediately after it via Body.InsertRegionAfter. If not found (or
-//     rec.PrevSibling is empty), append at the parent's end.
-//  3. When the parent named by rec.ParentName cannot be resolved in the output (e.g. the
-//     source removed the parent section), fall through to a body-level placement so content
-//     is never silently lost.
+//  1. If rec.ParentName is non-empty, resolve as a section (Body.SectionDeep)
+//     then as a managed region (Body.Deployed). If found, append the custom
+//     region at the end of the resolved parent via parentNode.AppendRegion.
+//  2. If rec.ParentName is empty or cannot be resolved, append at body level
+//     via body.AppendRegion. This fallthrough ensures content is never lost.
 //
-// Ordering contract: append-only was the previous behaviour and caused silent mis-positioning
-// when other content followed the custom region inside its parent. InsertRegionAfter is the
-// correct primitive and must be used whenever the preceding sibling is present and resolved.
+// No sibling-relative positioning is attempted. The custom region always lands
+// at the end of the parent's content, regardless of its original position in
+// the deployed file.
 func placeCustomRegion(body *docformat.Body, rec customRegionRecord, content []byte) (*docformat.Node, error) {
 	if rec.ParentName != "" {
 		// Resolve the parent as a section (any depth).
 		if section, ok := body.SectionDeep(rec.ParentName); ok {
-			return insertOrAppendInNode(body, section, rec, content)
+			return section.AppendRegion(docformat.NodeCustom, rec.Name, content)
 		}
 		// Resolve the parent as a deployed region (any depth).
 		if deployed, ok := body.Deployed(rec.ParentName); ok {
-			return insertOrAppendInNode(body, deployed, rec, content)
+			return deployed.AppendRegion(docformat.NodeCustom, rec.Name, content)
 		}
 		// Parent not found in the output — fall through to body-level placement so the
 		// custom region content is never dropped. This covers the case where the source
 		// removed the parent section (a structural change, not a normal update).
 	}
 
-	// Body-level placement: after the preceding top-level sibling, or append at the end.
-	if rec.PrevSibling != "" {
-		if sib := findTopLevelNodeByName(body, rec.PrevSibling); sib != nil {
-			return body.InsertRegionAfter(sib, docformat.NodeCustom, rec.Name, content)
-		}
-	}
+	// Body-level placement: append at body end.
 	return body.AppendRegion(docformat.NodeCustom, rec.Name, content)
-}
-
-// insertOrAppendInNode places the custom region described by rec inside parentNode.
-// If rec.PrevSibling names a direct child of parentNode, the region is inserted immediately
-// after that child. Otherwise the region is appended at the end of the parent's content.
-func insertOrAppendInNode(body *docformat.Body, parentNode *docformat.Node, rec customRegionRecord, content []byte) (*docformat.Node, error) {
-	if rec.PrevSibling != "" {
-		if sib := findChildByName(parentNode, rec.PrevSibling); sib != nil {
-			return body.InsertRegionAfter(sib, docformat.NodeCustom, rec.Name, content)
-		}
-	}
-	return parentNode.AppendRegion(docformat.NodeCustom, rec.Name, content)
-}
-
-// findChildByName returns the first direct child node of n whose name matches, or nil.
-func findChildByName(n *docformat.Node, name string) *docformat.Node {
-	for _, child := range n.Children() {
-		if child.Name() == name {
-			return child
-		}
-	}
-	return nil
-}
-
-// findTopLevelNodeByName returns the first top-level node in the body with the given name,
-// or nil when no top-level node has that name.
-func findTopLevelNodeByName(body *docformat.Body, name string) *docformat.Node {
-	for _, n := range body.TopLevelNodes() {
-		if n.Name() == name {
-			return n
-		}
-	}
-	return nil
 }
 
 // sourceAnchorNames returns the set of names that can anchor a custom region in the source

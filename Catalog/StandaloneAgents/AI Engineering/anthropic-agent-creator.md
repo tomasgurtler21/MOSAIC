@@ -2,6 +2,7 @@
 version: 1.4.0
 name: anthropic-agent-creator
 description: Creates high-quality AI agent instructions through iterative collaboration with the user, ensuring goal-instruction alignment and appropriate autonomy level
+role: standalone
 model: {model-identifier}
 tools: [file_read, file_write, file_edit, user_interaction]
 ---

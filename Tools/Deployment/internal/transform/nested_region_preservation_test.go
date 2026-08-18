@@ -559,10 +559,10 @@ func TestNestedRegionPreservation_Injection_AppearsAfterCanonicalContent(t *test
 // RegionPreserved, mirroring TestNestedRegionPreservation_Custom_ReportOutcome for the
 // injection provenance.
 //
-// ContractsDesign.md's reemitNestedUserRegions contract is explicit that the returned
-// RegionOutcome carries the region's true marker kind (NodeInjection or NodeCustom), never
-// the parent's NodeDeployed. This test pins the Action choice for the injection path so that
-// divergent implementations cannot silently disagree on what to report.
+// reemitNestedUserRegions is required to return a RegionOutcome whose Marker carries the
+// region's true marker kind (NodeInjection or NodeCustom), never the parent's NodeDeployed.
+// This test pins the Action choice for the injection path so that divergent implementations
+// cannot silently disagree on what to report.
 func TestNestedRegionPreservation_Injection_ReportOutcome(t *testing.T) {
 	req := transform.Request{
 		Source:   []byte(nestedInjectionSource),

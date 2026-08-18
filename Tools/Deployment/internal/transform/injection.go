@@ -282,6 +282,61 @@ func processRegions(doc *docformat.Document, req Request) (outcomes []RegionOutc
 			customRecordByName[rec.Name] = rec
 		}
 
+		// Enclosing-section change detection: for each core section that directly
+		// encloses at least one custom region, compare the section's own content
+		// (all child region blocks excised) between the deployed and output documents.
+		// One gap is emitted per affected section, listing all enclosed custom region
+		// names in sorted order. Detection runs before any custom region is placed into
+		// the output body so both sides of the comparison remain symmetric.
+		//
+		// Records with ParentKind == NodeDeployed (managed parent) are skipped: they are
+		// covered by GapDeployedRegionContentChanged. Records with empty ParentName
+		// (top-level) are skipped: no enclosing section to compare. When the output
+		// section cannot be resolved (section parked or removed), the comparison is
+		// naturally skipped because body.SectionDeep returns false.
+		{
+			// Group custom records by parent section name.
+			sectionToCustomNames := make(map[string][]string)
+			for _, rec := range customRecords {
+				if rec.ParentKind == docformat.NodeSection {
+					sectionToCustomNames[rec.ParentName] = append(sectionToCustomNames[rec.ParentName], rec.Name)
+				}
+			}
+
+			// Process section names in sorted order for deterministic gap ordering.
+			sectionNamesForDetection := make([]string, 0, len(sectionToCustomNames))
+			for sName := range sectionToCustomNames {
+				sectionNamesForDetection = append(sectionNamesForDetection, sName)
+			}
+			sort.Strings(sectionNamesForDetection)
+
+			for _, sName := range sectionNamesForDetection {
+				// Resolve the section in the output body. When absent, the section was
+				// removed or the custom region will be parked — skip the comparison.
+				outputSection, outOK := body.SectionDeep(sName)
+				if !outOK {
+					continue
+				}
+				// Resolve the section in the deployed document.
+				deployedSection, depOK := depDoc.Body().SectionDeep(sName)
+				if !depOK {
+					continue
+				}
+				// Compare section-own content. Managed children are excised from both
+				// sides so a regenerated managed sub-region does not register as a change.
+				if !bytes.Equal(SectionOwnContent(deployedSection), SectionOwnContent(outputSection)) {
+					customNamesForSection := sectionToCustomNames[sName]
+					sort.Strings(customNamesForSection)
+					gaps = append(gaps, domain.Gap{
+						Kind:    domain.GapEnclosingSectionChanged,
+						Subject: req.Key,
+						Owner:   req.Key,
+						Detail:  EnclosingSectionChangedDetail(sName, customNamesForSection, req.Timestamp),
+					})
+				}
+			}
+		}
+
 		orphanNames := make([]string, 0)
 		customNames := make([]string, 0)
 		for name, entry := range deployedContent {

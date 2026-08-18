@@ -1,7 +1,7 @@
 ---
 id: agent-template-architecture
 type: specification
-version: "2.0"
+version: "2.2"
 name: "Agent Template Architecture"
 description: "The structure of a MOSAIC agent file: frontmatter schema, the four region kinds and their ownership, canonical document order, the per-role region matrix, and what each section must contain."
 author: MOSAIC
@@ -81,9 +81,9 @@ An agent file has two parts: a YAML frontmatter block (§3) and a body composed 
 | `<Name type="core">` … `</Name>` | MOSAIC source authors | Carried from source byte-identically | Carried from source byte-identically |
 | `<Name type="managed">` … `</Name>` | The deployment tool | Body generated from a canonical source | Regenerated wholesale; prior content discarded |
 | `<Name type="project">` … `</Name>` | MOSAIC source authors | Carried from source; if non-empty, content is default (§2.1.1) | Preserved byte-identically |
-| `<Name type="custom">` … `</Name>` | Project authors | N/A — never in source | Preserved byte-identically |
+| `<Name type="custom">` … `</Name>` | Project authors | N/A — never in source | Content preserved byte-identically; placed at end of its resolved parent section (§6.4) |
 
-**`type="project"` vs `type="custom"`:** Both hold project-authored content preserved byte-identically on update. The difference is provenance. A `type="project"` region is **declared in the source file** by MOSAIC — the source defines where it sits, and on schema reorder the content follows the source's new position automatically (principle 10). A `type="custom"` region is **invented by the project** and exists only in the deployed file — it has no source anchor, so on schema reorder the tool parks it at end of file and emits a TODO for the user to reposition it (§6.4).
+**`type="project"` vs `type="custom"`:** Both hold project-authored content preserved byte-identically on update. The difference is provenance and position. A `type="project"` region is **declared in the source file** by MOSAIC — the source defines where it sits, and on schema reorder the content follows the source's new position automatically (principle 10). A `type="custom"` region is **invented by the project** and exists only in the deployed file — it has no source anchor. On every update, the tool resolves the region's parent section by name and places the region at the end of that parent's content; no positional information is kept from the previously-deployed file (§6.4). On schema reorder, if the parent section can no longer be resolved, the tool parks the region at end of file and emits a TODO for the user to reposition it (§6.4).
 
 Four consequences follow and are worth stating outright:
 
@@ -518,7 +518,7 @@ Both project (`type="project"`) and custom (`type="custom"`) regions hold projec
 | | `type="project"` | `type="custom"` |
 |---|---|---|
 | **Declared in** | MOSAIC source files | Deployed files only (project-invented) |
-| **Position on update** | Follows the source — if the source moves it, content moves with it | No source anchor — position is wherever the project put it |
+| **Position on update** | Follows the source — if the source moves it, content moves with it | Resolved by parent section name; placed at end of that parent's content on every update — no positional information is kept (§6.4) |
 | **On schema reorder** | Automatically repositioned per the new source (principle 10) | Parked at end of file with a TODO to reposition (§6.4) |
 | **Name set** | Catalogued below; most declared empty in source | Fully open — any name the project invents |
 
@@ -574,7 +574,9 @@ What the region resolves, whatever numbers a project puts in it, is the agent's 
 
 Custom regions exist only in deployed files. The project author writes them directly; the source has no knowledge of them.
 
-**On normal update (no structural change):** custom regions are preserved byte-identically in their current position, exactly like project regions. The tool reads them into the name->content map and writes them back where they were.
+**On normal update (no structural change):** the content of each custom region is preserved byte-identically. The tool reads custom regions into a name-to-content map, then resolves each region's parent section by name and appends the region at the end of that parent's content. If the parent section cannot be resolved, the region falls through to end of body. No positional information is kept — the region always lands at the end of its resolved parent, regardless of where it sat in the previously-deployed file.
+
+**Enclosing-section change warning:** when the core section directly enclosing a custom region has changed its own content since the previous deploy, the tool emits a TODO entry: "Section `<name>` changed and contains your custom content. Review for contradictions: `<region names>`." One warning is emitted per affected section, listing all custom regions inside it. This is advisory — the custom content itself is not modified.
 
 **On schema reorder** (section order in deployed file differs from section order in source):
 
@@ -851,6 +853,7 @@ A change to this schema is never local. The table below lists what must be check
 
 | Version | Date | Summary |
 |---------|------|---------|
+| 2.2 | 2026-08-18 | **Custom-region placement rule stated unambiguously; enclosing-section change warning documented.** §6.4's "On normal update" paragraph rewritten: custom regions are no longer described as preserved "in their current position." On every update the tool resolves the region's parent section by name and appends the region at the end of that parent's content — no positional information is kept. A new paragraph in §6.4 documents the enclosing-section change warning: when the core section directly enclosing a custom region changes its own content, the tool emits a TODO asking the user to review their custom content for contradictions against the updated section text. §6.1's "Position on update" cell and §2.1's table and intro paragraph updated to match — the contradiction between "in their current position" / "writes them back where they were" and principle 10's "no positional information is kept" is resolved in favour of principle 10. |
 | 2.1 | 2026-08-15 | **`IdentityExtension` and `ErrorHandlingExtension` removed from catalogue and all agents.** Neither passed the inclusion test: `IdentityExtension` (47→0 agents) offered ambient "domain expertise" no instruction consumed; `ErrorHandlingExtension` (46→0) offered "project recovery guidance" no project would know how to fill. §6.5's inclusion guidance rewritten from the vague "could use" to a two-part test: the region must be generally applicable (most projects have something to put there) AND improve agent performance when provided. §4.1 and §4.5 project-injection lines removed. §6.2 catalogue drops from seven names to five. `SourceFilesFormat.md` updated. Analysis in `SubagentProjectRegions-Review.md` §4.5 and §4.9. |
 | 2.0 | 2026-08-15 | **`OutputFormat` section removed.** The section carried `status_message` examples and `error_code` choices per agent — two things the Communication Protocol's deployed region and `ErrorHandling` (§4.5) already cover between them. The examples were actively causing verbose message parroting rather than helping. Canonical order drops from seven slots to six; §2.3, §2.4, §5.1 updated. §4.6 deleted, §4.7 renumbered to §4.6. Conformance rules 17 and 17r retired; rule 16 simplified. Migration step 7 marked superseded. §15's rename item moved to Rejected. All forty-seven subagent files already migrated — no `OutputFormat` region remains in the catalog. Analysis in `SubagentProjectRegions-Review.md` §4.10. |
 | 1.9 | 2026-08-15 | **§6.3 stops specifying the severity default table.** The document held a concrete four-row threshold table as *the* default, while the nine validation agent sources shipped a different one (MAJOR requiring rework, changed on operational experience). A per-agent value that is expected to vary and to be retuned does not belong in the schema; stating it twice guaranteed one copy would be wrong, and it was. §6.3 now places the region, fixes the status-code rule the table feeds, fixes CRITICAL as non-configurable, and points at the source files for the text. §16's severity open item updated: the validation agents are done, the audit agents' core-text severity tables are the remaining gap. |

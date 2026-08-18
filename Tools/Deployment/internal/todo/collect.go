@@ -39,6 +39,7 @@ var gapToCategory = map[domain.GapKind]domain.TodoCategory{
 	domain.GapInjectionReparented:          domain.TodoInjections,
 	domain.GapDeployedRegionContentChanged: domain.TodoInjections,
 	domain.GapDefaultContentDeployed:       domain.TodoInjections,
+	domain.GapEnclosingSectionChanged:      domain.TodoInjections,
 	domain.GapSkippedFile:                  domain.TodoSkippedFiles,
 	domain.GapHookRegistration:         domain.TodoRegistration,
 	domain.GapManualStep:               domain.TodoManual,

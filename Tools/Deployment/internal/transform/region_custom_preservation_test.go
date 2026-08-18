@@ -71,10 +71,10 @@ Always be helpful.
 // customPreservationDeployed is the deployed predecessor of customPreservationSource.
 // It has filled injection content and two custom-region regions added by the project:
 //   - <IdentityCustom type="custom"> nested inside <Identity type="core">, immediately after
-//     <IdentityExtension type="project"> (its PrevSibling)
+//     <IdentityExtension type="project"> inside the Identity section
 //   - <ProjectNotes type="custom"> at body top level, after the Constraints section
 //
-// Both custom regions must survive a normal update byte-identically at their existing positions.
+// Both custom regions must survive a normal update byte-identically.
 const customPreservationDeployed = `---
 id: 100
 version: 2.0.0
@@ -1081,17 +1081,16 @@ func TestCollision_NonCollidingMixedNames_Unaffected(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Position fidelity: custom region with trailing sibling content stays in place
+// Placement normalization: custom region is always appended at end of parent section
 // ---------------------------------------------------------------------------
 //
-// AC5.2 requires custom regions to survive at their *existing position*, not just
-// byte-identically in content. The critical case is a custom region followed by other
-// content within the same parent: if placement uses append-only, the region ends up
-// after the trailing content instead of before it.
-//
-// These fixtures verify the PrevSibling anchor (ContractsDesign.md AD-1 step 3): the
-// custom region must be inserted after its preceding sibling, not appended at the end
-// of the parent.
+// The placement rule is unconditional append-at-end: a custom region is always placed
+// at the end of its resolved parent's content, regardless of where it sat in the
+// deployed file. When the deployed file has a custom region followed by other content
+// in the same section (e.g. trailing prose), the region moves past that content in the
+// output. Three deployed-position variants (start, middle, end of section) must all
+// produce identical output, and a re-run over already-normalized output must be
+// byte-identical (no separator drift).
 // ---------------------------------------------------------------------------
 
 // positionFidelitySource is a source document whose Identity section contains an injection
@@ -1125,16 +1124,17 @@ TRAILING-POSITION-MARKER: this paragraph is static source content that follows t
 </Identity>
 `
 
-// positionFidelityDeployed is the deployed predecessor of positionFidelitySource.
-// It places <MidNote type="custom"> between the injection and the trailing paragraph:
+// positionFidelityDeployed is a deployed predecessor of positionFidelitySource.
+// It places <MidNote type="custom"> between the injection and the trailing paragraph
+// (the "middle" position):
 //
 //	<IdentityExtension type="project"> ... </IdentityExtension>
 //	<MidNote type="custom"> ... </MidNote>
 //	TRAILING-POSITION-MARKER: ...
 //
-// A correct placement re-inserts MidNote after IdentityExtension (its PrevSibling),
-// before the trailing paragraph. An append-only placement moves MidNote to the end
-// of the section, after the trailing paragraph — a silent position violation of AC5.2.
+// Under the append-at-end rule, MidNote must land at the end of the Identity section,
+// after the trailing paragraph. This is positionFidelityDeployedMiddle — two additional
+// deployed variants (at-start and at-end) are defined for the three-position test.
 const positionFidelityDeployed = `---
 id: 300
 version: 1.0.0
@@ -1164,13 +1164,10 @@ TRAILING-POSITION-MARKER: this paragraph is static source content that follows t
 `
 
 // TestNormalUpdate_CustomRegion_PositionFidelity_TrailingContentInSameParent asserts
-// that when a custom-region region is followed by other content in the same parent, the
-// region appears before that trailing content in the output — not appended after it.
-//
-// This is the regression test for the append-only placement bug identified in AC5.2:
-// append-only always places the custom region at the end of its parent, silently
-// relocating it past any trailing siblings. The correct placement uses the PrevSibling
-// anchor (ContractsDesign.md AD-1) to insert the region after its preceding sibling.
+// that when a custom-region region sits between an injection sibling and a trailing prose
+// paragraph in the deployed file, the region appears after the trailing paragraph in the
+// output. The append-at-end rule always places the custom region at the end of its
+// resolved parent's content, regardless of where it sat in the deployed file.
 func TestNormalUpdate_CustomRegion_PositionFidelity_TrailingContentInSameParent(t *testing.T) {
 	req := transform.Request{
 		Source:   []byte(positionFidelitySource),
@@ -1211,16 +1208,14 @@ func TestNormalUpdate_CustomRegion_PositionFidelity_TrailingContentInSameParent(
 			depMidNote.Content(), midNote.Content())
 	}
 
-	// Position fidelity: MidNote must appear *before* the trailing paragraph.
-	// We verify this by asserting that the trailing paragraph text appears after MidNote's
-	// closing tag in the output bytes, not before it.
-	//
-	// Strategy: scan the serialised Identity section for the byte offsets of MidNote's
-	// closing tag and the trailing paragraph's first distinctive word.
+	// Placement assertion: MidNote must appear *after* the trailing paragraph.
+	// Under the append-at-end rule the custom region is placed at the end of the
+	// Identity section, past any static prose that the source contains. We verify
+	// this by comparing byte offsets of MidNote's closing tag and the trailing
+	// paragraph sentinel in the output.
 	outputBytes := result.Output
-	// Locate MidNote's closing tag and the trailing paragraph sentinel in the output.
-	// The trailing paragraph comes from the source (static content is taken from the source
-	// document, not the deployed file), so the sentinel text matches positionFidelitySource.
+	// The trailing paragraph comes from the source (static content is taken from the
+	// source document), so the sentinel text matches positionFidelitySource.
 	midNoteClose := []byte("</MidNote>")
 	trailingMarker := []byte("TRAILING-POSITION-MARKER")
 
@@ -1233,10 +1228,199 @@ func TestNormalUpdate_CustomRegion_PositionFidelity_TrailingContentInSameParent(
 	if trailingIdx < 0 {
 		t.Fatal("TRAILING-POSITION-MARKER not found in output; static source content must be preserved")
 	}
-	if trailingIdx < closeIdx {
+	if closeIdx < trailingIdx {
 		t.Errorf("MidNote closing tag appears at byte %d but trailing paragraph appears at byte %d; "+
-			"MidNote must appear before the trailing paragraph (PrevSibling anchor must be honoured), "+
-			"not appended after it", closeIdx, trailingIdx)
+			"under append-at-end placement, MidNote must appear after the trailing paragraph, "+
+			"not before it", closeIdx, trailingIdx)
+	}
+}
+
+// positionFidelityDeployedAtStart is a deployed predecessor of positionFidelitySource
+// where <MidNote type="custom"> is at the very start of the Identity section, preceded
+// only by prose and before the IdentityExtension injection sibling.
+//
+// Under append-at-end placement, MidNote must still land at the end of the Identity
+// section in the output — identical to the middle and end variants.
+const positionFidelityDeployedAtStart = `---
+id: 300
+version: 1.0.0
+transform_version: 3.0.0
+injections_version: 1.2.0
+description: Agent for custom region position fidelity testing
+mode: subagent
+model: claude/claude-sonnet
+tools: [read-file]
+---
+
+<Identity type="core">
+# PositionFidelity Agent
+
+You are the PositionFidelity agent.
+
+<MidNote type="custom">
+A mid-section custom note that must remain between the injection and the trailing paragraph.
+</MidNote>
+
+<IdentityExtension type="project">
+User identity content that must survive byte-identically.
+</IdentityExtension>
+
+TRAILING-POSITION-MARKER: this paragraph is static source content that follows the injection.
+</Identity>
+`
+
+// positionFidelityDeployedAtEnd is a deployed predecessor of positionFidelitySource
+// where <MidNote type="custom"> is already at the end of the Identity section —
+// the normalized position. A re-run against this file (the "at-end" variant) must
+// produce output with MidNote still at the end, with no separator drift.
+const positionFidelityDeployedAtEnd = `---
+id: 300
+version: 1.0.0
+transform_version: 3.0.0
+injections_version: 1.2.0
+description: Agent for custom region position fidelity testing
+mode: subagent
+model: claude/claude-sonnet
+tools: [read-file]
+---
+
+<Identity type="core">
+# PositionFidelity Agent
+
+You are the PositionFidelity agent.
+
+<IdentityExtension type="project">
+User identity content that must survive byte-identically.
+</IdentityExtension>
+
+TRAILING-POSITION-MARKER: this paragraph is static source content that follows the injection.
+
+<MidNote type="custom">
+A mid-section custom note that must remain between the injection and the trailing paragraph.
+</MidNote>
+</Identity>
+`
+
+// TestNormalUpdate_CustomRegion_PlacementIndependentOfDeployedPosition asserts that
+// placement is independent of where the custom region sat in the deployed file. For the
+// same source, three deployed fixtures with MidNote at the start, in the middle, and
+// already at the end of the Identity section must all produce identical output bytes.
+// This covers the append-at-end rule exhaustively across all meaningful deployed positions.
+func TestNormalUpdate_CustomRegion_PlacementIndependentOfDeployedPosition(t *testing.T) {
+	cases := []struct {
+		name     string
+		deployed string
+	}{
+		{"at-start", positionFidelityDeployedAtStart},
+		{"at-middle", positionFidelityDeployed},
+		{"at-end", positionFidelityDeployedAtEnd},
+	}
+
+	outputs := make([][]byte, len(cases))
+	for i, tc := range cases {
+		tc := tc
+		i := i
+		req := transform.Request{
+			Source:   []byte(positionFidelitySource),
+			Deployed: []byte(tc.deployed),
+			Kind:     domain.ArtifactAgent,
+			Key:      "position-fidelity-test",
+			Module:   newFixtureModule(t),
+			Model:    fixtureModel(),
+			Scope:    domain.ScopeProject,
+		}
+		result, err := transform.Apply(req)
+		if err != nil {
+			t.Fatalf("%s: Apply: %v", tc.name, err)
+		}
+		outputs[i] = result.Output
+
+		// Verify MidNote is present in all outputs (content must survive).
+		outDoc, err := docformat.Parse(result.Output)
+		if err != nil {
+			t.Fatalf("%s: parse output: %v", tc.name, err)
+		}
+		if _, ok := outDoc.Body().Custom("MidNote"); !ok {
+			t.Errorf("%s: MidNote absent from output; custom region must survive regardless of deployed position", tc.name)
+		}
+
+		// Verify MidNote appears after the trailing paragraph in every variant.
+		midNoteClose := []byte("</MidNote>")
+		trailingMarker := []byte("TRAILING-POSITION-MARKER")
+		closeIdx := bytes.Index(result.Output, midNoteClose)
+		trailingIdx := bytes.Index(result.Output, trailingMarker)
+		if closeIdx < 0 {
+			t.Errorf("%s: </MidNote> not found in output", tc.name)
+			continue
+		}
+		if trailingIdx < 0 {
+			t.Errorf("%s: TRAILING-POSITION-MARKER not found in output", tc.name)
+			continue
+		}
+		if closeIdx < trailingIdx {
+			t.Errorf("%s: MidNote closing tag at byte %d appears before trailing paragraph at byte %d; "+
+				"append-at-end placement must put MidNote after all source prose", tc.name, closeIdx, trailingIdx)
+		}
+	}
+
+	// All three deployed variants must produce identical output bytes.
+	for i := 1; i < len(cases); i++ {
+		if !bytes.Equal(outputs[0], outputs[i]) {
+			t.Errorf("output for %q differs from output for %q; "+
+				"placement must be independent of deployed position — all three variants must produce identical output",
+				cases[i].name, cases[0].name)
+		}
+	}
+}
+
+// TestNormalUpdate_CustomRegion_IdempotenceAfterNormalization asserts that a second
+// update run over already-normalized output (MidNote at end of section) produces output
+// byte-identical to the first run's output. No whitespace drift, no separator changes.
+//
+// This covers the steady-state case: once the custom region is at the end of its parent
+// section, subsequent runs must not move it further or add stray bytes around it.
+func TestNormalUpdate_CustomRegion_IdempotenceAfterNormalization(t *testing.T) {
+	// Run 1: positionFidelityDeployed (MidNote in middle) → normalizes MidNote to end.
+	run1, err := transform.Apply(transform.Request{
+		Source:   []byte(positionFidelitySource),
+		Deployed: []byte(positionFidelityDeployed),
+		Kind:     domain.ArtifactAgent,
+		Key:      "position-fidelity-test",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+	})
+	if err != nil {
+		t.Fatalf("Run 1 Apply: %v", err)
+	}
+
+	// Run 2: same source, Run 1 output as deployed. MidNote is now at end of section.
+	// Output must be byte-identical to Run 1 output.
+	run2, err := transform.Apply(transform.Request{
+		Source:   []byte(positionFidelitySource),
+		Deployed: run1.Output,
+		Kind:     domain.ArtifactAgent,
+		Key:      "position-fidelity-test",
+		Module:   newFixtureModule(t),
+		Model:    fixtureModel(),
+		Scope:    domain.ScopeProject,
+	})
+	if err != nil {
+		t.Fatalf("Run 2 Apply: %v", err)
+	}
+
+	if !bytes.Equal(run1.Output, run2.Output) {
+		// Show a short tail of each to help diagnose drift without flooding the log.
+		tail1 := run1.Output
+		if len(tail1) > 300 {
+			tail1 = tail1[len(tail1)-300:]
+		}
+		tail2 := run2.Output
+		if len(tail2) > 300 {
+			tail2 = tail2[len(tail2)-300:]
+		}
+		t.Errorf("Run 1 and Run 2 outputs differ; a re-run against already-normalized output must be byte-identical (no separator drift):\n"+
+			"Run 1 tail: %q\nRun 2 tail: %q", tail1, tail2)
 	}
 }
 
