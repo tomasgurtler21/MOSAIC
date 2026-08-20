@@ -42,9 +42,7 @@ func probeDeployedArtifact(workspace, targetPath, modelKey string) domain.Deploy
 	if doc, parseErr := docformat.Parse(data); parseErr == nil {
 		fm := doc.Frontmatter()
 		if fm.Present() {
-			if v, ok := fm.Get("version"); ok && v.Kind == domain.KindScalar {
-				state.Version = v.Scalar
-			}
+			state.Version = readDeployedStamp(fm, "version")
 			state.TransformVersion = readDeployedStamp(fm, "transform_version")
 			state.InjectionsVersion = readDeployedStamp(fm, "injections_version")
 			state.OrchestratorInjectionsVersion = readDeployedStamp(fm, "orchestrator_injections_version")

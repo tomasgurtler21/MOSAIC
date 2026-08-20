@@ -118,14 +118,27 @@ func (p *planner) Build(ctx context.Context, in Input) (domain.Plan, error) {
 		}
 	}
 
-	// Build plan items for each skill.
+	// Build plan items for each skill: one PlanItem per file.
 	for _, skill := range set.Skills {
 		ref := domain.ArtifactRef{Kind: domain.ArtifactSkill, Key: skill.Key}
-		targetPath, _ := paths.Path(ref) // guaranteed present; EnumerateTargetPaths already errored if not
+		targetPaths := paths.PathsFor(ref) // one entry per file in skill.Files order
 
-		deployed := in.DeployedState[targetPath]
-		item := classifySkillItem(skill, targetPath, manifestUsable, in.Manifest.Manifest, deployed)
-		items = append(items, item)
+		files := skill.Files
+		if len(files) == 0 {
+			files = []string{skill.EntryFile}
+		}
+
+		for i, file := range files {
+			var targetPath string
+			if i < len(targetPaths) {
+				targetPath = targetPaths[i]
+			}
+			sourcePath := filepath.Join(skill.SourceDir, file)
+			isEntryFile := file == skill.EntryFile
+			deployed := in.DeployedState[targetPath]
+			item := classifySkillItem(skill, sourcePath, targetPath, isEntryFile, manifestUsable, in.Manifest.Manifest, deployed)
+			items = append(items, item)
+		}
 	}
 
 	// Build plan items for each hook bundle.
@@ -364,19 +377,18 @@ func classifyAgentItem(
 	return item
 }
 
-// classifySkillItem classifies one skill into a PlanItem with the appropriate action.
+// classifySkillItem classifies one file within a skill into a PlanItem with the appropriate
+// action. isEntryFile controls whether version-based staleness is evaluated (entry files only).
 func classifySkillItem(
 	skill domain.Skill,
+	sourcePath string,
 	targetPath string,
+	isEntryFile bool,
 	manifestUsable bool,
 	m domain.Manifest,
 	deployed domain.DeployedArtifactState,
 ) domain.PlanItem {
 	ref := domain.ArtifactRef{Kind: domain.ArtifactSkill, Key: skill.Key}
-	sourcePath := skill.SourceDir
-	if skill.EntryFile != "" {
-		sourcePath = filepath.Join(skill.SourceDir, skill.EntryFile)
-	}
 	item := domain.PlanItem{
 		Ref:        ref,
 		SourcePath: sourcePath,
@@ -424,16 +436,19 @@ func classifySkillItem(
 		return item
 	}
 
-	// Step 5: Staleness check.
-	deltas := SkillStaleness(deployed, skill)
-
-	// Step 7.
-	if len(deltas) > 0 || !deployed.HasVersionInfo() {
-		item.Action = domain.ActionUpdate
-		item.Stale = deltas
-		reasons := buildUpdateReasons(deltas, !deployed.HasVersionInfo())
-		item.Reason = "stale: " + reasons
-		return item
+	// Step 5: Staleness check — entry files only. Non-entry files have no version frontmatter
+	// so SkillStaleness would always produce a spurious delta (deployed.Version == "").
+	var deltas []domain.VersionDelta
+	if isEntryFile {
+		deltas = SkillStaleness(deployed, skill)
+		// Step 7.
+		if len(deltas) > 0 || !deployed.HasVersionInfo() {
+			item.Action = domain.ActionUpdate
+			item.Stale = deltas
+			reasons := buildUpdateReasons(deltas, !deployed.HasVersionInfo())
+			item.Reason = "stale: " + reasons
+			return item
+		}
 	}
 
 	// Step 8.

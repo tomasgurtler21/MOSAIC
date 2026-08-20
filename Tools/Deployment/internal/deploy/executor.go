@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"mosaic-deploy/internal/domain"
@@ -14,6 +15,14 @@ import (
 	"mosaic-deploy/internal/manifest"
 	"mosaic-deploy/internal/todo"
 )
+
+// entryKey is the composite key used by buildEntryMap and buildManifest.
+// Keying by (Ref, Target) instead of Ref alone ensures each file in a
+// multi-file skill retains its own manifest entry without silent overwrite.
+type entryKey struct {
+	Ref    domain.ArtifactRef
+	Target string // normalised target path (forward slashes)
+}
 
 // ErrUndecidedConflict is returned when a plan item classified as ActionConflict has no
 // corresponding entry in ExecRequest.Conflicts. This is a programming error in the caller:
@@ -281,7 +290,8 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 		actions = append(actions, ar)
 
 		if entry != nil {
-			entryMap[item.Ref] = *entry
+			normTarget := strings.ReplaceAll(item.TargetPath, "\\", "/")
+			entryMap[entryKey{Ref: item.Ref, Target: normTarget}] = *entry
 		}
 
 		// In atomic mode, stop at the first failure. Continuing to write more items only
@@ -737,18 +747,24 @@ func resolveVersionStamp(item domain.PlanItem, stamps map[string]domain.VersionS
 	return stamp
 }
 
-// buildEntryMap constructs a mutable map of manifest entries keyed by ArtifactRef.
-// The executor modifies this map during execution and converts it back to a Manifest.
-func buildEntryMap(m domain.Manifest) map[domain.ArtifactRef]domain.ManifestEntry {
-	out := make(map[domain.ArtifactRef]domain.ManifestEntry, len(m.Entries))
+// buildEntryMap constructs a mutable map of manifest entries keyed by the composite
+// (ArtifactRef, normalised TargetPath). The executor modifies this map during execution
+// and converts it back to a Manifest via buildManifest.
+//
+// Target paths are normalised (backslashes to forward slashes) to match LookupAt semantics.
+// Using a composite key ensures each file in a multi-file skill retains its own manifest
+// entry and is not silently overwritten by a later file with the same ArtifactRef.
+func buildEntryMap(m domain.Manifest) map[entryKey]domain.ManifestEntry {
+	out := make(map[entryKey]domain.ManifestEntry, len(m.Entries))
 	for _, e := range m.Entries {
-		out[e.Ref] = e
+		normTarget := strings.ReplaceAll(e.TargetPath, "\\", "/")
+		out[entryKey{Ref: e.Ref, Target: normTarget}] = e
 	}
 	return out
 }
 
 // buildManifest produces the final domain.Manifest from the entry map, sorted by TargetPath.
-func buildManifest(prior domain.Manifest, entryMap map[domain.ArtifactRef]domain.ManifestEntry, plan domain.Plan) domain.Manifest {
+func buildManifest(prior domain.Manifest, entryMap map[entryKey]domain.ManifestEntry, plan domain.Plan) domain.Manifest {
 	harnessID := plan.Harness.ID
 	if harnessID == "" {
 		harnessID = prior.HarnessID
@@ -759,15 +775,15 @@ func buildManifest(prior domain.Manifest, entryMap map[domain.ArtifactRef]domain
 		UpdatedAt:     time.Now(),
 	}
 
-	refs := make([]domain.ArtifactRef, 0, len(entryMap))
-	for ref := range entryMap {
-		refs = append(refs, ref)
+	keys := make([]entryKey, 0, len(entryMap))
+	for k := range entryMap {
+		keys = append(keys, k)
 	}
-	sort.Slice(refs, func(i, j int) bool {
-		return entryMap[refs[i]].TargetPath < entryMap[refs[j]].TargetPath
+	sort.Slice(keys, func(i, j int) bool {
+		return entryMap[keys[i]].TargetPath < entryMap[keys[j]].TargetPath
 	})
-	for _, ref := range refs {
-		m.Entries = append(m.Entries, entryMap[ref])
+	for _, k := range keys {
+		m.Entries = append(m.Entries, entryMap[k])
 	}
 	return m
 }

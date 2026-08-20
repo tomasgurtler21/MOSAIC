@@ -148,6 +148,7 @@ type wireToolRequest struct {
 type wireFrontmatterRequest struct {
 	Kind       string                 `json:"kind"`
 	AgentKey   string                 `json:"agent_key"`
+	Role       string                 `json:"role,omitempty"`
 	Source     []wireFrontmatterField `json:"source,omitempty"`
 	Model      wireModelSelection     `json:"model"`
 	ToolFields []wireFrontmatterField `json:"tool_fields,omitempty"`
@@ -855,6 +856,7 @@ func (a *adapter) Frontmatter(req domain.FrontmatterRequest) (domain.Frontmatter
 	params := wireFrontmatterRequest{
 		Kind:     string(req.Kind),
 		AgentKey: req.AgentKey,
+		Role:     string(req.Role),
 		Source:   toWireFrontmatterFields(req.Source),
 		Model: wireModelSelection{
 			ModelID: req.Model.ModelID,

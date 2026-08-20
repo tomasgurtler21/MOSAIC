@@ -71,16 +71,17 @@ func TestAll_DeployedAndLegacyNamesAreDistinct(t *testing.T) {
 	}
 }
 
-// TestAll_ContainsSixPlusOneEntries verifies that All() returns exactly eight entries: the
+// TestAll_ContainsSixPlusOneEntries verifies that All() returns exactly nine entries: the
 // six version stamp fields, plus the role field (Generic="role", Deployed="mosaic_role"),
 // plus mosaic_protocol_version which exists in the registry for drop-set symmetry only
-// (it is never written as frontmatter).
+// (it is never written as frontmatter), plus the skill version field
+// (Generic="version", Deployed="mosaic_version") added for the skill version prefix migration.
 //
-// This test FAILS until I3.1 adds the role entry to the registry.
+// This test FAILS until the skill version FieldName entry is added to the registry.
 func TestAll_ContainsSixPlusOneEntries(t *testing.T) {
 	entries := agentfields.All()
-	if len(entries) != 8 {
-		t.Errorf("All() returned %d entries, want 8 (6 version stamp fields + role field + protocol_version for drop-set symmetry)",
+	if len(entries) != 9 {
+		t.Errorf("All() returned %d entries, want 9 (6 version stamp fields + role field + protocol_version for drop-set symmetry + skill version field)",
 			len(entries))
 	}
 }
@@ -223,10 +224,18 @@ func TestAll_NoHarnessReadFieldInRegistry(t *testing.T) {
 	}
 }
 
-// TestAll_NoSharedIdentityFieldInRegistry verifies that the shared identity fields — name,
-// description, and version — are absent from the registry. These are never prefixed.
+// TestAll_NoSharedIdentityFieldInRegistry verifies that the purely descriptive shared
+// identity fields — name and description — are absent from the registry. These fields
+// are never prefixed or renamed during deployment.
+//
+// Note: "version" was previously in this list, but the skill version prefix migration
+// added a registry entry mapping Generic="version" to Deployed="mosaic_version" for
+// skill artifacts. That entry has a non-empty Generic, a non-"version" Deployed name,
+// and a Legacy of "version". The "version" key is therefore legitimately present in
+// the registry as a skill-specific mapping. Only name and description remain
+// unconditionally absent from the registry.
 func TestAll_NoSharedIdentityFieldInRegistry(t *testing.T) {
-	forbidden := []string{"name", "description", "version"}
+	forbidden := []string{"name", "description"}
 	for _, f := range agentfields.All() {
 		for _, bad := range forbidden {
 			if f.Deployed == bad || f.Legacy == bad || f.Generic == bad {
@@ -414,10 +423,18 @@ func TestIsMosaicOnlyDeployedKey_HarnessReadField_False(t *testing.T) {
 	}
 }
 
-// TestIsMosaicOnlyDeployedKey_SharedIdentityField_False verifies that shared identity fields
-// (name, description, version) are not recognized as MOSAIC-only deployed keys.
+// TestIsMosaicOnlyDeployedKey_SharedIdentityField_False verifies that the purely
+// descriptive shared identity fields (name, description) are not recognized as
+// MOSAIC-only deployed keys.
+//
+// Note: "version" was previously included in this list, but the skill version prefix
+// migration added a registry entry mapping Generic="version" to Deployed="mosaic_version"
+// for skill artifacts. Because that entry has Legacy="version", IsMosaicOnlyDeployedKey("version")
+// now intentionally returns true. The specific assertions for "version" are covered by
+// TestSkillVersionEntry_IsMosaicOnlyDeployedKey_Version_True in
+// skill_version_registry_test.go.
 func TestIsMosaicOnlyDeployedKey_SharedIdentityField_False(t *testing.T) {
-	for _, key := range []string{"name", "description", "version"} {
+	for _, key := range []string{"name", "description"} {
 		if agentfields.IsMosaicOnlyDeployedKey(key) {
 			t.Errorf("IsMosaicOnlyDeployedKey(%q) = true, want false; shared identity fields must not be in the registry", key)
 		}

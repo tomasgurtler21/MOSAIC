@@ -929,6 +929,13 @@ func (s *service) buildContent(
 			return res.Output, nil
 		}
 
+		if item.Ref.Kind == domain.ArtifactSkill {
+			src, err := s.deps.Catalog.ReadSource(item.SourcePath)
+			if err != nil {
+				return nil, err
+			}
+			return transform.RenameSkillVersionField(src)
+		}
 		if item.Ref.Kind != domain.ArtifactAgent {
 			return s.deps.Catalog.ReadSource(item.SourcePath)
 		}

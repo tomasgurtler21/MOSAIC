@@ -1476,11 +1476,12 @@ func TestContractTest_ExternalAdapter_PassesSharedContractSuite(t *testing.T) {
 			{
 				// drops_name_adds_mode_subagent_applies_key_order: name is dropped (not just the
 				// generic-only keys); mode:subagent is added; key order places description before
-				// mode and permission after model.
+				// mode and permission after model. Mode is resolved from Role via value_by_role.
 				Name: "drops_name_adds_mode_subagent_applies_key_order",
 				Request: domain.FrontmatterRequest{
 					Kind:     domain.ArtifactAgent,
 					AgentKey: "test-runner",
+					Role:     domain.RoleSubagent,
 					Model: domain.ModelSelection{
 						ModelID: "github-copilot/claude-sonnet-4-6",
 						Origin:  domain.OriginHarnessList,
@@ -1500,11 +1501,13 @@ func TestContractTest_ExternalAdapter_PassesSharedContractSuite(t *testing.T) {
 			},
 			{
 				// orchestrator_gets_mode_primary: the orchestrator is primary-facing, so its
-				// mode must be "primary" rather than "subagent".
+				// mode must be "primary" rather than "subagent". Mode is resolved from Role
+				// via the descriptor's value_by_role mapping.
 				Name: "orchestrator_gets_mode_primary",
 				Request: domain.FrontmatterRequest{
 					Kind:     domain.ArtifactAgent,
 					AgentKey: "orchestrator",
+					Role:     domain.RoleOrchestrator,
 					Model: domain.ModelSelection{
 						ModelID: "github-copilot/claude-sonnet-4-6",
 						Origin:  domain.OriginHarnessList,

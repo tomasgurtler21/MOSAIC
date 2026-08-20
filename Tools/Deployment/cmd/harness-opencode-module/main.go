@@ -86,6 +86,7 @@ type wireToolRequest struct {
 type wireFrontmatterRequest struct {
 	Kind       string                 `json:"kind"`
 	AgentKey   string                 `json:"agent_key"`
+	Role       string                 `json:"role,omitempty"`
 	Source     []wireFrontmatterField `json:"source,omitempty"`
 	Model      wireModelSelection     `json:"model"`
 	ToolFields []wireFrontmatterField `json:"tool_fields,omitempty"`
@@ -453,6 +454,7 @@ func handleRequest(mod domain.HarnessModule, req wireRequest) wireResponse {
 		domReq := domain.FrontmatterRequest{
 			Kind:       domain.ArtifactKind(params.Kind),
 			AgentKey:   params.AgentKey,
+			Role:       domain.AgentRole(params.Role),
 			Source:     fromWireFrontmatterFields(params.Source),
 			Model:      domain.ModelSelection{ModelID: params.Model.ModelID, Origin: domain.ModelOrigin(params.Model.Origin)},
 			ToolFields: fromWireFrontmatterFields(params.ToolFields),

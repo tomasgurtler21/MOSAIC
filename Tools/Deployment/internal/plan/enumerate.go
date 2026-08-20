@@ -60,20 +60,27 @@ func EnumerateTargetPaths(
 	}
 
 	for _, skill := range set.Skills {
-		targetPath, err := module.TargetPath(domain.TargetPathRequest{
-			Kind:     domain.ArtifactSkill,
-			Key:      skill.Key,
-			FileName: skill.EntryFile,
-			Scope:    scope,
-			GOOS:     goos,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("resolve target path for skill %q: %w", skill.Key, err)
+		ref := domain.ArtifactRef{Kind: domain.ArtifactSkill, Key: skill.Key}
+		files := skill.Files
+		if len(files) == 0 {
+			files = []string{skill.EntryFile}
 		}
-		result = append(result, PlannedPath{
-			Ref:        domain.ArtifactRef{Kind: domain.ArtifactSkill, Key: skill.Key},
-			TargetPath: targetPath,
-		})
+		for _, file := range files {
+			targetPath, err := module.TargetPath(domain.TargetPathRequest{
+				Kind:     domain.ArtifactSkill,
+				Key:      skill.Key,
+				FileName: file,
+				Scope:    scope,
+				GOOS:     goos,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("resolve target path for skill %q file %q: %w", skill.Key, file, err)
+			}
+			result = append(result, PlannedPath{
+				Ref:        ref,
+				TargetPath: targetPath,
+			})
+		}
 	}
 
 	for _, hook := range set.Hooks {

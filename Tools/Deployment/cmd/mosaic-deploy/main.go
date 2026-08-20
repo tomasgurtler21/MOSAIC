@@ -53,6 +53,23 @@ func wantsTUI(args []string) bool {
 	return isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())
 }
 
+// isFreshConsole reports whether mosaic-deploy is running in a freshly-spawned
+// console with no parent terminal — the typical double-click scenario on Windows.
+// When this is true, the console window closes as soon as the process exits, so
+// any error message printed to stderr would disappear before the user has a chance
+// to read it.
+//
+// The heuristic reuses wantsTUI's conditions (no subcommand given and stdin/stdout
+// are real terminals), restricted to Windows where the auto-closing console problem
+// applies. On non-Windows platforms this always returns false because POSIX terminals
+// and terminal emulators do not close automatically on process exit.
+func isFreshConsole(args []string) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	return wantsTUI(args)
+}
+
 func main() {
 	args := os.Args[1:]
 
@@ -76,6 +93,10 @@ func main() {
 		resolved, err := catalog.ResolveRoot(wd)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: mosaic-deploy must be run from the MOSAIC repository root: %v\n", err)
+			if isFreshConsole(args) {
+				fmt.Fprint(os.Stderr, "Press Enter to exit...")
+				fmt.Scanln() //nolint:errcheck
+			}
 			os.Exit(cli.ExitFailure)
 		}
 		mosaicRoot = resolved

@@ -24,6 +24,7 @@ type FieldName struct {
 var registry = []FieldName{
 	{Generic: "id", Deployed: "mosaic_id", Legacy: "id"},
 	{Generic: "role", Deployed: "mosaic_role", Legacy: "role"},
+	{Generic: "version", Deployed: "mosaic_version", Legacy: "version"},
 	{Generic: "", Deployed: "mosaic_transform_version", Legacy: "transform_version"},
 	{Generic: "", Deployed: "mosaic_injections_version", Legacy: "injections_version"},
 	{Generic: "", Deployed: "mosaic_tool_mappings_version", Legacy: "tool_mappings_version"},
