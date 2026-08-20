@@ -17,6 +17,8 @@ They are **translators and connectors**, not decision-makers or actors.
 | 19 | [audit-to-pull-request](./audit-to-pull-request.md) | 3.0.0 | Transforms a single audit artifact into condensed PR-ready comments — filters to PR scope with context zone intelligence, deduplicates against existing PR comments, writes to partial response queue |
 | 34 | [audit-response-merger](./audit-response-merger.md) | 1.0.0 | Merges partial PR response queues and transform reports from parallel audit-to-pull-request instances into consolidated artifacts — cross-audit deduplication, source attribution, merge summary |
 | 18 | [pull-request-comment-interface](./pull-request-comment-interface.md) | 1.1.2 | Bridges PR comments with orchestration - retrieves human comments for subagents, posts subagent output as PR comments |
+| 51 | [fix-to-pr-response](./fix-to-pr-response.md) | 1.0.0 | Maps a single stage's completed code fixes back to original PR comment threads as structured reply entries in a per-stage partial response queue artifact |
+| 52 | [response-merger](./response-merger.md) | 1.0.0 | Consolidates per-stage partial PullRequestResponses.md files into a single merged response queue with thread-ID-based deduplication, ready for posting |
 
 ## Characteristics
 

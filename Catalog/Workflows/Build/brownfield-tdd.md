@@ -91,8 +91,8 @@ Quality tracks feature sizing more than it tracks raw context budget. This was n
 
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
-| 3.7 | 2026-08-06 | Tomas Guertler | Make test-runner findings route back to planner |
-| 3.6 | 2026-08-05 | Tomas Guertler | Initial version |
+| 3.7 | 2026-08-06 | MOSAIC | Make test-runner findings route back to planner |
+| 3.6 | 2026-08-05 | MOSAIC | Initial version |
 
 ---
 

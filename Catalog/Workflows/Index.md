@@ -58,6 +58,7 @@ Harness conformance fixtures for `mosaic-run` live under `Tools/Runner/TestCatal
 | quick-fix | Build | Quick Fix Workflow | MOSAIC | `Build/quick-fix.md` |
 | implementation-only | Build | Implementation Only Workflow | MOSAIC | `Build/implementation-only.md` |
 | brownfield-tdd-build-verified | Build | Brownfield TDD Build-Verified Workflow | MOSAIC | `Build/brownfield-tdd-build-verified.md` |
+| brownfield-pr-fix | Build | Brownfield PR Fix Workflow | MOSAIC | `Build/brownfield-pr-fix.md` |
 
 ### Audit
 
@@ -71,6 +72,7 @@ Harness conformance fixtures for `mosaic-run` live under `Tools/Runner/TestCatal
 | ID | Category | Name | Author | File |
 |----|----------|------|--------|------|
 | brownfield-research-only | Research | Brownfield Research Only Workflow | MOSAIC | `Research/brownfield-research-only.md` |
+| product-comparison | Research | Product Comparison Workflow | MOSAIC | `Research/product-comparison.md` |
 
 ### Design
 
