@@ -1,6 +1,6 @@
 ---
 name: lean-tdd
-version: 1.0.0
+version: 1.1.0
 description: Lean TDD practices that eliminate wasteful testing patterns. Use when writing tests, reviewing test code, or validating RED/GREEN phases. Covers valid RED phase definition, behavioral testing principles, exception assertions, and mocking guidelines. Language-agnostic principles with C# examples.
 ---
 
@@ -211,7 +211,7 @@ public void Setup()
 private Mock<UserRepository> _mockRepo;  // Requires virtual methods, signals design issue
 ```
 
-**If you can't mock it, your design needs refactoring.** Concrete dependencies indicate tight coupling.
+**If you can't mock it, your design needs refactoring.** Concrete dependencies indicate tight coupling. **If you can't reach it through the public API, extract it — never widen access modifiers.** A `private` method that's "too complex to test indirectly" is a class trying to get out; extract it behind its own interface and test that.
 
 ### Avoid Verify() - Test Outputs Instead
 
@@ -291,6 +291,7 @@ public void MethodName_When_Condition_Should_ExpectedResult()
 | Mocking concrete classes | Indicates tight coupling | Refactor to depend on interfaces |
 | Multiple Acts in one test | Hard to identify which failed | One test, one Act, one logical assertion |
 | Tests that pass without implementation | Defeats TDD purpose | Verify test fails first (RED) |
+| `private` → `internal`/`protected` for testability | Breaks encapsulation, hides SRP violation | Extract class with its own public interface |
 
 ---
 
