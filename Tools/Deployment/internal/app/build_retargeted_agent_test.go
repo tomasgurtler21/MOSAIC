@@ -685,21 +685,24 @@ func TestBuildRetargetedAgent_TargetHarnessFieldsPresentInOutput(t *testing.T) {
 }
 
 // TestBuildRetargetedAgent_MosaicStampsUsePrefixedNames verifies that MOSAIC-owned stamp
-// fields in the output use the mosaic_-prefixed names (mosaic_transform_version,
-// mosaic_injections_version, mosaic_tool_mappings_version) rather than the legacy
-// unprefixed names. The output is a deployed file and must follow Stage 4 naming.
+// fields in the output use the correct mosaic_-prefixed names after Stage 1:
+//   - mosaic_harness_version (replaces mosaic_transform_version)
+//   - mosaic_tool_mappings_version
+//
+// The legacy unprefixed names must be absent. mosaic_injections_version is stripped by
+// the migration step and must not appear in the output.
 func TestBuildRetargetedAgent_MosaicStampsUsePrefixedNames(t *testing.T) {
 	src := alphaDeployedAgentBytes()
 	alpha := newAlphaHarnessModule()
 	beta := newBetaHarnessModule()
 
 	out, _, err := BuildRetargetedAgent(RetargetInput{
-		Source:            src,
-		SourceModule:      alpha,
-		TargetModule:      beta,
-		Kind:              domain.ArtifactAgent,
-		AgentKey:          "retarget-test-agent",
-		TargetModel:       "gpt-4-turbo",
+		Source:              src,
+		SourceModule:        alpha,
+		TargetModule:        beta,
+		Kind:                domain.ArtifactAgent,
+		AgentKey:            "retarget-test-agent",
+		TargetModel:         "gpt-4-turbo",
 		ToolMappingsVersion: "deadbeef",
 	})
 
@@ -709,17 +712,24 @@ func TestBuildRetargetedAgent_MosaicStampsUsePrefixedNames(t *testing.T) {
 
 	keys := frontmatterKeys(t, out)
 
-	// Prefixed names must be present.
-	if !keys["mosaic_transform_version"] {
-		t.Error("mosaic_transform_version must be present in the output; legacy transform_version should not be used")
+	// New harness version key must be present; old transform version key must be absent.
+	if !keys["mosaic_harness_version"] {
+		t.Error("mosaic_harness_version must be present in the output; the harness version stamp uses the new key name after Stage 1")
+	}
+	if keys["mosaic_transform_version"] {
+		t.Error("mosaic_transform_version must be absent; the output must use mosaic_harness_version after Stage 1")
 	}
 
-	// Legacy names must be absent (the output should use only prefixed names for MOSAIC stamps).
+	// Legacy names must be absent.
 	if keys["transform_version"] {
-		t.Error("legacy transform_version must be absent; the output must use mosaic_transform_version")
+		t.Error("legacy transform_version must be absent")
 	}
 	if keys["injections_version"] {
-		t.Error("legacy injections_version must be absent; the output must use mosaic_injections_version")
+		t.Error("legacy injections_version must be absent")
+	}
+	// mosaic_injections_version is stripped by the migration step.
+	if keys["mosaic_injections_version"] {
+		t.Error("mosaic_injections_version must be absent; migration strip removes it")
 	}
 }
 

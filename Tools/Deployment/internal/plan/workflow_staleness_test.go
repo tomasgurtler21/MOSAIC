@@ -18,7 +18,7 @@ package plan_test
 //
 //   WorkflowDrift.Deltas() field names and ordering (T5.1, T5.2):
 //   - Every delta field carries the WorkflowDeltaFieldPrefix so it cannot collide with
-//     "version", "transform_version", or "injections_version".
+//     "version", "harness_version", or "injections_version".
 //   - Ordering: added first, then removed, then version-changed.
 //   - Added delta: Deployed is empty, Source is the catalog version.
 //   - Removed delta: Source is empty, Deployed is the deployed version.
@@ -288,7 +288,7 @@ func TestWorkflowStaleness_VersionDowngrade_Stale(t *testing.T) {
 // TestWorkflowDrift_Deltas_FieldNamesCarryPrefix verifies that every VersionDelta produced by
 // WorkflowDrift.Deltas() has its Field value prefixed with WorkflowDeltaFieldPrefix ("workflow:").
 // This collision guard prevents workflow deltas from interfering with the executor's
-// resolveVersionStamp switch on "version", "transform_version", and "injections_version".
+// resolveVersionStamp switch on "version", "harness_version", and "injections_version".
 func TestWorkflowDrift_Deltas_FieldNamesCarryPrefix(t *testing.T) {
 	deployed := makeDeployedWorkflows("quick-fix", "1.0")
 	selected := makeSelectedWorkflows("quick-fix", "2.0", "greenfield-tdd", "1.0") // one changed, one added
@@ -303,7 +303,7 @@ func TestWorkflowDrift_Deltas_FieldNamesCarryPrefix(t *testing.T) {
 		if !strings.HasPrefix(d.Field, plan.WorkflowDeltaFieldPrefix) {
 			t.Errorf("delta.Field = %q does not start with WorkflowDeltaFieldPrefix %q; "+
 				"all workflow deltas must carry the prefix to avoid colliding with the executor's "+
-				"version-stamp field names (version, transform_version, injections_version)",
+				"version-stamp field names (version, harness_version, injections_version)",
 				d.Field, plan.WorkflowDeltaFieldPrefix)
 		}
 	}
@@ -431,7 +431,7 @@ func TestBuild_WorkerAgent_NotAffectedByWorkflowStaleness(t *testing.T) {
 	// agent.Role = RoleWorker (set by makeAgent)
 
 	manifestEntry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", hash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -448,7 +448,7 @@ func TestBuild_WorkerAgent_NotAffectedByWorkflowStaleness(t *testing.T) {
 			Present:           true,
 			ContentHash:       hash,
 			Version:           "1.0",
-			TransformVersion:  "1.0",
+			HarnessVersion:    "1.0",
 			InjectionsVersion: "1.0",
 			Workflows: domain.DeployedWorkflows{
 				{ID: "some-workflow", Version: "OLD-VERSION"}, // stale if checked — must be ignored
@@ -484,7 +484,7 @@ func TestBuild_OrchestratorWorkflowOnly_Stale_SingleUpdateItem(t *testing.T) {
 	// orch.Version = "1.0"; the deployed file carries "1.0" — no version-field staleness
 
 	manifestEntry := makeManifestEntry(agentRef("orchestrator"), orchPath, "1.0", hash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -500,7 +500,7 @@ func TestBuild_OrchestratorWorkflowOnly_Stale_SingleUpdateItem(t *testing.T) {
 			Present:           true,
 			ContentHash:       hash,
 			Version:           "1.0", // matches catalog — no version-field staleness
-			TransformVersion:  "1.0",
+			HarnessVersion:    "1.0",
 			InjectionsVersion: "1.0",
 			Workflows: domain.DeployedWorkflows{
 				{ID: "quick-fix", Version: "1.0"},
@@ -557,7 +557,7 @@ func TestBuild_OrchestratorWorkflowStaleness_ComposesWithVersionDeltas(t *testin
 	orch.Version = "2.0"
 
 	manifestEntry := makeManifestEntry(agentRef("orchestrator"), orchPath, "1.0", hash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -573,7 +573,7 @@ func TestBuild_OrchestratorWorkflowStaleness_ComposesWithVersionDeltas(t *testin
 			Present:           true,
 			ContentHash:       hash,
 			Version:           "1.0", // differs from catalog "2.0" — version-field staleness
-			TransformVersion:  "1.0",
+			HarnessVersion:    "1.0",
 			InjectionsVersion: "1.0",
 			Workflows: domain.DeployedWorkflows{
 				{ID: "quick-fix", Version: "1.0"},
@@ -650,7 +650,7 @@ func TestBuild_OrchestratorUnchangedWorkflows_StayUnchanged(t *testing.T) {
 	orch := makeOrchestrator()
 
 	manifestEntry := makeManifestEntry(agentRef("orchestrator"), orchPath, "1.0", hash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -666,7 +666,7 @@ func TestBuild_OrchestratorUnchangedWorkflows_StayUnchanged(t *testing.T) {
 			Present:           true,
 			ContentHash:       hash,
 			Version:           "1.0",
-			TransformVersion:  "1.0",
+			HarnessVersion:    "1.0",
 			InjectionsVersion: "1.0",
 			Workflows: domain.DeployedWorkflows{
 				{ID: "quick-fix", Version: "1.0"},
@@ -720,7 +720,7 @@ func TestBuild_WorkflowVersionBump_OrchestratorStale(t *testing.T) {
 	orch := makeOrchestrator()
 
 	manifestEntry := makeManifestEntry(agentRef("orchestrator"), orchPath, "1.0", hash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -736,7 +736,7 @@ func TestBuild_WorkflowVersionBump_OrchestratorStale(t *testing.T) {
 			Present:           true,
 			ContentHash:       hash,
 			Version:           "1.0",
-			TransformVersion:  "1.0",
+			HarnessVersion:    "1.0",
 			InjectionsVersion: "1.0",
 			Workflows: domain.DeployedWorkflows{
 				{ID: "quick-fix", Version: "1.0"}, // deployed version
@@ -852,7 +852,7 @@ func TestBuild_OrchestratorWorkflowRemoved_Stale(t *testing.T) {
 	// orch.Version = "1.0"; deployed file carries "1.0" — no version-field staleness
 
 	manifestEntry := makeManifestEntry(agentRef("orchestrator"), orchPath, "1.0", hash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -869,7 +869,7 @@ func TestBuild_OrchestratorWorkflowRemoved_Stale(t *testing.T) {
 			Present:           true,
 			ContentHash:       hash,
 			Version:           "1.0", // matches catalog — no version-field staleness
-			TransformVersion:  "1.0",
+			HarnessVersion:    "1.0",
 			InjectionsVersion: "1.0",
 			Workflows: domain.DeployedWorkflows{
 				{ID: "quick-fix", Version: "1.0"},
@@ -924,7 +924,7 @@ func TestBuild_Orchestrator_PlanItemReason_NamesWorkflows(t *testing.T) {
 	orch := makeOrchestrator()
 
 	manifestEntry := makeManifestEntry(agentRef("orchestrator"), orchPath, "1.0", hash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -941,7 +941,7 @@ func TestBuild_Orchestrator_PlanItemReason_NamesWorkflows(t *testing.T) {
 			Present:           true,
 			ContentHash:       hash,
 			Version:           "1.0",
-			TransformVersion:  "1.0",
+			HarnessVersion:    "1.0",
 			InjectionsVersion: "1.0",
 			Workflows: domain.DeployedWorkflows{
 				{ID: "quick-fix", Version: "1.0"},

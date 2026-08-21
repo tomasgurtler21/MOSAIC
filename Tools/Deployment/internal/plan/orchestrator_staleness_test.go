@@ -19,7 +19,7 @@ package plan_test
 //   - When the deployed file lacks the field (pre-migration, empty string) but source is
 //     non-empty, a delta is produced, triggering re-deploy after the first migration.
 //   - When all four version fields mismatch, four deltas are returned in fixed order.
-//   - Delta order is: version, transform_version, injections_version,
+//   - Delta order is: version, harness_version, injections_version,
 //     orchestrator_injections_version — deterministic and independent of which fields differ.
 
 import (
@@ -35,8 +35,8 @@ import (
 
 // deployedStateWithOrchVersion returns a DeployedArtifactState that includes all four version
 // fields. Use this when a test must set orchestratorInjectionsVersion explicitly.
-func deployedStateWithOrchVersion(contentHash, version, transformVersion, injectionsVersion, orchestratorInjectionsVersion string) domain.DeployedArtifactState {
-	s := deployedState(contentHash, version, transformVersion, injectionsVersion)
+func deployedStateWithOrchVersion(contentHash, version, harnessVersion, injectionsVersion, orchestratorInjectionsVersion string) domain.DeployedArtifactState {
+	s := deployedState(contentHash, version, harnessVersion, injectionsVersion)
 	s.OrchestratorInjectionsVersion = orchestratorInjectionsVersion
 	return s
 }
@@ -59,7 +59,8 @@ func orchestratorStampsFromDeployed(deployed domain.DeployedArtifactState) domai
 // values carry the deployed-file value and the source catalog value respectively.
 func TestAgentStaleness_OrchestratorInjectionsVersionMismatch_Only_ReturnsSingleDelta(t *testing.T) {
 	deployed := deployedStateWithOrchVersion("sha256:aaaa", "1.0", "2.0", "3.0", "1.0")
-	agent := makeAgent("orchestrator", deployed.Version)
+	agent := makeOrchestrator()
+	agent.Version = deployed.Version
 	stamps := orchestratorStampsFromDeployed(deployed)
 	stamps.OrchestratorInjectionsVersion = "1.1" // differs from deployed "1.0"
 
@@ -78,7 +79,8 @@ func TestAgentStaleness_OrchestratorInjectionsVersionMismatch_Only_ReturnsSingle
 // in delta.Deployed and the source catalog value in delta.Source.
 func TestAgentStaleness_OrchestratorInjectionsVersion_DeltaCarriesDeployedAndSourceValues(t *testing.T) {
 	deployed := deployedStateWithOrchVersion("sha256:aaaa", "1.0", "2.0", "3.0", "1.0")
-	agent := makeAgent("orchestrator", deployed.Version)
+	agent := makeOrchestrator()
+	agent.Version = deployed.Version
 	stamps := orchestratorStampsFromDeployed(deployed)
 	stamps.OrchestratorInjectionsVersion = "2.0" // source is newer than deployed "1.0"
 
@@ -102,10 +104,11 @@ func TestAgentStaleness_OrchestratorInjectionsVersion_DeltaCarriesDeployedAndSou
 // A different name would silently drop the orchestrator injection version from the manifest.
 func TestAgentStaleness_OrchestratorInjectionsVersion_FieldName_CompatibleWithExecutorStamping(t *testing.T) {
 	deployed := deployedStateWithOrchVersion("sha256:aaaa", "1.0", "1.0", "1.0", "1.0")
-	agent := makeAgent("orchestrator", "2.0")
+	agent := makeOrchestrator()
+	agent.Version = "2.0"
 	stamps := domain.VersionStamps{
 		Version:                       "2.0",
-		TransformVersion:              "1.0",
+		HarnessVersion:                "1.0",
 		InjectionsVersion:             "1.0",
 		OrchestratorInjectionsVersion: "2.0", // only this and version differ
 	}
@@ -134,7 +137,8 @@ func TestAgentStaleness_OrchestratorInjectionsVersion_FieldName_CompatibleWithEx
 // the other.
 func TestAgentStaleness_OrchestratorInjectionsVersion_IndependentOf_InjectionsVersion(t *testing.T) {
 	deployed := deployedStateWithOrchVersion("sha256:aaaa", "1.0", "2.0", "3.0", "1.0")
-	agent := makeAgent("orchestrator", deployed.Version)
+	agent := makeOrchestrator()
+	agent.Version = deployed.Version
 
 	t.Run("injections_mismatch_only_no_orch_delta", func(t *testing.T) {
 		stamps := orchestratorStampsFromDeployed(deployed)
@@ -190,14 +194,14 @@ func TestAgentStaleness_OrchestratorInjectionsVersion_Subagent_BothEmpty_NoExtra
 		Present:                       true,
 		ContentHash:                   "sha256:abc",
 		Version:                       "2.0",
-		TransformVersion:              "1.5",
+		HarnessVersion:                "1.5",
 		InjectionsVersion:             "3.0",
 		OrchestratorInjectionsVersion: "", // absent from deployed file — subagent
 	}
 	agent := makeAgent("some-subagent", deployed.Version)
 	stamps := domain.VersionStamps{
 		Version:                       "2.0",
-		TransformVersion:              "1.5",
+		HarnessVersion:                "1.5",
 		InjectionsVersion:             "3.0",
 		OrchestratorInjectionsVersion: "", // not populated for subagents
 	}
@@ -225,14 +229,15 @@ func TestAgentStaleness_OrchestratorInjectionsVersion_DeployedAbsent_SourceNonEm
 		Present:                       true,
 		ContentHash:                   "sha256:abc",
 		Version:                       "5.0",
-		TransformVersion:              "3.0",
+		HarnessVersion:                "3.0",
 		InjectionsVersion:             "2.0",
 		OrchestratorInjectionsVersion: "", // pre-migration: field not yet in deployed file
 	}
-	agent := makeAgent("orchestrator", deployed.Version)
+	agent := makeOrchestrator()
+	agent.Version = deployed.Version
 	stamps := domain.VersionStamps{
 		Version:                       "5.0",
-		TransformVersion:              "3.0",
+		HarnessVersion:                "3.0",
 		InjectionsVersion:             "2.0",
 		OrchestratorInjectionsVersion: "1.0", // source now carries the field
 	}
@@ -268,10 +273,11 @@ func TestAgentStaleness_OrchestratorInjectionsVersion_DeployedAbsent_SourceNonEm
 // carry correct Deployed and Source values.
 func TestAgentStaleness_AllFourVersionsMismatch_ReturnsFourDeltas(t *testing.T) {
 	deployed := deployedStateWithOrchVersion("sha256:aaaa", "1.0", "2.0", "3.0", "4.0")
-	agent := makeAgent("orchestrator", "1.1")
+	agent := makeOrchestrator()
+	agent.Version = "1.1"
 	stamps := domain.VersionStamps{
 		Version:                       "1.1", // all four differ
-		TransformVersion:              "2.1",
+		HarnessVersion:                "2.1",
 		InjectionsVersion:             "3.1",
 		OrchestratorInjectionsVersion: "4.1",
 	}
@@ -286,15 +292,16 @@ func TestAgentStaleness_AllFourVersionsMismatch_ReturnsFourDeltas(t *testing.T) 
 // TestAgentStaleness_DeltaOrder_OrchestratorInjectionsVersion_IsLast verifies that when all
 // four version fields mismatch, the deltas are returned in the fixed order:
 //
-//	version, transform_version, injections_version, orchestrator_injections_version
+//	version, harness_version, injections_version, orchestrator_injections_version
 //
 // The order must be deterministic and independent of which fields differ.
 func TestAgentStaleness_DeltaOrder_OrchestratorInjectionsVersion_IsLast(t *testing.T) {
 	deployed := deployedStateWithOrchVersion("sha256:aaaa", "1.0", "2.0", "3.0", "4.0")
-	agent := makeAgent("orchestrator", "1.1")
+	agent := makeOrchestrator()
+	agent.Version = "1.1"
 	stamps := domain.VersionStamps{
 		Version:                       "1.1",
-		TransformVersion:              "2.1",
+		HarnessVersion:                "2.1",
 		InjectionsVersion:             "3.1",
 		OrchestratorInjectionsVersion: "4.1",
 	}
@@ -306,7 +313,7 @@ func TestAgentStaleness_DeltaOrder_OrchestratorInjectionsVersion_IsLast(t *testi
 	}
 	wantOrder := []string{
 		"version",
-		"transform_version",
+		"harness_version",
 		"injections_version",
 		"orchestrator_injections_version",
 	}
@@ -322,7 +329,8 @@ func TestAgentStaleness_DeltaOrder_OrchestratorInjectionsVersion_IsLast(t *testi
 // returns an empty slice.
 func TestAgentStaleness_OrchestratorInjectionsVersion_AllMatch_NoExtraDelta(t *testing.T) {
 	deployed := deployedStateWithOrchVersion("sha256:aaaa", "1.0", "2.0", "3.0", "1.0")
-	agent := makeAgent("orchestrator", deployed.Version)
+	agent := makeOrchestrator()
+	agent.Version = deployed.Version
 	stamps := orchestratorStampsFromDeployed(deployed)
 
 	deltas := plan.AgentStaleness(deployed, agent, stamps)
@@ -337,7 +345,8 @@ func TestAgentStaleness_OrchestratorInjectionsVersion_AllMatch_NoExtraDelta(t *t
 // still produces a delta. Version delta direction is irrelevant: any difference is stale.
 func TestAgentStaleness_OrchestratorInjectionsVersion_Downgrade_StillProducesDelta(t *testing.T) {
 	deployed := deployedStateWithOrchVersion("sha256:aaaa", "1.0", "2.0", "3.0", "2.0")
-	agent := makeAgent("orchestrator", deployed.Version)
+	agent := makeOrchestrator()
+	agent.Version = deployed.Version
 	stamps := orchestratorStampsFromDeployed(deployed)
 	stamps.OrchestratorInjectionsVersion = "1.0" // source is older than deployed "2.0"
 

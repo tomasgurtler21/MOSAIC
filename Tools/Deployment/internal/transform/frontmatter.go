@@ -6,6 +6,7 @@ import (
 	"mosaic-common/docformat"
 	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
+	"mosaic-deploy/internal/harness/descriptor"
 )
 
 // resolveTools determines the tool frontmatter output for the transformation. It handles
@@ -164,14 +165,18 @@ func applyFrontmatter(
 	// Step 4: Stamp version fields under their mosaic_-prefixed deployed names, derived from
 	// the agentfields registry. No literal prefixed key names appear here; all names come from
 	// agentfields.ByDeployedName (which looks up by the legacy name) and uses field.Deployed.
-	tvField, _ := agentfields.ByDeployedName("transform_version")
+	// The harness version stamp is written as mosaic_harness_version (via the new registry
+	// entry with Legacy="harness_version"). The old mosaic_transform_version key is no longer
+	// written here; it is stripped by the migration step below if present from a legacy file.
+	tvField, _ := agentfields.ByDeployedName("harness_version")
 	if c := applyVersionStamp(fm, tvField.Deployed, desc.TransformVersion); c != nil {
 		changes = append(changes, *c)
 	}
+	// injections_version is no longer stamped as a frontmatter field; it is written as a
+	// version attribute on InjectionHarness-class region tags by applyHarnessRegion instead.
+	// The ivField variable is retained here for the migration strip below, which removes
+	// legacy mosaic_injections_version fields from pre-migration deployed files.
 	ivField, _ := agentfields.ByDeployedName("injections_version")
-	if c := applyVersionStamp(fm, ivField.Deployed, desc.InjectionsVersion); c != nil {
-		changes = append(changes, *c)
-	}
 	// tool_mappings_version is a content hash of the effective tool_destinations
 	// mappings for this harness (combined project + user config). It lets `update`
 	// detect stale tool mappings without re-diffing tool lists. See "The
@@ -229,6 +234,55 @@ func applyFrontmatter(
 		})
 	}
 
+	// Step 4e: Rename the generic "version" field to its mosaic_-prefixed deployed name.
+	// The generic source carries "version"; deployed files must carry the prefixed form
+	// (mosaic_version). This is parallel to the id and role renames above; the agentfields
+	// registry supplies both names so no prefixed literal appears here.
+	versionField, _ := agentfields.ByGeneric("version")
+	if v, ok := fm.Get(versionField.Legacy); ok {
+		fm.Remove(versionField.Legacy)
+		fm.Set(versionField.Deployed, v)
+		changes = append(changes, FieldChange{
+			Key:    versionField.Deployed,
+			Before: "",
+			After:  renderValue(v),
+			Reason: "version field rename to deployed form",
+		})
+	}
+
+	// Migration: strip legacy fields that have been renamed or relocated.
+	// All lookups go through the registry — no literal mosaic_* strings.
+	// mosaic_transform_version: the harness version stamp is now written as mosaic_harness_version.
+	// mosaic_injections_version: will be relocated to region tag attributes in Stage 2; Stage 1
+	// pre-strips it so that deployed files are already free of it when Stage 2 takes effect.
+	// mosaic_orchestrator_injections_version: same — stripped here to prepare for Stage 2.
+	oldTVField, _ := agentfields.ByDeployedName("transform_version")
+	if fm.Remove(oldTVField.Deployed) {
+		changes = append(changes, FieldChange{
+			Key:    oldTVField.Deployed,
+			Before: "(present)",
+			After:  "",
+			Reason: "migration strip",
+		})
+	}
+	if fm.Remove(ivField.Deployed) {
+		changes = append(changes, FieldChange{
+			Key:    ivField.Deployed,
+			Before: "(present)",
+			After:  "",
+			Reason: "migration strip",
+		})
+	}
+	oivField, _ := agentfields.ByDeployedName("orchestrator_injections_version")
+	if fm.Remove(oivField.Deployed) {
+		changes = append(changes, FieldChange{
+			Key:    oivField.Deployed,
+			Before: "(present)",
+			After:  "",
+			Reason: "migration strip",
+		})
+	}
+
 	// Step 5: Set the resolved tool fields produced by Module.Tools (or PlaceholderExpansion).
 	for _, field := range toolResult.Fields {
 		before := ""
@@ -242,6 +296,12 @@ func applyFrontmatter(
 			Reason: "tool mapping",
 		})
 		fm.Set(field.Key, field.Value)
+	}
+
+	// Step 5b: Merge user-added tools from the deployed file.
+	if req.Deployed != nil {
+		mergeChanges := mergeDeployedTools(fm, req.Deployed, desc)
+		changes = append(changes, mergeChanges...)
 	}
 
 	// Step 6: Accumulate gaps for unresolved tool mappings. ToolUnmapped and ToolSkipped
@@ -284,6 +344,151 @@ func applyVersionStamp(fm *docformat.Frontmatter, key, value string) *FieldChang
 		After:  value,
 		Reason: "version stamp",
 	}
+}
+
+// mergeDeployedTools augments the freshly-computed tool field(s) in fm with any
+// tools present in the deployed file but absent from the current computed output.
+// It uses descriptor.ExtractToolEntries to parse both the deployed file's tool
+// field and the current output's tool field, then appends any entries from the
+// deployed set that are missing from the output set.
+//
+// Parameters:
+//   - fm: the frontmatter being built (already has Step 5 tool fields set)
+//   - deployed: the previously-deployed file bytes (req.Deployed); nil on create
+//   - desc: the harness descriptor (provides ToolsKey, Tools.Shape, Tools.Universe)
+//
+// When deployed is nil (new deployment), this is a no-op.
+// When the deployed file has no parseable tool field, this is a no-op.
+// Tool names are compared at the harness-name level (the rendered form in the deployed file).
+// Appended tools preserve the harness-specific rendering format.
+func mergeDeployedTools(fm *docformat.Frontmatter, deployed []byte, desc *domain.HarnessDescriptor) []FieldChange {
+	if desc.Frontmatter.ToolsKey == "" {
+		return nil
+	}
+
+	// Parse the deployed file to extract its tool field value.
+	deployedDoc, err := docformat.Parse(deployed)
+	if err != nil {
+		// Graceful no-op on parse failure.
+		return nil
+	}
+
+	deployedToolsValue, ok := deployedDoc.Frontmatter().Get(desc.Frontmatter.ToolsKey)
+	if !ok {
+		// Deployed file has no tools field; nothing to merge.
+		return nil
+	}
+
+	// Get the names present in the deployed file.
+	deployedNames := descriptor.ExtractToolEntries(desc, deployedToolsValue)
+	if len(deployedNames) == 0 {
+		return nil
+	}
+
+	// Get the names already in the current output.
+	outputToolsValue, _ := fm.Get(desc.Frontmatter.ToolsKey)
+	outputNames := descriptor.ExtractToolEntries(desc, outputToolsValue)
+
+	// Build a set of names already in the output.
+	inOutput := make(map[string]bool, len(outputNames))
+	for _, name := range outputNames {
+		inOutput[name] = true
+	}
+
+	// Collect names from deployed that are absent from the output.
+	var toAppend []string
+	for _, name := range deployedNames {
+		if !inOutput[name] {
+			toAppend = append(toAppend, name)
+		}
+	}
+	if len(toAppend) == 0 {
+		return nil
+	}
+
+	// Append missing tools to the output field, preserving the harness-specific format.
+	var changes []FieldChange
+
+	if desc.Tools.Shape == domain.ShapePermission {
+		// Permission shape: KindMapping — append new pairs with allow disposition.
+		currentValue, _ := fm.Get(desc.Frontmatter.ToolsKey)
+		allowVal := domain.ScalarValue(string(domain.Allow), domain.QuotePlain)
+		var pairs []domain.FieldPair
+		if currentValue.Kind == domain.KindMapping {
+			pairs = append(pairs, currentValue.Pairs...)
+		}
+		for _, name := range toAppend {
+			pairs = append(pairs, domain.FieldPair{Key: name, Value: allowVal})
+		}
+		newValue := domain.MappingValue(pairs)
+		before := renderValue(currentValue)
+		fm.Set(desc.Frontmatter.ToolsKey, newValue)
+		changes = append(changes, FieldChange{
+			Key:    desc.Frontmatter.ToolsKey,
+			Before: before,
+			After:  renderValue(newValue),
+			Reason: "tool preservation",
+		})
+	} else {
+		// List or scalar shape.
+		currentValue, _ := fm.Get(desc.Frontmatter.ToolsKey)
+		before := renderValue(currentValue)
+
+		switch currentValue.Kind {
+		case domain.KindList:
+			// Append new scalar items to the existing list, preserving the list style.
+			items := make([]domain.FieldValue, len(currentValue.Items))
+			copy(items, currentValue.Items)
+			for _, name := range toAppend {
+				items = append(items, domain.ScalarValue(name, domain.QuotePlain))
+			}
+			newValue := domain.ListValue(items, currentValue.List)
+			fm.Set(desc.Frontmatter.ToolsKey, newValue)
+			changes = append(changes, FieldChange{
+				Key:    desc.Frontmatter.ToolsKey,
+				Before: before,
+				After:  renderValue(newValue),
+				Reason: "tool preservation",
+			})
+		case domain.KindScalar:
+			// Comma-separated scalar — append to the existing string.
+			existing := strings.TrimSpace(currentValue.Scalar)
+			added := strings.Join(toAppend, ", ")
+			var newScalar string
+			if existing == "" {
+				newScalar = added
+			} else {
+				newScalar = existing + ", " + added
+			}
+			newValue := domain.ScalarValue(newScalar, currentValue.Quote)
+			fm.Set(desc.Frontmatter.ToolsKey, newValue)
+			changes = append(changes, FieldChange{
+				Key:    desc.Frontmatter.ToolsKey,
+				Before: before,
+				After:  renderValue(newValue),
+				Reason: "tool preservation",
+			})
+		default:
+			// No parseable current value — build a new list from the deployed names.
+			// This handles the case where the output tools field was cleared or is absent.
+			// First include the computed output names, then the preserved ones.
+			allNames := append(outputNames, toAppend...)
+			items := make([]domain.FieldValue, len(allNames))
+			for i, name := range allNames {
+				items[i] = domain.ScalarValue(name, domain.QuotePlain)
+			}
+			newValue := domain.ListValue(items, domain.ListFlow)
+			fm.Set(desc.Frontmatter.ToolsKey, newValue)
+			changes = append(changes, FieldChange{
+				Key:    desc.Frontmatter.ToolsKey,
+				Before: before,
+				After:  renderValue(newValue),
+				Reason: "tool preservation",
+			})
+		}
+	}
+
+	return changes
 }
 
 // renderValue converts a domain.FieldValue to a concise string for use in FieldChange

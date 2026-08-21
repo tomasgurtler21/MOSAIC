@@ -25,7 +25,10 @@ var registry = []FieldName{
 	{Generic: "id", Deployed: "mosaic_id", Legacy: "id"},
 	{Generic: "role", Deployed: "mosaic_role", Legacy: "role"},
 	{Generic: "version", Deployed: "mosaic_version", Legacy: "version"},
+	// OLD entry — retained for migration stripping and backward-compatible reads.
 	{Generic: "", Deployed: "mosaic_transform_version", Legacy: "transform_version"},
+	// NEW entry — active entry for all new harness version writes.
+	{Generic: "", Deployed: "mosaic_harness_version", Legacy: "harness_version"},
 	{Generic: "", Deployed: "mosaic_injections_version", Legacy: "injections_version"},
 	{Generic: "", Deployed: "mosaic_tool_mappings_version", Legacy: "tool_mappings_version"},
 	{Generic: "", Deployed: "mosaic_bundle_version", Legacy: "bundle_version"},

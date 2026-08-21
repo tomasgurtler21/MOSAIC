@@ -587,3 +587,410 @@ func TestInfrastructureAgents_AssembledAction_WhenAgentsSupplied(t *testing.T) {
 		t.Errorf("InfrastructureAgents action: want %q, got %q", transform.RegionAssembledInfra, outcome.Action)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Preservation tests: InfrastructureAgents region preserved on Update
+// ---------------------------------------------------------------------------
+
+// orchestratorWithInfrastructureAgentsDeployed is an already-deployed orchestrator
+// whose InfrastructureAgents region contains a pre-assembled infrastructure-agent block.
+// It is used as the req.Deployed input in Update-scenario tests.
+const orchestratorWithInfrastructureAgentsDeployed = `---
+version: 6.0.0
+name: orchestrator
+description: Central coordinator that manages multi-agent workflow execution
+model: {model-identifier}
+tools: {tool-permissions}
+recommended_tier: HIGH
+tier_rationale: multi-phase coordination
+required_skills: []
+---
+
+<Identity type="core">
+# Orchestrator Agent
+
+You are the Orchestrator.
+
+<InfrastructureAgents type="managed">
+<InfrastructureAgent type="core" name="orchestration-review" version="1.0.0">
+
+| Class | Trigger | Param | On Failure | Description |
+| --- | --- | --- | --- | --- |
+| review | INVOCATION_INTERVAL | 30 | continue | Advisory checks on run bookkeeping. |
+</InfrastructureAgent>
+</InfrastructureAgents>
+
+<AvailableWorkflows type="managed">
+</AvailableWorkflows>
+
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
+`
+
+// orchestratorWithoutInfrastructureAgentsDeployed is an already-deployed orchestrator whose
+// InfrastructureAgents region is entirely absent — simulating a file deployed before the
+// InfrastructureAgents region was introduced. Used to verify the graceful no-op path: when
+// req.Deployed is non-nil but contains no InfrastructureAgents region, transform.Apply must
+// succeed without error and clear (or empty) the region in the output.
+const orchestratorWithoutInfrastructureAgentsDeployed = `---
+version: 6.0.0
+name: orchestrator
+description: Central coordinator that manages multi-agent workflow execution
+model: {model-identifier}
+tools: {tool-permissions}
+recommended_tier: HIGH
+tier_rationale: multi-phase coordination
+required_skills: []
+---
+
+<Identity type="core">
+# Orchestrator Agent
+
+You are the Orchestrator.
+
+<AvailableWorkflows type="managed">
+</AvailableWorkflows>
+
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
+`
+
+// orchestratorWithEmptyInfrastructureAgentsDeployed is an already-deployed orchestrator
+// whose InfrastructureAgents region is empty. Used to verify that Update preserves the
+// empty region rather than introducing content.
+const orchestratorWithEmptyInfrastructureAgentsDeployed = `---
+version: 6.0.0
+name: orchestrator
+description: Central coordinator that manages multi-agent workflow execution
+model: {model-identifier}
+tools: {tool-permissions}
+recommended_tier: HIGH
+tier_rationale: multi-phase coordination
+required_skills: []
+---
+
+<Identity type="core">
+# Orchestrator Agent
+
+You are the Orchestrator.
+
+<InfrastructureAgents type="managed">
+</InfrastructureAgents>
+
+<AvailableWorkflows type="managed">
+</AvailableWorkflows>
+
+<IdentityExtension type="project">
+</IdentityExtension>
+</Identity>
+`
+
+// TestInfrastructureAgents_Update_WithDeployedContent_PreservesContentByteForByte verifies
+// that when req.Deployed is non-nil (Update scenario) and req.InfrastructureAgents is empty,
+// transform.Apply copies the deployed file's InfrastructureAgents region content into the
+// output unchanged — byte-for-byte identical to what was in the deployed file.
+func TestInfrastructureAgents_Update_WithDeployedContent_PreservesContentByteForByte(t *testing.T) {
+	// Arrange: deployed file has InfrastructureAgents with content. Extract the content that
+	// must survive the Update so we can assert against it precisely.
+	deployed := []byte(orchestratorWithInfrastructureAgentsDeployed)
+	deployedDoc, err := docformat.Parse(deployed)
+	if err != nil {
+		t.Fatalf("parse deployed fixture: %v", err)
+	}
+	deployedNode, ok := deployedDoc.Body().Deployed("InfrastructureAgents")
+	if !ok {
+		t.Fatal("InfrastructureAgents absent from deployed fixture — fixture is malformed")
+	}
+	wantContent := deployedNode.Content()
+
+	req := transform.Request{
+		Source:               []byte(orchestratorWithInfrastructureAgents),
+		Kind:                 domain.ArtifactAgent,
+		Key:                  "orchestrator",
+		Module:               newFixtureModule(t),
+		Model:                fixtureModel(),
+		Scope:                domain.ScopeProject,
+		Deployed:             deployed,
+		InfrastructureAgents: nil, // Update: no new infrastructure agent selections
+	}
+
+	// Act
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	// Assert: output InfrastructureAgents content is byte-identical to the deployed file.
+	outDoc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	outNode, ok := outDoc.Body().Deployed("InfrastructureAgents")
+	if !ok {
+		t.Fatal("InfrastructureAgents region absent from output")
+	}
+	if !bytes.Equal(outNode.Content(), wantContent) {
+		t.Errorf("InfrastructureAgents content not preserved on Update:\ngot:  %q\nwant: %q",
+			outNode.Content(), wantContent)
+	}
+}
+
+// TestInfrastructureAgents_Update_WithDeployedContent_ReportsPreservedAction verifies that
+// when req.Deployed is non-nil and req.InfrastructureAgents is empty, the RegionOutcome for
+// InfrastructureAgents carries Action == RegionPreservedInfra, the dedicated constant for
+// infrastructure region preservation (value "preserved-infrastructure"), distinct from
+// RegionPreserved which is used for project-class regions.
+func TestInfrastructureAgents_Update_WithDeployedContent_ReportsPreservedAction(t *testing.T) {
+	req := transform.Request{
+		Source:               []byte(orchestratorWithInfrastructureAgents),
+		Kind:                 domain.ArtifactAgent,
+		Key:                  "orchestrator",
+		Module:               newFixtureModule(t),
+		Model:                fixtureModel(),
+		Scope:                domain.ScopeProject,
+		Deployed:             []byte(orchestratorWithInfrastructureAgentsDeployed),
+		InfrastructureAgents: nil, // Update: no new infrastructure agent selections
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	var outcome *transform.RegionOutcome
+	for i := range result.Report.Regions {
+		if result.Report.Regions[i].Name == "InfrastructureAgents" {
+			outcome = &result.Report.Regions[i]
+			break
+		}
+	}
+	if outcome == nil {
+		t.Fatal("RegionOutcome for InfrastructureAgents absent from report")
+	}
+	if outcome.Action != transform.RegionPreservedInfra {
+		t.Errorf("InfrastructureAgents action on Update: want %q, got %q",
+			transform.RegionPreservedInfra, outcome.Action)
+	}
+}
+
+// TestInfrastructureAgents_Update_WithDeployedContent_ReportHasNoAgentKeys verifies that
+// when the InfrastructureAgents region is preserved from the deployed file (not assembled),
+// Report.InfrastructureAgents is empty — the keys were not re-assembled in this pass.
+func TestInfrastructureAgents_Update_WithDeployedContent_ReportHasNoAgentKeys(t *testing.T) {
+	req := transform.Request{
+		Source:               []byte(orchestratorWithInfrastructureAgents),
+		Kind:                 domain.ArtifactAgent,
+		Key:                  "orchestrator",
+		Module:               newFixtureModule(t),
+		Model:                fixtureModel(),
+		Scope:                domain.ScopeProject,
+		Deployed:             []byte(orchestratorWithInfrastructureAgentsDeployed),
+		InfrastructureAgents: nil, // Update: no new infrastructure agent selections
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	// Preservation path does not re-assemble keys; report list must be empty.
+	if len(result.Report.InfrastructureAgents) != 0 {
+		t.Errorf("Report.InfrastructureAgents on Update preserve: want empty, got %v",
+			result.Report.InfrastructureAgents)
+	}
+}
+
+// TestInfrastructureAgents_DeployNew_NoDeployed_NoAgents_RegionCleared verifies that when
+// req.Deployed is nil (DeployNew) and req.InfrastructureAgents is empty, the
+// InfrastructureAgents region is cleared as before — the DeployNew path is unchanged by
+// the new preservation logic.
+func TestInfrastructureAgents_DeployNew_NoDeployed_NoAgents_RegionCleared(t *testing.T) {
+	req := transform.Request{
+		Source:               []byte(orchestratorWithInfrastructureAgents),
+		Kind:                 domain.ArtifactAgent,
+		Key:                  "orchestrator",
+		Module:               newFixtureModule(t),
+		Model:                fixtureModel(),
+		Scope:                domain.ScopeProject,
+		Deployed:             nil, // DeployNew: no previously-deployed file
+		InfrastructureAgents: nil, // no agents selected
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	outDoc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	outNode, ok := outDoc.Body().Deployed("InfrastructureAgents")
+	if !ok {
+		t.Fatal("InfrastructureAgents region absent from output")
+	}
+	if !outNode.IsEmpty() {
+		t.Errorf("DeployNew with no agents: InfrastructureAgents must be empty; got: %q",
+			outNode.Content())
+	}
+
+	var outcome *transform.RegionOutcome
+	for i := range result.Report.Regions {
+		if result.Report.Regions[i].Name == "InfrastructureAgents" {
+			outcome = &result.Report.Regions[i]
+			break
+		}
+	}
+	if outcome == nil {
+		t.Fatal("RegionOutcome for InfrastructureAgents absent from report")
+	}
+	if outcome.Action != transform.RegionEmptied {
+		t.Errorf("DeployNew no-agents action: want %q, got %q", transform.RegionEmptied, outcome.Action)
+	}
+}
+
+// TestInfrastructureAgents_Update_WithAgentsProvided_AssemblesFromRequest verifies that
+// when req.Deployed is non-nil (Update scenario) but req.InfrastructureAgents is non-empty,
+// the region is assembled from the supplied blocks rather than lifted from the deployed file.
+// Non-empty InfrastructureAgents always triggers assembly regardless of the Update/DeployNew
+// path.
+func TestInfrastructureAgents_Update_WithAgentsProvided_AssemblesFromRequest(t *testing.T) {
+	req := transform.Request{
+		Source:  []byte(orchestratorWithInfrastructureAgents),
+		Kind:    domain.ArtifactAgent,
+		Key:     "orchestrator",
+		Module:  newFixtureModule(t),
+		Model:   fixtureModel(),
+		Scope:   domain.ScopeProject,
+		Deployed: []byte(orchestratorWithInfrastructureAgentsDeployed),
+		InfrastructureAgents: []transform.InfrastructureBlock{
+			{
+				Key:         "checkpoint-manager-git",
+				Version:     "2.0.0",
+				Class:       "checkpoint",
+				Description: "Commits a restorable checkpoint of the working tree.",
+				OnFailure:   "halt",
+				Triggers: []domain.InfrastructureTrigger{
+					{Trigger: "STAGE_END", TriggerParam: ""},
+				},
+			},
+		},
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	outDoc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	outNode, ok := outDoc.Body().Deployed("InfrastructureAgents")
+	if !ok {
+		t.Fatal("InfrastructureAgents region absent from output")
+	}
+	content := outNode.Content()
+
+	// The output must contain the newly-assembled block, not the deployed block.
+	if !bytes.Contains(content, []byte(`name="checkpoint-manager-git"`)) {
+		t.Errorf("assembled block for checkpoint-manager-git absent from output; got: %q", content)
+	}
+	// The deployed block must NOT be present (assembly replaces it).
+	if bytes.Contains(content, []byte(`name="orchestration-review"`)) {
+		t.Errorf("deployed block for orchestration-review must not appear when assembly is requested; got: %q", content)
+	}
+
+	// RegionOutcome must be RegionAssembledInfra, not RegionPreserved.
+	var outcome *transform.RegionOutcome
+	for i := range result.Report.Regions {
+		if result.Report.Regions[i].Name == "InfrastructureAgents" {
+			outcome = &result.Report.Regions[i]
+			break
+		}
+	}
+	if outcome == nil {
+		t.Fatal("RegionOutcome for InfrastructureAgents absent from report")
+	}
+	if outcome.Action != transform.RegionAssembledInfra {
+		t.Errorf("Update with agents action: want %q, got %q",
+			transform.RegionAssembledInfra, outcome.Action)
+	}
+}
+
+// TestInfrastructureAgents_Update_EmptyDeployedRegion_PreservesEmpty verifies that when
+// req.Deployed is non-nil (Update scenario), req.InfrastructureAgents is empty, AND the
+// deployed file's InfrastructureAgents region is itself empty, the output region is also
+// empty. Update must not introduce any content; it preserves what was there, even if that
+// content is nothing.
+func TestInfrastructureAgents_Update_EmptyDeployedRegion_PreservesEmpty(t *testing.T) {
+	req := transform.Request{
+		Source:               []byte(orchestratorWithInfrastructureAgents),
+		Kind:                 domain.ArtifactAgent,
+		Key:                  "orchestrator",
+		Module:               newFixtureModule(t),
+		Model:                fixtureModel(),
+		Scope:                domain.ScopeProject,
+		Deployed:             []byte(orchestratorWithEmptyInfrastructureAgentsDeployed),
+		InfrastructureAgents: nil, // Update: no new selections
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+
+	outDoc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	outNode, ok := outDoc.Body().Deployed("InfrastructureAgents")
+	if !ok {
+		t.Fatal("InfrastructureAgents region absent from output")
+	}
+	if !outNode.IsEmpty() {
+		t.Errorf("Update with empty deployed region: InfrastructureAgents must remain empty; got: %q",
+			outNode.Content())
+	}
+}
+
+// TestInfrastructureAgents_Update_DeployedHasNoInfrastructureRegion_GracefulNoOp verifies
+// that when req.Deployed is non-nil (Update scenario) but the deployed file contains no
+// InfrastructureAgents region at all — as would occur when the source file adds the region
+// for the first time while a previous deployed file predates it — transform.Apply succeeds
+// without error and the output region is empty. Parse failure on the deployed-side lookup
+// must not cause a panic or a transform error; it is a graceful no-op per the Error Handling
+// Strategy: no content is introduced from the deployed file.
+func TestInfrastructureAgents_Update_DeployedHasNoInfrastructureRegion_GracefulNoOp(t *testing.T) {
+	req := transform.Request{
+		Source:               []byte(orchestratorWithInfrastructureAgents),
+		Kind:                 domain.ArtifactAgent,
+		Key:                  "orchestrator",
+		Module:               newFixtureModule(t),
+		Model:                fixtureModel(),
+		Scope:                domain.ScopeProject,
+		Deployed:             []byte(orchestratorWithoutInfrastructureAgentsDeployed),
+		InfrastructureAgents: nil, // Update: no new selections
+	}
+
+	result, err := transform.Apply(req)
+	if err != nil {
+		t.Fatalf("Apply must not error when deployed file has no InfrastructureAgents region: %v", err)
+	}
+
+	outDoc, err := docformat.Parse(result.Output)
+	if err != nil {
+		t.Fatalf("parse output: %v", err)
+	}
+	outNode, ok := outDoc.Body().Deployed("InfrastructureAgents")
+	if !ok {
+		t.Fatal("InfrastructureAgents region absent from output — source defines it, it must be present")
+	}
+	// No content from the deployed file (it had none); region must be empty.
+	if !outNode.IsEmpty() {
+		t.Errorf("Update with no deployed region: InfrastructureAgents must be empty (graceful no-op); got: %q",
+			outNode.Content())
+	}
+}

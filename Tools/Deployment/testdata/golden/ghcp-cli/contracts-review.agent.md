@@ -1,14 +1,13 @@
 ---
 mosaic_id: 1
-version: 1.0.0
-mosaic_transform_version: 3.0.0
-mosaic_injections_version: 1.2.0
 name: contracts-review
 description: Tool-light fixture for golden file tests — exercises skill-maps-to-empty and six harness tools emitted with no terminal
 model: claude-sonnet-4-6
 tools: ['read', 'edit', 'search', 'ask_user', 'skill']
 user-invocable: false
+mosaic_harness_version: 3.0.0
 mosaic_role: subagent
+mosaic_version: 1.0.0
 ---
 
 <Identity type="core">

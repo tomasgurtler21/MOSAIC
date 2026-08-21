@@ -320,12 +320,17 @@ func classifyAgentItem(
 	// Step 5: Compare version fields against the deployed-file versions.
 	stamps := domain.VersionStamps{
 		Version:             agent.Version,
-		TransformVersion:    desc.TransformVersion,
+		HarnessVersion:      desc.TransformVersion,
 		InjectionsVersion:   desc.InjectionsVersion,
 		ToolMappingsVersion: toolMappingsVersion,
 	}
-	if agent.Role == domain.RoleOrchestrator {
-		stamps.OrchestratorInjectionsVersion = desc.OrchestratorInjectionsVersion
+	if agent.Role == domain.RoleOrchestrator && desc.OrchestratorInjectionsVersion != "" {
+		// When the harness provides an orchestrator-specific injections version, use it for
+		// staleness comparison. The deployed orchestrator file carries this value in its
+		// InjectionsVersion field (written by the harness transform's write side).
+		// When the descriptor has no orchestrator-specific value, InjectionsVersion already
+		// holds desc.InjectionsVersion and applies to all agents uniformly.
+		stamps.InjectionsVersion = desc.OrchestratorInjectionsVersion
 	}
 	deltas := AgentStaleness(deployed, agent, stamps)
 

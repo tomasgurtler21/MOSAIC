@@ -1,8 +1,5 @@
 ---
 mosaic_id: 1
-version: 1.0.0
-mosaic_transform_version: 3.0.0
-mosaic_injections_version: 1.3.1
 description: Tool-light fixture for golden file tests — exercises skill-maps-to-empty and six harness tools emitted with no terminal
 mode: subagent
 model: github-copilot/claude-sonnet-4-6
@@ -22,7 +19,9 @@ permission:
   todowrite: deny
   todoread: deny
   skill: allow
+mosaic_harness_version: 3.0.0
 mosaic_role: subagent
+mosaic_version: 1.0.0
 ---
 
 <Identity type="core">

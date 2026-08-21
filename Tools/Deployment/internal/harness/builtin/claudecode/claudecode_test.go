@@ -549,7 +549,7 @@ func TestContract_ClaudeCode(t *testing.T) {
 						Origin:  domain.OriginHarnessList,
 					},
 					Versions: domain.VersionStamps{
-						TransformVersion:  "3.0.0",
+						HarnessVersion:  "3.0.0",
 						InjectionsVersion: "1.1.0",
 					},
 				},

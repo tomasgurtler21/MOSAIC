@@ -50,7 +50,6 @@ import (
 	"path"
 	"path/filepath"
 
-	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
 	"mosaic-deploy/internal/harness/injectionfile"
@@ -207,40 +206,18 @@ func (m *module) convertFieldsToFlowList(result domain.ToolResult) domain.ToolRe
 // and must not appear here; including them would produce duplicate FieldChange entries in
 // transform.Report.Fields.
 //
-// Exception: orchestrator_injections_version is stamped here for the orchestrator agent when
-// non-empty, and filtered from the key_order for non-orchestrator agents and orchestrator agents
-// with an empty version (where the field is not emitted).
+// The orchestrator_injections_version field has been relocated from frontmatter to the
+// version attribute on InjectionHarness-class region tags (written by applyHarnessRegion).
+// This method no longer stamps it as a frontmatter field for any agent.
 func (m *module) Frontmatter(req domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
 	set := make([]domain.FrontmatterField, len(m.desc.Frontmatter.Add))
 	copy(set, m.desc.Frontmatter.Add)
 
-	keyOrder := m.desc.Frontmatter.KeyOrder
-	orchField, _ := agentfields.ByDeployedName("orchestrator_injections_version")
-	if req.AgentKey == "orchestrator" && req.Versions.OrchestratorInjectionsVersion != "" {
-		set = append(set, domain.FrontmatterField{
-			Key:   orchField.Deployed,
-			Value: domain.ScalarValue(req.Versions.OrchestratorInjectionsVersion, domain.QuotePlain),
-		})
-	} else {
-		keyOrder = filterKeyOrder(keyOrder, orchField.Deployed)
-	}
-
 	return domain.FrontmatterPlan{
 		Set:      set,
 		Remove:   m.desc.Frontmatter.Drop,
-		KeyOrder: keyOrder,
+		KeyOrder: m.desc.Frontmatter.KeyOrder,
 	}, nil
-}
-
-// filterKeyOrder returns a copy of keys with the given key removed.
-func filterKeyOrder(keys []string, exclude string) []string {
-	filtered := make([]string, 0, len(keys))
-	for _, k := range keys {
-		if k != exclude {
-			filtered = append(filtered, k)
-		}
-	}
-	return filtered
 }
 
 // TargetPath returns the deployment path for one artifact.

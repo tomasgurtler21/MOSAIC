@@ -68,9 +68,9 @@ type FrontmatterRequest struct {
 // VersionStamps carries the version fields stamped into every deployed agent.
 type VersionStamps struct {
 	Version                       string // carried through from the source, unchanged
-	TransformVersion              string
-	InjectionsVersion             string
-	OrchestratorInjectionsVersion string // orchestrator-only; empty for subagents
+	HarnessVersion                string // transform engine version (agents only); written as mosaic_harness_version
+	InjectionsVersion             string // role-selected injection version; for orchestrators, populated with desc.OrchestratorInjectionsVersion
+	OrchestratorInjectionsVersion string // reserved; no longer populated after Stage 3 — role-conditional comparison uses InjectionsVersion
 	ToolMappingsVersion           string // hash of the effective tool-destination mapping set; empty when no config mappings
 }
 

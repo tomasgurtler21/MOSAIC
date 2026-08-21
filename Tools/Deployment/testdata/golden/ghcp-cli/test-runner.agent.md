@@ -1,14 +1,13 @@
 ---
 mosaic_id: 2
-version: 1.0.0
-mosaic_transform_version: 3.0.0
-mosaic_injections_version: 1.2.0
 name: test-runner
 description: Tool-heavy fixture for golden file tests — exercises all seven generic tools including terminal
 model: claude-sonnet-4-6
 tools: ['read', 'edit', 'search', 'execute', 'ask_user']
 user-invocable: false
+mosaic_harness_version: 3.0.0
 mosaic_role: subagent
+mosaic_version: 1.0.0
 ---
 
 <Identity type="core">

@@ -813,7 +813,7 @@ func TestModel_DescriptorDeclares_ModelKey(t *testing.T) {
 			Origin:  domain.OriginHarnessList,
 		},
 		Versions: domain.VersionStamps{
-			TransformVersion:  "3.0.0",
+			HarnessVersion:  "3.0.0",
 			InjectionsVersion: "1.3.0",
 		},
 	}
@@ -1413,7 +1413,7 @@ func TestContract_VSCodeGHCP(t *testing.T) {
 						Origin:  domain.OriginHarnessList,
 					},
 					Versions: domain.VersionStamps{
-						TransformVersion:  "3.0.0",
+						HarnessVersion:  "3.0.0",
 						InjectionsVersion: "1.3.0",
 					},
 				},

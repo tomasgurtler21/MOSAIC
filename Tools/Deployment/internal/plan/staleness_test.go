@@ -9,7 +9,7 @@ package plan_test
 //   - A mismatch on any single field produces one delta naming that field.
 //   - The delta carries the value from the deployed file in delta.Deployed, so the review
 //     screen can show the truthful "deployed version changed from X to Y" message.
-//   - Deltas are returned in the fixed order: version, transform_version, injections_version.
+//   - Deltas are returned in the fixed order: version, harness_version, injections_version.
 //   - All fields matching produces an empty slice (not stale).
 //   - A deployed file carrying no version stamps at all (all fields empty) produces deltas
 //     whenever the source has non-empty stamps; delta.Deployed is "" in each case.
@@ -47,7 +47,7 @@ func sampleDeployedState() domain.DeployedArtifactState {
 		Present:           true,
 		ContentHash:       "sha256:aaaa",
 		Version:           "1.0",
-		TransformVersion:  "2.0",
+		HarnessVersion:    "2.0",
 		InjectionsVersion: "3.0",
 	}
 }
@@ -62,7 +62,7 @@ func sampleDeployedState() domain.DeployedArtifactState {
 func sampleStampsFromDeployed(deployed domain.DeployedArtifactState) domain.VersionStamps {
 	return domain.VersionStamps{
 		Version:           deployed.Version,
-		TransformVersion:  deployed.TransformVersion,
+		HarnessVersion:    deployed.HarnessVersion,
 		InjectionsVersion: deployed.InjectionsVersion,
 		// OrchestratorInjectionsVersion intentionally omitted — see note above.
 	}
@@ -94,7 +94,7 @@ func TestAgentStaleness_VersionMismatch_Only_ReturnsSingleDelta(t *testing.T) {
 	agent := makeAgent("test-agent", "1.1")
 	stamps := domain.VersionStamps{
 		Version:           "1.1", // differs from deployed.Version "1.0"
-		TransformVersion:  deployed.TransformVersion,
+		HarnessVersion:    deployed.HarnessVersion,
 		InjectionsVersion: deployed.InjectionsVersion,
 	}
 
@@ -115,7 +115,7 @@ func TestAgentStaleness_VersionMismatch_DeployedCarriesFileValue(t *testing.T) {
 	deployed := sampleDeployedState() // deployed.Version = "1.0" — value in the file
 	stamps := domain.VersionStamps{
 		Version:           "1.1", // source is newer
-		TransformVersion:  deployed.TransformVersion,
+		HarnessVersion:    deployed.HarnessVersion,
 		InjectionsVersion: deployed.InjectionsVersion,
 	}
 	agent := makeAgent("test-agent", "1.1")
@@ -133,24 +133,24 @@ func TestAgentStaleness_VersionMismatch_DeployedCarriesFileValue(t *testing.T) {
 	}
 }
 
-// TestAgentStaleness_TransformVersionMismatch_Only_ReturnsSingleDelta verifies that a
-// mismatch on "transform_version" alone produces exactly one delta naming "transform_version".
-func TestAgentStaleness_TransformVersionMismatch_Only_ReturnsSingleDelta(t *testing.T) {
+// TestAgentStaleness_HarnessVersionMismatch_Only_ReturnsSingleDelta verifies that a
+// mismatch on "harness_version" alone produces exactly one delta naming "harness_version".
+func TestAgentStaleness_HarnessVersionMismatch_Only_ReturnsSingleDelta(t *testing.T) {
 	deployed := sampleDeployedState()
 	agent := makeAgent("test-agent", deployed.Version)
 	stamps := domain.VersionStamps{
 		Version:           deployed.Version,
-		TransformVersion:  "2.1", // differs from deployed.TransformVersion "2.0"
+		HarnessVersion:    "2.1", // differs from deployed.HarnessVersion "2.0"
 		InjectionsVersion: deployed.InjectionsVersion,
 	}
 
 	deltas := plan.AgentStaleness(deployed, agent, stamps)
 
 	if len(deltas) != 1 {
-		t.Fatalf("AgentStaleness with transform_version mismatch only: got %d deltas, want 1", len(deltas))
+		t.Fatalf("AgentStaleness with harness_version mismatch only: got %d deltas, want 1", len(deltas))
 	}
-	if deltas[0].Field != "transform_version" {
-		t.Errorf("delta.Field = %q, want %q", deltas[0].Field, "transform_version")
+	if deltas[0].Field != "harness_version" {
+		t.Errorf("delta.Field = %q, want %q", deltas[0].Field, "harness_version")
 	}
 }
 
@@ -161,7 +161,7 @@ func TestAgentStaleness_InjectionsVersionMismatch_Only_ReturnsSingleDelta(t *tes
 	agent := makeAgent("test-agent", deployed.Version)
 	stamps := domain.VersionStamps{
 		Version:           deployed.Version,
-		TransformVersion:  deployed.TransformVersion,
+		HarnessVersion:    deployed.HarnessVersion,
 		InjectionsVersion: "3.1", // differs from deployed.InjectionsVersion "3.0"
 	}
 
@@ -182,7 +182,7 @@ func TestAgentStaleness_AllThreeVersionsMismatch_ReturnsThreeDeltas(t *testing.T
 	agent := makeAgent("test-agent", "1.1")
 	stamps := domain.VersionStamps{
 		Version:           "1.1", // all three differ from deployed
-		TransformVersion:  "2.1",
+		HarnessVersion:    "2.1",
 		InjectionsVersion: "3.1",
 	}
 
@@ -194,14 +194,14 @@ func TestAgentStaleness_AllThreeVersionsMismatch_ReturnsThreeDeltas(t *testing.T
 }
 
 // TestAgentStaleness_DeltaOrder_IsFixed_VersionFirst verifies that when multiple fields
-// mismatch, the deltas are returned in the fixed order: version, transform_version,
+// mismatch, the deltas are returned in the fixed order: version, harness_version,
 // injections_version. The order must be deterministic and independent of which fields differ.
 func TestAgentStaleness_DeltaOrder_IsFixed_VersionFirst(t *testing.T) {
 	deployed := sampleDeployedState()
 	agent := makeAgent("test-agent", "1.1")
 	stamps := domain.VersionStamps{
 		Version:           "1.1",
-		TransformVersion:  "2.1",
+		HarnessVersion:    "2.1",
 		InjectionsVersion: "3.1",
 	}
 
@@ -210,7 +210,7 @@ func TestAgentStaleness_DeltaOrder_IsFixed_VersionFirst(t *testing.T) {
 	if len(deltas) != 3 {
 		t.Fatalf("expected 3 deltas, got %d", len(deltas))
 	}
-	wantOrder := []string{"version", "transform_version", "injections_version"}
+	wantOrder := []string{"version", "harness_version", "injections_version"}
 	for i, want := range wantOrder {
 		if deltas[i].Field != want {
 			t.Errorf("deltas[%d].Field = %q, want %q; delta order must be fixed", i, deltas[i].Field, want)
@@ -218,21 +218,21 @@ func TestAgentStaleness_DeltaOrder_IsFixed_VersionFirst(t *testing.T) {
 	}
 }
 
-// TestAgentStaleness_PartialMismatch_VersionAndTransform_TwoDeltas verifies that a
+// TestAgentStaleness_PartialMismatch_VersionAndHarness_TwoDeltas verifies that a
 // mismatch on two out of three fields returns exactly two deltas.
-func TestAgentStaleness_PartialMismatch_VersionAndTransform_TwoDeltas(t *testing.T) {
+func TestAgentStaleness_PartialMismatch_VersionAndHarness_TwoDeltas(t *testing.T) {
 	deployed := sampleDeployedState()
 	agent := makeAgent("test-agent", "1.1")
 	stamps := domain.VersionStamps{
 		Version:           "1.1", // differs
-		TransformVersion:  "2.1", // differs
+		HarnessVersion:    "2.1", // differs
 		InjectionsVersion: deployed.InjectionsVersion, // matches
 	}
 
 	deltas := plan.AgentStaleness(deployed, agent, stamps)
 
 	if len(deltas) != 2 {
-		t.Fatalf("AgentStaleness with version+transform_version mismatch: got %d deltas, want 2", len(deltas))
+		t.Fatalf("AgentStaleness with version+harness_version mismatch: got %d deltas, want 2", len(deltas))
 	}
 }
 
@@ -245,13 +245,13 @@ func TestAgentStaleness_NoVersionInfo_SourceHasValues_ProducesThreeDeltas(t *tes
 		Present:           true,
 		ContentHash:       "sha256:abc",
 		Version:           "",  // no version stamp in the deployed file
-		TransformVersion:  "",
+		HarnessVersion:    "",
 		InjectionsVersion: "",
 	}
 	agent := makeAgent("test-agent", "2.0")
 	stamps := domain.VersionStamps{
 		Version:           "2.0",
-		TransformVersion:  "1.5",
+		HarnessVersion:    "1.5",
 		InjectionsVersion: "3.0",
 	}
 
@@ -270,7 +270,7 @@ func TestAgentStaleness_NoVersionInfo_SourceHasValues_ProducesThreeDeltas(t *tes
 }
 
 // TestAgentStaleness_DeltaFieldNames_CompatibleWithExecutorStamping verifies that the field
-// names produced by AgentStaleness are exactly "version", "transform_version", and
+// names produced by AgentStaleness are exactly "version", "harness_version", and
 // "injections_version" — the three names the executor's resolveVersionStamp switches on
 // when writing manifest version stamps. Changing these names would silently break the
 // manifest stamping and leave deployed files with empty version fields.
@@ -279,13 +279,13 @@ func TestAgentStaleness_DeltaFieldNames_CompatibleWithExecutorStamping(t *testin
 		Present:           true,
 		ContentHash:       "sha256:abc",
 		Version:           "1.0",
-		TransformVersion:  "1.0",
+		HarnessVersion:    "1.0",
 		InjectionsVersion: "1.0",
 	}
 	agent := makeAgent("test-agent", "2.0")
 	stamps := domain.VersionStamps{
 		Version:           "2.0",
-		TransformVersion:  "1.5",
+		HarnessVersion:    "1.5",
 		InjectionsVersion: "3.0",
 	}
 
@@ -295,7 +295,7 @@ func TestAgentStaleness_DeltaFieldNames_CompatibleWithExecutorStamping(t *testin
 		t.Fatalf("expected 3 deltas (all fields differ), got %d", len(deltas))
 	}
 
-	wantFields := []string{"version", "transform_version", "injections_version"}
+	wantFields := []string{"version", "harness_version", "injections_version"}
 	for i, want := range wantFields {
 		if deltas[i].Field != want {
 			t.Errorf("deltas[%d].Field = %q, want %q; this name is relied on by the executor for manifest stamping",
@@ -486,7 +486,7 @@ func TestBuild_LocalModification_HashMatch_ClassifiesAsUnchanged(t *testing.T) {
 	agent := makeAgent("test-agent", "1.0")
 
 	manifestEntry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", hash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -527,7 +527,7 @@ func TestBuild_LocalModification_HashMismatch_ClassifiesAsConflict(t *testing.T)
 	agent := makeAgent("test-agent", "1.0")
 
 	manifestEntry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", recordedHash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -579,7 +579,7 @@ func TestBuild_LocalModification_WhitespaceChange_ClassifiesAsConflict(t *testin
 	agent := makeAgent("test-agent", "1.0")
 
 	manifestEntry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", recordedHash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -825,13 +825,13 @@ func TestAgentStaleness_VersionDowngrade_StillProducesDelta(t *testing.T) {
 		Present:           true,
 		ContentHash:       "sha256:abc",
 		Version:           "2.0", // deployed is newer than source
-		TransformVersion:  "1.0",
+		HarnessVersion:    "1.0",
 		InjectionsVersion: "1.0",
 	}
 	agent := makeAgent("test-agent", "1.0") // source is older
 	stamps := domain.VersionStamps{
 		Version:           "1.0",
-		TransformVersion:  "1.0",
+		HarnessVersion:    "1.0",
 		InjectionsVersion: "1.0",
 	}
 

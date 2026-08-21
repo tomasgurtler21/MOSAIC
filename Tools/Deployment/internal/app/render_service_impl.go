@@ -256,19 +256,22 @@ func renderAgent(_ context.Context, s *service, req RenderAgentRequest) (RenderA
 	// -----------------------------------------------------------------------
 	// 14. Render via transform.Apply (the sole transformation entry point)
 	// -----------------------------------------------------------------------
+	desc := module.Descriptor()
 	transformResult, transformErr := transform.Apply(transform.Request{
-		Source:               srcBytes,
-		Kind:                 domain.ArtifactAgent,
-		Key:                  agentKey,
-		Module:               module,
-		Model:                domain.ModelSelection{ModelID: req.TargetModel},
-		Scope:                domain.ScopeProject,
-		Role:                 role,
-		Protocol:             protocol,
-		Bundle:               bundle,
-		Workflows:            wfBlocks,
-		InfrastructureAgents: infraBlocks,
-		ToolMappingsVersion:  toolMappingsVersion,
+		Source:                        srcBytes,
+		Kind:                          domain.ArtifactAgent,
+		Key:                           agentKey,
+		Module:                        module,
+		Model:                         domain.ModelSelection{ModelID: req.TargetModel},
+		Scope:                         domain.ScopeProject,
+		Role:                          role,
+		Protocol:                      protocol,
+		Bundle:                        bundle,
+		Workflows:                     wfBlocks,
+		InfrastructureAgents:          infraBlocks,
+		ToolMappingsVersion:           toolMappingsVersion,
+		InjectionsVersion:             desc.InjectionsVersion,
+		OrchestratorInjectionsVersion: desc.OrchestratorInjectionsVersion,
 		// Deployed is nil: there is no prior deployed file at a fresh render destination.
 	})
 	if transformErr != nil {

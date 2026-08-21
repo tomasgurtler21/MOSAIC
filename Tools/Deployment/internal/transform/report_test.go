@@ -74,9 +74,11 @@ func TestReport_ChangedFieldsNamesEveryModifiedField(t *testing.T) {
 		}
 	}
 
-	// Fields that the fixture descriptor adds must appear in the report with Before == "".
-	// Version stamps now use mosaic_-prefixed deployed names; the id rename produces mosaic_id.
-	addedFields := []string{"mode", "mosaic_transform_version", "mosaic_injections_version", "mosaic_id"}
+	// Fields that the fixture descriptor adds or renames must appear in the report with Before == "".
+	// Version stamps use mosaic_-prefixed deployed names; the id and version renames produce
+	// mosaic_id and mosaic_version. mosaic_harness_version replaces mosaic_transform_version.
+	// mosaic_injections_version is written then stripped (not an "added" field in the final output).
+	addedFields := []string{"mode", "mosaic_harness_version", "mosaic_id", "mosaic_version"}
 	for _, key := range addedFields {
 		fc, ok := reportedKeys[key]
 		if !ok {

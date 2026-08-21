@@ -74,8 +74,8 @@ func TestProbeDeployedArtifact_FullFrontmatter_PresentAndVersionsPopulated(t *te
 	if state.Version != "2.0" {
 		t.Errorf("Version = %q, want %q", state.Version, "2.0")
 	}
-	if state.TransformVersion != "1.5" {
-		t.Errorf("TransformVersion = %q, want %q", state.TransformVersion, "1.5")
+	if state.HarnessVersion != "1.5" {
+		t.Errorf("TransformVersion = %q, want %q", state.HarnessVersion, "1.5")
 	}
 	if state.InjectionsVersion != "1.2" {
 		t.Errorf("InjectionsVersion = %q, want %q", state.InjectionsVersion, "1.2")
@@ -122,8 +122,8 @@ func TestProbeDeployedArtifact_PartialFrontmatter_MissingFieldsAreEmpty(t *testi
 	if state.Version != "3.0" {
 		t.Errorf("Version = %q, want %q", state.Version, "3.0")
 	}
-	if state.TransformVersion != "" {
-		t.Errorf("TransformVersion = %q, want empty (key absent from frontmatter)", state.TransformVersion)
+	if state.HarnessVersion != "" {
+		t.Errorf("TransformVersion = %q, want empty (key absent from frontmatter)", state.HarnessVersion)
 	}
 	if state.InjectionsVersion != "" {
 		t.Errorf("InjectionsVersion = %q, want empty (key absent from frontmatter)", state.InjectionsVersion)
@@ -151,9 +151,9 @@ func TestProbeDeployedArtifact_MalformedFrontmatter_PresentTrueVersionsEmpty(t *
 	if state.ContentHash != manifest.Hash(content) {
 		t.Errorf("ContentHash mismatch for malformed-frontmatter file")
 	}
-	if state.Version != "" || state.TransformVersion != "" || state.InjectionsVersion != "" {
+	if state.Version != "" || state.HarnessVersion != "" || state.InjectionsVersion != "" {
 		t.Errorf("all version fields must be empty when frontmatter is malformed; got Version=%q TransformVersion=%q InjectionsVersion=%q",
-			state.Version, state.TransformVersion, state.InjectionsVersion)
+			state.Version, state.HarnessVersion, state.InjectionsVersion)
 	}
 }
 
@@ -169,7 +169,7 @@ func TestProbeDeployedArtifact_NoFrontmatter_PresentTrueVersionsEmpty(t *testing
 	if !state.Present {
 		t.Fatal("expected Present: true for a readable file with no frontmatter")
 	}
-	if state.Version != "" || state.TransformVersion != "" || state.InjectionsVersion != "" {
+	if state.Version != "" || state.HarnessVersion != "" || state.InjectionsVersion != "" {
 		t.Error("expected all version fields empty when no frontmatter is present")
 	}
 }
@@ -441,8 +441,8 @@ func TestProbeDeployedArtifact_ModelIDDoesNotAffectVersionFields(t *testing.T) {
 	if state.Version != "2.0" {
 		t.Errorf("Version = %q, want %q; version field must be unaffected by model extraction", state.Version, "2.0")
 	}
-	if state.TransformVersion != "1.5" {
-		t.Errorf("TransformVersion = %q, want %q; transform_version field must be unaffected", state.TransformVersion, "1.5")
+	if state.HarnessVersion != "1.5" {
+		t.Errorf("TransformVersion = %q, want %q; transform_version field must be unaffected", state.HarnessVersion, "1.5")
 	}
 	if state.InjectionsVersion != "1.2" {
 		t.Errorf("InjectionsVersion = %q, want %q; injections_version field must be unaffected", state.InjectionsVersion, "1.2")

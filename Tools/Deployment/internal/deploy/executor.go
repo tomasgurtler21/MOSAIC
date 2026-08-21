@@ -711,7 +711,7 @@ func newManifestEntry(item domain.PlanItem, content []byte, stamp domain.Version
 		Ref:                           item.Ref,
 		TargetPath:                    item.TargetPath,
 		Version:                       stamp.Version,
-		TransformVersion:              stamp.TransformVersion,
+		HarnessVersion:                stamp.HarnessVersion,
 		InjectionsVersion:             stamp.InjectionsVersion,
 		OrchestratorInjectionsVersion: stamp.OrchestratorInjectionsVersion,
 		ToolMappingsVersion:           stamp.ToolMappingsVersion,
@@ -733,8 +733,8 @@ func resolveVersionStamp(item domain.PlanItem, stamps map[string]domain.VersionS
 			switch delta.Field {
 			case "version":
 				stamp.Version = delta.Source
-			case "transform_version":
-				stamp.TransformVersion = delta.Source
+			case "harness_version":
+				stamp.HarnessVersion = delta.Source
 			case "injections_version":
 				stamp.InjectionsVersion = delta.Source
 			case "orchestrator_injections_version":

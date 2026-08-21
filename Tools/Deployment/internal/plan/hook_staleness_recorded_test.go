@@ -196,7 +196,7 @@ func TestHookStalenessFromRecorded_DeltaFieldNeverCollidesWithAgentFields(t *tes
 		t.Fatal("expected a delta but got none")
 	}
 
-	agentFields := []string{"transform_version", "injections_version", "orchestrator_injections_version", "tool_mappings_version"}
+	agentFields := []string{"harness_version", "injections_version", "orchestrator_injections_version", "tool_mappings_version"}
 	for _, f := range agentFields {
 		if deltas[0].Field == f {
 			t.Errorf("hook delta Field = %q; must not collide with agent-specific field %q", deltas[0].Field, f)

@@ -173,17 +173,11 @@ func TestDescriptorConsolidation_CLIHarnesses_ModelsBlockRetired(t *testing.T) {
 // T1.2 — orchestrator_injections_version preservation
 // ─────────────────────────────────────────────────────────────────
 
-// TestDescriptorConsolidation_MosaicOrchestratorInjectionsVersionInKeyOrder verifies that
-// "mosaic_orchestrator_injections_version" is present in each affected embedded descriptor's
-// frontmatter key_order after the Stage 4 mosaic_ prefix migration.
-//
-// The embedded descriptors are the authoritative copies. Both the model list migration
-// (Stage 1) and the prefix rename (Stage 4/I4.4) update the key_order entries. This test
-// guards that the renamed entry survives both migrations.
-//
-// RED: FAILS until I4.4 renames the key_order entry from "orchestrator_injections_version"
-// to "mosaic_orchestrator_injections_version" in all three embedded descriptor YAML files.
-func TestDescriptorConsolidation_MosaicOrchestratorInjectionsVersionInKeyOrder(t *testing.T) {
+// TestDescriptorConsolidation_MosaicOrchestratorInjectionsVersionAbsentFromKeyOrder verifies
+// that "mosaic_orchestrator_injections_version" is NOT present in each affected embedded
+// descriptor's frontmatter key_order. Stage 2 relocated this field from frontmatter to
+// InjectionHarness-class region tag attributes, so it no longer needs a position in key_order.
+func TestDescriptorConsolidation_MosaicOrchestratorInjectionsVersionAbsentFromKeyOrder(t *testing.T) {
 	cases := []struct {
 		harness string
 		dir     string
@@ -198,9 +192,9 @@ func TestDescriptorConsolidation_MosaicOrchestratorInjectionsVersionInKeyOrder(t
 		tc := tc
 		t.Run(tc.harness, func(t *testing.T) {
 			d := loadEmbeddedDescriptor(t, tc.dir, tc.file)
-			if !containsStr(d.Frontmatter.KeyOrder, "mosaic_orchestrator_injections_version") {
-				t.Errorf("%s: Frontmatter.KeyOrder does not contain \"mosaic_orchestrator_injections_version\"; "+
-					"the prefixed name must be present after Stage 4 descriptor update\n  KeyOrder: %v",
+			if containsStr(d.Frontmatter.KeyOrder, "mosaic_orchestrator_injections_version") {
+				t.Errorf("%s: Frontmatter.KeyOrder contains \"mosaic_orchestrator_injections_version\"; "+
+					"Stage 2 relocated this version to region tag attributes — it must not appear in key_order\n  KeyOrder: %v",
 					tc.harness, d.Frontmatter.KeyOrder)
 			}
 		})

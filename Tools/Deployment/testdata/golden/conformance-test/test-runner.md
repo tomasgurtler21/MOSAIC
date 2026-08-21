@@ -1,5 +1,4 @@
 ---
-version: 1.0.0
 description: Tool-heavy fixture for golden file tests — exercises all seven generic tools including terminal
 model: github-copilot/claude-sonnet-4-6
 tools:
@@ -9,10 +8,10 @@ tools:
   - search
   - execute
   - ask_user
-mosaic_transform_version: 1.0.0
-mosaic_injections_version: 1.0.0
+mosaic_harness_version: 1.0.0
 mosaic_id: 2
 mosaic_role: subagent
+mosaic_version: 1.0.0
 ---
 
 <Identity type="core">

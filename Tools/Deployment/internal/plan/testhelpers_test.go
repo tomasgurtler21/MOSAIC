@@ -382,7 +382,7 @@ func makeManifestEntry(ref domain.ArtifactRef, targetPath, version, contentHash 
 		Ref:               ref,
 		TargetPath:        targetPath,
 		Version:           version,
-		TransformVersion:  "1.0",
+		HarnessVersion:    "1.0",
 		InjectionsVersion: "1.0",
 		ContentHash:       contentHash,
 		DeployedAt:        time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -407,12 +407,12 @@ func makeManifestEntry(ref domain.ArtifactRef, targetPath, version, contentHash 
 // Pass version, transformVersion, and injectionsVersion as "" when the deployed file
 // carries no stamp for that field. A present file with all three empty represents an
 // unversioned deployed artifact (treated as stale by the classifier per D5).
-func deployedState(contentHash, version, transformVersion, injectionsVersion string) domain.DeployedArtifactState {
+func deployedState(contentHash, version, harnessVersion, injectionsVersion string) domain.DeployedArtifactState {
 	return domain.DeployedArtifactState{
 		Present:           true,
 		ContentHash:       contentHash,
 		Version:           version,
-		TransformVersion:  transformVersion,
+		HarnessVersion:    harnessVersion,
 		InjectionsVersion: injectionsVersion,
 	}
 }
@@ -603,8 +603,8 @@ func findGapForSubject(gaps []domain.Gap, kind domain.GapKind, subject string) (
 // deployedStateWithModel returns a DeployedArtifactState identical to deployedState but with
 // ModelID set to modelID. Use this when a test needs the deployed file to carry an embedded
 // model so the action-aware gap logic can treat it as "model already present on disk".
-func deployedStateWithModel(contentHash, version, transformVersion, injectionsVersion, modelID string) domain.DeployedArtifactState {
-	s := deployedState(contentHash, version, transformVersion, injectionsVersion)
+func deployedStateWithModel(contentHash, version, harnessVersion, injectionsVersion, modelID string) domain.DeployedArtifactState {
+	s := deployedState(contentHash, version, harnessVersion, injectionsVersion)
 	s.ModelID = modelID
 	return s
 }

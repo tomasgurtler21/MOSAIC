@@ -865,7 +865,7 @@ func (a *adapter) Frontmatter(req domain.FrontmatterRequest) (domain.Frontmatter
 		ToolFields: toWireFrontmatterFields(req.ToolFields),
 		Versions: wireVersionStamps{
 			Version:                       req.Versions.Version,
-			TransformVersion:              req.Versions.TransformVersion,
+			TransformVersion:              req.Versions.HarnessVersion,
 			InjectionsVersion:             req.Versions.InjectionsVersion,
 			OrchestratorInjectionsVersion: req.Versions.OrchestratorInjectionsVersion,
 		},

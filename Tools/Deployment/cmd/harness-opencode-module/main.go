@@ -460,7 +460,7 @@ func handleRequest(mod domain.HarnessModule, req wireRequest) wireResponse {
 			ToolFields: fromWireFrontmatterFields(params.ToolFields),
 			Versions: domain.VersionStamps{
 				Version:                       params.Versions.Version,
-				TransformVersion:              params.Versions.TransformVersion,
+				HarnessVersion:                params.Versions.TransformVersion,
 				InjectionsVersion:             params.Versions.InjectionsVersion,
 				OrchestratorInjectionsVersion: params.Versions.OrchestratorInjectionsVersion,
 			},

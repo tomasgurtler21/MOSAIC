@@ -49,7 +49,7 @@ func Apply(req Request) (Result, error) {
 		ToolFields: toolResult.Fields,
 		Versions: domain.VersionStamps{
 			Version:                       sourceVersion,
-			TransformVersion:              desc.TransformVersion,
+			HarnessVersion:                desc.TransformVersion,
 			InjectionsVersion:             desc.InjectionsVersion,
 			OrchestratorInjectionsVersion: desc.OrchestratorInjectionsVersion,
 		},

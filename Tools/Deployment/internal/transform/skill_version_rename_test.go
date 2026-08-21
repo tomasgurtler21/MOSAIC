@@ -270,17 +270,14 @@ func TestRenameSkillVersionField_UnparseableFrontmatter_NilError(t *testing.T) {
 // Agent isolation — FR-7 out-of-scope boundary
 // ---------------------------------------------------------------------------
 
-// TestAgentIsolation_AgentVersionFieldUnchangedByTransform verifies that transform.Apply
-// on an agent source does NOT rename the "version" field to "mosaic_version". Agents
-// must continue to carry the bare "version" key in deployed frontmatter; only skill
-// artifacts go through RenameSkillVersionField.
-//
-// This test PASSES from the start (agents have always kept bare "version") and serves
-// as a regression guard: the implementation must not inadvertently route agent content
-// through RenameSkillVersionField or rename "version" during applyFrontmatter.
-func TestAgentIsolation_AgentVersionFieldUnchangedByTransform(t *testing.T) {
-	// Minimal agent source with a "version" field. The version field must remain "version"
-	// (not become "mosaic_version") in the deployed output.
+// TestAgentVersionRenamedToMosaicVersionByTransform verifies that transform.Apply on an
+// agent source DOES rename the "version" field to "mosaic_version". After Stage 1, agents
+// carry the deployed key "mosaic_version" (not bare "version") just like skills. Both code
+// paths (RenameSkillVersionField for skills and applyFrontmatter Step 4e for agents) produce
+// the same "mosaic_version" deployed key.
+func TestAgentVersionRenamedToMosaicVersionByTransform(t *testing.T) {
+	// Minimal agent source with a "version" field. The version field must be renamed to
+	// "mosaic_version" in the deployed output by applyFrontmatter's Step 4e.
 	agentSrc := []byte(`---
 id: 42
 version: 2.0.0
@@ -317,12 +314,12 @@ Agent identity for isolation test.
 	}
 	fm := doc.Frontmatter()
 
-	if _, ok := fm.Get("version"); !ok {
-		t.Error("agent output frontmatter does not contain \"version\"; " +
-			"agents must keep the bare \"version\" key — only skills are renamed to \"mosaic_version\"")
+	if _, ok := fm.Get("mosaic_version"); !ok {
+		t.Error("agent output frontmatter does not contain \"mosaic_version\"; " +
+			"agents must carry the deployed key \"mosaic_version\" after Stage 1's Step 4e rename")
 	}
-	if _, ok := fm.Get("mosaic_version"); ok {
-		t.Error("agent output frontmatter contains \"mosaic_version\"; " +
-			"the \"version\" field must NEVER be renamed to \"mosaic_version\" for agents (FR-7 out-of-scope boundary)")
+	if _, ok := fm.Get("version"); ok {
+		t.Error("agent output frontmatter still contains bare \"version\"; " +
+			"the rename step must replace it with \"mosaic_version\" in deployed output")
 	}
 }

@@ -262,7 +262,7 @@ func TestBuild_Artifact_InManifest_AllVersionsMatch_HashMatches_ClassifiesAsUnch
 	const hash = "sha256:aaaaaa"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0" // matches newFakeModule's descriptor
+	entry.HarnessVersion = "1.0" // matches newFakeModule's descriptor
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -304,7 +304,7 @@ func TestBuild_Artifact_InManifest_VersionMismatch_ClassifiesAsUpdate(t *testing
 
 	// Manifest records version "1.0" (for conflict-hash lookup); source is "1.1".
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -345,7 +345,7 @@ func TestBuild_Artifact_InManifest_VersionMismatch_StaleHasAtLeastOneDelta(t *te
 	const hash = "sha256:aaaaaa"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -383,7 +383,7 @@ func TestBuild_Artifact_InManifest_HashMismatch_ClassifiesAsConflict(t *testing.
 	const agentTarget = "agents/test-agent.md"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", "sha256:recorded")
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -570,7 +570,7 @@ func TestPlan_Empty_TrueWhenAllItemsAreUnchanged(t *testing.T) {
 	const hash = "sha256:unchanged"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -766,7 +766,7 @@ func TestBuild_AgentAbsentFromDeployedState_ClassifiesAsCreate_DespiteManifestEn
 
 	// Manifest has a valid, fully-matching entry for the agent.
 	entry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", recordedHash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -889,7 +889,7 @@ func TestBuild_AgentAbsent_DeployedState_MissingKey_TreatedAsAbsent(t *testing.T
 
 	// Manifest has a fully-matching entry.
 	entry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", "sha256:aaaaaa")
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -958,7 +958,7 @@ func TestBuild_CrossHarness_FilesAbsentAtNewTargetPaths_AllAgentsAreCreate(t *te
 
 	// Manifest has an entry for the agent at the OLD harness path.
 	oldEntry := makeManifestEntry(agentRef("test-agent"), oldTargetPath, "1.0", "sha256:old")
-	oldEntry.TransformVersion = "1.0"
+	oldEntry.HarnessVersion = "1.0"
 	oldEntry.InjectionsVersion = "2.0" // old harness had a newer injections version
 
 	snap := presentSnapshot(domain.Manifest{
@@ -1045,7 +1045,7 @@ func TestBuild_ManifestEntryAtDifferentTargetPath_FileExistsAtCurrentPath_Classi
 
 	// Manifest entry at old path.
 	oldEntry := makeManifestEntry(agentRef("test-agent"), oldTargetPath, "1.0", "sha256:old")
-	oldEntry.TransformVersion = "1.0"
+	oldEntry.HarnessVersion = "1.0"
 	oldEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -1134,7 +1134,7 @@ func TestBuild_HashMismatch_TakesPrecedenceOverVersionStaleness(t *testing.T) {
 	agent := makeAgent("test-agent", "2.0")
 
 	entry := makeManifestEntry(agentRef("test-agent"), targetPath, "2.0", recordedHash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -1196,7 +1196,7 @@ func TestBuild_HashMatch_ConflictNotFired_VersionStalenessClassifiedAsUpdate(t *
 	agent := makeAgent("test-agent", "2.0")
 
 	entry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -1261,7 +1261,7 @@ func TestBuild_UnversionedDeployedFile_ClassifiesAsUpdate(t *testing.T) {
 
 	// Manifest entry present and hash matches (no local modification).
 	entry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -1277,7 +1277,7 @@ func TestBuild_UnversionedDeployedFile_ClassifiesAsUpdate(t *testing.T) {
 			Present:           true,
 			ContentHash:       hash,
 			Version:           "",  // no version info
-			TransformVersion:  "",
+			HarnessVersion:  "",
 			InjectionsVersion: "",
 		},
 	}
@@ -1738,7 +1738,7 @@ func TestBuild_VersionDowngrade_StillClassifiesAsUpdate(t *testing.T) {
 	agent := makeAgent("test-agent", "1.0")
 
 	entry := makeManifestEntry(agentRef("test-agent"), targetPath, "2.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{

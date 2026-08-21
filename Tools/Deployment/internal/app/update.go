@@ -429,8 +429,12 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 	}
 	// Infrastructure agent selection is intentionally omitted from the update flow.
 	// Update re-deploys whatever was already deployed; it does not re-prompt for
-	// infrastructure agent choices. The InfrastructureAgents injection region is
-	// preserved from the deployed file via the InjectionProject preservation pass.
+	// infrastructure agent choices. The InfrastructureAgents region is preserved
+	// byte-for-byte from the deployed file by applyInfrastructureRegion's
+	// deployed-content fallback: when InfrastructureAgents is empty and req.Deployed
+	// is non-nil, applyInfrastructureRegion parses the deployed file and lifts the
+	// region content directly. This is an InjectionInfrastructure-class managed region
+	// and is never a member of buildDeployedRegionMap/deployedContent.
 	contentFn := s.buildContent(module, agentByKey, allModels, req.CustomTools, nil, workflowBlocks, nil, scope, deployedReader, toolMappingsVersion, protocol, bundle, harnessOnlyPlan)
 
 	versionStamps := buildVersionStamps(set.Agents, set.Skills, set.Hooks, p.Items, module.Descriptor(), toolMappingsVersion)

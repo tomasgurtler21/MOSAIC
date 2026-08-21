@@ -957,16 +957,19 @@ func (s *service) buildContent(
 			wfBlocks = workflowBlocks
 			infraBlocks = infrastructureBlocks
 		}
+		desc := module.Descriptor()
 		res, err := transform.Apply(transform.Request{
 			Source: src, Kind: domain.ArtifactAgent, Key: agent.Key, Module: module,
 			Model: models[agent.Key], CustomTools: customTools, SkippedTools: skippedTools,
 			Scope: scope, Deployed: deployed, Workflows: wfBlocks,
-			InfrastructureAgents: infraBlocks,
-			ToolMappingsVersion:  toolMappingsVersion,
-			Role:                 agent.Role,
-			Protocol:             protocol,
-			Bundle:               bundle,
-			Timestamp:            s.now().UTC().Format(time.RFC3339),
+			InfrastructureAgents:          infraBlocks,
+			ToolMappingsVersion:           toolMappingsVersion,
+			Role:                          agent.Role,
+			Protocol:                      protocol,
+			Bundle:                        bundle,
+			Timestamp:                     s.now().UTC().Format(time.RFC3339),
+			InjectionsVersion:             desc.InjectionsVersion,
+			OrchestratorInjectionsVersion: desc.OrchestratorInjectionsVersion,
 		})
 		if err != nil {
 			return nil, err
@@ -1009,7 +1012,7 @@ func buildVersionStamps(
 		case domain.ArtifactAgent:
 			if a, ok := agentByKey[item.Ref.Key]; ok {
 				stamp := domain.VersionStamp{
-					Version: a.Version, TransformVersion: desc.TransformVersion, InjectionsVersion: desc.InjectionsVersion,
+					Version: a.Version, HarnessVersion: desc.TransformVersion, InjectionsVersion: desc.InjectionsVersion,
 					ToolMappingsVersion: toolMappingsVersion,
 				}
 				if a.Role == domain.RoleOrchestrator {

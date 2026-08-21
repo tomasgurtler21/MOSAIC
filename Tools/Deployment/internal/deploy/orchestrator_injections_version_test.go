@@ -43,7 +43,7 @@ func TestManifest_CreatedItem_OrchestratorInjectionsVersion_StampedFromVersionSt
 		VersionStamps: map[string]domain.VersionStamp{
 			"agents/orchestrator.md": {
 				Version:                       "5.0",
-				TransformVersion:              "3.0",
+				HarnessVersion:              "3.0",
 				InjectionsVersion:             "2.0",
 				OrchestratorInjectionsVersion: "1.0",
 			},
@@ -97,7 +97,7 @@ func TestManifest_UpdatedItem_OrchestratorInjectionsVersionDelta_StampsManifestE
 		VersionStamps: map[string]domain.VersionStamp{
 			"agents/orchestrator.md": {
 				Version:                       "5.0",
-				TransformVersion:              "3.0",
+				HarnessVersion:              "3.0",
 				InjectionsVersion:             "2.0",
 				OrchestratorInjectionsVersion: "1.0", // delta overrides this
 			},
@@ -202,7 +202,7 @@ func TestManifest_UpdatedItem_OrchestratorAndInjectionsVersionDeltas_AreIndepend
 		VersionStamps: map[string]domain.VersionStamp{
 			"agents/orchestrator.md": {
 				Version:          "5.0",
-				TransformVersion: "3.0",
+				HarnessVersion: "3.0",
 			},
 		},
 	}
@@ -248,7 +248,7 @@ func TestManifest_SubagentItem_OrchestratorInjectionsVersion_EmptyInManifest(t *
 		VersionStamps: map[string]domain.VersionStamp{
 			"agents/test-writer.md": {
 				Version:                       "2.0",
-				TransformVersion:              "1.5",
+				HarnessVersion:              "1.5",
 				InjectionsVersion:             "3.0",
 				OrchestratorInjectionsVersion: "", // empty for subagents
 			},
@@ -303,7 +303,7 @@ func TestManifest_WorkflowDeltasDoNotCorruptOrchestratorInjectionsVersion(t *tes
 		VersionStamps: map[string]domain.VersionStamp{
 			"agents/orchestrator.md": {
 				Version:                       "5.0",
-				TransformVersion:              "3.0",
+				HarnessVersion:              "3.0",
 				InjectionsVersion:             "2.0",
 				OrchestratorInjectionsVersion: wantOrchestratorVersion,
 			},

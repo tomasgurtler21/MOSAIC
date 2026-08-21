@@ -468,7 +468,7 @@ func TestManifest_UnchangedItem_PriorEntryPreserved(t *testing.T) {
 
 // TestManifest_UpdatedItem_VersionFieldsFromStaleDeltas verifies that when an ActionUpdate
 // plan item carries Stale deltas, the executor reads the delta Source values using the field
-// names "version", "transform_version", and "injections_version" to write the manifest entry.
+// names "version", "harness_version", and "injections_version" to write the manifest entry.
 // Fields not covered by Stale are filled from ExecRequest.VersionStamps.
 //
 // This test guards the contract between the planner (which produces field-named deltas) and
@@ -487,7 +487,7 @@ func TestManifest_UpdatedItem_VersionFieldsFromStaleDeltas(t *testing.T) {
 		Action:     domain.ActionUpdate,
 		Stale: []domain.VersionDelta{
 			{Field: "version", Deployed: "1.0", Source: "2.0"},
-			{Field: "transform_version", Deployed: "1.0", Source: "1.5"},
+			{Field: "harness_version", Deployed: "1.0", Source: "1.5"},
 		},
 	}
 
@@ -517,10 +517,10 @@ func TestManifest_UpdatedItem_VersionFieldsFromStaleDeltas(t *testing.T) {
 	if entry.Version != "2.0" {
 		t.Errorf("manifest Version = %q; want %q (from delta Field=version, Source=2.0)", entry.Version, "2.0")
 	}
-	// TransformVersion must come from the "transform_version" delta's Source.
-	if entry.TransformVersion != "1.5" {
+	// TransformVersion must come from the "harness_version" delta's Source.
+	if entry.HarnessVersion != "1.5" {
 		t.Errorf("manifest TransformVersion = %q; want %q (from delta Field=transform_version, Source=1.5)",
-			entry.TransformVersion, "1.5")
+			entry.HarnessVersion, "1.5")
 	}
 	// InjectionsVersion must fall back to VersionStamps when not covered by a delta.
 	if entry.InjectionsVersion != "3.0" {
@@ -555,7 +555,7 @@ func TestManifest_UpdatedItem_UnversionedDeployed_StampsFromVersionStamps(t *tes
 	stamps := map[string]domain.VersionStamp{
 		item.TargetPath: {
 			Version:           "3.0",
-			TransformVersion:  "2.0",
+			HarnessVersion:  "2.0",
 			InjectionsVersion: "1.5",
 		},
 	}
@@ -581,9 +581,9 @@ func TestManifest_UpdatedItem_UnversionedDeployed_StampsFromVersionStamps(t *tes
 	if entry.Version != "3.0" {
 		t.Errorf("manifest Version = %q; want %q (from VersionStamps, Stale is empty)", entry.Version, "3.0")
 	}
-	if entry.TransformVersion != "2.0" {
+	if entry.HarnessVersion != "2.0" {
 		t.Errorf("manifest TransformVersion = %q; want %q (from VersionStamps, Stale is empty)",
-			entry.TransformVersion, "2.0")
+			entry.HarnessVersion, "2.0")
 	}
 	if entry.InjectionsVersion != "1.5" {
 		t.Errorf("manifest InjectionsVersion = %q; want %q (from VersionStamps, Stale is empty)",
@@ -630,7 +630,7 @@ func TestManifest_MultipleItemsAllRecorded(t *testing.T) {
 // TestManifest_WorkflowStalenessDeltas_DoNotCorruptVersionStamps verifies that when an
 // ActionUpdate plan item's Stale slice contains only workflow-prefixed deltas (field names
 // of the form "workflow:<id>"), the executor's resolveVersionStamp function does NOT match
-// those fields in its switch on "version", "transform_version", "injections_version", and
+// those fields in its switch on "version", "harness_version", "injections_version", and
 // therefore does NOT overwrite those version stamps in the manifest entry. The correct stamps
 // come solely from the VersionStamps map, which is the intended carrier for non-stale fields.
 //
@@ -667,7 +667,7 @@ func TestManifest_WorkflowStalenessDeltas_DoNotCorruptVersionStamps(t *testing.T
 		VersionStamps: map[string]domain.VersionStamp{
 			"agents/orchestrator.md": {
 				Version:           wantVersion,
-				TransformVersion:  wantTransform,
+				HarnessVersion:  wantTransform,
 				InjectionsVersion: wantInjections,
 			},
 		},
@@ -691,10 +691,10 @@ func TestManifest_WorkflowStalenessDeltas_DoNotCorruptVersionStamps(t *testing.T
 			"workflow delta field %q must not overwrite the version stamp",
 			entry.Version, wantVersion, "workflow:quick-fix")
 	}
-	if entry.TransformVersion != wantTransform {
+	if entry.HarnessVersion != wantTransform {
 		t.Errorf("manifest entry TransformVersion = %q; want %q; "+
 			"workflow delta field must not overwrite the transform_version stamp",
-			entry.TransformVersion, wantTransform)
+			entry.HarnessVersion, wantTransform)
 	}
 	if entry.InjectionsVersion != wantInjections {
 		t.Errorf("manifest entry InjectionsVersion = %q; want %q; "+

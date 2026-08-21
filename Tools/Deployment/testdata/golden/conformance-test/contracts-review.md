@@ -1,5 +1,4 @@
 ---
-version: 1.0.0
 description: Tool-light fixture for golden file tests — exercises skill-maps-to-empty and six harness tools emitted with no terminal
 model: github-copilot/claude-sonnet-4-6
 tools:
@@ -8,10 +7,10 @@ tools:
   - edit
   - search
   - ask_user
-mosaic_transform_version: 1.0.0
-mosaic_injections_version: 1.0.0
+mosaic_harness_version: 1.0.0
 mosaic_id: 1
 mosaic_role: subagent
+mosaic_version: 1.0.0
 ---
 
 <Identity type="core">

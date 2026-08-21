@@ -135,7 +135,6 @@ frontmatter:
     - "version"
     - "mosaic_transform_version"
     - "mosaic_injections_version"
-    - "mosaic_orchestrator_injections_version"
     - "name"
     - "description"
     - "model"

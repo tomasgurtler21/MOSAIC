@@ -892,7 +892,7 @@ func TestContract_GHCP(t *testing.T) {
 						Origin:  domain.OriginHarnessList,
 					},
 					Versions: domain.VersionStamps{
-						TransformVersion:  "3.0.0",
+						HarnessVersion:  "3.0.0",
 						InjectionsVersion: "1.2.0",
 					},
 				},
@@ -919,7 +919,7 @@ func TestContract_GHCP(t *testing.T) {
 						Origin:  domain.OriginHarnessList,
 					},
 					Versions: domain.VersionStamps{
-						TransformVersion:  "3.0.0",
+						HarnessVersion:  "3.0.0",
 						InjectionsVersion: "1.2.0",
 					},
 				},
@@ -945,7 +945,7 @@ func TestContract_GHCP(t *testing.T) {
 						Origin:  domain.OriginHarnessList,
 					},
 					Versions: domain.VersionStamps{
-						TransformVersion:  "3.0.0",
+						HarnessVersion:  "3.0.0",
 						InjectionsVersion: "1.2.0",
 					},
 				},
@@ -971,7 +971,7 @@ func TestContract_GHCP(t *testing.T) {
 						Origin:  domain.OriginHarnessList,
 					},
 					Versions: domain.VersionStamps{
-						TransformVersion:  "3.0.0",
+						HarnessVersion:  "3.0.0",
 						InjectionsVersion: "1.2.0",
 					},
 				},
@@ -997,7 +997,7 @@ func TestContract_GHCP(t *testing.T) {
 						Origin:  domain.OriginHarnessList,
 					},
 					Versions: domain.VersionStamps{
-						TransformVersion:  "3.0.0",
+						HarnessVersion:  "3.0.0",
 						InjectionsVersion: "1.2.0",
 					},
 				},
