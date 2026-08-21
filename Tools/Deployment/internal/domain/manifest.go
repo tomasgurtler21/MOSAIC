@@ -11,9 +11,9 @@ import (
 // detect staleness on subsequent runs.
 type VersionStamp struct {
 	Version                       string // catalog version of the artifact (agents, skills, hooks)
-	TransformVersion              string // transform engine version (agents only)
-	InjectionsVersion             string // injections version (agents only)
-	OrchestratorInjectionsVersion string // orchestrator-only injections version; empty for subagents
+	HarnessVersion                string // transform engine version (agents only); written as mosaic_harness_version
+	InjectionsVersion             string // role-selected injection version (agents only)
+	OrchestratorInjectionsVersion string // reserved; no longer populated after Stage 3
 	ToolMappingsVersion           string // hash of the effective tool-destination mapping set; agents only; empty when no config mappings
 }
 
@@ -35,9 +35,9 @@ type ManifestEntry struct {
 	Ref                           ArtifactRef
 	TargetPath                    string    // relative to the deployment root
 	Version                       string    // agents, skills, hook bundles
-	TransformVersion              string    // agents only
-	InjectionsVersion             string    // agents only
-	OrchestratorInjectionsVersion string    // orchestrator-only; empty for subagents
+	HarnessVersion                string    // agents only; written as harness_version in manifest YAML
+	InjectionsVersion             string    // agents only; role-selected injection version
+	OrchestratorInjectionsVersion string    // reserved; no longer populated after Stage 3
 	ToolMappingsVersion           string    // agents only; hash of the effective tool-destination mapping set at deploy time
 	ContentHash                   string    // "sha256:<hex>" over the exact deployed bytes (CD-11)
 	DeployedAt                    time.Time

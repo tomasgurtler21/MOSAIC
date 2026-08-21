@@ -89,7 +89,7 @@ type yamlManifestEntry struct {
 	Ref                           yamlArtifactRef `yaml:"ref"`
 	TargetPath                    string          `yaml:"target_path"`
 	Version                       string          `yaml:"version"`
-	TransformVersion              string          `yaml:"transform_version"`
+	HarnessVersion                string          `yaml:"harness_version"`
 	InjectionsVersion             string          `yaml:"injections_version"`
 	OrchestratorInjectionsVersion string          `yaml:"orchestrator_injections_version,omitempty"`
 	ContentHash                   string          `yaml:"content_hash"`
@@ -176,7 +176,7 @@ func (s *store) Load(workspaceRoot string) (Snapshot, error) {
 			Ref:                           domain.ArtifactRef{Kind: domain.ArtifactKind(e.Ref.Kind), Key: e.Ref.Key},
 			TargetPath:                    e.TargetPath,
 			Version:                       e.Version,
-			TransformVersion:              e.TransformVersion,
+			HarnessVersion:                e.HarnessVersion,
 			InjectionsVersion:             e.InjectionsVersion,
 			OrchestratorInjectionsVersion: e.OrchestratorInjectionsVersion,
 			ContentHash:                   e.ContentHash,
@@ -214,7 +214,7 @@ func (s *store) Save(workspaceRoot string, m domain.Manifest) error {
 			Ref:                           yamlArtifactRef{Kind: string(e.Ref.Kind), Key: e.Ref.Key},
 			TargetPath:                    e.TargetPath,
 			Version:                       e.Version,
-			TransformVersion:              e.TransformVersion,
+			HarnessVersion:                e.HarnessVersion,
 			InjectionsVersion:             e.InjectionsVersion,
 			OrchestratorInjectionsVersion: e.OrchestratorInjectionsVersion,
 			ContentHash:                   e.ContentHash,

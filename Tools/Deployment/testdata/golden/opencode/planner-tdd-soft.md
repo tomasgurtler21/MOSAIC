@@ -1,8 +1,5 @@
 ---
 mosaic_id: 3
-version: 1.0.0
-mosaic_transform_version: 3.0.0
-mosaic_injections_version: 1.3.1
 description: Skill-using fixture for golden file tests — exercises skill plus terminal alongside the full file-access tool set
 mode: subagent
 model: github-copilot/claude-sonnet-4-6
@@ -22,7 +19,9 @@ permission:
   todowrite: deny
   todoread: deny
   skill: allow
+mosaic_harness_version: 3.0.0
 mosaic_role: subagent
+mosaic_version: 1.0.0
 ---
 
 <Identity type="core">

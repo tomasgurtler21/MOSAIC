@@ -91,7 +91,7 @@ func buildProtocolStalenessInput(
 	const targetPath = "agents/test-agent.md"
 
 	manifestEntry := makeManifestEntry(agentRef(agent.Key), targetPath, "1.0", contentHash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -479,10 +479,10 @@ func TestBuild_ProtocolStaleness_AppliedToSubagentNotJustOrchestrator(t *testing
 	agentCurrent := makeAgent("current-agent", "1.0")
 
 	entryStale := makeManifestEntry(agentRef("stale-agent"), pathStale, "1.0", hashStale)
-	entryStale.TransformVersion = "1.0"
+	entryStale.HarnessVersion = "1.0"
 	entryStale.InjectionsVersion = "1.0"
 	entryCurrent := makeManifestEntry(agentRef("current-agent"), pathCurrent, "1.0", hashCurrent)
-	entryCurrent.TransformVersion = "1.0"
+	entryCurrent.HarnessVersion = "1.0"
 	entryCurrent.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -563,7 +563,7 @@ func TestBuild_ProtocolStaleness_ComposesWithVersionStampDeltas(t *testing.T) {
 
 	// Manifest records version 2.0 for the agent (matches hash and newer source version).
 	manifestEntry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", contentHash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -635,7 +635,7 @@ func TestBuild_ProtocolStaleness_OrchestratorComposesWithWorkflowDrift(t *testin
 
 	// Manifest records the orchestrator at orchPath with the current hash.
 	entryOrch := makeManifestEntry(agentRef("orchestrator"), orchPath, "1.0", orchHash)
-	entryOrch.TransformVersion = "1.0"
+	entryOrch.HarnessVersion = "1.0"
 	entryOrch.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -653,7 +653,7 @@ func TestBuild_ProtocolStaleness_OrchestratorComposesWithWorkflowDrift(t *testin
 			Present:         true,
 			ContentHash:     orchHash,
 			Version:         "1.0",
-			TransformVersion: "1.0",
+			HarnessVersion: "1.0",
 			InjectionsVersion: "1.0",
 			Workflows: domain.DeployedWorkflows{
 				{ID: "quick-fix", Version: "1.0"},
@@ -789,7 +789,7 @@ func TestBuild_ProtocolStale_AndHashConflict_ConflictTakesPrecedence(t *testing.
 
 	// Manifest records original hash.
 	manifestEntry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", recordedHash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -836,7 +836,7 @@ func TestBuild_ProtocolStale_AndHashConflict_ConflictFieldsCorrect(t *testing.T)
 	agent := makeAgent("test-agent", "1.0")
 
 	manifestEntry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", recordedHash)
-	manifestEntry.TransformVersion = "1.0"
+	manifestEntry.HarnessVersion = "1.0"
 	manifestEntry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{

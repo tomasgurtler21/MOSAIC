@@ -34,6 +34,12 @@ tools:
     - name: "AskUserQuestion"
       unused: deny
       by_convention: false
+    - name: "WebSearch"
+      unused: deny
+      by_convention: false
+    - name: "WebFetch"
+      unused: deny
+      by_convention: false
   mappings:
     - generic: "file_read"
       destinations:
@@ -76,6 +82,16 @@ tools:
         - to: main
           names:
             - "AskUserQuestion"
+    - generic: "web_search"
+      destinations:
+        - to: main
+          names:
+            - "WebSearch"
+    - generic: "web_fetch"
+      destinations:
+        - to: main
+          names:
+            - "WebFetch"
     - generic: "skill"
       destinations: []
   custom_tool_destination:
@@ -119,7 +135,6 @@ frontmatter:
     - "version"
     - "mosaic_transform_version"
     - "mosaic_injections_version"
-    - "mosaic_orchestrator_injections_version"
     - "name"
     - "description"
     - "model"

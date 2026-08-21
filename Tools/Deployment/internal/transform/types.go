@@ -57,6 +57,18 @@ type Request struct {
 	// regeneration of the TODO report. Empty is legal and omits the timestamp clause from
 	// the parking gap detail message.
 	Timestamp string
+
+	// InjectionsVersion is the harness descriptor's injection version for non-orchestrator
+	// agents. Used by applyHarnessRegion to stamp version attributes on InjectionHarness-class
+	// regions. Populated by the app layer from desc.InjectionsVersion. Empty string means no
+	// version attribute is written.
+	InjectionsVersion string
+
+	// OrchestratorInjectionsVersion is the injection version for orchestrator agents.
+	// Used by applyHarnessRegion when req.Key == "orchestrator" to select the orchestrator-
+	// specific value. Populated by the app layer from desc.OrchestratorInjectionsVersion.
+	// Empty string means no version attribute is written for orchestrators.
+	OrchestratorInjectionsVersion string
 }
 
 // Result is the output of a successful Apply call.

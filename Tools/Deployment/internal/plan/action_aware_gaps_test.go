@@ -46,7 +46,7 @@ func TestBuild_ActionUnchanged_NoModel_NoGapNoModel(t *testing.T) {
 	const hash = "sha256:unchanged"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -75,7 +75,7 @@ func TestBuild_ActionUnchanged_NoModel_NoGapNoModel(t *testing.T) {
 				Present:           true,
 				ContentHash:       hash,
 				Version:           "1.0",
-				TransformVersion:  "1.0",
+				HarnessVersion:  "1.0",
 				InjectionsVersion: "1.0",
 			},
 		},
@@ -209,7 +209,7 @@ func TestBuild_ActionUpdate_NoModel_NoDeployedModel_EmitsGapNoModel(t *testing.T
 	const hash = "sha256:aaaaaa"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -270,7 +270,7 @@ func TestBuild_ActionUpdate_NoModel_WithDeployedModel_SuppressesGapNoModel(t *te
 	const hash = "sha256:aaaaaa"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -330,7 +330,7 @@ func TestBuild_ActionUpdate_ResolvedModel_NoGapNoModel(t *testing.T) {
 	const hash = "sha256:aaaaaa"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -394,7 +394,7 @@ func TestBuild_ActionConflict_NoModel_NoDeployedModel_EmitsGapNoModel(t *testing
 	const agentTarget = "agents/test-agent.md"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", "sha256:recorded")
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -458,7 +458,7 @@ func TestBuild_ActionConflict_NoModel_WithDeployedModel_SuppressesGapNoModel(t *
 	const agentTarget = "agents/test-agent.md"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", "sha256:recorded")
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -527,7 +527,7 @@ func TestBuild_ActionAwareGap_UnmappedToolGapsUnaffected(t *testing.T) {
 	const hash = "sha256:unchanged"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -568,7 +568,7 @@ func TestBuild_ActionAwareGap_UnmappedToolGapsUnaffected(t *testing.T) {
 				Present:           true,
 				ContentHash:       hash,
 				Version:           "1.0",
-				TransformVersion:  "1.0",
+				HarnessVersion:  "1.0",
 				InjectionsVersion: "1.0",
 			},
 		},
@@ -615,7 +615,7 @@ func TestBuild_ActionAwareGap_ItemClassificationUnaffected(t *testing.T) {
 	const unchangedHash = "sha256:unchanged"
 
 	entry := makeManifestEntry(agentRef("unchanged-agent"), unchangedTarget, "1.0", unchangedHash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -643,7 +643,7 @@ func TestBuild_ActionAwareGap_ItemClassificationUnaffected(t *testing.T) {
 				Present:           true,
 				ContentHash:       unchangedHash,
 				Version:           "1.0",
-				TransformVersion:  "1.0",
+				HarnessVersion:  "1.0",
 				InjectionsVersion: "1.0",
 			},
 		},

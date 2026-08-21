@@ -1,14 +1,12 @@
 ---
-version: 1.0.0
-mosaic_transform_version: 3.0.0
-mosaic_injections_version: 1.3.0
-mosaic_orchestrator_injections_version: 1.0.0
 name: orchestrator
 description: Placeholder-expanding fixture for golden file tests — exercises {tool-permissions} placeholder expansion and RoleOrchestrator
 model: Claude Sonnet 4.6
 tools: ['read/readFile', 'edit/createFile', 'edit/createDirectory', 'edit/editFiles', 'search/fileSearch', 'search/textSearch', 'search/listDirectory', 'execute/runInTerminal', 'agent', 'vscode/askQuestions']
 disable-model-invocation: false
+mosaic_harness_version: 3.0.0
 mosaic_role: orchestrator
+mosaic_version: 1.0.0
 ---
 
 <Identity type="core">

@@ -71,9 +71,10 @@ func (s *SeedInputScreen) Done() bool { return s.input.Done() }
 // Back reports whether the user pressed Esc.
 func (s *SeedInputScreen) Back() bool { return s.input.Back() }
 
-// SeedInput returns the entered path, whitespace-trimmed. Empty string means the
+// SeedInput returns the entered path, normalised (whitespace-trimmed,
+// surrounding double quotes stripped). Empty string means the
 // user chose not to seed. Only meaningful when Done() is true.
-func (s *SeedInputScreen) SeedInput() string { return strings.TrimSpace(s.input.Value()) }
+func (s *SeedInputScreen) SeedInput() string { return normalizePath(s.input.Value()) }
 
 // Reset clears both the Done and Back flags before the screen is re-entered.
 func (s *SeedInputScreen) Reset() { s.input.Reset() }

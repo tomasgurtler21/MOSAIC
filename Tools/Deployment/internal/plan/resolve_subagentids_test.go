@@ -85,14 +85,15 @@ func TestOrchestratorExcludedFor_DeployHooks_ReturnsTrue(t *testing.T) {
 }
 
 // TestOrchestratorExcludedFor_AllOtherModes_ReturnFalse verifies that the update to
-// OrchestratorExcludedFor for ModeDeployAgents and ModeDeployHooks does not accidentally
-// change the return value for workspace-oriented modes. Every workspace-mode caller relies on
-// the zero value (false = include orchestrator). ModeStandaloneOnly has been retired in
-// Stage 6 and is no longer in the mode set.
+// OrchestratorExcludedFor for ModeDeployAgents, ModeDeployHooks, and ModeUpdateWorkspace
+// does not accidentally change the return value for the remaining workspace-oriented modes.
+// ModeDeployWorkspace, ModeUpdateWorkflows, ModePromoteToGeneric, and ModeTransformHarness
+// all rely on force-inclusion (false = include orchestrator). ModeUpdateWorkspace is excluded
+// from this list because it now returns true so the orchestrator enters only via
+// ScannedAgentKeys when the workspace scan finds it on disk.
 func TestOrchestratorExcludedFor_AllOtherModes_ReturnFalse(t *testing.T) {
 	otherModes := []domain.RunMode{
 		domain.ModeDeployWorkspace,
-		domain.ModeUpdateWorkspace,
 		domain.ModeUpdateWorkflows,
 		domain.ModePromoteToGeneric,
 		domain.ModeTransformHarness,
@@ -100,8 +101,9 @@ func TestOrchestratorExcludedFor_AllOtherModes_ReturnFalse(t *testing.T) {
 	for _, mode := range otherModes {
 		if plan.OrchestratorExcludedFor(mode) {
 			t.Errorf("OrchestratorExcludedFor(%q) = true, want false; "+
-				"only ModeDeployAgents and ModeDeployHooks must exclude the orchestrator; "+
-				"every workspace-oriented mode must preserve today's include behavior (AC3.4)",
+				"only ModeDeployAgents, ModeDeployHooks, and ModeUpdateWorkspace must exclude "+
+				"the orchestrator from forced inclusion; every other workspace-oriented mode "+
+				"must preserve force-include behavior",
 				mode)
 		}
 	}

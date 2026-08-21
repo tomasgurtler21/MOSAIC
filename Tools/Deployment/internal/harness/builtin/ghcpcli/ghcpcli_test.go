@@ -13,7 +13,6 @@ package ghcpcli_test
 //     that skill maps to the 'skill' harness tool and terminal maps to 'execute'.
 //   - A transform of the generic orchestrator produces the placeholder expansion as a
 //     flow-style list without 'skill' (orchestrators do not use skills).
-//   - All GHCP CLI agents have the .agent.md extension and user-invocable: false field.
 //
 //   Many-to-one aliasing:
 //   - file_write and file_edit both map to 'edit'; only one 'edit' entry appears in output.
@@ -39,6 +38,13 @@ package ghcpcli_test
 //     by this harness.
 //   - injections_version is "1.2.0" per the GHCP CLI descriptor.
 //   - Project-class injections are not filled by the harness.
+//
+//   Role-conditional user-invocable (TDD RED - implementation pending):
+//   - user-invocable is false for subagent role.
+//   - user-invocable is true for orchestrator role.
+//   - user-invocable is true for utility role.
+//   - user-invocable is true for standalone role.
+//   - user-invocable is absent from Set when no role is provided (empty/zero value).
 //
 //   Shared contract:
 //   - Both modules pass contracttest.Run with identical universal invariant results.
@@ -720,6 +726,42 @@ func TestInjection_GHCP_InjectionsVersion(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Role-conditional mechanism test
+// ---------------------------------------------------------------------------
+
+// TestGhcpCli_UserInvocable_MechanismIsRoleConditional verifies that the GHCP CLI descriptor
+// implements user-invocable via the role-conditional schema (RoleConditionalAdd), not via a
+// static Add entry. This is the RED-phase signal for the subagent false outcome: the current
+// descriptor has a static value: false for all agents, so RoleConditionalAdd will be empty
+// before implementation.
+//
+// RED: currently fails because ghcp-cli.yaml uses a static value: false entry. After
+// implementation (I2.6), the descriptor uses value_by_role and RoleConditionalAdd is non-empty.
+func TestGhcpCli_UserInvocable_MechanismIsRoleConditional(t *testing.T) {
+	mod := newModule(t)
+	desc := mod.Descriptor()
+	if desc == nil {
+		t.Fatal("Descriptor() returned nil")
+	}
+
+	// The descriptor must use value_by_role for user-invocable, which is loaded into
+	// RoleConditionalAdd, not the static Add list.
+	if len(desc.Frontmatter.RoleConditionalAdd) == 0 {
+		t.Error("Frontmatter.RoleConditionalAdd is empty: user-invocable must be declared " +
+			"with value_by_role in ghcp-cli.yaml, not as a static value entry; " +
+			"the static value: false entry must be replaced by a role-conditional entry")
+	}
+
+	// The static Add list must not contain user-invocable (it must be role-conditional only).
+	for _, f := range desc.Frontmatter.Add {
+		if f.Key == "user-invocable" {
+			t.Errorf("Frontmatter.Add contains a static %q entry; after implementation, "+
+				"user-invocable must be in RoleConditionalAdd (value_by_role), not in Add (static value)", f.Key)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Shared contract test
 // ---------------------------------------------------------------------------
 
@@ -828,14 +870,125 @@ func TestContract_GHCP(t *testing.T) {
 
 		FrontmatterCases: []contracttest.FrontmatterCase{
 			{
-				// adds_user_invocable_false_and_drops_generic_keys: the key behavioral difference
-				// between GHCP CLI and Claude Code in Frontmatter is that GHCP CLI declaratively adds
-				// "user-invocable: false" to every agent's frontmatter. Set contains only this static
-				// descriptor Add field. The three generic-only keys are removed, and the canonical key
-				// order (with user-invocable at the end) is applied. Model and version stamps are NOT
-				// in Set — they are applied exclusively by the transform's Steps 3 and 4. Including
-				// them here would cause duplicate FieldChange entries in transform.Report.Fields.
-				Name: "adds_user_invocable_false_and_drops_generic_keys",
+				// user_invocable_false_for_subagent: GHCP CLI adds "user-invocable: false" for
+				// subagent-role agents. The three generic-only keys are removed, and the canonical
+				// key order is applied. Model and version stamps are NOT in Set — they are applied
+				// exclusively by the transform's Steps 3 and 4.
+				//
+				// Note: This case is a REGRESSION GUARD for preserved subagent behavior. It does
+				// not fail in TDD RED phase because the current static descriptor already produces
+				// user-invocable: false for all agents including subagent. After implementation,
+				// the mechanism changes (role-conditional resolution), but the outcome (false for
+				// subagent) is identical. The companion test
+				// TestGhcpCli_UserInvocable_MechanismIsRoleConditional asserts the implementation
+				// mechanism and provides the RED-phase signal for this outcome.
+				Name: "user_invocable_false_for_subagent",
+				Request: domain.FrontmatterRequest{
+					Kind:     domain.ArtifactAgent,
+					AgentKey: "test-agent",
+					Role:     domain.RoleSubagent,
+					Model: domain.ModelSelection{
+						ModelID: "claude-sonnet-4-6",
+						Origin:  domain.OriginHarnessList,
+					},
+					Versions: domain.VersionStamps{
+						HarnessVersion:  "3.0.0",
+						InjectionsVersion: "1.2.0",
+					},
+				},
+				Expected: domain.FrontmatterPlan{
+					Set: []domain.FrontmatterField{
+						{Key: "user-invocable", Value: domain.ScalarValue("false", domain.QuotePlain)},
+					},
+					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
+					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "user-invocable"},
+				},
+			},
+			{
+				// user_invocable_true_for_orchestrator: GHCP CLI sets "user-invocable: true" for
+				// orchestrator-role agents, enabling the agent to be invoked by users. The role-
+				// conditional schema resolves the orchestrator role to true.
+				// RED: currently fails because user-invocable is a static false in the descriptor.
+				Name: "user_invocable_true_for_orchestrator",
+				Request: domain.FrontmatterRequest{
+					Kind:     domain.ArtifactAgent,
+					AgentKey: "test-agent",
+					Role:     domain.RoleOrchestrator,
+					Model: domain.ModelSelection{
+						ModelID: "claude-sonnet-4-6",
+						Origin:  domain.OriginHarnessList,
+					},
+					Versions: domain.VersionStamps{
+						HarnessVersion:  "3.0.0",
+						InjectionsVersion: "1.2.0",
+					},
+				},
+				Expected: domain.FrontmatterPlan{
+					Set: []domain.FrontmatterField{
+						{Key: "user-invocable", Value: domain.ScalarValue("true", domain.QuotePlain)},
+					},
+					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
+					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "user-invocable"},
+				},
+			},
+			{
+				// user_invocable_true_for_utility: GHCP CLI sets "user-invocable: true" for utility-
+				// role agents so they can be invoked by users outside of orchestrated workflows.
+				// RED: currently fails because user-invocable is a static false in the descriptor.
+				Name: "user_invocable_true_for_utility",
+				Request: domain.FrontmatterRequest{
+					Kind:     domain.ArtifactAgent,
+					AgentKey: "test-agent",
+					Role:     domain.RoleUtility,
+					Model: domain.ModelSelection{
+						ModelID: "claude-sonnet-4-6",
+						Origin:  domain.OriginHarnessList,
+					},
+					Versions: domain.VersionStamps{
+						HarnessVersion:  "3.0.0",
+						InjectionsVersion: "1.2.0",
+					},
+				},
+				Expected: domain.FrontmatterPlan{
+					Set: []domain.FrontmatterField{
+						{Key: "user-invocable", Value: domain.ScalarValue("true", domain.QuotePlain)},
+					},
+					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
+					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "user-invocable"},
+				},
+			},
+			{
+				// user_invocable_true_for_standalone: GHCP CLI sets "user-invocable: true" for
+				// standalone-role agents deployed outside any workflow.
+				// RED: currently fails because user-invocable is a static false in the descriptor.
+				Name: "user_invocable_true_for_standalone",
+				Request: domain.FrontmatterRequest{
+					Kind:     domain.ArtifactAgent,
+					AgentKey: "test-agent",
+					Role:     domain.RoleStandalone,
+					Model: domain.ModelSelection{
+						ModelID: "claude-sonnet-4-6",
+						Origin:  domain.OriginHarnessList,
+					},
+					Versions: domain.VersionStamps{
+						HarnessVersion:  "3.0.0",
+						InjectionsVersion: "1.2.0",
+					},
+				},
+				Expected: domain.FrontmatterPlan{
+					Set: []domain.FrontmatterField{
+						{Key: "user-invocable", Value: domain.ScalarValue("true", domain.QuotePlain)},
+					},
+					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
+					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "user-invocable"},
+				},
+			},
+			{
+				// user_invocable_absent_for_empty_role: when no role is set (zero value), the
+				// role-conditional user-invocable field is omitted entirely from the Set. The
+				// Remove list and KeyOrder remain unchanged.
+				// RED: currently fails because the static descriptor always adds user-invocable: false.
+				Name: "user_invocable_absent_for_empty_role",
 				Request: domain.FrontmatterRequest{
 					Kind:     domain.ArtifactAgent,
 					AgentKey: "test-agent",
@@ -844,14 +997,12 @@ func TestContract_GHCP(t *testing.T) {
 						Origin:  domain.OriginHarnessList,
 					},
 					Versions: domain.VersionStamps{
-						TransformVersion:  "3.0.0",
+						HarnessVersion:  "3.0.0",
 						InjectionsVersion: "1.2.0",
 					},
 				},
 				Expected: domain.FrontmatterPlan{
-					Set: []domain.FrontmatterField{
-						{Key: "user-invocable", Value: domain.ScalarValue("false", domain.QuotePlain)},
-					},
+					Set:      []domain.FrontmatterField{},
 					Remove:   []string{"recommended_tier", "tier_rationale", "required_skills"},
 					KeyOrder: []string{"mosaic_id", "version", "mosaic_transform_version", "mosaic_injections_version", "name", "description", "model", "tools", "user-invocable"},
 				},

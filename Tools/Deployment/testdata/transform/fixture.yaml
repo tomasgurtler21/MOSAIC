@@ -113,9 +113,8 @@ frontmatter:
     - "tier_rationale"
   key_order:
     - "mosaic_id"
-    - "version"
-    - "mosaic_transform_version"
-    - "mosaic_injections_version"
+    - "mosaic_version"
+    - "mosaic_harness_version"
     - "description"
     - "mode"
     - "model"

@@ -17,10 +17,18 @@ package descriptor_test
 //   - A minimal descriptor (only required fields present) loads without error.
 //   - A non-existent file path returns an error.
 //   - Parse with valid bytes produces an equivalent descriptor to Load.
+//
+//   value_by_role descriptor parsing (TDD RED - implementation pending):
+//   - A descriptor with a valid value_by_role entry parses successfully; the entry
+//     is loaded into FrontmatterSpec.RoleConditionalAdd, not into the static Add list.
+//   - An entry with both value and value_by_role set is rejected with a validation error.
+//   - An entry with neither value nor value_by_role set is rejected with a validation error.
+//   - An entry with an unrecognized role key in value_by_role is rejected with a validation error.
 
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mosaic-deploy/internal/domain"
@@ -528,6 +536,141 @@ func TestParse_ValidBytes_SameIDAsLoad(t *testing.T) {
 	}
 }
 
+// --- value_by_role parsing (TDD RED - implementation pending) ---
+
+// TestLoad_ValueByRole_ParsesSuccessfully verifies that a descriptor containing a
+// valid value_by_role entry loads without error. The entry declares user-invocable
+// with distinct values per role (subagent: false, orchestrator/utility/standalone: true).
+// RED: currently fails because wireFrontmatterField does not recognise value_by_role,
+// causing yaml.DisallowUnknownField to reject the descriptor.
+func TestLoad_ValueByRole_ParsesSuccessfully(t *testing.T) {
+	_, err := descriptor.Load(filepath.Join(testdataDir, "value-by-role-valid.yaml"))
+	if err != nil {
+		t.Fatalf("Load(value-by-role-valid.yaml): unexpected error: %v", err)
+	}
+}
+
+// TestLoad_ValueByRole_LoadedIntoRoleConditionalAdd verifies that a value_by_role entry
+// is placed in FrontmatterSpec.RoleConditionalAdd rather than the static Add list.
+// The static Add list must be empty; the role-conditional list must have one entry
+// with key "user-invocable" and four role mappings.
+// RED: currently fails because value_by_role is rejected at parse time as an unknown field.
+func TestLoad_ValueByRole_LoadedIntoRoleConditionalAdd(t *testing.T) {
+	d, err := descriptor.Load(filepath.Join(testdataDir, "value-by-role-valid.yaml"))
+	if err != nil {
+		t.Fatalf("Load(value-by-role-valid.yaml): %v", err)
+	}
+
+	if len(d.Frontmatter.Add) != 0 {
+		t.Errorf("Frontmatter.Add: want empty (value_by_role entry must not appear in static Add), got %d entries: %v",
+			len(d.Frontmatter.Add), d.Frontmatter.Add)
+	}
+	if len(d.Frontmatter.RoleConditionalAdd) == 0 {
+		t.Fatal("Frontmatter.RoleConditionalAdd: want at least one entry, got empty")
+	}
+	rc := d.Frontmatter.RoleConditionalAdd[0]
+	if rc.Key != "user-invocable" {
+		t.Errorf("RoleConditionalAdd[0].Key: want %q, got %q", "user-invocable", rc.Key)
+	}
+	if len(rc.ValueByRole) != 4 {
+		t.Errorf("RoleConditionalAdd[0].ValueByRole: want 4 entries (one per role), got %d", len(rc.ValueByRole))
+	}
+}
+
+// TestLoad_ValueByRole_SubagentValueIsFalse verifies that the subagent role maps to
+// the boolean false value in the parsed RoleConditionalField.
+// RED: currently fails because value_by_role is rejected at parse time.
+func TestLoad_ValueByRole_SubagentValueIsFalse(t *testing.T) {
+	d, err := descriptor.Load(filepath.Join(testdataDir, "value-by-role-valid.yaml"))
+	if err != nil {
+		t.Fatalf("Load(value-by-role-valid.yaml): %v", err)
+	}
+	if len(d.Frontmatter.RoleConditionalAdd) == 0 {
+		t.Fatal("Frontmatter.RoleConditionalAdd: want at least one entry, got empty")
+	}
+	rc := d.Frontmatter.RoleConditionalAdd[0]
+	subagentVal, ok := rc.ValueByRole[domain.RoleSubagent]
+	if !ok {
+		t.Fatal("RoleConditionalAdd[0].ValueByRole: missing entry for RoleSubagent")
+	}
+	if subagentVal.Kind != domain.KindScalar {
+		t.Errorf("subagent value kind: want KindScalar, got %q", subagentVal.Kind)
+	}
+	if subagentVal.Scalar != "false" {
+		t.Errorf("subagent value scalar: want %q (false maps to string \"false\"), got %q", "false", subagentVal.Scalar)
+	}
+}
+
+// TestLoad_ValueByRole_OrchestratorValueIsTrue verifies that the orchestrator role maps
+// to the boolean true value in the parsed RoleConditionalField.
+// RED: currently fails because value_by_role is rejected at parse time.
+func TestLoad_ValueByRole_OrchestratorValueIsTrue(t *testing.T) {
+	d, err := descriptor.Load(filepath.Join(testdataDir, "value-by-role-valid.yaml"))
+	if err != nil {
+		t.Fatalf("Load(value-by-role-valid.yaml): %v", err)
+	}
+	if len(d.Frontmatter.RoleConditionalAdd) == 0 {
+		t.Fatal("Frontmatter.RoleConditionalAdd: want at least one entry, got empty")
+	}
+	rc := d.Frontmatter.RoleConditionalAdd[0]
+	orchVal, ok := rc.ValueByRole[domain.RoleOrchestrator]
+	if !ok {
+		t.Fatal("RoleConditionalAdd[0].ValueByRole: missing entry for RoleOrchestrator")
+	}
+	if orchVal.Scalar != "true" {
+		t.Errorf("orchestrator value scalar: want %q (true maps to string \"true\"), got %q", "true", orchVal.Scalar)
+	}
+}
+
+// TestLoad_ValueByRole_BothValueAndValueByRole_ReturnsError verifies that an entry
+// declaring both value and value_by_role is rejected with a validation error. The error
+// must mention the violating field path (e.g. "frontmatter.add[0]").
+// RED: currently fails — yaml.DisallowUnknownField rejects value_by_role as unknown
+// rather than returning the expected mutual-exclusivity validation error.
+func TestLoad_ValueByRole_BothValueAndValueByRole_ReturnsError(t *testing.T) {
+	_, err := descriptor.Load(filepath.Join(testdataDir, "value-by-role-both-set.yaml"))
+	if err == nil {
+		t.Fatal("expected error for entry with both value and value_by_role set, got nil")
+	}
+	// The error must mention frontmatter to identify the violation site.
+	errStr := err.Error()
+	if !containsSubstring(errStr, "frontmatter") {
+		t.Errorf("error message should mention %q to identify the violation site; got: %v", "frontmatter", err)
+	}
+}
+
+// TestLoad_ValueByRole_NeitherValueNorValueByRole_ReturnsError verifies that an entry
+// with only a key and no value declaration is rejected with a validation error.
+// RED: currently the loader silently maps nil value to an empty scalar, producing no error.
+func TestLoad_ValueByRole_NeitherValueNorValueByRole_ReturnsError(t *testing.T) {
+	_, err := descriptor.Load(filepath.Join(testdataDir, "value-by-role-neither-set.yaml"))
+	if err == nil {
+		t.Fatal("expected error for entry with neither value nor value_by_role set, got nil")
+	}
+}
+
+// TestLoad_ValueByRole_UnrecognizedRoleKey_ReturnsError verifies that an entry with an
+// unrecognized role key (e.g. "not-a-valid-role") in value_by_role is rejected with a
+// semantic validation error. The error must contain a phrase produced by the role-key
+// validation path (e.g. "unrecognized role"), NOT just the role string literal — the
+// role string can appear incidentally in yaml parse-error context windows. Asserting the
+// validation phrase ensures this test only passes once the semantic validation logic is
+// in place, not merely because yaml error output happens to mention the role name.
+// RED: currently the yaml loader rejects value_by_role as an unknown field entirely,
+// before role-key validation runs. The test will remain RED until both the YAML parsing
+// of value_by_role AND the role-key validation are implemented.
+func TestLoad_ValueByRole_UnrecognizedRoleKey_ReturnsError(t *testing.T) {
+	_, err := descriptor.Load(filepath.Join(testdataDir, "value-by-role-unrecognized-role.yaml"))
+	if err == nil {
+		t.Fatal("expected error for entry with unrecognized role key, got nil")
+	}
+	errStr := err.Error()
+	if !containsSubstring(errStr, "unrecognized role") {
+		t.Errorf("error message should contain the validation phrase %q to confirm semantic validation ran; got: %v",
+			"unrecognized role", err)
+	}
+}
+
 // --- helpers ---
 
 func genericNamesSlice(mappings []domain.ToolMapping) []string {
@@ -536,4 +679,10 @@ func genericNamesSlice(mappings []domain.ToolMapping) []string {
 		names[i] = m.Generic
 	}
 	return names
+}
+
+// containsSubstring reports whether s contains substr. Delegates to strings.Contains;
+// exists as a named helper so test failure messages can name what was searched for.
+func containsSubstring(s, substr string) bool {
+	return strings.Contains(s, substr)
 }

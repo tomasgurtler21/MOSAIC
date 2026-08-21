@@ -8,17 +8,17 @@ import (
 )
 
 // AgentStaleness compares the source version stamps against the versions read from the
-// deployed file, returning one delta per mismatching field in the fixed order
-// version, transform_version, injections_version, orchestrator_injections_version.
+// deployed file, returning one delta per mismatching field in the fixed order:
+// version, harness_version, injections_version, orchestrator_injections_version (orchestrators only).
 // VersionDelta.Deployed carries the value actually present in the deployed file.
 //
 // Callers must only invoke this for a deployed artifact that is present; absence is
 // handled by the classifier as ActionCreate before staleness is consulted.
 //
-// The agent parameter is accepted for future extension (for example, key-based log
-// attribution or per-agent version overrides) but is not used by the current
-// implementation. It is explicitly blanked with _ to signal this intent.
-func AgentStaleness(deployed domain.DeployedArtifactState, _ domain.Agent, stamps domain.VersionStamps) []domain.VersionDelta {
+// The agent parameter controls role-conditional comparisons: orchestrator_injections_version
+// is compared only for orchestrator-role agents; the comparison is skipped for all others
+// to prevent false positives.
+func AgentStaleness(deployed domain.DeployedArtifactState, agent domain.Agent, stamps domain.VersionStamps) []domain.VersionDelta {
 	var deltas []domain.VersionDelta
 
 	if deployed.Version != stamps.Version {
@@ -28,11 +28,11 @@ func AgentStaleness(deployed domain.DeployedArtifactState, _ domain.Agent, stamp
 			Source:   stamps.Version,
 		})
 	}
-	if deployed.TransformVersion != stamps.TransformVersion {
+	if deployed.HarnessVersion != stamps.HarnessVersion {
 		deltas = append(deltas, domain.VersionDelta{
-			Field:    "transform_version",
-			Deployed: deployed.TransformVersion,
-			Source:   stamps.TransformVersion,
+			Field:    "harness_version",
+			Deployed: deployed.HarnessVersion,
+			Source:   stamps.HarnessVersion,
 		})
 	}
 	if deployed.InjectionsVersion != stamps.InjectionsVersion {
@@ -42,12 +42,17 @@ func AgentStaleness(deployed domain.DeployedArtifactState, _ domain.Agent, stamp
 			Source:   stamps.InjectionsVersion,
 		})
 	}
-	if deployed.OrchestratorInjectionsVersion != stamps.OrchestratorInjectionsVersion {
-		deltas = append(deltas, domain.VersionDelta{
-			Field:    "orchestrator_injections_version",
-			Deployed: deployed.OrchestratorInjectionsVersion,
-			Source:   stamps.OrchestratorInjectionsVersion,
-		})
+	// Orchestrator-only: compare orchestrator_injections_version only when the agent is an
+	// orchestrator. Non-orchestrator agents never populate this field on either side, so the
+	// comparison is skipped to prevent false positives.
+	if agent.Role == domain.RoleOrchestrator {
+		if deployed.OrchestratorInjectionsVersion != stamps.OrchestratorInjectionsVersion {
+			deltas = append(deltas, domain.VersionDelta{
+				Field:    "orchestrator_injections_version",
+				Deployed: deployed.OrchestratorInjectionsVersion,
+				Source:   stamps.OrchestratorInjectionsVersion,
+			})
+		}
 	}
 	if deployed.ToolMappingsVersion != stamps.ToolMappingsVersion {
 		deltas = append(deltas, domain.VersionDelta{
@@ -102,7 +107,7 @@ func HookStaleness(deployed domain.DeployedArtifactState, bundle domain.HookBund
 }
 
 // WorkflowDeltaFieldPrefix prefixes the Field name of every workflow-drift VersionDelta so
-// it can never collide with "version", "transform_version", or "injections_version", which
+// it can never collide with "version", "harness_version", or "injections_version", which
 // deploy.resolveVersionStamp switches on when writing manifest version stamps.
 const WorkflowDeltaFieldPrefix = "workflow:"
 
@@ -211,7 +216,7 @@ func (d WorkflowDrift) Stale() bool {
 
 // Deltas converts the drift into a slice of VersionDelta values, one per changed workflow.
 // Every delta's Field is prefixed with WorkflowDeltaFieldPrefix so it cannot collide with
-// the executor's resolveVersionStamp switch on "version", "transform_version", or
+// the executor's resolveVersionStamp switch on "version", "harness_version", or
 // "injections_version".
 //
 // Ordering: added first, then removed, then version-changed; within each group, source order.

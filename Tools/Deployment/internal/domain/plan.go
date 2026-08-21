@@ -38,7 +38,7 @@ const (
 )
 
 // VersionDelta records one independent staleness comparison.
-// Field is one of: "version", "transform_version", "injections_version".
+// Field is one of: "version", "harness_version", "injections_version".
 type VersionDelta struct {
 	Field    string
 	Deployed string

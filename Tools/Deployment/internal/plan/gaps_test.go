@@ -330,7 +330,7 @@ func TestBuild_ActionUpdate_ReasonIsNonEmpty(t *testing.T) {
 	const hash = "sha256:aaaaaa"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -387,7 +387,7 @@ func TestBuild_ActionUpdate_StaleFieldsMatchVersionDeltas(t *testing.T) {
 	const hash = "sha256:aaaaaa"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -494,7 +494,7 @@ func TestBuild_ActionConflict_ReasonIsNonEmpty(t *testing.T) {
 	const agentTarget = "agents/test-agent.md"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", "sha256:recorded")
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -549,7 +549,7 @@ func TestBuild_ActionUnchanged_StaleIsEmpty(t *testing.T) {
 	const hash = "sha256:unchanged"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -604,7 +604,7 @@ func TestBuild_ActionUnchanged_ConflictIsNil(t *testing.T) {
 	const hash = "sha256:unchanged"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -666,7 +666,7 @@ func TestBuild_LoggingConsumer_ActionRecordFields(t *testing.T) {
 	const hash = "sha256:aaaaaa"
 
 	entry := makeManifestEntry(agentRef("test-agent"), agentTarget, "1.0", hash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{

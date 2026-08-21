@@ -1400,16 +1400,18 @@ func TestContract_OpenCode(t *testing.T) {
 				// (b) mode:subagent is added (a new harness-specific field), and (c) the key
 				// order places description before mode and permission after model.
 				// Model and version stamps are NOT in Set — transform applies them exclusively.
+				// Mode is resolved from Role via the descriptor's value_by_role mapping.
 				Name: "drops_name_adds_mode_subagent_applies_key_order",
 				Request: domain.FrontmatterRequest{
 					Kind:     domain.ArtifactAgent,
 					AgentKey: "test-runner",
+					Role:     domain.RoleSubagent,
 					Model: domain.ModelSelection{
 						ModelID: "github-copilot/claude-sonnet-4-6",
 						Origin:  domain.OriginHarnessList,
 					},
 					Versions: domain.VersionStamps{
-						TransformVersion:  "3.0.0",
+						HarnessVersion:  "3.0.0",
 						InjectionsVersion: "1.3.1",
 					},
 				},
@@ -1424,17 +1426,18 @@ func TestContract_OpenCode(t *testing.T) {
 			{
 				// orchestrator_gets_mode_primary: the orchestrator is a primary agent in OpenCode
 				// (user-facing, not invoked by other agents), so its mode must be "primary" rather
-				// than "subagent". The module detects the orchestrator via AgentKey == "orchestrator".
+				// than "subagent". Mode is resolved from Role via the descriptor's value_by_role mapping.
 				Name: "orchestrator_gets_mode_primary",
 				Request: domain.FrontmatterRequest{
 					Kind:     domain.ArtifactAgent,
 					AgentKey: "orchestrator",
+					Role:     domain.RoleOrchestrator,
 					Model: domain.ModelSelection{
 						ModelID: "github-copilot/claude-sonnet-4-6",
 						Origin:  domain.OriginHarnessList,
 					},
 					Versions: domain.VersionStamps{
-						TransformVersion:  "3.0.0",
+						HarnessVersion:  "3.0.0",
 						InjectionsVersion: "1.3.1",
 					},
 				},

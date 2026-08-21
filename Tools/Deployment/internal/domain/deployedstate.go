@@ -10,9 +10,9 @@ type DeployedArtifactState struct {
 	Present                       bool
 	ContentHash                   string            // "sha256:<hex>"; empty when !Present
 	Version                       string            // frontmatter `version` scalar, verbatim; "" when absent or unparseable
-	TransformVersion              string            // frontmatter `transform_version` scalar, verbatim
-	InjectionsVersion             string            // frontmatter `injections_version` scalar, verbatim
-	OrchestratorInjectionsVersion string            // frontmatter `orchestrator_injections_version` scalar, verbatim; "" when absent or subagent
+	HarnessVersion                string            // frontmatter `mosaic_harness_version` scalar (or legacy `mosaic_transform_version` fallback), verbatim
+	InjectionsVersion             string            // injection version from InjectionHarness-class region tag attribute (or legacy frontmatter fallback)
+	OrchestratorInjectionsVersion string            // reserved; always empty after Stage 3 — role-conditional comparison is in AgentStaleness
 	ToolMappingsVersion           string            // frontmatter `tool_mappings_version` scalar, verbatim; "" when absent
 	ModelID                       string            // frontmatter model scalar under the harness's ModelKey, verbatim; "" when absent, unparseable, or the harness emits no model
 	Workflows                     DeployedWorkflows // non-nil only when the file carries workflow section markers
@@ -23,7 +23,7 @@ type DeployedArtifactState struct {
 // HasVersionInfo reports whether the deployed file carries at least one readable version stamp.
 // A present file with no version info cannot be proven current and is treated as stale.
 func (s DeployedArtifactState) HasVersionInfo() bool {
-	return s.Version != "" || s.TransformVersion != "" || s.InjectionsVersion != "" || s.OrchestratorInjectionsVersion != ""
+	return s.Version != "" || s.HarnessVersion != "" || s.InjectionsVersion != "" || s.OrchestratorInjectionsVersion != ""
 }
 
 // DeployedWorkflow is one workflow block found in a deployed orchestrator, paired with the

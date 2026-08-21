@@ -37,7 +37,7 @@ import (
 func matchingStamps(version, transformVersion, injectionsVersion string) domain.VersionStamps {
 	return domain.VersionStamps{
 		Version:           version,
-		TransformVersion:  transformVersion,
+		HarnessVersion:  transformVersion,
 		InjectionsVersion: injectionsVersion,
 	}
 }
@@ -124,7 +124,7 @@ func TestStaleness_PrefixedNamedFile_AllStampsMatch_NotStale(t *testing.T) {
 	agent := domain.Agent{Key: "agent-x", Version: "2.0.0"}
 	stamps := domain.VersionStamps{
 		Version:             "2.0.0",
-		TransformVersion:    "4.0.0",
+		HarnessVersion:    "4.0.0",
 		InjectionsVersion:   "2.0.0",
 		ToolMappingsVersion: "hash1",
 	}
@@ -161,7 +161,7 @@ func TestStaleness_PrefixedNamedFile_TransformVersionMismatch_IsStale(t *testing
 
 	var foundTransformDelta bool
 	for _, d := range deltas {
-		if d.Field == "transform_version" {
+		if d.Field == "harness_version" {
 			foundTransformDelta = true
 			if d.Deployed != "2.0.0" {
 				t.Errorf("delta.Deployed = %q, want %q (value from the prefixed mosaic_transform_version field)",
@@ -170,7 +170,7 @@ func TestStaleness_PrefixedNamedFile_TransformVersionMismatch_IsStale(t *testing
 		}
 	}
 	if !foundTransformDelta {
-		t.Errorf("expected a transform_version delta (deployed=2.0.0, source=3.0.0), but got %d deltas: %v",
+		t.Errorf("expected a harness_version delta (deployed=2.0.0, source=3.0.0), but got %d deltas: %v",
 			len(deltas), deltas)
 	}
 }

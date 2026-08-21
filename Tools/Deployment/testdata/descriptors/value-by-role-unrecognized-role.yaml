@@ -1,0 +1,12 @@
+# Descriptor with an entry that has an unrecognized role key in value_by_role.
+# Used by load tests to verify that the loader rejects unrecognized role keys.
+schema_version: "1"
+id: "value-by-role-bad-role-harness"
+display_name: "Bad Role Harness"
+
+frontmatter:
+  add:
+    - key: "user-invocable"
+      value_by_role:
+        subagent: false
+        not-a-valid-role: true

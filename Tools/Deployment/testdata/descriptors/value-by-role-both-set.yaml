@@ -1,0 +1,13 @@
+# Descriptor with an entry that has BOTH value and value_by_role set.
+# Used by load tests to verify that the loader rejects this as a validation error.
+schema_version: "1"
+id: "value-by-role-both-harness"
+display_name: "Both Set Harness"
+
+frontmatter:
+  add:
+    - key: "user-invocable"
+      value: false
+      value_by_role:
+        subagent: false
+        orchestrator: true

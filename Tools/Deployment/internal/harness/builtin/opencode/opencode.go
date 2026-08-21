@@ -4,7 +4,9 @@
 // OpenCode is the most complex transformation case in the system:
 //   - Replaces the generic tools list with a nested permission mapping (allow/deny for every
 //     tool in the harness's universe, in stable descriptor order).
-//   - Adds "mode: subagent" to every regular agent; the orchestrator receives "mode: primary".
+//   - Resolves the "mode" field from the agent's role via the descriptor's value_by_role
+//     mapping: orchestrator, utility, and standalone roles receive "mode: primary"; the
+//     subagent role receives "mode: subagent".
 //   - Drops the "name" field present in the generic source.
 //   - Applies a distinct key order: id, version, transform_version, injections_version,
 //     description, mode, model, permission.
@@ -16,17 +18,16 @@
 //
 // Exceptions requiring module code beyond the descriptor:
 //
-//  1. Mode field value: "mode: subagent" for regular agents vs "mode: primary" for the
-//     orchestrator. The descriptor can only declare static Add fields; the orchestrator
-//     distinction requires module code that inspects FrontmatterRequest.AgentKey.
-//
-//  2. Skill path key subdirectory: skills must be deployed under
+//  1. Skill path key subdirectory: skills must be deployed under
 //     "<skills-dir>/<key>/SKILL.md" to avoid filename collisions (all entry files share
 //     the name SKILL.md). The descriptor path template is a flat directory without
 //     support for an intermediate key segment.
 //
-//  3. Placeholder expansion for permission shape: descriptor.MapTools expands placeholders
+//  2. Placeholder expansion for permission shape: descriptor.MapTools expands placeholders
 //     into a flat list; OpenCode needs a full permission block from the expansion set.
+//
+//  3. Orchestrator injections version: stamped only for the orchestrator agent when
+//     non-empty; requires inspecting FrontmatterRequest.AgentKey at runtime.
 //
 // Registration: init() calls registry.Register so the module is available whenever
 // this package is imported.
@@ -38,7 +39,6 @@ import (
 	"path"
 	"path/filepath"
 
-	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/harness/descriptor"
 	"mosaic-deploy/internal/harness/injectionfile"
@@ -162,51 +162,27 @@ func (m *module) expandPlaceholderPermission() domain.ToolResult {
 
 // Frontmatter builds the FrontmatterPlan for OpenCode agents.
 //
-// The mode field is dynamic: regular agents receive "mode: subagent" and the orchestrator
-// receives "mode: primary". All other operations (drop, key order) come from the descriptor.
-// Model and version stamps are applied exclusively by the transform pipeline and must not
-// appear here; including them would produce duplicate FieldChange entries in transform.Report.Fields.
+// The mode field is resolved from the agent's role via the descriptor's value_by_role
+// mapping declared in opencode.yaml. All other operations (drop, key order) come from
+// the descriptor. Model and version stamps are applied exclusively by the transform
+// pipeline and must not appear here; including them would produce duplicate FieldChange
+// entries in transform.Report.Fields.
 //
-// Exception: orchestrator_injections_version is stamped here for the orchestrator agent when
-// non-empty, and filtered from the key_order for non-orchestrator agents and orchestrator agents
-// with an empty version (where the field is not emitted).
+// The orchestrator_injections_version field has been relocated from frontmatter to the
+// version attribute on InjectionHarness-class region tags (written by applyHarnessRegion).
+// This method no longer stamps it as a frontmatter field for any agent.
 func (m *module) Frontmatter(req domain.FrontmatterRequest) (domain.FrontmatterPlan, error) {
-	mode := "subagent"
-	if req.AgentKey == "orchestrator" {
-		mode = "primary"
-	}
-
-	set := []domain.FrontmatterField{
-		{Key: "mode", Value: domain.ScalarValue(mode, domain.QuotePlain)},
-	}
-
-	keyOrder := m.desc.Frontmatter.KeyOrder
-	orchField, _ := agentfields.ByDeployedName("orchestrator_injections_version")
-	if req.AgentKey == "orchestrator" && req.Versions.OrchestratorInjectionsVersion != "" {
-		set = append(set, domain.FrontmatterField{
-			Key:   orchField.Deployed,
-			Value: domain.ScalarValue(req.Versions.OrchestratorInjectionsVersion, domain.QuotePlain),
-		})
-	} else {
-		keyOrder = filterKeyOrder(keyOrder, orchField.Deployed)
-	}
+	// Resolve role-conditional fields (mode) from the descriptor.
+	resolved := descriptor.ResolveRoleConditionalFields(m.desc.Frontmatter.RoleConditionalAdd, req.Role)
+	set := make([]domain.FrontmatterField, 0, len(m.desc.Frontmatter.Add)+len(resolved))
+	set = append(set, m.desc.Frontmatter.Add...)
+	set = append(set, resolved...)
 
 	return domain.FrontmatterPlan{
 		Set:      set,
 		Remove:   m.desc.Frontmatter.Drop,
-		KeyOrder: keyOrder,
+		KeyOrder: m.desc.Frontmatter.KeyOrder,
 	}, nil
-}
-
-// filterKeyOrder returns a copy of keys with the given key removed.
-func filterKeyOrder(keys []string, exclude string) []string {
-	filtered := make([]string, 0, len(keys))
-	for _, k := range keys {
-		if k != exclude {
-			filtered = append(filtered, k)
-		}
-	}
-	return filtered
 }
 
 // TargetPath returns the deployment path for one artifact.

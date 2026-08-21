@@ -42,7 +42,7 @@ func TestProvenanceRetirement_CurrentAgent_NoProvenanceReasonInPlanItem(t *testi
 	agent := makeAgent("test-agent", "1.0")
 
 	entry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", contentHash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -91,7 +91,7 @@ func TestProvenanceRetirement_NoProvenanceStalenessDrivesPlanUpdate(t *testing.T
 	agent := makeAgent("test-agent", "1.0")
 
 	entry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.0", contentHash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -140,7 +140,7 @@ func TestProvenanceRetirement_PlanItemStaleSlice_ContainsNoProvenanceDelta(t *te
 	// Introduce a version-stamp mismatch to produce a non-empty Stale slice, so the
 	// absence-of-provenance assertion has non-trivial content to check.
 	entry := makeManifestEntry(agentRef("test-agent"), targetPath, "1.1", contentHash)
-	entry.TransformVersion = "1.1"
+	entry.HarnessVersion = "1.1"
 	entry.InjectionsVersion = "1.1"
 
 	snap := presentSnapshot(domain.Manifest{

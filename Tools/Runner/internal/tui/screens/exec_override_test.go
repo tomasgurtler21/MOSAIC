@@ -288,6 +288,102 @@ func TestExecOverrideScreen_Resize_DoesNotPanic(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Path() — double-quote stripping
+//
+// These tests verify that Path() strips a surrounding pair of double-quote
+// characters after whitespace trimming, matching the normalizePath convention.
+// Single quotes must NOT be stripped.
+//
+// TDD RED: Path() currently returns strings.TrimSpace(s.input.Value()) with no
+// quote stripping. All assertions below will fail until I3.2 applies normalizePath.
+// ---------------------------------------------------------------------------
+
+// TestExecOverrideScreen_Path_DoubleQuoteStripped verifies that Path() strips a
+// surrounding pair of double-quote characters from the entered path.
+func TestExecOverrideScreen_Path_DoubleQuoteStripped(t *testing.T) {
+	s := newOverrideScreen("ghcp-cli", "/usr/bin/copilot", 1)
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(`"/custom/copilot"`)})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !s.Done() {
+		t.Fatal("precondition: Done() = false; cannot check Path() quote stripping")
+	}
+	got := s.Path()
+	want := "/custom/copilot"
+	if got != want {
+		t.Errorf("Path() = %q, want %q; surrounding double quotes must be stripped", got, want)
+	}
+}
+
+// TestExecOverrideScreen_Path_WhitespacePaddedDoubleQuote_TrimmedAndStripped verifies
+// that Path() trims whitespace first and then strips the surrounding double-quote pair,
+// matching the normalizePath ordering (trim whitespace, then strip outer quotes).
+func TestExecOverrideScreen_Path_WhitespacePaddedDoubleQuote_TrimmedAndStripped(t *testing.T) {
+	s := newOverrideScreen("ghcp-cli", "/usr/bin/copilot", 1)
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(`  "/custom/copilot"  `)})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !s.Done() {
+		t.Fatal("precondition: Done() = false; cannot check Path() whitespace+quote normalisation")
+	}
+	got := s.Path()
+	want := "/custom/copilot"
+	if got != want {
+		t.Errorf("Path() = %q, want %q; whitespace must be trimmed and outer double quotes stripped", got, want)
+	}
+}
+
+// TestExecOverrideScreen_Path_SingleQuote_NotStripped verifies that Path() does NOT
+// strip surrounding single quotes. Single-quote stripping is not part of the
+// normalization convention.
+func TestExecOverrideScreen_Path_SingleQuote_NotStripped(t *testing.T) {
+	const entered = `'/custom/copilot'`
+	s := newOverrideScreen("ghcp-cli", "/usr/bin/copilot", 1)
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(entered)})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !s.Done() {
+		t.Fatal("precondition: Done() = false; cannot check Path() single-quote preservation")
+	}
+	got := s.Path()
+	want := entered
+	if got != want {
+		t.Errorf("Path() = %q, want %q; single quotes must NOT be stripped", got, want)
+	}
+}
+
+// TestExecOverrideScreen_Path_MismatchedQuotes_NotStripped verifies that Path() does
+// not strip a mismatched pair (leading double quote, trailing single quote).
+func TestExecOverrideScreen_Path_MismatchedQuotes_NotStripped(t *testing.T) {
+	const entered = `"/custom/copilot'`
+	s := newOverrideScreen("ghcp-cli", "/usr/bin/copilot", 1)
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(entered)})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !s.Done() {
+		t.Fatal("precondition: Done() = false; cannot check Path() mismatched-quote handling")
+	}
+	got := s.Path()
+	want := entered
+	if got != want {
+		t.Errorf("Path() = %q, want %q; mismatched quotes must not be stripped", got, want)
+	}
+}
+
+// TestExecOverrideScreen_Path_OneSidedLeadingDoubleQuote_NotStripped verifies that
+// Path() does not strip an unmatched leading double quote.
+func TestExecOverrideScreen_Path_OneSidedLeadingDoubleQuote_NotStripped(t *testing.T) {
+	const entered = `"/custom/copilot`
+	s := newOverrideScreen("ghcp-cli", "/usr/bin/copilot", 1)
+	s.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(entered)})
+	s.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !s.Done() {
+		t.Fatal("precondition: Done() = false; cannot check Path() one-sided quote handling")
+	}
+	got := s.Path()
+	want := entered
+	if got != want {
+		t.Errorf("Path() = %q, want %q; an unmatched leading double quote must not be stripped", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

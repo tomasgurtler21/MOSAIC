@@ -146,15 +146,23 @@ func parseSkillDir(dir, key string) (domain.Skill, error) {
 		skill.Version = v.Scalar
 	}
 
-	// Enumerate all files in the directory (relative paths).
-	dirEntries, err := os.ReadDir(dir)
+	// Enumerate all files recursively (relative paths, lexicographic depth-first order).
+	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			return nil // descend into subdirectories but do not add them to Files
+		}
+		rel, relErr := filepath.Rel(dir, path)
+		if relErr != nil {
+			return relErr
+		}
+		skill.Files = append(skill.Files, rel)
+		return nil
+	})
 	if err != nil {
 		return domain.Skill{}, err
-	}
-	for _, e := range dirEntries {
-		if !e.IsDir() {
-			skill.Files = append(skill.Files, e.Name())
-		}
 	}
 
 	return skill, nil

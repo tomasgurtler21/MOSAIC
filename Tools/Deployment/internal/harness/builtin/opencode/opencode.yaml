@@ -131,12 +131,18 @@ frontmatter:
     - "tier_rationale"
     - "required_skills"
     - "tools"
+  add:
+    - key: "mode"
+      value_by_role:
+        subagent: subagent
+        orchestrator: primary
+        utility: primary
+        standalone: primary
   key_order:
     - "mosaic_id"
     - "version"
     - "mosaic_transform_version"
     - "mosaic_injections_version"
-    - "mosaic_orchestrator_injections_version"
     - "description"
     - "mode"
     - "model"

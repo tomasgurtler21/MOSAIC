@@ -491,6 +491,18 @@ func applyHarnessRegion(node *docformat.Node, name string, class domain.Injectio
 			contentBytes = append(contentBytes, []byte(lineEnding)...)
 		}
 		node.SetContent(contentBytes) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
+		// Stamp the injection version on the region tag. For orchestrator agents, the
+		// orchestrator-specific version is selected; for all other agents, the regular
+		// injections version is used. This follows the same role-conditional pattern as
+		// build.go's stamp construction. The guard skips SetVersion when the version is
+		// empty so that agents without a configured injection version produce no attribute.
+		injVersion := req.InjectionsVersion
+		if req.Key == "orchestrator" {
+			injVersion = req.OrchestratorInjectionsVersion
+		}
+		if injVersion != "" {
+			node.SetVersion(injVersion) //nolint:errcheck // Node.SetVersion always returns nil; forward-compatible error return.
+		}
 		return RegionOutcome{
 			Name:   name,
 			Marker: node.Kind(),
@@ -640,10 +652,37 @@ func applyWorkflowRegion(node *docformat.Node, name string, class domain.Injecti
 }
 
 // applyInfrastructureRegion assembles the InfrastructureAgents region from
-// req.InfrastructureAgents. The blocks are concatenated in selection order; the deployed
-// file's InfrastructureAgents content is completely replaced on every transform.
+// req.InfrastructureAgents, or preserves the deployed file's content on Update.
+//
+// Behavioral contract:
+//
+//	len(req.InfrastructureAgents) == 0 AND req.Deployed != nil  =>  preserve from deployed (Update)
+//	len(req.InfrastructureAgents) == 0 AND req.Deployed == nil  =>  node.Clear() (DeployNew without selections)
+//	len(req.InfrastructureAgents) > 0                           =>  assemble from selections (unchanged)
+//
+// When preserving, the deployed document is parsed via docformat.Parse and the
+// InfrastructureAgents region content is lifted byte-for-byte. If the deployed file
+// has no InfrastructureAgents region (e.g. the source is adding it for the first time),
+// the node is cleared as a graceful no-op.
 func applyInfrastructureRegion(node *docformat.Node, name string, class domain.InjectionClass, req Request) (RegionOutcome, []string) {
 	if len(req.InfrastructureAgents) == 0 {
+		// Update scenario: preserve whatever was in the deployed file.
+		if req.Deployed != nil {
+			if deployedDoc, err := docformat.Parse(req.Deployed); err == nil {
+				if deployedNode, ok := deployedDoc.Body().Deployed("InfrastructureAgents"); ok {
+					preservedContent := deployedNode.Content()
+					node.SetContent(preservedContent) //nolint:errcheck // Node.SetContent always returns nil; forward-compatible error return.
+					return RegionOutcome{
+						Name:   name,
+						Marker: node.Kind(),
+						Class:  class,
+						Action: RegionPreservedInfra,
+						Bytes:  len(preservedContent),
+					}, nil
+				}
+			}
+			// Deployed file has no InfrastructureAgents region or is unparseable: graceful no-op.
+		}
 		node.Clear() //nolint:errcheck // Node.Clear always returns nil; forward-compatible error return.
 		return RegionOutcome{
 			Name:   name,

@@ -30,6 +30,7 @@ package app_test
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"mosaic-deploy/internal/app"
@@ -343,9 +344,11 @@ func TestOrchestratorScript_ModelResolution_ScriptGetsIndependentQuestion(t *tes
 }
 
 // TestOrchestratorScript_Flow_UpdatePassesInclusiveMode verifies that the Update flow passes
-// ModeUpdateWorkspace to the planner, which is an inclusive mode for the script file.
-// Combined with the plan-layer tests in resolve_orchestrator_script_test.go, this guarantees
-// the script is included in the plan when Update is invoked with a catalog that has it.
+// ModeUpdateWorkspace to the planner. After the Stage 1 behavioral change,
+// OrchestratorExcludedFor returns true for ModeUpdateWorkspace (the mode is exclusive for
+// force-inclusion). However the orchestrator-script still enters the artifact set when present
+// on disk: the Update flow probes the script file and, if found, adds its key to
+// scannedAgentKeys — the same path every other deployed agent uses.
 func TestOrchestratorScript_Flow_UpdatePassesInclusiveMode(t *testing.T) {
 	// Arrange — catalog with orchestratorScript so ResolveArtifacts can include it once implemented.
 	stub := interactiontest.NewBuilder().AnswerReview(true).Build()
@@ -396,8 +399,9 @@ func TestOrchestratorScript_Flow_UpdatePassesInclusiveMode(t *testing.T) {
 		t.Fatal("planner was not called")
 	}
 	if capturing.capturedInput.Mode != domain.ModeUpdateWorkspace {
-		t.Errorf("planner Input.Mode = %q; want %q (inclusive mode so that OrchestratorExcludedFor "+
-			"returns false and the script is included in the plan when Update is invoked)",
+		t.Errorf("planner Input.Mode = %q; want %q (ModeUpdateWorkspace: OrchestratorExcludedFor "+
+			"returns true for this mode, so the script is not force-included; instead the Update "+
+			"flow probes the script file and adds it to scannedAgentKeys when present on disk)",
 			capturing.capturedInput.Mode, domain.ModeUpdateWorkspace)
 	}
 }
@@ -592,5 +596,153 @@ func TestOrchestratorScript_ModelResolution_TierMappingSkipsScriptQuestion(t *te
 		t.Error("QAgentModel was asked for \"orchestrator-script\" even though a tier mapping " +
 			"(HIGH → model-a) should have resolved its model automatically; " +
 			"once the script is in the probe set, tier mapping must apply to it just like any orchestrator")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T4.3: Orchestrator-script Update-flow inclusion based on disk presence
+// ---------------------------------------------------------------------------
+
+// TestOrchestratorScript_Update_ScriptPresentOnDisk_IncludedInDeployedState verifies that
+// when the catalog has an orchestrator-script and the script file is present on disk at its
+// target path, the Update flow includes the script's key in the artifact set and DeployedState.
+func TestOrchestratorScript_Update_ScriptPresentOnDisk_IncludedInDeployedState(t *testing.T) {
+	ws := t.TempDir()
+
+	// Write the orchestrator-script file to disk so the probe finds it present.
+	scriptContent := []byte("---\nversion: \"1.0\"\n---\nOrchestrator script body.\n")
+	if err := os.WriteFile(ws+"/orchestrator-script.md", scriptContent, 0o644); err != nil {
+		t.Fatalf("write orchestrator-script.md: %v", err)
+	}
+
+	spy := &spyPlanner{response: domain.Plan{
+		Mode:          domain.ModeUpdateWorkspace,
+		Harness:       minimalHarness,
+		WorkspacePath: ws,
+		Scope:         domain.ScopeProject,
+	}}
+	stub := interactiontest.NewBuilder().Build()
+	deps, _ := newBaseDeps(t, stub)
+	deps.Planner = spy
+	deps.Catalog = &stubCatalog{
+		root:         "testroot",
+		orchestrator: minimalOrchestrator,
+		orchestratorScript: domain.Agent{
+			Key:     "orchestrator-script",
+			Version: "1.0",
+			Name:    "Orchestrator Script",
+			Role:    domain.RoleOrchestrator,
+		},
+		orchestratorScriptOK: true,
+		agents:               []domain.Agent{minimalAgent},
+		skills:               []domain.Skill{},
+		hooks:                []domain.HookBundle{},
+		workflows:            []domain.Workflow{minimalWorkflow},
+		categories: []domain.WorkflowCategory{
+			{Name: "Build", Workflows: []domain.Workflow{minimalWorkflow}},
+		},
+	}
+	svc := app.New(deps)
+
+	_, err := svc.Update(context.Background(), app.UpdateRequest{
+		HarnessID:       "stub-harness",
+		WorkspacePath:   ws,
+		AutoConfirmPlan: true,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	captured := spy.lastCaptured(t)
+
+	// The orchestrator-script file is present on disk; the Update flow must have probed it,
+	// added its key to scannedAgentKeys, and included it in the artifact set and DeployedState.
+	scriptState, ok := captured.DeployedState["orchestrator-script.md"]
+	if !ok {
+		t.Error("orchestrator-script.md not found in plan.Input.DeployedState; " +
+			"when the script file is present on disk, the Update flow must probe it and include " +
+			"it in the artifact set via scannedAgentKeys")
+		return
+	}
+	if !scriptState.Present {
+		t.Error("DeployedState[orchestrator-script.md].Present = false; " +
+			"the file was written to disk and must be detected as present by the probe")
+	}
+
+	// Verify the script key appears in ScannedAgentKeys (the single-authority slice).
+	found := false
+	for _, key := range captured.ScannedAgentKeys {
+		if key == "orchestrator-script" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("\"orchestrator-script\" not in plan.Input.ScannedAgentKeys; " +
+			"the orchestrator-script probe must feed its key into scannedAgentKeys when present on disk")
+	}
+}
+
+// TestOrchestratorScript_Update_ScriptAbsentFromDisk_ExcludedFromDeployedState verifies that
+// when the catalog has an orchestrator-script but the script file is absent from disk, the
+// Update flow does not include the script in the artifact set or DeployedState.
+func TestOrchestratorScript_Update_ScriptAbsentFromDisk_ExcludedFromDeployedState(t *testing.T) {
+	ws := t.TempDir()
+	// Intentionally do NOT write orchestrator-script.md to disk.
+
+	spy := &spyPlanner{response: domain.Plan{
+		Mode:          domain.ModeUpdateWorkspace,
+		Harness:       minimalHarness,
+		WorkspacePath: ws,
+		Scope:         domain.ScopeProject,
+	}}
+	stub := interactiontest.NewBuilder().Build()
+	deps, _ := newBaseDeps(t, stub)
+	deps.Planner = spy
+	deps.Catalog = &stubCatalog{
+		root:         "testroot",
+		orchestrator: minimalOrchestrator,
+		orchestratorScript: domain.Agent{
+			Key:     "orchestrator-script",
+			Version: "1.0",
+			Name:    "Orchestrator Script",
+			Role:    domain.RoleOrchestrator,
+		},
+		orchestratorScriptOK: true,
+		agents:               []domain.Agent{minimalAgent},
+		skills:               []domain.Skill{},
+		hooks:                []domain.HookBundle{},
+		workflows:            []domain.Workflow{minimalWorkflow},
+		categories: []domain.WorkflowCategory{
+			{Name: "Build", Workflows: []domain.Workflow{minimalWorkflow}},
+		},
+	}
+	svc := app.New(deps)
+
+	_, err := svc.Update(context.Background(), app.UpdateRequest{
+		HarnessID:       "stub-harness",
+		WorkspacePath:   ws,
+		AutoConfirmPlan: true,
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	captured := spy.lastCaptured(t)
+
+	// The orchestrator-script file is absent from disk; it must not appear in DeployedState.
+	if _, ok := captured.DeployedState["orchestrator-script.md"]; ok {
+		t.Error("orchestrator-script.md found in plan.Input.DeployedState; " +
+			"when the script file is absent from disk, the Update flow must not include it " +
+			"in the artifact set or DeployedState")
+	}
+
+	// The script key must not appear in ScannedAgentKeys.
+	for _, key := range captured.ScannedAgentKeys {
+		if key == "orchestrator-script" {
+			t.Error("\"orchestrator-script\" found in plan.Input.ScannedAgentKeys; " +
+				"the key must not be added when the script file is absent from disk")
+			break
+		}
 	}
 }

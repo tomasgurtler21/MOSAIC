@@ -22,6 +22,11 @@ const (
 	// RegionAssembledInfra means the InfrastructureAgents region was assembled from
 	// selected infrastructure agents.
 	RegionAssembledInfra RegionAction = "assembled-infrastructure"
+	// RegionPreservedInfra means the InfrastructureAgents region content was preserved
+	// byte-for-byte from the deployed file because no new infrastructure agent selections
+	// were provided (Update scenario). Symmetric with RegionAssembledInfra which covers
+	// the assembled-from-selections case.
+	RegionPreservedInfra RegionAction = "preserved-infrastructure"
 	// RegionProtocolFilled means the CommunicationProtocol region was filled with the
 	// role-matched protocol block plus its version marker.
 	RegionProtocolFilled RegionAction = "filled-from-protocol"

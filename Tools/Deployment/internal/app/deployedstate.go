@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"mosaic-common/docformat"
+	"mosaic-common/mosaic"
 	"mosaic-deploy/internal/agentfields"
 	"mosaic-deploy/internal/domain"
 	"mosaic-deploy/internal/manifest"
@@ -42,12 +43,16 @@ func probeDeployedArtifact(workspace, targetPath, modelKey string) domain.Deploy
 	if doc, parseErr := docformat.Parse(data); parseErr == nil {
 		fm := doc.Frontmatter()
 		if fm.Present() {
-			if v, ok := fm.Get("version"); ok && v.Kind == domain.KindScalar {
-				state.Version = v.Scalar
+			state.Version = readDeployedStamp(fm, "version")
+			// Read harness version: try mosaic_harness_version first, fall back to
+			// mosaic_transform_version (legacy name) for pre-migration files.
+			state.HarnessVersion = readDeployedStamp(fm, "harness_version")
+			if state.HarnessVersion == "" {
+				state.HarnessVersion = readDeployedStamp(fm, "transform_version")
 			}
-			state.TransformVersion = readDeployedStamp(fm, "transform_version")
-			state.InjectionsVersion = readDeployedStamp(fm, "injections_version")
-			state.OrchestratorInjectionsVersion = readDeployedStamp(fm, "orchestrator_injections_version")
+			// OrchestratorInjectionsVersion is intentionally NOT read from frontmatter.
+			// Stage 3 redesigns the read side to stop populating this field entirely.
+			// Role-conditional comparison is handled in AgentStaleness using InjectionsVersion.
 			state.ToolMappingsVersion = readDeployedStamp(fm, "tool_mappings_version")
 			state.BundleVersion = readDeployedStamp(fm, "bundle_version")
 			if modelKey != "" {
@@ -57,6 +62,10 @@ func probeDeployedArtifact(workspace, targetPath, modelKey string) domain.Deploy
 			}
 		}
 	}
+
+	// Read injection version from InjectionHarness-class region tag attributes.
+	// Falls back to mosaic_injections_version frontmatter for pre-migration files.
+	state.InjectionsVersion = extractDeployedInjectionVersion(data, "injections_version")
 
 	// Extract workflow section markers; nil when none are present.
 	state.Workflows = extractDeployedWorkflows(data)
@@ -83,6 +92,50 @@ func readDeployedStamp(fm *docformat.Frontmatter, legacyKey string) string {
 		if v, ok := fm.Get(key); ok && v.Kind == domain.KindScalar {
 			return v.Scalar
 		}
+	}
+	return ""
+}
+
+// extractDeployedInjectionVersion parses a deployed agent file and returns the version
+// attribute from the first InjectionHarness-class region found. Returns "" when no such
+// region exists or when the region carries no version attribute.
+//
+// Falls back to reading the specified frontmatter field for pre-migration files that still
+// carry injection versions in frontmatter rather than tag attributes. The primary path
+// (tag read) takes precedence over the fallback.
+//
+// legacyFrontmatterKey is the agentfields registry key used for the frontmatter fallback
+// (e.g., "injections_version"). The primary path reads the tag version from whichever
+// InjectionHarness-class region it finds first, since all harness regions in a file share
+// the same version value (written by applyHarnessRegion with a single role-selected value).
+func extractDeployedInjectionVersion(data []byte, legacyFrontmatterKey string) string {
+	if len(data) == 0 {
+		return ""
+	}
+	doc, err := docformat.Parse(data)
+	if err != nil {
+		return ""
+	}
+
+	// Primary path: enumerate all tool-managed regions and find the first InjectionHarness-class one.
+	for _, node := range doc.Body().DeployedRegions() {
+		class, classErr := docformat.ClassifyRegion(node.Kind(), node.Name())
+		if classErr != nil {
+			continue // skip unclassified or error regions
+		}
+		if class == mosaic.InjectionHarness {
+			v := node.Version()
+			if v != "" {
+				return v
+			}
+			// Found an InjectionHarness region but it has no version attribute — stop primary path.
+			break
+		}
+	}
+
+	// Fallback path: pre-migration files carry the injection version in frontmatter.
+	if doc.Frontmatter().Present() {
+		return readDeployedStamp(doc.Frontmatter(), legacyFrontmatterKey)
 	}
 	return ""
 }

@@ -1,14 +1,13 @@
 ---
 mosaic_id: 3
-version: 1.0.0
-mosaic_transform_version: 3.0.0
-mosaic_injections_version: 1.3.0
 name: planner-tdd-soft
 description: Skill-using fixture for golden file tests — exercises skill plus terminal alongside the full file-access tool set
 model: Claude Sonnet 4.6
 tools: ['read/readFile', 'edit/createFile', 'edit/editFiles', 'search/fileSearch', 'search/textSearch', 'search/listDirectory', 'execute/runInTerminal', 'vscode/askQuestions']
 disable-model-invocation: false
+mosaic_harness_version: 3.0.0
 mosaic_role: subagent
+mosaic_version: 1.0.0
 ---
 
 <Identity type="core">

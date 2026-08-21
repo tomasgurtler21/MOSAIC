@@ -77,7 +77,7 @@ func deployedStateNoVersionMarkers(contentHash string) domain.DeployedArtifactSt
 		Present:           true,
 		ContentHash:       contentHash,
 		Version:           "1.0", // matches agent.Version set by make*Agent helpers
-		TransformVersion:  "1.0", // matches newFakeModule().desc.TransformVersion
+		HarnessVersion:  "1.0", // matches newFakeModule().desc.TransformVersion
 		InjectionsVersion: "1.0", // matches newFakeModule().desc.InjectionsVersion
 		// ProtocolVersion: ""  — absent by design for utility and standalone agents
 		// BundleVersion:   ""  — absent by design for utility and standalone agents
@@ -99,7 +99,7 @@ func buildRoleGateInput(agent domain.Agent) plan.Input {
 	const contentHash = "sha256:role-gate-fixture"
 
 	entry := makeManifestEntry(agentRef(agent.Key), targetPath, "1.0", contentHash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -160,7 +160,7 @@ func buildOrchestratorRoleGateInput() plan.Input {
 	targetPath := "agents/" + orc.Key + ".md"
 
 	entry := makeManifestEntry(agentRef(orc.Key), targetPath, "1.0", contentHash)
-	entry.TransformVersion = "1.0"
+	entry.HarnessVersion = "1.0"
 	entry.InjectionsVersion = "1.0"
 
 	snap := presentSnapshot(domain.Manifest{
@@ -179,15 +179,16 @@ func buildOrchestratorRoleGateInput() plan.Input {
 	}
 
 	return plan.Input{
-		Catalog:         cat,
-		Module:          newFakeModule(),
-		Mode:            domain.ModeUpdateWorkspace,
-		WorkspacePath:   "/fake/workspace",
-		Scope:           domain.ScopeProject,
-		GOOS:            "linux",
-		Manifest:        snap,
-		ProtocolVersion: "1.9",
-		BundleVersion:   "2.0",
+		Catalog:          cat,
+		Module:           newFakeModule(),
+		Mode:             domain.ModeUpdateWorkspace,
+		WorkspacePath:    "/fake/workspace",
+		Scope:            domain.ScopeProject,
+		GOOS:             "linux",
+		Manifest:         snap,
+		ProtocolVersion:  "1.9",
+		BundleVersion:    "2.0",
+		ScannedAgentKeys: []string{orc.Key},
 		Models: map[string]domain.ModelSelection{
 			orc.Key: {ModelID: "test-model", Origin: domain.OriginHarnessList},
 		},

@@ -246,8 +246,8 @@ func TestProbeDeployedHookBundle_PresentBundle_AllVersionFieldsEmpty(t *testing.
 	if state.Version != "" {
 		t.Errorf("Version = %q, want empty; hook bundle probe must leave all version fields empty", state.Version)
 	}
-	if state.TransformVersion != "" {
-		t.Errorf("TransformVersion = %q, want empty", state.TransformVersion)
+	if state.HarnessVersion != "" {
+		t.Errorf("TransformVersion = %q, want empty", state.HarnessVersion)
 	}
 	if state.InjectionsVersion != "" {
 		t.Errorf("InjectionsVersion = %q, want empty", state.InjectionsVersion)

@@ -16,6 +16,7 @@ Validation agents are gatekeepers that ensure quality before proceeding to the n
 | 10 | [system-design-review](./system-design-review.md) | 2.0.1 | Reviews system design for architecture quality and design principles |
 | 14 | [implementation-review](./implementation-review.md) | 2.2.0 | Reviews code quality, design compliance, and code standards |
 | 13 | [tests-review-tdd](./tests-review-tdd.md) | 2.3.0 | Reviews test quality, coverage, and TDD RED phase correctness |
+| 65 | [comparison-review](./comparison-review.md) | 1.0.0 | Autonomous quality gate on the comparison synthesis - validates balance, evidence, criteria alignment, and consistency with per-topic comparisons |
 
 ## What Validation Agents Do
 
@@ -42,3 +43,4 @@ Validation agents are gatekeepers that ensure quality before proceeding to the n
 | SystemDesignReview | System design documents (SystemDesign.md) |
 | ImplementationReview | Project files (source code) |
 | TestsReview TDD | Project files (test code) |
+| ComparisonReview | Orchestration artifacts (ComparisonAnalysis.md against per-topic comparisons and Requirements.md) |

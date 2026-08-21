@@ -61,9 +61,9 @@ func TestProbeDeployedArtifact_PrefixedTransformVersion_ReadCorrectly(t *testing
 	if !state.Present {
 		t.Fatal("expected Present: true for a readable file")
 	}
-	if state.TransformVersion != "3.0.0" {
-		t.Errorf("TransformVersion = %q, want %q; probeDeployedArtifact must read the prefixed mosaic_transform_version key",
-			state.TransformVersion, "3.0.0")
+	if state.HarnessVersion != "3.0.0" {
+		t.Errorf("HarnessVersion = %q, want %q; probeDeployedArtifact must read the prefixed mosaic_transform_version key",
+			state.HarnessVersion, "3.0.0")
 	}
 }
 
@@ -112,21 +112,6 @@ func TestProbeDeployedArtifact_PrefixedBundleVersion_ReadCorrectly(t *testing.T)
 	}
 }
 
-// TestProbeDeployedArtifact_PrefixedOrchestratorInjectionsVersion_ReadCorrectly verifies
-// that "mosaic_orchestrator_injections_version" populates state.OrchestratorInjectionsVersion.
-func TestProbeDeployedArtifact_PrefixedOrchestratorInjectionsVersion_ReadCorrectly(t *testing.T) {
-	ws := t.TempDir()
-	content := []byte("---\nmosaic_orchestrator_injections_version: \"o1.0\"\n---\n\nAgent body.\n")
-	writeFile(t, ws, "agent.md", content)
-
-	state := probeDeployedArtifact(ws, "agent.md", "")
-
-	if state.OrchestratorInjectionsVersion != "o1.0" {
-		t.Errorf("OrchestratorInjectionsVersion = %q, want %q; probeDeployedArtifact must read mosaic_orchestrator_injections_version",
-			state.OrchestratorInjectionsVersion, "o1.0")
-	}
-}
-
 // TestProbeDeployedArtifact_LegacyTransformVersion_StillReadCorrectly verifies backward
 // compatibility: a file carrying the legacy "transform_version" key (without the prefix)
 // must still populate state.TransformVersion. This test PASSES both before and after
@@ -138,9 +123,9 @@ func TestProbeDeployedArtifact_LegacyTransformVersion_StillReadCorrectly(t *test
 
 	state := probeDeployedArtifact(ws, "agent.md", "")
 
-	if state.TransformVersion != "2.0.0" {
-		t.Errorf("TransformVersion = %q, want %q; legacy transform_version must still be read for backward compatibility",
-			state.TransformVersion, "2.0.0")
+	if state.HarnessVersion != "2.0.0" {
+		t.Errorf("HarnessVersion = %q, want %q; legacy transform_version must still be read for backward compatibility",
+			state.HarnessVersion, "2.0.0")
 	}
 }
 
@@ -156,15 +141,22 @@ func TestProbeDeployedArtifact_BothPrefixedAndLegacyTransformVersion_PrefixedWin
 
 	state := probeDeployedArtifact(ws, "agent.md", "")
 
-	if state.TransformVersion != "3.0.0" {
-		t.Errorf("TransformVersion = %q, want %q; prefixed mosaic_transform_version must win over legacy transform_version",
-			state.TransformVersion, "3.0.0")
+	if state.HarnessVersion != "3.0.0" {
+		t.Errorf("HarnessVersion = %q, want %q; prefixed mosaic_transform_version must win over legacy transform_version",
+			state.HarnessVersion, "3.0.0")
 	}
 }
 
 // TestProbeDeployedArtifact_AllPrefixedStamps_AllFieldsPopulated verifies that a deployed
-// file carrying all six prefixed MOSAIC stamp keys has every corresponding state field
+// file carrying the current prefixed MOSAIC stamp keys has every corresponding state field
 // populated from the prefixed key's value.
+//
+// Note: mosaic_orchestrator_injections_version is intentionally excluded. Stage 3 removed
+// read-side population of DeployedArtifactState.OrchestratorInjectionsVersion from any source
+// (frontmatter or tag attributes). The staleness comparison handles the orchestrator/non-
+// orchestrator distinction via role-conditional logic in AgentStaleness; the read side always
+// leaves OrchestratorInjectionsVersion empty. See harness_version_probe_test.go for the
+// AlwaysEmpty assertions that cover this invariant.
 func TestProbeDeployedArtifact_AllPrefixedStamps_AllFieldsPopulated(t *testing.T) {
 	ws := t.TempDir()
 	content := []byte("---\n" +
@@ -173,7 +165,6 @@ func TestProbeDeployedArtifact_AllPrefixedStamps_AllFieldsPopulated(t *testing.T
 		"mosaic_injections_version: \"1.5.0\"\n" +
 		"mosaic_tool_mappings_version: \"hash77\"\n" +
 		"mosaic_bundle_version: \"b3.0\"\n" +
-		"mosaic_orchestrator_injections_version: \"o2.0\"\n" +
 		"---\n\nAgent body.\n")
 	writeFile(t, ws, "agent.md", content)
 
@@ -182,8 +173,8 @@ func TestProbeDeployedArtifact_AllPrefixedStamps_AllFieldsPopulated(t *testing.T
 	if !state.Present {
 		t.Fatal("expected Present: true")
 	}
-	if state.TransformVersion != "3.0.0" {
-		t.Errorf("TransformVersion = %q, want %q", state.TransformVersion, "3.0.0")
+	if state.HarnessVersion != "3.0.0" {
+		t.Errorf("HarnessVersion = %q, want %q", state.HarnessVersion, "3.0.0")
 	}
 	if state.InjectionsVersion != "1.5.0" {
 		t.Errorf("InjectionsVersion = %q, want %q", state.InjectionsVersion, "1.5.0")
@@ -193,9 +184,6 @@ func TestProbeDeployedArtifact_AllPrefixedStamps_AllFieldsPopulated(t *testing.T
 	}
 	if state.BundleVersion != "b3.0" {
 		t.Errorf("BundleVersion = %q, want %q", state.BundleVersion, "b3.0")
-	}
-	if state.OrchestratorInjectionsVersion != "o2.0" {
-		t.Errorf("OrchestratorInjectionsVersion = %q, want %q", state.OrchestratorInjectionsVersion, "o2.0")
 	}
 }
 

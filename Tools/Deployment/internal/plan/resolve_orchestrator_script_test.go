@@ -23,7 +23,7 @@ package plan_test
 //   - OrchestratorExcludedFor(ModeDeployAgents) returns true — both files excluded.
 //   - OrchestratorExcludedFor(ModeDeployHooks) returns true — both files excluded.
 //   - OrchestratorExcludedFor(ModeDeployWorkspace) returns false — both files included.
-//   - OrchestratorExcludedFor(ModeUpdateWorkspace) returns false — both files included.
+//   - OrchestratorExcludedFor(ModeUpdateWorkspace) returns true — both files scanned-in-only.
 //   - OrchestratorExcludedFor(ModeUpdateWorkflows) returns false — both files included.
 
 import (
@@ -252,12 +252,16 @@ func TestOrchestratorExcludedFor_DeployWorkspace_BothFilesIncluded(t *testing.T)
 	}
 }
 
-// TestOrchestratorExcludedFor_UpdateWorkspace_BothFilesIncluded verifies that
-// OrchestratorExcludedFor returns false for ModeUpdateWorkspace.
-func TestOrchestratorExcludedFor_UpdateWorkspace_BothFilesIncluded(t *testing.T) {
-	if plan.OrchestratorExcludedFor(domain.ModeUpdateWorkspace) {
-		t.Error("OrchestratorExcludedFor(ModeUpdateWorkspace) = true, want false; " +
-			"update-workspace must include both orchestrator-role files in the artifact set")
+// TestOrchestratorExcludedFor_UpdateWorkspace_BothFilesScannedInOnly verifies that
+// OrchestratorExcludedFor returns true for ModeUpdateWorkspace. When excluded from forced
+// inclusion, both orchestrator-role files enter the artifact set only when the workspace scan
+// discovers them on disk and supplies their keys via ScannedAgentKeys — the same path every
+// other deployed agent uses.
+func TestOrchestratorExcludedFor_UpdateWorkspace_BothFilesScannedInOnly(t *testing.T) {
+	if !plan.OrchestratorExcludedFor(domain.ModeUpdateWorkspace) {
+		t.Error("OrchestratorExcludedFor(ModeUpdateWorkspace) = false, want true; " +
+			"update-workspace must exclude both orchestrator-role files from forced inclusion; " +
+			"both files enter the artifact set only when the workspace scan discovers them via ScannedAgentKeys")
 	}
 }
 

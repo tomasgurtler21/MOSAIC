@@ -63,7 +63,7 @@ func sampleEntry(targetPath string, ref domain.ArtifactRef) domain.ManifestEntry
 		Ref:               ref,
 		TargetPath:        targetPath,
 		Version:           "1.2.3",
-		TransformVersion:  "2.0.0",
+		HarnessVersion:    "2.0.0",
 		InjectionsVersion: "3.1.0",
 		ContentHash:       "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab",
 		DeployedAt:        time.Date(2024, 6, 15, 12, 0, 0, 0, time.UTC),
@@ -205,7 +205,7 @@ func TestStore_WriteRead_EntryCountPreserved(t *testing.T) {
 }
 
 // TestStore_WriteRead_EntryFieldsPreserved verifies that all fields of every ManifestEntry
-// survive a write-then-read cycle: Ref (Kind+Key), TargetPath, Version, TransformVersion,
+// survive a write-then-read cycle: Ref (Kind+Key), TargetPath, Version, HarnessVersion,
 // InjectionsVersion, ContentHash, and DeployedAt.
 func TestStore_WriteRead_EntryFieldsPreserved(t *testing.T) {
 	store := manifest.NewStore()
@@ -233,8 +233,8 @@ func TestStore_WriteRead_EntryFieldsPreserved(t *testing.T) {
 		if got.Version != want.Version {
 			t.Errorf("Entries[%d].Version: got %q, want %q", i, got.Version, want.Version)
 		}
-		if got.TransformVersion != want.TransformVersion {
-			t.Errorf("Entries[%d].TransformVersion: got %q, want %q", i, got.TransformVersion, want.TransformVersion)
+		if got.HarnessVersion != want.HarnessVersion {
+			t.Errorf("Entries[%d].HarnessVersion: got %q, want %q", i, got.HarnessVersion, want.HarnessVersion)
 		}
 		if got.InjectionsVersion != want.InjectionsVersion {
 			t.Errorf("Entries[%d].InjectionsVersion: got %q, want %q", i, got.InjectionsVersion, want.InjectionsVersion)

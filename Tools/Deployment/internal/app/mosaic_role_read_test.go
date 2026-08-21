@@ -387,7 +387,7 @@ func TestStaleness_LegacyBareRoleFile_MatchingVersionStamps_NotStale(t *testing.
 	agent := domain.Agent{Key: "legacy-role-agent", Version: "1.5.0"}
 	stamps := domain.VersionStamps{
 		Version:           "1.5.0",
-		TransformVersion:  "3.0.0",
+		HarnessVersion:  "3.0.0",
 		InjectionsVersion: "1.2.0",
 	}
 

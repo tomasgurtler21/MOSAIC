@@ -1,8 +1,4 @@
 ---
-version: 1.0.0
-mosaic_transform_version: 3.0.0
-mosaic_injections_version: 1.3.1
-mosaic_orchestrator_injections_version: 1.0.0
 description: Placeholder-expanding fixture for golden file tests — exercises {tool-permissions} placeholder expansion and RoleOrchestrator
 mode: primary
 model: github-copilot/claude-sonnet-4-6
@@ -22,7 +18,9 @@ permission:
   todowrite: deny
   todoread: deny
   skill: deny
+mosaic_harness_version: 3.0.0
 mosaic_role: orchestrator
+mosaic_version: 1.0.0
 ---
 
 <Identity type="core">

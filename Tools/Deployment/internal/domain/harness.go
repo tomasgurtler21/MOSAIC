@@ -75,11 +75,27 @@ type ScopedPaths struct {
 
 // FrontmatterSpec declares the field operations a harness applies to every agent frontmatter.
 type FrontmatterSpec struct {
-	ModelKey string             // key the model is written to; empty = model not emitted
-	ToolsKey string             // key the rendered tools value is written to; empty = module decides
-	Add      []FrontmatterField // fields added with fixed values
-	Drop     []string           // keys removed from the generic source
-	KeyOrder []string           // output order; unlisted keys keep source-relative order, appended after
+	ModelKey           string                  // key the model is written to; empty = model not emitted
+	ToolsKey           string                  // key the rendered tools value is written to; empty = module decides
+	Add                []FrontmatterField      // fields added with fixed values
+	RoleConditionalAdd []RoleConditionalField  // fields whose value depends on agent role
+	Drop               []string                // keys removed from the generic source
+	KeyOrder           []string                // output order; unlisted keys keep source-relative order, appended after
+}
+
+// RoleConditionalField is a frontmatter add entry whose value varies by agent role.
+// At resolution time, the agent's role is looked up in ValueByRole; if found, a
+// FrontmatterField with that key and value is emitted. If the role is not found
+// (including when the role is the zero value), the field is omitted entirely.
+//
+// Instances in FrontmatterSpec.RoleConditionalAdd always hold already-valid data:
+// every entry has a non-empty Key, at least one ValueByRole entry, and no
+// zero-valued AgentRole key. Invalid wire entries (both value and value_by_role
+// set, or neither set) are rejected during mapping and never appear in this type.
+type RoleConditionalField struct {
+	Key         string                   // frontmatter key, e.g. "user-invocable"
+	ValueByRole map[AgentRole]FieldValue // role -> resolved value
+	sourceIndex int                      // unexported: original wire-array index in frontmatter.add[]
 }
 
 // InjectionContent is one injection point's harness-level content, keyed by the canonical name.

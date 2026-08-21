@@ -374,8 +374,8 @@ func TestProbeDeployedArtifact_ProtocolVersionDoesNotAffectOtherFields(t *testin
 		t.Errorf("state.Version = %q, want %q; must be unaffected by protocol version extraction",
 			state.Version, "2.0")
 	}
-	if state.TransformVersion != "1.5" {
-		t.Errorf("state.TransformVersion = %q, want %q; must be unaffected", state.TransformVersion, "1.5")
+	if state.HarnessVersion != "1.5" {
+		t.Errorf("state.HarnessVersion = %q, want %q; must be unaffected", state.HarnessVersion, "1.5")
 	}
 	if state.InjectionsVersion != "1.2" {
 		t.Errorf("state.InjectionsVersion = %q, want %q; must be unaffected", state.InjectionsVersion, "1.2")

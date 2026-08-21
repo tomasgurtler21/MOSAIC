@@ -542,14 +542,24 @@ func BuildRetargetedAgent(in RetargetInput) ([]byte, RetargetReport, error) {
 
 	// Stamp target version fields under their mosaic_-prefixed deployed names.
 	// No literal prefixed key names appear here; all names come from agentfields.ByDeployedName.
-	tvField, _ := agentfields.ByDeployedName("transform_version")
+	// The harness version stamp uses the new entry (harness_version), writing as
+	// mosaic_harness_version. The old mosaic_transform_version key is not written.
+	tvField, _ := agentfields.ByDeployedName("harness_version")
 	if tgtDesc.TransformVersion != "" {
 		fm.Set(tvField.Deployed, domain.ScalarValue(tgtDesc.TransformVersion, domain.QuotePlain))
 	}
+	// mosaic_injections_version is written here and then stripped by the migration step below,
+	// consistent with applyFrontmatter. Stage 2 will remove the write entirely.
 	ivField, _ := agentfields.ByDeployedName("injections_version")
 	if tgtDesc.InjectionsVersion != "" {
 		fm.Set(ivField.Deployed, domain.ScalarValue(tgtDesc.InjectionsVersion, domain.QuotePlain))
 	}
+	// Migration: strip legacy fields that have been renamed or relocated.
+	// mosaic_injections_version is stripped here (pre-stripping for Stage 2 relocation to tags).
+	// mosaic_orchestrator_injections_version is also stripped for the same reason.
+	fm.Remove(ivField.Deployed)
+	oivField, _ := agentfields.ByDeployedName("orchestrator_injections_version")
+	fm.Remove(oivField.Deployed)
 	tmvField, _ := agentfields.ByDeployedName("tool_mappings_version")
 	if in.ToolMappingsVersion != "" {
 		fm.Set(tmvField.Deployed, domain.ScalarValue(in.ToolMappingsVersion, domain.QuotePlain))

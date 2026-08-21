@@ -9,9 +9,9 @@ package transform_test
 //   - add:  [{key: mode, value: subagent}]
 //   - model_key: model
 //   - tools_key: tools
-//   - key_order: [id, version, transform_version, injections_version, description, mode, model, tools]
-//   - transform_version: 3.0.0
-//   - injections_version: 1.2.0
+//   - key_order: [mosaic_id, mosaic_version, mosaic_harness_version, description, mode, model, tools]
+//   - transform_version: 3.0.0 (stamped as mosaic_harness_version in output)
+//   - injections_version: 1.2.0 (stripped by migration strip, not in output)
 
 import (
 	"testing"
@@ -236,10 +236,11 @@ func TestFrontmatter_KeyOrder_OutputMatchesDescriptorOrder(t *testing.T) {
 }
 
 // TestFrontmatter_UntouchedFieldsPreservedVerbatim asserts that fields not in the Add,
-// Drop, or special-cased (model, tools, version stamps, id rename) sets are carried through
-// byte-identical. The fixture descriptor preserves: version, description, required_skills.
+// Drop, or special-cased (model, tools, version stamps, id/role/version renames) sets are
+// carried through byte-identical. The fixture descriptor preserves: description, required_skills.
 // Note: the generic "id" field is renamed to "mosaic_id" in the deployed output (Step 4c),
-// so it is verified under its deployed name here.
+// and the generic "version" field is renamed to "mosaic_version" (Step 4e), so both are
+// verified under their deployed names here.
 func TestFrontmatter_UntouchedFieldsPreservedVerbatim(t *testing.T) {
 	doc := applyFrontmatterSource(t)
 	fm := doc.Frontmatter()
@@ -273,7 +274,9 @@ func TestFrontmatter_UntouchedFieldsPreservedVerbatim(t *testing.T) {
 // --- T8.4: Version stamping ---
 
 // TestVersionStamp_TransformVersionFromModule asserts that the output frontmatter contains
-// transform_version equal to the harness module's descriptor TransformVersion.
+// mosaic_harness_version equal to the harness module's descriptor TransformVersion. The key
+// name changed from mosaic_transform_version to mosaic_harness_version; the value source
+// (desc.TransformVersion) is unchanged.
 func TestVersionStamp_TransformVersionFromModule(t *testing.T) {
 	mod := newFixtureModule(t)
 	desc := mod.Descriptor()
@@ -295,27 +298,26 @@ func TestVersionStamp_TransformVersionFromModule(t *testing.T) {
 		t.Fatalf("Parse output: %v", err)
 	}
 
-	v, ok := doc.Frontmatter().Get("mosaic_transform_version")
+	v, ok := doc.Frontmatter().Get("mosaic_harness_version")
 	if !ok {
-		t.Fatal("mosaic_transform_version absent from output frontmatter")
+		t.Fatal("mosaic_harness_version absent from output frontmatter")
 	}
 	if v.Scalar != desc.TransformVersion {
-		t.Errorf("mosaic_transform_version: want %q (from module descriptor), got %q",
+		t.Errorf("mosaic_harness_version: want %q (from module descriptor), got %q",
 			desc.TransformVersion, v.Scalar)
 	}
 }
 
-// TestVersionStamp_InjectionsVersionFromModule asserts that the output frontmatter contains
-// injections_version equal to the harness module's descriptor InjectionsVersion.
-func TestVersionStamp_InjectionsVersionFromModule(t *testing.T) {
-	mod := newFixtureModule(t)
-	desc := mod.Descriptor()
-
+// TestVersionStamp_InjectionsVersionStrippedFromOutput asserts that "mosaic_injections_version"
+// is absent from the deployed output. Although the stamp is still written internally by the
+// version stamp step, the migration strip removes it immediately so that deployed files are
+// clean for Stage 2 (which will relocate the injection version to region tag attributes).
+func TestVersionStamp_InjectionsVersionStrippedFromOutput(t *testing.T) {
 	req := transform.Request{
 		Source: []byte(frontmatterSource),
 		Kind:   domain.ArtifactAgent,
 		Key:    "fm-test-agent",
-		Module: mod,
+		Module: newFixtureModule(t),
 		Model:  fixtureModel(),
 		Scope:  domain.ScopeProject,
 	}
@@ -328,44 +330,56 @@ func TestVersionStamp_InjectionsVersionFromModule(t *testing.T) {
 		t.Fatalf("Parse output: %v", err)
 	}
 
-	v, ok := doc.Frontmatter().Get("mosaic_injections_version")
-	if !ok {
-		t.Fatal("mosaic_injections_version absent from output frontmatter")
-	}
-	if v.Scalar != desc.InjectionsVersion {
-		t.Errorf("mosaic_injections_version: want %q (from module descriptor), got %q",
-			desc.InjectionsVersion, v.Scalar)
+	if _, ok := doc.Frontmatter().Get("mosaic_injections_version"); ok {
+		t.Error("mosaic_injections_version must be absent from output frontmatter; " +
+			"the migration strip removes it to prepare for Stage 2's relocation to region tags")
 	}
 }
 
 // TestVersionStamp_SourceVersionCarriedThrough asserts that the source agent's version
-// field value is present in the output unchanged. The transform engine must never alter
-// the source version; it stamps transform_version and injections_version separately.
+// field value is present in the output under the deployed key "mosaic_version". The generic
+// source carries "version: X"; the deploy path renames it to "mosaic_version: X" (Step 4e),
+// so the value is preserved but the key name changes.
 func TestVersionStamp_SourceVersionCarriedThrough(t *testing.T) {
 	doc := applyFrontmatterSource(t)
 	fm := doc.Frontmatter()
 
-	// frontmatterSource declares version: 2.5.0
-	v, ok := fm.Get("version")
+	// frontmatterSource declares version: 2.5.0; the output must carry mosaic_version: 2.5.0.
+	v, ok := fm.Get("mosaic_version")
 	if !ok {
-		t.Fatal("version field absent from output frontmatter")
+		t.Fatal("mosaic_version field absent from output frontmatter; the generic \"version\" field must be renamed to \"mosaic_version\" in deployed output")
 	}
 	if v.Scalar != "2.5.0" {
-		t.Errorf("version field: want %q (source value, unchanged), got %q", "2.5.0", v.Scalar)
+		t.Errorf("mosaic_version field: want %q (source value, unchanged), got %q", "2.5.0", v.Scalar)
+	}
+	if _, ok := fm.Get("version"); ok {
+		t.Error("bare \"version\" key must be absent from deployed output; it must be renamed to \"mosaic_version\"")
 	}
 }
 
-// TestVersionStamp_AllThreeVersionFieldsPresent asserts that all three version-related
-// fields appear in the output: version (source), transform_version, and injections_version.
-// This covers the minimum observable contract for the version stamping stage.
-func TestVersionStamp_AllThreeVersionFieldsPresent(t *testing.T) {
+// TestVersionStamp_VersionFieldsInOutput asserts that the expected version-related fields
+// appear in the output after Stage 1's renames:
+//   - mosaic_version: the source "version" field renamed to its deployed form
+//   - mosaic_harness_version: the harness version stamp (was mosaic_transform_version)
+//
+// The fields mosaic_transform_version and mosaic_injections_version must NOT appear —
+// the former is no longer written (stamp uses harness_version now), the latter is stripped
+// by the migration strip.
+func TestVersionStamp_VersionFieldsInOutput(t *testing.T) {
 	doc := applyFrontmatterSource(t)
 	fm := doc.Frontmatter()
 
-	requiredVersionKeys := []string{"version", "mosaic_transform_version", "mosaic_injections_version"}
-	for _, key := range requiredVersionKeys {
+	requiredKeys := []string{"mosaic_version", "mosaic_harness_version"}
+	for _, key := range requiredKeys {
 		if _, ok := fm.Get(key); !ok {
 			t.Errorf("version field %q absent from output frontmatter", key)
+		}
+	}
+
+	absentKeys := []string{"version", "mosaic_transform_version", "mosaic_injections_version"}
+	for _, key := range absentKeys {
+		if _, ok := fm.Get(key); ok {
+			t.Errorf("field %q must be absent from output frontmatter after Stage 1 renames/strips", key)
 		}
 	}
 }

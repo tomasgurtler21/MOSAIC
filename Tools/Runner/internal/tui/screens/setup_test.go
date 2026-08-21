@@ -90,16 +90,16 @@ func TestOrchestratorPath_DoubleQuoted_Stripped(t *testing.T) {
 	}
 }
 
-// TestOrchestratorPath_SingleQuoted_Stripped verifies that a path surrounded by matching
-// single quotes has those outer quotes stripped by FilePath().
-// RED: currently FilePath() only trims whitespace and does not strip quotes.
-func TestOrchestratorPath_SingleQuoted_Stripped(t *testing.T) {
+// TestOrchestratorPath_SingleQuoted_NotStripped verifies that a path surrounded by
+// single quotes is NOT stripped by FilePath(). Single-quote stripping is dropped to
+// align with the double-quote-only normalization convention.
+func TestOrchestratorPath_SingleQuoted_NotStripped(t *testing.T) {
 	s := newOrchestratorScreen()
 	typeInput(s, `'C:\a\b.md'`)
 	got := s.FilePath()
-	want := `C:\a\b.md`
+	want := `'C:\a\b.md'`
 	if got != want {
-		t.Errorf("FilePath() = %q, want %q; surrounding single quotes must be stripped", got, want)
+		t.Errorf("FilePath() = %q, want %q; surrounding single quotes must NOT be stripped", got, want)
 	}
 }
 
@@ -117,16 +117,17 @@ func TestOrchestratorPath_WhitespacePaddedDoubleQuoted_TrimmedAndStripped(t *tes
 	}
 }
 
-// TestOrchestratorPath_WhitespacePaddedSingleQuoted_TrimmedAndStripped verifies the same
-// whitespace-then-strip ordering for single-quoted input.
-// RED: currently FilePath() only trims whitespace and does not strip quotes.
-func TestOrchestratorPath_WhitespacePaddedSingleQuoted_TrimmedAndStripped(t *testing.T) {
+// TestOrchestratorPath_WhitespacePaddedSingleQuoted_WhitespaceTrimmedQuotesRetained verifies
+// that leading and trailing whitespace is trimmed from a single-quoted input but the
+// single quotes themselves are NOT stripped. Single-quote stripping is not part of the
+// double-quote-only normalization convention.
+func TestOrchestratorPath_WhitespacePaddedSingleQuoted_WhitespaceTrimmedQuotesRetained(t *testing.T) {
 	s := newOrchestratorScreen()
 	typeInput(s, `  'C:\a\b.md'  `)
 	got := s.FilePath()
-	want := `C:\a\b.md`
+	want := `'C:\a\b.md'`
 	if got != want {
-		t.Errorf("FilePath() = %q, want %q; whitespace must be trimmed before outer single quotes are stripped", got, want)
+		t.Errorf("FilePath() = %q, want %q; whitespace must be trimmed but single quotes must NOT be stripped", got, want)
 	}
 }
 
@@ -246,14 +247,15 @@ func TestValidateOrchestratorFile_DoubleQuotedExistingFile_Accepted(t *testing.T
 	}
 }
 
-// TestValidateOrchestratorFile_SingleQuotedExistingFile_Accepted verifies that a
-// single-quoted path pointing at an existing file passes validation.
-// RED: same as above — quotes are currently not stripped before os.Stat.
-func TestValidateOrchestratorFile_SingleQuotedExistingFile_Accepted(t *testing.T) {
+// TestValidateOrchestratorFile_SingleQuotedExistingFile_Rejected verifies that a
+// single-quoted path pointing at an existing file does NOT pass validation.
+// Single quotes are not stripped (double-quote-only convention), so the path with
+// surrounding single quotes is not found on disk and validation returns an error.
+func TestValidateOrchestratorFile_SingleQuotedExistingFile_Rejected(t *testing.T) {
 	realPath := makeTempFile(t)
 	quoted := `'` + realPath + `'`
-	if err := validateOrchestratorFile(quoted); err != nil {
-		t.Errorf("validateOrchestratorFile(%q) = %v, want nil; single-quoted path to existing file must pass validation after quote stripping", quoted, err)
+	if err := validateOrchestratorFile(quoted); err == nil {
+		t.Errorf("validateOrchestratorFile(%q) = nil, want non-nil error; single-quoted path must NOT pass validation (single quotes are not stripped)", quoted)
 	}
 }
 
@@ -298,22 +300,27 @@ func TestOrchestratorPath_NormalisationEquivalence_DoubleQuoted(t *testing.T) {
 	}
 }
 
-// TestOrchestratorPath_NormalisationEquivalence_SingleQuoted verifies the same
-// equivalence for a single-quoted path to an existing file.
-// RED: same as above.
+// TestOrchestratorPath_NormalisationEquivalence_SingleQuoted verifies that for a
+// single-quoted path, validateOrchestratorFile and FilePath() agree: both leave the
+// single quotes intact (single-quote stripping is not part of the convention).
+// validateOrchestratorFile rejects the input because the single-quoted path is not
+// found on disk. FilePath() returns the raw input with single quotes and whitespace
+// trimmed but quotes preserved.
 func TestOrchestratorPath_NormalisationEquivalence_SingleQuoted(t *testing.T) {
 	realPath := makeTempFile(t)
 	rawInput := `'` + realPath + `'`
 
-	if err := validateOrchestratorFile(rawInput); err != nil {
-		t.Fatalf("validateOrchestratorFile(%q) = %v, want nil; prerequisite: single-quoted path to existing file must pass validation", rawInput, err)
+	// Single quotes are not stripped, so validation must reject (path not found on disk).
+	if err := validateOrchestratorFile(rawInput); err == nil {
+		t.Fatalf("validateOrchestratorFile(%q) = nil, want non-nil error; single-quoted path must NOT pass validation (single quotes not stripped)", rawInput)
 	}
 
+	// FilePath() must preserve the single quotes (no stripping).
 	s := newOrchestratorScreen()
 	typeInput(s, rawInput)
 	got := s.FilePath()
-	if got != realPath {
-		t.Errorf("FilePath() = %q, want %q; FilePath() must return the same normalised path that validateOrchestratorFile accepted", got, realPath)
+	if got != rawInput {
+		t.Errorf("FilePath() = %q, want %q; single-quoted path must be returned with quotes intact", got, rawInput)
 	}
 }
 

@@ -71,16 +71,19 @@ func TestAll_DeployedAndLegacyNamesAreDistinct(t *testing.T) {
 	}
 }
 
-// TestAll_ContainsSixPlusOneEntries verifies that All() returns exactly eight entries: the
+// TestAll_ContainsSixPlusOneEntries verifies that All() returns exactly ten entries: the
 // six version stamp fields, plus the role field (Generic="role", Deployed="mosaic_role"),
 // plus mosaic_protocol_version which exists in the registry for drop-set symmetry only
-// (it is never written as frontmatter).
+// (it is never written as frontmatter), plus the skill version field
+// (Generic="version", Deployed="mosaic_version") added for the skill version prefix migration,
+// plus the new mosaic_harness_version entry added alongside the retained mosaic_transform_version
+// entry for backwards-compatible migration.
 //
-// This test FAILS until I3.1 adds the role entry to the registry.
+// This test FAILS until the new harness_version FieldName entry is added to the registry.
 func TestAll_ContainsSixPlusOneEntries(t *testing.T) {
 	entries := agentfields.All()
-	if len(entries) != 8 {
-		t.Errorf("All() returned %d entries, want 8 (6 version stamp fields + role field + protocol_version for drop-set symmetry)",
+	if len(entries) != 10 {
+		t.Errorf("All() returned %d entries, want 10 (old transform_version entry retained + new harness_version entry added + 8 existing entries)",
 			len(entries))
 	}
 }
@@ -107,6 +110,8 @@ func TestAll_ContainsIDField(t *testing.T) {
 
 // TestAll_ContainsTransformVersionField verifies the transform_version entry is present with
 // its correct Deployed and Legacy names and an empty Generic (deploy-only field).
+// This OLD entry must be retained unchanged alongside the new harness_version entry so that
+// migration stripping and backward-compatible reads can look it up via the registry.
 func TestAll_ContainsTransformVersionField(t *testing.T) {
 	var found bool
 	for _, f := range agentfields.All() {
@@ -122,6 +127,134 @@ func TestAll_ContainsTransformVersionField(t *testing.T) {
 	}
 	if !found {
 		t.Error("All() does not contain an entry with Legacy==\"transform_version\"")
+	}
+}
+
+// TestAll_ContainsHarnessVersionField verifies that the NEW harness_version entry is present
+// in the registry with the correct Deployed and Legacy names and an empty Generic (deploy-only
+// field). This entry is the active write-path entry after Stage 1; the old transform_version
+// entry is retained alongside it for migration and backward-compatible reads.
+//
+// This test FAILS until the new harness_version entry is added to the registry.
+func TestAll_ContainsHarnessVersionField(t *testing.T) {
+	var found bool
+	for _, f := range agentfields.All() {
+		if f.Legacy == "harness_version" {
+			found = true
+			if f.Generic != "" {
+				t.Errorf("harness_version entry: Generic=%q, want empty (deploy-only field)", f.Generic)
+			}
+			if f.Deployed != "mosaic_harness_version" {
+				t.Errorf("harness_version entry: Deployed=%q, want %q", f.Deployed, "mosaic_harness_version")
+			}
+		}
+	}
+	if !found {
+		t.Error("All() does not contain an entry with Legacy==\"harness_version\"; the new entry must be added to the registry")
+	}
+}
+
+// TestAll_BothHarnessVersionAndTransformVersionEntryPresent verifies that BOTH the old
+// transform_version entry and the new harness_version entry exist simultaneously in the
+// registry. This dual-entry shape is required by the migration design: the old entry is
+// needed for migration stripping and backward-compatible reads, while the new entry is the
+// active write-path entry.
+//
+// This test FAILS until the new harness_version entry is added (until then only one entry
+// for the harness version concept exists).
+func TestAll_BothHarnessVersionAndTransformVersionEntryPresent(t *testing.T) {
+	var foundOld, foundNew bool
+	for _, f := range agentfields.All() {
+		if f.Legacy == "transform_version" {
+			foundOld = true
+		}
+		if f.Legacy == "harness_version" {
+			foundNew = true
+		}
+	}
+	if !foundOld {
+		t.Error("All() does not contain the OLD entry with Legacy==\"transform_version\"; it must be retained for migration")
+	}
+	if !foundNew {
+		t.Error("All() does not contain the NEW entry with Legacy==\"harness_version\"; it must be added for the write path")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ByDeployedName — harness_version dual-entry lookups
+// ---------------------------------------------------------------------------
+
+// TestByDeployedName_HarnessVersionLegacyName_ReturnsNewEntry verifies that
+// ByDeployedName("harness_version") returns the new entry with Deployed="mosaic_harness_version".
+// This is the primary lookup the write path uses after Stage 1.
+//
+// This test FAILS until the new harness_version entry is added to the registry.
+func TestByDeployedName_HarnessVersionLegacyName_ReturnsNewEntry(t *testing.T) {
+	f, ok := agentfields.ByDeployedName("harness_version")
+	if !ok {
+		t.Fatal("ByDeployedName(\"harness_version\") returned ok=false; the new harness_version entry must be findable by its Legacy name")
+	}
+	if f.Deployed != "mosaic_harness_version" {
+		t.Errorf("ByDeployedName(\"harness_version\").Deployed = %q, want %q", f.Deployed, "mosaic_harness_version")
+	}
+	if f.Legacy != "harness_version" {
+		t.Errorf("ByDeployedName(\"harness_version\").Legacy = %q, want %q", f.Legacy, "harness_version")
+	}
+	if f.Generic != "" {
+		t.Errorf("ByDeployedName(\"harness_version\").Generic = %q, want empty (deploy-only field)", f.Generic)
+	}
+}
+
+// TestByDeployedName_HarnessVersionPrefixedName_ReturnsNewEntry verifies that
+// ByDeployedName("mosaic_harness_version") also returns the new entry. Both the prefixed and
+// legacy names must index to the same entry.
+//
+// This test FAILS until the new harness_version entry is added to the registry.
+func TestByDeployedName_HarnessVersionPrefixedName_ReturnsNewEntry(t *testing.T) {
+	f, ok := agentfields.ByDeployedName("mosaic_harness_version")
+	if !ok {
+		t.Fatal("ByDeployedName(\"mosaic_harness_version\") returned ok=false; the new entry must be findable by its Deployed name")
+	}
+	if f.Legacy != "harness_version" {
+		t.Errorf("ByDeployedName(\"mosaic_harness_version\").Legacy = %q, want %q", f.Legacy, "harness_version")
+	}
+}
+
+// TestByDeployedName_TransformVersionEntryDistinctFromHarnessVersionEntry verifies that the
+// transform_version and harness_version entries are distinct registry objects: looking up
+// "transform_version" returns the OLD entry (Deployed="mosaic_transform_version"), and looking
+// up "harness_version" returns the NEW entry (Deployed="mosaic_harness_version"). They must
+// not collide or alias each other.
+//
+// This test FAILS until the new harness_version entry is added (currently only the old entry
+// exists, so ByDeployedName("harness_version") returns ok=false).
+func TestByDeployedName_TransformVersionEntryDistinctFromHarnessVersionEntry(t *testing.T) {
+	oldEntry, oldOK := agentfields.ByDeployedName("transform_version")
+	newEntry, newOK := agentfields.ByDeployedName("harness_version")
+
+	if !oldOK {
+		t.Error("ByDeployedName(\"transform_version\") returned ok=false; the old entry must be retained")
+	}
+	if !newOK {
+		t.Error("ByDeployedName(\"harness_version\") returned ok=false; the new entry must be added")
+	}
+	if !oldOK || !newOK {
+		return // cannot assert inequality if either lookup failed
+	}
+
+	if oldEntry.Deployed == newEntry.Deployed {
+		t.Errorf("old and new entries have the same Deployed name %q; they must be distinct registry entries",
+			oldEntry.Deployed)
+	}
+	if oldEntry.Legacy == newEntry.Legacy {
+		t.Errorf("old and new entries have the same Legacy name %q; they must be distinct registry entries",
+			oldEntry.Legacy)
+	}
+	if oldEntry.Deployed != "mosaic_transform_version" {
+		t.Errorf("old entry Deployed = %q, want %q", oldEntry.Deployed, "mosaic_transform_version")
+	}
+	if newEntry.Deployed != "mosaic_harness_version" {
+		t.Errorf("new entry Deployed = %q, want %q", newEntry.Deployed, "mosaic_harness_version")
 	}
 }
 
@@ -223,10 +356,18 @@ func TestAll_NoHarnessReadFieldInRegistry(t *testing.T) {
 	}
 }
 
-// TestAll_NoSharedIdentityFieldInRegistry verifies that the shared identity fields — name,
-// description, and version — are absent from the registry. These are never prefixed.
+// TestAll_NoSharedIdentityFieldInRegistry verifies that the purely descriptive shared
+// identity fields — name and description — are absent from the registry. These fields
+// are never prefixed or renamed during deployment.
+//
+// Note: "version" was previously in this list, but the skill version prefix migration
+// added a registry entry mapping Generic="version" to Deployed="mosaic_version" for
+// skill artifacts. That entry has a non-empty Generic, a non-"version" Deployed name,
+// and a Legacy of "version". The "version" key is therefore legitimately present in
+// the registry as a skill-specific mapping. Only name and description remain
+// unconditionally absent from the registry.
 func TestAll_NoSharedIdentityFieldInRegistry(t *testing.T) {
-	forbidden := []string{"name", "description", "version"}
+	forbidden := []string{"name", "description"}
 	for _, f := range agentfields.All() {
 		for _, bad := range forbidden {
 			if f.Deployed == bad || f.Legacy == bad || f.Generic == bad {
@@ -414,10 +555,18 @@ func TestIsMosaicOnlyDeployedKey_HarnessReadField_False(t *testing.T) {
 	}
 }
 
-// TestIsMosaicOnlyDeployedKey_SharedIdentityField_False verifies that shared identity fields
-// (name, description, version) are not recognized as MOSAIC-only deployed keys.
+// TestIsMosaicOnlyDeployedKey_SharedIdentityField_False verifies that the purely
+// descriptive shared identity fields (name, description) are not recognized as
+// MOSAIC-only deployed keys.
+//
+// Note: "version" was previously included in this list, but the skill version prefix
+// migration added a registry entry mapping Generic="version" to Deployed="mosaic_version"
+// for skill artifacts. Because that entry has Legacy="version", IsMosaicOnlyDeployedKey("version")
+// now intentionally returns true. The specific assertions for "version" are covered by
+// TestSkillVersionEntry_IsMosaicOnlyDeployedKey_Version_True in
+// skill_version_registry_test.go.
 func TestIsMosaicOnlyDeployedKey_SharedIdentityField_False(t *testing.T) {
-	for _, key := range []string{"name", "description", "version"} {
+	for _, key := range []string{"name", "description"} {
 		if agentfields.IsMosaicOnlyDeployedKey(key) {
 			t.Errorf("IsMosaicOnlyDeployedKey(%q) = true, want false; shared identity fields must not be in the registry", key)
 		}

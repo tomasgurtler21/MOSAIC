@@ -118,9 +118,10 @@ func (s *ExecOverrideScreen) Choice() ExecOverrideChoice {
 	return ExecOverrideChoiceRetry
 }
 
-// Path returns the entered executable path, whitespace-trimmed.
+// Path returns the entered executable path, normalised (whitespace-trimmed,
+// surrounding double quotes stripped).
 // Only meaningful when Done() is true (Choice() == ExecOverrideChoiceRetry).
-func (s *ExecOverrideScreen) Path() string { return strings.TrimSpace(s.input.Value()) }
+func (s *ExecOverrideScreen) Path() string { return normalizePath(s.input.Value()) }
 
 // Reset clears the Done and Back flags so the screen may be re-entered.
 func (s *ExecOverrideScreen) Reset() { s.input.Reset() }

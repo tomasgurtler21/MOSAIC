@@ -3,6 +3,7 @@ package descriptor_test
 // Tests for the shared descriptor-driven algorithms exported from harness/descriptor:
 //   - ApplyFrontmatterSpec: derives FrontmatterPlan from a descriptor's FrontmatterSpec and a request.
 //   - ResolveTargetPath: expands a ScopedPaths template for a given artifact kind, scope, and GOOS.
+//   - ResolveRoleConditionalFields: resolves role-conditional entries to FrontmatterField values.
 //
 // Coverage:
 //   ApplyFrontmatterSpec:
@@ -18,6 +19,14 @@ package descriptor_test
 //   - An empty scope (unreached by normalised callers) also returns domain.ErrUnsupportedScope.
 //   - An artifact kind with Supported == false returns domain.ErrArtifactUnsupported.
 //   - ResolveTargetPath never returns an empty string with a nil error.
+//
+//   ResolveRoleConditionalFields (TDD RED - implementation pending):
+//   - A matching role produces one FrontmatterField with the role's value.
+//   - An empty role produces no fields.
+//   - An unrecognized role string produces no fields.
+//   - All four standard roles (subagent, orchestrator, utility, standalone) resolve correctly.
+//   - Input order is preserved in the returned slice.
+//   - An empty entry slice produces an empty result regardless of role.
 
 import (
 	"errors"
@@ -155,6 +164,113 @@ func TestApplyFrontmatterSpec_KeyOrderFromDescriptor(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("key %q not found in KeyOrder in order; KeyOrder: %v", want, plan.KeyOrder)
+		}
+	}
+}
+
+// TestApplyFrontmatterSpec_RoleConditionalEntry_AppendedForMatchingRole verifies that a
+// descriptor whose FrontmatterSpec.RoleConditionalAdd is non-empty produces a resolved
+// FrontmatterField in FrontmatterPlan.Set when the request's Role matches an entry. This
+// covers the descriptor-only adapter path: any module that delegates frontmatter shaping
+// entirely to ApplyFrontmatterSpec (rather than a custom Frontmatter method) must have
+// role-conditional fields resolved here.
+//
+// The descriptor is built programmatically (not from a fixture file) so the test does not
+// depend on the YAML loader supporting value_by_role — the loader and the resolution are
+// separate concerns.
+//
+// RED: currently fails because ApplyFrontmatterSpec ignores req (including req.Role) and
+// returns only d.Frontmatter.Add entries. After implementation (I2.5), it calls
+// ResolveRoleConditionalFields and appends the results to FrontmatterPlan.Set.
+func TestApplyFrontmatterSpec_RoleConditionalEntry_AppendedForMatchingRole(t *testing.T) {
+	// Build a descriptor with a single role-conditional entry: user-invocable is true for
+	// orchestrator and false for subagent.
+	d := &domain.HarnessDescriptor{
+		Frontmatter: domain.FrontmatterSpec{
+			RoleConditionalAdd: []domain.RoleConditionalField{
+				{
+					Key: "user-invocable",
+					ValueByRole: map[domain.AgentRole]domain.FieldValue{
+						domain.RoleOrchestrator: domain.ScalarValue("true", domain.QuotePlain),
+						domain.RoleSubagent:     domain.ScalarValue("false", domain.QuotePlain),
+					},
+				},
+			},
+		},
+	}
+	req := domain.FrontmatterRequest{
+		Kind:     domain.ArtifactAgent,
+		AgentKey: "test-agent",
+		Role:     domain.RoleOrchestrator,
+	}
+
+	plan, err := descriptor.ApplyFrontmatterSpec(d, req)
+
+	if err != nil {
+		t.Fatalf("ApplyFrontmatterSpec: %v", err)
+	}
+	var found bool
+	var foundValue string
+	for _, f := range plan.Set {
+		if f.Key == "user-invocable" {
+			found = true
+			foundValue = f.Value.Scalar
+			break
+		}
+	}
+	if !found {
+		keys := make([]string, len(plan.Set))
+		for i, f := range plan.Set {
+			keys[i] = f.Key
+		}
+		t.Errorf("user-invocable not found in FrontmatterPlan.Set for orchestrator role; "+
+			"ApplyFrontmatterSpec must resolve RoleConditionalAdd entries; Set keys: %v", keys)
+		return
+	}
+	if foundValue != "true" {
+		t.Errorf("user-invocable value for orchestrator role: want %q, got %q", "true", foundValue)
+	}
+}
+
+// TestApplyFrontmatterSpec_RoleConditionalEntry_AbsentForNonMatchingRole verifies that when
+// the request's Role does not appear in a RoleConditionalAdd entry's ValueByRole map, the
+// field is omitted from FrontmatterPlan.Set. This is the fallback behavior for unknown/zero
+// roles described in the design.
+//
+// RED: currently ApplyFrontmatterSpec ignores req.Role entirely, but since it also ignores
+// RoleConditionalAdd entirely, the field is absent for the wrong reason (the whole
+// role-conditional resolution is missing). After implementation, it must be absent because
+// the role has no matching entry.
+func TestApplyFrontmatterSpec_RoleConditionalEntry_AbsentForNonMatchingRole(t *testing.T) {
+	// Only orchestrator has a value; subagent is not in the map.
+	d := &domain.HarnessDescriptor{
+		Frontmatter: domain.FrontmatterSpec{
+			RoleConditionalAdd: []domain.RoleConditionalField{
+				{
+					Key: "orchestrator-only-field",
+					ValueByRole: map[domain.AgentRole]domain.FieldValue{
+						domain.RoleOrchestrator: domain.ScalarValue("present", domain.QuotePlain),
+					},
+				},
+			},
+		},
+	}
+	req := domain.FrontmatterRequest{
+		Kind:     domain.ArtifactAgent,
+		AgentKey: "test-agent",
+		Role:     domain.RoleSubagent, // not in ValueByRole
+	}
+
+	plan, err := descriptor.ApplyFrontmatterSpec(d, req)
+
+	if err != nil {
+		t.Fatalf("ApplyFrontmatterSpec: %v", err)
+	}
+	for _, f := range plan.Set {
+		if f.Key == "orchestrator-only-field" {
+			t.Errorf("orchestrator-only-field appeared in FrontmatterPlan.Set for subagent role; "+
+				"role-conditional fields must be omitted when the role has no matching entry; "+
+				"Set: %v", plan.Set)
 		}
 	}
 }
@@ -312,5 +428,143 @@ func TestResolveTargetPath_NeverReturnsEmptyPathWithNilError(t *testing.T) {
 
 	if err == nil && path == "" {
 		t.Error("ResolveTargetPath must not return an empty path with a nil error")
+	}
+}
+
+// --- ResolveRoleConditionalFields (TDD RED - implementation pending) ---
+
+// roleConditionalEntry is a helper that builds a single-entry RoleConditionalField
+// covering all four standard roles, mapping each to its own distinct scalar value.
+// Used across multiple resolution tests to reduce boilerplate.
+func allRolesEntry() domain.RoleConditionalField {
+	return domain.RoleConditionalField{
+		Key: "user-invocable",
+		ValueByRole: map[domain.AgentRole]domain.FieldValue{
+			domain.RoleSubagent:     domain.ScalarValue("false", domain.QuotePlain),
+			domain.RoleOrchestrator: domain.ScalarValue("true", domain.QuotePlain),
+			domain.RoleUtility:      domain.ScalarValue("true", domain.QuotePlain),
+			domain.RoleStandalone:   domain.ScalarValue("true", domain.QuotePlain),
+		},
+	}
+}
+
+// TestResolveRoleConditionalFields_MatchingRole_ProducesField verifies that when the
+// role has a corresponding entry in ValueByRole, exactly one FrontmatterField is returned
+// with the key and value declared for that role.
+// RED: the stub returns nil, so len(result) == 0 and the test fails.
+func TestResolveRoleConditionalFields_MatchingRole_ProducesField(t *testing.T) {
+	entries := []domain.RoleConditionalField{allRolesEntry()}
+
+	result := descriptor.ResolveRoleConditionalFields(entries, domain.RoleOrchestrator)
+
+	if len(result) != 1 {
+		t.Fatalf("ResolveRoleConditionalFields with matching role: want 1 field, got %d", len(result))
+	}
+	if result[0].Key != "user-invocable" {
+		t.Errorf("result[0].Key: want %q, got %q", "user-invocable", result[0].Key)
+	}
+	if result[0].Value.Scalar != "true" {
+		t.Errorf("result[0].Value.Scalar for orchestrator: want %q, got %q", "true", result[0].Value.Scalar)
+	}
+}
+
+// TestResolveRoleConditionalFields_EmptyRole_ProducesNoFields verifies that an empty
+// (zero-value) role produces no output fields. The zero role is not a valid key, so
+// the fallback behavior is to omit the entry.
+func TestResolveRoleConditionalFields_EmptyRole_ProducesNoFields(t *testing.T) {
+	entries := []domain.RoleConditionalField{allRolesEntry()}
+
+	result := descriptor.ResolveRoleConditionalFields(entries, domain.AgentRole(""))
+
+	if len(result) != 0 {
+		t.Errorf("ResolveRoleConditionalFields with empty role: want 0 fields, got %d: %v", len(result), result)
+	}
+}
+
+// TestResolveRoleConditionalFields_UnknownRole_ProducesNoFields verifies that a role
+// string not present in any entry's ValueByRole map produces no output fields.
+func TestResolveRoleConditionalFields_UnknownRole_ProducesNoFields(t *testing.T) {
+	entries := []domain.RoleConditionalField{allRolesEntry()}
+
+	result := descriptor.ResolveRoleConditionalFields(entries, domain.AgentRole("not-a-real-role"))
+
+	if len(result) != 0 {
+		t.Errorf("ResolveRoleConditionalFields with unknown role: want 0 fields, got %d: %v", len(result), result)
+	}
+}
+
+// TestResolveRoleConditionalFields_EmptyEntries_ProducesNoFields verifies that an empty
+// input slice always produces an empty result regardless of role.
+func TestResolveRoleConditionalFields_EmptyEntries_ProducesNoFields(t *testing.T) {
+	result := descriptor.ResolveRoleConditionalFields(nil, domain.RoleOrchestrator)
+	if len(result) != 0 {
+		t.Errorf("ResolveRoleConditionalFields with nil entries: want 0 fields, got %d", len(result))
+	}
+
+	result = descriptor.ResolveRoleConditionalFields([]domain.RoleConditionalField{}, domain.RoleOrchestrator)
+	if len(result) != 0 {
+		t.Errorf("ResolveRoleConditionalFields with empty entries: want 0 fields, got %d", len(result))
+	}
+}
+
+// TestResolveRoleConditionalFields_AllStandardRoles_ResolveCorrectly is a table-driven
+// test covering all four standard AgentRole constants. Each role resolves to the value
+// declared for it in allRolesEntry(): subagent→false, orchestrator/utility/standalone→true.
+// RED: the stub returns nil for all cases, causing the test to fail for all rows.
+func TestResolveRoleConditionalFields_AllStandardRoles_ResolveCorrectly(t *testing.T) {
+	entries := []domain.RoleConditionalField{allRolesEntry()}
+
+	tests := []struct {
+		role          domain.AgentRole
+		wantScalar    string
+	}{
+		{domain.RoleSubagent, "false"},
+		{domain.RoleOrchestrator, "true"},
+		{domain.RoleUtility, "true"},
+		{domain.RoleStandalone, "true"},
+	}
+
+	for _, tc := range tests {
+		t.Run(string(tc.role), func(t *testing.T) {
+			result := descriptor.ResolveRoleConditionalFields(entries, tc.role)
+			if len(result) != 1 {
+				t.Fatalf("role %q: want 1 field, got %d", tc.role, len(result))
+			}
+			if result[0].Value.Scalar != tc.wantScalar {
+				t.Errorf("role %q: want scalar %q, got %q", tc.role, tc.wantScalar, result[0].Value.Scalar)
+			}
+		})
+	}
+}
+
+// TestResolveRoleConditionalFields_InputOrderPreserved verifies that when multiple
+// role-conditional entries are provided, the returned fields appear in the same order
+// as the input entries (for a role that matches all of them).
+// RED: stub returns nil.
+func TestResolveRoleConditionalFields_InputOrderPreserved(t *testing.T) {
+	firstEntry := domain.RoleConditionalField{
+		Key: "first-key",
+		ValueByRole: map[domain.AgentRole]domain.FieldValue{
+			domain.RoleOrchestrator: domain.ScalarValue("first-value", domain.QuotePlain),
+		},
+	}
+	secondEntry := domain.RoleConditionalField{
+		Key: "second-key",
+		ValueByRole: map[domain.AgentRole]domain.FieldValue{
+			domain.RoleOrchestrator: domain.ScalarValue("second-value", domain.QuotePlain),
+		},
+	}
+	entries := []domain.RoleConditionalField{firstEntry, secondEntry}
+
+	result := descriptor.ResolveRoleConditionalFields(entries, domain.RoleOrchestrator)
+
+	if len(result) != 2 {
+		t.Fatalf("want 2 resolved fields, got %d", len(result))
+	}
+	if result[0].Key != "first-key" {
+		t.Errorf("result[0].Key: want %q, got %q", "first-key", result[0].Key)
+	}
+	if result[1].Key != "second-key" {
+		t.Errorf("result[1].Key: want %q, got %q", "second-key", result[1].Key)
 	}
 }

@@ -1,34 +1,34 @@
 package plan_test
 
 // resolve_orchestrator_exclusion_test.go covers the orchestrator-exclusion mechanism
-// in artifact resolution. After Stage 6 retires ModeStandaloneOnly and ModeUtilityInfraOnly,
-// OrchestratorExcludedFor returns true only for ModeDeployAgents and ModeDeployHooks and
-// false for all workspace-oriented modes.
+// in artifact resolution. OrchestratorExcludedFor returns true for ModeDeployAgents,
+// ModeDeployHooks, and ModeUpdateWorkspace; false for all other workspace-oriented modes.
 //
 // OrchestratorExcludedFor (pure mode → bool predicate):
-//   - Returns true for ModeDeployAgents and ModeDeployHooks
-//   - Returns false for all workspace-oriented modes (deploy-workspace, update-workspace,
-//     update-workflows, promote-to-generic, transform-harness)
+//   - Returns true for ModeDeployAgents, ModeDeployHooks, and ModeUpdateWorkspace
+//   - Returns false for deploy-workspace, update-workflows, promote-to-generic, transform-harness
 //
-// ResolveArtifactsFrom — ExcludeOrchestrator: true (deploy-agents / deploy-hooks path):
-//   - Result contains no orchestrator agent (AC1.2)
+// ResolveArtifactsFrom — ExcludeOrchestrator: true (deploy-agents / deploy-hooks / update-workspace path):
+//   - Result contains no orchestrator agent when ScannedAgentKeys is empty
+//   - Orchestrator is present when ScannedAgentKeys contains its key (AC1.3)
+//   - Orchestrator is absent when ScannedAgentKeys does not contain its key (AC1.4)
 //   - Result contains the selected standalone agent
 //   - Skill set equals exactly the transitive skills of the selected agents
 //   - Holds even when StandaloneAgentIDs is an empty slice
 //
 // ResolveArtifactsFrom — ExcludeOrchestrator: false (zero value, workspace modes):
-//   - Workflow selections keep including the orchestrator (AC1.4)
-//   - Utility-agent-only selections keep including the orchestrator (AC1.4)
-//   - Infrastructure-agent-only selections keep including the orchestrator (AC1.4)
-//   - Hook-only selections keep including the orchestrator (AC1.4)
-//   - Empty selections (zero-value Selection) keep including the orchestrator (AC1.4)
+//   - Workflow selections keep including the orchestrator
+//   - Utility-agent-only selections keep including the orchestrator
+//   - Infrastructure-agent-only selections keep including the orchestrator
+//   - Hook-only selections keep including the orchestrator
+//   - Empty selections (zero-value Selection) keep including the orchestrator
 //
 // ResolveArtifacts (positional legacy form):
 //   - ExcludeOrchestrator is implicitly false; orchestrator is always included
 //
 // plan.Build with workspace modes:
-//   - ModeDeployWorkspace includes the orchestrator (AC1.4)
-//   - ModeUpdateWorkspace includes the orchestrator (AC1.4)
+//   - ModeDeployWorkspace includes the orchestrator
+//   - ModeUpdateWorkspace includes the orchestrator when ScannedAgentKeys contains its key (AC1.6)
 
 import (
 	"context"
@@ -50,14 +50,13 @@ import (
 // ---------------------------------------------------------------------------
 
 // TestOrchestratorExcludedFor_WorkspaceModes_ReturnsFalse verifies that workspace-oriented
-// modes (deploy-workspace, update-workspace, update-workflows, promote-to-generic,
-// transform-harness) return false from OrchestratorExcludedFor, preserving the always-include
-// behaviour every pre-existing caller relies on. Only the agent-deploy modes (deploy-agents,
-// deploy-hooks) return true; the retired standalone-only mode is no longer in the set.
+// modes that still force-include the orchestrator (deploy-workspace, update-workflows,
+// promote-to-generic, transform-harness) return false from OrchestratorExcludedFor.
+// update-workspace is not in this list — it returns true so the orchestrator enters only via
+// ScannedAgentKeys when the workspace scan discovers it on disk.
 func TestOrchestratorExcludedFor_WorkspaceModes_ReturnsFalse(t *testing.T) {
 	workspaceModes := []domain.RunMode{
 		domain.ModeDeployWorkspace,
-		domain.ModeUpdateWorkspace,
 		domain.ModeUpdateWorkflows,
 		domain.ModePromoteToGeneric,
 		domain.ModeTransformHarness,
@@ -65,10 +64,23 @@ func TestOrchestratorExcludedFor_WorkspaceModes_ReturnsFalse(t *testing.T) {
 	for _, mode := range workspaceModes {
 		if plan.OrchestratorExcludedFor(mode) {
 			t.Errorf("OrchestratorExcludedFor(%q) = true, want false; "+
-				"workspace-mode runs must include the orchestrator in their artifact set; "+
-				"only deploy-agents and deploy-hooks must exclude it (AC1.4)",
+				"this workspace mode must force-include the orchestrator in its artifact set; "+
+				"only deploy-agents, deploy-hooks, and update-workspace must exclude forced inclusion",
 				mode)
 		}
+	}
+}
+
+// TestOrchestratorExcludedFor_UpdateWorkspace_ReturnsTrue verifies that ModeUpdateWorkspace
+// returns true from OrchestratorExcludedFor. When excluded from forced inclusion, the
+// orchestrator can still enter the artifact set via ScannedAgentKeys if the workspace scan
+// found it on disk — the same path every other deployed agent uses.
+func TestOrchestratorExcludedFor_UpdateWorkspace_ReturnsTrue(t *testing.T) {
+	if !plan.OrchestratorExcludedFor(domain.ModeUpdateWorkspace) {
+		t.Error("OrchestratorExcludedFor(ModeUpdateWorkspace) = false, want true; " +
+			"update-workspace must not force-include the orchestrator: when the orchestrator is " +
+			"absent from the workspace, the forced inclusion incorrectly adds it to the artifact set; " +
+			"the orchestrator should enter only via ScannedAgentKeys when the workspace scan finds it on disk")
 	}
 }
 
@@ -319,6 +331,61 @@ func TestResolveArtifactsFrom_ZeroValueSelection_OrchestratorPresent(t *testing.
 }
 
 // ---------------------------------------------------------------------------
+// ResolveArtifactsFrom — ExcludeOrchestrator: true + ScannedAgentKeys (update-workspace path)
+// ---------------------------------------------------------------------------
+
+// TestResolveArtifactsFrom_ExcludeOrchestrator_ScannedOrchestratorPresent verifies that when
+// ExcludeOrchestrator is true and ScannedAgentKeys contains the orchestrator key, the
+// orchestrator is included in the artifact set. This is the update-workspace path: the
+// orchestrator is not force-included, but enters via the workspace scan result (AC1.3).
+func TestResolveArtifactsFrom_ExcludeOrchestrator_ScannedOrchestratorPresent(t *testing.T) {
+	cat := &fakeCatalog{
+		orchestrator: makeOrchestrator(),
+	}
+
+	set, err := plan.ResolveArtifactsFrom(cat, plan.Selection{
+		ExcludeOrchestrator: true,
+		ScannedAgentKeys:    []string{"orchestrator"},
+	})
+	if err != nil {
+		t.Fatalf("ResolveArtifactsFrom with ExcludeOrchestrator=true and orchestrator in ScannedAgentKeys: %v", err)
+	}
+
+	if !containsAgent(set.Agents, "orchestrator") {
+		t.Error("ArtifactSet.Agents does not contain orchestrator even though ScannedAgentKeys includes its key; " +
+			"when ExcludeOrchestrator is true the orchestrator must still enter via ScannedAgentKeys — " +
+			"this is the update-workspace path where the workspace scan discovered the orchestrator on disk (AC1.3)")
+	}
+}
+
+// TestResolveArtifactsFrom_ExcludeOrchestrator_OrchestratorAbsentWhenNotScanned verifies that
+// when ExcludeOrchestrator is true and ScannedAgentKeys does not contain the orchestrator key,
+// the orchestrator is absent from the artifact set. This represents an update-workspace run
+// where the orchestrator is not deployed in the workspace (AC1.4).
+func TestResolveArtifactsFrom_ExcludeOrchestrator_OrchestratorAbsentWhenNotScanned(t *testing.T) {
+	worker := makeAgent("test-runner", "1.0")
+	cat := &fakeCatalog{
+		orchestrator: makeOrchestrator(),
+		workers:      []domain.Agent{worker},
+	}
+
+	set, err := plan.ResolveArtifactsFrom(cat, plan.Selection{
+		ExcludeOrchestrator: true,
+		ScannedAgentKeys:    []string{"test-runner"},
+	})
+	if err != nil {
+		t.Fatalf("ResolveArtifactsFrom with ExcludeOrchestrator=true and orchestrator absent from ScannedAgentKeys: %v", err)
+	}
+
+	if containsAgent(set.Agents, "orchestrator") {
+		t.Error("ArtifactSet.Agents contains orchestrator even though ScannedAgentKeys does not include it; " +
+			"when ExcludeOrchestrator is true and the orchestrator key is absent from ScannedAgentKeys, " +
+			"the orchestrator must not appear in the artifact set — this represents an update-workspace run " +
+			"where the orchestrator is not deployed in the workspace (AC1.4)")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // ResolveArtifacts (positional legacy form) — orchestrator always included
 // ---------------------------------------------------------------------------
 
@@ -391,9 +458,9 @@ func TestBuild_ModeDeployNew_OrchestratorPlanItemPresent(t *testing.T) {
 }
 
 // TestBuild_ModeUpdateWorkspace_OrchestratorPlanItemPresent verifies that Build with
-// ModeUpdateWorkspace still includes the orchestrator, confirming the exclusion is strictly
-// mode-gated to deploy-agents and deploy-hooks only. This covers a representative workspace
-// mode (AC1.4) and complements the ModeDeployWorkspace test above.
+// ModeUpdateWorkspace includes the orchestrator in the plan when ScannedAgentKeys contains
+// the orchestrator key. For update-workspace, OrchestratorExcludedFor returns true so the
+// orchestrator is not force-included; it must enter via ScannedAgentKeys (AC1.6).
 func TestBuild_ModeUpdateWorkspace_OrchestratorPlanItemPresent(t *testing.T) {
 	worker := makeAgent("test-runner", "1.0")
 	cat := &fakeCatalog{
@@ -406,14 +473,15 @@ func TestBuild_ModeUpdateWorkspace_OrchestratorPlanItemPresent(t *testing.T) {
 	p := plan.New()
 
 	in := plan.Input{
-		Catalog:       cat,
-		Module:        module,
-		Mode:          domain.ModeUpdateWorkspace,
-		WorkspacePath: "/fake/workspace",
-		Scope:         domain.ScopeProject,
-		GOOS:          "linux",
-		Manifest:      absentSnapshot(),
-		WorkflowIDs:   []string{"quick-fix"},
+		Catalog:          cat,
+		Module:           module,
+		Mode:             domain.ModeUpdateWorkspace,
+		WorkspacePath:    "/fake/workspace",
+		Scope:            domain.ScopeProject,
+		GOOS:             "linux",
+		Manifest:         absentSnapshot(),
+		WorkflowIDs:      []string{"quick-fix"},
+		ScannedAgentKeys: []string{"orchestrator"},
 		Models: map[string]domain.ModelSelection{
 			"test-runner":  {ModelID: "test-model", Origin: domain.OriginHarnessList},
 			"orchestrator": {ModelID: "test-model", Origin: domain.OriginHarnessList},
@@ -433,9 +501,10 @@ func TestBuild_ModeUpdateWorkspace_OrchestratorPlanItemPresent(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("plan does not contain orchestrator for ModeUpdateWorkspace; " +
-			"the orchestrator must remain in plans for all workspace-oriented modes (AC1.4); " +
-			"only deploy-agents and deploy-hooks exclude the orchestrator")
+		t.Error("plan does not contain orchestrator for ModeUpdateWorkspace with orchestrator in ScannedAgentKeys; " +
+			"when the workspace scan discovers the orchestrator on disk it must appear in the built plan (AC1.6); " +
+			"if OrchestratorExcludedFor now correctly returns true for ModeUpdateWorkspace, the orchestrator " +
+			"is no longer force-included and must enter via ScannedAgentKeys instead")
 	}
 }
 
