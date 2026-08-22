@@ -159,7 +159,7 @@ func (s *service) UpdateWorkflows(ctx context.Context, req WorkflowUpdateRequest
 		probeAgentByKey[a.Key] = a
 	}
 
-	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed, deployedAgentIndex, probeAgentByKey)
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed, deployedAgentIndex, probeAgentByKey, nil)
 	if err != nil {
 		return domain.RunSummary{}, err
 	}

@@ -218,7 +218,7 @@ func (s *service) Update(ctx context.Context, req UpdateRequest) (domain.RunSumm
 		probeAgentByKey[a.Key] = a
 	}
 
-	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed, deployedAgentIndex, probeAgentByKey)
+	deployedState, err := probeDeployedStateWithIndex(workspace, plannedPaths, module.Descriptor().Frontmatter.ModelKey, seed, deployedAgentIndex, probeAgentByKey, buildParseFailedPaths(scan.Matched))
 	if err != nil {
 		return domain.RunSummary{}, err
 	}

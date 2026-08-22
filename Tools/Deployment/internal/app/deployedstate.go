@@ -215,6 +215,22 @@ func probeDeployedState(
 // this preserves the orchestrator's single-read invariant in the update and workflow-update flows.
 //
 // Returns an error if resolveDeployedPath encounters two or more deployed files with the same id.
+// buildParseFailedPaths extracts the target paths of scan matches that have ParseFailed=true.
+// Returns nil when no entries are parse-failed, so the map is only allocated when needed.
+// The implementation agent must call this at the Update flow call site.
+func buildParseFailedPaths(matched []ScannedAgentMatch) map[string]bool {
+	var result map[string]bool
+	for _, m := range matched {
+		if m.ParseFailed {
+			if result == nil {
+				result = make(map[string]bool)
+			}
+			result[m.TargetPath] = true
+		}
+	}
+	return result
+}
+
 func probeDeployedStateWithIndex(
 	workspace string,
 	paths plan.PlannedPaths,
@@ -222,6 +238,7 @@ func probeDeployedStateWithIndex(
 	seed map[string]domain.DeployedArtifactState,
 	index DeployedAgentIndex,
 	agentByKey map[string]domain.Agent,
+	parseFailedPaths map[string]bool,
 ) (map[string]domain.DeployedArtifactState, error) {
 	result := make(map[string]domain.DeployedArtifactState, len(paths))
 
@@ -248,8 +265,20 @@ func probeDeployedStateWithIndex(
 					return nil, err
 				}
 				if resolved == "" {
-					// Agent has a numeric id but no deployed file matches it: not deployed.
-					result[pp.TargetPath] = domain.DeployedArtifactState{Present: false}
+					// Agent has a numeric id but no deployed file matches in the index.
+					// Fallback: probe at the planned path only when the scan flagged this path
+					// as parse-failed. This catches files that exist on disk but could not be
+					// indexed because their frontmatter was unparseable. Files that simply have
+					// a different id (non-matching id-based resolution) still yield Present: false.
+					if parseFailedPaths[pp.TargetPath] {
+						fallback := probeDeployedArtifact(workspace, pp.TargetPath, modelKey)
+						if fallback.Present {
+							fallback.ParseFailed = true
+						}
+						result[pp.TargetPath] = fallback
+					} else {
+						result[pp.TargetPath] = domain.DeployedArtifactState{Present: false}
+					}
 				} else {
 					// Probe at the id-resolved path (may differ from planned path if renamed).
 					result[pp.TargetPath] = probeDeployedArtifact(workspace, resolved, modelKey)

@@ -409,17 +409,25 @@ func TestToolPreservation_ScalarShapeDeployed_UserAddedToolPreserved(t *testing.
 }
 
 // ---------------------------------------------------------------------------
-// T4.2: New source tool added alongside preserved user tools
+// Stage 4 contract: verbatim copy from deployed — new source tools NOT added
 // ---------------------------------------------------------------------------
 
-// TestToolPreservation_NewSourceTool_AddedAlongsidePreservedUserTool asserts that when
-// the generic source gains a new tool mapping (generic_d → delta) that was not in the
-// deployed file, delta appears in the output tools field alongside the preserved user
-// tool "user-extra". Both the new source tool (delta) and the preserved user tool
-// (user-extra) must be present in the output simultaneously (AC4.2).
+// TestToolPreservation_NewSourceTool_AddedAlongsidePreservedUserTool asserts the Stage 4
+// contract: on Update, the output tools field is a verbatim copy of the deployed file's
+// tools field. When the source gains a new tool mapping (generic_d → delta) that was NOT
+// in the deployed file, delta is NOT added to the output. The deployed file's tools field
+// — [alpha, beta, user-extra] — is preserved byte-exact. Source-computed tools (including
+// new ones like delta) are not written to the output on Update; tools are user-owned after
+// initial Deploy.
 //
-// This test will be RED until mergeDeployedTools is implemented: user-extra is discarded
-// by the current pipeline even though delta is correctly added.
+// Deployed file contains: [alpha, beta, user-extra]. Source maps to: [alpha, beta, delta].
+// Expected output: exactly [alpha, beta, user-extra] (verbatim from deployed). delta must
+// be absent (it is source-computed, not user-deployed). user-extra must be present
+// (verbatim from deployed). The total count must be exactly 3.
+//
+// This test is RED until Stage 4 verbatim-copy behavior is implemented in applyFrontmatter:
+// the current pipeline (Steps 5/5b) sets [alpha, beta, delta] from source and then merges
+// user-extra, producing [alpha, beta, delta, user-extra] — delta appears when it should not.
 func TestToolPreservation_NewSourceTool_AddedAlongsidePreservedUserTool(t *testing.T) {
 	mod := newDescriptorModule(t, preservationListDescriptorYAML, "inline:preservation-list")
 	req := transform.Request{
@@ -442,19 +450,42 @@ func TestToolPreservation_NewSourceTool_AddedAlongsidePreservedUserTool(t *testi
 		t.Fatalf("Parse output: %v", err)
 	}
 
-	// delta must appear (new tool from source).
-	if !toolListContains(doc, "tools", "delta") {
+	// delta must NOT appear: it is a source-computed tool not present in the deployed file.
+	// On Update, tools are user-owned and copied verbatim from the deployed file; new source
+	// tools are not automatically added.
+	if toolListContains(doc, "tools", "delta") {
 		items := listFieldScalars(t, doc, "tools")
-		t.Errorf("newly-added source tool %q absent from output tools field; "+
-			"new source tools must be added to the output; got: %v", "delta", items)
+		t.Errorf("source-computed tool %q must not appear in output tools field on Update; "+
+			"on Update, the tools field is user-owned and copied verbatim from the deployed "+
+			"file — new source tools are not added; deployed was [alpha, beta, user-extra]; "+
+			"got output tools: %v", "delta", items)
 	}
 
-	// user-extra must appear (user-added tool preserved from deployed file).
+	// user-extra must appear: it is present in the deployed file and must be preserved verbatim.
 	if !toolListContains(doc, "tools", "user-extra") {
 		items := listFieldScalars(t, doc, "tools")
-		t.Errorf("user-added tool %q absent from output tools field after Update; "+
-			"user-added tools must be preserved alongside new source tools (AC4.2); "+
+		t.Errorf("deployed tool %q absent from output tools field after Update; "+
+			"the deployed file's tools field must be preserved verbatim — [alpha, beta, user-extra]; "+
 			"got output tools: %v", "user-extra", items)
+	}
+
+	// alpha and beta must appear: they are present in the deployed file.
+	for _, tool := range []string{"alpha", "beta"} {
+		if !toolListContains(doc, "tools", tool) {
+			items := listFieldScalars(t, doc, "tools")
+			t.Errorf("deployed tool %q absent from output tools field after Update; "+
+				"the deployed file's tools field must be preserved verbatim — [alpha, beta, user-extra]; "+
+				"got output tools: %v", tool, items)
+		}
+	}
+
+	// The output must contain exactly 3 tools — the verbatim deployed set [alpha, beta, user-extra].
+	items := listFieldScalars(t, doc, "tools")
+	if len(items) != 3 {
+		t.Errorf("output tools field has %d items, want exactly 3 "+
+			"(verbatim deployed set [alpha, beta, user-extra]); "+
+			"source-computed tools must not be merged into the output on Update; got: %v",
+			len(items), items)
 	}
 }
 

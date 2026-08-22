@@ -9,68 +9,118 @@ import (
 	"mosaic-deploy/internal/domain"
 )
 
+// ContentError records a content-render failure for one plan item during the
+// writability probe. The item was skipped as a probe candidate but must be
+// surfaced to the user as a failed/skipped item.
+type ContentError struct {
+	Item domain.PlanItem
+	Err  error
+}
+
 // resolveDeploymentRoot determines the deployment root by probing writability with
-// the first Create or Update plan item. If the workspace probe fails, the MOSAIC-root
-// fallback is tried, then the OS-temp fallback. The probe error (workspace write failure)
-// is returned so callers can record it as a partial failure even when fallback succeeds.
-// For DryRun or plans with no writable items, the workspace is used without probing.
-func resolveDeploymentRoot(req ExecRequest) (root string, fallback domain.FallbackTier, probeErr error, err error) {
+// probe-eligible Create or Update plan items. If the first eligible item's content
+// cannot be rendered, the next eligible item is tried. If the workspace probe fails,
+// the MOSAIC-root fallback is tried, then the OS-temp fallback. The probe error
+// (workspace write failure) is returned so callers can record it as a partial failure
+// even when fallback succeeds. For DryRun or plans with no writable items, the
+// workspace is used without probing.
+//
+// contentErrors lists items whose Content callback failed; they were skipped as probe
+// candidates but must be surfaced to the user. usedItem is the item whose content was
+// actually used for the writability probe. When all items fail, usedItem is the zero value.
+//
+// journal, when non-nil, is recorded for the workspace probe path immediately before the
+// probe write. Recording before the write ensures that when atomic reversal deletes or
+// restores the file, it correctly treats the probe as a new file (existed=false) rather
+// than a pre-existing one. The journal is passed through from the executor so the probe
+// write participates in the same reversal scope as the rest of the run.
+func resolveDeploymentRoot(req ExecRequest, journal *writeJournal) (root string, fallback domain.FallbackTier, probeErr error, contentErrors []ContentError, usedItem domain.PlanItem, err error) {
 	if req.DryRun {
-		return req.Plan.WorkspacePath, domain.FallbackNone, nil, nil
+		return req.Plan.WorkspacePath, domain.FallbackNone, nil, nil, domain.PlanItem{}, nil
 	}
 
-	probeItem, hasProbe := firstProbeItem(req.Plan.Items)
-	if !hasProbe {
+	eligible := probeEligibleItems(req.Plan.Items)
+	if len(eligible) == 0 {
 		// No Create/Update items; use workspace as the deployment root.
-		return req.Plan.WorkspacePath, domain.FallbackNone, nil, nil
+		return req.Plan.WorkspacePath, domain.FallbackNone, nil, nil, domain.PlanItem{}, nil
 	}
 
-	content, err := req.Content(probeItem)
-	if err != nil {
-		return "", "", nil, fmt.Errorf("content for probe item %q: %w", probeItem.Ref.Key, err)
+	// Iterate through eligible items, skipping those whose content rendering fails.
+	var probeContent []byte
+	found := false
+	for _, item := range eligible {
+		content, cerr := req.Content(item)
+		if cerr != nil {
+			contentErrors = append(contentErrors, ContentError{Item: item, Err: cerr})
+			continue
+		}
+		probeContent = content
+		usedItem = item
+		found = true
+		break
 	}
 
-	// Tier 1: workspace.
-	workspaceDest := filepath.Join(req.Plan.WorkspacePath, probeItem.TargetPath)
-	if writeErr := mkdirAndWrite(workspaceDest, content); writeErr == nil {
-		return req.Plan.WorkspacePath, domain.FallbackNone, nil, nil
+	// If every eligible item failed content rendering, return a distinct error (not
+	// ErrNoWritableLocation, which signals a filesystem problem, not a content problem).
+	if !found {
+		return "", "", nil, contentErrors, domain.PlanItem{}, fmt.Errorf("content rendering failed for all probe-eligible items")
+	}
+
+	// Tier 1: workspace. Journal the probe path before writing so atomic reversal can
+	// correctly identify the file as newly created (existed=false) and delete it on rollback.
+	workspaceDest := filepath.Join(req.Plan.WorkspacePath, usedItem.TargetPath)
+	if journal != nil {
+		_ = journal.record(workspaceDest)
+	}
+	if writeErr := mkdirAndWrite(workspaceDest, probeContent); writeErr == nil {
+		return req.Plan.WorkspacePath, domain.FallbackNone, nil, contentErrors, usedItem, nil
 	} else {
 		probeErr = writeErr
 	}
 
 	// Tier 2: MOSAIC-root fallback.
 	mosaicFallback := mosaicFallbackRoot(req.MosaicRoot, req.Plan.WorkspacePath)
-	mosaicDest := filepath.Join(mosaicFallback, probeItem.TargetPath)
-	if writeErr := mkdirAndWrite(mosaicDest, content); writeErr == nil {
-		return mosaicFallback, domain.FallbackMosaicRoot, probeErr, nil
+	mosaicDest := filepath.Join(mosaicFallback, usedItem.TargetPath)
+	if writeErr := mkdirAndWrite(mosaicDest, probeContent); writeErr == nil {
+		return mosaicFallback, domain.FallbackMosaicRoot, probeErr, contentErrors, usedItem, nil
 	}
 
 	// Tier 3: OS-temp fallback.
 	tempFallback := tempFallbackRoot(req.Plan.WorkspacePath)
-	tempDest := filepath.Join(tempFallback, probeItem.TargetPath)
-	if writeErr := mkdirAndWrite(tempDest, content); writeErr == nil {
-		return tempFallback, domain.FallbackTemp, probeErr, nil
+	tempDest := filepath.Join(tempFallback, usedItem.TargetPath)
+	if writeErr := mkdirAndWrite(tempDest, probeContent); writeErr == nil {
+		return tempFallback, domain.FallbackTemp, probeErr, contentErrors, usedItem, nil
 	}
 
-	return "", "", nil, ErrNoWritableLocation
+	return "", "", nil, contentErrors, domain.PlanItem{}, ErrNoWritableLocation
 }
 
-// firstProbeItem returns the first ActionCreate or ActionUpdate item from the plan that
-// is suitable for a writability probe (i.e. has content that can be fetched and written).
-// Conflict and unchanged items are not used for probing.
-// Hook items are also excluded: their SourcePath is a bundle directory that the catalog
-// never registers as a file, so calling req.Content on them always returns a catalog error.
-// Hook deployment is handled separately by deployHooks and must not be used to probe the
-// workspace write path.
-func firstProbeItem(items []domain.PlanItem) (domain.PlanItem, bool) {
+// probeEligibleItems returns all plan items eligible for use as a writability probe,
+// in plan order. Eligible items have ActionCreate or ActionUpdate and are not hooks.
+// Hook items are excluded because their SourcePath is a bundle directory that the
+// catalog never registers as a file, so calling req.Content on them always returns
+// a catalog error. Returns nil when no items are eligible.
+func probeEligibleItems(items []domain.PlanItem) []domain.PlanItem {
+	var eligible []domain.PlanItem
 	for _, item := range items {
 		if item.Action == domain.ActionCreate || item.Action == domain.ActionUpdate {
 			if item.Ref.Kind != domain.ArtifactHook {
-				return item, true
+				eligible = append(eligible, item)
 			}
 		}
 	}
-	return domain.PlanItem{}, false
+	return eligible
+}
+
+// firstProbeItem returns the first probe-eligible item, or false if none exist.
+// Retained for callers that need to identify the first candidate without iterating
+// (e.g. the atomic-mode journal pre-record, which now delegates to resolveDeploymentRoot).
+func firstProbeItem(items []domain.PlanItem) (domain.PlanItem, bool) {
+	eligible := probeEligibleItems(items)
+	if len(eligible) == 0 {
+		return domain.PlanItem{}, false
+	}
+	return eligible[0], true
 }
 
 // mkdirAndWrite creates parent directories and writes content to path.

@@ -986,3 +986,329 @@ func TestScanWorkspaceAgents_EmptyScan_MatchedKeysReturnsNil(t *testing.T) {
 		t.Errorf("MatchedKeys() returned %d keys for an empty scan, want 0", len(keys))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Parse-failure resilience: filename-key fallback on docformat.Parse failure
+// ---------------------------------------------------------------------------
+
+// writeUnparseableMatchFile writes a .md file with invalid YAML frontmatter (duplicate key)
+// at filepath.Join(dir, filename). docformat.Parse fails on such files, triggering the
+// parse-failure filename-key fallback path introduced in Stage 2.
+func writeUnparseableMatchFile(t *testing.T, dir, filename string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("writeUnparseableMatchFile: MkdirAll(%q): %v", dir, err)
+	}
+	// Duplicate `id` key causes docformat.Parse to fail.
+	content := "---\nid: \"1\"\nid: \"2\"\n---\nContent that cannot be parsed.\n"
+	if err := os.WriteFile(filepath.Join(dir, filename), []byte(content), 0o644); err != nil {
+		t.Fatalf("writeUnparseableMatchFile: WriteFile: %v", err)
+	}
+}
+
+// TestScanWorkspaceAgents_ParseFailedFile_CatalogKeyMatch_InMatched verifies that a file whose
+// frontmatter is genuinely unparseable but whose filename matches a catalog agent key is
+// reported in Matched rather than silently skipped.
+//
+// This is the core parse-failure resilience requirement (FR-1): a file identifiable as
+// MOSAIC-managed by its filename must surface in the scan result, not be lost, so that the
+// planner can classify it as CONFLICT rather than misclassifying it as CREATE.
+func TestScanWorkspaceAgents_ParseFailedFile_CatalogKeyMatch_InMatched(t *testing.T) {
+	// Arrange — unparseable file whose filename key "worker-agent" is in the catalog.
+	workspace := t.TempDir()
+	agentsDir := "agents"
+	writeUnparseableMatchFile(t, filepath.Join(workspace, agentsDir), "worker-agent.md")
+
+	cat := newScanCatalog()
+	cat.byKey["worker-agent"] = domain.Agent{Key: "worker-agent", Role: domain.RoleWorker}
+	// byNumericID is empty: the numeric id cannot be extracted from an unparseable file.
+
+	// Act
+	scan := scanWorkspaceAgents(workspace, agentsDir, cat)
+
+	// Assert — the parse-failed file must appear in Matched, not be silently skipped.
+	if len(scan.Matched) == 0 {
+		t.Fatalf("scan.Matched is empty; expected one entry for unparseable file whose filename key "+
+			"'worker-agent' resolves via catalog.Agent. "+
+			"scanWorkspaceAgents must perform a filename-key fallback after parse failure "+
+			"instead of silently skipping the file (FR-1: identifiable files must not be dropped).")
+	}
+}
+
+// TestScanWorkspaceAgents_ParseFailedFile_CatalogKeyMatch_ParseFailedIsTrue verifies that the
+// Matched entry for a parse-failed file has ParseFailed == true. This flag is the signal
+// that flows downstream through probeDeployedStateWithIndex and into classifyAgentItem so
+// the file can be classified as CONFLICT with a distinct reason.
+func TestScanWorkspaceAgents_ParseFailedFile_CatalogKeyMatch_ParseFailedIsTrue(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	agentsDir := "agents"
+	writeUnparseableMatchFile(t, filepath.Join(workspace, agentsDir), "worker-agent.md")
+
+	cat := newScanCatalog()
+	cat.byKey["worker-agent"] = domain.Agent{Key: "worker-agent", Role: domain.RoleWorker}
+
+	// Act
+	scan := scanWorkspaceAgents(workspace, agentsDir, cat)
+
+	// Assert
+	if len(scan.Matched) == 0 {
+		t.Fatal("scan.Matched is empty; cannot check ParseFailed")
+	}
+	if !scan.Matched[0].ParseFailed {
+		t.Errorf("scan.Matched[0].ParseFailed = false, want true; "+
+			"a file matched by filename-key after a parse failure must carry ParseFailed == true "+
+			"so the downstream planner can classify it as CONFLICT, not CREATE")
+	}
+}
+
+// TestScanWorkspaceAgents_ParseFailedFile_CatalogKeyMatch_MatchedByIsParseFailed verifies that
+// the Matched entry for a parse-failed file carries MatchedBy == MatchByFileNameKeyParseFailed.
+// This distinguishes parse-failed matches from normal filename-key matches (MatchByFileNameKey)
+// and numeric-id matches (MatchByNumericID) for diagnostic purposes.
+func TestScanWorkspaceAgents_ParseFailedFile_CatalogKeyMatch_MatchedByIsParseFailed(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	agentsDir := "agents"
+	writeUnparseableMatchFile(t, filepath.Join(workspace, agentsDir), "worker-agent.md")
+
+	cat := newScanCatalog()
+	cat.byKey["worker-agent"] = domain.Agent{Key: "worker-agent", Role: domain.RoleWorker}
+
+	// Act
+	scan := scanWorkspaceAgents(workspace, agentsDir, cat)
+
+	// Assert
+	if len(scan.Matched) == 0 {
+		t.Fatal("scan.Matched is empty; cannot check MatchedBy")
+	}
+	if scan.Matched[0].MatchedBy != MatchByFileNameKeyParseFailed {
+		t.Errorf("scan.Matched[0].MatchedBy = %q, want %q; "+
+			"a parse-failed file matched by filename key must carry MatchedBy == MatchByFileNameKeyParseFailed, "+
+			"not MatchByNumericID or MatchByFileNameKey",
+			scan.Matched[0].MatchedBy, MatchByFileNameKeyParseFailed)
+	}
+}
+
+// TestScanWorkspaceAgents_ParseFailedFile_CatalogKeyMatch_NumericIDIsEmpty verifies that the
+// Matched entry for a parse-failed file has an empty NumericID. The numeric id cannot be
+// extracted from an unparseable file, so the field must be empty rather than carrying a
+// garbage value.
+func TestScanWorkspaceAgents_ParseFailedFile_CatalogKeyMatch_NumericIDIsEmpty(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	agentsDir := "agents"
+	writeUnparseableMatchFile(t, filepath.Join(workspace, agentsDir), "worker-agent.md")
+
+	cat := newScanCatalog()
+	cat.byKey["worker-agent"] = domain.Agent{Key: "worker-agent", Role: domain.RoleWorker}
+
+	// Act
+	scan := scanWorkspaceAgents(workspace, agentsDir, cat)
+
+	// Assert
+	if len(scan.Matched) == 0 {
+		t.Fatal("scan.Matched is empty; cannot check NumericID")
+	}
+	if scan.Matched[0].NumericID != "" {
+		t.Errorf("scan.Matched[0].NumericID = %q, want empty; "+
+			"a parse-failed file has no extractable numeric id, so NumericID must be empty string",
+			scan.Matched[0].NumericID)
+	}
+}
+
+// TestScanWorkspaceAgents_ParseFailedFile_CatalogKeyMatch_AgentKeyFromCatalog verifies that
+// the AgentKey in the parse-failed Matched entry comes from the catalog record, matching the
+// same contract as normal filename-key matches.
+func TestScanWorkspaceAgents_ParseFailedFile_CatalogKeyMatch_AgentKeyFromCatalog(t *testing.T) {
+	// Arrange — file "known-catalog-agent.md" has unparseable frontmatter; the catalog has
+	// a matching key "known-catalog-agent".
+	workspace := t.TempDir()
+	agentsDir := "agents"
+	writeUnparseableMatchFile(t, filepath.Join(workspace, agentsDir), "known-catalog-agent.md")
+
+	cat := newScanCatalog()
+	cat.byKey["known-catalog-agent"] = domain.Agent{Key: "known-catalog-agent", Role: domain.RoleWorker}
+
+	// Act
+	scan := scanWorkspaceAgents(workspace, agentsDir, cat)
+
+	// Assert
+	if len(scan.Matched) == 0 {
+		t.Fatal("scan.Matched is empty; cannot check AgentKey")
+	}
+	if scan.Matched[0].AgentKey != "known-catalog-agent" {
+		t.Errorf("scan.Matched[0].AgentKey = %q, want %q; "+
+			"AgentKey for a parse-failed match must come from the catalog record, not derived from the filename",
+			scan.Matched[0].AgentKey, "known-catalog-agent")
+	}
+}
+
+// TestScanWorkspaceAgents_ParseFailedFile_NoCatalogKeyMatch_StillSkipped verifies the FR-3
+// requirement: a genuinely foreign non-MOSAIC .md file that also fails to parse is still
+// silently skipped. Only parse-failed files whose filename matches a catalog key are surfaced.
+func TestScanWorkspaceAgents_ParseFailedFile_NoCatalogKeyMatch_StillSkipped(t *testing.T) {
+	// Arrange — unparseable file "foreign-tool.md" whose filename key "foreign-tool" is NOT
+	// in the catalog. This simulates a non-MOSAIC file that happens to be unparseable.
+	workspace := t.TempDir()
+	agentsDir := "agents"
+	writeUnparseableMatchFile(t, filepath.Join(workspace, agentsDir), "foreign-tool.md")
+
+	cat := newScanCatalog()
+	// byKey and byNumericID are both empty — "foreign-tool" is not a known agent.
+
+	// Act — must not panic; parse-failure without catalog key match must skip silently.
+	scan := scanWorkspaceAgents(workspace, agentsDir, cat)
+
+	// Assert — the foreign file must produce no entries in either slice (FR-3 preserved).
+	if len(scan.Matched) != 0 {
+		t.Errorf("scan.Matched has %d entries, want 0; "+
+			"a parse-failed file whose filename does NOT match any catalog key must be silently skipped "+
+			"(FR-3: non-MOSAIC files are always skipped, including when they fail to parse)",
+			len(scan.Matched))
+	}
+	if len(scan.HarnessOnly) != 0 {
+		t.Errorf("scan.HarnessOnly has %d entries, want 0; "+
+			"a parse-failed foreign file must not appear in HarnessOnly",
+			len(scan.HarnessOnly))
+	}
+}
+
+// TestScanWorkspaceAgents_ParseFailedFile_TargetPathSet verifies that the TargetPath of the
+// parse-failed Matched entry is set correctly as filepath.Join(agentsDir, fileName). This
+// mirrors the contract for normal Matched entries and ensures probeDeployedStateWithIndex
+// can look up the entry by its expected target path.
+func TestScanWorkspaceAgents_ParseFailedFile_TargetPathSet(t *testing.T) {
+	// Arrange
+	workspace := t.TempDir()
+	agentsDir := "agents"
+	writeUnparseableMatchFile(t, filepath.Join(workspace, agentsDir), "worker-agent.md")
+
+	cat := newScanCatalog()
+	cat.byKey["worker-agent"] = domain.Agent{Key: "worker-agent", Role: domain.RoleWorker}
+
+	// Act
+	scan := scanWorkspaceAgents(workspace, agentsDir, cat)
+
+	// Assert
+	if len(scan.Matched) == 0 {
+		t.Fatal("scan.Matched is empty; cannot check TargetPath")
+	}
+	wantTargetPath := filepath.Join(agentsDir, "worker-agent.md")
+	if scan.Matched[0].TargetPath != wantTargetPath {
+		t.Errorf("scan.Matched[0].TargetPath = %q, want %q; "+
+			"TargetPath for a parse-failed match must be filepath.Join(agentsDir, fileName)",
+			scan.Matched[0].TargetPath, wantTargetPath)
+	}
+}
+
+// TestScanWorkspaceAgents_NormalMatchedFile_ParseFailedIsFalse verifies that a normally
+// parseable file matched by numeric id or filename key has ParseFailed == false. This is the
+// regression guard: the new ParseFailed field must default to false and must not be set on
+// files that parsed successfully.
+func TestScanWorkspaceAgents_NormalMatchedFile_ParseFailedIsFalse(t *testing.T) {
+	// Arrange — normal parseable file matched by numeric id.
+	workspace := t.TempDir()
+	agentsDir := "agents"
+	writeScanFileWithID(t, filepath.Join(workspace, agentsDir), "worker-agent.md", "5")
+
+	cat := newScanCatalog()
+	cat.byNumericID["5"] = domain.Agent{Key: "worker-agent", NumericID: "5"}
+
+	// Act
+	scan := scanWorkspaceAgents(workspace, agentsDir, cat)
+
+	// Assert
+	if len(scan.Matched) == 0 {
+		t.Fatal("scan.Matched is empty; cannot check ParseFailed")
+	}
+	if scan.Matched[0].ParseFailed {
+		t.Errorf("scan.Matched[0].ParseFailed = true, want false; "+
+			"a normally parseable file that matches via numeric id must NOT have ParseFailed set; "+
+			"ParseFailed must only be set for files that failed docformat.Parse")
+	}
+}
+
+// TestScanWorkspaceAgents_MixedDirectory_ParseFailedAndNormal_BothClassifiedCorrectly verifies
+// that a mixed directory containing a parse-failed catalog-matched file, a normal catalog-
+// matched file, and a foreign unparseable file all classify correctly in a single scan pass.
+func TestScanWorkspaceAgents_MixedDirectory_ParseFailedAndNormal_BothClassifiedCorrectly(t *testing.T) {
+	// Arrange:
+	//   "catalog-agent.md"   — normal parseable file matched by numeric id
+	//   "parse-failed-agent.md" — unparseable file whose filename key is in catalog
+	//   "foreign-broken.md"  — unparseable file with no catalog match (must be skipped)
+	workspace := t.TempDir()
+	agentsDir := "agents"
+	dir := filepath.Join(workspace, agentsDir)
+
+	writeScanFileWithID(t, dir, "catalog-agent.md", "10")
+	writeUnparseableMatchFile(t, dir, "parse-failed-agent.md")
+	writeUnparseableMatchFile(t, dir, "foreign-broken.md")
+
+	cat := newScanCatalog()
+	cat.byNumericID["10"] = domain.Agent{Key: "catalog-agent", NumericID: "10"}
+	cat.byKey["parse-failed-agent"] = domain.Agent{Key: "parse-failed-agent", Role: domain.RoleWorker}
+	// "foreign-broken" is deliberately absent from the catalog.
+
+	// Act
+	scan := scanWorkspaceAgents(workspace, agentsDir, cat)
+
+	// Assert — exactly two entries in Matched: one normal, one parse-failed.
+	if len(scan.Matched) != 2 {
+		t.Errorf("scan.Matched has %d entries, want 2 (one normal, one parse-failed); "+
+			"the foreign unparseable file must be silently skipped", len(scan.Matched))
+	}
+
+	// Find each entry by key.
+	var normal, parseFailed ScannedAgentMatch
+	for _, m := range scan.Matched {
+		switch m.AgentKey {
+		case "catalog-agent":
+			normal = m
+		case "parse-failed-agent":
+			parseFailed = m
+		}
+	}
+
+	// The normal entry must not be flagged as parse-failed.
+	if normal.AgentKey == "" {
+		t.Error("catalog-agent not found in scan.Matched")
+	} else if normal.ParseFailed {
+		t.Error("catalog-agent.ParseFailed = true, want false; normally parsed file must not be flagged")
+	}
+
+	// The parse-failed entry must be flagged.
+	if parseFailed.AgentKey == "" {
+		t.Error("parse-failed-agent not found in scan.Matched; parse-failed catalog-key match must appear in Matched")
+	} else if !parseFailed.ParseFailed {
+		t.Error("parse-failed-agent.ParseFailed = false, want true; filename-key-matched parse-failed file must be flagged")
+	}
+}
+
+// TestScanWorkspaceAgents_ParseFailedFile_NotInHarnessOnly verifies that a parse-failed file
+// that is matched via filename key is placed in Matched, not in HarnessOnly. Parse-failed
+// catalog-matched files are always Matched entries; the HarnessOnly path requires a successful
+// parse to apply the two-signal eligibility check.
+func TestScanWorkspaceAgents_ParseFailedFile_NotInHarnessOnly(t *testing.T) {
+	// Arrange — parse-failed file with catalog key match.
+	workspace := t.TempDir()
+	agentsDir := "agents"
+	writeUnparseableMatchFile(t, filepath.Join(workspace, agentsDir), "worker-agent.md")
+
+	cat := newScanCatalog()
+	cat.byKey["worker-agent"] = domain.Agent{Key: "worker-agent", Role: domain.RoleWorker}
+
+	// Act
+	scan := scanWorkspaceAgents(workspace, agentsDir, cat)
+
+	// Assert — must be in Matched, not HarnessOnly.
+	if len(scan.HarnessOnly) != 0 {
+		for _, h := range scan.HarnessOnly {
+			if h.FileName == "worker-agent.md" {
+				t.Errorf("worker-agent.md appeared in HarnessOnly; a parse-failed catalog-matched file "+
+					"must be in Matched, not HarnessOnly. HarnessOnly requires a successful parse "+
+					"to evaluate the two-signal eligibility check.")
+			}
+		}
+	}
+}

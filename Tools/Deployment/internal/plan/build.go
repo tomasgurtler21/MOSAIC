@@ -282,6 +282,20 @@ func classifyAgentItem(
 		return item
 	}
 
+	// Step 1b: File exists but frontmatter could not be parsed. Classify as CONFLICT with a
+	// distinct reason before reaching the manifest-availability or hash-mismatch checks.
+	// Without this early exit, the file would fall through to Step 4's hash comparison and
+	// produce the misleading "locally modified since last deployment" reason.
+	if deployed.ParseFailed {
+		item.Action = domain.ActionConflict
+		item.Conflict = &domain.LocalModification{
+			CurrentHash:     deployed.ContentHash,
+			ManifestMissing: true,
+		}
+		item.Reason = "deployed file could not be read/parsed"
+		return item
+	}
+
 	// Step 2: No usable manifest — any file on disk could have been placed there manually.
 	if !manifestUsable {
 		item.Action = domain.ActionConflict

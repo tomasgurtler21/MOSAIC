@@ -8,6 +8,9 @@ package domain
 // correctly without a separate absence sentinel.
 type DeployedArtifactState struct {
 	Present                       bool
+	ParseFailed                   bool              // true when the file exists on disk and is identifiable as MOSAIC-managed
+	                                                // but its frontmatter could not be parsed. When true, Present is also true.
+	                                                // ContentHash is still set (computed from raw bytes), but all version fields are empty.
 	ContentHash                   string            // "sha256:<hex>"; empty when !Present
 	Version                       string            // frontmatter `version` scalar, verbatim; "" when absent or unparseable
 	HarnessVersion                string            // frontmatter `mosaic_harness_version` scalar (or legacy `mosaic_transform_version` fallback), verbatim

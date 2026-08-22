@@ -283,25 +283,64 @@ func applyFrontmatter(
 		})
 	}
 
-	// Step 5: Set the resolved tool fields produced by Module.Tools (or PlaceholderExpansion).
-	for _, field := range toolResult.Fields {
-		before := ""
-		if v, ok := fm.Get(field.Key); ok {
-			before = renderValue(v)
+	// Steps 5 and 5b: Tool field handling.
+	// On Update (req.Deployed != nil) when the deployed file has the tools/permission key:
+	// preserve that field verbatim rather than re-generating it from source. This makes
+	// the tools/permission field user-owned after initial Deploy — subsequent Updates never
+	// overwrite user customizations (including per-command sub-permission flow mappings).
+	// On Create (req.Deployed == nil), or when the deployed file cannot be parsed, or when
+	// the deployed file has no tools key: fall through to the Create path (Steps 5 and 5b).
+	toolsPreservedVerbatim := false
+	if req.Deployed != nil && desc.Frontmatter.ToolsKey != "" {
+		deployedDoc, deployedParseErr := docformat.Parse(req.Deployed)
+		if deployedParseErr == nil {
+			deployedFM := deployedDoc.Frontmatter()
+			if deployedToolsValue, ok := deployedFM.Get(desc.Frontmatter.ToolsKey); ok {
+				before := ""
+				if v, ok2 := fm.Get(desc.Frontmatter.ToolsKey); ok2 {
+					before = renderValue(v)
+				}
+				fm.Set(desc.Frontmatter.ToolsKey, deployedToolsValue)
+				changes = append(changes, FieldChange{
+					Key:    desc.Frontmatter.ToolsKey,
+					Before: before,
+					After:  renderValue(deployedToolsValue),
+					Reason: "preserved from deployed file",
+				})
+				toolsPreservedVerbatim = true
+			}
 		}
-		changes = append(changes, FieldChange{
-			Key:    field.Key,
-			Before: before,
-			After:  renderValue(field.Value),
-			Reason: "tool mapping",
-		})
-		fm.Set(field.Key, field.Value)
+		// When deployedParseErr != nil: fall through to the Create path below.
+		// buildDeployedRegionMap (called earlier in the pipeline) normally catches parse
+		// failures before reaching this point. If it does not, the safe fallback is to
+		// compute tools from source — identical to what a first-time Deploy would produce.
+		// When the deployed file parses but has no tools key: also fall through, so the
+		// output always has the tools/permission key set (never left absent).
 	}
 
-	// Step 5b: Merge user-added tools from the deployed file.
-	if req.Deployed != nil {
-		mergeChanges := mergeDeployedTools(fm, req.Deployed, desc)
-		changes = append(changes, mergeChanges...)
+	if !toolsPreservedVerbatim {
+		// Step 5: Set the resolved tool fields produced by Module.Tools (or PlaceholderExpansion).
+		for _, field := range toolResult.Fields {
+			before := ""
+			if v, ok := fm.Get(field.Key); ok {
+				before = renderValue(v)
+			}
+			changes = append(changes, FieldChange{
+				Key:    field.Key,
+				Before: before,
+				After:  renderValue(field.Value),
+				Reason: "tool mapping",
+			})
+			fm.Set(field.Key, field.Value)
+		}
+
+		// Step 5b: Merge user-added tools from the deployed file. This is skipped when
+		// toolsPreservedVerbatim is true because the deployed value is already set verbatim
+		// and there is nothing to merge.
+		if req.Deployed != nil {
+			mergeChanges := mergeDeployedTools(fm, req.Deployed, desc)
+			changes = append(changes, mergeChanges...)
+		}
 	}
 
 	// Step 6: Accumulate gaps for unresolved tool mappings. ToolUnmapped and ToolSkipped

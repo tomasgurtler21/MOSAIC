@@ -1120,6 +1120,214 @@ func TestDiscoverExistingWorkflows_PresentButNoWorkflows_ReturnsNil(t *testing.T
 }
 
 // ---------------------------------------------------------------------------
+// probeDeployedStateWithIndex — parseFailedPaths parameter
+// ---------------------------------------------------------------------------
+
+// TestProbeDeployedStateWithIndex_NilParseFailedPaths_NoPanic verifies that passing nil for
+// parseFailedPaths to probeDeployedStateWithIndex does not panic. This is the regression guard
+// for the four non-Update call sites (deploy, deployagents, deployhooks, workflow_update)
+// which all pass nil. Go nil-map lookup semantics guarantee that parseFailedPaths[path]
+// returns false (not panic) for any path, so parse-failure detection is inert when nil is passed.
+func TestProbeDeployedStateWithIndex_NilParseFailedPaths_NoPanic(t *testing.T) {
+	// Arrange — a simple agent with a deployed file present on disk.
+	ws := t.TempDir()
+	agentsDir := ".mosaic"
+	if err := os.MkdirAll(filepath.Join(ws, agentsDir), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	content := []byte("---\nversion: \"1.0\"\n---\nAgent body.\n")
+	writeFile(t, filepath.Join(ws, agentsDir), "my-agent.md", content)
+
+	agent := domain.Agent{Key: "my-agent", NumericID: "5", Role: domain.RoleWorker}
+	targetPath := filepath.Join(agentsDir, "my-agent.md")
+
+	index := DeployedAgentIndex{
+		"5": {{NumericID: "5", TargetPath: targetPath}},
+	}
+	agentByKey := map[string]domain.Agent{"my-agent": agent}
+
+	paths := plan.PlannedPaths{
+		{Ref: domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "my-agent"}, TargetPath: targetPath},
+	}
+
+	// Act — must not panic with nil parseFailedPaths.
+	result, err := probeDeployedStateWithIndex(ws, paths, "", nil, index, agentByKey, nil)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("probeDeployedStateWithIndex returned unexpected error with nil parseFailedPaths: %v", err)
+	}
+	state, ok := result[targetPath]
+	if !ok {
+		t.Fatalf("result missing entry for path %q", targetPath)
+	}
+	if !state.Present {
+		t.Errorf("state.Present = false, want true; the file exists on disk")
+	}
+	// With nil parseFailedPaths, ParseFailed must be false (no parse failure was signalled).
+	if state.ParseFailed {
+		t.Errorf("state.ParseFailed = true, want false; "+
+			"ParseFailed must not be set when parseFailedPaths is nil (non-Update call sites)")
+	}
+}
+
+// TestProbeDeployedStateWithIndex_ParseFailedPathsNotContainingAgentPath_ParseFailedFalse
+// verifies that when parseFailedPaths is non-nil but does not contain the agent's target path,
+// the resulting state has ParseFailed == false. Only paths explicitly listed in parseFailedPaths
+// should receive the ParseFailed flag.
+func TestProbeDeployedStateWithIndex_ParseFailedPathsNotContainingAgentPath_ParseFailedFalse(t *testing.T) {
+	// Arrange
+	ws := t.TempDir()
+	agentsDir := ".mosaic"
+	if err := os.MkdirAll(filepath.Join(ws, agentsDir), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	content := []byte("---\nversion: \"1.0\"\n---\nAgent body.\n")
+	writeFile(t, filepath.Join(ws, agentsDir), "my-agent.md", content)
+
+	agent := domain.Agent{Key: "my-agent", NumericID: "5", Role: domain.RoleWorker}
+	targetPath := filepath.Join(agentsDir, "my-agent.md")
+	someOtherPath := filepath.Join(agentsDir, "other-agent.md")
+
+	index := DeployedAgentIndex{
+		"5": {{NumericID: "5", TargetPath: targetPath}},
+	}
+	agentByKey := map[string]domain.Agent{"my-agent": agent}
+
+	paths := plan.PlannedPaths{
+		{Ref: domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "my-agent"}, TargetPath: targetPath},
+	}
+
+	// parseFailedPaths contains a DIFFERENT path — not my-agent's path.
+	parseFailedPaths := map[string]bool{someOtherPath: true}
+
+	// Act
+	result, err := probeDeployedStateWithIndex(ws, paths, "", nil, index, agentByKey, parseFailedPaths)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Assert
+	state := result[targetPath]
+	if state.ParseFailed {
+		t.Errorf("state.ParseFailed = true, want false; "+
+			"ParseFailed must only be set for paths that appear in parseFailedPaths, "+
+			"not for all paths when parseFailedPaths is non-nil")
+	}
+}
+
+// TestProbeDeployedStateWithIndex_ParseFailedPathPresent_StateHasParseFailedTrue verifies the
+// core fallback behavior (FR-1): when an agent has a numeric id, the index has no entry for it
+// (so resolveDeployedPath returns ""), the file exists at the planned path, and the planned
+// path is in parseFailedPaths, the resulting state must have Present: true and ParseFailed: true.
+//
+// This is the TDD RED test: the current implementation of probeDeployedStateWithIndex does not
+// check parseFailedPaths and returns Present: false (not deployed) when resolved == "". The
+// implementation (I2.3) must add the fallback probe and the ParseFailed flag to make this pass.
+func TestProbeDeployedStateWithIndex_ParseFailedPathPresent_StateHasParseFailedTrue(t *testing.T) {
+	// Arrange: agent has NumericID "9" but the index has NO entry for "9" (the file could not
+	// be indexed because its frontmatter was unparseable). The file exists on disk at the
+	// planned path. parseFailedPaths flags that path as parse-failed.
+	ws := t.TempDir()
+	agentsDir := ".mosaic"
+	if err := os.MkdirAll(filepath.Join(ws, agentsDir), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// Write the file at the planned path — it exists on disk but was not indexed.
+	content := []byte("---\nid: \"1\"\nid: \"2\"\n---\nUnparseable frontmatter.\n")
+	writeFile(t, filepath.Join(ws, agentsDir), "parse-failed-agent.md", content)
+
+	agent := domain.Agent{Key: "parse-failed-agent", NumericID: "9", Role: domain.RoleWorker}
+	targetPath := filepath.Join(agentsDir, "parse-failed-agent.md")
+
+	// Index is empty for id "9" — file was not indexed because it could not be parsed.
+	index := DeployedAgentIndex{} // no entries
+	agentByKey := map[string]domain.Agent{"parse-failed-agent": agent}
+
+	paths := plan.PlannedPaths{
+		{Ref: domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "parse-failed-agent"}, TargetPath: targetPath},
+	}
+
+	// parseFailedPaths flags the agent's target path as parse-failed (scan detected this).
+	parseFailedPaths := map[string]bool{targetPath: true}
+
+	// Act
+	result, err := probeDeployedStateWithIndex(ws, paths, "", nil, index, agentByKey, parseFailedPaths)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Assert
+	state, ok := result[targetPath]
+	if !ok {
+		t.Fatalf("result missing entry for path %q; probeDeployedStateWithIndex must always "+
+			"produce an entry per path", targetPath)
+	}
+
+	// The file exists on disk — Present must be true, not false.
+	if !state.Present {
+		t.Errorf("state.Present = false, want true; "+
+			"a parse-failed file exists on disk at the planned path — "+
+			"probeDeployedStateWithIndex must detect it via a fallback probe and return Present: true. "+
+			"The current implementation returns Present: false when resolved == \"\" (no index entry), "+
+			"which misclassifies the file as CREATE instead of CONFLICT. "+
+			"I2.3 must add the fallback probe to fix this.")
+	}
+
+	// ParseFailed must be set to carry the signal to classifyAgentItem.
+	if !state.ParseFailed {
+		t.Errorf("state.ParseFailed = false, want true; "+
+			"when the file's target path is in parseFailedPaths and the file exists on disk, "+
+			"ParseFailed must be set so classifyAgentItem can classify it as CONFLICT "+
+			"with the distinct parse-failure reason (FR-1, FR-2)")
+	}
+}
+
+// TestProbeDeployedStateWithIndex_ParseFailedPathAbsentFile_PresentFalse verifies that the
+// parse-failure fallback probe only changes the result when the file actually exists on disk.
+// When the file is absent (genuinely not deployed), Present must remain false even if the path
+// is in parseFailedPaths. This preserves the correct "not deployed" classification for agents
+// whose file was truly never written.
+func TestProbeDeployedStateWithIndex_ParseFailedPathAbsentFile_PresentFalse(t *testing.T) {
+	// Arrange: agent has NumericID "9" with no index entry AND no file on disk.
+	// parseFailedPaths includes the target path — but there is nothing there.
+	ws := t.TempDir()
+	agentsDir := ".mosaic"
+	if err := os.MkdirAll(filepath.Join(ws, agentsDir), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	// No file is written — the agent is genuinely not deployed.
+
+	agent := domain.Agent{Key: "never-deployed-agent", NumericID: "99", Role: domain.RoleWorker}
+	targetPath := filepath.Join(agentsDir, "never-deployed-agent.md")
+
+	index := DeployedAgentIndex{} // no entries
+	agentByKey := map[string]domain.Agent{"never-deployed-agent": agent}
+
+	paths := plan.PlannedPaths{
+		{Ref: domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: "never-deployed-agent"}, TargetPath: targetPath},
+	}
+
+	// Even though the path is in parseFailedPaths, the file does not exist on disk.
+	parseFailedPaths := map[string]bool{targetPath: true}
+
+	// Act
+	result, err := probeDeployedStateWithIndex(ws, paths, "", nil, index, agentByKey, parseFailedPaths)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Assert — file is absent so Present must be false.
+	state := result[targetPath]
+	if state.Present {
+		t.Errorf("state.Present = true, want false; "+
+			"a genuinely absent file must remain Present: false even when its path is in parseFailedPaths. "+
+			"The fallback probe calls probeDeployedArtifact at the planned path; "+
+			"probeDeployedArtifact returns Present: false when the file does not exist.")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers (local to this test file)
 // ---------------------------------------------------------------------------
 
