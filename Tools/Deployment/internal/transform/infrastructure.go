@@ -67,6 +67,10 @@ func writeInfrastructureBlock(buf *bytes.Buffer, agent InfrastructureBlock) {
 		fmt.Fprintf(buf, "%s\n\n", agent.Name)
 	}
 
+	// Blank line so CommonMark ends the HTML block opened by the section tag,
+	// allowing the pipe table to be parsed as markdown rather than raw HTML.
+	buf.WriteByte('\n')
+
 	// Table header and separator.
 	buf.WriteString("| Class | Trigger | Param | On Failure | Description |\n")
 	buf.WriteString("|-------|---------|-------|------------|-------------|\n")
@@ -80,6 +84,10 @@ func writeInfrastructureBlock(buf *bytes.Buffer, agent InfrastructureBlock) {
 		fmt.Fprintf(buf, "| %s | %s | %s | %s | %s |\n",
 			agent.Class, trig.Trigger, param, agent.OnFailure, agent.Description)
 	}
+
+	// Blank line before the close tag so the table's trailing row isn't
+	// consumed as part of an HTML block started by the close tag.
+	buf.WriteByte('\n')
 
 	// Section close tag. RenderCloseTagLine errors only on invalid names; controlled here.
 	closeTag, _ := docformat.RenderCloseTagLine("InfrastructureAgent:" + agent.Key)

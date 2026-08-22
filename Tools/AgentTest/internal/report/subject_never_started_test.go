@@ -59,7 +59,7 @@ func neverStartedResult() report.Result {
 			},
 			Runs: []report.RunReport{run},
 		},
-	})
+	}, "")
 }
 
 // genuineAssertionFailureResult builds a Result whose run carries a genuine
@@ -92,7 +92,7 @@ func genuineAssertionFailureResult() report.Result {
 				},
 			},
 		},
-	})
+	}, "")
 }
 
 // --- Text surface: never-started case ---

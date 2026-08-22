@@ -167,7 +167,7 @@ func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error
 	}
 
 	finished := clock.Now()
-	result := report.Build(p.Suite.ID, started, finished, testReports)
+	result := report.Build(p.Suite.ID, started, finished, testReports, p.CatalogFolder)
 
 	emitSafe(sink, domain.ProgressEvent{
 		Kind:      domain.ProgressSuiteFinished,

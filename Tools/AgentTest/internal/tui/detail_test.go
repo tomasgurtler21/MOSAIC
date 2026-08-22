@@ -73,7 +73,7 @@ func modelWithFinishedResult(t *testing.T, run report.RunReport) Model {
 		TestID: run.Key.TestID,
 		Runs:   []report.RunReport{run},
 	}
-	result := report.Build("suite-under-test", time.Now(), time.Now(), []report.TestReport{testReport})
+	result := report.Build("suite-under-test", time.Now(), time.Now(), []report.TestReport{testReport}, "")
 
 	runner := newFakeSuiteRunner().withResult(result)
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, runner))

@@ -239,6 +239,12 @@ type WiringConfig struct {
 	FixtureRoot     string
 	WorkspaceRoot   string
 	SelfPath        string
+	// SelfDir is the directory containing this binary, resolved once from
+	// os.Executable(). It is the anchor for every binary-relative default
+	// (LoggerBundleDir, CostToolPath, DeployToolPath, MosaicRoot) and is
+	// exposed here so runTUIMode can derive the suite-discovery default
+	// (SelfDir/..) without duplicating the os.Executable() computation.
+	SelfDir         string
 	LoggerBundleDir string
 	CostToolPath    string
 	CostTimeout     time.Duration
@@ -255,6 +261,11 @@ type WiringConfig struct {
 	// working directory. An empty value is never used as a default; when the
 	// resolved path is non-empty it is passed as --mosaic-root.
 	MosaicRoot string
+	// MosaicRootProvenance records which resolution tier produced MosaicRoot
+	// and, for the default tier, the literal default expression. It is
+	// threaded into preflight diagnostics so a user can see exactly which
+	// configuration produced the failing path.
+	MosaicRootProvenance ConfigProvenance
 	// CatalogFolder overrides the catalogue the deployment tool sources
 	// agents and workflows from. Empty means "do not override". Resolved
 	// through the same three-tier chain as MosaicRoot.
@@ -298,6 +309,20 @@ type Deps struct {
 	// sandbox before the adapter's Provision is called. Both frontends receive
 	// the same value via RunnerDeps, matching every other collaborator on Deps.
 	Deploy domain.AgentDeployer
+
+	// NewDeployer constructs a deployer configured for the given catalog
+	// folder. Called by composedSuiteRunner.Run when the plan's resolved
+	// catalog folder differs from the process-wide default.
+	//
+	// The factory is trivially cheap (agentdeploy.New wraps options into a
+	// struct, no I/O) and the returned deployer is immutable. Required field
+	// -- the composition root always wires it.
+	NewDeployer func(catalogFolder string) domain.AgentDeployer
+
+	// CatalogFolder is the process-wide default catalog folder from
+	// WiringConfig, threaded to the composition root's deployer resolution
+	// logic and to preflight.Input so both can resolve overrides against it.
+	CatalogFolder string
 
 	// Pass-through values the runner hands to the adapter without
 	// interpreting, carried here so neither frontend has to know them.
@@ -399,24 +424,43 @@ func buildDeps(cfg WiringConfig) (Deps, error) {
 	// runner) and Deps.Preflight (for dry-run declaration validation) close
 	// over the same value, so preflight and the runner can never validate
 	// against one deployer and render with another.
-	deployProvider := agentdeploy.New(agentdeploy.Options{
+	deployOpts := agentdeploy.Options{
 		ExecutablePath: cfg.DeployToolPath,
 		MosaicRoot:     cfg.MosaicRoot,
 		CatalogFolder:  cfg.CatalogFolder,
 		Timeout:        cfg.DeployTimeout,
 		Invoke:         cfg.DeployInvoke,
-	})
+	}
+	deployProvider := agentdeploy.New(deployOpts)
+
+	bakedPreflight := environmentBakedPreflight(envReport, deployProvider, cfg.DeployScratchRoot)
+	provenance := string(cfg.MosaicRootProvenance)
 
 	return Deps{
-		Adapter:   adapter,
-		Decoder:   decoder,
-		Launcher:  launcher,
-		Fixtures:  resolver,
-		Effects:   effects,
-		Cost:      costProvider,
-		Clock:     systemClock{},
-		Preflight: environmentBakedPreflight(envReport, deployProvider, cfg.DeployScratchRoot),
-		Deploy:    deployProvider,
+		Adapter:  adapter,
+		Decoder:  decoder,
+		Launcher: launcher,
+		Fixtures: resolver,
+		Effects:  effects,
+		Cost:     costProvider,
+		Clock:    systemClock{},
+		Preflight: func(in preflight.Input) (preflight.Plan, authoring.Report) {
+			in.MosaicRootProvenance = provenance
+			in.CatalogFolder = cfg.CatalogFolder
+			return bakedPreflight(in)
+		},
+		Deploy: deployProvider,
+		NewDeployer: func(catalogFolder string) domain.AgentDeployer {
+			opts := agentdeploy.Options{
+				ExecutablePath: deployOpts.ExecutablePath,
+				MosaicRoot:     deployOpts.MosaicRoot,
+				CatalogFolder:  catalogFolder,
+				Timeout:        deployOpts.Timeout,
+				Invoke:         deployOpts.Invoke,
+			}
+			return agentdeploy.New(opts)
+		},
+		CatalogFolder: cfg.CatalogFolder,
 
 		SelfPath:        cfg.SelfPath,
 		LoggerBundleDir: cfg.LoggerBundleDir,
@@ -497,6 +541,15 @@ type composedSuiteRunner struct {
 
 func (r composedSuiteRunner) Run(ctx context.Context, p preflight.Plan, sink domain.ProgressSink) (report.Result, error) {
 	rd := r.deps.RunnerDeps(r.ws, sink)
+
+	// Resolve the deployer for this run. When the plan's catalog folder
+	// differs from the process-wide default, construct a per-run deployer
+	// through the factory; otherwise rd.Deploy already carries the
+	// process-wide deployer from RunnerDeps.
+	if p.CatalogFolder != r.deps.CatalogFolder && r.deps.NewDeployer != nil {
+		rd.Deploy = r.deps.NewDeployer(p.CatalogFolder)
+	}
+
 	s := suite.New(suite.Options{
 		Runner:    testRunnerAdapter{deps: rd, retention: r.retention},
 		Progress:  sink,
@@ -612,15 +665,33 @@ func osWriteFile(path string, data []byte) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-// defaultReportPath returns the JSON report file location used when neither
-// --report-path nor --no-report is supplied. Both frontends default to the
-// same value, resolved once here so they cannot drift apart.
-func defaultReportPath() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = "."
+// defaultReportPath returns a collision-free JSON report filename incorporating
+// the suite name and a timestamp. suiteName is the suite's identifier
+// (sanitised for filesystem safety). now is the time source.
+// The filename follows the pattern report-<sanitized-suite>-<timestamp>.json
+// and is relative to the current working directory.
+func defaultReportPath(suiteName string, now time.Time) string {
+	sanitized := sanitizeSuiteName(suiteName)
+	timestamp := now.UTC().Format("20060102T150405")
+	return fmt.Sprintf("report-%s-%s.json", sanitized, timestamp)
+}
+
+// sanitizeSuiteName replaces characters that are invalid in filenames with
+// hyphens, so a suite name like "org/project/suite" becomes
+// "org-project-suite" in the report filename. This keeps all components of
+// the suite name visible while producing a valid, flat filename on all
+// platforms.
+func sanitizeSuiteName(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		switch r {
+		case '/', '\\', ':', '*', '?', '"', '<', '>', '|':
+			b.WriteRune('-')
+		default:
+			b.WriteRune(r)
+		}
 	}
-	return filepath.Join(cwd, "report.json")
+	return b.String()
 }
 
 func cliOptions(d Deps, stdout, stderr io.Writer) cli.Options {
@@ -646,8 +717,15 @@ func cliOptions(d Deps, stdout, stderr io.Writer) cli.Options {
 		// cannot accept a model identifier for a harness the binary cannot wire.
 		Models: supportedModelCatalogs(),
 
-		DefaultReportPath: defaultReportPath(),
-		WriteFile:         osWriteFile,
+		// ReportPathFor encodes the actual suite name and current time in the
+		// report filename. The CLI parses the suite path from the invocation at
+		// run time, so only the composition root needs to supply the naming
+		// function here — the DefaultReportPath fallback is never reached when
+		// ReportPathFor is set.
+		ReportPathFor: func(suitePath string) string {
+			return defaultReportPath(filepath.Base(suitePath), time.Now())
+		},
+		WriteFile: osWriteFile,
 	}
 }
 
@@ -684,7 +762,19 @@ func tuiOptions(d Deps, suites []string) (tui.Options, error) {
 		// must not be selectable here either.
 		Models: supportedModelCatalogs(),
 
-		ReportPath: defaultReportPath(),
-		WriteFile:  osWriteFile,
+		ReportPath: defaultReportPath("placeholder", time.Now()),
+
+		// ReportPathFor encodes the selected suite name and current time in the
+		// report filename when a run starts. The placeholder above is what the
+		// suite-select screen shows before a suite is chosen; the actual
+		// per-suite filename is computed here at the moment the user confirms a
+		// run, so repeated runs of the same suite produce distinct report files.
+		ReportPathFor: func(suitePath string) string {
+			return defaultReportPath(filepath.Base(suitePath), time.Now())
+		},
+		WriteFile: osWriteFile,
+
+		// Process-wide default catalog folder, editable in TUI.
+		CatalogFolder: d.CatalogFolder,
 	}, nil
 }

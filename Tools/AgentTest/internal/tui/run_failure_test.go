@@ -49,7 +49,7 @@ func runFailureResult(suiteID, testID string) report.Result {
 		Duration: time.Second,
 	}
 	tr := report.TestReport{TestID: testID, Runs: []report.RunReport{run}}
-	return report.Build(suiteID, time.Now(), time.Now(), []report.TestReport{tr})
+	return report.Build(suiteID, time.Now(), time.Now(), []report.TestReport{tr}, "")
 }
 
 // tuiStubStructuredFailure is a test-local error type that satisfies the

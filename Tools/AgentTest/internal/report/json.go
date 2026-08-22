@@ -24,6 +24,10 @@ type wireResult struct {
 	Counts                 map[string]int   `json:"counts"`
 	TotalCost              wireCost         `json:"total_cost"`
 	InfrastructureFailures int              `json:"infrastructure_failures"`
+
+	// CatalogFolder is the agent catalog directory used for this run.
+	// Additive-only: new field, never removed or retyped.
+	CatalogFolder string `json:"catalog_folder"`
 }
 
 type wireTestReport struct {
@@ -140,6 +144,7 @@ func toWireResult(r Result) wireResult {
 		Counts:                 counts,
 		TotalCost:              toWireCost(r.TotalCost),
 		InfrastructureFailures: r.InfrastructureFailures,
+		CatalogFolder:          r.CatalogFolder,
 	}
 }
 

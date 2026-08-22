@@ -112,7 +112,17 @@ func resolveWiringConfig(args []string) WiringConfig {
 	}
 	selfDir := filepath.Dir(selfPath)
 
+	mosaicRoot, mosaicRootProvenance := resolveConfiguredPathWithProvenance(
+		args, "--mosaic-root", "MOSAIC_AGENT_TEST_MOSAIC_ROOT",
+		filepath.Join(selfDir, "../../.."), "selfDir/../../..",
+	)
+
 	return WiringConfig{
+		// SelfDir is the anchor for every binary-relative default. It is
+		// resolved once here and shared so no consumer duplicates the
+		// os.Executable()/filepath.Dir computation.
+		SelfDir: selfDir,
+
 		// The default names the shared CLI-harness catalog's Claude Code
 		// identity, not an adapter package's own constant, so the resolved
 		// default cannot silently diverge from the catalog. The resolved
@@ -150,16 +160,19 @@ func resolveWiringConfig(args []string) WiringConfig {
 		// AgentTest module directory, itself inside Tools/), so the default
 		// resolves the repository root without requiring a flag or an
 		// environment variable. An explicit --mosaic-root always wins.
-		MosaicRoot: resolveConfiguredPath(
-			args, "--mosaic-root", "MOSAIC_AGENT_TEST_MOSAIC_ROOT",
-			filepath.Join(selfDir, "../../.."),
-		),
-		// CatalogFolder defaults to empty, meaning "do not override" — the
-		// deploy tool resolves its own catalogue under its own root. A run
-		// against the test catalogue supplies an explicit path here.
+		// MosaicRootProvenance records which tier produced the value so it can
+		// be embedded verbatim in delegate-tool failure diagnostics.
+		MosaicRoot:           mosaicRoot,
+		MosaicRootProvenance: mosaicRootProvenance,
+		// CatalogFolder defaults to the MosaicRoot-anchored test-stub catalog
+		// directory. This deliberately deviates from the selfDir anchor used
+		// by LoggerBundleDir, CostToolPath, and DeployToolPath, because the
+		// test-stub catalog lives in the source tree, not in dist/. The
+		// --catalog-folder flag and MOSAIC_AGENT_TEST_CATALOG_FOLDER env var
+		// overrides take precedence via resolveConfiguredPath.
 		CatalogFolder: resolveConfiguredPath(
 			args, "--catalog-folder", "MOSAIC_AGENT_TEST_CATALOG_FOLDER",
-			"",
+			filepath.Join(mosaicRoot, "Tools", "AgentTest", "catalog"),
 		),
 		// DeployScratchRoot is a per-process path under os.TempDir(). Nothing
 		// is written there (dry-run suppresses the write and directory
@@ -171,6 +184,27 @@ func resolveWiringConfig(args []string) WiringConfig {
 		Diag:          os.Stderr, // never stdout: stdout carries the machine-readable report in --format json
 	}
 }
+
+// suitesRootFrom returns the resolved suite-discovery root directory for a TUI
+// invocation. When args contains a --suites flag, that path is returned
+// unconditionally. Otherwise the default is selfDir/.. — one level above the
+// running binary's own directory — which is the AgentTest module root in a
+// correctly staged distribution. The current working directory is never
+// consulted; suite discovery anchors to the binary location, not CWD.
+//
+// FR-3: no environment variable override; precedence is flag > default only.
+func suitesRootFrom(args []string, selfDir string) string {
+	if v := scanFlag(args, "--suites", ""); v != "" {
+		return v
+	}
+	return filepath.Join(selfDir, "..")
+}
+
+// ConfigProvenance records which resolution tier produced a configured
+// path value. It is a human-readable string suitable for embedding in a
+// diagnostic message, e.g. "--mosaic-root default: selfDir/../../..",
+// "--mosaic-root flag", "--mosaic-root env: MOSAIC_AGENT_TEST_MOSAIC_ROOT".
+type ConfigProvenance string
 
 // resolveConfiguredPath resolves one configurable path through the
 // three-tier precedence every override in this binary follows: a CLI flag
@@ -184,6 +218,31 @@ func resolveConfiguredPath(args []string, flagName, envName, def string) string 
 		return v
 	}
 	return def
+}
+
+// resolveConfiguredPathWithProvenance resolves one configurable path
+// through the same three-tier precedence as resolveConfiguredPath and
+// additionally reports which tier produced the value. The provenance
+// string is human-readable and includes the flag name and, for the
+// default tier, the literal default expression.
+//
+// defExpr is the human-readable expression for the default value
+// (e.g. "selfDir/../../.."), distinct from def which is the evaluated
+// filepath. defExpr appears in the provenance string only when the
+// default tier is selected.
+func resolveConfiguredPathWithProvenance(
+	args []string,
+	flagName, envName string,
+	def string,
+	defExpr string,
+) (value string, provenance ConfigProvenance) {
+	if v := scanFlag(args, flagName, ""); v != "" {
+		return v, ConfigProvenance(flagName + " flag")
+	}
+	if v := os.Getenv(envName); v != "" {
+		return v, ConfigProvenance(flagName + " env: " + envName)
+	}
+	return def, ConfigProvenance(flagName + " default: " + defExpr)
 }
 
 // wiringFailureExitCode maps a buildDeps failure onto the CLI's own exit
@@ -207,20 +266,14 @@ func runCLIMode(args []string) int {
 }
 
 func runTUIMode(args []string) int {
-	d, err := buildDeps(resolveWiringConfig(args))
+	cfg := resolveWiringConfig(args)
+	d, err := buildDeps(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mosaic-agent-test: %v\n", err)
 		return wiringFailureExitCode(err)
 	}
 
-	suitesRoot := scanFlag(args, "--suites", "")
-	if suitesRoot == "" {
-		cwd, cwdErr := os.Getwd()
-		if cwdErr != nil {
-			cwd = "."
-		}
-		suitesRoot = cwd
-	}
+	suitesRoot := suitesRootFrom(args, cfg.SelfDir)
 
 	opts, err := tuiOptions(d, discoverSuites(suitesRoot))
 	if err != nil {

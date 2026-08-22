@@ -117,6 +117,9 @@ func testDeps(t *testing.T) Deps {
 		Clock:     fakeClock{t: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
 		Preflight: preflight.Validate,
 		Deploy:    fakeDeployer{},
+		NewDeployer: func(catalogFolder string) domain.AgentDeployer {
+			return fakeDeployer{}
+		},
 
 		SelfPath:        "C:/bin/mosaic-agent-test.exe",
 		LoggerBundleDir: "C:/bundles/logger",
@@ -125,6 +128,7 @@ func testDeps(t *testing.T) Deps {
 		HarnessID:     "claude-code",
 		FixtureRoot:   "C:/fixtures",
 		WorkspaceRoot: "C:/workspaces",
+		CatalogFolder: "C:/catalog",
 	}
 }
 
@@ -152,6 +156,7 @@ func TestBuildDeps_PopulatesEveryField_OnSuccess(t *testing.T) {
 		CostToolPath:    "C:/bin/mosaic-log-analyzer.exe",
 		CostTimeout:     30 * time.Second,
 		Diag:            new(discardWriter),
+		CatalogFolder:   "C:/catalog",
 	}
 
 	d, err := buildDeps(cfg)

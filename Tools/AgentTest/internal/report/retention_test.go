@@ -45,7 +45,7 @@ func retainedPathResult(path string) report.Result {
 				},
 			},
 		},
-	})
+	}, "")
 }
 
 func TestRenderText_PrintsTheRetainedSandboxPath_WhenSet(t *testing.T) {

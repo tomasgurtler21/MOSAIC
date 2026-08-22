@@ -341,6 +341,9 @@ func resolveReportPath(inv parsedInvocation, o Options) (string, error) {
 		}
 		return v, nil
 	}
+	if o.ReportPathFor != nil {
+		return o.ReportPathFor(inv.suitePath), nil
+	}
 	return o.DefaultReportPath, nil
 }
 
@@ -410,6 +413,11 @@ func runCommand(ctx context.Context, inv parsedInvocation, o Options) int {
 		fmt.Fprintf(o.Stderr, "error: %v\n", err)
 		return ExitFailure
 	}
+
+	// Record the effective repetitions count in the result so the text renderer
+	// can surface it in the report header. This gives the user a confirmation
+	// of the configured value without requiring them to examine the suite file.
+	result.EffectiveRepetitions = in.Overrides.Repetitions
 
 	if err := renderResult(o.Stdout, format, result); err != nil {
 		fmt.Fprintf(o.Stderr, "error: rendering the report: %v\n", err)

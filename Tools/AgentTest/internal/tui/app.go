@@ -85,8 +85,23 @@ type Options struct {
 	// composition root resolves the same default the CLI uses.
 	ReportPath string
 
+	// ReportPathFor, when non-nil, is called with the selected suite path when
+	// a run is about to start to compute the actual report file location. It is
+	// only called when the user has not manually edited the path since the model
+	// was constructed (i.e. the current path still matches the initial
+	// ReportPath). This lets the composition root supply a function that encodes
+	// the suite name and current timestamp in the filename for each run, so
+	// repeated runs of the same suite produce distinct report files.
+	ReportPathFor func(suitePath string) string
+
 	// WriteFile writes the JSON report file. See WriteFileFunc.
 	WriteFile WriteFileFunc
+
+	// CatalogFolder is the initial/default catalog folder path, shown on
+	// the suite-select screen and editable there before a run starts. The
+	// composition root resolves the same default the CLI uses
+	// (WiringConfig.CatalogFolder).
+	CatalogFolder string
 }
 
 // Screen names one of the screens this frontend presents.
@@ -185,6 +200,20 @@ type Model struct {
 	// suite-select screen's toggle affordance (Stage 7).
 	retention domain.RetentionPolicy
 
+	// repetitions is the user-configured override for the number of repetitions
+	// per test. When nil, the suite's authored default applies. The suite-select
+	// screen shows this value; it threads through preflight.Overrides.Repetitions
+	// when a run starts, following the same pattern as selectedSubjectModel and
+	// selectedStubModel.
+	repetitions *int
+
+	// catalogFolder is the catalog folder currently in force. Starts as
+	// Options.CatalogFolder; the suite-select screen shows it and allows
+	// editing before a run starts. When it differs from Options.CatalogFolder
+	// at run-start, it flows as a per-run override through
+	// preflight.Overrides.CatalogFolder.
+	catalogFolder string
+
 	// reportPath is the JSON report file path currently in force. Starts as
 	// Options.ReportPath; the suite-select screen's inline-edit affordance may
 	// change it before a run starts. The value at run-start is what WriteFile
@@ -261,6 +290,7 @@ func NewModel(o Options) Model {
 		selectedHarness: o.Harness,
 		retention:       o.Retention,
 		reportPath:      o.ReportPath,
+		catalogFolder:   o.CatalogFolder,
 	}
 	if len(o.Harnesses) > 0 {
 		m.screen = ScreenHarnessSelect
@@ -670,14 +700,35 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 
 	suitePath := m.opts.Suites[m.suiteCursor]
 
+	// Recompute the report path from the selected suite name when the composition
+	// root has supplied a path function and the user has not manually edited the
+	// path (i.e. it still matches the initial Options value). This gives each run
+	// a suite-named, timestamped report filename instead of the placeholder that
+	// was shown on the suite-select screen before a suite was chosen.
+	if m.opts.ReportPathFor != nil && m.reportPath == m.opts.ReportPath {
+		m.reportPath = m.opts.ReportPathFor(suitePath)
+	}
+
 	var plan preflight.Plan
 	if m.opts.Preflight != nil {
+		// Build the catalog-folder override: only set it when the user
+		// changed the value from the initial Options.CatalogFolder default,
+		// so a nil pointer means "use the process-wide default".
+		var catOverride *string
+		if m.catalogFolder != m.opts.CatalogFolder {
+			v := m.catalogFolder
+			catOverride = &v
+		}
+
 		resolved, rpt := m.opts.Preflight(preflight.Input{
-			SuitePath: suitePath,
-			HarnessID: m.selectedHarness,
+			SuitePath:     suitePath,
+			HarnessID:     m.selectedHarness,
+			CatalogFolder: m.opts.CatalogFolder,
 			Overrides: preflight.Overrides{
-				SubjectModel: m.selectedSubjectModel,
-				StubModel:    m.selectedStubModel,
+				SubjectModel:  m.selectedSubjectModel,
+				StubModel:     m.selectedStubModel,
+				Repetitions:   m.repetitions,
+				CatalogFolder: catOverride,
 			},
 		})
 		if rpt.HasErrors() {
@@ -964,11 +1015,24 @@ func (m Model) Retention() domain.RetentionPolicy {
 	return m.retention
 }
 
+// Repetitions reports the override repetitions count configured on this
+// Model, or nil when no override is set (the suite's authored default applies).
+func (m Model) Repetitions() *int {
+	return m.repetitions
+}
+
 // ReportPath reports the JSON report file path currently in force —
 // Options.ReportPath until the suite-select screen's inline-edit affordance
 // changes it. An empty string means "suppressed: no file will be written".
 func (m Model) ReportPath() string {
 	return m.reportPath
+}
+
+// CatalogFolder reports the catalog folder currently in force —
+// Options.CatalogFolder until the suite-select screen's edit affordance
+// changes it. An empty string means "deploy tool resolves its own catalogue".
+func (m Model) CatalogFolder() string {
+	return m.catalogFolder
 }
 
 // EditingReportPath reports whether the suite-select screen's inline report-

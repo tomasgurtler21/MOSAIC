@@ -33,6 +33,20 @@ type Result struct {
 	// fault, kept separate from the verdict counts because it is a statement
 	// about the tool rather than about the subject.
 	InfrastructureFailures int
+
+	// EffectiveRepetitions, when non-nil, is the repetitions count that was in
+	// effect for this run — either a CLI/TUI override or the suite's authored
+	// default as resolved by the caller. Nil means the caller did not record it.
+	// The text renderer surfaces this in the report header so a user can
+	// confirm the value without examining the suite file.
+	EffectiveRepetitions *int
+
+	// CatalogFolder is the agent catalog directory that was used for
+	// this run's agent deployments. Suite-level (not per-run on
+	// RunReport) because the catalog folder is process-wide and
+	// constant for all runs in a single invocation. Empty means no
+	// catalog folder was configured (production catalog was used).
+	CatalogFolder string
 }
 
 // TestReport is one test's aggregate outcome plus its per-repetition detail.
@@ -93,7 +107,7 @@ type SubjectFailure struct {
 // Counts, TotalCost and InfrastructureFailures are derived here, once, from
 // each test's aggregate — the same rule report.Result documents: no other
 // consumer computes a count or a total of its own.
-func Build(suiteID string, started, finished time.Time, tests []TestReport) Result {
+func Build(suiteID string, started, finished time.Time, tests []TestReport, catalogFolder string) Result {
 	counts := map[domain.Verdict]int{}
 	total := domain.CostReport{Attribution: domain.AttributionAttributed}
 	infra := 0
@@ -115,6 +129,7 @@ func Build(suiteID string, started, finished time.Time, tests []TestReport) Resu
 		Counts:                 counts,
 		TotalCost:              total,
 		InfrastructureFailures: infra,
+		CatalogFolder:          catalogFolder,
 	}
 }
 

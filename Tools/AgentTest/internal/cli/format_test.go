@@ -76,7 +76,7 @@ func TestJSONFormat_ProgressAndDiagnosticsGoToStderr(t *testing.T) {
 // well-formed rather than a special case the caller has to branch on.
 func TestJSONFormat_EmptySuite(t *testing.T) {
 	stdout, stderr := &bytes.Buffer{}, &bytes.Buffer{}
-	empty := report.Build("empty-suite", time.Time{}, time.Time{}, nil)
+	empty := report.Build("empty-suite", time.Time{}, time.Time{}, nil, "")
 	runner := &fakeSuiteRunner{result: empty}
 	opts := baseOptions(stdout, stderr, scriptedPreflight(preflight.Plan{}, cleanReport(), nil), runner)
 

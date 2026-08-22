@@ -206,6 +206,128 @@ MOSAIC_AGENT_TEST_MOSAIC_ROOT=C:\AI\MOSAIC\MOSAIC
 
 ---
 
+## 7. Sandbox Location and Retention
+
+Each test run creates an isolated sandbox directory where the subject agent and its stub collaborators are deployed before the run starts.
+
+### Sandbox naming scheme
+
+Every sandbox lives under the workspace root and follows this layout:
+
+```
+<workspaceRoot>/
+  <RunID>-<TestID>-<RunNumber>/
+    subject/      <- subject agent deployment
+    control/      <- stub collaborator deployment
+```
+
+`RunID` is a UUID assigned when the suite run starts. `TestID` is the test's identifier from the suite file. `RunNumber` is a 1-based counter for the current repetition (always `1` unless `--repetitions` is set above 1).
+
+### Default workspace root
+
+The workspace root defaults to:
+
+```
+<os.TempDir()>/mosaic-agent-test-workspaces
+```
+
+On Windows this resolves to:
+
+```
+C:\Users\<user>\AppData\Local\Temp\mosaic-agent-test-workspaces
+```
+
+On Linux it resolves to `/tmp/mosaic-agent-test-workspaces`.
+
+To override the workspace root, pass `--workspace-root` with an absolute path:
+
+```
+mosaic-agent-test.exe --workspace-root D:\test-sandboxes run my-suite.suite.yaml
+```
+
+### Retention cycle
+
+The `--retention` flag (or the TUI retention toggle) controls whether sandbox directories survive after a run completes. The setting cycles through three states:
+
+| State | Behaviour |
+|-------|-----------|
+| `Never` (default) | Every sandbox is deleted after its run, regardless of outcome. |
+| `OnFailure` | Sandboxes from failing runs are kept; sandboxes from passing runs are deleted. |
+| `Always` | Every sandbox is kept after its run, regardless of outcome. |
+
+In the TUI, press the retention key to advance through the cycle: `Never → OnFailure → Always → Never → ...`. The current state is shown on the run screen.
+
+A retained sandbox is printed to the report as the sandbox path, so you can inspect the deployed agents and conversation transcripts after the fact.
+
+---
+
+## 8. Worked Example: Missing pricing.yaml
+
+### Symptom
+
+A run completes but reports zero cost for every test, or the cost-analysis step fails with an error similar to:
+
+```
+error loading pricing config: open MosaicLogAnalyzer\config\pricing.yaml: The system cannot find the path specified.
+```
+
+### Why It Happens
+
+The cost-analysis tool (`mosaic-log-analyzer`) looks for pricing configuration at:
+
+```
+<MosaicRoot>/MosaicLogAnalyzer/config/pricing.yaml
+```
+
+`MosaicRoot` defaults to `selfDir/../../..` — three directories above the binary, which resolves to the **repository root**, not to `dist/`. When the binary lives at `Tools/AgentTest/dist/mosaic-agent-test.exe`, the default resolution is:
+
+```
+selfDir      = Tools\AgentTest\dist
+selfDir/..   = Tools\AgentTest
+selfDir/../..= Tools
+selfDir/../../.. = <repo root>
+```
+
+So the expected pricing file path is:
+
+```
+<repo root>\MosaicLogAnalyzer\config\pricing.yaml
+```
+
+A common mistake is placing the file at:
+
+```
+Tools\AgentTest\dist\MosaicLogAnalyzer\config\pricing.yaml
+```
+
+This is inside `dist/`, not at the repository root. `MosaicRoot` points at the repository root, so the cost tool never looks inside `dist/` for its config files.
+
+### How to Fix It
+
+**Option 1 — Place the file at the correct location.** Copy `pricing.yaml` to the path the tool actually reads:
+
+```
+<repo root>\MosaicLogAnalyzer\config\pricing.yaml
+```
+
+If the `MosaicLogAnalyzer/config/` directory does not yet exist at the repository root, create it first.
+
+**Option 2 — Override MosaicRoot.** If you cannot modify the repository root (e.g. a read-only installation), point `--mosaic-root` at the directory that contains your `MosaicLogAnalyzer/config/pricing.yaml`:
+
+```
+mosaic-agent-test.exe --mosaic-root D:\my-config-root run my-suite.suite.yaml
+```
+
+Or set the environment variable for persistent configuration:
+
+```
+MOSAIC_AGENT_TEST_MOSAIC_ROOT=D:\my-config-root
+```
+
+**Option 1 is the standard path.** The repository already contains `MosaicLogAnalyzer/config/` under the source tree; `pricing.yaml` belongs there alongside the rest of the log-analyser configuration.
+
+---
+
 ## Related Documents
 
 - `Tools/AgentTest/docs/Design.md` — architecture and design decisions

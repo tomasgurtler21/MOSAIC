@@ -110,9 +110,17 @@ type Options struct {
 	Models []commonharness.ModelCatalog
 
 	// DefaultReportPath is the JSON report file location used when
-	// --report-path is absent. Resolved by the composition root so both
-	// frontends default to the same place.
+	// --report-path is absent and ReportPathFor is nil. Resolved by the
+	// composition root so both frontends default to the same place.
 	DefaultReportPath string
+
+	// ReportPathFor, when non-nil, is called with the suite path from the
+	// parsed invocation to compute the default report file location. It takes
+	// precedence over DefaultReportPath so the composition root can supply a
+	// function that encodes the suite name and current timestamp in the filename,
+	// making each run's report uniquely identifiable without a fixed-name
+	// override. When nil, DefaultReportPath is used as the fallback.
+	ReportPathFor func(suitePath string) string
 
 	// WriteFile writes the JSON report file. See WriteFileFunc.
 	WriteFile WriteFileFunc

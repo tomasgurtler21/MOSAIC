@@ -214,7 +214,7 @@ func passingResult(suiteID string) report.Result {
 				},
 			},
 		},
-	})
+	}, "")
 }
 
 // failedTestResult is a report.Result whose single test failed an
@@ -248,7 +248,7 @@ func failedTestResult(suiteID string) report.Result {
 				},
 			},
 		},
-	})
+	}, "")
 }
 
 // infrastructureFaultResult is a report.Result whose single test ended by a
@@ -275,7 +275,7 @@ func infrastructureFaultResult(suiteID string) report.Result {
 				},
 			},
 		},
-	})
+	}, "")
 }
 
 // infrastructureFaultResultFromRunnerError is a report.Result whose single
@@ -307,7 +307,7 @@ func infrastructureFaultResultFromRunnerError(suiteID string) report.Result {
 				},
 			},
 		},
-	})
+	}, "")
 }
 
 func durationPtr(d time.Duration) *time.Duration { return &d }

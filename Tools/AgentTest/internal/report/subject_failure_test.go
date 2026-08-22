@@ -43,7 +43,7 @@ func subjectFailureResult(subject report.SubjectFailure) report.Result {
 				},
 			},
 		},
-	})
+	}, "")
 }
 
 func TestRenderText_PrintsSubjectExitCodeAndStderr_OnNonZeroExit(t *testing.T) {

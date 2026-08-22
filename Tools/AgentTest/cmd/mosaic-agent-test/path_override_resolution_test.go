@@ -349,20 +349,44 @@ func TestResolveWiringConfig_CatalogFolder_EnvWinsOverDefault(t *testing.T) {
 	}
 }
 
-// TestResolveWiringConfig_CatalogFolder_DefaultsToEmpty asserts that with
-// neither a flag nor the environment variable set, CatalogFolder defaults to
-// the empty string. An empty CatalogFolder means "do not override" — the
-// --catalog-folder flag is not passed to the deployment tool, which then
-// resolves its own catalogue under its own root. A correctly staged
-// distribution therefore works with no flag and no environment variable,
-// exactly as MosaicRoot does.
-func TestResolveWiringConfig_CatalogFolder_DefaultsToEmpty(t *testing.T) {
+// TestResolveWiringConfig_CatalogFolder_DefaultsToMosaicRootAnchored asserts
+// that with neither a flag nor the environment variable set, CatalogFolder
+// defaults to <MosaicRoot>/Tools/AgentTest/catalog — anchored to MosaicRoot,
+// not to selfDir, because the test-stub catalog lives in the source tree. A
+// correctly staged AgentTest distribution therefore points at the bundled test
+// catalog without requiring a flag or environment variable.
+func TestResolveWiringConfig_CatalogFolder_DefaultsToMosaicRootAnchored(t *testing.T) {
 	t.Setenv("MOSAIC_AGENT_TEST_CATALOG_FOLDER", "")
+	t.Setenv("MOSAIC_AGENT_TEST_MOSAIC_ROOT", "")
 
 	cfg := resolveWiringConfig([]string{"run", "suite.yaml"})
 
-	if cfg.CatalogFolder != "" {
-		t.Errorf("resolveWiringConfig(...).CatalogFolder = %q, want empty string (empty means the deploy tool resolves its own catalogue; a correctly staged distribution needs no flag and no variable)", cfg.CatalogFolder)
+	// The expected default mirrors what resolveWiringConfig itself computes:
+	// mosaicRoot = filepath.Join(selfDir, "../../.."), then
+	// CatalogFolder = filepath.Join(mosaicRoot, "Tools", "AgentTest", "catalog").
+	selfDir := expectedSelfDir(t)
+	want := filepath.Join(selfDir, "..", "..", "..", "Tools", "AgentTest", "catalog")
+
+	if cfg.CatalogFolder != want {
+		t.Errorf("resolveWiringConfig(...).CatalogFolder = %q, want the MosaicRoot-anchored default %q (the test-stub catalog lives in the source tree, not in dist/, so its default must be anchored to MosaicRoot rather than selfDir)", cfg.CatalogFolder, want)
+	}
+}
+
+// TestResolveWiringConfig_CatalogFolder_Default_IsAbsolutePath asserts that
+// the default CatalogFolder value is a non-empty absolute path, since it is
+// derived from the binary's own location. An empty or relative default would
+// silently misroute deployments.
+func TestResolveWiringConfig_CatalogFolder_Default_IsAbsolutePath(t *testing.T) {
+	t.Setenv("MOSAIC_AGENT_TEST_CATALOG_FOLDER", "")
+	t.Setenv("MOSAIC_AGENT_TEST_MOSAIC_ROOT", "")
+
+	cfg := resolveWiringConfig([]string{"run", "suite.yaml"})
+
+	if cfg.CatalogFolder == "" {
+		t.Fatal("resolveWiringConfig(...).CatalogFolder = empty string, want a non-empty MosaicRoot-anchored path to the bundled test catalog")
+	}
+	if !filepath.IsAbs(cfg.CatalogFolder) {
+		t.Errorf("resolveWiringConfig(...).CatalogFolder = %q, want an absolute path (the default is anchored to the binary location, not the working directory)", cfg.CatalogFolder)
 	}
 }
 

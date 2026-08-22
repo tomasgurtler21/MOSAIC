@@ -3,6 +3,7 @@ package evaluate
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"mosaic-agent-test/internal/domain"
 )
@@ -29,10 +30,41 @@ func observedSequence(records []domain.LogRecord) []observedStep {
 	return out
 }
 
+// formatObservedKeys returns a bracketed, comma-separated list of identity
+// keys for observed steps at/after fromPos. Returns "(none)" when no steps
+// exist at or after that position.
+func formatObservedKeys(observed []observedStep, fromPos int) string {
+	var keys []string
+	for i := fromPos; i < len(observed); i++ {
+		keys = append(keys, observed[i].Identity.Key())
+	}
+	if len(keys) == 0 {
+		return "(none)"
+	}
+	return "[" + strings.Join(keys, ", ") + "]"
+}
+
+// formatDeclaredSteps returns a bracketed, comma-separated summary of the
+// declared sequence steps for use in the Expected diagnostic field.
+func formatDeclaredSteps(steps []domain.SequenceStep) string {
+	var parts []string
+	for _, s := range steps {
+		if s.Identity != nil {
+			parts = append(parts, s.Identity.Key())
+		} else {
+			parts = append(parts, fmt.Sprintf("group:%s", s.Group))
+		}
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
 // evaluateSequence matches the observed invocation sequence against a
 // declared SequenceAssertion. Order between steps decides the match; order
 // within a declared parallel group does not.
 func evaluateSequence(observed []observedStep, want domain.SequenceAssertion) domain.AssertionResult {
+	expected := formatDeclaredSteps(want.Steps)
+	actual := formatObservedKeys(observed, 0)
+
 	pointer := 0
 	for _, step := range want.Steps {
 		switch {
@@ -45,10 +77,18 @@ func evaluateSequence(observed []observedStep, want domain.SequenceAssertion) do
 				}
 			}
 			if idx == -1 {
-				return sequenceFail(fmt.Sprintf("expected invocation %s not found at or after position %d", step.Identity.Key(), pointer))
+				detail := fmt.Sprintf(
+					"expected invocation %s not found at or after position %d; observed at/after position %d: %s",
+					step.Identity.Key(), pointer, pointer, formatObservedKeys(observed, pointer),
+				)
+				return sequenceFail(expected, actual, detail)
 			}
 			if want.Exact && idx != pointer {
-				return sequenceFail(fmt.Sprintf("exact match requires %s at position %d, but it first appears at position %d", step.Identity.Key(), pointer, idx))
+				detail := fmt.Sprintf(
+					"exact match requires %s at position %d, but it first appears at position %d; observed at/after position %d: %s",
+					step.Identity.Key(), pointer, idx, pointer, formatObservedKeys(observed, pointer),
+				)
+				return sequenceFail(expected, actual, detail)
 			}
 			pointer = idx + 1
 
@@ -61,10 +101,18 @@ func evaluateSequence(observed []observedStep, want domain.SequenceAssertion) do
 				}
 			}
 			if start == -1 {
-				return sequenceFail(fmt.Sprintf("declared parallel group %q not found at or after position %d", step.Group, pointer))
+				detail := fmt.Sprintf(
+					"declared parallel group %q not found at or after position %d; observed at/after position %d: %s",
+					step.Group, pointer, pointer, formatObservedKeys(observed, pointer),
+				)
+				return sequenceFail(expected, actual, detail)
 			}
 			if want.Exact && start != pointer {
-				return sequenceFail(fmt.Sprintf("exact match requires parallel group %q at position %d, but it first appears at position %d", step.Group, pointer, start))
+				detail := fmt.Sprintf(
+					"exact match requires parallel group %q at position %d, but it first appears at position %d; observed at/after position %d: %s",
+					step.Group, pointer, start, pointer, formatObservedKeys(observed, pointer),
+				)
+				return sequenceFail(expected, actual, detail)
 			}
 			end := start
 			for end < len(observed) && observed[end].Group == step.Group {
@@ -72,30 +120,46 @@ func evaluateSequence(observed []observedStep, want domain.SequenceAssertion) do
 			}
 			runLen := end - start
 			if runLen != len(step.Members) {
-				return sequenceFail(fmt.Sprintf("parallel group %q observed with %d member(s), declared %d", step.Group, runLen, len(step.Members)))
+				detail := fmt.Sprintf(
+					"parallel group %q observed with %d member(s), declared %d; observed at/after position %d: %s",
+					step.Group, runLen, len(step.Members), pointer, formatObservedKeys(observed, pointer),
+				)
+				return sequenceFail(expected, actual, detail)
 			}
 			if !identityMultisetEqual(observed[start:end], step.Members) {
-				return sequenceFail(fmt.Sprintf("parallel group %q members do not match the declared set", step.Group))
+				detail := fmt.Sprintf(
+					"parallel group %q members do not match the declared set; observed at/after position %d: %s",
+					step.Group, pointer, formatObservedKeys(observed, pointer),
+				)
+				return sequenceFail(expected, actual, detail)
 			}
 			pointer = end
 		}
 	}
 
 	if want.Exact && pointer != len(observed) {
-		return sequenceFail(fmt.Sprintf("exact match requires nothing beyond the declared steps, but %d further invocation(s) were observed", len(observed)-pointer))
+		detail := fmt.Sprintf(
+			"exact match requires nothing beyond the declared steps, but %d further invocation(s) were observed; observed at/after position %d: %s",
+			len(observed)-pointer, pointer, formatObservedKeys(observed, pointer),
+		)
+		return sequenceFail(expected, actual, detail)
 	}
 
 	return domain.AssertionResult{
-		Class:   domain.ClassInvocationSequence,
-		Outcome: domain.AssertionPass,
+		Class:    domain.ClassInvocationSequence,
+		Outcome:  domain.AssertionPass,
+		Expected: expected,
+		Actual:   actual,
 	}
 }
 
-func sequenceFail(detail string) domain.AssertionResult {
+func sequenceFail(expected, actual, detail string) domain.AssertionResult {
 	return domain.AssertionResult{
-		Class:   domain.ClassInvocationSequence,
-		Outcome: domain.AssertionFail,
-		Detail:  detail,
+		Class:    domain.ClassInvocationSequence,
+		Outcome:  domain.AssertionFail,
+		Expected: expected,
+		Actual:   actual,
+		Detail:   detail,
 	}
 }
 

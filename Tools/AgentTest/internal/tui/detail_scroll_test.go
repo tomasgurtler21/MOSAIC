@@ -54,7 +54,7 @@ func modelAtDetailScreenWithManyAssertions(t *testing.T, termWidth, termHeight i
 		TestID: testID,
 		Runs:   []report.RunReport{run},
 	}
-	result := report.Build("suite-under-test", time.Now(), time.Now(), []report.TestReport{testReport})
+	result := report.Build("suite-under-test", time.Now(), time.Now(), []report.TestReport{testReport}, "")
 	runner := newFakeSuiteRunner().withResult(result)
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, runner))
 	m, _ = safeUpdate(t, m, tea.WindowSizeMsg{Width: termWidth, Height: termHeight})
@@ -169,7 +169,7 @@ func TestDetailScroll_CanReachLastLine(t *testing.T) {
 		Assertions: assertions,
 	}
 	result := report.Build("suite-under-test", time.Now(), time.Now(),
-		[]report.TestReport{{TestID: testID, Runs: []report.RunReport{run}}})
+		[]report.TestReport{{TestID: testID, Runs: []report.RunReport{run}}}, "")
 	runner := newFakeSuiteRunner().withResult(result)
 	m := NewModel(newFixtureOptions([]string{"suite.yaml"}, runner))
 	m, _ = safeUpdate(t, m, tea.WindowSizeMsg{Width: termWidth, Height: termHeight})
@@ -316,8 +316,7 @@ func TestDetailScroll_PositionResetsOnSelectionChange(t *testing.T) {
 		run := manyAssertionRun(id, 15)
 		return report.TestReport{TestID: id, Runs: []report.RunReport{run}}
 	}
-	result := report.Build("suite-under-test", time.Now(), time.Now(),
-		[]report.TestReport{makeTest("test-alpha"), makeTest("test-beta")})
+	result := report.Build("suite-under-test", time.Now(), time.Now(), []report.TestReport{makeTest("test-alpha"), makeTest("test-beta")}, "")
 	runner := newFakeSuiteRunner().withResult(result)
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, runner))
 	m, _ = safeUpdate(t, m, tea.WindowSizeMsg{Width: termWidth, Height: termHeight})

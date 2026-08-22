@@ -17,7 +17,6 @@ import (
 
 	tuicommon "mosaic-common/tui"
 
-	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/report"
 )
 
@@ -165,11 +164,19 @@ func (m Model) viewSuiteSelect() string {
 	b.WriteString("\n")
 	b.WriteString(tuicommon.Truncate(fmt.Sprintf("Retain sandbox: %s", m.retention), width))
 	b.WriteString("\n")
+	if m.repetitions != nil {
+		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Repetitions: %d", *m.repetitions), width))
+	} else {
+		b.WriteString(tuicommon.Truncate("Repetitions: suite default", width))
+	}
+	b.WriteString("\n")
 	if m.editingReportPath {
 		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Report [editing]: %s", m.reportPathDraft), width))
 	} else {
 		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Report: %s", m.reportPath), width))
 	}
+	b.WriteString("\n")
+	b.WriteString(tuicommon.Truncate(fmt.Sprintf("Catalog: %s", m.catalogFolder), width))
 
 	body := b.String()
 	if m.showFailureDetail && m.detailPane != nil {
@@ -308,10 +315,45 @@ func (m Model) viewDetail() string {
 		fmt.Sprintf("Duration: %s", run.Duration),
 		fmt.Sprintf("Cost: %.2f USD (%s)", run.Cost.TotalUSD, run.Cost.Attribution),
 	}
+
+	// Catalog folder (suite-level, from the terminal result model).
+	if m.result != nil && m.result.CatalogFolder != "" {
+		logicalLines = append(logicalLines, tuicommon.Wrap("Catalog: "+m.result.CatalogFolder, width))
+	}
+
+	// Retained sandbox path -- show explicitly even when absent so the user
+	// knows whether retention was active for this run.
+	if run.RetainedSandboxPath != "" {
+		logicalLines = append(logicalLines, tuicommon.Wrap("Sandbox: "+run.RetainedSandboxPath, width))
+	} else {
+		logicalLines = append(logicalLines, "Sandbox: no sandbox retained")
+	}
+
+	// All assertions with their full diagnostic fields, for both passing and
+	// failing outcomes. Data comes directly from report.RunReport -- no
+	// re-derivation here.
 	for _, a := range run.Assertions {
-		if a.Outcome == domain.AssertionFail {
-			logicalLines = append(logicalLines, tuicommon.Wrap("Failed assertion: "+a.Detail, width))
+		line := fmt.Sprintf("Assertion %s %s", a.Outcome, string(a.Class))
+		if a.Target != "" {
+			line += " [" + a.Target + "]"
 		}
+		if a.Expected != "" || a.Actual != "" {
+			line += fmt.Sprintf(": expected %q, got %q", a.Expected, a.Actual)
+		}
+		if a.Detail != "" {
+			line += " (" + a.Detail + ")"
+		}
+		logicalLines = append(logicalLines, tuicommon.Wrap(line, width))
+	}
+
+	// Failure reasons when present.
+	for _, reason := range run.Reasons {
+		logicalLines = append(logicalLines, fmt.Sprintf("Reason: %s", string(reason)))
+	}
+
+	// Run conditions when present.
+	for _, c := range run.Conditions {
+		logicalLines = append(logicalLines, tuicommon.Wrap(fmt.Sprintf("Condition %s: %s", c.Kind, c.Detail), width))
 	}
 
 	// Expand logical lines into physical lines: Wrap may introduce embedded

@@ -26,6 +26,12 @@ type Input struct {
 	// Overrides applied on top of suite defaults, from CLI flags.
 	Overrides Overrides
 
+	// CatalogFolder is the process-wide default catalog folder resolved
+	// by the composition root (WiringConfig.CatalogFolder). Preflight
+	// resolves Overrides.CatalogFolder against this to produce
+	// Plan.CatalogFolder.
+	CatalogFolder string
+
 	// Capabilities are the selected adapter's declared capabilities, supplied
 	// by the composition root. Preflight decides on these values alone; no
 	// harness name reaches a decision here.
@@ -53,6 +59,13 @@ type Input struct {
 	// rather than a constant so a test can assert the value the port received.
 	// Supplied by the composition root alongside Deploy.
 	DeployScratchRoot string
+
+	// MosaicRootProvenance is the human-readable description of which
+	// configuration tier produced the MosaicRoot value passed to the
+	// deployment tool. It is embedded in delegate-tool failure diagnostics
+	// so the user can identify which configuration to change.
+	// Supplied by the composition root.
+	MosaicRootProvenance string
 }
 
 // Overrides are CLI-flag-sourced values applied on top of a suite's
@@ -73,6 +86,15 @@ type Overrides struct {
 	// and means the stubs run on the subject's model.
 	SubjectModel string
 	StubModel    string
+
+	// CatalogFolder, when non-nil, overrides the process-wide default
+	// catalog folder for the run about to start. The pointed-to string
+	// is an absolute path to the catalog directory. A nil pointer means
+	// "use the process-wide default from WiringConfig.CatalogFolder".
+	//
+	// This follows the same pointer-means-override convention as
+	// Repetitions, Timeout, and TurnLimit.
+	CatalogFolder *string
 }
 
 // Plan is a fully resolved, cross-validated set of tests ready to run. It is
@@ -80,6 +102,13 @@ type Overrides struct {
 type Plan struct {
 	Suite domain.TestSuite
 	Tests []ResolvedTest
+
+	// CatalogFolder is the resolved catalog folder for this run: the
+	// override from Overrides.CatalogFolder if set, otherwise the
+	// process-wide default from Input.CatalogFolder (the WiringConfig
+	// value threaded through Input). The composition root uses this to
+	// decide whether a per-run deployer is needed.
+	CatalogFolder string
 }
 
 // ResolvedTest is one test definition plus its stub registry and the
@@ -112,6 +141,14 @@ type ResolvedTest struct {
 func Validate(in Input) (Plan, authoring.Report) {
 	var report authoring.Report
 	var plan Plan
+
+	// Resolve CatalogFolder unconditionally, before any early return.
+	// Every returned Plan -- even one accompanying a non-empty Report
+	// (e.g. the missing-suite early return) -- carries a resolved value.
+	plan.CatalogFolder = in.CatalogFolder
+	if in.Overrides.CatalogFolder != nil {
+		plan.CatalogFolder = *in.Overrides.CatalogFolder
+	}
 
 	suiteData, err := os.ReadFile(in.SuitePath)
 	if err != nil {
@@ -707,13 +744,24 @@ func checkDeploymentDeclarations(report *authoring.Report, defPath, defDir strin
 					addDeployToolProblem(report, renderErr)
 					return
 				}
-				report.Add(authoring.Diagnostic{
-					Severity: authoring.SeverityError,
-					Code:     "unrenderable-stub-definition",
-					Path:     defPath,
-					Pointer:  fmt.Sprintf("stub_agents[%d].source", si),
-					Message:  fmt.Sprintf("stub definition %q failed dry-run render: %v", sa.SourcePath, renderErr),
-				})
+				var re *agentdeploy.RenderError
+				if errors.As(renderErr, &re) {
+					report.Add(DelegateToolDiagnostic(FailureContext{
+						Operation:      "stub definition dry-run render",
+						Provenance:     in.MosaicRootProvenance,
+						DiagnosticCode: "unrenderable-stub-definition",
+						Path:           defPath,
+						Pointer:        fmt.Sprintf("stub_agents[%d].source", si),
+					}, re))
+				} else {
+					report.Add(authoring.Diagnostic{
+						Severity: authoring.SeverityError,
+						Code:     "unrenderable-stub-definition",
+						Path:     defPath,
+						Pointer:  fmt.Sprintf("stub_agents[%d].source", si),
+						Message:  fmt.Sprintf("stub definition %q failed dry-run render: %v", sa.SourcePath, renderErr),
+					})
+				}
 			}
 		}
 	}
@@ -745,19 +793,24 @@ func checkSubjectDeploy(report *authoring.Report, defPath string, def domain.Tes
 		return
 	}
 
-	// Deploy path: no structured reason codes — carry the tool's own message.
-	toolMsg := err.Error()
 	var de *agentdeploy.DeployError
 	if errors.As(err, &de) {
-		toolMsg = de.ToolMessage
+		report.Add(DelegateToolDiagnostic(FailureContext{
+			Operation:      "subject declaration dry-run deploy",
+			Provenance:     in.MosaicRootProvenance,
+			DiagnosticCode: "undeployable-subject-declaration",
+			Path:           defPath,
+			Pointer:        "subject",
+		}, de))
+		return
 	}
-
+	// Fallback for unexpected error types without structured failure fields.
 	report.Add(authoring.Diagnostic{
 		Severity: authoring.SeverityError,
 		Code:     "undeployable-subject-declaration",
 		Path:     defPath,
 		Pointer:  "subject",
-		Message:  fmt.Sprintf("subject declaration failed dry-run deploy: %s", toolMsg),
+		Message:  fmt.Sprintf("subject declaration failed dry-run deploy: %s", err.Error()),
 	})
 }
 
@@ -826,13 +879,13 @@ func checkSubjectRender(report *authoring.Report, defPath string, def domain.Tes
 		// is treated as unrenderable-subject-declaration. This is the
 		// forward-compatibility rule: an unrecognised reason degrades to a less
 		// specific diagnostic rather than to a wrong one.
-		report.Add(authoring.Diagnostic{
-			Severity: authoring.SeverityError,
-			Code:     "unrenderable-subject-declaration",
-			Path:     defPath,
-			Pointer:  "subject",
-			Message:  fmt.Sprintf("subject declaration failed dry-run render: %s", re.ToolMessage),
-		})
+		report.Add(DelegateToolDiagnostic(FailureContext{
+			Operation:      "subject declaration dry-run render",
+			Provenance:     in.MosaicRootProvenance,
+			DiagnosticCode: "unrenderable-subject-declaration",
+			Path:           defPath,
+			Pointer:        "subject",
+		}, re))
 		return
 	}
 

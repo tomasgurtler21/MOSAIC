@@ -6,5 +6,6 @@
   "tests": [],
   "counts": {},
   "total_cost": { "total_usd": 0, "attribution": "attributed", "detail": "" },
-  "infrastructure_failures": 0
+  "infrastructure_failures": 0,
+  "catalog_folder": ""
 }
