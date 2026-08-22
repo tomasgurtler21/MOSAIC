@@ -47,6 +47,7 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 			SubjectVersion:      ev.SubjectVersion,
 			SubjectModel:        ev.SubjectModel,
 			StubModel:           ev.StubModel,
+			TerminationReason:   string(ev.SubjectResult.Disposition),
 		}
 	}
 
@@ -119,6 +120,7 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 		SubjectVersion:      ev.SubjectVersion,
 		SubjectModel:        ev.SubjectModel,
 		StubModel:           ev.StubModel,
+		TerminationReason:   string(ev.SubjectResult.Disposition),
 	}
 }
 

@@ -3,6 +3,7 @@ package suite_test
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -60,7 +61,7 @@ func TestSuiteRun_EmitsCompleteOrderedStream(t *testing.T) {
 				t.Errorf("ProgressSuiteFinished.Counts[%v] = %d, want %d (result.Counts[%v])", verdict, last.Counts[verdict], wantCount, verdict)
 			}
 		}
-		if last.TotalCost != result.TotalCost {
+		if !reflect.DeepEqual(last.TotalCost, result.TotalCost) {
 			t.Errorf("ProgressSuiteFinished.TotalCost = %+v, want %+v (result.TotalCost)", last.TotalCost, result.TotalCost)
 		}
 	}

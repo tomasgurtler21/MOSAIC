@@ -45,7 +45,7 @@ These use cases all require full control over every variable: which orchestrator
 | **Execution & Evaluation** | Complete — sandbox lifecycle, evidence assembly, pure verdict engine, repetitions, pass-rate aggregation | `internal/runner/`, `internal/suite/`, `internal/evaluate/`, `internal/concurrency/`, `internal/protocolcheck/`, `internal/orchstate/`, `internal/cost/` |
 | **Reporting** | Complete — single `report.Result` model, text + JSON renderings | `internal/report/` |
 | **Frontends** | CLI + TUI (bubbletea) | `internal/cli/`, `internal/tui/` |
-| **Deploy Integration** | Partial — `domain.AgentDeployer` port delegates to `mosaic-deploy render` subprocess (works for single-agent rendering). Port needs `--catalog-folder` wiring and a `Deploy` method for single-call catalogue deployment (§6) | `internal/agentdeploy/` |
+| **Deploy Integration** | Partial — `domain.AgentDeployer` port delegates to `mosaic-deploy render` subprocess (works for single-agent rendering). Port needs `--catalog-folder` wiring and a `Deploy` method for single-call catalogue deployment (§7) | `internal/agentdeploy/` |
 | **Architecture Enforcement** | Complete — static import-layer checker | `tools/importcheck/` |
 | **Stub Agent Definitions** | 4 generic-form stubs | `agents/` |
 | **Example Suites** | `examples/` (fake harness, exercised by Go e2e tests), `tests/first-run/` (real claude-code harness) | `examples/`, `tests/first-run/` |
@@ -233,9 +233,68 @@ Plus **echo fidelity** — evaluated unconditionally on every run, never declare
 
 ---
 
-## 5. Design Decisions
+## 5. Cutoff Semantics and Evidence Boundaries
 
-### 5.1 Test Workflow ↔ Stub Consistency
+### 5.1 What N Counts
+
+`stop_after_invocations: N` counts **completed collaborator dispatches** — specifically, the number of times the interception pipeline has both started and finished handling a collaborator call, delivering the stub reply to the subject. Each call the subject makes and receives a response for increments the counter by one. A call the subject begins but that terminates before reply delivery (because the subject process was already stopped) is not counted.
+
+### 5.2 The Termination Moment
+
+Termination is **immediate on delivery of the Nth reply**. The interception pipeline delivers the Nth stub reply to the subject, then writes the early-exit sentinel file. The supervisor observes the sentinel on its next poll (every 250 ms) and cancels the subject's launch context, ending the subject's process.
+
+There is no grace period. The subject process ends as soon as the supervisor observes the sentinel. It does not wait for the subject to perform any further action — the subject is terminated in the middle of whatever it was doing next.
+
+### 5.3 What the Evidence Contains
+
+When a run exits via `stop_after_invocations: N`, the evidence snapshot contains:
+
+- **Exactly N invocation-log entries** (one start record and one end record per dispatch). Because termination fires after the Nth reply is delivered, not before, no phantom (N+1)th entry is ever present. The interception pipeline writes its records synchronously before delivering the reply, so the Nth records are always present.
+- **The orchestration document as it existed when the subject process was terminated** — which may be mid-update if the subject was writing it when the supervisor cancelled it.
+- **Any files the stub side effects created** — these are written by the interception pipeline before the reply is delivered, so they are always present regardless of the cutoff.
+- **No events the subject would have emitted after receiving the Nth reply** — the subject is terminated before it can write output artifacts for that dispatch, log the Nth agent in its execution log, or dispatch a subsequent collaborator.
+
+### 5.4 Post-Reply Bookkeeping Caveat
+
+Because the subject is terminated immediately after the Nth reply is delivered, any **bookkeeping the subject performs after receiving dispatch N** — writing the Nth dispatch's result to the orchestration document, recording the Nth agent in the execution log, writing the Nth output artifact — may be absent from the evidence. This is expected behaviour, not evidence corruption.
+
+**Practical consequence for test authors:** Do not assert on the subject's own post-reply state for the final dispatch (dispatch N). For a single-dispatch test (`stop_after_invocations: 1`), do not assert `final_state`, `execution_log`, or `artifact_created` for artifacts the subject writes after receiving the reply — these assertions observe the subject's own bookkeeping, which may be incomplete when the cutoff fires. The `invocation_sequence` assertion observes the interception pipeline's own log and is always reliable regardless of cutoff.
+
+### 5.5 What Each Assertion Class Observes
+
+| Assertion | Source | Reliable after cutoff? |
+|-----------|--------|------------------------|
+| `invocation_sequence` | Interception pipeline log | Always reliable — written by the pipeline before the reply is delivered |
+| `task_messages` | Interception pipeline log | Always reliable — messages are recorded when intercepted, before the reply |
+| `echo_fidelity` | Interception pipeline log | Always reliable |
+| `min_concurrency` | Interception pipeline log | Always reliable |
+| `final_state` | Subject's orchestration document | Unreliable for dispatch N — the subject may not have updated it yet |
+| `execution_log` | Subject's orchestration document | Unreliable for dispatch N — same reason |
+| `artifact_created` / `artifact_not_created` | Files in the sandbox | Reliable for files stub side effects create; unreliable for files the subject writes after receiving dispatch N |
+
+The reliable group all observe data the interception pipeline records independently of the subject's own activity. The unreliable group observe the subject's own output, which the cutoff may have interrupted mid-write.
+
+### 5.6 Protocol-Envelope Precondition for Run Identity and Cost Attribution
+
+AgentTest's evidence bucketing and per-run cost attribution depend on the subject being identifiable by the MOSAIC run ID that AgentTest injects at launch. The logger bundle resolves this identity by two mechanisms:
+
+1. Reading the `run_id` field from the first collaborator dispatch the subject makes using the documented protocol envelope.
+2. Falling back to the `MOSAIC_RUN_ID` environment variable that AgentTest injects into the subject's environment before launch.
+
+A subject that **never dispatches a collaborator using the documented protocol envelope** — a misconfigured subject, or a subject that aborts before its first dispatch — produces no extractable run ID from mechanism (1). Mechanism (2) provides the binding via the environment variable for logger-bundle versions that include this fallback.
+
+**Pre-dispatch events:** Any events the subject emits before its first collaborator dispatch may be attributed to the `unknown-run` fallback bucket rather than to the per-run log folder, depending on the timing of the logger bundle's identity resolution. Events emitted before the first dispatch are outside the window where the bundle has confirmed the run identity.
+
+**Practical consequences:**
+- A cost report of `unknown_bucket` means the subject's events landed in the fallback bucket because run identity was not resolved before those events were emitted. This is a run-identity binding failure, not a pricing configuration failure.
+- A cost report of `unavailable` (with "no usage data found") means the logger bundle either did not run or the subject terminated before emitting any events.
+- A subject that dispatches at least one collaborator before the cutoff will generally have its events attributed correctly, because the protocol-envelope binding fires on the first dispatch.
+
+---
+
+## 6. Design Decisions
+
+### 6.1 Test Workflow ↔ Stub Consistency
 
 A test workflow references agent names in its routing table. Those same names must appear in the stub registry (what they return) and in the stub agent definitions (the files that make the dispatch legal). This is a three-way coupling the test author maintains manually.
 
@@ -243,7 +302,7 @@ Preflight validates the deploy calls (agent key exists, workflow ID resolves) bu
 
 **Current position:** Manual consistency is acceptable. The error paths are well-defined and diagnosable. Cross-validation could be added later without changing the authoring format.
 
-### 5.2 Orchestrator Variant Lifecycle
+### 6.2 Orchestrator Variant Lifecycle
 
 Orchestrator variants are experimental files placed in the test catalogue. They have no lifecycle beyond git. After a fix ships, the test should switch to the production orchestrator. Keeping stale variants is the same forking problem the transformation architecture exists to prevent.
 
@@ -251,13 +310,13 @@ Orchestrator variants are experimental files placed in the test catalogue. They 
 
 **Deferred: workbench folder concept.** A possible future enhancement: a `workbench/` folder alongside the test catalogue, holding named orchestrator variants. The test tool could offer a picker dialog letting the user select which variant to test. This would avoid manual file-swapping for interactive variant comparison. Not designed — noted as a direction.
 
-### 5.3 Multiple Variants in One Test Run — Resolved
+### 6.3 Multiple Variants in One Test Run — Resolved
 
 The core use case (§1.2) involves comparing variants. Running the same test against five variants means five test runs, each with a different orchestrator in the catalogue.
 
 **Decision: manual swap.** The test author replaces `catalog/.../orchestrator.md` between runs. Simple, interactive, no tooling needed. Parallelisation is achievable via workspace copies — duplicate the catalogue, put a different variant in each, run simultaneously. Not elegant, but variant comparison is an infrequent interactive activity, not a hot path.
 
-### 5.4 Stub Agents — Resolved
+### 6.4 Stub Agents — Resolved
 
 **Decision: stubs live in the test catalogue.** Placeholder stub agent definitions live at `catalog/Subagents/TestStubs/<name>.md` within the test catalogue. This lets the deploy tool's `deploy` subcommand resolve all agents referenced by the test workflow in a single call — no separate `--source` rendering needed per stub.
 
@@ -267,11 +326,11 @@ The existing `agents/` folder and `stub_agents` mechanism remain available for e
 
 ---
 
-## 6. Deploy Tool Dependency
+## 7. Deploy Tool Dependency
 
 AgentTest uses the deploy tool as a subprocess, through the `domain.AgentDeployer` port. This is a binary dependency, not a library import — the harness isolation boundary forbids importing `mosaic-deploy` directly.
 
-### 6.1 Primary Interface: `deploy` Subcommand
+### 7.1 Primary Interface: `deploy` Subcommand
 
 The primary deployment mechanism is the `deploy` subcommand, which deploys an orchestrator and all agents referenced by selected workflows into a workspace in a single call. This matches the test setup need exactly: one call produces a fully-wired sandbox with the orchestrator and all its stub collaborators.
 
@@ -287,7 +346,7 @@ All required deploy tool capabilities exist:
 
 The remaining work is AgentTest-side: wiring `--catalog-folder` into the `agentdeploy` port and adding a `Deploy` method that calls the `deploy` subcommand.
 
-### 6.2 Secondary Interface: `render` Subcommand
+### 7.2 Secondary Interface: `render` Subcommand
 
 The `render` subcommand (single-agent rendering) remains available for edge cases: subagent-layer tests, rendering from an arbitrary source path, or any test that needs an agent not covered by the workflow-driven deployment. AgentTest's existing `agentdeploy` port already uses `render` — the migration to `deploy` is additive, not a replacement.
 
@@ -301,7 +360,7 @@ The `render` subcommand (single-agent rendering) remains available for edge case
 | Dry-run validation | `render --dry-run` | Exists |
 | JSON output | `render --output json` | Exists |
 
-### 6.3 Implementation Path
+### 7.3 Implementation Path
 
 The deploy tool's `--catalog-folder` is implemented. `catalog.Load(mosaicRoot, catalogFolder)` already separates catalogue loading from protocol/bundle loading.
 

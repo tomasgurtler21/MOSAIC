@@ -54,6 +54,14 @@ const (
 	SetupLedgerFileName = "setup.json"
 )
 
+// LogsRoot returns the OrchestrationLogs directory, the parent of all
+// per-run log folders including the unknown-run fallback bucket. It is
+// the sibling-bucket detection anchor: the unknown-run fallback bucket
+// sits at LogsRoot()/unknown-run, not inside the per-run folder.
+func (s Sandbox) LogsRoot() string {
+	return filepath.Join(s.SubjectDir, "OrchestrationLogs")
+}
+
 // LogRoot returns the directory the MOSAIC logger bundle writes into,
 // beneath the subject directory, from which cost is read.
 func (s Sandbox) LogRoot() string {

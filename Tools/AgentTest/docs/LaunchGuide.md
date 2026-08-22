@@ -101,7 +101,26 @@ Tools\AgentTest\dist\mosaic-agent-test.exe --tui
 
 The TUI scans for `*.suite.yaml` files starting from the process working directory (or from the path given by `--suites`). Launching from the repository root lets it discover all suites under `Tools/AgentTest/tests/`.
 
-### 4.3 Launching the CLI
+### 4.3 TUI Run-Configuration Surface
+
+After selecting a harness and models, the TUI lands on the **suite-select screen**. The help bar shows all discoverable keys. Press **Tab** (shown as "configure run" in the help bar) to open the **settings screen**, where every per-run setting is displayed as a labelled row and all are editable.
+
+**Settings screen — four settings:**
+
+| Setting | Edit mode | How to change |
+|---------|-----------|---------------|
+| Retain sandbox | Cycle | Press Enter to advance: Never → OnFailure → Always → Never |
+| Repetitions | Numeric | Press Enter to open the editor, type digits, Enter to confirm or Esc to cancel |
+| Report path | Inline text | Press Enter to open the editor, type the path, Enter to confirm or Esc to cancel |
+| Catalog folder | Inline text | Press Enter to open the editor, type the path, Enter to confirm or Esc to cancel |
+
+Navigate between settings with the **up/down arrow keys**. The cursor marks the focused row. Press **Esc** to return to the suite-select screen without starting a run. Every functional key is shown in the help bar — no key is hidden.
+
+**Repetitions provenance:** The repetitions setting shows whether the displayed value comes from the selected suite file (shown as `N (suite default)`) or is a user override entered in this session (shown as `N (override)`). When the suite declares no default and the user has not set an override, the display reads `suite default`. The displayed value is the one that will actually be used when the run starts.
+
+After configuring, press **Esc** to return to the suite-select screen and **Enter** to start the run.
+
+### 4.4 Launching the CLI
 
 The CLI requires a positional subcommand:
 
@@ -261,58 +280,43 @@ A retained sandbox is printed to the report as the sandbox path, so you can insp
 
 ---
 
-## 8. Worked Example: Missing pricing.yaml
+## 8. Cost Attribution: Configuration and Diagnostics
 
-### Symptom
+### 8.1 How the Analyser Finds pricing.yaml
 
-A run completes but reports zero cost for every test, or the cost-analysis step fails with an error similar to:
+`mosaic-agent-test` invokes `mosaic-log-analyzer` as a subprocess. The analyser resolves its pricing configuration at:
+
+```
+<working directory>/MosaicLogAnalyzer/config/pricing.yaml
+```
+
+AgentTest sets the analyser subprocess's **working directory** to the resolved MOSAIC root — the same path `--mosaic-root` controls. This is the only mechanism through which the analyser locates pricing configuration; it exposes no override flag of its own.
+
+When the binary lives at `Tools/AgentTest/dist/mosaic-agent-test.exe`, the default `--mosaic-root` resolves to the repository root (`selfDir/../../..`), so the effective pricing file path is:
+
+```
+<repo root>\MosaicLogAnalyzer\config\pricing.yaml
+```
+
+**A `pricing.yaml` placed inside `Tools/AgentTest/dist/` is never read.** The analyser's working directory is set to the MOSAIC root, not to `dist/`. Placing the file in `dist/` will not fix a missing-pricing error.
+
+### 8.2 Fixing a Missing pricing.yaml
+
+A missing pricing file produces an error similar to:
 
 ```
 error loading pricing config: open MosaicLogAnalyzer\config\pricing.yaml: The system cannot find the path specified.
 ```
 
-### Why It Happens
-
-The cost-analysis tool (`mosaic-log-analyzer`) looks for pricing configuration at:
-
-```
-<MosaicRoot>/MosaicLogAnalyzer/config/pricing.yaml
-```
-
-`MosaicRoot` defaults to `selfDir/../../..` — three directories above the binary, which resolves to the **repository root**, not to `dist/`. When the binary lives at `Tools/AgentTest/dist/mosaic-agent-test.exe`, the default resolution is:
-
-```
-selfDir      = Tools\AgentTest\dist
-selfDir/..   = Tools\AgentTest
-selfDir/../..= Tools
-selfDir/../../.. = <repo root>
-```
-
-So the expected pricing file path is:
+**Option 1 — Place the file at the correct location.** Copy `pricing.yaml` to:
 
 ```
 <repo root>\MosaicLogAnalyzer\config\pricing.yaml
 ```
 
-A common mistake is placing the file at:
+If the `MosaicLogAnalyzer/config/` directory does not yet exist at the repository root, create it first. The repository already contains this directory under the source tree; `pricing.yaml` belongs there alongside the rest of the log-analyser configuration.
 
-```
-Tools\AgentTest\dist\MosaicLogAnalyzer\config\pricing.yaml
-```
-
-This is inside `dist/`, not at the repository root. `MosaicRoot` points at the repository root, so the cost tool never looks inside `dist/` for its config files.
-
-### How to Fix It
-
-**Option 1 — Place the file at the correct location.** Copy `pricing.yaml` to the path the tool actually reads:
-
-```
-<repo root>\MosaicLogAnalyzer\config\pricing.yaml
-```
-
-If the `MosaicLogAnalyzer/config/` directory does not yet exist at the repository root, create it first.
-
-**Option 2 — Override MosaicRoot.** If you cannot modify the repository root (e.g. a read-only installation), point `--mosaic-root` at the directory that contains your `MosaicLogAnalyzer/config/pricing.yaml`:
+**Option 2 — Override MosaicRoot.** If you cannot modify the repository root, point `--mosaic-root` at the directory that contains your `MosaicLogAnalyzer/config/pricing.yaml`. AgentTest passes this directory to the analyser as its working directory:
 
 ```
 mosaic-agent-test.exe --mosaic-root D:\my-config-root run my-suite.suite.yaml
@@ -324,7 +328,24 @@ Or set the environment variable for persistent configuration:
 MOSAIC_AGENT_TEST_MOSAIC_ROOT=D:\my-config-root
 ```
 
-**Option 1 is the standard path.** The repository already contains `MosaicLogAnalyzer/config/` under the source tree; `pricing.yaml` belongs there alongside the rest of the log-analyser configuration.
+**Option 1 is the standard path.**
+
+### 8.3 Cost Attribution Diagnostics
+
+A run's cost report can produce one of four attribution values. Each names a distinct failure cause:
+
+| Attribution | Meaning | Likely cause |
+|-------------|---------|--------------|
+| `attributed` | Full cost captured for this run | All models priced, run identity bound correctly |
+| `partial` | Partial cost captured; some models unpriced | One or more models had no entry in `pricing.yaml`; the attributable amount from priced models is shown and the unpriced model(s) are named |
+| `unknown_bucket` | Events exist but in the fallback bucket | Run identity was not resolved before the subject emitted events; events landed in the `unknown-run` folder instead of the per-run folder |
+| `unavailable` | No usable cost data | Logger bundle did not run, subject terminated before emitting events, or the analyser could not be invoked |
+
+**Partial attribution:** When one model among several is unpriced, the cost report shows the attributable amount from priced models rather than zeroing the entire run. The unpriced model name is included in the cost detail. One unpriced model does not silence the rest.
+
+**unknown_bucket vs unavailable:** If you see `unknown_bucket`, the subject ran and emitted events but they were attributed to the fallback bucket rather than the per-run folder. This is a run-identity binding failure, not a pricing configuration failure — check that the subject dispatched at least one collaborator using the documented protocol envelope before the cutoff fired. If you see `unavailable` with "no usage data found", the logger bundle either did not run or the subject terminated without emitting any events at all.
+
+**Unpriced model:** If you see `partial` or `unavailable` with a message about model pricing, add the model to `pricing.yaml`. The model name is included in the diagnostic detail when the analyser can identify it.
 
 ---
 

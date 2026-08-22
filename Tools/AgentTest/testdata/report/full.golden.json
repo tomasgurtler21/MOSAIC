@@ -32,7 +32,8 @@
           "negative_applied": false,
           "subject_version": "unknown",
           "subject_model": "unknown",
-          "stub_model": "unknown"
+          "stub_model": "unknown",
+          "termination_reason": "unknown"
         }
       ]
     },
@@ -73,7 +74,8 @@
           "negative_applied": false,
           "subject_version": "unknown",
           "subject_model": "unknown",
-          "stub_model": "unknown"
+          "stub_model": "unknown",
+          "termination_reason": "unknown"
         }
       ]
     },
@@ -105,7 +107,8 @@
           "negative_applied": false,
           "subject_version": "unknown",
           "subject_model": "unknown",
-          "stub_model": "unknown"
+          "stub_model": "unknown",
+          "termination_reason": "unknown"
         }
       ]
     },
@@ -137,7 +140,8 @@
           "negative_applied": false,
           "subject_version": "unknown",
           "subject_model": "unknown",
-          "stub_model": "unknown"
+          "stub_model": "unknown",
+          "termination_reason": "unknown"
         }
       ]
     },
@@ -171,7 +175,8 @@
           "negative_applied": false,
           "subject_version": "unknown",
           "subject_model": "unknown",
-          "stub_model": "unknown"
+          "stub_model": "unknown",
+          "termination_reason": "unknown"
         }
       ]
     }

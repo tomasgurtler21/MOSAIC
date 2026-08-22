@@ -32,7 +32,8 @@
           "negative_applied": false,
           "subject_version": "unknown",
           "subject_model": "unknown",
-          "stub_model": "unknown"
+          "stub_model": "unknown",
+          "termination_reason": "unknown"
         },
         {
           "run": { "run_id": "run-001", "test_id": "always-loses-its-lock", "run_number": 2 },
@@ -45,7 +46,8 @@
           "negative_applied": false,
           "subject_version": "unknown",
           "subject_model": "unknown",
-          "stub_model": "unknown"
+          "stub_model": "unknown",
+          "termination_reason": "unknown"
         }
       ]
     }

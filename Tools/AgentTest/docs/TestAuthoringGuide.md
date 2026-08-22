@@ -50,16 +50,17 @@ tests/
       requirements.md
 ```
 
-Stub agent definitions are shared across suites and live in `Tools/AgentTest/agents/`:
+Stub agent definitions are shared across suites and live in the test catalogue at `Tools/AgentTest/catalog/Subagents/TestStubs/`:
 
 ```
 Tools/AgentTest/
-  agents/
-    README.md
-    researcher.md                # stub agent placeholder
-    planner.md
-    requirements-refinement.md
-    library-researcher.md
+  catalog/
+    Subagents/
+      TestStubs/
+        codebase-research.md
+        requirements-refinement.md
+        planner-tdd-soft.md
+        ...                      # all brownfield-tdd agents
   tests/
     my-suite/
       ...
@@ -161,6 +162,8 @@ assertions:
 
 Note: The `opening_message` must include the fields the orchestrator requires to begin — task, workflow type, and checkpoints preference. Without these, the orchestrator prompts the user for configuration instead of dispatching.
 
+Note: `exact: true` with N declared steps is the normal shape for a single-decision test. `stop_after_invocations: N` terminates the subject immediately after it receives the Nth reply, so exactly N invocation-log entries are recorded and no phantom entry appears. Do not assert on `final_state`, `execution_log`, or `artifact_created` for artifacts the subject writes after receiving the final reply — the subject is terminated before it can complete that bookkeeping, and its absence is expected behaviour, not evidence corruption.
+
 ### Full Example
 
 All features exercised — based on the `brownfield-tdd` workflow routing table (RESEARCH and PLANNING phases shown):
@@ -201,28 +204,6 @@ subject:
 
 stub_registry: research-planning-happy-path.stubs.json
 
-stub_agents:
-  - identity:
-      tool: dispatch
-      agent: codebase-research
-    source: ../../agents/codebase-research.md
-  - identity:
-      tool: dispatch
-      agent: requirements-refinement
-    source: ../../agents/requirements-refinement.md
-  - identity:
-      tool: dispatch
-      agent: requirements-review
-    source: ../../agents/requirements-review.md
-  - identity:
-      tool: dispatch
-      agent: planner-tdd-soft
-    source: ../../agents/planner-tdd-soft.md
-  - identity:
-      tool: dispatch
-      agent: plan-review
-    source: ../../agents/plan-review.md
-
 timeout: 15m
 turn_limit: 60
 stop_after_invocations: 5
@@ -236,17 +217,6 @@ assertions:
       - { tool: dispatch, agent: requirements-review }
       - { tool: dispatch, agent: planner-tdd-soft }
       - { tool: dispatch, agent: plan-review }
-  final_state:
-    phase: PLANNING
-    last_status: SUCCESS
-  execution_log:
-    agent_ids:
-      - "codebase-research#1"
-      - "requirements-refinement#2"
-      - "requirements-review#3"
-      - "planner-tdd-soft#4"
-      - "plan-review#5"
-    all_status: SUCCESS
   artifact_created:
     - Orchestration-{run_id}/Research.md
     - Orchestration-{run_id}/Requirements.md
@@ -287,7 +257,7 @@ assertions:
 | `turn_limit` | No | int | Max LLM turns |
 | `repetitions` | No | int | Override suite-level repetitions |
 | `pass_rate` | No | float | Override suite-level pass rate |
-| `stop_after_invocations` | No | int | Force-stop after N collaborator dispatches |
+| `stop_after_invocations` | No | int | Force-stop after N collaborator dispatches. Termination fires immediately after the subject receives the Nth reply. Use `exact: true` with exactly N declared steps as the normal single-decision shape. Do not assert on `final_state`, `execution_log`, or artifacts the subject writes after receiving reply N — those may be absent. |
 | `seed_files` | No | list | Files to place in sandbox before run |
 | `parallel_groups` | No | list | Declare which collaborators may run concurrently |
 | `assertions` | No | object | What to verify after the run |
@@ -619,22 +589,38 @@ assertions:
 
 ## Stub Agent Definitions
 
-Stub agent definitions are placeholder `.md` files in `Tools/AgentTest/agents/`. They exist solely to make a dispatch "legal" from the harness's perspective — the harness needs an agent file to exist for the dispatch target. **All actual behavior comes from the stub registry, not from these files.**
+Stub agent definitions live in the test catalogue at `Tools/AgentTest/catalog/Subagents/TestStubs/`. They exist solely to make a dispatch "legal" from the harness's perspective — the harness needs an agent file to exist for the dispatch target. **All actual behavior comes from the stub registry, not from these files.**
+
+When using the `--catalog-folder` deployment path (see Design.md §3), all agents referenced by the test workflow are deployed from the test catalogue in a single `mosaic-deploy deploy` call. Individual `stub_agents` entries in the test definition are not needed — the catalogue contains the stub definitions.
 
 ### When You Need One
 
-You need a stub agent definition when your test's `stub_agents` list references a collaborator. If the collaborator already has a definition in `agents/`, reuse it. If not, create one.
+You need a stub agent definition when a test workflow references an agent that does not yet have a file in `catalog/Subagents/TestStubs/`. All 11 agents from the `brownfield-tdd` workflow already have stubs. If your test uses a custom workflow with a new agent name, create a stub for it.
 
 ### File Format
 
-Stub agent definitions are minimal — just enough for the deployment tool's validation to pass:
+Stub agent definitions follow the standard generic-form agent structure with echo instructions:
 
 ```markdown
-# stub: <agent-key>
-# Placeholder generic-form stub agent definition.
-# This file exists so preflight's os.Stat check passes for stub_agents entries
-# that reference this collaborator. The deployment tool renders it when Deploy
-# is wired; the os.Stat check is the only check run when Deploy is nil.
+---
+id: {next-available-id}
+version: 1.0.0
+name: {agent-name}
+description: Test stub standing in for the {agent-name} collaborator
+role: subagent
+model: "{model-identifier}"
+recommended_tier: TEST-STUB
+tier_rationale: Test stub receiving cheap model via shared TEST-STUB tier mapping
+tools: []
+---
+
+<Identity type="core">
+# {Agent Display Name} — Test Echo Agent
+
+You are a test echo agent in an automated test scenario. Your only job is exact reproduction.
+
+When you receive a prompt asking you to respond with specific content, reproduce that content exactly as given. Do not add commentary, explanation, formatting, or wrapping. Do not modify, summarize, or interpret the content. Output only the requested content and nothing else.
+</Identity>
 ```
 
 ### Naming Convention
@@ -642,34 +628,19 @@ Stub agent definitions are minimal — just enough for the deployment tool's val
 File name = `<agent-key>.md`, where `<agent-key>` matches the `agent` field of the collaborator identity. Use the exact agent key from the workflow table's `Subagent` column:
 
 ```
-agents/codebase-research.md          -> matches agent: codebase-research
-agents/requirements-refinement.md    -> matches agent: requirements-refinement
-agents/requirements-review.md        -> matches agent: requirements-review
-agents/planner-tdd-soft.md           -> matches agent: planner-tdd-soft
-agents/plan-review.md                -> matches agent: plan-review
-agents/implementation-tdd.md         -> matches agent: implementation-tdd
-agents/test-runner.md                -> matches agent: test-runner
-```
-
-### Referencing from Test Definitions
-
-The `source` path is relative to the test definition file:
-
-```yaml
-stub_agents:
-  - identity:
-      tool: dispatch
-      agent: codebase-research
-    source: ../../agents/codebase-research.md
-  - identity:
-      tool: dispatch
-      agent: requirements-refinement
-    source: ../../agents/requirements-refinement.md
+catalog/Subagents/TestStubs/codebase-research.md          -> matches agent: codebase-research
+catalog/Subagents/TestStubs/requirements-refinement.md    -> matches agent: requirements-refinement
+catalog/Subagents/TestStubs/requirements-review.md        -> matches agent: requirements-review
+catalog/Subagents/TestStubs/planner-tdd-soft.md           -> matches agent: planner-tdd-soft
+catalog/Subagents/TestStubs/plan-review.md                -> matches agent: plan-review
+catalog/Subagents/TestStubs/implementation-tdd.md         -> matches agent: implementation-tdd
+catalog/Subagents/TestStubs/implementation-review.md      -> matches agent: implementation-review
+catalog/Subagents/TestStubs/test-runner.md                -> matches agent: test-runner
 ```
 
 ### ID Assignment
 
-Each stub agent file carries a numeric ID unique within the `agents/` directory. See `agents/README.md` for the current assignment table. When adding a new stub, assign the next available integer.
+Each stub agent file carries a numeric ID unique within the `TestStubs/` directory. When adding a new stub, assign the next available integer.
 
 ### Current Inventory
 
@@ -679,6 +650,17 @@ Each stub agent file carries a numeric ID unique within the `agents/` directory.
 | 2 | `researcher.md` | `researcher` |
 | 3 | `library-researcher.md` | `library-researcher` |
 | 4 | `planner.md` | `planner` |
+| 5 | `codebase-research.md` | `codebase-research` |
+| 6 | `requirements-review.md` | `requirements-review` |
+| 7 | `planner-tdd-soft.md` | `planner-tdd-soft` |
+| 8 | `plan-review.md` | `plan-review` |
+| 9 | `contracts-designer.md` | `contracts-designer` |
+| 10 | `contracts-review.md` | `contracts-review` |
+| 11 | `test-writer-tdd.md` | `test-writer-tdd` |
+| 12 | `tests-review-tdd.md` | `tests-review-tdd` |
+| 13 | `implementation-tdd.md` | `implementation-tdd` |
+| 14 | `implementation-review.md` | `implementation-review` |
+| 15 | `test-runner.md` | `test-runner` |
 
 ---
 
@@ -716,7 +698,7 @@ assertions:
       - { tool: dispatch, agent: planner-tdd }
 ```
 
-When `exact: true`, the observed sequence must contain exactly these steps and nothing else. When `exact: false`, these steps must appear as a subsequence of the observed sequence (other dispatches may appear between them).
+When `exact: true`, the observed sequence must contain exactly these steps and nothing else. This is the normal shape for tests that use `stop_after_invocations: N` — declare exactly N steps with `exact: true`, and the assertion matches the pipeline's record precisely. When `exact: false`, these steps must appear as a subsequence of the observed sequence (other dispatches may appear between them).
 
 ### `final_state`
 
@@ -850,17 +832,7 @@ A good test scenario: "When `requirements-review` returns `COMPLETED_NEEDS_ACTIO
 
 ### 3. Create Stub Agent Definitions (if needed)
 
-Check `Tools/AgentTest/agents/` for existing stubs. If your test dispatches a collaborator that does not have a stub file yet, create one:
-
-```markdown
-# stub: requirements-review
-# Placeholder generic-form stub agent definition.
-# This file exists so preflight's os.Stat check passes for stub_agents entries
-# that reference this collaborator. The deployment tool renders it when Deploy
-# is wired; the os.Stat check is the only check run when Deploy is nil.
-```
-
-Add it to the ID assignment table in `agents/README.md`.
+Check `Tools/AgentTest/catalog/Subagents/TestStubs/` for existing stubs. All 11 `brownfield-tdd` agents already have stubs (IDs 5-15). If your test uses a custom workflow with agent names not yet in the catalogue, create a stub following the format in the [Stub Agent Definitions](#stub-agent-definitions) section and assign the next available ID.
 
 ### 4. Write the Stub Registry
 
@@ -1010,19 +982,6 @@ subject:
   allowed_tools: [Task, Read, Write, Edit]
 
 stub_registry: findings-reroute.stubs.json
-stub_agents:
-  - identity:
-      tool: dispatch
-      agent: codebase-research
-    source: ../../agents/codebase-research.md
-  - identity:
-      tool: dispatch
-      agent: requirements-refinement
-    source: ../../agents/requirements-refinement.md
-  - identity:
-      tool: dispatch
-      agent: requirements-review
-    source: ../../agents/requirements-review.md
 
 timeout: 10m
 turn_limit: 30

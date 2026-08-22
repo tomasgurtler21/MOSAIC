@@ -143,7 +143,6 @@ func BuildArgs(req SpawnRequest) (args []string, stdin []byte, err error) {
 			"-p",
 			"--output-format", req.OutputFormat,
 			"--permission-mode", "auto",
-			"--no-session-persistence",
 		}
 	default: // InvocationOrdinary
 		args = []string{
@@ -151,8 +150,11 @@ func BuildArgs(req SpawnRequest) (args []string, stdin []byte, err error) {
 			"--append-system-prompt-file", req.Agent.DefinitionPath,
 			"--output-format", req.OutputFormat,
 			"--permission-mode", "auto",
-			"--no-session-persistence",
 		}
+	}
+
+	if !req.SessionPersistence {
+		args = append(args, "--no-session-persistence")
 	}
 
 	args = append(args, req.ExtraArgs...)

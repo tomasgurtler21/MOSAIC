@@ -50,10 +50,25 @@ func evaluateConditions(ev domain.RunEvidence) []domain.RunCondition {
 		})
 	}
 
-	if !ev.LogsProduced {
+	switch {
+	case !ev.LogsProduced:
+		// Genuine no-logs: nothing was written anywhere in the session tree.
 		out = append(out, domain.RunCondition{
 			Kind:   domain.ConditionNoLogsProduced,
 			Detail: fmt.Sprintf("no logs found under %s", ev.LogRoot),
+		})
+	case ev.FallbackBucketPresent:
+		// Logs exist but landed in the unknown-run fallback bucket, not the
+		// expected per-run folder. The run's identity may not have bound
+		// correctly. Name the fallback bucket so the user knows where to look.
+		out = append(out, domain.RunCondition{
+			Kind: domain.ConditionNoLogsProduced,
+			Detail: fmt.Sprintf(
+				"logs were found in the unknown-run fallback bucket alongside %s — "+
+					"the run's identity may not have bound correctly; "+
+					"check the unknown-run directory for this session's events",
+				ev.LogRoot,
+			),
 		})
 	}
 

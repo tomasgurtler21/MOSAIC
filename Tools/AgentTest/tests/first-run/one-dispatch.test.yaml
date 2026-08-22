@@ -37,11 +37,7 @@ turn_limit: 20
 stop_after_invocations: 1
 
 assertions:
-  # Not exact: stop_after_invocations halts the run at the *second* dispatch,
-  # and that halted dispatch is still recorded as an observed invocation. The
-  # assertion is about the first routing decision the real brownfield-tdd
-  # workflow makes, which is codebase-research.
   invocation_sequence:
-    exact: false
+    exact: true
     steps:
       - { tool: dispatch, agent: codebase-research }

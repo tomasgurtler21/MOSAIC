@@ -23,6 +23,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"mosaic-agent-test/internal/authoring"
 	"mosaic-agent-test/internal/preflight"
 )
@@ -156,48 +158,44 @@ func TestSuiteSelect_Repetitions_OverridePreservesOtherOverrides(t *testing.T) {
 // T3.2: repetitions displayed on suite-select screen
 // ---------------------------------------------------------------------------
 
-// TestSuiteSelect_Repetitions_DisplayedOnScreen verifies that the suite-select
-// screen renders some indication of the repetitions setting before a run
-// starts, so the user can see the effective repetitions count. The exact label
-// wording is the implementer's choice; the test requires at least one term
-// associated with repetitions to appear in the rendered output.
-func TestSuiteSelect_Repetitions_DisplayedOnScreen(t *testing.T) {
+// TestSettings_Repetitions_DisplayedOnScreen verifies that the settings
+// screen renders some indication of the repetitions setting, so the user can
+// see the effective repetitions count after navigating to run configuration.
+func TestSettings_Repetitions_DisplayedOnScreen(t *testing.T) {
 	m := NewModel(newFixtureOptions([]string{"suite.yaml"}, newFakeSuiteRunner()))
 
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
+	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
+	if m.Screen() != ScreenSettings {
+		t.Fatalf("Screen() after Tab = %q, want %q", m.Screen(), ScreenSettings)
 	}
 
 	view := safeView(t, m)
 	viewLower := strings.ToLower(view)
 
-	// Accept any of these terms: "repetition", "reps", "repeat", "×", "times".
-	// This is intentionally permissive to avoid constraining the implementation's
-	// wording choice; the requirement is that the concept is visible.
 	hasRepetitionDisplay := strings.Contains(viewLower, "repetition") ||
 		strings.Contains(viewLower, " reps") ||
 		strings.Contains(viewLower, "repeat") ||
 		strings.Contains(viewLower, "×") ||
 		strings.Contains(viewLower, "times")
 	if !hasRepetitionDisplay {
-		t.Errorf("suite-select View() does not mention repetitions (checked for 'repetition', 'reps', 'repeat', '×', or 'times' in lower-cased view):\n%s", view)
+		t.Errorf("settings View() does not mention repetitions:\n%s", view)
 	}
 }
 
-// TestSuiteSelect_Repetitions_OverrideValue_DisplayedOnScreen verifies that
+// TestSettings_Repetitions_OverrideValue_DisplayedOnScreen verifies that
 // when a repetitions override is set on the Model, its numeric value appears
-// in the suite-select screen's rendered output, confirming the override is
-// visible to the user before a run starts.
-func TestSuiteSelect_Repetitions_OverrideValue_DisplayedOnScreen(t *testing.T) {
+// in the settings screen's rendered output.
+func TestSettings_Repetitions_OverrideValue_DisplayedOnScreen(t *testing.T) {
 	m := NewModel(newFixtureOptions([]string{"suite.yaml"}, newFakeSuiteRunner()))
 	m.repetitions = intPtr(7)
 
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
+	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
+	if m.Screen() != ScreenSettings {
+		t.Fatalf("Screen() after Tab = %q, want %q", m.Screen(), ScreenSettings)
 	}
 
 	view := safeView(t, m)
 	if !strings.Contains(view, "7") {
-		t.Errorf("suite-select View() does not display the repetitions override value 7:\n%s", view)
+		t.Errorf("settings View() does not display the repetitions override value 7:\n%s", view)
 	}
 }

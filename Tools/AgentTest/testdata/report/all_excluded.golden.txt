@@ -8,10 +8,12 @@ always-loses-its-lock: FAIL 0/0 passed (n/a, required 0%) [state_integrity] (inf
   subject version: unknown
   subject model: unknown
   stub model: unknown
+  termination reason: unknown
   ? STATE_INTEGRITY
   subject version: unknown
   subject model: unknown
   stub model: unknown
+  termination reason: unknown
 
 Totals: FAIL=1
 Infrastructure failures: 1

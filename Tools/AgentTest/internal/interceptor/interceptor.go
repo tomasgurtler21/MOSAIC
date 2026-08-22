@@ -234,21 +234,27 @@ func runOneInterception(ctx context.Context, cfg Config) {
 		}
 	}
 
-	// Early exit: the sentinel the driver's supervisor watches for, so later
-	// calls in the same sandbox halt on entry.
-	if decision.Outcome.Kind == domain.OutcomeHalt && decision.Outcome.HaltReason == domain.HaltEarlyExit {
-		if err := writeSentinel(cfg.ControlDir); err != nil {
-			handleFailure(cfg, &call, fmt.Errorf("writing early-exit sentinel: %w", err))
-			return
-		}
-	}
-
 	reply, err := cfg.Adapter.TranslateOutcome(decision.Outcome, call)
 	if err != nil {
 		handleFailure(cfg, &call, fmt.Errorf("translating outcome: %w", err))
 		return
 	}
 	_, _ = cfg.Out.Write(reply)
+
+	// Early exit: the sentinel the driver's supervisor watches for. Written
+	// after the reply so the supervisor cannot observe the sentinel and cancel
+	// the subject's context before the Nth reply reaches the subject.
+	if decision.TerminateSubject {
+		if err := writeSentinel(cfg.ControlDir); err != nil {
+			// The reply was already delivered; do not call handleFailure
+			// (which would write a second neutral reply). Log the failure
+			// and append an error record so the log reflects the fault.
+			if cfg.Diag != nil {
+				fmt.Fprintf(cfg.Diag, "interceptor: writing early-exit sentinel: %v\n", err)
+			}
+			appendDiagnosticRecord(cfg, call, fmt.Errorf("writing early-exit sentinel: %w", err))
+		}
+	}
 }
 
 // sentinelPresent reports whether the early-exit sentinel has been written

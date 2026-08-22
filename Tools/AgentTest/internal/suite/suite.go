@@ -221,6 +221,7 @@ func (s *Suite) runTest(ctx context.Context, rt preflight.ResolvedTest, sink dom
 			SubjectVersion:      final.SubjectVersion,
 			SubjectModel:        final.SubjectModel,
 			StubModel:           final.StubModel,
+			TerminationReason:   final.TerminationReason,
 			Subject: report.SubjectFailure{
 				ExitCode:  final.SubjectResult.ExitCode,
 				Stderr:    final.SubjectResult.Stderr,

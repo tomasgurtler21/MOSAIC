@@ -40,6 +40,12 @@ func TestDisposition_EarlyExit_EndsNormally(t *testing.T) {
 
 	out := RunScenario(t, sc)
 
+	// A cutoff-terminated run is evaluated exactly like any other run: its
+	// verdict is determined by its assertions, not by a special disposition
+	// code. The single-decision test declares invocation_sequence.exact: true
+	// with 1 step (greeter). With the Stage 2 implementation the invocation
+	// log has exactly 1 entry (greeter only, no phantom helper record), so the
+	// assertion passes and the verdict is PASS.
 	assertSingleTestVerdict(t, out, "single-decision", domain.VerdictPass, cli.ExitSuccess)
 
 	if len(out.Result.Tests) != 1 || len(out.Result.Tests[0].Runs) != 1 {
@@ -51,6 +57,24 @@ func TestDisposition_EarlyExit_EndsNormally(t *testing.T) {
 			t.Errorf("Runs[0].Reasons contains %q, want an early exit to end normally with no such reason: %+v\nstdout: %s",
 				reason, run.Reasons, out.Stdout)
 		}
+	}
+
+	// Exact invocation-log count: the invocation_sequence.exact: true
+	// assertion declared in the fixture must pass, confirming the invocation
+	// log contains exactly N=1 entries and no phantom (N+1)th dispatch was
+	// recorded. A failure here means a phantom record is still being emitted.
+	foundSequenceAssertion := false
+	for _, a := range run.Assertions {
+		if a.Class == string(domain.ClassInvocationSequence) {
+			foundSequenceAssertion = true
+			if a.Outcome != "pass" {
+				t.Errorf("invocation_sequence assertion outcome = %q, want pass: the invocation log must contain exactly N=1 entries for a stop_after_invocations: 1 run; a non-pass result indicates a phantom (N+1)th record was emitted\nstdout: %s",
+					a.Outcome, out.Stdout)
+			}
+		}
+	}
+	if !foundSequenceAssertion {
+		t.Errorf("no invocation_sequence assertion found in run report; the fixture declares exact: true and it must be evaluated\nstdout: %s", out.Stdout)
 	}
 }
 

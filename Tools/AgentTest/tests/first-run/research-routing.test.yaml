@@ -54,5 +54,6 @@ assertions:
       human_in_the_loop: true
       required_input_artifacts:
         - Orchestration-{run_id}/Research.md
+        - Orchestration-{run_id}/Requirements.md
       required_output_artifacts:
         - Orchestration-{run_id}/Requirements.md

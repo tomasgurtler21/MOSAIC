@@ -59,11 +59,21 @@ type RunEvidence struct {
 	// searched without evaluate importing anything path- or I/O-related.
 	LogRoot string
 
-	// LogsProduced reports whether LogRoot contained any log records at all.
+	// LogsProduced reports whether ANY log records exist for this session,
+	// including in the unknown-run fallback bucket. False only when neither
+	// the run-id folder nor the fallback bucket contains logs.
 	// False raises ConditionNoLogsProduced. Only meaningful when the run
 	// actually started: RunEvidence is never built on the path where it did
 	// not (see ConditionRunNotStarted).
 	LogsProduced bool
+
+	// FallbackBucketPresent reports whether the unknown-run fallback bucket
+	// exists alongside the run-id folder. Used by conditions to produce a
+	// non-misleading signal: when true, the condition detail names the
+	// fallback bucket rather than claiming no logs were found. It is used
+	// only in conditions.go and never by assertion evaluation, so assertion
+	// results remain independent of which bucket a run's logs land in.
+	FallbackBucketPresent bool
 
 	// RetainedSandboxPath is the sandbox left on disk for diagnosis by this
 	// attempt's teardown, empty when none was retained. Carried here so the
@@ -137,6 +147,12 @@ type TestResult struct {
 	// report can attribute a regression to a model change.
 	SubjectModel string
 	StubModel    string
+
+	// TerminationReason is the raw disposition string from
+	// RunEvidence.SubjectResult.Disposition, carried through unchanged so the
+	// report layer can render it without re-consulting RunEvidence. Empty means
+	// no disposition was recorded; the renderings show it as "unknown".
+	TerminationReason string
 }
 
 // AssertionOutcome is the per-assertion result of evaluating one class.

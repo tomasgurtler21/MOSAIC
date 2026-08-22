@@ -16,6 +16,16 @@ type RunTotal struct {
 	Money       domain.MoneyValue
 	// Complete is false when any model contributing to this run was unpriced.
 	Complete bool
+
+	// UnpricedModels names the model(s) contributing to this run that had no
+	// price entry. Empty when Complete is true. Populated from the run entry's
+	// own UnpricedModels, which already carries them.
+	UnpricedModels []domain.ModelID
+
+	// PartialAmount is the amount attributable to priced models when the run is
+	// partially priced (some models were priced and some were not). Zero-valued
+	// when fully priced or when no models were priced at all.
+	PartialAmount domain.MoneyValue
 }
 
 // RunTotalFor extracts the basic total for one named run from a report.
@@ -25,12 +35,19 @@ func RunTotalFor(r domain.Report, runID string) (RunTotal, bool) {
 	if !found {
 		return RunTotal{}, false
 	}
+	partial := run.Totals.Money.Total
+	if run.Totals.Money.Complete || partial.State != domain.MoneyKnown {
+		partial = domain.MoneyValue{}
+	}
+
 	return RunTotal{
-		RunID:       run.Run.ID,
-		Provisional: run.Provisional,
-		Tokens:      run.Totals.Tokens,
-		Money:       run.Totals.Money.Total,
-		Complete:    run.Totals.Money.Complete,
+		RunID:          run.Run.ID,
+		Provisional:    run.Provisional,
+		Tokens:         run.Totals.Tokens,
+		Money:          run.Totals.Money.Total,
+		Complete:       run.Totals.Money.Complete,
+		UnpricedModels: run.UnpricedModels,
+		PartialAmount:  partial,
 	}, true
 }
 

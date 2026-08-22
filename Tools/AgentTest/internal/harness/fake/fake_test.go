@@ -134,8 +134,18 @@ func TestTranslateCall_PhasePost_ExhaustedScript_ReturnsError(t *testing.T) {
 	}
 }
 
+// TestTranslateCall_PhasePost_NoScriptForIdentity_ReturnsErrorNotPanic verifies
+// that when a non-nil script map is provided but has no entry for the called
+// collaborator identity, TranslateCall returns an error rather than panicking.
+// This covers the "forgot to add this collaborator to the script" mistake.
+//
+// A nil Script (no script at all) is different: it means post calls are
+// unscripted and are allowed with an empty ObservedResponse. Tests that do not
+// care about collaborator responses can pass nil to Options.Script.
 func TestTranslateCall_PhasePost_NoScriptForIdentity_ReturnsErrorNotPanic(t *testing.T) {
-	a := fake.New(fake.Options{})
+	// Non-nil empty map: a script was provided but this collaborator has no
+	// scripted turns. This is the "identity not in script" error case.
+	a := fake.New(fake.Options{Script: map[string][]fake.Turn{}})
 
 	defer func() {
 		if r := recover(); r != nil {

@@ -37,11 +37,12 @@ func (a *Adapter) SpawnPlan(ctx context.Context, subject domain.SubjectUnderTest
 			DefinitionPath: filepath.Join(p.Sandbox.SubjectDir, filepath.FromSlash(subject.DefinitionPath)),
 			Kind:           commonharness.InvocationKind(subject.InvocationKind),
 		},
-		Prompt:       subject.OpeningMessage,
-		Model:        subject.Model,
-		AllowedTools: subject.AllowedTools,
-		OutputFormat: "json",
-		WorkingDir:   p.Sandbox.SubjectDir,
+		Prompt:             subject.OpeningMessage,
+		Model:              subject.Model,
+		AllowedTools:       subject.AllowedTools,
+		OutputFormat:       "json",
+		WorkingDir:         p.Sandbox.SubjectDir,
+		SessionPersistence: true,
 	}
 
 	args, stdin, err := commonharness.BuildArgs(spawnReq)
@@ -56,11 +57,14 @@ func (a *Adapter) SpawnPlan(ctx context.Context, subject domain.SubjectUnderTest
 	configHome := filepath.Join(p.Sandbox.ControlDir, ConfigHomeRelDir)
 
 	return domain.SpawnPlan{
-		Executable:        ClaudeCLIExecutable,
-		Args:              args,
-		Stdin:             stdin,
-		WorkingDir:        p.Sandbox.SubjectDir,
-		Env:               []string{ConfigHomeEnvVar + "=" + configHome},
+		Executable: ClaudeCLIExecutable,
+		Args:       args,
+		Stdin:      stdin,
+		WorkingDir: p.Sandbox.SubjectDir,
+		Env: []string{
+			ConfigHomeEnvVar + "=" + configHome,
+			RunIDEnvVar + "=" + p.Sandbox.Key.RunID,
+		},
 		Timeout:           DefaultSpawnTimeout,
 		EarlyExitSentinel: p.Sandbox.EarlyExitSentinelPath(),
 	}, nil

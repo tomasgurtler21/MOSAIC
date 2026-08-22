@@ -15,6 +15,7 @@ package harness_test
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -422,5 +423,186 @@ func TestBuildArgs_Orchestrator_EnvBlockAndPromptDeliveredViaStdin(t *testing.T)
 	}
 	if !strings.Contains(stdinStr, prompt) {
 		t.Errorf("want request prompt %q in orchestrator stdin payload, got %q", prompt, stdinStr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Session persistence opt-in (argument construction for transcript capture)
+// ---------------------------------------------------------------------------
+
+// TestBuildArgs_Ordinary_SessionPersistenceOptIn_OmitsNoSessionPersistence
+// verifies that when SessionPersistence is true, --no-session-persistence is
+// absent from the constructed args for an ordinary invocation. Omitting the
+// flag allows the Claude Code CLI to write its transcript file, which is
+// required for the logger bundle to capture token usage and model identity.
+func TestBuildArgs_Ordinary_SessionPersistenceOptIn_OmitsNoSessionPersistence(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:              ordinaryAgent(),
+		Prompt:             "x",
+		OutputFormat:       "json",
+		SessionPersistence: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsArg(args, "--no-session-persistence") {
+		t.Errorf("want --no-session-persistence absent when SessionPersistence is true, got %v", args)
+	}
+}
+
+// TestBuildArgs_Orchestrator_SessionPersistenceOptIn_OmitsNoSessionPersistence
+// is the same assertion for orchestrator invocations.
+func TestBuildArgs_Orchestrator_SessionPersistenceOptIn_OmitsNoSessionPersistence(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:              orchestratorAgent(),
+		Prompt:             "x",
+		OutputFormat:       "json",
+		SessionPersistence: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containsArg(args, "--no-session-persistence") {
+		t.Errorf("want --no-session-persistence absent when SessionPersistence is true, got %v", args)
+	}
+}
+
+// TestBuildArgs_Ordinary_ExplicitOptOut_StillEmitsNoSessionPersistence
+// verifies that an explicit SessionPersistence: false (the zero value) still
+// produces --no-session-persistence for ordinary invocations. This pins the
+// invariant that the field is truly opt-in: the zero value is opt-out, and
+// every existing caller that does not set it continues to get the flag.
+func TestBuildArgs_Ordinary_ExplicitOptOut_StillEmitsNoSessionPersistence(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:              ordinaryAgent(),
+		Prompt:             "x",
+		OutputFormat:       "json",
+		SessionPersistence: false, // explicit zero value — same as omitting the field
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !containsArg(args, "--no-session-persistence") {
+		t.Errorf("want --no-session-persistence when SessionPersistence is false (zero value), got %v", args)
+	}
+}
+
+// TestBuildArgs_Orchestrator_ExplicitOptOut_StillEmitsNoSessionPersistence
+// is the same assertion for orchestrator invocations.
+func TestBuildArgs_Orchestrator_ExplicitOptOut_StillEmitsNoSessionPersistence(t *testing.T) {
+	args, _, err := harness.BuildArgs(harness.SpawnRequest{
+		Agent:              orchestratorAgent(),
+		Prompt:             "x",
+		OutputFormat:       "json",
+		SessionPersistence: false, // explicit zero value
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !containsArg(args, "--no-session-persistence") {
+		t.Errorf("want --no-session-persistence when SessionPersistence is false (zero value), got %v", args)
+	}
+}
+
+// TestBuildArgs_Ordinary_SessionPersistenceOptIn_OnlyFlagDiffers verifies that
+// when SessionPersistence is true, the only change to the ordinary invocation's
+// args is the absence of --no-session-persistence: every other flag is present
+// and in the same relative order. No other argument or stdin content changes.
+func TestBuildArgs_Ordinary_SessionPersistenceOptIn_OnlyFlagDiffers(t *testing.T) {
+	req := harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+	}
+	withoutOptIn, _, err := harness.BuildArgs(req)
+	if err != nil {
+		t.Fatalf("building without opt-in: %v", err)
+	}
+	req.SessionPersistence = true
+	withOptIn, _, err := harness.BuildArgs(req)
+	if err != nil {
+		t.Fatalf("building with opt-in: %v", err)
+	}
+
+	// Remove --no-session-persistence from the without-opt-in result and
+	// compare: the remaining args must be identical to the opt-in result.
+	stripped := argsWithout(withoutOptIn, "--no-session-persistence")
+	if !reflect.DeepEqual(stripped, withOptIn) {
+		t.Errorf("session persistence opt-in must only remove --no-session-persistence and change nothing else\nwithout opt-in (flag stripped): %v\nwith opt-in:                    %v", stripped, withOptIn)
+	}
+}
+
+// TestBuildArgs_Orchestrator_SessionPersistenceOptIn_OnlyFlagDiffers is the
+// same assertion for orchestrator invocations.
+func TestBuildArgs_Orchestrator_SessionPersistenceOptIn_OnlyFlagDiffers(t *testing.T) {
+	req := harness.SpawnRequest{
+		Agent:        orchestratorAgent(),
+		Prompt:       "x",
+		OutputFormat: "json",
+	}
+	withoutOptIn, _, err := harness.BuildArgs(req)
+	if err != nil {
+		t.Fatalf("building without opt-in: %v", err)
+	}
+	req.SessionPersistence = true
+	withOptIn, _, err := harness.BuildArgs(req)
+	if err != nil {
+		t.Fatalf("building with opt-in: %v", err)
+	}
+
+	stripped := argsWithout(withoutOptIn, "--no-session-persistence")
+	if !reflect.DeepEqual(stripped, withOptIn) {
+		t.Errorf("session persistence opt-in must only remove --no-session-persistence and change nothing else\nwithout opt-in (flag stripped): %v\nwith opt-in:                    %v", stripped, withOptIn)
+	}
+}
+
+// TestBuildArgs_Ordinary_SessionPersistenceOptIn_StdinUnchanged verifies that
+// the stdin payload is not affected by the SessionPersistence field for an
+// ordinary invocation: the prompt travels on stdin identically regardless of
+// whether the opt-in is set.
+func TestBuildArgs_Ordinary_SessionPersistenceOptIn_StdinUnchanged(t *testing.T) {
+	const prompt = "stdin-unchanged-ordinary-marker"
+	req := harness.SpawnRequest{
+		Agent:        ordinaryAgent(),
+		Prompt:       prompt,
+		OutputFormat: "json",
+	}
+	_, stdinWithout, err := harness.BuildArgs(req)
+	if err != nil {
+		t.Fatalf("building without opt-in: %v", err)
+	}
+	req.SessionPersistence = true
+	_, stdinWith, err := harness.BuildArgs(req)
+	if err != nil {
+		t.Fatalf("building with opt-in: %v", err)
+	}
+
+	if string(stdinWithout) != string(stdinWith) {
+		t.Errorf("stdin must be identical regardless of SessionPersistence\nwithout opt-in: %q\nwith opt-in:    %q", stdinWithout, stdinWith)
+	}
+}
+
+// TestBuildArgs_Orchestrator_SessionPersistenceOptIn_StdinUnchanged is the
+// same assertion for orchestrator invocations, which carry both the
+// synthesized <env> block and the prompt in their stdin payload.
+func TestBuildArgs_Orchestrator_SessionPersistenceOptIn_StdinUnchanged(t *testing.T) {
+	const prompt = "stdin-unchanged-orchestrator-marker"
+	req := harness.SpawnRequest{
+		Agent:        orchestratorAgent(),
+		Prompt:       prompt,
+		OutputFormat: "json",
+	}
+	_, stdinWithout, err := harness.BuildArgs(req)
+	if err != nil {
+		t.Fatalf("building without opt-in: %v", err)
+	}
+	req.SessionPersistence = true
+	_, stdinWith, err := harness.BuildArgs(req)
+	if err != nil {
+		t.Fatalf("building with opt-in: %v", err)
+	}
+
+	if string(stdinWithout) != string(stdinWith) {
+		t.Errorf("stdin must be identical regardless of SessionPersistence\nwithout opt-in: %q\nwith opt-in:    %q", stdinWithout, stdinWith)
 	}
 }

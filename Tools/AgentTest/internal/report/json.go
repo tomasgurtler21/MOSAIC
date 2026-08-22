@@ -80,6 +80,10 @@ type wireRunReport struct {
 	// on. Always present; the literal "unknown" when no model was recorded.
 	SubjectModel string `json:"subject_model"`
 	StubModel    string `json:"stub_model"`
+
+	// TerminationReason names why this run ended. Always present; the literal
+	// "unknown" when no disposition was recorded.
+	TerminationReason string `json:"termination_reason"`
 }
 
 // wireSubjectFailure is what a subject that exited non-zero told us.
@@ -205,6 +209,7 @@ func toWireRunReport(r RunReport) wireRunReport {
 		SubjectVersion:      subjectVersionOrUnknown(r.SubjectVersion),
 		SubjectModel:        subjectVersionOrUnknown(r.SubjectModel),
 		StubModel:           subjectVersionOrUnknown(r.StubModel),
+		TerminationReason:   subjectVersionOrUnknown(r.TerminationReason),
 	}
 }
 

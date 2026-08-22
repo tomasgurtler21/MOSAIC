@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -102,6 +103,15 @@ type Options struct {
 	// composition root resolves the same default the CLI uses
 	// (WiringConfig.CatalogFolder).
 	CatalogFolder string
+
+	// ResolveSuiteDefaults returns the declared defaults for a suite file.
+	// Called lazily when the selected suite changes, not on every render.
+	// A nil function or an error result degrades to ProvenanceUnknown display
+	// rather than blocking navigation. The composition root wires this to a
+	// function that reads and parses the suite file's defaults block using the
+	// same schema preflight uses, ensuring the displayed value agrees with the
+	// one preflight applies at run start.
+	ResolveSuiteDefaults func(suitePath string) (SuiteDefaults, error)
 }
 
 // Screen names one of the screens this frontend presents.
@@ -123,6 +133,7 @@ const (
 	ScreenModelSelect Screen = "model_select"
 
 	ScreenSuiteSelect Screen = "suite_select"
+	ScreenSettings    Screen = "settings"
 	ScreenProgress    Screen = "progress"
 	ScreenResults     Screen = "results"
 	ScreenDetail      Screen = "detail"
@@ -196,6 +207,13 @@ type Model struct {
 	suiteCursor int
 	running     bool
 
+	// resolvedSuiteDefaults holds the declared defaults from the currently
+	// selected suite file, resolved lazily on construction and on each
+	// cursor change. A zero SuiteDefaults (nil Repetitions) means either
+	// the suite declares no default or the resolver is nil/returned an error;
+	// both cases degrade to the "suite default" label.
+	resolvedSuiteDefaults SuiteDefaults
+
 	// retention starts as Options.Retention and is updated by the
 	// suite-select screen's toggle affordance (Stage 7).
 	retention domain.RetentionPolicy
@@ -215,18 +233,23 @@ type Model struct {
 	catalogFolder string
 
 	// reportPath is the JSON report file path currently in force. Starts as
-	// Options.ReportPath; the suite-select screen's inline-edit affordance may
+	// Options.ReportPath; the settings screen's inline-edit affordance may
 	// change it before a run starts. The value at run-start is what WriteFile
 	// receives. An empty value suppresses the write.
 	reportPath string
 
-	// editingReportPath is true while the suite-select screen's inline edit
-	// mode is active. While true, list navigation keys are text input rather
-	// than navigation.
-	editingReportPath bool
+	// settingsCursor is the focused row on the settings screen. Zero-indexed
+	// within SettingsEntries(). Reset to 0 each time the user enters the
+	// settings screen.
+	settingsCursor int
 
-	// reportPathDraft accumulates the typed value during inline edit mode.
-	reportPathDraft string
+	// settingEditing identifies which setting is currently being edited on
+	// the settings screen. An empty value means no editing is in progress.
+	settingEditing SettingKind
+
+	// settingDraft accumulates the typed value while an EditInline or
+	// EditNumeric editor is open. Discarded on Esc; committed on Enter.
+	settingDraft string
 
 	// Folded progress state (AC16.2, AC16.8): every field here is set only
 	// by Fold, from an event or the terminal result model, and nothing in
@@ -276,6 +299,22 @@ type Model struct {
 // Compile-time assertion that Model satisfies tea.Model.
 var _ tea.Model = Model{}
 
+// resolveForSuite calls opts.ResolveSuiteDefaults for the suite at the given
+// cursor position and returns the result. When the resolver is nil, the cursor
+// is out of range, or the resolver returns an error, it returns a zero
+// SuiteDefaults (nil Repetitions), which SettingsEntries() treats as
+// ProvenanceUnknown and renders as the generic "suite default" label.
+func resolveForSuite(o Options, cursor int) SuiteDefaults {
+	if o.ResolveSuiteDefaults == nil || cursor >= len(o.Suites) {
+		return SuiteDefaults{}
+	}
+	d, err := o.ResolveSuiteDefaults(o.Suites[cursor])
+	if err != nil {
+		return SuiteDefaults{}
+	}
+	return d
+}
+
 // NewModel constructs the initial Model on the suite-select screen. The
 // suite has not started; Suites lists what a user may pick from.
 func NewModel(o Options) Model {
@@ -295,6 +334,7 @@ func NewModel(o Options) Model {
 	if len(o.Harnesses) > 0 {
 		m.screen = ScreenHarnessSelect
 	}
+	m.resolvedSuiteDefaults = resolveForSuite(o, 0)
 	paneH, paneW := m.paneGeometry()
 	m.detailPane = widgets.NewDetailPane(paneH, paneW, widgets.DefaultDetailPaneStyles())
 	return m
@@ -419,6 +459,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateModelSelect(msg)
 	case ScreenSuiteSelect:
 		return m.updateSuiteSelect(msg)
+	case ScreenSettings:
+		return m.updateSettings(msg)
 	case ScreenResults:
 		return m.updateResults(msg)
 	case ScreenDetail:
@@ -580,41 +622,29 @@ func (m Model) updateModelSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// isEditKey reports whether msg is the report-path inline-edit activation key.
-// 'e' is chosen so it does not conflict with any existing navigation binding.
-func isEditKey(msg tea.KeyMsg) bool {
-	return msg.Type == tea.KeyRunes && string(msg.Runes) == "e"
-}
-
-// updateSuiteSelect handles suite-cursor movement, the retention toggle,
-// the report-path inline editor activation, and starting the chosen suite.
+// updateSuiteSelect handles suite-cursor movement, Tab to the settings screen,
+// and starting the chosen suite. Per-run settings (retention, report path,
+// catalog folder, repetitions) are no longer on this screen; they live on
+// ScreenSettings, reachable via Tab.
 func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// While the report-path inline editor is active, route all keys to it so
-	// navigation keys become text input rather than cursor movement.
-	if m.editingReportPath {
-		return m.updateReportPathEdit(msg)
-	}
-
 	switch {
 	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Down):
 		if m.suiteCursor < len(m.opts.Suites)-1 {
 			m.suiteCursor++
+			m.resolvedSuiteDefaults = resolveForSuite(m.opts, m.suiteCursor)
 		}
 		return m, nil
 
 	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Up):
 		if m.suiteCursor > 0 {
 			m.suiteCursor--
+			m.resolvedSuiteDefaults = resolveForSuite(m.opts, m.suiteCursor)
 		}
 		return m, nil
 
-	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Space):
-		m.retention = nextRetention(m.retention)
-		return m, nil
-
-	case isEditKey(msg):
-		m.editingReportPath = true
-		m.reportPathDraft = ""
+	case msg.Type == tea.KeyTab:
+		m.screen = ScreenSettings
+		m.settingsCursor = 0
 		return m, nil
 
 	case msg.Type == tea.KeyPgDown:
@@ -635,39 +665,171 @@ func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateReportPathEdit handles key input while the report-path inline editor
-// is active. Enter commits the draft, Escape cancels and restores the
-// previous value, Backspace removes the last character, and any rune
-// appends to the draft. Other special keys (Down, Up, etc.) are consumed
-// without effect so they cannot drive navigation behind the editor.
-func (m Model) updateReportPathEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// updateSettings handles key input on the settings screen. When an inline or
+// numeric editor is active, all keys route to updateSettingEdit. Otherwise,
+// Down/Up move the cursor, Tab/Esc return to suite-select, and Enter
+// activates the focused entry's edit mode.
+func (m Model) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.settingEditing != "" {
+		return m.updateSettingEdit(msg)
+	}
+
+	switch {
+	case msg.Type == tea.KeyTab:
+		m.screen = ScreenSuiteSelect
+		return m, nil
+
+	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Back):
+		m.screen = ScreenSuiteSelect
+		return m, nil
+
+	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Down):
+		entries := m.SettingsEntries()
+		if m.settingsCursor < len(entries)-1 {
+			m.settingsCursor++
+		}
+		return m, nil
+
+	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Up):
+		if m.settingsCursor > 0 {
+			m.settingsCursor--
+		}
+		return m, nil
+
+	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Select):
+		return m.activateFocusedSetting()
+	}
+
+	return m, nil
+}
+
+// activateFocusedSetting applies the action key to the currently focused
+// settings entry. For EditCycle entries the value cycles immediately. For
+// EditInline and EditNumeric entries an inline editor opens.
+func (m Model) activateFocusedSetting() (tea.Model, tea.Cmd) {
+	entries := m.SettingsEntries()
+	if m.settingsCursor >= len(entries) {
+		return m, nil
+	}
+	entry := entries[m.settingsCursor]
+	switch entry.EditMode {
+	case EditCycle:
+		switch entry.Kind {
+		case SettingRetention:
+			m.retention = nextRetention(m.retention)
+		}
+	case EditInline, EditNumeric:
+		m.settingEditing = entry.Kind
+		m.settingDraft = ""
+	}
+	return m, nil
+}
+
+// updateSettingEdit handles key input while an inline or numeric editor is
+// active on the settings screen. Enter commits the draft; Esc discards it
+// without changing the underlying value; Backspace trims one character;
+// rune keys append to the draft (numeric editors accept only digit runes).
+func (m Model) updateSettingEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
-		m.reportPath = m.reportPathDraft
-		m.editingReportPath = false
-		m.reportPathDraft = ""
+		m = m.commitSettingEdit()
 		return m, nil
 
 	case tea.KeyEsc:
-		// Cancel: reportPath is left unchanged; only the draft is discarded.
-		m.editingReportPath = false
-		m.reportPathDraft = ""
+		m.settingEditing = ""
+		m.settingDraft = ""
 		return m, nil
 
 	case tea.KeyBackspace:
-		if len(m.reportPathDraft) > 0 {
-			m.reportPathDraft = m.reportPathDraft[:len(m.reportPathDraft)-1]
+		if len(m.settingDraft) > 0 {
+			m.settingDraft = m.settingDraft[:len(m.settingDraft)-1]
 		}
 		return m, nil
 
 	case tea.KeyRunes:
-		m.reportPathDraft += string(msg.Runes)
+		text := string(msg.Runes)
+		if m.settingEditing == SettingRepetitions {
+			// Numeric editor: only accept digit characters.
+			for _, r := range text {
+				if r >= '0' && r <= '9' {
+					m.settingDraft += string(r)
+				}
+			}
+		} else {
+			m.settingDraft += text
+		}
 		return m, nil
 	}
 
-	// Other special keys (Down, Up, Space, etc.) are consumed but do not
-	// produce text and do not drive navigation.
+	// Other special keys are consumed without effect so they cannot drive
+	// navigation behind the open editor.
 	return m, nil
+}
+
+// commitSettingEdit writes the accumulated draft to the appropriate model
+// field and closes the editor.
+func (m Model) commitSettingEdit() Model {
+	switch m.settingEditing {
+	case SettingReportPath:
+		m.reportPath = m.settingDraft
+	case SettingCatalog:
+		m.catalogFolder = m.settingDraft
+	case SettingRepetitions:
+		if m.settingDraft == "" {
+			m.repetitions = nil
+		} else if v, err := strconv.Atoi(m.settingDraft); err == nil && v > 0 {
+			m.repetitions = &v
+		}
+	}
+	m.settingEditing = ""
+	m.settingDraft = ""
+	return m
+}
+
+// SettingsEntries returns the current state of all four per-run settings as a
+// slice of SettingsEntry instances. The slice order is fixed: retention,
+// repetitions, report path, catalog folder. SettingsEntries is callable from
+// any screen; it does not require the model to be on ScreenSettings.
+func (m Model) SettingsEntries() []SettingsEntry {
+	retDisplay := string(m.retention)
+
+	// Build the repetitions display with a provenance marker so the user can
+	// tell whether the shown value comes from the suite file or is their own
+	// override. When neither a user override nor a resolved suite default is
+	// available, the generic "suite default" label degrades gracefully.
+	repDisplay := "suite default"
+	if m.repetitions != nil {
+		repDisplay = fmt.Sprintf("%d (override)", *m.repetitions)
+	} else if m.resolvedSuiteDefaults.Repetitions != nil {
+		repDisplay = fmt.Sprintf("%d (suite default)", *m.resolvedSuiteDefaults.Repetitions)
+	}
+
+	return []SettingsEntry{
+		{
+			Kind:     SettingRetention,
+			Label:    "Retain sandbox",
+			Display:  retDisplay,
+			EditMode: EditCycle,
+		},
+		{
+			Kind:     SettingRepetitions,
+			Label:    "Repetitions",
+			Display:  repDisplay,
+			EditMode: EditNumeric,
+		},
+		{
+			Kind:     SettingReportPath,
+			Label:    "Report path",
+			Display:  m.reportPath,
+			EditMode: EditInline,
+		},
+		{
+			Kind:     SettingCatalog,
+			Label:    "Catalog folder",
+			Display:  m.catalogFolder,
+			EditMode: EditInline,
+		},
+	}
 }
 
 // nextRetention advances p one step around the cycle the suite-select
@@ -944,6 +1106,8 @@ func (m Model) View() string {
 		return m.viewModelSelect()
 	case ScreenSuiteSelect:
 		return m.viewSuiteSelect()
+	case ScreenSettings:
+		return m.viewSettings()
 	case ScreenProgress:
 		return m.viewProgress()
 	case ScreenResults:
@@ -1035,10 +1199,10 @@ func (m Model) CatalogFolder() string {
 	return m.catalogFolder
 }
 
-// EditingReportPath reports whether the suite-select screen's inline report-
-// path editor is currently active.
+// EditingReportPath reports whether the settings screen's inline report-path
+// editor is currently active.
 func (m Model) EditingReportPath() bool {
-	return m.editingReportPath
+	return m.settingEditing == SettingReportPath
 }
 
 // TotalTests reports the suite's declared total, learned from

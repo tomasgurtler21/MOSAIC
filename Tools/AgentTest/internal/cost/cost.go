@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"mosaic-agent-test/internal/domain"
@@ -99,39 +100,61 @@ func (p *provider) Cost(ctx context.Context, q domain.CostQuery) (domain.CostRep
 		defer cancel()
 	}
 
-	args := []string{"total", "--run", q.RunID, "--path", q.LogRoot, "--format", "json"}
+	// When LogsRoot is available, pass it as --path so the analyser scans the
+	// entire OrchestrationLogs tree and can see the unknown-run sibling bucket.
+	scanPath := q.LogRoot
+	if q.LogsRoot != "" {
+		scanPath = q.LogsRoot
+	}
+
+	// The fallback bucket is a sibling of the run folder when LogsRoot is known,
+	// or a child of the run folder as a legacy fallback for callers that pre-date
+	// the LogsRoot field.
+	unknownBucketPath := filepath.Join(q.LogRoot, UnknownRunBucket)
+	if q.LogsRoot != "" {
+		unknownBucketPath = filepath.Join(q.LogsRoot, UnknownRunBucket)
+	}
+
+	args := []string{"total", "--run", q.RunID, "--path", scanPath, "--format", "json"}
 	stdout, exitCode, invokeErr := invoke(runCtx, p.opts.ExecutablePath, args, p.opts.WorkingDir)
 	if invokeErr != nil {
 		return Map(MapInput{
 			ExecutablePath: p.opts.ExecutablePath,
 			RunID:          q.RunID,
 			LogRoot:        q.LogRoot,
+			LogsRoot:       q.LogsRoot,
 			ExitCode:       exitCode,
 			InvokeErr:      invokeErr,
 		}), nil
 	}
 
+	// Detect the unknown-run bucket for exit codes that signal missing run data.
+	// For exitUsage, detection requires LogsRoot so we know where to look for the
+	// sibling bucket.
+	unknownBucketPresent := false
+	if exitCode == exitNoData || (exitCode == exitUsage && q.LogsRoot != "") {
+		unknownBucketPresent = statDir(unknownBucketPath)
+	}
+
 	var total RunTotal
 	if parseErr := json.Unmarshal(stdout, &total); parseErr != nil {
 		return Map(MapInput{
-			ExecutablePath: p.opts.ExecutablePath,
-			RunID:          q.RunID,
-			LogRoot:        q.LogRoot,
-			ExitCode:       exitCode,
-			StdoutLen:      len(stdout),
-			ParseErr:       parseErr,
+			ExecutablePath:       p.opts.ExecutablePath,
+			RunID:                q.RunID,
+			LogRoot:              q.LogRoot,
+			LogsRoot:             q.LogsRoot,
+			ExitCode:             exitCode,
+			StdoutLen:            len(stdout),
+			ParseErr:             parseErr,
+			UnknownBucketPresent: unknownBucketPresent,
 		}), nil
-	}
-
-	unknownBucketPresent := false
-	if exitCode == exitNoData {
-		unknownBucketPresent = statDir(filepath.Join(q.LogRoot, UnknownRunBucket))
 	}
 
 	return Map(MapInput{
 		ExecutablePath:       p.opts.ExecutablePath,
 		RunID:                q.RunID,
 		LogRoot:              q.LogRoot,
+		LogsRoot:             q.LogsRoot,
 		ExitCode:             exitCode,
 		Total:                total,
 		UnknownBucketPresent: unknownBucketPresent,
@@ -149,6 +172,15 @@ type RunTotal struct {
 	Tokens        TokenUsage `json:"tokens"`
 	Money         MoneyValue `json:"money"`
 	Complete      bool       `json:"complete"`
+
+	// UnpricedModels lists model names that could not be priced. Absent from
+	// older analyser builds; decodes to nil, which the mapping treats as "no
+	// information about which models were unpriced".
+	UnpricedModels []string `json:"unpriced_models,omitempty"`
+
+	// PartialMoney is the attributable amount when some models are priced and
+	// others are not. Absent from older builds; decodes to nil.
+	PartialMoney *MoneyValue `json:"partial_money,omitempty"`
 }
 
 // TokenUsage categories are pointers because absent and zero are different
@@ -174,9 +206,10 @@ type MoneyValue struct {
 type MapInput struct {
 	// ExecutablePath is the delegate that was invoked.
 	ExecutablePath string
-	// RunID and LogRoot are what was queried.
-	RunID   string
-	LogRoot string
+	// RunID, LogRoot and LogsRoot are what was queried.
+	RunID    string
+	LogRoot  string
+	LogsRoot string // the OrchestrationLogs parent; used for unknown-bucket detection on exitUsage
 
 	// ExitCode is the delegate's exit code; meaningful only when InvokeErr is nil.
 	ExitCode int
@@ -207,6 +240,14 @@ func Map(in MapInput) domain.CostReport {
 	}
 
 	if in.ParseErr != nil {
+		// An unknown-bucket condition takes precedence over a parse error when
+		// the exit code is one that signals missing run data.
+		if in.UnknownBucketPresent && (in.ExitCode == exitNoData || in.ExitCode == exitUsage) {
+			return domain.CostReport{
+				Attribution: domain.AttributionUnknownBucket,
+				Detail:      "cost: no data for this run, but the fallback bucket is present — a cost exists but could not be attributed",
+			}
+		}
 		if in.ExitCode == exitSuccess {
 			return domain.CostReport{
 				Attribution: domain.AttributionUnavailable,
@@ -242,9 +283,15 @@ func Map(in MapInput) domain.CostReport {
 			Detail:      "cost: the log-analysis tool reported an infrastructure failure",
 		}
 	case exitUsage:
+		if in.UnknownBucketPresent {
+			return domain.CostReport{
+				Attribution: domain.AttributionUnknownBucket,
+				Detail:      "cost: no data for this run, but the fallback bucket is present — a cost exists but could not be attributed",
+			}
+		}
 		return domain.CostReport{
 			Attribution: domain.AttributionUnavailable,
-			Detail:      "cost: the log-analysis tool reported a usage error",
+			Detail:      fmt.Sprintf("cost: no usage data found — queried %q which does not exist", in.LogRoot),
 		}
 	case exitUnusable:
 		return domain.CostReport{
@@ -271,9 +318,27 @@ func mapSuccess(total RunTotal) domain.CostReport {
 		}
 		return report
 	case "unpriced":
+		// When the analyser names the unpriced models and provides a partial
+		// amount, report the attributable cost as partial rather than zeroing
+		// the run. One unpriced model among several must not silence the rest.
+		if len(total.UnpricedModels) > 0 && total.PartialMoney != nil {
+			detail := fmt.Sprintf(
+				"cost: usage captured but the following model(s) had no price entry: %s",
+				strings.Join(total.UnpricedModels, ", "),
+			)
+			return domain.CostReport{
+				Attribution:    domain.AttributionPartial,
+				TotalUSD:       parseAmount(total.PartialMoney.Amount),
+				Detail:         detail,
+				UnpricedModels: total.UnpricedModels,
+			}
+		}
+		// Without model identity we cannot name what we do not know, but we
+		// must acknowledge that usage was captured — not redirect the user to
+		// pricing configuration.
 		return domain.CostReport{
 			Attribution: domain.AttributionUnavailable,
-			Detail:      "cost: total reports usage priced against unpriced models",
+			Detail:      "cost: usage was captured but the model(s) responsible could not be identified for attribution",
 		}
 	case "no_data":
 		return domain.CostReport{Attribution: domain.AttributionAttributed, TotalUSD: 0}

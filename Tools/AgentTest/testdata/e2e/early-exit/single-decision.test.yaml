@@ -26,6 +26,17 @@ timeout: 30s
 turn_limit: 5
 stop_after_invocations: 1
 
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: orchestration.md
+
 assertions:
   artifact_created:
     - greeting.txt
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: greeter }
+  final_state:
+    phase: EXECUTION
+    last_status: SUCCESS

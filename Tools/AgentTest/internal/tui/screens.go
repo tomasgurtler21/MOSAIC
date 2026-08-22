@@ -129,19 +129,19 @@ func (m Model) viewModelSelect() string {
 // Suite selection
 // ---------------------------------------------------------------------------
 
-// suiteSelectHelp is EntryScreenHelp with the Space/toggle entry and the
-// pane-scroll entry inserted, so both affordances are discoverable the same
-// way every other key binding on this screen is.
+// suiteSelectHelp is EntryScreenHelp with a Tab entry (to reach the settings
+// screen) and the detail-pane scroll entry prepended, so all affordances on
+// this screen are discoverable via the help bar.
 func suiteSelectHelp() []tuicommon.HelpEntry {
-	spaceEntry := tuicommon.HelpEntry{
-		Key:  tuicommon.GlobalKeys.Space.Help().Key,
-		Desc: tuicommon.GlobalKeys.Space.Help().Desc,
+	tabEntry := tuicommon.HelpEntry{
+		Key:  "tab",
+		Desc: "configure run",
 	}
 	scrollEntry := tuicommon.HelpEntry{
 		Key:  "pgup/pgdn",
 		Desc: "scroll detail",
 	}
-	return append([]tuicommon.HelpEntry{spaceEntry, scrollEntry}, tuicommon.EntryScreenHelp()...)
+	return append([]tuicommon.HelpEntry{tabEntry, scrollEntry}, tuicommon.EntryScreenHelp()...)
 }
 
 func (m Model) viewSuiteSelect() string {
@@ -161,22 +161,6 @@ func (m Model) viewSuiteSelect() string {
 		}
 		b.WriteString(tuicommon.Truncate(prefix+s, width))
 	}
-	b.WriteString("\n")
-	b.WriteString(tuicommon.Truncate(fmt.Sprintf("Retain sandbox: %s", m.retention), width))
-	b.WriteString("\n")
-	if m.repetitions != nil {
-		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Repetitions: %d", *m.repetitions), width))
-	} else {
-		b.WriteString(tuicommon.Truncate("Repetitions: suite default", width))
-	}
-	b.WriteString("\n")
-	if m.editingReportPath {
-		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Report [editing]: %s", m.reportPathDraft), width))
-	} else {
-		b.WriteString(tuicommon.Truncate(fmt.Sprintf("Report: %s", m.reportPath), width))
-	}
-	b.WriteString("\n")
-	b.WriteString(tuicommon.Truncate(fmt.Sprintf("Catalog: %s", m.catalogFolder), width))
 
 	body := b.String()
 	if m.showFailureDetail && m.detailPane != nil {
@@ -184,6 +168,52 @@ func (m Model) viewSuiteSelect() string {
 	}
 
 	return m.renderScreen("Select a Suite", "", body, suiteSelectHelp())
+}
+
+// ---------------------------------------------------------------------------
+// Run configuration settings
+// ---------------------------------------------------------------------------
+
+// settingsHelp returns the help entries for the settings screen. All
+// functional keys are listed so none is undiscoverable.
+func settingsHelp() []tuicommon.HelpEntry {
+	return []tuicommon.HelpEntry{
+		{Key: "up/down", Desc: "move"},
+		{Key: "enter", Desc: "change"},
+		{Key: "esc", Desc: "back"},
+		{Key: tuicommon.GlobalKeys.Cancel.Help().Key, Desc: tuicommon.GlobalKeys.Cancel.Help().Desc},
+	}
+}
+
+// viewSettings renders the run-configuration settings screen. Each
+// SettingsEntry is shown as a labelled row; the focused row is marked with a
+// cursor prefix. When an inline or numeric editor is open for an entry, that
+// entry shows the draft value in place of its current value.
+func (m Model) viewSettings() string {
+	width := m.contentWidth()
+	entries := m.SettingsEntries()
+
+	var b strings.Builder
+	for i, e := range entries {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		prefix := "  "
+		if i == m.settingsCursor {
+			prefix = "> "
+		}
+
+		// When this entry's editor is open, show the draft instead of the
+		// committed value.
+		display := e.Display
+		if m.settingEditing == e.Kind {
+			display = m.settingDraft + "_"
+		}
+
+		b.WriteString(tuicommon.Truncate(fmt.Sprintf("%s%s: %s", prefix, e.Label, display), width))
+	}
+
+	return m.renderScreen("Run Configuration", "", b.String(), settingsHelp())
 }
 
 // ---------------------------------------------------------------------------

@@ -318,9 +318,26 @@ func (a *Adapter) TranslateCall(phase domain.InterceptionPhase, native []byte) (
 }
 
 // nextTurn returns the next scripted Turn for id, advancing its per-identity
-// index. An identity with no remaining scripted turns — including one with
-// no script at all — is reported as an error, never a panic.
+// index.
+//
+// When Options.Script is nil (no script provided at all), every post call is
+// unscripted: nextTurn returns an empty Turn so the post phase proceeds with
+// an empty ObservedResponse. This lets tests exercise the interceptor shell's
+// post/completion path (e.g., the cutoff sentinel write) without needing to
+// provide a collaborator response.
+//
+// When Options.Script is non-nil, every collaborator identity must appear in
+// the map with at least as many turns as it is called: an identity with no
+// entry, or one whose script is exhausted, is reported as an error, never a
+// panic. Use an empty non-nil map (map[string][]Turn{}) to assert that no
+// scripted turns are consumed while still enforcing the "no unexpected script
+// consumption" check for known identities.
 func (a *Adapter) nextTurn(id domain.CollaboratorIdentity) (Turn, error) {
+	// Nil Script means "unscripted" — allow post calls with empty response.
+	if a.opts.Script == nil {
+		return Turn{}, nil
+	}
+
 	key := id.Key()
 	turns := a.opts.Script[key]
 

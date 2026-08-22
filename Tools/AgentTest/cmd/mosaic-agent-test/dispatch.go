@@ -776,5 +776,22 @@ func tuiOptions(d Deps, suites []string) (tui.Options, error) {
 
 		// Process-wide default catalog folder, editable in TUI.
 		CatalogFolder: d.CatalogFolder,
+
+		// ResolveSuiteDefaults reads the suite file and returns its declared
+		// defaults so the TUI settings screen can display the number that will
+		// actually be used rather than the generic "suite default" label. A
+		// parse error or missing file returns an error, which resolveForSuite
+		// handles by degrading to the unknown-provenance label — never a panic.
+		ResolveSuiteDefaults: func(suitePath string) (tui.SuiteDefaults, error) {
+			data, err := os.ReadFile(suitePath)
+			if err != nil {
+				return tui.SuiteDefaults{}, fmt.Errorf("reading suite file %q: %w", suitePath, err)
+			}
+			parsedSuite, suiteReport := authoring.ParseSuite(authoring.Source{Path: suitePath, Data: data})
+			if suiteReport.HasErrors() {
+				return tui.SuiteDefaults{}, fmt.Errorf("parsing suite file %q: %w", suitePath, suiteReport)
+			}
+			return tui.SuiteDefaults{Repetitions: parsedSuite.Defaults.Repetitions}, nil
+		},
 	}, nil
 }

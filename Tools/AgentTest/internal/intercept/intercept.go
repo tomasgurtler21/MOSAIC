@@ -36,6 +36,12 @@ type Decision struct {
 	Delta       domain.StateDelta
 	Records     []domain.LogRecord
 	SideEffects []domain.FileEffect
+	// TerminateSubject, when true, instructs the interceptor shell to write
+	// the early-exit sentinel after delivering the current reply. It is set
+	// by the post/completion handler when the just-completed dispatch is the
+	// Nth (where N == EarlyExitThreshold). The outcome on the same decision
+	// is always OutcomePassthrough — the reply must be delivered first.
+	TerminateSubject bool
 }
 
 // Decide handles all three interception phases, selected by Input.Call.Phase.
@@ -96,33 +102,6 @@ func decidePre(in Input) Decision {
 	id := in.Call.Identity
 	seq := in.State.SequenceCounter + 1
 	ordinal := in.State.CollaboratorCounters[id.Key()] + 1
-
-	// Early-exit threshold takes priority over everything else: any call
-	// halts once the threshold has been reached.
-	if in.State.EarlyExitThreshold > 0 && in.State.SequenceCounter >= in.State.EarlyExitThreshold {
-		outcome := domain.InterceptionOutcome{
-			Kind:             domain.OutcomeHalt,
-			HaltReason:       domain.HaltEarlyExit,
-			CorrelationToken: in.Call.CorrelationToken,
-			Message:          "This operation cannot proceed further in this run.",
-		}
-		delta := domain.StateDelta{
-			SequenceIncrement:      1,
-			CollaboratorIncrements: map[string]int{id.Key(): 1},
-			SetEarlyExitTriggered:  true,
-		}
-		records := []domain.LogRecord{
-			startRecord(in, seq, ordinal, outcome.Kind),
-			{
-				Kind:      domain.RecordRun,
-				TestID:    in.State.TestID,
-				RunNumber: in.State.RunNumber,
-				Timestamp: in.Now,
-				Event:     domain.RunEventEarlyExitTriggered,
-			},
-		}
-		return Decision{Outcome: outcome, Delta: delta, Records: records}
-	}
 
 	// Protocol-extraction-failure escalation ladder, final step: the
 	// collaborator identity is not determinable at all. Never guess it and
@@ -230,12 +209,36 @@ func decidePre(in Input) Decision {
 
 	records := append([]domain.LogRecord{startRecord(in, seq, ordinal, outcome.Kind)}, extraRecords...)
 
-	return Decision{
+	d := Decision{
 		Outcome:     outcome,
 		Delta:       delta,
 		Records:     records,
 		SideEffects: sideEffects,
 	}
+
+	// Cutoff detection for the direct-substitution path: when the harness
+	// supports direct substitution (OutcomeSubstitute), the substitute reply IS
+	// the Nth reply delivered to the subject at the pre-invocation point — no
+	// post/completion event fires for it. Detect the cutoff here so the
+	// interceptor shell writes the sentinel after the substitute reply leaves
+	// cfg.Out, terminating the subject process before any (N+1)th pre-invocation
+	// is processed.
+	//
+	// For non-direct-substitution harnesses (OutcomeRewritePrompt), the real
+	// reply arrives at the post/completion point, so decidePost handles the
+	// cutoff there. This branch fires only for OutcomeSubstitute.
+	if in.State.EarlyExitThreshold > 0 && seq == in.State.EarlyExitThreshold && outcome.Kind == domain.OutcomeSubstitute {
+		d.TerminateSubject = true
+		d.Records = append(d.Records, domain.LogRecord{
+			Kind:      domain.RecordRun,
+			TestID:    in.State.TestID,
+			RunNumber: in.State.RunNumber,
+			Timestamp: in.Now,
+			Event:     domain.RunEventEarlyExitTriggered,
+		})
+	}
+
+	return d
 }
 
 // substitutionOutcome applies the capability-driven outcome selection: a
@@ -338,11 +341,31 @@ func decidePost(in Input) Decision {
 		CorrelationToken: token,
 	}
 
-	return Decision{
+	d := Decision{
 		Outcome: outcome,
 		Delta:   delta,
 		Records: []domain.LogRecord{rec},
 	}
+
+	// Cutoff detection: when the just-completed dispatch is the Nth (where
+	// N == EarlyExitThreshold), signal process termination. The outcome
+	// remains OutcomePassthrough — the reply is delivered first, and the
+	// interceptor shell writes the sentinel only after the reply leaves
+	// cfg.Out. The RunEventEarlyExitTriggered record is appended after the
+	// end record so it appears at the correct chronological position in the
+	// invocation log.
+	if hasPending && in.State.EarlyExitThreshold > 0 && pending.Seq == in.State.EarlyExitThreshold {
+		d.TerminateSubject = true
+		d.Records = append(d.Records, domain.LogRecord{
+			Kind:      domain.RecordRun,
+			TestID:    in.State.TestID,
+			RunNumber: in.State.RunNumber,
+			Timestamp: in.Now,
+			Event:     domain.RunEventEarlyExitTriggered,
+		})
+	}
+
+	return d
 }
 
 // EchoInstruction renders the prompt that replaces a stubbed call's input

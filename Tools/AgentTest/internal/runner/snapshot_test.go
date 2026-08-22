@@ -7,6 +7,7 @@ package runner_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -143,7 +144,7 @@ func TestBuildEvidence_MapsSnapshotSettlingsAndCostIntoRunEvidence(t *testing.T)
 	if len(evidence.SnapshotFiles) != 2 {
 		t.Errorf("evidence.SnapshotFiles = %v, want the snapshot's file listing", evidence.SnapshotFiles)
 	}
-	if evidence.Cost != cost {
+	if !reflect.DeepEqual(evidence.Cost, cost) {
 		t.Errorf("evidence.Cost = %+v, want %+v", evidence.Cost, cost)
 	}
 	if evidence.Duration != dur {

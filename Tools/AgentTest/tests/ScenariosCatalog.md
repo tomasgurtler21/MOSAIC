@@ -103,7 +103,8 @@ Filled in when tests are created. One test may cover multiple scenarios; one sce
 
 | Test ID | Test Name | Scenarios Covered | Workflow | Notes |
 |---------|-----------|-------------------|----------|-------|
-| | | | | |
+| findings-route-back | Findings Route-Back | S-1, G-1 | brownfield-tdd | Seeded after planner SUCCESS. plan-review COMPLETED_NEEDS_ACTION → planner-tdd-soft with plan-review.md in inputs |
+| partially-done-redispatch | PARTIALLY_DONE Redispatch | S-2 | brownfield-tdd | Seeded at EXECUTION stage 1 impl. implementation-tdd PARTIALLY_DONE → same agent re-dispatched |
 
 ---
 

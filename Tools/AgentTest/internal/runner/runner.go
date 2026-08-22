@@ -149,7 +149,11 @@ func Run(ctx context.Context, d Deps, req Request, eval domain.AttemptEvaluator)
 		snap.StubModel = snap.SubjectModel
 	}
 
-	costReport, costErr := d.Cost.Cost(ctx, domain.CostQuery{LogRoot: snap.LogRoot, RunID: req.Key.RunID})
+	costReport, costErr := d.Cost.Cost(ctx, domain.CostQuery{
+		LogRoot:  snap.LogRoot,
+		LogsRoot: snap.LogsRoot,
+		RunID:    req.Key.RunID,
+	})
 	if costErr != nil {
 		costReport = domain.CostReport{
 			Attribution: domain.AttributionUnavailable,
@@ -763,6 +767,12 @@ func watchSentinel(path string, hit chan<- struct{}, stop <-chan struct{}) {
 	}
 }
 
+// unknownRunBucket is the folder name the MOSAIC logger writes into when it
+// cannot resolve a run's identity. It sits at LogsRoot()/unknown-run as a
+// sibling of the per-run folder; its presence is what FallbackBucketPresent
+// signals to conditions.go so the evaluate package never performs I/O.
+const unknownRunBucket = "unknown-run"
+
 // Snapshot is everything the verdict engine will need, captured while it
 // still exists.
 type Snapshot struct {
@@ -772,11 +782,18 @@ type Snapshot struct {
 	Records              []domain.LogRecord
 	LogReport            invlog.ReadReport
 	SubjectResult        domain.SubjectResult
-	LogRoot              string // captured so cost can be read after teardown
+	LogRoot              string // per-run folder; captured so cost can be read after teardown
+	LogsRoot             string // OrchestrationLogs parent; captured for the cost query
 
-	// LogsProduced reports whether LogRoot held any log records, populated
-	// from the actual log tree by TakeSnapshot via logRootHasFiles.
+	// LogsProduced reports whether ANY log files exist for this session
+	// (the full OrchestrationLogs tree, not only the per-run folder).
+	// Populated by TakeSnapshot via logRootHasFiles(LogsRoot).
 	LogsProduced bool
+
+	// FallbackBucketPresent reports whether the unknown-run fallback bucket
+	// exists alongside the per-run folder. Set by TakeSnapshot so
+	// conditions.go can produce a non-misleading signal without I/O.
+	FallbackBucketPresent bool
 
 	// SubjectVersion is the subject's declared source version, captured from
 	// the deployment port's result during setup and copied here from the
@@ -796,11 +813,14 @@ type Snapshot struct {
 // TakeSnapshot captures everything the verdict engine will need, before
 // anything is removed.
 func TakeSnapshot(d Deps, s domain.Sandbox, res domain.SubjectResult) Snapshot {
+	logsRoot := s.LogsRoot()
 	snap := Snapshot{
-		Files:         listSubjectFiles(s.SubjectDir),
-		SubjectResult: res,
-		LogRoot:       s.LogRoot(),
-		LogsProduced:  logRootHasFiles(s.LogRoot()),
+		Files:                 listSubjectFiles(s.SubjectDir),
+		SubjectResult:         res,
+		LogRoot:               s.LogRoot(),
+		LogsRoot:              logsRoot,
+		LogsProduced:          logRootHasFiles(logsRoot),
+		FallbackBucketPresent: fallbackBucketExists(filepath.Join(logsRoot, unknownRunBucket)),
 	}
 
 	records, report, err := invlog.NewLog(s.InvocationLogPath()).Read()
@@ -843,6 +863,14 @@ func logRootHasFiles(root string) bool {
 		return nil
 	})
 	return found
+}
+
+// fallbackBucketExists reports whether path names an existing directory, so
+// TakeSnapshot can populate FallbackBucketPresent without the evaluate package
+// ever needing to perform I/O.
+func fallbackBucketExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // listSubjectFiles returns every file beneath subjectDir, relative to it,
@@ -891,8 +919,9 @@ func BuildEvidence(req Request, snap Snapshot, cost domain.CostReport, dur time.
 		Cost:     cost,
 		Duration: dur,
 
-		LogRoot:      snap.LogRoot,
-		LogsProduced: snap.LogsProduced,
+		LogRoot:               snap.LogRoot,
+		LogsProduced:          snap.LogsProduced,
+		FallbackBucketPresent: snap.FallbackBucketPresent,
 
 		SubjectVersion: snap.SubjectVersion,
 

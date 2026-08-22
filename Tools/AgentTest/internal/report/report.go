@@ -89,6 +89,12 @@ type RunReport struct {
 	// recorded; both renderings show that as unknown, never as blank.
 	SubjectModel string
 	StubModel    string
+
+	// TerminationReason names why this run ended. Values match
+	// domain.RunDisposition: "completed", "early_exit", "timed_out",
+	// "turn_limit", "spawn_failed". Empty only when disposition was not
+	// recorded, which both renderings show as "unknown" rather than blank.
+	TerminationReason string
 }
 
 // SubjectFailure is what a subject that exited non-zero told us. Zero-valued
@@ -166,6 +172,11 @@ const (
 
 	// ClassSubjectFailure is a subject that exited non-zero.
 	ClassSubjectFailure OutcomeClass = "subject_failure"
+
+	// ClassCutoff is a run that was terminated by the hard subject cutoff
+	// (stop_after_invocations). Present in Classify's output if and only if
+	// TerminationReason equals domain.DispositionEarlyExit.
+	ClassCutoff OutcomeClass = "cutoff"
 )
 
 // Classify reports every class a run exhibits, in a stable order. A run can
@@ -192,6 +203,9 @@ func Classify(r RunReport) []OutcomeClass {
 	}
 	if r.Subject.ExitCode != 0 {
 		out = append(out, ClassSubjectFailure)
+	}
+	if r.TerminationReason == string(domain.DispositionEarlyExit) {
+		out = append(out, ClassCutoff)
 	}
 	if len(out) == 0 && r.Verdict == domain.VerdictPass {
 		out = append(out, ClassPass)

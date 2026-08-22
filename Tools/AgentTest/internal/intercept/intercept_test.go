@@ -200,14 +200,20 @@ func TestDecide_UnmatchedCall_UnderHaltingPolicy_YieldsHaltUnmatched(t *testing.
 	}
 }
 
-func TestDecide_OnceEarlyExitThresholdReached_AnyCallYieldsHaltEarlyExit(t *testing.T) {
+// TestDecide_EarlyExitThreshold_PreInvocationNoLongerHalts documents that
+// the pre-invocation phase does NOT halt when the early-exit threshold has
+// been reached. Stage 2 moved the cutoff to the Nth reply's completion phase;
+// the (N+1)th pre-invocation call is never refused. See cutoff_test.go for
+// the full suite of cutoff-specific cases.
+func TestDecide_EarlyExitThreshold_PreInvocationNoLongerHalts(t *testing.T) {
 	id := researcherIdentity()
 	state := baseState()
 	state.EarlyExitThreshold = 3
 	state.SequenceCounter = 3 // threshold already reached
 
-	// Even a call that would otherwise match a stub cleanly must halt once
-	// the threshold is reached: the early-exit rule takes priority.
+	// A call that would previously have halted at the pre-invocation point
+	// must now proceed normally: the stub is matched, the outcome is
+	// OutcomeSubstitute, and no HaltEarlyExit is produced.
 	in := intercept.Input{
 		Call:     baseCall(id, domain.HarnessCapabilities{SupportsDirectSubstitution: true}),
 		State:    state,
@@ -220,11 +226,8 @@ func TestDecide_OnceEarlyExitThresholdReached_AnyCallYieldsHaltEarlyExit(t *test
 	if err != nil {
 		t.Fatalf("Decide returned unexpected error: %v", err)
 	}
-	if decision.Outcome.Kind != domain.OutcomeHalt {
-		t.Fatalf("Outcome.Kind = %q, want %q", decision.Outcome.Kind, domain.OutcomeHalt)
-	}
-	if decision.Outcome.HaltReason != domain.HaltEarlyExit {
-		t.Errorf("HaltReason = %q, want %q", decision.Outcome.HaltReason, domain.HaltEarlyExit)
+	if decision.Outcome.Kind == domain.OutcomeHalt && decision.Outcome.HaltReason == domain.HaltEarlyExit {
+		t.Fatalf("Outcome is HaltEarlyExit: the pre-invocation phase must not halt for calls at or beyond the threshold; the cutoff fires at the Nth reply's completion, not here")
 	}
 }
 

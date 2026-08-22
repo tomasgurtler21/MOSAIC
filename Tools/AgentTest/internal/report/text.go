@@ -144,6 +144,9 @@ func writeTestLine(w io.Writer, t TestReport) error {
 		if _, err := fmt.Fprintf(w, "  stub model: %s\n", subjectVersionOrUnknown(run.StubModel)); err != nil {
 			return err
 		}
+		if _, err := fmt.Fprintf(w, "  termination reason: %s\n", subjectVersionOrUnknown(run.TerminationReason)); err != nil {
+			return err
+		}
 	}
 	return nil
 }

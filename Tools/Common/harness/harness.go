@@ -52,6 +52,12 @@ type SpawnRequest struct {
 	// The Claude Code builder ignores this field: it has
 	// --append-system-prompt-file and needs no substitute.
 	SystemPrompt string
+
+	// SessionPersistence, when true, omits --no-session-persistence from
+	// the constructed argument list, allowing the Claude Code CLI to write
+	// its transcript file. The default (false) preserves today's behaviour
+	// exactly: --no-session-persistence is emitted for both invocation kinds.
+	SessionPersistence bool
 }
 
 // Response is the structured result of a spawn.

@@ -32,6 +32,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"mosaic-agent-test/internal/authoring"
 	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/preflight"
@@ -80,30 +82,31 @@ func TestNewModel_CatalogFolder_EmptyDefault_StartsEmpty(t *testing.T) {
 // Suite-select screen: catalog folder displayed (T4.3a, T4.3d)
 // ---------------------------------------------------------------------------
 
-// TestSuiteSelect_CatalogFolder_DisplayedOnScreen verifies that the suite-select
-// screen shows the current catalog folder so a user can see it before starting
-// a run. This doubles as the display affordance: the field is visible whether
-// or not the user has edited it.
-func TestSuiteSelect_CatalogFolder_DisplayedOnScreen(t *testing.T) {
+// TestSettings_CatalogFolder_DisplayedOnScreen verifies that the settings
+// screen shows the current catalog folder, so a user can see it after
+// navigating to run configuration.
+func TestSettings_CatalogFolder_DisplayedOnScreen(t *testing.T) {
 	const catalog = "C:/Tools/AgentTest/catalog"
 	o := newFixtureOptions([]string{"suite.yaml"}, newFakeSuiteRunner())
 	o.CatalogFolder = catalog
 
 	m := NewModel(o)
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
+
+	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
+	if m.Screen() != ScreenSettings {
+		t.Fatalf("Screen() after Tab = %q, want %q", m.Screen(), ScreenSettings)
 	}
 
 	view := safeView(t, m)
 	if !strings.Contains(view, catalog) {
-		t.Errorf("suite-select View() does not contain the catalog folder %q; the user must be able to see it before starting a run.\nView:\n%s", catalog, view)
+		t.Errorf("settings View() does not contain the catalog folder %q.\nView:\n%s", catalog, view)
 	}
 }
 
-// TestSuiteSelect_CatalogFolder_ChangedValue_DisplayedOnScreen verifies that
-// when the model's catalogFolder field is changed (e.g. through user editing),
-// the updated value appears in the suite-select View.
-func TestSuiteSelect_CatalogFolder_ChangedValue_DisplayedOnScreen(t *testing.T) {
+// TestSettings_CatalogFolder_ChangedValue_DisplayedOnScreen verifies that
+// when the model's catalogFolder field is changed, the updated value appears
+// in the settings screen's View.
+func TestSettings_CatalogFolder_ChangedValue_DisplayedOnScreen(t *testing.T) {
 	const initial = "C:/default/catalog"
 	const edited = "C:/custom/catalog"
 	o := newFixtureOptions([]string{"suite.yaml"}, newFakeSuiteRunner())
@@ -112,9 +115,14 @@ func TestSuiteSelect_CatalogFolder_ChangedValue_DisplayedOnScreen(t *testing.T) 
 	m := NewModel(o)
 	m.catalogFolder = edited // directly set the unexported field (same-package test)
 
+	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
+	if m.Screen() != ScreenSettings {
+		t.Fatalf("Screen() after Tab = %q, want %q", m.Screen(), ScreenSettings)
+	}
+
 	view := safeView(t, m)
 	if !strings.Contains(view, edited) {
-		t.Errorf("suite-select View() does not contain the edited catalog folder %q.\nView:\n%s", edited, view)
+		t.Errorf("settings View() does not contain the edited catalog folder %q.\nView:\n%s", edited, view)
 	}
 }
 

@@ -6,6 +6,7 @@ and exits 0 unconditionally. Nothing is written to stdout.
 """
 
 import json
+import os
 import sys
 
 import mosaic_logger_core as core
@@ -82,6 +83,11 @@ def resolve_run_identity(ctx: core.HookContext) -> None:
         bound = runstate.get_session_run_binding(ctx.paths, ctx.session_id, at=ctx.timestamp)
         if bound:
             ctx.run_id = bound
+            return
+
+        env_run_id = os.environ.get("MOSAIC_RUN_ID")
+        if env_run_id and runstate.is_valid_run_id(env_run_id):
+            runstate.adopt_run_id(ctx, env_run_id)
             return
 
         core.debug_log(
