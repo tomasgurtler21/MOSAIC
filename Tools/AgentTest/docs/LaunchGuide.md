@@ -105,7 +105,7 @@ The TUI scans for `*.suite.yaml` files starting from the process working directo
 
 After selecting a harness and models, the TUI lands on the **suite-select screen**. The help bar shows all discoverable keys. Press **Tab** (shown as "configure run" in the help bar) to open the **settings screen**, where every per-run setting is displayed as a labelled row and all are editable.
 
-**Settings screen — four settings:**
+**Settings screen — five settings:**
 
 | Setting | Edit mode | How to change |
 |---------|-----------|---------------|
@@ -113,10 +113,17 @@ After selecting a harness and models, the TUI lands on the **suite-select screen
 | Repetitions | Numeric | Press Enter to open the editor, type digits, Enter to confirm or Esc to cancel |
 | Report path | Inline text | Press Enter to open the editor, type the path, Enter to confirm or Esc to cancel |
 | Catalog folder | Inline text | Press Enter to open the editor, type the path, Enter to confirm or Esc to cancel |
+| Max concurrent runs | Numeric | Press Enter to open the editor, type digits (must be ≥ 1), Enter to confirm or Esc to cancel |
 
 Navigate between settings with the **up/down arrow keys**. The cursor marks the focused row. Press **Esc** to return to the suite-select screen without starting a run. Every functional key is shown in the help bar — no key is hidden.
 
 **Repetitions provenance:** The repetitions setting shows whether the displayed value comes from the selected suite file (shown as `N (suite default)`) or is a user override entered in this session (shown as `N (override)`). When the suite declares no default and the user has not set an override, the display reads `suite default`. The displayed value is the one that will actually be used when the run starts.
+
+**Max concurrent runs:** Controls how many tests × repetitions run concurrently across the entire suite — one bound over the full (test × repetition) matrix, not one per nesting level. The default is `4`, chosen conservatively: each concurrent run is a full harness process plus a deployed agent tree plus a relocated harness configuration tree on disk, and every dispatch inside it spawns short-lived interceptor processes contending on that run's own lock file. Four gives most of the wall-clock relief the feature exists for while keeping simultaneous sandboxes to a handful and staying well below the concurrency a provider account is likely to permit. A value of `1` is strictly sequential and reproduces the pre-concurrency behaviour exactly. Values below `1` are rejected.
+
+**Resource cost of a chosen bound.** Each attempt in flight occupies one slot and holds: one sandbox directory on disk (named `<suiteRunID>-<testID>-<runNumber>`), one deployed agent tree (subject orchestrator plus stub collaborators, typically a few hundred KB of text files), one relocated harness configuration tree (potentially several MB, depending on the session transcript the harness accumulates), one growing diagnostic-capture file for the subject's stdout and stderr, one deploy log written during setup, one running harness process, and short-lived interceptor processes for each dispatch. At a bound of N, N complete sets of these resources exist simultaneously. They are released when each slot completes teardown.
+
+**Retention multiplies the footprint.** When sandbox retention is set to `OnFailure` or `Always`, teardown does not delete the sandbox. With `Always`, every attempt leaves its sandbox, deployed agent tree, harness configuration tree, and diagnostic capture on disk until you delete them manually. A 50-repetition suite with `Always` retention retains 50 sandboxes, potentially several hundred MB total. Use `OnFailure` for diagnostic workflows (retain evidence only where it is needed) and `Never` for large-repetition statistical runs.
 
 After configuring, press **Esc** to return to the suite-select screen and **Enter** to start the run.
 
@@ -133,6 +140,12 @@ Tools\AgentTest\dist\mosaic-agent-test.exe validate <suite-file>
 ```
 
 The CLI exits with a structured result and is suitable for scripted use, CI, and cases where stdout must carry the machine-readable report (`--format json`).
+
+**`--max-concurrent-runs <n>`** sets how many tests × repetitions run concurrently across the entire suite. The default is `4` (see the Max concurrent runs section under the TUI settings above for the full rationale). A value of `1` is strictly sequential. Values below `1` are rejected as a usage error.
+
+```
+Tools\AgentTest\dist\mosaic-agent-test.exe run suite.yaml --max-concurrent-runs 1
+```
 
 ---
 

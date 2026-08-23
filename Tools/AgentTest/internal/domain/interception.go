@@ -22,6 +22,16 @@ const (
 	// Observation only: an outcome for this phase is never a substitution, a
 	// rewrite or a halt.
 	PhaseCompletion InterceptionPhase = "completion"
+
+	// PhaseAgentStart is the harness's in-session agent-start signal, fired
+	// after the dispatch is issued and before the collaborator finishes. On
+	// harnesses whose completion event carries no dispatch identifier, this
+	// phase lets the decision core associate the dispatch's correlation token
+	// with the agent identifier the completion event will later carry.
+	//
+	// Observation only: an outcome for this phase is always OutcomePassthrough.
+	// The decision core never substitutes, rewrites or halts on this phase.
+	PhaseAgentStart InterceptionPhase = "agent_start"
 )
 
 // InterceptedCall is the normalized inbound model every harness adapter
@@ -39,6 +49,13 @@ type InterceptedCall struct {
 	// legitimate outcome for an un-stubbed or partially-stubbed dispatch, not
 	// an error: there is nothing pending to compare it against.
 	ObservedResponse string
+
+	// AgentID is the collaborator's runtime agent identifier, populated on
+	// PhaseCompletion and PhaseAgentStart by adapters whose completion event
+	// carries no dispatch identifier. The decision core uses it to correlate a
+	// completion event back to its dispatch through the agent-start association.
+	// Empty on PhasePre and PhasePost, where CorrelationToken is used instead.
+	AgentID string
 }
 
 // OutcomeKind is the kind of decision an interception yields.
@@ -94,9 +111,21 @@ type HarnessCapabilities struct {
 	// from the run's residue rather than compared in-flight.
 	SupportsPostInterception bool
 
-	// CorrelationField names the native field the adapter plants the
-	// correlation token in. Declared so the conformance suite can verify it.
+	// CorrelationField names the native field the adapter uses for correlation
+	// on PreToolUse and PostToolUse events. Declared so the conformance suite
+	// can verify it.
 	CorrelationField string
+
+	// CompletionCorrelationField names the native field the adapter uses to
+	// correlate a completion event (SubagentStop) back to its dispatch.
+	//
+	// Non-empty when the adapter's completion event carries no dispatch
+	// identifier (i.e. the CorrelationField is absent from that event) and the
+	// adapter instead correlates through an agent-start association. A non-empty
+	// value is the adapter's declaration that it registers an agent-start
+	// interception phase and uses AgentID for completion correlation. Empty
+	// means the adapter uses CorrelationField on the completion event too.
+	CompletionCorrelationField string
 
 	// SupportsReplyRecovery declares that this adapter can observe the
 	// collaborator's real reply through a later completion event, rather than
@@ -253,4 +282,18 @@ type SpawnPlan struct {
 	// EarlyExitSentinel is the path the supervisor watches to terminate the
 	// subject before its natural end.
 	EarlyExitSentinel string
+	// DiagnosticLog is the file this run's captured subject stdout and stderr
+	// are written to. Empty means the run's diagnostics are discarded.
+	//
+	// It travels on the plan rather than being bound into the launcher,
+	// following EarlyExitSentinel: both are per-run paths the launcher's
+	// executor needs and the launcher itself is a process-wide singleton.
+	DiagnosticLog string
+
+	// RunID is the run identity string, stamped onto the plan by the runner so
+	// the diagnostic sink factory can write it into the attribution header
+	// without needing a separate channel. It mirrors EarlyExitSentinel and
+	// DiagnosticLog: per-run data that the launcher's factory needs, carried
+	// on the plan so the launcher itself remains a process-wide singleton.
+	RunID string
 }

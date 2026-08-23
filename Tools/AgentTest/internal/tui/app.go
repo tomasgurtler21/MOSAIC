@@ -13,7 +13,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -25,6 +24,9 @@ import (
 	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/preflight"
 	"mosaic-agent-test/internal/report"
+	"mosaic-agent-test/internal/runprogress"
+	"mosaic-agent-test/internal/suite"
+	"mosaic-agent-test/internal/tui/screens"
 )
 
 // PreflightFunc resolves suite input into a validated plan. Same shape as
@@ -44,12 +46,13 @@ type WriteFileFunc func(path string, data []byte) error
 
 // SuiteRunner is the interface the TUI drives the suite through. Unlike
 // cli.SuiteRunner (which the CLI's factory rebuilds per invocation, already
-// carrying its resolved retention), the TUI wires one long-lived Suite for
-// the whole process, so retention cannot be baked in at construction: the
-// suite-select screen's toggle can change it on every run. Run therefore
-// takes the live retention policy as a call-time argument — the value
-// startSelectedSuite passes is Model.retention at the moment the run starts,
-// not whatever Options.Suite was built with.
+// carrying its resolved retention), the TUI wires a per-run runner through
+// Options.NewSuiteRunner so that both retention and the max-concurrent-runs
+// bound — each of which the settings screen can change between runs — reach
+// the suite with their live values. Run takes the live retention policy as a
+// call-time argument. The max-concurrent-runs bound is resolved from the
+// model and supplied when constructing the runner (via Options.NewSuiteRunner)
+// rather than as a further call-time argument.
 type SuiteRunner interface {
 	Run(ctx context.Context, p preflight.Plan, sink domain.ProgressSink, retention domain.RetentionPolicy) (report.Result, error)
 }
@@ -57,7 +60,28 @@ type SuiteRunner interface {
 // Options is the pre-wired dependency set the composition root hands in.
 type Options struct {
 	Preflight PreflightFunc
-	Suite     SuiteRunner
+
+	// Suite is the suite runner used when NewSuiteRunner is nil. Tests supply
+	// a fake runner here; production code sets NewSuiteRunner instead so that
+	// the live max-concurrent-runs bound is forwarded on every run.
+	Suite SuiteRunner
+
+	// NewSuiteRunner, when non-nil, constructs a fresh SuiteRunner and a
+	// per-harness PreflightFunc for each run, incorporating the caller-supplied
+	// max-concurrent-runs bound and the harness selection. The composition root
+	// resolves the per-harness adapter, decoder, and environment from harnessID
+	// and returns both a runner and a preflight function that validates against
+	// that harness's environment, ensuring validation and execution agree on the
+	// harness by construction.
+	//
+	// An error return means the harness selection cannot be honored (unknown
+	// harness, CheckEnvironment failure). The TUI surfaces this as a run
+	// failure with a diagnostic rather than falling back to a default.
+	//
+	// When nil, Suite and the top-level Preflight are used instead (fallback
+	// for tests that supply a fake runner directly).
+	NewSuiteRunner func(maxConcurrentRuns int, harnessID string) (SuiteRunner, PreflightFunc, error)
+
 	// Suites are the discovered suite paths offered for selection on the
 	// suite-select screen.
 	Suites []string
@@ -133,10 +157,17 @@ const (
 	ScreenModelSelect Screen = "model_select"
 
 	ScreenSuiteSelect Screen = "suite_select"
-	ScreenSettings    Screen = "settings"
 	ScreenProgress    Screen = "progress"
 	ScreenResults     Screen = "results"
 	ScreenDetail      Screen = "detail"
+
+	// Setting screens for the sequential run-configuration flow. Each screen
+	// is self-contained and driven by Done()/Back() checks in the root model.
+	ScreenRetention         Screen = "retention"
+	ScreenRepetitions       Screen = "repetitions"
+	ScreenReportPath        Screen = "report_path"
+	ScreenCatalogFolder     Screen = "catalog_folder"
+	ScreenMaxConcurrentRuns Screen = "max_concurrent_runs"
 )
 
 // modelSelectPhase tracks which phase of the model-selection screen is active.
@@ -225,6 +256,13 @@ type Model struct {
 	// selectedStubModel.
 	repetitions *int
 
+	// maxConcurrentRuns is the user-configured override for the maximum number
+	// of runs executing concurrently across the suite. When nil, the suite
+	// applies suite.DefaultMaxConcurrentRuns. Follows the same nil-means-default
+	// pattern as repetitions. The value is threaded into the suite's options at
+	// run-start by the composition root (I12.5).
+	maxConcurrentRuns *int
+
 	// catalogFolder is the catalog folder currently in force. Starts as
 	// Options.CatalogFolder; the suite-select screen shows it and allows
 	// editing before a run starts. When it differs from Options.CatalogFolder
@@ -238,32 +276,35 @@ type Model struct {
 	// receives. An empty value suppresses the write.
 	reportPath string
 
-	// settingsCursor is the focused row on the settings screen. Zero-indexed
-	// within SettingsEntries(). Reset to 0 each time the user enters the
-	// settings screen.
-	settingsCursor int
+	// Screen instances for the sequential run-configuration flow.
+	// Nil until the user confirms a suite via Enter from ScreenSuiteSelect.
+	// Each screen is initialized in initSettingScreens() at suite-confirmation
+	// time and holds its own input/display state through the flow.
+	retentionScr         *screens.RetentionScreen
+	repetitionsScr       *screens.RepetitionsScreen
+	reportPathScr        *screens.ReportPathScreen
+	catalogFolderScr     *screens.CatalogFolderScreen
+	maxConcurrentRunsScr *screens.MaxConcurrentRunsScreen
 
-	// settingEditing identifies which setting is currently being edited on
-	// the settings screen. An empty value means no editing is in progress.
-	settingEditing SettingKind
+	// Folded progress state: every field here is set only by Fold, from an
+	// event or the terminal result model, and nothing in this package
+	// aggregates a number of its own.
+	//
+	// progress is the shared pure-core fold that both frontends import,
+	// providing the multi-run in-flight set, the running/finished/remaining
+	// tally, and per-run invocation counts. It replaces the single-run
+	// scalar fields (runningTestID, runningRepetition, runningRepetitions,
+	// observedInvocations) that could not represent more than one run at a
+	// time.
+	progress runprogress.Model
 
-	// settingDraft accumulates the typed value while an EditInline or
-	// EditNumeric editor is open. Discarded on Esc; committed on Enter.
-	settingDraft string
-
-	// Folded progress state (AC16.2, AC16.8): every field here is set only
-	// by Fold, from an event or the terminal result model, and nothing in
-	// this package aggregates a number of its own.
-	totalTests          int
-	runningTestID       string
-	runningRepetition   int
-	runningRepetitions  int
-	observedInvocations int
-	finished            []report.RunReport
-	counts              map[domain.Verdict]int
-	totalCost           domain.CostReport
-	result              *report.Result
-	resultErr           error
+	// finished holds each finished run's outcome for the results and detail
+	// screens. Populated from ProgressTestFinished events in Fold; kept
+	// separately from progress because the report display needs the full
+	// RunReport shape, not just the in-flight display shape.
+	finished  []report.RunReport
+	result    *report.Result
+	resultErr error
 
 	// Results/detail screen state.
 	resultsCursor      int
@@ -334,7 +375,6 @@ func NewModel(o Options) Model {
 	if len(o.Harnesses) > 0 {
 		m.screen = ScreenHarnessSelect
 	}
-	m.resolvedSuiteDefaults = resolveForSuite(o, 0)
 	paneH, paneW := m.paneGeometry()
 	m.detailPane = widgets.NewDetailPane(paneH, paneW, widgets.DefaultDetailPaneStyles())
 	return m
@@ -410,6 +450,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		paneH, paneW := m.paneGeometry()
 		m.detailPane.Resize(paneH, paneW)
+		m.resizeActiveSettingScreen(msg.Width)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -459,8 +500,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateModelSelect(msg)
 	case ScreenSuiteSelect:
 		return m.updateSuiteSelect(msg)
-	case ScreenSettings:
-		return m.updateSettings(msg)
+	case ScreenRetention:
+		return m.updateRetentionScreen(msg)
+	case ScreenRepetitions:
+		return m.updateRepetitionsScreen(msg)
+	case ScreenReportPath:
+		return m.updateReportPathScreen(msg)
+	case ScreenCatalogFolder:
+		return m.updateCatalogFolderScreen(msg)
+	case ScreenMaxConcurrentRuns:
+		return m.updateMaxConcurrentRunsScreen(msg)
 	case ScreenResults:
 		return m.updateResults(msg)
 	case ScreenDetail:
@@ -622,29 +671,24 @@ func (m Model) updateModelSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateSuiteSelect handles suite-cursor movement, Tab to the settings screen,
-// and starting the chosen suite. Per-run settings (retention, report path,
-// catalog folder, repetitions) are no longer on this screen; they live on
-// ScreenSettings, reachable via Tab.
+// updateSuiteSelect handles suite-cursor movement and explicit suite
+// confirmation. Pressing Enter confirms the current suite, resolves suite-scoped
+// defaults, and transitions to the first settings screen (ScreenRetention) so
+// the user can configure per-run settings before the suite starts. Tab no
+// longer navigates to settings; Enter is the only transition into the
+// sequential settings flow.
 func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Down):
 		if m.suiteCursor < len(m.opts.Suites)-1 {
 			m.suiteCursor++
-			m.resolvedSuiteDefaults = resolveForSuite(m.opts, m.suiteCursor)
 		}
 		return m, nil
 
 	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Up):
 		if m.suiteCursor > 0 {
 			m.suiteCursor--
-			m.resolvedSuiteDefaults = resolveForSuite(m.opts, m.suiteCursor)
 		}
-		return m, nil
-
-	case msg.Type == tea.KeyTab:
-		m.screen = ScreenSettings
-		m.settingsCursor = 0
 		return m, nil
 
 	case msg.Type == tea.KeyPgDown:
@@ -660,148 +704,204 @@ func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Select):
-		return m.startSelectedSuite()
-	}
-	return m, nil
-}
-
-// updateSettings handles key input on the settings screen. When an inline or
-// numeric editor is active, all keys route to updateSettingEdit. Otherwise,
-// Down/Up move the cursor, Tab/Esc return to suite-select, and Enter
-// activates the focused entry's edit mode.
-func (m Model) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.settingEditing != "" {
-		return m.updateSettingEdit(msg)
-	}
-
-	switch {
-	case msg.Type == tea.KeyTab:
-		m.screen = ScreenSuiteSelect
-		return m, nil
-
-	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Back):
-		m.screen = ScreenSuiteSelect
-		return m, nil
-
-	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Down):
-		entries := m.SettingsEntries()
-		if m.settingsCursor < len(entries)-1 {
-			m.settingsCursor++
+		if len(m.opts.Suites) == 0 || m.suiteCursor >= len(m.opts.Suites) {
+			return m, nil
 		}
-		return m, nil
-
-	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Up):
-		if m.settingsCursor > 0 {
-			m.settingsCursor--
-		}
-		return m, nil
-
-	case tuicommon.MatchesKey(msg, tuicommon.GlobalKeys.Select):
-		return m.activateFocusedSetting()
-	}
-
-	return m, nil
-}
-
-// activateFocusedSetting applies the action key to the currently focused
-// settings entry. For EditCycle entries the value cycles immediately. For
-// EditInline and EditNumeric entries an inline editor opens.
-func (m Model) activateFocusedSetting() (tea.Model, tea.Cmd) {
-	entries := m.SettingsEntries()
-	if m.settingsCursor >= len(entries) {
-		return m, nil
-	}
-	entry := entries[m.settingsCursor]
-	switch entry.EditMode {
-	case EditCycle:
-		switch entry.Kind {
-		case SettingRetention:
-			m.retention = nextRetention(m.retention)
-		}
-	case EditInline, EditNumeric:
-		m.settingEditing = entry.Kind
-		m.settingDraft = ""
-	}
-	return m, nil
-}
-
-// updateSettingEdit handles key input while an inline or numeric editor is
-// active on the settings screen. Enter commits the draft; Esc discards it
-// without changing the underlying value; Backspace trims one character;
-// rune keys append to the draft (numeric editors accept only digit runes).
-func (m Model) updateSettingEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.Type {
-	case tea.KeyEnter:
-		m = m.commitSettingEdit()
-		return m, nil
-
-	case tea.KeyEsc:
-		m.settingEditing = ""
-		m.settingDraft = ""
-		return m, nil
-
-	case tea.KeyBackspace:
-		if len(m.settingDraft) > 0 {
-			m.settingDraft = m.settingDraft[:len(m.settingDraft)-1]
-		}
-		return m, nil
-
-	case tea.KeyRunes:
-		text := string(msg.Runes)
-		if m.settingEditing == SettingRepetitions {
-			// Numeric editor: only accept digit characters.
-			for _, r := range text {
-				if r >= '0' && r <= '9' {
-					m.settingDraft += string(r)
-				}
+		// Resolve suite-scoped defaults only after explicit suite confirmation.
+		// A nil resolver is silently skipped; an error keeps the user on
+		// ScreenSuiteSelect so they can choose a different suite.
+		if m.opts.ResolveSuiteDefaults != nil {
+			suitePath := m.opts.Suites[m.suiteCursor]
+			defaults, err := m.opts.ResolveSuiteDefaults(suitePath)
+			if err != nil {
+				m.statusMsg = "cannot load suite defaults"
+				m.statusError = true
+				return m, nil
 			}
-		} else {
-			m.settingDraft += text
+			m.resolvedSuiteDefaults = defaults
 		}
+		m = m.initSettingScreens()
+		m.screen = ScreenRetention
 		return m, nil
 	}
-
-	// Other special keys are consumed without effect so they cannot drive
-	// navigation behind the open editor.
 	return m, nil
 }
 
-// commitSettingEdit writes the accumulated draft to the appropriate model
-// field and closes the editor.
-func (m Model) commitSettingEdit() Model {
-	switch m.settingEditing {
-	case SettingReportPath:
-		m.reportPath = m.settingDraft
-	case SettingCatalog:
-		m.catalogFolder = m.settingDraft
-	case SettingRepetitions:
-		if m.settingDraft == "" {
-			m.repetitions = nil
-		} else if v, err := strconv.Atoi(m.settingDraft); err == nil && v > 0 {
-			m.repetitions = &v
-		}
+// initSettingScreens constructs fresh screen instances for all five per-run
+// settings, initialized from the current model state and resolved suite defaults.
+// Suite-scoped defaults (repetitions) are used as the initial value for the
+// corresponding screen only when the user has not already set an explicit
+// override. Screens are pointer types so their state persists across model
+// copies during the settings flow.
+func (m Model) initSettingScreens() Model {
+	var styles screens.Styles // zero-value: no lipgloss styling; suitable for headless tests
+	width := m.width
+
+	// Normalize empty retention to RetainNever so the cycle (Space key)
+	// starts at a known position rather than treating "" as an unknown value.
+	retentionInitial := m.retention
+	if retentionInitial == "" {
+		retentionInitial = domain.RetainNever
 	}
-	m.settingEditing = ""
-	m.settingDraft = ""
+	m.retentionScr = screens.NewRetentionScreen(retentionInitial, width, styles)
+
+	// RepetitionsScreen: initialize from user override only. Suite defaults
+	// are shown in SettingsEntries() for display purposes but must NOT be
+	// committed as user overrides when the user presses Enter without typing.
+	// Zero means "no override" — pressing Enter without typing keeps m.repetitions nil.
+	repsInitial := 0
+	if m.repetitions != nil {
+		repsInitial = *m.repetitions
+	}
+	m.repetitionsScr = screens.NewRepetitionsScreen(repsInitial, width, styles)
+
+	m.reportPathScr = screens.NewReportPathScreen(m.reportPath, width, styles)
+	m.catalogFolderScr = screens.NewCatalogFolderScreen(m.catalogFolder, width, styles)
+
+	// MaxConcurrentRunsScreen: user override or 0 meaning "let the suite
+	// apply its own default".
+	maxInitial := 0
+	if m.maxConcurrentRuns != nil {
+		maxInitial = *m.maxConcurrentRuns
+	}
+	m.maxConcurrentRunsScr = screens.NewMaxConcurrentRunsScreen(maxInitial, width, styles)
+
 	return m
 }
 
-// SettingsEntries returns the current state of all four per-run settings as a
+// ---------------------------------------------------------------------------
+// Sequential settings screen handlers
+//
+// Each handler forwards the key message to the active setting screen and
+// checks Done()/Back() to drive the sequential navigation state machine
+// described in the design. The pattern is identical across all five screens:
+//   - Done: Reset the screen (clears flags, preserves value), advance forward.
+//   - Back: Reset the screen, go backward.
+//   - Neither: return the model unchanged (key consumed by the screen).
+// ---------------------------------------------------------------------------
+
+func (m Model) updateRetentionScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.retentionScr == nil {
+		return m, nil
+	}
+	cmd := m.retentionScr.Update(msg)
+	if m.retentionScr.Done() {
+		// Capture the confirmed value into the model field BEFORE Reset()
+		// restores the screen's policy to its initial value.
+		m.retention = m.retentionScr.Policy()
+		m.retentionScr.Reset()
+		m.screen = ScreenRepetitions
+	} else if m.retentionScr.Back() {
+		m.retentionScr.Reset()
+		m.screen = ScreenSuiteSelect
+	}
+	return m, cmd
+}
+
+func (m Model) updateRepetitionsScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.repetitionsScr == nil {
+		return m, nil
+	}
+	cmd := m.repetitionsScr.Update(msg)
+	if m.repetitionsScr.Done() {
+		v := m.repetitionsScr.Value()
+		if v > 0 {
+			m.repetitions = &v
+		} else {
+			m.repetitions = nil
+		}
+		m.repetitionsScr.Reset()
+		m.screen = ScreenReportPath
+	} else if m.repetitionsScr.Back() {
+		m.repetitionsScr.Reset()
+		m.screen = ScreenRetention
+	}
+	return m, cmd
+}
+
+func (m Model) updateReportPathScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.reportPathScr == nil {
+		return m, nil
+	}
+	cmd := m.reportPathScr.Update(msg)
+	if m.reportPathScr.Done() {
+		m.reportPath = m.reportPathScr.Path()
+		m.reportPathScr.Reset()
+		m.screen = ScreenCatalogFolder
+	} else if m.reportPathScr.Back() {
+		m.reportPathScr.Reset()
+		m.screen = ScreenRepetitions
+	}
+	return m, cmd
+}
+
+func (m Model) updateCatalogFolderScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.catalogFolderScr == nil {
+		return m, nil
+	}
+	cmd := m.catalogFolderScr.Update(msg)
+	if m.catalogFolderScr.Done() {
+		m.catalogFolder = m.catalogFolderScr.Folder()
+		m.catalogFolderScr.Reset()
+		m.screen = ScreenMaxConcurrentRuns
+	} else if m.catalogFolderScr.Back() {
+		m.catalogFolderScr.Reset()
+		m.screen = ScreenReportPath
+	}
+	return m, cmd
+}
+
+// updateMaxConcurrentRunsScreen handles the final settings screen. When the
+// user confirms (Done), it captures the value, updates the model's setting field,
+// and calls startSelectedSuite() to begin the run. All prior screens' values
+// were captured into model fields as each screen was confirmed.
+func (m Model) updateMaxConcurrentRunsScreen(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.maxConcurrentRunsScr == nil {
+		return m, nil
+	}
+	cmd := m.maxConcurrentRunsScr.Update(msg)
+	if m.maxConcurrentRunsScr.Done() {
+		v := m.maxConcurrentRunsScr.Value()
+		if v > 0 {
+			m.maxConcurrentRuns = &v
+		} else {
+			m.maxConcurrentRuns = nil
+		}
+		return m.startSelectedSuite()
+	} else if m.maxConcurrentRunsScr.Back() {
+		m.maxConcurrentRunsScr.Reset()
+		m.screen = ScreenCatalogFolder
+	}
+	return m, cmd
+}
+
+// SettingsEntries returns the current state of all five per-run settings as a
 // slice of SettingsEntry instances. The slice order is fixed: retention,
-// repetitions, report path, catalog folder. SettingsEntries is callable from
-// any screen; it does not require the model to be on ScreenSettings.
+// repetitions, report path, catalog folder, max-concurrent-runs.
+// SettingsEntries is callable from any screen.
 func (m Model) SettingsEntries() []SettingsEntry {
 	retDisplay := string(m.retention)
 
 	// Build the repetitions display with a provenance marker so the user can
 	// tell whether the shown value comes from the suite file or is their own
-	// override. When neither a user override nor a resolved suite default is
-	// available, the generic "suite default" label degrades gracefully.
+	// override. Call the resolver live for the current cursor position so the
+	// display updates as the suite cursor moves — even before Enter is pressed.
+	// When the resolver is nil, returns an error, or the suite declares no
+	// default, the generic "suite default" label degrades gracefully.
+	suiteDefaults := resolveForSuite(m.opts, m.suiteCursor)
 	repDisplay := "suite default"
 	if m.repetitions != nil {
 		repDisplay = fmt.Sprintf("%d (override)", *m.repetitions)
-	} else if m.resolvedSuiteDefaults.Repetitions != nil {
-		repDisplay = fmt.Sprintf("%d (suite default)", *m.resolvedSuiteDefaults.Repetitions)
+	} else if suiteDefaults.Repetitions != nil {
+		repDisplay = fmt.Sprintf("%d (suite default)", *suiteDefaults.Repetitions)
+	}
+
+	// Build the max-concurrent-runs display. When no override is set, show the
+	// effective default so the user knows what bound will be applied without
+	// having to look it up.
+	maxRunsDisplay := fmt.Sprintf("%d (default)", suite.DefaultMaxConcurrentRuns)
+	if m.maxConcurrentRuns != nil {
+		maxRunsDisplay = fmt.Sprintf("%d", *m.maxConcurrentRuns)
 	}
 
 	return []SettingsEntry{
@@ -829,23 +929,12 @@ func (m Model) SettingsEntries() []SettingsEntry {
 			Display:  m.catalogFolder,
 			EditMode: EditInline,
 		},
-	}
-}
-
-// nextRetention advances p one step around the cycle the suite-select
-// screen's Space binding walks: RetainNever -> RetainOnFailure ->
-// RetainAlways -> RetainNever, wrapping. Ascending retention, so repeated
-// presses walk from least to most retained before wrapping. A zero
-// RetentionPolicy (the unset value) is treated as RetainNever, so the first
-// press from an unset Options.Retention still advances predictably.
-func nextRetention(p domain.RetentionPolicy) domain.RetentionPolicy {
-	switch p {
-	case domain.RetainOnFailure:
-		return domain.RetainAlways
-	case domain.RetainAlways:
-		return domain.RetainNever
-	default:
-		return domain.RetainOnFailure
+		{
+			Kind:     SettingMaxConcurrentRuns,
+			Label:    "Max concurrent runs",
+			Display:  maxRunsDisplay,
+			EditMode: EditNumeric,
+		},
 	}
 }
 
@@ -871,8 +960,38 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 		m.reportPath = m.opts.ReportPathFor(suitePath)
 	}
 
+	// Resolve the max-concurrent-runs bound from the model. A nil override
+	// means the suite should apply its documented default; zero carries that
+	// signal through to the runner so the suite — not the composition root —
+	// resolves the default, keeping that logic in one place.
+	bound := 0
+	if v := m.MaxConcurrentRuns(); v != nil {
+		bound = *v
+	}
+
+	// Resolve the runner and per-run preflight together, so validation and
+	// execution agree on the harness by construction. When NewSuiteRunner is
+	// nil (tests that supply a fake runner directly), fall back to Suite and
+	// the top-level Preflight.
+	var runner SuiteRunner
+	var activePreflight PreflightFunc
+
+	if m.opts.NewSuiteRunner != nil {
+		r, pf, err := m.opts.NewSuiteRunner(bound, m.selectedHarness)
+		if err != nil {
+			m.statusMsg = fmt.Sprintf("cannot use harness %q: %v", m.selectedHarness, err)
+			m.statusError = true
+			return m, nil
+		}
+		runner = r
+		activePreflight = pf
+	} else {
+		runner = m.opts.Suite
+		activePreflight = m.opts.Preflight
+	}
+
 	var plan preflight.Plan
-	if m.opts.Preflight != nil {
+	if activePreflight != nil {
 		// Build the catalog-folder override: only set it when the user
 		// changed the value from the initial Options.CatalogFolder default,
 		// so a nil pointer means "use the process-wide default".
@@ -882,7 +1001,7 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 			catOverride = &v
 		}
 
-		resolved, rpt := m.opts.Preflight(preflight.Input{
+		resolved, rpt := activePreflight(preflight.Input{
 			SuitePath:     suitePath,
 			HarnessID:     m.selectedHarness,
 			CatalogFolder: m.opts.CatalogFolder,
@@ -897,6 +1016,11 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 			m = m.withFailureDetail("Pre-flight failed: "+suitePath, authoring.RenderReport(rpt))
 			m.statusMsg = "pre-flight failed for " + suitePath
 			m.statusError = true
+			// Return the user to suite-select so they can choose a different
+			// suite or retry after fixing the problem. This matches the original
+			// behavior where the suite never left suite-select before the
+			// settings flow was introduced.
+			m.screen = ScreenSuiteSelect
 			return m, nil
 		}
 		if len(rpt.Diagnostics) > 0 {
@@ -923,8 +1047,6 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 	m.screen = ScreenProgress
 	m.statusMsg = ""
 	m.statusError = false
-
-	runner := m.opts.Suite
 	sink := m.sinkBox.get()
 	// The live toggle value, not Options.Retention: this is what makes the
 	// suite-select screen's affordance actually reach the run it starts,
@@ -1095,6 +1217,33 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// resizeActiveSettingScreen forwards a terminal width change to whichever
+// setting screen is currently active, so layout adapts without losing edit state.
+func (m Model) resizeActiveSettingScreen(width int) {
+	switch m.screen {
+	case ScreenRetention:
+		if m.retentionScr != nil {
+			m.retentionScr.Resize(width)
+		}
+	case ScreenRepetitions:
+		if m.repetitionsScr != nil {
+			m.repetitionsScr.Resize(width)
+		}
+	case ScreenReportPath:
+		if m.reportPathScr != nil {
+			m.reportPathScr.Resize(width)
+		}
+	case ScreenCatalogFolder:
+		if m.catalogFolderScr != nil {
+			m.catalogFolderScr.Resize(width)
+		}
+	case ScreenMaxConcurrentRuns:
+		if m.maxConcurrentRunsScr != nil {
+			m.maxConcurrentRunsScr.Resize(width)
+		}
+	}
+}
+
 // View renders the current screen from the folded Model, using the shared
 // theme, key set and scaffold. It degrades legibly at a narrow width rather
 // than wrapping into noise.
@@ -1106,8 +1255,31 @@ func (m Model) View() string {
 		return m.viewModelSelect()
 	case ScreenSuiteSelect:
 		return m.viewSuiteSelect()
-	case ScreenSettings:
-		return m.viewSettings()
+	case ScreenRetention:
+		if m.retentionScr != nil {
+			return m.retentionScr.View()
+		}
+		return ""
+	case ScreenRepetitions:
+		if m.repetitionsScr != nil {
+			return m.repetitionsScr.View()
+		}
+		return ""
+	case ScreenReportPath:
+		if m.reportPathScr != nil {
+			return m.reportPathScr.View()
+		}
+		return ""
+	case ScreenCatalogFolder:
+		if m.catalogFolderScr != nil {
+			return m.catalogFolderScr.View()
+		}
+		return ""
+	case ScreenMaxConcurrentRuns:
+		if m.maxConcurrentRunsScr != nil {
+			return m.maxConcurrentRunsScr.View()
+		}
+		return ""
 	case ScreenProgress:
 		return m.viewProgress()
 	case ScreenResults:
@@ -1123,38 +1295,31 @@ func (m Model) View() string {
 // no terminal and no program loop, and the cross-frontend equivalence test
 // drives this and the CLI's FormatEvent from the same sequence.
 func (m Model) Fold(ev domain.ProgressEvent) Model {
+	// Delegate multi-run progress tracking to the shared pure core.
+	// This is what makes CLI/TUI equivalence for the multi-run display
+	// structural: both frontends import the same Model.Fold and call it here.
+	m.progress = m.progress.Fold(ev)
+
 	switch ev.Kind {
 	case domain.ProgressSuiteStarted:
-		m.totalTests = ev.TotalTests
 		m.running = true
 
-	case domain.ProgressTestStarted:
-		m.runningTestID = ev.TestID
-		m.runningRepetition = ev.Repetition
-		m.runningRepetitions = ev.Repetitions
-		m.observedInvocations = 0
-
-	case domain.ProgressInvocation:
-		m.observedInvocations++
-
 	case domain.ProgressTestFinished:
+		// Build the RunReport key from ev.Run when it is populated (the normal
+		// case), falling back to ev.TestID / ev.Repetition for legacy event
+		// shapes that do not carry a Run field.
+		key := ev.Run
+		if key.TestID == "" {
+			key = domain.RunKey{TestID: ev.TestID, RunNumber: ev.Repetition}
+		}
 		m.finished = append(m.finished, report.RunReport{
-			Key: domain.RunKey{
-				TestID:    ev.TestID,
-				RunNumber: ev.Repetition,
-			},
+			Key:      key,
 			Verdict:  ev.Verdict,
 			Duration: ev.Duration,
 			Cost:     ev.Cost,
 		})
-		m.runningTestID = ""
-		m.runningRepetition = 0
-		m.runningRepetitions = 0
-		m.observedInvocations = 0
 
 	case domain.ProgressSuiteFinished:
-		m.counts = ev.Counts
-		m.totalCost = ev.TotalCost
 		m.running = false
 	}
 
@@ -1185,6 +1350,13 @@ func (m Model) Repetitions() *int {
 	return m.repetitions
 }
 
+// MaxConcurrentRuns reports the override max-concurrent-runs bound configured
+// on this Model, or nil when no override is set (suite.DefaultMaxConcurrentRuns
+// applies). Mirrors the nil-means-default pattern that Repetitions uses.
+func (m Model) MaxConcurrentRuns() *int {
+	return m.maxConcurrentRuns
+}
+
 // ReportPath reports the JSON report file path currently in force —
 // Options.ReportPath until the suite-select screen's inline-edit affordance
 // changes it. An empty string means "suppressed: no file will be written".
@@ -1199,29 +1371,37 @@ func (m Model) CatalogFolder() string {
 	return m.catalogFolder
 }
 
-// EditingReportPath reports whether the settings screen's inline report-path
-// editor is currently active.
-func (m Model) EditingReportPath() bool {
-	return m.settingEditing == SettingReportPath
-}
-
 // TotalTests reports the suite's declared total, learned from
 // ProgressSuiteStarted.
 func (m Model) TotalTests() int {
-	return m.totalTests
+	return m.progress.TotalTests()
 }
 
-// Running reports the test currently executing and which repetition of how
-// many, learned from ProgressTestStarted / ProgressTestFinished. ok is false
-// when no test is currently running.
-func (m Model) Running() (testID string, repetition, repetitions int, ok bool) {
-	return m.runningTestID, m.runningRepetition, m.runningRepetitions, m.runningTestID != ""
+// Running returns every run currently in flight, ordered by StartedAt and
+// then by RunID. A finished run leaves the set without clearing the others.
+// Replaces the previous single-run scalars that could not represent more
+// than one run at a time.
+func (m Model) Running() []runprogress.RunProgress {
+	return m.progress.Running()
 }
 
-// ObservedInvocations reports the count of ProgressInvocation events
-// observed for the currently running test.
-func (m Model) ObservedInvocations() int {
-	return m.observedInvocations
+// ObservedInvocations reports the invocations observed for one run, keyed
+// by its RunKey. Approximate by design and never authoritative: invocation
+// events are the only kind the async sink drops under saturation, so this
+// can under-report. Lifecycle events are never dropped, which is why the
+// tally is sound and this count is not.
+func (m Model) ObservedInvocations(key domain.RunKey) int {
+	for _, rp := range m.progress.Running() {
+		if rp.Key.RunID == key.RunID {
+			return rp.ObservedInvocations
+		}
+	}
+	return 0
+}
+
+// Tally returns the display-only running/finished/remaining counts.
+func (m Model) Tally() runprogress.Tally {
+	return m.progress.Tally()
 }
 
 // Finished reports every finished repetition's outcome so far, in the order
@@ -1230,16 +1410,18 @@ func (m Model) Finished() []report.RunReport {
 	return m.finished
 }
 
-// Counts reports the running verdict tally, learned from
-// ProgressSuiteFinished.
+// Counts reports the verdict counts, learned from ProgressSuiteFinished.
+// The figures are the report's own authoritative values carried through the
+// stream; this accessor delegates to the shared runprogress core so both
+// frontends read from the same source.
 func (m Model) Counts() map[domain.Verdict]int {
-	return m.counts
+	return m.progress.Counts()
 }
 
 // TotalCost reports the suite's total cost, learned from
 // ProgressSuiteFinished.
 func (m Model) TotalCost() domain.CostReport {
-	return m.totalCost
+	return m.progress.TotalCost()
 }
 
 // Result reports the terminal result model once the suite has finished. ok

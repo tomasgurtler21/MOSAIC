@@ -174,6 +174,13 @@ func fixtureFullResult() report.Result {
 					TotalCost: domain.CostReport{
 						Attribution: domain.AttributionAttributed,
 					},
+					Exclusions: []domain.ExcludedRun{
+						{
+							Key:    domain.RunKey{RunID: "run-001", TestID: "checkout-state-integrity-fault", RunNumber: 1},
+							Reason: domain.ExclusionStateIntegrity,
+							Detail: "lock was reclaimed; one or more state updates may have been lost",
+						},
+					},
 				},
 				Runs: []report.RunReport{
 					{
@@ -268,6 +275,18 @@ func fixtureAllExcludedResult() report.Result {
 					Excluded:              2,
 					InfrastructureFailure: true,
 					TotalCost:             domain.CostReport{Attribution: domain.AttributionAttributed},
+					Exclusions: []domain.ExcludedRun{
+						{
+							Key:    domain.RunKey{RunID: "run-001", TestID: "always-loses-its-lock", RunNumber: 1},
+							Reason: domain.ExclusionStateIntegrity,
+							Detail: "lock was reclaimed; one or more state updates may have been lost",
+						},
+						{
+							Key:    domain.RunKey{RunID: "run-001", TestID: "always-loses-its-lock", RunNumber: 2},
+							Reason: domain.ExclusionStateIntegrity,
+							Detail: "lock was reclaimed; one or more state updates may have been lost",
+						},
+					},
 				},
 				Runs: []report.RunReport{
 					{

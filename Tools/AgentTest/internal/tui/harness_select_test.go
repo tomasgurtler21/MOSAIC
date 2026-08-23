@@ -124,8 +124,8 @@ func TestHarnessSelect_SelectionReachesPreflightInput(t *testing.T) {
 		t.Fatalf("Screen() after model-select = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	// Choose the offered suite to trigger the preflight call.
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	// Choose the offered suite through the full settings flow to trigger the preflight call.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}

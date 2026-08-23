@@ -45,7 +45,7 @@ flowchart TD
 |-----------|---------|
 | **Preflight** | Composes `authoring`'s parsed suite/test-definition/stub-registry with `fixtures`' `$ref` resolution into one aggregated, deterministically ordered validation report plus a `Plan` — usable only when the report has no errors. Performs no process spawning, no sandbox creation. Does not itself own file-format parsing (`authoring`) or `$ref` resolution (`fixtures`); it only cross-checks and merges what those packages produce, and applies CLI-flag overrides and suite/definition setting layering. |
 | **Runner** | Owns one attempt of one test end to end. Composes a workspace manager, a harness adapter, a subject launcher, a fixture resolver, a side-effect applier and a cost provider — every one a port or pure package, so this package spawns nothing directly and names no concrete harness. |
-| **Suite** | Owns suite-level orchestration: deterministic test ordering, per-test repetition, delegating per-repetition evaluation and pass-rate aggregation to Evaluate, and the state-integrity retry-and-exclude rule. Sole producer of the progress-event stream (`domain.ProgressSink`). |
+| **Suite** | Owns suite-level orchestration: deterministic test ordering, per-test repetition, bounded concurrent execution of tests and repetitions under `Options.MaxConcurrentRuns`, delegating per-repetition evaluation and pass-rate aggregation to Evaluate, and the state-integrity retry-and-exclude rule. Sole producer of the progress-event stream (`domain.ProgressSink`). |
 | **Evaluate** | Pure verdict engine. Turns one run's evidence into per-assertion results and a verdict; aggregates a test's repetitions against a declared pass rate; decides whether a result is a tool fault worth retrying. |
 | **Orchstate** | Parses a MOSAIC orchestration document (frontmatter `current_state` plus the `<ExecutionLog type="core">` table) into the phase/status/execution-log evidence Evaluate consumes. Reuses `mosaic-common/docformat` and `mosaic-common/mdtable` rather than hand-rolling markdown parsing. |
 | **Protocolcheck** | Pure Communication Protocol validator. Checks one message (a task invocation or an agent response) against a targeted protocol version and classifies every defect found. Used both for collaborator messages recorded by the Interception Pipeline and for the subject's own final message. |
@@ -66,9 +66,11 @@ Four phases, with teardown guaranteed on every exit path — including a panic d
 
 Runner then assembles `domain.RunEvidence` (`BuildEvidence`) from the snapshot plus derived measurements: it checks every recorded collaborator response — correlated to the invocation it answers by sequence number, since Runner is the only component holding both sides of a message pair — against the Communication Protocol, separately checks the subject's own final message (deriving its response context from the subject's declared opening message when that itself parses as a protocol invocation), and reconstructs peak concurrency from the same records.
 
-### One test's repetitions and the state-integrity retry rule (`suite.runTest` / `runRepetition`)
+### One test's repetitions and the state-integrity retry rule (`suite.runRepetition`)
 
-A test runs its declared repetition count in strict order — never overlapped — because a repetition exists to sample a non-deterministic subject, and overlapping samples would make load itself part of what's being measured. Each repetition attempts up to `StateIntegrityRetries + 1` (currently 2) raw runs: if a run's evidence shows its state lock was reclaimed (a crash-recovery signal from the Interception Pipeline, not a fact about the subject), it is retried once; a second occurrence in the same repetition ends that repetition and is surfaced by `evaluate.Aggregate` as an infrastructure failure rather than a subject regression. Every raw attempt (including a retried one) still reaches `evaluate.Aggregate`'s excluded/counted split — only `evaluate.NeedsRetry` decides which raw attempts are excluded from the pass-rate denominator; nothing is recomputed by Suite itself.
+The suite's bounded concurrent scheduler treats one repetition of one test as the scheduling unit. Each unit occupies exactly one slot of `Options.MaxConcurrentRuns` for its whole life, running its attempts strictly in order inside that slot. Repetitions of different tests, and different repetitions of the same test, execute concurrently up to the bound — which is one bound across the whole (test × repetition) matrix, not one bound per nesting level. A bound of 1 reproduces the former strictly sequential behaviour exactly.
+
+Each repetition attempts up to `StateIntegrityRetries + 1` (currently 2) raw runs: if a run's evidence shows its state lock was reclaimed (a crash-recovery signal from the Interception Pipeline, not a fact about the subject), it is retried once; a second occurrence in the same repetition ends that repetition and is surfaced by `evaluate.Aggregate` as an infrastructure failure rather than a subject regression. Every raw attempt (including a retried one) still reaches `evaluate.Aggregate`'s excluded/counted split — only `evaluate.NeedsRetry` decides which raw attempts are excluded from the pass-rate denominator; nothing is recomputed by Suite itself.
 
 ### Evidence to verdict (`evaluate.Evaluate`)
 
@@ -104,8 +106,8 @@ A cancelled `context.Context` propagates into every in-flight attempt (so the gu
 
 ## Boundaries
 
-- **Owns:** the full lifecycle of one attempt (setup/supervise/snapshot/teardown), suite-level scheduling/repetition/retry, pure verdict evaluation, assembly of the four evidence sources into one evidence value, and the single report model plus its two renderings.
-- **Does Not Own:** authored-file schema parsing or `$ref` resolution (owned by `authoring`/`fixtures`; Preflight only composes and cross-validates their output); anything harness-specific (owned by Harness Adapters); actual process spawning/decoding (owned by Subject Launch); the invocation-log/run-state storage format itself (owned by the Interception Pipeline; this area only reads it as evidence); concurrent execution of multiple tests within one suite — `suite.Options.MaxConcurrentTests` is declared but the current scheduler always runs a suite's tests strictly in sequence.
+- **Owns:** the full lifecycle of one attempt (setup/supervise/snapshot/teardown), suite-level scheduling/repetition/retry (including bounded concurrent execution of tests and repetitions under `Options.MaxConcurrentRuns`), pure verdict evaluation, assembly of the four evidence sources into one evidence value, and the single report model plus its two renderings.
+- **Does Not Own:** authored-file schema parsing or `$ref` resolution (owned by `authoring`/`fixtures`; Preflight only composes and cross-validates their output); anything harness-specific (owned by Harness Adapters); actual process spawning/decoding (owned by Subject Launch); the invocation-log/run-state storage format itself (owned by the Interception Pipeline; this area only reads it as evidence).
 
 ## Invariants & Conventions
 
@@ -114,7 +116,7 @@ A cancelled `context.Context` propagates into every in-flight attempt (so the gu
 - Every pure-core package in this area (`evaluate`, `protocolcheck`, `concurrency`) performs no I/O and takes no ambient clock reads — the same input always yields the same output, which is what makes re-evaluating stored evidence without re-spawning an agent meaningful.
 - `evaluate.Aggregate` and `report.Build` are the sole places a pass rate, a verdict count or a cost total is computed; nothing downstream (a rendering, a frontend) recomputes one independently.
 - A negative test inverts every assertion's outcome except echo fidelity, and inverts only *after* evaluation — never by evaluating against a pre-inverted expectation.
-- A repetition's raw attempts always run strictly in order, never concurrently, regardless of suite-level concurrency settings.
+- A repetition's raw attempts always run strictly in order, never concurrently — both attempts of one repetition are serialised inside their scheduling slot regardless of the suite-level bound.
 - `report.Result`'s wire (JSON) shape is additive-only: a field already emitted is never removed or retyped, and every collection renders as an empty array rather than `null`.
 
 ## Known Complexity

@@ -39,10 +39,15 @@ type Deps struct {
 	Adapter    domain.HarnessAdapter
 	Launcher   domain.SubjectLauncher
 	Fixtures   fixtures.Resolver
-	Effects    sideeffects.Applier
-	Cost       domain.CostProvider
-	Clock      domain.Clock
-	Progress   domain.ProgressSink
+	// FixtureFactory, when non-nil, is used by seedFile to construct a
+	// per-document resolver rooted at the test definition's own directory,
+	// with the shared fixture root as fallback. When nil, seedFile falls
+	// back to Fixtures for backward compatibility.
+	FixtureFactory fixtures.ResolverFactory
+	Effects        sideeffects.Applier
+	Cost           domain.CostProvider
+	Clock          domain.Clock
+	Progress       domain.ProgressSink
 
 	// SelfPath and LoggerBundleDir are passed through to the adapter's
 	// provision request; the runner does not interpret either.
@@ -64,6 +69,13 @@ type Deps struct {
 	// nothing itself and names no harness, and it passes the harness id
 	// through from the adapter without interpreting it.
 	Deploy domain.AgentDeployer
+
+	// SandboxDiagnostics, when true, instructs the runner to set
+	// SpawnPlan.DiagnosticLog to the sandbox's diagnostic log path before
+	// handing the plan to the launcher. False leaves DiagnosticLog empty,
+	// which the launcher's sink factory interprets as a discard instruction.
+	// The composition root sets this from ResolveDiagnosticDestination.
+	SandboxDiagnostics bool
 }
 
 // Request is what one attempt of one test needs to run.
@@ -128,6 +140,23 @@ func Run(ctx context.Context, d Deps, req Request, eval domain.AttemptEvaluator)
 		return domain.TestResult{}, fmt.Errorf("runner: obtaining spawn plan: %w", planErr)
 	}
 
+	// Stamp runner-derived fields onto the plan. These are values the runner
+	// knows from the request and sandbox, which the adapter cannot know:
+	//
+	//   RunID        — carried into the plan so the diagnostic sink factory can
+	//                  write the attribution header without a separate channel.
+	//   DiagnosticLog — set when the composition root resolved the diagnostic
+	//                  destination to the run sandbox; left empty otherwise so
+	//                  the sink factory treats the run as discard.
+	//
+	// Both are stamped after SpawnPlan returns so the adapter never sees them
+	// as constraints, and before superviseExecution so the launcher receives
+	// the fully populated plan.
+	plan.RunID = req.Key.RunID
+	if d.SandboxDiagnostics {
+		plan.DiagnosticLog = sb.DiagnosticLogPath()
+	}
+
 	res, launchErr := superviseExecution(ctx, d, sb, plan, req.Settings)
 
 	snap := TakeSnapshot(d, sb, res)
@@ -148,6 +177,7 @@ func Run(ctx context.Context, d Deps, req Request, eval domain.AttemptEvaluator)
 	if snap.StubModel == "" {
 		snap.StubModel = snap.SubjectModel
 	}
+	snap.HarnessID = d.Adapter.ID()
 
 	costReport, costErr := d.Cost.Cost(ctx, domain.CostQuery{
 		LogRoot:  snap.LogRoot,
@@ -228,6 +258,13 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 			WorkspaceRoot: sb.SubjectDir,
 			Workflows:     req.Test.Definition.Subject.Workflows,
 			TierModels:    buildTierModelMap(req.Test.Definition.Subject, req.Test.Models),
+			// LogDir routes the deployment tool's per-run log files into the
+			// run's own sandbox directory. The deploy logs are per-run evidence
+			// and coupling their lifetime to the sandbox is intentional: the
+			// run's retention policy governs them uniformly alongside all other
+			// control files, and concurrent runs write to distinct directories
+			// so they cannot contend on a shared log location.
+			LogDir: sb.DeployLogDir(),
 		})
 		if deployErr != nil {
 			return sb, ledger, fmt.Errorf("runner: deploying catalogue path: %w", deployErr)
@@ -317,9 +354,12 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 	}
 
 	// 3. Seed declared files, resolving $ref through the fixture resolver,
-	// with {run_id} expanded in the declared path.
+	// with {run_id} expanded in the declared path. Derive the test
+	// definition's directory from its source path so seedFile can construct
+	// a per-document resolver when FixtureFactory is set.
+	docDir := filepath.Dir(req.Test.Definition.SourcePath)
 	for _, sf := range req.Test.Definition.SeedFiles {
-		rel, err := seedFile(d, sb, req.Key, sf)
+		rel, err := seedFile(d, sb, req.Key, sf, docDir)
 		if err != nil {
 			return sb, ledger, fmt.Errorf("runner: seeding file %q: %w", sf.Path, err)
 		}
@@ -432,10 +472,26 @@ func subjectWithRunIDPrelude(subject domain.SubjectUnderTest, runID string) doma
 
 // seedFile resolves and writes one declared seed file beneath the subject
 // directory, returning its path relative to the subject directory.
-func seedFile(d Deps, sb domain.Sandbox, key domain.RunKey, sf domain.SeedFile) (string, error) {
+//
+// docDir is the directory containing the test definition that declared this
+// seed file. When d.FixtureFactory is set and docDir is non-empty, the ref
+// is resolved against a per-document resolver (docDir first, shared root as
+// fallback). When FixtureFactory is nil or docDir is empty, the ref is
+// resolved against d.Fixtures for backward compatibility.
+func seedFile(d Deps, sb domain.Sandbox, key domain.RunKey, sf domain.SeedFile, docDir string) (string, error) {
 	var content []byte
 	if sf.Ref != "" {
-		resolved, err := d.Fixtures.Resolve(sf.Ref)
+		var resolver fixtures.Resolver
+		if d.FixtureFactory != nil && docDir != "" {
+			r, err := d.FixtureFactory(docDir)
+			if err != nil {
+				return "", fmt.Errorf("constructing fixture resolver for %q: %w", docDir, err)
+			}
+			resolver = r
+		} else {
+			resolver = d.Fixtures
+		}
+		resolved, err := resolver.Resolve(sf.Ref)
 		if err != nil {
 			return "", err
 		}
@@ -808,6 +864,11 @@ type Snapshot struct {
 	// stub-tier fallback to the subject model when no stub model was selected.
 	SubjectModel string
 	StubModel    string
+
+	// HarnessID is the stable identifier of the harness adapter that served
+	// this run, set from d.Adapter.ID() at the same point SubjectModel is
+	// captured so BuildEvidence can carry it into RunEvidence.
+	HarnessID string
 }
 
 // TakeSnapshot captures everything the verdict engine will need, before
@@ -933,6 +994,7 @@ func BuildEvidence(req Request, snap Snapshot, cost domain.CostReport, dur time.
 		// report layer's responsibility; the runner carries the resolved string.
 		SubjectModel: snap.SubjectModel,
 		StubModel:    snap.StubModel,
+		HarnessID:    snap.HarnessID,
 	}
 }
 

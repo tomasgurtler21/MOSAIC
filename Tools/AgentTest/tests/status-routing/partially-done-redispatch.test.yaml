@@ -1,0 +1,77 @@
+schema_version: 1
+id: partially-done-redispatch
+description: >
+  Scenario S-2. implementation-tdd returns PARTIALLY_DONE during EXECUTION
+  stage 1. The orchestrator must re-dispatch the same agent type (successor
+  invocation with new sequence number), not advance to implementation-review
+  or treat it as an error.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  opening_message: |
+    Task: Add a --verbose flag to the widgets CLI so it prints per-item
+    diagnostics to stderr.
+
+    Workflow type: brownfield-tdd
+
+    Checkpoints: disabled
+
+    Constraints: none. Do not ask me any further questions - proceed with the
+    workflow immediately and autonomously using the information above.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: partially-done-redispatch.stubs.json
+
+timeout: 10m
+turn_limit: 30
+stop_after_invocations: 2
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: execution-stage1-tests-done.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+  - path: Orchestration-{run_id}/ContractsDesign.md
+    ref: ContractsDesign.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: implementation-tdd }
+      - { tool: dispatch, agent: implementation-tdd }
+
+  task_messages:
+    # Dispatch 1: implementation-tdd (first invocation, returns PARTIALLY_DONE)
+    - at: 1
+      identity: { tool: dispatch, agent: implementation-tdd }
+      human_in_the_loop: false
+      required_input_artifacts:
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/ContractsDesign.md
+        - Orchestration-{run_id}/Stage-1/PlanProgress.md
+      required_output_artifacts:
+        - Orchestration-{run_id}/Stage-1/PlanProgress.md
+
+    # Dispatch 2: implementation-tdd again (successor, not implementation-review)
+    - at: 2
+      identity: { tool: dispatch, agent: implementation-tdd }
+      human_in_the_loop: false

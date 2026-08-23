@@ -284,8 +284,8 @@ func TestModelSelect_ChosenSubjectModel_ReachesPreflightOverrides(t *testing.T) 
 		t.Fatalf("Screen() after completing model-select = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	// Start the suite to trigger the preflight call.
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	// Start the suite through the full settings flow to trigger the preflight call.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -327,7 +327,7 @@ func TestModelSelect_ChosenStubModel_ReachesPreflightOverrides(t *testing.T) {
 		t.Fatalf("Screen() after completing model-select = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -363,7 +363,7 @@ func TestModelSelect_DefaultStub_LeavesStubModelEmpty(t *testing.T) {
 		t.Fatalf("Screen() after completing model-select = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -405,7 +405,7 @@ func TestModelSelect_BothModels_ReachDistinctOverrideFields(t *testing.T) {
 		t.Fatalf("Screen() after completing model-select = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -446,8 +446,8 @@ func TestModelSelect_SubjectModel_ReachesHarnessID(t *testing.T) {
 	m, _ = safeUpdate(t, m, keyMsg("\r")) // subject phase
 	m, _ = safeUpdate(t, m, keyMsg("\r")) // stub phase
 
-	// Start the suite.
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	// Start the suite through the full settings flow.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -703,8 +703,8 @@ func TestModelSelect_ChangeHarness_PreviousSubjectModelSelectionCleared(t *testi
 		t.Fatalf("Screen() after completing model-select for harness B = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	// Start the suite to trigger the preflight call.
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	// Start the suite through the full settings flow to trigger the preflight call.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -767,7 +767,8 @@ func TestNavigation_ModelSelect_SubjectEscape_ThenReselect_CursorResets(t *testi
 		t.Fatalf("Screen() after model-select = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r")) // start the suite
+	// Start the suite through the full settings flow.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}

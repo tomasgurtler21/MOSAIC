@@ -722,6 +722,25 @@ Run logs are written to:
 
 The log directory is created on first run if it does not exist.
 
+To write logs to a different directory for one invocation, pass `--log-dir`:
+
+```sh
+./mosaic-deploy --log-dir /path/to/my-logs deploy ...
+```
+
+Both flag forms are accepted:
+
+```sh
+./mosaic-deploy --log-dir /path/to/my-logs deploy ...
+./mosaic-deploy --log-dir=/path/to/my-logs deploy ...
+```
+
+When `--log-dir` is supplied, the two sink files are written there and the
+default `MosaicDeploy/logs` location is not created or written to. The
+supplied directory is created on demand. Write failures accumulate as
+degradation rather than stopping the run, consistent with the default location.
+Omitting `--log-dir` preserves the existing behaviour exactly.
+
 ### TODO file
 
 After deploy or update, a `TODO.md` file is written to the workspace root.

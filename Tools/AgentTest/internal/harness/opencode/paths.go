@@ -12,6 +12,12 @@
 // entire descriptor model for a handful of short paths.
 package opencode
 
+import (
+	"path/filepath"
+
+	"mosaic-agent-test/internal/domain"
+)
+
 // This harness's project-scoped layout.
 const (
 	HarnessID      = "opencode"
@@ -25,3 +31,27 @@ const (
 // .cmd/.bat shim case, is mosaic-common/harness's job at spawn time, not
 // this adapter's.
 const OpenCodeCLIExecutable = "opencode"
+
+// ConfigHomeEnvVar is the environment variable this harness resolves its
+// user-scope configuration directory from. Setting it in the spawn plan
+// is what relocates both non-sandbox scopes into the run's sandbox,
+// following the pattern the sibling adapter already establishes for its
+// own configuration home.
+const ConfigHomeEnvVar = "XDG_CONFIG_HOME"
+
+// ConfigHomeRelDir is where the relocated configuration home lives,
+// relative to the sandbox's control directory. It is under ControlDir and
+// not under SubjectDir so the subject cannot discover it.
+const ConfigHomeRelDir = "opencode-home"
+
+// UserConfigDir returns this harness's user-scope configuration directory for
+// sandbox s: the opencode subdirectory inside the relocated XDG_CONFIG_HOME
+// the spawn plan sets. Setting ConfigHomeEnvVar in the spawn plan to
+// filepath.Join(s.ControlDir, ConfigHomeRelDir) causes the spawned opencode
+// process to read its user configuration from this directory rather than from
+// the real user home.
+//
+// Pure path derivation; reads no environment and touches no filesystem.
+func UserConfigDir(s domain.Sandbox) string {
+	return filepath.Join(s.ControlDir, ConfigHomeRelDir, "opencode")
+}

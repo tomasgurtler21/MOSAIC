@@ -66,6 +66,16 @@ type Input struct {
 	// so the user can identify which configuration to change.
 	// Supplied by the composition root.
 	MosaicRootProvenance string
+
+	// ResolverFactory constructs a per-document Resolver. When non-nil,
+	// preflight uses it to build a resolver rooted at each referencing
+	// document's own directory: checkSeedFileRefs calls factory(defDir) and
+	// checkSideEffectRefs calls factory(filepath.Dir(regPath)).
+	//
+	// When nil, preflight falls back to a single Resolver built from
+	// FixtureRoot (backward compatibility for callers that do not supply a
+	// factory).
+	ResolverFactory fixtures.ResolverFactory
 }
 
 // Overrides are CLI-flag-sourced values applied on top of a suite's
@@ -165,15 +175,23 @@ func Validate(in Input) (Plan, authoring.Report) {
 	report.Merge(suiteReport)
 	plan.Suite = suite
 
-	resolver, err := fixtures.NewResolver(in.FixtureRoot)
-	if err != nil {
-		report.Add(authoring.Diagnostic{
-			Severity: authoring.SeverityError,
-			Code:     "invalid-fixture-root",
-			Path:     in.FixtureRoot,
-			Message:  err.Error(),
-		})
-		resolver = nil
+	// When a ResolverFactory is supplied, per-document resolvers are built
+	// inside the per-test loop (where the document directory is known). When
+	// no factory is supplied, fall back to a single resolver built from
+	// FixtureRoot for backward compatibility with callers that do not set it.
+	var fallbackResolver fixtures.Resolver
+	if in.ResolverFactory == nil {
+		r, err := fixtures.NewResolver(in.FixtureRoot)
+		if err != nil {
+			report.Add(authoring.Diagnostic{
+				Severity: authoring.SeverityError,
+				Code:     "invalid-fixture-root",
+				Path:     in.FixtureRoot,
+				Message:  err.Error(),
+			})
+		} else {
+			fallbackResolver = r
+		}
 	}
 
 	suiteDir := filepath.Dir(in.SuitePath)
@@ -239,14 +257,63 @@ func Validate(in Input) (Plan, authoring.Report) {
 
 		if haveRegistry {
 			ids := registryIdentities(registry)
-			checkCollaboratorsKnown(&report, defPath, def, ids)
+			// checkDispatchToolsProducible validates that every collaborator
+			// identity in the stub registry uses a tool name the selected
+			// harness can produce. Only registry stubs are checked here;
+			// stub_agents entries are excluded because their producibility is
+			// validated when the deployment tool renders them, not here.
 			checkDispatchToolsProducible(&report, regPath, ids, in.Capabilities)
+
+			// checkCollaboratorsKnown validates that every collaborator an
+			// assertion names is declared somewhere in the fixture.
+			// stub_agents entries are explicitly declared collaborators even
+			// when they carry no response stub (the on_unmatched policy
+			// governs what happens at runtime). Add them so that assertions
+			// naming a passthrough-only collaborator are not rejected.
+			known := make(map[domain.CollaboratorIdentity]bool, len(ids)+len(def.StubAgents))
+			for id := range ids {
+				known[id] = true
+			}
+			for _, sa := range def.StubAgents {
+				known[sa.Identity] = true
+			}
+			checkCollaboratorsKnown(&report, defPath, def, known)
 		}
 
-		if resolver != nil {
-			checkSeedFileRefs(&report, resolver, defPath, def)
+		if in.ResolverFactory != nil {
+			// Per-document resolution: build a resolver rooted at the
+			// test definition's own directory for seed file refs, and a
+			// resolver rooted at the stub registry's own directory for
+			// side-effect refs.
+			defResolver, factoryErr := in.ResolverFactory(defDir)
+			if factoryErr != nil {
+				report.Add(authoring.Diagnostic{
+					Severity: authoring.SeverityError,
+					Code:     "invalid-fixture-root",
+					Path:     defDir,
+					Message:  factoryErr.Error(),
+				})
+			} else {
+				checkSeedFileRefs(&report, defResolver, defPath, def)
+			}
 			if haveRegistry {
-				checkSideEffectRefs(&report, resolver, regPath, registry)
+				regDir := filepath.Dir(regPath)
+				regResolver, factoryErr := in.ResolverFactory(regDir)
+				if factoryErr != nil {
+					report.Add(authoring.Diagnostic{
+						Severity: authoring.SeverityError,
+						Code:     "invalid-fixture-root",
+						Path:     regDir,
+						Message:  factoryErr.Error(),
+					})
+				} else {
+					checkSideEffectRefs(&report, regResolver, regPath, registry)
+				}
+			}
+		} else if fallbackResolver != nil {
+			checkSeedFileRefs(&report, fallbackResolver, defPath, def)
+			if haveRegistry {
+				checkSideEffectRefs(&report, fallbackResolver, regPath, registry)
 			}
 		}
 

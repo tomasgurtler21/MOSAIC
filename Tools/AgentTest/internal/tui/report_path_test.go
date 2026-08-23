@@ -7,13 +7,12 @@ package tui
 //           be overridden, and the chosen path reaches the started run.
 //
 // These tests drive Model through Options.ReportPath / Options.WriteFile and
-// the suite-select screen's inline edit affordance. No real filesystem is
+// the ScreenReportPath self-contained settings screen. No real filesystem is
 // touched: WriteFile is an in-memory capture function supplied on Options.
 //
-// The inline-edit affordance lives on the suite-select screen alongside the
-// retention toggle. Pressing 'e' enters edit mode; while in edit mode, key
-// presses are text input (not navigation); Enter commits the typed value;
-// Escape restores the previous value.
+// Updated for Stage 3: the inline-edit affordance moved from the old monolithic
+// ScreenSettings to the dedicated ScreenReportPath in the sequential settings
+// flow. Navigation: Enter(×3) from ScreenSuiteSelect → ScreenReportPath.
 
 import (
 	"encoding/json"
@@ -82,36 +81,32 @@ func newReportPathOptions(suites []string, runner *fakeSuiteRunner, reportPath s
 	return o
 }
 
-// navigateToReportPathEdit navigates from ScreenSuiteSelect to the settings
-// screen, positions the cursor on the report-path entry, and opens the inline
-// editor by pressing Enter. On return, the model is on ScreenSettings with
-// the report-path inline editor active (EditingReportPath() == true).
-func navigateToReportPathEdit(t *testing.T, m Model) Model {
+// navigateToScreenReportPath advances from ScreenSuiteSelect to ScreenReportPath
+// by pressing Enter three times (SuiteSelect→Retention→Repetitions→ReportPath).
+// It fails the test immediately if any intermediate screen is wrong.
+func navigateToScreenReportPath(t *testing.T, m Model) Model {
 	t.Helper()
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after Tab = %q, want ScreenSettings (prerequisite failed)", m.Screen())
+	m = advanceToSettingsFlow(t, m) // Enter → ScreenRetention
+	var cmd tea.Cmd
+	m, cmd = safeUpdate(t, m, keyMsg("\r")) // ScreenRetention → ScreenRepetitions
+	_ = cmd
+	if m.Screen() != ScreenRepetitions {
+		t.Fatalf("navigateToScreenReportPath: Screen() after Retention Enter = %q, want %q", m.Screen(), ScreenRepetitions)
 	}
-	entries := m.SettingsEntries()
-	for i, e := range entries {
-		if e.Kind == SettingReportPath {
-			for j := 0; j < i; j++ {
-				m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-			}
-			m, _ = safeUpdate(t, m, keyType(tea.KeyEnter)) // open inline editor
-			return m
-		}
+	m, cmd = safeUpdate(t, m, keyMsg("\r")) // ScreenRepetitions → ScreenReportPath
+	_ = cmd
+	if m.Screen() != ScreenReportPath {
+		t.Fatalf("navigateToScreenReportPath: Screen() after Repetitions Enter = %q, want %q", m.Screen(), ScreenReportPath)
 	}
-	t.Fatalf("SettingsEntries() has no SettingReportPath entry")
 	return m
 }
 
-// enterKey returns the key that commits the in-progress edit.
+// enterKey returns the key that commits an in-progress edit or advances a screen.
 func enterKey() tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyEnter}
 }
 
-// escKey returns the key that cancels the in-progress edit.
+// escKey returns the key that cancels an in-progress edit or navigates backward.
 func escKey() tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyEsc}
 }
@@ -134,134 +129,134 @@ func TestNewModel_ReportPath_StartsAtOptionsReportPath(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// T7.3: display on suite-select screen
+// T7.3: display on ScreenReportPath
 // ---------------------------------------------------------------------------
 
-// TestSettings_ReportPath_IsDisplayedBeforeRunStarts asserts that the settings
-// screen's rendered output includes the current report path so a user can see
-// where the report will be written before starting a run.
+// TestSettings_ReportPath_IsDisplayedBeforeRunStarts asserts that ScreenReportPath
+// renders the current report path so the user can see where the report will be
+// written before confirming.
 func TestSettings_ReportPath_IsDisplayedBeforeRunStarts(t *testing.T) {
 	o := newReportPathOptions([]string{"suite.yaml"}, newFakeSuiteRunner(), "report.json", nil)
 	m := NewModel(o)
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after Tab = %q, want %q", m.Screen(), ScreenSettings)
-	}
+	m = navigateToScreenReportPath(t, m)
 
 	view := safeView(t, m)
 	if !strings.Contains(view, "report.json") {
-		t.Errorf("settings View() does not contain the report path %q:\n%s", "report.json", view)
+		t.Errorf("ScreenReportPath View() does not contain the report path %q:\n%s", "report.json", view)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// T7.3: inline edit — commit
+// T7.3: path editing on ScreenReportPath
 // ---------------------------------------------------------------------------
 
-// TestSettings_ReportPath_ActionKey_EntersEditMode asserts that pressing Enter
-// on the report-path entry of the settings screen activates the inline editor.
+// TestSettings_ReportPath_ActionKey_EntersEditMode asserts that ScreenReportPath
+// shows the typed draft immediately, confirming that path input is live.
+// In the new sequential flow, navigating to ScreenReportPath itself constitutes
+// entering path-edit mode; there is no separate activation step.
 func TestSettings_ReportPath_ActionKey_EntersEditMode(t *testing.T) {
 	o := newReportPathOptions([]string{"suite.yaml"}, newFakeSuiteRunner(), "report.json", nil)
 	m := NewModel(o)
 
-	m = navigateToReportPathEdit(t, m)
+	m = navigateToScreenReportPath(t, m)
+	if m.Screen() != ScreenReportPath {
+		t.Fatalf("Screen() = %q, want %q (navigateToScreenReportPath failed)", m.Screen(), ScreenReportPath)
+	}
 
-	if !m.EditingReportPath() {
-		t.Error("EditingReportPath() = false after pressing Enter on the report-path entry; want true (inline editor active)")
+	// Type a single character; it must appear in the view immediately.
+	m, _ = safeUpdate(t, m, keyMsg("x"))
+	view := safeView(t, m)
+	if !strings.Contains(view, "x") {
+		t.Errorf("ScreenReportPath View() after typing 'x' does not contain 'x'; draft input must be reflected immediately:\n%s", view)
 	}
 }
 
 // TestSettings_ReportPath_InlineEdit_Commit_UpdatesPath asserts that the user
-// can type a new path on the settings screen and commit it with Enter, and the
-// new value is reflected in ReportPath().
+// can type a new path on ScreenReportPath and commit it with Enter, and the
+// new value is reflected in ReportPath() once the screen advances.
 func TestSettings_ReportPath_InlineEdit_Commit_UpdatesPath(t *testing.T) {
 	o := newReportPathOptions([]string{"suite.yaml"}, newFakeSuiteRunner(), "old-report.json", nil)
 	m := NewModel(o)
 
-	m = navigateToReportPathEdit(t, m)
-	if !m.EditingReportPath() {
-		t.Fatalf("EditingReportPath() = false after opening the inline editor via settings screen")
-	}
+	m = navigateToScreenReportPath(t, m)
 
 	for _, ch := range "new-report.json" {
 		m, _ = safeUpdate(t, m, keyMsg(string(ch)))
 	}
+	// Enter commits the typed path and advances to ScreenCatalogFolder,
+	// capturing the confirmed value into m.reportPath.
 	m, _ = safeUpdate(t, m, enterKey())
 
-	if m.EditingReportPath() {
-		t.Error("EditingReportPath() = true after Enter; want false (edit mode exited)")
+	if m.Screen() != ScreenCatalogFolder {
+		t.Errorf("Screen() after Enter on ScreenReportPath = %q, want %q", m.Screen(), ScreenCatalogFolder)
 	}
 	if got := m.ReportPath(); got != "new-report.json" {
 		t.Errorf("ReportPath() = %q after commit, want %q", got, "new-report.json")
 	}
 }
 
-// TestSettings_ReportPath_InlineEdit_Commit_ShownInView asserts that the
-// committed path appears in the settings screen's View() output.
+// TestSettings_ReportPath_InlineEdit_Commit_ShownInView asserts that the typed
+// draft appears in ScreenReportPath's rendered output before committing.
 func TestSettings_ReportPath_InlineEdit_Commit_ShownInView(t *testing.T) {
 	o := newReportPathOptions([]string{"suite.yaml"}, newFakeSuiteRunner(), "old.json", nil)
 	m := NewModel(o)
 
-	m = navigateToReportPathEdit(t, m)
+	m = navigateToScreenReportPath(t, m)
 	for _, ch := range "custom.json" {
 		m, _ = safeUpdate(t, m, keyMsg(string(ch)))
 	}
-	m, _ = safeUpdate(t, m, enterKey())
 
 	view := safeView(t, m)
 	if !strings.Contains(view, "custom.json") {
-		t.Errorf("settings View() after commit does not contain %q:\n%s", "custom.json", view)
+		t.Errorf("ScreenReportPath View() while typing does not contain %q:\n%s", "custom.json", view)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// T7.3: inline edit — cancel
+// T7.3: back navigation leaves path unchanged
 // ---------------------------------------------------------------------------
 
 // TestSettings_ReportPath_InlineEdit_Cancel_RestoresPrevious asserts that
-// pressing Escape while editing on the settings screen cancels the edit and
-// restores the previous path value.
+// pressing Escape on ScreenReportPath while a draft is in progress navigates
+// back to ScreenRepetitions without changing the confirmed path.
 func TestSettings_ReportPath_InlineEdit_Cancel_RestoresPrevious(t *testing.T) {
 	o := newReportPathOptions([]string{"suite.yaml"}, newFakeSuiteRunner(), "original.json", nil)
 	m := NewModel(o)
 
-	m = navigateToReportPathEdit(t, m)
-	if !m.EditingReportPath() {
-		t.Fatalf("EditingReportPath() = false after opening the inline editor via settings screen — cancel test cannot run (prerequisite missing)")
-	}
+	m = navigateToScreenReportPath(t, m)
 	for _, ch := range "half-typed" {
 		m, _ = safeUpdate(t, m, keyMsg(string(ch)))
 	}
 	m, _ = safeUpdate(t, m, escKey())
 
-	if m.EditingReportPath() {
-		t.Error("EditingReportPath() = true after Escape; want false (edit mode cancelled)")
+	if m.Screen() != ScreenRepetitions {
+		t.Errorf("Screen() after Esc on ScreenReportPath = %q, want %q (must go back to ScreenRepetitions)", m.Screen(), ScreenRepetitions)
 	}
+	// The report path must not have been changed by the abandoned draft.
 	if got := m.ReportPath(); got != "original.json" {
-		t.Errorf("ReportPath() = %q after cancel, want %q (original path restored)", got, "original.json")
+		t.Errorf("ReportPath() = %q after Esc; want %q (original path must not be overwritten by abandoned draft)", got, "original.json")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// T7.3: edit mode suspends list navigation
+// T7.3: non-editing keys do not advance the screen
 // ---------------------------------------------------------------------------
 
 // TestSettings_ReportPath_EditMode_NavigationKeysAreConsumed asserts that while
-// the inline editor is active on the settings screen, the Down key does not
-// move the settings cursor — navigation keys are consumed without effect during
-// editing.
+// ScreenReportPath is active, a navigation key such as Down does not advance
+// the flow to the next screen — only Enter and Esc drive navigation.
 func TestSettings_ReportPath_EditMode_NavigationKeysAreConsumed(t *testing.T) {
 	o := newReportPathOptions([]string{"suite.yaml"}, newFakeSuiteRunner(), "report.json", nil)
 	m := NewModel(o)
 
-	m = navigateToReportPathEdit(t, m)
-	cursorBefore := m.settingsCursor
+	m = navigateToScreenReportPath(t, m)
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
+	m, _ = safeUpdate(t, m, tea.KeyMsg{Type: tea.KeyDown})
 
-	if m.settingsCursor != cursorBefore {
-		t.Errorf("settingsCursor changed from %d to %d while editing: Down key must not move the cursor during inline editing", cursorBefore, m.settingsCursor)
+	// Down must not advance to the next screen.
+	if m.Screen() != ScreenReportPath {
+		t.Errorf("Screen() after Down on ScreenReportPath = %q, want %q (navigation keys must not drive the sequential flow)", m.Screen(), ScreenReportPath)
 	}
 }
 
@@ -278,10 +273,7 @@ func TestSuiteSelect_InitialReportPath_ReachesRun(t *testing.T) {
 	o := newReportPathOptions([]string{"suite-a.yaml"}, runner, "my-report.json", capture)
 	m := NewModel(o)
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
-	if m.Screen() != ScreenProgress {
-		t.Fatalf("Screen() after selecting suite = %q, want %q", m.Screen(), ScreenProgress)
-	}
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	msg := runCmd(t, cmd)
 	if msg == nil {
 		t.Fatalf("no tea.Cmd returned when starting the suite")
@@ -297,34 +289,33 @@ func TestSuiteSelect_InitialReportPath_ReachesRun(t *testing.T) {
 	}
 }
 
-// TestSettings_EditedReportPath_ReachesRun asserts that when the user edits
-// the report path via the settings screen before starting, the committed value
-// — not the original Options.ReportPath — is the path WriteFile receives.
+// TestSettings_EditedReportPath_ReachesRun asserts that when the user types a
+// new path on ScreenReportPath and confirms it, that value — not the original
+// Options.ReportPath — is the path WriteFile receives.
 func TestSettings_EditedReportPath_ReachesRun(t *testing.T) {
 	runner := newFakeSuiteRunner()
 	capture := &tuiCaptureWriteFile{}
 	o := newReportPathOptions([]string{"suite-a.yaml"}, runner, "default.json", capture)
 	m := NewModel(o)
 
-	m = navigateToReportPathEdit(t, m)
+	// Navigate to ScreenReportPath and type an override.
+	m = navigateToScreenReportPath(t, m)
 	for _, ch := range "override.json" {
 		m, _ = safeUpdate(t, m, keyMsg(string(ch)))
 	}
+	// Enter commits the path and advances to ScreenCatalogFolder.
 	m, _ = safeUpdate(t, m, enterKey())
-
+	if m.Screen() != ScreenCatalogFolder {
+		t.Fatalf("Screen() after Enter on ScreenReportPath = %q, want %q", m.Screen(), ScreenCatalogFolder)
+	}
 	if got := m.ReportPath(); got != "override.json" {
 		t.Fatalf("ReportPath() = %q after commit, want %q", got, "override.json")
 	}
 
-	// Return to suite-select and start the run.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEsc))
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("Screen() after Esc from settings = %q, want %q", m.Screen(), ScreenSuiteSelect)
-	}
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
-	if m.Screen() != ScreenProgress {
-		t.Fatalf("Screen() after selecting suite = %q, want %q", m.Screen(), ScreenProgress)
-	}
+	// Complete the remaining settings screens to start the suite.
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // → ScreenMaxConcurrentRuns
+	m, cmd := safeUpdate(t, m, keyMsg("\r")) // → ScreenProgress + Cmd
+	_ = m
 	msg := runCmd(t, cmd)
 	if msg == nil {
 		t.Fatalf("no tea.Cmd returned when starting the suite")
@@ -340,33 +331,19 @@ func TestSettings_EditedReportPath_ReachesRun(t *testing.T) {
 	}
 }
 
-// TestSettings_EmptyReportPath_SuppressesWrite asserts that when the user
-// clears the path to an empty string via the settings screen, WriteFile is not
-// called after a run — an empty path is the TUI's equivalent of --no-report.
+// TestSettings_EmptyReportPath_SuppressesWrite asserts that when Options.ReportPath
+// is empty, WriteFile is not called after a run — an empty path is the TUI's
+// equivalent of --no-report.
 func TestSettings_EmptyReportPath_SuppressesWrite(t *testing.T) {
 	runner := newFakeSuiteRunner()
 	capture := &tuiCaptureWriteFile{}
-	o := newReportPathOptions([]string{"suite-a.yaml"}, runner, "report.json", capture)
+	// Set the initial path to "" so ScreenReportPath is initialized with an
+	// empty confirmed path. The user pressing Enter on ScreenReportPath without
+	// typing keeps it empty, and startSelectedSuite skips WriteFile for "".
+	o := newReportPathOptions([]string{"suite-a.yaml"}, runner, "", capture)
 	m := NewModel(o)
 
-	// Clear the path by opening the editor on the settings screen and committing
-	// with nothing typed.
-	m = navigateToReportPathEdit(t, m)
-	m, _ = safeUpdate(t, m, enterKey())
-
-	if got := m.ReportPath(); got != "" {
-		t.Fatalf("ReportPath() = %q after committing empty; want empty string", got)
-	}
-
-	// Return to suite-select and start the run.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEsc))
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("Screen() after Esc from settings = %q, want %q", m.Screen(), ScreenSuiteSelect)
-	}
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
-	if m.Screen() != ScreenProgress {
-		t.Fatalf("Screen() after selecting suite = %q, want %q", m.Screen(), ScreenProgress)
-	}
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	msg := runCmd(t, cmd)
 	if msg == nil {
 		t.Fatalf("no tea.Cmd returned when starting the suite")
@@ -391,7 +368,7 @@ func TestSuiteSelect_ReportContent_IsJSON(t *testing.T) {
 	o := newReportPathOptions([]string{"suite-a.yaml"}, runner, "report.json", capture)
 	m := NewModel(o)
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	msg := runCmd(t, cmd)
 	if msg == nil {
 		t.Fatalf("no cmd from starting the suite")
@@ -430,10 +407,7 @@ func TestSuiteSelect_WriteFileFailure_IsVisibleInView(t *testing.T) {
 	o := newReportPathOptions([]string{"suite-a.yaml"}, runner, "report.json", capture)
 	m := NewModel(o)
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
-	if m.Screen() != ScreenProgress {
-		t.Fatalf("Screen() after selecting suite = %q, want %q", m.Screen(), ScreenProgress)
-	}
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	msg := runCmd(t, cmd)
 	if msg == nil {
 		t.Fatalf("no tea.Cmd returned when starting the suite")
@@ -459,10 +433,7 @@ func TestSuiteSelect_NilWriteFile_IsReportedInView(t *testing.T) {
 	o := newReportPathOptions([]string{"suite-a.yaml"}, runner, "report.json", nil)
 	m := NewModel(o)
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
-	if m.Screen() != ScreenProgress {
-		t.Fatalf("Screen() after selecting suite = %q, want %q", m.Screen(), ScreenProgress)
-	}
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	msg := runCmd(t, cmd)
 	if msg == nil {
 		t.Fatalf("no tea.Cmd returned when starting the suite")

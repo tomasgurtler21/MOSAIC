@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"mosaic-agent-test/internal/domain"
 )
@@ -69,7 +70,18 @@ type Recorded struct {
 }
 
 // Adapter is a scripted domain.HarnessAdapter with no LLM dependency.
+//
+// Safe for concurrent use by many runs: the script cursors and the recorded
+// invocation list are guarded by a mutex, because the composition root hands
+// one adapter value to every attempt and the end-to-end harness is where
+// concurrency is first exercised.
+//
+// Note what that safety does and does not mean. Script consumption is
+// serialised, so no turn is lost or double-consumed; it is not partitioned
+// per run, so a scenario driving several concurrent runs against one scripted
+// identity must not depend on which run receives which turn.
 type Adapter struct {
+	mu          sync.Mutex
 	opts        Options
 	invocations []Recorded
 	scriptIdx   map[string]int
@@ -87,13 +99,19 @@ func New(opts Options) *Adapter {
 // Invocations returns every call the adapter translated, in order, so
 // tests can assert call sequence and argument values.
 func (a *Adapter) Invocations() []Recorded {
-	return a.invocations
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	result := make([]Recorded, len(a.invocations))
+	copy(result, a.invocations)
+	return result
 }
 
 // RemainingScript reports unconsumed scripted turns across every
 // collaborator identity. A non-zero value after a run means fewer
 // collaborators were invoked than the test author intended.
 func (a *Adapter) RemainingScript() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	total := 0
 	for key, turns := range a.opts.Script {
 		consumed := 0
@@ -267,14 +285,101 @@ type wireCall struct {
 	Token           string `json:"token"`
 }
 
+// wireCompletion is this package's own private wire shape for
+// PhaseCompletion payloads, mirrored by nativeCompletion in fake_test.go.
+// Unlike wireCall, completion payloads carry no correlation token — the
+// AgentID field is what the decision core uses to correlate this event
+// back to its dispatch through the agent-start association.
+type wireCompletion struct {
+	Phase   string `json:"phase"`
+	Tool    string `json:"tool"`
+	Agent   string `json:"agent"`
+	AgentID string `json:"agent_id"`
+}
+
+// wireAgentStart is the fake adapter's own private wire shape for
+// PhaseAgentStart payloads, mirrored by encodeAgentStart in
+// internal/interceptor/agent_start_test.go.
+type wireAgentStart struct {
+	Phase   string `json:"phase"`
+	AgentID string `json:"agent_id"`
+}
+
 // TranslateCall implements domain.HarnessAdapter.
 //
-// On PhasePre it decodes the fake's own native wire shape into a normalized
-// call. On PhasePost it additionally consumes the next Turn scripted for
-// the decoded collaborator identity: an exhausted script, a scripted Err,
-// or a malformed scripted Raw payload must each surface as a handleable
-// error here, never a panic and never a zero-valued call on success.
+// Exactly one phase consumes a scripted turn for a given collaborator
+// identity, selected by Options.Capabilities.SupportsReplyRecovery: the
+// post-invocation phase when it is false, the completion phase when it is
+// true. This mirrors what the decision core does with the two phases and is
+// what makes the fake able to drive a reply-recovery harness's cutoff path
+// end to end.
+//
+// Every other phase decodes into a valid call, consumes nothing, and carries
+// no observed response. An exhausted script surfaces as a handleable error,
+// never as blocking and never as a panic; a nil script means unscripted and
+// yields an empty response.
+//
+// On PhaseAgentStart it decodes the agent-start wire shape (carrying AgentID
+// and no correlation token) into a normalized call with Phase=PhaseAgentStart.
 func (a *Adapter) TranslateCall(phase domain.InterceptionPhase, native []byte) (domain.InterceptedCall, error) {
+	if phase == domain.PhaseAgentStart {
+		var w wireAgentStart
+		if err := json.Unmarshal(native, &w); err != nil {
+			return domain.InterceptedCall{}, fmt.Errorf("fake: malformed agent-start payload: %w", err)
+		}
+		if w.AgentID == "" {
+			return domain.InterceptedCall{}, fmt.Errorf("fake: agent-start payload missing agent_id")
+		}
+		return domain.InterceptedCall{
+			Phase:        domain.PhaseAgentStart,
+			AgentID:      w.AgentID,
+			RawPayload:   native,
+			Capabilities: a.Capabilities(),
+		}, nil
+	}
+
+	if phase == domain.PhaseCompletion {
+		var w wireCompletion
+		if err := json.Unmarshal(native, &w); err != nil {
+			return domain.InterceptedCall{}, fmt.Errorf("fake: malformed completion payload: %w", err)
+		}
+		if w.Tool == "" || w.AgentID == "" {
+			return domain.InterceptedCall{}, fmt.Errorf("fake: unrecognised completion payload: %+v", w)
+		}
+		id := domain.CollaboratorIdentity{ToolName: w.Tool, AgentIdentity: w.Agent}
+		call := domain.InterceptedCall{
+			Phase:        domain.PhaseCompletion,
+			Identity:     id,
+			AgentID:      w.AgentID,
+			RawPayload:   native,
+			Capabilities: a.Capabilities(),
+		}
+
+		// Consume the scripted turn at the completion phase; this is the
+		// point a reply-recovery harness delivers the real collaborator reply.
+		a.mu.Lock()
+		turn, err := a.nextTurnLocked(id)
+		a.mu.Unlock()
+
+		if err != nil {
+			return domain.InterceptedCall{}, err
+		}
+		if turn.Err != nil {
+			return domain.InterceptedCall{}, turn.Err
+		}
+		if turn.Raw != nil {
+			var probe json.RawMessage
+			if err := json.Unmarshal(turn.Raw, &probe); err != nil {
+				return domain.InterceptedCall{}, fmt.Errorf("fake: malformed scripted payload for %q: %w", id.Key(), err)
+			}
+			call.ObservedResponse = string(turn.Raw)
+			return call, nil
+		}
+
+		call.ObservedResponse = turn.Body
+		return call, nil
+	}
+
 	var w wireCall
 	if err := json.Unmarshal(native, &w); err != nil {
 		return domain.InterceptedCall{}, fmt.Errorf("fake: malformed native payload: %w", err)
@@ -293,11 +398,18 @@ func (a *Adapter) TranslateCall(phase domain.InterceptionPhase, native []byte) (
 		Capabilities:     a.Capabilities(),
 	}
 
-	if phase != domain.PhasePost {
+	// When the adapter declares reply recovery, the scripted turn is
+	// deferred to PhaseCompletion so it cannot be double-consumed. The post
+	// phase decodes normally but carries no observed response.
+	if phase != domain.PhasePost || a.opts.Capabilities.SupportsReplyRecovery {
 		return call, nil
 	}
 
-	turn, err := a.nextTurn(id)
+	// nextTurn accesses shared mutable state; lock while consuming it.
+	a.mu.Lock()
+	turn, err := a.nextTurnLocked(id)
+	a.mu.Unlock()
+
 	if err != nil {
 		return domain.InterceptedCall{}, err
 	}
@@ -317,14 +429,14 @@ func (a *Adapter) TranslateCall(phase domain.InterceptionPhase, native []byte) (
 	return call, nil
 }
 
-// nextTurn returns the next scripted Turn for id, advancing its per-identity
-// index.
+// nextTurnLocked returns the next scripted Turn for id, advancing its
+// per-identity index. The caller must hold a.mu.
 //
 // When Options.Script is nil (no script provided at all), every post call is
-// unscripted: nextTurn returns an empty Turn so the post phase proceeds with
-// an empty ObservedResponse. This lets tests exercise the interceptor shell's
-// post/completion path (e.g., the cutoff sentinel write) without needing to
-// provide a collaborator response.
+// unscripted: nextTurnLocked returns an empty Turn so the post phase proceeds
+// with an empty ObservedResponse. This lets tests exercise the interceptor
+// shell's post/completion path (e.g., the cutoff sentinel write) without
+// needing to provide a collaborator response.
 //
 // When Options.Script is non-nil, every collaborator identity must appear in
 // the map with at least as many turns as it is called: an identity with no
@@ -332,7 +444,7 @@ func (a *Adapter) TranslateCall(phase domain.InterceptionPhase, native []byte) (
 // panic. Use an empty non-nil map (map[string][]Turn{}) to assert that no
 // scripted turns are consumed while still enforcing the "no unexpected script
 // consumption" check for known identities.
-func (a *Adapter) nextTurn(id domain.CollaboratorIdentity) (Turn, error) {
+func (a *Adapter) nextTurnLocked(id domain.CollaboratorIdentity) (Turn, error) {
 	// Nil Script means "unscripted" — allow post calls with empty response.
 	if a.opts.Script == nil {
 		return Turn{}, nil
@@ -374,12 +486,14 @@ func (a *Adapter) TranslateOutcome(outcome domain.InterceptionOutcome, call doma
 		return nil, fmt.Errorf("fake: encode outcome reply: %w", err)
 	}
 
+	a.mu.Lock()
 	a.invocations = append(a.invocations, Recorded{
 		Phase:    call.Phase,
 		Identity: call.Identity,
 		Message:  call.Message,
 		Outcome:  outcome,
 	})
+	a.mu.Unlock()
 
 	return b, nil
 }

@@ -1,0 +1,12 @@
+schema_version: 1
+id: ref-subdirectory
+description: >
+  Minimal regression suite for fixture $ref resolution against a nested
+  fixtures/ subdirectory. Bare-filename refs in test definitions must resolve
+  against docDir/fixtures/ when the fixture files exist there. This suite is
+  inert (not run end-to-end); only its preflight validation is exercised by
+  the automated regression test.
+defaults:
+  repetitions: 1
+tests:
+  - path: ref-check.test.yaml

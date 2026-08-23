@@ -43,6 +43,11 @@ const (
 	LedgerFileName        = "effects.json"
 	EarlyExitSentinelName = "early-exit"
 
+	// DiagnosticLogName is the filename of the per-run diagnostic log written
+	// by the file-backed sink. It lives in ControlDir so the run's retention
+	// policy governs it uniformly alongside the other control files.
+	DiagnosticLogName = "diag.log"
+
 	// The active stub registry, resolved and token-expanded by setup, read by
 	// every interceptor process.
 	ActiveRegistryFileName = "registry.json"
@@ -106,4 +111,29 @@ func (s Sandbox) ParallelGroupsPath() string {
 // SetupLedgerPath returns the setup ledger's path.
 func (s Sandbox) SetupLedgerPath() string {
 	return filepath.Join(s.ControlDir, SetupLedgerFileName)
+}
+
+// DiagnosticLogPath returns the path of the per-run diagnostic log file.
+// The file lives in ControlDir so the run's retention policy governs it
+// uniformly alongside the other control files.
+func (s Sandbox) DiagnosticLogPath() string {
+	return filepath.Join(s.ControlDir, DiagnosticLogName)
+}
+
+// DeployLogDirName is the directory name within ControlDir that holds the
+// deployment tool's per-run log files. It is a directory rather than a single
+// file because the deployment tool writes two files inside it (latest.log and
+// history.log) — so the override targets the directory, not any individual file.
+const DeployLogDirName = "deploy-logs"
+
+// DeployLogDir returns the directory this run's deployment tool invocation
+// should write its logs to.
+//
+// It lives under ControlDir so the run's retention policy governs the deploy
+// logs uniformly alongside all other per-run evidence (state, lock, invocation
+// log, diagnostic log). Placing them here is intentional: these logs are
+// per-run evidence, and coupling their lifetime to the sandbox prevents them
+// from accumulating in the shared repository root across concurrent runs.
+func (s Sandbox) DeployLogDir() string {
+	return filepath.Join(s.ControlDir, DeployLogDirName)
 }

@@ -149,7 +149,7 @@ func TestEquivalence_ModelSelection_SubjectModel_CLIAndTUIArriveAtSameValue(t *t
 	m, _ = safeUpdate(t, m, keyType(tea.KeyDown))   // move cursor to second model (wantModel)
 	m, _ = safeUpdate(t, m, keyMsg("\r"))            // confirm subject model → stub phase
 	m, _ = safeUpdate(t, m, keyMsg("\r"))            // stub phase: accept "same as subject" → suite-select
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))         // suite-select: start the suite
+	m, cmd := startSuiteFromSuiteSelect(t, m)        // suite-select: navigate settings and start the suite
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -203,7 +203,7 @@ func TestEquivalence_ModelSelection_StubModel_CLIAndTUIArriveAtSameValue(t *test
 	m, _ = safeUpdate(t, m, keyMsg("\r"))            // subject phase: accept default (first model, cursor 0)
 	m, _ = safeUpdate(t, m, keyType(tea.KeyDown))   // stub phase: move past "same as subject" to wantStub
 	m, _ = safeUpdate(t, m, keyMsg("\r"))            // confirm stub model → suite-select
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))         // suite-select: start the suite
+	m, cmd := startSuiteFromSuiteSelect(t, m)        // suite-select: navigate settings and start the suite
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}

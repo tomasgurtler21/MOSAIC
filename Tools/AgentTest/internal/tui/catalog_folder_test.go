@@ -32,8 +32,6 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"mosaic-agent-test/internal/authoring"
 	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/preflight"
@@ -82,9 +80,9 @@ func TestNewModel_CatalogFolder_EmptyDefault_StartsEmpty(t *testing.T) {
 // Suite-select screen: catalog folder displayed (T4.3a, T4.3d)
 // ---------------------------------------------------------------------------
 
-// TestSettings_CatalogFolder_DisplayedOnScreen verifies that the settings
+// TestSettings_CatalogFolder_DisplayedOnScreen verifies that the catalog-folder
 // screen shows the current catalog folder, so a user can see it after
-// navigating to run configuration.
+// navigating to the catalog-folder step in the settings flow.
 func TestSettings_CatalogFolder_DisplayedOnScreen(t *testing.T) {
 	const catalog = "C:/Tools/AgentTest/catalog"
 	o := newFixtureOptions([]string{"suite.yaml"}, newFakeSuiteRunner())
@@ -92,20 +90,24 @@ func TestSettings_CatalogFolder_DisplayedOnScreen(t *testing.T) {
 
 	m := NewModel(o)
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after Tab = %q, want %q", m.Screen(), ScreenSettings)
+	// Navigate to ScreenCatalogFolder: Enter×4 from SuiteSelect.
+	m = advanceToSettingsFlow(t, m) // → ScreenRetention
+	for _, want := range []Screen{ScreenRepetitions, ScreenReportPath, ScreenCatalogFolder} {
+		m, _ = safeUpdate(t, m, keyMsg("\r"))
+		if m.Screen() != want {
+			t.Fatalf("Screen() = %q, want %q during navigation to ScreenCatalogFolder", m.Screen(), want)
+		}
 	}
 
 	view := safeView(t, m)
 	if !strings.Contains(view, catalog) {
-		t.Errorf("settings View() does not contain the catalog folder %q.\nView:\n%s", catalog, view)
+		t.Errorf("catalog-folder screen View() does not contain the catalog folder %q.\nView:\n%s", catalog, view)
 	}
 }
 
 // TestSettings_CatalogFolder_ChangedValue_DisplayedOnScreen verifies that
 // when the model's catalogFolder field is changed, the updated value appears
-// in the settings screen's View.
+// in the catalog-folder screen's View.
 func TestSettings_CatalogFolder_ChangedValue_DisplayedOnScreen(t *testing.T) {
 	const initial = "C:/default/catalog"
 	const edited = "C:/custom/catalog"
@@ -115,14 +117,18 @@ func TestSettings_CatalogFolder_ChangedValue_DisplayedOnScreen(t *testing.T) {
 	m := NewModel(o)
 	m.catalogFolder = edited // directly set the unexported field (same-package test)
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after Tab = %q, want %q", m.Screen(), ScreenSettings)
+	// Navigate to ScreenCatalogFolder: Enter×4 from SuiteSelect.
+	m = advanceToSettingsFlow(t, m) // → ScreenRetention
+	for _, want := range []Screen{ScreenRepetitions, ScreenReportPath, ScreenCatalogFolder} {
+		m, _ = safeUpdate(t, m, keyMsg("\r"))
+		if m.Screen() != want {
+			t.Fatalf("Screen() = %q, want %q during navigation to ScreenCatalogFolder", m.Screen(), want)
+		}
 	}
 
 	view := safeView(t, m)
 	if !strings.Contains(view, edited) {
-		t.Errorf("settings View() does not contain the edited catalog folder %q.\nView:\n%s", edited, view)
+		t.Errorf("catalog-folder screen View() does not contain the edited catalog folder %q.\nView:\n%s", edited, view)
 	}
 }
 
@@ -176,7 +182,7 @@ func TestSuiteSelect_CatalogFolder_ChangedValue_FlowsThroughOverrides(t *testing
 	m := NewModel(o)
 	m.catalogFolder = overrideCatalog // user changed the catalog folder
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -212,7 +218,7 @@ func TestSuiteSelect_CatalogFolder_OverridePreservesOtherOverrides(t *testing.T)
 	m.selectedSubjectModel = wantSubject
 	m.repetitions = intPtr(wantReps)
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}

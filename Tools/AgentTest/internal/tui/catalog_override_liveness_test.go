@@ -17,8 +17,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"mosaic-agent-test/internal/authoring"
 	"mosaic-agent-test/internal/preflight"
 )
@@ -27,13 +25,13 @@ import (
 // Branch 1: changed catalog folder → override fires (override branch live)
 // ---------------------------------------------------------------------------
 
-// TestCatalogFolder_OverrideBranch_IsLive_WhenEditedViaSettingsScreen verifies
-// that when the user edits the catalog folder through the settings screen and
-// the new value differs from the initial Options.CatalogFolder, startSelectedSuite
+// TestCatalogFolder_OverrideBranch_IsLive_WhenEditedViaSettingsFlow verifies
+// that when the user edits the catalog folder before starting a run and the new
+// value differs from the initial Options.CatalogFolder, startSelectedSuite
 // fires the override branch and passes a non-nil CatalogFolder override to
 // preflight. This proves the branch is not dead: a setting change drives a
 // real code path.
-func TestCatalogFolder_OverrideBranch_IsLive_WhenEditedViaSettingsScreen(t *testing.T) {
+func TestCatalogFolder_OverrideBranch_IsLive_WhenEditedViaSettingsFlow(t *testing.T) {
 	const defaultCatalog = "/default/catalog"
 	const newCatalog = "/override/catalog"
 	var captured preflight.Input
@@ -47,41 +45,11 @@ func TestCatalogFolder_OverrideBranch_IsLive_WhenEditedViaSettingsScreen(t *test
 	}
 	m := NewModel(o)
 
-	// Navigate to the settings screen.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after Tab = %q, want %q (test setup: settings screen must be reachable from suite-select)", m.Screen(), ScreenSettings)
-	}
+	// Simulate the user changing the catalog folder before starting the run.
+	m.catalogFolder = newCatalog
 
-	// Find the catalog entry and position the cursor on it.
-	entries := m.SettingsEntries()
-	catIdx := -1
-	for i, e := range entries {
-		if e.Kind == SettingCatalog {
-			catIdx = i
-			break
-		}
-	}
-	if catIdx < 0 {
-		t.Fatalf("SettingsEntries() contains no SettingCatalog entry; cannot navigate to it for editing")
-	}
-	for i := 0; i < catIdx; i++ {
-		m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-	}
-
-	// Open the inline editor and type the new catalog path.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
-	for _, ch := range newCatalog {
-		m, _ = safeUpdate(t, m, keyMsg(string(ch)))
-	}
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter)) // confirm the edit
-
-	// Return to suite-select and start the run.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEsc))
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("Screen() after Esc from settings = %q, want %q (Esc must return to suite-select)", m.Screen(), ScreenSuiteSelect)
-	}
-	m, cmd := safeUpdate(t, m, keyType(tea.KeyEnter))
+	// Navigate through the full settings flow and start the run.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	_ = m
 	if cmd != nil {
 		_ = runCmd(t, cmd)
@@ -89,7 +57,7 @@ func TestCatalogFolder_OverrideBranch_IsLive_WhenEditedViaSettingsScreen(t *test
 
 	// The override branch must have fired.
 	if captured.Overrides.CatalogFolder == nil {
-		t.Fatalf("preflight.Input.Overrides.CatalogFolder = nil after editing via settings screen; the override branch must fire when the user changes the catalog folder (branch must be live, not dead)")
+		t.Fatalf("preflight.Input.Overrides.CatalogFolder = nil after editing the catalog folder; the override branch must fire when the user changes the catalog folder (branch must be live, not dead)")
 	}
 	if *captured.Overrides.CatalogFolder != newCatalog {
 		t.Errorf("preflight.Input.Overrides.CatalogFolder = %q, want %q (the edited value must reach preflight)", *captured.Overrides.CatalogFolder, newCatalog)
@@ -119,7 +87,7 @@ func TestCatalogFolder_NoOverrideBranch_IsLive_WhenNotChanged(t *testing.T) {
 	m := NewModel(o)
 	// catalogFolder starts equal to Options.CatalogFolder; user makes no change.
 
-	m, cmd := safeUpdate(t, m, keyType(tea.KeyEnter))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	_ = m
 	if cmd != nil {
 		_ = runCmd(t, cmd)
@@ -155,7 +123,7 @@ func TestCatalogFolder_BothBranches_ConfirmedLive_InContrast(t *testing.T) {
 		}
 		m := NewModel(o)
 
-		m, cmd := safeUpdate(t, m, keyType(tea.KeyEnter))
+		m, cmd := startSuiteFromSuiteSelect(t, m)
 		_ = m
 		if cmd != nil {
 			_ = runCmd(t, cmd)
@@ -178,7 +146,7 @@ func TestCatalogFolder_BothBranches_ConfirmedLive_InContrast(t *testing.T) {
 		m := NewModel(o)
 		m.catalogFolder = overrideCatalog // simulate user changing catalog
 
-		m, cmd := safeUpdate(t, m, keyType(tea.KeyEnter))
+		m, cmd := startSuiteFromSuiteSelect(t, m)
 		_ = m
 		if cmd != nil {
 			_ = runCmd(t, cmd)
@@ -215,7 +183,7 @@ func TestCatalogFolder_ClearedToEmpty_TreatedAsOverride(t *testing.T) {
 	m := NewModel(o)
 	m.catalogFolder = "" // user cleared the catalog folder
 
-	m, cmd := safeUpdate(t, m, keyType(tea.KeyEnter))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	_ = m
 	if cmd != nil {
 		_ = runCmd(t, cmd)
@@ -235,22 +203,26 @@ func TestCatalogFolder_ClearedToEmpty_TreatedAsOverride(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestSettings_CatalogFolder_ViewShowsCurrentValueForOverrideLiveness verifies
-// that the settings screen shows the catalog folder's current value in the View
-// output. This is a prerequisite for the user being able to see and change the
-// catalog folder — if the value is not visible, the editing affordance is blind.
+// that the catalog-folder screen shows the catalog folder's current value in
+// the View output. This is a prerequisite for the user being able to see and
+// change the catalog folder — if the value is not visible, the editing affordance is blind.
 func TestSettings_CatalogFolder_ViewShowsCurrentValueForOverrideLiveness(t *testing.T) {
 	const catalog = "/current/catalog"
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	o.CatalogFolder = catalog
 	m := NewModel(o)
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after Tab = %q, want %q", m.Screen(), ScreenSettings)
+	// Navigate to ScreenCatalogFolder: Enter×4 from SuiteSelect.
+	m = advanceToSettingsFlow(t, m) // → ScreenRetention
+	for _, want := range []Screen{ScreenRepetitions, ScreenReportPath, ScreenCatalogFolder} {
+		m, _ = safeUpdate(t, m, keyMsg("\r"))
+		if m.Screen() != want {
+			t.Fatalf("Screen() = %q, want %q during navigation to ScreenCatalogFolder", m.Screen(), want)
+		}
 	}
 
 	view := safeView(t, m)
 	if !strings.Contains(view, catalog) {
-		t.Errorf("settings View() does not contain the current catalog folder %q; the user must be able to see the active value before changing it.\nView:\n%s", catalog, view)
+		t.Errorf("catalog-folder screen View() does not contain the current catalog folder %q; the user must be able to see the active value before changing it.\nView:\n%s", catalog, view)
 	}
 }

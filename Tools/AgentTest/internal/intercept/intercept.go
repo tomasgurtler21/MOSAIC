@@ -17,6 +17,112 @@ import (
 	"mosaic-agent-test/internal/stubmatch"
 )
 
+// TokenSource names how a post- or completion-phase call's correlation token
+// was recovered.
+type TokenSource string
+
+const (
+	// TokenFromCall: the call carried a non-empty token directly.
+	TokenFromCall TokenSource = "call"
+	// TokenFromAgent: the call carried no token, and the token was recovered
+	// through the dispatch-to-agent association the agent-start phase built.
+	// This source applies when AgentDispatch is populated by prior agent-start
+	// events, binding each agent identifier to its dispatch token.
+	TokenFromAgent TokenSource = "agent"
+	// TokenFromSoleOutstanding: the call carried no token and no agent
+	// binding existed, but exactly one dispatch was outstanding, so the
+	// correlation is unambiguous without any association at all.
+	//
+	// This is the degradation path, and it is deliberate: an agent-start
+	// event that fires late or not at all still allows correlation to succeed
+	// for the run shape in which the cutoff was observed failing.
+	TokenFromSoleOutstanding TokenSource = "sole_outstanding"
+	// TokenUnresolved: no token could be recovered. Whether this is a defect
+	// or a legitimate un-stubbed completion is decided by
+	// CorrelationExpected, never by the emptiness of the token alone.
+	TokenUnresolved TokenSource = "unresolved"
+)
+
+// ResolveToken returns the correlation token a post- or completion-phase call
+// belongs to.
+//
+// Resolution order, each step tried only when the one before it yielded
+// nothing:
+//
+//  1. The call's own token. A call that carries one is authoritative and is
+//     never overridden.
+//  2. State.AgentDispatch, keyed by the call's AgentID. When an agent-start
+//     event bound the agent identifier to a dispatch token, this step returns
+//     that token without any inference about the run shape.
+//  3. The sole outstanding dispatch, when the run state holds exactly one
+//     in-flight entry and that entry has no agent binding. This is the
+//     degradation path for an agent-start event that fired late or not at all.
+//
+// A call reaching the end of that order resolves to TokenUnresolved and an
+// empty token. Never a default and never a guess: step 3 applies only where
+// there is exactly one candidate, so it cannot attribute a completion to the
+// wrong dispatch.
+func ResolveToken(state domain.RunState, call domain.InterceptedCall) (token string, source TokenSource) {
+	if call.CorrelationToken != "" {
+		return call.CorrelationToken, TokenFromCall
+	}
+	// Step 2: recover through the agent-start association. When the completion
+	// event carries an AgentID and the agent-start phase already bound it to a
+	// dispatch token, use that token. This is the mechanism for harnesses whose
+	// completion event carries no dispatch identifier.
+	if call.AgentID != "" {
+		if tok, ok := state.AgentDispatch[call.AgentID]; ok {
+			return tok, TokenFromAgent
+		}
+	}
+	// Step 3: sole-outstanding fallback — when exactly one dispatch is in
+	// flight and that dispatch has no pending stub (i.e. it is an unmatched-
+	// passthrough dispatch that fired before an agent-start event could bind
+	// it), attribute the completion to it. This is the degradation path for
+	// an agent-start event that fired late or not at all. A dispatch with a
+	// pending stub requires exact agent matching and is never inferred; sole-
+	// outstanding applies only on the passthrough path where the echo fidelity
+	// check cannot produce a false mismatch against a registered stub.
+	if len(state.InFlight) == 1 {
+		for tok := range state.InFlight {
+			if _, hasPending := state.PendingStubs[tok]; !hasPending {
+				return tok, TokenFromSoleOutstanding
+			}
+		}
+	}
+	return "", TokenUnresolved
+}
+
+// CorrelationExpected reports whether a dispatch existed that this call could
+// have correlated to.
+//
+// True when the run state holds at least one pending stub or at least one
+// in-flight entry. This is the distinction between the defect and the benign
+// case: a completion event arriving when nothing is outstanding is a
+// legitimate un-stubbed dispatch and raises no condition; a completion event
+// arriving while a dispatch is outstanding and resolving to nothing is a
+// correlation failure and must be named. The predicate keys on a dispatch
+// having existed, never on the token being empty.
+func CorrelationExpected(state domain.RunState) bool {
+	return len(state.PendingStubs) > 0 || len(state.InFlight) > 0
+}
+
+// SeqSource names where a resolved sequence number came from.
+type SeqSource string
+
+const (
+	// SeqFromPending: the correlation token resolved to a pending stub.
+	SeqFromPending SeqSource = "pending"
+	// SeqFromInFlight: the token resolved to an in-flight entry but no
+	// pending stub — the dispatch was unmatched under a passthrough policy,
+	// so no stub was ever registered for it.
+	SeqFromInFlight SeqSource = "in_flight"
+	// SeqFromCounter: the token resolved to nothing, so the sequence number
+	// is the global invocation counter — the count of dispatches issued so
+	// far. This is an inference about the run, not a fact about this call.
+	SeqFromCounter SeqSource = "counter"
+)
+
 // Input is everything the decision needs. Nothing is read from ambient
 // state.
 type Input struct {
@@ -77,6 +183,9 @@ type Decision struct {
 // collaborator has already run, so refusing either can only damage the
 // subject's run.
 func Decide(in Input) (Decision, error) {
+	if in.Call.Phase == domain.PhaseAgentStart {
+		return decideAgentStart(in), nil
+	}
 	if in.Call.Phase == domain.PhasePost {
 		if in.Call.Capabilities.SupportsReplyRecovery {
 			// Bare passthrough: the post event fires at launch on a
@@ -96,6 +205,26 @@ func Decide(in Input) (Decision, error) {
 		return decidePost(in), nil
 	}
 	return decidePre(in), nil
+}
+
+// decideAgentStart handles the PhaseAgentStart interception point. It is
+// observation only: the outcome is always OutcomePassthrough and the subject
+// is never halted. The state delta pops the oldest unclaimed dispatch token
+// and binds the call's AgentID to that token in AgentDispatch, establishing
+// the association the completion phase uses for correlation.
+func decideAgentStart(in Input) Decision {
+	delta := domain.StateDelta{}
+
+	if in.Call.AgentID != "" && len(in.State.UnclaimedDispatches) > 0 {
+		claimedToken := in.State.UnclaimedDispatches[0]
+		delta.DequeueUnclaimed = 1
+		delta.BindAgent = map[string]string{in.Call.AgentID: claimedToken}
+	}
+
+	return Decision{
+		Outcome: domain.InterceptionOutcome{Kind: domain.OutcomePassthrough},
+		Delta:   delta,
+	}
 }
 
 func decidePre(in Input) Decision {
@@ -207,6 +336,16 @@ func decidePre(in Input) Decision {
 		})
 	}
 
+	// Enqueue the correlation token for the agent-start phase to claim when
+	// the dispatch results in an agent that will actually run. Terminating
+	// outcomes (substitute, halt) are excluded: on those paths the response is
+	// delivered at this point and the agent never runs, so no agent-start or
+	// completion event will fire. Only rewrite-prompt and passthrough outcomes
+	// proceed to agent-start and completion.
+	if len(delta.MarkInFlight) > 0 && !TerminatesAtPre(outcome.Kind) {
+		delta.EnqueueUnclaimed = []string{token}
+	}
+
 	records := append([]domain.LogRecord{startRecord(in, seq, ordinal, outcome.Kind)}, extraRecords...)
 
 	d := Decision{
@@ -216,19 +355,28 @@ func decidePre(in Input) Decision {
 		SideEffects: sideEffects,
 	}
 
-	// Cutoff detection for the direct-substitution path: when the harness
-	// supports direct substitution (OutcomeSubstitute), the substitute reply IS
-	// the Nth reply delivered to the subject at the pre-invocation point — no
-	// post/completion event fires for it. Detect the cutoff here so the
-	// interceptor shell writes the sentinel after the substitute reply leaves
-	// cfg.Out, terminating the subject process before any (N+1)th pre-invocation
-	// is processed.
+	// Cutoff detection for outcomes that terminate at the pre-invocation point:
+	// when TerminatesAtPre is true (OutcomeSubstitute or OutcomeHalt), the reply
+	// IS delivered at this point and no post/completion event fires for it.
+	// Detect the cutoff here so the interceptor shell writes the sentinel after
+	// the reply leaves cfg.Out.
 	//
-	// For non-direct-substitution harnesses (OutcomeRewritePrompt), the real
-	// reply arrives at the post/completion point, so decidePost handles the
-	// cutoff there. This branch fires only for OutcomeSubstitute.
-	if in.State.EarlyExitThreshold > 0 && seq == in.State.EarlyExitThreshold && outcome.Kind == domain.OutcomeSubstitute {
+	// TerminatesAtPre(OutcomeSubstitute): the harness supports direct substitution
+	// — the substitute reply is the Nth reply delivered to the subject.
+	//
+	// TerminatesAtPre(OutcomeHalt): the call was refused — the refusal IS the Nth
+	// answer and no post/completion fires for it. Under an unmatched-halt policy,
+	// this is how the cutoff fires when the Nth dispatch matched no registered stub.
+	//
+	// Equality (==) rather than >= is used here: for dispatches beyond the threshold,
+	// the state should have EarlyExitTriggered=true from the Nth dispatch, and the
+	// !EarlyExitTriggered guard handles that case. A strict == here ensures the
+	// pre-invocation path does not write the sentinel for any dispatch beyond the
+	// Nth when state was not yet updated (e.g. asynchronous completion lag).
+	if in.State.EarlyExitThreshold > 0 && !in.State.EarlyExitTriggered &&
+		seq == in.State.EarlyExitThreshold && TerminatesAtPre(outcome.Kind) {
 		d.TerminateSubject = true
+		d.Delta.SetEarlyExitTriggered = true
 		d.Records = append(d.Records, domain.LogRecord{
 			Kind:      domain.RecordRun,
 			TestID:    in.State.TestID,
@@ -297,8 +445,23 @@ func groupFor(id domain.CollaboratorIdentity, groups []domain.ParallelGroup) str
 // OutcomePassthrough — the collaborator has already run by this point, so
 // refusing it can only damage the subject's run.
 func decidePost(in Input) Decision {
-	token := in.Call.CorrelationToken
+	// Resolve the correlation token. For PhaseCompletion, the call may carry
+	// no token directly; ResolveToken checks the call's own token first, then
+	// the agent-dispatch binding (when an agent-start event established one),
+	// then the sole-outstanding fallback path. TokenUnresolved means none of
+	// those succeeded.
+	token, tokenSource := ResolveToken(in.State, in.Call)
 	pending, hasPending := in.State.PendingStubs[token]
+
+	// Resolve the sequence number for this dispatch. The resolution order is:
+	// (1) pending stub — present for matched and generic-response dispatches;
+	// (2) in-flight entry — present for unmatched-passthrough dispatches, which
+	//     create an in-flight entry but no pending stub;
+	// (3) global sequence counter — fallback when the token cannot be correlated
+	//     to any dispatch at all.
+	// This makes the cutoff count-based on every path, including paths where the
+	// Nth dispatch matched no registered stub.
+	resolvedSeq, resolvedSource := ResolveSeq(in.State, token)
 
 	var echo *domain.EchoOutcome
 	if hasPending {
@@ -311,6 +474,11 @@ func decidePost(in Input) Decision {
 	}
 	if hasPending {
 		delta.ResolvePending = []string{token}
+	}
+	// Release the agent binding when completion was correlated through it, so
+	// the agent identifier does not match a later dispatch erroneously.
+	if tokenSource == TokenFromAgent && in.Call.AgentID != "" {
+		delta.ReleaseAgents = []string{in.Call.AgentID}
 	}
 
 	// Identity for the end record: prefer the call's own identity; fall
@@ -332,8 +500,10 @@ func decidePost(in Input) Decision {
 		CorrelationToken: token,
 		Echo:             echo,
 	}
-	if hasPending {
-		rec.Seq = pending.Seq
+	// Set the Seq field when we resolved a concrete dispatch (pending or in-flight).
+	// When the token was unresolved (SeqFromCounter), the Seq remains zero.
+	if resolvedSource == SeqFromPending || resolvedSource == SeqFromInFlight {
+		rec.Seq = resolvedSeq
 	}
 
 	outcome := domain.InterceptionOutcome{
@@ -347,15 +517,46 @@ func decidePost(in Input) Decision {
 		Records: []domain.LogRecord{rec},
 	}
 
-	// Cutoff detection: when the just-completed dispatch is the Nth (where
-	// N == EarlyExitThreshold), signal process termination. The outcome
-	// remains OutcomePassthrough — the reply is delivered first, and the
-	// interceptor shell writes the sentinel only after the reply leaves
-	// cfg.Out. The RunEventEarlyExitTriggered record is appended after the
-	// end record so it appears at the correct chronological position in the
-	// invocation log.
-	if hasPending && in.State.EarlyExitThreshold > 0 && pending.Seq == in.State.EarlyExitThreshold {
+	// Emit RunEventUncorrelatedCompletion when correlation did not succeed
+	// through an established agent binding (TokenFromCall or TokenFromAgent)
+	// and a dispatch was outstanding. This covers both the complete failure
+	// case (TokenUnresolved) and the degraded sole-outstanding case
+	// (TokenFromSoleOutstanding), which succeeds by proximity rather than by
+	// an actual agent binding established at the agent-start phase. Both are
+	// named here so the operator can see that correlation was not clean.
+	//
+	// TokenFromCall and TokenFromAgent never produce this event: a direct
+	// token or an established binding are authoritative correlations.
+	if (tokenSource == TokenUnresolved || tokenSource == TokenFromSoleOutstanding) && CorrelationExpected(in.State) {
+		outstanding := len(in.State.InFlight)
+		d.Records = append(d.Records, domain.LogRecord{
+			Kind:      domain.RecordRun,
+			TestID:    in.State.TestID,
+			RunNumber: in.State.RunNumber,
+			Timestamp: in.Now,
+			Event:     domain.RunEventUncorrelatedCompletion,
+			Detail:    fmt.Sprintf("%d dispatch(es) outstanding when completion arrived with no resolvable token", outstanding),
+		})
+	}
+
+	// Cutoff detection: the cutoff fires when the sequence number resolved for
+	// this dispatch is at or beyond the threshold, and the threshold has not
+	// already been triggered. The outcome remains OutcomePassthrough — the reply
+	// is delivered first, and the interceptor shell writes the sentinel only after
+	// the reply leaves cfg.Out. The >= (not ==) comparison ensures a missed Nth
+	// observation (e.g. due to a concurrency gap) is still caught by the next
+	// post or completion event.
+	//
+	// The !EarlyExitTriggered guard ensures the RunEventEarlyExitTriggered record
+	// appears exactly once in the invocation log, even if multiple post events
+	// arrive with seq >= threshold before the updated state is read.
+	//
+	// No conjunct short-circuits before the threshold comparison: the cutoff is
+	// count-based and fires regardless of whether the dispatch was stubbed,
+	// answered with a generic response, or unmatched.
+	if in.State.EarlyExitThreshold > 0 && !in.State.EarlyExitTriggered && resolvedSeq >= in.State.EarlyExitThreshold {
 		d.TerminateSubject = true
+		d.Delta.SetEarlyExitTriggered = true
 		d.Records = append(d.Records, domain.LogRecord{
 			Kind:      domain.RecordRun,
 			TestID:    in.State.TestID,
@@ -366,6 +567,45 @@ func decidePost(in Input) Decision {
 	}
 
 	return d
+}
+
+// ResolveSeq reports the invocation sequence number the dispatch behind a
+// post- or completion-phase call carries, and where that number came from.
+//
+// The resolution order is pending stub, then in-flight entry, then the global
+// sequence counter. The fallback to the counter is what makes the cutoff
+// count-based: a dispatch that matched no registered stub creates no pending
+// entry, and a completion event that cannot be correlated resolves to no
+// entry at all, yet the tool still knows how many dispatches have been
+// issued. The count is the only thing the cutoff may depend on.
+//
+// A zero return is possible only for a state whose SequenceCounter is zero,
+// i.e. before any dispatch — a caller must treat 0 as "no dispatch".
+func ResolveSeq(state domain.RunState, token string) (seq int, source SeqSource) {
+	if pending, ok := state.PendingStubs[token]; ok {
+		return pending.Seq, SeqFromPending
+	}
+	if inFlight, ok := state.InFlight[token]; ok {
+		return inFlight.Seq, SeqFromInFlight
+	}
+	return state.SequenceCounter, SeqFromCounter
+}
+
+// TerminatesAtPre reports whether an outcome answers the dispatch at the
+// pre-invocation point, so no later phase will observe it.
+//
+// True for OutcomeSubstitute (the tool supplied the reply itself) and
+// OutcomeHalt (the call was refused and will never run). False for
+// OutcomeRewritePrompt and OutcomePassthrough, on which the collaborator
+// still runs and the reply is observed at the post or completion point —
+// termination is deferred to whichever of those observes it, because the
+// reply must reach the subject before the subject is stopped.
+//
+// This generalises the previous pre-invocation cutoff condition, which tested
+// OutcomeSubstitute alone and therefore never fired on a harness that can
+// only rewrite a prompt. The substitution path's behaviour is unchanged.
+func TerminatesAtPre(kind domain.OutcomeKind) bool {
+	return kind == domain.OutcomeSubstitute || kind == domain.OutcomeHalt
 }
 
 // EchoInstruction renders the prompt that replaces a stubbed call's input

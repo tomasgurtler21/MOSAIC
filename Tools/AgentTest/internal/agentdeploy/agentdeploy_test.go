@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -2159,6 +2160,265 @@ func TestDeploy_SelectionsFile_RemovedAfterCancellation(t *testing.T) {
 	if _, statErr := os.Stat(capturedPath); !os.IsNotExist(statErr) {
 		t.Errorf("selections file at %q still exists after Deploy returned on cancellation; "+
 			"cleanup must be unconditional across all exit paths including caller cancellation", capturedPath)
+	}
+}
+
+// =============================================================================
+// T8.1 — Per-run log destination on the deploy path; empty-means-omitted
+// =============================================================================
+
+// TestDeploy_LogDirNonEmpty_LogDirFlagPresent asserts that when LogDir is
+// non-empty, --log-dir is present in the deploy argument list. The flag is
+// what routes the delegate's two sink files (latest.log, history.log) away
+// from the shared repository root and into the run's sandbox. Without it,
+// every concurrent attempt truncates the same latest.log.
+func TestDeploy_LogDirNonEmpty_LogDirFlagPresent(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.LogDir = "/tmp/run-a/ctl/deploy-logs"
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if flagIndex(capturedArgs, "--log-dir") < 0 {
+		t.Errorf("args = %v, want --log-dir to be present when LogDir is non-empty "+
+			"(needed to redirect the delegate's sink files away from the shared repository root)", capturedArgs)
+	}
+}
+
+// TestDeploy_LogDirNonEmpty_LogDirFlagCarriesCorrectValue asserts that the
+// --log-dir value is the exact path from req.LogDir, not a transformed or
+// reconstructed version. The value is what the deployment tool uses as its
+// log directory; any transformation here would put logs somewhere else.
+func TestDeploy_LogDirNonEmpty_LogDirFlagCarriesCorrectValue(t *testing.T) {
+	var capturedArgs []string
+	const wantLogDir = "/tmp/run-a/ctl/deploy-logs"
+	req := minimalDeployRequest()
+	req.LogDir = wantLogDir
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if !containsFlag(capturedArgs, "--log-dir", wantLogDir) {
+		t.Errorf("args = %v, want --log-dir %q (the LogDir value passed through verbatim)", capturedArgs, wantLogDir)
+	}
+}
+
+// TestDeploy_LogDirEmpty_LogDirFlagAbsent asserts the empty-means-omitted
+// contract: when LogDir is empty (the zero value), --log-dir must be absent
+// from the argument list. An omitted flag lets the deployment tool write to
+// its own default location — the correct behaviour for callers that have not
+// opted into the per-run isolation.
+func TestDeploy_LogDirEmpty_LogDirFlagAbsent(t *testing.T) {
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	req.LogDir = "" // empty = do not override
+
+	d := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	if len(capturedArgs) == 0 {
+		t.Fatal("Deploy did not invoke CommandRunner; cannot assert argument absence")
+	}
+	if flagIndex(capturedArgs, "--log-dir") >= 0 {
+		t.Errorf("args = %v, want --log-dir to be absent when LogDir is empty (empty-means-omitted; absent flag lets the tool use its own default)", capturedArgs)
+	}
+}
+
+// TestDeploy_LogDirEmpty_ArgumentListUnchangedFromBaseline pins the
+// backwards-compatibility contract: the argument list produced with LogDir
+// explicitly empty must be byte-identical to the list produced when the field
+// is absent at all. Any deviation would silently alter every pre-existing
+// Deploy call's wire shape — an implicit contract break that surfaces only
+// when the delegate rejects the new argument.
+func TestDeploy_LogDirEmpty_ArgumentListUnchangedFromBaseline(t *testing.T) {
+	req := minimalDeployRequest()
+
+	// Baseline: no LogDir field set (zero value, same as absent).
+	var baselineArgs []string
+	baselineDeployer := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		MosaicRoot:     "/opt/mosaic",
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			baselineArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+	_, _ = baselineDeployer.Deploy(context.Background(), req)
+
+	// Same request but with LogDir set to the empty string explicitly.
+	// Must produce the identical argument slice.
+	reqWithEmpty := req
+	reqWithEmpty.LogDir = "" // explicit empty — must not alter the argument list
+	var withEmptyArgs []string
+	withEmptyDeployer := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		MosaicRoot:     "/opt/mosaic",
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			withEmptyArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+	_, _ = withEmptyDeployer.Deploy(context.Background(), reqWithEmpty)
+
+	if len(baselineArgs) != len(withEmptyArgs) {
+		t.Errorf("arg count: baseline = %d, with empty LogDir = %d; want byte-identical argument lists (empty LogDir must not add any argument)",
+			len(baselineArgs), len(withEmptyArgs))
+		return
+	}
+	for i := range baselineArgs {
+		if baselineArgs[i] != withEmptyArgs[i] {
+			t.Errorf("args[%d]: baseline = %q, with empty LogDir = %q; want byte-identical argument lists",
+				i, baselineArgs[i], withEmptyArgs[i])
+		}
+	}
+}
+
+// =============================================================================
+// T8.3 — Deploy invocation writes no file under the shared repository root
+//         outside the run's own location
+// =============================================================================
+
+// TestDeploy_LogDirFlag_NotUnderSharedMosaicRoot asserts the audit property:
+// when the per-run log destination is derived from a sandbox (not from
+// opts.MosaicRoot), the --log-dir argument value is not under the shared
+// repository root. This is the structural guarantee that the deploy path
+// writes its sink files only within the run's own sandbox.
+//
+// The test fails in the RED phase because buildDeployArgs does not yet emit
+// --log-dir, so the flag is absent and the deployment tool would fall back to
+// writing its default location (<mosaicRoot>/MosaicDeploy/logs) on every call.
+func TestDeploy_LogDirFlag_NotUnderSharedMosaicRoot(t *testing.T) {
+	const sharedMosaicRoot = "/opt/mosaic-shared"
+	const sandboxControlDir = "/tmp/runs/run-a/ctl"
+
+	var capturedArgs []string
+	req := minimalDeployRequest()
+	// LogDir is derived from a sandbox: under the sandbox's control dir,
+	// not under sharedMosaicRoot.
+	req.LogDir = sandboxControlDir + "/deploy-logs"
+
+	d := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		MosaicRoot:     sharedMosaicRoot,
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return deploySuccessJSON(), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = d.Deploy(context.Background(), req)
+
+	// First: --log-dir must be present — without it the delegate writes to
+	// <sharedMosaicRoot>/MosaicDeploy/logs, which is a shared write.
+	idx := flagIndex(capturedArgs, "--log-dir")
+	if idx < 0 {
+		t.Errorf("args = %v, want --log-dir to be present when LogDir is non-empty "+
+			"(its absence means the delegate writes to the shared root at %q)", capturedArgs, sharedMosaicRoot)
+		return
+	}
+
+	// Second: the --log-dir value must not be under the shared mosaic root.
+	logDir := capturedArgs[idx+1]
+	// Normalise to forward slashes for cross-platform comparison.
+	cleanLogDir := filepath.ToSlash(filepath.Clean(logDir))
+	cleanSharedRoot := filepath.ToSlash(filepath.Clean(sharedMosaicRoot))
+	if strings.HasPrefix(cleanLogDir, cleanSharedRoot+"/") || cleanLogDir == cleanSharedRoot {
+		t.Errorf("--log-dir = %q is under the shared mosaic root %q; the deploy log destination must be within the run's sandbox so concurrent calls cannot overwrite each other's logs", logDir, sharedMosaicRoot)
+	}
+}
+
+// =============================================================================
+// T8.4 — Render path is unaffected: no log destination, no run logging
+// =============================================================================
+
+// TestRender_HasNoLogDirFlag asserts that the render subcommand argument list
+// never contains --log-dir under any circumstances. The render path triggers
+// no run logging in the delegate, so it needs no destination override and
+// adding one would be a contract break against the render subcommand's flag
+// surface.
+func TestRender_HasNoLogDirFlag(t *testing.T) {
+	var capturedArgs []string
+
+	deployer := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return []byte(successJSON), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = deployer.Render(context.Background(), minimalRequest())
+
+	if flagIndex(capturedArgs, "--log-dir") >= 0 {
+		t.Errorf("render args = %v, want --log-dir to be absent from the render subcommand argument list "+
+			"(render triggers no run logging and must not receive a log destination override)", capturedArgs)
+	}
+}
+
+// TestRender_WithMosaicRoot_HasNoLogDirFlag asserts that --log-dir remains
+// absent from render args even when MosaicRoot is set. The deploy path and the
+// render path share opts.MosaicRoot, so an incorrect implementation that
+// emitted --log-dir based on opts would affect both — this test catches that.
+func TestRender_WithMosaicRoot_HasNoLogDirFlag(t *testing.T) {
+	var capturedArgs []string
+
+	deployer := agentdeploy.New(agentdeploy.Options{
+		ExecutablePath: "mosaic-deploy",
+		MosaicRoot:     "/opt/mosaic",
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return []byte(successJSON), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = deployer.Render(context.Background(), minimalRequest())
+
+	if flagIndex(capturedArgs, "--log-dir") >= 0 {
+		t.Errorf("render args = %v, want --log-dir to be absent from render args even when MosaicRoot is set "+
+			"(the flag is a deploy-path-only override; it must not appear on the render path)", capturedArgs)
+	}
+}
+
+// TestRender_FirstArgIsRender_NotDeploy asserts that the render path still
+// routes to the "render" subcommand and has not been accidentally changed
+// to "deploy" by stage changes. This is a regression guard: a change that
+// routes render calls to deploy would produce wrong output structure and
+// succeed with garbage that nothing downstream could use.
+func TestRender_FirstArgIsRender_NotDeploy(t *testing.T) {
+	var capturedArgs []string
+
+	deployer := newDeployer(agentdeploy.Options{
+		Invoke: func(ctx context.Context, path string, args []string) ([]byte, []byte, int, error) {
+			capturedArgs = append([]string(nil), args...)
+			return []byte(successJSON), nil, exitSuccess, nil
+		},
+	})
+
+	_, _ = deployer.Render(context.Background(), minimalRequest())
+
+	if len(capturedArgs) == 0 {
+		t.Fatal("Render passed no arguments to CommandRunner; cannot assert subcommand name")
+	}
+	if capturedArgs[0] != "render" {
+		t.Errorf("render args[0] = %q, want %q (must still be the render subcommand after stage changes)", capturedArgs[0], "render")
 	}
 }
 

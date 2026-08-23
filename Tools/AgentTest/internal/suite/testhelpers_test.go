@@ -61,18 +61,38 @@ type scriptedOutcome struct {
 	err      error
 }
 
+// repKey uniquely identifies one repetition of one test within a runner.
+type repKey struct {
+	testID    string
+	runNumber int
+}
+
 // scriptedRunner is a suite.TestRunner double whose responses are scripted
-// per test ID, consumed in order. A test exhausted of scripted outcomes
-// falls back to a single passing disposition, so a scheduling test that
-// only cares about call count and order need not script every call.
+// per test ID, consumed in order. To prevent concurrent goroutines from
+// interleaving their script consumption — which causes spurious failures when
+// MaxConcurrentRuns > 1 and retries are in play — each (testID, runNumber)
+// pair pre-allocates its scripts atomically on first encounter. The window is
+// bounded by (1 + suite.StateIntegrityRetries), the maximum number of
+// runner.Run calls one repetition can ever make. Scripts beyond that window
+// that are never consumed by retrying repetitions are simply unused.
+//
+// A test exhausted of scripted outcomes falls back to a single passing
+// disposition, so a scheduling test that only cares about call count and
+// order need not script every call.
 type scriptedRunner struct {
-	mu     sync.Mutex
-	calls  []domain.RunKey
-	script map[string][]scriptedOutcome
+	mu        sync.Mutex
+	calls     []domain.RunKey
+	script    map[string][]scriptedOutcome // global queue by testID
+	repQueues map[repKey][]scriptedOutcome // per-(testID, runNumber) remaining scripts
+	repSeen   map[repKey]bool              // tracks which (testID, runNumber) have been allocated
 }
 
 func newScriptedRunner() *scriptedRunner {
-	return &scriptedRunner{script: map[string][]scriptedOutcome{}}
+	return &scriptedRunner{
+		script:    map[string][]scriptedOutcome{},
+		repQueues: map[repKey][]scriptedOutcome{},
+		repSeen:   map[repKey]bool{},
+	}
 }
 
 // scriptFor queues outcomes to be returned, in order, for calls naming
@@ -86,13 +106,49 @@ func (r *scriptedRunner) scriptFor(testID string, outcomes ...scriptedOutcome) {
 func (r *scriptedRunner) Run(ctx context.Context, key domain.RunKey, t preflight.ResolvedTest, eval domain.AttemptEvaluator) (domain.TestResult, error) {
 	r.mu.Lock()
 	r.calls = append(r.calls, key)
-	q := r.script[t.Definition.ID]
+
+	rk := repKey{testID: t.Definition.ID, runNumber: key.RunNumber}
+
 	var next scriptedOutcome
-	haveScripted := len(q) > 0
-	if haveScripted {
-		next = q[0]
-		r.script[t.Definition.ID] = q[1:]
+	haveScripted := false
+
+	if !r.repSeen[rk] {
+		// First call for this (testID, runNumber): pre-allocate a bounded
+		// window of scripts from the global queue. The window is bounded by
+		// (1 + suite.StateIntegrityRetries) — the maximum number of
+		// runner.Run calls one repetition can ever make. All allocation
+		// happens inside this lock, so concurrent goroutines for different
+		// repetitions cannot interleave their script consumption: each rep
+		// gets its own contiguous slice of the global queue.
+		r.repSeen[rk] = true
+		maxPerRep := 1 + suite.StateIntegrityRetries
+
+		globalQ := r.script[t.Definition.ID]
+		var alloc []scriptedOutcome
+		if len(globalQ) >= maxPerRep {
+			alloc = globalQ[:maxPerRep]
+			r.script[t.Definition.ID] = globalQ[maxPerRep:]
+		} else {
+			alloc = globalQ
+			r.script[t.Definition.ID] = nil
+		}
+
+		if len(alloc) > 0 {
+			next = alloc[0]
+			haveScripted = true
+			r.repQueues[rk] = alloc[1:]
+		}
+		// If alloc is empty, haveScripted stays false → fallback below.
+	} else {
+		// Subsequent call for this rep: use its pre-allocated queue.
+		repQ := r.repQueues[rk]
+		if len(repQ) > 0 {
+			next = repQ[0]
+			haveScripted = true
+			r.repQueues[rk] = repQ[1:]
+		}
 	}
+
 	r.mu.Unlock()
 
 	if next.err != nil {

@@ -245,14 +245,24 @@ Termination is **immediate on delivery of the Nth reply**. The interception pipe
 
 There is no grace period. The subject process ends as soon as the supervisor observes the sentinel. It does not wait for the subject to perform any further action — the subject is terminated in the middle of whatever it was doing next.
 
+**Asynchronous completion.** On harnesses whose completion event fires asynchronously (i.e. the harness fires the post-invocation hook at launch time, not when the collaborator finishes), the subject may issue an (N+1)th dispatch before the Nth completion event arrives at the interception pipeline. When that happens:
+
+1. The (N+1)th pre-invocation hook fires first. The pipeline processes it normally — it does not refuse the call or write the sentinel here. The reply for the (N+1)th dispatch is delivered to the subject.
+2. The Nth completion event then arrives. The pipeline detects `seq >= threshold`, writes the sentinel, and records `RunEventEarlyExitTriggered` in the invocation log.
+3. The supervisor observes the sentinel and terminates the subject process.
+
+Termination is therefore guaranteed even under asynchronous completion: the sentinel is written at step 2, not at pre-invocation of the (N+1)th call. The (N+1)th dispatch will appear in the evidence (its start record is written at step 1), but its own completion and any subject bookkeeping it triggers may be absent — the subject is terminated before either can complete.
+
+**No refusal of over-threshold calls.** The interception pipeline never refuses a call at or beyond the threshold at the pre-invocation point solely because the threshold was reached. Refusing at the pre-invocation point would cause the harness to observe a failed hook rather than a valid reply, damaging the run this tool is measuring. The only refusals that occur are those the registered stubs or the unmatched-halt policy already specify, and those fire for the same reasons they would without a threshold. The sentinel, written after the Nth reply is delivered, is the only mechanism that stops the subject — no call is refused for being over-threshold.
+
 ### 5.3 What the Evidence Contains
 
 When a run exits via `stop_after_invocations: N`, the evidence snapshot contains:
 
-- **Exactly N invocation-log entries** (one start record and one end record per dispatch). Because termination fires after the Nth reply is delivered, not before, no phantom (N+1)th entry is ever present. The interception pipeline writes its records synchronously before delivering the reply, so the Nth records are always present.
+- **At least N and at most N+1 invocation start records.** On harnesses with synchronous completion, exactly N start records are present. On harnesses with asynchronous completion, the subject may have issued an (N+1)th dispatch before the sentinel was written; that dispatch's start record is present but its end record and any subject bookkeeping for it may be absent.
 - **The orchestration document as it existed when the subject process was terminated** — which may be mid-update if the subject was writing it when the supervisor cancelled it.
 - **Any files the stub side effects created** — these are written by the interception pipeline before the reply is delivered, so they are always present regardless of the cutoff.
-- **No events the subject would have emitted after receiving the Nth reply** — the subject is terminated before it can write output artifacts for that dispatch, log the Nth agent in its execution log, or dispatch a subsequent collaborator.
+- **No events the subject would have emitted after receiving the Nth reply** — the subject is terminated before it can write output artifacts for that dispatch, log the Nth agent in its execution log, or dispatch a subsequent collaborator (except on asynchronous harnesses where the (N+1)th dispatch may have been issued, as described in §5.2).
 
 ### 5.4 Post-Reply Bookkeeping Caveat
 
@@ -370,6 +380,86 @@ AgentTest's `agentdeploy` port needs:
 3. The runner's setup phase must call `Deploy` (single call) for catalogue-based tests, falling back to per-agent `Render` for `stub_agents`-based tests.
 
 See `Requirements-agentTest.md` for the full requirement set.
+
+---
+
+---
+
+## 8. Concurrent Execution Model
+
+### 8.1 What the Bound Governs
+
+`MaxConcurrentRuns` is a single bound over the full (test × repetition) matrix produced by a suite run. It limits how many test attempts — each being a unique (test, repetition) pair — execute simultaneously across the entire suite. There is no separate bound per test and no separate bound per repetition level; one number controls both.
+
+The scheduling unit is one repetition of one test. Each unit occupies exactly one slot for its entire lifecycle: sandbox setup, supervised execution, evidence snapshot, and teardown. A slot is not released until teardown completes.
+
+Within a slot, the two raw attempts of one repetition (the initial attempt and, if `NeedsRetry` fires, its retry) execute strictly in order — they are serialised inside their slot regardless of the suite-level bound. Concurrency only applies across slots, never within one.
+
+### 8.2 What a Bound of 1 Guarantees
+
+A bound of `1` is the sequential degenerate case: only one attempt is ever in progress at any moment. The suite processes each (test, repetition) pair in declared plan order, one at a time, completing each attempt's full lifecycle before beginning the next. This reproduces the pre-concurrency behaviour exactly and is guaranteed never to create a second sandbox while the first exists.
+
+A bound of `1` therefore guarantees:
+- At most one sandbox exists on disk at any moment.
+- At most one harness process is running.
+- At most one block of interceptor processes is contending on lock files.
+- No parallelism of any kind within a suite run.
+
+This is the right choice for inspecting a single run's diagnostic output interactively, for running on a machine with very limited resources, or for comparing against a concurrent run to verify identical behaviour.
+
+### 8.3 How Ordering and Identity Are Preserved Under Concurrency
+
+**Report ordering.** `suite.Run` schedules attempts in declared plan order and collects results into the same fixed-length slice. Concurrent completion of results does not affect the order in which they appear in the report — each result is written to its pre-allocated position in the plan-ordered slice regardless of when it finished. The report always reflects the declared suite order.
+
+**Run identity.** Each attempt receives a UUID-based run ID generated at slot-acquisition time, before the slot's lifecycle begins. The run ID is passed through the sandbox name, the subject environment (`MOSAIC_RUN_ID`), the interception pipeline's run-state file, and the evidence snapshot. Every component of one attempt uses the same ID and no other attempt's ID — identity is established before any I/O begins and never shared.
+
+**Evidence isolation.** Each attempt runs in its own sandbox directory, named `<suiteRunID>-<testID>-<runNumber>`. The interception pipeline acquires a lock file inside that sandbox before writing any run-state; the lock is unique to the directory and cannot be acquired by a concurrent attempt. The invocation log, orchestration document, and diagnostic output are all written inside the sandbox, so no concurrent attempt can observe or corrupt them.
+
+---
+
+## 9. Resource Cost of a Chosen Bound
+
+The concurrency bound directly multiplies the resources AgentTest holds simultaneously. This section states what each resource is, how many exist at a given bound, and how sandbox retention changes the figures.
+
+### 9.1 Per-Attempt Resources
+
+Each attempt in flight — one slot of the bound — creates and holds:
+
+| Resource | Description | Approximate size |
+|----------|-------------|-----------------|
+| **Sandbox directory** | Root directory under `<workspaceRoot>/`; named `<suiteRunID>-<testID>-<runNumber>` | 1 entry in the filesystem; the container for everything below |
+| **Deployed agent tree** (`subject/`) | The subject orchestrator and all its stub collaborators, as rendered by the deploy tool into the sandbox's `subject/` subdirectory | Proportional to the catalogue agents referenced by the test — typically a few hundred KB of text files |
+| **Relocated harness configuration tree** (`subject/<harness-config-dir>/`) | The harness's own configuration directory (e.g. `.claude/` for `claude-code`), relocated into the sandbox so the harness process sees per-run configuration rather than the user's real configuration | Session transcript tree plus hook files; on an observed live run this was several MB including the transcript |
+| **Interception control directory** (`control/`) | The stub registry file, the parallel-group document, the run-state lock file, the early-exit sentinel file, and the invocation log, all written by the interception pipeline during the run | A few KB per attempt; the invocation log grows with each intercepted dispatch but stays small for typical test suites |
+| **Deploy log** | One log file written by the deploy tool subprocess during sandbox setup, capturing the rendering trace for the attempt's agents | Tens of KB per attempt; captured in the run's own log folder outside the sandbox |
+| **Diagnostic capture** | The subject process's stdout and stderr, captured to a file by the harness adapter during supervised execution | Tens of KB per attempt for a typical run; grows with the number of dispatches and the verbosity of the subject's output |
+| **Harness process** | The harness CLI process (`claude` or equivalent) running the subject agent | One OS process per slot; each process holds its own open file handles and memory for the session |
+| **Interceptor processes** | Short-lived processes spawned by the harness for each dispatch, converging on the slot's lock file | Several per dispatch; they exit immediately after delivering the stub reply |
+
+### 9.2 Total Resources at a Given Bound N
+
+At a bound of N, at steady state (all N slots occupied):
+
+- **N sandboxes** exist simultaneously on disk.
+- **N deployed agent trees** (subject + stubs) occupy disk.
+- **N relocated harness configuration trees** occupy disk, each potentially several MB.
+- **N diagnostic capture files** are being written simultaneously.
+- **N deploy logs** were written during setup (one per attempt, not N simultaneously — setup is sequential within a slot, so they are written one per slot start, not all at once at the same instant).
+- **N harness processes** run simultaneously.
+- Up to **N × (dispatches per turn)** interceptor processes may overlap, each short-lived.
+
+All of these are released when a slot completes teardown. Teardown always runs, so resources do not accumulate beyond the bound under normal operation.
+
+### 9.3 Multiplication Under Sandbox Retention
+
+When retention is set to `OnFailure` or `Always`, teardown deliberately skips sandbox removal for the matching runs. This breaks the resource-release guarantee:
+
+- With `Always`: every completed attempt leaves its sandbox, deployed agent tree, harness configuration tree, diagnostic capture, and invocation log on disk permanently until the user deletes them manually. A suite of T tests × R repetitions at bound N retains T × R complete sandboxes after the suite run ends. For a suite with 2 tests × 50 repetitions, this is 100 retained sandboxes, each potentially several MB.
+- With `OnFailure`: only failing runs retain their sandboxes. The number of retained sandboxes equals the number of failing attempts, which depends on the subject's behaviour.
+
+The deploy log is written outside the sandbox (in the log store) and is not subject to sandbox retention policy — it persists regardless of the retention setting until the user clears the log store.
+
+**Practical consequence:** Do not set `Always` retention for large-repetition suite runs without first estimating the total disk footprint. For a typical suite with a moderate harness configuration tree (a few MB per sandbox), a 50-repetition suite with `Always` retention can easily retain several hundred MB of sandboxes. `OnFailure` is the practical default for diagnostic workflows: it retains evidence exactly where it is needed and discards the rest.
 
 ---
 

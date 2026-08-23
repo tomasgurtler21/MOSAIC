@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
 
 	"mosaic-agent-test/internal/domain"
@@ -29,9 +30,17 @@ import (
 // and therefore cannot forget to.
 //
 // eval is called at most once, and exactly once on every path where evidence
-// was gathered. It is called synchronously, on Run's own goroutine, so a
-// caller may emit progress from inside it and observe its side effects
-// afterwards without synchronisation.
+// was gathered. It is called synchronously on Run's own goroutine, before
+// teardown and while the sandbox is still on disk, and it completes before
+// the Run call that invoked it returns.
+//
+// What changed, and what a caller may no longer assume: under a bound above
+// one, many Run calls execute on many goroutines at once, so one caller's
+// eval closure may be entered concurrently with other entries of itself. A
+// closure that emits progress or accumulates state must be safe for
+// concurrent use. What remains guaranteed is per-call, not global: this
+// call's eval finishes before this call returns, and this call's sandbox is
+// intact throughout it.
 //
 // A nil eval means "no verdict is wanted": the attempt still runs and still
 // tears down, the retention decision falls back to the launch-failure signal
@@ -57,12 +66,26 @@ type Options struct {
 	Progress domain.ProgressSink
 	Clock    domain.Clock
 
-	// MaxConcurrentTests bounds how many tests execute at once. 1, the
-	// default, is sequential. Concurrency here is across tests; a single
-	// test's repetitions always run in order, because a repetition's
-	// purpose is to sample a non-deterministic subject and overlapping
-	// samples make a burst of load part of what is being measured.
-	MaxConcurrentTests int
+	// MaxConcurrentRuns bounds how many runs execute at once across the whole
+	// suite — one bound over the (test × repetition) matrix together, not one
+	// bound per nesting level.
+	//
+	// 1 is strictly sequential and reproduces the pre-concurrency behaviour,
+	// results and lifecycle-event ordering exactly, so a user who does not
+	// opt into concurrency is unaffected.
+	//
+	// It replaces MaxConcurrentTests, which was declared, never read, and
+	// carried a rationale for sequential repetitions ("overlapping samples
+	// make a burst of load part of what is being measured") that does not
+	// apply here: this tool asserts routing decisions, not latency or
+	// throughput under load.
+	//
+	// Deliberately not named for "concurrency": internal/concurrency already
+	// means peak collaborator invocations in flight within one run, which is
+	// a different thing entirely.
+	//
+	// Zero selects DefaultMaxConcurrentRuns.
+	MaxConcurrentRuns int
 
 	// RunID authors the run identity for one attempt. The third
 	// argument is the zero-based attempt index within the repetition:
@@ -101,12 +124,14 @@ func New(o Options) *Suite {
 	return &Suite{opts: o}
 }
 
-// StateIntegrityRetries is fixed at one by design. A run whose lock was
-// reclaimed may rest on lost state, so it is evidence about the tool rather
-// than about the subject: it is retried once and excluded from the
-// pass-rate denominator, and a second occurrence ends the test as an
-// infrastructure failure. Letting the tool's own faults count against the
-// subject would stop the aggregate measuring the subject at all.
+// StateIntegrityRetries is fixed at one by design. A run that triggers the
+// retry-and-exclude rule — a lock reclaim (state-integrity fault) or a
+// non-zero harness exit (spawn-failed) — may rest on lost or absent subject
+// state, so it is evidence about the tool rather than about the subject: it
+// is retried once and excluded from the pass-rate denominator, and a second
+// occurrence of the same fault ends the test as an infrastructure failure.
+// Letting the tool's own faults count against the subject would stop the
+// aggregate measuring the subject at all.
 const StateIntegrityRetries = 1
 
 // emitTimeout bounds how long the suite waits for one progress event to be
@@ -138,31 +163,227 @@ func emitSafe(sink domain.ProgressSink, ev domain.ProgressEvent) {
 	}
 }
 
+// testSlot holds the pre-allocated result buffers for one test's repetitions.
+// All fields are written before scheduling and read after wg.Wait(). Each
+// slice element is written by exactly one worker (the one that claimed that
+// repIdx work item), so concurrent writes are always to non-overlapping
+// positions and Go's memory model makes them race-free without a mutex.
+// wg.Wait() provides the happens-before edge that makes every worker's writes
+// visible to the assembler goroutine that reads them afterwards.
+type testSlot struct {
+	rt          preflight.ResolvedTest
+	repetitions int
+	passRate    float64
+	allResults  [][]domain.TestResult // [rep-1] = every attempt result for that repetition
+	runReports  []report.RunReport    // [rep-1] = the run report for that repetition
+}
+
+// workItem is one scheduling unit: one repetition of one test.
+type workItem struct {
+	slotIdx int // index into the slots array (= test index in plan order)
+	repIdx  int // 0-based (rep - 1)
+	rep     int // 1-based repetition number
+}
+
 // Run executes a validated plan and returns the single result model both
 // renderers and both frontends consume.
 //
-// Cancellation propagates to every in-flight attempt through ctx, so the
-// per-test lifecycle's guaranteed teardown still runs. A cancelled suite
-// returns the results it completed rather than discarding them.
+// Scheduling unit. The unit of concurrent scheduling is one repetition of one
+// test, not one attempt. A unit occupies exactly one slot of
+// Options.MaxConcurrentRuns for its whole life and runs its attempts strictly
+// in order inside that slot. Two properties follow by construction rather
+// than from two cooperating mechanisms: the total number of runs in flight
+// across all tests never exceeds the bound, and a repetition's raw attempts
+// never run concurrently at any bound.
+//
+// Ordering. Every unit's result is written into a slot reserved for it by
+// (test index, repetition number) before scheduling begins, never appended on
+// completion. Report ordering is therefore by test order and repetition
+// number regardless of completion order, which is what the report builder
+// already assumes when it consumes reports in the order the suite produced
+// them.
+//
+// Identity and isolation. Each unit's attempts receive distinct run
+// identities and therefore distinct sandboxes, distinct run-state files,
+// distinct locks and distinct invocation logs. No file, counter or lock is
+// shared across units, so two runs executing at the same instant can neither
+// observe nor corrupt each other's evidence.
+//
+// Cancellation. Run returns only after every unit it started has returned.
+// Cancellation stops further units from being scheduled; units already in
+// flight receive the same ctx and complete their own guaranteed teardown.
+// Results completed before cancellation are returned rather than discarded,
+// and a cancelled suite is not itself a failure.
+//
+// A bound of 1 reproduces the sequential implementation's behaviour, results
+// and lifecycle-event ordering exactly: the work channel is FIFO and one
+// worker processes items in submission order, giving the same ordering the
+// previous sequential loop produced.
 func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error) {
 	clock := s.opts.Clock
 	sink := s.opts.Progress
 
 	started := clock.Now()
+
+	// totalRuns is the sum of repetitions across every test in the plan,
+	// so the suite-started event carries the full run count for display.
+	var totalRuns int
+	for _, rt := range p.Tests {
+		reps := 1
+		if rt.Settings.Repetitions != nil {
+			reps = *rt.Settings.Repetitions
+		}
+		totalRuns += reps
+	}
+
 	emitSafe(sink, domain.ProgressEvent{
 		Kind:       domain.ProgressSuiteStarted,
 		At:         started,
 		SuiteID:    p.Suite.ID,
 		TotalTests: len(p.Tests),
+		TotalRuns:  totalRuns,
 	})
 
-	var testReports []report.TestReport
-	for _, rt := range p.Tests {
-		testReports = append(testReports, s.runTest(ctx, rt, sink, clock))
-		if ctx.Err() != nil {
-			// The completed results stand; a cancelled context is not
-			// itself a suite failure, and no further test is scheduled.
-			break
+	bound := s.opts.MaxConcurrentRuns
+	if bound <= 0 {
+		// Zero means unset: apply the package default so that the exported
+		// field contract ("Zero selects DefaultMaxConcurrentRuns") is honoured.
+		// Callers that want strictly sequential execution must supply bound=1
+		// explicitly.
+		bound = DefaultMaxConcurrentRuns
+	}
+
+	// Pre-allocate result slots in plan order. Positions are fixed before
+	// any goroutine starts so completion order cannot affect the final
+	// report ordering.
+	slots := make([]testSlot, len(p.Tests))
+	totalWork := 0
+	for i, rt := range p.Tests {
+		reps := 1
+		if rt.Settings.Repetitions != nil {
+			reps = *rt.Settings.Repetitions
+		}
+		rate := 1.0
+		if rt.Settings.PassRate != nil {
+			rate = *rt.Settings.PassRate
+		}
+		slots[i] = testSlot{
+			rt:          rt,
+			repetitions: reps,
+			passRate:    rate,
+			allResults:  make([][]domain.TestResult, reps),
+			runReports:  make([]report.RunReport, reps),
+		}
+		totalWork += reps
+	}
+
+	// Enqueue all work items in (test, repetition) order. The channel is
+	// buffered to hold every item so producers never block. With a single
+	// worker (bound=1) items are consumed in send order, reproducing the
+	// sequential implementation's ordering exactly.
+	workCh := make(chan workItem, totalWork)
+	for i := range slots {
+		for rep := 1; rep <= slots[i].repetitions; rep++ {
+			workCh <- workItem{slotIdx: i, repIdx: rep - 1, rep: rep}
+		}
+	}
+	close(workCh)
+
+	// Launch exactly bound workers. Each worker processes items from the
+	// shared FIFO channel until it is drained, holding the semaphore
+	// implicitly by being one of at most bound active goroutines.
+	var wg sync.WaitGroup
+	for w := 0; w < bound; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for item := range workCh {
+				slot := &slots[item.slotIdx]
+
+				// Respect cancellation: drain remaining items without
+				// executing them, so wg.Done() fires for every started
+				// goroutine and the suite does not orphan goroutines.
+				if ctx.Err() != nil {
+					continue
+				}
+
+				final, attempts := s.executeWork(ctx, item, slot, sink, clock)
+
+				// Write into the pre-allocated position. Each repIdx is owned
+				// by exactly one work item, so concurrent workers always write
+				// to non-overlapping slice positions — no mutex needed.
+				// wg.Wait() provides the happens-before edge that makes these
+				// writes visible to the assembler goroutine below.
+				slot.allResults[item.repIdx] = attempts
+				slot.runReports[item.repIdx] = report.RunReport{
+					Key:                 final.Key,
+					Verdict:             final.Verdict,
+					Reasons:             final.Reasons,
+					Assertions:          final.Assertions,
+					Conditions:          final.Conditions,
+					Duration:            final.Duration,
+					Cost:                final.Cost,
+					NegativeApplied:     final.NegativeApplied,
+					RetainedSandboxPath: final.RetainedSandboxPath,
+					SubjectVersion:      final.SubjectVersion,
+					SubjectModel:        final.SubjectModel,
+					StubModel:           final.StubModel,
+					HarnessID:           final.HarnessID,
+					TerminationReason:   final.TerminationReason,
+					Subject: report.SubjectFailure{
+						ExitCode:  final.SubjectResult.ExitCode,
+						Stderr:    final.SubjectResult.Stderr,
+						RawOutput: final.SubjectResult.RawOutput,
+					},
+				}
+
+				emitSafe(sink, domain.ProgressEvent{
+					Kind:             domain.ProgressTestFinished,
+					At:               clock.Now(),
+					TestID:           slot.rt.Definition.ID,
+					Repetition:       item.rep,
+					Repetitions:      slot.repetitions,
+					Verdict:          final.Verdict,
+					Duration:         final.Duration,
+					Cost:             final.Cost,
+					FailedAssertions: failedAssertionNames(final.Assertions),
+					Run:              final.Key,
+				})
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// Assemble test reports from the pre-allocated slots, in plan order.
+	// Repetitions that were cancelled before execution have a nil allResults
+	// entry (the slot was pre-allocated but never written). Those are excluded
+	// from the report so the output matches the old sequential implementation,
+	// which simply produced fewer entries when cancelled mid-run rather than
+	// including zero-valued placeholders.
+	testReports := make([]report.TestReport, len(slots))
+	for i, slot := range slots {
+		var allResults []domain.TestResult
+		var runReports []report.RunReport
+		for repIdx, attempts := range slot.allResults {
+			if attempts == nil {
+				// This repetition was not executed (context cancelled before
+				// the worker reached it). Omit it from the report.
+				continue
+			}
+			allResults = append(allResults, attempts...)
+			runReports = append(runReports, slot.runReports[repIdx])
+		}
+		agg := evaluate.Aggregate(allResults, domain.RepetitionPolicy{
+			Repetitions: slot.repetitions,
+			PassRate:    slot.passRate,
+		})
+		testReports[i] = report.TestReport{
+			TestID:      slot.rt.Definition.ID,
+			Description: slot.rt.Definition.Description,
+			Layer:       slot.rt.Definition.Layer,
+			Aggregate:   agg,
+			Runs:        runReports,
 		}
 	}
 
@@ -179,100 +400,54 @@ func (s *Suite) Run(ctx context.Context, p preflight.Plan) (report.Result, error
 	return result, nil
 }
 
-// runTest executes one test's declared repetitions and delegates
-// pass-rate aggregation to the verdict engine over every raw attempt
-// (including any state-integrity retry), never recomputing it here.
-func (s *Suite) runTest(ctx context.Context, rt preflight.ResolvedTest, sink domain.ProgressSink, clock domain.Clock) report.TestReport {
-	testID := rt.Definition.ID
-
-	repetitions := 1
-	if rt.Settings.Repetitions != nil {
-		repetitions = *rt.Settings.Repetitions
-	}
-	passRate := 1.0
-	if rt.Settings.PassRate != nil {
-		passRate = *rt.Settings.PassRate
-	}
-
-	var allResults []domain.TestResult
-	var runReports []report.RunReport
-
-	for rep := 1; rep <= repetitions; rep++ {
-		emitSafe(sink, domain.ProgressEvent{
-			Kind:        domain.ProgressTestStarted,
-			At:          clock.Now(),
-			TestID:      testID,
-			Repetition:  rep,
-			Repetitions: repetitions,
-		})
-
-		final, attempts := s.runRepetition(ctx, rt, rep, sink, clock)
-		allResults = append(allResults, attempts...)
-		runReports = append(runReports, report.RunReport{
-			Key:                 final.Key,
-			Verdict:             final.Verdict,
-			Reasons:             final.Reasons,
-			Assertions:          final.Assertions,
-			Conditions:          final.Conditions,
-			Duration:            final.Duration,
-			Cost:                final.Cost,
-			NegativeApplied:     final.NegativeApplied,
-			RetainedSandboxPath: final.RetainedSandboxPath,
-			SubjectVersion:      final.SubjectVersion,
-			SubjectModel:        final.SubjectModel,
-			StubModel:           final.StubModel,
-			TerminationReason:   final.TerminationReason,
-			Subject: report.SubjectFailure{
-				ExitCode:  final.SubjectResult.ExitCode,
-				Stderr:    final.SubjectResult.Stderr,
-				RawOutput: final.SubjectResult.RawOutput,
-			},
-		})
-
-		emitSafe(sink, domain.ProgressEvent{
-			Kind:             domain.ProgressTestFinished,
-			At:               clock.Now(),
-			TestID:           testID,
-			Repetition:       rep,
-			Repetitions:      repetitions,
-			Verdict:          final.Verdict,
-			Duration:         final.Duration,
-			Cost:             final.Cost,
-			FailedAssertions: failedAssertionNames(final.Assertions),
-		})
-	}
-
-	agg := evaluate.Aggregate(allResults, domain.RepetitionPolicy{Repetitions: repetitions, PassRate: passRate})
-
-	return report.TestReport{
-		TestID:      testID,
-		Description: rt.Definition.Description,
-		Layer:       rt.Definition.Layer,
-		Aggregate:   agg,
-		Runs:        runReports,
-	}
-}
-
 // runRepetition executes one declared repetition, applying the
-// state-integrity retry-and-exclude rule: a run that fails for state
-// integrity is retried once, and a second such fault in the same
-// repetition ends it as evidence the verdict engine's aggregation marks as
-// an infrastructure failure. It returns the repetition's final result —
+// retry-and-exclude rule: a run that fails for state integrity or exits
+// with a non-zero harness exit (spawn-failed) is retried once, and a
+// second such fault of the same kind in the same repetition ends it as
+// evidence the verdict engine's aggregation marks as an infrastructure
+// failure. It returns the repetition's final result —
 // what the displayed report and the ProgressTestFinished event carry — plus
 // every raw attempt's result, so the excluded attempt still reaches the
 // verdict engine's aggregation.
-func (s *Suite) runRepetition(ctx context.Context, rt preflight.ResolvedTest, rep int, sink domain.ProgressSink, clock domain.Clock) (domain.TestResult, []domain.TestResult) {
+//
+// ProgressTestStarted is emitted here at attempt 0, after the run key is
+// computed, so the event carries the same run identity as the invocation
+// events it opens — without calling RunID a second time.
+//
+// runRepetition is safe for concurrent calls from many goroutines: it
+// writes only to its own stack and through the emitSafe sink, whose own
+// goroutine isolation makes concurrent callers safe.
+func (s *Suite) runRepetition(ctx context.Context, rt preflight.ResolvedTest, rep, repetitions int, sink domain.ProgressSink, clock domain.Clock) (domain.TestResult, []domain.TestResult) {
 	var attempts []domain.TestResult
 	var final domain.TestResult
 
 	for attempt := 0; attempt <= StateIntegrityRetries; attempt++ {
 		key := domain.RunKey{RunID: s.runID(rt.Definition.ID, rep, attempt), TestID: rt.Definition.ID, RunNumber: rep}
 
+		// Emit ProgressTestStarted for the first attempt only. The key is
+		// already in scope so the event carries the same run identity the
+		// invocation events inside the evaluator closure will carry.
+		if attempt == 0 {
+			emitSafe(sink, domain.ProgressEvent{
+				Kind:        domain.ProgressTestStarted,
+				At:          clock.Now(),
+				TestID:      rt.Definition.ID,
+				Repetition:  rep,
+				Repetitions: repetitions,
+				Run:         key,
+			})
+		}
+
 		// The evaluator closes over key and sink so it stamps the run key
 		// and emits invocation progress events from inside the runner, while
 		// the sandbox is still on disk. The runner calls it synchronously
 		// before teardown, so all side effects are visible to the caller by
 		// the time Run returns.
+		//
+		// Under a bound above one, many such closures execute concurrently on
+		// many goroutines. emitSafe's per-event goroutine isolation makes the
+		// sink writes safe; the key and sink captures are read-only within the
+		// closure. No shared mutable state is accessed.
 		eval := func(ev domain.RunEvidence) domain.TestResult {
 			ev.Key = key
 			for _, rec := range ev.Records {
@@ -285,6 +460,7 @@ func (s *Suite) runRepetition(ctx context.Context, rt preflight.ResolvedTest, re
 					Seq:      rec.Seq,
 					Identity: rec.Identity,
 					Outcome:  rec.Outcome,
+					Run:      key,
 				})
 			}
 			return evaluate.Evaluate(ev)
@@ -321,6 +497,36 @@ func (s *Suite) runRepetition(ctx context.Context, rt preflight.ResolvedTest, re
 	}
 
 	return final, attempts
+}
+
+// executeWork runs one scheduling unit and catches any panic that escapes
+// runRepetition. If a panic occurs, it returns an infrastructure failure result
+// so the worker goroutine is not terminated — per-goroutine containment is
+// what makes "a panic in one unit does not affect sibling units" true at the
+// scheduler level. runner.Run already recovers panics inside its own scope;
+// this recovery catches any panic that somehow escapes that inner recovery,
+// preventing the scheduler goroutine from crashing the process.
+func (s *Suite) executeWork(ctx context.Context, item workItem, slot *testSlot, sink domain.ProgressSink, clock domain.Clock) (final domain.TestResult, attempts []domain.TestResult) {
+	defer func() {
+		if r := recover(); r != nil {
+			key := domain.RunKey{
+				RunID:     s.runID(slot.rt.Definition.ID, item.rep, 0),
+				TestID:    slot.rt.Definition.ID,
+				RunNumber: item.rep,
+			}
+			final = domain.TestResult{
+				Key:     key,
+				Verdict: domain.VerdictFail,
+				Reasons: []domain.FailureReason{domain.ReasonInfrastructure},
+				Conditions: []domain.RunCondition{{
+					Kind:   domain.ConditionRunNotStarted,
+					Detail: fmt.Sprintf("runner panicked: %v", r),
+				}},
+			}
+			attempts = []domain.TestResult{final}
+		}
+	}()
+	return s.runRepetition(ctx, slot.rt, item.rep, slot.repetitions, sink, clock)
 }
 
 func (s *Suite) runID(testID string, runNumber, attempt int) string {

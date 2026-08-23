@@ -88,11 +88,19 @@ func (a *Adapter) ID() string {
 //	    completion signal (its SubagentStop hook) instead, which is what
 //	    makes echo-fidelity comparison possible on this harness.
 //	CorrelationField:           "tool_use_id"
-//	    The dispatch-scoped identifier the harness sends on every PreToolUse,
-//	    PostToolUse and SubagentStop event. The correlation token is populated
-//	    directly from this field on all three interception phases. It is not
-//	    planted in the prompt text; prompt-planting and transcript-scanning are
-//	    both retired. See correlation.go for the full mechanism basis.
+//	    The dispatch-scoped identifier the harness sends on PreToolUse and
+//	    PostToolUse events. The correlation token is populated directly from
+//	    this field on the pre- and post-invocation phases. It is not planted
+//	    in the prompt text; prompt-planting and transcript-scanning are both
+//	    retired. See correlation.go for the full mechanism basis.
+//	CompletionCorrelationField: "agent_id"
+//	    The SubagentStop (completion) event carries NO tool_use_id — the field
+//	    is absent from the payload entirely on every observed firing against
+//	    harness version 2.1.240. agent_id is the only identifier on that event
+//	    that distinguishes one dispatch from another. Declaring a non-empty
+//	    CompletionCorrelationField is this adapter's statement that its
+//	    completion event uses a different correlation field and that it
+//	    therefore registers an agent-start interception phase.
 //	RegistrationModel:          domain.RegistrationSharedFile
 //	BridgeKind:                 domain.BridgeSpawned
 func Capabilities() domain.HarnessCapabilities {
@@ -101,6 +109,7 @@ func Capabilities() domain.HarnessCapabilities {
 		SupportsPostInterception:   true,
 		SupportsReplyRecovery:      true,
 		CorrelationField:           "tool_use_id",
+		CompletionCorrelationField: "agent_id",
 		RegistrationModel:          domain.RegistrationSharedFile,
 		BridgeKind:                 domain.BridgeSpawned,
 		ProducibleToolNames:        []string{domain.DispatchToolName},
@@ -271,10 +280,15 @@ func (a *Adapter) Provision(ctx context.Context, req domain.ProvisionRequest) (d
 	if err != nil {
 		return prov, fmt.Errorf("claudecode: building completion bridge: %w", err)
 	}
+	agentStartBridge, err := BuildBridge(req, domain.PhaseAgentStart)
+	if err != nil {
+		return prov, fmt.Errorf("claudecode: building agent-start bridge: %w", err)
+	}
 
-	allContribs := make([]Contribution, 0, len(bundleContribs)+2)
+	allContribs := make([]Contribution, 0, len(bundleContribs)+3)
 	allContribs = append(allContribs, InterceptorEntries(preBridge, postBridge))
 	allContribs = append(allContribs, CompletionEntry(completionBridge))
+	allContribs = append(allContribs, AgentStartEntry(agentStartBridge))
 	allContribs = append(allContribs, bundleContribs...)
 
 	if req.InterpreterCmd != "" {
@@ -303,8 +317,34 @@ func (a *Adapter) Provision(ctx context.Context, req domain.ProvisionRequest) (d
 		return prov, err
 	}
 
-	if findings, err := a.InspectScopes(ctx); err == nil {
-		prov.ScopeFindings = findings
+	// Populate ScopeFindings with the sandbox-derived user scope path so
+	// CheckScopeIsolationAcrossRuns sees distinct paths for each provisioned
+	// run. The port method ConfigScopes takes no sandbox and therefore returns
+	// the real user-home-derived path, which is the same for all runs; the
+	// provisioning findings must carry the relocated, sandbox-specific path
+	// instead.
+	//
+	// The relocated path is what SpawnPlan sets ConfigHomeEnvVar to (plus
+	// "settings.json"): the spawned process reads from this sandbox-specific
+	// location rather than the real user home, so credential seeding there
+	// keeps authentication working without touching the real home.
+	//
+	// The scope is always absent at provisioning time (Provision only seeds
+	// credentials, not a settings document), so it is correctly reported as
+	// neutralized: the empty relocated scope confirms there is no competing
+	// hook configuration there.
+	userScopePath := filepath.Join(req.Sandbox.ControlDir, ConfigHomeRelDir, "settings.json")
+	prov.ScopeFindings = []domain.ScopeFinding{
+		{
+			Scope: domain.ConfigScope{
+				Name:       "user",
+				Path:       userScopePath,
+				InSandbox:  false,
+				Isolatable: true,
+			},
+			Neutralized:              true,
+			PreservesSubjectFunction: true,
+		},
 	}
 
 	return prov, nil

@@ -215,6 +215,18 @@ func evaluateEchoFidelity(records []domain.LogRecord) []domain.AssertionResult {
 		}
 		out = append(out, ar)
 	}
+	// For each uncorrelated completion event, report echo fidelity as
+	// not evaluated with a named reason. Without this, the evaluation
+	// is silently absent — the same invisible failure the run event exists to name.
+	for _, r := range records {
+		if r.Kind == domain.RecordRun && r.Event == domain.RunEventUncorrelatedCompletion {
+			out = append(out, domain.AssertionResult{
+				Class:   domain.ClassEchoFidelity,
+				Outcome: domain.AssertionNotEvaluated,
+				Detail:  "echo fidelity could not be evaluated: completion could not be correlated to its dispatch",
+			})
+		}
+	}
 	return out
 }
 

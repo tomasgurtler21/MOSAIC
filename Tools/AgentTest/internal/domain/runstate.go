@@ -53,6 +53,23 @@ type RunState struct {
 	EarlyExitThreshold int  `json:"early_exit_threshold"`
 	EarlyExitTriggered bool `json:"early_exit_triggered"`
 	TurnLimit          int  `json:"turn_limit"`
+
+	// UnclaimedDispatches is the FIFO queue of correlation tokens for
+	// dispatches that have not yet been claimed by an agent-start event.
+	// The agent-start phase pops from the head of this queue and binds the
+	// popped token to the agent identifier the event carries.
+	//
+	// Nil and empty are equivalent: no unclaimed dispatches.
+	UnclaimedDispatches []string `json:"unclaimed_dispatches,omitempty"`
+
+	// AgentDispatch maps each agent identifier to the correlation token of
+	// the dispatch it is executing, established by the agent-start phase.
+	// The completion phase uses this map to correlate a completion event
+	// (which carries an agent identifier but no dispatch identifier) back to
+	// its originating dispatch.
+	//
+	// Nil and empty are equivalent: no agent bindings exist.
+	AgentDispatch map[string]string `json:"agent_dispatch,omitempty"`
 }
 
 // PendingStub is a stub awaiting its echo check.
@@ -80,6 +97,26 @@ type StateDelta struct {
 	MarkInFlight           map[string]InFlight
 	ClearInFlight          []string
 	SetEarlyExitTriggered  bool
+
+	// EnqueueUnclaimed appends these correlation tokens to the tail of
+	// UnclaimedDispatches. Applied by the pre-invocation phase so the
+	// agent-start phase can pop them.
+	EnqueueUnclaimed []string
+
+	// DequeueUnclaimed removes this many entries from the head of
+	// UnclaimedDispatches. Applied by the agent-start phase when it claims
+	// a dispatch.
+	DequeueUnclaimed int
+
+	// BindAgent merges these agent-identifier-to-token mappings into
+	// AgentDispatch. Applied by the agent-start phase to record which dispatch
+	// each agent is executing.
+	BindAgent map[string]string
+
+	// ReleaseAgents removes these agent identifiers from AgentDispatch. Applied
+	// by the completion phase after the association has been used so the
+	// identifiers do not match a later dispatch erroneously.
+	ReleaseAgents []string
 }
 
 // Apply is a pure state transition, so a test can assert on a delta without a
@@ -94,6 +131,7 @@ func (s RunState) Apply(d StateDelta) RunState {
 	next.CollaboratorCounters = cloneIntMap(s.CollaboratorCounters)
 	next.PendingStubs = clonePendingStubMap(s.PendingStubs)
 	next.InFlight = cloneInFlightMap(s.InFlight)
+	next.AgentDispatch = cloneStringMap(s.AgentDispatch)
 
 	next.SequenceCounter += d.SequenceIncrement
 
@@ -128,6 +166,29 @@ func (s RunState) Apply(d StateDelta) RunState {
 		next.EarlyExitTriggered = true
 	}
 
+	if len(d.EnqueueUnclaimed) > 0 {
+		next.UnclaimedDispatches = append(append([]string(nil), next.UnclaimedDispatches...), d.EnqueueUnclaimed...)
+	}
+
+	if d.DequeueUnclaimed > 0 {
+		n := d.DequeueUnclaimed
+		if n > len(next.UnclaimedDispatches) {
+			n = len(next.UnclaimedDispatches)
+		}
+		next.UnclaimedDispatches = append([]string(nil), next.UnclaimedDispatches[n:]...)
+	}
+
+	for agentID, token := range d.BindAgent {
+		if next.AgentDispatch == nil {
+			next.AgentDispatch = map[string]string{}
+		}
+		next.AgentDispatch[agentID] = token
+	}
+
+	for _, agentID := range d.ReleaseAgents {
+		delete(next.AgentDispatch, agentID)
+	}
+
 	return next
 }
 
@@ -158,6 +219,17 @@ func cloneInFlightMap(m map[string]InFlight) map[string]InFlight {
 		return nil
 	}
 	out := make(map[string]InFlight, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
 	for k, v := range m {
 		out[k] = v
 	}

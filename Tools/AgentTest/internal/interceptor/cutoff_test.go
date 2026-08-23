@@ -249,3 +249,179 @@ func TestRun_Post_BelowThreshold_DoesNotWriteSentinel(t *testing.T) {
 // by TestRun_Post_AtNthDispatch_DeliversReplyBeforeSentinelIsObservable above,
 // using an orderCheckWriter that observes the sentinel's file-system state at
 // the exact moment the reply bytes are written to cfg.Out.
+
+// --- Stage 1: Sentinel on unmatched dispatches ---
+//
+// The defect: the post/completion cutoff condition short-circuits on the
+// absence of a pending stub, so an unmatched-passthrough Nth dispatch never
+// writes the sentinel and the supervisor never observes the cutoff. The tests
+// below pin the fix at the shell level: the sentinel must be written and the
+// reply must be delivered first, regardless of whether the Nth dispatch was
+// matched, generically-answered or unmatched.
+
+// TestRun_Post_UnmatchedPassthrough_AtNthDispatch_WritesSentinel verifies that
+// the interceptor shell writes the early-exit sentinel when the Nth dispatch
+// was unmatched under the passthrough policy (no pending stub, only an
+// in-flight entry). This is the observed live failure: the sentinel was never
+// written and the run continued to turn_limit.
+func TestRun_Post_UnmatchedPassthrough_AtNthDispatch_WritesSentinel(t *testing.T) {
+	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "researcher"}
+	token := "corr-unmatched-nth"
+
+	// State reflects what the pre-invocation passthrough call left behind:
+	// the sequence counter is N, an in-flight entry exists at seq N, but there
+	// is no pending stub — the passthrough path never creates one.
+	state := baseState()
+	state.EarlyExitThreshold = 1
+	state.SequenceCounter = 1
+	state.InFlight[token] = domain.InFlight{Seq: 1, Identity: id}
+	// No PendingStubs entry for token.
+
+	registry := domain.StubRegistry{OnUnmatched: domain.UnmatchedPassthrough}
+	h := newHarness(t, state, registry, domain.HarnessCapabilities{}, nil)
+
+	native := encodePost(t, id, token)
+	_, exitCode, _ := run(t, h.Config, domain.PhasePost, native)
+
+	if exitCode != 0 {
+		t.Fatalf("Run returned exit code %d, want 0: a non-zero exit damages the run being measured", exitCode)
+	}
+
+	sentinelPath := filepath.Join(h.ControlDir, domain.EarlyExitSentinelName)
+	if _, err := os.Stat(sentinelPath); err != nil {
+		t.Fatalf("expected the early-exit sentinel at %q after the Nth unmatched-passthrough dispatch, but stat failed: %v — without the sentinel the supervisor never observes the cutoff", sentinelPath, err)
+	}
+}
+
+// TestRun_Post_UnmatchedPassthrough_AtNthDispatch_ExitsZeroWithReply verifies
+// that the shell still exits zero and delivers a valid reply when the Nth
+// dispatch was unmatched. The subject receives the Nth reply before the sentinel
+// is observed by the supervisor; a missing or malformed reply at this point
+// would corrupt the run this tool is measuring.
+func TestRun_Post_UnmatchedPassthrough_AtNthDispatch_ExitsZeroWithReply(t *testing.T) {
+	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "researcher"}
+	token := "corr-unmatched-nth-reply"
+
+	state := baseState()
+	state.EarlyExitThreshold = 1
+	state.SequenceCounter = 1
+	state.InFlight[token] = domain.InFlight{Seq: 1, Identity: id}
+
+	registry := domain.StubRegistry{OnUnmatched: domain.UnmatchedPassthrough}
+	h := newHarness(t, state, registry, domain.HarnessCapabilities{}, nil)
+
+	native := encodePost(t, id, token)
+	reply, exitCode, _ := run(t, h.Config, domain.PhasePost, native)
+
+	if exitCode != 0 {
+		t.Fatalf("Run returned exit code %d, want 0", exitCode)
+	}
+	if len(reply) == 0 {
+		t.Error("expected a non-empty reply for the Nth unmatched-passthrough dispatch, got empty: the subject must receive a reply before the sentinel is written")
+	}
+	got := decodeReply(t, reply)
+	if got.Kind == "" {
+		t.Errorf("reply Kind is empty, want a non-empty kind (e.g. %q)", "passthrough")
+	}
+}
+
+// TestRun_Post_UnmatchedPassthrough_AtNthDispatch_DeliversReplyBeforeSentinel
+// verifies the ordering contract for the unmatched-passthrough case: the reply
+// must be written to cfg.Out before the sentinel is written to the control
+// directory. If the sentinel appeared first, the supervisor could cancel the
+// subject's context before the Nth reply reached it, losing the reply.
+func TestRun_Post_UnmatchedPassthrough_AtNthDispatch_DeliversReplyBeforeSentinel(t *testing.T) {
+	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "researcher"}
+	token := "corr-unmatched-nth-order"
+
+	state := baseState()
+	state.EarlyExitThreshold = 1
+	state.SequenceCounter = 1
+	state.InFlight[token] = domain.InFlight{Seq: 1, Identity: id}
+
+	registry := domain.StubRegistry{OnUnmatched: domain.UnmatchedPassthrough}
+	h := newHarness(t, state, registry, domain.HarnessCapabilities{}, nil)
+
+	sentinelPath := filepath.Join(h.ControlDir, domain.EarlyExitSentinelName)
+	out := &orderCheckWriter{sentinelPath: sentinelPath}
+
+	native := encodePost(t, id, token)
+	var diagBuf bytes.Buffer
+	cfg := h.Config
+	cfg.Phase = domain.PhasePost
+	cfg.In = bytes.NewReader(native)
+	cfg.Out = out
+	cfg.Diag = &diagBuf
+	exitCode := interceptor.Run(context.Background(), cfg)
+
+	if exitCode != 0 {
+		t.Fatalf("Run returned exit code %d, want 0", exitCode)
+	}
+	if len(out.buf.Bytes()) == 0 {
+		t.Error("expected a non-empty reply written to cfg.Out for the Nth unmatched-passthrough dispatch")
+	}
+	if _, err := os.Stat(sentinelPath); err != nil {
+		t.Errorf("expected the sentinel to exist after Run returned, stat failed: %v — cannot verify ordering when the sentinel was never written", err)
+	}
+	if out.sentinelExisted {
+		t.Error("ordering violation: the sentinel already existed when the reply was written to cfg.Out; the sentinel must be written AFTER the reply so the supervisor cannot cancel the subject before it receives the Nth reply")
+	}
+}
+
+// TestRun_Pre_UnmatchedHalt_AtNthDispatch_WritesSentinel verifies that the
+// sentinel is written when the Nth dispatch is refused at the pre-invocation
+// point under the unmatched-halt policy. TerminatesAtPre(OutcomeHalt) must be
+// true: the refusal IS the Nth answer and no post/completion event fires for it.
+func TestRun_Pre_UnmatchedHalt_AtNthDispatch_WritesSentinel(t *testing.T) {
+	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "no-stub-identity"}
+
+	// SequenceCounter = 0 so the pre-invocation call arrives at seq 1 = threshold.
+	state := baseState()
+	state.EarlyExitThreshold = 1
+	state.SequenceCounter = 0
+
+	// Registry has no stubs for this identity; every call halts.
+	registry := domain.StubRegistry{OnUnmatched: domain.UnmatchedHalt}
+	h := newHarness(t, state, registry, domain.HarnessCapabilities{SupportsDirectSubstitution: true}, nil)
+
+	native := encodePre(t, id, "corr-halt-nth", "no-stub-identity#1", "do work")
+	_, exitCode, _ := run(t, h.Config, domain.PhasePre, native)
+
+	if exitCode != 0 {
+		t.Fatalf("Run returned exit code %d, want 0", exitCode)
+	}
+
+	sentinelPath := filepath.Join(h.ControlDir, domain.EarlyExitSentinelName)
+	if _, err := os.Stat(sentinelPath); err != nil {
+		t.Fatalf("expected the early-exit sentinel at %q after the Nth unmatched-halt dispatch, but stat failed: %v — without the sentinel the supervisor never observes the cutoff", sentinelPath, err)
+	}
+}
+
+// TestRun_Pre_UnmatchedHalt_AtNthDispatch_ExitsZeroWithReply verifies that the
+// shell still exits zero and delivers a valid reply when the Nth unmatched call
+// is refused at the pre-invocation point. A missing reply from this process is
+// interpreted by the harness as a failed hook.
+func TestRun_Pre_UnmatchedHalt_AtNthDispatch_ExitsZeroWithReply(t *testing.T) {
+	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "no-stub-identity"}
+
+	state := baseState()
+	state.EarlyExitThreshold = 1
+	state.SequenceCounter = 0
+
+	registry := domain.StubRegistry{OnUnmatched: domain.UnmatchedHalt}
+	h := newHarness(t, state, registry, domain.HarnessCapabilities{SupportsDirectSubstitution: true}, nil)
+
+	native := encodePre(t, id, "corr-halt-nth-reply", "no-stub-identity#1", "do work")
+	reply, exitCode, _ := run(t, h.Config, domain.PhasePre, native)
+
+	if exitCode != 0 {
+		t.Fatalf("Run returned exit code %d, want 0", exitCode)
+	}
+	if len(reply) == 0 {
+		t.Error("expected a non-empty reply for the Nth unmatched-halt dispatch, got empty: a missing reply is interpreted by the harness as a failed hook")
+	}
+	got := decodeReply(t, reply)
+	if got.Kind != "halt" {
+		t.Errorf("reply Kind = %q, want %q: the unmatched call must be refused", got.Kind, "halt")
+	}
+}

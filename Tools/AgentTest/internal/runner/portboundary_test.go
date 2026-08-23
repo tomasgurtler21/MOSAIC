@@ -40,8 +40,16 @@ func TestRun_PlanTheAdapterReturnedReachesTheLauncherUnmodified(t *testing.T) {
 		t.Fatalf("Run returned unexpected error: %v", err)
 	}
 
-	if !reflect.DeepEqual(h.Launcher.receivedPlan, h.Adapter.plan) {
-		t.Errorf("launcher received plan %+v, want exactly the adapter's plan %+v", h.Launcher.receivedPlan, h.Adapter.plan)
+	// The runner stamps two fields onto the plan before handing it to the
+	// launcher: RunID (always) and DiagnosticLog (when SandboxDiagnostics is
+	// true). All adapter-controlled fields must pass through unmodified.
+	//
+	// SandboxDiagnostics is false in the default test harness, so
+	// DiagnosticLog remains empty. RunID is stamped from req.Key.RunID.
+	wantPlan := h.Adapter.plan
+	wantPlan.RunID = req.Key.RunID
+	if !reflect.DeepEqual(h.Launcher.receivedPlan, wantPlan) {
+		t.Errorf("launcher received plan %+v, want adapter's plan with runner-stamped RunID %+v", h.Launcher.receivedPlan, wantPlan)
 	}
 }
 

@@ -244,6 +244,23 @@ type DeployRequest struct {
 	// DryRun validates everything and writes nothing. Used by preflight to
 	// refuse a bad declaration before a sandbox exists.
 	DryRun bool
+
+	// LogDir is the directory the delegate writes its own per-run log files to.
+	//
+	// Empty means "do not override" — the flag is omitted and the delegate
+	// writes to its own default location under the shared repository root,
+	// following this port's empty-means-omitted convention for root-scoped
+	// overrides. A non-empty value is emitted as --log-dir so that the
+	// delegate writes its two sink files (latest.log, history.log) there
+	// instead.
+	//
+	// It exists because the delegate's default log location is derived from
+	// the repository root, which is the same for every attempt: without an
+	// override, N concurrent attempts truncate and append to the same two
+	// files, outside every sandbox. The runner sets this to
+	// sandbox.DeployLogDir() so each attempt writes to its own location
+	// and the run's retention policy governs the logs uniformly.
+	LogDir string
 }
 
 // DeployResult is what the delegate reported it did. Every field is reported

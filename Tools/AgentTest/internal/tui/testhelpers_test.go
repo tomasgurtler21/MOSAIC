@@ -129,6 +129,76 @@ func fixturePlan(suiteID string) preflight.Plan {
 	return preflight.Plan{Suite: domain.TestSuite{ID: suiteID}}
 }
 
+// ---------------------------------------------------------------------------
+// Settings-flow navigation helpers
+// ---------------------------------------------------------------------------
+
+// advanceThroughSettingsToProgress navigates from ScreenRetention through all
+// five sequential settings screens by pressing Enter five times, landing on
+// ScreenProgress with the suite-start Cmd. The caller must already be at
+// ScreenRetention (e.g. after advanceToSettingsFlow). It fails the test
+// immediately if any intermediate screen is wrong.
+func advanceThroughSettingsToProgress(t *testing.T, m Model) (Model, tea.Cmd) {
+	t.Helper()
+	// Press Enter on ScreenRetention → ScreenRepetitions → ScreenReportPath
+	// → ScreenCatalogFolder → ScreenMaxConcurrentRuns.
+	for _, want := range []Screen{ScreenRepetitions, ScreenReportPath, ScreenCatalogFolder, ScreenMaxConcurrentRuns} {
+		var cmd tea.Cmd
+		m, cmd = safeUpdate(t, m, keyMsg("\r"))
+		_ = cmd
+		if m.Screen() != want {
+			t.Fatalf("advanceThroughSettingsToProgress: Screen() = %q, want %q", m.Screen(), want)
+		}
+	}
+	// Final Enter on ScreenMaxConcurrentRuns transitions to ScreenProgress.
+	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenProgress {
+		t.Fatalf("advanceThroughSettingsToProgress: final Screen() = %q, want %q", m.Screen(), ScreenProgress)
+	}
+	return m, cmd
+}
+
+// startSuiteFromSuiteSelect navigates from ScreenSuiteSelect through the
+// full five-screen settings flow to ScreenProgress, returning the model and
+// the Cmd the suite start produces. The caller must be at ScreenSuiteSelect.
+func startSuiteFromSuiteSelect(t *testing.T, m Model) (Model, tea.Cmd) {
+	t.Helper()
+	m = advanceToSettingsFlow(t, m) // Enter → ScreenRetention
+	return advanceThroughSettingsToProgress(t, m)
+}
+
+// navigateThroughSettings presses Enter five times starting from ScreenRetention,
+// advancing through the intermediate settings screens, and returns the final
+// model and Cmd. Unlike advanceThroughSettingsToProgress, it does NOT assert
+// that the final screen is ScreenProgress — use this when the final screen
+// depends on external conditions such as the preflight outcome.
+func navigateThroughSettings(t *testing.T, m Model) (Model, tea.Cmd) {
+	t.Helper()
+	// Enter through: Retention→Repetitions → ReportPath → CatalogFolder → MaxConcurrentRuns.
+	for _, want := range []Screen{ScreenRepetitions, ScreenReportPath, ScreenCatalogFolder, ScreenMaxConcurrentRuns} {
+		var cmd tea.Cmd
+		m, cmd = safeUpdate(t, m, keyMsg("\r"))
+		_ = cmd
+		if m.Screen() != want {
+			t.Fatalf("navigateThroughSettings: Screen() = %q, want %q", m.Screen(), want)
+		}
+	}
+	// Final Enter on ScreenMaxConcurrentRuns — outcome depends on preflight.
+	return safeUpdate(t, m, keyMsg("\r"))
+}
+
+// triggerSuiteStart navigates from ScreenSuiteSelect through the full
+// settings flow and discards the returned Cmd. When the preflight fails the
+// model lands on ScreenSuiteSelect; when it succeeds the model lands on
+// ScreenProgress. Useful for tests that only care about model state after
+// the navigation, not about invoking the suite-start Cmd.
+func triggerSuiteStart(t *testing.T, m Model) Model {
+	t.Helper()
+	m = advanceToSettingsFlow(t, m) // Enter → ScreenRetention
+	m, _ = navigateThroughSettings(t, m)
+	return m
+}
+
 // newFixtureOptions builds Options wired to a fakeSuiteRunner and a
 // preflight stub, offering the given suite paths for selection.
 func newFixtureOptions(suites []string, runner *fakeSuiteRunner) Options {
@@ -271,7 +341,8 @@ type scriptedSuite struct {
 // that do not need to exercise the repetition loop itself.
 type scriptedTest struct {
 	testID      string
-	invocations int // ProgressInvocation events emitted before the test finishes
+	runID       string // run identity for per-run events; derived from testID if empty
+	invocations int    // ProgressInvocation events emitted before the test finishes
 	verdict     domain.Verdict
 	duration    time.Duration
 	cost        domain.CostReport
@@ -279,29 +350,54 @@ type scriptedTest struct {
 }
 
 // events renders the scripted suite into the exact ordered ProgressEvent
-// sequence suite.Suite emits for it.
+// sequence suite.Suite emits for it, including the run identity that the
+// implementation phase (I10.2) stamps on every per-run event. TotalRuns
+// on the suite-started event is the total number of repetitions declared
+// across every test in the plan — equal to len(s.tests) here because each
+// scriptedTest represents one repetition.
+//
+// This function references domain.ProgressEvent.Run and
+// domain.ProgressEvent.TotalRuns, fields added additively by the
+// implementation phase (I10.1). Until those fields exist the callers that
+// use this function fail to compile — the expected RED state.
 func (s scriptedSuite) events() []domain.ProgressEvent {
 	var out []domain.ProgressEvent
 	out = append(out, domain.ProgressEvent{
 		Kind:       domain.ProgressSuiteStarted,
 		SuiteID:    s.suiteID,
 		TotalTests: len(s.tests),
+		TotalRuns:  len(s.tests),
 	})
 	counts := map[domain.Verdict]int{}
 	total := domain.CostReport{Attribution: domain.AttributionAttributed}
-	for _, tc := range s.tests {
+	for i, tc := range s.tests {
+		runID := tc.runID
+		if runID == "" {
+			// Derive a valid run ID from position when none is supplied, so
+			// existing test cases that do not set runID compile and run without
+			// change. The format matches the external run-ID contract: eight
+			// digits, T, six digits, Z, -, four lowercase hex digits.
+			runID = fmt.Sprintf("20260807T120000Z-%04x", i+1)
+		}
+		run := domain.RunKey{
+			RunID:     runID,
+			TestID:    tc.testID,
+			RunNumber: 1,
+		}
 		out = append(out, domain.ProgressEvent{
 			Kind:        domain.ProgressTestStarted,
 			TestID:      tc.testID,
 			Repetition:  1,
 			Repetitions: 1,
+			Run:         run,
 		})
-		for i := 0; i < tc.invocations; i++ {
+		for j := 0; j < tc.invocations; j++ {
 			out = append(out, domain.ProgressEvent{
 				Kind:     domain.ProgressInvocation,
-				Seq:      i + 1,
+				Seq:      j + 1,
 				Identity: domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "worker"},
 				Outcome:  domain.OutcomePassthrough,
+				Run:      run,
 			})
 		}
 		out = append(out, domain.ProgressEvent{
@@ -313,6 +409,7 @@ func (s scriptedSuite) events() []domain.ProgressEvent {
 			Duration:         tc.duration,
 			Cost:             tc.cost,
 			FailedAssertions: tc.failed,
+			Run:              run,
 		})
 		counts[tc.verdict]++
 		total = total.Add(tc.cost)

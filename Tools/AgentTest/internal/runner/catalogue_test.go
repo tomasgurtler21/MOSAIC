@@ -589,6 +589,63 @@ func TestSetup_CataloguePathDeployResult_SubjectKeyNotFound_ReturnsError(t *test
 	}
 }
 
+// TestSetup_CataloguePath_DeployRequestCarriesSandboxDeployLogDir asserts that
+// the runner sets DeployRequest.LogDir to the sandbox's per-run deploy log
+// directory before calling the deployer. Without this wiring, every concurrent
+// run's deploy invocation would write to the deployment tool's shared fixed
+// location under the repository root, creating a write-contention window between
+// concurrent runs — the precise risk this stage was introduced to close.
+//
+// The expected value is derived from the same sandbox object that setup creates
+// in step 1 and passes to the deployer in step 2: sandbox.DeployLogDir() is
+// pure path arithmetic over ControlDir, so the test needs no knowledge of the
+// workspace layout.
+func TestSetup_CataloguePath_DeployRequestCarriesSandboxDeployLogDir(t *testing.T) {
+	h := newHarness(t)
+	req := catalogueRequest("catalogue-deploy-log-dir")
+
+	if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	// Prerequisite guard: Deploy must have been called exactly once. Without
+	// the catalogue-path branching, Deploy is never called (Render is used
+	// instead), so the assertion below would fire on a missing call rather
+	// than a missing LogDir. Fail immediately to surface the RED phase.
+	deployCalls := h.Deployer.allDeployCalls()
+	if len(deployCalls) != 1 {
+		t.Fatalf("Deploy called %d time(s), want exactly 1; "+
+			"this test requires the catalogue-path branching to call Deploy exactly once — "+
+			"without it this assertion cannot distinguish 'LogDir not set' from 'Deploy not called'",
+			len(deployCalls))
+	}
+
+	// The sandbox passed to Provision (step 6 of setup) is the same sandbox
+	// created in step 1 and used for the Deploy call in step 2. Both operate
+	// on the same domain.Sandbox value, so its DeployLogDir() is the expected
+	// LogDir the runner must have provided to the deployer.
+	sb := h.Adapter.lastProvisionReq.Sandbox
+	wantLogDir := sb.DeployLogDir()
+
+	if wantLogDir == "" {
+		// Guard against a misconfigured sandbox whose ControlDir is empty,
+		// which would make the assertion below trivially pass (both sides
+		// would be empty) without validating anything real.
+		t.Fatal("sandbox.DeployLogDir() is empty; " +
+			"the workspace manager must populate Sandbox.ControlDir so " +
+			"DeployLogDir() produces a non-empty per-run path")
+	}
+
+	gotLogDir := deployCalls[0].LogDir
+	if gotLogDir != wantLogDir {
+		t.Errorf("Deploy LogDir = %q, want %q (sandbox.DeployLogDir()); "+
+			"the runner must set DeployRequest.LogDir = sandbox.DeployLogDir() before "+
+			"calling the deployer so each run's deploy logs are governed by the run's "+
+			"retention policy and concurrent runs cannot contend on a shared log location",
+			gotLogDir, wantLogDir)
+	}
+}
+
 // TestSetup_CataloguePathNilDeploy_SkipsDeployGracefully asserts that when
 // Deps.Deploy is nil on a catalogue-path request, setup skips the Deploy step
 // gracefully — neither panicking nor returning an unexpected error. This

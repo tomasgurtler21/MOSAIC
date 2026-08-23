@@ -115,6 +115,23 @@ type ProgressEvent struct {
 	// ProgressSuiteStarted
 	SuiteID    string
 	TotalTests int
+	// TotalRuns is the total number of runs (repetitions) across all tests in
+	// the plan. It is exact rather than estimated: it is computed from the
+	// resolved plan, which fixes each test's repetition count before scheduling
+	// begins, so a suite whose tests declare different repetition counts still
+	// gets a correct total. It counts declared repetitions, not attempts: a
+	// retry does not increase it.
+	TotalRuns int
+
+	// Run carries the identity of the run that produced this event.
+	// Zero-valued for suite-level events (suite-started, suite-finished),
+	// which belong to no single run.
+	//
+	// Per-event-kind semantics:
+	//   - ProgressTestStarted: the repetition's first attempt's key.
+	//   - ProgressInvocation: the key of the attempt that produced the invocation.
+	//   - ProgressTestFinished: the key of the attempt the repetition settled on.
+	Run RunKey
 
 	// ProgressTestStarted / ProgressTestFinished
 	TestID      string

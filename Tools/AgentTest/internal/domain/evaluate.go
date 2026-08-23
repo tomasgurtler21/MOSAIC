@@ -102,6 +102,18 @@ type RunEvidence struct {
 	// real value. This mirrors SubjectVersion's treatment exactly.
 	SubjectModel string
 	StubModel    string
+
+	// HarnessID is the stable identifier of the harness adapter that
+	// actually served this run, taken from adapter.ID() at evidence-building
+	// time. Empty means no harness identity was recorded; renderings show
+	// it as unknown rather than blank — matching SubjectVersion's treatment.
+	HarnessID string
+
+	// Residue is the correlation state the run still held when it ended.
+	// Zero-valued means nothing leaked, which is the expected state; see
+	// StateResidue.Unreadable for the case where that could not be
+	// established.
+	Residue StateResidue
 }
 
 // TestResult is the outcome of evaluating one run's evidence: a verdict with
@@ -147,6 +159,11 @@ type TestResult struct {
 	// report can attribute a regression to a model change.
 	SubjectModel string
 	StubModel    string
+
+	// HarnessID is carried through from RunEvidence unchanged, exactly as
+	// SubjectVersion, SubjectModel, and StubModel are. It names the harness
+	// adapter that actually served this run.
+	HarnessID string
 
 	// TerminationReason is the raw disposition string from
 	// RunEvidence.SubjectResult.Disposition, carried through unchanged so the
@@ -194,6 +211,31 @@ const (
 	ConditionExtractionDegraded      RunConditionKind = "extraction_degraded"
 	ConditionUnmatchedInvocation     RunConditionKind = "unmatched_invocation"
 	ConditionOrchestrationUnreadable RunConditionKind = "orchestration_unreadable"
+
+	// ConditionUncorrelatedCompletion reports that at least one completion
+	// event could not be resolved to the dispatch that produced it while a
+	// dispatch was outstanding.
+	//
+	// It exists because that failure previously produced a well-formed but
+	// empty end record — no sequence number, no identity, no echo outcome —
+	// and nothing named it. Echo-fidelity comparison depends on the same
+	// correlation, so a run in this state was not evaluating echo fidelity at
+	// all, equally invisibly.
+	//
+	// Detail names how many completions were affected and how many dispatches
+	// were outstanding, and is never the empty string.
+	ConditionUncorrelatedCompletion RunConditionKind = "uncorrelated_completion"
+
+	// ConditionLeakedRunState reports that the run finished with correlation
+	// state still outstanding: pending stubs never resolved, or in-flight
+	// entries never released.
+	//
+	// It is an infrastructure condition about the tool, not a statement about
+	// the subject. Detail names the counts and the sequence numbers of the
+	// affected dispatches, so the fault is diagnosable from the report rather
+	// than by inspecting a retained sandbox — which is how it had to be
+	// discovered before this condition existed.
+	ConditionLeakedRunState RunConditionKind = "leaked_run_state"
 
 	// ConditionRunNotStarted carries the detail of a fault that stopped an
 	// attempt before it began: a setup, provisioning or spawn-plan failure, or
@@ -268,4 +310,10 @@ type AggregateResult struct {
 	// after its single retry.
 	InfrastructureFailure bool
 	TotalCost             CostReport
+
+	// Exclusions describes every run excluded from the denominator, in the
+	// order the runs were attempted. len(Exclusions) always equals Excluded.
+	//
+	// Renders as [] rather than null, like every other collection on the wire.
+	Exclusions []ExcludedRun
 }

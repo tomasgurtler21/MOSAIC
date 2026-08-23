@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "test_id": "reply-recovery-unmatched",
+  "on_unmatched": "passthrough",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "greeter", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "greeter#1",
+        "status_code": "SUCCESS",
+        "status_message": "Greeted."
+      }
+    }
+  ]
+}

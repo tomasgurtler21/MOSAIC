@@ -20,9 +20,11 @@ func newSuite(runner *scriptedRunner, clock *fakeClock, progress domain.Progress
 	})
 }
 
-// TestSuiteRun_ExecutesTestsInDeclaredOrder asserts a suite's tests are
-// executed in the order the plan declares, not in some incidental order
-// (e.g. map iteration).
+// TestSuiteRun_ExecutesTestsInDeclaredOrder asserts a suite's test reports
+// are returned in the order the plan declares, not in some incidental order
+// (e.g. map iteration or completion order under concurrent execution).
+// The concurrent scheduler preserves declaration order in the assembled
+// report regardless of which worker finishes first.
 func TestSuiteRun_ExecutesTestsInDeclaredOrder(t *testing.T) {
 	// Arrange
 	runner := newScriptedRunner()
@@ -34,26 +36,28 @@ func TestSuiteRun_ExecutesTestsInDeclaredOrder(t *testing.T) {
 	)
 
 	// Act
-	_, err := runSuite(t, s, context.Background(), plan)
+	result, err := runSuite(t, s, context.Background(), plan)
 
 	// Assert
 	if err != nil {
 		t.Fatalf("Suite.Run returned an error: %v", err)
 	}
-	calls := runner.allCalls()
-	if len(calls) != 3 {
-		t.Fatalf("runner was called %d times, want 3", len(calls))
-	}
 	wantOrder := []string{"test-a", "test-b", "test-c"}
+	if len(result.Tests) != len(wantOrder) {
+		t.Fatalf("got %d test reports, want %d", len(result.Tests), len(wantOrder))
+	}
 	for i, want := range wantOrder {
-		if calls[i].TestID != want {
-			t.Errorf("call %d: test %q, want %q", i, calls[i].TestID, want)
+		if result.Tests[i].TestID != want {
+			t.Errorf("result.Tests[%d].TestID = %q, want %q", i, result.Tests[i].TestID, want)
 		}
 	}
 }
 
 // TestSuiteRun_ExecutesDeclaredRepetitions asserts each test runs exactly
-// its declared number of repetitions, numbered from 1.
+// its declared number of repetitions, numbered from 1. Under concurrent
+// execution workers may complete in any order, so this test checks that
+// all expected run numbers are present in the call set rather than
+// asserting that the i-th call carries run number i+1.
 func TestSuiteRun_ExecutesDeclaredRepetitions(t *testing.T) {
 	// Arrange
 	runner := newScriptedRunner()
@@ -71,11 +75,25 @@ func TestSuiteRun_ExecutesDeclaredRepetitions(t *testing.T) {
 	if len(calls) != 3 {
 		t.Fatalf("test-a was run %d times, want 3", len(calls))
 	}
-	for i, c := range calls {
-		if c.RunNumber != i+1 {
-			t.Errorf("call %d: RunNumber = %d, want %d", i, c.RunNumber, i+1)
+	seen := make(map[int]bool, len(calls))
+	for _, c := range calls {
+		seen[c.RunNumber] = true
+	}
+	for _, want := range []int{1, 2, 3} {
+		if !seen[want] {
+			t.Errorf("RunNumber %d not present in runner calls: calls recorded %v", want, runNumbersFrom(calls))
 		}
 	}
+}
+
+// runNumbersFrom extracts the RunNumber from each call for use in diagnostic
+// messages.
+func runNumbersFrom(calls []domain.RunKey) []int {
+	nums := make([]int, len(calls))
+	for i, c := range calls {
+		nums[i] = c.RunNumber
+	}
+	return nums
 }
 
 // TestSuiteRun_AggregatesViaVerdictEngine asserts the reported aggregate for

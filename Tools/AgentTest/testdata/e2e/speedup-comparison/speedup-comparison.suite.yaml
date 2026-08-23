@@ -1,0 +1,15 @@
+schema_version: 1
+id: speedup-comparison-e2e
+description: >
+  Comparative wall-clock fixture for the speedup demonstration. One test with
+  several repetitions; a deliberate per-run delay is injected via
+  Scenario.SleepBeforeExit so sequential and parallel execution differ by a
+  ratio the test can assert on cleanly. The per-run delay makes each run's
+  cost dominate scheduling overhead by construction rather than by luck.
+defaults:
+  timeout: 90s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: speedup-subject.test.yaml

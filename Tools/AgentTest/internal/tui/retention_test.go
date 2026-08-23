@@ -20,8 +20,6 @@ package tui
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"mosaic-agent-test/internal/domain"
 )
 
@@ -40,59 +38,46 @@ func TestNewModel_Retention_StartsAtOptionsRetention(t *testing.T) {
 	}
 }
 
-// TestSettings_Space_CyclesTheRetentionPolicy verifies that the retention
-// entry on the settings screen cycles through the full sequence
-// Never → OnFailure → Always → Never when Enter is pressed repeatedly.
-// This replaces the old Space-on-suite-select affordance with the uniform
-// settings-screen interaction model.
+// TestSettings_Space_CyclesTheRetentionPolicy verifies that ScreenRetention
+// cycles through the full sequence Never → OnFailure → Always → Never when
+// Space is pressed repeatedly, and that each confirmed value is reflected by
+// Model.Retention() after confirming the entire settings flow.
 func TestSettings_Space_CyclesTheRetentionPolicy(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	o.Retention = domain.RetainNever
 
 	m := NewModel(o)
 
-	// Navigate to settings.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after Tab = %q, want %q", m.Screen(), ScreenSettings)
+	// Navigate to ScreenRetention.
+	m = advanceToSettingsFlow(t, m)
+	if m.Screen() != ScreenRetention {
+		t.Fatalf("Screen() after Enter = %q, want %q", m.Screen(), ScreenRetention)
 	}
 
-	// Retention is the first entry; cursor starts at 0.
-	entries := m.SettingsEntries()
-	retIdx := -1
-	for i, e := range entries {
-		if e.Kind == SettingRetention {
-			retIdx = i
-			break
-		}
-	}
-	if retIdx < 0 {
-		t.Fatalf("SettingsEntries() does not include SettingRetention")
-	}
-	for i := 0; i < retIdx; i++ {
-		m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
+	// Space cycles: RetainNever → RetainOnFailure.
+	m, _ = safeUpdate(t, m, keyMsg(" "))
+	// Space again: RetainOnFailure → RetainAlways.
+	m, _ = safeUpdate(t, m, keyMsg(" "))
+	// Space again: RetainAlways → RetainNever.
+	m, _ = safeUpdate(t, m, keyMsg(" "))
+
+	// Confirm RetainNever on ScreenRetention and advance through the remaining
+	// screens to verify the final confirmed value reaches Retention().
+	m, cmd := advanceThroughSettingsToProgress(t, m)
+	if cmd != nil {
+		_ = runCmd(t, cmd)
 	}
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
-	if got := m.Retention(); got != domain.RetainOnFailure {
-		t.Errorf("Retention() after one Enter on retention entry = %q, want %q", got, domain.RetainOnFailure)
-	}
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
-	if got := m.Retention(); got != domain.RetainAlways {
-		t.Errorf("Retention() after two Enters = %q, want %q", got, domain.RetainAlways)
-	}
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
 	if got := m.Retention(); got != domain.RetainNever {
-		t.Errorf("Retention() after three Enters = %q, want %q (back to start)", got, domain.RetainNever)
+		t.Errorf("Retention() after three Space presses (back to start) = %q, want %q", got, domain.RetainNever)
 	}
 }
 
 // TestSettings_ToggledRetention_ReachesTheStartedRun verifies that a
-// retention value changed via the settings screen reaches the SuiteRunner
-// when the run starts from suite-select. This is the equivalent of the old
-// Space-toggle regression test, exercised through the new settings path.
+// retention value changed on ScreenRetention reaches the SuiteRunner when the
+// run starts. This exercises the full path: Space twice on ScreenRetention to
+// reach RetainAlways, then complete the remaining screens and assert the
+// runner received RetainAlways.
 func TestSettings_ToggledRetention_ReachesTheStartedRun(t *testing.T) {
 	runner := newFakeSuiteRunner()
 	o := newFixtureOptions([]string{"suite-a.yaml"}, runner)
@@ -100,42 +85,14 @@ func TestSettings_ToggledRetention_ReachesTheStartedRun(t *testing.T) {
 
 	m := NewModel(o)
 
-	// Navigate to settings and cycle retention twice:
+	// Navigate to ScreenRetention and cycle twice:
 	// RetainNever → RetainOnFailure → RetainAlways.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after Tab = %q, want %q", m.Screen(), ScreenSettings)
-	}
-	// Find retention entry.
-	entries := m.SettingsEntries()
-	retIdx := -1
-	for i, e := range entries {
-		if e.Kind == SettingRetention {
-			retIdx = i
-			break
-		}
-	}
-	if retIdx < 0 {
-		t.Fatalf("SettingsEntries() does not include SettingRetention")
-	}
-	for i := 0; i < retIdx; i++ {
-		m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-	}
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter)) // Never → OnFailure
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter)) // OnFailure → Always
-	if got := m.Retention(); got != domain.RetainAlways {
-		t.Fatalf("Retention() after two cycles = %q, want %q", got, domain.RetainAlways)
-	}
+	m = advanceToSettingsFlow(t, m)
+	m, _ = safeUpdate(t, m, keyMsg(" ")) // Never → OnFailure
+	m, _ = safeUpdate(t, m, keyMsg(" ")) // OnFailure → Always
 
-	// Return to suite-select and start the run.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEsc))
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("Screen() after Esc = %q, want %q", m.Screen(), ScreenSuiteSelect)
-	}
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
-	if m.Screen() != ScreenProgress {
-		t.Fatalf("Screen() after starting the suite = %q, want %q", m.Screen(), ScreenProgress)
-	}
+	// Complete the remaining settings screens and start the suite.
+	m, cmd := advanceThroughSettingsToProgress(t, m)
 	msg := runCmd(t, cmd)
 	if msg == nil {
 		t.Fatalf("starting the suite produced no tea.Cmd to await the run")
@@ -146,6 +103,6 @@ func TestSettings_ToggledRetention_ReachesTheStartedRun(t *testing.T) {
 		t.Fatalf("SuiteRunner.Run was never called")
 	}
 	if got := runner.gotRetention; got != domain.RetainAlways {
-		t.Errorf("SuiteRunner.Run received retention %q, want %q (the value cycled on the settings screen must reach the run)", got, domain.RetainAlways)
+		t.Errorf("SuiteRunner.Run received retention %q, want %q (the value cycled on ScreenRetention must reach the run)", got, domain.RetainAlways)
 	}
 }

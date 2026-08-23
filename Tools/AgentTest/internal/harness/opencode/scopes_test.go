@@ -16,6 +16,7 @@ package opencode_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mosaic-agent-test/internal/domain"
@@ -46,10 +47,12 @@ func (p fixtureScopeProbe) Read(scope domain.ConfigScope) ([]byte, error) {
 	return doc, nil
 }
 
-// TestScopes_EnumeratesUserConfigAndUserPluginsOutsideTheSandbox asserts the
-// enumeration declares both non-sandbox scopes this harness merges, neither
-// marked InSandbox.
-func TestScopes_EnumeratesUserConfigAndUserPluginsOutsideTheSandbox(t *testing.T) {
+// TestScopes_EnumeratesUserConfigAndUserPlugins asserts the enumeration
+// declares both user-config and user-plugins scopes. After relocation these
+// scopes are inside the sandbox (InSandbox: true), so this test checks only
+// that they are present in any position — their InSandbox flag is covered by
+// TestScopes_RelocatedNonSandboxScopesAreMarkedInSandbox.
+func TestScopes_EnumeratesUserConfigAndUserPlugins(t *testing.T) {
 	sb := newSandbox(t, t.TempDir())
 
 	scopes := opencode.Scopes(sb)
@@ -59,9 +62,6 @@ func TestScopes_EnumeratesUserConfigAndUserPluginsOutsideTheSandbox(t *testing.T
 
 	var sawUserConfig, sawUserPlugins bool
 	for _, s := range scopes {
-		if s.InSandbox {
-			continue
-		}
 		switch s.Name {
 		case "user-config":
 			sawUserConfig = true
@@ -70,10 +70,10 @@ func TestScopes_EnumeratesUserConfigAndUserPluginsOutsideTheSandbox(t *testing.T
 		}
 	}
 	if !sawUserConfig {
-		t.Errorf("Scopes: no non-sandbox scope named %q found among %+v", "user-config", scopes)
+		t.Errorf("Scopes: no scope named %q found among %+v", "user-config", scopes)
 	}
 	if !sawUserPlugins {
-		t.Errorf("Scopes: no non-sandbox scope named %q found among %+v", "user-plugins", scopes)
+		t.Errorf("Scopes: no scope named %q found among %+v", "user-plugins", scopes)
 	}
 }
 
@@ -95,23 +95,6 @@ func TestScopes_SandboxScopeIsIncludedAndComesLast(t *testing.T) {
 	}
 	if last.Name != "sandbox" {
 		t.Errorf("Scopes: last scope name = %q, want %q", last.Name, "sandbox")
-	}
-}
-
-// TestScopes_NonSandboxScopesAreNotClaimedIsolatable asserts that, absent a
-// confirmed environment variable relocating OpenCode's user-scope
-// configuration, neither non-sandbox scope is marked Isolatable — the
-// adapter must not claim a neutralization capability it cannot back up.
-func TestScopes_NonSandboxScopesAreNotClaimedIsolatable(t *testing.T) {
-	sb := newSandbox(t, t.TempDir())
-
-	for _, s := range opencode.Scopes(sb) {
-		if s.InSandbox {
-			continue
-		}
-		if s.Isolatable {
-			t.Errorf("Scopes: scope %q Isolatable = true, want false (no confirmed relocation variable)", s.Name)
-		}
 	}
 }
 
@@ -366,4 +349,238 @@ func TestConfigScopes_IncludesEveryScopeInspectScopesConsiders(t *testing.T) {
 	if !sawUserConfig || !sawUserPlugins {
 		t.Errorf("ConfigScopes: got %+v, want it to include both user-config and user-plugins", scopes)
 	}
+}
+
+// --- Scope relocation tests (TDD RED phase) ---
+//
+// These tests specify the behaviour of the opencode adapter's scope
+// relocation: both non-sandbox scopes must be relocated into the run's
+// sandbox so two concurrently executing runs cannot share a configuration
+// directory. The implementation does not yet do this; these tests exist to
+// fail until it does.
+
+// TestConfigHomeEnvVar_IsXDGConfigHome asserts the constant this adapter uses
+// to redirect its user-scope configuration directory into the sandbox matches
+// the environment variable opencode actually honours.
+func TestConfigHomeEnvVar_IsXDGConfigHome(t *testing.T) {
+	if opencode.ConfigHomeEnvVar != "XDG_CONFIG_HOME" {
+		t.Errorf("ConfigHomeEnvVar = %q, want %q", opencode.ConfigHomeEnvVar, "XDG_CONFIG_HOME")
+	}
+}
+
+// TestConfigHomeRelDir_IsOpencodeHome asserts the relative path under ControlDir
+// at which the adapter places the relocated XDG_CONFIG_HOME. It must live under
+// ControlDir (never SubjectDir) so the subject cannot discover the relocated home.
+func TestConfigHomeRelDir_IsOpencodeHome(t *testing.T) {
+	if opencode.ConfigHomeRelDir != "opencode-home" {
+		t.Errorf("ConfigHomeRelDir = %q, want %q", opencode.ConfigHomeRelDir, "opencode-home")
+	}
+}
+
+// TestUserConfigDir_ReturnsPathUnderSandboxControlDir asserts the pure
+// derivation of the relocated user configuration directory. It must be under
+// ControlDir so the subject cannot discover it, and it must be the same path
+// the spawn plan points XDG_CONFIG_HOME at (as the directory, not the
+// opencode subdirectory inside it).
+func TestUserConfigDir_ReturnsPathUnderSandboxControlDir(t *testing.T) {
+	sb := newSandbox(t, t.TempDir())
+
+	got := opencode.UserConfigDir(sb)
+
+	if got == "" {
+		t.Fatalf("UserConfigDir: returned empty string, want a path under %q", sb.ControlDir)
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("UserConfigDir: returned %q, want an absolute path", got)
+	}
+
+	rel, err := filepath.Rel(sb.ControlDir, got)
+	if err != nil || rel == ".." || len(rel) > 0 && rel[0] == '.' {
+		t.Errorf("UserConfigDir: %q is not under ControlDir %q (rel=%q, err=%v)", got, sb.ControlDir, rel, err)
+	}
+}
+
+// TestUserConfigDir_IsUnderConfigHomeRelDir asserts the relocated config dir
+// is specifically at <ControlDir>/<ConfigHomeRelDir>/opencode — mirroring the
+// path opencode would derive when XDG_CONFIG_HOME is set to
+// <ControlDir>/<ConfigHomeRelDir>.
+func TestUserConfigDir_IsUnderConfigHomeRelDir(t *testing.T) {
+	sb := newSandbox(t, t.TempDir())
+
+	got := opencode.UserConfigDir(sb)
+	want := filepath.Join(sb.ControlDir, opencode.ConfigHomeRelDir, "opencode")
+
+	if got != want {
+		t.Errorf("UserConfigDir: got %q, want %q", got, want)
+	}
+}
+
+// TestUserConfigDir_IsPureNeverReadsEnv asserts UserConfigDir reads no
+// environment variables: two sandboxes with different ControlDirs must return
+// different paths regardless of XDG_CONFIG_HOME.
+func TestUserConfigDir_IsPureNeverReadsEnv(t *testing.T) {
+	// Point XDG_CONFIG_HOME at a fixed location and prove UserConfigDir ignores it.
+	fixedHome := "/this/should/be/ignored/by/pure/function"
+	t.Setenv("XDG_CONFIG_HOME", fixedHome)
+
+	sb := newSandbox(t, t.TempDir())
+	got := opencode.UserConfigDir(sb)
+
+	if filepath.Clean(got) == filepath.Clean(filepath.Join(fixedHome, "opencode")) {
+		t.Errorf(
+			"UserConfigDir: returned %q which matches XDG_CONFIG_HOME-derived path; "+
+				"UserConfigDir must be pure over its sandbox argument and must not read XDG_CONFIG_HOME",
+			got,
+		)
+	}
+}
+
+// TestScopes_WithSandbox_UserConfigPathIsUnderUserConfigDir asserts that the
+// user-config scope's path is derived from UserConfigDir, not from the real
+// XDG_CONFIG_HOME or the user's home directory.
+func TestScopes_WithSandbox_UserConfigPathIsUnderUserConfigDir(t *testing.T) {
+	sb := newSandbox(t, t.TempDir())
+	expectedBase := opencode.UserConfigDir(sb)
+
+	scopes := opencode.Scopes(sb)
+	for _, s := range scopes {
+		if s.Name != "user-config" {
+			continue
+		}
+		if !strings.HasPrefix(filepath.Clean(s.Path), filepath.Clean(expectedBase)) {
+			t.Errorf(
+				"Scopes: user-config path = %q, want it under UserConfigDir(%q) = %q",
+				s.Path, sb.ControlDir, expectedBase,
+			)
+		}
+		return
+	}
+	t.Errorf("Scopes: no scope named user-config found in %+v", scopes)
+}
+
+// TestScopes_WithSandbox_UserPluginsPathIsUnderUserConfigDir asserts that the
+// user-plugins scope's path is derived from UserConfigDir, relocating the
+// plugins directory inside the sandbox alongside the config file.
+func TestScopes_WithSandbox_UserPluginsPathIsUnderUserConfigDir(t *testing.T) {
+	sb := newSandbox(t, t.TempDir())
+	expectedBase := opencode.UserConfigDir(sb)
+
+	scopes := opencode.Scopes(sb)
+	for _, s := range scopes {
+		if s.Name != "user-plugins" {
+			continue
+		}
+		if !strings.HasPrefix(filepath.Clean(s.Path), filepath.Clean(expectedBase)) {
+			t.Errorf(
+				"Scopes: user-plugins path = %q, want it under UserConfigDir(%q) = %q",
+				s.Path, sb.ControlDir, expectedBase,
+			)
+		}
+		return
+	}
+	t.Errorf("Scopes: no scope named user-plugins found in %+v", scopes)
+}
+
+// TestScopes_RelocatedNonSandboxScopesAreMarkedInSandbox asserts that both
+// formerly-external scopes are marked InSandbox: true after relocation —
+// their paths now live inside the run's sandbox and must be described as such.
+func TestScopes_RelocatedNonSandboxScopesAreMarkedInSandbox(t *testing.T) {
+	sb := newSandbox(t, t.TempDir())
+
+	for _, s := range opencode.Scopes(sb) {
+		if s.Name == "sandbox" {
+			continue // the sandbox scope was always InSandbox
+		}
+		switch s.Name {
+		case "user-config", "user-plugins":
+			if !s.InSandbox {
+				t.Errorf(
+					"Scopes: scope %q InSandbox = false after relocation; "+
+						"a scope relocated into the sandbox must be declared InSandbox: true",
+					s.Name,
+				)
+			}
+		}
+	}
+}
+
+// TestScopes_RelocatedNonSandboxScopesAreMarkedIsolatable asserts that both
+// formerly-external scopes are marked Isolatable: true after relocation — the
+// adapter can now back up that claim with the environment variable it sets.
+func TestScopes_RelocatedNonSandboxScopesAreMarkedIsolatable(t *testing.T) {
+	sb := newSandbox(t, t.TempDir())
+
+	for _, s := range opencode.Scopes(sb) {
+		switch s.Name {
+		case "user-config", "user-plugins":
+			if !s.Isolatable {
+				t.Errorf(
+					"Scopes: scope %q Isolatable = false; "+
+						"a scope relocated into the sandbox via %s must be declared Isolatable: true",
+					s.Name, opencode.ConfigHomeEnvVar,
+				)
+			}
+		}
+	}
+}
+
+// TestScopes_TwoSandboxesProduceDistinctUserConfigDirs asserts that two
+// distinct sandboxes produce distinct UserConfigDir values and therefore
+// distinct scope paths — which is what makes concurrent runs non-overlapping
+// without any per-run coordination.
+func TestScopes_TwoSandboxesProduceDistinctUserConfigDirs(t *testing.T) {
+	sb1 := newSandbox(t, t.TempDir())
+	sb2 := newSandbox(t, t.TempDir())
+
+	dir1 := opencode.UserConfigDir(sb1)
+	dir2 := opencode.UserConfigDir(sb2)
+
+	if dir1 == dir2 {
+		t.Errorf(
+			"UserConfigDir: two distinct sandboxes produced the same path %q; "+
+				"distinct sandboxes must always produce distinct config dirs for scope isolation",
+			dir1,
+		)
+	}
+}
+
+// TestSpawnPlan_SetsXDGConfigHomeToRelocatedConfigHome asserts that the spawn
+// plan includes XDG_CONFIG_HOME in its environment, pointing at the parent of
+// the relocated opencode config directory — i.e., <ControlDir>/<ConfigHomeRelDir>.
+// Setting this variable is what causes the spawned opencode process to read
+// from the relocated directory rather than the real user home.
+func TestSpawnPlan_SetsXDGConfigHomeToRelocatedConfigHome(t *testing.T) {
+	a := opencode.New(opencode.Options{})
+	sb, prov := baseProvisioning(t, t.TempDir())
+
+	plan, err := a.SpawnPlan(testContext(), spawnTestSubject(), prov)
+	if err != nil {
+		t.Fatalf("SpawnPlan: %v", err)
+	}
+
+	wantKey := opencode.ConfigHomeEnvVar
+	wantVal := filepath.Join(sb.ControlDir, opencode.ConfigHomeRelDir)
+
+	for _, kv := range plan.Env {
+		eqIdx := strings.IndexByte(kv, '=')
+		if eqIdx < 0 {
+			continue
+		}
+		key := kv[:eqIdx]
+		val := kv[eqIdx+1:]
+		if key == wantKey {
+			if filepath.Clean(val) != filepath.Clean(wantVal) {
+				t.Errorf(
+					"SpawnPlan: %s=%q, want %q (ControlDir=%q, ConfigHomeRelDir=%q)",
+					wantKey, val, wantVal, sb.ControlDir, opencode.ConfigHomeRelDir,
+				)
+			}
+			return
+		}
+	}
+	t.Errorf(
+		"SpawnPlan: Env does not contain %s; got %v; "+
+			"the spawn plan must set %s to relocate the opencode user-scope configuration into the sandbox",
+		wantKey, plan.Env, wantKey,
+	)
 }

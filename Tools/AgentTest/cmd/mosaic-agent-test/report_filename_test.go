@@ -190,8 +190,14 @@ func TestDefaultReportPath_ReturnedPath_IsNotEmpty(t *testing.T) {
 // detail; the structural invariants (starts with "report-", ends with ".json",
 // is not the old fixed filename) are what matter.
 func TestTUIOptions_ReportPath_IsTimestampedPattern(t *testing.T) {
-	// tuiOptions requires a non-empty WorkspaceRoot so newTUISuiteRunner succeeds.
-	opts, err := tuiOptions(Deps{WorkspaceRoot: "placeholder"}, nil)
+	// tuiOptions requires a non-empty WorkspaceRoot and a non-nil HarnessFactory
+	// so bundle resolution succeeds; fakeHarnessFactory provides a minimal
+	// factory without real I/O.
+	opts, err := tuiOptions(Deps{
+		WorkspaceRoot:  "placeholder",
+		HarnessFactory: fakeHarnessFactory{},
+		HarnessID:      "claude-code",
+	}, nil)
 	if err != nil {
 		t.Fatalf("tuiOptions returned an error: %v", err)
 	}

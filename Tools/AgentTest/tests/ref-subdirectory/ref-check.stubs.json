@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "test_id": "ref-check",
+  "on_unmatched": "halt",
+  "stubs": []
+}

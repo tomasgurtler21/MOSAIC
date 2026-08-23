@@ -1380,5 +1380,176 @@ class TestOrchestratorTranscriptExport(unittest.TestCase):
         self.assertEqual("turn", events[0]["event"])
 
 
+# ---------------------------------------------------------------------------
+# AC4.1(b) – payload-driven usage_record events carry model and token fields
+# ---------------------------------------------------------------------------
+
+class TestHandleStopUsageRecordModelAndTokenFields(unittest.TestCase):
+    """handle_stop driven by a payload whose transcript_path names a readable
+    transcript emits usage_record events that carry both the model and the
+    token-count fields.
+
+    This closes the payload → HookContext.transcript_path → emit_usage_records
+    → usage_record seam.  Two gaps in the existing suites make this class
+    necessary:
+
+    (1) TestHandleStopUsageEmission (in this file) asserts usage_record count,
+        source, and the absence of agent_instance_id — but never model or
+        token_usage.
+    (2) test_usage_emission.py asserts model and token fields on usage_records,
+        but calls emit_usage_records directly with a path argument, bypassing
+        the payload → ctx.transcript_path intake that this stage changed.
+
+    The tests here are payload-driven end-to-end and assert the full content
+    of the emitted usage_record, spanning both halves at once.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = pathlib.Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _usage_events(self, ctx):
+        return [e for e in _read_events(ctx) if e["event"] == "usage_record"]
+
+    def test_usage_record_carries_model_from_payload_driven_transcript(self):
+        """A payload-driven Stop with a readable transcript emits a usage_record
+        event that contains the model name from the transcript's assistant record."""
+        transcript_path = self.tmp_path / "transcript.jsonl"
+        _write_transcript(transcript_path, [
+            {"type": "assistant", "message": {
+                "id": "msg_model_seam",
+                "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 100, "output_tokens": 40},
+            }},
+        ])
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": TEST_SESSION_ID,
+            "last_assistant_message": "Done.",
+            "transcript_path": str(transcript_path),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_stop(ctx)
+        usage_events = self._usage_events(ctx)
+        self.assertEqual(1, len(usage_events))
+        self.assertIn("model", usage_events[0])
+        self.assertEqual("claude-opus-4-5", usage_events[0]["model"])
+
+    def test_usage_record_carries_input_and_output_tokens_from_payload_driven_transcript(self):
+        """A payload-driven Stop with a readable transcript emits a usage_record
+        event whose token_usage block contains input_tokens and output_tokens
+        matching the assistant record in the transcript."""
+        transcript_path = self.tmp_path / "transcript.jsonl"
+        _write_transcript(transcript_path, [
+            {"type": "assistant", "message": {
+                "id": "msg_tokens_seam",
+                "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 250, "output_tokens": 85},
+            }},
+        ])
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": TEST_SESSION_ID,
+            "last_assistant_message": "Done.",
+            "transcript_path": str(transcript_path),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_stop(ctx)
+        usage_events = self._usage_events(ctx)
+        self.assertEqual(1, len(usage_events))
+        self.assertIn("token_usage", usage_events[0])
+        token_usage = usage_events[0]["token_usage"]
+        self.assertEqual(250, token_usage["input_tokens"])
+        self.assertEqual(85, token_usage["output_tokens"])
+
+    def test_usage_record_carries_cache_read_tokens_from_payload_driven_transcript(self):
+        """Cache-read token counts in the transcript are included in the
+        usage_record's token_usage block when the payload drives the transcript path."""
+        transcript_path = self.tmp_path / "transcript.jsonl"
+        _write_transcript(transcript_path, [
+            {"type": "assistant", "message": {
+                "id": "msg_cache_seam",
+                "model": "claude-opus-4-5",
+                "usage": {
+                    "input_tokens": 50,
+                    "output_tokens": 20,
+                    "cache_read_input_tokens": 1000,
+                },
+            }},
+        ])
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": TEST_SESSION_ID,
+            "last_assistant_message": "Done.",
+            "transcript_path": str(transcript_path),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_stop(ctx)
+        usage_events = self._usage_events(ctx)
+        self.assertEqual(1, len(usage_events))
+        token_usage = usage_events[0]["token_usage"]
+        self.assertIn("cache_read_tokens", token_usage)
+        self.assertEqual(1000, token_usage["cache_read_tokens"])
+
+    def test_each_of_multiple_usage_records_carries_model_and_tokens(self):
+        """When the transcript has multiple assistant records, each emitted
+        usage_record carries the model and token counts from its own record —
+        verified end-to-end through the payload-driven seam."""
+        transcript_path = self.tmp_path / "transcript.jsonl"
+        _write_transcript(transcript_path, [
+            {"type": "assistant", "message": {
+                "id": "msg_multi_first",
+                "model": "claude-opus-4-5",
+                "usage": {"input_tokens": 100, "output_tokens": 40},
+            }},
+            {"type": "assistant", "message": {
+                "id": "msg_multi_second",
+                "model": "claude-haiku-3",
+                "usage": {"input_tokens": 200, "output_tokens": 60},
+            }},
+        ])
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": TEST_SESSION_ID,
+            "last_assistant_message": "Done.",
+            "transcript_path": str(transcript_path),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_stop(ctx)
+        usage_events = self._usage_events(ctx)
+        self.assertEqual(2, len(usage_events))
+        # Every emitted record must carry both model and token_usage.
+        for event in usage_events:
+            with self.subTest(record_id=event.get("record_id")):
+                self.assertIn("model", event)
+                self.assertIn("token_usage", event)
+        # Per-record values must match the transcript.
+        by_id = {e["record_id"]: e for e in usage_events}
+        self.assertEqual("claude-opus-4-5", by_id["msg_multi_first"]["model"])
+        self.assertEqual(100, by_id["msg_multi_first"]["token_usage"]["input_tokens"])
+        self.assertEqual(40, by_id["msg_multi_first"]["token_usage"]["output_tokens"])
+        self.assertEqual("claude-haiku-3", by_id["msg_multi_second"]["model"])
+        self.assertEqual(200, by_id["msg_multi_second"]["token_usage"]["input_tokens"])
+        self.assertEqual(60, by_id["msg_multi_second"]["token_usage"]["output_tokens"])
+
+    def test_model_and_tokens_absent_from_usage_record_when_transcript_missing(self):
+        """When transcript_path in the payload names a file that does not exist,
+        no usage_record events are emitted (the transcript cannot be read, so
+        there is nothing to emit).  This is the degrade-silently path."""
+        payload = {
+            "hook_event_name": "Stop",
+            "session_id": TEST_SESSION_ID,
+            "last_assistant_message": "Done.",
+            "transcript_path": str(self.tmp_path / "nonexistent.jsonl"),
+        }
+        ctx = _make_ctx(payload, self.tmp_path)
+        session_handlers.handle_stop(ctx)
+        usage_events = self._usage_events(ctx)
+        self.assertEqual(0, len(usage_events))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -117,7 +117,7 @@ func modelOnSuiteSelectWithPreflight(rpt authoring.Report) Model {
 // screen — the run must not start.
 func TestPreflightFailure_ScreenStaysOnSuiteSelect(t *testing.T) {
 	m := modelOnSuiteSelectWithPreflight(errorReport())
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m) // navigate through settings flow; preflight fails and returns to suite-select
 
 	if m.Screen() != ScreenSuiteSelect {
 		t.Errorf("Screen() after a pre-flight error = %q, want %q; the suite must not start when pre-flight fails", m.Screen(), ScreenSuiteSelect)
@@ -135,7 +135,7 @@ func TestPreflightFailure_ScreenStaysOnSuiteSelect(t *testing.T) {
 func TestPreflightFailure_ViewContainsAllDiagnosticFields(t *testing.T) {
 	rpt := errorReport()
 	m := modelOnSuiteSelectWithPreflight(rpt)
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m) // navigate through settings flow; preflight fails
 	view := safeView(t, m)
 
 	_, body, shown := m.FailureDetail()
@@ -170,7 +170,7 @@ func TestPreflightFailure_ViewContainsAllDiagnosticFields(t *testing.T) {
 func TestPreflightFailure_FailureDetailContainsAllDiagnostics(t *testing.T) {
 	rpt := errorReport()
 	m := modelOnSuiteSelectWithPreflight(rpt)
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m)
 
 	_, body, shown := m.FailureDetail()
 	if !shown {
@@ -204,7 +204,7 @@ func TestPreflightFailure_FailureDetailContainsAllDiagnostics(t *testing.T) {
 func TestPreflightFailure_FailureDetailTitle(t *testing.T) {
 	rpt := errorReport()
 	m := modelOnSuiteSelectWithPreflight(rpt)
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m)
 
 	title, _, shown := m.FailureDetail()
 	if !shown {
@@ -223,7 +223,7 @@ func TestPreflightFailure_NothingDroppedFromManyDiagnostics(t *testing.T) {
 	const n = 30
 	rpt := manyDiagnosticsReport(n)
 	m := modelOnSuiteSelectWithPreflight(rpt)
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m)
 
 	_, body, shown := m.FailureDetail()
 	if !shown {
@@ -246,7 +246,7 @@ func TestPreflightFailure_NothingDroppedFromManyDiagnostics(t *testing.T) {
 // full diagnostic list.
 func TestPreflightFailure_StatusBarKeepsSummary(t *testing.T) {
 	m := modelOnSuiteSelectWithPreflight(errorReport())
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m)
 	view := safeView(t, m)
 
 	// The status bar historically showed "pre-flight failed for <path>".
@@ -267,7 +267,7 @@ func TestPreflightFailure_StatusBarKeepsSummary(t *testing.T) {
 func TestPreflightWarning_RunStillProceeds(t *testing.T) {
 	rpt := warningReport()
 	m := modelOnSuiteSelectWithPreflight(rpt)
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m) // navigate through settings flow; warnings don't block the run
 
 	if m.Screen() != ScreenProgress {
 		t.Errorf("Screen() after warning-only pre-flight = %q, want %q; warnings must not block the run", m.Screen(), ScreenProgress)
@@ -280,7 +280,7 @@ func TestPreflightWarning_RunStillProceeds(t *testing.T) {
 func TestPreflightWarning_WarningsAreSurfaced(t *testing.T) {
 	rpt := warningReport()
 	m := modelOnSuiteSelectWithPreflight(rpt)
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m)
 
 	title, body, shown := m.FailureDetail()
 	if !shown {
@@ -321,14 +321,14 @@ func TestPreflightWarning_StatusBarNotStyled_AsError(t *testing.T) {
 	optsE := newFixtureOptions([]string{"suite-a.yaml"}, runnerE)
 	optsE.Preflight = scriptedPreflight(errorReport())
 	mError := NewModel(optsE)
-	mError, _ = safeUpdate(t, mError, keyMsg("\r"))
+	mError = triggerSuiteStart(t, mError)
 	viewError := safeView(t, mError)
 
 	runnerW := newFakeSuiteRunner()
 	optsW := newFixtureOptions([]string{"suite-a.yaml"}, runnerW)
 	optsW.Preflight = scriptedPreflight(warningReport())
 	mWarning := NewModel(optsW)
-	mWarning, _ = safeUpdate(t, mWarning, keyMsg("\r"))
+	mWarning = triggerSuiteStart(t, mWarning)
 	viewWarning := safeView(t, mWarning)
 
 	if viewError == viewWarning {
@@ -343,7 +343,7 @@ func TestPreflightWarning_StatusBarNotStyled_AsError(t *testing.T) {
 func TestPreflightWarning_ViewContainsWarningContent(t *testing.T) {
 	rpt := warningReport()
 	m := modelOnSuiteSelectWithPreflight(rpt)
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m)
 
 	_, body, shown := m.FailureDetail()
 	if !shown {
@@ -370,7 +370,7 @@ func TestPreflightWarning_ViewContainsWarningContent(t *testing.T) {
 func TestDetailSurface_NoScreenChangeOnPreflightError(t *testing.T) {
 	m := modelOnSuiteSelectWithPreflight(errorReport())
 	before := m.Screen()
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m) // navigate through settings flow; preflight error returns to suite-select
 	after := m.Screen()
 
 	if before != after {
@@ -410,7 +410,7 @@ func TestDetailSurface_FailureDetailClearedAfterSuccessfulRun(t *testing.T) {
 	// First attempt: error pre-flight.
 	opts.Preflight = scriptedPreflight(errorReport())
 	m := NewModel(opts)
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m) // navigate through settings; preflight fails, returns to suite-select
 	_, _, shownAfterError := m.FailureDetail()
 	if !shownAfterError {
 		t.Fatalf("FailureDetail() not shown after the error-bearing pre-flight run; test precondition not met")
@@ -420,7 +420,7 @@ func TestDetailSurface_FailureDetailClearedAfterSuccessfulRun(t *testing.T) {
 	// on the model's options to simulate the user retrying on the same suite.
 	opts.Preflight = fixturePreflight(fixturePlan("suite-under-test"))
 	m.opts = opts
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m) // navigate again; success this time
 
 	titleAfterSuccess, bodyAfterSuccess, shownAfterSuccess := m.FailureDetail()
 	if shownAfterSuccess {
@@ -453,7 +453,7 @@ func TestDetailSurface_FreshFailureResetsScrollToTop(t *testing.T) {
 	m := NewModel(opts)
 	// Resize to a small height so the pane does not show everything at once.
 	m, _ = safeUpdate(t, m, tea.WindowSizeMsg{Width: 80, Height: 12})
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m) // navigate through settings; preflight fails
 
 	// Scroll down several times.
 	for i := 0; i < 5; i++ {
@@ -462,7 +462,7 @@ func TestDetailSurface_FreshFailureResetsScrollToTop(t *testing.T) {
 	viewScrolled := safeView(t, m)
 
 	// Second failure: triggers a SetContent reset which must reset scroll to top.
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m) // navigate again; second preflight failure resets scroll
 	viewAfterReset := safeView(t, m)
 
 	// After a fresh failure the view must match what we see when we first
@@ -472,7 +472,7 @@ func TestDetailSurface_FreshFailureResetsScrollToTop(t *testing.T) {
 	opts2.Preflight = scriptedPreflight(manyDiagnosticsReport(20))
 	mFresh := NewModel(opts2)
 	mFresh, _ = safeUpdate(t, mFresh, tea.WindowSizeMsg{Width: 80, Height: 12})
-	mFresh, _ = safeUpdate(t, mFresh, keyMsg("\r"))
+	mFresh = triggerSuiteStart(t, mFresh)
 	viewFresh := safeView(t, mFresh)
 
 	if viewScrolled == viewFresh {
@@ -501,8 +501,8 @@ func TestDetailSurface_ScrollKeysMovePaneNotCursor(t *testing.T) {
 	}
 	m := NewModel(opts)
 	m, _ = safeUpdate(t, m, tea.WindowSizeMsg{Width: 80, Height: 12})
-	// Trigger the pre-flight failure so the pane has content.
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	// Navigate through the settings flow to trigger the pre-flight failure.
+	m = triggerSuiteStart(t, m)
 
 	cursorBefore := m.suiteCursor
 
@@ -530,7 +530,7 @@ func TestDetailSurface_ScrollProducesVisiblyDifferentView(t *testing.T) {
 	m := NewModel(opts)
 	// Small height forces the pane to clip content.
 	m, _ = safeUpdate(t, m, tea.WindowSizeMsg{Width: 80, Height: 10})
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m)
 
 	viewBefore := safeView(t, m)
 
@@ -557,18 +557,18 @@ func TestDetailSurface_ResizeHonored(t *testing.T) {
 
 	// A fresh model with no WindowSizeMsg must still render (uses defaults).
 	m := NewModel(opts)
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m)
 	_ = safeView(t, m) // must not panic
 
 	// Apply a resize and re-render — view dimensions must change.
 	mWide := NewModel(opts)
 	mWide, _ = safeUpdate(t, mWide, tea.WindowSizeMsg{Width: 120, Height: 40})
-	mWide, _ = safeUpdate(t, mWide, keyMsg("\r"))
+	mWide = triggerSuiteStart(t, mWide)
 	viewWide := safeView(t, mWide)
 
 	mNarrow := NewModel(opts)
 	mNarrow, _ = safeUpdate(t, mNarrow, tea.WindowSizeMsg{Width: 40, Height: 20})
-	mNarrow, _ = safeUpdate(t, mNarrow, keyMsg("\r"))
+	mNarrow = triggerSuiteStart(t, mNarrow)
 	viewNarrow := safeView(t, mNarrow)
 
 	if viewWide == viewNarrow {
@@ -587,7 +587,7 @@ func TestDetailSurface_ReadableCopyMatchesRenderedCopy(t *testing.T) {
 	rpt := errorReport()
 	m := modelOnSuiteSelectWithPreflight(rpt)
 	m, _ = safeUpdate(t, m, tea.WindowSizeMsg{Width: 80, Height: 40})
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m = triggerSuiteStart(t, m)
 
 	_, body, shown := m.FailureDetail()
 	if !shown {

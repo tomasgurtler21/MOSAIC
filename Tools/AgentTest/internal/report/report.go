@@ -90,6 +90,15 @@ type RunReport struct {
 	SubjectModel string
 	StubModel    string
 
+	// HarnessID names the harness adapter that produced this run, carried
+	// from RunEvidence through TestResult. Per-run placement (not
+	// report-level) because a single invocation may run different attempts
+	// against different harnesses once harness selection is resolved.
+	//
+	// Empty means no harness identity was recorded; both renderings show
+	// that as unknown, never as blank.
+	HarnessID string
+
 	// TerminationReason names why this run ended. Values match
 	// domain.RunDisposition: "completed", "early_exit", "timed_out",
 	// "turn_limit", "spawn_failed". Empty only when disposition was not

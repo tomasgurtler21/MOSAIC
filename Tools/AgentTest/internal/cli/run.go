@@ -15,6 +15,7 @@ import (
 	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/preflight"
 	"mosaic-agent-test/internal/report"
+	"mosaic-agent-test/internal/suite"
 )
 
 // valueFlags are the flags this package's command surface accepts that
@@ -50,6 +51,10 @@ var valueFlags = map[string]bool{
 	// against the selected harness's catalog before pre-flight runs.
 	"subject-model": true,
 	"stub-model":    true,
+
+	// max-concurrent-runs bounds how many runs execute at once across the whole
+	// suite. Validated as an integer >= 1; absent means DefaultMaxConcurrentRuns.
+	"max-concurrent-runs": true,
 }
 
 // boolFlags are the flags this package's command surface accepts that take
@@ -365,6 +370,25 @@ func writeReportFile(o Options, path string, result report.Result) {
 	}
 }
 
+// resolveMaxConcurrentRuns parses --max-concurrent-runs from inv, validates it
+// as an integer >= 1, and returns it. When the flag is absent the result is
+// suite.DefaultMaxConcurrentRuns. A non-integer, zero or negative value is a
+// usageError, never silently clamped.
+func resolveMaxConcurrentRuns(inv parsedInvocation) (int, error) {
+	v, ok := inv.flags["max-concurrent-runs"]
+	if !ok {
+		return suite.DefaultMaxConcurrentRuns, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, usageError{fmt.Sprintf("invalid --max-concurrent-runs value %q: must be an integer >= 1", v)}
+	}
+	if n < 1 {
+		return 0, usageError{fmt.Sprintf("invalid --max-concurrent-runs value %d: must be >= 1", n)}
+	}
+	return n, nil
+}
+
 // runCommand implements `run <suite>`: pre-flight, then — only on a clean
 // report — execute the suite.
 func runCommand(ctx context.Context, inv parsedInvocation, o Options) int {
@@ -392,9 +416,17 @@ func runCommand(ctx context.Context, inv parsedInvocation, o Options) int {
 		return ExitPreflight
 	}
 
+	maxConcurrentRuns, err := resolveMaxConcurrentRuns(inv)
+	if err != nil {
+		fmt.Fprintf(o.Stderr, "error: %v\n", err)
+		return ExitUsage
+	}
+
 	cfg := RunConfig{
-		WorkspaceRoot: resolveWorkspaceRoot(inv, o),
-		Retention:     resolveRetention(inv),
+		WorkspaceRoot:     resolveWorkspaceRoot(inv, o),
+		Retention:         resolveRetention(inv),
+		MaxConcurrentRuns: maxConcurrentRuns,
+		HarnessID:         in.HarnessID,
 	}
 	runner, err := o.Suite(cfg)
 	if err != nil {

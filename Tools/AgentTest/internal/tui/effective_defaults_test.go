@@ -88,17 +88,19 @@ func TestSettingsEntries_Repetitions_ResolverNil_NoPanic(t *testing.T) {
 }
 
 // TestSettings_Repetitions_ResolverNil_ViewDoesNotPanic verifies that the
-// settings screen renders without panic even when no resolver is configured.
+// repetitions screen renders without panic even when no resolver is configured.
 func TestSettings_Repetitions_ResolverNil_ViewDoesNotPanic(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	m := NewModel(o)
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after Tab = %q, want %q (test setup failed)", m.Screen(), ScreenSettings)
+	// Navigate to ScreenRepetitions: Enter×2 from SuiteSelect.
+	m = advanceToSettingsFlow(t, m) // → ScreenRetention
+	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenRepetitions {
+		t.Fatalf("Screen() = %q, want %q (test setup failed)", m.Screen(), ScreenRepetitions)
 	}
 	view := safeView(t, m)
 	if view == "" {
-		t.Errorf("settings View() returned empty string with nil resolver; want non-empty output")
+		t.Errorf("ScreenRepetitions View() returned empty string with nil resolver; want non-empty output")
 	}
 }
 
@@ -419,7 +421,7 @@ func TestStartSuite_SuiteDefault_NoUserOverride_PreflightGetsNilRepetitions(t *t
 	m := NewModel(o)
 	// No user override: m.repetitions is nil.
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	_ = m
 	if cmd != nil {
 		_ = runCmd(t, cmd)
@@ -450,7 +452,7 @@ func TestStartSuite_UserOverride_PreflightGetsOverrideValue(t *testing.T) {
 	m := NewModel(o)
 	m.repetitions = intPtr(wantReps) // user override
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	_ = m
 	if cmd != nil {
 		_ = runCmd(t, cmd)

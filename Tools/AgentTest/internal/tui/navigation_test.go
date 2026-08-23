@@ -25,19 +25,19 @@ func keyType(kt tea.KeyType) tea.KeyMsg {
 	return tea.KeyMsg{Type: kt}
 }
 
-// runSuiteToCompletion drives m from ScreenSuiteSelect, through selecting
-// the first offered suite, to the model reflecting the suite's finished
-// result. It fails the test if the model never reaches ScreenProgress or
-// never receives the SuiteFinishedMsg the background run produces.
+// runSuiteToCompletion drives m from ScreenSuiteSelect, through the full
+// settings flow and into ScreenProgress, to the model reflecting the suite's
+// finished result. It fails the test if any screen transition is unexpected or
+// if the background run never produces a SuiteFinishedMsg.
 func runSuiteToCompletion(t *testing.T, m Model, runner *fakeSuiteRunner) Model {
 	t.Helper()
-	m, cmd := safeUpdate(t, m, keyMsg("\r")) // enter: select the first suite
-	if m.Screen() != ScreenProgress {
-		t.Fatalf("Screen() after selecting a suite = %q, want %q", m.Screen(), ScreenProgress)
+	m, cmd := startSuiteFromSuiteSelect(t, m)
+	if cmd == nil {
+		t.Fatalf("startSuiteFromSuiteSelect produced no tea.Cmd to start the run")
 	}
 	msg := runCmd(t, cmd)
 	if msg == nil {
-		t.Fatalf("selecting a suite produced no tea.Cmd to start the run")
+		t.Fatalf("selecting a suite produced no tea.Msg from the run")
 	}
 	m, _ = safeUpdate(t, m, msg)
 	return m
@@ -158,12 +158,9 @@ func TestNavigation_QuitDuringRun_CancelsSuiteContext(t *testing.T) {
 	runner := newFakeSuiteRunner().blocking()
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, runner))
 
-	m, startCmd := safeUpdate(t, m, keyMsg("\r")) // select the first suite
-	if m.Screen() != ScreenProgress {
-		t.Fatalf("Screen() after selecting a suite = %q, want %q", m.Screen(), ScreenProgress)
-	}
+	m, startCmd := startSuiteFromSuiteSelect(t, m)
 	if startCmd == nil {
-		t.Fatalf("selecting a suite produced no tea.Cmd to start the run")
+		t.Fatalf("startSuiteFromSuiteSelect produced no tea.Cmd to start the run")
 	}
 
 	// Start the (blocking) run on its own goroutine, exactly as a real

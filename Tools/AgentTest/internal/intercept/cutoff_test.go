@@ -348,3 +348,362 @@ func TestDecide_Pre_AtOrAboveThreshold_NoRefusalMessageProduced(t *testing.T) {
 		t.Errorf("Outcome.Message = %q, want empty: no refusal message must be produced at the pre-invocation point for a call at or beyond the threshold", decision.Outcome.Message)
 	}
 }
+
+// --- Stage 1: Count-based cutoff — unmatched dispatch cases ---
+//
+// The defect: the post/completion cutoff branch guards on hasPending (the
+// presence of a pending stub for the correlation token). Under the
+// unmatched-passthrough policy the pre-invocation call creates an in-flight
+// entry but no pending stub, so hasPending is false and the threshold is never
+// compared. A run with stop_after_invocations: N runs to turn_limit instead.
+//
+// The fix replaces the short-circuiting hasPending conjunct with a sequence
+// number resolved from: (1) the pending stub; (2) the in-flight entry; (3) the
+// global invocation counter. The cutoff is then count-based on every path,
+// including the paths where the dispatch was unmatched and where the
+// correlation token could not be recovered at all.
+
+// unmatchedNthPostState returns the RunState that exists immediately before the
+// Nth dispatch's post/completion phase when that dispatch was unmatched under
+// the passthrough policy. The pre-invocation call incremented SequenceCounter
+// to N and created an in-flight entry at seq N, but no pending stub was created
+// — only matched or generic-response dispatches create pending stubs.
+func unmatchedNthPostState(n int, token string, id domain.CollaboratorIdentity) domain.RunState {
+	state := baseState()
+	state.EarlyExitThreshold = n
+	state.SequenceCounter = n
+	state.InFlight[token] = domain.InFlight{Seq: n, Identity: id, StartedAt: time.Now()}
+	// deliberately no PendingStubs entry for token
+	return state
+}
+
+// --- T1.1: Cutoff fires on an unmatched-passthrough Nth dispatch ---
+
+// TestDecide_Post_UnmatchedPassthrough_AtNthDispatch_SetsTerminateSubject is
+// the primary regression test for the Stage 1 defect. The Nth dispatch was
+// unmatched under the passthrough policy: the pre-invocation call created an
+// in-flight entry but no pending stub. The current code's hasPending short-
+// circuit prevents the threshold from being compared, so TerminateSubject
+// remains false. After the fix the in-flight entry's seq resolves the threshold
+// comparison and TerminateSubject is set.
+func TestDecide_Post_UnmatchedPassthrough_AtNthDispatch_SetsTerminateSubject(t *testing.T) {
+	id := researcherIdentity()
+	token := "corr-unmatched-passthrough"
+	n := 1
+
+	in := intercept.Input{
+		Call:     completionCall(id, token, "", domain.HarnessCapabilities{}),
+		State:    unmatchedNthPostState(n, token, id),
+		Registry: domain.StubRegistry{OnUnmatched: domain.UnmatchedPassthrough},
+		Now:      time.Now(),
+	}
+
+	decision, err := intercept.Decide(in)
+
+	if err != nil {
+		t.Fatalf("Decide returned unexpected error: %v", err)
+	}
+	if !decision.TerminateSubject {
+		t.Errorf("TerminateSubject = false, want true: the Nth dispatch must trigger the cutoff even when that dispatch matched no stub — the count is the only thing that decides, not a pending-stub hit")
+	}
+}
+
+// TestDecide_Post_UnmatchedPassthrough_AtNthDispatch_OutcomeIsPassthrough verifies
+// that the post/completion path never refuses, even when the cutoff fires. The reply
+// must reach the subject before the sentinel is written; refusing at this point would
+// lose the Nth reply.
+func TestDecide_Post_UnmatchedPassthrough_AtNthDispatch_OutcomeIsPassthrough(t *testing.T) {
+	id := researcherIdentity()
+	token := "corr-unmatched-passthrough-outcome"
+	n := 1
+
+	in := intercept.Input{
+		Call:     completionCall(id, token, "", domain.HarnessCapabilities{}),
+		State:    unmatchedNthPostState(n, token, id),
+		Registry: domain.StubRegistry{OnUnmatched: domain.UnmatchedPassthrough},
+		Now:      time.Now(),
+	}
+
+	decision, err := intercept.Decide(in)
+
+	if err != nil {
+		t.Fatalf("Decide returned unexpected error: %v", err)
+	}
+	if decision.Outcome.Kind != domain.OutcomePassthrough {
+		t.Errorf("Outcome.Kind = %q, want %q: the post/completion path must never refuse, even when the cutoff fires", decision.Outcome.Kind, domain.OutcomePassthrough)
+	}
+}
+
+// TestDecide_Post_UnmatchedPassthrough_AtNthDispatch_EmitsEarlyExitTriggeredRecord
+// verifies that the RunEventEarlyExitTriggered record is emitted after the end
+// record for the Nth unmatched dispatch, exactly as it is for a matched Nth dispatch.
+func TestDecide_Post_UnmatchedPassthrough_AtNthDispatch_EmitsEarlyExitTriggeredRecord(t *testing.T) {
+	id := researcherIdentity()
+	token := "corr-unmatched-passthrough-record"
+	n := 1
+
+	in := intercept.Input{
+		Call:     completionCall(id, token, "", domain.HarnessCapabilities{}),
+		State:    unmatchedNthPostState(n, token, id),
+		Registry: domain.StubRegistry{OnUnmatched: domain.UnmatchedPassthrough},
+		Now:      time.Now(),
+	}
+
+	decision, err := intercept.Decide(in)
+
+	if err != nil {
+		t.Fatalf("Decide returned unexpected error: %v", err)
+	}
+	found := false
+	for _, rec := range decision.Records {
+		if rec.Kind == domain.RecordRun && rec.Event == domain.RunEventEarlyExitTriggered {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected RunEventEarlyExitTriggered in records for an unmatched Nth dispatch, got: %+v", decision.Records)
+	}
+}
+
+// --- T1.1: Cutoff fires on an unmatched-halt Nth dispatch (pre-invocation) ---
+
+// TestDecide_Pre_UnmatchedHalt_AtNthDispatch_SetsTerminateSubject verifies
+// that under the unmatched-halt policy the cutoff fires at the pre-invocation
+// point when the Nth dispatch is refused. TerminatesAtPre must be true for
+// OutcomeHalt (not only OutcomeSubstitute) so that the sentinel is written
+// after the refusal reply is delivered — no post/completion event fires for a
+// halted call.
+func TestDecide_Pre_UnmatchedHalt_AtNthDispatch_SetsTerminateSubject(t *testing.T) {
+	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "no-stub-identity"}
+	n := 1
+
+	state := baseState()
+	state.EarlyExitThreshold = n
+	state.SequenceCounter = n - 1 // seq = (n-1)+1 = n at the pre-invocation point
+
+	in := intercept.Input{
+		Call:     baseCall(id, domain.HarnessCapabilities{SupportsDirectSubstitution: true}),
+		State:    state,
+		Registry: domain.StubRegistry{OnUnmatched: domain.UnmatchedHalt},
+		Now:      time.Now(),
+	}
+
+	decision, err := intercept.Decide(in)
+
+	if err != nil {
+		t.Fatalf("Decide returned unexpected error: %v", err)
+	}
+	if decision.Outcome.Kind != domain.OutcomeHalt {
+		t.Fatalf("Outcome.Kind = %q, want %q: the unmatched call under UnmatchedHalt policy must be refused", decision.Outcome.Kind, domain.OutcomeHalt)
+	}
+	if decision.Outcome.HaltReason != domain.HaltUnmatched {
+		t.Fatalf("HaltReason = %q, want %q", decision.Outcome.HaltReason, domain.HaltUnmatched)
+	}
+	if !decision.TerminateSubject {
+		t.Errorf("TerminateSubject = false, want true: the refusal reply IS the Nth answer delivered to the subject; no post/completion fires for it, so the cutoff must be signalled here")
+	}
+}
+
+// --- T1.2: Count is the only thing that decides ---
+
+// TestDecide_Post_CutoffIsCountBased_StubbedGenericUnmatchedAllTerminateAtN
+// pins the T1.2 requirement: a stubbed, a generically-answered and an unmatched
+// Nth dispatch must all trigger the cutoff. The match outcome of the dispatch is
+// irrelevant; the sequence number is what the threshold compares against.
+func TestDecide_Post_CutoffIsCountBased_StubbedGenericUnmatchedAllTerminateAtN(t *testing.T) {
+	id := researcherIdentity()
+	n := 1
+	expected := json.RawMessage(`{"status_code":"SUCCESS"}`)
+
+	cases := []struct {
+		name  string
+		state domain.RunState
+		token string
+	}{
+		{
+			name:  "stubbed",
+			token: "corr-stubbed",
+			state: nthPostState(n, "corr-stubbed", id, expected),
+		},
+		{
+			// A generic-response dispatch also creates a pending stub entry,
+			// so its state shape is identical to the stubbed case.
+			name:  "generic_response",
+			token: "corr-generic",
+			state: nthPostState(n, "corr-generic", id, expected),
+		},
+		{
+			name:  "unmatched_passthrough",
+			token: "corr-unmatched",
+			state: unmatchedNthPostState(n, "corr-unmatched", id),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := intercept.Input{
+				Call:     completionCall(id, tc.token, `{"status_code":"SUCCESS"}`, domain.HarnessCapabilities{}),
+				State:    tc.state,
+				Registry: domain.StubRegistry{OnUnmatched: domain.UnmatchedPassthrough},
+				Now:      time.Now(),
+			}
+
+			decision, err := intercept.Decide(in)
+
+			if err != nil {
+				t.Fatalf("Decide returned unexpected error: %v", err)
+			}
+			if !decision.TerminateSubject {
+				t.Errorf("TerminateSubject = false for %q case, want true: the count is the only thing that decides, not the match outcome of the Nth dispatch", tc.name)
+			}
+			if decision.Outcome.Kind != domain.OutcomePassthrough {
+				t.Errorf("Outcome.Kind = %q, want %q for %q case: the post/completion path must never refuse", decision.Outcome.Kind, domain.OutcomePassthrough, tc.name)
+			}
+		})
+	}
+}
+
+// --- T1.3: Direct-substitution path is unchanged, plus new guards ---
+
+// TestDecide_Pre_DirectSubstitution_AtNthDispatch_SetsTerminateSubjectAndRecord
+// verifies that the pre-invocation substitution path still cuts off at the Nth
+// dispatch. This is a regression guard: the existing path sets TerminateSubject
+// correctly for OutcomeSubstitute and must continue to do so after the Stage 1
+// implementation adds the !EarlyExitTriggered guard and generalises the
+// TerminatesAtPre check.
+func TestDecide_Pre_DirectSubstitution_AtNthDispatch_SetsTerminateSubjectAndRecord(t *testing.T) {
+	id := researcherIdentity()
+	n := 2
+	state := baseState()
+	state.EarlyExitThreshold = n
+	state.SequenceCounter = n - 1 // seq = (n-1)+1 = n = threshold
+
+	in := intercept.Input{
+		Call:     baseCall(id, domain.HarnessCapabilities{SupportsDirectSubstitution: true}),
+		State:    state,
+		Registry: registryWithOneStub(id, `{"status_code":"SUCCESS"}`, nil),
+		Now:      time.Now(),
+	}
+
+	decision, err := intercept.Decide(in)
+
+	if err != nil {
+		t.Fatalf("Decide returned unexpected error: %v", err)
+	}
+	if decision.Outcome.Kind != domain.OutcomeSubstitute {
+		t.Fatalf("Outcome.Kind = %q, want %q: the stubbed call must yield a substitute reply", decision.Outcome.Kind, domain.OutcomeSubstitute)
+	}
+	if !decision.TerminateSubject {
+		t.Errorf("TerminateSubject = false, want true: the Nth substitute reply must signal termination so the sentinel is written after the substitute reply is delivered")
+	}
+	found := false
+	for _, rec := range decision.Records {
+		if rec.Kind == domain.RecordRun && rec.Event == domain.RunEventEarlyExitTriggered {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected RunEventEarlyExitTriggered in records for the Nth direct-substitute dispatch, got: %+v", decision.Records)
+	}
+}
+
+// TestDecide_Pre_EarlyExitAlreadyTriggered_DoesNotSetTerminateSubjectAgain
+// verifies that the !EarlyExitTriggered guard prevents the pre-invocation cutoff
+// from firing a second time. Without this guard, a subsequent call at or beyond
+// the threshold would append a second RunEventEarlyExitTriggered record and
+// signal the sentinel write again. The sentinel write is idempotent, but the
+// duplicate log record is not.
+func TestDecide_Pre_EarlyExitAlreadyTriggered_DoesNotSetTerminateSubjectAgain(t *testing.T) {
+	id := researcherIdentity()
+	n := 1
+	state := baseState()
+	state.EarlyExitThreshold = n
+	state.SequenceCounter = n         // seq = n+1 > threshold
+	state.EarlyExitTriggered = true   // already triggered in a prior interception
+
+	in := intercept.Input{
+		Call:     baseCall(id, domain.HarnessCapabilities{SupportsDirectSubstitution: true}),
+		State:    state,
+		Registry: registryWithOneStub(id, `{"status_code":"SUCCESS"}`, nil),
+		Now:      time.Now(),
+	}
+
+	decision, err := intercept.Decide(in)
+
+	if err != nil {
+		t.Fatalf("Decide returned unexpected error: %v", err)
+	}
+	if decision.TerminateSubject {
+		t.Errorf("TerminateSubject = true after EarlyExitTriggered is already set in state, want false: the cutoff must fire at most once per run")
+	}
+	for _, rec := range decision.Records {
+		if rec.Kind == domain.RecordRun && rec.Event == domain.RunEventEarlyExitTriggered {
+			t.Errorf("RunEventEarlyExitTriggered emitted after EarlyExitTriggered is already set: this record must appear exactly once in the invocation log")
+		}
+	}
+}
+
+// TestDecide_Post_EarlyExitAlreadyTriggered_DoesNotSetTerminateSubjectAgain
+// verifies the !EarlyExitTriggered guard on the post/completion path: once the
+// sentinel has been written and the state records EarlyExitTriggered = true, a
+// subsequent post/completion event must not signal termination again.
+func TestDecide_Post_EarlyExitAlreadyTriggered_DoesNotSetTerminateSubjectAgain(t *testing.T) {
+	id := researcherIdentity()
+	n := 1
+	expected := json.RawMessage(`{"status_code":"SUCCESS"}`)
+	token := "corr-already-triggered-post"
+
+	state := nthPostState(n, token, id, expected)
+	state.EarlyExitTriggered = true // already triggered in a prior interception
+
+	in := intercept.Input{
+		Call:     completionCall(id, token, `{"status_code":"SUCCESS"}`, domain.HarnessCapabilities{}),
+		State:    state,
+		Registry: domain.StubRegistry{OnUnmatched: domain.UnmatchedPassthrough},
+		Now:      time.Now(),
+	}
+
+	decision, err := intercept.Decide(in)
+
+	if err != nil {
+		t.Fatalf("Decide returned unexpected error: %v", err)
+	}
+	if decision.TerminateSubject {
+		t.Errorf("TerminateSubject = true after EarlyExitTriggered is already set in state, want false: the cutoff must fire at most once per run")
+	}
+}
+
+// TestDecide_Post_SeqBeyondThreshold_StillSetsTerminateSubject verifies the
+// >= semantics: if the exact Nth observation was missed (a dispatch completed
+// but the threshold comparison was skipped), the next observation at seq > N
+// must still trigger the cutoff. Combined with the !EarlyExitTriggered guard,
+// the RunEventEarlyExitTriggered record still appears exactly once.
+func TestDecide_Post_SeqBeyondThreshold_StillSetsTerminateSubject(t *testing.T) {
+	id := researcherIdentity()
+	n := 1
+	expected := json.RawMessage(`{"status_code":"SUCCESS"}`)
+	token := "corr-beyond-threshold"
+
+	// seq = n+1 (beyond threshold) — the exact Nth was not observed.
+	state := baseState()
+	state.EarlyExitThreshold = n
+	state.SequenceCounter = n + 1
+	state.PendingStubs[token] = domain.PendingStub{Seq: n + 1, Identity: id, Expected: expected}
+	state.InFlight[token] = domain.InFlight{Seq: n + 1, Identity: id, StartedAt: time.Now()}
+
+	in := intercept.Input{
+		Call:     completionCall(id, token, `{"status_code":"SUCCESS"}`, domain.HarnessCapabilities{}),
+		State:    state,
+		Registry: domain.StubRegistry{OnUnmatched: domain.UnmatchedPassthrough},
+		Now:      time.Now(),
+	}
+
+	decision, err := intercept.Decide(in)
+
+	if err != nil {
+		t.Fatalf("Decide returned unexpected error: %v", err)
+	}
+	if !decision.TerminateSubject {
+		t.Errorf("TerminateSubject = false for dispatch at seq %d with threshold %d, want true: the cutoff rule uses >= not ==, so a missed Nth observation is still caught by the next completion", n+1, n)
+	}
+}

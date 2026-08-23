@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"mosaic-agent-test/internal/domain"
+	"mosaic-agent-test/internal/runprogress"
 )
 
 // NewLineSink renders each progress event as one line, written as the event
@@ -30,23 +31,32 @@ func NewLineSink(w io.Writer) domain.ProgressSink {
 }
 
 type lineSink struct {
-	mu sync.Mutex
-	w  io.Writer
+	mu    sync.Mutex
+	w     io.Writer
+	model runprogress.Model
 }
 
 // Emit writes ev's rendered line, followed — for a ProgressTestFinished
 // event carrying failed assertions — by one indented line per failed
 // assertion, so a failure's reasons are visible in the stream without
 // waiting for the final report.
+//
+// After each lifecycle event (ProgressTestStarted, ProgressTestFinished) a
+// tally line is also written, so the running/finished/remaining counts are
+// visible in the live stream without waiting for the final report.
 func (s *lineSink) Emit(ev domain.ProgressEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.model = s.model.Fold(ev)
 	fmt.Fprintln(s.w, FormatEvent(ev))
 	if ev.Kind == domain.ProgressTestFinished {
 		for _, fa := range ev.FailedAssertions {
 			fmt.Fprintln(s.w, "  - "+fa)
 		}
+	}
+	if ev.Kind == domain.ProgressTestStarted || ev.Kind == domain.ProgressTestFinished {
+		fmt.Fprintln(s.w, FormatTally(s.model.Tally()))
 	}
 }
 
@@ -57,24 +67,39 @@ func (s *lineSink) Emit(ev domain.ProgressEvent) {
 //
 // Grammar (fixed by design, see Frontend Models in ContractsDesign.md):
 //
+// Per-run events carry a run-attribution prefix in square brackets, followed
+// by the per-kind grammar. Suite-level events carry no such prefix, because
+// they belong to no single run.
+//
 //	ProgressSuiteStarted  -> "suite <suite-id> started: <n> tests"
-//	ProgressTestStarted   -> "test <test-id> [<rep>/<reps>] started"
-//	ProgressInvocation    -> "  #<seq> <identity-key> -> <outcome>"
-//	ProgressTestFinished  -> "test <test-id> [<rep>/<reps>] <verdict> (<duration>, <cost>)"
+//	ProgressTestStarted   -> "[<runID>] test <test-id> [<rep>/<reps>] started"
+//	ProgressInvocation    -> "[<runID>]   #<seq> <identity-key> -> <outcome>"
+//	ProgressTestFinished  -> "[<runID>] test <test-id> [<rep>/<reps>] <verdict> (<duration>, <cost>)"
 //	ProgressSuiteFinished -> "suite finished: <counts> (<total cost>)"
 //
-// A cost whose attribution is not domain.AttributionAttributed renders as
-// its attribution word, never as a currency amount.
+// The prefix is what makes lines from interleaved runs individually readable
+// under concurrency. A cost whose attribution is not domain.AttributionAttributed
+// renders as its attribution word, never as a currency amount.
 func FormatEvent(ev domain.ProgressEvent) string {
+	// runPrefix returns the attribution prefix for a per-run event whose
+	// run identity is non-empty, or the empty string when none is set.
+	// Suite-level events always carry an empty Run, so they receive no prefix.
+	runPrefix := func(runID string) string {
+		if runID == "" {
+			return ""
+		}
+		return "[" + runID + "] "
+	}
+
 	switch ev.Kind {
 	case domain.ProgressSuiteStarted:
 		return fmt.Sprintf("suite %s started: %d tests", ev.SuiteID, ev.TotalTests)
 	case domain.ProgressTestStarted:
-		return fmt.Sprintf("test %s [%d/%d] started", ev.TestID, ev.Repetition, ev.Repetitions)
+		return fmt.Sprintf("%stest %s [%d/%d] started", runPrefix(ev.Run.RunID), ev.TestID, ev.Repetition, ev.Repetitions)
 	case domain.ProgressInvocation:
-		return fmt.Sprintf("  #%d %s -> %s", ev.Seq, ev.Identity.Key(), ev.Outcome)
+		return fmt.Sprintf("%s  #%d %s -> %s", runPrefix(ev.Run.RunID), ev.Seq, ev.Identity.Key(), ev.Outcome)
 	case domain.ProgressTestFinished:
-		return fmt.Sprintf("test %s [%d/%d] %s (%s, %s)", ev.TestID, ev.Repetition, ev.Repetitions, ev.Verdict, ev.Duration, formatCost(ev.Cost))
+		return fmt.Sprintf("%stest %s [%d/%d] %s (%s, %s)", runPrefix(ev.Run.RunID), ev.TestID, ev.Repetition, ev.Repetitions, ev.Verdict, ev.Duration, formatCost(ev.Cost))
 	case domain.ProgressSuiteFinished:
 		return fmt.Sprintf("suite finished: %s (%s)", formatCounts(ev.Counts), formatCost(ev.TotalCost))
 	default:

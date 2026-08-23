@@ -18,9 +18,10 @@ package cli
 // per-run CLI flag requires updating this list, which signals that a
 // corresponding TUI setting must also be added.
 var TUIParityFlags = []string{
-	"repetitions",    // corresponds to SettingRepetitions
-	"catalog-folder", // corresponds to SettingCatalog
-	"report-path",    // corresponds to SettingReportPath
+	"repetitions",        // corresponds to SettingRepetitions
+	"catalog-folder",     // corresponds to SettingCatalog
+	"report-path",        // corresponds to SettingReportPath
+	"max-concurrent-runs", // corresponds to SettingMaxConcurrentRuns
 }
 
 // TUIParityBoolFlags lists every bool-flag (a flag that takes no value)

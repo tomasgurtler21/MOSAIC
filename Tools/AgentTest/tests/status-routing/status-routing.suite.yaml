@@ -1,0 +1,15 @@
+schema_version: 1
+id: status-routing
+description: >
+  Status-code-driven routing decisions in brownfield-tdd. Tests that the
+  orchestrator correctly interprets COMPLETED_NEEDS_ACTION (On Findings
+  route-back with review artifact) and PARTIALLY_DONE (re-dispatch same
+  agent type).
+defaults:
+  timeout: 10m
+  turn_limit: 30
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: findings-route-back.test.yaml
+  - path: partially-done-redispatch.test.yaml

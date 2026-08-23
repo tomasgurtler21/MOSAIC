@@ -158,10 +158,11 @@ func TestSuiteSelect_SuiteNavigation_StillWorks(t *testing.T) {
 	}
 }
 
-// TestSuiteSelect_Enter_StillStartsRun verifies that pressing Enter on the
-// suite-select screen still starts the chosen suite, regardless of the layout
-// change that removed per-run settings from this screen.
-func TestSuiteSelect_Enter_StillStartsRun(t *testing.T) {
+// TestSuiteSelect_Enter_BeginsSettingsFlow verifies that pressing Enter on the
+// suite-select screen enters the sequential settings flow, landing on
+// ScreenRetention as the first step before the suite starts. The full settings
+// flow must be completed before the run begins.
+func TestSuiteSelect_Enter_BeginsSettingsFlow(t *testing.T) {
 	runner := newFakeSuiteRunner()
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, runner))
 
@@ -169,12 +170,9 @@ func TestSuiteSelect_Enter_StillStartsRun(t *testing.T) {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
-	m, cmd := safeUpdate(t, m, keyType(tea.KeyEnter))
-	if m.Screen() != ScreenProgress {
-		t.Errorf("Screen() after Enter on suite-select = %q, want %q (Enter must still start the run)", m.Screen(), ScreenProgress)
-	}
-	if cmd == nil {
-		t.Errorf("Enter on suite-select produced no tea.Cmd; the run must have started")
+	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
+	if m.Screen() != ScreenRetention {
+		t.Errorf("Screen() after Enter on suite-select = %q, want %q (Enter must enter the settings flow starting at ScreenRetention)", m.Screen(), ScreenRetention)
 	}
 }
 
@@ -201,62 +199,17 @@ func TestSuiteSelect_Space_DoesNotChangeRetention(t *testing.T) {
 // T9.2 — Settings screen reachable; every setting focusable and changeable
 // ---------------------------------------------------------------------------
 
-// TestSuiteSelect_Tab_NavigatesToSettingsScreen verifies that pressing Tab on
-// the suite-select screen navigates to the run-configuration settings screen
-// (ScreenSettings). Tab is the affordance that makes the settings screen
-// discoverable: the help bar must list it so a user can find it.
-func TestSuiteSelect_Tab_NavigatesToSettingsScreen(t *testing.T) {
-	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
+// Note: The monolithic ScreenSettings was replaced by sequential per-setting
+// screens (Stage 3). Tab no longer navigates to a settings screen; Enter on
+// ScreenSuiteSelect enters the sequential flow (ScreenRetention → …).
+// The navigation and back-navigation tests for the old ScreenSettings are
+// superseded by settings_navigation_test.go which covers the sequential flow.
 
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
-	}
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Errorf("Screen() after Tab from suite-select = %q, want %q", m.Screen(), ScreenSettings)
-	}
-}
-
-// TestSettings_Tab_ReturnsToSuiteSelect verifies that pressing Tab from the
-// settings screen returns to suite-select, completing the round-trip navigation.
-// Esc should also return — this test covers Tab as the mirrored navigation key.
-func TestSettings_Tab_ReturnsToSuiteSelect(t *testing.T) {
-	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
-
-	// Navigate to settings.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after first Tab = %q, want %q (prerequisite failed)", m.Screen(), ScreenSettings)
-	}
-
-	// Navigate back.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSuiteSelect {
-		t.Errorf("Screen() after second Tab from settings = %q, want %q", m.Screen(), ScreenSuiteSelect)
-	}
-}
-
-// TestSettings_Esc_ReturnsToSuiteSelect verifies that pressing Esc from the
-// settings screen returns to suite-select.
-func TestSettings_Esc_ReturnsToSuiteSelect(t *testing.T) {
-	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after Tab = %q, want %q (prerequisite failed)", m.Screen(), ScreenSettings)
-	}
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEsc))
-	if m.Screen() != ScreenSuiteSelect {
-		t.Errorf("Screen() after Esc from settings = %q, want %q", m.Screen(), ScreenSuiteSelect)
-	}
-}
-
-// TestSettings_ShowsAllFourSettings verifies that the settings screen View
-// contains visible text for all four per-run settings: retention, repetitions,
-// report path, and catalog folder.
-func TestSettings_ShowsAllFourSettings(t *testing.T) {
+// TestSettings_AllScreensShowTheirSetting verifies that each sequential
+// settings screen renders its respective setting — retention, repetitions,
+// report path, and catalog folder — so the user can see the active value on
+// the screen that lets them change it.
+func TestSettings_AllScreensShowTheirSetting(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	o.Retention = domain.RetainNever
 	o.ReportPath = "/reports/out.json"
@@ -264,166 +217,77 @@ func TestSettings_ShowsAllFourSettings(t *testing.T) {
 	m := NewModel(o)
 	m.repetitions = intPtr(3)
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
+	// ScreenRetention must show a retention-related term.
+	m = advanceToSettingsFlow(t, m)
+	if m.Screen() != ScreenRetention {
+		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenRetention)
 	}
-
 	view := safeView(t, m)
 	viewLower := strings.ToLower(view)
+	if !strings.Contains(viewLower, "retention") && !strings.Contains(viewLower, "retain") && !strings.Contains(viewLower, "never") && !strings.Contains(viewLower, "always") {
+		t.Errorf("ScreenRetention View() does not mention retention.\nView:\n%s", view)
+	}
 
-	if !strings.Contains(viewLower, "retain") {
-		t.Errorf("settings View() does not mention retention; all four settings must be visible on the settings screen.\nView:\n%s", view)
+	// ScreenRepetitions must show a repetitions-related term.
+	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenRepetitions {
+		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenRepetitions)
 	}
-	if !strings.Contains(viewLower, "repetition") && !strings.Contains(viewLower, " reps") {
-		t.Errorf("settings View() does not mention repetitions; all four settings must be visible on the settings screen.\nView:\n%s", view)
+	view = safeView(t, m)
+	if !strings.Contains(strings.ToLower(view), "repetition") && !strings.Contains(strings.ToLower(view), "reps") && !strings.Contains(strings.ToLower(view), "repeat") {
+		t.Errorf("ScreenRepetitions View() does not mention repetitions.\nView:\n%s", view)
 	}
+
+	// ScreenReportPath must show the report path value.
+	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenReportPath {
+		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenReportPath)
+	}
+	view = safeView(t, m)
 	if !strings.Contains(view, "/reports/out.json") {
-		t.Errorf("settings View() does not show the report path %q; all four settings must be visible.\nView:\n%s", "/reports/out.json", view)
+		t.Errorf("ScreenReportPath View() does not show the report path.\nView:\n%s", view)
 	}
+
+	// ScreenCatalogFolder must show the catalog folder value.
+	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenCatalogFolder {
+		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenCatalogFolder)
+	}
+	view = safeView(t, m)
 	if !strings.Contains(view, "/catalog/main") {
-		t.Errorf("settings View() does not show the catalog folder %q; all four settings must be visible.\nView:\n%s", "/catalog/main", view)
+		t.Errorf("ScreenCatalogFolder View() does not show the catalog folder.\nView:\n%s", view)
 	}
 }
 
-// TestSettings_CursorNavigation_MovesAmongEntries verifies that Down and Up
-// move the cursor among the settings entries, and that the cursor starts at
-// the first entry.
-func TestSettings_CursorNavigation_MovesAmongEntries(t *testing.T) {
-	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
+// Note: The ScreenSettings cursor navigation tests (Down/Up among entries,
+// clamping at boundaries) are no longer applicable: the monolithic settings
+// screen with a shared cursor was replaced by sequential per-setting screens
+// (ScreenRetention → ScreenRepetitions → …). Navigation between settings
+// is now by screen transition rather than cursor movement.
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
-	}
-
-	entries := m.SettingsEntries()
-	if len(entries) < 2 {
-		t.Fatalf("SettingsEntries() returned %d entries; need at least 2 to test cursor movement", len(entries))
-	}
-
-	// Cursor should start at entry 0.
-	if m.settingsCursor != 0 {
-		t.Errorf("settingsCursor = %d at entry to settings screen, want 0", m.settingsCursor)
-	}
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-	if m.settingsCursor != 1 {
-		t.Errorf("settingsCursor after Down = %d, want 1", m.settingsCursor)
-	}
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyUp))
-	if m.settingsCursor != 0 {
-		t.Errorf("settingsCursor after Up = %d, want 0", m.settingsCursor)
-	}
-}
-
-// TestSettings_CursorDown_Clamped_AtLastEntry verifies that Down does not move
-// the cursor past the last entry: repeated Downs must stop at len(entries)-1.
-func TestSettings_CursorDown_Clamped_AtLastEntry(t *testing.T) {
-	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
-	}
-
-	entries := m.SettingsEntries()
-	last := len(entries) - 1
-
-	// Press Down enough times to reach (and attempt to pass) the last entry.
-	for i := 0; i <= last+2; i++ {
-		m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-	}
-	if m.settingsCursor != last {
-		t.Errorf("settingsCursor after excess Downs = %d, want %d (clamped at last entry)", m.settingsCursor, last)
-	}
-}
-
-// TestSettings_CursorUp_Clamped_AtFirstEntry verifies that Up does not move
-// the cursor before the first entry: pressing Up when settingsCursor is already
-// at 0 must leave it at 0. This is the symmetric boundary condition to
-// TestSettings_CursorDown_Clamped_AtLastEntry.
-func TestSettings_CursorUp_Clamped_AtFirstEntry(t *testing.T) {
-	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
-	}
-
-	// Cursor starts at 0 on entry to the settings screen.
-	if m.settingsCursor != 0 {
-		t.Fatalf("settingsCursor = %d at entry to settings screen, want 0 (prerequisite failed)", m.settingsCursor)
-	}
-
-	// Press Up: cursor must stay at 0, not wrap or underflow.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyUp))
-	if m.settingsCursor != 0 {
-		t.Errorf("settingsCursor after Up from position 0 = %d, want 0 (cursor must be clamped at the first entry)", m.settingsCursor)
-	}
-}
-
-// TestSettings_RetentionCycle_ViaActionKey verifies that pressing the action
-// key (Enter) while the retention entry is focused cycles the retention value,
-// and the changed value reaches the run that is subsequently started.
-func TestSettings_RetentionCycle_ViaActionKey(t *testing.T) {
-	var captured domain.RetentionPolicy
-	runner := &fakeSuiteRunner{
-		release:    make(chan struct{}),
-		cancelDone: make(chan struct{}),
-	}
-	// Use a custom preflight that always succeeds so we can observe the run start.
+// TestSettings_RetentionCycle_ViaSpaceOnRetentionScreen verifies that pressing
+// Space on ScreenRetention cycles the retention value, and the changed value
+// reaches the run that is subsequently started.
+func TestSettings_RetentionCycle_ViaSpaceOnRetentionScreen(t *testing.T) {
+	runner := newFakeSuiteRunner()
 	o := newFixtureOptions([]string{"suite-a.yaml"}, runner)
 	o.Retention = domain.RetainNever
-	// Wrap the runner to capture gotRetention without races.
 	m := NewModel(o)
 
-	// Navigate to settings.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
+	// Navigate to ScreenRetention.
+	m = advanceToSettingsFlow(t, m)
+	if m.Screen() != ScreenRetention {
+		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenRetention)
 	}
 
-	// Position cursor on the retention entry (it is the first entry by design).
-	entries := m.SettingsEntries()
-	retentionIdx := -1
-	for i, e := range entries {
-		if e.Kind == SettingRetention {
-			retentionIdx = i
-			break
-		}
-	}
-	if retentionIdx < 0 {
-		t.Fatalf("SettingsEntries() does not include a SettingRetention entry; all four settings must be present")
-	}
-	for i := 0; i < retentionIdx; i++ {
-		m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-	}
+	// Space cycles: RetainNever → RetainOnFailure → RetainAlways.
+	m, _ = safeUpdate(t, m, keyMsg(" "))
+	m, _ = safeUpdate(t, m, keyMsg(" "))
 
-	// Press Enter to cycle: RetainNever -> RetainOnFailure.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
-	if got := m.Retention(); got != domain.RetainOnFailure {
-		t.Errorf("Retention() after one Enter on retention entry = %q, want %q (Enter must cycle through retention values)", got, domain.RetainOnFailure)
-	}
-
-	// Cycle again: RetainOnFailure -> RetainAlways.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
-	if got := m.Retention(); got != domain.RetainAlways {
-		t.Errorf("Retention() after two Enters on retention entry = %q, want %q", got, domain.RetainAlways)
-	}
-
-	// Return to suite-select and start the run; the cycled value must reach the runner.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEsc))
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("Screen() after Esc = %q, want %q", m.Screen(), ScreenSuiteSelect)
-	}
-	m, cmd := safeUpdate(t, m, keyType(tea.KeyEnter))
-	if m.Screen() != ScreenProgress {
-		t.Fatalf("Screen() after Enter on suite-select = %q, want %q", m.Screen(), ScreenProgress)
-	}
+	// Complete the settings flow to start the run with RetainAlways.
+	m, cmd := advanceThroughSettingsToProgress(t, m)
 	if cmd == nil {
-		t.Fatalf("Enter on suite-select produced no tea.Cmd")
+		t.Fatalf("suite start produced no tea.Cmd")
 	}
 	msg := runCmd(t, cmd)
 	if msg != nil {
@@ -433,45 +297,28 @@ func TestSettings_RetentionCycle_ViaActionKey(t *testing.T) {
 	if !runner.called {
 		t.Fatalf("SuiteRunner.Run was never called")
 	}
-	captured = runner.gotRetention
-	if captured != domain.RetainAlways {
-		t.Errorf("SuiteRunner.Run received retention %q, want %q (the value cycled on the settings screen must reach the run)", captured, domain.RetainAlways)
+	if got := runner.gotRetention; got != domain.RetainAlways {
+		t.Errorf("SuiteRunner.Run received retention %q, want %q", got, domain.RetainAlways)
 	}
 }
 
-// TestSettings_ReportPath_ViaActionKey verifies that pressing the action key
-// (Enter) on the report-path entry opens an inline editor, typing into it
-// accumulates the text, and confirming with Enter commits the new value to the
-// Model's report path.
+// TestSettings_ReportPath_ViaActionKey verifies that on ScreenReportPath, typing
+// a new path and pressing Enter commits the new value to the Model's report path.
 func TestSettings_ReportPath_ViaActionKey(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	o.ReportPath = "/original/path.json"
 	m := NewModel(o)
 
-	// Navigate to settings.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
+	// Navigate to ScreenReportPath: Enter×3 from SuiteSelect.
+	m = advanceToSettingsFlow(t, m) // → ScreenRetention
+	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenRepetitions {
+		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenRepetitions)
 	}
-
-	// Find the report-path entry and position cursor on it.
-	entries := m.SettingsEntries()
-	reportIdx := -1
-	for i, e := range entries {
-		if e.Kind == SettingReportPath {
-			reportIdx = i
-			break
-		}
+	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenReportPath {
+		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenReportPath)
 	}
-	if reportIdx < 0 {
-		t.Fatalf("SettingsEntries() does not include a SettingReportPath entry")
-	}
-	for i := 0; i < reportIdx; i++ {
-		m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-	}
-
-	// Press Enter to open the inline editor for the report path.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
 
 	// Type the new path character by character.
 	const newPath = "/new/path.json"
@@ -480,135 +327,111 @@ func TestSettings_ReportPath_ViaActionKey(t *testing.T) {
 	}
 
 	// Confirm the edit.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
+	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenCatalogFolder {
+		t.Fatalf("Screen() after Enter on ScreenReportPath = %q, want %q", m.Screen(), ScreenCatalogFolder)
+	}
 
 	if got := m.ReportPath(); got != newPath {
-		t.Errorf("ReportPath() after editing via settings screen = %q, want %q", got, newPath)
+		t.Errorf("ReportPath() after editing via ScreenReportPath = %q, want %q", got, newPath)
 	}
 }
 
-// TestSettings_ReportPath_EscCancelsEdit verifies that pressing Esc while the
-// inline editor for report path is open discards the draft and leaves the
-// original value in place — the same cancel semantics the old inline editor had.
+// TestSettings_ReportPath_EscCancelsEdit verifies that pressing Esc on
+// ScreenReportPath while a draft is present discards the draft, leaves the
+// original value in place, and navigates back to ScreenRepetitions.
 func TestSettings_ReportPath_EscCancelsEdit(t *testing.T) {
 	const original = "/original/path.json"
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	o.ReportPath = original
 	m := NewModel(o)
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
+	// Navigate to ScreenReportPath.
+	m = advanceToSettingsFlow(t, m)
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // → ScreenRepetitions
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // → ScreenReportPath
+	if m.Screen() != ScreenReportPath {
+		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenReportPath)
 	}
 
-	entries := m.SettingsEntries()
-	reportIdx := -1
-	for i, e := range entries {
-		if e.Kind == SettingReportPath {
-			reportIdx = i
-			break
-		}
+	// Type a draft then cancel with Esc.
+	for _, ch := range "/typed/draft" {
+		m, _ = safeUpdate(t, m, keyMsg(string(ch)))
 	}
-	if reportIdx < 0 {
-		t.Fatalf("SettingsEntries() does not include a SettingReportPath entry")
-	}
-	for i := 0; i < reportIdx; i++ {
-		m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-	}
+	m, _ = safeUpdate(t, m, keyType(tea.KeyEsc))
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter)) // open inline editor
-	m, _ = safeUpdate(t, m, keyMsg("/typed/draft"))
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEsc)) // cancel
-
+	if m.Screen() != ScreenRepetitions {
+		t.Errorf("Screen() after Esc on ScreenReportPath = %q, want %q", m.Screen(), ScreenRepetitions)
+	}
 	if got := m.ReportPath(); got != original {
-		t.Errorf("ReportPath() after Esc during edit = %q, want %q (Esc must restore the original value)", got, original)
+		t.Errorf("ReportPath() after Esc = %q, want %q (Esc must discard the draft)", got, original)
 	}
 }
 
-// TestSettings_CatalogFolder_ViaActionKey verifies that the catalog-folder entry
-// on the settings screen is editable via the same inline-editor affordance as
-// report path: Enter opens the editor, typing accumulates, Enter confirms.
+// TestSettings_CatalogFolder_ViaActionKey verifies that on ScreenCatalogFolder,
+// typing a new path and pressing Enter commits the new value.
 func TestSettings_CatalogFolder_ViaActionKey(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	o.CatalogFolder = "/original/catalog"
 	m := NewModel(o)
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
-	}
-
-	entries := m.SettingsEntries()
-	catIdx := -1
-	for i, e := range entries {
-		if e.Kind == SettingCatalog {
-			catIdx = i
-			break
+	// Navigate to ScreenCatalogFolder: Enter×4 from SuiteSelect.
+	m = advanceToSettingsFlow(t, m)
+	for _, want := range []Screen{ScreenRepetitions, ScreenReportPath, ScreenCatalogFolder} {
+		m, _ = safeUpdate(t, m, keyMsg("\r"))
+		if m.Screen() != want {
+			t.Fatalf("Screen() = %q, want %q during navigation to ScreenCatalogFolder", m.Screen(), want)
 		}
-	}
-	if catIdx < 0 {
-		t.Fatalf("SettingsEntries() does not include a SettingCatalog entry")
-	}
-	for i := 0; i < catIdx; i++ {
-		m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
 	}
 
 	const newCatalog = "/new/catalog"
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
 	for _, ch := range newCatalog {
 		m, _ = safeUpdate(t, m, keyMsg(string(ch)))
 	}
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
+	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenMaxConcurrentRuns {
+		t.Fatalf("Screen() after Enter on ScreenCatalogFolder = %q, want %q", m.Screen(), ScreenMaxConcurrentRuns)
+	}
 
 	if got := m.CatalogFolder(); got != newCatalog {
-		t.Errorf("CatalogFolder() after editing via settings screen = %q, want %q", got, newCatalog)
+		t.Errorf("CatalogFolder() after editing via ScreenCatalogFolder = %q, want %q", got, newCatalog)
 	}
 }
 
-// TestSettings_CatalogFolder_EscCancelsEdit verifies that pressing Esc while
-// the inline editor for catalog folder is open discards the draft and leaves
-// the original value in place — the same cancel semantics as the report-path
-// inline editor.
+// TestSettings_CatalogFolder_EscCancelsEdit verifies that pressing Esc on
+// ScreenCatalogFolder discards the draft and navigates back to ScreenReportPath.
 func TestSettings_CatalogFolder_EscCancelsEdit(t *testing.T) {
 	const original = "/original/catalog"
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	o.CatalogFolder = original
 	m := NewModel(o)
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
-	}
-
-	entries := m.SettingsEntries()
-	catIdx := -1
-	for i, e := range entries {
-		if e.Kind == SettingCatalog {
-			catIdx = i
-			break
+	// Navigate to ScreenCatalogFolder.
+	m = advanceToSettingsFlow(t, m)
+	for _, want := range []Screen{ScreenRepetitions, ScreenReportPath, ScreenCatalogFolder} {
+		m, _ = safeUpdate(t, m, keyMsg("\r"))
+		if m.Screen() != want {
+			t.Fatalf("Screen() = %q, want %q during navigation", m.Screen(), want)
 		}
 	}
-	if catIdx < 0 {
-		t.Fatalf("SettingsEntries() does not include a SettingCatalog entry")
-	}
-	for i := 0; i < catIdx; i++ {
-		m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-	}
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter)) // open inline editor
-	m, _ = safeUpdate(t, m, keyMsg("/typed/draft"))
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEsc)) // cancel
+	// Type a draft then cancel.
+	for _, ch := range "/typed/draft" {
+		m, _ = safeUpdate(t, m, keyMsg(string(ch)))
+	}
+	m, _ = safeUpdate(t, m, keyType(tea.KeyEsc))
 
+	if m.Screen() != ScreenReportPath {
+		t.Errorf("Screen() after Esc on ScreenCatalogFolder = %q, want %q", m.Screen(), ScreenReportPath)
+	}
 	if got := m.CatalogFolder(); got != original {
-		t.Errorf("CatalogFolder() after Esc during edit = %q, want %q (Esc must restore the original value)", got, original)
+		t.Errorf("CatalogFolder() after Esc = %q, want %q (Esc must discard the draft)", got, original)
 	}
 }
 
 // TestSettings_ChangedCatalogFolder_ReachesPreflightOverrides verifies that a
-// catalog folder edited via the settings screen reaches
-// preflight.Overrides.CatalogFolder when the run starts — the same contract
-// the old direct-field tests verified, but now exercised through the real
-// key-driven path.
+// catalog folder changed before starting a run reaches
+// preflight.Overrides.CatalogFolder.
 func TestSettings_ChangedCatalogFolder_ReachesPreflightOverrides(t *testing.T) {
 	const defaultCatalog = "/default/catalog"
 	const newCatalog = "/new/catalog"
@@ -623,107 +446,57 @@ func TestSettings_ChangedCatalogFolder_ReachesPreflightOverrides(t *testing.T) {
 	}
 	m := NewModel(o)
 
-	// Navigate to settings and edit the catalog folder.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
-	}
-	entries := m.SettingsEntries()
-	catIdx := -1
-	for i, e := range entries {
-		if e.Kind == SettingCatalog {
-			catIdx = i
-			break
-		}
-	}
-	if catIdx < 0 {
-		t.Fatalf("SettingsEntries() does not include SettingCatalog")
-	}
-	for i := 0; i < catIdx; i++ {
-		m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-	}
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
-	for _, ch := range newCatalog {
-		m, _ = safeUpdate(t, m, keyMsg(string(ch)))
-	}
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
+	// Pre-set the catalog folder via direct field assignment (simulating prior edits).
+	m.catalogFolder = newCatalog
 
-	// Return to suite-select and start the run.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEsc))
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("Screen() after Esc = %q, want %q", m.Screen(), ScreenSuiteSelect)
-	}
-	m, cmd := safeUpdate(t, m, keyType(tea.KeyEnter))
+	// Start the run via the settings flow.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
+	_ = m
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
 
 	if captured.Overrides.CatalogFolder == nil {
-		t.Fatalf("preflight.Input.Overrides.CatalogFolder = nil; want *%q (edited value must reach the run)", newCatalog)
+		t.Fatalf("preflight.Input.Overrides.CatalogFolder = nil; want *%q", newCatalog)
 	}
 	if *captured.Overrides.CatalogFolder != newCatalog {
 		t.Errorf("preflight.Input.Overrides.CatalogFolder = %q, want %q", *captured.Overrides.CatalogFolder, newCatalog)
 	}
 }
 
-// TestSettings_Repetitions_ViaActionKey verifies that pressing the action key
-// (Enter) on the repetitions entry opens an inline numeric editor, typing a
-// digit accumulates the value, and confirming with Enter commits the new
-// repetitions override to the Model.
+// TestSettings_Repetitions_ViaActionKey verifies that on ScreenRepetitions,
+// typing a digit and pressing Enter commits the new repetitions override.
 func TestSettings_Repetitions_ViaActionKey(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	m := NewModel(o)
 
-	// Navigate to settings.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
+	// Navigate to ScreenRepetitions: Enter×2 from SuiteSelect.
+	m = advanceToSettingsFlow(t, m) // → ScreenRetention
+	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenRepetitions {
+		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenRepetitions)
 	}
 
-	// Find the repetitions entry and position cursor on it.
-	entries := m.SettingsEntries()
-	repIdx := -1
-	for i, e := range entries {
-		if e.Kind == SettingRepetitions {
-			repIdx = i
-			break
-		}
+	// Type the new repetitions count and confirm.
+	m, _ = safeUpdate(t, m, keyMsg("5"))
+	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenReportPath {
+		t.Fatalf("Screen() after Enter on ScreenRepetitions = %q, want %q", m.Screen(), ScreenReportPath)
 	}
-	if repIdx < 0 {
-		t.Fatalf("SettingsEntries() does not include a SettingRepetitions entry; all four settings must be present")
-	}
-	for i := 0; i < repIdx; i++ {
-		m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-	}
-
-	// Press Enter to open the numeric editor.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
-
-	// Type the new repetitions count digit by digit.
-	const newReps = "5"
-	for _, ch := range newReps {
-		m, _ = safeUpdate(t, m, keyMsg(string(ch)))
-	}
-
-	// Confirm the edit.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
 
 	got := m.Repetitions()
 	if got == nil {
-		t.Fatalf("Repetitions() = nil after editing via settings screen; want *5 (numeric editor must commit the typed value)")
+		t.Fatalf("Repetitions() = nil after editing via ScreenRepetitions; want *5")
 	}
 	if *got != 5 {
-		t.Errorf("Repetitions() = %d after editing via settings screen, want 5", *got)
+		t.Errorf("Repetitions() = %d after editing via ScreenRepetitions, want 5", *got)
 	}
 }
 
 // TestSettings_ChangedRepetitions_ReachesPreflightOverrides verifies that a
-// repetitions count edited via the settings screen reaches
-// preflight.Overrides.Repetitions when the run starts — the same contract
-// the old direct-field tests verified, but now exercised through the real
-// key-driven numeric-editor path.
+// repetitions count changed before starting a run reaches
+// preflight.Overrides.Repetitions.
 func TestSettings_ChangedRepetitions_ReachesPreflightOverrides(t *testing.T) {
-	const newReps = "3"
 	const wantReps = 3
 	var captured preflight.Input
 
@@ -735,43 +508,30 @@ func TestSettings_ChangedRepetitions_ReachesPreflightOverrides(t *testing.T) {
 	}
 	m := NewModel(o)
 
-	// Navigate to settings and edit the repetitions count.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
-	}
-	entries := m.SettingsEntries()
-	repIdx := -1
-	for i, e := range entries {
-		if e.Kind == SettingRepetitions {
-			repIdx = i
-			break
+	// Navigate to ScreenRepetitions and type "3".
+	m = advanceToSettingsFlow(t, m)
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // → ScreenRepetitions
+	m, _ = safeUpdate(t, m, keyMsg("3"))
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // confirm → ScreenReportPath
+
+	// Complete the remaining screens: ReportPath → CatalogFolder → MaxConcurrentRuns → Progress.
+	for _, want := range []Screen{ScreenCatalogFolder, ScreenMaxConcurrentRuns} {
+		m, _ = safeUpdate(t, m, keyMsg("\r"))
+		if m.Screen() != want {
+			t.Fatalf("Screen() = %q, want %q during final settings navigation", m.Screen(), want)
 		}
 	}
-	if repIdx < 0 {
-		t.Fatalf("SettingsEntries() does not include SettingRepetitions")
+	var cmd tea.Cmd
+	m, cmd = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenProgress {
+		t.Fatalf("Screen() = %q, want %q after final Enter", m.Screen(), ScreenProgress)
 	}
-	for i := 0; i < repIdx; i++ {
-		m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-	}
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
-	for _, ch := range newReps {
-		m, _ = safeUpdate(t, m, keyMsg(string(ch)))
-	}
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEnter))
-
-	// Return to suite-select and start the run.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyEsc))
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("Screen() after Esc = %q, want %q", m.Screen(), ScreenSuiteSelect)
-	}
-	m, cmd := safeUpdate(t, m, keyType(tea.KeyEnter))
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
 
 	if captured.Overrides.Repetitions == nil {
-		t.Fatalf("preflight.Input.Overrides.Repetitions = nil; want *%d (edited value must reach the run)", wantReps)
+		t.Fatalf("preflight.Input.Overrides.Repetitions = nil; want *%d", wantReps)
 	}
 	if *captured.Overrides.Repetitions != wantReps {
 		t.Errorf("preflight.Input.Overrides.Repetitions = %d, want %d", *captured.Overrides.Repetitions, wantReps)
@@ -782,25 +542,13 @@ func TestSettings_ChangedRepetitions_ReachesPreflightOverrides(t *testing.T) {
 // T9.3 — Every functional binding appears in the help bar
 // ---------------------------------------------------------------------------
 
-// TestSuiteSelect_HelpBar_IncludesSettingsNavKey verifies that the suite-select
-// screen's help bar lists the Tab key (the key that navigates to the settings
-// screen), so it is discoverable — closing the discoverability defect the old
-// undocumented 'e' key had.
-func TestSuiteSelect_HelpBar_IncludesSettingsNavKey(t *testing.T) {
-	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
-	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
-	}
-
-	view := safeView(t, m)
-	viewLower := strings.ToLower(view)
-	// "tab" should appear in the help bar section of the rendered output.
-	if !strings.Contains(viewLower, "tab") {
-		t.Errorf("suite-select View() help bar does not include 'tab' for the settings-navigation key; every functional key must be discoverable in the help bar.\nView:\n%s", view)
-	}
-}
+// Note: TestSuiteSelect_HelpBar_IncludesSettingsNavKey (Tab key) is removed.
+// The monolithic ScreenSettings accessed by Tab was replaced by sequential
+// per-setting screens. Tab is no longer a navigation key from suite-select.
 
 // TestSuiteSelect_HelpBar_DoesNotIncludeUndiscoverableEditKey verifies that the
+// 'e' key (old undiscoverable inline-edit affordance) no longer appears as a
+// binding in the suite-select help bar.
 // 'e' key (the old undiscoverable inline-edit affordance) no longer appears as a
 // binding in the suite-select help bar, since it has been removed from this screen.
 func TestSuiteSelect_HelpBar_DoesNotIncludeUndiscoverableEditKey(t *testing.T) {
@@ -818,74 +566,10 @@ func TestSuiteSelect_HelpBar_DoesNotIncludeUndiscoverableEditKey(t *testing.T) {
 	}
 }
 
-// TestSettings_HelpBar_IncludesActionKey verifies that the settings screen's
-// help bar lists the Enter key (the action key that edits or cycles a focused
-// setting). This key is the centerpiece of the settings interaction model and
-// must be discoverable.
-func TestSettings_HelpBar_IncludesActionKey(t *testing.T) {
-	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
-	}
-
-	view := safeView(t, m)
-	viewLower := strings.ToLower(view)
-	// The action key (Enter) must appear in the help bar with a descriptor.
-	// Accept "enter", "return", or "↵" as valid representations of the key.
-	hasEnterKey := strings.Contains(viewLower, "enter") ||
-		strings.Contains(viewLower, "return") ||
-		strings.Contains(view, "↵")
-	if !hasEnterKey {
-		t.Errorf("settings View() help bar does not mention the action key (enter/return/↵); every functional key must be discoverable.\nView:\n%s", view)
-	}
-}
-
-// TestSettings_HelpBar_IncludesNavigationKeys verifies that the settings screen's
-// help bar lists the navigation keys (up/down to move between entries), so a
-// user can discover how to move focus without trial and error.
-func TestSettings_HelpBar_IncludesNavigationKeys(t *testing.T) {
-	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
-	}
-
-	view := safeView(t, m)
-	viewLower := strings.ToLower(view)
-	// Accept "up/down", "↑/↓", "up" + "down", or the shared "j/k" convention.
-	hasNavKeys := strings.Contains(viewLower, "up/down") ||
-		strings.Contains(viewLower, "↑/↓") ||
-		strings.Contains(view, "↑") ||
-		(strings.Contains(viewLower, "up") && strings.Contains(viewLower, "down"))
-	if !hasNavKeys {
-		t.Errorf("settings View() help bar does not include navigation keys (up/down); they must be discoverable.\nView:\n%s", view)
-	}
-}
-
-// TestSettings_HelpBar_IncludesBackKey verifies that the settings screen's help
-// bar lists the Esc key (the key to return to suite-select), so a user can find
-// the exit without guessing.
-func TestSettings_HelpBar_IncludesBackKey(t *testing.T) {
-	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
-	}
-
-	view := safeView(t, m)
-	viewLower := strings.ToLower(view)
-	// Accept "esc", "escape", or "back" as the back/cancel key label.
-	hasBackKey := strings.Contains(viewLower, "esc") ||
-		strings.Contains(viewLower, "escape") ||
-		strings.Contains(viewLower, "back")
-	if !hasBackKey {
-		t.Errorf("settings View() help bar does not include the back/esc key; it must be discoverable.\nView:\n%s", view)
-	}
-}
+// Note: TestSettings_HelpBar_IncludesActionKey, TestSettings_HelpBar_IncludesNavigationKeys,
+// and TestSettings_HelpBar_IncludesBackKey are removed. They tested the help bar of
+// the monolithic ScreenSettings which was replaced by sequential per-setting screens.
+// Each sequential screen's help bar is verified by its own screen-specific test file.
 
 // ---------------------------------------------------------------------------
 // T9.4 — All four settings go through one uniform SettingsEntry mechanism
@@ -1047,28 +731,8 @@ func TestSettings_DisplayReflectsCurrentValues(t *testing.T) {
 	}
 }
 
-// TestSettings_FocusedEntryHighlighted verifies that the settings screen's
-// View marks the focused entry distinctly — with a cursor prefix, highlighting,
-// or similar affordance — so the user can tell which entry is focused. The
-// exact styling is an implementation choice; the test requires only that the
-// focused entry is visually differentiated from the others.
-func TestSettings_FocusedEntryHighlighted(t *testing.T) {
-	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
-
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() = %q, want %q", m.Screen(), ScreenSettings)
-	}
-
-	// View at cursor=0.
-	viewAtZero := safeView(t, m)
-
-	// Move cursor to position 1 and re-render.
-	m, _ = safeUpdate(t, m, keyType(tea.KeyDown))
-	viewAtOne := safeView(t, m)
-
-	// The two views must differ — a focused-entry indicator must move.
-	if viewAtZero == viewAtOne {
-		t.Errorf("settings View() is identical before and after moving the cursor; the focused entry must be visually differentiated (cursor prefix, colour, etc.)")
-	}
-}
+// Note: TestSettings_FocusedEntryHighlighted is removed. It tested cursor
+// highlighting on the monolithic ScreenSettings which was replaced by sequential
+// per-setting screens (ScreenRetention → ScreenRepetitions → …). Each sequential
+// screen is the sole focused element, so cursor differentiation within a single
+// screen is not applicable.

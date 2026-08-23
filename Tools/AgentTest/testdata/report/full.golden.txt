@@ -7,6 +7,7 @@ checkout-happy-path: PASS 1/1 passed (100%, required 0%)
   subject version: unknown
   subject model: unknown
   stub model: unknown
+  harness: unknown
   termination reason: unknown
 checkout-rejects-invalid-cart: FAIL 0/1 passed (0%, required 0%) [assertion_failure]
   - final_state.last_status: expected "REJECTED", got "COMPLETED" (final status did not match)
@@ -14,24 +15,29 @@ checkout-rejects-invalid-cart: FAIL 0/1 passed (0%, required 0%) [assertion_fail
   subject version: unknown
   subject model: unknown
   stub model: unknown
+  harness: unknown
   termination reason: unknown
 checkout-times-out: TIMEOUT 0/1 passed (0%, required 0%) [timeout]
   ? TIMEOUT
   subject version: unknown
   subject model: unknown
   stub model: unknown
+  harness: unknown
   termination reason: unknown
 checkout-state-integrity-fault: FAIL 0/0 passed (n/a, required 0%) [state_integrity] (infrastructure failure)
   ? STATE_INTEGRITY
   subject version: unknown
   subject model: unknown
   stub model: unknown
+  harness: unknown
   termination reason: unknown
+  excluded [state_integrity]: lock was reclaimed; one or more state updates may have been lost (unknown)
 checkout-cost-unattributed: PASS 1/1 passed (100%, required 0%) [cost_unattributed]
   ! cost_unattributed: log root missing
   subject version: unknown
   subject model: unknown
   stub model: unknown
+  harness: unknown
   termination reason: unknown
 
 Totals: FAIL=2 PASS=2 TIMEOUT=1

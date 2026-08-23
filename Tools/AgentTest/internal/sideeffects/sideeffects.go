@@ -33,6 +33,27 @@ func NewApplier(res fixtures.Resolver) Applier {
 	return &applier{resolver: res}
 }
 
+// NewContextualApplier constructs an Applier whose $ref resolution is
+// document-relative. On each Apply call, the factory is invoked with subjectDir
+// to produce a per-call resolver, so $ref paths are searched starting from the
+// call's subject directory rather than a single process-wide root.
+func NewContextualApplier(factory fixtures.ResolverFactory) Applier {
+	return &contextualApplier{factory: factory}
+}
+
+type contextualApplier struct {
+	factory fixtures.ResolverFactory
+}
+
+func (a *contextualApplier) Apply(subjectDir string, effects []domain.FileEffect) (domain.EffectLedger, error) {
+	resolver, err := a.factory(subjectDir)
+	if err != nil {
+		return domain.EffectLedger{}, fmt.Errorf("sideeffects: constructing resolver for %q: %w", subjectDir, err)
+	}
+	inner := &applier{resolver: resolver}
+	return inner.Apply(subjectDir, effects)
+}
+
 type applier struct {
 	resolver fixtures.Resolver
 }

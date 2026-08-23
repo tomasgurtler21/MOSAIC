@@ -44,6 +44,7 @@ var flagSpecs = []FlagSpec{
 	{Name: "--workspace-root", Placeholder: "<dir>", Summary: "Where sandboxes are created", ConsumesValue: true},
 	{Name: "--timeout", Placeholder: "<duration>", Summary: "Per-attempt timeout override", ConsumesValue: true},
 	{Name: "--repetitions", Placeholder: "<n>", Summary: "Repetition count override", ConsumesValue: true},
+	{Name: "--max-concurrent-runs", Placeholder: "<n>", Summary: "Max runs executing at once across the whole suite (>= 1)", ConsumesValue: true},
 	{Name: "--tui", Summary: "Launch the interactive frontend", ConsumesValue: false},
 	{Name: "--logger-bundle", Placeholder: "<dir>", Summary: "Logger bundle directory override", ConsumesValue: true},
 	{Name: "--cost-tool", Placeholder: "<path>", Summary: "Log-analysis tool path override", ConsumesValue: true},

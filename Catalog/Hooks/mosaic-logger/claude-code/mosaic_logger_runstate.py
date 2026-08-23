@@ -140,6 +140,25 @@ def extract_run_id(prompt: "str | None") -> "str | None":
         return None
 
 
+# Pattern for validating a run id — matches the full string, not a substring.
+_RUN_ID_VALID_RE = re.compile(r'^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{4}$')
+
+
+def is_valid_run_id(value: object) -> bool:
+    """Return True when value is a string matching the canonical run-id format.
+
+    The canonical format is {YYYYMMDD}T{HHMMSS}Z-{4 lowercase hex chars}.
+    Any non-string input, empty string, or string that does not match the
+    full pattern returns False. Never raises.
+    """
+    try:
+        if not isinstance(value, str) or not value:
+            return False
+        return bool(_RUN_ID_VALID_RE.match(value))
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Pending-dispatch state management
 # ---------------------------------------------------------------------------

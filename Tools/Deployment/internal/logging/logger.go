@@ -10,6 +10,31 @@ import (
 	"mosaic-deploy/internal/domain"
 )
 
+// options holds the optional configuration for a Logger constructed by New.
+type options struct {
+	logDir string
+}
+
+// Option configures a Logger constructed by New.
+type Option func(*options)
+
+// WithLogDir overrides the directory the two sink files are written to.
+//
+// The empty string selects the default, <mosaicRoot>/MosaicDeploy/logs — the
+// location this package's own doc comment calls fixed by contract, and which
+// other tooling may read. Backward compatibility is absolute: an invocation
+// that supplies no override writes to the same two paths, with the same
+// truncate-at-run-start and append behaviour, as it does today.
+//
+// A supplied directory is created on demand, and write failures against it
+// accumulate in Degraded rather than being returned, exactly as they do for
+// the default location.
+func WithLogDir(dir string) Option {
+	return func(o *options) {
+		o.logDir = dir
+	}
+}
+
 // loggerImpl is the concrete Logger implementation that writes to two sink files.
 type loggerImpl struct {
 	latestPath  string
@@ -17,16 +42,26 @@ type loggerImpl struct {
 	degraded    []error
 }
 
-// New constructs a Logger that writes to the two sinks under mosaicRoot. The log directory
-// is created on demand if absent. If the directory cannot be created or a sink cannot be
-// written, errors accumulate in Degraded rather than being returned.
+// New constructs a Logger that writes to the two sinks under mosaicRoot, or
+// under the directory WithLogDir supplies.
 //
-// Sink locations (fixed by contract):
+// Sink locations:
 //
-//	<mosaicRoot>/MosaicDeploy/logs/latest.log   truncated at StartRun
-//	<mosaicRoot>/MosaicDeploy/logs/history.log  appended
-func New(mosaicRoot string, cfg config.ToolConfig) Logger {
-	logDir := filepath.Join(mosaicRoot, "MosaicDeploy", "logs")
+//	<logDir>/latest.log   truncated at StartRun
+//	<logDir>/history.log  appended
+//
+// where logDir defaults to <mosaicRoot>/MosaicDeploy/logs.
+//
+// The parameter is variadic so every existing call site compiles unchanged.
+func New(mosaicRoot string, cfg config.ToolConfig, opts ...Option) Logger {
+	o := &options{}
+	for _, opt := range opts {
+		opt(o)
+	}
+	logDir := o.logDir
+	if logDir == "" {
+		logDir = filepath.Join(mosaicRoot, "MosaicDeploy", "logs")
+	}
 	return &loggerImpl{
 		latestPath:  filepath.Join(logDir, "latest.log"),
 		historyPath: filepath.Join(logDir, "history.log"),

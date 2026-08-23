@@ -144,7 +144,21 @@ func writeTestLine(w io.Writer, t TestReport) error {
 		if _, err := fmt.Fprintf(w, "  stub model: %s\n", subjectVersionOrUnknown(run.StubModel)); err != nil {
 			return err
 		}
+		if _, err := fmt.Fprintf(w, "  harness: %s\n", subjectVersionOrUnknown(run.HarnessID)); err != nil {
+			return err
+		}
 		if _, err := fmt.Fprintf(w, "  termination reason: %s\n", subjectVersionOrUnknown(run.TerminationReason)); err != nil {
+			return err
+		}
+	}
+	// Render excluded-run details so a reader can see why each run did not
+	// count without inspecting a retained sandbox.
+	for _, excl := range t.Aggregate.Exclusions {
+		terminationReason := excl.TerminationReason
+		if terminationReason == "" {
+			terminationReason = "unknown"
+		}
+		if _, err := fmt.Fprintf(w, "  excluded [%s]: %s (%s)\n", excl.Reason, excl.Detail, terminationReason); err != nil {
 			return err
 		}
 	}

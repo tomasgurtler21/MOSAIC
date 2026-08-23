@@ -4,10 +4,11 @@ package main
 // dependency wiring. The function strips surrounding double-quote characters from path-valued
 // flags and returns the raw pre-scan value (before defaulting or validation).
 //
-// scanGlobalFlags signature: (args []string) (mosaicRoot, catalogFolder string, allowExternal bool)
+// scanGlobalFlags signature: (args []string) (mosaicRoot, catalogFolder, logDir string, allowExternal bool)
 //
 // Existing tests verify the --mosaic-root behaviour. Tests for --catalog-folder pre-scan
-// (T5.1) are in catalog_folder_scan_test.go in this same package.
+// are in catalog_folder_scan_test.go and tests for --log-dir pre-scan are in
+// log_dir_scan_test.go, both in this same package.
 
 import "testing"
 
@@ -18,7 +19,7 @@ func TestScanGlobalFlags_QuotedMosaicRoot_Stripped(t *testing.T) {
 	rawPath := "/path/to/mosaic-root"
 	quotedPath := `"` + rawPath + `"`
 
-	got, _, _ := scanGlobalFlags([]string{"--mosaic-root", quotedPath, "deploy"})
+	got, _, _, _ := scanGlobalFlags([]string{"--mosaic-root", quotedPath, "deploy"})
 
 	if got != rawPath {
 		t.Errorf("scanGlobalFlags --mosaic-root %q = %q, want %q; quoted value must be stripped to match the unquoted form",
@@ -32,7 +33,7 @@ func TestScanGlobalFlags_QuotedMosaicRootEqualForm_Stripped(t *testing.T) {
 	rawPath := "/path/to/mosaic-root"
 	quotedPath := `"` + rawPath + `"`
 
-	got, _, _ := scanGlobalFlags([]string{"--mosaic-root=" + quotedPath, "deploy"})
+	got, _, _, _ := scanGlobalFlags([]string{"--mosaic-root=" + quotedPath, "deploy"})
 
 	if got != rawPath {
 		t.Errorf("scanGlobalFlags --mosaic-root=%q = %q, want %q; quoted value in --flag=value form must be stripped",
@@ -45,7 +46,7 @@ func TestScanGlobalFlags_QuotedMosaicRootEqualForm_Stripped(t *testing.T) {
 func TestScanGlobalFlags_UnquotedMosaicRoot_PassedThroughUnchanged(t *testing.T) {
 	rawPath := "/path/to/mosaic-root"
 
-	got, _, _ := scanGlobalFlags([]string{"--mosaic-root", rawPath, "deploy"})
+	got, _, _, _ := scanGlobalFlags([]string{"--mosaic-root", rawPath, "deploy"})
 
 	if got != rawPath {
 		t.Errorf("scanGlobalFlags --mosaic-root %q = %q, want %q; unquoted value must be returned unchanged",
@@ -61,8 +62,8 @@ func TestScanGlobalFlags_QuotedAndUnquotedMosaicRoot_ProduceIdenticalValues(t *t
 	rawPath := "/path/to/mosaic-root"
 	quotedPath := `"` + rawPath + `"`
 
-	gotQuoted, _, _ := scanGlobalFlags([]string{"--mosaic-root", quotedPath, "deploy"})
-	gotUnquoted, _, _ := scanGlobalFlags([]string{"--mosaic-root", rawPath, "deploy"})
+	gotQuoted, _, _, _ := scanGlobalFlags([]string{"--mosaic-root", quotedPath, "deploy"})
+	gotUnquoted, _, _, _ := scanGlobalFlags([]string{"--mosaic-root", rawPath, "deploy"})
 
 	if gotQuoted != gotUnquoted {
 		t.Errorf("quoted --mosaic-root produced %q, unquoted produced %q; both forms must yield the same value",

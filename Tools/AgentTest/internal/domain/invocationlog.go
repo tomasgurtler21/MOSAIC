@@ -57,6 +57,17 @@ const (
 	RunEventUnmatchedInvocation RunEventKind = "unmatched_invocation"
 	RunEventSubjectSpawned      RunEventKind = "subject_spawned"
 	RunEventSubjectExited       RunEventKind = "subject_exited"
+
+	// RunEventUncorrelatedCompletion reports that a completion event arrived
+	// while at least one dispatch was outstanding and could not be resolved
+	// to any of them.
+	//
+	// It is not raised for a completion arriving when nothing is outstanding:
+	// that is a legitimate un-stubbed dispatch. The distinction keys on a
+	// dispatch having existed, never on the correlation token being empty,
+	// because the token is empty on every dispatch for at least one supported
+	// harness.
+	RunEventUncorrelatedCompletion RunEventKind = "uncorrelated_completion"
 )
 
 // EchoOutcome is the result of comparing a stub's expected response against

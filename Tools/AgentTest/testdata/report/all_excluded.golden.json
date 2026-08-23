@@ -18,7 +18,21 @@
         "pass_rate": 0,
         "required_pass_rate": 0,
         "infrastructure_failure": true,
-        "total_cost": { "total_usd": 0, "attribution": "attributed", "detail": "" }
+        "total_cost": { "total_usd": 0, "attribution": "attributed", "detail": "" },
+        "exclusions": [
+          {
+            "key": { "run_id": "run-001", "test_id": "always-loses-its-lock", "run_number": 1 },
+            "reason": "state_integrity",
+            "termination_reason": "",
+            "detail": "lock was reclaimed; one or more state updates may have been lost"
+          },
+          {
+            "key": { "run_id": "run-001", "test_id": "always-loses-its-lock", "run_number": 2 },
+            "reason": "state_integrity",
+            "termination_reason": "",
+            "detail": "lock was reclaimed; one or more state updates may have been lost"
+          }
+        ]
       },
       "runs": [
         {
@@ -33,6 +47,7 @@
           "subject_version": "unknown",
           "subject_model": "unknown",
           "stub_model": "unknown",
+          "harness_id": "unknown",
           "termination_reason": "unknown"
         },
         {
@@ -47,6 +62,7 @@
           "subject_version": "unknown",
           "subject_model": "unknown",
           "stub_model": "unknown",
+          "harness_id": "unknown",
           "termination_reason": "unknown"
         }
       ]

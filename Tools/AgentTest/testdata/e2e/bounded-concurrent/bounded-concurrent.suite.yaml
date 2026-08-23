@@ -1,0 +1,16 @@
+schema_version: 1
+id: bounded-concurrent-e2e
+description: >
+  Two tests each with two repetitions, exercised by the bounded-concurrent
+  scenario test. Each test dispatches one collaborator whose response is
+  substituted directly by the scripted adapter. Both tests should pass at any
+  bound, so a correctness regression in the concurrent scheduler shows up as
+  wrong verdicts rather than wrong timing.
+defaults:
+  timeout: 30s
+  turn_limit: 5
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: run-alpha.test.yaml
+  - path: run-beta.test.yaml

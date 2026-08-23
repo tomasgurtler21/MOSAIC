@@ -42,24 +42,47 @@ const InterceptedToolName = "task"
 //
 // Ordering is global-then-sandbox: a project scope overrides a global one,
 // so the sandbox scope is highest precedence and comes last.
+//
+// When s carries a non-empty ControlDir (a real sandbox), both user scopes are
+// returned at their relocated paths under s.ControlDir, with InSandbox: true
+// and Isolatable: true: the spawn plan sets ConfigHomeEnvVar to point there,
+// so two concurrently running processes read from distinct per-run directories
+// and cannot observe each other's configuration.
+//
+// When s has an empty ControlDir (the port method ConfigScopes, which takes no
+// sandbox), both user scopes are returned at the paths this harness would
+// actually read from in a real run — resolved from ConfigHomeEnvVar or the
+// user's home directory — with InSandbox: false and Isolatable: false,
+// describing the real external locations rather than claiming a neutralization
+// that has no sandbox to relocate into.
 func Scopes(s domain.Sandbox) []domain.ConfigScope {
-	dir := userConfigDir()
+	var dir string
+	var inSandbox, isolatable bool
+	if s.ControlDir != "" {
+		// Real sandbox known: use the relocated configuration home so both user
+		// scopes are isolated to this run's control directory.
+		dir = UserConfigDir(s)
+		inSandbox = true
+		isolatable = true
+	} else {
+		// No sandbox (ConfigScopes port method): resolve from the environment
+		// so the enumeration names the real locations the harness would read.
+		dir = userConfigDir()
+		inSandbox = false
+		isolatable = false
+	}
 	return []domain.ConfigScope{
 		{
-			Name: "user-config",
-			Path: filepath.Join(dir, ConfigFileName),
-			// Neither non-sandbox scope is claimed Isolatable: no environment
-			// variable that relocates OpenCode's user-scope configuration is
-			// confirmed, and the adapter must not claim a neutralization
-			// capability it cannot back up.
-			InSandbox:  false,
-			Isolatable: false,
+			Name:       "user-config",
+			Path:       filepath.Join(dir, ConfigFileName),
+			InSandbox:  inSandbox,
+			Isolatable: isolatable,
 		},
 		{
 			Name:       "user-plugins",
 			Path:       filepath.Join(dir, "plugin"),
-			InSandbox:  false,
-			Isolatable: false,
+			InSandbox:  inSandbox,
+			Isolatable: isolatable,
 		},
 		{
 			Name:       "sandbox",
@@ -183,13 +206,15 @@ func inspectOneScope(probe ScopeProbe, scope domain.ConfigScope) domain.ScopeFin
 	doc, err := probe.Read(scope)
 	if err != nil {
 		if errors.Is(err, ErrScopeAbsent) {
+			// When the scope is Isolatable (a relocated sandbox scope), an
+			// absent document means the relocated location exists but has no
+			// user configuration in it — the relocation succeeded and the
+			// subject's config home is clean. When it is not Isolatable (an
+			// env-derived scope under ConfigScopes), the absence is merely
+			// noted; it neither isolates nor breaks anything.
 			return domain.ScopeFinding{
-				Scope:       scope,
-				Neutralized: scope.Isolatable,
-				// This adapter never relocates or otherwise interferes with a
-				// scope: it neither isolates nor breaks anything, so it
-				// reports true unconditionally, per ContractsDesign.md's
-				// domain.ScopeFinding contract.
+				Scope:                    scope,
+				Neutralized:              scope.Isolatable,
 				PreservesSubjectFunction: true,
 				Detail:                   fmt.Sprintf("%s configuration scope not found; treated as absent, not inspected", scope.Name),
 			}
@@ -216,13 +241,9 @@ func inspectOneScope(probe ScopeProbe, scope domain.ConfigScope) domain.ScopeFin
 		detail = fmt.Sprintf("%s configuration scope registers something that rewrites the intercepted call's input", scope.Name)
 	}
 	return domain.ScopeFinding{
-		Scope:         scope,
-		RewritesInput: finding.RewritesInput,
-		Neutralized:   neutralized,
-		// This adapter never relocates or otherwise interferes with a scope:
-		// it neither isolates nor breaks anything, so it reports true
-		// unconditionally, per ContractsDesign.md's domain.ScopeFinding
-		// contract.
+		Scope:                    scope,
+		RewritesInput:            finding.RewritesInput,
+		Neutralized:              neutralized,
 		PreservesSubjectFunction: true,
 		Detail:                   detail,
 	}

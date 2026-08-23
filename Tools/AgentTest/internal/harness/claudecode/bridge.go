@@ -83,6 +83,33 @@ func InterceptorEntries(pre, post Bridge) Contribution {
 	}
 }
 
+// AgentStartEntry generates this adapter's registration contribution for the
+// harness's in-session agent-start signal (SubagentStart hook). It is
+// registered separately from InterceptorEntries and CompletionEntry.
+//
+// The entry is asynchronous and purely observational: it never rewrites the
+// intercepted call's input and therefore does not contribute to the
+// single-rewriter composition invariant Compose enforces.
+func AgentStartEntry(agentStart Bridge) Contribution {
+	agentStartAsync := true
+
+	return Contribution{
+		Source:        "interceptor",
+		RewritesInput: false,
+		Settings: Settings{
+			Hooks: map[string][]Matcher{
+				"SubagentStart": {
+					{
+						Hooks: []Entry{
+							{Type: "command", Command: agentStart.Executable, Args: agentStart.Args, Async: &agentStartAsync},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 // CompletionEntry generates this adapter's registration contribution for the
 // harness's own completion signal — the SubagentStop hook, the source of the
 // collaborator's real reply once the collaborator has actually finished

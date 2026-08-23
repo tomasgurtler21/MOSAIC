@@ -182,7 +182,28 @@ func resolveWiringConfig(args []string) WiringConfig {
 		CostTimeout:   30 * time.Second,
 		DeployTimeout: 60 * time.Second,
 		Diag:          os.Stderr, // never stdout: stdout carries the machine-readable report in --format json
+
+		// Pre-scan the output mode so buildDeps can call
+		// ResolveDiagnosticDestination before either frontend's own flag
+		// parser runs. The same two-pass pattern as --harness above.
+		OutputMode: resolveOutputMode(args),
 	}
+}
+
+// resolveOutputMode pre-scans args for the output mode without a full flag
+// parse, matching selectFrontend's own pre-scan logic. --tui anywhere in the
+// args implies TUI mode; --format json implies JSON mode; everything else is
+// the human-readable CLI mode.
+func resolveOutputMode(args []string) OutputMode {
+	for _, arg := range args {
+		if arg == "--tui" {
+			return OutputModeTUI
+		}
+	}
+	if scanFlag(args, "--format", "text") == "json" {
+		return OutputModeJSON
+	}
+	return OutputModeCLI
 }
 
 // suitesRootFrom returns the resolved suite-discovery root directory for a TUI

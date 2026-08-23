@@ -1,0 +1,82 @@
+schema_version: 1
+id: findings-route-back
+description: >
+  Scenarios S-1 + G-1. plan-review returns COMPLETED_NEEDS_ACTION. The
+  orchestrator must route back to planner-tdd-soft (On Findings target), not
+  advance to contracts-designer (On Success target). The route-back dispatch
+  must include plan-review.md in input_artifacts so the creator can see the
+  review findings.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  opening_message: |
+    Task: Add a --verbose flag to the widgets CLI so it prints per-item
+    diagnostics to stderr.
+
+    Workflow type: brownfield-tdd
+
+    Checkpoints: disabled
+
+    Constraints: none. Do not ask me any further questions - proceed with the
+    workflow immediately and autonomously using the information above.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: findings-route-back.stubs.json
+
+timeout: 10m
+turn_limit: 30
+stop_after_invocations: 2
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: planning-after-planner.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: plan-review }
+      - { tool: dispatch, agent: planner-tdd-soft }
+
+  task_messages:
+    # Dispatch 1: plan-review (On Success from planner-tdd-soft#4)
+    - at: 1
+      identity: { tool: dispatch, agent: plan-review }
+      human_in_the_loop: false
+      required_input_artifacts:
+        - Orchestration-{run_id}/Requirements.md
+        - Orchestration-{run_id}/Plan.md
+      required_output_artifacts:
+        - Orchestration-{run_id}/plan-review.md
+
+    # Dispatch 2: planner-tdd-soft (On Findings from plan-review)
+    # G-1: plan-review.md MUST be in input_artifacts
+    - at: 2
+      identity: { tool: dispatch, agent: planner-tdd-soft }
+      human_in_the_loop: true
+      required_input_artifacts:
+        - Orchestration-{run_id}/Research.md
+        - Orchestration-{run_id}/Requirements.md
+        - Orchestration-{run_id}/plan-review.md
+      required_output_artifacts:
+        - Orchestration-{run_id}/Plan.md

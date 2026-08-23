@@ -25,7 +25,7 @@ type ModelCatalog struct {
 // invariant at test time.
 var cliModelCatalogs = []ModelCatalog{
 	{
-		HarnessID: HarnessIDClaudeCode,
+		HarnessID:  HarnessIDClaudeCode,
 		FormatHint: "claude-<model>-<version>",
 		IDs: []string{
 			"claude-opus-4-6",
@@ -40,19 +40,18 @@ var cliModelCatalogs = []ModelCatalog{
 		},
 	},
 	{
-		HarnessID: HarnessIDOpenCode,
+		HarnessID:  HarnessIDOpenCode,
 		FormatHint: "provider/model-id",
 		IDs: []string{
 			"github-copilot/claude-opus-4.6",
-			"github-copilot/claude-sonnet-4-6",
-			"anthropic/claude-opus-4-20250514",
-			"anthropic/claude-sonnet-4-20250514",
+			"github-copilot/claude-sonnet-4.6",
 		},
 	},
 	{
-		HarnessID: HarnessIDGHCPCLI,
+		HarnessID:  HarnessIDGHCPCLI,
 		FormatHint: "claude-<model>-<version> or gpt-<version>",
 		IDs: []string{
+			"claude-sonnet-5",
 			"claude-sonnet-4.6",
 			"claude-sonnet-4.5",
 			"claude-opus-4.6",

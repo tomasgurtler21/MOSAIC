@@ -10,9 +10,10 @@ package tui
 // The CLI side of the parity declaration lives in internal/cli/parity.go.
 
 // CLIParitySettingKinds lists every SettingKind for which the CLI command
-// surface has at least one equivalent flag. Every entry here must appear in
-// SettingsEntries(). Adding a new per-run setting to the settings screen
-// requires also adding the corresponding CLI flag(s) and updating this list.
+// surface has at least one equivalent flag. Each entry here must also appear
+// in SettingsEntries(), which the parity test verifies. Adding a new per-run
+// setting (and its corresponding sequential screen constant) requires also
+// adding the equivalent CLI flag(s) and updating this list.
 //
 // Parity rule: every entry in this list must have at least one flag in
 // cli.TUIParityFlags or cli.TUIParityBoolFlags, and vice versa.
@@ -26,4 +27,6 @@ var CLIParitySettingKinds = []SettingKind{
 	SettingReportPath,
 	// SettingCatalog maps to --catalog-folder on the CLI.
 	SettingCatalog,
+	// SettingMaxConcurrentRuns maps to --max-concurrent-runs on the CLI.
+	SettingMaxConcurrentRuns,
 }

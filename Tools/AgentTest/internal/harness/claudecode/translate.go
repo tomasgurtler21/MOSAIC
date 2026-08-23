@@ -49,6 +49,8 @@ func (a *Adapter) TranslateCall(phase domain.InterceptionPhase, native []byte) (
 		return a.translatePost(native)
 	case domain.PhaseCompletion:
 		return a.translateCompletion(native)
+	case domain.PhaseAgentStart:
+		return a.translateAgentStart(native)
 	default:
 		return domain.InterceptedCall{}, fmt.Errorf("%w: interception phase %q", ErrPayloadUnrecognised, phase)
 	}
@@ -120,13 +122,13 @@ func (a *Adapter) translatePost(native []byte) (domain.InterceptedCall, error) {
 }
 
 // translateCompletion translates the harness's SubagentStop completion signal
-// into a call carrying the recovered collaborator reply and the correlation
-// token. See correlation.go for the full mechanism basis documentation.
+// into a call carrying the recovered collaborator reply. See correlation.go
+// for the full mechanism basis documentation.
 //
-// CorrelationToken is populated directly from ToolUseID, the dispatch-scoped
-// identifier the harness sends on both the originating PreToolUse event and
-// this SubagentStop event. An absent ToolUseID produces an empty token — a
-// legitimate outcome for an un-stubbed dispatch — and is never an error.
+// CorrelationToken is left empty: SubagentStop carries no tool_use_id — the
+// field is absent from the payload entirely on every observed firing against
+// harness version 2.1.240. Completion correlation is recovered through the
+// agent-start association (agent_id), not from a shared dispatch identifier.
 // Only a malformed payload or a wrong hook_event_name is an error, mirroring
 // translatePre/translatePost's own validation.
 func (a *Adapter) translateCompletion(native []byte) (domain.InterceptedCall, error) {
@@ -140,10 +142,35 @@ func (a *Adapter) translateCompletion(native []byte) (domain.InterceptedCall, er
 
 	return domain.InterceptedCall{
 		Phase:            domain.PhaseCompletion,
-		CorrelationToken: payload.ToolUseID,
+		AgentID:          payload.AgentID,
+		CorrelationToken: "",
 		RawPayload:       json.RawMessage(native),
 		Capabilities:     a.Capabilities(),
 		ObservedResponse: payload.LastAssistantMessage,
+	}, nil
+}
+
+// translateAgentStart translates the harness's SubagentStart agent-start signal
+// into a call carrying the agent identifier. CorrelationToken is left empty:
+// SubagentStart carries no tool_use_id. ObservedResponse is left empty: there
+// is no collaborator reply at the agent-start point.
+func (a *Adapter) translateAgentStart(native []byte) (domain.InterceptedCall, error) {
+	var payload AgentStartPayload
+	if err := json.Unmarshal(native, &payload); err != nil {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: %v", ErrPayloadMalformed, err)
+	}
+	if payload.HookEventName != "SubagentStart" {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: hook_event_name %q", ErrPayloadUnrecognised, payload.HookEventName)
+	}
+	if payload.AgentID == "" {
+		return domain.InterceptedCall{}, fmt.Errorf("%w: agent_id is empty", ErrIdentityUndetermined)
+	}
+
+	return domain.InterceptedCall{
+		Phase:        domain.PhaseAgentStart,
+		AgentID:      payload.AgentID,
+		RawPayload:   json.RawMessage(native),
+		Capabilities: a.Capabilities(),
 	}, nil
 }
 

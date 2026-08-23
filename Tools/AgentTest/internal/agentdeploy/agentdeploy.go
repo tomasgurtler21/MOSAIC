@@ -423,13 +423,24 @@ func buildDeployArgs(req domain.DeployRequest, opts Options, selectionsPath stri
 	// --output json is always present so the deployer can parse the run summary.
 	args = append(args, "--output", "json")
 
-	// --mosaic-root and --catalog-folder follow the empty-means-omitted convention,
-	// identical to buildArgs for render, keeping both root-scoped overrides together.
+	// --mosaic-root, --catalog-folder, and --log-dir all follow the
+	// empty-means-omitted convention: the flag is omitted when the field is
+	// empty, and emitted verbatim when non-empty. All three root-scoped
+	// overrides are kept together so the convention is visible in one place.
 	if opts.MosaicRoot != "" {
 		args = append(args, "--mosaic-root", opts.MosaicRoot)
 	}
 	if opts.CatalogFolder != "" {
 		args = append(args, "--catalog-folder", opts.CatalogFolder)
+	}
+	// --log-dir overrides the directory the deployment tool writes its two
+	// sink files (latest.log and history.log) to. Omitted when empty so the
+	// tool falls back to its own default location — the correct behaviour for
+	// callers that have not opted into per-run isolation. When non-empty the
+	// value is the run's own sandbox location so concurrent invocations each
+	// write to their own directory and cannot contend on a shared path.
+	if req.LogDir != "" {
+		args = append(args, "--log-dir", req.LogDir)
 	}
 
 	// --selections is appended when a temporary tier-models file was written.

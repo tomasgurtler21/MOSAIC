@@ -23,8 +23,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"mosaic-agent-test/internal/authoring"
 	"mosaic-agent-test/internal/preflight"
 )
@@ -84,7 +82,9 @@ func TestSuiteSelect_Repetitions_NilWhenNotSet_ReachesPreflightOverrides(t *test
 	m := NewModel(o)
 	// repetitions is deliberately not set; it must be nil by default.
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	// Navigate through the full settings flow without typing a repetitions value
+	// so the screen keeps the default (0 = no override) and m.repetitions stays nil.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -110,7 +110,9 @@ func TestSuiteSelect_Repetitions_WhenSet_ReachesPreflightOverrides(t *testing.T)
 	m := NewModel(o)
 	m.repetitions = intPtr(wantReps)
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	// Navigate through the full settings flow; repetitions screen is pre-loaded
+	// with the configured override and confirms it on Enter.
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -141,7 +143,7 @@ func TestSuiteSelect_Repetitions_OverridePreservesOtherOverrides(t *testing.T) {
 	m.repetitions = intPtr(wantReps)
 	m.selectedSubjectModel = wantSubject
 
-	m, cmd := safeUpdate(t, m, keyMsg("\r"))
+	m, cmd := startSuiteFromSuiteSelect(t, m)
 	if cmd != nil {
 		_ = runCmd(t, cmd)
 	}
@@ -158,15 +160,17 @@ func TestSuiteSelect_Repetitions_OverridePreservesOtherOverrides(t *testing.T) {
 // T3.2: repetitions displayed on suite-select screen
 // ---------------------------------------------------------------------------
 
-// TestSettings_Repetitions_DisplayedOnScreen verifies that the settings
-// screen renders some indication of the repetitions setting, so the user can
-// see the effective repetitions count after navigating to run configuration.
+// TestSettings_Repetitions_DisplayedOnScreen verifies that ScreenRepetitions
+// renders some indication of the repetitions setting, so the user can see the
+// effective count after navigating into the settings flow.
 func TestSettings_Repetitions_DisplayedOnScreen(t *testing.T) {
 	m := NewModel(newFixtureOptions([]string{"suite.yaml"}, newFakeSuiteRunner()))
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after Tab = %q, want %q", m.Screen(), ScreenSettings)
+	// Navigate to ScreenRepetitions: Enter (SuiteSelect→Retention) then Enter (Retention→Repetitions).
+	m = advanceToSettingsFlow(t, m) // → ScreenRetention
+	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenRepetitions {
+		t.Fatalf("Screen() after Enter on ScreenRetention = %q, want %q", m.Screen(), ScreenRepetitions)
 	}
 
 	view := safeView(t, m)
@@ -178,24 +182,26 @@ func TestSettings_Repetitions_DisplayedOnScreen(t *testing.T) {
 		strings.Contains(viewLower, "×") ||
 		strings.Contains(viewLower, "times")
 	if !hasRepetitionDisplay {
-		t.Errorf("settings View() does not mention repetitions:\n%s", view)
+		t.Errorf("ScreenRepetitions View() does not mention repetitions:\n%s", view)
 	}
 }
 
 // TestSettings_Repetitions_OverrideValue_DisplayedOnScreen verifies that
 // when a repetitions override is set on the Model, its numeric value appears
-// in the settings screen's rendered output.
+// in ScreenRepetitions' rendered output.
 func TestSettings_Repetitions_OverrideValue_DisplayedOnScreen(t *testing.T) {
 	m := NewModel(newFixtureOptions([]string{"suite.yaml"}, newFakeSuiteRunner()))
 	m.repetitions = intPtr(7)
 
-	m, _ = safeUpdate(t, m, keyType(tea.KeyTab))
-	if m.Screen() != ScreenSettings {
-		t.Fatalf("Screen() after Tab = %q, want %q", m.Screen(), ScreenSettings)
+	// Navigate to ScreenRepetitions.
+	m = advanceToSettingsFlow(t, m) // → ScreenRetention
+	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	if m.Screen() != ScreenRepetitions {
+		t.Fatalf("Screen() after Enter on ScreenRetention = %q, want %q", m.Screen(), ScreenRepetitions)
 	}
 
 	view := safeView(t, m)
 	if !strings.Contains(view, "7") {
-		t.Errorf("settings View() does not display the repetitions override value 7:\n%s", view)
+		t.Errorf("ScreenRepetitions View() does not display the repetitions override value 7:\n%s", view)
 	}
 }

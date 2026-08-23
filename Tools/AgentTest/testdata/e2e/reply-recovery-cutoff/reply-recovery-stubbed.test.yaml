@@ -1,0 +1,43 @@
+schema_version: 1
+id: reply-recovery-stubbed
+description: >
+  A reply-recovery run with stop_after_invocations: 2 where both dispatches have
+  registered stubs. The cutoff must fire at the completion event of the second
+  (Nth) dispatch and the run must end with an early-exit disposition, not a
+  fault. Exactly N=2 invocation records must appear in the log — no phantom
+  (N+1)th record from a surplus dispatch.
+layer: subagent
+negative: false
+
+subject:
+  identity: standin-subject
+  agent: standin-subject
+  opening_message: |
+    Dispatch the greeter, then the helper, then attempt a third collaborator.
+  invocation_kind: subagent
+  allowed_tools: [Task]
+
+stub_registry: reply-recovery-stubbed.stubs.json
+stub_agents:
+  - identity:
+      tool: dispatch
+      agent: greeter
+    source: ../stub-agent-placeholder.md
+  - identity:
+      tool: dispatch
+      agent: helper
+    source: ../stub-agent-placeholder.md
+timeout: 30s
+turn_limit: 10
+stop_after_invocations: 2
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: orchestration.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: greeter }
+      - { tool: dispatch, agent: helper }

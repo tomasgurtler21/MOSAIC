@@ -94,6 +94,7 @@ var pureCorePackages = map[string]bool{
 	"internal/evaluate":      true,
 	"internal/concurrency":   true,
 	"internal/protocolcheck": true,
+	"internal/runprogress":   true, // display-only progress fold shared by both frontends
 }
 
 // adapterPackages are the packages classified as adapters and stores.
@@ -115,6 +116,8 @@ var adapterPackages = map[string]bool{
 	"internal/authoring":          true,
 	"internal/fixtures":           true,
 	"internal/preflight":          true,
+	"internal/diaglog":            true, // file-backed per-run diagnostic sink (adapter layer)
+	"internal/tui/screens":        true, // self-contained setting screens; imports only domain and styling libs
 }
 
 // useCasePackages are the packages classified as use cases.
@@ -161,14 +164,17 @@ var adapterImportExceptions = map[string]map[string]bool{
 // composition either frontend performs itself.
 var frontendImportExceptions = map[string]map[string]bool{
 	"internal/cli": {
-		"internal/report":    true,
-		"internal/preflight": true,
-		"internal/authoring": true,
+		"internal/report":       true,
+		"internal/preflight":    true,
+		"internal/authoring":    true,
+		"internal/runprogress":  true, // pure core shared by both frontends for progress display
 	},
 	"internal/tui": {
-		"internal/report":    true,
-		"internal/preflight": true,
-		"internal/authoring": true,
+		"internal/report":       true,
+		"internal/preflight":    true,
+		"internal/authoring":    true,
+		"internal/runprogress":  true, // pure core shared by both frontends for progress display
+		"internal/tui/screens":  true, // setting screens subpackage: adapter layer, permitted by frontend
 	},
 }
 

@@ -171,67 +171,29 @@ func (m Model) viewSuiteSelect() string {
 }
 
 // ---------------------------------------------------------------------------
-// Run configuration settings
-// ---------------------------------------------------------------------------
-
-// settingsHelp returns the help entries for the settings screen. All
-// functional keys are listed so none is undiscoverable.
-func settingsHelp() []tuicommon.HelpEntry {
-	return []tuicommon.HelpEntry{
-		{Key: "up/down", Desc: "move"},
-		{Key: "enter", Desc: "change"},
-		{Key: "esc", Desc: "back"},
-		{Key: tuicommon.GlobalKeys.Cancel.Help().Key, Desc: tuicommon.GlobalKeys.Cancel.Help().Desc},
-	}
-}
-
-// viewSettings renders the run-configuration settings screen. Each
-// SettingsEntry is shown as a labelled row; the focused row is marked with a
-// cursor prefix. When an inline or numeric editor is open for an entry, that
-// entry shows the draft value in place of its current value.
-func (m Model) viewSettings() string {
-	width := m.contentWidth()
-	entries := m.SettingsEntries()
-
-	var b strings.Builder
-	for i, e := range entries {
-		if i > 0 {
-			b.WriteString("\n")
-		}
-		prefix := "  "
-		if i == m.settingsCursor {
-			prefix = "> "
-		}
-
-		// When this entry's editor is open, show the draft instead of the
-		// committed value.
-		display := e.Display
-		if m.settingEditing == e.Kind {
-			display = m.settingDraft + "_"
-		}
-
-		b.WriteString(tuicommon.Truncate(fmt.Sprintf("%s%s: %s", prefix, e.Label, display), width))
-	}
-
-	return m.renderScreen("Run Configuration", "", b.String(), settingsHelp())
-}
-
-// ---------------------------------------------------------------------------
 // Live progress
 // ---------------------------------------------------------------------------
 
 func (m Model) viewProgress() string {
 	width := m.contentWidth()
 
-	lines := []string{fmt.Sprintf("Total tests: %d", m.totalTests)}
-	if testID, rep, reps, ok := m.Running(); ok {
-		lines = append(lines, tuicommon.Truncate(
-			fmt.Sprintf("Running: %s (repetition %d/%d)", testID, rep, reps), width))
-		lines = append(lines, fmt.Sprintf("Invocations observed: %d", m.observedInvocations))
+	lines := []string{fmt.Sprintf("Total tests: %d", m.TotalTests())}
+
+	running := m.Running()
+	if len(running) > 0 {
+		for _, rp := range running {
+			lines = append(lines, tuicommon.Truncate(
+				fmt.Sprintf("Running: %s (repetition %d/%d)", rp.Key.TestID, rp.Key.RunNumber, rp.Repetitions), width))
+			inv := m.ObservedInvocations(rp.Key)
+			if inv > 0 {
+				lines = append(lines, fmt.Sprintf("Invocations observed: %d", inv))
+			}
+		}
 	} else {
 		lines = append(lines, "Waiting for the next test to start...")
 	}
-	lines = append(lines, fmt.Sprintf("Finished: %d", len(m.finished)))
+	tally := m.Tally()
+	lines = append(lines, fmt.Sprintf("Running: %d | Finished: %d | Remaining: %d", tally.Running, tally.Finished, tally.Remaining))
 
 	body := strings.Join(lines, "\n")
 	if m.showFailureDetail && m.detailPane != nil {
