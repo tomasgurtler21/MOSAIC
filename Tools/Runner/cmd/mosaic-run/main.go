@@ -25,6 +25,7 @@ import (
 	"mosaic-run/internal/artifact"
 	"mosaic-run/internal/cli"
 	"mosaic-run/internal/debuglog"
+	"mosaic-run/internal/dispatchlog"
 	"mosaic-run/internal/domain"
 	"mosaic-run/internal/harness"
 	"mosaic-run/internal/runscan"
@@ -76,6 +77,12 @@ func main() {
 	logger := debuglog.New(workDir)
 	defer logger.Close()
 
+	// Construct the process-level dispatch logger. One logger per process;
+	// records every subagent ProtocolRequest/ProtocolResponse pair as JSONL.
+	// File is created lazily on first use and closed via defer.
+	dispLogger := dispatchlog.New(workDir)
+	defer dispLogger.Close()
+
 	// CLI mode: pre-scan flags needed for dependency wiring before cobra parses them,
 	// then resolve run identity (run_id, run folder, is-new-run) before constructing
 	// the session. Resolving run identity here ensures the session's ArtifactStore is
@@ -116,8 +123,9 @@ func main() {
 		os.Exit(2)
 	}
 
-	// Associate the run_id with the log file now that identity is resolved.
+	// Associate the run_id with both log files now that identity is resolved.
 	logger.SetRunID(runIdentity.RunID)
+	dispLogger.SetRunID(runIdentity.RunID)
 
 	// Build the artifact store with the process logger so that path anomalies
 	// (non-absolute or non-run-scoped paths) are captured in the debug log.
@@ -154,15 +162,16 @@ func main() {
 	// The store path matches runIdentity.RunFolder, so session I/O and the COMPLETED
 	// marker write both target the same Orchestration-{run_id}/Orchestration.md file.
 	sess := session.New(session.Deps{
-		Harness:    h,
-		Store:      store,
-		Clock:      &realClock{},
-		Interact:   interact,
-		Debug:      logger,
-		Routing:    routingDeps.Routing,
-		Manual:     routingDeps.Manual,
-		PreConsult: routingDeps.PreConsult,
-		Approvals:  routingDeps.Approvals,
+		Harness:     h,
+		Store:       store,
+		Clock:       &realClock{},
+		Interact:    interact,
+		Debug:       logger,
+		DispatchLog: dispLogger,
+		Routing:     routingDeps.Routing,
+		Manual:      routingDeps.Manual,
+		PreConsult:  routingDeps.PreConsult,
+		Approvals:   routingDeps.Approvals,
 	})
 
 	// Pass the pre-resolved store and identity so that cli.Run skips its own
@@ -186,6 +195,11 @@ func runTUIMode(args []string) {
 	// runs more than once per process), ensuring exactly one log file per run.
 	logger := debuglog.New(workDir)
 	defer logger.Close()
+
+	// Construct the process-level dispatch logger once here, shared across all
+	// sessFactory calls, ensuring exactly one dispatch log file per process/run.
+	dispLogger := dispatchlog.New(workDir)
+	defer dispLogger.Close()
 
 	// Pre-scan --claude-path so it is available to the session factory.
 	claudePathTUI := scanFlag(args, "--claude-path")
@@ -248,15 +262,16 @@ func runTUIMode(args []string) {
 		routingDeps := buildDeps(cfg.Settings, rawInvoker, programRef, artifact.NewApprovalReader())
 
 		return session.New(session.Deps{
-			Harness:    h,
-			Store:      store,
-			Clock:      &realClock{},
-			Interact:   programRef,
-			Debug:      logger,
-			Routing:    routingDeps.Routing,
-			Manual:     routingDeps.Manual,
-			PreConsult: routingDeps.PreConsult,
-			Approvals:  routingDeps.Approvals,
+			Harness:     h,
+			Store:       store,
+			Clock:       &realClock{},
+			Interact:    programRef,
+			Debug:       logger,
+			DispatchLog: dispLogger,
+			Routing:     routingDeps.Routing,
+			Manual:      routingDeps.Manual,
+			PreConsult:  routingDeps.PreConsult,
+			Approvals:   routingDeps.Approvals,
 		})
 	}
 
@@ -272,12 +287,13 @@ func runTUIMode(args []string) {
 		os.Exit(1)
 	}
 
-	// Associate the run_id with the log file if identity is already resolved
+	// Associate the run_id with both log files if identity is already resolved
 	// (single-candidate auto-resume, --run flag, or --new-run flag). When
 	// identity is deferred to the run-select screen (multi-candidate), the
 	// run_id will be associated via a separate SetRunID call once selected.
 	if identity.RunID != "" {
 		logger.SetRunID(identity.RunID)
+		dispLogger.SetRunID(identity.RunID)
 	}
 
 	// Construct the initial session using the resolved identity (or placeholder for multi-candidate).

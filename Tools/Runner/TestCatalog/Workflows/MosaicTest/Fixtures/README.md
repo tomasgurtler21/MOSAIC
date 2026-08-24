@@ -8,7 +8,7 @@ Each workflow has exactly one seed root. Seed that directory and nothing else.
 
 | Workflow | Mode | Seed path |
 |----------|------|-----------|
-| `smoke-single` | any | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\smoke-single` |
+| `smoke-single` | auto, auto-review | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\smoke-single` |
 | `payload-stress` | any | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\payload-stress` |
 | `staged-preplaced-plan` | any | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\staged-preplaced-plan` |
 | `orchestrated-linear` | **orchestrated only** | `C:\AI\MOSAIC\MOSAIC\Tools\Runner\TestCatalog\Workflows\MosaicTest\Fixtures\orchestrated-linear` |

@@ -25,6 +25,14 @@ package harness_test
 //     contribute nothing to the accumulated text.
 //   - The first terminal event wins: events after it are not read.
 //   - On every error path the returned text is empty.
+//   - A tool_use event with part.tool == "task" and part.state.status == "completed"
+//     has its <task_result>-wrapped payload extracted as the accumulated text.
+//   - A tool_use event with part.tool == "task" but status != "completed"
+//     contributes nothing.
+//   - A completed task tool_use event interleaved with text events: the task
+//     result text is accumulated alongside any surrounding text events.
+//   - A completed task tool_use event whose output has no <task_result> tags
+//     falls through gracefully: the raw output is accumulated unchanged.
 
 import (
 	"errors"
@@ -50,6 +58,22 @@ func ocTextLine(text string) string {
 func ocToolUseLine() string {
 	return `{"type":"tool_use","timestamp":0,"sessionID":"s1","part":{"id":"p3","callID":"c1","tool":"bash",` +
 		`"state":{"status":"completed"}}}`
+}
+
+// ocTaskToolUseLine produces a tool_use JSONL line for a completed task-tool
+// event. The output parameter is the raw string placed into part.state.output,
+// which for real subagent results is a <task_result>...</task_result>-wrapped
+// Communication Protocol JSON.
+func ocTaskToolUseLine(output string) string {
+	return `{"type":"tool_use","timestamp":0,"sessionID":"s1","part":{"id":"p4","callID":"c2","tool":"task",` +
+		`"state":{"status":"completed","output":` + jsonQuote(output) + `}}}`
+}
+
+// ocTaskToolUseLineStatus produces a tool_use JSONL line for a task-tool event
+// with an arbitrary status. Use this to test non-completed task events.
+func ocTaskToolUseLineStatus(status, output string) string {
+	return `{"type":"tool_use","timestamp":0,"sessionID":"s1","part":{"id":"p5","callID":"c3","tool":"task",` +
+		`"state":{"status":` + jsonQuote(status) + `,"output":` + jsonQuote(output) + `}}}`
 }
 
 func ocStepFinishLine(reason string) string {
@@ -333,5 +357,127 @@ func TestParseOpenCodeEnvelope_BlankLinesAmongEvents_Skipped(t *testing.T) {
 	}
 	if text != "content" {
 		t.Errorf("want text=%q, got %q", "content", text)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// task tool_use event extraction
+// ---------------------------------------------------------------------------
+
+// A completed task tool_use event whose output is wrapped in <task_result>
+// tags must have those tags stripped and the inner content returned as the
+// accumulated text. This is the primary subagent result delivery path for
+// OpenCode runners.
+func TestParseOpenCodeEnvelope_CompletedTaskToolUse_ExtractsTaskResultPayload(t *testing.T) {
+	protocolJSON := `{"agent_instance_id":"worker#1","status_code":"SUCCESS","status_message":"done"}`
+	output := `<task id="t1" state="completed"><task_result>` + protocolJSON + `</task_result></task>`
+
+	data := ocStream(
+		ocStepStartLine(),
+		ocTaskToolUseLine(output),
+		ocStepFinishLine("stop"),
+	)
+
+	text, err := harness.ParseOpenCodeEnvelope(data)
+
+	if err != nil {
+		t.Fatalf("want no error, got %v", err)
+	}
+	if text != protocolJSON {
+		t.Errorf("want tag-stripped payload %q, got %q", protocolJSON, text)
+	}
+}
+
+// An ordinary (non-task) tool_use event must continue to contribute nothing
+// to the accumulated text. This pins the existing contract against regression
+// now that the parser gains a new code path for task-tool events.
+func TestParseOpenCodeEnvelope_OrdinaryToolUseEvent_StillContributesNothing(t *testing.T) {
+	data := ocStream(
+		ocStepStartLine(),
+		ocTextLine("before"),
+		ocToolUseLine(),
+		ocTextLine("after"),
+		ocStepFinishLine("stop"),
+	)
+
+	text, err := harness.ParseOpenCodeEnvelope(data)
+
+	if err != nil {
+		t.Fatalf("want no error, got %v", err)
+	}
+	if text != "beforeafter" {
+		t.Errorf("want non-task tool_use to contribute nothing (text=%q), got %q", "beforeafter", text)
+	}
+}
+
+// A completed task tool_use event interleaved with surrounding text events
+// must accumulate its extracted payload alongside those text events. The task
+// result text is written to the accumulator at the point in stream order where
+// the event appears.
+func TestParseOpenCodeEnvelope_TaskToolUseInterleavedWithText_AccumulatesCorrectly(t *testing.T) {
+	protocolJSON := `{"agent_instance_id":"worker#2","status_code":"SUCCESS","status_message":"ok"}`
+	output := `<task_result>` + protocolJSON + `</task_result>`
+
+	data := ocStream(
+		ocStepStartLine(),
+		ocTextLine("prefix "),
+		ocTaskToolUseLine(output),
+		ocTextLine(" suffix"),
+		ocStepFinishLine("stop"),
+	)
+
+	text, err := harness.ParseOpenCodeEnvelope(data)
+
+	if err != nil {
+		t.Fatalf("want no error, got %v", err)
+	}
+	want := "prefix " + protocolJSON + " suffix"
+	if text != want {
+		t.Errorf("want %q, got %q", want, text)
+	}
+}
+
+// A completed task tool_use event whose output contains no <task_result> tags
+// must fall through gracefully: the raw output is accumulated unchanged rather
+// than returning an error.
+func TestParseOpenCodeEnvelope_TaskToolUseNoTaskResultTags_AccumulatesRawOutput(t *testing.T) {
+	rawOutput := `{"agent_instance_id":"worker#3","status_code":"SUCCESS","status_message":"bare"}`
+
+	data := ocStream(
+		ocStepStartLine(),
+		ocTaskToolUseLine(rawOutput),
+		ocStepFinishLine("stop"),
+	)
+
+	text, err := harness.ParseOpenCodeEnvelope(data)
+
+	if err != nil {
+		t.Fatalf("want graceful fallback (no error), got %v", err)
+	}
+	if text != rawOutput {
+		t.Errorf("want raw output accumulated unchanged %q, got %q", rawOutput, text)
+	}
+}
+
+// A task tool_use event that is NOT completed (e.g. status == "running" or
+// "error") must contribute nothing to the accumulated text, preserving the
+// no-contribution contract for non-terminal tool states.
+func TestParseOpenCodeEnvelope_TaskToolUseNotCompleted_ContributesNothing(t *testing.T) {
+	output := `<task_result>{"agent_instance_id":"worker#4","status_code":"SUCCESS","status_message":"x"}</task_result>`
+
+	data := ocStream(
+		ocStepStartLine(),
+		ocTextLine("only this"),
+		ocTaskToolUseLineStatus("running", output),
+		ocStepFinishLine("stop"),
+	)
+
+	text, err := harness.ParseOpenCodeEnvelope(data)
+
+	if err != nil {
+		t.Fatalf("want no error, got %v", err)
+	}
+	if text != "only this" {
+		t.Errorf("want non-completed task tool_use to contribute nothing, got %q", text)
 	}
 }

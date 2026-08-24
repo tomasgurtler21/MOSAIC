@@ -53,10 +53,21 @@ type openCodeEventLine struct {
 	Error *openCodeError `json:"error"`
 }
 
+// openCodePartState decodes the subset of a tool_use event's part.state
+// object that the parser reads. Only status and output are needed;
+// everything else (input, title, metadata, time, error, attachments)
+// is deliberately not decoded.
+type openCodePartState struct {
+	Status string `json:"status"`
+	Output string `json:"output"`
+}
+
 type openCodePart struct {
-	Type   string `json:"type"`
-	Text   string `json:"text"`
-	Reason string `json:"reason"`
+	Type   string            `json:"type"`
+	Text   string            `json:"text"`
+	Reason string            `json:"reason"`
+	Tool   string            `json:"tool"`
+	State  openCodePartState `json:"state"`
 }
 
 type openCodeError struct {
@@ -64,6 +75,27 @@ type openCodeError struct {
 	Data struct {
 		Message string `json:"message"`
 	} `json:"data"`
+}
+
+// stripTaskResultEnvelope extracts the text between the first
+// <task_result> open tag and the last </task_result> close tag,
+// trimming surrounding whitespace. If either tag is absent or
+// they do not form a valid pair (close before open), the input
+// string is returned unchanged.
+func stripTaskResultEnvelope(s string) string {
+	const openTag = "<task_result>"
+	const closeTag = "</task_result>"
+
+	start := strings.Index(s, openTag)
+	if start == -1 {
+		return s
+	}
+	end := strings.LastIndex(s, closeTag)
+	if end == -1 || end < start {
+		return s
+	}
+	inner := s[start+len(openTag) : end]
+	return strings.TrimSpace(inner)
 }
 
 // ParseOpenCodeEnvelope reads `opencode run --format json` output as a
@@ -118,7 +150,15 @@ func ParseOpenCodeEnvelope(data []byte) (string, error) {
 			}
 			return "", fmt.Errorf("%w: %s: %s", ErrOpenCodeStreamError, name, message)
 
-		case ocEventStepStart, ocEventToolUse:
+		case ocEventToolUse:
+			if event.Part.Tool == "task" && event.Part.State.Status == "completed" {
+				inner := stripTaskResultEnvelope(event.Part.State.Output)
+				accumulated.WriteString(inner)
+			}
+			// Non-task tool_use events (and task events that are not completed)
+			// contribute nothing to the accumulator.
+
+		case ocEventStepStart:
 			// Recognised; contributes nothing to the accumulator.
 		}
 	}

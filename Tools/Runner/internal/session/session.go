@@ -113,6 +113,13 @@ type Deps struct {
 	// otherwise identical with and without a logger.
 	Debug domain.DebugLogger
 
+	// DispatchLog records the full ProtocolRequest/ProtocolResponse pairs for
+	// every subagent invocation to a dedicated JSONL log file.
+	//
+	// Optional: nil is normalised to domain.NopDispatchLogger in New, so the
+	// dispatch loop never nil-checks it.
+	DispatchLog domain.DispatchLogger
+
 	// Routing is the configured routing decision-maker consulted whenever the
 	// engine yields a Consult or Deviation decision. In production this is the
 	// OrchestratorConsultant; a run started with manual resolution still uses
@@ -146,6 +153,9 @@ type Deps struct {
 func New(deps Deps) Session {
 	if deps.Debug == nil {
 		deps.Debug = domain.NopDebugLogger{}
+	}
+	if deps.DispatchLog == nil {
+		deps.DispatchLog = domain.NopDispatchLogger{}
 	}
 	if deps.Approvals == nil {
 		deps.Approvals = unreadableApprovalReader{}
@@ -181,6 +191,21 @@ type sessionImpl struct {
 	// when config.ManualDispatch is true; cleared after the first consultRoute
 	// call so that subsequent routing decisions use the configured consultant.
 	manualDispatchPending bool
+}
+
+// invokeAndLog wraps s.deps.Harness.Invoke with dispatch logging. It logs the
+// full request immediately before the invocation and the full response (or a
+// harness-level error) immediately after. The response and error are returned
+// unchanged so callers need only change the method name.
+func (s *sessionImpl) invokeAndLog(ctx context.Context, agentRef domain.AgentReference, request domain.ProtocolRequest) (domain.ProtocolResponse, error) {
+	s.deps.DispatchLog.LogRequest(request)
+	resp, err := s.deps.Harness.Invoke(ctx, agentRef, request)
+	if err != nil {
+		s.deps.DispatchLog.LogError(request.AgentInstanceID, err.Error())
+	} else {
+		s.deps.DispatchLog.LogResponse(resp)
+	}
+	return resp, err
 }
 
 // Start implements Session.
@@ -615,7 +640,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 			})
 
 			// Invoke the harness.
-			response, invokeErr := s.deps.Harness.Invoke(ctx, step.Agent, step.Request)
+			response, invokeErr := s.invokeAndLog(ctx, step.Agent, step.Request)
 			if invokeErr != nil {
 				if ctx.Err() != nil {
 					return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
@@ -693,7 +718,7 @@ func (s *sessionImpl) Start(ctx context.Context, config domain.RunConfig) (domai
 					rdReq := hitlStep.Request
 					rdReq.AgentInstanceID = fmt.Sprintf("%s#%d", hitlStep.Agent.Identifier, hitlAttemptSeq)
 					hitlStep.Request = rdReq
-					rdResp, rdErr := s.deps.Harness.Invoke(ctx, hitlStep.Agent, hitlStep.Request)
+					rdResp, rdErr := s.invokeAndLog(ctx, hitlStep.Agent, hitlStep.Request)
 					if rdErr != nil {
 						if ctx.Err() != nil {
 							return domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
@@ -1197,7 +1222,7 @@ func (s *sessionImpl) consultRoute(
 	})
 
 	// Invoke the harness. A harness error is a deviation, not a crash.
-	response, invokeErr := s.deps.Harness.Invoke(ctx, agentRef, agentReq)
+	response, invokeErr := s.invokeAndLog(ctx, agentRef, agentReq)
 	if invokeErr != nil {
 		if ctx.Err() != nil {
 			return true, domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
@@ -1256,7 +1281,7 @@ hitlLoop:
 			currentAttemptSeq++
 			rdReq := agentReq
 			rdReq.AgentInstanceID = fmt.Sprintf("%s#%d", agentRef.Identifier, currentAttemptSeq)
-			rdResp, rdErr := s.deps.Harness.Invoke(ctx, agentRef, rdReq)
+			rdResp, rdErr := s.invokeAndLog(ctx, agentRef, rdReq)
 			if rdErr != nil {
 				if ctx.Err() != nil {
 					return true, domain.RunOutcome{Status: domain.RunStopped, Message: "run stopped: context cancelled"}, nil
@@ -1513,7 +1538,7 @@ func (s *sessionImpl) doCommitSetupDispatch(
 		RunID:           config.RunID,
 		TaskDescription: "commit setup: establish the target branch for this run",
 	}
-	response, invokeErr := s.deps.Harness.Invoke(ctx, agentRef, req)
+	response, invokeErr := s.invokeAndLog(ctx, agentRef, req)
 	completedAt := s.deps.Clock.Now()
 	if invokeErr != nil {
 		return nil, "commit setup dispatch failed: " + invokeErr.Error()
@@ -1690,7 +1715,7 @@ func (s *sessionImpl) evaluateTriggers(
 			TaskDescription: fmt.Sprintf("infrastructure agent dispatch: %s", agent.Name),
 		}
 
-		response, invokeErr := s.deps.Harness.Invoke(ctx, agentRef, req)
+		response, invokeErr := s.invokeAndLog(ctx, agentRef, req)
 		if invokeErr != nil {
 			if ctx.Err() != nil {
 				return true, ctx.Err()
