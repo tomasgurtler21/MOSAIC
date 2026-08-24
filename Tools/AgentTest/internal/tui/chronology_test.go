@@ -44,8 +44,14 @@ var settingScreens = []Screen{
 // transition out of suite selection.
 func TestChronology_TabDoesNotNavigateToAnySettingsScreen(t *testing.T) {
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
+	// The initial screen is now ScreenModeSelect. Navigate to ScreenSuiteSelect
+	// by selecting "Run Tests" (cursor 0, Enter).
+	if m.Screen() != ScreenModeSelect {
+		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenModeSelect)
+	}
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // Enter: select "Run Tests" → ScreenSuiteSelect
 	if m.Screen() != ScreenSuiteSelect {
-		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
+		t.Fatalf("Screen() after mode-select Enter = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}
 
 	m, _ = safeUpdate(t, m, tea.KeyMsg{Type: tea.KeyTab})
@@ -60,14 +66,18 @@ func TestChronology_TabDoesNotNavigateToAnySettingsScreen(t *testing.T) {
 // TestChronology_EnterOnSuiteNavigatesToRetentionScreen verifies that pressing
 // Enter on a suite in ScreenSuiteSelect transitions the root Model to
 // ScreenRetention, the first screen in the sequential settings flow, rather
-// than starting the suite immediately.
+// than starting the suite immediately. The model now starts at ScreenModeSelect,
+// so an extra Enter is needed to reach ScreenSuiteSelect first.
 func TestChronology_EnterOnSuiteNavigatesToRetentionScreen(t *testing.T) {
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
+
+	// Navigate through mode-select to reach suite-select.
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // Enter: select "Run Tests" → ScreenSuiteSelect
 
 	// "\r" is the carriage-return rune that the existing suite-select key
 	// binding (GlobalKeys.Select) matches, consistent with other navigation
 	// tests in this package.
-	m, _ = safeUpdate(t, m, keyMsg("\r"))
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // Enter: confirm suite → ScreenRetention
 
 	if m.Screen() != ScreenRetention {
 		t.Errorf("Enter on suite select: Screen() = %q, want %q", m.Screen(), ScreenRetention)
@@ -107,6 +117,9 @@ func TestChronology_EnterOnSuiteCallsResolveSuiteDefaultsWithCorrectPath(t *test
 
 	m := NewModel(opts)
 
+	// Navigate through mode-select to reach suite-select.
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // Enter: select "Run Tests" → ScreenSuiteSelect
+
 	// Move the cursor to suite-b.yaml (index 1).
 	m, _ = safeUpdate(t, m, tea.KeyMsg{Type: tea.KeyDown})
 
@@ -131,7 +144,8 @@ func TestChronology_ResolveSuiteDefaultsErrorDoesNotNavigateToSettingsFlow(t *te
 	}
 
 	m := NewModel(opts)
-	m, _ = safeUpdate(t, m, keyMsg("\r")) // Enter: attempt to confirm suite
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // Enter: select "Run Tests" → ScreenSuiteSelect
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // Enter: attempt to confirm suite (error occurs here)
 
 	if m.Screen() == ScreenRetention {
 		t.Errorf("ResolveSuiteDefaults error: Screen() = %q; must not navigate into settings flow when suite-defaults resolution fails", m.Screen())

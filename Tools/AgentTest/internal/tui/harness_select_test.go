@@ -52,8 +52,14 @@ func newHarnessFixtureOptions(suites []string, runner *fakeSuiteRunner) Options 
 // front, before anything runs.
 func TestNavigation_InitialScreenIsHarnessSelect_WhenHarnessesOffered(t *testing.T) {
 	m := NewModel(newHarnessFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
+	// The initial screen is always ScreenModeSelect. Selecting "Run Tests"
+	// then leads to ScreenHarnessSelect when a harness catalog is offered.
+	if m.Screen() != ScreenModeSelect {
+		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenModeSelect)
+	}
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // Enter: select "Run Tests"
 	if m.Screen() != ScreenHarnessSelect {
-		t.Errorf("initial Screen() = %q, want %q — a harness catalog was offered and must be presented before suite selection", m.Screen(), ScreenHarnessSelect)
+		t.Errorf("Screen() after 'Run Tests' selection = %q, want %q — a harness catalog was offered and must be presented before suite selection", m.Screen(), ScreenHarnessSelect)
 	}
 }
 
@@ -68,6 +74,7 @@ func TestNavigation_InitialScreenIsHarnessSelect_WhenHarnessesOffered(t *testing
 func TestNavigation_HarnessSelect_DownEnter_MovesToModelSelectAndRecordsSelection(t *testing.T) {
 	catalog := twoHarnessCatalog()
 	m := NewModel(newHarnessFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenHarnessSelect
 	if m.Screen() != ScreenHarnessSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenHarnessSelect)
 	}
@@ -105,6 +112,7 @@ func TestHarnessSelect_SelectionReachesPreflightInput(t *testing.T) {
 	}
 
 	m := NewModel(o)
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenHarnessSelect
 	if m.Screen() != ScreenHarnessSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenHarnessSelect)
 	}

@@ -369,8 +369,12 @@ func TestPreflightWarning_ViewContainsWarningContent(t *testing.T) {
 // suite-select.
 func TestDetailSurface_NoScreenChangeOnPreflightError(t *testing.T) {
 	m := modelOnSuiteSelectWithPreflight(errorReport())
+	// Navigate to suite-select first (the screen where preflight errors are shown).
+	m = advanceToRunFlow(t, m)
 	before := m.Screen()
-	m = triggerSuiteStart(t, m) // navigate through settings flow; preflight error returns to suite-select
+	// Navigate through settings flow; preflight error returns to suite-select.
+	m, _ = safeUpdate(t, m, keyMsg("\r")) // Enter: confirm suite → settings flow starts
+	m, _ = navigateThroughSettings(t, m)
 	after := m.Screen()
 
 	if before != after {

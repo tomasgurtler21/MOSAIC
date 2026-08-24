@@ -210,6 +210,20 @@ func newFixtureOptions(suites []string, runner *fakeSuiteRunner) Options {
 	}
 }
 
+// advanceToRunFlow navigates from ScreenModeSelect (the entry point added in
+// Stage 5) to the first run-flow screen by pressing Enter to select "Run
+// Tests". When harnesses are wired the result is ScreenHarnessSelect;
+// otherwise ScreenSuiteSelect. If the model is already past ScreenModeSelect,
+// it is returned unchanged. This helper allows tests written before Stage 5
+// to remain valid without inserting the mode-select step in every callsite.
+func advanceToRunFlow(t *testing.T, m Model) Model {
+	t.Helper()
+	if m.Screen() == ScreenModeSelect {
+		m, _ = safeUpdate(t, m, keyMsg("\r")) // Enter: select "Run Tests"
+	}
+	return m
+}
+
 // ---------------------------------------------------------------------------
 // fakeSuiteRunner: a SuiteRunner double
 // ---------------------------------------------------------------------------

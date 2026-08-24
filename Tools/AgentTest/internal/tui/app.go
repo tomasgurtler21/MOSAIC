@@ -24,6 +24,8 @@ import (
 	"mosaic-agent-test/internal/domain"
 	"mosaic-agent-test/internal/preflight"
 	"mosaic-agent-test/internal/report"
+	"mosaic-agent-test/internal/resultstore"
+	"mosaic-agent-test/internal/resultsummary"
 	"mosaic-agent-test/internal/runprogress"
 	"mosaic-agent-test/internal/suite"
 	"mosaic-agent-test/internal/tui/screens"
@@ -43,6 +45,54 @@ type PreflightFunc func(preflight.Input) (preflight.Plan, authoring.Report)
 // reports that as a report-write failure rather than silently skipping the
 // write, so a wiring omission is visible.
 type WriteFileFunc func(path string, data []byte) error
+
+// StoreFunc processes report files into the TestResults tree. The composition
+// root supplies a function that calls resultstore.StoreFromPaths with a real
+// filesystem and the resolved TestResults root.
+//
+// Following the PreflightFunc precedent, this type references resultstore types
+// directly rather than defining mirror types.
+type StoreFunc func(req resultstore.StoreFromPathsRequest) (resultstore.StoreResult, error)
+
+// SummaryFunc generates summary Markdown files from stored reports. The
+// composition root supplies a function that calls resultsummary.Generate with a
+// real filesystem and the resolved TestResults root.
+type SummaryFunc func(req resultsummary.SummaryRequest) (resultsummary.SummaryResult, error)
+
+// StoreFinishedMsg carries the store operation's outcome into the Bubble Tea
+// message loop. Follows the same pattern as SuiteFinishedMsg.
+type StoreFinishedMsg struct {
+	Result resultstore.StoreResult
+	Err    error
+}
+
+// SummaryFinishedMsg carries the summary generation's outcome into the Bubble
+// Tea message loop.
+type SummaryFinishedMsg struct {
+	Result resultsummary.SummaryResult
+	Err    error
+}
+
+// processReportsState groups the Model fields for the "Process Test Reports"
+// flow, keeping them namespaced rather than adding flat fields to Model's
+// already large field set.
+type processReportsState struct {
+	// mode tracks whether the user is in "Store Reports" or "Generate Summary".
+	mode string // "store" or "summary"
+
+	// cursor is the selected item index on mode-select and process-select screens.
+	cursor int
+
+	// Store flow state.
+	storeInput  *screens.StoreInputScreen
+	storeResult *resultstore.StoreResult
+	storeErr    error
+
+	// Summary flow state.
+	summaryInput  *screens.SummaryInputScreen
+	summaryResult *resultsummary.SummaryResult
+	summaryErr    error
+}
 
 // SuiteRunner is the interface the TUI drives the suite through. Unlike
 // cli.SuiteRunner (which the CLI's factory rebuilds per invocation, already
@@ -136,14 +186,48 @@ type Options struct {
 	// same schema preflight uses, ensuring the displayed value agrees with the
 	// one preflight applies at run start.
 	ResolveSuiteDefaults func(suitePath string) (SuiteDefaults, error)
+
+	// Store processes report files into TestResults/. Nil means the
+	// "Store Reports" flow is unavailable (the TUI disables the option
+	// rather than crashing).
+	Store StoreFunc
+
+	// Summary generates summary Markdown. Nil means the "Generate
+	// Summary" flow is unavailable.
+	Summary SummaryFunc
+
+	// TestResultsRoot is the absolute path to TestResults/, shown read-only
+	// in the store/summary input screens for user confirmation.
+	TestResultsRoot string
 }
 
 // Screen names one of the screens this frontend presents.
 type Screen string
 
 const (
+	// ScreenModeSelect is the new entry point: "Run Tests" vs
+	// "Process Test Reports". Replaces ScreenHarnessSelect/ScreenSuiteSelect
+	// as the initial screen.
+	ScreenModeSelect Screen = "mode_select"
+
+	// ScreenProcessSelect offers "Store Reports" and "Generate Summary"
+	// under the "Process Test Reports" mode.
+	ScreenProcessSelect Screen = "process_select"
+
+	// ScreenStoreInput collects file/directory path for the store operation.
+	ScreenStoreInput Screen = "store_input"
+
+	// ScreenStoreResult displays the outcome of the store operation.
+	ScreenStoreResult Screen = "store_result"
+
+	// ScreenSummaryInput collects the optional version filter for summary.
+	ScreenSummaryInput Screen = "summary_input"
+
+	// ScreenSummaryResult displays the outcome of summary generation.
+	ScreenSummaryResult Screen = "summary_result"
+
 	// ScreenHarnessSelect offers the harness-selection affordance —
-	// Stage 5's TUI equivalent of the CLI's --harness flag — following the
+	// the TUI's equivalent of the CLI's --harness flag — following the
 	// same cursor-and-select pattern as ScreenSuiteSelect, sourced from
 	// Options.Harnesses.
 	ScreenHarnessSelect Screen = "harness_select"
@@ -313,6 +397,10 @@ type Model struct {
 	statusMsg   string
 	statusError bool
 
+	// processReports holds state for the "Process Test Reports" flow.
+	// Grouped into a single struct to keep Model's flat field count manageable.
+	processReports processReportsState
+
 	// detailPane renders failure detail (pre-flight diagnostics, run-failure
 	// and report-write-failure text) that will not fit the one-line status bar.
 	// It is a pointer for the same reason sinkBox is: Model is a value type
@@ -356,13 +444,14 @@ func resolveForSuite(o Options, cursor int) SuiteDefaults {
 	return d
 }
 
-// NewModel constructs the initial Model on the suite-select screen. The
-// suite has not started; Suites lists what a user may pick from.
+// NewModel constructs the initial Model on the mode-select screen. The user
+// chooses between "Run Tests" (entering the existing harness/suite-select flow)
+// and "Process Test Reports" (store or summary operations).
 func NewModel(o Options) Model {
 	m := Model{
 		opts:            o,
 		theme:           tuicommon.DefaultTheme(),
-		screen:          ScreenSuiteSelect,
+		screen:          ScreenModeSelect,
 		width:           tuicommon.DefaultWidth,
 		height:          tuicommon.DefaultHeight,
 		ctx:             context.Background(),
@@ -371,9 +460,6 @@ func NewModel(o Options) Model {
 		retention:       o.Retention,
 		reportPath:      o.ReportPath,
 		catalogFolder:   o.CatalogFolder,
-	}
-	if len(o.Harnesses) > 0 {
-		m.screen = ScreenHarnessSelect
 	}
 	paneH, paneW := m.paneGeometry()
 	m.detailPane = widgets.NewDetailPane(paneH, paneW, widgets.DefaultDetailPaneStyles())
@@ -462,6 +548,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SuiteFinishedMsg:
 		return m.handleSuiteFinished(msg), nil
+
+	case StoreFinishedMsg:
+		return m.handleStoreFinished(msg), nil
+
+	case SummaryFinishedMsg:
+		return m.handleSummaryFinished(msg), nil
 	}
 
 	return m, nil
@@ -494,6 +586,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch m.screen {
+	case ScreenModeSelect:
+		return m.updateModeSelect(msg)
+	case ScreenProcessSelect:
+		return m.updateProcessSelect(msg)
+	case ScreenStoreInput:
+		return m.updateStoreInput(msg)
+	case ScreenStoreResult:
+		return m.updateStoreResult(msg)
+	case ScreenSummaryInput:
+		return m.updateSummaryInput(msg)
+	case ScreenSummaryResult:
+		return m.updateSummaryResult(msg)
 	case ScreenHarnessSelect:
 		return m.updateHarnessSelect(msg)
 	case ScreenModelSelect:
@@ -1220,6 +1324,14 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // setting screen is currently active, so layout adapts without losing edit state.
 func (m Model) resizeActiveSettingScreen(width int) {
 	switch m.screen {
+	case ScreenStoreInput:
+		if m.processReports.storeInput != nil {
+			m.processReports.storeInput.Resize(width)
+		}
+	case ScreenSummaryInput:
+		if m.processReports.summaryInput != nil {
+			m.processReports.summaryInput.Resize(width)
+		}
 	case ScreenRetention:
 		if m.retentionScr != nil {
 			m.retentionScr.Resize(width)
@@ -1248,6 +1360,18 @@ func (m Model) resizeActiveSettingScreen(width int) {
 // than wrapping into noise.
 func (m Model) View() string {
 	switch m.screen {
+	case ScreenModeSelect:
+		return m.viewModeSelect()
+	case ScreenProcessSelect:
+		return m.viewProcessSelect()
+	case ScreenStoreInput:
+		return m.viewStoreInput()
+	case ScreenStoreResult:
+		return m.viewStoreResult()
+	case ScreenSummaryInput:
+		return m.viewSummaryInput()
+	case ScreenSummaryResult:
+		return m.viewSummaryResult()
 	case ScreenHarnessSelect:
 		return m.viewHarnessSelect()
 	case ScreenModelSelect:

@@ -335,6 +335,7 @@ func TestSuiteNavigation_MovingCursor_UpdatesRepetitionsDefault(t *testing.T) {
 		"suite-b.yaml": {Repetitions: intPtr(suiteBDefault)},
 	})
 	m := NewModel(o)
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenSuiteSelect
 
 	// Initial selection is suite-a (cursor=0). Verify its default (3) is shown.
 	var displayBeforeMove string

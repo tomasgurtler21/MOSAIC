@@ -56,6 +56,7 @@ func TestSuiteSelect_ShowsNoRetentionLine(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml", "suite-b.yaml"}, newFakeSuiteRunner())
 	o.Retention = domain.RetainOnFailure
 	m := NewModel(o)
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenSuiteSelect
 
 	if m.Screen() != ScreenSuiteSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
@@ -75,6 +76,7 @@ func TestSuiteSelect_ShowsNoRepetitionsLine(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	m := NewModel(o)
 	m.repetitions = intPtr(4)
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenSuiteSelect
 
 	if m.Screen() != ScreenSuiteSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
@@ -94,6 +96,7 @@ func TestSuiteSelect_ShowsNoReportPathLine(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	o.ReportPath = "/reports/output.json"
 	m := NewModel(o)
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenSuiteSelect
 
 	if m.Screen() != ScreenSuiteSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
@@ -115,6 +118,7 @@ func TestSuiteSelect_ShowsNoCatalogLine(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	o.CatalogFolder = "/catalog/main"
 	m := NewModel(o)
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenSuiteSelect
 
 	if m.Screen() != ScreenSuiteSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
@@ -134,6 +138,7 @@ func TestSuiteSelect_ShowsNoCatalogLine(t *testing.T) {
 func TestSuiteSelect_SuiteNavigation_StillWorks(t *testing.T) {
 	suites := []string{"suite-a.yaml", "suite-b.yaml", "suite-c.yaml"}
 	m := NewModel(newFixtureOptions(suites, newFakeSuiteRunner()))
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenSuiteSelect
 
 	if m.Screen() != ScreenSuiteSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
@@ -165,6 +170,7 @@ func TestSuiteSelect_SuiteNavigation_StillWorks(t *testing.T) {
 func TestSuiteSelect_Enter_BeginsSettingsFlow(t *testing.T) {
 	runner := newFakeSuiteRunner()
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, runner))
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenSuiteSelect
 
 	if m.Screen() != ScreenSuiteSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
@@ -183,6 +189,7 @@ func TestSuiteSelect_Space_DoesNotChangeRetention(t *testing.T) {
 	o := newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner())
 	o.Retention = domain.RetainNever
 	m := NewModel(o)
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenSuiteSelect
 
 	if m.Screen() != ScreenSuiteSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
@@ -553,6 +560,7 @@ func TestSettings_ChangedRepetitions_ReachesPreflightOverrides(t *testing.T) {
 // binding in the suite-select help bar, since it has been removed from this screen.
 func TestSuiteSelect_HelpBar_DoesNotIncludeUndiscoverableEditKey(t *testing.T) {
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenSuiteSelect
 	if m.Screen() != ScreenSuiteSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}

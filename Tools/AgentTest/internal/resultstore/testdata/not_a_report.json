@@ -1,0 +1,5 @@
+{
+  "name": "some-tool",
+  "version": "2.0.0",
+  "description": "This is not an AgentTest report; it has no schema_version, suite_id, or tests fields."
+}

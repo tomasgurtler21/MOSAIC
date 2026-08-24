@@ -47,10 +47,10 @@ func runSuiteToCompletion(t *testing.T, m Model, runner *fakeSuiteRunner) Model 
 // Initial state
 // ---------------------------------------------------------------------------
 
-func TestNavigation_InitialScreenIsSuiteSelect(t *testing.T) {
+func TestNavigation_InitialScreenIsModeSelect(t *testing.T) {
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
-	if m.Screen() != ScreenSuiteSelect {
-		t.Errorf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
+	if m.Screen() != ScreenModeSelect {
+		t.Errorf("initial Screen() = %q, want %q", m.Screen(), ScreenModeSelect)
 	}
 }
 
@@ -86,9 +86,9 @@ func TestNavigation_KeySequences(t *testing.T) {
 			wantScreen:  ScreenResults,
 		},
 		{
-			name:       "ctrl+c from suite select quits",
+			name:       "ctrl+c from mode select quits",
 			steps:      []tea.KeyMsg{keyType(tea.KeyCtrlC)},
-			wantScreen: ScreenSuiteSelect,
+			wantScreen: ScreenModeSelect,
 			wantQuit:   true,
 		},
 		{
@@ -186,8 +186,8 @@ func TestNavigation_QuitDuringRun_CancelsSuiteContext(t *testing.T) {
 func TestNavigation_WindowResize(t *testing.T) {
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
 	updated, _ := safeUpdate(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
-	if updated.Screen() != ScreenSuiteSelect {
-		t.Errorf("resize changed Screen() to %q, want unchanged %q", updated.Screen(), ScreenSuiteSelect)
+	if updated.Screen() != ScreenModeSelect {
+		t.Errorf("resize changed Screen() to %q, want unchanged %q", updated.Screen(), ScreenModeSelect)
 	}
 }
 

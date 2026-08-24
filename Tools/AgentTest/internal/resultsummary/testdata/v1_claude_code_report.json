@@ -1,0 +1,61 @@
+{
+  "schema_version": "1",
+  "suite_id": "happy-path",
+  "started_at": "2026-08-20T10:00:00Z",
+  "finished_at": "2026-08-20T10:05:00Z",
+  "tests": [
+    {
+      "test_id": "test-alpha",
+      "description": "Test alpha verifies initial dispatch",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "pass",
+        "counted": 1,
+        "passed": 1,
+        "pass_rate": 1.0,
+        "infrastructure_failure": false,
+        "total_cost": { "total_usd": 0.03, "attribution": "direct" }
+      },
+      "runs": [
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 3000,
+          "cost": { "total_usd": 0.03, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": []
+        }
+      ]
+    },
+    {
+      "test_id": "test-beta",
+      "description": "Test beta verifies re-routing",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "pass",
+        "counted": 1,
+        "passed": 1,
+        "pass_rate": 1.0,
+        "infrastructure_failure": false,
+        "total_cost": { "total_usd": 0.02, "attribution": "direct" }
+      },
+      "runs": [
+        {
+          "subject_version": "v1.0.0",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 2000,
+          "cost": { "total_usd": 0.02, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": []
+        }
+      ]
+    }
+  ],
+  "counts": { "pass": 2 },
+  "total_cost": { "total_usd": 0.05, "attribution": "direct" },
+  "infrastructure_failures": 0
+}

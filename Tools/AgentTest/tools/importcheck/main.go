@@ -118,6 +118,8 @@ var adapterPackages = map[string]bool{
 	"internal/preflight":          true,
 	"internal/diaglog":            true, // file-backed per-run diagnostic sink (adapter layer)
 	"internal/tui/screens":        true, // self-contained setting screens; imports only domain and styling libs
+	"internal/resultstore":        true, // report filing adapter: parses, validates, and files test reports
+	"internal/resultsummary":      true, // summary generation adapter: aggregates stored reports into Markdown
 }
 
 // useCasePackages are the packages classified as use cases.
@@ -151,6 +153,9 @@ var adapterImportExceptions = map[string]map[string]bool{
 	"internal/sideeffects": {
 		"internal/fixtures": true,
 	},
+	"internal/resultsummary": {
+		"internal/resultstore": true, // resultsummary reuses ParseAndValidate and ParsedReport from resultstore
+	},
 }
 
 // frontendImportExceptions narrows the "frontends may import only domain
@@ -164,17 +169,21 @@ var adapterImportExceptions = map[string]map[string]bool{
 // composition either frontend performs itself.
 var frontendImportExceptions = map[string]map[string]bool{
 	"internal/cli": {
-		"internal/report":       true,
-		"internal/preflight":    true,
-		"internal/authoring":    true,
-		"internal/runprogress":  true, // pure core shared by both frontends for progress display
+		"internal/report":        true,
+		"internal/preflight":     true,
+		"internal/authoring":     true,
+		"internal/runprogress":   true, // pure core shared by both frontends for progress display
+		"internal/resultstore":   true, // StoreFunc/StoreResult types used directly in func signatures
+		"internal/resultsummary": true, // SummaryFunc/SummaryResult types used directly in func signatures
 	},
 	"internal/tui": {
-		"internal/report":       true,
-		"internal/preflight":    true,
-		"internal/authoring":    true,
-		"internal/runprogress":  true, // pure core shared by both frontends for progress display
-		"internal/tui/screens":  true, // setting screens subpackage: adapter layer, permitted by frontend
+		"internal/report":        true,
+		"internal/preflight":     true,
+		"internal/authoring":     true,
+		"internal/runprogress":   true, // pure core shared by both frontends for progress display
+		"internal/tui/screens":   true, // setting screens subpackage: adapter layer, permitted by frontend
+		"internal/resultstore":   true, // StoreFunc/StoreResult types used directly in func signatures
+		"internal/resultsummary": true, // SummaryFunc/SummaryResult types used directly in func signatures
 	},
 }
 

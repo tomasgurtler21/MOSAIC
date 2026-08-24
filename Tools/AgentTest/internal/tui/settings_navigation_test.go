@@ -33,12 +33,20 @@ import (
 	"mosaic-agent-test/internal/domain"
 )
 
-// advanceToSettingsFlow navigates from ScreenSuiteSelect to ScreenRetention
-// by pressing Enter on the first suite. It fails the test immediately if the
-// transition does not land on ScreenRetention, because all subsequent
-// settings-navigation assertions depend on being inside the settings flow.
+// advanceToSettingsFlow navigates to ScreenRetention (the first settings
+// screen) from wherever the model currently is. It handles the new mode-select
+// entry point: if the model is at ScreenModeSelect, it first presses Enter to
+// select "Run Tests" (cursor 0) and land on ScreenSuiteSelect, then presses
+// Enter again to confirm suite selection. If the model is already at
+// ScreenSuiteSelect, it presses Enter directly to confirm suite selection. It
+// fails the test immediately if the transition does not land on ScreenRetention.
 func advanceToSettingsFlow(t *testing.T, m Model) Model {
 	t.Helper()
+	// Navigate through mode-select if needed.
+	if m.Screen() == ScreenModeSelect {
+		m, _ = safeUpdate(t, m, keyMsg("\r")) // Enter: select "Run Tests" (cursor 0)
+		// With no harnesses in newFixtureOptions, this lands on ScreenSuiteSelect.
+	}
 	m, _ = safeUpdate(t, m, keyMsg("\r")) // Enter: confirm suite selection
 	if m.Screen() != ScreenRetention {
 		t.Fatalf("advanceToSettingsFlow: Screen() after Enter = %q, want %q (settings flow must begin at ScreenRetention after explicit suite confirmation)", m.Screen(), ScreenRetention)

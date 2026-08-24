@@ -34,6 +34,7 @@ func TestSuiteSelectHelp_HasNoTabEntry(t *testing.T) {
 // the help bar, the status line, or any other rendered element.
 func TestSuiteSelectView_DoesNotAdvertiseTab(t *testing.T) {
 	m := NewModel(newFixtureOptions([]string{"suite-a.yaml"}, newFakeSuiteRunner()))
+	m = advanceToRunFlow(t, m) // navigate through mode-select to ScreenSuiteSelect
 	if m.Screen() != ScreenSuiteSelect {
 		t.Fatalf("initial Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
 	}

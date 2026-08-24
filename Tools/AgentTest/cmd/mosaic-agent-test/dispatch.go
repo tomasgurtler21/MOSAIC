@@ -33,6 +33,8 @@ import (
 	"mosaic-agent-test/internal/launch"
 	"mosaic-agent-test/internal/preflight"
 	"mosaic-agent-test/internal/report"
+	"mosaic-agent-test/internal/resultstore"
+	"mosaic-agent-test/internal/resultsummary"
 	"mosaic-agent-test/internal/runner"
 	"mosaic-agent-test/internal/sideeffects"
 	"mosaic-agent-test/internal/suite"
@@ -455,6 +457,12 @@ type Deps struct {
 	FixtureRoot   string
 	WorkspaceRoot string
 
+	// TestResultsRoot is the absolute path to the TestResults/ directory,
+	// derived from MosaicRoot as filepath.Join(MosaicRoot, "TestResults").
+	// Supplied to both frontends so store/summary subcommands and TUI
+	// flows can resolve the storage tree without re-deriving it.
+	TestResultsRoot string
+
 	// SandboxDiagnostics is true when the composition root resolved the
 	// diagnostic destination to DestRunSandbox. The runner reads this to
 	// decide whether to stamp SpawnPlan.DiagnosticLog before launch.
@@ -629,9 +637,10 @@ func buildDeps(cfg WiringConfig) (Deps, error) {
 		LoggerBundleDir:   cfg.LoggerBundleDir,
 		DeployScratchRoot: cfg.DeployScratchRoot,
 
-		HarnessID:     cfg.HarnessID,
-		FixtureRoot:   cfg.FixtureRoot,
-		WorkspaceRoot: cfg.WorkspaceRoot,
+		HarnessID:       cfg.HarnessID,
+		FixtureRoot:     cfg.FixtureRoot,
+		WorkspaceRoot:   cfg.WorkspaceRoot,
+		TestResultsRoot: filepath.Join(cfg.MosaicRoot, "TestResults"),
 
 		SandboxDiagnostics: diagDest == DestRunSandbox,
 	}, nil
@@ -932,6 +941,18 @@ func cliOptions(d Deps, stdout, stderr io.Writer) cli.Options {
 			return defaultReportPath(filepath.Base(suitePath), time.Now())
 		},
 		WriteFile: osWriteFile,
+
+		// Store and Summary wire the report-processing subcommands to the
+		// real filesystem and the resolved TestResults root. All Dir-or-Files
+		// branching and mutual-exclusion validation live in StoreFromPaths, so
+		// these closures are pure argument-passing.
+		Store: func(req resultstore.StoreFromPathsRequest) (resultstore.StoreResult, error) {
+			return resultstore.StoreFromPaths(osFileSystem{}, req)
+		},
+		Summary: func(req resultsummary.SummaryRequest) (resultsummary.SummaryResult, error) {
+			return resultsummary.Generate(osFileSystem{}, req)
+		},
+		TestResultsRoot: d.TestResultsRoot,
 	}
 }
 
@@ -1036,5 +1057,16 @@ func tuiOptions(d Deps, suites []string) (tui.Options, error) {
 			}
 			return tui.SuiteDefaults{Repetitions: parsedSuite.Defaults.Repetitions}, nil
 		},
+
+		// Store and Summary wire the process-reports flow to the real
+		// filesystem and the resolved TestResults root. Same pattern as
+		// cliOptions: pure argument-passing, all branching in StoreFromPaths.
+		Store: func(req resultstore.StoreFromPathsRequest) (resultstore.StoreResult, error) {
+			return resultstore.StoreFromPaths(osFileSystem{}, req)
+		},
+		Summary: func(req resultsummary.SummaryRequest) (resultsummary.SummaryResult, error) {
+			return resultsummary.Generate(osFileSystem{}, req)
+		},
+		TestResultsRoot: d.TestResultsRoot,
 	}, nil
 }

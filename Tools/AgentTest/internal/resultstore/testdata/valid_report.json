@@ -1,0 +1,36 @@
+{
+  "schema_version": "1",
+  "suite_id": "happy-path",
+  "started_at": "2026-08-23T19:11:26Z",
+  "finished_at": "2026-08-23T19:15:00Z",
+  "tests": [
+    {
+      "test_id": "test-one",
+      "description": "Test one description",
+      "layer": "orchestrator",
+      "aggregate": {
+        "verdict": "pass",
+        "counted": 1,
+        "passed": 1,
+        "pass_rate": 1.0,
+        "infrastructure_failure": false,
+        "total_cost": { "total_usd": 0.01, "attribution": "direct" }
+      },
+      "runs": [
+        {
+          "subject_version": "v1.2.3",
+          "subject_model": "github-copilot/claude-sonnet-4.6",
+          "harness_id": "claude-code",
+          "verdict": "pass",
+          "duration_ms": 5000,
+          "cost": { "total_usd": 0.01, "attribution": "direct" },
+          "termination_reason": "completed",
+          "conditions": []
+        }
+      ]
+    }
+  ],
+  "counts": { "pass": 1 },
+  "total_cost": { "total_usd": 0.01, "attribution": "direct" },
+  "infrastructure_failures": 0
+}

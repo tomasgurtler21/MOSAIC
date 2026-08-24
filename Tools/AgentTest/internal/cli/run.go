@@ -18,63 +18,129 @@ import (
 	"mosaic-agent-test/internal/suite"
 )
 
-// valueFlags are the flags this package's command surface accepts that
-// require a value, in the flag names used on the command line (without the
-// leading "--"). --tui is handled separately: it takes no value and is
-// recognised-and-ignored rather than resolved into anything below.
-var valueFlags = map[string]bool{
-	"tests":          true,
+// preScanValueFlags lists value flags consumed by the composition root before
+// CLI dispatch. These are recognised on every command so they do not cause an
+// unknown-flag error.
+var preScanValueFlags = map[string]bool{
 	"harness":        true,
-	"format":         true,
-	"fixtures":       true,
-	"workspace-root": true,
-	"timeout":        true,
-	"repetitions":    true,
-
-	// logger-bundle, cost-tool, suites, deploy-tool, mosaic-root and
-	// catalog-folder are recognised-and-ignored here, the same way tui is:
-	// all are pre-scanned by the composition root ahead of this parser (see
-	// cmd/mosaic-agent-test's resolveWiringConfig and runTUIMode), so this
-	// package owes them nothing beyond not rejecting them as unknown.
 	"logger-bundle":  true,
 	"cost-tool":      true,
 	"suites":         true,
 	"deploy-tool":    true,
 	"mosaic-root":    true,
 	"catalog-folder": true,
+}
 
-	// report-path overrides the JSON report file location; --no-report is the
-	// bool companion that suppresses the write entirely.
-	"report-path": true,
-
-	// subject-model and stub-model are the run-time model selections validated
-	// against the selected harness's catalog before pre-flight runs.
-	"subject-model": true,
-	"stub-model":    true,
-
-	// max-concurrent-runs bounds how many runs execute at once across the whole
-	// suite. Validated as an integer >= 1; absent means DefaultMaxConcurrentRuns.
+// runValueFlags are the value flags specific to run and validate, beyond the
+// pre-scanned set. Combined with preScanValueFlags to form each command's full
+// flag set.
+var runValueFlags = map[string]bool{
+	"tests":               true,
+	"format":              true,
+	"fixtures":            true,
+	"workspace-root":      true,
+	"timeout":             true,
+	"repetitions":         true,
+	"report-path":         true,
+	"subject-model":       true,
+	"stub-model":          true,
 	"max-concurrent-runs": true,
 }
 
-// boolFlags are the flags this package's command surface accepts that take
-// no value, other than --tui (handled separately above) and --help/-h
-// (handled ahead of parseInvocation).
-var boolFlags = map[string]bool{
+// runBoolFlags are the bool flags specific to run and validate.
+var runBoolFlags = map[string]bool{
 	"keep-sandbox":            true,
 	"keep-sandbox-on-failure": true,
 	"no-report":               true,
 }
 
+// storeValueFlags are the value flags specific to the store command.
+var storeValueFlags = map[string]bool{
+	"dir": true,
+}
+
+// summaryValueFlags are the value flags specific to the summary command.
+var summaryValueFlags = map[string]bool{
+	"for-version": true,
+}
+
+// valueFlags and boolFlags are the combined flag sets for the run command,
+// exposed as package-level maps for parity-declaration tests in this package
+// that need to verify specific flag names are recognised. They mirror the
+// maps the old monolithic flag set provided.
+var valueFlags = func() map[string]bool {
+	m := make(map[string]bool)
+	for k, v := range preScanValueFlags {
+		m[k] = v
+	}
+	for k, v := range runValueFlags {
+		m[k] = v
+	}
+	return m
+}()
+
+var boolFlags = func() map[string]bool {
+	m := make(map[string]bool)
+	for k, v := range runBoolFlags {
+		m[k] = v
+	}
+	return m
+}()
+
+// commandFlagSet returns the value flags and bool flags valid for the named
+// command. Pre-scanned flags are included in every command's set so they are
+// recognised and do not cause an unknown-flag error.
+//
+// Returns (nil, nil) for an unknown command; the caller surfaces the
+// unknown-command error.
+func commandFlagSet(command string) (vf map[string]bool, bf map[string]bool) {
+	switch command {
+	case "run", "validate":
+		vf = make(map[string]bool)
+		for k, v := range preScanValueFlags {
+			vf[k] = v
+		}
+		for k, v := range runValueFlags {
+			vf[k] = v
+		}
+		bf = make(map[string]bool)
+		for k, v := range runBoolFlags {
+			bf[k] = v
+		}
+		return vf, bf
+	case "store":
+		vf = make(map[string]bool)
+		for k, v := range preScanValueFlags {
+			vf[k] = v
+		}
+		for k, v := range storeValueFlags {
+			vf[k] = v
+		}
+		return vf, map[string]bool{}
+	case "summary":
+		vf = make(map[string]bool)
+		for k, v := range preScanValueFlags {
+			vf[k] = v
+		}
+		for k, v := range summaryValueFlags {
+			vf[k] = v
+		}
+		return vf, map[string]bool{}
+	default:
+		return nil, nil
+	}
+}
+
 // parsedInvocation is the result of tokenising the command line: the
-// command name, the positional suite path, and every recognised flag's raw
-// string value.
+// command name, the positional suite path, all positional arguments, and
+// every recognised flag's raw string value.
 type parsedInvocation struct {
-	command    string
-	suitePath  string
-	flags      map[string]string
-	boolFlags  map[string]bool
-	tuiPresent bool
+	command     string
+	suitePath   string            // positionals[0] for run/validate (backward compat)
+	positionals []string          // all positional arguments after the command
+	flags       map[string]string
+	boolFlags   map[string]bool
+	tuiPresent  bool
 }
 
 // usageError is returned by parsing steps that must produce ExitUsage. It
@@ -117,8 +183,12 @@ func execute(ctx context.Context, args []string, o Options) int {
 		return runCommand(ctx, inv, o)
 	case "validate":
 		return validateCommand(inv, o)
+	case "store":
+		return storeCommand(inv, o)
+	case "summary":
+		return summaryCommand(inv, o)
 	default:
-		fmt.Fprintf(o.Stderr, "error: unknown command %q; want \"run\" or \"validate\"\n", inv.command)
+		fmt.Fprintf(o.Stderr, "error: unknown command %q; want \"run\", \"validate\", \"store\", or \"summary\"\n", inv.command)
 		return ExitUsage
 	}
 }
@@ -140,22 +210,28 @@ func helpRequested(args []string) bool {
 // positional suite path and a set of flag values, accepting both
 // space-separated ("--flag value") and equals-separated ("--flag=value")
 // forms equivalently. An unrecognised flag or a value-flag stated without a
-// value is a usageError.
+// value is a usageError. Flag sets are scoped to the command: only flags
+// valid for the resolved command are accepted.
 func parseInvocation(args []string) (parsedInvocation, error) {
 	inv := parsedInvocation{flags: map[string]string{}, boolFlags: map[string]bool{}}
 
 	if len(args) == 0 {
-		return inv, usageError{"no command given; want \"run\" or \"validate\""}
+		return inv, usageError{"no command given; want \"run\", \"validate\", \"store\", or \"summary\""}
 	}
 	inv.command = args[0]
 
+	vf, bf := commandFlagSet(inv.command)
+	if vf == nil {
+		// Unknown command — return now; the caller will surface the error.
+		return inv, nil
+	}
+
 	rest := args[1:]
-	var positionals []string
 
 	for i := 0; i < len(rest); i++ {
 		tok := rest[i]
 		if !strings.HasPrefix(tok, "--") {
-			positionals = append(positionals, tok)
+			inv.positionals = append(inv.positionals, tok)
 			continue
 		}
 
@@ -173,12 +249,12 @@ func parseInvocation(args []string) (parsedInvocation, error) {
 			continue
 		}
 
-		if boolFlags[name] {
+		if bf[name] {
 			inv.boolFlags[name] = true
 			continue
 		}
 
-		if !valueFlags[name] {
+		if !vf[name] {
 			return inv, usageError{fmt.Sprintf("unknown flag: --%s", name)}
 		}
 
@@ -193,8 +269,8 @@ func parseInvocation(args []string) (parsedInvocation, error) {
 		inv.flags[name] = value
 	}
 
-	if len(positionals) > 0 {
-		inv.suitePath = positionals[0]
+	if len(inv.positionals) > 0 {
+		inv.suitePath = inv.positionals[0]
 	}
 
 	return inv, nil

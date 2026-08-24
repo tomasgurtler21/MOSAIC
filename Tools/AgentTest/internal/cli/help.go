@@ -23,14 +23,21 @@ type CommandSpec struct {
 	Name    string // "run"
 	Args    string // "<suite>"
 	Summary string
+	Group   string // non-empty groups commands under a section header in --help
 }
 
 // commandSpecs is the single source Commands returns. The interceptor route
 // is deliberately absent and is never derived generically: the subject
 // under test may read this binary's help text.
+//
+// Ungrouped commands (empty Group) appear first in usage output. Commands with
+// a non-empty Group are rendered under a group header line after all ungrouped
+// commands.
 var commandSpecs = []CommandSpec{
 	{Name: "run", Args: "<suite>", Summary: "Pre-flights the suite, then executes it"},
 	{Name: "validate", Args: "<suite>", Summary: "Pre-flights the suite only; creates no sandbox"},
+	{Name: "store", Args: "[<report.json>...]", Summary: "File reports into TestResults/", Group: "Process Test Reports"},
+	{Name: "summary", Args: "", Summary: "Generate summary Markdown from stored reports", Group: "Process Test Reports"},
 }
 
 // flagSpecs is the single source Flags, ValueConsumingFlags and Usage all
@@ -58,6 +65,8 @@ var flagSpecs = []FlagSpec{
 	{Name: "--no-report", Summary: "Suppress the JSON report file entirely", ConsumesValue: false},
 	{Name: "--keep-sandbox", Summary: "Retain every sandbox for diagnosis", ConsumesValue: false},
 	{Name: "--keep-sandbox-on-failure", Summary: "Retain a sandbox when the attempt failed", ConsumesValue: false},
+	{Name: "--dir", Placeholder: "<folder>", Summary: "Directory of reports to store (store only)", ConsumesValue: true},
+	{Name: "--for-version", Placeholder: "<ver>", Summary: "Restrict summary to one orchestrator version (summary only)", ConsumesValue: true},
 	{Name: "--help", Summary: "Show this usage surface and exit (-h)", ConsumesValue: false},
 }
 
@@ -93,6 +102,10 @@ func ValueConsumingFlags() []string {
 // Usage writes the usage surface to w. Called for --help, -h, and a bare
 // invocation with no arguments. The interceptor route is never written
 // here — see Commands and flagSpecs above.
+//
+// Ungrouped commands appear first. Then for each distinct Group value (in
+// order of first appearance), a blank line, a group-header line, and the
+// grouped commands.
 func Usage(w io.Writer, o Options) error {
 	if _, err := fmt.Fprintln(w, "mosaic-agent-test — exercise a MOSAIC agent under an agent harness"); err != nil {
 		return err
@@ -104,9 +117,38 @@ func Usage(w io.Writer, o Options) error {
 	if _, err := fmt.Fprintln(w, "\nCommands:"); err != nil {
 		return err
 	}
+
+	// Render ungrouped commands first.
 	for _, c := range commandSpecs {
+		if c.Group != "" {
+			continue
+		}
 		if _, err := fmt.Fprintf(w, "  %s %s\n      %s\n", c.Name, c.Args, c.Summary); err != nil {
 			return err
+		}
+	}
+
+	// Render grouped commands under their group headers, in order of first
+	// appearance. Collect group names preserving order.
+	var groupOrder []string
+	seenGroups := map[string]bool{}
+	for _, c := range commandSpecs {
+		if c.Group != "" && !seenGroups[c.Group] {
+			groupOrder = append(groupOrder, c.Group)
+			seenGroups[c.Group] = true
+		}
+	}
+	for _, group := range groupOrder {
+		if _, err := fmt.Fprintf(w, "\n  %s:\n", group); err != nil {
+			return err
+		}
+		for _, c := range commandSpecs {
+			if c.Group != group {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "  %s %s\n      %s\n", c.Name, c.Args, c.Summary); err != nil {
+				return err
+			}
 		}
 	}
 
