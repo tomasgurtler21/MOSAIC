@@ -15,15 +15,9 @@ subject:
   agent: orchestrator
   workflows: [brownfield-tdd]
   opening_message: |
-    Task: Add a --verbose flag to the widgets CLI so it prints per-item
-    diagnostics to stderr.
-
-    Workflow type: brownfield-tdd
-
-    Checkpoints: disabled
-
-    Constraints: none. Do not ask me any further questions - proceed with the
-    workflow immediately and autonomously using the information above.
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
   invocation_kind: orchestrator
   allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
 
@@ -66,6 +60,11 @@ assertions:
       required_input_artifacts:
         - Orchestration-{run_id}/Requirements.md
         - Orchestration-{run_id}/Plan.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/Stage-1/PlanProgress.md
+        - Orchestration-{run_id}/Stage-2/Plan.md
+        - Orchestration-{run_id}/Stage-2/PlanProgress.md
       required_output_artifacts:
         - Orchestration-{run_id}/plan-review.md
 
@@ -78,5 +77,18 @@ assertions:
         - Orchestration-{run_id}/Research.md
         - Orchestration-{run_id}/Requirements.md
         - Orchestration-{run_id}/plan-review.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/Plan.md
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/Stage-1/PlanProgress.md
+        - Orchestration-{run_id}/Stage-2/Plan.md
+        - Orchestration-{run_id}/Stage-2/PlanProgress.md
       required_output_artifacts:
         - Orchestration-{run_id}/Plan.md
+      optional_output_artifacts:
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/Stage-1/PlanProgress.md
+        - Orchestration-{run_id}/Stage-2/Plan.md
+        - Orchestration-{run_id}/Stage-2/PlanProgress.md
+        - Orchestration-{run_id}/Stage-*/Plan.md
+        - Orchestration-{run_id}/Stage-*/PlanProgress.md

@@ -266,6 +266,9 @@ func (e *executor) Execute(ctx context.Context, req ExecRequest) (ExecResult, er
 			Taken:      domain.TakenFailed,
 			Err:        fmt.Sprintf("content render failed during probe: %s", ce.Err),
 		}
+		if ce.Item.Ref.Kind == domain.ArtifactAgent {
+			ar.SourceVersion = ce.Item.SourceVersion
+		}
 		e.log.Action(ar)
 		actions = append(actions, ar)
 	}
@@ -456,6 +459,9 @@ func (e *executor) executeItem(
 		TargetPath: filepath.Join(deployRoot, item.TargetPath),
 		Stale:      item.Stale,
 	}
+	if item.Ref.Kind == domain.ArtifactAgent {
+		ar.SourceVersion = item.SourceVersion
+	}
 
 	switch item.Action {
 	case domain.ActionUnchanged:
@@ -532,6 +538,9 @@ func (e *executor) executeFallbackItem(
 		Ref:        item.Ref,
 		TargetPath: filepath.Join(deployRoot, item.TargetPath),
 		Stale:      item.Stale,
+	}
+	if item.Ref.Kind == domain.ArtifactAgent {
+		ar.SourceVersion = item.SourceVersion
 	}
 
 	switch item.Action {
@@ -693,6 +702,9 @@ func simulateAction(item domain.PlanItem, req ExecRequest) domain.ActionRecord {
 		Ref:        item.Ref,
 		TargetPath: item.TargetPath,
 		Stale:      item.Stale,
+	}
+	if item.Ref.Kind == domain.ArtifactAgent {
+		ar.SourceVersion = item.SourceVersion
 	}
 	switch item.Action {
 	case domain.ActionCreate:

@@ -39,7 +39,7 @@ func conformanceNativePre(id domain.CollaboratorIdentity, msg domain.TaskMessage
 	rawArgs, _ := json.Marshal(args)
 	b, _ := json.Marshal(opencode.ToolBeforePayload{
 		HookEventName: "tool.execute.before",
-		Tool:          id.ToolName,
+		Tool:          opencode.InterceptedToolName,
 		Args:          rawArgs,
 	})
 	return b
@@ -55,7 +55,7 @@ func conformanceNativePost(id domain.CollaboratorIdentity, token string, observe
 	observedJSON, _ := json.Marshal(observed)
 	b, _ := json.Marshal(opencode.ToolAfterPayload{
 		HookEventName: "tool.execute.after",
-		Tool:          id.ToolName,
+		Tool:          opencode.InterceptedToolName,
 		Args:          rawArgs,
 		Output:        observedJSON,
 	})

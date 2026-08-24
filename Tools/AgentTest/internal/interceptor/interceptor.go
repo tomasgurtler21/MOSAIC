@@ -176,6 +176,7 @@ func runOneInterception(ctx context.Context, cfg Config) {
 			Registry: cfg.Registry,
 			Groups:   cfg.Groups,
 			Now:      cfg.Clock.Now(),
+			RunID:    cfg.RunID,
 		})
 		if decideErr != nil {
 			return domain.RunState{}, decideErr
@@ -215,13 +216,14 @@ func runOneInterception(ctx context.Context, cfg Config) {
 		// Expand the run-ID placeholder in every effect's path before Apply
 		// is called. This mirrors seedFile's expand-then-write shape and
 		// ensures the escape guard inside Apply evaluates the post-expansion
-		// path. Effect content and Ref are never touched.
+		// path. Content expansion (both inline and $ref-resolved) happens
+		// inside Apply after $ref resolution.
 		expanded := make([]domain.FileEffect, len(decision.SideEffects))
 		for i, e := range decision.SideEffects {
 			e.Path = strings.ReplaceAll(e.Path, domain.RunIDPlaceholder, cfg.RunID)
 			expanded[i] = e
 		}
-		if _, err := cfg.Effects.Apply(cfg.SubjectDir, expanded); err != nil {
+		if _, err := cfg.Effects.Apply(cfg.SubjectDir, expanded, cfg.RunID); err != nil {
 			handleFailure(cfg, &call, fmt.Errorf("applying side effects: %w", err))
 			return
 		}

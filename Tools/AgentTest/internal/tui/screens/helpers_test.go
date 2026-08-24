@@ -31,6 +31,8 @@ func runeKey(r rune) tea.Msg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
 }
 
+func backspaceKey() tea.Msg { return tea.KeyMsg{Type: tea.KeyBackspace} }
+
 // collapseWhitespace joins the words in s with single spaces, removing
 // newlines and extra whitespace. Used to compare View output that lipgloss
 // may have wrapped across multiple lines.

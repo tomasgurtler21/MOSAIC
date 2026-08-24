@@ -5,17 +5,21 @@ import (
 	"time"
 )
 
-// RunIDPlaceholder is expanded to the run's identifier in any authored path
-// that may need to name a directory which only exists once the run identity
-// is known (e.g. an orchestration document under Orchestration-{run_id}/).
+// RunIDPlaceholder is expanded to the run's identifier in every authored
+// surface whose content may reference the run's identity:
 //
-// It is expanded in two authored surfaces and no others:
 //   - a seed file's declared path
+//   - a seed file's content (inline or $ref-resolved)
 //   - a stub side effect's declared create-file path
+//   - a stub side effect's content (inline or $ref-resolved)
+//   - a stub's response content (the JSON returned to the subject)
+//   - the registry's generic response content
 //
-// It is NOT expanded in stub response content. A stub's response is returned
-// to the subject verbatim; the subject carries its own run identity and any
-// substitution there would corrupt the reply the test is measuring.
+// A stub's response is test-author-authored fixture content simulating
+// what a sub-agent would say. Expanding {run_id} in it resolves a
+// placeholder the test author deliberately wrote so the same fixture
+// works across different run IDs. This does not alter anything the
+// subject generated -- only framework-controlled content.
 const RunIDPlaceholder = "{run_id}"
 
 // RunState is the document shared between the driver and every interceptor

@@ -25,7 +25,12 @@ type Applier interface {
 	// relative to subjectDir; an effect resolving outside it is refused.
 	// The returned ledger is cumulative-safe: it may be merged with a
 	// previously persisted ledger.
-	Apply(subjectDir string, effects []domain.FileEffect) (domain.EffectLedger, error)
+	//
+	// runID is expanded in place of domain.RunIDPlaceholder in every
+	// effect's content (both inline Content and $ref-resolved bytes)
+	// before writing. An empty runID disables content expansion (paths
+	// are the caller's responsibility and are NOT expanded here).
+	Apply(subjectDir string, effects []domain.FileEffect, runID string) (domain.EffectLedger, error)
 }
 
 // NewApplier constructs an Applier that resolves $ref effects through res.
@@ -45,20 +50,20 @@ type contextualApplier struct {
 	factory fixtures.ResolverFactory
 }
 
-func (a *contextualApplier) Apply(subjectDir string, effects []domain.FileEffect) (domain.EffectLedger, error) {
+func (a *contextualApplier) Apply(subjectDir string, effects []domain.FileEffect, runID string) (domain.EffectLedger, error) {
 	resolver, err := a.factory(subjectDir)
 	if err != nil {
 		return domain.EffectLedger{}, fmt.Errorf("sideeffects: constructing resolver for %q: %w", subjectDir, err)
 	}
 	inner := &applier{resolver: resolver}
-	return inner.Apply(subjectDir, effects)
+	return inner.Apply(subjectDir, effects, runID)
 }
 
 type applier struct {
 	resolver fixtures.Resolver
 }
 
-func (a *applier) Apply(subjectDir string, effects []domain.FileEffect) (domain.EffectLedger, error) {
+func (a *applier) Apply(subjectDir string, effects []domain.FileEffect, runID string) (domain.EffectLedger, error) {
 	var ledger domain.EffectLedger
 
 	absSubject, err := filepath.Abs(subjectDir)
@@ -82,6 +87,10 @@ func (a *applier) Apply(subjectDir string, effects []domain.FileEffect) (domain.
 			}
 		} else {
 			content = []byte(effect.Content)
+		}
+
+		if runID != "" {
+			content = []byte(strings.ReplaceAll(string(content), domain.RunIDPlaceholder, runID))
 		}
 
 		newDirs, err := mkdirAllTracked(absSubject, filepath.Dir(fullPath))

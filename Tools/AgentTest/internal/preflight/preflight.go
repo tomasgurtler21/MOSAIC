@@ -634,6 +634,9 @@ func mergeSettings(base, override domain.RunSettings) domain.RunSettings {
 	if override.StopAfterInvocations != nil {
 		result.StopAfterInvocations = override.StopAfterInvocations
 	}
+	if override.EchoFidelity != nil {
+		result.EchoFidelity = override.EchoFidelity
+	}
 	return result
 }
 

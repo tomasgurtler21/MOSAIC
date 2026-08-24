@@ -226,10 +226,11 @@ type wireRunSummary struct {
 }
 
 type wireActionRecord struct {
-	Ref        wireArtifactRef `json:"Ref"`
-	TargetPath string          `json:"TargetPath"`
-	Taken      string          `json:"Taken"`
-	Err        string          `json:"Err"`
+	Ref           wireArtifactRef `json:"Ref"`
+	TargetPath    string          `json:"TargetPath"`
+	Taken         string          `json:"Taken"`
+	Err           string          `json:"Err"`
+	SourceVersion string          `json:"SourceVersion"`
 }
 
 type wireArtifactRef struct {
@@ -553,6 +554,7 @@ func (d *deployer) Deploy(ctx context.Context, req domain.DeployRequest) (domain
 				agents = append(agents, domain.DeployedAgent{
 					Key:             action.Ref.Key,
 					DestinationPath: action.TargetPath,
+					SourceVersion:   action.SourceVersion,
 				})
 			}
 		}

@@ -35,7 +35,7 @@ func TestApply_LiteralContentEffect_WritesTheFileWithThatContent(t *testing.T) {
 		{Path: "notes/plan.md", Content: "seeded plan content"},
 	}
 
-	ledger, err := applier.Apply(subjectDir, effects)
+	ledger, err := applier.Apply(subjectDir, effects, "")
 
 	if err != nil {
 		t.Fatalf("Apply returned unexpected error: %v", err)
@@ -64,7 +64,7 @@ func TestApply_RefEffect_ResolvesTheFixtureAndWritesItsContent(t *testing.T) {
 		{Path: "docs/from-ref.md", Ref: "template.md"},
 	}
 
-	ledger, err := applier.Apply(subjectDir, effects)
+	ledger, err := applier.Apply(subjectDir, effects, "")
 
 	if err != nil {
 		t.Fatalf("Apply returned unexpected error: %v", err)
@@ -90,7 +90,7 @@ func TestApply_RecordsDirectoriesItCreated(t *testing.T) {
 		{Path: filepath.Join("a", "b", "c.txt"), Content: "nested"},
 	}
 
-	ledger, err := applier.Apply(subjectDir, effects)
+	ledger, err := applier.Apply(subjectDir, effects, "")
 
 	if err != nil {
 		t.Fatalf("Apply returned unexpected error: %v", err)
@@ -109,7 +109,7 @@ func TestApply_EffectResolvingOutsideSubjectDir_IsRefused(t *testing.T) {
 		{Path: filepath.Join("..", "escaped.txt"), Content: "should never be written"},
 	}
 
-	_, err := applier.Apply(subjectDir, effects)
+	_, err := applier.Apply(subjectDir, effects, "")
 
 	if err == nil {
 		t.Fatal("expected Apply to refuse an effect whose path escapes subjectDir, got nil error")
@@ -146,7 +146,7 @@ func TestRemove_DeletesExactlyTheLedgeredFilesAndDirectories(t *testing.T) {
 
 	ledger, err := applier.Apply(subjectDir, []domain.FileEffect{
 		{Path: filepath.Join("owned", "created.txt"), Content: "created by the applier"},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("Apply returned unexpected error: %v", err)
 	}
@@ -191,13 +191,13 @@ func TestApply_CalledTwiceAgainstSameSubjectDir_LedgersAreCumulativeSafeWhenMerg
 
 	firstLedger, err := applier.Apply(subjectDir, []domain.FileEffect{
 		{Path: "first.txt", Content: "from the first Apply call"},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("first Apply returned unexpected error: %v", err)
 	}
 	secondLedger, err := applier.Apply(subjectDir, []domain.FileEffect{
 		{Path: "second.txt", Content: "from the second Apply call"},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("second Apply returned unexpected error: %v", err)
 	}

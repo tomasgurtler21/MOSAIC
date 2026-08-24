@@ -9,7 +9,10 @@ import (
 
 // evaluateAssertions evaluates every assertion class declared by ev's
 // definition, plus echo fidelity — which is never declared, never
-// suppressed, and always evaluated for every stubbed invocation.
+// suppressed, and always evaluated for every stubbed invocation. Echo
+// fidelity results always appear in the returned slice regardless of the
+// effective echo fidelity mode; whether a mismatch contributes to the
+// verdict is decided in Evaluate based on the mode.
 func evaluateAssertions(ev domain.RunEvidence) []domain.AssertionResult {
 	var out []domain.AssertionResult
 	a := ev.Definition.Assertions

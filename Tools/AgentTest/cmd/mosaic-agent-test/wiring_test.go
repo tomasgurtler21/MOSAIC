@@ -68,7 +68,7 @@ func (fakeResolver) Validate(ref string) error { return errors.New("fakeResolver
 
 type fakeApplier struct{}
 
-func (fakeApplier) Apply(subjectDir string, effects []domain.FileEffect) (domain.EffectLedger, error) {
+func (fakeApplier) Apply(subjectDir string, effects []domain.FileEffect, runID string) (domain.EffectLedger, error) {
 	return domain.EffectLedger{}, errors.New("fakeApplier: not exercised")
 }
 

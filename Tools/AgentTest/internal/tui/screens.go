@@ -129,19 +129,15 @@ func (m Model) viewModelSelect() string {
 // Suite selection
 // ---------------------------------------------------------------------------
 
-// suiteSelectHelp is EntryScreenHelp with a Tab entry (to reach the settings
-// screen) and the detail-pane scroll entry prepended, so all affordances on
-// this screen are discoverable via the help bar.
+// suiteSelectHelp is EntryScreenHelp with the detail-pane scroll entry
+// prepended, so all affordances on this screen are discoverable via the
+// help bar.
 func suiteSelectHelp() []tuicommon.HelpEntry {
-	tabEntry := tuicommon.HelpEntry{
-		Key:  "tab",
-		Desc: "configure run",
-	}
 	scrollEntry := tuicommon.HelpEntry{
 		Key:  "pgup/pgdn",
 		Desc: "scroll detail",
 	}
-	return append([]tuicommon.HelpEntry{tabEntry, scrollEntry}, tuicommon.EntryScreenHelp()...)
+	return append([]tuicommon.HelpEntry{scrollEntry}, tuicommon.EntryScreenHelp()...)
 }
 
 func (m Model) viewSuiteSelect() string {

@@ -276,13 +276,10 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 		}
 		ledger.Provisioning.Dirs = append(ledger.Provisioning.Dirs, result.CreatedDirectories...)
 
-		// The subject version is empty on the catalogue path: Deploy reports
-		// no source version and we must not reconstruct one.
-		ledger.SubjectVersion = ""
-
 		// Derive the subject's definition path from the DeployedAgent entry
 		// whose Key matches the declared catalogue agent key. No positional
-		// assumption; key-based matching is the contract.
+		// assumption; key-based matching is the contract. Also thread the
+		// declared source version from the matching agent to the ledger.
 		found := false
 		for _, agent := range result.Agents {
 			if agent.Key != req.Test.Definition.Subject.CatalogAgentKey {
@@ -294,6 +291,10 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 					agent.DestinationPath, sb.SubjectDir, relErr)
 			}
 			req.Test.Definition.Subject.DefinitionPath = rel
+			// Carry the declared version from the deploy report. When the agent
+			// declares no version, SourceVersion is empty and SubjectVersion
+			// remains empty — the report layer maps that to "unknown".
+			ledger.SubjectVersion = agent.SourceVersion
 			found = true
 			break
 		}
@@ -499,6 +500,8 @@ func seedFile(d Deps, sb domain.Sandbox, key domain.RunKey, sf domain.SeedFile, 
 	} else {
 		content = []byte(sf.Content)
 	}
+
+	content = []byte(strings.ReplaceAll(string(content), domain.RunIDPlaceholder, key.RunID))
 
 	expandedPath := strings.ReplaceAll(sf.Path, domain.RunIDPlaceholder, key.RunID)
 	rel, full, err := resolveSubjectPath(sb.SubjectDir, expandedPath)

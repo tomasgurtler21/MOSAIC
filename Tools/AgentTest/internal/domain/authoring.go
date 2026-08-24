@@ -33,6 +33,33 @@ type RunSettings struct {
 	Repetitions          *int
 	PassRate             *float64
 	StopAfterInvocations *int
+
+	// EchoFidelity controls whether echo fidelity mismatches affect the
+	// test verdict. Nil means "not stated at this level" and inherits
+	// from the next level down in the suite/entry/definition precedence
+	// chain; the resolved default is EchoFidelityRequired.
+	//
+	// Possible values: EchoFidelityRequired, EchoFidelityAdvisory.
+	EchoFidelity *string
+}
+
+const (
+	// EchoFidelityRequired means echo fidelity mismatches cause FAIL with
+	// ReasonEchoMismatch. This is the default and preserves current behavior.
+	EchoFidelityRequired = "required"
+
+	// EchoFidelityAdvisory means echo fidelity is always evaluated and
+	// reported, but mismatches do not contribute to the verdict.
+	EchoFidelityAdvisory = "advisory"
+)
+
+// EffectiveEchoFidelity resolves a possibly-nil EchoFidelity pointer to
+// a concrete mode string, defaulting to EchoFidelityRequired.
+func EffectiveEchoFidelity(settings RunSettings) string {
+	if settings.EchoFidelity != nil {
+		return *settings.EchoFidelity
+	}
+	return EchoFidelityRequired
 }
 
 // TestDefinition is the authored document (`*.test.yaml`) describing one
@@ -107,7 +134,8 @@ const (
 type Stub struct {
 	Match StubMatch
 	// Response is the payload the collaborator is made to produce, carried
-	// verbatim so a faithful echo compares equal.
+	// verbatim (except for {run_id} placeholder expansion) so a faithful
+	// echo compares equal.
 	Response    json.RawMessage
 	SideEffects []FileEffect
 }

@@ -85,11 +85,13 @@ func Evaluate(ev domain.RunEvidence) domain.TestResult {
 	// something was declared.
 	vacuousAssertions := assertionsDeclared(ev.Definition.Assertions) && len(assertions) == 0
 
+	echoFidelityMode := domain.EffectiveEchoFidelity(ev.Definition.Settings)
+
 	var reasons []domain.FailureReason
 	if assertionFailed || vacuousAssertions {
 		reasons = append(reasons, domain.ReasonAssertion)
 	}
-	if echoFailed {
+	if echoFailed && echoFidelityMode != domain.EchoFidelityAdvisory {
 		reasons = append(reasons, domain.ReasonEchoMismatch)
 	}
 	if stateIntegrity {

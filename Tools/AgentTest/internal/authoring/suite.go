@@ -35,6 +35,10 @@ type WireSettings struct {
 	Repetitions          *int     `yaml:"repetitions" json:"repetitions"`
 	PassRate             *float64 `yaml:"pass_rate" json:"pass_rate"`
 	StopAfterInvocations *int     `yaml:"stop_after_invocations" json:"stop_after_invocations"`
+
+	// EchoFidelity controls whether echo fidelity mismatches affect the
+	// test verdict. Valid values: "required" (default), "advisory".
+	EchoFidelity *string `yaml:"echo_fidelity" json:"echo_fidelity"`
 }
 
 // toDomain converts w to domain.RunSettings. The only field needing real
@@ -45,6 +49,7 @@ func (w WireSettings) toDomain(src Source, pointer string, report *Report) domai
 		Repetitions:          w.Repetitions,
 		PassRate:             w.PassRate,
 		StopAfterInvocations: w.StopAfterInvocations,
+		EchoFidelity:         w.EchoFidelity,
 	}
 	if w.Timeout != nil {
 		d, err := time.ParseDuration(*w.Timeout)

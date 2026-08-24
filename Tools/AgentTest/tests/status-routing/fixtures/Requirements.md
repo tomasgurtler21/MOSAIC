@@ -1,5 +1,5 @@
 ---
-run_id: "test-run"
+run_id: "{run_id}"
 created_by: "requirements-refinement#2"
 human_approved: true
 ---

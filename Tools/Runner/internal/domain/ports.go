@@ -193,6 +193,50 @@ type Clock interface {
 	Now() time.Time
 }
 
+// DispatchLogger records subagent dispatch requests and responses to a
+// dedicated log. Each method serialises its argument as a complete JSON
+// object and writes it as a single line (JSON Lines format).
+//
+// Contract: implementations never return an error, never panic, and never
+// block a run. A logging failure (unwritable folder, closed file, disk full)
+// must degrade silently to a no-op. Callers therefore never check a result
+// and never guard a call.
+//
+// Implementations must be safe for concurrent use by multiple goroutines.
+type DispatchLogger interface {
+	// LogRequest records the full protocol request dispatched to a subagent.
+	// Called immediately before the harness invocation. The request is
+	// serialised as-is with no field omission or truncation.
+	LogRequest(req ProtocolRequest)
+
+	// LogResponse records the full protocol response returned by a subagent.
+	// Called immediately after the harness invocation succeeds. The response
+	// is serialised as-is with no field omission or truncation.
+	LogResponse(resp ProtocolResponse)
+
+	// LogError records a harness-level error for an invocation that never
+	// produced a ProtocolResponse. The agentInstanceID ties the error entry
+	// to the preceding LogRequest entry for the same invocation. errText is
+	// the result of err.Error() on the harness error.
+	LogError(agentInstanceID string, errText string)
+
+	// SetRunID associates the log with a run_id. Called before the first
+	// write, it names the file "{run_id}.log"; called after, it records a
+	// correlation entry. An invalid or empty runID is silently ignored.
+	// Safe to call more than once; only the first effective call names the file.
+	SetRunID(runID string)
+
+	// Close permanently disables the logger. No further entries are written.
+	// Safe to call on a disabled or never-used logger, and safe to call more
+	// than once. Never returns an error.
+	Close()
+
+	// Path returns the absolute path of the log file. Returns "" only if no
+	// file has ever been successfully created. Once a file has been created,
+	// Path continues to return that path even after Close.
+	Path() string
+}
+
 // DebugLogger is the seam between the runner and its always-on file-based
 // debug log. It exists so that harness I/O, parse failures and dispatch events
 // — including steps that never reach Orchestration.md — leave a diagnosable

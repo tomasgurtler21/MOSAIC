@@ -54,7 +54,7 @@ func TestApplier_ConcurrentApply_ProducesNoDataRaces(t *testing.T) {
 			// An empty effects slice produces an empty ledger without touching
 			// the filesystem. The race detector verifies no goroutine writes
 			// to applier fields; the result is discarded as it is not the focus.
-			applier.Apply(t.TempDir(), []domain.FileEffect{}) //nolint:errcheck
+			applier.Apply(t.TempDir(), []domain.FileEffect{}, "") //nolint:errcheck
 		}()
 	}
 	wg.Wait()

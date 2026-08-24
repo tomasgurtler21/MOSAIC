@@ -188,6 +188,74 @@ func TestReportPathScreen_Reset_ClearsDraftState(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Backspace — removes last character from draft
+// ---------------------------------------------------------------------------
+
+// TestReportPathScreen_Backspace_RemovesLastCharacter verifies that pressing
+// Backspace after typing a path removes the last character from the draft so
+// that Enter confirms only the remaining characters.
+func TestReportPathScreen_Backspace_RemovesLastCharacter(t *testing.T) {
+	// Arrange — type "/ab" so the draft is "/ab"
+	s := newReportPathScreen("")
+	for _, r := range "/ab" {
+		s.Update(runeKey(r))
+	}
+
+	// Act — erase the 'b', leaving "/a"
+	s.Update(backspaceKey())
+
+	// Confirm so we can observe the committed path
+	s.Update(enterKey())
+
+	// Assert — only "/a" must have been committed
+	if s.Path() != "/a" {
+		t.Errorf("Path() = %q after typing %q, Backspace, Enter; want %q (last character erased)", s.Path(), "/ab", "/a")
+	}
+}
+
+// TestReportPathScreen_Backspace_OnEmptyDraft_IsNoOp verifies that pressing
+// Backspace when the draft is empty does not crash and does not alter the
+// confirmed path, Done, or Back flags.
+func TestReportPathScreen_Backspace_OnEmptyDraft_IsNoOp(t *testing.T) {
+	// Arrange — screen with no characters typed (draft is empty)
+	s := newReportPathScreen("/original.json")
+
+	// Act — backspace on an empty draft must be a silent no-op
+	s.Update(backspaceKey())
+
+	// Assert — flags unchanged
+	if s.Done() {
+		t.Error("Done() = true after Backspace on empty draft; Backspace must not set Done")
+	}
+	if s.Back() {
+		t.Error("Back() = true after Backspace on empty draft; Backspace must not set Back")
+	}
+	// Assert — confirmed path still equals the initial value (nothing committed yet)
+	if s.Path() != "/original.json" {
+		t.Errorf("Path() = %q after Backspace on empty draft; want initial path %q (no-op must leave path unchanged)", s.Path(), "/original.json")
+	}
+}
+
+// TestReportPathScreen_Backspace_DoesNotSetDoneOrBack verifies that a Backspace
+// key press alone does not accidentally advance or cancel the screen.
+func TestReportPathScreen_Backspace_DoesNotSetDoneOrBack(t *testing.T) {
+	// Arrange — type one character so the draft is non-empty
+	s := newReportPathScreen("")
+	s.Update(runeKey('/'))
+
+	// Act
+	s.Update(backspaceKey())
+
+	// Assert
+	if s.Done() {
+		t.Error("Done() = true after Backspace; Backspace must not set Done")
+	}
+	if s.Back() {
+		t.Error("Back() = true after Backspace; Backspace must not set Back")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Resize — does not corrupt state
 // ---------------------------------------------------------------------------
 

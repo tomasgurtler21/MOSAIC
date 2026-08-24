@@ -216,6 +216,74 @@ func TestRepetitionsScreen_Reset_ClearsDraftState(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Backspace — removes last digit from draft
+// ---------------------------------------------------------------------------
+
+// TestRepetitionsScreen_Backspace_RemovesLastDigit verifies that pressing
+// Backspace after typing digits removes the last digit from the draft so that
+// Enter confirms only the remaining digits.
+func TestRepetitionsScreen_Backspace_RemovesLastDigit(t *testing.T) {
+	// Arrange — type two digits so the draft is "42"
+	s := newRepetitionsScreen(1)
+	s.Update(digitKey('4'))
+	s.Update(digitKey('2'))
+
+	// Act — erase the '2', leaving "4"
+	s.Update(backspaceKey())
+
+	// Confirm so we can observe the committed value
+	s.Update(enterKey())
+
+	// Assert — only the remaining digit "4" must have been committed
+	if s.Value() != 4 {
+		t.Errorf("Value() = %d after typing '42', Backspace, Enter; want 4 (last digit erased)", s.Value())
+	}
+}
+
+// TestRepetitionsScreen_Backspace_OnEmptyDraft_IsNoOp verifies that pressing
+// Backspace when the draft is empty does not crash and does not alter the
+// confirmed value, Done, or Back flags.
+func TestRepetitionsScreen_Backspace_OnEmptyDraft_IsNoOp(t *testing.T) {
+	// Arrange — screen with no digits typed (draft is empty)
+	s := newRepetitionsScreen(3)
+
+	// Act — backspace on an empty draft must be a silent no-op
+	s.Update(backspaceKey())
+
+	// Assert — flags unchanged
+	if s.Done() {
+		t.Error("Done() = true after Backspace on empty draft; Backspace must not set Done")
+	}
+	if s.Back() {
+		t.Error("Back() = true after Backspace on empty draft; Backspace must not set Back")
+	}
+	// Assert — confirmed value unchanged (initial is still 3, nothing was confirmed)
+	s.Update(enterKey()) // confirm whatever the draft holds
+	if s.Value() != 3 {
+		t.Errorf("Value() = %d after Backspace on empty draft + Enter; want initial value 3 (no-op must leave value unchanged)", s.Value())
+	}
+}
+
+// TestRepetitionsScreen_Backspace_DoesNotSetDoneOrBack verifies that a Backspace
+// key press alone does not accidentally advance or cancel the screen.
+func TestRepetitionsScreen_Backspace_DoesNotSetDoneOrBack(t *testing.T) {
+	// Arrange — type one digit so the draft is non-empty
+	s := newRepetitionsScreen(1)
+	s.Update(digitKey('7'))
+
+	// Act
+	s.Update(backspaceKey())
+
+	// Assert
+	if s.Done() {
+		t.Error("Done() = true after Backspace; Backspace must not set Done")
+	}
+	if s.Back() {
+		t.Error("Back() = true after Backspace; Backspace must not set Back")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Resize — does not corrupt state
 // ---------------------------------------------------------------------------
 

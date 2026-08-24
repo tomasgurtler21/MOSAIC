@@ -1,5 +1,5 @@
 ---
-run_id: "test-run"
+run_id: "{run_id}"
 created_by: "codebase-research#1"
 human_approved: false
 ---

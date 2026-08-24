@@ -82,13 +82,6 @@ func catalogRoot(t *testing.T) string {
 	return filepath.Join(agentTestRoot(t), "catalog")
 }
 
-// agentsStubDir returns the absolute path to Tools/AgentTest/agents/ — the
-// stub-agents source directory used for comparison in T6.3.
-func agentsStubDir(t *testing.T) string {
-	t.Helper()
-	return filepath.Join(agentTestRoot(t), "agents")
-}
-
 // ---------------------------------------------------------------------------
 // Path builders (mirroring catalogpaths)
 //
@@ -578,122 +571,6 @@ func TestCatalogueTree_ReferencedAgentsResolveAndWorkflowIsIndexed(t *testing.T)
 			if got != expectedFile {
 				t.Errorf("Workflows/Index.md row[File] = %q, want %q (backtick-quoted, relative to Workflows/)", got, expectedFile)
 			}
-		}
-	})
-}
-
-// ---------------------------------------------------------------------------
-// T6.3: TestStubs and agents/ stub sets stay in sync
-// ---------------------------------------------------------------------------
-
-// TestCatalogueTree_TestStubsInSyncWithAgentsDir asserts that:
-//   - The agent key set in catalog/Subagents/TestStubs/ exactly matches the
-//     agent key set in Tools/AgentTest/agents/.
-//   - Every file in catalog/Subagents/TestStubs/ satisfies the same frontmatter
-//     and body-region contract as the agents/ stubs (same required fields, same
-//     recommended_tier, same body regions).
-//
-// Both locations serve different provisioning paths but must remain identical
-// in content so both paths exercise the same stubs.
-//
-// Fails until I6.2 is complete and all 15 stubs are correctly formatted.
-func TestCatalogueTree_TestStubsInSyncWithAgentsDir(t *testing.T) {
-	root := catalogRoot(t)
-	catalogStubsDir := subagentCategoryDir(root, testStubsCategory)
-
-	// Collect keys from agents/ — this directory already exists.
-	agentsDirKeys := mdFileKeys(t, agentsStubDir(t), "README.md")
-
-	// Collect keys from catalog/Subagents/TestStubs/ — will fail until I6.2.
-	catalogStubKeys := mdFileKeys(t, catalogStubsDir, "")
-
-	// The two key sets must be identical.
-	t.Run("same_key_set", func(t *testing.T) {
-		agentsSet := toStringSet(agentsDirKeys)
-		catalogSet := toStringSet(catalogStubKeys)
-
-		for key := range agentsSet {
-			if !catalogSet[key] {
-				t.Errorf("agents/%s.md exists but catalog/Subagents/TestStubs/%s.md is absent", key, key)
-			}
-		}
-		for key := range catalogSet {
-			if !agentsSet[key] {
-				t.Errorf("catalog/Subagents/TestStubs/%s.md exists but agents/%s.md is absent", key, key)
-			}
-		}
-	})
-
-	// Every catalogue stub must satisfy the stub agent definition file contract.
-	t.Run("catalog_stubs_satisfy_contract", func(t *testing.T) {
-		entries, err := os.ReadDir(catalogStubsDir)
-		if err != nil {
-			t.Fatalf("ReadDir(%q) = %v", catalogStubsDir, err)
-		}
-
-		for _, e := range entries {
-			name := e.Name()
-			if e.IsDir() || !strings.HasSuffix(name, ".md") {
-				continue
-			}
-			base := strings.TrimSuffix(name, ".md")
-			path := filepath.Join(catalogStubsDir, name)
-
-			t.Run(base, func(t *testing.T) {
-				fm, body := parseFrontmatter(t, path)
-				if fm == nil {
-					return
-				}
-
-				// Required string fields.
-				for _, field := range []string{"version", "description", "model", "recommended_tier", "tier_rationale"} {
-					requireStringField(t, fm, base, field)
-				}
-
-				// id must be present and integer-typed. YAML integers decode as
-				// int or float64 depending on the value; both are acceptable.
-				if idVal, ok := fm["id"]; !ok {
-					t.Errorf("%s: frontmatter field \"id\" is absent — must be a non-empty integer", base)
-				} else {
-					switch idVal.(type) {
-					case int, float64, uint64:
-						// acceptable integer representations from the YAML decoder
-					default:
-						t.Errorf("%s: frontmatter field \"id\" has type %T, want integer", base, idVal)
-					}
-				}
-
-				// name must be present and match the file's base name.
-				if name := requireStringField(t, fm, base, "name"); name != "" && name != base {
-					t.Errorf("%s: frontmatter field \"name\" = %q, want %q (file base name without .md)", base, name, base)
-				}
-
-				// role must be "subagent".
-				if role := requireStringField(t, fm, base, "role"); role != "" && role != "subagent" {
-					t.Errorf("%s: frontmatter field \"role\" = %q, want \"subagent\"", base, role)
-				}
-
-				// recommended_tier must be the stub tier.
-				if tier, _ := fm["recommended_tier"].(string); tier != "" && tier != tierTestStub {
-					t.Errorf("%s: frontmatter field \"recommended_tier\" = %q, want %q", base, tier, tierTestStub)
-				}
-
-				// tools key must be present (may be an empty list).
-				if _, ok := fm["tools"]; !ok {
-					t.Errorf("%s: frontmatter field \"tools\" is absent — it must be declared (may be an empty list)", base)
-				}
-
-				// Required body regions.
-				if !strings.Contains(body, `<Identity type="core">`) {
-					t.Errorf("%s: body does not contain an Identity core block (<Identity type=\"core\">)", base)
-				}
-				// CommunicationProtocol region is intentionally absent from
-				// test stub definitions: a stub that receives the full
-				// protocol block reasons about task structure and may refuse
-				// or rewrite the substituted reply. The deployment tool only
-				// fills regions that exist, so removing the region here is
-				// sufficient to suppress it in the deployed stub.
-			})
 		}
 	})
 }

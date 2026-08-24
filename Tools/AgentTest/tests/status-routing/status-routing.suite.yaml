@@ -10,6 +10,7 @@ defaults:
   turn_limit: 30
   repetitions: 1
   pass_rate: 1.0
+  echo_fidelity: advisory
 tests:
   - path: findings-route-back.test.yaml
   - path: partially-done-redispatch.test.yaml

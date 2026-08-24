@@ -1,6 +1,6 @@
 ---
 type: orchestration-artifact
-run_id: "test-run"
+run_id: "{run_id}"
 workflow: brownfield-tdd
 workflow_version: "3.7"
 task: "Add a --verbose flag to the widgets CLI so it prints per-item diagnostics to stderr."

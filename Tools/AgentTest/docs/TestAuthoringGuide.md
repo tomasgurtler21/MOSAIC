@@ -162,6 +162,30 @@ assertions:
 
 Note: The `opening_message` must include the fields the orchestrator requires to begin — task, workflow type, and checkpoints preference. Without these, the orchestrator prompts the user for configuration instead of dispatching.
 
+#### Fresh-Start vs Resume Opening Messages
+
+The `opening_message` framing determines whether the orchestrator initializes a new workflow or resumes from existing state. This distinction is critical when tests seed an `Orchestration.md` fixture:
+
+**Fresh-start** (no seeded Orchestration.md — testing the first dispatch):
+```yaml
+opening_message: |
+    Task: Add rate limiting to the API gateway
+    Workflow: brownfield-tdd
+    Checkpoints: disabled
+```
+
+**Resume** (seeded Orchestration.md — testing a mid-workflow routing decision):
+```yaml
+opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+```
+
+**Why this matters:** If you seed an Orchestration.md with prior execution state but use a fresh-start opening message, the orchestrator will overwrite the seeded file with a blank one and start from scratch — dispatching `codebase-research` instead of the agent your test expects. The harness prepends `run_id: {actual_run_id}` to every opening message, so the orchestrator can always derive the run-scoped folder path.
+
+Do NOT include Task/Workflow/Checkpoints fields in a resume message — those fields signal "new workflow" to the orchestrator and trigger the initialization path regardless of existing state.
+
 Note: `exact: true` with N declared steps is the normal shape for a single-decision test. `stop_after_invocations: N` terminates the subject immediately after it receives the Nth reply, so exactly N invocation-log entries are recorded and no phantom entry appears. Do not assert on `final_state`, `execution_log`, or `artifact_created` for artifacts the subject writes after receiving the final reply — the subject is terminated before it can complete that bookkeeping, and its absence is expected behaviour, not evidence corruption.
 
 ### Full Example
@@ -794,6 +818,24 @@ assertions:
 **`identity`** is optional. When set, it cross-checks against the invocation at that sequence position — a mismatch is reported as a sequence drift, not a message content error.
 
 **Artifact assertions** follow set semantics: every `required_*` entry must be present, each `optional_*` entry may be. Anything present that is in neither list fails the assertion.
+
+#### Artifact Path Leniency
+
+The orchestrator sometimes includes extra artifacts beyond the workflow table's declared set (e.g., stage sub-plans alongside the top-level Plan.md), or uses glob-style paths like `Stage-*/Plan.md`. It may also inconsistently omit the `Orchestration-{run_id}/` prefix from artifact paths, passing bare names like `Stage-1/Plan.md` instead of the fully-qualified `Orchestration-{run_id}/Stage-1/Plan.md`.
+
+When your test's purpose is **routing correctness** (did the orchestrator dispatch the right agent?), not artifact path hygiene, handle these variations pragmatically:
+
+- Put the core routing-relevant artifacts in `required_*` (e.g., the review findings file that proves On Findings routing was used)
+- Put predictable but non-essential extras in `optional_*` (e.g., stage plans the planner also produces)
+- When the orchestrator inconsistently prefixes paths, list both forms in `optional_*`:
+
+```yaml
+optional_input_artifacts:
+  - Orchestration-{run_id}/Stage-1/Plan.md   # fully-qualified form
+  - Stage-1/Plan.md                           # bare form (orchestrator sometimes omits prefix)
+```
+
+This keeps the test focused on its routing assertion while tolerating LLM variance in path formatting. If you want to separately assert path correctness, write a dedicated test for that concern.
 
 **`task_description_contains`** checks that each listed substring appears somewhere in the task description of the invocation message.
 

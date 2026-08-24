@@ -269,10 +269,11 @@ func classifyAgentItem(
 ) domain.PlanItem {
 	ref := domain.ArtifactRef{Kind: domain.ArtifactAgent, Key: agent.Key}
 	item := domain.PlanItem{
-		Ref:        ref,
-		SourcePath: agent.SourcePath,
-		TargetPath: targetPath,
-		Model:      model,
+		Ref:           ref,
+		SourcePath:    agent.SourcePath,
+		TargetPath:    targetPath,
+		Model:         model,
+		SourceVersion: agent.Version,
 	}
 
 	// Step 1: No deployed file — short-circuit to create before consulting the manifest.

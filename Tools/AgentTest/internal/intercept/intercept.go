@@ -131,6 +131,13 @@ type Input struct {
 	Registry domain.StubRegistry
 	Groups   []domain.ParallelGroup // for tagging records with their group
 	Now      time.Time              // injected; the core never reads a clock
+
+	// RunID is the run's identifier, used to expand
+	// domain.RunIDPlaceholder in stub response content and generic
+	// response content before they are returned to the subject and
+	// before they are stored as PendingStub.Expected.
+	// Empty disables expansion.
+	RunID string
 }
 
 // Decision is the whole answer: what to tell the harness, how the state
@@ -290,6 +297,15 @@ func decidePre(in Input) Decision {
 	token := in.Call.CorrelationToken
 
 	result := stubmatch.Match(in.Registry, id, ordinal)
+
+	if in.RunID != "" {
+		if result.Matched {
+			result.Stub.Response = json.RawMessage(strings.ReplaceAll(string(result.Stub.Response), domain.RunIDPlaceholder, in.RunID))
+		}
+		if result.Policy == domain.UnmatchedGenericResponse {
+			result.GenericResponse = json.RawMessage(strings.ReplaceAll(string(result.GenericResponse), domain.RunIDPlaceholder, in.RunID))
+		}
+	}
 
 	switch {
 	case result.Matched:

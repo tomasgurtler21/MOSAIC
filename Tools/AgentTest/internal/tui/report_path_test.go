@@ -422,6 +422,102 @@ func TestSuiteSelect_WriteFileFailure_IsVisibleInView(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Suite-selection recomputation: derived path shown in settings flow
+// ---------------------------------------------------------------------------
+
+// TestSuiteSelect_WithReportPathFor_ShowsDerivedPathInSettingsFlow asserts
+// that when Options.ReportPathFor is supplied, ScreenReportPath displays the
+// suite-derived path — not the initial placeholder — when the settings flow
+// opens after the user confirms their suite selection with Enter.
+//
+// This specifies that the report-path recomputation must happen at
+// suite-selection time (inside updateSuiteSelect, before initSettingScreens
+// is called), so the user sees the correct output location during the settings
+// flow, not only after completing all settings screens.
+func TestSuiteSelect_WithReportPathFor_ShowsDerivedPathInSettingsFlow(t *testing.T) {
+	const placeholder = "placeholder.json"
+	const suiteName = "suite-a.yaml"
+	const derivedPath = "suite-a-derived-report.json"
+
+	o := newFixtureOptions([]string{suiteName}, newFakeSuiteRunner())
+	o.ReportPath = placeholder
+	o.ReportPathFor = func(_ string) string {
+		return derivedPath
+	}
+	m := NewModel(o)
+
+	// Confirm suite selection (Enter) then navigate through the settings flow
+	// to ScreenReportPath.
+	m = navigateToScreenReportPath(t, m)
+
+	// Act
+	view := safeView(t, m)
+
+	// Assert: the derived path must appear; the placeholder must not.
+	if !strings.Contains(view, derivedPath) {
+		t.Errorf("ScreenReportPath view after suite selection does not contain the suite-derived path %q;\n"+
+			"recomputation must occur at selection time (before initSettingScreens) so the settings flow "+
+			"shows the real output path:\n%s", derivedPath, view)
+	}
+}
+
+// TestSuiteSelect_WithReportPathFor_PreservesManualEdit asserts that when the
+// user has manually changed the report path (so it differs from the initial
+// Options.ReportPath), re-selecting the suite does not overwrite the edited
+// value with the suite-derived one.
+//
+// The guard is: recompute only when m.reportPath == m.opts.ReportPath.
+// Once the user edits the path the values diverge, and the guard must suppress
+// further recomputation on subsequent suite selections.
+func TestSuiteSelect_WithReportPathFor_PreservesManualEdit(t *testing.T) {
+	const placeholder = "placeholder.json"
+	const suiteName = "suite-a.yaml"
+	const customPath = "my-custom-report.json"
+
+	o := newFixtureOptions([]string{suiteName}, newFakeSuiteRunner())
+	o.ReportPath = placeholder
+	o.ReportPathFor = func(suitePath string) string {
+		return "derived-" + suitePath + ".json"
+	}
+	m := NewModel(o)
+
+	// Step 1: Enter the settings flow and manually edit the report path.
+	m = navigateToScreenReportPath(t, m)
+	for _, ch := range customPath {
+		m, _ = safeUpdate(t, m, keyMsg(string(ch)))
+	}
+	// Commit; model advances to ScreenCatalogFolder and m.reportPath = customPath.
+	m, _ = safeUpdate(t, m, enterKey())
+	if m.Screen() != ScreenCatalogFolder {
+		t.Fatalf("after committing report path, Screen() = %q, want %q", m.Screen(), ScreenCatalogFolder)
+	}
+	if got := m.ReportPath(); got != customPath {
+		t.Fatalf("ReportPath() = %q after manual edit; want %q", got, customPath)
+	}
+
+	// Step 2: Navigate back to ScreenSuiteSelect via Esc.
+	m, _ = safeUpdate(t, m, escKey()) // CatalogFolder → ReportPath
+	m, _ = safeUpdate(t, m, escKey()) // ReportPath → Repetitions
+	m, _ = safeUpdate(t, m, escKey()) // Repetitions → Retention
+	m, _ = safeUpdate(t, m, escKey()) // Retention → SuiteSelect
+	if m.Screen() != ScreenSuiteSelect {
+		t.Fatalf("after Esc back through settings, Screen() = %q, want %q", m.Screen(), ScreenSuiteSelect)
+	}
+
+	// Step 3: Re-select the suite. The guard must prevent overwriting customPath.
+	m = navigateToScreenReportPath(t, m)
+
+	// Assert: the manually-edited path must be preserved.
+	if got := m.ReportPath(); got != customPath {
+		t.Errorf("ReportPath() = %q after re-selection; want %q (manual edit must not be overwritten by suite-derived recomputation)", got, customPath)
+	}
+	view := safeView(t, m)
+	if !strings.Contains(view, customPath) {
+		t.Errorf("ScreenReportPath view after re-selection does not contain the manually-edited path %q;\nuser edits must be preserved:\n%s", customPath, view)
+	}
+}
+
 // TestSuiteSelect_NilWriteFile_IsReportedInView asserts that when
 // Options.WriteFile is nil, the TUI surfaces a report-write failure in the
 // rendered view rather than silently skipping the write. A nil WriteFile is a

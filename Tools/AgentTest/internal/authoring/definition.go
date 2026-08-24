@@ -23,6 +23,7 @@ var definitionKnownFields = map[string]bool{
 	"repetitions":            true,
 	"pass_rate":              true,
 	"stop_after_invocations": true,
+	"echo_fidelity":          true,
 	"seed_files":             true,
 	"parallel_groups":        true,
 	"assertions":             true,

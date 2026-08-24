@@ -115,3 +115,29 @@ type NopDebugLogger struct{}
 
 // Log implements DebugLogger. It discards the entry.
 func (NopDebugLogger) Log(event string, message string, fields ...DebugField) {}
+
+// NopDispatchLogger is the named no-op DispatchLogger. It is the default
+// whenever no logger is injected, so consumers never hold a nil
+// DispatchLogger and never need a nil check at a call site.
+//
+// The zero value is usable; NopDispatchLogger{} may be copied freely and
+// shared.
+type NopDispatchLogger struct{}
+
+// LogRequest implements DispatchLogger. It discards the entry.
+func (NopDispatchLogger) LogRequest(req ProtocolRequest) {}
+
+// LogResponse implements DispatchLogger. It discards the entry.
+func (NopDispatchLogger) LogResponse(resp ProtocolResponse) {}
+
+// LogError implements DispatchLogger. It discards the entry.
+func (NopDispatchLogger) LogError(agentInstanceID string, errText string) {}
+
+// SetRunID implements DispatchLogger. It is a no-op.
+func (NopDispatchLogger) SetRunID(runID string) {}
+
+// Close implements DispatchLogger. It is a no-op.
+func (NopDispatchLogger) Close() {}
+
+// Path implements DispatchLogger. It always returns "".
+func (NopDispatchLogger) Path() string { return "" }

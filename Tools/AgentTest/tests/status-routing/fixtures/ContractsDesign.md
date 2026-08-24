@@ -1,5 +1,5 @@
 ---
-run_id: "test-run"
+run_id: "{run_id}"
 created_by: "contracts-designer#6"
 human_approved: true
 ---

@@ -13,7 +13,9 @@ package runner_test
 //   - Deploy receives a tier-model map covering both the subject and stub
 //     tiers, keyed by the domain tier constants (T7.6)
 //   - An absent StubModel falls back to the subject's Model (T7.6)
-//   - Subject version is recorded as empty on the catalogue path (T7.7)
+//   - Subject version is threaded from the Deploy result when the agent
+//     declares a version (T7.7)
+//   - Subject version is empty when the agent declares no version (T7.7)
 //   - Subject definition path is derived from the matching DeployedAgent
 //     entry, not reconstructed (T7.7)
 //
@@ -399,17 +401,77 @@ func TestSetup_CataloguePathDeploy_TierMapHasExactlyTwoEntries(t *testing.T) {
 
 // --- T7.7: subject version and definition path on the catalogue path ---
 
-// TestSetup_CataloguePathRecordsSubjectVersionAsEmpty asserts that the
-// catalogue path records the subject version as empty in RunEvidence, because
-// the Deploy result carries no version information. The report layer renders
-// an empty version as "unknown"; the runner's job is to carry it empty, not
-// to invent or reconstruct a value.
-func TestSetup_CataloguePathRecordsSubjectVersionAsEmpty(t *testing.T) {
+// TestSetup_CataloguePathRecordsSubjectVersionFromDeployReport asserts that
+// when the Deploy result's matching agent carries a SourceVersion, the runner
+// threads that value through to result.SubjectVersion. The runner must carry
+// the reported version as-is; it must never reconstruct or fabricate a value.
+//
+// This test references DeployedAgent.SourceVersion, which is added in Stage 3
+// (I3.1). It will fail to compile (TDD RED) until that field exists and the
+// runner threads it through (I3.3).
+func TestSetup_CataloguePathRecordsSubjectVersionFromDeployReport(t *testing.T) {
 	h := newHarness(t)
-	req := catalogueRequest("catalogue-subject-version-empty")
+	req := catalogueRequest("catalogue-subject-version-reported")
 
-	// Default deployFn returns a result with no version — by contract, deploy
-	// never reports a source version. No extra configuration needed.
+	const wantVersion = "1.2.3"
+
+	// Fake deployer returns a version for the deployed subject agent.
+	h.Deployer.deployFn = func(dr domain.DeployRequest) (domain.DeployResult, error) {
+		return domain.DeployResult{
+			Agents: []domain.DeployedAgent{
+				{
+					Key:             "orchestrator",
+					DestinationPath: filepath.Join(dr.WorkspaceRoot, ".claude", "agents", "orchestrator.md"),
+					SourceVersion:   wantVersion,
+				},
+			},
+		}, nil
+	}
+
+	result, err := runner.Run(context.Background(), h.Deps, req, nil)
+	if err != nil {
+		t.Fatalf("Run returned unexpected error: %v", err)
+	}
+
+	// Prerequisite guard: Deploy must have been called exactly once.
+	if len(h.Deployer.allDeployCalls()) != 1 {
+		t.Fatalf("Deploy called %d time(s), want exactly 1; "+
+			"this test cannot validate catalogue-path subject-version threading unless "+
+			"the branching implementation calls Deploy exactly once",
+			len(h.Deployer.allDeployCalls()))
+	}
+
+	if result.SubjectVersion != wantVersion {
+		t.Errorf("result.SubjectVersion = %q, want %q; "+
+			"when the Deploy result's matching agent carries a SourceVersion, "+
+			"the runner must thread that value to result.SubjectVersion — "+
+			"it must not discard it or substitute an empty string.",
+			result.SubjectVersion, wantVersion)
+	}
+}
+
+// TestSetup_CataloguePathRecordsSubjectVersionAsEmptyWhenAgentDeclaresNone
+// asserts that when the matching deployed agent declares no version (SourceVersion
+// is empty), result.SubjectVersion remains empty. The report layer maps an empty
+// SubjectVersion to "unknown"; the runner's job is to carry what Deploy reports,
+// never to reconstruct or invent a value.
+func TestSetup_CataloguePathRecordsSubjectVersionAsEmptyWhenAgentDeclaresNone(t *testing.T) {
+	h := newHarness(t)
+	req := catalogueRequest("catalogue-subject-version-unversioned")
+
+	// Fake deployer returns a result with no SourceVersion — the agent declares
+	// no version, which is legal. The runner must pass this empty value through.
+	h.Deployer.deployFn = func(dr domain.DeployRequest) (domain.DeployResult, error) {
+		return domain.DeployResult{
+			Agents: []domain.DeployedAgent{
+				{
+					Key:             "orchestrator",
+					DestinationPath: filepath.Join(dr.WorkspaceRoot, ".claude", "agents", "orchestrator.md"),
+					SourceVersion:   "", // no version declared — legal state
+				},
+			},
+		}, nil
+	}
 
 	result, err := runner.Run(context.Background(), h.Deps, req, nil)
 	if err != nil {
@@ -417,21 +479,19 @@ func TestSetup_CataloguePathRecordsSubjectVersionAsEmpty(t *testing.T) {
 	}
 
 	// Prerequisite guard: Deploy must have been called exactly once for this
-	// test to be meaningful. If Deploy was never called, the assertion below
-	// passes trivially (because the current implementation never sets
-	// SubjectVersion), not because the catalogue path correctly omits it.
-	// Fail immediately so the RED phase is visible.
+	// test to be meaningful. Without the branching implementation, Deploy is
+	// never called and the assertion below may pass trivially. Fail immediately
+	// so the RED phase is visible.
 	if len(h.Deployer.allDeployCalls()) != 1 {
 		t.Fatalf("Deploy called %d time(s), want exactly 1; "+
-			"this test cannot validate catalogue-path subject-version behavior unless "+
-			"the branching implementation calls Deploy exactly once — "+
-			"the prerequisite (I7.2 catalogue-path branching) is not yet implemented",
+			"this test cannot validate unversioned catalogue-path behavior unless "+
+			"the branching implementation calls Deploy exactly once",
 			len(h.Deployer.allDeployCalls()))
 	}
 
 	if result.SubjectVersion != "" {
 		t.Errorf("result.SubjectVersion = %q, want empty string; "+
-			"the catalogue path records no source version because Deploy reports none — "+
+			"when the deployed agent declares no version, SubjectVersion must remain empty — "+
 			"the report layer renders empty as 'unknown'. "+
 			"The runner must NOT reconstruct the version by parsing the deployed file.",
 			result.SubjectVersion)

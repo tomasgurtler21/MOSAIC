@@ -45,6 +45,9 @@ var cliModelCatalogs = []ModelCatalog{
 		IDs: []string{
 			"github-copilot/claude-opus-4.6",
 			"github-copilot/claude-sonnet-4.6",
+			"openai/gpt-5.6-luna",
+			"openai/gpt-5.6-terra",
+			"openai/gpt-5.6-sol",
 		},
 	},
 	{

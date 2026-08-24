@@ -74,6 +74,12 @@ type PlanItem struct {
 	Model      ModelSelection     // agents only
 	Conflict   *LocalModification // non-nil only for ActionConflict
 	Reason     string             // one-line human-readable explanation, rendered by both frontends
+
+	// SourceVersion is the source agent's declared version (frontmatter `version`).
+	// Non-empty only for agent artifacts whose source file declares a version.
+	// The executor copies this into ActionRecord.SourceVersion so the version is
+	// visible in the deploy --output json wire contract.
+	SourceVersion string
 }
 
 // Plan is the complete, pre-computed description of what a deployment run will do.

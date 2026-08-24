@@ -8,10 +8,16 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mosaic-agent-test/internal/domain"
+	"mosaic-agent-test/internal/fixtures"
 	"mosaic-agent-test/internal/harness/fake"
+	"mosaic-agent-test/internal/interceptor"
+	"mosaic-agent-test/internal/invlog"
+	"mosaic-agent-test/internal/runstate"
+	"mosaic-agent-test/internal/sideeffects"
 )
 
 // TestRun_SideEffectPath_WithRunIDPlaceholder_WritesFileAtExpandedLocation
@@ -192,44 +198,177 @@ func TestRun_SideEffectPath_EscapesSubjectDirAfterRunIDExpansion_RefusedButInter
 	}
 }
 
-// TestRun_StubResponseContent_IsReturnedVerbatim_WithNoRunIDSubstitution
-// asserts that a stub's response body is returned to the harness exactly as
-// declared, even when the body contains the run-ID placeholder string.
-// Response content belongs to the subject's communication protocol; expanding
-// it would corrupt the output the test is measuring and violate AC4.5.
-func TestRun_StubResponseContent_IsReturnedVerbatim_WithNoRunIDSubstitution(t *testing.T) {
+// --- T3.2: {run_id} expansion in side-effect file content -----------------
+//
+// The tests below assert that a stub's declared side-effect Content (both
+// inline and $ref-resolved) has every occurrence of {run_id} replaced by
+// the actual run ID before the file is written to disk. This mirrors the
+// path expansion that already happens for side-effect paths.
+//
+// RED phase: these tests fail until I3.2 is implemented — the interceptor
+// must thread cfg.RunID into sideeffects.Applier.Apply (or expand inline
+// content before calling Apply), and Apply must expand content after $ref
+// resolution.
+
+// TestRun_SideEffectContent_InlineWithRunIDPlaceholder_IsExpanded asserts
+// that a side effect's inline Content field has {run_id} replaced by the
+// actual run ID before the file is written to disk.
+func TestRun_SideEffectContent_InlineWithRunIDPlaceholder_IsExpanded(t *testing.T) {
 	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "researcher"}
-	const runID = "20260815T111456Z-6b68"
-	// The response body contains the placeholder string at a realistic
-	// location an orchestrator might reference in its reply.
-	responseWithPlaceholder := json.RawMessage(
-		`{"artifact_path":"Orchestration-` + domain.RunIDPlaceholder + `/Design.md"}`,
-	)
+	const runID = "20260823T210751Z-a854"
 	registry := domain.StubRegistry{
 		SchemaVersion: 1,
-		TestID:        "stage4-verbatim-response",
+		TestID:        "stage3-content-inline-expansion",
 		OnUnmatched:   domain.UnmatchedHalt,
 		Stubs: []domain.Stub{{
 			Match:    domain.StubMatch{Identity: id, Invocation: 1},
-			Response: responseWithPlaceholder,
+			Response: json.RawMessage(`{"status_code":"SUCCESS"}`),
+			SideEffects: []domain.FileEffect{
+				{
+					Path:    "Orchestration/Plan.md",
+					Content: "Run plan for " + domain.RunIDPlaceholder + ". Ref: Orchestration-" + domain.RunIDPlaceholder + "/",
+				},
+			},
 		}},
 	}
 	h := newHarness(t, baseState(), registry, domain.HarnessCapabilities{SupportsDirectSubstitution: true}, nil)
 	h.Config.RunID = runID
 
-	native := encodePre(t, id, "corr-5", "researcher#1", "do work")
-	reply, exitCode, _ := run(t, h.Config, domain.PhasePre, native)
+	native := encodePre(t, id, "corr-content-1", "researcher#1", "do work")
+	_, exitCode, _ := run(t, h.Config, domain.PhasePre, native)
 
 	if exitCode != 0 {
 		t.Fatalf("Run returned exit code %d, want 0", exitCode)
 	}
 
-	got := decodeReply(t, reply)
-	// The body must be byte-identical to the declared stub response.
-	// No substitution — not even partial — must have been applied.
-	wantBody := string(responseWithPlaceholder)
-	if string(got.Body) != wantBody {
-		t.Errorf("reply Body = %s, want verbatim stub response %s — run-ID substitution must not be applied to response content", got.Body, wantBody)
+	got, err := os.ReadFile(filepath.Join(h.SubjectDir, "Orchestration", "Plan.md"))
+	if err != nil {
+		t.Fatalf("expected side-effect file to exist: %v", err)
+	}
+	if strings.Contains(string(got), domain.RunIDPlaceholder) {
+		t.Errorf("side-effect file content still contains literal placeholder %q — inline Content must have {run_id} expanded to %q before writing; got: %q",
+			domain.RunIDPlaceholder, runID, got)
+	}
+	if !strings.Contains(string(got), runID) {
+		t.Errorf("side-effect file content does not contain the actual run ID %q; got: %q", runID, got)
+	}
+}
+
+// TestRun_SideEffectContent_WithoutRunIDPlaceholder_IsUnchanged asserts
+// that a side effect whose Content does not contain {run_id} is written
+// byte-identical to what was declared — expansion is a no-op when the
+// placeholder is absent.
+func TestRun_SideEffectContent_WithoutRunIDPlaceholder_IsUnchanged(t *testing.T) {
+	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "researcher"}
+	const declaredContent = "# Static content with no placeholders.\n"
+	registry := domain.StubRegistry{
+		SchemaVersion: 1,
+		TestID:        "stage3-content-no-placeholder",
+		OnUnmatched:   domain.UnmatchedHalt,
+		Stubs: []domain.Stub{{
+			Match:    domain.StubMatch{Identity: id, Invocation: 1},
+			Response: json.RawMessage(`{"status_code":"SUCCESS"}`),
+			SideEffects: []domain.FileEffect{
+				{Path: "static/notes.md", Content: declaredContent},
+			},
+		}},
+	}
+	h := newHarness(t, baseState(), registry, domain.HarnessCapabilities{SupportsDirectSubstitution: true}, nil)
+	h.Config.RunID = "20260823T210751Z-a854"
+
+	native := encodePre(t, id, "corr-content-2", "researcher#1", "do work")
+	_, exitCode, _ := run(t, h.Config, domain.PhasePre, native)
+
+	if exitCode != 0 {
+		t.Fatalf("Run returned exit code %d, want 0", exitCode)
+	}
+
+	got, err := os.ReadFile(filepath.Join(h.SubjectDir, "static", "notes.md"))
+	if err != nil {
+		t.Fatalf("expected side-effect file to exist: %v", err)
+	}
+	if string(got) != declaredContent {
+		t.Errorf("side-effect file content = %q, want byte-identical declared content %q — placeholder-free content must be left unchanged",
+			got, declaredContent)
+	}
+}
+
+// TestRun_SideEffectContent_RefResolvedWithRunIDPlaceholder_IsExpanded asserts
+// that when a side effect uses a $ref to source its content, and that fixture
+// file contains {run_id}, the placeholder is expanded before the file is
+// written. Expansion must happen after $ref resolution, so the fully
+// substituted content reaches the filesystem.
+func TestRun_SideEffectContent_RefResolvedWithRunIDPlaceholder_IsExpanded(t *testing.T) {
+	const runID = "20260823T210751Z-a854"
+
+	// Create a fixture root with a template file whose content contains {run_id}.
+	fixtureRoot := t.TempDir()
+	fixtureContent := "Report for run " + domain.RunIDPlaceholder + ": all tasks completed."
+	if err := os.WriteFile(filepath.Join(fixtureRoot, "report-template.md"), []byte(fixtureContent), 0o644); err != nil {
+		t.Fatalf("WriteFile(report-template.md): %v", err)
+	}
+
+	id := domain.CollaboratorIdentity{ToolName: "Task", AgentIdentity: "researcher"}
+	registry := domain.StubRegistry{
+		SchemaVersion: 1,
+		TestID:        "stage3-content-ref-expansion",
+		OnUnmatched:   domain.UnmatchedHalt,
+		Stubs: []domain.Stub{{
+			Match:    domain.StubMatch{Identity: id, Invocation: 1},
+			Response: json.RawMessage(`{"status_code":"SUCCESS"}`),
+			SideEffects: []domain.FileEffect{
+				{Path: "report.md", Ref: "report-template.md"},
+			},
+		}},
+	}
+
+	// Build a custom config whose applier resolves fixtures from fixtureRoot.
+	subjectDir, controlDir := newSandboxDirs(t)
+	clock := newFakeClock()
+	state := baseState()
+	store := runstate.NewStore(controlDir, clock)
+	if err := store.Initialize(state); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	log := invlog.NewLog(filepath.Join(controlDir, domain.InvocationLogName))
+	resolver, err := fixtures.NewResolver(fixtureRoot)
+	if err != nil {
+		t.Fatalf("NewResolver: %v", err)
+	}
+	applier := sideeffects.NewApplier(resolver)
+	adapter := fake.New(fake.Options{Capabilities: domain.HarnessCapabilities{SupportsDirectSubstitution: true}})
+
+	cfg := interceptor.Config{
+		ControlDir: controlDir,
+		SubjectDir: subjectDir,
+		Adapter:    adapter,
+		State:      store,
+		Log:        log,
+		Effects:    applier,
+		Clock:      clock,
+		Registry:   registry,
+		TestID:     state.TestID,
+		RunNumber:  state.RunNumber,
+		RunID:      runID,
+	}
+
+	native := encodePre(t, id, "corr-content-3", "researcher#1", "do work")
+	_, exitCode, _ := run(t, cfg, domain.PhasePre, native)
+
+	if exitCode != 0 {
+		t.Fatalf("Run returned exit code %d, want 0", exitCode)
+	}
+
+	got, err := os.ReadFile(filepath.Join(subjectDir, "report.md"))
+	if err != nil {
+		t.Fatalf("expected $ref-resolved side-effect file to exist: %v", err)
+	}
+	if strings.Contains(string(got), domain.RunIDPlaceholder) {
+		t.Errorf("$ref-resolved side-effect file content still contains literal placeholder %q — content must be expanded to %q after $ref resolution; got: %q",
+			domain.RunIDPlaceholder, runID, got)
+	}
+	if !strings.Contains(string(got), runID) {
+		t.Errorf("$ref-resolved side-effect file content does not contain the actual run ID %q; got: %q", runID, got)
 	}
 }
 

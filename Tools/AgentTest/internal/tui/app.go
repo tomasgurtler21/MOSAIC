@@ -710,8 +710,8 @@ func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Resolve suite-scoped defaults only after explicit suite confirmation.
 		// A nil resolver is silently skipped; an error keeps the user on
 		// ScreenSuiteSelect so they can choose a different suite.
+		suitePath := m.opts.Suites[m.suiteCursor]
 		if m.opts.ResolveSuiteDefaults != nil {
-			suitePath := m.opts.Suites[m.suiteCursor]
 			defaults, err := m.opts.ResolveSuiteDefaults(suitePath)
 			if err != nil {
 				m.statusMsg = "cannot load suite defaults"
@@ -719,6 +719,14 @@ func (m Model) updateSuiteSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.resolvedSuiteDefaults = defaults
+		}
+		// Recompute the report path from the selected suite name when the
+		// composition root has supplied a path function and the user has not
+		// manually edited the path (i.e. it still matches the initial Options
+		// value). This must happen before initSettingScreens so the settings
+		// flow displays the real output location during configuration.
+		if m.opts.ReportPathFor != nil && m.reportPath == m.opts.ReportPath {
+			m.reportPath = m.opts.ReportPathFor(suitePath)
 		}
 		m = m.initSettingScreens()
 		m.screen = ScreenRetention
@@ -950,15 +958,6 @@ func (m Model) startSelectedSuite() (tea.Model, tea.Cmd) {
 	}
 
 	suitePath := m.opts.Suites[m.suiteCursor]
-
-	// Recompute the report path from the selected suite name when the composition
-	// root has supplied a path function and the user has not manually edited the
-	// path (i.e. it still matches the initial Options value). This gives each run
-	// a suite-named, timestamped report filename instead of the placeholder that
-	// was shown on the suite-select screen before a suite was chosen.
-	if m.opts.ReportPathFor != nil && m.reportPath == m.opts.ReportPath {
-		m.reportPath = m.opts.ReportPathFor(suitePath)
-	}
 
 	// Resolve the max-concurrent-runs bound from the model. A nil override
 	// means the suite should apply its documented default; zero carries that

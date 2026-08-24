@@ -49,6 +49,10 @@ func (s *RepetitionsScreen) Update(msg tea.Msg) tea.Cmd {
 	case tea.KeyEsc:
 		s.draft = ""
 		s.back = true
+	case tea.KeyBackspace:
+		if len(s.draft) > 0 {
+			s.draft = s.draft[:len(s.draft)-1]
+		}
 	case tea.KeyRunes:
 		for _, r := range key.Runes {
 			if unicode.IsDigit(r) {
@@ -67,7 +71,7 @@ func (s *RepetitionsScreen) View() string {
 	}
 	title := s.styles.Title.Render("Repetitions")
 	value := s.styles.Selected.Render(display)
-	help := s.styles.Help.Render("type digits  enter confirm  esc back")
+	help := s.styles.Help.Render("type digits  backspace delete  enter confirm  esc back")
 	content := title + "\n\n  " + value + "\n\n" + help
 	if s.width > 0 {
 		return lipgloss.NewStyle().Width(s.width).Render(content)

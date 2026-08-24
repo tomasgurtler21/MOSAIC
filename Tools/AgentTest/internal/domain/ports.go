@@ -290,6 +290,11 @@ type DeployedAgent struct {
 	// sandbox-relative definition path is derived from this and from nothing
 	// else. Callers MUST NOT reconstruct it from harness layout knowledge.
 	DestinationPath string
+
+	// SourceVersion is the source agent's declared version. Empty means the
+	// source declared none — a legal state that must be reported as unknown,
+	// never as a blank that reads like a real value.
+	SourceVersion string
 }
 
 // RenderAgentResult is what the delegate reported it did. Every field is

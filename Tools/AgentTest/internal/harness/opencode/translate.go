@@ -4,9 +4,11 @@ package opencode
 // Translation" section for the full contract.
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"mosaic-agent-test/internal/domain"
 )
@@ -23,7 +25,24 @@ var (
 	// Emitting a plausible-looking reply here is exactly the failure mode
 	// the capability-honesty test exists to prevent.
 	ErrSubstitutionUnsupported = errors.New("opencode: this harness cannot substitute a result directly")
+
+	// ErrUnrecognisedDispatchToolName is returned when a native payload
+	// reports a dispatch-tool name this adapter does not know how to
+	// normalize. Passing an unrecognised name through verbatim is exactly
+	// how a vendor's next rename would become another invisible defect, so
+	// it is surfaced as a handleable error instead.
+	ErrUnrecognisedDispatchToolName = errors.New("opencode: unrecognised native dispatch-tool name")
 )
+
+// normalizeDispatchToolName maps this harness's native dispatch-tool name to
+// the normalized, harness-neutral vocabulary authored tests use. An
+// unrecognised native name is rejected rather than passed through silently.
+func normalizeDispatchToolName(native string) (string, error) {
+	if native == InterceptedToolName {
+		return domain.DispatchToolName, nil
+	}
+	return "", fmt.Errorf("%w: %q", ErrUnrecognisedDispatchToolName, native)
+}
 
 // TranslateCall implements domain.HarnessAdapter. An unrecognised phase, a
 // wrong-phase discriminator, a payload missing the fields identity is
@@ -53,6 +72,11 @@ func (a *Adapter) translatePre(native []byte) (domain.InterceptedCall, error) {
 		return domain.InterceptedCall{}, fmt.Errorf("%w: tool is empty", ErrIdentityUndetermined)
 	}
 
+	normalizedToolName, err := normalizeDispatchToolName(payload.Tool)
+	if err != nil {
+		return domain.InterceptedCall{}, err
+	}
+
 	args, err := decodeTaskToolArgs(payload.Args)
 	if err != nil {
 		return domain.InterceptedCall{}, err
@@ -73,7 +97,7 @@ func (a *Adapter) translatePre(native []byte) (domain.InterceptedCall, error) {
 
 	return domain.InterceptedCall{
 		Phase:            domain.PhasePre,
-		Identity:         domain.CollaboratorIdentity{ToolName: payload.Tool, AgentIdentity: args.SubagentType},
+		Identity:         domain.CollaboratorIdentity{ToolName: normalizedToolName, AgentIdentity: args.SubagentType},
 		Message:          parseTaskMessage(args.Prompt),
 		CorrelationToken: token,
 		RawPayload:       json.RawMessage(native),
@@ -93,6 +117,11 @@ func (a *Adapter) translatePost(native []byte) (domain.InterceptedCall, error) {
 		return domain.InterceptedCall{}, fmt.Errorf("%w: tool is empty", ErrIdentityUndetermined)
 	}
 
+	normalizedToolName, err := normalizeDispatchToolName(payload.Tool)
+	if err != nil {
+		return domain.InterceptedCall{}, err
+	}
+
 	args, err := decodeTaskToolArgs(payload.Args)
 	if err != nil {
 		return domain.InterceptedCall{}, err
@@ -102,7 +131,7 @@ func (a *Adapter) translatePost(native []byte) (domain.InterceptedCall, error) {
 
 	return domain.InterceptedCall{
 		Phase:            domain.PhasePost,
-		Identity:         domain.CollaboratorIdentity{ToolName: payload.Tool, AgentIdentity: args.SubagentType},
+		Identity:         domain.CollaboratorIdentity{ToolName: normalizedToolName, AgentIdentity: args.SubagentType},
 		Message:          parseTaskMessage(args.Prompt),
 		CorrelationToken: token,
 		RawPayload:       json.RawMessage(native),
@@ -131,6 +160,13 @@ func decodeTaskToolArgs(raw json.RawMessage) (TaskToolArgs, error) {
 // a dispatch tool's prompt text. raw is preserved verbatim regardless of
 // whether it parses, so protocol validation downstream can still inspect
 // what was actually sent.
+//
+// When the entire raw string is not valid JSON, the function scans for
+// embedded JSON objects by locating each '{' and walking forward to its
+// matching '}' (tracking nested braces). Each candidate is attempted in
+// order; the first one that unmarshals successfully and carries a non-empty
+// agent_instance_id is returned as ExtractionRecovered. If no candidate
+// satisfies the requirement, ExtractionDegraded is returned.
 func parseTaskMessage(raw string) domain.TaskMessage {
 	if raw == "" {
 		return domain.TaskMessage{Extraction: domain.ExtractionDegraded}
@@ -141,19 +177,94 @@ func parseTaskMessage(raw string) domain.TaskMessage {
 		tm.Extraction = domain.ExtractionParsed
 		return tm
 	}
+	// Fallback: scan for embedded JSON objects within prose.
+	if recovered, ok := extractJSONObject(raw); ok {
+		recovered.Raw = raw
+		recovered.Extraction = domain.ExtractionRecovered
+		return recovered
+	}
 	return domain.TaskMessage{Raw: raw, Extraction: domain.ExtractionDegraded}
 }
 
-// extractOutput recovers a plain string from the after-hook's Output, whose
-// runtime shape is inconsistent between two undocumented forms. It tries, in
-// order: a {"output": "…"} object; a {"content":[{"type":"text","text":"…"}]}
-// object, concatenating its text parts; a bare JSON string; and finally the
-// raw bytes as text, so nothing is silently dropped.
+// extractJSONObject scans s for all top-level '{...}' substrings (handling
+// nested braces) and returns the first domain.TaskMessage that unmarshals
+// successfully and carries a non-empty AgentInstanceID. The second return
+// value is false when no such object is found.
+func extractJSONObject(s string) (domain.TaskMessage, bool) {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '{' {
+			continue
+		}
+		// Walk forward tracking brace depth to find the matching '}'.
+		depth := 0
+		end := -1
+		for j := i; j < len(s); j++ {
+			switch s[j] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					end = j
+				}
+			}
+			if end >= 0 {
+				break
+			}
+		}
+		if end < 0 {
+			// No closing brace found from this '{'; no further candidates possible.
+			break
+		}
+		candidate := s[i : end+1]
+		var tm domain.TaskMessage
+		if err := json.Unmarshal([]byte(candidate), &tm); err == nil && tm.AgentInstanceID != "" {
+			return tm, true
+		}
+		// Advance past this object to try the next one.
+		i = end
+	}
+	return domain.TaskMessage{}, false
+}
+
+// extractOutput recovers a plain string from the after-hook's Output field,
+// whose runtime shape varies across at least three documented forms. Text is
+// first extracted from whichever container shape is detected, then a single
+// shared XML-stripping pass is applied: if the extracted text contains a
+// <task_result>…</task_result> span, only the trimmed inner content is
+// returned. This ensures the XML envelope is stripped regardless of which
+// container shape delivered it.
+//
+// Container shapes tried in order:
+//
+//  1. Bare XML text: raw bytes starting with '<' are used directly as text
+//  2. Bare JSON string (possibly wrapping an XML envelope)
+//  3. {"output": "…"} object -> .output string
+//  4. {"content":[{"type":"text","text":"…"}]} -> concatenated text parts
+//  5. Fallback: raw bytes as string
 func extractOutput(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
+	return stripXMLEnvelope(extractOutputText(raw))
+}
 
+// extractOutputText extracts plain text from a raw output value without
+// applying XML envelope stripping. It tries container shapes in order and
+// returns the first successful extraction.
+func extractOutputText(raw json.RawMessage) string {
+	// Bare XML / non-JSON text: raw bytes starting with '<'.
+	if bytes.HasPrefix(bytes.TrimSpace(raw), []byte("<")) {
+		return string(raw)
+	}
+
+	// Bare JSON string (possibly an XML envelope or plain text).
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+
+	// {"output": "…"} object.
 	var outputForm struct {
 		Output string `json:"output"`
 	}
@@ -161,6 +272,7 @@ func extractOutput(raw json.RawMessage) string {
 		return outputForm.Output
 	}
 
+	// {"content":[{"type":"text","text":"…"}]} content array.
 	var contentForm struct {
 		Content []struct {
 			Type string `json:"type"`
@@ -179,12 +291,22 @@ func extractOutput(raw json.RawMessage) string {
 		}
 	}
 
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
-	}
-
 	return string(raw)
+}
+
+// stripXMLEnvelope extracts the content between the first <task_result> and
+// the last </task_result> tag, trimming surrounding whitespace. When no
+// matching tags are found, s is returned unchanged. Using first open and last
+// close handles nested occurrences defensively, yielding the outermost span.
+func stripXMLEnvelope(s string) string {
+	const openTag = "<task_result>"
+	const closeTag = "</task_result>"
+	openIdx := strings.Index(s, openTag)
+	closeIdx := strings.LastIndex(s, closeTag)
+	if openIdx >= 0 && closeIdx > openIdx {
+		return strings.TrimSpace(s[openIdx+len(openTag) : closeIdx])
+	}
+	return s
 }
 
 // TranslateOutcome implements domain.HarnessAdapter. call.Phase decides the
