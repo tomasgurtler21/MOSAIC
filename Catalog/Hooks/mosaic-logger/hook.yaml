@@ -329,87 +329,107 @@ variants:
           Write the hooks configuration to .github/hooks/mosaic-logger.json to
           register the mosaic-logger dispatcher as a handler for all 14 GHCP CLI
           hook events. subagentStart is synchronous so that the agent_id mapping
-          is written before the subagent's first tool call. All other events are
-          asynchronous so the adapter cannot block or deny operations.
+          is written before the subagent's first tool call. Other events include
+          async: true for forward-compatibility, but note that GHCP CLI does not
+          currently honor async execution (github/copilot-cli#3063).
         fragment: |
           {
             "hooks": {
               "sessionStart": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py sessionStart",
+                  "bash": "python3 mosaic_logger.py sessionStart",
+                  "powershell": "py mosaic_logger.py sessionStart",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ],
               "sessionEnd": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py sessionEnd",
+                  "bash": "python3 mosaic_logger.py sessionEnd",
+                  "powershell": "py mosaic_logger.py sessionEnd",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ],
               "userPromptSubmitted": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py userPromptSubmitted",
+                  "bash": "python3 mosaic_logger.py userPromptSubmitted",
+                  "powershell": "py mosaic_logger.py userPromptSubmitted",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ],
               "userPromptTransformed": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py userPromptTransformed",
+                  "bash": "python3 mosaic_logger.py userPromptTransformed",
+                  "powershell": "py mosaic_logger.py userPromptTransformed",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ],
               "preToolUse": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py preToolUse",
+                  "bash": "python3 mosaic_logger.py preToolUse",
+                  "powershell": "py mosaic_logger.py preToolUse",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ],
               "postToolUse": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py postToolUse",
+                  "bash": "python3 mosaic_logger.py postToolUse",
+                  "powershell": "py mosaic_logger.py postToolUse",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ],
               "postToolUseFailure": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py postToolUseFailure",
+                  "bash": "python3 mosaic_logger.py postToolUseFailure",
+                  "powershell": "py mosaic_logger.py postToolUseFailure",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ],
               "preCompact": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py preCompact",
+                  "bash": "python3 mosaic_logger.py preCompact",
+                  "powershell": "py mosaic_logger.py preCompact",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ],
               "agentStop": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py agentStop",
+                  "bash": "python3 mosaic_logger.py agentStop",
+                  "powershell": "py mosaic_logger.py agentStop",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ],
               "subagentStart": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py subagentStart",
+                  "bash": "python3 mosaic_logger.py subagentStart",
+                  "powershell": "py mosaic_logger.py subagentStart",
                   "cwd": ".github/hooks",
                   "timeout": 30
                 }
@@ -417,33 +437,41 @@ variants:
               "subagentStop": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py subagentStop",
+                  "bash": "python3 mosaic_logger.py subagentStop",
+                  "powershell": "py mosaic_logger.py subagentStop",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ],
               "permissionRequest": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py permissionRequest",
+                  "bash": "python3 mosaic_logger.py permissionRequest",
+                  "powershell": "py mosaic_logger.py permissionRequest",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ],
               "errorOccurred": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py errorOccurred",
+                  "bash": "python3 mosaic_logger.py errorOccurred",
+                  "powershell": "py mosaic_logger.py errorOccurred",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ],
               "notification": [
                 {
                   "type": "command",
-                  "command": "python mosaic_logger.py notification",
+                  "bash": "python3 mosaic_logger.py notification",
+                  "powershell": "py mosaic_logger.py notification",
                   "cwd": ".github/hooks",
-                  "timeout": 30
+                  "timeout": 30,
+                  "async": true
                 }
               ]
             }
