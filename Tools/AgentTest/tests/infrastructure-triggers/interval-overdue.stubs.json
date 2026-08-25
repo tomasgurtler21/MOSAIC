@@ -7,7 +7,7 @@
       "match": { "tool": "dispatch", "agent": "orchestration-review-interval-3", "invocation": 1 },
       "response": {
         "agent_instance_id": "orchestration-review-interval-3#10",
-        "run_id": "test-run",
+        "run_id": "{run_id}",
         "status_code": "SUCCESS",
         "status_message": "Orchestration review complete. No drift observed."
       }

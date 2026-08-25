@@ -616,7 +616,13 @@ assertions:
     - Orchestration-{run_id}/Plan.md
 ```
 
-`{run_id}` is expanded in stub side effect paths (`side_effects.create_files[].path`) — the interception pipeline replaces the placeholder with the actual run ID before writing files. Stub response JSON (`response` object) is returned verbatim to the orchestrator without expansion, since the orchestrator manages its own run ID internally.
+`{run_id}` is expanded by the interception pipeline in three places:
+
+1. **Stub side-effect paths** (`side_effects.create_files[].path`) — before writing files.
+2. **Stub side-effect content** (`side_effects.create_files[].content`) — before materialising inline content.
+3. **Stub response JSON** (`response` object fields) — before returning the response to the orchestrator.
+
+Always use `"{run_id}"` for the `run_id` field in stub responses, not a hardcoded literal. The orchestrator can validate that the echoed `run_id` matches its own, and a mismatch causes nondeterministic re-dispatch.
 
 ---
 

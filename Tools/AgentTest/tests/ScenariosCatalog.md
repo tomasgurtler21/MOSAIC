@@ -14,55 +14,55 @@ Each scenario is one verifiable routing condition. Scenarios are atomic — whet
 
 | ID | Scenario | Expected | Status |
 |----|----------|----------|--------|
-| H-1 | HITL-enabled agent returns SUCCESS but output artifact has `human_approved: false` | Re-dispatch same agent to complete HITL gate, not advance to next row | Ready |
-| H-2 | Plan stage table marks stage HITL=true, workflow table marks agent HITL=false | Dispatch agent with `human_in_the_loop: true` (additive merge) | Ready |
-| H-3 | Plan stage HITL=true applies to ALL agents in that stage, not just first | Second agent in same HITL stage also dispatched with `human_in_the_loop: true` | Ready |
+| H-1 | HITL-enabled agent returns SUCCESS but output artifact has `human_approved: false` | Re-dispatch same agent to complete HITL gate, not advance to next row | Tested |
+| H-2 | Plan stage table marks stage HITL=true, workflow table marks agent HITL=false | Dispatch agent with `human_in_the_loop: true` (additive merge) | Tested |
+| H-3 | Plan stage HITL=true applies to ALL agents in that stage, not just first | Second agent in same HITL stage also dispatched with `human_in_the_loop: true` | Tested |
 
 ### Status Code Routing
 
 | ID | Scenario | Expected | Status |
 |----|----------|----------|--------|
-| S-1 | Reviewer returns COMPLETED_NEEDS_ACTION | Route to On Findings target, not On Success | Ready |
-| S-2 | Agent returns PARTIALLY_DONE | Re-dispatch same agent type (successor invocation), not advance to next row | Ready |
-| S-3 | Agent returns BLOCKED (E101 INPUT_NOT_FOUND) | Tier 1 auto-retry (up to 3 attempts), then Tier 2 alternative strategy | Ready |
-| S-4 | Agent returns BLOCKED (E501 TOOL_UNAVAILABLE) | Tier 1 auto-retry (up to 3 attempts), then Tier 2 alternative strategy | Ready |
-| S-5 | Agent returns NEEDS_CLARIFICATION | Provide context or escalate to human, not advance | Ready |
-| S-6 | Agent returns CAPABILITY_EXCEEDED | Try close alternative or escalate to human | Ready |
-| S-7 | Agent returns BLOCKED (E503 USER_CONTACT_UNAVAILABLE) on HITL dispatch | Tier 1 auto-retry, do not skip the HITL gate | Ready |
+| S-1 | Reviewer returns COMPLETED_NEEDS_ACTION | Route to On Findings target, not On Success | Tested |
+| S-2 | Agent returns PARTIALLY_DONE | Re-dispatch same agent type (successor invocation), not advance to next row | Tested |
+| S-3 | Agent returns BLOCKED (E101 INPUT_NOT_FOUND) | Tier 1 auto-retry (up to 3 attempts), then Tier 2 alternative strategy | Tested |
+| S-4 | Agent returns BLOCKED (E501 TOOL_UNAVAILABLE) | Tier 1 auto-retry (up to 3 attempts), then Tier 2 alternative strategy | Tested |
+| S-5 | Agent returns NEEDS_CLARIFICATION | Provide context or escalate to human, not advance | Tested |
+| S-6 | Agent returns CAPABILITY_EXCEEDED | Try close alternative or escalate to human | Tested |
+| S-7 | Agent returns BLOCKED (E503 USER_CONTACT_UNAVAILABLE) on HITL dispatch | Tier 1 auto-retry, do not skip the HITL gate | Tested |
 
 ### Creator/Reviewer Gate
 
 | ID | Scenario | Expected | Status |
 |----|----------|----------|--------|
-| G-1 | Reviewer returns COMPLETED_NEEDS_ACTION — route back to creator | Creator receives review findings artifact in input_artifacts | Ready |
-| G-2 | Creator fixes and returns SUCCESS after reviewer findings | Route back to reviewer for re-review, not advance past gate | Ready |
+| G-1 | Reviewer returns COMPLETED_NEEDS_ACTION — route back to creator | Creator receives review findings artifact in input_artifacts | Tested |
+| G-2 | Creator fixes and returns SUCCESS after reviewer findings | Route back to reviewer for re-review, not advance past gate | Tested |
 | G-3 | On re-review dispatch, should reviewer receive its own previous review artifact? | UNDECIDED — see [Discussion: G-3](#discussion-g-3) | Decision pending |
 
 ### Distant Route-Back
 
 | ID | Scenario | Expected | Status |
 |----|----------|----------|--------|
-| R-1 | Distant route-back completes (e.g. stage 5 → planner) — quality gate | Dispatch paired reviewer (e.g. plan-review) before re-entering EXECUTION | Ready |
-| R-2 | Distant route-back to planner — input artifacts | Provide workflow-table inputs (Research.md, Requirements.md), not just local stage context | Ready |
-| R-3 | Distant route-back to contracts-designer — quality gate | Dispatch contracts-review before re-entering EXECUTION | Ready |
-| R-4 | Route-back from test-runner (REVIEW) to planner — quality gate | Dispatch plan-review before re-entering EXECUTION | Ready |
+| R-1 | Distant route-back completes (e.g. stage 5 → planner) — quality gate | Dispatch paired reviewer (e.g. plan-review) before re-entering EXECUTION | Tested |
+| R-2 | Distant route-back to planner — input artifacts | Provide workflow-table inputs (Research.md, Requirements.md), not just local stage context | Tested |
+| R-3 | Distant route-back to contracts-designer — quality gate | Dispatch contracts-review before re-entering EXECUTION | Tested |
+| R-4 | Route-back from test-runner (REVIEW) to planner — quality gate | Dispatch plan-review before re-entering EXECUTION | Tested |
 
 ### Wildcard & Artifact Path Resolution
 
 | ID | Scenario | Expected | Status |
 |----|----------|----------|--------|
-| W-1 | Workflow table says `Stage-*/Plan.md` — dispatch to contracts-designer | Expand to all existing Stage-{N}/Plan.md (e.g. 4 stages → 4 paths) | Ready |
-| W-2 | Workflow table says `Stage-*/Plan.md` AND `Stage-*/PlanProgress.md` — dispatch to plan-review | Both wildcards fully expanded | Ready |
-| W-3 | Wildcard expansion after route-back that changed stage count | Expansion picks up newly added stages, not stale count | Ready |
+| W-1 | Workflow table says `Stage-*/Plan.md` — dispatch to contracts-designer | Expand to all existing Stage-{N}/Plan.md (e.g. 4 stages → 4 paths) | Tested |
+| W-2 | Workflow table says `Stage-*/Plan.md` AND `Stage-*/PlanProgress.md` — dispatch to plan-review | Both wildcards fully expanded | Tested |
+| W-3 | Wildcard expansion after route-back that changed stage count | Expansion picks up newly added stages, not stale count | Tested |
 
 ### Execution Groups & Stage Progression
 
 | ID | Scenario | Expected | Status |
 |----|----------|----------|--------|
-| E-1 | EXECUTION phase entry — first stage, TDD approach | Dispatch test-writer-tdd (correct first agent per approach) | Ready |
-| E-2 | Stage with Approach = "Implementation-Only" | Skip test-writer-tdd/tests-review-tdd, dispatch implementation-tdd directly | Ready |
-| E-3 | Stage with Approach = "Implementation-First" | Dispatch implementation-tdd before test-writer-tdd (reversed from TDD) | Ready |
-| E-4 | Stage with Approach = "Tests-Only" | Dispatch test-writer-tdd/tests-review-tdd only, skip implementation agents | Ready |
+| E-1 | EXECUTION phase entry — first stage, TDD approach | Dispatch test-writer-tdd (correct first agent per approach) | Tested |
+| E-2 | Stage with Approach = "Implementation-Only" | Skip test-writer-tdd/tests-review-tdd, dispatch implementation-tdd directly | Tested |
+| E-3 | Stage with Approach = "Implementation-First" | Dispatch implementation-tdd before test-writer-tdd (reversed from TDD) | Tested |
+| E-4 | Stage with Approach = "Tests-Only" | Dispatch test-writer-tdd/tests-review-tdd only, skip implementation agents | Tested |
 
 ### Parallel Dispatch
 
