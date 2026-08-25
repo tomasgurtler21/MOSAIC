@@ -55,6 +55,8 @@ Beyond correcting the scope of "output", the block closes three gaps the old ste
 
 **No channel to the user is `BLOCKED`, not permission to proceed.** Error code `E503`. An agent that cannot reach the user has not been excused from the gate; it has hit an environmental block, and the orchestrator is the party that can do something about it.
 
+**Presentation means tool calls, not prose.** The agent's response is consumed by the orchestrator, not the user. An agent that "presents" by writing a summary or a question in its response has not reached the user — it has broken the JSON contract and produced a response the orchestrator cannot parse. This is the most common mechanical failure of the gate, distinct from the scope and re-arming failures above: those are agents that skip the gate or discharge it incorrectly, while this is an agent that believes it is discharging the gate and is instead talking to the wrong audience. The fix names the mechanism explicitly — "use your user interaction tools to present" — and states the consequence: prose in the response reaches the orchestrator, not the user.
+
 ## 5. Why the second step is stated at all
 
 "Return the protocol response, and nothing else" restates a rule the contract already carries as a key rule and that `ProtocolConstraints` carries as a bullet. That is three statements of one thing, and the general rule is that a third copy is the copy that drifts.
@@ -88,3 +90,4 @@ Option 2 is out. Between 1 and 3, the argument for 3 is that this gate is the on
 | Bundle version | Date | Change |
 |----------------|------|--------|
 | 1.0.0 | 2026-08-05 | Initial text. Replaces the Process-list HITL step carried by 28/42 subagents, corrected from "output artifacts" to complete output, with the no-artifacts case, gate re-arming, the earlier-questions rule, and the `E503` case all stated explicitly. Canonical text matches none of the forty-two source files: the majority wording was the defective one. |
+| 1.1.0 | 2026-08-25 | Explicit tool-use requirement for HITL presentation. Agents were "presenting" by writing prose in their response, which goes to the orchestrator and breaks the JSON contract. Step 1 now opens with "Use your user interaction tools to present" and a new bullet states the consequence: the response is consumed by the orchestrator, not the user. §4 extended with the failure-mode rationale. |
