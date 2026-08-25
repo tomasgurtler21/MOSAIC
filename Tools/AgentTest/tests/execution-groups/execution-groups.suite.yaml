@@ -1,0 +1,16 @@
+schema_version: 1
+id: execution-groups
+description: >
+  Execution group selection based on the Plan stage table's Approach column.
+  Tests that the orchestrator reads the Approach and dispatches the correct
+  agent sequence, skipping or reordering groups as specified.
+defaults:
+  timeout: 10m
+  turn_limit: 30
+  repetitions: 1
+  pass_rate: 1.0
+  echo_fidelity: advisory
+tests:
+  - path: impl-only-skip-tests.test.yaml
+  - path: impl-first-reorder.test.yaml
+  - path: tests-only-skip-impl.test.yaml

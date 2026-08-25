@@ -1,0 +1,97 @@
+schema_version: 1
+id: planner-routeback-quality-gate
+description: >
+  Scenarios R-1 + R-2 + R-4. test-runner returns COMPLETED_NEEDS_ACTION.
+  Orchestrator routes back to planner-tdd-soft (On Findings target). After
+  planner SUCCESS, orchestrator must dispatch plan-review (quality gate)
+  before re-entering EXECUTION. The planner must receive Research.md and
+  Requirements.md (workflow table inputs), and plan-review must receive
+  the updated Plan.md with expanded Stage-*/Plan.md including the new
+  stage 3.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: []
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: planner-routeback-quality-gate.stubs.json
+
+timeout: 10m
+turn_limit: 30
+stop_after_invocations: 2
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: review-test-runner-cna.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+  - path: Orchestration-{run_id}/ContractsDesign.md
+    ref: ContractsDesign.md
+  - path: Orchestration-{run_id}/TestResults.md
+    ref: TestResults.md
+  - path: Orchestration-{run_id}/requirements-review.md
+    ref: requirements-review.md
+  - path: Orchestration-{run_id}/plan-review.md
+    ref: plan-review.md
+  - path: Orchestration-{run_id}/contracts-review.md
+    ref: contracts-review.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: planner-tdd-soft }
+      - { tool: dispatch, agent: plan-review }
+
+  task_messages:
+    # Dispatch 1: planner-tdd-soft (route-back from test-runner CNA)
+    # R-2: must receive workflow-table inputs, not just local context
+    - at: 1
+      identity: { tool: dispatch, agent: planner-tdd-soft }
+      human_in_the_loop: true
+      required_input_artifacts:
+        - Orchestration-{run_id}/Research.md
+        - Orchestration-{run_id}/Requirements.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/Plan.md
+        - Orchestration-{run_id}/TestResults.md
+
+    # Dispatch 2: plan-review (quality gate — R-1/R-4)
+    # Must receive updated Plan.md + all stage plans including new stage 3
+    - at: 2
+      identity: { tool: dispatch, agent: plan-review }
+      human_in_the_loop: false
+      required_input_artifacts:
+        - Orchestration-{run_id}/Requirements.md
+        - Orchestration-{run_id}/Plan.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/Stage-2/Plan.md
+        - Orchestration-{run_id}/Stage-3/Plan.md
+        - Orchestration-{run_id}/Stage-1/PlanProgress.md
+        - Orchestration-{run_id}/Stage-2/PlanProgress.md
+        - Orchestration-{run_id}/Stage-3/PlanProgress.md
+      required_output_artifacts:
+        - Orchestration-{run_id}/plan-review.md

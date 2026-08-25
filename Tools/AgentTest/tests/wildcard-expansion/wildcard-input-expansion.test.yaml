@@ -1,0 +1,70 @@
+schema_version: 1
+id: wildcard-input-expansion
+description: >
+  Scenario W-1. The workflow table specifies Stage-*/Plan.md in the Input
+  column for contracts-designer. The orchestrator must expand the wildcard
+  to all existing stage plan files (Stage-1/Plan.md, Stage-2/Plan.md), not
+  pass the literal glob or omit them.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: []
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: wildcard-input-expansion.stubs.json
+
+timeout: 10m
+turn_limit: 30
+stop_after_invocations: 1
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: planning-after-review.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+  - path: Orchestration-{run_id}/plan-review.md
+    ref: plan-review.md
+  - path: Orchestration-{run_id}/requirements-review.md
+    ref: requirements-review.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: contracts-designer }
+
+  task_messages:
+    # Dispatch 1: contracts-designer with expanded Stage-*/Plan.md
+    - at: 1
+      identity: { tool: dispatch, agent: contracts-designer }
+      human_in_the_loop: true
+      required_input_artifacts:
+        - Orchestration-{run_id}/Research.md
+        - Orchestration-{run_id}/Requirements.md
+        - Orchestration-{run_id}/Plan.md
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/Stage-2/Plan.md
+      required_output_artifacts:
+        - Orchestration-{run_id}/ContractsDesign.md

@@ -52,10 +52,10 @@ func uncorrelatedCompletionEvent(at time.Time, detail string) domain.LogRecord {
 // TestEvaluate_UncorrelatedCompletion_EchoFidelity_ReportedAsNotEvaluated
 // asserts that when a run's records include RunEventUncorrelatedCompletion,
 // the evaluate result contains an echo-fidelity assertion result with outcome
-// AssertionNotEvaluated and a non-empty Detail naming the reason. The current
-// implementation omits any echo-fidelity result for the uncorrelated
-// completion — this test must fail (RED) until evaluateConditions and the
-// assertion evaluator are updated to surface the non-evaluation explicitly.
+// AssertionNotEvaluated and a non-empty Detail naming the reason. This is a
+// regression guard: the implementation already surfaces this not-evaluated
+// result (assertions.go:224-231), so this test passes before any Stage 1 fix
+// and must continue to pass throughout implementation.
 func TestEvaluate_UncorrelatedCompletion_EchoFidelity_ReportedAsNotEvaluated(t *testing.T) {
 	start := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
 
@@ -86,6 +86,45 @@ func TestEvaluate_UncorrelatedCompletion_EchoFidelity_ReportedAsNotEvaluated(t *
 	}
 	if !foundNotEvaluated {
 		t.Errorf("expected an echo-fidelity AssertionResult with Outcome=AssertionNotEvaluated for an uncorrelated completion, got Assertions = %+v", got.Assertions)
+	}
+}
+
+// TestEvaluate_UncorrelatedCompletion_EchoFidelity_PopulatesExpectedActualAndTarget
+// verifies that the not-evaluated AssertionResult for an uncorrelated completion
+// carries non-empty Expected, Actual, and Target fields. The correlated branch
+// already sets all three (Target = seq, Expected = stub bytes, Actual = observed
+// output); the uncorrelated branch currently sets only Detail, leaving Expected,
+// Actual, and Target empty — this test pins against that gap.
+func TestEvaluate_UncorrelatedCompletion_EchoFidelity_PopulatesExpectedActualAndTarget(t *testing.T) {
+	start := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+
+	ev := baseEvidence()
+	ev.Records = []domain.LogRecord{
+		uncorrelatedEndRecord(start),
+		uncorrelatedCompletionEvent(start, "1 completion could not be correlated; 1 dispatch was outstanding"),
+	}
+
+	got := evaluate.Evaluate(ev)
+
+	var notEvalResult *domain.AssertionResult
+	for i := range got.Assertions {
+		ar := &got.Assertions[i]
+		if ar.Class == domain.ClassEchoFidelity && ar.Outcome == domain.AssertionNotEvaluated {
+			notEvalResult = ar
+			break
+		}
+	}
+	if notEvalResult == nil {
+		t.Fatalf("no ClassEchoFidelity AssertionResult with Outcome=AssertionNotEvaluated found among %+v", got.Assertions)
+	}
+	if notEvalResult.Expected == "" {
+		t.Errorf("Expected = %q; want non-empty on uncorrelated-completion not-evaluated — must carry what was expected for diagnostic context", notEvalResult.Expected)
+	}
+	if notEvalResult.Actual == "" {
+		t.Errorf("Actual = %q; want non-empty on uncorrelated-completion not-evaluated — must describe why evaluation could not occur", notEvalResult.Actual)
+	}
+	if notEvalResult.Target == "" {
+		t.Errorf("Target = %q; want non-empty on uncorrelated-completion not-evaluated — must identify which invocation sequence was affected, consistent with the correlated branch", notEvalResult.Target)
 	}
 }
 

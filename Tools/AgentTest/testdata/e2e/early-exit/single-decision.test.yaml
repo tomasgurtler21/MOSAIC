@@ -11,6 +11,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the first collaborator, then attempt a second.
   invocation_kind: subagent

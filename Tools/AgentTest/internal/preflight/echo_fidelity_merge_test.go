@@ -42,6 +42,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: echo-merge-test.stubs.json
 stub_agents:
   - identity:
@@ -64,6 +65,7 @@ echo_fidelity: advisory
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: echo-merge-test.stubs.json
 stub_agents:
   - identity:

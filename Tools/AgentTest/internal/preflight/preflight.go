@@ -848,11 +848,12 @@ func checkDeploymentDeclarations(report *authoring.Report, defPath, defDir strin
 // reason codes that Deploy never produces.
 func checkSubjectDeploy(report *authoring.Report, defPath string, def domain.TestDefinition, in Input) {
 	_, err := in.Deploy.Deploy(context.Background(), domain.DeployRequest{
-		HarnessID:     in.HarnessID,
-		WorkspaceRoot: in.DeployScratchRoot,
-		Workflows:     def.Subject.Workflows,
-		TierModels:    preflightTierModelMap(def.Subject),
-		DryRun:        true,
+		HarnessID:              in.HarnessID,
+		WorkspaceRoot:          in.DeployScratchRoot,
+		Workflows:              def.Subject.Workflows,
+		InfrastructureAgentIDs: def.Subject.InfrastructureAgentIDs,
+		TierModels:             preflightTierModelMap(def.Subject),
+		DryRun:                 true,
 	})
 	if err == nil {
 		return

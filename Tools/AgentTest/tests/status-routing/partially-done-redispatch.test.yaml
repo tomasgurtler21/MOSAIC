@@ -13,6 +13,7 @@ subject:
   identity: orchestrator
   agent: orchestrator
   workflows: [brownfield-tdd]
+  infrastructure_agents: []
   opening_message: |
     Continue the existing workflow run. Read the Orchestration.md in the
     run-scoped folder and resume from where it left off. Do not ask me any

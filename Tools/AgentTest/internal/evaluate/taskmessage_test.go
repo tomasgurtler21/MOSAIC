@@ -37,9 +37,14 @@ func TestEvaluate_TaskMessage_RequiredArtifactsAllPresent_Passes(t *testing.T) {
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
-	if ar.Outcome != domain.AssertionPass {
-		t.Errorf("Outcome = %q, want pass — every required artifact is present", ar.Outcome)
+	// Both input_artifacts and output_artifacts are declared; check each.
+	inputAR := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.input_artifacts")
+	if inputAR.Outcome != domain.AssertionPass {
+		t.Errorf("input_artifacts Outcome = %q, want pass — every required input artifact is present", inputAR.Outcome)
+	}
+	outputAR := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.output_artifacts")
+	if outputAR.Outcome != domain.AssertionPass {
+		t.Errorf("output_artifacts Outcome = %q, want pass — every required output artifact is present", outputAR.Outcome)
 	}
 }
 
@@ -57,7 +62,7 @@ func TestEvaluate_TaskMessage_RequiredArtifactMissing_Fails(t *testing.T) {
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.input_artifacts")
 	if ar.Outcome != domain.AssertionFail {
 		t.Errorf("Outcome = %q, want fail — Requirements.md was declared required but never sent", ar.Outcome)
 	}
@@ -84,7 +89,7 @@ func TestEvaluate_TaskMessage_OptionalArtifactMayOrMayNotBePresent_BothPass(t *t
 
 		got := evaluate.Evaluate(ev)
 
-		ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+		ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.input_artifacts")
 		if ar.Outcome != domain.AssertionPass {
 			t.Errorf("%s: Outcome = %q, want pass — an optional entry may or may not be present", name, ar.Outcome)
 		}
@@ -105,7 +110,7 @@ func TestEvaluate_TaskMessage_ArtifactInNeitherSet_Fails(t *testing.T) {
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.input_artifacts")
 	if ar.Outcome != domain.AssertionFail {
 		t.Errorf("Outcome = %q, want fail — SystemDesign.md is in neither the required nor the optional set", ar.Outcome)
 	}
@@ -128,7 +133,7 @@ func TestEvaluate_TaskMessage_RequiredOutputArtifactMissing_Fails(t *testing.T) 
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.output_artifacts")
 	if ar.Outcome != domain.AssertionFail {
 		t.Errorf("Outcome = %q, want fail — Research.md was declared a required output but never produced", ar.Outcome)
 	}
@@ -157,7 +162,7 @@ func TestEvaluate_TaskMessage_OptionalOutputArtifactMayOrMayNotBePresent_BothPas
 
 		got := evaluate.Evaluate(ev)
 
-		ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+		ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.output_artifacts")
 		if ar.Outcome != domain.AssertionPass {
 			t.Errorf("%s: Outcome = %q, want pass — an optional output entry may or may not be present", name, ar.Outcome)
 		}
@@ -180,7 +185,7 @@ func TestEvaluate_TaskMessage_OutputArtifactInNeitherSet_Fails(t *testing.T) {
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.output_artifacts")
 	if ar.Outcome != domain.AssertionFail {
 		t.Errorf("Outcome = %q, want fail — scratch.tmp is in neither the required nor the optional output set", ar.Outcome)
 	}
@@ -197,7 +202,7 @@ func TestEvaluate_TaskMessage_HumanInTheLoop_MismatchFails(t *testing.T) {
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.human_in_the_loop")
 	if ar.Outcome != domain.AssertionFail {
 		t.Errorf("Outcome = %q, want fail — declared human_in_the_loop true, observed false", ar.Outcome)
 	}
@@ -214,7 +219,7 @@ func TestEvaluate_TaskMessage_HumanInTheLoop_MatchPasses(t *testing.T) {
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.human_in_the_loop")
 	if ar.Outcome != domain.AssertionPass {
 		t.Errorf("Outcome = %q, want pass — declared and observed human_in_the_loop both true", ar.Outcome)
 	}
@@ -230,7 +235,7 @@ func TestEvaluate_TaskMessage_TaskDescriptionSubstring_AbsentFails(t *testing.T)
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.task_description")
 	if ar.Outcome != domain.AssertionFail {
 		t.Errorf("Outcome = %q, want fail — %q does not contain %q", ar.Outcome, msg.TaskDescription, "research")
 	}
@@ -246,7 +251,7 @@ func TestEvaluate_TaskMessage_TaskDescriptionSubstring_PresentPasses(t *testing.
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.task_description")
 	if ar.Outcome != domain.AssertionPass {
 		t.Errorf("Outcome = %q, want pass — the task description contains the declared substring", ar.Outcome)
 	}
@@ -266,7 +271,7 @@ func TestEvaluate_TaskMessage_TaskDescriptionMultipleSubstrings_AllPresent_Passe
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.task_description")
 	if ar.Outcome != domain.AssertionPass {
 		t.Errorf("Outcome = %q, want pass — the task description contains every declared substring", ar.Outcome)
 	}
@@ -285,7 +290,7 @@ func TestEvaluate_TaskMessage_TaskDescriptionMultipleSubstrings_OneMissing_Fails
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.task_description")
 	if ar.Outcome != domain.AssertionFail {
 		t.Errorf("Outcome = %q, want fail — %q is declared but absent from the task description", ar.Outcome, "recommendations")
 	}
@@ -305,7 +310,7 @@ func TestEvaluate_TaskMessage_IdentityDrift_Fails(t *testing.T) {
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.identity")
 	if ar.Outcome != domain.AssertionFail {
 		t.Errorf("Outcome = %q, want fail — invocation 1 is the researcher, not the reviewer", ar.Outcome)
 	}

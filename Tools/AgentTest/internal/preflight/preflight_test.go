@@ -55,6 +55,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: happy-path.stubs.json
 stub_agents:
   - identity:

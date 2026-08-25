@@ -13,6 +13,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the one collaborator.
   invocation_kind: subagent

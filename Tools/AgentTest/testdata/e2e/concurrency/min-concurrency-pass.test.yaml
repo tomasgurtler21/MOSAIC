@@ -11,6 +11,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Dispatch the researcher and the library researcher together, then finish.
   invocation_kind: subagent

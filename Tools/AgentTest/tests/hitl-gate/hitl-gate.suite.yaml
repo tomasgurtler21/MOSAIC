@@ -1,0 +1,16 @@
+schema_version: 1
+id: hitl-gate
+description: >
+  Human-in-the-loop gate enforcement. Tests that the orchestrator correctly
+  reads the human_approved field on output artifacts and re-dispatches when
+  the HITL gate was not discharged.
+defaults:
+  timeout: 10m
+  turn_limit: 30
+  repetitions: 1
+  pass_rate: 1.0
+  echo_fidelity: advisory
+tests:
+  - path: hitl-redispatch-unapproved.test.yaml
+  - path: hitl-plan-stage-override.test.yaml
+  - path: hitl-plan-stage-all-agents.test.yaml

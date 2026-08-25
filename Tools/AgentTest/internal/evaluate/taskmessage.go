@@ -9,24 +9,33 @@ import (
 )
 
 // evaluateTaskMessage evaluates one TaskMessageAssertion against the
-// invocation at its declared global sequence number.
-func evaluateTaskMessage(records []domain.LogRecord, want domain.TaskMessageAssertion) domain.AssertionResult {
-	target := strconv.Itoa(want.At)
-	ar := domain.AssertionResult{Class: domain.ClassTaskMessage, Target: target}
+// invocation at its declared global sequence number. Each declared sub-field
+// produces its own separate AssertionResult, with Target "<seq>.<subfield>".
+//
+// Exception: when no start record exists for the declared sequence number, a
+// single result is returned with the bare sequence number as Target (no
+// per-field split is possible without an invocation to inspect).
+func evaluateTaskMessage(records []domain.LogRecord, want domain.TaskMessageAssertion) []domain.AssertionResult {
+	seqStr := strconv.Itoa(want.At)
 
 	rec := findStartRecord(records, want.At)
 	if rec == nil {
-		ar.Outcome = domain.AssertionFail
-		ar.Detail = fmt.Sprintf("no invocation with sequence %d was observed", want.At)
-		return ar
+		return []domain.AssertionResult{{
+			Class:    domain.ClassTaskMessage,
+			Target:   seqStr,
+			Outcome:  domain.AssertionFail,
+			Expected: fmt.Sprintf("invocation at sequence %d", want.At),
+			Actual:   fmt.Sprintf("no invocation observed at sequence %d", want.At),
+			Detail:   fmt.Sprintf("no invocation with sequence %d was observed", want.At),
+		}}
 	}
 
-	if want.Identity != nil && rec.Identity != *want.Identity {
-		ar.Outcome = domain.AssertionFail
-		ar.Expected = want.Identity.Key()
-		ar.Actual = rec.Identity.Key()
-		ar.Detail = fmt.Sprintf("invocation %d is %s, declared identity is %s — a sequence drift, not an ordinary message mismatch", want.At, rec.Identity.Key(), want.Identity.Key())
-		return ar
+	// When extraction is degraded or failed, the fields in the message cannot
+	// be trusted. Produce one failing result per declared sub-field so the
+	// caller can see which checks failed and why.
+	if rec.Message != nil && (rec.Message.Extraction == domain.ExtractionDegraded || rec.Message.Extraction == domain.ExtractionFailed) {
+		extractionStatus := string(rec.Message.Extraction)
+		return degradedResults(want, seqStr, extractionStatus, rec.Identity)
 	}
 
 	var msg domain.TaskMessage
@@ -34,47 +43,193 @@ func evaluateTaskMessage(records []domain.LogRecord, want domain.TaskMessageAsse
 		msg = *rec.Message
 	}
 
-	// A degraded or failed extraction never carries fields worth trusting:
-	// a task-message assertion against it must fail, never accidentally
-	// pass against an effectively-empty message.
-	if rec.Message != nil && (rec.Message.Extraction == domain.ExtractionDegraded || rec.Message.Extraction == domain.ExtractionFailed) {
-		ar.Outcome = domain.AssertionFail
-		ar.Detail = fmt.Sprintf("invocation %d's message extraction was %q; task-message assertions never pass against it", want.At, rec.Message.Extraction)
-		return ar
+	var out []domain.AssertionResult
+
+	// Identity check: always evaluable from the start record, regardless of
+	// message extraction quality, since it comes from the record itself.
+	if want.Identity != nil {
+		ar := domain.AssertionResult{
+			Class:    domain.ClassTaskMessage,
+			Target:   seqStr + ".identity",
+			Expected: want.Identity.Key(),
+			Actual:   rec.Identity.Key(),
+		}
+		if rec.Identity == *want.Identity {
+			ar.Outcome = domain.AssertionPass
+		} else {
+			ar.Outcome = domain.AssertionFail
+			ar.Detail = fmt.Sprintf("invocation %d is %s, declared identity is %s — a sequence drift, not an ordinary message mismatch", want.At, rec.Identity.Key(), want.Identity.Key())
+		}
+		out = append(out, ar)
 	}
 
-	var failures []string
+	// Input artifacts check.
+	if want.RequiredInputArtifacts != nil || want.OptionalInputArtifacts != nil {
+		ar := domain.AssertionResult{
+			Class:    domain.ClassTaskMessage,
+			Target:   seqStr + ".input_artifacts",
+			Expected: artifactSetDescription(want.RequiredInputArtifacts, want.OptionalInputArtifacts),
+			Actual:   artifactListDescription(msg.InputArtifacts),
+		}
+		if _, ok := evaluateArtifactSet(msg.InputArtifacts, want.RequiredInputArtifacts, want.OptionalInputArtifacts, "input"); ok {
+			ar.Outcome = domain.AssertionPass
+		} else {
+			detail, _ := evaluateArtifactSet(msg.InputArtifacts, want.RequiredInputArtifacts, want.OptionalInputArtifacts, "input")
+			ar.Outcome = domain.AssertionFail
+			ar.Detail = detail
+		}
+		out = append(out, ar)
+	}
+
+	// Output artifacts check.
+	if want.RequiredOutputArtifacts != nil || want.OptionalOutputArtifacts != nil {
+		ar := domain.AssertionResult{
+			Class:    domain.ClassTaskMessage,
+			Target:   seqStr + ".output_artifacts",
+			Expected: artifactSetDescription(want.RequiredOutputArtifacts, want.OptionalOutputArtifacts),
+			Actual:   artifactListDescription(msg.OutputArtifacts),
+		}
+		if _, ok := evaluateArtifactSet(msg.OutputArtifacts, want.RequiredOutputArtifacts, want.OptionalOutputArtifacts, "output"); ok {
+			ar.Outcome = domain.AssertionPass
+		} else {
+			detail, _ := evaluateArtifactSet(msg.OutputArtifacts, want.RequiredOutputArtifacts, want.OptionalOutputArtifacts, "output")
+			ar.Outcome = domain.AssertionFail
+			ar.Detail = detail
+		}
+		out = append(out, ar)
+	}
+
+	// Human-in-the-loop check.
+	if want.HumanInTheLoop != nil {
+		ar := domain.AssertionResult{
+			Class:    domain.ClassTaskMessage,
+			Target:   seqStr + ".human_in_the_loop",
+			Expected: strconv.FormatBool(*want.HumanInTheLoop),
+			Actual:   strconv.FormatBool(msg.HumanInTheLoop),
+		}
+		if msg.HumanInTheLoop == *want.HumanInTheLoop {
+			ar.Outcome = domain.AssertionPass
+		} else {
+			ar.Outcome = domain.AssertionFail
+			ar.Detail = fmt.Sprintf("human_in_the_loop observed %v, declared %v", msg.HumanInTheLoop, *want.HumanInTheLoop)
+		}
+		out = append(out, ar)
+	}
+
+	// Task description substring check.
+	if want.TaskDescriptionContains != nil {
+		ar := domain.AssertionResult{
+			Class:    domain.ClassTaskMessage,
+			Target:   seqStr + ".task_description",
+			Expected: fmt.Sprintf("contains %v", want.TaskDescriptionContains),
+			Actual:   msg.TaskDescription,
+		}
+		var missingSubstrings []string
+		for _, substr := range want.TaskDescriptionContains {
+			if !strings.Contains(msg.TaskDescription, substr) {
+				missingSubstrings = append(missingSubstrings, substr)
+			}
+		}
+		if len(missingSubstrings) == 0 {
+			ar.Outcome = domain.AssertionPass
+		} else {
+			ar.Outcome = domain.AssertionFail
+			ar.Detail = fmt.Sprintf("task_description does not contain declared substring(s): %v", missingSubstrings)
+		}
+		out = append(out, ar)
+	}
+
+	return out
+}
+
+// degradedResults produces one failing AssertionResult per declared sub-field
+// when extraction quality prevents trusting the message. Evidence in each
+// result describes what was expected vs. the extraction status observed.
+func degradedResults(want domain.TaskMessageAssertion, seqStr, extractionStatus string, recordIdentity domain.CollaboratorIdentity) []domain.AssertionResult {
+	var out []domain.AssertionResult
+	actualMsg := fmt.Sprintf("message extraction was %q; fields cannot be trusted", extractionStatus)
+
+	if want.Identity != nil {
+		out = append(out, domain.AssertionResult{
+			Class:    domain.ClassTaskMessage,
+			Target:   seqStr + ".identity",
+			Outcome:  domain.AssertionFail,
+			Expected: want.Identity.Key(),
+			Actual:   actualMsg,
+			Detail:   fmt.Sprintf("invocation %s's message extraction was %q; task-message assertions never pass against it", seqStr, extractionStatus),
+		})
+	}
 
 	if want.RequiredInputArtifacts != nil || want.OptionalInputArtifacts != nil {
-		if detail, ok := evaluateArtifactSet(msg.InputArtifacts, want.RequiredInputArtifacts, want.OptionalInputArtifacts, "input"); !ok {
-			failures = append(failures, detail)
-		}
+		out = append(out, domain.AssertionResult{
+			Class:    domain.ClassTaskMessage,
+			Target:   seqStr + ".input_artifacts",
+			Outcome:  domain.AssertionFail,
+			Expected: artifactSetDescription(want.RequiredInputArtifacts, want.OptionalInputArtifacts),
+			Actual:   actualMsg,
+			Detail:   fmt.Sprintf("invocation %s's message extraction was %q; task-message assertions never pass against it", seqStr, extractionStatus),
+		})
 	}
 
 	if want.RequiredOutputArtifacts != nil || want.OptionalOutputArtifacts != nil {
-		if detail, ok := evaluateArtifactSet(msg.OutputArtifacts, want.RequiredOutputArtifacts, want.OptionalOutputArtifacts, "output"); !ok {
-			failures = append(failures, detail)
-		}
+		out = append(out, domain.AssertionResult{
+			Class:    domain.ClassTaskMessage,
+			Target:   seqStr + ".output_artifacts",
+			Outcome:  domain.AssertionFail,
+			Expected: artifactSetDescription(want.RequiredOutputArtifacts, want.OptionalOutputArtifacts),
+			Actual:   actualMsg,
+			Detail:   fmt.Sprintf("invocation %s's message extraction was %q; task-message assertions never pass against it", seqStr, extractionStatus),
+		})
 	}
 
-	if want.HumanInTheLoop != nil && msg.HumanInTheLoop != *want.HumanInTheLoop {
-		failures = append(failures, fmt.Sprintf("human_in_the_loop observed %v, declared %v", msg.HumanInTheLoop, *want.HumanInTheLoop))
+	if want.HumanInTheLoop != nil {
+		out = append(out, domain.AssertionResult{
+			Class:    domain.ClassTaskMessage,
+			Target:   seqStr + ".human_in_the_loop",
+			Outcome:  domain.AssertionFail,
+			Expected: strconv.FormatBool(*want.HumanInTheLoop),
+			Actual:   actualMsg,
+			Detail:   fmt.Sprintf("invocation %s's message extraction was %q; task-message assertions never pass against it", seqStr, extractionStatus),
+		})
 	}
 
-	for _, substr := range want.TaskDescriptionContains {
-		if !strings.Contains(msg.TaskDescription, substr) {
-			failures = append(failures, fmt.Sprintf("task_description %q does not contain declared substring %q", msg.TaskDescription, substr))
-		}
+	if want.TaskDescriptionContains != nil {
+		out = append(out, domain.AssertionResult{
+			Class:    domain.ClassTaskMessage,
+			Target:   seqStr + ".task_description",
+			Outcome:  domain.AssertionFail,
+			Expected: fmt.Sprintf("contains %v", want.TaskDescriptionContains),
+			Actual:   actualMsg,
+			Detail:   fmt.Sprintf("invocation %s's message extraction was %q; task-message assertions never pass against it", seqStr, extractionStatus),
+		})
 	}
 
-	if len(failures) > 0 {
-		ar.Outcome = domain.AssertionFail
-		ar.Detail = strings.Join(failures, "; ")
-		return ar
-	}
+	return out
+}
 
-	ar.Outcome = domain.AssertionPass
-	return ar
+// artifactSetDescription returns a human-readable description of a required +
+// optional artifact set for use as the Expected field in an AssertionResult.
+func artifactSetDescription(required, optional []string) string {
+	var parts []string
+	if len(required) > 0 {
+		parts = append(parts, fmt.Sprintf("required:%v", required))
+	}
+	if len(optional) > 0 {
+		parts = append(parts, fmt.Sprintf("optional:%v", optional))
+	}
+	if len(parts) == 0 {
+		return "[]"
+	}
+	return strings.Join(parts, " ")
+}
+
+// artifactListDescription returns a human-readable description of an observed
+// artifact list for use as the Actual field in an AssertionResult.
+func artifactListDescription(artifacts []string) string {
+	if len(artifacts) == 0 {
+		return "[]"
+	}
+	return fmt.Sprintf("%v", artifacts)
 }
 
 // evaluateArtifactSet checks the required-versus-optional set semantics: a

@@ -706,6 +706,94 @@ func TestSetup_CataloguePath_DeployRequestCarriesSandboxDeployLogDir(t *testing.
 	}
 }
 
+// TestSetup_CataloguePathDeployCallCarriesInfrastructureAgentIDs asserts that
+// the single Deploy call for a catalogue-path test carries the subject's
+// declared InfrastructureAgentIDs, preserving the nil/non-nil-empty/populated
+// distinction. The runner must forward the field verbatim; it must never
+// interpret, default, or transform it. This is the same direct passthrough
+// contract as Workflows.
+func TestSetup_CataloguePathDeployCallCarriesInfrastructureAgentIDs(t *testing.T) {
+	t.Run("populated_infrastructure_agent_ids_passed_through", func(t *testing.T) {
+		h := newHarness(t)
+		req := catalogueRequest("catalogue-infra-agent-ids-populated")
+		req.Test.Definition.Subject.InfrastructureAgentIDs = []string{"checkpoint-manager-git", "commit-manager-git"}
+
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
+			t.Fatalf("Run returned unexpected error: %v", err)
+		}
+
+		deployCalls := h.Deployer.allDeployCalls()
+		if len(deployCalls) == 0 {
+			t.Fatal("Deploy was never called; want exactly one Deploy call for a catalogue-path test")
+		}
+		got := deployCalls[0].InfrastructureAgentIDs
+		want := req.Test.Definition.Subject.InfrastructureAgentIDs
+		if len(got) != len(want) {
+			t.Errorf("Deploy InfrastructureAgentIDs = %v, want %v; "+
+				"the subject's InfrastructureAgentIDs must be passed through to Deploy verbatim",
+				got, want)
+		} else {
+			for i := range want {
+				if got[i] != want[i] {
+					t.Errorf("Deploy InfrastructureAgentIDs[%d] = %q, want %q",
+						i, got[i], want[i])
+				}
+			}
+		}
+	})
+
+	t.Run("nil_infrastructure_agent_ids_stays_nil", func(t *testing.T) {
+		h := newHarness(t)
+		req := catalogueRequest("catalogue-infra-agent-ids-nil")
+		req.Test.Definition.Subject.InfrastructureAgentIDs = nil
+
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
+			t.Fatalf("Run returned unexpected error: %v", err)
+		}
+
+		deployCalls := h.Deployer.allDeployCalls()
+		if len(deployCalls) == 0 {
+			t.Fatal("Deploy was never called; want exactly one Deploy call for a catalogue-path test")
+		}
+		// nil means "not specified" — it must reach Deploy as nil, not empty.
+		// An implementor who writes `InfrastructureAgentIDs: []string{}` instead of
+		// copying the field verbatim would incorrectly trigger the selections file.
+		if deployCalls[0].InfrastructureAgentIDs != nil {
+			t.Errorf("Deploy InfrastructureAgentIDs = %v, want nil; "+
+				"a nil subject InfrastructureAgentIDs must reach Deploy as nil, not as an "+
+				"empty slice — nil means not-specified, empty means explicitly-none",
+				deployCalls[0].InfrastructureAgentIDs)
+		}
+	})
+
+	t.Run("non_nil_empty_infrastructure_agent_ids_stays_non_nil_empty", func(t *testing.T) {
+		h := newHarness(t)
+		req := catalogueRequest("catalogue-infra-agent-ids-non-nil-empty")
+		req.Test.Definition.Subject.InfrastructureAgentIDs = []string{} // explicitly none
+
+		if _, err := runner.Run(context.Background(), h.Deps, req, nil); err != nil {
+			t.Fatalf("Run returned unexpected error: %v", err)
+		}
+
+		deployCalls := h.Deployer.allDeployCalls()
+		if len(deployCalls) == 0 {
+			t.Fatal("Deploy was never called; want exactly one Deploy call for a catalogue-path test")
+		}
+		got := deployCalls[0].InfrastructureAgentIDs
+		// Non-nil empty is the "explicitly none" sentinel. It must reach Deploy as
+		// non-nil so the deploy guard writes the selections file and the deploy tool
+		// receives a pre-answer rather than firing an interactive prompt.
+		if got == nil {
+			t.Error("Deploy InfrastructureAgentIDs = nil, want non-nil empty; " +
+				"non-nil empty (explicitly none) must reach Deploy as non-nil — " +
+				"an implementor who drops the value to nil would suppress the selections file")
+		} else if len(got) != 0 {
+			t.Errorf("Deploy InfrastructureAgentIDs = %v (len %d), want empty slice; "+
+				"the verbatim passthrough must not add elements", got, len(got))
+		}
+	})
+}
+
 // TestSetup_CataloguePathNilDeploy_SkipsDeployGracefully asserts that when
 // Deps.Deploy is nil on a catalogue-path request, setup skips the Deploy step
 // gracefully — neither panicking nor returning an unexpected error. This

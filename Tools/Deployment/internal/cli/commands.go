@@ -71,13 +71,13 @@ func PreAnswersFromSelectionsFile(path string) (PreAnswers, error) {
 	if len(sf.Workflows) > 0 {
 		values[domain.QWorkflows] = map[string]string{"": strings.Join(sf.Workflows, ",")}
 	}
-	if len(sf.UtilityAgents) > 0 {
+	if sf.UtilityAgents != nil {
 		values[domain.QUtilityAgents] = map[string]string{"": strings.Join(sf.UtilityAgents, ",")}
 	}
-	if len(sf.InfrastructureAgents) > 0 {
+	if sf.InfrastructureAgents != nil {
 		values[domain.QInfrastructureAgents] = map[string]string{"": strings.Join(sf.InfrastructureAgents, ",")}
 	}
-	if len(sf.Hooks) > 0 {
+	if sf.Hooks != nil {
 		values[domain.QHooks] = map[string]string{"": strings.Join(sf.Hooks, ",")}
 	}
 	if len(sf.TierModels) > 0 {

@@ -1,0 +1,53 @@
+schema_version: 1
+id: interval-overdue
+description: >
+  I-2 (overdue): INVOCATION_INTERVAL trigger fires when obviously past
+  threshold. Seeded with global_sequence=9 and interval=3, the condition
+  9 >= 3 is well past due. The orchestrator catches up overdue triggers
+  on resume, dispatching the review agent before the next workflow agent.
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: [orchestration-review-interval-3]
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Task, Read, Write, Edit, Bash, Glob, Grep]
+
+stub_registry: interval-overdue.stubs.json
+
+timeout: 10m
+turn_limit: 30
+stop_after_invocations: 1
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: stage1-tests-done.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/ContractsDesign.md
+    ref: ContractsDesign.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: orchestration-review-interval-3 }

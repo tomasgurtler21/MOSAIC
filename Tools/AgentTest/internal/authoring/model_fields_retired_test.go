@@ -203,6 +203,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   opening_message: "Build the thing."
   invocation_kind: orchestrator
   allowed_tools: [Task, Read, Write, Edit]
@@ -235,6 +236,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/minimal.stubs.json
 timeout: 5m
 assertions:

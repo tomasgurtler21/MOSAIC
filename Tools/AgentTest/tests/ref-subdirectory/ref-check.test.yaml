@@ -9,6 +9,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: ref-check.stubs.json
 seed_files:
   - path: Orchestration/sample-fixture.md

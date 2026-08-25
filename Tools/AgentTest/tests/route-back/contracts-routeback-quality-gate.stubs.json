@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "test_id": "contracts-routeback-quality-gate",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "contracts-designer", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "contracts-designer#16",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Updated ContractsDesign.md to match actual Itemf signature."
+      },
+      "side_effects": {
+        "create_files": [
+          {
+            "path": "Orchestration-{run_id}/ContractsDesign.md",
+            "content": "---\nrun_id: {run_id}\ncreated_by: contracts-designer#16\nhuman_approved: true\n---\n# Contracts Design\n\n## Verbose Flag Contract\n\n- diagnostics.SetVerbose(bool)\n- diagnostics.Itemf(format string, args ...any) — updated signature\n- Only active when --verbose flag is set\n"
+          }
+        ]
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "contracts-review", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "contracts-review#17",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Contracts review passed. Updated signature is consistent."
+      }
+    }
+  ]
+}

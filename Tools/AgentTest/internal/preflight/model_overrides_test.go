@@ -45,6 +45,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: test-a.stubs.json
 stub_agents:
   - identity:
@@ -64,6 +65,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: test-b.stubs.json
 stub_agents:
   - identity:

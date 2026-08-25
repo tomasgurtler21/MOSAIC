@@ -1,0 +1,63 @@
+schema_version: 1
+id: blocked-e101-retry
+description: >
+  Scenario S-3. implementation-tdd returns BLOCKED with error_code E101
+  (INPUT_NOT_FOUND). The orchestrator must apply Tier 1 auto-retry —
+  re-dispatch the same agent, not advance to implementation-review or
+  treat it as a terminal failure.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: []
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: blocked-e101-retry.stubs.json
+
+timeout: 10m
+turn_limit: 30
+stop_after_invocations: 2
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: execution-stage1-tests-done.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+  - path: Orchestration-{run_id}/ContractsDesign.md
+    ref: ContractsDesign.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: implementation-tdd }
+      - { tool: dispatch, agent: implementation-tdd }
+
+  task_messages:
+    - at: 1
+      identity: { tool: dispatch, agent: implementation-tdd }
+      human_in_the_loop: false
+    - at: 2
+      identity: { tool: dispatch, agent: implementation-tdd }
+      human_in_the_loop: false

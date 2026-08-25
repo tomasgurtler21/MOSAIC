@@ -13,6 +13,7 @@ pass_rate: 1.0
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Invoke the worker collaborator once, then finish.
   invocation_kind: subagent

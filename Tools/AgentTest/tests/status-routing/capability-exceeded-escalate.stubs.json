@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "test_id": "capability-exceeded-escalate",
+  "on_unmatched": "halt",
+  "stubs": []
+}

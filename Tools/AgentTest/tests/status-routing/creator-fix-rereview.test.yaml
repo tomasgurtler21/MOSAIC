@@ -1,0 +1,72 @@
+schema_version: 1
+id: creator-fix-rereview
+description: >
+  Scenario G-2. Execution log shows planner SUCCESS, plan-review
+  COMPLETED_NEEDS_ACTION, planner SUCCESS (fix). The orchestrator must route
+  back to plan-review for re-review, not advance to contracts-designer. The
+  creator/reviewer gate cannot be passed without the reviewer returning SUCCESS
+  last.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: []
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: creator-fix-rereview.stubs.json
+
+timeout: 10m
+turn_limit: 30
+stop_after_invocations: 1
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: planning-after-creator-fix.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+  - path: Orchestration-{run_id}/plan-review.md
+    ref: plan-review-findings.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: plan-review }
+
+  task_messages:
+    # Dispatch 1: plan-review (re-review after creator fix, NOT contracts-designer)
+    - at: 1
+      identity: { tool: dispatch, agent: plan-review }
+      human_in_the_loop: false
+      required_input_artifacts:
+        - Orchestration-{run_id}/Requirements.md
+        - Orchestration-{run_id}/Plan.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/Stage-1/Plan.md
+        - Orchestration-{run_id}/Stage-1/PlanProgress.md
+        - Orchestration-{run_id}/Stage-2/Plan.md
+        - Orchestration-{run_id}/Stage-2/PlanProgress.md
+        - Orchestration-{run_id}/plan-review.md
+      required_output_artifacts:
+        - Orchestration-{run_id}/plan-review.md

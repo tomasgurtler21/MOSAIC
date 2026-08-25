@@ -12,6 +12,7 @@ pass_rate: 0.5
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Ask the effecter to do its one thing, then finish.
   invocation_kind: subagent

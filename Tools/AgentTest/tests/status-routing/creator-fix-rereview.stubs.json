@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "test_id": "creator-fix-rereview",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "plan-review", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "plan-review#7",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Re-review passed. Error handling strategy and rollback approach are adequate."
+      },
+      "side_effects": {
+        "create_files": [
+          {
+            "path": "Orchestration-{run_id}/plan-review.md",
+            "content": "---\nrun_id: {run_id}\ncreated_by: plan-review#7\nhuman_approved: false\n---\n# Plan Review\n\nRe-review after creator fix. All previous findings addressed.\n"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -41,21 +41,23 @@ var definitionKnownFields = map[string]bool{
 // runtime-only concern; a definition declaring either will now be rejected by
 // the unknown-field check below.
 var subjectKnownFields = map[string]bool{
-	"identity":       true,
-	"agent":          true,
-	"workflows":      true,
-	"opening_message": true,
-	"invocation_kind": true,
-	"allowed_tools":  true,
+	"identity":               true,
+	"agent":                  true,
+	"workflows":              true,
+	"infrastructure_agents":  true,
+	"opening_message":        true,
+	"invocation_kind":        true,
+	"allowed_tools":          true,
 }
 
 type wireSubject struct {
-	Identity       string   `yaml:"identity"`
-	Agent          string   `yaml:"agent"`
-	Workflows      []string `yaml:"workflows"`
-	OpeningMessage string   `yaml:"opening_message"`
-	InvocationKind string   `yaml:"invocation_kind"`
-	AllowedTools   []string `yaml:"allowed_tools"`
+	Identity             string   `yaml:"identity"`
+	Agent                string   `yaml:"agent"`
+	Workflows            []string `yaml:"workflows"`
+	InfrastructureAgents []string `yaml:"infrastructure_agents"`
+	OpeningMessage       string   `yaml:"opening_message"`
+	InvocationKind       string   `yaml:"invocation_kind"`
+	AllowedTools         []string `yaml:"allowed_tools"`
 }
 
 type wireStubAgent struct {
@@ -242,6 +244,10 @@ func ParseTestDefinition(src Source) (domain.TestDefinition, Report) {
 		report.Add(missingRequiredField(src, "id"))
 	}
 
+	if wire.Subject.InfrastructureAgents == nil {
+		report.Add(missingRequiredField(src, "subject.infrastructure_agents"))
+	}
+
 	def := domain.TestDefinition{
 		SchemaVersion: wire.SchemaVersion,
 		ID:            wire.ID,
@@ -249,12 +255,13 @@ func ParseTestDefinition(src Source) (domain.TestDefinition, Report) {
 		Layer:         domain.TestLayer(wire.Layer),
 		Negative:      wire.Negative,
 		Subject: domain.SubjectUnderTest{
-			Identity:        wire.Subject.Identity,
-			CatalogAgentKey: wire.Subject.Agent,
-			Workflows:       wire.Subject.Workflows,
-			OpeningMessage:  wire.Subject.OpeningMessage,
-			InvocationKind:  wire.Subject.InvocationKind,
-			AllowedTools:    wire.Subject.AllowedTools,
+			Identity:               wire.Subject.Identity,
+			CatalogAgentKey:        wire.Subject.Agent,
+			Workflows:              wire.Subject.Workflows,
+			InfrastructureAgentIDs: wire.Subject.InfrastructureAgents,
+			OpeningMessage:         wire.Subject.OpeningMessage,
+			InvocationKind:         wire.Subject.InvocationKind,
+			AllowedTools:           wire.Subject.AllowedTools,
 		},
 		StubRegistryPath: wire.StubRegistry,
 		Settings:         wire.WireSettings.toDomain(src, "timeout", &report),

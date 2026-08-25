@@ -1,0 +1,42 @@
+schema_version: 1
+id: phase-end-trigger
+description: >
+  I-5: PHASE_END trigger fires infrastructure agent at phase transition.
+  After requirements-review completes RESEARCH (routing changes phase to
+  PLANNING), infra-phase-end must be dispatched before the first PLANNING
+  agent (planner-tdd-soft).
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: [infra-phase-end]
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Task, Read, Write, Edit, Bash, Glob, Grep]
+
+stub_registry: phase-end-trigger.stubs.json
+
+timeout: 10m
+turn_limit: 30
+stop_after_invocations: 2
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: research-reqref-done.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: requirements-review }
+      - { tool: dispatch, agent: infra-phase-end }

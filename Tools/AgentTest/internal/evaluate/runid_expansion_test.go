@@ -203,7 +203,7 @@ func TestEvaluate_TaskMessage_RequiredInputArtifacts_PlaceholderMatchesRealPath_
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.input_artifacts")
 	if ar.Outcome != domain.AssertionPass {
 		t.Errorf("Outcome = %q, want pass — declared RequiredInputArtifacts with placeholder should match the real path", ar.Outcome)
 	}
@@ -225,7 +225,7 @@ func TestEvaluate_TaskMessage_RequiredInputArtifacts_NoPlaceholder_ComparedLiter
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.input_artifacts")
 	if ar.Outcome != domain.AssertionPass {
 		t.Errorf("Outcome = %q, want pass — literal RequiredInputArtifacts path should match literally", ar.Outcome)
 	}
@@ -250,7 +250,7 @@ func TestEvaluate_TaskMessage_OptionalInputArtifacts_PlaceholderMatchesRealPath_
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.input_artifacts")
 	if ar.Outcome != domain.AssertionPass {
 		t.Errorf("Outcome = %q, want pass — OptionalInputArtifacts with placeholder should match the real path", ar.Outcome)
 	}
@@ -275,7 +275,7 @@ func TestEvaluate_TaskMessage_RequiredOutputArtifacts_PlaceholderMatchesRealPath
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.output_artifacts")
 	if ar.Outcome != domain.AssertionPass {
 		t.Errorf("Outcome = %q, want pass — RequiredOutputArtifacts with placeholder should match the real path", ar.Outcome)
 	}
@@ -297,7 +297,7 @@ func TestEvaluate_TaskMessage_RequiredOutputArtifacts_NoPlaceholder_ComparedLite
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.output_artifacts")
 	if ar.Outcome != domain.AssertionPass {
 		t.Errorf("Outcome = %q, want pass — literal RequiredOutputArtifacts path should match literally", ar.Outcome)
 	}
@@ -322,7 +322,7 @@ func TestEvaluate_TaskMessage_OptionalOutputArtifacts_PlaceholderMatchesRealPath
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1")
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, "1.output_artifacts")
 	if ar.Outcome != domain.AssertionPass {
 		t.Errorf("Outcome = %q, want pass — OptionalOutputArtifacts with placeholder should match the real path", ar.Outcome)
 	}

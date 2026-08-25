@@ -8,6 +8,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the collaborator, then have the helper assist without creating files.
   invocation_kind: subagent

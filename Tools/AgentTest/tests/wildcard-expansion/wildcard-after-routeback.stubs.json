@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "test_id": "wildcard-after-routeback",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "plan-review", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "plan-review#18",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Plan review passed. Stage 3 addition is well-scoped."
+      },
+      "side_effects": {
+        "create_files": [
+          {
+            "path": "Orchestration-{run_id}/plan-review.md",
+            "content": "---\nrun_id: \"{run_id}\"\ncreated_by: \"plan-review#18\"\nhuman_approved: false\n---\n# Plan Review\n\nNo findings. Stage 3 addition for batch mode verbose is well-scoped.\n"
+          }
+        ]
+      }
+    }
+  ]
+}

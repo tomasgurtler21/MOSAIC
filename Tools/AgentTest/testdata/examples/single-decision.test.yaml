@@ -10,6 +10,7 @@ negative: false
 subject:
   identity: planner
   agent: planner
+  infrastructure_agents: []
   opening_message: |
     Continue the workflow using the seeded orchestration state.
   invocation_kind: subagent

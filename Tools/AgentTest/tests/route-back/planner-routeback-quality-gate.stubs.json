@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "test_id": "planner-routeback-quality-gate",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "planner-tdd-soft", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "planner-tdd-soft#18",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Added stage 3 to fix diagnostics output formatting issues."
+      },
+      "side_effects": {
+        "create_files": [
+          {
+            "path": "Orchestration-{run_id}/Plan.md",
+            "content": "---\nrun_id: {run_id}\ncreated_by: planner-tdd-soft#18\nhuman_approved: true\n---\n# Plan\n\n## Stage Table\n\n| Stage | Description | Approach | HITL | Depends On |\n|-------|-------------|----------|------|------------|\n| 1 | Add --verbose flag parsing and wire to diagnostics | TDD | No | - |\n| 2 | Per-item diagnostic output in list command | TDD | No | 1 |\n| 3 | Fix diagnostics output formatting | TDD | No | 2 |\n"
+          },
+          {
+            "path": "Orchestration-{run_id}/Stage-3/Plan.md",
+            "content": "---\nrun_id: {run_id}\ncreated_by: planner-tdd-soft#18\nhuman_approved: true\n---\n# Stage 3 Plan\n\nFix diagnostics output formatting: prefix with DIAG, suppress when --verbose not set.\n"
+          },
+          {
+            "path": "Orchestration-{run_id}/Stage-3/PlanProgress.md",
+            "content": "---\nrun_id: {run_id}\ncreated_by: planner-tdd-soft#18\nhuman_approved: true\n---\n# Stage 3 Progress\n\nNo work started.\n"
+          }
+        ]
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "plan-review", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "plan-review#19",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Plan review passed. Fix stage correctly scoped."
+      }
+    }
+  ]
+}

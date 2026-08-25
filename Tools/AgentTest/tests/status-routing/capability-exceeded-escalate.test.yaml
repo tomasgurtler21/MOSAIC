@@ -1,0 +1,53 @@
+schema_version: 1
+id: capability-exceeded-escalate
+description: >
+  Scenario S-6. implementation-tdd returned CAPABILITY_EXCEEDED. The
+  orchestrator must escalate to the human — produce a message and exit
+  without dispatching any further agents. Must NOT retry the same agent
+  (pointless) and must NOT advance to implementation-review as if
+  successful.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: []
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: capability-exceeded-escalate.stubs.json
+
+timeout: 5m
+turn_limit: 15
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: execution-stage1-impl-exceeded.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+  - path: Orchestration-{run_id}/ContractsDesign.md
+    ref: ContractsDesign.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps: []

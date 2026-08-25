@@ -17,6 +17,7 @@ subject:
   identity: orchestrator
   agent: orchestrator
   workflows: [brownfield-tdd]
+  infrastructure_agents: []
   opening_message: |
     Task: Add a --verbose flag to the widgets CLI so it prints per-item
     diagnostics to stderr.

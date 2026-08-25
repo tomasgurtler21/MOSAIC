@@ -134,6 +134,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 `),
 	}

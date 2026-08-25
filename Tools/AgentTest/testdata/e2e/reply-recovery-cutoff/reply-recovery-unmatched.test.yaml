@@ -12,6 +12,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Dispatch the greeter, then the helper.
   invocation_kind: subagent

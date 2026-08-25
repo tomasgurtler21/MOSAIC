@@ -16,6 +16,7 @@ negative: false
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   opening_message: |
     Build the thing described in Requirements.md.
   invocation_kind: orchestrator

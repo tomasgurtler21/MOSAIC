@@ -1,0 +1,16 @@
+schema_version: 1
+id: wildcard-expansion
+description: >
+  Wildcard and artifact path resolution. Tests that the orchestrator correctly
+  expands Stage-*/Plan.md and similar wildcards in workflow table Input/Output
+  columns to all matching files.
+defaults:
+  timeout: 10m
+  turn_limit: 30
+  repetitions: 1
+  pass_rate: 1.0
+  echo_fidelity: advisory
+tests:
+  - path: wildcard-input-expansion.test.yaml
+  - path: wildcard-dual-expansion.test.yaml
+  - path: wildcard-after-routeback.test.yaml

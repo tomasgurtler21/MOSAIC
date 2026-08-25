@@ -79,3 +79,28 @@ func TestEvaluate_Layer_Orchestrator_AlsoSuppressesSubjectsOwnMessageViolations(
 		t.Errorf("Verdict = %q, want PASS", got.Verdict)
 	}
 }
+
+// TestEvaluate_Layer_Orchestrator_SuppressedProtocolViolations_PopulatesExpectedAndActual
+// verifies that when the orchestrator layer suppresses protocol-violations
+// evaluation, the not-evaluated AssertionResult carries non-empty Expected (the
+// declared threshold) and non-empty Actual (indicating the suppression), so the
+// evidence context is preserved even when evaluation is suppressed. Currently
+// the suppressed branch sets only Detail, leaving Expected and Actual empty.
+func TestEvaluate_Layer_Orchestrator_SuppressedProtocolViolations_PopulatesExpectedAndActual(t *testing.T) {
+	ev := baseEvidence()
+	ev.Definition.Layer = domain.LayerOrchestrator
+	ev.Definition.Assertions.ProtocolViolations = intp(0)
+
+	got := evaluate.Evaluate(ev)
+
+	ar := findAssertion(t, got.Assertions, domain.ClassProtocolViolations, "")
+	if ar.Outcome != domain.AssertionNotEvaluated {
+		t.Fatalf("Outcome = %q, want not_evaluated — layer: orchestrator suppresses protocol-violations", ar.Outcome)
+	}
+	if ar.Expected == "" {
+		t.Errorf("Expected = %q; want non-empty on suppressed not-evaluated — the declared threshold must be carried for diagnostic context", ar.Expected)
+	}
+	if ar.Actual == "" {
+		t.Errorf("Actual = %q; want non-empty on suppressed not-evaluated — must indicate the suppression reason rather than be left empty", ar.Actual)
+	}
+}

@@ -50,7 +50,7 @@ tests/
       requirements.md
 ```
 
-Stub agent definitions are shared across suites and live in the test catalogue at `Tools/AgentTest/catalog/Subagents/TestStubs/`:
+Stub agent definitions are shared across suites and live in the test catalogue at `Tools/AgentTest/catalog/Subagents/TestStubs/`. This includes both workflow agent stubs and infrastructure agent stubs — the deploy tool classifies agents by frontmatter fields, not by subdirectory:
 
 ```
 Tools/AgentTest/
@@ -60,7 +60,11 @@ Tools/AgentTest/
         codebase-research.md
         requirements-refinement.md
         planner-tdd-soft.md
-        ...                      # all brownfield-tdd agents
+        checkpoint-manager-git.md   # infrastructure agent stub
+        commit-manager-git.md       # infrastructure agent stub
+        orchestration-review.md     # infrastructure agent stub
+        checkpoint-restore-git.md   # infrastructure agent stub
+        ...
   tests/
     my-suite/
       ...
@@ -140,6 +144,7 @@ subject:
   identity: orchestrator
   agent: orchestrator
   workflows: [brownfield-tdd]
+  infrastructure_agents: []
   opening_message: |
     Task: Add rate limiting to the API gateway in src/gateway/
     Workflow: brownfield-tdd
@@ -159,6 +164,8 @@ assertions:
     steps:
       - { tool: dispatch, agent: codebase-research }
 ```
+
+Note: The `infrastructure_agents: []` field is **required** — omitting it is a parse error. Use an empty list when the test does not involve infrastructure agents.
 
 Note: The `opening_message` must include the fields the orchestrator requires to begin — task, workflow type, and checkpoints preference. Without these, the orchestrator prompts the user for configuration instead of dispatching.
 
@@ -218,6 +225,7 @@ subject:
   identity: orchestrator
   agent: orchestrator
   workflows: [brownfield-tdd]
+  infrastructure_agents: []
   opening_message: |
     Task: Add rate limiting to the API gateway in src/gateway/
     Workflow: brownfield-tdd
@@ -293,6 +301,7 @@ assertions:
 | `identity` | Yes | string | The subject's identity name |
 | `agent` | Yes | string | Catalogue agent key used for deployment |
 | `workflows` | No | list of strings | Workflow IDs to inject. `null`/absent = all, `[]` = none, `["id"]` = exactly these |
+| `infrastructure_agents` | **Yes** | list of strings | Infrastructure agent IDs to deploy. `[]` = none (region stays empty), `["id"]` = exactly these. **Absent field is a parse error** — every test must declare this explicitly |
 | `opening_message` | Yes | string | The initial message the subject receives |
 | `invocation_kind` | Yes | string | `orchestrator` or `subagent` |
 | `model` | No | string | Model identifier for the subject (e.g. `sonnet`, `claude-sonnet-4-5`) |
@@ -685,6 +694,100 @@ Each stub agent file carries a numeric ID unique within the `TestStubs/` directo
 | 13 | `implementation-tdd.md` | `implementation-tdd` |
 | 14 | `implementation-review.md` | `implementation-review` |
 | 15 | `test-runner.md` | `test-runner` |
+| 16 | `checkpoint-manager-git.md` | `checkpoint-manager-git` |
+| 17 | `commit-manager-git.md` | `commit-manager-git` |
+| 18 | `orchestration-review.md` | `orchestration-review` |
+| 19 | `checkpoint-restore-git.md` | `checkpoint-restore-git` |
+| 20 | `orchestration-review-interval-10.md` | `orchestration-review-interval-10` |
+| 21 | `infra-phase-end.md` | `infra-phase-end` |
+| 22 | `restore-stage-end.md` | `restore-stage-end` |
+| 23 | `orchestration-review-interval-3.md` | `orchestration-review-interval-3` |
+| 24 | `checkpoint-stage-end-only.md` | `checkpoint-stage-end-only` |
+
+Infrastructure agent stubs (IDs 16-19) live in the same `TestStubs/` directory — the deploy tool classifies them by frontmatter (`infrastructure`, `triggers`, `on_failure` fields), not by subdirectory. Variant stubs (IDs 20+) are test-specific configurations with different trigger parameters. See the [Infrastructure Agent Stubs](#infrastructure-agent-stubs) section below.
+
+---
+
+## Infrastructure Agent Stubs
+
+Infrastructure agents fire on trigger conditions (not workflow routing) and perform orchestration-support work such as checkpointing and periodic review. They are declared in the orchestrator's `<InfrastructureAgents>` region, which the deploy tool populates from agent frontmatter when infrastructure agent IDs are specified.
+
+### Default Set
+
+The test catalogue ships four infrastructure agent stubs in `catalog/Subagents/TestStubs/`, alongside the workflow agent stubs. They mirror the production agents with production-equivalent triggers:
+
+| ID | File | Agent Key | Class | Triggers | On Failure |
+|----|------|-----------|-------|----------|------------|
+| 16 | `checkpoint-manager-git.md` | `checkpoint-manager-git` | `checkpoint` | STAGE_END, INVOCATION_INTERVAL(10) | halt |
+| 17 | `commit-manager-git.md` | `commit-manager-git` | `commit` | STAGE_END | continue |
+| 18 | `orchestration-review.md` | `orchestration-review` | `review` | INVOCATION_INTERVAL(30) | continue |
+| 19 | `checkpoint-restore-git.md` | `checkpoint-restore-git` | `restore` | MANUAL | halt |
+
+These stubs use the same echo-agent body as workflow stub agents — all actual response behaviour comes from the stub registry. The infrastructure-specific frontmatter fields (`infrastructure`, `triggers`, `on_failure`) are what the deploy tool reads to assemble the `<InfrastructureAgent>` declaration block in the orchestrator.
+
+### Using Infrastructure Agents in Tests
+
+Declare the agents you need in `subject.infrastructure_agents`:
+
+```yaml
+subject:
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: [checkpoint-manager-git, commit-manager-git]
+  # ...
+```
+
+Each listed agent must have a stub registry entry in `.stubs.json` so the interception pipeline knows what to return when the orchestrator dispatches it. Infrastructure agent dispatches consume sequence numbers and appear in the invocation log just like workflow agent dispatches.
+
+### Creating Trigger Variants
+
+The default stubs carry production-equivalent triggers, but tests often need different trigger configurations. For example:
+
+- **I-2** tests `INVOCATION_INTERVAL` — production uses interval 10, but a test with `stop_after_invocations: 3` needs interval 2 to fire within the test's lifespan.
+- **I-5** tests `PHASE_END` — no production agent uses this trigger, so a synthetic test-only agent is needed.
+
+Create variant stubs directly in `catalog/Subagents/TestStubs/` with descriptive names:
+
+```markdown
+---
+id: 20
+version: 1.0.0
+name: checkpoint-interval-3
+description: Test variant — checkpoint agent with INVOCATION_INTERVAL(3) for short tests
+role: subagent
+model: "{model-identifier}"
+recommended_tier: TEST-STUB
+tier_rationale: Test stub receiving cheap model via shared TEST-STUB tier mapping
+tools: []
+infrastructure: checkpoint
+triggers:
+  - trigger: INVOCATION_INTERVAL
+    trigger_param: 3
+on_failure: halt
+---
+
+<Identity type="core">
+# CheckpointInterval3 — Test Echo Agent
+
+You are a test echo agent in an automated test scenario. Your only job is exact reproduction.
+
+When you receive a prompt asking you to respond with specific content, reproduce that content exactly as given. Do not add commentary, explanation, formatting, or wrapping. Do not modify, summarize, or interpret the content. Output only the requested content and nothing else.
+</Identity>
+```
+
+The agent name is arbitrary — it is the `infrastructure` class field that classifies the agent, not the name. A test references the variant by its name:
+
+```yaml
+infrastructure_agents: [checkpoint-interval-3]
+```
+
+**Guidelines for variants:**
+
+- Keep the echo-agent body identical across all variants — only frontmatter differs.
+- Use descriptive names that encode the variant's purpose: `checkpoint-interval-3`, `infra-phase-end`, `checkpoint-stage-end-only`.
+- Assign the next available ID in `TestStubs/` (continuing from 19).
+- Variants are cheap — one file per configuration. Create as many as your tests need.
+- A gated class (checkpoint, commit, restore) allows at most one active agent per class. Two agents of the same gated class in `infrastructure_agents` is a deployment error.
 
 ---
 
@@ -1015,6 +1118,7 @@ subject:
   identity: orchestrator
   agent: orchestrator
   workflows: [brownfield-tdd]
+  infrastructure_agents: []
   opening_message: |
     Task: Add rate limiting to the API gateway in src/gateway/
     Workflow: brownfield-tdd

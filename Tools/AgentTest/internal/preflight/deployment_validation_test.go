@@ -691,6 +691,69 @@ stub_registry: subject.stubs.json
 	}
 }
 
+// TestValidate_CataloguePathCheckSubjectDeploy_CarriesInfrastructureAgentIDs
+// asserts that preflight's dry-run deploy call propagates InfrastructureAgentIDs
+// from the subject definition into the DeployRequest. Without this wiring the
+// deploy tool's interactive infrastructure-agent question fires during the
+// dry-run validation, hanging the preflight check in an automated run.
+//
+// The test exercises the catalogue path (subject.agent set) with a definition
+// that declares two infrastructure agents, and asserts that the captured
+// DeployRequest carries those IDs verbatim.
+func TestValidate_CataloguePathCheckSubjectDeploy_CarriesInfrastructureAgentIDs(t *testing.T) {
+	const definitionWithInfraAgents = `
+schema_version: 1
+id: subject-test
+layer: orchestrator
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  infrastructure_agents:
+    - checkpoint-manager-git
+    - commit-manager-git
+stub_registry: subject.stubs.json
+`
+
+	root := writeTree(t, map[string]string{
+		"suite.suite.yaml":   validSuiteWithOneTest,
+		"subject.test.yaml":  definitionWithInfraAgents,
+		"subject.stubs.json": validRegistryForDeployTests,
+	})
+
+	deployer := &fakeDeployer{}
+
+	preflight.Validate(preflight.Input{
+		SuitePath:   filepath.Join(root, "suite.suite.yaml"),
+		FixtureRoot: filepath.Join(root, "fixtures"),
+		HarnessID:   "claude-code",
+		Deploy:      deployer,
+	})
+
+	if len(deployer.deployCalls) == 0 {
+		t.Fatal("Deploy was never called during preflight; " +
+			"preflight must issue a dry-run deploy call for the subject on the catalogue path")
+	}
+
+	got := deployer.deployCalls[0].InfrastructureAgentIDs
+	want := []string{"checkpoint-manager-git", "commit-manager-git"}
+
+	if len(got) != len(want) {
+		t.Errorf("dry-run DeployRequest.InfrastructureAgentIDs = %v (len %d), want %v (len %d); "+
+			"preflight must propagate InfrastructureAgentIDs from the subject definition "+
+			"into the dry-run deploy request so the deploy tool resolves the infrastructure-agent "+
+			"selection non-interactively rather than hanging on an interactive prompt",
+			got, len(got), want, len(want))
+		return
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("dry-run DeployRequest.InfrastructureAgentIDs[%d] = %q, want %q; "+
+				"the field must be carried verbatim from the subject definition",
+				i, got[i], want[i])
+		}
+	}
+}
+
 // suppressUnusedImportWarning uses the os package to satisfy the compiler when
 // no file-system calls are in scope. This is removed once the tests exercise
 // file-based checks.

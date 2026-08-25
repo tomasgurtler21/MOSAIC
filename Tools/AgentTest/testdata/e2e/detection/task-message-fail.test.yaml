@@ -8,6 +8,7 @@ negative: false
 subject:
   identity: standin-subject
   agent: standin-subject
+  infrastructure_agents: []
   opening_message: |
     Greet the collaborator, then have the helper assist without creating files.
   invocation_kind: subagent
@@ -29,5 +30,4 @@ turn_limit: 5
 assertions:
   task_messages:
     - at: 1
-      identity: { tool: dispatch, agent: greeter }
       task_description_contains: ["this phrase never appears"]

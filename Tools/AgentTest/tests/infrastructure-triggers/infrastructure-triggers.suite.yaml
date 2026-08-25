@@ -1,0 +1,21 @@
+schema_version: 1
+id: infrastructure-triggers
+description: >
+  Infrastructure agent trigger evaluation tests. Verifies STAGE_END,
+  INVOCATION_INTERVAL, PHASE_END triggers fire correctly, gated agents
+  are suppressed when their switch is disabled, multiple agents fire in
+  declaration order on the same boundary, and restore-class agents never
+  fire automatically.
+defaults:
+  timeout: 10m
+  turn_limit: 30
+  repetitions: 1
+  pass_rate: 1.0
+tests:
+  - path: stage-end-checkpoint.test.yaml
+  - path: interval-precise-boundary.test.yaml
+  - path: interval-overdue.test.yaml
+  - path: multiple-triggers-same-boundary.test.yaml
+  - path: gated-checkpoint-disabled.test.yaml
+  - path: phase-end-trigger.test.yaml
+  - path: restore-class-exclusion.test.yaml

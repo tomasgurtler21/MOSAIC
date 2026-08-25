@@ -76,12 +76,12 @@ Each scenario is one verifiable routing condition. Scenarios are atomic — whet
 
 | ID | Scenario | Expected | Status |
 |----|----------|----------|--------|
-| I-1 | STAGE_END trigger — checkpoint agent at stage boundary | Dispatch checkpoint agent before next stage's first workflow agent | Ready |
-| I-2 | INVOCATION_INTERVAL trigger — review agent after N invocations | Dispatch review agent (threshold from agent's last firing, not modulus) | Ready |
-| I-3 | Multiple triggers fire on same boundary (checkpoint + commit both STAGE_END) | Dispatch ALL fired agents in declaration order, each with own Seq | Ready |
-| I-4 | Gated agent — checkpoint trigger exists but `checkpoints: disabled` | Do NOT dispatch checkpoint agent | Ready |
-| I-5 | PHASE_END trigger | Dispatch infrastructure agent at phase transition | Ready |
-| I-6 | Restore-class agent — never fires automatically regardless of declared triggers | Do NOT dispatch restore agent even if trigger condition is met | Ready |
+| I-1 | STAGE_END trigger — checkpoint agent at stage boundary | Dispatch checkpoint agent before next stage's first workflow agent | Tested |
+| I-2 | INVOCATION_INTERVAL trigger — review agent after N invocations | Dispatch review agent (threshold from agent's last firing, not modulus) | Tested (2 tests: precise + overdue) |
+| I-3 | Multiple triggers fire on same boundary (checkpoint + commit both STAGE_END) | Dispatch ALL fired agents in declaration order, each with own Seq | Tested |
+| I-4 | Gated agent — checkpoint trigger exists but `checkpoints: disabled` | Do NOT dispatch checkpoint agent | Tested |
+| I-5 | PHASE_END trigger | Dispatch infrastructure agent at phase transition | Tested |
+| I-6 | Restore-class agent — never fires automatically regardless of declared triggers | Do NOT dispatch restore agent even if trigger condition is met | Tested |
 
 ### Optional Phases
 
@@ -105,6 +105,30 @@ Filled in when tests are created. One test may cover multiple scenarios; one sce
 |---------|-----------|-------------------|----------|-------|
 | findings-route-back | Findings Route-Back | S-1, G-1 | brownfield-tdd | Seeded after planner SUCCESS. plan-review COMPLETED_NEEDS_ACTION → planner-tdd-soft with plan-review.md in inputs |
 | partially-done-redispatch | PARTIALLY_DONE Redispatch | S-2 | brownfield-tdd | Seeded at EXECUTION stage 1 impl. implementation-tdd PARTIALLY_DONE → same agent re-dispatched |
+| creator-fix-rereview | Creator Fix Re-review | G-2 | brownfield-tdd | Seeded after planner fix (plan-review CNA → planner SUCCESS). Must re-review, not advance to contracts-designer |
+| hitl-redispatch-unapproved | HITL Re-dispatch Unapproved | H-1 | brownfield-tdd | Seeded after requirements-refinement SUCCESS with human_approved: false. Must re-dispatch for HITL gate, not advance |
+| impl-only-skip-tests | Impl-Only Skip Tests | E-2 | brownfield-tdd | Stage 1 Approach=Implementation-Only. Must skip test-writer-tdd/tests-review-tdd, dispatch implementation-tdd directly |
+| hitl-plan-stage-override | HITL Plan Stage Override | H-2, E-1 | brownfield-tdd | Plan stage 1 HITL=Yes overrides workflow HITL=false. test-writer-tdd dispatched with human_in_the_loop: true. Also proves E-1 (TDD first agent) |
+| hitl-plan-stage-all-agents | HITL Plan Stage All Agents | H-3 | brownfield-tdd | Stage 1 HITL=Yes, test-writer-tdd already done. tests-review-tdd must also get human_in_the_loop: true |
+| blocked-e101-retry | BLOCKED E101 Retry | S-3 | brownfield-tdd | implementation-tdd BLOCKED E101 → Tier 1 auto-retry, same agent re-dispatched |
+| blocked-e501-retry | BLOCKED E501 Retry | S-4 | brownfield-tdd | implementation-tdd BLOCKED E501 → Tier 1 auto-retry, same agent re-dispatched |
+| needs-clarification-no-advance | NEEDS_CLARIFICATION No Advance | S-5 | brownfield-tdd | implementation-tdd NEEDS_CLARIFICATION → route back to planner-tdd-soft for clarification, not advance |
+| blocked-e503-hitl-retry | BLOCKED E503 HITL Retry | S-7 | brownfield-tdd | requirements-refinement BLOCKED E503 on HITL dispatch → retry with human_in_the_loop still true |
+| planner-routeback-quality-gate | Planner Route-Back Quality Gate | R-1, R-2, R-4 | brownfield-tdd | test-runner CNA → planner (with Research.md, Requirements.md) → plan-review quality gate. Plan-review gets updated Plan.md + all stage plans |
+| contracts-routeback-quality-gate | Contracts Route-Back Quality Gate | R-3 | brownfield-tdd | implementation-review CNA routes to contracts-designer → contracts-review quality gate before re-entering EXECUTION |
+| wildcard-input-expansion | Wildcard Input Expansion | W-1 | brownfield-tdd | contracts-designer dispatch after plan-review SUCCESS. Stage-*/Plan.md must expand to Stage-1/Plan.md + Stage-2/Plan.md |
+| capability-exceeded-escalate | CAPABILITY_EXCEEDED Escalate | S-6 | brownfield-tdd | implementation-tdd CAPABILITY_EXCEEDED → zero dispatches expected. Orchestrator must escalate to human, not retry or advance |
+| impl-first-reorder | Impl-First Reorder | E-3 | brownfield-tdd | Stage 1 Approach=Implementation-First. Must dispatch implementation-tdd first, not test-writer-tdd |
+| tests-only-skip-impl | Tests-Only Skip Impl | E-4 | brownfield-tdd | Stage 1 Approach=Tests-Only. Must dispatch test-writer-tdd, skip implementation agents entirely |
+| wildcard-dual-expansion | Wildcard Dual Expansion | W-2 | brownfield-tdd | plan-review dispatch after planner SUCCESS. Both Stage-*/Plan.md and Stage-*/PlanProgress.md must expand to all stage files |
+| wildcard-after-routeback | Wildcard After Route-Back | W-3 | brownfield-tdd | After route-back adding Stage-3, plan-review wildcards must expand to all 3 stages, not stale 2-stage count |
+| stage-end-checkpoint | STAGE_END Checkpoint | I-1 | brownfield-tdd | implementation-review SUCCESS completes stage 1 → checkpoint-manager-git fires before stage 2 |
+| interval-precise-boundary | Interval Precise Boundary | I-2 | brownfield-tdd | implementation-tdd SUCCESS at global_sequence=10, interval=10 → review fires exactly at threshold |
+| interval-overdue | Interval Overdue | I-2 | brownfield-tdd | implementation-tdd SUCCESS at global_sequence=10, interval=3 → review fires when obviously past threshold |
+| multiple-triggers-same-boundary | Multiple Triggers Same Boundary | I-3 | brownfield-tdd | implementation-review SUCCESS completes stage 1 → checkpoint + commit both fire in declaration order |
+| gated-checkpoint-disabled | Gated Checkpoint Disabled | I-4 | brownfield-tdd | STAGE_END met but checkpoints: disabled → checkpoint skipped, test-writer-tdd dispatched directly |
+| phase-end-trigger | PHASE_END Trigger | I-5 | brownfield-tdd | requirements-review SUCCESS completes RESEARCH → infra-phase-end fires before planner-tdd-soft |
+| restore-class-exclusion | Restore Class Exclusion | I-6 | brownfield-tdd | STAGE_END met, restore-class agent with STAGE_END trigger → NOT dispatched, test-writer-tdd dispatched instead |
 
 ---
 

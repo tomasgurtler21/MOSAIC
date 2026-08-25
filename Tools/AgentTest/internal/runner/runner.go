@@ -254,10 +254,11 @@ func setup(ctx context.Context, d Deps, req Request) (domain.Sandbox, SetupLedge
 			break
 		}
 		result, deployErr := d.Deploy.Deploy(ctx, domain.DeployRequest{
-			HarnessID:     d.Adapter.ID(),
-			WorkspaceRoot: sb.SubjectDir,
-			Workflows:     req.Test.Definition.Subject.Workflows,
-			TierModels:    buildTierModelMap(req.Test.Definition.Subject, req.Test.Models),
+			HarnessID:              d.Adapter.ID(),
+			WorkspaceRoot:          sb.SubjectDir,
+			Workflows:              req.Test.Definition.Subject.Workflows,
+			InfrastructureAgentIDs: req.Test.Definition.Subject.InfrastructureAgentIDs,
+			TierModels:             buildTierModelMap(req.Test.Definition.Subject, req.Test.Models),
 			// LogDir routes the deployment tool's per-run log files into the
 			// run's own sandbox directory. The deploy logs are per-run evidence
 			// and coupling their lifetime to the sandbox is intentional: the

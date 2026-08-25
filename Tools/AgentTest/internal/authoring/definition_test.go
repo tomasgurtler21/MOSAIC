@@ -27,6 +27,7 @@ negative: false
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
   opening_message: |
     Build the thing described in Requirements.md.
   invocation_kind: orchestrator
@@ -130,6 +131,7 @@ negative: true
 subject:
   identity: researcher
   agent: researcher
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 `),
 	}
@@ -156,6 +158,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 repetitions: 3
 pass_rate: 0.67
@@ -184,6 +187,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 timeout: 15m
 turn_limit: 60
@@ -212,6 +216,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 parallel_groups:
   - name: research-fanout
@@ -258,6 +263,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 seed_files:
   - path: Orchestration-{run_id}/Orchestration.md
@@ -297,6 +303,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 assertions:
 %s
@@ -472,6 +479,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: stubs/d.stubs.json
 assertions:
   artifact_created: []

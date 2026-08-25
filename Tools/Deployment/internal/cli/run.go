@@ -127,6 +127,7 @@ func Run(ctx context.Context, args []string, svc app.Service, out, errOut io.Wri
 				}
 				req.WorkflowIDs = sf.Workflows
 				req.UtilityAgentIDs = sf.UtilityAgents
+				req.InfrastructureAgentIDs = sf.InfrastructureAgents
 				req.HookIDs = sf.Hooks
 				if len(sf.TierModels) > 0 {
 					req.TierModels = tierModelsFromFile(sf)

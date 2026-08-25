@@ -1,0 +1,54 @@
+schema_version: 1
+id: hitl-redispatch-unapproved
+description: >
+  Scenario H-1. requirements-refinement returned SUCCESS but its output
+  artifact Requirements.md has human_approved: false. The orchestrator must
+  re-dispatch requirements-refinement to complete the HITL gate, not advance
+  to requirements-review.
+
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: []
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Read, Write, Edit, Bash, Glob, Grep, Task]
+
+stub_registry: hitl-redispatch-unapproved.stubs.json
+
+timeout: 10m
+turn_limit: 30
+stop_after_invocations: 1
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: research-after-requirements.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements-not-approved.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: requirements-refinement }
+
+  task_messages:
+    # Dispatch 1: requirements-refinement re-dispatch for HITL gate, NOT requirements-review
+    - at: 1
+      identity: { tool: dispatch, agent: requirements-refinement }
+      human_in_the_loop: true
+      required_input_artifacts:
+        - Orchestration-{run_id}/Requirements.md
+      optional_input_artifacts:
+        - Orchestration-{run_id}/Research.md
+      required_output_artifacts:
+        - Orchestration-{run_id}/Requirements.md

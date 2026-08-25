@@ -55,7 +55,7 @@ func evaluateAssertions(ev domain.RunEvidence) []domain.AssertionResult {
 	}
 
 	for _, tma := range a.TaskMessages {
-		out = append(out, evaluateTaskMessage(ev.Records, tma))
+		out = append(out, evaluateTaskMessage(ev.Records, tma)...)
 	}
 
 	out = append(out, evaluateEchoFidelity(ev.Records)...)
@@ -123,15 +123,18 @@ func evaluateExecutionLogAllStatus(rows []domain.ExecutionLogRow, want string) d
 		}
 	}
 	ar.Outcome = domain.AssertionPass
+	ar.Actual = want
 	return ar
 }
 
 func evaluateProtocolViolations(ev domain.RunEvidence, layer domain.TestLayer, want int) domain.AssertionResult {
 	if domain.LayerSuppresses(layer, domain.ClassProtocolViolations) {
 		return domain.AssertionResult{
-			Class:   domain.ClassProtocolViolations,
-			Outcome: domain.AssertionNotEvaluated,
-			Detail:  domain.SuppressionReason(layer, domain.ClassProtocolViolations),
+			Class:    domain.ClassProtocolViolations,
+			Outcome:  domain.AssertionNotEvaluated,
+			Expected: strconv.Itoa(want),
+			Actual:   "not evaluated (layer suppressed)",
+			Detail:   domain.SuppressionReason(layer, domain.ClassProtocolViolations),
 		}
 	}
 
@@ -159,22 +162,34 @@ func sumViolations(m map[domain.ViolationClassKey]int) int {
 }
 
 func evaluateArtifactCreated(name string, snapshot []string) domain.AssertionResult {
-	ar := domain.AssertionResult{Class: domain.ClassArtifactCreated, Target: name}
+	ar := domain.AssertionResult{
+		Class:    domain.ClassArtifactCreated,
+		Target:   name,
+		Expected: "created",
+	}
 	if contains(snapshot, name) {
 		ar.Outcome = domain.AssertionPass
+		ar.Actual = "found"
 	} else {
 		ar.Outcome = domain.AssertionFail
+		ar.Actual = "not found"
 		ar.Detail = fmt.Sprintf("%s was declared created but is absent from the snapshot", name)
 	}
 	return ar
 }
 
 func evaluateArtifactNotCreated(name string, snapshot []string) domain.AssertionResult {
-	ar := domain.AssertionResult{Class: domain.ClassArtifactNotCreated, Target: name}
+	ar := domain.AssertionResult{
+		Class:    domain.ClassArtifactNotCreated,
+		Target:   name,
+		Expected: "not created",
+	}
 	if !contains(snapshot, name) {
 		ar.Outcome = domain.AssertionPass
+		ar.Actual = "absent"
 	} else {
 		ar.Outcome = domain.AssertionFail
+		ar.Actual = "found"
 		ar.Detail = fmt.Sprintf("%s was declared not created but is present in the snapshot", name)
 	}
 	return ar
@@ -224,9 +239,12 @@ func evaluateEchoFidelity(records []domain.LogRecord) []domain.AssertionResult {
 	for _, r := range records {
 		if r.Kind == domain.RecordRun && r.Event == domain.RunEventUncorrelatedCompletion {
 			out = append(out, domain.AssertionResult{
-				Class:   domain.ClassEchoFidelity,
-				Outcome: domain.AssertionNotEvaluated,
-				Detail:  "echo fidelity could not be evaluated: completion could not be correlated to its dispatch",
+				Class:    domain.ClassEchoFidelity,
+				Target:   strconv.Itoa(r.Seq),
+				Outcome:  domain.AssertionNotEvaluated,
+				Expected: "echo match",
+				Actual:   "could not evaluate -- uncorrelated completion",
+				Detail:   "echo fidelity could not be evaluated: completion could not be correlated to its dispatch",
 			})
 		}
 	}

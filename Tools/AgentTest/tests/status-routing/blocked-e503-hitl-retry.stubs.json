@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "test_id": "blocked-e503-hitl-retry",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "requirements-refinement", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "requirements-refinement#2",
+        "run_id": "{run_id}",
+        "status_code": "BLOCKED",
+        "status_message": "Cannot complete. Task requires human-in-the-loop output review but no user contact tools available.",
+        "error_code": "E503",
+        "error_reason": "USER_CONTACT_UNAVAILABLE: human_in_the_loop is true but agent has no means to contact user"
+      }
+    },
+    {
+      "match": { "tool": "dispatch", "agent": "requirements-refinement", "invocation": 2 },
+      "response": {
+        "agent_instance_id": "requirements-refinement#3",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Requirements refined with verbose flag specifics. User reviewed and approved."
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "test_id": "hitl-redispatch-unapproved",
+  "on_unmatched": "halt",
+  "stubs": [
+    {
+      "match": { "tool": "dispatch", "agent": "requirements-refinement", "invocation": 1 },
+      "response": {
+        "agent_instance_id": "requirements-refinement#3",
+        "run_id": "{run_id}",
+        "status_code": "SUCCESS",
+        "status_message": "Presented output to user, human review gate discharged."
+      }
+    }
+  ]
+}

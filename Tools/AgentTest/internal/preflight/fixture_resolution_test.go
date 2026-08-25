@@ -58,6 +58,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: my-test.stubs.json
 `
 
@@ -92,6 +93,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: my-test.stubs.json
 seed_files:
   - path: Orchestration/doc.md
@@ -143,6 +145,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: registries/my-test.stubs.json
 stub_agents:
   - identity:
@@ -206,6 +209,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: my-test.stubs.json
 seed_files:
   - path: doc.md
@@ -270,6 +274,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: my-test.stubs.json
 seed_files:
   - path: doc.md
@@ -333,6 +338,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: ref-check.stubs.json
 seed_files:
   - path: Orchestration/sample-fixture.md
@@ -395,6 +401,7 @@ layer: orchestrator
 subject:
   identity: orchestrator
   agent: orchestrator
+  infrastructure_agents: []
 stub_registry: my-test.stubs.json
 seed_files:
   - path: doc.md

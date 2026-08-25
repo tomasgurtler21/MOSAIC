@@ -130,6 +130,95 @@ func TestEvaluate_ArtifactNotCreated_UnexpectedlyPresent_Fails(t *testing.T) {
 	}
 }
 
+// TestEvaluate_ArtifactCreated_Pass_PopulatesExpectedAndActual verifies that
+// Expected and Actual carry meaningful, non-empty content when an artifact is
+// present in the snapshot (pass outcome), so the evidence is always available
+// regardless of outcome — not only on fail.
+func TestEvaluate_ArtifactCreated_Pass_PopulatesExpectedAndActual(t *testing.T) {
+	ev := baseEvidence()
+	ev.SnapshotFiles = []string{"Research.md"}
+	ev.Definition.Assertions.ArtifactCreated = []string{"Research.md"}
+
+	got := evaluate.Evaluate(ev)
+
+	ar := findAssertion(t, got.Assertions, domain.ClassArtifactCreated, "Research.md")
+	if ar.Outcome != domain.AssertionPass {
+		t.Fatalf("Outcome = %q, want pass — Research.md is in the snapshot", ar.Outcome)
+	}
+	if ar.Expected == "" {
+		t.Errorf("Expected = %q; want non-empty on pass — the assertion must always carry its expectation for diagnostic context", ar.Expected)
+	}
+	if ar.Actual == "" {
+		t.Errorf("Actual = %q; want non-empty on pass — the assertion must always carry what was observed for diagnostic context", ar.Actual)
+	}
+}
+
+// TestEvaluate_ArtifactCreated_Fail_PopulatesExpectedAndActual verifies that
+// Expected and Actual carry meaningful, non-empty content when an artifact is
+// absent from the snapshot (fail outcome).
+func TestEvaluate_ArtifactCreated_Fail_PopulatesExpectedAndActual(t *testing.T) {
+	ev := baseEvidence()
+	ev.SnapshotFiles = []string{"Requirements.md"}
+	ev.Definition.Assertions.ArtifactCreated = []string{"Research.md"}
+
+	got := evaluate.Evaluate(ev)
+
+	ar := findAssertion(t, got.Assertions, domain.ClassArtifactCreated, "Research.md")
+	if ar.Outcome != domain.AssertionFail {
+		t.Fatalf("Outcome = %q, want fail — Research.md is absent from the snapshot", ar.Outcome)
+	}
+	if ar.Expected == "" {
+		t.Errorf("Expected = %q; want non-empty on fail — the assertion must always carry its expectation for diagnostic context", ar.Expected)
+	}
+	if ar.Actual == "" {
+		t.Errorf("Actual = %q; want non-empty on fail — the assertion must always carry what was observed for diagnostic context", ar.Actual)
+	}
+}
+
+// TestEvaluate_ArtifactNotCreated_Pass_PopulatesExpectedAndActual verifies that
+// Expected and Actual carry meaningful, non-empty content when an artifact is
+// truly absent from the snapshot (pass outcome for a not-created assertion).
+func TestEvaluate_ArtifactNotCreated_Pass_PopulatesExpectedAndActual(t *testing.T) {
+	ev := baseEvidence()
+	ev.SnapshotFiles = []string{"Research.md"}
+	ev.Definition.Assertions.ArtifactNotCreated = []string{"scratch.tmp"}
+
+	got := evaluate.Evaluate(ev)
+
+	ar := findAssertion(t, got.Assertions, domain.ClassArtifactNotCreated, "scratch.tmp")
+	if ar.Outcome != domain.AssertionPass {
+		t.Fatalf("Outcome = %q, want pass — scratch.tmp is absent from the snapshot", ar.Outcome)
+	}
+	if ar.Expected == "" {
+		t.Errorf("Expected = %q; want non-empty on pass — the assertion must always carry its expectation for diagnostic context", ar.Expected)
+	}
+	if ar.Actual == "" {
+		t.Errorf("Actual = %q; want non-empty on pass — the assertion must always carry what was observed for diagnostic context", ar.Actual)
+	}
+}
+
+// TestEvaluate_ArtifactNotCreated_Fail_PopulatesExpectedAndActual verifies that
+// Expected and Actual carry meaningful, non-empty content when an artifact is
+// unexpectedly present in the snapshot (fail outcome for a not-created assertion).
+func TestEvaluate_ArtifactNotCreated_Fail_PopulatesExpectedAndActual(t *testing.T) {
+	ev := baseEvidence()
+	ev.SnapshotFiles = []string{"Research.md", "scratch.tmp"}
+	ev.Definition.Assertions.ArtifactNotCreated = []string{"scratch.tmp"}
+
+	got := evaluate.Evaluate(ev)
+
+	ar := findAssertion(t, got.Assertions, domain.ClassArtifactNotCreated, "scratch.tmp")
+	if ar.Outcome != domain.AssertionFail {
+		t.Fatalf("Outcome = %q, want fail — scratch.tmp is present in the snapshot but was declared not created", ar.Outcome)
+	}
+	if ar.Expected == "" {
+		t.Errorf("Expected = %q; want non-empty on fail — the assertion must always carry its expectation for diagnostic context", ar.Expected)
+	}
+	if ar.Actual == "" {
+		t.Errorf("Actual = %q; want non-empty on fail — the assertion must always carry what was observed for diagnostic context", ar.Actual)
+	}
+}
+
 func TestEvaluate_ArtifactCreated_EmptyDeclaredSet_TriviallyPasses(t *testing.T) {
 	ev := baseEvidence()
 	ev.Definition.Assertions.ArtifactCreated = []string{}

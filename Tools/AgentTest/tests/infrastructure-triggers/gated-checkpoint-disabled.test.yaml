@@ -1,0 +1,55 @@
+schema_version: 1
+id: gated-checkpoint-disabled
+description: >
+  I-4: Gated infrastructure agent not dispatched when its switch is off.
+  checkpoint-manager-git declares STAGE_END, but checkpoints: disabled.
+  After implementation-review completes stage 1 (STAGE_END condition met),
+  the orchestrator must skip the checkpoint agent and dispatch the next
+  workflow agent (test-writer-tdd for stage 2) directly.
+layer: orchestrator
+negative: false
+
+subject:
+  identity: orchestrator
+  agent: orchestrator
+  workflows: [brownfield-tdd]
+  infrastructure_agents: [checkpoint-manager-git]
+  opening_message: |
+    Continue the existing workflow run. Read the Orchestration.md in the
+    run-scoped folder and resume from where it left off. Do not ask me any
+    further questions - proceed immediately and autonomously.
+  invocation_kind: orchestrator
+  allowed_tools: [Task, Read, Write, Edit, Bash, Glob, Grep]
+
+stub_registry: gated-checkpoint-disabled.stubs.json
+
+timeout: 10m
+turn_limit: 30
+stop_after_invocations: 2
+
+seed_files:
+  - path: Orchestration-{run_id}/Orchestration.md
+    ref: stage1-impl-done-disabled.md
+  - path: Orchestration-{run_id}/Plan.md
+    ref: Plan.md
+  - path: Orchestration-{run_id}/Research.md
+    ref: Research.md
+  - path: Orchestration-{run_id}/Requirements.md
+    ref: Requirements.md
+  - path: Orchestration-{run_id}/ContractsDesign.md
+    ref: ContractsDesign.md
+  - path: Orchestration-{run_id}/Stage-1/Plan.md
+    ref: Stage-1-Plan.md
+  - path: Orchestration-{run_id}/Stage-1/PlanProgress.md
+    ref: Stage-1-PlanProgress.md
+  - path: Orchestration-{run_id}/Stage-2/Plan.md
+    ref: Stage-2-Plan.md
+  - path: Orchestration-{run_id}/Stage-2/PlanProgress.md
+    ref: Stage-2-PlanProgress.md
+
+assertions:
+  invocation_sequence:
+    exact: true
+    steps:
+      - { tool: dispatch, agent: implementation-review }
+      - { tool: dispatch, agent: test-writer-tdd }

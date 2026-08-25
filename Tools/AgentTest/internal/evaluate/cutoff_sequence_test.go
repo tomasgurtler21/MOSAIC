@@ -152,7 +152,7 @@ func TestEvaluate_CutoffRun_TaskMessageAt1_Passes(t *testing.T) {
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, strconv.Itoa(1))
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, strconv.Itoa(1)+".identity")
 	if ar.Outcome != domain.AssertionPass {
 		t.Errorf("task_messages.at: 1 on a 2-dispatch cutoff run: Outcome = %q, want pass; Detail = %q", ar.Outcome, ar.Detail)
 	}
@@ -173,7 +173,7 @@ func TestEvaluate_CutoffRun_TaskMessageAtN_Passes(t *testing.T) {
 
 	got := evaluate.Evaluate(ev)
 
-	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, strconv.Itoa(n))
+	ar := findAssertion(t, got.Assertions, domain.ClassTaskMessage, strconv.Itoa(n)+".identity")
 	if ar.Outcome != domain.AssertionPass {
 		t.Errorf("task_messages.at: %d on a %d-dispatch cutoff run: Outcome = %q, want pass; Detail = %q", n, n, ar.Outcome, ar.Detail)
 	}

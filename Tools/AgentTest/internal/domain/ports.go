@@ -226,6 +226,17 @@ type DeployRequest struct {
 	// not "send nothing".
 	Workflows []string
 
+	// InfrastructureAgentIDs pins the infrastructure agent set to deploy.
+	// nil means "not specified"; non-nil empty means "explicitly none."
+	// Same nil/non-nil convention as Workflows.
+	//
+	// When non-nil, the agentdeploy port writes an infrastructure_agents
+	// key in the --selections file so the deploy tool resolves the
+	// selection non-interactively. An absent key leaves the deploy tool
+	// free to ask its interactive question, which would hang an automated
+	// AgentTest run.
+	InfrastructureAgentIDs []string
+
 	// TierModels pre-answers model selection, keyed by tier name. Catalogue
 	// agent definitions carry a model placeholder rather than a real
 	// identifier, and identifiers are harness-specific, so a tier left

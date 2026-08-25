@@ -24,6 +24,7 @@ echo_fidelity: advisory
 subject:
   identity: researcher
   agent: researcher
+  infrastructure_agents: []
   invocation_kind: subagent
 `),
 	}
@@ -52,6 +53,7 @@ echo_fidelity: required
 subject:
   identity: researcher
   agent: researcher
+  infrastructure_agents: []
   invocation_kind: subagent
 `),
 	}
@@ -79,6 +81,7 @@ layer: subagent
 subject:
   identity: researcher
   agent: researcher
+  infrastructure_agents: []
   invocation_kind: subagent
 `),
 	}
