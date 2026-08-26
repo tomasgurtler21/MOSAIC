@@ -120,28 +120,28 @@ const quickFixContent = `## Quick Fix Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | implementation-tdd | planner-tdd-soft | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | test-runner | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | implementation-tdd | planner-tdd-soft | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | test-runner | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 `
 
 const brownfieldTDDContent = `## Brownfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | codebase-research | ❌ | requirements-refinement | - | Requirements.md | Research.md |
-| RESEARCH | requirements-refinement | ✅ | requirements-review | - | Research.md, Requirements.md | Requirements.md |
-| RESEARCH | requirements-review | ❌ | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| DESIGN | contracts-designer | ✅ | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
-| DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| RESEARCH | codebase-research | FALSE | requirements-refinement | - | Requirements.md | Research.md |
+| RESEARCH | requirements-refinement | TRUE | requirements-review | - | Research.md, Requirements.md | Requirements.md |
+| RESEARCH | requirements-review | FALSE | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| DESIGN | contracts-designer | TRUE | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
+| DESIGN | contracts-review | FALSE | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | FALSE | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | FALSE | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 
 **Execution Groups:**
 
@@ -157,19 +157,19 @@ const brownfieldBuildVerifiedContent = `## Brownfield TDD Build-Verified Workflo
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | codebase-research | ❌ | requirements-refinement | - | Requirements.md | Research.md |
-| RESEARCH | requirements-refinement | ✅ | requirements-review | - | Research.md, Requirements.md | Requirements.md |
-| RESEARCH | requirements-review | ❌ | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| DESIGN | contracts-designer | ✅ | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
-| DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Test.[StageNumber] | build-review | ❌ | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-tests.md |
-| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-tests.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Implementation.[StageNumber] | build-review | ❌ | implementation-review | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-impl.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-impl.md | Stage-{StageNumber}/implementation-review.md |
+| RESEARCH | codebase-research | FALSE | requirements-refinement | - | Requirements.md | Research.md |
+| RESEARCH | requirements-refinement | TRUE | requirements-review | - | Research.md, Requirements.md | Requirements.md |
+| RESEARCH | requirements-review | FALSE | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| DESIGN | contracts-designer | TRUE | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
+| DESIGN | contracts-review | FALSE | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | FALSE | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | build-review | FALSE | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-tests.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-tests.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | FALSE | build-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | build-review | FALSE | implementation-review | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-impl.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | FALSE | COMPLETE | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md, Stage-{StageNumber}/build-review-impl.md | Stage-{StageNumber}/implementation-review.md |
 
 **Execution Groups:**
 
@@ -185,28 +185,28 @@ const implOnlyContent = `## Implementation Only Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.[StageNumber] | implementation-review | FALSE | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 `
 
 const greenfieldTDDContent = `## Greenfield TDD Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | requirements-refinement | ✅ | requirements-review | - | Requirements.md | Requirements.md |
-| RESEARCH | requirements-review | ❌ | system-designer | requirements-refinement | Requirements.md | requirements-review.md |
-| ARCHITECTURE | system-designer | ✅ | system-design-review | - | Requirements.md | SystemDesign.md |
-| ARCHITECTURE | system-design-review | ❌ | planner-tdd-soft | system-designer | Requirements.md, SystemDesign.md | system-design-review.md |
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | Requirements.md, SystemDesign.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| DESIGN | contracts-designer | ✅ | contracts-review | - | Requirements.md, Plan.md, Stage-*/Plan.md, SystemDesign.md | ContractsDesign.md |
-| DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| RESEARCH | requirements-refinement | TRUE | requirements-review | - | Requirements.md | Requirements.md |
+| RESEARCH | requirements-review | FALSE | system-designer | requirements-refinement | Requirements.md | requirements-review.md |
+| ARCHITECTURE | system-designer | TRUE | system-design-review | - | Requirements.md | SystemDesign.md |
+| ARCHITECTURE | system-design-review | FALSE | planner-tdd-soft | system-designer | Requirements.md, SystemDesign.md | system-design-review.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | Requirements.md, SystemDesign.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| DESIGN | contracts-designer | TRUE | contracts-review | - | Requirements.md, Plan.md, Stage-*/Plan.md, SystemDesign.md | ContractsDesign.md |
+| DESIGN | contracts-review | FALSE | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | FALSE | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | FALSE | test-runner | implementation-tdd (or other based on issue) | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 
 **Execution Groups:**
 
@@ -228,10 +228,10 @@ const onSuccessDivergentContent = `## On-Success-Divergent Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.[StageNumber] | test-writer-tdd | ❌ | implementation-tdd | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| EXECUTION.[StageNumber] | test-writer-tdd | FALSE | implementation-tdd | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.[StageNumber] | implementation-review | FALSE | COMPLETE | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
 `
 
 // ---- Helper functions ----
@@ -692,8 +692,8 @@ func TestNext_PreExecution_AbsentOnSuccess_ReturnsDeviation(t *testing.T) {
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a | ❌ | - | out.md |
-| PLANNING | agent-b | ❌ | out.md | final.md |
+| PLANNING | agent-a | FALSE | - | out.md |
+| PLANNING | agent-b | FALSE | out.md | final.md |
 `
 	info := domain.WorkflowInfo{ID: "no-hint", Version: "1.0"}
 	table, err := workflow.Parse([]byte(noHintContent), info)
@@ -781,7 +781,7 @@ func TestNext_AgentInstanceID_ZeroSeqProducesOne(t *testing.T) {
 // TestNext_HITL_RowTrue_EffectiveTrue verifies that row-level HITL=true
 // produces an effective HITL=true regardless of stage HITL.
 func TestNext_HITL_RowTrue_EffectiveTrue(t *testing.T) {
-	// quick-fix row 0: planner-tdd-soft has HITL=✅ (true)
+	// quick-fix row 0: planner-tdd-soft has HITL=TRUE (true)
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
 	stages := singleStageSet("Implementation-Only")
 	agents := makeAgents("planner-tdd-soft", "plan-review", "implementation-tdd", "test-runner")
@@ -806,7 +806,7 @@ func TestNext_HITL_RowTrue_EffectiveTrue(t *testing.T) {
 // TestNext_HITL_BothFalse_EffectiveFalse verifies that when both row HITL and
 // stage HITL are false, effective HITL is false.
 func TestNext_HITL_BothFalse_EffectiveFalse(t *testing.T) {
-	// quick-fix row 1: plan-review has HITL=❌ (false), stage HITL=false
+	// quick-fix row 1: plan-review has HITL=FALSE (false), stage HITL=false
 	aw := mustParseAndAdmit(t, quickFixContent, "quick-fix", "3.0")
 	stagesNoHITL := makeStageSet([]domain.StageEntry{
 		{Number: 1, HITL: false, Approach: "Implementation-Only"},
@@ -1591,7 +1591,7 @@ func TestNext_OnFindings_AbsentColumn_CNA_ReturnsDeviation(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
-| PLANNING | agent-a | ❌ | COMPLETE | - | out.md |
+| PLANNING | agent-a | FALSE | COMPLETE | - | out.md |
 `
 	info := domain.WorkflowInfo{ID: "no-findings", Version: "1.0"}
 	table, err := workflow.Parse([]byte(noFindingsContent), info)
@@ -2321,7 +2321,7 @@ func TestNext_Paths_UnresolvableStageNumber_ReturnsStop(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | agent-a | ❌ | COMPLETE | - | Stage-{StageNumber}/Plan.md | out.md |
+| PLANNING | agent-a | FALSE | COMPLETE | - | Stage-{StageNumber}/Plan.md | out.md |
 `
 	info := domain.WorkflowInfo{ID: "unresolvable-template", Version: "1.0"}
 	table, err := workflow.Parse([]byte(unresolvableTemplateContent), info)
@@ -2365,8 +2365,8 @@ func TestNext_PreExecution_FreeFormOnSuccess_ReturnsDeviation(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b (or other based on issue) | - | - | out.md |
-| PLANNING | agent-b | ❌ | COMPLETE | - | out.md | final.md |
+| PLANNING | agent-a | FALSE | agent-b (or other based on issue) | - | - | out.md |
+| PLANNING | agent-b | FALSE | COMPLETE | - | out.md | final.md |
 `
 	info := domain.WorkflowInfo{ID: "free-form-on-success", Version: "1.0"}
 	table, err := workflow.Parse([]byte(freeFormOnSuccessContent), info)
@@ -2536,8 +2536,8 @@ func TestNext_HITL_RowTrue_StageTrue_EffectiveTrue(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.[StageNumber] | agent-a | ✅ | agent-b | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/out.md |
-| EXECUTION.[StageNumber] | agent-b | ❌ | COMPLETE | - | Stage-{StageNumber}/out.md | Stage-{StageNumber}/final.md |
+| EXECUTION.[StageNumber] | agent-a | TRUE | agent-b | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/out.md |
+| EXECUTION.[StageNumber] | agent-b | FALSE | COMPLETE | - | Stage-{StageNumber}/out.md | Stage-{StageNumber}/final.md |
 `
 	info := domain.WorkflowInfo{ID: "both-hitl-true", Version: "1.0"}
 	table, err := workflow.Parse([]byte(bothHITLTrueContent), info)
@@ -2595,9 +2595,9 @@ const threeGroupContent = `## Three-Group Workflow
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.Alpha.[StageNumber] | agent-alpha | ❌ | - | - | - | - |
-| EXECUTION.Beta.[StageNumber] | agent-beta | ❌ | - | - | - | - |
-| EXECUTION.Gamma.[StageNumber] | agent-gamma | ❌ | - | - | - | - |
+| EXECUTION.Alpha.[StageNumber] | agent-alpha | FALSE | - | - | - | - |
+| EXECUTION.Beta.[StageNumber] | agent-beta | FALSE | - | - | - | - |
+| EXECUTION.Gamma.[StageNumber] | agent-gamma | FALSE | - | - | - | - |
 
 **Execution Groups:**
 

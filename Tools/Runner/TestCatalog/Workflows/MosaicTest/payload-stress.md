@@ -20,9 +20,9 @@ artifacts:
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.[StageNumber] | mosaictest-scripted | ❌ | - | - | MosaicTestScript/payload-unicode.md | - |
-| EXECUTION.[StageNumber] | mosaictest-scripted | ❌ | - | - | MosaicTestScript/payload-fences.md | - |
-| EXECUTION.[StageNumber] | mosaictest-scripted | ❌ | - | - | MosaicTestScript/payload-json.md | - |
+| EXECUTION.[StageNumber] | mosaictest-scripted | FALSE | - | - | MosaicTestScript/payload-unicode.md | - |
+| EXECUTION.[StageNumber] | mosaictest-scripted | FALSE | - | - | MosaicTestScript/payload-fences.md | - |
+| EXECUTION.[StageNumber] | mosaictest-scripted | FALSE | - | - | MosaicTestScript/payload-json.md | - |
 
 **EXECUTION Stages:** Loop per stage (stages defined in Plan.md). The fixture plan declares a single stage, so each row runs exactly once.
 

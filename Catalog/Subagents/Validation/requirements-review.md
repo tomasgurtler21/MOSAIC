@@ -1,6 +1,6 @@
 ---
 id: 9
-version: 4.2.0
+version: 4.2.1
 name: requirements-review
 description: Reviews requirements completeness, identifies gaps, and ensures sufficient information exists for planning and implementation
 role: subagent
@@ -109,14 +109,14 @@ Apply these checks systematically:
 
 | Severity | Requires Rework |
 |----------|-----------------|
-| CRITICAL | ✅ Always |
-| MAJOR | ✅ Yes |
-| MINOR | ❌ No |
-| SUGGESTION | ❌ No |
+| CRITICAL | Yes — Always |
+| MAJOR | Yes |
+| MINOR | No |
+| SUGGESTION | No |
 
 **Status Code Logic:**
-- ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`
-- ALL issues at "Requires Rework: ❌" levels → return `SUCCESS` with issues noted in report
+- ANY issue at "Requires Rework: Yes" level → return `COMPLETED_NEEDS_ACTION`
+- ALL issues at "Requires Rework: No" levels → return `SUCCESS` with issues noted in report
 
 </SeverityThresholds>
 

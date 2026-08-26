@@ -7,5 +7,5 @@ Stage numbers skip from 1 to 3 (gap at 2).
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | First | First stage | - | ❌ |
-| 3 | Third | Third stage | - | ❌ |
+| 1 | First | First stage | - | FALSE |
+| 3 | Third | Third stage | - | FALSE |

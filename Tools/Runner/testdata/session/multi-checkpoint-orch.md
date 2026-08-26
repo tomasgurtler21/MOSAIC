@@ -3,8 +3,8 @@
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b | - | - | plan.md |
-| PLANNING | agent-b | ❌ | COMPLETE | - | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | - | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | - | plan.md | result.md |
 </Workflow>
 
 <InfrastructureAgents type="project">

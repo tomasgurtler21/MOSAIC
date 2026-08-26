@@ -1,5 +1,5 @@
 ---
-version: 0.4
+version: 0.5
 name: Knowledge Verification (Human) Workflow
 description: Verify knowledge quality using architect-provided challenge questions. Tests whether an agent can answer expert questions using available knowledge sources + codebase. Produces a diagnostic report — remediation is a separate concern.
 hint: "Theoretical — never used in practice. Beyond its stated diagnostic purpose, this is also a natural harness for an A/B comparison: run the same question set with and without an existing KB in scope to measure the actual delta in speed, cost, and answer precision the KB provides, rather than assuming it."
@@ -16,16 +16,16 @@ artifacts:
   - VerificationReport.md
 ---
 
-<Workflow type="core" name="kb-verification-human" version="0.4">
+<Workflow type="core" name="kb-verification-human" version="0.5">
 ## Knowledge Verification (Human) Workflow
 
 **Use when:** Verify knowledge quality using **architect-provided challenge questions**. Tests whether an agent can answer expert questions using available knowledge sources + codebase. Produces a diagnostic report — remediation is a separate concern.
 
 | Phase | Subagent | HITL | On Success | On Findings | Waits For | Input | Output |
 |-------|----------|:----:|------------|-------------|-----------|-------|--------|
-| RESEARCH | verification-questions-preparer | ✅ | codebase-research* | - | - | - | VerificationQuestions.md, VerificationAnswers.md, VerificationAttemptedAnswers.md |
-| EXECUTION.[StageNumber] | codebase-research | ❌ | verification-answer-validator | - | - | VerificationQuestions.md, VerificationAttemptedAnswers.md | VerificationAttemptedAnswers.md |
-| REVIEW | verification-answer-validator | ✅ | COMPLETE | - | codebase-research* | VerificationQuestions.md, VerificationAnswers.md, VerificationAttemptedAnswers.md | VerificationReport.md |
+| RESEARCH | verification-questions-preparer | TRUE | codebase-research* | - | - | - | VerificationQuestions.md, VerificationAnswers.md, VerificationAttemptedAnswers.md |
+| EXECUTION.[StageNumber] | codebase-research | FALSE | verification-answer-validator | - | - | VerificationQuestions.md, VerificationAttemptedAnswers.md | VerificationAttemptedAnswers.md |
+| REVIEW | verification-answer-validator | TRUE | COMPLETE | - | codebase-research* | VerificationQuestions.md, VerificationAnswers.md, VerificationAttemptedAnswers.md | VerificationReport.md |
 
 **Parallel execution:** This workflow uses the Waits For column for parallel dispatch (see Workflow Table Format above).
 
@@ -51,6 +51,7 @@ There's a second use this workflow's structure naturally supports and hasn't bee
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 0.4 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
+| 0.5 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
 
 ---
 

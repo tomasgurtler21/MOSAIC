@@ -358,9 +358,9 @@ Protection is therefore layered, with each layer doing only what it is architect
 | Layer | May scan? | Responsibility |
 |---|---|---|
 | This design | — | States the rule: **concurrent runs sharing a working tree with checkpointing enabled is unsupported** |
-| LLM orchestrator | ❌ | Emits a fixed advisory when the user enables checkpoints. No detection of any kind. |
-| Script runner | ✅ | May enforce at run start; it is a script, and enumerating run folders costs it nothing |
-| `checkpoint-restore-git` | ✅ | The backstop. Checks at the moment of danger, works in both execution modes. |
+| LLM orchestrator | FALSE | Emits a fixed advisory when the user enables checkpoints. No detection of any kind. |
+| Script runner | TRUE | May enforce at run start; it is a script, and enumerating run folders costs it nothing |
+| `checkpoint-restore-git` | TRUE | The backstop. Checks at the moment of danger, works in both execution modes. |
 
 The orchestrator's warning is a **fixed string, not a finding**. It does not look for other runs; it states unconditionally that if other runs are active, a rollback may destroy their work. The user knows their own workspace. This costs the orchestrator nothing and tells it nothing.
 

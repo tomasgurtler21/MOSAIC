@@ -4,5 +4,5 @@
 
 | Name | Goal | Depends On | HITL |
 |------|------|------------|:----:|
-| First | First stage | - | ❌ |
-| Second | Second stage | - | ❌ |
+| First | First stage | - | FALSE |
+| Second | Second stage | - | FALSE |

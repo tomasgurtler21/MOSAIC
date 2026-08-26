@@ -8,5 +8,5 @@ but invalid when needsApproach is true.
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | First | First stage | - | ❌ |
-| 2 | Second | Second stage | 1 | ❌ |
+| 1 | First | First stage | - | FALSE |
+| 2 | Second | Second stage | 1 | FALSE |

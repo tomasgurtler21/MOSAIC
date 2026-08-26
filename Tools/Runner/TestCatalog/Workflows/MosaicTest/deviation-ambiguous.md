@@ -19,7 +19,7 @@ artifacts:
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | mosaictest-scripted | ❌ | COMPLETE | mosaictest-scripted (re-check) | MosaicTestScript/ambiguous-produce.md | MosaicTestAmbiguousReport.md |
+| RESEARCH | mosaictest-scripted | FALSE | COMPLETE | mosaictest-scripted (re-check) | MosaicTestScript/ambiguous-produce.md | MosaicTestAmbiguousReport.md |
 
 **Notes:**
 - **Run in Auto-review mode.** The whole point is to show that Auto-review does NOT auto-route when the hint is ambiguous. Running in Auto mode would produce the same log (Auto always deviates on CNA) and prove nothing specific.

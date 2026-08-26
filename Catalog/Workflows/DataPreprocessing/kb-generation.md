@@ -1,5 +1,5 @@
 ---
-version: 1.0
+version: 1.1
 name: Knowledge Base Generation Workflow
 description: Generate N-tier knowledge base documentation for a codebase, producing hierarchical documentation optimized for AI agent navigation — tiered from project overview down to complex subsystem specs.
 hint: "Recommended first step before any other workflow on a codebase — research agents downstream actively look for an existing KB and perform noticeably better when one is present. The KB is deliberately abstract (no concrete file/class/method names), which makes it resistant to going stale — in practice, feature planners can often fold doc updates into a normal feature plan without much quality loss, so a dedicated re-run of this workflow isn't required after every change."
@@ -16,17 +16,17 @@ artifacts:
   - KBFlagReport.md
 ---
 
-<Workflow type="core" name="kb-generation" version="1.0">
+<Workflow type="core" name="kb-generation" version="1.1">
 ## Knowledge Base Generation Workflow
 
 **Use when:** Generate N-tier knowledge base documentation for a codebase. Produces hierarchical documentation optimized for AI agent navigation — tiered from project overview down to complex subsystem specs.
 
 | Phase | Subagent | HITL | On Success | On Findings | Waits For | Input | Output |
 |-------|----------|:----:|------------|-------------|-----------|-------|--------|
-| EXECUTION.[StageNumber] | knowledge-base-generator(generate) | ✅ | knowledge-base-flag-sorter | - | - | Requirements.md, KBProgress.md | KBProgress.md, KBFlags.md |
-| REVIEW | knowledge-base-flag-sorter | ❌ | knowledge-base-generator(correct) | - | knowledge-base-generator(generate)* | KBProgress.md, KBFlags.md | KBFlagReport.md, KBProgress.md |
-| REVIEW.[StageNumber] | knowledge-base-generator(correct) | ❌ | knowledge-base-index-assembler | - | - | KBProgress.md, KBFlagReport.md | KBProgress.md |
-| COMPLETION | knowledge-base-index-assembler | ❌ | COMPLETE | - | - | KBProgress.md | KBProgress.md |
+| EXECUTION.[StageNumber] | knowledge-base-generator(generate) | TRUE | knowledge-base-flag-sorter | - | - | Requirements.md, KBProgress.md | KBProgress.md, KBFlags.md |
+| REVIEW | knowledge-base-flag-sorter | FALSE | knowledge-base-generator(correct) | - | knowledge-base-generator(generate)* | KBProgress.md, KBFlags.md | KBFlagReport.md, KBProgress.md |
+| REVIEW.[StageNumber] | knowledge-base-generator(correct) | FALSE | knowledge-base-index-assembler | - | - | KBProgress.md, KBFlagReport.md | KBProgress.md |
+| COMPLETION | knowledge-base-index-assembler | FALSE | COMPLETE | - | - | KBProgress.md | KBProgress.md |
 
 **Parallel execution:** This workflow uses the Waits For column for parallel dispatch (see Workflow Table Format above).
 
@@ -57,6 +57,7 @@ The KB's tiered structure is deliberately kept abstract — general subsystem de
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 1.0 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
+| 1.1 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
 
 ---
 

@@ -8,5 +8,5 @@ fixed recognised set. Verifies that planstages.ReadStages accepts arbitrary toke
 
 | Stage | Name | Goal | Depends On | HITL | Approach |
 |-------|------|------|------------|:----:|----------|
-| 1 | Foundation | First stage | - | ❌ | CustomFlow |
-| 2 | Extension | Second stage | 1 | ✅ | CustomFlow |
+| 1 | Foundation | First stage | - | FALSE | CustomFlow |
+| 2 | Extension | Second stage | 1 | TRUE | CustomFlow |

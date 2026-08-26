@@ -7,6 +7,6 @@ A simple feature with three stages and no Approach column.
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Foundation | Build the base | - | ❌ |
-| 2 | Core | Implement core logic | - | ✅ |
-| 3 | Integration | Wire everything | 1, 2 | ❌ |
+| 1 | Foundation | Build the base | - | FALSE |
+| 2 | Core | Implement core logic | - | TRUE |
+| 3 | Integration | Wire everything | 1, 2 | FALSE |

@@ -44,7 +44,7 @@ const minimalWorkflowContent = `<Workflow type="core" name="demo" version="1.0">
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a | ❌ | - | plan.md |
+| PLANNING | agent-a | FALSE | - | plan.md |
 </Workflow>
 `
 

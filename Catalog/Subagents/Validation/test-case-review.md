@@ -1,6 +1,6 @@
 ---
 id: 47
-version: 1.1.0
+version: 1.1.1
 name: test-case-review
 description: Reviews abstract test cases for format conformance, faithfulness to the approved scenario model, and unbroken traceability back to the requirement - the final quality gate before export
 role: subagent
@@ -122,14 +122,14 @@ Where a review pass produces findings of both kinds, say so explicitly in the st
 
 | Severity | Requires Rework |
 |----------|-----------------|
-| CRITICAL | ✅ Always |
-| MAJOR | ✅ Yes |
-| MINOR | ❌ No |
-| SUGGESTION | ❌ No |
+| CRITICAL | Yes — Always |
+| MAJOR | Yes |
+| MINOR | No |
+| SUGGESTION | No |
 
 **Status Code Logic:**
-- ANY issue at "Requires Rework: ✅" level → return `COMPLETED_NEEDS_ACTION`
-- ALL issues at "Requires Rework: ❌" levels → return `SUCCESS` with issues noted in report
+- ANY issue at "Requires Rework: Yes" level → return `COMPLETED_NEEDS_ACTION`
+- ALL issues at "Requires Rework: No" levels → return `SUCCESS` with issues noted in report
 
 </SeverityThresholds>
 

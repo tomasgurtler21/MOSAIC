@@ -3,7 +3,7 @@
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | planner | ✅ | - | Plan.md |
+| PLANNING | planner | TRUE | - | Plan.md |
 </Workflow>
 
 <Workflow type="core" name="shared-id" version="2.0">
@@ -11,5 +11,5 @@
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | planner | ✅ | - | Plan.md |
+| PLANNING | planner | TRUE | - | Plan.md |
 </Workflow>

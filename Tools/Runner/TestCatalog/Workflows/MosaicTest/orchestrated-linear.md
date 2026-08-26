@@ -18,7 +18,7 @@ artifacts:
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | mosaictest-scripted | ❌ | COMPLETE | - | MosaicTestScript/linear-echo.md | - |
+| RESEARCH | mosaictest-scripted | FALSE | COMPLETE | - | MosaicTestScript/linear-echo.md | - |
 
 **Notes:**
 - **Run this workflow in Orchestrated mode only.** In Auto or Auto-review the engine routes the single row to `COMPLETE` without ever consulting the orchestrator, and the run proves nothing this workflow exists to prove.

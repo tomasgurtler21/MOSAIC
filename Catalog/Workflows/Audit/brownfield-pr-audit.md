@@ -1,5 +1,5 @@
 ---
-version: "3.1"
+version: "3.2"
 name: "Brownfield PR Audit Workflow"
 description: "Audit quality of existing code for PR review — multi-pass research, plan-driven staged audits with 4 types, per-audit PR comment transform with cross-audit deduplication, and post."
 hint: "Proven, not just theoretical — run a handful of times against real PRs with sufficient quality. Its purpose is straightforward (let AI participate as a reviewer on a live pull request) but the machinery underneath is the most elaborate in the catalog — 4 parallel audit tracks, per-track PR comment transforms, cross-audit dedup. Requirements.md must be user-authored with PR ID, branches, and scope before starting."
@@ -48,7 +48,7 @@ artifacts:
   - AuditTransformReport.md
 ---
 
-<Workflow type="core" name="brownfield-pr-audit" version="3.1">
+<Workflow type="core" name="brownfield-pr-audit" version="3.2">
 ## Brownfield PR Audit Workflow
 
 > **Version:** 3.1
@@ -57,28 +57,28 @@ artifacts:
 
 | Phase | Subagent | HITL | On Success | On Findings | Waits For | Input | Output |
 |-------|----------|:----:|------------|-------------|-----------|-------|--------|
-| RESEARCH | pull-request-comment-interface(retrieve) | ❌ | pr-requirements-analyzer | - | - | Requirements.md | PullRequestComments.md, PullRequestResponses.md |
-| RESEARCH | pr-requirements-analyzer | ✅ | codebase-research | - | - | Requirements.md, PullRequestComments.md | Requirements.md |
-| RESEARCH | codebase-research | ❌ | codebase-research(architecture), planner-audit | - | - | Requirements.md | Research.md |
-| RESEARCH | codebase-research(architecture) | ❌ | codebase-research(contracts), architecture-audit | - | - | Requirements.md, Research.md | ResearchArchitecture.md |
-| PLANNING | planner-audit | ✅ | tests-audit*, implementation-audit*, architecture-audit*, contracts-audit* | - | - | Requirements.md, Research.md | AuditPlan.md, Stage-*/AuditPlan.md, Stage-*/AuditProgress.md |
-| RESEARCH | codebase-research(contracts) | ❌ | contracts-audit | - | - | Requirements.md, Research.md, ResearchArchitecture.md | ResearchContracts.md |
-| EXECUTION | architecture-audit | ❌ | audit-review(architecture) | - | - | Requirements.md, Research.md, ResearchArchitecture.md | ArchitectureAudit.md |
-| EXECUTION | audit-review(architecture) | ❌ | audit-to-pull-request(architecture) | architecture-audit | - | Requirements.md, Research.md, ResearchArchitecture.md, ArchitectureAudit.md | architecture-audit-review.md |
-| EXECUTION | contracts-audit | ❌ | audit-review(contracts) | - | - | Requirements.md, Research.md, ResearchContracts.md | ContractsAudit.md |
-| EXECUTION | audit-review(contracts) | ❌ | audit-to-pull-request(contracts) | contracts-audit | - | Requirements.md, Research.md, ResearchContracts.md, ContractsAudit.md | contracts-audit-review.md |
-| EXECUTION.[StageNumber] | tests-audit | ❌ | audit-to-pull-request(tests) | - | - | Requirements.md, Research.md, Stage-{StageNumber}/AuditPlan.md, Stage-{StageNumber}/AuditProgress.md | Stage-{StageNumber}/TestsAudit.md, Stage-{StageNumber}/AuditProgress.md |
-| EXECUTION.[StageNumber] | implementation-audit | ❌ | audit-to-pull-request(impl) | - | - | Requirements.md, Research.md, Stage-{StageNumber}/AuditPlan.md, Stage-{StageNumber}/AuditProgress.md | Stage-{StageNumber}/ImplementationAudit.md, Stage-{StageNumber}/AuditProgress.md |
-| EXECUTION.[StageNumber] | architecture-audit(staged) | ❌ | audit-to-pull-request(arch-staged) | - | - | Requirements.md, Research.md, ResearchArchitecture.md, Stage-{StageNumber}/AuditPlan.md, Stage-{StageNumber}/AuditProgress.md | Stage-{StageNumber}/ArchitectureAudit.md, Stage-{StageNumber}/AuditProgress.md |
-| EXECUTION.[StageNumber] | contracts-audit(staged) | ❌ | audit-to-pull-request(contracts-staged) | - | - | Requirements.md, Research.md, ResearchContracts.md, Stage-{StageNumber}/AuditPlan.md, Stage-{StageNumber}/AuditProgress.md | Stage-{StageNumber}/ContractsAudit.md, Stage-{StageNumber}/AuditProgress.md |
-| EXECUTION | audit-to-pull-request(architecture) | ❌ | audit-response-merger | - | - | Requirements.md, PullRequestComments.md, PullRequestResponses.md, ArchitectureAudit.md, architecture-audit-review.md | ArchitectureAudit-PullRequestResponses.md, ArchitectureAudit-TransformReport.md |
-| EXECUTION | audit-to-pull-request(contracts) | ❌ | audit-response-merger | - | - | Requirements.md, PullRequestComments.md, PullRequestResponses.md, ContractsAudit.md, contracts-audit-review.md | ContractsAudit-PullRequestResponses.md, ContractsAudit-TransformReport.md |
-| EXECUTION.[StageNumber] | audit-to-pull-request(tests) | ❌ | audit-response-merger | - | - | Requirements.md, PullRequestComments.md, PullRequestResponses.md, Stage-{StageNumber}/TestsAudit.md | Stage-{StageNumber}/PullRequestResponses.md, Stage-{StageNumber}/TransformReport.md |
-| EXECUTION.[StageNumber] | audit-to-pull-request(impl) | ❌ | audit-response-merger | - | - | Requirements.md, PullRequestComments.md, PullRequestResponses.md, Stage-{StageNumber}/ImplementationAudit.md | Stage-{StageNumber}/PullRequestResponses.md, Stage-{StageNumber}/TransformReport.md |
-| EXECUTION.[StageNumber] | audit-to-pull-request(arch-staged) | ❌ | audit-response-merger | - | - | Requirements.md, PullRequestComments.md, PullRequestResponses.md, Stage-{StageNumber}/ArchitectureAudit.md | Stage-{StageNumber}/PullRequestResponses.md, Stage-{StageNumber}/TransformReport.md |
-| EXECUTION.[StageNumber] | audit-to-pull-request(contracts-staged) | ❌ | audit-response-merger | - | - | Requirements.md, PullRequestComments.md, PullRequestResponses.md, Stage-{StageNumber}/ContractsAudit.md | Stage-{StageNumber}/PullRequestResponses.md, Stage-{StageNumber}/TransformReport.md |
-| REVIEW | audit-response-merger | ✅ | pull-request-comment-interface(post) | - | audit-to-pull-request(architecture), audit-to-pull-request(contracts), audit-to-pull-request(tests)\*, audit-to-pull-request(impl)\*, audit-to-pull-request(arch-staged)\*, audit-to-pull-request(contracts-staged)\* | Requirements.md, PullRequestComments.md, AuditPlan.md, *-PullRequestResponses.md, Stage-*/PullRequestResponses.md, *-TransformReport.md, Stage-*/TransformReport.md | PullRequestResponses.md, AuditTransformReport.md |
-| COMPLETION | pull-request-comment-interface(post) | ✅ | COMPLETE | - | - | PullRequestResponses.md | PullRequestResponses.md |
+| RESEARCH | pull-request-comment-interface(retrieve) | FALSE | pr-requirements-analyzer | - | - | Requirements.md | PullRequestComments.md, PullRequestResponses.md |
+| RESEARCH | pr-requirements-analyzer | TRUE | codebase-research | - | - | Requirements.md, PullRequestComments.md | Requirements.md |
+| RESEARCH | codebase-research | FALSE | codebase-research(architecture), planner-audit | - | - | Requirements.md | Research.md |
+| RESEARCH | codebase-research(architecture) | FALSE | codebase-research(contracts), architecture-audit | - | - | Requirements.md, Research.md | ResearchArchitecture.md |
+| PLANNING | planner-audit | TRUE | tests-audit*, implementation-audit*, architecture-audit*, contracts-audit* | - | - | Requirements.md, Research.md | AuditPlan.md, Stage-*/AuditPlan.md, Stage-*/AuditProgress.md |
+| RESEARCH | codebase-research(contracts) | FALSE | contracts-audit | - | - | Requirements.md, Research.md, ResearchArchitecture.md | ResearchContracts.md |
+| EXECUTION | architecture-audit | FALSE | audit-review(architecture) | - | - | Requirements.md, Research.md, ResearchArchitecture.md | ArchitectureAudit.md |
+| EXECUTION | audit-review(architecture) | FALSE | audit-to-pull-request(architecture) | architecture-audit | - | Requirements.md, Research.md, ResearchArchitecture.md, ArchitectureAudit.md | architecture-audit-review.md |
+| EXECUTION | contracts-audit | FALSE | audit-review(contracts) | - | - | Requirements.md, Research.md, ResearchContracts.md | ContractsAudit.md |
+| EXECUTION | audit-review(contracts) | FALSE | audit-to-pull-request(contracts) | contracts-audit | - | Requirements.md, Research.md, ResearchContracts.md, ContractsAudit.md | contracts-audit-review.md |
+| EXECUTION.[StageNumber] | tests-audit | FALSE | audit-to-pull-request(tests) | - | - | Requirements.md, Research.md, Stage-{StageNumber}/AuditPlan.md, Stage-{StageNumber}/AuditProgress.md | Stage-{StageNumber}/TestsAudit.md, Stage-{StageNumber}/AuditProgress.md |
+| EXECUTION.[StageNumber] | implementation-audit | FALSE | audit-to-pull-request(impl) | - | - | Requirements.md, Research.md, Stage-{StageNumber}/AuditPlan.md, Stage-{StageNumber}/AuditProgress.md | Stage-{StageNumber}/ImplementationAudit.md, Stage-{StageNumber}/AuditProgress.md |
+| EXECUTION.[StageNumber] | architecture-audit(staged) | FALSE | audit-to-pull-request(arch-staged) | - | - | Requirements.md, Research.md, ResearchArchitecture.md, Stage-{StageNumber}/AuditPlan.md, Stage-{StageNumber}/AuditProgress.md | Stage-{StageNumber}/ArchitectureAudit.md, Stage-{StageNumber}/AuditProgress.md |
+| EXECUTION.[StageNumber] | contracts-audit(staged) | FALSE | audit-to-pull-request(contracts-staged) | - | - | Requirements.md, Research.md, ResearchContracts.md, Stage-{StageNumber}/AuditPlan.md, Stage-{StageNumber}/AuditProgress.md | Stage-{StageNumber}/ContractsAudit.md, Stage-{StageNumber}/AuditProgress.md |
+| EXECUTION | audit-to-pull-request(architecture) | FALSE | audit-response-merger | - | - | Requirements.md, PullRequestComments.md, PullRequestResponses.md, ArchitectureAudit.md, architecture-audit-review.md | ArchitectureAudit-PullRequestResponses.md, ArchitectureAudit-TransformReport.md |
+| EXECUTION | audit-to-pull-request(contracts) | FALSE | audit-response-merger | - | - | Requirements.md, PullRequestComments.md, PullRequestResponses.md, ContractsAudit.md, contracts-audit-review.md | ContractsAudit-PullRequestResponses.md, ContractsAudit-TransformReport.md |
+| EXECUTION.[StageNumber] | audit-to-pull-request(tests) | FALSE | audit-response-merger | - | - | Requirements.md, PullRequestComments.md, PullRequestResponses.md, Stage-{StageNumber}/TestsAudit.md | Stage-{StageNumber}/PullRequestResponses.md, Stage-{StageNumber}/TransformReport.md |
+| EXECUTION.[StageNumber] | audit-to-pull-request(impl) | FALSE | audit-response-merger | - | - | Requirements.md, PullRequestComments.md, PullRequestResponses.md, Stage-{StageNumber}/ImplementationAudit.md | Stage-{StageNumber}/PullRequestResponses.md, Stage-{StageNumber}/TransformReport.md |
+| EXECUTION.[StageNumber] | audit-to-pull-request(arch-staged) | FALSE | audit-response-merger | - | - | Requirements.md, PullRequestComments.md, PullRequestResponses.md, Stage-{StageNumber}/ArchitectureAudit.md | Stage-{StageNumber}/PullRequestResponses.md, Stage-{StageNumber}/TransformReport.md |
+| EXECUTION.[StageNumber] | audit-to-pull-request(contracts-staged) | FALSE | audit-response-merger | - | - | Requirements.md, PullRequestComments.md, PullRequestResponses.md, Stage-{StageNumber}/ContractsAudit.md | Stage-{StageNumber}/PullRequestResponses.md, Stage-{StageNumber}/TransformReport.md |
+| REVIEW | audit-response-merger | TRUE | pull-request-comment-interface(post) | - | audit-to-pull-request(architecture), audit-to-pull-request(contracts), audit-to-pull-request(tests)\*, audit-to-pull-request(impl)\*, audit-to-pull-request(arch-staged)\*, audit-to-pull-request(contracts-staged)\* | Requirements.md, PullRequestComments.md, AuditPlan.md, *-PullRequestResponses.md, Stage-*/PullRequestResponses.md, *-TransformReport.md, Stage-*/TransformReport.md | PullRequestResponses.md, AuditTransformReport.md |
+| COMPLETION | pull-request-comment-interface(post) | TRUE | COMPLETE | - | - | PullRequestResponses.md | PullRequestResponses.md |
 
 **Parallel execution:** This workflow uses the Waits For column for parallel dispatch (see Workflow Table Format above).
 
@@ -123,6 +123,7 @@ This is a reusable pattern beyond this workflow specifically: whenever a workflo
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 3.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
+| 3.2 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
 
 ---
 

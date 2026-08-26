@@ -7,5 +7,5 @@ Stage numbers begin at 2, not 1.
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 2 | Second | Second stage | - | ❌ |
-| 3 | Third | Third stage | 2 | ❌ |
+| 2 | Second | Second stage | - | FALSE |
+| 3 | Third | Third stage | 2 | FALSE |

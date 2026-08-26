@@ -19,7 +19,7 @@ artifacts:
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | mosaictest-scripted | ❌ | COMPLETE | mosaictest-scripted | MosaicTestScript/findings-loop.md | MosaicTestMarker.md |
+| RESEARCH | mosaictest-scripted | FALSE | COMPLETE | mosaictest-scripted | MosaicTestScript/findings-loop.md | MosaicTestMarker.md |
 
 **Notes:**
 - **Run this workflow twice: once in Auto mode, once in Auto-review mode.** The two runs use identical fixtures and produce different logs. That difference is the proof.

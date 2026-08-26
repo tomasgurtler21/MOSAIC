@@ -7,4 +7,4 @@ Minimal single-stage plan for session tests.
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |

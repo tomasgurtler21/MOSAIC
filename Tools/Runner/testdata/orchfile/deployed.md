@@ -9,8 +9,8 @@ You are an orchestrator agent.
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | planner | ✅ | - | Plan.md |
-| EXECUTION.[StageNumber] | implementer | ❌ | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
+| PLANNING | planner | TRUE | - | Plan.md |
+| EXECUTION.[StageNumber] | implementer | FALSE | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/PlanProgress.md |
 </Workflow>
 </AvailableWorkflows>
 </Identity>

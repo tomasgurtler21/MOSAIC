@@ -923,7 +923,7 @@ You are the NestedWorkflow agent.
 
 | Phase | Subagent | HITL |
 |-------|----------|:----:|
-| PLAN | planner | ✅ |
+| PLAN | planner | TRUE |
 
 </Workflow>
 

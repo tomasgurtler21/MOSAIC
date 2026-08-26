@@ -1,7 +1,7 @@
 ---
 id: deployed-sections
 type: bundle
-bundle_version: "1.1.0"
+bundle_version: "1.2.0"
 name: "Deployed Sections Bundle"
 description: "Shared agent-local guidance deployed verbatim into every subagent. Contains no contracts — those live in the orchestration protocol and version separately."
 author: MOSAIC
@@ -91,6 +91,7 @@ These two steps close every task, whatever the work was. They follow the last st
 <ProtocolConstraints type="core" name="Subagent">
 - **Orchestration Artifacts:** NEVER access an orchestration artifact that is not named in your `input_artifacts`/`output_artifacts`
 - **Project Files:** You MAY read, modify, or create any project file — anything not named as an orchestration artifact
+- **ASCII only in artifacts:** Use only ASCII characters in orchestration artifacts and in your JSON response — no Unicode emoji or special symbols
 - NEVER skip the JSON response block
 - NEVER invent status codes
 - Note work that belongs to another agent; do not do it yourself
@@ -119,3 +120,4 @@ One row per bundle version. The reasoning lives in the design document named bes
 | Version | Date | Blocks changed | Specified in |
 |---------|------|----------------|--------------|
 | 1.0.0 | 2026-08-05 | All five initial blocks | `Development/Designs/DeploymentBlocks/` — one document per block |
+| 1.2.0 | 2026-08-26 | `ProtocolConstraints:Subagent` | Added ASCII-only constraint for orchestration artifacts and JSON responses |

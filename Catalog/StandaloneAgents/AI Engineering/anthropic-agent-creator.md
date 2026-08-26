@@ -1,5 +1,5 @@
 ---
-version: 1.4.0
+version: 1.4.1
 name: anthropic-agent-creator
 description: Creates high-quality AI agent instructions through iterative collaboration with the user, ensuring goal-instruction alignment and appropriate autonomy level
 role: standalone
@@ -55,8 +55,8 @@ Anthropic models reason about instructions. When you explain WHY:
 Without "why", the model may misinterpret when instructions apply, especially in edge cases.
 
 **Example:**
-- ❌ "Never modify user files without confirmation"
-- ✅ "Never modify user files without confirmation - unexpected changes break user trust and can cause data loss"
+- [BAD] "Never modify user files without confirmation"
+- [GOOD] "Never modify user files without confirmation - unexpected changes break user trust and can cause data loss"
 
 ### 4. Scope as Identity
 
@@ -369,8 +369,8 @@ Understanding how current Anthropic models interpret instructions helps create b
 **What's Still Legitimate - Process Specification:**
 Defining the actual workflow is different from forcing the model to think harder:
 ```
-❌ "Think carefully about the code" (anti-laziness)
-✅ "When analyzing code: 1) Identify entry point, 2) Trace data flow, 3) Check edge cases" (process)
+[BAD] "Think carefully about the code" (anti-laziness)
+[GOOD] "When analyzing code: 1) Identify entry point, 2) Trace data flow, 3) Check edge cases" (process)
 ```
 
 ### Claude Opus (4.5/4.6)

@@ -37,7 +37,7 @@ const quickFixBlockCore = `<Workflow type="core" name="quick-fix" version="3.0">
 
 | Phase | Subagent | HITL |
 |-------|----------|:----:|
-| PLANNING | planner | ✅ |
+| PLANNING | planner | TRUE |
 
 </Workflow>
 `
@@ -49,7 +49,7 @@ const greenfieldTDDBlockCore = `<Workflow type="core" name="greenfield-tdd" vers
 
 | Phase | Subagent | HITL |
 |-------|----------|:----:|
-| PLANNING | planner-tdd-soft | ✅ |
+| PLANNING | planner-tdd-soft | TRUE |
 
 </Workflow>
 `
@@ -215,7 +215,7 @@ func TestWorkflowManagedMarker_SingleBlock_BodyPreservedVerbatim(t *testing.T) {
 	bodyLines := []string{
 		"## Quick Fix Workflow",
 		"**Use when:** Small, well-scoped changes.",
-		"| PLANNING | planner | ✅ |",
+		"| PLANNING | planner | TRUE |",
 	}
 	for _, line := range bodyLines {
 		if !bytes.Contains(content, []byte(line)) {

@@ -146,7 +146,7 @@ Detailed context for each scenario — failure modes observed, setup specifics, 
 
 ### H-2 / H-3: HITL Additive Merge From Plan Stage Table
 
-**Setup:** EXECUTION stage 3 in progress. Plan.md stage table marks stage 3 with HITL=true. Workflow table has `test-writer-tdd` as HITL ❌.
+**Setup:** EXECUTION stage 3 in progress. Plan.md stage table marks stage 3 with HITL=true. Workflow table has `test-writer-tdd` as HITL FALSE.
 
 **Failure mode anticipated:** Orchestrator only checks the workflow table's HITL column, ignores Plan's per-stage HITL. Subtle — requires reading Plan for HITL resolution, not just stage ordering.
 

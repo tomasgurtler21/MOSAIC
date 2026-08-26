@@ -18,7 +18,7 @@ artifacts:
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | mosaictest-scripted | ❌ | COMPLETE | - | MosaicTestScript/backjump-echo.md | - |
+| RESEARCH | mosaictest-scripted | FALSE | COMPLETE | - | MosaicTestScript/backjump-echo.md | - |
 
 **Notes:**
 - **Run this workflow in Orchestrated mode only.**

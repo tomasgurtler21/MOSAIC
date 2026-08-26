@@ -8,4 +8,4 @@ Used to verify that a dash Approach cell is refused (catalogue S2) when requireA
 
 | Stage | Name | Goal | Depends On | HITL | Approach |
 |-------|------|------|------------|:----:|----------|
-| 1 | Foundation | First stage | - | ❌ | - |
+| 1 | Foundation | First stage | - | FALSE | - |

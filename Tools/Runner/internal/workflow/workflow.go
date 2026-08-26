@@ -92,8 +92,8 @@ func Parse(content []byte, info domain.WorkflowInfo) (domain.RoutingTable, error
 		inputCell := rawRow[inputCol]
 		outputCell := rawRow[outputCol]
 
-		// Decode HITL: ✅ means true, anything else means false.
-		hitl := strings.Contains(hitlCell, "✅")
+		// Decode HITL: TRUE means true, anything else means false.
+		hitl := strings.EqualFold(strings.TrimSpace(hitlCell), "TRUE")
 
 		// Split comma-separated artifact paths; "-" or empty means no artifacts.
 		inputArtifacts := splitArtifacts(inputCell)

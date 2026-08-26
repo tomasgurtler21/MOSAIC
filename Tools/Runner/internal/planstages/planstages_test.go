@@ -7,7 +7,7 @@ package planstages_test
 //   Happy path - no-groups workflow (requireApproach=false, no Approach column):
 //   - three-stages-no-approach.md: returns 3 StageEntry values.
 //   - Stage numbers in returned entries start at 1 and are consecutive.
-//   - HITL column decoded: ✅ → true, ❌ → false.
+//   - HITL column decoded: TRUE → true, FALSE → false.
 //   - Depends On column parsed: "-" produces empty DependsOn slice.
 //   - Depends On column parsed: "1, 2" produces []StageNumber{1, 2}.
 //   - Approach is zero value (empty string) when requireApproach is false.
@@ -127,7 +127,7 @@ func TestReadStages_ThreeStagesNoApproach_NumbersAreConsecutive(t *testing.T) {
 }
 
 func TestReadStages_ThreeStagesNoApproach_HITL_CheckmarkIsTrue(t *testing.T) {
-	// Stage 2 in the fixture has HITL = ✅.
+	// Stage 2 in the fixture has HITL = TRUE.
 	set, err := planstages.ReadStages(planstagesFixture("three-stages-no-approach.md"), false)
 	if err != nil {
 		t.Fatalf("ReadStages: %v", err)
@@ -138,12 +138,12 @@ func TestReadStages_ThreeStagesNoApproach_HITL_CheckmarkIsTrue(t *testing.T) {
 		t.Fatal("stage 2 not found in returned set")
 	}
 	if !entry.HITL {
-		t.Error("stage 2 HITL: want true (✅), got false")
+		t.Error("stage 2 HITL: want true (TRUE), got false")
 	}
 }
 
 func TestReadStages_ThreeStagesNoApproach_HITL_CrossIsfalse(t *testing.T) {
-	// Stage 1 in the fixture has HITL = ❌.
+	// Stage 1 in the fixture has HITL = FALSE.
 	set, err := planstages.ReadStages(planstagesFixture("three-stages-no-approach.md"), false)
 	if err != nil {
 		t.Fatalf("ReadStages: %v", err)
@@ -154,7 +154,7 @@ func TestReadStages_ThreeStagesNoApproach_HITL_CrossIsfalse(t *testing.T) {
 		t.Fatal("stage 1 not found in returned set")
 	}
 	if entry.HITL {
-		t.Error("stage 1 HITL: want false (❌), got true")
+		t.Error("stage 1 HITL: want false (FALSE), got true")
 	}
 }
 

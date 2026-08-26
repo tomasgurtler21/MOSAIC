@@ -1,6 +1,6 @@
 ---
 id: 18
-version: 2.2.0
+version: 2.2.1
 name: pull-request-comment-interface
 description: Bridges pull request comments with the multi-agent orchestration system - retrieves comment threads for subagent consumption and posts subagent responses/new comments to PRs with AI attribution
 role: subagent
@@ -114,7 +114,7 @@ You manage TWO artifacts:
 ```markdown
 # Pull Request Comments
 
-> ⚠️ **READ-ONLY ARTIFACT** - This file is updated ONLY by PullRequestCommentInterface.
+> [WARN] **READ-ONLY ARTIFACT** - This file is updated ONLY by PullRequestCommentInterface.
 > Other agents should read this to understand current PR comment state.
 > To respond to comments, write to PullRequestResponses.md instead.
 
@@ -214,7 +214,7 @@ You manage TWO artifacts:
 ```markdown
 # Pull Request Responses
 
-> ⚠️ **RESPONSE QUEUE** - Only modify the `pending` array at the bottom of this file.
+> [WARN] **RESPONSE QUEUE** - Only modify the `pending` array at the bottom of this file.
 > Do NOT modify the Response Schema or PR Context sections.
 > PullRequestCommentInterface will process pending items and remove them after posting.
 

@@ -1,5 +1,5 @@
 ---
-version: "0.3"
+version: "0.4"
 name: "Requirements to Test Cases Workflow"
 description: "Derive abstract test cases from a requirement held in large external specification documents. Resolves the requirement to closure via runtime retrieval, models the test scenario space, authors test cases in a project-defined format, and exports them to the target system."
 hint: "Fresh and untested — theoretical only, no real-world runs yet. Open experiments already planned for first real use, e.g. dropping test-scenario-review once the full path is proven — check the workflow file's Design Rationale before running it for real."
@@ -27,7 +27,7 @@ artifacts:
   - ExportReport.md
 ---
 
-<Workflow type="core" name="requirements-to-test-cases" version="0.3">
+<Workflow type="core" name="requirements-to-test-cases" version="0.4">
 ## Requirements to Test Cases Workflow
 
 > **Version:** 0.3
@@ -36,15 +36,15 @@ artifacts:
 
 | Phase | Subagent | HITL | On Success | On Findings | Waits For | Input | Output |
 |-------|----------|:----:|------------|-------------|-----------|-------|--------|
-| RESEARCH | document-research | ❌ | requirements-review | - | - | Requirements.md | Research.md |
-| RESEARCH | requirements-review | ❌ | test-scenario-designer | document-research | - | Requirements.md, Research.md | requirements-review.md |
-| DESIGN | test-scenario-designer | ❌ | test-scenario-review | - | - | Requirements.md, Research.md | TestScenarios.md |
-| DESIGN | test-scenario-review | ❌ | approval-presenter(scenarios) | test-scenario-designer | - | Requirements.md, Research.md, TestScenarios.md | test-scenario-review.md |
-| DESIGN | approval-presenter(scenarios) | ✅ | test-case-writer | test-scenario-designer | - | TestScenarios.md, test-scenario-review.md | TestScenarios.md, approval-presenter-scenarios.md |
-| EXECUTION | test-case-writer | ❌ | test-case-review | test-scenario-designer | - | Requirements.md, Research.md, TestScenarios.md | TestCases.md |
-| REVIEW | test-case-review | ❌ | approval-presenter(cases) | test-case-writer | - | Requirements.md, Research.md, TestScenarios.md, TestCases.md | test-case-review.md |
-| REVIEW | approval-presenter(cases) | ✅ | test-case-export | test-case-writer | - | TestCases.md, test-case-review.md | TestCases.md, approval-presenter-cases.md |
-| COMPLETION | test-case-export | ✅ | COMPLETE | test-case-writer | - | TestCases.md | ExportReport.md |
+| RESEARCH | document-research | FALSE | requirements-review | - | - | Requirements.md | Research.md |
+| RESEARCH | requirements-review | FALSE | test-scenario-designer | document-research | - | Requirements.md, Research.md | requirements-review.md |
+| DESIGN | test-scenario-designer | FALSE | test-scenario-review | - | - | Requirements.md, Research.md | TestScenarios.md |
+| DESIGN | test-scenario-review | FALSE | approval-presenter(scenarios) | test-scenario-designer | - | Requirements.md, Research.md, TestScenarios.md | test-scenario-review.md |
+| DESIGN | approval-presenter(scenarios) | TRUE | test-case-writer | test-scenario-designer | - | TestScenarios.md, test-scenario-review.md | TestScenarios.md, approval-presenter-scenarios.md |
+| EXECUTION | test-case-writer | FALSE | test-case-review | test-scenario-designer | - | Requirements.md, Research.md, TestScenarios.md | TestCases.md |
+| REVIEW | test-case-review | FALSE | approval-presenter(cases) | test-case-writer | - | Requirements.md, Research.md, TestScenarios.md, TestCases.md | test-case-review.md |
+| REVIEW | approval-presenter(cases) | TRUE | test-case-export | test-case-writer | - | TestCases.md, test-case-review.md | TestCases.md, approval-presenter-cases.md |
+| COMPLETION | test-case-export | TRUE | COMPLETE | test-case-writer | - | TestCases.md | ExportReport.md |
 
 **Notes:**
 
@@ -82,9 +82,9 @@ Note that `test-case-writer` deliberately carries **no** `OutputArtifactTemplate
 
 `approval-presenter` deliberately carries **no** `OutputArtifactTemplate`. Reshaping its approval record would invite fields the presenter must *derive* — severity, priority, category — and deriving any of them is the evaluation its central constraint forbids. The record keeps a generic numbered-findings shape that the producing agent already knows how to read.
 
-**User-contact tooling follows the HITL column.** The producer agents — `document-research`, `test-scenario-designer`, `test-case-writer` — carry no `user_interaction` tool. The workflow's rule that no agent asks the user a domain question is therefore structural rather than only textual: they cannot ask. Flipping any of those rows to `✅` would produce `BLOCKED`/`E503`, correctly, since the agent has no means to present.
+**User-contact tooling follows the HITL column.** The producer agents — `document-research`, `test-scenario-designer`, `test-case-writer` — carry no `user_interaction` tool. The workflow's rule that no agent asks the user a domain question is therefore structural rather than only textual: they cannot ask. Flipping any of those rows to `TRUE` would produce `BLOCKED`/`E503`, correctly, since the agent has no means to present.
 
-The three review agents keep the tool despite sitting on `❌` rows here. They are generic and are gated `✅` in other workflows, so stripping it would make them unusable elsewhere. In this workflow the flag is simply never set for them.
+The three review agents keep the tool despite sitting on `FALSE` rows here. They are generic and are gated `TRUE` in other workflows, so stripping it would make them unusable elsewhere. In this workflow the flag is simply never set for them.
 
 **The `requirements-review` row has a purpose-built alternative.** The generic agent covers this gate — its remit already includes verifying that acceptance criteria are testable and that research findings are sufficient to proceed, and its codebase-alignment step is simply inert here. Where it proves too general in practice, `requirements-testability-review` is a drop-in built for this one job: swap the subagent name in that row and in `referenced_agents`. It writes the same `requirements-review.md`, so nothing downstream changes.
 
@@ -120,7 +120,7 @@ The split is expected to be challenged during real use, and dropping `test-scena
 
 ### Why human approval sits on a presenter row rather than on a reviewer
 
-The protocol defines HITL as an approval gate on finished output. The library's existing convention of marking *creators* `✅` inverts that: the human does first-pass review of work no agent has checked, and the review agent then audits the human's judgement. This workflow never adopted that inversion.
+The protocol defines HITL as an approval gate on finished output. The library's existing convention of marking *creators* `TRUE` inverts that: the human does first-pass review of work no agent has checked, and the review agent then audits the human's judgement. This workflow never adopted that inversion.
 
 Version 0.1 moved the gate to the reviewers instead, which fixed the ordering but left two problems. The reviewer's gate fires on *every* invocation, including rounds whose findings guarantee rework and where there is nothing yet to approve. And more seriously, at a reviewer's gate the human is approving the **creator's** artifact — `TestScenarios.md`, `TestCases.md` — which is not among the reviewer's output artifacts. Per the protocol an agent stamps `human_approved` only on its own outputs, so the approved artifact would stay `human_approved: false` permanently and the orchestrator's stamp check could never see that a human had signed it off.
 
@@ -138,7 +138,7 @@ The cost is one extra row per loop, and that cost is the thing to watch: if it b
 
 ### Why the reviewers are not human gates
 
-All three review rows are `❌`. Reviews run to convergence automatically, and the human sees only the settled result. `requirements-review` in particular is `❌` deliberately and has no presenter: the artifact under review there is the retrieved dossier, which is large, dense, and genuinely hard for a human to check by reading. A retrieval gap surfaces more usefully one step later, as a missing dimension in the scenario space, where the human is looking at a structured model rather than pages of extracted specification text.
+All three review rows are `FALSE`. Reviews run to convergence automatically, and the human sees only the settled result. `requirements-review` in particular is `FALSE` deliberately and has no presenter: the artifact under review there is the retrieved dossier, which is large, dense, and genuinely hard for a human to check by reading. A retrieval gap surfaces more usefully one step later, as a missing dimension in the scenario space, where the human is looking at a structured model rather than pages of extracted specification text.
 
 ### Why no agent may ask the user a domain question
 
@@ -151,8 +151,9 @@ In a safety context an agent's plausible guess is the most dangerous possible ou
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 0.1 | 2026-08-05 | MOSAIC | Initial version |
-| 0.2 | 2026-08-06 | MOSAIC | Human approval moved from the review rows to dedicated `approval-presenter` rows, per the architect decision in `OnSuccessHITL.md` §7. Reviews now converge automatically (`❌`); the presenter is reachable only on convergence and stamps `human_approved` on the artifact the human actually approved, closing the §4.5 provenance gap. `requirements-review` gate becomes `❌` with no presenter. |
+| 0.2 | 2026-08-06 | MOSAIC | Human approval moved from the review rows to dedicated `approval-presenter` rows, per the architect decision in `OnSuccessHITL.md` §7. Reviews now converge automatically (`FALSE`); the presenter is reachable only on convergence and stamps `human_approved` on the artifact the human actually approved, closing the §4.5 provenance gap. `requirements-review` gate becomes `FALSE` with no presenter. |
 | 0.3 | 2026-08-06 | MOSAIC | Terminology only, no routing or gate change. The provenance stamp field named throughout this document was renamed `hitl_confirmed` → `human_approved` in Communication Protocol v1.10; every reference here follows, including the two historical entries below, so the document carries one spelling of one field. |
+| 0.4 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
 
 ---
 
@@ -165,11 +166,11 @@ In a safety context an agent's plausible guess is the most dangerous possible ou
 - **A third `approval-presenter` row after `requirements-review`**, if running the workflow shows that retrieval gaps need catching before scenario design rather than surfacing as missing dimensions afterwards. Omitted in 0.2 because the dossier is large and dense and a human reading it is unlikely to spot what is absent.
 - **Watch the row cost.** One presenter row per convergence loop is cheap here at two rows; across the library it may not be. `OnSuccessHITL.md` §5.3 — a separate `Gate` column with a `gate_on` invocation field — is the parked alternative if it becomes noisy.
 - **Coverage counter-check.** An agent that queries retrieval for what *should* have been found and compares against `TestScenarios.md` — defends against a retrieval miss that every downstream agent then inherits silently. Currently mitigated only by `requirements-review`.
-- **Backport `approval-presenter` to the older creator-gated workflows once this pattern is proven.** This workflow is the first place the presenter-on-convergence pattern was used for real, and it fixes a real inefficiency present across most of the older Build/Design workflows: those mark the *creator* row `✅` directly (the library's older convention), so a human reviews every draft the creator produces — including drafts an automated reviewer would have flagged anyway — instead of only the version that already converged. Once this workflow has enough real use to trust the pattern, that's the trigger to revisit `brownfield-tdd`, `greenfield-tdd`, `brownfield-design`, `brownfield-tdd-build-verified`, and `quick-fix`, all of which currently spend human attention this way.
+- **Backport `approval-presenter` to the older creator-gated workflows once this pattern is proven.** This workflow is the first place the presenter-on-convergence pattern was used for real, and it fixes a real inefficiency present across most of the older Build/Design workflows: those mark the *creator* row `TRUE` directly (the library's older convention), so a human reviews every draft the creator produces — including drafts an automated reviewer would have flagged anyway — instead of only the version that already converged. Once this workflow has enough real use to trust the pattern, that's the trigger to revisit `brownfield-tdd`, `greenfield-tdd`, `brownfield-design`, `brownfield-tdd-build-verified`, and `quick-fix`, all of which currently spend human attention this way.
 
 **Dead ends (tried and rejected):**
 - **KB ingestion of the specification** — rejected; see Design Rationale.
 - **A `TestProfile.md` input artifact** carrying the output format, glossary and gold examples. Rejected: the agent template architecture already solves this with `<OutputArtifactTemplate type="project">` and `<CodebaseContext type="project">`, which bind at deploy rather than per run. Format is stable; making it a per-run artifact would be paying run-time cost for deploy-time data.
-- **A third HITL column value (`✅ˢ`, on-success)** firing the gate only on the converging pass, implemented by re-dispatching the reviewer. Rejected by architect review — see `OnSuccessHITL.md` §4. It encodes a *policy* into a flag that carries an *amount*, which breaks the additive `row.hitl OR stage_hitl` merge that stage HITL depends on; it needs `already_presented` state the orchestration artifact has nowhere to store; and the re-dispatched reviewer would re-review and could contradict its own prior `SUCCESS`. Superseded by the presenter row in 1.1.
+- **A third HITL column value (`TRUEˢ`, on-success)** firing the gate only on the converging pass, implemented by re-dispatching the reviewer. Rejected by architect review — see `OnSuccessHITL.md` §4. It encodes a *policy* into a flag that carries an *amount*, which breaks the additive `row.hitl OR stage_hitl` merge that stage HITL depends on; it needs `already_presented` state the orchestration artifact has nowhere to store; and the re-dispatched reviewer would re-review and could contradict its own prior `SUCCESS`. Superseded by the presenter row in 1.1.
 - **Reviewer-held approval gates (workflow v0.1).** Correct in ordering, but the human approved the *creator's* artifact while only the reviewer could stamp provenance — so the approved artifact stayed `human_approved: false` permanently. Superseded by the presenter row in 0.2.
 - **Specialising `document-research` per retrieval flavour** (vector / graph / hybrid). Rejected: would produce one agent per stack for a process that is identical across all of them.

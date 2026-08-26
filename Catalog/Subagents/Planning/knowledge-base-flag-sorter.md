@@ -1,6 +1,6 @@
 ---
 id: 24
-version: 3.2.0
+version: 3.2.1
 name: knowledge-base-flag-sorter
 description: Collects correction flags from KBFlags.md, organizes them bottom-up by target tier, produces a sorted flag report, and creates correction stages in KBProgress.md
 role: subagent
@@ -89,7 +89,7 @@ If KBFlags.md exists but contains no flags, this is a valid outcome — the gene
 ### Agent-Specific Artifact Behavior
 
 - **KBFlags.md (input):** Read all flags. Parse each flag's type (FIX/ADD/ELEVATE), source stage, target document, and content. Do not modify this artifact.
-- **KBProgress.md (input + output):** Read to determine tier assignments for KB documents (the Tier column in the stages table). Append correction stages — one per target document, ordered bottom-up by tier. Use status `PENDING`, HITL `❌`, and set Recommended By to `flag-sorter`.
+- **KBProgress.md (input + output):** Read to determine tier assignments for KB documents (the Tier column in the stages table). Append correction stages — one per target document, ordered bottom-up by tier. Use status `PENDING`, HITL `FALSE`, and set Recommended By to `flag-sorter`.
 - **KBFlagReport.md (output):** Create this artifact with the organized flag report. This is a new artifact — do not expect it to exist.
 
 <OutputArtifactTemplate type="project">
@@ -120,7 +120,7 @@ If KBFlags.md exists but contains no flags, this is a valid outcome — the gene
 ...
 
 {If contradictions exist for this document:}
-> ⚠️ **Contradiction detected:** Flags {X} and {Y} target the same section with conflicting corrections. Validate both against the codebase to determine the accurate state.
+> [WARN] **Contradiction detected:** Flags {X} and {Y} target the same section with conflicting corrections. Validate both against the codebase to determine the accurate state.
 
 ---
 
@@ -133,7 +133,7 @@ If KBFlags.md exists but contains no flags, this is a valid outcome — the gene
 When appending correction stages to KBProgress.md, use this format:
 
 ```markdown
-| {next_number} | correction-{N} | {KB document path} | - | PENDING | ❌ | flag-sorter |
+| {next_number} | correction-{N} | {KB document path} | - | PENDING | FALSE | flag-sorter |
 ```
 
 **Fields:**
@@ -142,7 +142,7 @@ When appending correction stages to KBProgress.md, use this format:
 - **Scope** — The KB document path to correct (matches the section headers in KBFlagReport.md)
 - **KB Document** — `-` (the correction modifies the existing document, doesn't create a new one)
 - **Status** — `PENDING`
-- **HITL** — `❌` (corrections are autonomous — lower-tier research is authoritative)
+- **HITL** — `FALSE` (corrections are autonomous — lower-tier research is authoritative)
 - **Recommended By** — `flag-sorter`
 </OutputArtifactTemplate>
 

@@ -1,5 +1,5 @@
 ---
-version: "3.1"
+version: "3.2"
 name: "Implementation Only Workflow"
 description: "Research, planning, and design already complete. Direct implementation from existing artifacts."
 hint: "Likely obsolete — this is the EXECUTION/REVIEW tail of brownfield-tdd/greenfield-tdd, split out to manually resume a long workflow past RESEARCH/PLANNING/DESIGN. Native mid-execution run persistence and continuation now covers that need directly; prefer continuing the original run over starting this one."
@@ -17,16 +17,16 @@ artifacts:
   - TestResults.md
 ---
 
-<Workflow type="core" name="implementation-only" version="3.1">
+<Workflow type="core" name="implementation-only" version="3.2">
 ## Implementation Only Workflow
 
 **Use when:** Research, planning, and design already complete. Direct implementation from existing artifacts.
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.[StageNumber] | implementation-review | FALSE | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 
 **EXECUTION Stages:** Loop per stage (stages defined in Plan.md): implementation-tdd → implementation-review. This workflow has a fixed subagent sequence — the Approach column is not used.
 
@@ -49,6 +49,7 @@ Mid-execution run persistence and continuation now solves the same problem nativ
 | Version | Date | Author | Summary |
 |---------|------|--------|---------|
 | 3.1 | 2026-08-17 | MOSAIC | Changelog tracking begins here; earlier revisions predate this record. |
+| 3.2 | 2026-08-26 | MOSAIC | Replace Unicode emoji with ASCII tokens in HITL column (TRUE/FALSE). |
 
 ---
 

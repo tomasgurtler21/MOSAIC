@@ -434,7 +434,7 @@ func TestSession_Start_AdmissionFailure_ReturnsRefusal(t *testing.T) {
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a(mode) | ❌ | - | out.md |
+| PLANNING | agent-a(mode) | FALSE | - | out.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "refused-orch.md")
@@ -615,8 +615,8 @@ func TestSession_Start_OnFindings_LoopBack_HarnessInvokedNotDeviation(t *testing
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b | agent-a | - | plan.md |
-| PLANNING | agent-b | ❌ | COMPLETE | - | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | agent-a | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | - | plan.md | result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "loopback-orch.md")
@@ -698,8 +698,8 @@ func TestSession_Start_StageStarOutput_TriggersStageSetRederivation(t *testing.T
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | First | - | ❌ |
-| 2 | Stage Two | Second | 1 | ❌ |
+| 1 | Stage One | First | - | FALSE |
+| 2 | Stage Two | Second | 1 | FALSE |
 `
 	planPath := filepath.Join(dir, "Plan.md")
 	if err := os.WriteFile(planPath, []byte(planContent), 0600); err != nil {
@@ -779,8 +779,8 @@ func TestSession_Start_Deviation_ReturnsDeviationUnresolved(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b | - | plan.md |
-| PLANNING | agent-b | ❌ | COMPLETE | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | plan.md | result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "deviation-orch.md")
@@ -1070,7 +1070,7 @@ func TestSession_Start_StagedWorkflow_Completes(t *testing.T) {
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
 	}
@@ -1131,7 +1131,7 @@ func TestSession_Start_PlanFile_ResolvedFromRunFolder_StagesApplied(t *testing.T
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
 	}
@@ -1191,7 +1191,7 @@ func TestSession_Start_PlanFile_InOrchestratorDir_NotPickedUp(t *testing.T) {
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
 	}
@@ -1479,8 +1479,8 @@ func TestSession_Start_StageStarRederivation_ResolvesFromRunFolder(t *testing.T)
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | First | - | ❌ |
-| 2 | Stage Two | Second | 1 | ❌ |
+| 1 | Stage One | First | - | FALSE |
+| 2 | Stage Two | Second | 1 | FALSE |
 `
 	planPath := filepath.Join(runFolder, "Plan.md")
 	if err := os.WriteFile(planPath, []byte(planContent), 0600); err != nil {
@@ -1663,8 +1663,8 @@ func TestSession_Start_Deviation_ResolverStop_ReturnsDeviationUnresolved(t *test
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b | - | plan.md |
-| PLANNING | agent-b | ❌ | COMPLETE | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | plan.md | result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "deviation-stop-orch.md")
@@ -2019,8 +2019,8 @@ func TestSession_Start_Dispatch_ResolvesInputArtifacts_ToRunScopedForm(t *testin
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a | ❌ | Plan.md | Progress.md |
-| PLANNING | agent-b | ❌ | Progress.md | Result.md |
+| PLANNING | agent-a | FALSE | Plan.md | Progress.md |
+| PLANNING | agent-b | FALSE | Progress.md | Result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "resolve-orch.md")
@@ -2093,8 +2093,8 @@ func TestSession_Start_Dispatch_ResolvesOutputArtifacts_ToRunScopedForm(t *testi
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a | ❌ | - | Progress.md |
-| PLANNING | agent-b | ❌ | Progress.md | Result.md |
+| PLANNING | agent-a | FALSE | - | Progress.md |
+| PLANNING | agent-b | FALSE | Progress.md | Result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "resolve-out-orch.md")
@@ -2180,7 +2180,7 @@ func TestSession_Start_Dispatch_DoesNotDoublePrefixAlreadyScopedPaths(t *testing
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a | ❌ | ` + scopedPrefix + `Plan.md | ` + scopedPrefix + `Progress.md |
+| PLANNING | agent-a | FALSE | ` + scopedPrefix + `Plan.md | ` + scopedPrefix + `Progress.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "already-scoped-orch.md")
@@ -2270,7 +2270,7 @@ func TestSession_Start_Dispatch_EmptyRunID_PathsNotPrefixed(t *testing.T) {
 
 | Phase | Subagent | HITL | Input | Output |
 |-------|----------|:----:|-------|--------|
-| PLANNING | agent-a | ❌ | Plan.md | Progress.md |
+| PLANNING | agent-a | FALSE | Plan.md | Progress.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "no-runid-orch.md")
@@ -2960,8 +2960,8 @@ func newStageEndStagedSession(t *testing.T) (ses session.Session, f *harness.Fak
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | First stage | - | ❌ |
-| 2 | Stage Two | Second stage | 1 | ❌ |
+| 1 | Stage One | First stage | - | FALSE |
+| 2 | Stage Two | Second stage | 1 | FALSE |
 `
 	planPath := filepath.Join(filepath.Dir(orchPath), "Plan.md")
 	if err := os.WriteFile(planPath, []byte(planContent), 0600); err != nil {
@@ -3210,7 +3210,7 @@ func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireWithinSameStage(t *testi
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `
 	if err := os.WriteFile(filepath.Join(dir, "Plan.md"), []byte(singleStagePlan), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
@@ -3274,7 +3274,7 @@ func TestSession_Start_TriggerEval_STAGE_END_DoesNotFireOnFirstWorkflowStep(t *t
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `
 	if err := os.WriteFile(filepath.Join(dir, "Plan.md"), []byte(singleStagePlan), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
@@ -4635,8 +4635,8 @@ func buildDeviationWorkflowSession(
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b | - | plan.md |
-| PLANNING | agent-b | ❌ | COMPLETE | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | plan.md | result.md |
 </Workflow>
 `
 	orchPath = filepath.Join(dir, "deviate-log-orch.md")
@@ -4852,7 +4852,7 @@ func TestSession_Start_StageStarOutputPrecedesStagedExecution_EntersExecution(t 
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `
 	planPath := filepath.Join(runFolder, "Plan.md")
 
@@ -4991,7 +4991,7 @@ func TestSession_Start_FailedStageStarRederivation_RetainsExistingStageSet(t *te
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `
 	planPath := filepath.Join(runFolder, "Plan.md")
 
@@ -6740,8 +6740,8 @@ func TestSession_AutoReviewMode_CNAWithUnambiguousHint_EngineAutoRoutes(t *testi
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b | agent-a | - | plan.md |
-| PLANNING | agent-b | ❌ | COMPLETE | - | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | agent-a | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | - | plan.md | result.md |
 </Workflow>
 `
 	orchPath := filepath.Join(dir, "loopback-orch.md")

@@ -275,8 +275,8 @@ func TestIntegration_StagedWorkflow_TwoStages_Completes(t *testing.T) {
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | First stage | - | ❌ |
-| 2 | Stage Two | Second stage | 1 | ❌ |
+| 1 | Stage One | First stage | - | FALSE |
+| 2 | Stage Two | Second stage | 1 | FALSE |
 `
 	if err := os.WriteFile(filepath.Join(dir, "Plan.md"), []byte(planContent), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
@@ -540,9 +540,9 @@ func TestIntegration_OptionalRow_IsDispatchedAndContributesToDeviation(t *testin
 
 | Phase | Subagent       | HITL | On Success     | On Findings | Input | Output     |
 |-------|----------------|:----:|----------------|-------------|-------|------------|
-| PLANNING | agent-a     | ❌ | optional-agent | -           | -     | plan.md    |
-| DESIGN   | optional-agent | ❌ | agent-b       | -           | plan.md | design.md |
-| REVIEW   | agent-b     | ❌ | COMPLETE       | -           | design.md | result.md |
+| PLANNING | agent-a     | FALSE | optional-agent | -           | -     | plan.md    |
+| DESIGN   | optional-agent | FALSE | agent-b       | -           | plan.md | design.md |
+| REVIEW   | agent-b     | FALSE | COMPLETE       | -           | design.md | result.md |
 </Workflow>
 `
 	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
@@ -625,9 +625,9 @@ func TestIntegration_BuildReview_OnFindings_LoopBack_NoDev(t *testing.T) {
 
 | Phase | Subagent          | HITL | On Success        | On Findings      | Input | Output         |
 |-------|-------------------|:----:|-------------------|------------------|-------|----------------|
-| PLANNING | test-writer-tdd | ❌ | build-review      | -                | -     | tests.md       |
-| PLANNING | build-review    | ❌ | implementation-tdd| test-writer-tdd  | tests.md | build.md    |
-| PLANNING | implementation-tdd | ❌ | COMPLETE         | -                | tests.md | impl.md     |
+| PLANNING | test-writer-tdd | FALSE | build-review      | -                | -     | tests.md       |
+| PLANNING | build-review    | FALSE | implementation-tdd| test-writer-tdd  | tests.md | build.md    |
+| PLANNING | implementation-tdd | FALSE | COMPLETE         | -                | tests.md | impl.md     |
 </Workflow>
 `
 	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
@@ -726,12 +726,12 @@ func TestIntegration_AllFourApproaches_StagedWorkflow_GoldenFileMatch(t *testing
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/tests.md |
-| EXECUTION.Test.[StageNumber] | build-review | ❌ | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/tests.md | Stage-{StageNumber}/build-review-tests.md |
-| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/tests.md | Stage-{StageNumber}/tests-review.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | build-review | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/impl.md |
-| EXECUTION.Implementation.[StageNumber] | build-review | ❌ | implementation-review | implementation-tdd | Stage-{StageNumber}/impl.md | Stage-{StageNumber}/build-review-impl.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd | Stage-{StageNumber}/impl.md | Stage-{StageNumber}/impl-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | FALSE | build-review | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/tests.md |
+| EXECUTION.Test.[StageNumber] | build-review | FALSE | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/tests.md | Stage-{StageNumber}/build-review-tests.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/tests.md | Stage-{StageNumber}/tests-review.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | FALSE | build-review | - | Stage-{StageNumber}/Plan.md | Stage-{StageNumber}/impl.md |
+| EXECUTION.Implementation.[StageNumber] | build-review | FALSE | implementation-review | implementation-tdd | Stage-{StageNumber}/impl.md | Stage-{StageNumber}/build-review-impl.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | FALSE | COMPLETE | implementation-tdd | Stage-{StageNumber}/impl.md | Stage-{StageNumber}/impl-review.md |
 
 **Execution Groups:**
 
@@ -752,10 +752,10 @@ func TestIntegration_AllFourApproaches_StagedWorkflow_GoldenFileMatch(t *testing
 
 | Stage | Name | Goal | Depends On | HITL | Approach |
 |-------|------|------|------------|:----:|----------|
-| 1 | TDD Stage | Test-first development | - | ❌ | TDD |
-| 2 | IF Stage | Implementation-first | 1 | ❌ | Implementation-First |
-| 3 | IO Stage | Implementation only | 2 | ❌ | Implementation-Only |
-| 4 | TO Stage | Tests only | 3 | ❌ | Tests-Only |
+| 1 | TDD Stage | Test-first development | - | FALSE | TDD |
+| 2 | IF Stage | Implementation-first | 1 | FALSE | Implementation-First |
+| 3 | IO Stage | Implementation only | 2 | FALSE | Implementation-Only |
+| 4 | TO Stage | Tests only | 3 | FALSE | Tests-Only |
 `
 	if err := os.WriteFile(filepath.Join(dir, "Plan.md"), []byte(planContent), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
@@ -877,7 +877,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 
 | Stage | Name | Goal | Depends On | HITL | Approach |
 |-------|------|------|------------|:----:|----------|
-| 1 | Stage One | Run | - | ❌ | Implementation-Only |
+| 1 | Stage One | Run | - | FALSE | Implementation-Only |
 `
 
 	// planSingleGroup is a single-stage Plan.md without an Approach column,
@@ -888,7 +888,7 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | Run | - | ❌ |
+| 1 | Stage One | Run | - | FALSE |
 `
 
 	// agentResponse is a scripted SUCCESS response for a named agent.
@@ -917,18 +917,18 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | codebase-research | ❌ | requirements-refinement | - | Requirements.md | Research.md |
-| RESEARCH | requirements-refinement | ✅ | requirements-review | - | Research.md, Requirements.md | Requirements.md |
-| RESEARCH | requirements-review | ❌ | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| DESIGN | contracts-designer | ✅ | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
-| DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| RESEARCH | codebase-research | FALSE | requirements-refinement | - | Requirements.md | Research.md |
+| RESEARCH | requirements-refinement | TRUE | requirements-review | - | Research.md, Requirements.md | Requirements.md |
+| RESEARCH | requirements-review | FALSE | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| DESIGN | contracts-designer | TRUE | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
+| DESIGN | contracts-review | FALSE | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | FALSE | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | FALSE | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 
 **Execution Groups:**
 
@@ -974,19 +974,19 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | codebase-research | ❌ | requirements-refinement | - | Requirements.md | Research.md |
-| RESEARCH | requirements-refinement | ✅ | requirements-review | - | Research.md, Requirements.md | Requirements.md |
-| RESEARCH | requirements-review | ❌ | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| DESIGN | contracts-designer | ✅ | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
-| DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | build-review | - | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Test.[StageNumber] | build-review | ❌ | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-tests.md |
-| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | build-review | - | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Implementation.[StageNumber] | build-review | ❌ | implementation-review | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-impl.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | COMPLETE | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| RESEARCH | codebase-research | FALSE | requirements-refinement | - | Requirements.md | Research.md |
+| RESEARCH | requirements-refinement | TRUE | requirements-review | - | Research.md, Requirements.md | Requirements.md |
+| RESEARCH | requirements-review | FALSE | planner-tdd-soft | requirements-refinement | Requirements.md | requirements-review.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | Research.md, Requirements.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| DESIGN | contracts-designer | TRUE | contracts-review | - | Research.md, Requirements.md, Plan.md, Stage-*/Plan.md | ContractsDesign.md |
+| DESIGN | contracts-review | FALSE | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | FALSE | build-review | - | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | build-review | FALSE | tests-review-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-tests.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | FALSE | build-review | - | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | build-review | FALSE | implementation-review | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/build-review-impl.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | FALSE | COMPLETE | implementation-tdd | Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
 
 **Execution Groups:**
 
@@ -1031,19 +1031,19 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| RESEARCH | requirements-refinement | ✅ | requirements-review | - | Requirements.md | Requirements.md |
-| RESEARCH | requirements-review | ❌ | system-designer | requirements-refinement | Requirements.md | requirements-review.md |
-| ARCHITECTURE | system-designer | ✅ | system-design-review | - | Requirements.md | SystemDesign.md |
-| ARCHITECTURE | system-design-review | ❌ | planner-tdd-soft | system-designer | Requirements.md, SystemDesign.md | system-design-review.md |
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | Requirements.md, SystemDesign.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| DESIGN | contracts-designer | ✅ | contracts-review | - | Requirements.md, Plan.md, Stage-*/Plan.md, SystemDesign.md | ContractsDesign.md |
-| DESIGN | contracts-review | ❌ | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
-| EXECUTION.Test.[StageNumber] | test-writer-tdd | ❌ | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Test.[StageNumber] | tests-review-tdd | ❌ | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.Implementation.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| RESEARCH | requirements-refinement | TRUE | requirements-review | - | Requirements.md | Requirements.md |
+| RESEARCH | requirements-review | FALSE | system-designer | requirements-refinement | Requirements.md | requirements-review.md |
+| ARCHITECTURE | system-designer | TRUE | system-design-review | - | Requirements.md | SystemDesign.md |
+| ARCHITECTURE | system-design-review | FALSE | planner-tdd-soft | system-designer | Requirements.md, SystemDesign.md | system-design-review.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | Requirements.md, SystemDesign.md | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | contracts-designer | planner-tdd-soft | Requirements.md, Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| DESIGN | contracts-designer | TRUE | contracts-review | - | Requirements.md, Plan.md, Stage-*/Plan.md, SystemDesign.md | ContractsDesign.md |
+| DESIGN | contracts-review | FALSE | test-writer-tdd | contracts-designer | Plan.md, Stage-*/Plan.md, ContractsDesign.md | contracts-review.md |
+| EXECUTION.Test.[StageNumber] | test-writer-tdd | FALSE | tests-review-tdd | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Test.[StageNumber] | tests-review-tdd | FALSE | implementation-tdd | test-writer-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/tests-review-tdd.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.Implementation.[StageNumber] | implementation-review | FALSE | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 
 **Execution Groups:**
 
@@ -1090,9 +1090,9 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| EXECUTION.[StageNumber] | implementation-review | ❌ | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | implementation-review | - | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| EXECUTION.[StageNumber] | implementation-review | FALSE | test-runner | implementation-tdd | Stage-{StageNumber}/Plan.md, ContractsDesign.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/implementation-review.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 </Workflow>
 `,
 			plan:   planSingleGroup,
@@ -1114,10 +1114,10 @@ func TestIntegration_FiveWorkflows_EndToEnd(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | planner-tdd-soft | ✅ | plan-review | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
-| PLANNING | plan-review | ❌ | implementation-tdd | planner-tdd-soft | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | test-runner | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
-| REVIEW | test-runner | ❌ | COMPLETE | implementation-tdd | - | TestResults.md |
+| PLANNING | planner-tdd-soft | TRUE | plan-review | - | - | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md |
+| PLANNING | plan-review | FALSE | implementation-tdd | planner-tdd-soft | Plan.md, Stage-*/Plan.md, Stage-*/PlanProgress.md | plan-review.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | test-runner | - | Stage-{StageNumber}/Plan.md, Stage-{StageNumber}/PlanProgress.md | Stage-{StageNumber}/PlanProgress.md |
+| REVIEW | test-runner | FALSE | COMPLETE | implementation-tdd | - | TestResults.md |
 </Workflow>
 `,
 			plan:   planSingleGroup,
@@ -1201,8 +1201,8 @@ func TestIntegration_Deviation_NoConsultant_ReturnsUnresolved(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
-| PLANNING | agent-a | ❌ | agent-b | - | plan.md |
-| PLANNING | agent-b | ❌ | COMPLETE | plan.md | result.md |
+| PLANNING | agent-a | FALSE | agent-b | - | plan.md |
+| PLANNING | agent-b | FALSE | COMPLETE | plan.md | result.md |
 </Workflow>
 `
 	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
@@ -1375,7 +1375,7 @@ func TestIntegration_IncompatibleWorkflow_RefusedFR18a(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success       | Input | Output |
 |-------|----------|:----:|------------------|-------|--------|
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | agent-a, agent-b | Stage-{StageNumber}/Plan.md | out.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | agent-a, agent-b | Stage-{StageNumber}/Plan.md | out.md |
 </Workflow>
 `,
 			wantMsgContains: "parallel",
@@ -1393,7 +1393,7 @@ func TestIntegration_IncompatibleWorkflow_RefusedFR18a(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | Input | Output |
 |-------|----------|:----:|------------|-------|--------|
-| EXECUTION.[StageNumber] | implementation-tdd | ❌ | COMPLETE | Stage-{StageNumber}/Plan.md | Stage-*/Plan.md |
+| EXECUTION.[StageNumber] | implementation-tdd | FALSE | COMPLETE | Stage-{StageNumber}/Plan.md | Stage-*/Plan.md |
 </Workflow>
 `,
 			wantMsgContains: "dynamic",
@@ -1407,7 +1407,7 @@ func TestIntegration_IncompatibleWorkflow_RefusedFR18a(t *testing.T) {
 
 | Phase | Subagent       | HITL | On Success | Input | Output |
 |-------|----------------|:----:|------------|-------|--------|
-| PLANNING | agent-a(mode) | ❌ | COMPLETE | - | out.md |
+| PLANNING | agent-a(mode) | FALSE | COMPLETE | - | out.md |
 </Workflow>
 `,
 			wantMsgContains: "parentheses",
@@ -1532,8 +1532,8 @@ func TestIntegration_StageWildcardResolution_NonExecutionRow(t *testing.T) {
 
 | Phase | Subagent | HITL | On Success | On Findings | Input | Output |
 |-------|----------|:----:|------------|-------------|-------|--------|
-| PLANNING | planner | ❌ | plan-review | - | - | Plan.md, Stage-*/Plan.md |
-| PLANNING | plan-review | ❌ | COMPLETE | planner | Plan.md, Stage-*/Plan.md | plan-review.md |
+| PLANNING | planner | FALSE | plan-review | - | - | Plan.md, Stage-*/Plan.md |
+| PLANNING | plan-review | FALSE | COMPLETE | planner | Plan.md, Stage-*/Plan.md | plan-review.md |
 </Workflow>
 `
 	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
@@ -1548,8 +1548,8 @@ func TestIntegration_StageWildcardResolution_NonExecutionRow(t *testing.T) {
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | First stage | - | ❌ |
-| 2 | Stage Two | Second stage | 1 | ❌ |
+| 1 | Stage One | First stage | - | FALSE |
+| 2 | Stage Two | Second stage | 1 | FALSE |
 `
 	if err := os.WriteFile(filepath.Join(dir, "Plan.md"), []byte(planContent), 0600); err != nil {
 		t.Fatalf("write Plan.md: %v", err)
@@ -2223,7 +2223,7 @@ func TestIntegration_Seeding_StagedWorkflow_SeededStageTable_DispatchesFirstAtte
 
 | Stage | Name | Goal | Depends On | HITL |
 |-------|------|------|------------|:----:|
-| 1 | Stage One | The only stage | - | ❌ |
+| 1 | Stage One | The only stage | - | FALSE |
 `
 	planSrc := filepath.Join(seedDir, "Plan.md")
 	if err := os.WriteFile(planSrc, []byte(planContent), 0600); err != nil {
@@ -2955,9 +2955,9 @@ func TestIntegration_AutoReview_CNA_AutoRouteBack_NoConsultAndArtifactInjected(t
 
 | Phase | Subagent          | HITL | On Success  | On Findings      | Input    | Output   |
 |-------|-------------------|:----:|-------------|------------------|----------|----------|
-| PLANNING | test-writer-tdd | ❌ | build-review | -               | -        | tests.md |
-| PLANNING | build-review    | ❌ | impl-tdd    | test-writer-tdd  | tests.md | build.md |
-| PLANNING | impl-tdd        | ❌ | COMPLETE    | -                | tests.md | impl.md  |
+| PLANNING | test-writer-tdd | FALSE | build-review | -               | -        | tests.md |
+| PLANNING | build-review    | FALSE | impl-tdd    | test-writer-tdd  | tests.md | build.md |
+| PLANNING | impl-tdd        | FALSE | COMPLETE    | -                | tests.md | impl.md  |
 </Workflow>
 `
 	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)
@@ -3059,9 +3059,9 @@ func TestIntegration_Auto_CNA_ConsultsForDeviation(t *testing.T) {
 
 | Phase | Subagent          | HITL | On Success  | On Findings      | Input    | Output   |
 |-------|-------------------|:----:|-------------|------------------|----------|----------|
-| PLANNING | test-writer-tdd | ❌ | build-review | -               | -        | tests.md |
-| PLANNING | build-review    | ❌ | impl-tdd    | test-writer-tdd  | tests.md | build.md |
-| PLANNING | impl-tdd        | ❌ | COMPLETE    | -                | tests.md | impl.md  |
+| PLANNING | test-writer-tdd | FALSE | build-review | -               | -        | tests.md |
+| PLANNING | build-review    | FALSE | impl-tdd    | test-writer-tdd  | tests.md | build.md |
+| PLANNING | impl-tdd        | FALSE | COMPLETE    | -                | tests.md | impl.md  |
 </Workflow>
 `
 	orchPath := writeOrchFile(t, dir, "orchestrator.md", orchContent)

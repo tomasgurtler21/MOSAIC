@@ -1,6 +1,6 @@
 ---
 id: 3
-version: 3.2.0
+version: 3.2.1
 name: knowledge-base-generator
 description: Researches codebase scope and produces N-tier knowledge base documentation optimized for KB consumer navigation
 role: subagent
@@ -157,7 +157,7 @@ When creating KBProgress.md, use this structure:
 
 | # | Tier | Scope | KB Document | Status | HITL | Recommended By |
 |---|------|-------|-------------|--------|------|----------------|
-| 1 | 1 | Full project | {path} | PENDING/IN_PROGRESS/COMPLETE | ✅/❌ | initial |
+| 1 | 1 | Full project | {path} | PENDING/IN_PROGRESS/COMPLETE | TRUE/FALSE | initial |
 ```
 
 **Stage fields:**
@@ -166,7 +166,7 @@ When creating KBProgress.md, use this structure:
 - **Scope** — What area of the codebase to research (e.g., "Payment domain", "Checkout retry mechanism")
 - **KB Document** — Path to the KB document this stage produces (relative to KB output path)
 - **Status** — `PENDING`, `IN_PROGRESS`, or `COMPLETE`
-- **HITL** — Whether this stage requires human review (✅ for Tier 1, typically ❌ for deeper tiers)
+- **HITL** — Whether this stage requires human review (TRUE for Tier 1, typically FALSE for deeper tiers)
 - **Recommended By** — `initial` for the first stage, or the stage number that recommended this one
 
 When adding deeper-tier recommendations, append new rows with status `PENDING` and set `Recommended By` to your current stage number.

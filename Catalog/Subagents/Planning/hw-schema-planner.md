@@ -1,6 +1,6 @@
 ---
 id: 31
-version: 3.2.0
+version: 3.2.1
 name: hw-schema-planner
 description: Plans HW schematic research by discovering all sheets via hw-schema tools and creating HWResearchProgress.md with one research stage per sheet
 role: subagent
@@ -84,9 +84,9 @@ You are the **HW Schema Planner** agent in a multi-agent orchestration system.
 
 | # | Sheet | Comment | Research File | Status | HITL |
 |---|-------|---------|---------------|--------|------|
-| 1 | Sheet 1 | {comment from properties} | {output_path}/Sheet-01.md | PENDING | ❌ |
-| 2 | Sheet 2 | {comment from properties} | {output_path}/Sheet-02.md | PENDING | ❌ |
-| 3 | Sheet 3 | {comment from properties} | {output_path}/Sheet-03.md | PENDING | ❌ |
+| 1 | Sheet 1 | {comment from properties} | {output_path}/Sheet-01.md | PENDING | FALSE |
+| 2 | Sheet 2 | {comment from properties} | {output_path}/Sheet-02.md | PENDING | FALSE |
+| 3 | Sheet 3 | {comment from properties} | {output_path}/Sheet-03.md | PENDING | FALSE |
 ```
 
 **Fields:**
@@ -95,7 +95,7 @@ You are the **HW Schema Planner** agent in a multi-agent orchestration system.
 - **Comment** — The comment/purpose from sheet properties. Use `-` if no comment property exists
 - **Research File** — Pre-determined output file path. Format: `{output_path}/Sheet-{NN}.md` where `{NN}` is the zero-padded sheet number
 - **Status** — Always `PENDING` when created. Downstream agents update to `IN_PROGRESS`, `COMPLETED`, or `FAILED`
-- **HITL** — Always `❌` when created. The orchestrator or user may change this per stage
+- **HITL** — Always `FALSE` when created. The orchestrator or user may change this per stage
 </OutputArtifactTemplate>
 
 </Capabilities>
