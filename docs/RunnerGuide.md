@@ -28,19 +28,20 @@ This guide is for **project authors** who want to run multi-agent workflows with
 ./mosaic-run
 ```
 
-The TUI walks you through: orchestrator file selection, workflow selection, harness and mode configuration, and then shows live progress as the run executes.
+The TUI walks you through: harness selection (which auto-discovers the orchestrator script), workflow selection, mode configuration, and then shows live progress as the run executes.
 
 ### CLI
 
 ```sh
 ./mosaic-run run \
-  --orchestrator-file .claude/agents/orchestrator.md \
   --workflow quick-fix \
   --task "Fix the login timeout bug reported in issue #42" \
   --harness claude-code \
   --mode auto \
   --timeout 30m
 ```
+
+The orchestrator script is discovered automatically from the harness-convention agents directory (e.g., `.claude/agents/orchestrator-script.md` for `claude-code`). If the workspace has not been deployed for the selected harness, the Runner exits immediately with a clear error.
 
 ---
 
@@ -68,7 +69,6 @@ All three modes are dramatically cheaper than running the orchestrator agent man
 
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
-| `--orchestrator-file` | Yes | — | Path to the orchestrator agent file |
 | `--workflow` | Yes | — | Workflow identifier (must exist in the orchestrator file) |
 | `--task` | Yes | — | Task description for the run |
 | `--harness` | Yes | `fake` | Harness adapter (`claude-code`, `opencode`, `ghcp-cli`) |
@@ -83,6 +83,22 @@ All three modes are dramatically cheaper than running the orchestrator agent man
 | `--new-run` | No | `false` | Force creation of a new run |
 | `--claude-path` | No | `claude` | Path to the Claude Code CLI binary |
 | `--infra-class` | No | — | Non-interactive agent-per-class mappings (e.g. `checkpoint=checkpoint-manager-git,commit=commit-manager-git`) |
+
+### Orchestrator Auto-Discovery
+
+There is no `--orchestrator-file` flag. The Runner derives the orchestrator path from the `--harness` value using the harness-convention agents directory:
+
+| Harness | Expected orchestrator path |
+|---------|---------------------------|
+| `claude-code` | `.claude/agents/orchestrator-script.md` |
+| `opencode` | `.opencode/agents/orchestrator-script.md` |
+| `ghcp-cli` | `.github/agents/orchestrator-script.md` |
+
+If the file does not exist, the Runner exits immediately with a message indicating the workspace is not properly deployed for the selected harness. Run the Deploy tool to populate the agents directory before using the Runner.
+
+### Agent Snapshot Directories
+
+At run start, the Runner creates a run-scoped copy of the agents directory alongside the regular one (e.g., `.claude/agents-runner-{run_id}/`). This snapshot is used for all invocations and deleted automatically when the run completes or stops gracefully. If the Runner crashes mid-run, an orphaned `agents-runner-{run_id}/` directory may remain -- it is safe to delete manually and does not affect other runs.
 
 ---
 
@@ -163,7 +179,7 @@ When enabled, the Runner dispatches a commit infrastructure agent to commit comp
 | I want to... | Do this |
 |--------------|---------|
 | Run a workflow interactively | `mosaic-run` (no subcommand) |
-| Run a workflow from CLI | `mosaic-run run --orchestrator-file <path> --workflow <id> --task "<desc>" --harness claude-code --mode orchestrated` |
+| Run a workflow from CLI | `mosaic-run run --workflow <id> --task "<desc>" --harness claude-code --mode orchestrated` |
 | Use the cheapest mode | `--mode auto-review` |
 | Get the best task descriptions | `--mode orchestrated` |
 | Add environment guidance in auto modes | `--pre-consult` |

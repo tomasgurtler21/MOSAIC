@@ -143,6 +143,12 @@ type Options struct {
 	// Clock supplies the timestamp handed to ArtifactStore.SetPhase for the
 	// completion-marker write. When nil, a real UTC clock is used.
 	Clock domain.Clock
+
+	// OnRunIDResolved, when non-nil, is called once when the run-select screen
+	// resolves a deferred run identity. It receives the resolved run_id. It is
+	// nil-safe (skipped when nil) and is only invoked when the resolved run_id
+	// is non-empty (empty run_id, e.g. from a nil minter, does not trigger it).
+	OnRunIDResolved func(runID string)
 }
 
 // runSetupSelections holds all inputs collected during the setup phase.
@@ -207,6 +213,7 @@ type rootModel struct {
 	mintRunIdentity        RunIdentityMinter
 	interact               *ProgramRef
 	orchestratorDiscoverer func(workDir, harnessID string) (string, error)
+	onRunIDResolved        func(runID string)
 
 	// Completion-marker write seam. When artifactStoreFactory is nil the TUI
 	// constructs the store itself from the resolved run folder. When clock is
@@ -366,6 +373,7 @@ func newRootModel(ctx context.Context, sess session.Session, opts Options) *root
 		configScreen:         configScreen,
 		artifactStoreFactory: opts.ArtifactStoreFactory,
 		clock:                opts.Clock,
+		onRunIDResolved:      opts.OnRunIDResolved,
 	}
 
 	// Always propagate InitialRunFolder so readArtifactContent and the COMPLETED-marker
@@ -630,6 +638,9 @@ func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selections.runID = ""
 				m.selections.runFolder = ""
 			}
+			if m.onRunIDResolved != nil && m.selections.runID != "" {
+				m.onRunIDResolved(m.selections.runID)
+			}
 		} else if m.runSelectQuestion != nil {
 			choiceID := m.runSelectScreen.SelectedChoiceID()
 			// Resolve the chosen ID back to a full Identity via the same
@@ -650,6 +661,9 @@ func (m *rootModel) updateRunSelect(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Harness config is not yet known (config screen has not run); defaults to fake adapter.
 				if m.sessionFactory != nil {
 					m.sess = m.sessionFactory(id.RunFolder, false, "", screens.ConfigSelection{})
+				}
+				if m.onRunIDResolved != nil && m.selections.runID != "" {
+					m.onRunIDResolved(m.selections.runID)
 				}
 			}
 		}

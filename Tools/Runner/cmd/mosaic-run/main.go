@@ -315,6 +315,10 @@ func runTUIMode(args []string) {
 			return newLoggedArtifactStore(filepath.Join(runFolder, "Orchestration.md"), logger)
 		},
 		Clock: &realClock{},
+		OnRunIDResolved: func(runID string) {
+			logger.SetRunID(runID)
+			dispLogger.SetRunID(runID)
+		},
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "tui: %v\n", err)
 		os.Exit(1)

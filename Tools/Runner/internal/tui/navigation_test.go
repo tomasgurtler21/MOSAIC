@@ -1520,6 +1520,195 @@ func TestRunSelect_Resume_WithMinter_MinterNotCalled(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Run selection screen: OnRunIDResolved callback
+// ---------------------------------------------------------------------------
+
+// newModelWithScanMinterFactoryCallback creates a rootModel pre-wired with:
+//   - a multi-candidate scan result (shows the run-select screen),
+//   - an injectable RunIdentityMinter,
+//   - a session factory that records each call in *calls, and
+//   - an OnRunIDResolved callback.
+//
+// This lets tests drive the run-select screen and inspect callback invocations
+// from the OnRunIDResolved path alongside normal selections state.
+func newModelWithScanMinterFactoryCallback(
+	candidates []runscan.RunCandidate,
+	minter RunIdentityMinter,
+	calls *[]factoryCall,
+	capSess *capturingSession,
+	onRunIDResolved func(runID string),
+) *rootModel {
+	scanResult := &runscan.ScanResult{Candidates: candidates}
+	return newRootModel(context.Background(), capSess, Options{
+		Theme:           tuicommon.DefaultTheme(),
+		ScanResult:      scanResult,
+		MintRunIdentity: minter,
+		SessionFactory: func(runFolder string, isNewRun bool, orchFile string, cfg screens.ConfigSelection) session.Session {
+			*calls = append(*calls, factoryCall{runFolder: runFolder, isNewRun: isNewRun})
+			return capSess
+		},
+		OnRunIDResolved: onRunIDResolved,
+	})
+}
+
+// TestRunSelect_NewRun_WithMinter_OnRunIDResolved_CalledWithMintedRunID verifies that
+// when OnRunIDResolved is set and the user picks "new run" on the run-select screen with
+// a minter provided, the callback receives exactly the minted run_id.
+//
+// In RED (compile failure): OnRunIDResolved field does not exist on Options (I1.1 not done).
+// After I1.1 (compile OK): callback is never invoked because updateRunSelect does not call
+// it yet (I1.2 not done) — test still fails at runtime.
+// In GREEN (after I1.1+I1.2): callback receives fixedMintedRunID.
+func TestRunSelect_NewRun_WithMinter_OnRunIDResolved_CalledWithMintedRunID(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	calls := make([]factoryCall, 0)
+	capSess := newCapturingSession()
+
+	var callbackRunIDs []string
+	onResolved := func(runID string) {
+		callbackRunIDs = append(callbackRunIDs, runID)
+	}
+
+	m := newModelWithScanMinterFactoryCallback(candidates, fixedMinter(), &calls, capSess, onResolved)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	// "Start a new run" is the first item in the run-select list. Enter selects it.
+	sendKey(m, tea.KeyEnter)
+
+	if len(callbackRunIDs) == 0 {
+		t.Fatal("OnRunIDResolved was not called after 'new run' with minter; want exactly one call with the minted run_id")
+	}
+	if len(callbackRunIDs) > 1 {
+		t.Errorf("OnRunIDResolved was called %d times; want exactly 1", len(callbackRunIDs))
+	}
+	if callbackRunIDs[0] != fixedMintedRunID {
+		t.Errorf("OnRunIDResolved received %q, want minted value %q", callbackRunIDs[0], fixedMintedRunID)
+	}
+}
+
+// TestRunSelect_NewRun_NilMinter_OnRunIDResolved_NotCalled verifies that when the minter
+// is nil (the legacy/backward-compat path), OnRunIDResolved is NOT called after "new run"
+// is selected, because the resolved run_id is empty and the guard must prevent the callback
+// from firing with an empty string.
+//
+// In RED (compile failure): OnRunIDResolved field does not exist on Options (I1.1 not done).
+// In GREEN (after I1.1+I1.2): callback is never invoked because selections.runID stays "".
+func TestRunSelect_NewRun_NilMinter_OnRunIDResolved_NotCalled(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	sess := &stubNavSession{outcome: domain.RunOutcome{Status: domain.RunCompleted, Message: "ok"}}
+	scanResult := &runscan.ScanResult{Candidates: candidates}
+
+	callbackInvoked := false
+	onResolved := func(runID string) {
+		callbackInvoked = true
+	}
+
+	// MintRunIdentity is intentionally nil so selections.runID will be "" after "new run" selection.
+	m := newRootModel(context.Background(), sess, Options{
+		Theme:           tuicommon.DefaultTheme(),
+		ScanResult:      scanResult,
+		OnRunIDResolved: onResolved,
+	})
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	// Select "Start a new run" — the first item; Enter confirms.
+	sendKey(m, tea.KeyEnter)
+
+	if callbackInvoked {
+		t.Error("OnRunIDResolved was called when run_id is empty (nil-minter path); " +
+			"callback must not fire when the resolved run_id is empty")
+	}
+}
+
+// TestRunSelect_Resume_OnRunIDResolved_CalledWithCandidateRunID verifies that when
+// OnRunIDResolved is set and the user selects an existing candidate on the run-select
+// screen, the callback receives that candidate's run_id.
+//
+// In RED (compile failure): OnRunIDResolved field does not exist on Options (I1.1 not done).
+// After I1.1 (compile OK): callback is never invoked because updateRunSelect does not call
+// it yet (I1.2 not done) — test still fails at runtime.
+// In GREEN (after I1.1+I1.2): callback receives candidateRunID.
+func TestRunSelect_Resume_OnRunIDResolved_CalledWithCandidateRunID(t *testing.T) {
+	const candidateRunID = "20260701T120000Z-a3f9"
+	candidates := []runscan.RunCandidate{
+		makeCandidate(candidateRunID, "/ws/Orchestration-"+candidateRunID),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	calls := make([]factoryCall, 0)
+	capSess := newCapturingSession()
+
+	var callbackRunIDs []string
+	onResolved := func(runID string) {
+		callbackRunIDs = append(callbackRunIDs, runID)
+	}
+
+	m := newModelWithScanMinterFactoryCallback(candidates, fixedMinter(), &calls, capSess, onResolved)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	// Navigate down once past "Start a new run" to reach the first candidate, then select.
+	sendKey(m, tea.KeyDown)
+	sendKey(m, tea.KeyEnter)
+
+	if len(callbackRunIDs) == 0 {
+		t.Fatal("OnRunIDResolved was not called after selecting an existing candidate; " +
+			"want exactly one call with the candidate's run_id")
+	}
+	if len(callbackRunIDs) > 1 {
+		t.Errorf("OnRunIDResolved was called %d times; want exactly 1", len(callbackRunIDs))
+	}
+	if callbackRunIDs[0] != candidateRunID {
+		t.Errorf("OnRunIDResolved received %q, want candidate run_id %q", callbackRunIDs[0], candidateRunID)
+	}
+}
+
+// TestRunSelect_OnRunIDResolved_NilCallback_NewRun_NoopNoPanic verifies that when
+// OnRunIDResolved is nil (not provided in Options), selecting "new run" with a minter
+// does not panic and still populates selections.runID normally.
+//
+// This test is expected to pass in both RED and GREEN states — it guards against
+// regressions where a nil-check is omitted and the code panics on nil dereference.
+func TestRunSelect_OnRunIDResolved_NilCallback_NewRun_NoopNoPanic(t *testing.T) {
+	candidates := []runscan.RunCandidate{
+		makeCandidate("20260701T120000Z-a3f9", "/ws/Orchestration-20260701T120000Z-a3f9"),
+		makeCandidate("20260702T120000Z-b4e8", "/ws/Orchestration-20260702T120000Z-b4e8"),
+	}
+	calls := make([]factoryCall, 0)
+	capSess := newCapturingSession()
+
+	// OnRunIDResolved is nil — the old-path / no-callback behaviour.
+	m := newModelWithScanMinterFactory(candidates, fixedMinter(), &calls, capSess)
+	if m.screen != screenRunSelect {
+		t.Fatalf("precondition: screen = %v, want screenRunSelect", m.screen)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("selecting 'new run' with nil OnRunIDResolved caused a panic: %v", r)
+		}
+	}()
+
+	sendKey(m, tea.KeyEnter)
+
+	// selections.runID must still be populated by the minter regardless of nil callback.
+	if m.selections.runID != fixedMintedRunID {
+		t.Errorf("selections.runID = %q, want %q (minting must work even with nil OnRunIDResolved)",
+			m.selections.runID, fixedMintedRunID)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // containsAny helper
 // ---------------------------------------------------------------------------
 
