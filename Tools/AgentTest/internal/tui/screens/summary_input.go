@@ -3,6 +3,7 @@ package screens
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"mosaic-common/tui/pathutil"
 )
 
 // SummaryInputScreen accepts an optional version filter for the summary
@@ -99,6 +100,6 @@ func (s *SummaryInputScreen) Resize(width int) {
 	s.width = width
 }
 
-// VersionFilter returns the currently confirmed version filter. An empty
-// string means "all versions".
-func (s *SummaryInputScreen) VersionFilter() string { return s.confirmed }
+// VersionFilter returns the currently confirmed version filter, normalized.
+// An empty string means "all versions".
+func (s *SummaryInputScreen) VersionFilter() string { return pathutil.NormalizeInput(s.confirmed) }

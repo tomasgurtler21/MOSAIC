@@ -3,6 +3,7 @@ package screens
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"mosaic-common/tui/pathutil"
 )
 
 // CatalogFolderScreen accepts inline text input for the catalog folder override.
@@ -87,5 +88,5 @@ func (s *CatalogFolderScreen) Resize(width int) {
 	s.width = width
 }
 
-// Folder returns the currently confirmed catalog folder override.
-func (s *CatalogFolderScreen) Folder() string { return s.confirmed }
+// Folder returns the currently confirmed catalog folder override, normalized.
+func (s *CatalogFolderScreen) Folder() string { return pathutil.NormalizeInput(s.confirmed) }

@@ -3,6 +3,7 @@ package screens
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"mosaic-common/tui/pathutil"
 )
 
 // StoreInputScreen accepts inline text input for the file or directory path
@@ -94,5 +95,5 @@ func (s *StoreInputScreen) Resize(width int) {
 	s.width = width
 }
 
-// Path returns the currently confirmed file or directory path.
-func (s *StoreInputScreen) Path() string { return s.confirmed }
+// Path returns the currently confirmed file or directory path, normalized.
+func (s *StoreInputScreen) Path() string { return pathutil.NormalizeInput(s.confirmed) }

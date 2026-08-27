@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"mosaic-common/tui/pathutil"
 	"mosaic-common/tui/widgets"
 )
 
@@ -94,8 +95,8 @@ func (s *SourceScreen) Done() bool { return s.input.Done() }
 // Back reports whether the user pressed Esc.
 func (s *SourceScreen) Back() bool { return s.input.Back() }
 
-// Path returns the entered path. Only valid when Done() is true.
-func (s *SourceScreen) Path() string { return strings.TrimSpace(s.input.Value()) }
+// Path returns the entered path, normalized. Only valid when Done() is true.
+func (s *SourceScreen) Path() string { return pathutil.NormalizeInput(s.input.Value()) }
 
 // Reset clears the done and back flags.
 func (s *SourceScreen) Reset() { s.input.Reset() }

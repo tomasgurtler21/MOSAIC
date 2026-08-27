@@ -3,6 +3,7 @@ package screens
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"mosaic-common/tui/pathutil"
 )
 
 // ReportPathScreen accepts inline text input for the report file path.
@@ -91,5 +92,5 @@ func (s *ReportPathScreen) Resize(width int) {
 	s.width = width
 }
 
-// Path returns the currently confirmed report file path.
-func (s *ReportPathScreen) Path() string { return s.confirmed }
+// Path returns the currently confirmed report file path, normalized.
+func (s *ReportPathScreen) Path() string { return pathutil.NormalizeInput(s.confirmed) }
